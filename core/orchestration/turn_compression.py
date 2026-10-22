@@ -81,6 +81,43 @@ def _coerce_message_list(value: Any) -> list:
         return []
 
 
+def build_token_budget_window(
+    messages: Any,
+    *,
+    hard_limit: int,
+    estimator: Any,
+) -> Tuple[List[Any], int, bool]:
+    """Codex-parity token-budget compaction window.
+
+    ``codex-rs/core/src/compact_token_budget.rs`` runs token-budget compaction
+    without asking a model to summarize: it installs a fresh window sized to
+    the budget instead of failing the turn. This helper does the same for an
+    already-summarized payload that still exceeds the hard input limit: keep
+    the newest messages that fit, then trim leading orphan tool results whose
+    assistant tool call fell out of the window (an orphan result alone breaks
+    the provider tool chain).
+
+    Returns ``(window, tokens, applied)``. ``applied`` is False when nothing
+    fits; the caller must then fail closed instead of calling the model.
+    """
+
+    items = _coerce_message_list(messages)
+    budget = _coerce_nonnegative_int(hard_limit)
+    if not items or budget <= 0:
+        return [], 0, False
+    kept: List[Any] = []
+    for message in reversed(items):
+        candidate = [message, *kept]
+        if _coerce_nonnegative_int(estimator(candidate)) > budget:
+            break
+        kept = candidate
+    while kept and _pairing_role(kept[0]) == "tool":
+        kept.pop(0)
+    if not kept:
+        return [], 0, False
+    return kept, _coerce_nonnegative_int(estimator(kept)), True
+
+
 # --- Context retention contract (versioned compression policy v3) -----------
 
 
@@ -699,6 +736,47 @@ def compress_turn_messages(
     after_pairing = _tool_call_pairing_snapshot(compressed)
     retention_violation = _retention_violation_reason(before_pairing, after_pairing)
     over_hard_limit = normalized_hard_limit > 0 and after_tokens > normalized_hard_limit
+    if over_hard_limit and not retention_violation:
+        # Codex parity (codex-rs/core/src/compact_token_budget.rs): when the
+        # summarizer cannot bring the payload under the hard input limit, a
+        # token-budget window that keeps only the newest fitting history lets
+        # the turn continue instead of failing closed. The window must still
+        # pass the same retention contract, so a cut that breaks the tool chain
+        # is rejected rather than silently repaired.
+        budget_window, budget_tokens, budget_applied = build_token_budget_window(
+            compressed,
+            hard_limit=normalized_hard_limit,
+            estimator=estimator,
+        )
+        if budget_applied:
+            budget_pairing = _tool_call_pairing_snapshot(budget_window)
+            budget_violation = _retention_violation_reason(before_pairing, budget_pairing)
+            if not budget_violation:
+                recorder(
+                    "runtime",
+                    "agent.context_compression.token_budget_applied",
+                    message=(
+                        "Summarized history still exceeded the hard input limit; "
+                        "fell back to a token-budget window."
+                    ),
+                    outcome="applied",
+                    fields={
+                        "agentId": agent_id,
+                        "sessionId": session_id,
+                        "turnId": turn_id,
+                        "iteration": iteration,
+                        "beforeTokens": current_tokens,
+                        "summarizedTokens": after_tokens,
+                        "windowTokens": budget_tokens,
+                        "contextInputHardLimit": normalized_hard_limit,
+                        "messageCount": len(budget_window),
+                    },
+                )
+                compressed = budget_window
+                after_tokens = budget_tokens
+                after_pairing = budget_pairing
+                token_saved = current_tokens - after_tokens
+                over_hard_limit = False
     if retention_violation or over_hard_limit:
         guard_reason = retention_violation or "post_compression_over_hard_limit"
         return fail_closed(guard_reason, after_pairing, after_tokens)
