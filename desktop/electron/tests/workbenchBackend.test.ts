@@ -1394,13 +1394,13 @@ describe("workbenchBackendEnv", () => {
 });
 
 describe("writeLauncherStateFile", () => {
-  it("publishes complete JSON without leaving a shared temp file", () => {
+  it("publishes complete JSON without leaving a shared temp file", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vibelution-workbench-state-"));
     try {
       const path = join(dir, "state.json");
       const sharedTempPath = `${path}.tmp`;
       writeFileSync(sharedTempPath, "sentinel", "utf8");
-      writeLauncherStateFile(path, { backendPort: 8011, phase: "steady" });
+      await writeLauncherStateFile(path, { backendPort: 8011, phase: "steady" });
 
       expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
         backendPort: 8011,
