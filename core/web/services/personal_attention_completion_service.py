@@ -19,7 +19,7 @@
    pet activity 自带的 15s 完成脉冲，天然只在完成瞬间可见。
 2. 聚合 + 稳定 id：同一派遣多条回执只报一行（id 按派遣 messageId 聚合）、
    同一 run 一行；id 跨轮询稳定，web 层按天账本与壳层 60s 去重窗口都能
-   压住 5s 一次的轮询重发。会话 id 携带完成时间戳：同一会话下一轮完成是
+   压住 5s 一次的轮询重发。会话 id 携带 Journal Turn 身份：同一会话下一轮完成是
    新事件（应再提醒），同一轮的重复轮询是同一 id（不再提醒）。
 3. 每次采集条数上限：三个来源各自设上限，聚合层再设全局上限，单次轮询
    最多涌入 ``MAX_COMPLETION_ITEMS`` 条，堆叠卡片（上限 3）不会被淹没。
@@ -34,6 +34,7 @@ humanAttention 契约：``id``/``kind``/``severity``/``title``/``targetUrl``/
 
 from __future__ import annotations
 
+import hashlib
 import time
 from typing import Any
 
@@ -259,8 +260,8 @@ def collect_session_completed_attention(
 
     防刷屏：只有 pet activity 判定为 ``completed`` 语气（15s 完成脉冲）的
     会话进入候选；child / 有父会话的研究扇出 worker 被排除——它们的每轮
-    “完成”由 ``run_completed`` 在 run 级聚合承载，不逐轮刷屏。id 携带完成
-    时间戳：同一轮重复轮询是同一 id（账本压住），下一轮完成是新的 id（应
+    “完成”由 ``run_completed`` 在 run 级聚合承载，不逐轮刷屏。id 携带终态
+    Turn 身份：同一轮重复轮询是同一 id（账本压住），下一轮完成是新的 id（应
     再次提醒）。自主行动 worker 按 Agent 身份排除，包括额外创建的可见会话；
     虚拟人本人的正常聊天仍保留完成提醒。
     """
@@ -319,12 +320,13 @@ def collect_session_completed_attention(
             continue
         if str(row.get("agentId") or "").strip() in self_wake_agent_ids:
             continue
-        # id 的时间戳段必须来自行内稳定字段：缺 updatedAt 的行拿不到稳定
-        # 完成时刻（退到 observed 会让 15s 脉冲内每次轮询都生成新 id，账本
-        # 压不住，同一完成弹多次），直接跳过。
-        stamp = _parse_iso_timestamp(row.get("updatedAt"))
-        if stamp is None:
+        # The pet projection carries the Journal terminal identity and instant.
+        # Session selection/recency updates must never mint another completion.
+        identity = str(row.get("completionIdentity") or "").strip()
+        stamp = _parse_iso_timestamp(row.get("completedAt"))
+        if stamp is None or not identity:
             continue
+        identity_key = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
         agent_name = str(row.get("agentDisplayName") or "").strip()
         title = str(row.get("title") or "").strip() or "会话"
         rows.append(
@@ -333,7 +335,7 @@ def collect_session_completed_attention(
                 {
                     "id": (
                         f"session-completed:{_id_segment(session_id)}:"
-                        f"{int(round(stamp))}"
+                        f"{identity_key}"
                     ),
                     "kind": ATTENTION_KIND_SESSION_COMPLETED,
                     "severity": ATTENTION_SEVERITY_INFO,

@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import re
+import threading
 from datetime import datetime, timezone
 from typing import Any
 
-from core.chat.session_activity import resolve_session_activity
+from core.chat.session_activity import activity_outcome, resolve_session_activity
+from core.chat.turn_journal import EVENT_TURN_COMPLETED, TERMINAL_EVENTS, load_latest_turn_events_for_preview
 
+from . import session_service
 from .session.timebase import parse_timestamp_utc
 from .session.tool_approvals import list_tool_approval_requests
 from .session_service import list_sessions, load_chat_turn_work_run_summary
@@ -15,6 +18,8 @@ from .session_service import list_sessions, load_chat_turn_work_run_summary
 _COMPLETION_PULSE_SECONDS = 15.0
 _ERROR_ATTENTION_SECONDS = 300.0
 _TONE_PRIORITY = {"approval": 0, "error": 1, "running": 2, "completed": 3, "idle": 4}
+_COMPLETION_RECEIPTS_LOCK = threading.Lock()
+_COMPLETION_RECEIPTS: dict[tuple[str, str], tuple[str, dict[str, str]]] = {}
 
 
 def get_pet_activity(*, now: datetime | None = None) -> dict[str, Any]:
@@ -22,6 +27,13 @@ def get_pet_activity(*, now: datetime | None = None) -> dict[str, Any]:
 
     observed_at = _as_utc(now or datetime.now(timezone.utc))
     sessions = list_sessions()
+    # Keep one immutable receipt per currently listed Session, not a history of
+    # Turns or copies of their transcripts. A new terminal Turn changes the key.
+    visible_keys = {(str(session_service.PROJECT_ROOT), str(row.get("id") or "").strip())
+                    for row in sessions if isinstance(row, dict)}
+    with _COMPLETION_RECEIPTS_LOCK:
+        for key in _COMPLETION_RECEIPTS.keys() - visible_keys:
+            _COMPLETION_RECEIPTS.pop(key, None)
     work_run_summary = load_chat_turn_work_run_summary()
     active_items = work_run_summary.get("activeItems") if isinstance(work_run_summary, dict) else []
     live_by_session = {
@@ -40,11 +52,18 @@ def get_pet_activity(*, now: datetime | None = None) -> dict[str, Any]:
             continue
         live_item = live_by_session.get(session_id)
         needs_approval = bool(list_tool_approval_requests(session_id, status="pending"))
+        completion = (
+            _completion_receipt(session)
+            if not live_item and not needs_approval
+            and resolve_session_activity(session)["outcome"] == "completed"
+            else {}
+        )
         tone = _resolve_tone(
             session,
             runtime_running=live_item is not None,
             needs_approval=needs_approval,
             now=observed_at,
+            completion_at=completion.get("completedAt", ""),
         )
         if tone == "idle":
             continue
@@ -63,6 +82,7 @@ def get_pet_activity(*, now: datetime | None = None) -> dict[str, Any]:
                 "tone": tone,
                 "phase": phase,
                 "updatedAt": updated_at,
+                **(completion if tone == "completed" else {}),
                 "_updatedSort": _parse_timestamp(updated_at).timestamp()
                 if _parse_timestamp(updated_at) is not None
                 else 0.0,
@@ -102,6 +122,7 @@ def _resolve_tone(
     runtime_running: bool,
     needs_approval: bool,
     now: datetime,
+    completion_at: str = "",
 ) -> str:
     if needs_approval:
         return "approval"
@@ -113,7 +134,7 @@ def _resolve_tone(
         return "running"
     if state["outcome"] == "failed":
         return "error"
-    if state["outcome"] == "completed" and _is_recent(session, now=now):
+    if state["outcome"] == "completed" and _is_recent_completion(completion_at, now=now):
         return "completed"
     return "idle"
 
@@ -153,11 +174,51 @@ def _aggregate_animation_state(aggregate_tone: str, rows: list[dict[str, Any]]) 
     return "idle"
 
 
-def _is_recent(session: dict[str, Any], *, now: datetime) -> bool:
-    updated_at = _parse_timestamp(session.get("updatedAt") or session.get("lastActive"))
-    if updated_at is None:
+def _completion_receipt(session: dict[str, Any]) -> dict[str, str]:
+    """Read the named Turn's terminal receipt; directory recency is not completion."""
+    session_id = str(session.get("id") or "").strip()
+    turn_id = str(session.get("lastTurnTerminalTurnId") or "").strip()
+    if not session_id or not turn_id:
+        return {}
+    key = (str(session_service.PROJECT_ROOT), session_id)
+    with _COMPLETION_RECEIPTS_LOCK:
+        cached = _COMPLETION_RECEIPTS.get(key)
+        if cached and cached[0] == turn_id:
+            return dict(cached[1])
+    try:
+        events = _read_completion_events(session_id)
+    except Exception:
+        return {}
+    for event in reversed(events):
+        if event.turn_id != turn_id or event.event_type not in TERMINAL_EVENTS:
+            continue
+        if event.event_type != EVENT_TURN_COMPLETED or activity_outcome(event.status) != "completed":
+            return {}
+        timestamp = str(event.timestamp or "").strip()
+        if not _parse_timestamp(timestamp):
+            return {}
+        receipt = {"completionIdentity": turn_id, "completedAt": timestamp}
+        with _COMPLETION_RECEIPTS_LOCK:
+            _COMPLETION_RECEIPTS[key] = (turn_id, receipt)
+        return dict(receipt)
+    return {}
+
+
+def _read_completion_events(session_id: str) -> list[Any]:
+    # The named latest terminal is at the Journal tail. Read a bounded slice;
+    # never replay full historical transcripts for an activity poll. A missing
+    # receipt stays silent and is not cached, so a later poll can recover.
+    events, _, _ = load_latest_turn_events_for_preview(
+        session_service.PROJECT_ROOT, session_id, limit=128,
+    )
+    return events
+
+
+def _is_recent_completion(completed_at: str, *, now: datetime) -> bool:
+    timestamp = _parse_timestamp(completed_at)
+    if timestamp is None:
         return False
-    age_seconds = (now - updated_at).total_seconds()
+    age_seconds = (now - timestamp).total_seconds()
     return 0 <= age_seconds <= _COMPLETION_PULSE_SECONDS
 
 

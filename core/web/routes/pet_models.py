@@ -62,6 +62,8 @@ class PetActivitySessionResponse(BaseModel):
     tone: PetActivityTone
     phase: PetActivityPhase
     updatedAt: str = ""
+    completionIdentity: str | None = None
+    completedAt: str | None = None
 
 
 class PetActivityResponse(BaseModel):

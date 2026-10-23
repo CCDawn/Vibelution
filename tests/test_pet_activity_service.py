@@ -1,12 +1,41 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
 from core.web.services import pet_activity_service
 
 NOW = datetime(2026, 9, 8, 2, 0, tzinfo=timezone.utc)
+
+
+@pytest.fixture(autouse=True)
+def clear_completion_receipts():
+    pet_activity_service._COMPLETION_RECEIPTS.clear()
+    yield
+    pet_activity_service._COMPLETION_RECEIPTS.clear()
+
+
+def test_revisiting_old_success_does_not_create_a_new_completion(monkeypatch):
+    session = {
+        **_session("revisited", status="ready"),
+        "terminalReason": "success",
+        "lastTurnTerminalTurnId": "turn-completed-once",
+    }
+    monkeypatch.setattr(pet_activity_service, "list_sessions", lambda: [session])
+    monkeypatch.setattr(pet_activity_service, "load_chat_turn_work_run_summary", lambda: {"activeItems": []})
+    monkeypatch.setattr(pet_activity_service, "list_tool_approval_requests", lambda *_a, **_k: [])
+    monkeypatch.setattr(
+        pet_activity_service, "_read_completion_events",
+        lambda _sid: [SimpleNamespace(
+            turn_id="turn-completed-once", event_type="turn_completed", status="completed",
+            timestamp=(NOW - timedelta(minutes=8)).isoformat(),
+        )], raising=False,
+    )
+
+    assert pet_activity_service.get_pet_activity(now=NOW)["sessions"] == []
 
 
 def _session(
@@ -23,6 +52,7 @@ def _session(
         "agentDisplayName": f"Agent {session_id}",
         "status": status,
         "currentPhase": status,
+        "lastTurnTerminalTurnId": f"turn-{session_id}",
         "updatedAt": (updated_at or NOW).isoformat(),
     }
 
@@ -92,6 +122,13 @@ def test_pet_activity_maps_running_phases_and_recent_completion(monkeypatch):
         lambda: {"activeItems": []},
     )
     monkeypatch.setattr(pet_activity_service, "list_tool_approval_requests", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        pet_activity_service, "_read_completion_events",
+        lambda sid: [SimpleNamespace(
+            turn_id=f"turn-{sid}", event_type="turn_completed", status="completed",
+            timestamp=next(s["updatedAt"] for s in sessions if s["id"] == sid),
+        )],
+    )
 
     payload = pet_activity_service.get_pet_activity(now=NOW)
 
@@ -101,6 +138,8 @@ def test_pet_activity_maps_running_phases_and_recent_completion(monkeypatch):
     assert by_id["verifying"]["phase"] == "verifying"
     assert by_id["answering"]["phase"] == "answering"
     assert by_id["completed"]["tone"] == "completed"
+    assert by_id["completed"]["completionIdentity"] == "turn-completed"
+    assert by_id["completed"]["completedAt"] == (NOW - timedelta(seconds=5)).isoformat()
     assert "old-completed" not in by_id
 
 
@@ -142,7 +181,10 @@ def test_live_turn_overrides_previous_failure():
 def test_ready_uses_actual_last_turn_outcome():
     session = _session("s", status="ready")
     session["lastTurnStatus"] = "completed"
-    assert pet_activity_service._resolve_tone(session, runtime_running=False, needs_approval=False, now=NOW) == "completed"
+    assert pet_activity_service._resolve_tone(
+        session, runtime_running=False, needs_approval=False, now=NOW,
+        completion_at=NOW.isoformat(),
+    ) == "completed"
     # ``ready`` is the idle phase, never a turn outcome. Treating it as a
     # success made a settled session announce a completion it never had.
     session["lastTurnStatus"] = "ready"
@@ -190,7 +232,99 @@ def test_settled_success_still_reports_completion():
     session = {**_session("s", status="ready"), "lastTurnStatus": "completed"}
     assert pet_activity_service._resolve_tone(
         session, runtime_running=False, needs_approval=False, now=NOW,
+        completion_at=NOW.isoformat(),
     ) == "completed"
+
+
+@pytest.mark.parametrize("event_type,status", [
+    ("turn_interrupted", "stopped_by_user"), ("turn_failed", "failed"),
+    ("turn_completed", "future_status"),
+])
+def test_success_projection_requires_a_successful_journal_receipt(monkeypatch, event_type, status):
+    session = {**_session("s", status="ready"), "terminalReason": "success"}
+    monkeypatch.setattr(pet_activity_service, "list_sessions", lambda: [session])
+    monkeypatch.setattr(pet_activity_service, "load_chat_turn_work_run_summary", lambda: {"activeItems": []})
+    monkeypatch.setattr(pet_activity_service, "list_tool_approval_requests", lambda *_a, **_k: [])
+    monkeypatch.setattr(
+        pet_activity_service, "_read_completion_events",
+        lambda _sid: [SimpleNamespace(
+            turn_id="turn-s", event_type=event_type, status=status, timestamp=NOW.isoformat(),
+        )],
+    )
+    assert pet_activity_service.get_pet_activity(now=NOW)["sessions"] == []
+
+
+def test_unreadable_completion_receipt_stays_idle(monkeypatch):
+    def unavailable(_sid):
+        raise OSError("journal unavailable")
+
+    monkeypatch.setattr(pet_activity_service, "_read_completion_events", unavailable)
+    assert pet_activity_service._completion_receipt(_session("s", status="completed")) == {}
+    assert pet_activity_service._completion_receipt({"id": "s"}) == {}
+
+
+def test_completion_polls_reuse_small_receipts_and_refresh_only_new_turns(monkeypatch):
+    sessions = [{**_session(str(i), status="ready"), "terminalReason": "success"} for i in range(65)]
+    reads = []
+
+    def terminal_events(sid):
+        reads.append(sid)
+        session = next(s for s in sessions if s["id"] == sid)
+        return [SimpleNamespace(
+            turn_id=session["lastTurnTerminalTurnId"], event_type="turn_completed", status="completed",
+            timestamp=(NOW if len(reads) > 65 else NOW - timedelta(hours=1)).isoformat(),
+        )]
+
+    monkeypatch.setattr(pet_activity_service, "list_sessions", lambda: sessions)
+    monkeypatch.setattr(pet_activity_service, "load_chat_turn_work_run_summary", lambda: {"activeItems": []})
+    monkeypatch.setattr(pet_activity_service, "list_tool_approval_requests", lambda *_a, **_k: [])
+    monkeypatch.setattr(pet_activity_service, "_read_completion_events", terminal_events)
+    assert pet_activity_service.get_pet_activity(now=NOW)["sessions"] == []
+    assert pet_activity_service.get_pet_activity(now=NOW)["sessions"] == []
+    assert len(reads) == 65
+    sessions[0]["lastTurnTerminalTurnId"] = "new-terminal-turn"
+    rows = pet_activity_service.get_pet_activity(now=NOW)["sessions"]
+    assert len(reads) == 66
+    assert rows[0]["completionIdentity"] == "new-terminal-turn"
+    sessions.pop(0)
+    pet_activity_service.get_pet_activity(now=NOW)
+    assert len(pet_activity_service._COMPLETION_RECEIPTS) == 64
+
+
+def test_terminal_tail_reader_inherits_runtime_project_root(monkeypatch, tmp_path):
+    seen = []
+    monkeypatch.setattr(pet_activity_service.session_service, "PROJECT_ROOT", tmp_path)
+
+    def bounded_reader(root, sid, *, limit):
+        seen.append((root, sid, limit))
+        return [], False, True
+
+    monkeypatch.setattr(pet_activity_service, "load_latest_turn_events_for_preview", bounded_reader)
+    assert pet_activity_service._read_completion_events("s") == []
+    assert seen == [(tmp_path, "s", 128)]
+
+
+def test_real_terminal_tail_projects_completion_receipt(monkeypatch, tmp_path):
+    from core.chat.turn_journal import TurnJournalEvent, turn_journal_path
+
+    journal_root = tmp_path / "workspace"
+    path = turn_journal_path(tmp_path, "s", journal_workspace_root=journal_root)
+    path.parent.mkdir(parents=True)
+    event = TurnJournalEvent(
+        schema_version=2, event_id="terminal-receipt", session_id="s", turn_id="turn-s",
+        sequence=1, event_type="turn_completed", status="completed", timestamp=NOW.isoformat(),
+        source="test", payload={},
+    )
+    path.write_text(json.dumps(event.to_dict()) + "\n", encoding="utf-8")
+    reader = pet_activity_service.load_latest_turn_events_for_preview
+    monkeypatch.setattr(pet_activity_service.session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        pet_activity_service, "load_latest_turn_events_for_preview",
+        lambda root, sid, *, limit: reader(root, sid, limit=limit, journal_workspace_root=journal_root),
+    )
+    assert pet_activity_service._completion_receipt(_session("s", status="completed")) == {
+        "completionIdentity": "turn-s", "completedAt": NOW.isoformat(),
+    }
 
 
 def test_previous_turn_running_is_not_current_execution():
