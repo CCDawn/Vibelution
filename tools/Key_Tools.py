@@ -3078,7 +3078,7 @@ def _build_key_tools() -> List[BaseTool]:
         settings_catalog查用户名/头像/壁纸/语言等字段和选项；settings_update的updates为
         [{"section":"user_profile","key":"display_name","value":"新名字"}]。
         model_options查已有模型；model_add在已配置provider添加模型，不接收密钥/网络地址。
-        team_status: team_id、run_id，可选wait_seconds最多30秒；完成时返回团队最终产物。
+        team_status: run_id，可选team_id（可省略，由自己的创建记录定位）、wait_seconds最多30秒；完成时返回团队最终产物。
         搭团队并运行使用manage的team_run，单次审批。需要等待完成时用team_status有界等待，勿快速空轮询。
         只以工具成功且verified/原生终态为完成依据；unknown时核验，不能换request_id重复创建。
         """

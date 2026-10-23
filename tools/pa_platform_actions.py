@@ -49,7 +49,7 @@ class ModelAdd(Arguments):
 
 
 class TeamStatus(Arguments):
-    team_id: str = Field(min_length=1, max_length=128)
+    team_id: str | int = ""
     run_id: str = Field(min_length=1, max_length=128)
     wait_seconds: int = Field(default=0, ge=0, le=30)
 
@@ -65,7 +65,7 @@ _CONTRACTS = {
     "agent_avatar": (AgentAvatar, "使用 avatar_options 中的现有图片或恢复模型默认头像。"),
     "settings_update": (SettingsUpdate, "更新应用用户名、头像预设、壁纸与普通设置；先 settings_catalog 取得 section/key/选项。"),
     "model_add": (ModelAdd, "为已配置 Provider 添加模型；不接收密钥或新网络地址。"),
-    "team_status": (TeamStatus, "读取自己所建团队的原生状态、当前步骤与完成产物，可 wait_seconds 最多30秒；started/running 不代表完成。"),
+    "team_status": (TeamStatus, "用 run_id 读取自己所建团队的状态和完成产物；team_id 可省略，将从自己的创建记录定位。可 wait_seconds 最多30秒。"),
 }
 
 

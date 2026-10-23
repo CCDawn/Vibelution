@@ -95,6 +95,29 @@ def test_native_contracts_role_mapping_and_no_permission_changes(env, monkeypatc
     assert flow.failureRecovery is None and "_localIntegration" not in run
     assert created[0][0] == created[0][1]
     assert set(env.templates[0][1]) == {"name", "team_source"}
+
+
+def test_status_can_locate_team_from_its_own_run_receipt(env):
+    result = launch()
+    status = actions.team_run_status(run_id=result["runId"])
+    assert status["ok"] and status["teamId"] == result["teamId"]
+
+
+def test_numeric_team_id_preserves_original_leading_zeroes_via_owned_receipt(env):
+    home = env.tmp_path / "personal-assistant-actions" / "teams"
+    home.mkdir(parents=True)
+    target = home / "numeric.json"
+    record = {"ownerAgentId": env.actor["agentId"], "runId": "run-number", "teamId": "001234"}
+    target.write_text(json.dumps(record))
+    assert actions._resolve_team_id(1234, "run-number", env.actor) == "001234"
+    assert actions._resolve_team_id("", "run-number", env.actor) == "001234"
+    for value in (True, 9999):
+        with pytest.raises(ValueError):
+            actions._resolve_team_id(value, "run-number", env.actor)
+    record["ownerAgentId"] = "other-assistant"
+    target.write_text(json.dumps(record))
+    with pytest.raises(ValueError):
+        actions._resolve_team_id(1234, "run-number", env.actor)
     assert "goal" not in json.dumps(records(env))
 
 

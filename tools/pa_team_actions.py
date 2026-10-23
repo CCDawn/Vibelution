@@ -204,14 +204,39 @@ def team_run(name: str, goal: str, request_id: str, template_id: str = "dev-team
         return _failure("operation_unconfirmed", "团队操作未确认；已保留幂等记录和已知对象标识，请核验，不要重复创建。", record)
 
 
-def team_run_status(team_id: str, run_id: str, wait_seconds: int = 0) -> dict:
+def _resolve_team_id(team_id: str | int, run_id: str, runtime: dict) -> str:
+    if isinstance(team_id, str) and team_id:
+        return store.token(team_id)
+    if type(team_id) is not int and team_id != "":
+        raise ValueError("团队标识无效。")
+    # Team IDs can consist only of digits; models sometimes serialize them as
+    # numbers. Resolve the exact opaque ID through our own run receipt instead
+    # of guessing lost leading zeroes or accepting another controller's Team.
+    home = directory._workspace_path("personal-assistant-actions", "teams")
+    matches = set()
+    for index, path in enumerate(home.glob("*.json")):
+        if index >= 1000:
+            raise ValueError("创建记录过多，请提供字符串团队标识。")
+        record = json.loads(path.read_text(encoding="utf-8"))
+        if record.get("ownerAgentId") != runtime["agentId"] or record.get("runId") != run_id:
+            continue
+        candidate = str(record.get("teamId") or "")
+        if team_id != "" and (not candidate.isdigit() or int(candidate) != team_id):
+            continue
+        matches.add(store.token(candidate))
+    if len(matches) != 1:
+        raise ValueError("未找到唯一的自有团队运行。")
+    return matches.pop()
+
+
+def team_run_status(team_id: str | int = "", run_id: str = "", wait_seconds: int = 0) -> dict:
     """Read owned workflow state and its final published artifact, never a transcript."""
     try:
         if type(wait_seconds) is not int or not 0 <= wait_seconds <= 30:
             return _failure("invalid_input", "等待时间必须是0到30秒的整数。")
-        store.token(team_id)
         store.token(run_id)
         runtime = _runtime()
+        team_id = _resolve_team_id(team_id, run_id, runtime)
         team = store.team(team_id)
         if team.get("teamSource") != _owner_source(runtime):
             return _failure("not_owned", "仅可读取当前个人助理创建的团队运行。")
