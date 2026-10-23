@@ -348,8 +348,8 @@ def test_disabled_feature_or_missing_compressor_skips_without_counting():
         extra={},
     )
 
-    assert skipped_disabled == (original, False, False, 0, 0)
-    assert skipped_none == (original, False, False, 0, 0)
+    assert skipped_disabled == (original, False, False, 0, 0, "")
+    assert skipped_none == (original, False, False, 0, 0, "")
     assert compressor.calls == []
 
 
@@ -368,7 +368,7 @@ def test_iteration_gap_and_max_compressions_skip_without_calling_compressor():
         compression_min_iteration_gap=3,
         compression_count_this_turn=1,
     )
-    assert gap == (original, False, False, 1, 4)
+    assert gap == (original, False, False, 1, 4, "")
     assert extras["events"][0]["kwargs"]["fields"]["guardReason"] == "iteration_gap"
 
     extras = {}
@@ -381,7 +381,7 @@ def test_iteration_gap_and_max_compressions_skip_without_calling_compressor():
         last_compression_iteration=0,
         compression_count_this_turn=2,
     )
-    assert maxed == (original, False, False, 2, 0)
+    assert maxed == (original, False, False, 2, 0, "")
     assert extras["events"][0]["kwargs"]["fields"]["guardReason"] == "max_compressions"
     assert compressor.calls == []
 
@@ -517,7 +517,7 @@ def test_budget_window_requires_a_real_checkpoint_before_continuing(
         config=_feature_config(), extra=extras, project_root=str(tmp_path),
         context_input_hard_limit=1000, post_compression_target_tokens=600,
     )
-    assert result == (original, True, False, 0, 0)
+    assert result == (original, True, False, 0, 0, "context_budget_exhausted")
     assert attempts[0]["status"] == "failed_preserved"
     assert attempts[0]["summary"] == ""
     assert not extras["ui"].events
@@ -626,9 +626,12 @@ def test_emergency_breaks_non_chat_but_not_chat_mode():
     )
 
     assert chat[1] is False
-    assert evolution[1] is True
+    assert evolution[1] is False
     assert chat[2] is True
     assert evolution[2] is True
+    # 提前收轮走专属 stop_reason，不再借 should_break 预算通道。
+    assert chat[5] == ""
+    assert evolution[5] == "emergency_compression"
 
 
 def test_iteration_over_thirty_breaks_even_in_chat():
@@ -644,9 +647,10 @@ def test_iteration_over_thirty_breaks_even_in_chat():
         iteration=31,
     )
 
-    assert result[1] is True
+    assert result[1] is False
     assert result[3] == 1
     assert result[4] == 31
+    assert result[5] == "iteration_limit_reached"
 
 
 def test_compress_coerces_iteration_gap_json_binding_and_rejects_character_split():
@@ -664,7 +668,7 @@ def test_compress_coerces_iteration_gap_json_binding_and_rejects_character_split
         compression_min_iteration_gap="3",
         compression_count_this_turn="1",
     )
-    assert gap == (original, False, False, 1, 4)
+    assert gap == (original, False, False, 1, 4, "")
     assert extras["events"][0]["kwargs"]["fields"]["guardReason"] == "iteration_gap"
     assert extras["events"][0]["kwargs"]["fields"]["iteration"] == 5
 
@@ -977,3 +981,114 @@ def test_ledger_fallback_failure_records_session_ledger_failed(monkeypatch, tmp_
     assert fields["beforeTokens"] > 0
     assert fields["reason"] == "context_pressure"
     assert "secret compression summary" not in str(extras["events"])
+
+
+def test_iteration_limit_stop_reason_says_what_happened_not_budget():
+    """回归：10-23 事故——iteration>30 借 should_break 返回，调用方误标为
+    context_budget_exhausted（压缩明明成功）。新契约下 stop_reason 专属，
+    UI 文案与日志都说「迭代上限」而非「预算」。"""
+    original = [AIMessage(content="long-context-message")]
+    compressed = [AIMessage(content="x")]
+    extras = {}
+
+    result = _run(
+        messages=original,
+        compressor=_FakeCompressor(compressed),
+        config=_feature_config(),
+        extra=extras,
+        mode=AgentMode.CHAT,
+        iteration=39,
+    )
+
+    assert result[1] is False
+    assert result[2] is True
+    assert result[5] == "iteration_limit_reached"
+    warn_logs = [message for level, message in extras["ui"].logs if level == "WARN"]
+    assert any("已超上限" in message and "迭代 39" in message for message in warn_logs)
+    assert not any("安全输入预算" in message for message in warn_logs)
+    assert not any("提前结束当前轮次" in message for message in warn_logs)
+
+
+def test_iteration_at_limit_boundary_keeps_running():
+    original = [AIMessage(content="long-context-message")]
+    compressed = [AIMessage(content="x")]
+
+    result = _run(
+        messages=original,
+        compressor=_FakeCompressor(compressed),
+        config=_feature_config(),
+        extra={},
+        mode=AgentMode.CHAT,
+        iteration=30,
+    )
+
+    assert result[1] is False
+    assert result[5] == ""
+
+
+def test_emergency_chat_reports_iteration_limit_instead_of_emergency():
+    original = [AIMessage(content="long-context-message")]
+    compressed = [AIMessage(content="x")]
+
+    low_iter = _run(
+        messages=original,
+        compressor=_FakeCompressor(compressed),
+        config=_feature_config(),
+        extra={},
+        mode=AgentMode.CHAT,
+        compression_strategy=_FakeStrategy(CompressionLevel.EMERGENCY),
+        iteration=2,
+    )
+    over_limit = _run(
+        messages=original,
+        compressor=_FakeCompressor(compressed),
+        config=_feature_config(),
+        extra={},
+        mode=AgentMode.CHAT,
+        compression_strategy=_FakeStrategy(CompressionLevel.EMERGENCY),
+        iteration=31,
+    )
+
+    assert low_iter[5] == ""
+    assert over_limit[5] == "iteration_limit_reached"
+
+
+def test_fail_closed_budget_paths_keep_budget_stop_reason(monkeypatch, tmp_path):
+    """retention/预算 fail-closed 路径的 stop_reason 必须仍是预算语义，且优先
+    于迭代上限分支：iteration=39 时真实预算失败不得被「迭代上限」文案吞掉。"""
+    from core.orchestration.turn_compression import STOP_REASON_CONTEXT_BUDGET_EXHAUSTED
+
+    monkeypatch.setattr(
+        "core.chat.conversation_ledger.append_context_compression_checkpoint",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("checkpoint unavailable")),
+    )
+    monkeypatch.setattr(
+        "core.chat.conversation_ledger.append_context_compression_attempt",
+        lambda *args, **kwargs: None,
+    )
+    rules = SystemMessage(content="rules and history summary")
+    current_request = HumanMessage(content="current request")
+    original = [rules, AIMessage(content="old" * 1000), current_request]
+    extras = {}
+
+    result = _run(
+        messages=original,
+        compressor=_FakeCompressor([rules, AIMessage(content="k" * 800), current_request]),
+        config=_feature_config(),
+        extra=extras,
+        project_root=str(tmp_path),
+        mode=AgentMode.CHAT,
+        iteration=39,
+        context_input_hard_limit=1000,
+        post_compression_target_tokens=600,
+    )
+
+    assert result[1] is True
+    assert result[5] == STOP_REASON_CONTEXT_BUDGET_EXHAUSTED
+    exhausted = [
+        item
+        for item in extras["events"]
+        if item["args"][1] == "agent.context_budget_exhausted"
+    ]
+    assert exhausted
+    assert exhausted[0]["kwargs"]["outcome"] == "blocked"
