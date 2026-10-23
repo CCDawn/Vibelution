@@ -516,7 +516,7 @@ def _run_compress(context_input_hard_limit: int):
 
 
 def test_compress_emits_diagnostic_event_when_budget_limit_unconfigured():
-    (messages, should_break, applied, _count, _last), events = _run_compress(0)
+    (messages, should_break, applied, _count, _last, _stop), events = _run_compress(0)
     # The guard stays non-blocking (no limit to enforce) but is audible now.
     assert should_break is False
     assert any(event["action"] == "agent.context_budget_exhausted" for event in events) is False
@@ -533,7 +533,7 @@ def test_compress_emits_diagnostic_event_when_budget_limit_unconfigured():
 
 
 def test_compress_with_configured_limit_keeps_existing_behavior():
-    (_messages, should_break, applied, _count, _last), events = _run_compress(1_000)
+    (_messages, should_break, applied, _count, _last, _stop), events = _run_compress(1_000)
     assert should_break is False
     assert applied is True
     assert any(event["action"] == "agent.context_budget_unconfigured" for event in events) is False

@@ -37,6 +37,24 @@ from tools.token_manager import estimate_messages_tokens
 # but it is now explicit in results and diagnostics.
 BUDGET_LIMIT_UNCONFIGURED_GUARD_REASON = "budget_limit_unconfigured"
 
+# Turn-end reasons that are NOT budget fail-closed. The caller used to receive
+# them through the same ``should_break`` channel as the retention/hard-limit
+# fail-closed contract, which mislabeled them as
+# ``context_budget_exhausted``. Each gets a dedicated ``stop_reason`` string so
+# the caller can pick honest copy and diagnostics per reason (ZCode names its
+# equivalent ``critic_iteration_limit_reached``). ``should_break`` stays
+# reserved for the fail-closed contract documented on
+# ``compress_turn_messages``.
+STOP_REASON_CONTEXT_BUDGET_EXHAUSTED = "context_budget_exhausted"
+STOP_REASON_ITERATION_LIMIT = "iteration_limit_reached"
+STOP_REASON_EMERGENCY_COMPRESSION = "emergency_compression"
+
+# Legacy anti-runaway backstop, kept behavior-equal: only consulted after a
+# compression actually ran (the guard used to live at the end of
+# ``compress_turn_messages``), so long tool loops below this line are governed
+# by maxCallsPerTurn instead.
+_TURN_ITERATION_HARD_LIMIT = 30
+
 
 def _cooperative_yield() -> None:
     """GIL courtesy between serial estimator sweeps (compressionGateMs).
@@ -467,7 +485,7 @@ def compress_turn_messages(
     post_compression_target_tokens: int = 0,
     retention_contract: Optional[Mapping[str, Any]] = None,
     trigger_source: str = "",
-) -> Tuple[List[Any], bool, bool, int, int]:
+) -> Tuple[List[Any], bool, bool, int, int, str]:
     """Execute message compression.
 
     Fail-closed contract (versioned compression policy v3): when the compressed
@@ -477,9 +495,15 @@ def compress_turn_messages(
     ``agent.context_budget_exhausted`` scene event is recorded; the model is
     never invoked with the over-limit or chain-broken context.
 
+    ``should_break`` is reserved for that fail-closed contract alone. Turn-end
+    guards that are not budget failures (iteration hard limit, emergency
+    compression in non-chat modes) return ``should_break=False`` plus a
+    dedicated ``stop_reason`` so the caller reports the real cause instead of
+    mislabeling it as context budget exhaustion.
+
     Returns:
         (compressed_messages, should_break, last_context_compression_applied,
-         new_compression_count, new_last_iteration)
+         new_compression_count, new_last_iteration, stop_reason)
     """
     ui_getter = get_ui_fn or get_ui
     ui = ui_getter()
@@ -543,13 +567,13 @@ def compress_turn_messages(
         config=config,
     ).effective_enabled:
         record_preflight(eligible=False, guard_reason="disabled")
-        return messages, False, False, compression_count_this_turn, last_compression_iteration
+        return messages, False, False, compression_count_this_turn, last_compression_iteration, ""
 
     # Guard: 速率限制
     if last_compression_iteration > 0:
         if iteration - last_compression_iteration < compression_min_iteration_gap:
             record_preflight(eligible=False, guard_reason="iteration_gap")
-            return messages, False, False, compression_count_this_turn, last_compression_iteration
+            return messages, False, False, compression_count_this_turn, last_compression_iteration, ""
 
     # Guard: 超过最大压缩次数
     max_comp = _coerce_nonnegative_int(
@@ -558,7 +582,7 @@ def compress_turn_messages(
     )
     if compression_count_this_turn >= max_comp:
         record_preflight(eligible=False, guard_reason="max_compressions")
-        return messages, False, False, compression_count_this_turn, last_compression_iteration
+        return messages, False, False, compression_count_this_turn, last_compression_iteration, ""
 
     record_preflight(eligible=True)
 
@@ -714,7 +738,14 @@ def compress_turn_messages(
                 "messageCount": len(messages),
             },
         )
-        return messages, True, False, compression_count_this_turn, last_compression_iteration
+        return (
+            messages,
+            True,
+            False,
+            compression_count_this_turn,
+            last_compression_iteration,
+            STOP_REASON_CONTEXT_BUDGET_EXHAUSTED,
+        )
 
     normalized_hard_limit = _coerce_nonnegative_int(context_input_hard_limit)
     refusal_reason = getattr(compression_output, "retention_refusal_reason", "")
@@ -1133,13 +1164,28 @@ def compress_turn_messages(
     new_count = compression_count_this_turn + 1
     new_last_iteration = iteration
 
-    # 提前结束判断
+    # 提前结束判断：这两类收轮不是预算 fail-closed，历史上借用 should_break
+    # 通道返回，调用方会把它们统一误标成 context_budget_exhausted（压缩明明
+    # 成功却报「仍超出安全输入预算」）。现在改为专属 stop_reason 透出，由调用
+    # 方分诊文案与诊断码；should_break 只保留给 retention/hard-limit 契约。
     should_break = False
+    stop_reason = ""
     if level == CompressionLevel.EMERGENCY and mode_text != AgentMode.CHAT:
-        should_break = True
-        ui.add_log("紧急压缩触发，提前结束当前轮次", "WARN")
-    elif iteration > 30:
-        should_break = True
-        ui.add_log(f"迭代次数过多 ({iteration})，提前结束当前轮次", "WARN")
+        stop_reason = STOP_REASON_EMERGENCY_COMPRESSION
+        ui.add_log("紧急压缩完成，非对话模式按防御策略收束本轮", "WARN")
+    elif iteration > _TURN_ITERATION_HARD_LIMIT:
+        stop_reason = STOP_REASON_ITERATION_LIMIT
+        ui.add_log(
+            f"本轮迭代 {iteration} 次已超上限 {_TURN_ITERATION_HARD_LIMIT}，"
+            "压缩完成后收束本轮（非上下文预算问题）",
+            "WARN",
+        )
 
-    return compressed, should_break, last_context_compression_applied, new_count, new_last_iteration
+    return (
+        compressed,
+        should_break,
+        last_context_compression_applied,
+        new_count,
+        new_last_iteration,
+        stop_reason,
+    )
