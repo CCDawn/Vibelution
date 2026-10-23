@@ -59,7 +59,7 @@ describe("Agent permission preset API", () => {
     expect(apiSource).toContain("/api/agents/avatar-options");
     expect(apiSource).toContain("export function listAgentAvatarOptions");
     expect(apiSource).toContain("export function createAgent");
-    expect(apiSource).toContain('fetchJson<AgentConfigWorkspaceAgent>("/api/agents"');
+    expect(apiSource).toContain('agentManagementWrite<AgentConfigWorkspaceAgent>("/api/agents"');
     expect(apiSource).toContain("export function updateAgent");
     expect(apiSource).toContain("export function archiveAgent");
     expect(apiSource).toContain("export function resetAgent");

@@ -1,3 +1,4 @@
+import { isChatRoomMutationPending } from "./useChatScopedMutationPending";
 import { collapseProjectUtilityRail, selectSessionUtilityRail, setProjectUtilityHost } from "../../app/projectUtilityRail";
 import { useProjectAwareRightRail } from "./useProjectAwareRightRail";
 /**
@@ -1332,10 +1333,10 @@ export function ChatCodingRouteWorkbench() {
     groupManageModeDraft,
     groupManagePurposeDraft,
     groupManageSessionIds,
-    updateGroupRoomPending: updateGroupRoomMutation.isPending,
-    deleteGroupRoomPending: deleteGroupRoomMutation.isPending,
-    resetGroupRoomPending: resetGroupRoomMutation.isPending,
-    stopGroupRoundPending: stopGroupRoundMutation.isPending,
+    updateGroupRoomPending: isChatRoomMutationPending(updateGroupRoomMutation, activeGroupRoomId),
+    deleteGroupRoomPending: isChatRoomMutationPending(deleteGroupRoomMutation, activeGroupRoomId),
+    resetGroupRoomPending: isChatRoomMutationPending(resetGroupRoomMutation, activeGroupRoomId),
+    stopGroupRoundPending: isChatRoomMutationPending(stopGroupRoundMutation, activeGroupRoomId),
   });
 
   useChatSessionWarmup({
@@ -3442,8 +3443,8 @@ export function ChatCodingRouteWorkbench() {
               groupSpeakerStreams={groupSpeakerStreams}
               groupSpeakerProgress={groupSpeakerProgress}
               groupTimeline={groupTimeline}
-              startGroupRoundPending={startGroupRoundMutation.isPending}
-              stopGroupRoundPending={stopGroupRoundMutation.isPending}
+              startGroupRoundPending={isChatRoomMutationPending(startGroupRoundMutation, activeGroupRoomId)}
+              stopGroupRoundPending={isChatRoomMutationPending(stopGroupRoundMutation, activeGroupRoomId)}
               formatTime={formatTime}
               statusLabel={statusLabel}
               groupParticipantIdentity={groupParticipantIdentity}
@@ -3669,9 +3670,9 @@ export function ChatCodingRouteWorkbench() {
         avatarInitials={avatarInitials}
         agentRoleClass={agentRoleClass}
         avatarImageUrlFrom={avatarImageUrlFrom}
-        updateGroupRoomPending={updateGroupRoomMutation.isPending}
-        deleteGroupRoomPending={deleteGroupRoomMutation.isPending}
-        resetGroupRoomPending={resetGroupRoomMutation.isPending}
+        updateGroupRoomPending={isChatRoomMutationPending(updateGroupRoomMutation, activeGroupRoomId)}
+        deleteGroupRoomPending={isChatRoomMutationPending(deleteGroupRoomMutation, activeGroupRoomId)}
+        resetGroupRoomPending={isChatRoomMutationPending(resetGroupRoomMutation, activeGroupRoomId)}
         onOpenTeam={(teamId) => navigate(teamWorkspaceRoute(teamId))}
         onApplyGroupRoomManagement={handleApplyGroupRoomManagement}
         onDeleteActiveGroupRoom={handleDeleteActiveGroupRoom}

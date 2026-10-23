@@ -136,24 +136,25 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("type ScopedToolTestResult");
     expect(routeSource).toContain("toolTestKey(variables.toolId, variables.agentScopeId, variables.agentId)");
     expect(routeSource).toContain("const visibleTestResult = testResult?.key === activeToolTestKey ? testResult.result : null");
-    expect(routeSource).toContain("enableMutation.variables?.toolId === activeTool?.id");
-    expect(routeSource).toContain("deleteMutation.variables === activeTool?.id");
+    expect(routeSource).toContain('pendingToolWrites.get(activeTool?.id ?? "") === "enable"');
+    expect(routeSource).toContain('pendingToolWrites.get(activeTool?.id ?? "") === "delete"');
     expect(routeSource).toContain("activeToolTestPending");
     expect(routeSource).not.toContain("setTestResult(null);\n  }, [activeAgentScopeId, activePolicyAgentId, activeToolId]);");
   });
 
-  it("optimistically updates single-tool enable and delete actions before backend confirmation", () => {
+  it("rolls back only the optimistic enable target and waits for confirmed deletion", () => {
     expect(routeSource).toContain("function updatedToolRegistryPayload(");
     expect(routeSource).toContain("function removedToolRegistryPayload(");
     expect(routeSource).toContain("function optimisticToolEnabled(tool: ToolRegistryItem, enabled: boolean)");
     expect(routeSource).toContain("queryClient.cancelQueries({ queryKey: queryKeys.tools() })");
-    expect(routeSource).toContain("const previousTools = queryClient.getQueryData<ToolRegistryPayload>(queryKeys.tools())");
+    expect(routeSource).toContain("const previousTool = queryClient.getQueryData<ToolRegistryPayload>(queryKeys.tools())?.tools.find");
     expect(routeSource).toContain("optimisticToolEnabled(tool, payload.enabled)");
     expect(routeSource).toContain("removedToolRegistryPayload(current, toolId)");
-    expect(routeSource).toContain("queryClient.setQueryData(queryKeys.tools(), context.previousTools)");
-    expect(routeSource).toContain("const previousActiveToolId = activeToolId");
-    expect(routeSource).toContain("const previousSelectedToolIds = new Set(selectedToolIds)");
-    expect(routeSource).toContain("setSelectedToolIds(new Set(context.previousSelectedToolIds))");
+    expect(routeSource).toContain("tool === context.optimisticTool ? context.previousTool! : tool");
+    expect(routeSource).toContain("if (!payload.deleted || payload.toolId !== toolId)");
+    expect(routeSource).toContain("setActiveToolId(current => current === toolId ? null : current)");
+    expect(routeSource).not.toContain("context.previousTools");
+    expect(routeSource).not.toContain("context.previousSelectedToolIds");
   });
 
   it("keeps package grouping while virtualizing the registered tool rows", () => {

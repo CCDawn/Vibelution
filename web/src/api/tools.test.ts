@@ -1,9 +1,32 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { deleteTool, setGeneratedToolEnabled } from "./tools";
+import { resetControlTokenForTests, seedControlTokenForTests } from "./client";
 
 import apiSource from "./tools.ts?raw";
 import agentsRouteSource from "../routes/AgentsRoute.tsx?raw";
 import wizardSource from "../routes/agent-create/AgentCreateWizardDialog.tsx?raw";
 import routeSource from "../routes/ToolsRoute.tsx?raw";
+
+describe("bounded tool writes", () => {
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); resetControlTokenForTests(); });
+  it.each([
+    ["enable", () => setGeneratedToolEnabled("a/b", false), "/api/tools/generated/a%2Fb/enabled", "PUT"],
+    ["delete", () => deleteTool("a/b"), "/api/tools/a%2Fb", "DELETE"],
+  ] as const)("bounds %s and never automatically repeats the write", async (_name, execute, endpoint, method) => {
+    vi.useFakeTimers(); seedControlTokenForTests();
+    const fetchMock = vi.fn((_input: string, init?: RequestInit) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    let failure: unknown;
+    const pending = execute().catch(error => { failure = error; });
+    await vi.advanceTimersByTimeAsync(60_001);
+    expect(failure).toMatchObject({ name: "TimeoutError" });
+    await pending;
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]).toMatchObject([endpoint, { method }]);
+  });
+});
 
 describe("tools catalog API", () => {
   it("owns the tools JSON transports", () => {

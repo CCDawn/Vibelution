@@ -44,9 +44,11 @@ export function useTeamShellMutations(options: UseTeamShellMutationsOptions) {
     }),
     onSuccess: (team, teamId, context) => {
       context?.telemetry?.succeeded({ teamId });
-      options.setSelectedTeamId("");
-      options.setSelectedNodeId("");
-      options.clearTeamSearchParams();
+      if (options.selectedTeamId === teamId) {
+        options.setSelectedTeamId(current => current === teamId ? "" : current);
+        options.setSelectedNodeId("");
+        options.clearTeamSearchParams();
+      }
       void chatWorkspaceCache.afterTeamArchived(teamId, team.linkedChatRoomId || team.linkedChatRoom?.roomId);
     },
     onError: (error, teamId, context) => {

@@ -3,7 +3,7 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { updateAgent } from "../../api/agents";
+import { discardAgentConfigDraft, promoteAgentModel, saveAgentConfigDraft, updateAgent } from "../../api/agents";
 import type { AgentConfigWorkspaceAgent } from "../../api/types";
 import type { AgentConfigDraft } from "../AgentCoreConfigPanel";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
@@ -49,6 +49,36 @@ beforeEach(async () => {
   await act(async () => root.render(<QueryClientProvider client={client}><Consumer /></QueryClientProvider>));
 });
 afterEach(async () => { await act(async () => root.unmount()); client.clear(); node.remove(); });
+
+it.each(["save", "discard", "promote"] as const)("%s completes even when the following readback never settles", async kind => {
+  vi.spyOn(client, "invalidateQueries").mockReturnValue(new Promise<void>(() => {}));
+  vi.mocked(saveAgentConfigDraft).mockResolvedValue({ draftId: "draft" } as Awaited<ReturnType<typeof saveAgentConfigDraft>>);
+  vi.mocked(discardAgentConfigDraft).mockResolvedValue({ draftId: "draft", status: "discarded" });
+  vi.mocked(promoteAgentModel).mockResolvedValue({ agent, modelRef: "model" });
+  let settled = false;
+  await act(async () => {
+    const pending = kind === "save"
+      ? mutations.saveAgentConfigDraftMutation.mutateAsync({ agentId: agent.agentId, baseUpdatedAt: agent.updatedAt, snapshot: {} })
+      : kind === "discard"
+        ? mutations.discardAgentConfigDraftMutation.mutateAsync({ agentId: agent.agentId, draftId: "draft" })
+        : mutations.promoteAgentModelMutation.mutateAsync({ agent, slot: { slot: "dialogue" }, candidate: { modelRef: "model" }, expectedBaseHash: "base" } as Parameters<typeof mutations.promoteAgentModelMutation.mutateAsync>[0]);
+    void pending.then(() => { settled = true; });
+    await Promise.resolve();
+  });
+  expect(settled).toBe(true);
+});
+
+it("a late model promotion does not overwrite the newly selected Agent's draft", async () => {
+  let finish!: (value: { agent: AgentConfigWorkspaceAgent; modelRef: string }) => void;
+  vi.mocked(promoteAgentModel).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+  let pending!: Promise<unknown>;
+  await act(async () => {
+    pending = mutations.promoteAgentModelMutation.mutateAsync({ agent, slot: { slot: "dialogue" }, candidate: { modelRef: "model" }, expectedBaseHash: "base" } as Parameters<typeof mutations.promoteAgentModelMutation.mutateAsync>[0]);
+  });
+  activeAgentId = "other";
+  await act(async () => { finish({ agent, modelRef: "model" }); await pending; });
+  expect(setConfigDraft).not.toHaveBeenCalled();
+});
 async function save(changes: Partial<AgentConfigDraft>, group?: "models" | "basic") {
   await act(async () => mutations.updateAgentMutation.mutateAsync({
     agentId: agent.agentId, agent, draft: { ...draftFromAgent(agent), ...changes }, modelChoices: [], sourceDraftId: "", group,
