@@ -1984,7 +1984,11 @@ class TestToolExecutorErrorHandling:
 
         assert action is None
         assert '"issue_count": 2' in str(result)
-        event = events[-1]
+        # Phase receipts may follow the semantic terminal; its identity and
+        # uniqueness must not depend on global diagnostic arrival order.
+        terminal_events = [event for event in events if event["eventCode"] == "tool.execute.degraded"]
+        assert len(terminal_events) == 1
+        event = terminal_events[0]
         assert event["eventCode"] == "tool.execute.degraded"
         assert event["level"] == "warning"
         assert event["outcome"] == "degraded"
@@ -2019,7 +2023,9 @@ class TestToolExecutorErrorHandling:
 
         assert action is None
         assert str(result).startswith("[搜索质量不足]")
-        event = events[-1]
+        terminal_events = [event for event in events if event["eventCode"] == "tool.execute.degraded"]
+        assert len(terminal_events) == 1
+        event = terminal_events[0]
         assert event["eventCode"] == "tool.execute.degraded"
         assert event["level"] == "warning"
         assert event["outcome"] == "degraded"
