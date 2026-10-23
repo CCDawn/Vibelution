@@ -347,6 +347,10 @@ def _chat_turn_result_status(result_status: str, result: Any, *, stop_requested:
             )
         ):
             return "failed_runtime"
+        # A continuation fuse has already decided why this turn yielded.
+        # Its progress outcome must not erase the explicit limit verdict.
+        if normalized in {"needs_continue", "paused_limit"}:
+            return normalized
         contract = s.build_chat_coding_result_contract(result)
         outcome = str(contract.get("outcome") or result.get("outcome") or result.get("task_outcome") or "").strip().lower()
         explicit_outcome = s._explicit_chat_result_outcome(result)

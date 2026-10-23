@@ -1173,6 +1173,60 @@ def test_run_session_turn_stop_during_history_assembly_aborts_before_run(monkeyp
     assert calls == ["stopped"]
 
 
+@pytest.mark.parametrize("receipt,record_fails", [
+    ({"turnId": "receipt-turn", "finalStatus": "needs_continue", "terminalReason": "needs_continue"}, False),
+    ({"turnId": "receipt-turn", "finalStatus": "paused_limit", "terminalReason": "paused_limit"}, False),
+    ({"turnId": "receipt-turn", "finalStatus": "failed_provider", "terminalReason": "failed_provider"}, False),
+    ({"turnId": "receipt-turn", "finalStatus": "completed", "terminalReason": "success"}, False),
+    ({"turnId": "receipt-turn", "finalStatus": "completed", "terminalReason": "success"}, True),
+    (None, False),
+    ({"turnId": "other-turn", "finalStatus": "completed", "terminalReason": "success"}, False),
+])
+def test_worker_records_committed_agent_run_before_releasing_owner(monkeypatch, tmp_path, receipt, record_fails):
+    from core.web.services.session import runtime_glue
+
+    calls, lifecycle, recorded = [], [], []
+    _install_full_prepare_reach_harness(monkeypatch, tmp_path, calls=calls, lifecycle=lifecycle)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "get_agent", lambda *_args, **_kwargs: {"agentId": "agent-receipt", "status": "active"})
+    monkeypatch.setattr(session_service, "_ensure_session_agent_prompt_snapshot", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(session_service, "_render_agent_prompt_snapshot_block", lambda *_args: "")
+    monkeypatch.setattr(session_service, "_session_reasoning_effort_snapshot", lambda *_args: "")
+    monkeypatch.setattr(session_service, "_resolve_session_agent_llm", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "build_agent_context", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_is_session_turn_current", runtime_glue._is_session_turn_current)
+    monkeypatch.setattr(session_service, "_schedule_session_queued_turn_drain", lambda *_args: None)
+    monkeypatch.setattr(session_service, "notify_parent_session_of_child_return", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda *_args: None)
+    raw = {"status": "completed", "summary": "已记录", "tool_call_count": 1}
+    monkeypatch.setattr(worker, "_run_session_continuation_loop", lambda *_args, **_kwargs: raw)
+    monkeypatch.setattr(session_service, "_persist_session_turn_result", lambda *_args, **_kwargs: receipt)
+
+    def record(_agent_id, _session_id, result, *, run_id):
+        assert runtime_glue._is_session_turn_current("receipt-session", run_id)
+        recorded.append(result)
+        if record_fails:
+            raise OSError("history storage unavailable")
+
+    monkeypatch.setattr(session_service, "record_agent_turn_result", record)
+    runtime_glue._set_session_running("receipt-session", True, turn_id="receipt-turn")
+    try:
+        worker._run_session_turn_impl({"session_id": "receipt-session", "turn_id": "receipt-turn",
+                                       "agent_id": "agent-receipt", "user_message": "keep progress"})
+        assert "failure" not in calls
+        expected = bool(receipt and receipt["turnId"] == "receipt-turn")
+        assert len(recorded) == int(expected), (calls, lifecycle)
+        if expected:
+            assert recorded[0]["status"] == receipt["finalStatus"]
+            assert recorded[0]["terminalReason"] == receipt["terminalReason"]
+            assert recorded[0] is not raw
+        assert raw["status"] == "completed"
+        assert not runtime_glue._is_session_turn_current("receipt-session", "receipt-turn")
+        assert ("agent_run_record_failed" in [phase for phase, _ in lifecycle]) == record_fails
+    finally:
+        runtime_glue._set_session_running("receipt-session", False, turn_id="receipt-turn")
+
+
 def test_run_session_turn_stop_before_model_request_aborts_at_turn_start(monkeypatch, tmp_path) -> None:
     """The last pre-run checkpoint fires before the first model request handoff."""
 

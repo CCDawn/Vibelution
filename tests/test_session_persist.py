@@ -41,11 +41,12 @@ def test_persist_turn_result_noop_when_conversation_missing(monkeypatch, tmp_pat
     monkeypatch.setattr(session_service, "load_session_chat_state", lambda _root, _sid: None)
 
     # Must return without raising when conversation is gone.
-    persist._persist_session_turn_result(
+    receipt = persist._persist_session_turn_result(
         "missing-session",
         {"status": "completed", "summary": "ok", "raw_output": "ok"},
         turn_id="turn-x",
     )
+    assert receipt is None
 
 
 def test_persist_turn_result_skips_stale_turn(monkeypatch, tmp_path) -> None:
@@ -68,11 +69,12 @@ def test_persist_turn_result_skips_stale_turn(monkeypatch, tmp_path) -> None:
         lambda sid: called.append("ledger") or [],
     )
 
-    persist._persist_session_turn_result(
+    receipt = persist._persist_session_turn_result(
         "s1",
         {"status": "completed", "summary": "ok", "raw_output": "ok"},
         turn_id="stale",
     )
+    assert receipt is None
     assert called == []
 
 
@@ -259,6 +261,32 @@ def _seed_running_session(tmp_path, session_id: str, turn_id: str) -> None:
         },
     )
     session_service._set_session_running(session_id, True, turn_id=turn_id)
+
+
+@pytest.mark.parametrize(("result", "expected"), [
+    ({"status": "completed", "summary": "已记录", "tool_call_count": 1,
+      "tool_trace": [{"name": "todo_write", "status": "done"}]}, "needs_continue"),
+    ({"status": "paused_limit", "summary": "保留进度", "outcome": "progress"}, "paused_limit"),
+    ({"status": "completed", "summary": "任务已完成"}, "completed"),
+    ({"status": "failed", "summary": "provider_protocol_error: HTTP 429 rate limit exceeded",
+      "error": "provider_protocol_error: HTTP 429 rate limit exceeded"}, "failed_provider"),
+])
+def test_persist_returns_only_the_committed_terminal_verdict(tmp_path, monkeypatch, result, expected):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_running_session(tmp_path, "receipt-session", "receipt-turn")
+    original_status = result["status"]
+    receipt = persist._persist_session_turn_result("receipt-session", result, turn_id="receipt-turn")
+    events = session_service._load_session_conversation_events_cached("receipt-session")
+    terminal = events[-1]
+    assert terminal.status == expected
+    assert receipt == {
+        "turnId": terminal.turn_id,
+        "finalStatus": terminal.status,
+        "terminalReason": load_session_chat_state(tmp_path, "receipt-session")["last_turn_terminal_reason"],
+    }
+    assert result["status"] == original_status
+    # A second persist is a no-op, not a new authority for the old result.
+    assert persist._persist_session_turn_result("receipt-session", result, turn_id="receipt-turn") is None
 
 
 def test_persist_turn_result_provider_protocol_error_keeps_error_out_of_journal(

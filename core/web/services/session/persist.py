@@ -12,15 +12,27 @@ from __future__ import annotations
 import json
 from copy import deepcopy
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 from .control import _stopped_turn_message
 
-from core.chat.turn_journal import turn_has_terminal_event
+from core.chat.turn_journal import TERMINAL_EVENTS, turn_has_terminal_event
 from core.web.services.session.turn_failure_classification import classify_turn_failure
 
 
 _CHALLENGE_DEADLINE_PROBLEM_CODE = "challenge_logical_task_deadline_exhausted"
+
+
+class SessionTurnTerminalReceipt(TypedDict):
+    turnId: str
+    finalStatus: str
+    terminalReason: str
+
+
+def _terminal_receipt(event: Any, reason: str) -> SessionTurnTerminalReceipt | None:
+    if event is None or event.event_type not in TERMINAL_EVENTS or not event.turn_id or not event.status:
+        return None
+    return {"turnId": event.turn_id, "finalStatus": event.status, "terminalReason": reason}
 
 
 def _apply_turn_failure_problem_code(conversation: dict[str, Any], problem_code: str) -> None:
@@ -371,7 +383,7 @@ def _persist_session_turn_result(
     active_task_hint: Any = None,
     user_message_source: str = "",
     turn_id: str = "",
-) -> None:
+) -> SessionTurnTerminalReceipt | None:
     s = _service()
     lang = s.get_web_language()
     capture_messages: list[dict[str, Any]] | None = None
@@ -714,7 +726,7 @@ def _persist_session_turn_result(
         # and persisting it polluted model history (see history-filtering contract
         # in core/chat/turn_journal.py). The error stays visible via
         # conversation["last_turn_error"] (session detail turnError surface).
-        s._append_session_conversation_event(
+        committed_terminal = s._append_session_conversation_event(
             session_id,
             turn_id,
             s.EVENT_TURN_FAILED,
@@ -736,7 +748,7 @@ def _persist_session_turn_result(
             status="failed",
             last_preview=str(turn_error.get("message") or ""),
         )
-        return
+        return _terminal_receipt(committed_terminal, conversation["last_turn_terminal_reason"])
     if provider_failure_after_final_answer:
         s._record_session_turn_lifecycle_event(
             session_id,
@@ -1119,7 +1131,7 @@ def _persist_session_turn_result(
         if challenge_deadline_cancelled or stop_requested or final_status in {"stopped", "stopped_by_user"}
         else s.EVENT_TURN_COMPLETED
     )
-    s._append_session_conversation_event(
+    committed_terminal = s._append_session_conversation_event(
         session_id,
         turn_id,
         terminal_event,
@@ -1160,6 +1172,7 @@ def _persist_session_turn_result(
         s._deliver_agent_inbox_turn_reply(agent_inbox_reply)
     if capture_messages:
         s._capture_session_chat_candidate(session_id, capture_messages)
+    return _terminal_receipt(committed_terminal, conversation["last_turn_terminal_reason"])
 
 def _persist_session_turn_runtime_error(
     session_id: str,

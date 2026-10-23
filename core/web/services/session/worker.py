@@ -2577,7 +2577,7 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                     reason="binding_revision_fence_before_assistant_persist",
                 )
                 return
-            s._persist_session_turn_result(
+            terminal_receipt = s._persist_session_turn_result(
                 session_id,
                 result,
                 mental_model_enabled=mental_model_enabled,
@@ -2588,22 +2588,42 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
             )
             _finalize_proactive_delivery_after_persist(context)
             if s._is_session_turn_current(session_id, turn_id):
+                final_status = ""
+                if (isinstance(terminal_receipt, dict) and turn_id
+                        and terminal_receipt.get("turnId") == turn_id):
+                    final_status = str(terminal_receipt.get("finalStatus") or "").strip()
+                if agent_id and final_status:
+                    # Record the Journal's verdict while this worker still owns
+                    # the turn. Releasing ownership first makes the guard false;
+                    # the raw model result can also differ from that verdict.
+                    agent_result = {
+                        **(result if isinstance(result, dict) else {}),
+                        "status": final_status,
+                        "terminalReason": terminal_receipt.get("terminalReason", ""),
+                    }
+                    try:
+                        s.record_agent_turn_result(agent_id, session_id, agent_result, run_id=turn_id)
+                    except Exception as exc:  # History failure cannot undo a committed native terminal.
+                        s._record_session_turn_lifecycle_event(
+                            session_id, "agent_run_record_failed", turn_id=turn_id,
+                            level="warning", outcome="failed",
+                            fields={"exceptionType": type(exc).__name__},
+                        )
                 s._set_session_running(session_id, False, turn_id=turn_id)
                 s._publish_session_detail_snapshot(session_id)
                 s._record_session_turn_lifecycle_event(
                     session_id,
                     "user_visible_finished",
                     turn_id=turn_id,
-                    outcome="completed",
+                    outcome=final_status or "completed",
                     fields={
                         "resultStatus": str(result.get("status") or "completed").strip()
                         if isinstance(result, dict)
                         else "completed",
                         "finalDetailPublished": True,
+                        "finalStatus": final_status,
                     },
                 )
-            if agent_id and s._is_session_turn_current(session_id, turn_id):
-                s.record_agent_turn_result(agent_id, session_id, result if isinstance(result, dict) else {}, run_id=turn_id)
     except Exception as exc:
         deadline_cancelled = _is_challenge_deadline_cancelled(
             context,
