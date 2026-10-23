@@ -1,7 +1,7 @@
 import type { ConversationMessage, SessionDetail, SessionStreamEvent } from "../api/types";
 import type { BrowserTelemetryEventInput } from "../app/browserTelemetry";
 import {
-  activityOutcome, isActivityBusy, resolveSessionActivity, sessionTerminalStatus,
+  activityOutcome, hasExecutionOwnership, resolveSessionActivity, sessionTerminalStatus,
 } from "./sessionActivityState";
 
 export type DesktopConversationCompletionNotification = {
@@ -389,7 +389,7 @@ export function createDesktopConversationNotifier(
         return;
       }
 
-      const busy = isActivityBusy(resolveSessionActivity(detail).execution);
+      const busy = hasExecutionOwnership(resolveSessionActivity(detail).execution);
       const terminalPhase = sessionTerminalStatus(detail);
       const wasBusy = lastBusyBySession.get(sessionId) ?? false;
       lastBusyBySession.set(sessionId, busy);
@@ -442,7 +442,7 @@ export function createDesktopConversationNotifier(
         if (sessionId === normalizeNotificationText(context?.viewedSessionId) && !companionAgentId) {
           continue;
         }
-        const busy = isActivityBusy(resolveSessionActivity(session).execution);
+        const busy = hasExecutionOwnership(resolveSessionActivity(session).execution);
         const terminalPhase = sessionTerminalStatus(session);
         const completionIdentity = normalizeNotificationText(session.completionIdentity);
         const suppressWhenFocused = companionAgentId

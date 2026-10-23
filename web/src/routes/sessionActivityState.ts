@@ -45,7 +45,8 @@ export function isActivityResting(value: unknown) {
   return (contract.resting as readonly string[]).includes(normalizeActivityValue(value));
 }
 
-export function isActivityBusy(value: unknown) {
+/** Paused execution still owns the Turn, while producing no active output. */
+export function hasExecutionOwnership(value: unknown) {
   return Boolean(activityExecution(value));
 }
 

@@ -15,6 +15,7 @@
 | 当前执行 | Session 当前状态与实时 WorkRun | 不从 `lastTurnStatus`、`terminalReason` 推断正在运行 |
 | 活动阶段 | `thinking/tooling/answering/planning/reading/editing/verifying` | 旧 `currentPhase` 中的状态只在读取边界解码；新 AgentRun 终态清空阶段 |
 | 本轮结果 | 明确的结果与终态原因 | `ready/idle` 不证明成功；`paused_limit/needs_continue` 表示本轮结束但可继续 |
+| 暂停 | 保留执行归属，等待恢复 | 通知继续等待终态；编辑/流式输出标记不把 paused 当正在输出 |
 | 未读指示 | 既有回复身份与已读记录 | 蓝色指示表示有新消息，不证明任务成功；通知与宠物庆祝须有明确成功结果 |
 | 未知状态 | 保留原始状态，读取结果为 unknown | 不回落到上一轮成功；生命周期阻塞仍保守保护未知 WorkRun |
 

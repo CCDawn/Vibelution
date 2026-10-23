@@ -1,6 +1,6 @@
 import { isFetchJsonHttpError } from "../../api/chat";
 import type { TranslationKey } from "../../i18n/dictionary";
-import { activityExecution, isActivityBusy } from "../sessionActivityState";
+import { activityExecution } from "../sessionActivityState";
 
 export type ResizableSide = "left" | "right";
 
@@ -224,7 +224,8 @@ export function isStoppingPhase(value: string | null | undefined) {
 }
 
 export function isBusyPhase(value: string | null | undefined) {
-  return isActivityBusy(value);
+  // Paused retains ownership but does not mean the worker is editing output.
+  return isRunningPhase(value) || isStoppingPhase(value);
 }
 
 export function formatTokenSpeedValue(tokensPerSecond: number | null | undefined) {
