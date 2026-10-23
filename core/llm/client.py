@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import threading
@@ -3151,6 +3152,15 @@ class LLMClient:
         # breaking the provider call.
         provider = getattr(self, "provider", None)
         profile = getattr(self, "profile", None)
+        # Scene events need a query to be seen; a one-line warning log keeps
+        # the degraded stop latency reachable from the backend log tail.
+        logging.getLogger(__name__).warning(
+            "LLM provider abort watcher unavailable (transport=%s reason=%s backend=%s); "
+            "user stops stay cooperative-only for this transport.",
+            transport,
+            reason,
+            backend_id,
+        )
         _record_llm_scene_event(
             "transport",
             _PROVIDER_ABORT_UNAVAILABLE_EVENT_CODE,

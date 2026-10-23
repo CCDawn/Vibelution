@@ -1,6 +1,7 @@
 from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 import inspect
 import json
+import logging
 import os
 import threading
 import time
@@ -4361,7 +4362,7 @@ def _capture_llm_scene_events(monkeypatch):
     return events
 
 
-def test_non_default_chat_backend_records_abort_unavailable(monkeypatch):
+def test_non_default_chat_backend_records_abort_unavailable(monkeypatch, caplog):
     """A non-default Chat backend stays cooperative-only and says so once."""
     import litellm
 
@@ -4395,7 +4396,8 @@ def test_non_default_chat_backend_records_abort_unavailable(monkeypatch):
     }
 
     with llm_cancel_context(lambda: "", enable_chat_provider_abort=True):
-        response = client._invoke_payload_once(payload)
+        with caplog.at_level(logging.WARNING, logger="core.llm.client"):
+            response = client._invoke_payload_once(payload)
 
     # The call result is unchanged: the fake backend answered and no
     # cancellable client was injected.
@@ -4411,6 +4413,19 @@ def test_non_default_chat_backend_records_abort_unavailable(monkeypatch):
     assert fields["reason"] == "backend_not_default"
     assert fields["backendId"] == "fake_backend"
     assert fields["adapterId"]
+    # 场景事件要靠查询才能看到；降级还必须落一行 WARNING 日志，让停止
+    # 延迟劣化能从后端日志尾部直接发现。
+    warning_records = [
+        record
+        for record in caplog.records
+        if record.name == "core.llm.client"
+        and "LLM provider abort watcher unavailable" in record.getMessage()
+    ]
+    assert len(warning_records) == 1
+    warning_message = warning_records[0].getMessage()
+    assert "transport=non_stream_chat" in warning_message
+    assert "reason=backend_not_default" in warning_message
+    assert "backend=fake_backend" in warning_message
 
 
 def test_non_default_responses_backends_record_abort_unavailable(monkeypatch):

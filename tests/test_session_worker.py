@@ -931,6 +931,282 @@ def test_run_session_turn_aborts_when_prepare_context_interrupted(monkeypatch):
     assert "running_cleared" in calls
 
 
+def test_run_session_turn_stop_during_agent_create_aborts_before_context_build(monkeypatch) -> None:
+    """A stop landing while the runtime agent is being built must not pay for context assembly."""
+
+    from pathlib import Path
+
+    calls: list[str] = []
+    lifecycle: list[tuple[str, dict]] = []
+    control = session_service.SessionTurnControl(session_id="worker-s1", turn_id="turn-stop")
+
+    class _Decision:
+        effective_enabled = False
+
+    monkeypatch.setattr(session_service, "_is_session_turn_current", lambda sid, tid: True)
+    monkeypatch.setattr(session_service, "_normalize_optional_bool", lambda value: False)
+    monkeypatch.setattr(session_service, "resolve_feature_decision", lambda *args, **kwargs: _Decision())
+    monkeypatch.setattr(session_service, "_ensure_session_workspace", lambda *args, **kwargs: Path("."))
+    monkeypatch.setattr(session_service, "_sync_agent_directory_project_root", lambda *args, **kwargs: None)
+    monkeypatch.setattr(session_service, "get_agent", lambda *args, **kwargs: {"agentId": "agent-1"})
+    monkeypatch.setattr(session_service, "_supervised_role_for_runtime_context", lambda *args, **kwargs: "")
+    monkeypatch.setattr(session_service, "_supervised_runtime_tool_grants_for_context", lambda *args, **kwargs: None)
+    monkeypatch.setattr(session_service, "_ensure_session_agent_prompt_snapshot", lambda *args, **kwargs: {})
+    monkeypatch.setattr(session_service, "_render_agent_prompt_snapshot_block", lambda *args, **kwargs: "")
+    monkeypatch.setattr(session_service, "_session_reasoning_effort_snapshot", lambda *args, **kwargs: "")
+    monkeypatch.setattr(session_service, "_resolve_session_agent_llm", lambda *args, **kwargs: None)
+    monkeypatch.setattr(session_service, "_normalize_message_attachments", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        session_service,
+        "_lightweight_chat_payload_decision",
+        lambda *args, **kwargs: (False, "unified_conversation_chain"),
+    )
+
+    def fake_acquire(*args, **kwargs):
+        calls.append("agent_create")
+        control.request_stop("operator requested stop")
+        return SimpleNamespace(), {}
+
+    monkeypatch.setattr(session_service, "_acquire_chat_agent_for_session", fake_acquire)
+    # The context build at this point only feeds the early packet; returning
+    # None keeps the historical-agent fallback path so the flow reaches the
+    # agent-create stage where the stop lands.
+    monkeypatch.setattr(session_service, "build_agent_context", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        session_service,
+        "_persist_session_turn_result",
+        lambda *args, **kwargs: calls.append("persist"),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_turn_lifecycle_event",
+        lambda session_id, phase, **kwargs: calls.append(str(phase)) or lifecycle.append((str(phase), kwargs)),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_ensure_session_turn_terminal_fallback",
+        lambda *args, **kwargs: calls.append("fallback"),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_execution_registry_event",
+        lambda *args, **kwargs: calls.append("registry"),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_set_session_running",
+        lambda *args, **kwargs: calls.append("running_cleared"),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_clear_session_turn_control",
+        lambda *args, **kwargs: calls.append("control_cleared"),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_publish_session_detail_snapshot",
+        lambda *args, **kwargs: calls.append("published"),
+    )
+
+    worker._run_session_turn(
+        {
+            "session_id": "worker-s1",
+            "turn_id": "turn-stop",
+            "turn_control": control,
+            "agent_id": "agent-1",
+            "user_message": "hello",
+        }
+    )
+
+    stop_stages = [
+        kwargs.get("fields", {}).get("stage")
+        for phase, kwargs in lifecycle
+        if phase == "stop_observed"
+    ]
+    assert stop_stages == ["prepare_agent_runtime"]
+    assert "agent_create" in calls
+    assert "persist" in calls
+    assert "worker_finished" in calls
+    assert "running_cleared" in calls
+
+
+def _install_full_prepare_reach_harness(monkeypatch, tmp_path, *, calls, lifecycle) -> None:
+    """Patch the whole prepare path so ``_run_session_turn_impl`` reaches the run handoff.
+
+    Mirrors the provider-error routing harness: everything from workspace setup
+    down to ``_run_session_continuation_loop`` is stubbed; individual tests
+    decide where the user stop lands and what must not run afterwards.
+    """
+
+    from pathlib import Path
+
+    from core.llm.types import LLMError
+
+    runtime_agent = SimpleNamespace()
+
+    class _Decision:
+        effective_enabled = False
+
+    class _Assembly:
+        history_messages: list = []
+        events: list = []
+        included_event_ids: list = []
+        omitted_event_count = 0
+        checkpoint_event_id = ""
+
+        @staticmethod
+        def to_composition_patch() -> dict:
+            return {}
+
+    monkeypatch.setattr(session_service, "_is_session_turn_current", lambda *_args: True)
+    monkeypatch.setattr(session_service, "_normalize_optional_bool", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(session_service, "resolve_feature_decision", lambda *_args, **_kwargs: _Decision())
+    monkeypatch.setattr(session_service, "_ensure_session_workspace", lambda *_args: tmp_path)
+    monkeypatch.setattr(session_service, "_sync_agent_directory_project_root", lambda: None)
+    monkeypatch.setattr(session_service, "_supervised_role_for_runtime_context", lambda *_args: "")
+    monkeypatch.setattr(session_service, "_supervised_runtime_tool_grants_for_context", lambda *_args: None)
+    monkeypatch.setattr(session_service, "_supervised_workspace_override_path", lambda *_args: None)
+    monkeypatch.setattr(session_service, "_normalize_message_attachments", lambda *_args: [])
+    monkeypatch.setattr(
+        session_service,
+        "_lightweight_chat_payload_decision",
+        lambda *_args, **_kwargs: (False, "unified_conversation_chain"),
+    )
+    monkeypatch.setattr(session_service, "sync_llm_key_env_from_persisted_user_env", lambda **_kwargs: {"ok": True})
+    monkeypatch.setattr(session_service, "_source_collection_stage_task_context_metadata", lambda *_args: {})
+    monkeypatch.setattr(session_service, "_source_collection_stage_task_required_tool_names", lambda *_args: [])
+    monkeypatch.setattr(session_service, "_session_task_workspace_for_turn", lambda *_args, **_kwargs: Path(tmp_path))
+    monkeypatch.setattr(session_service, "_session_tool_workspace_override", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(session_service, "active_agent_runtime", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(session_service, "mental_model_enabled_override", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(
+        session_service,
+        "_acquire_chat_agent_for_session",
+        lambda *_args, **_kwargs: (runtime_agent, {}),
+    )
+    monkeypatch.setattr(session_service, "_capture_session_ui_stream", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(session_service, "_history_messages_for_agent_seed", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(session_service, "_load_session_conversation_events_cached", lambda *_args: [])
+    monkeypatch.setattr(session_service, "assemble_conversation_context", lambda *_args, **_kwargs: _Assembly())
+    monkeypatch.setattr(session_service, "_session_context_segments_without_prompt_template", lambda *_args: [])
+    monkeypatch.setattr(session_service, "_prompt_snapshot_context_segment", lambda *_args: None)
+    monkeypatch.setattr(session_service, "_session_context_segments_block", lambda *_args: "")
+    monkeypatch.setattr(session_service, "_recent_session_guidance_context_block", lambda *_args: "")
+    monkeypatch.setattr(session_service, "_skill_runtime_context_from_invocation", lambda *_args: "")
+    monkeypatch.setattr(session_service, "refresh_active_skill_contract_status", lambda value: value)
+    monkeypatch.setattr(session_service, "_active_skill_runtime_context_from_contract", lambda *_args: "")
+    monkeypatch.setattr(session_service, "_build_last_context_composition", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(session_service, "_append_session_conversation_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_set_session_live_context_composition", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_session_workspace_relative_path", lambda *_args: "session-1")
+    monkeypatch.setattr(session_service, "_session_prompt_cache_partition", lambda *_args, **_kwargs: "partition")
+    monkeypatch.setattr(session_service, "_session_prompt_cache_scope", lambda *_args, **_kwargs: "chat_session")
+    monkeypatch.setattr(session_service, "_session_prompt_cache_log_fields", lambda **_kwargs: {})
+    monkeypatch.setattr(session_service, "_record_session_turn_lifecycle_event", lambda _sid, phase, **kwargs: lifecycle.append((phase, kwargs)))
+    monkeypatch.setattr(session_service, "_record_session_execution_registry_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_record_session_turn_trace_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_set_session_turn_progress_live_output", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_set_session_model_thinking_live_output", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_get_session_stop_reason", lambda *_args: "")
+    monkeypatch.setattr(worker, "build_research_thinking_budget_segment", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr(worker, "_wait_for_tool_execution_quiescence", lambda *_args: None)
+    monkeypatch.setattr(worker, "_finish_session_turn_worker", lambda *_args: None)
+    monkeypatch.setattr(
+        session_service,
+        "_persist_session_turn_result",
+        lambda *_args, **_kwargs: calls.append("stopped"),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_persist_session_turn_failure",
+        lambda *_args, **_kwargs: calls.append("failure"),
+    )
+
+    def forbidden_continuation(*args, **kwargs):
+        calls.append("continuation")
+        raise LLMError("api_error", "model request must not start", retryable=False)
+
+    monkeypatch.setattr(worker, "_run_session_continuation_loop", forbidden_continuation)
+
+
+def test_run_session_turn_stop_during_history_assembly_aborts_before_run(monkeypatch, tmp_path) -> None:
+    """A stop landing during the history ledger walk must not pay for the remaining seed stages."""
+
+    class _Assembly:
+        history_messages: list = []
+        events: list = []
+        included_event_ids: list = []
+        omitted_event_count = 0
+        checkpoint_event_id = ""
+
+        @staticmethod
+        def to_composition_patch() -> dict:
+            return {}
+
+    calls: list[str] = []
+    lifecycle: list[tuple[str, dict]] = []
+    control = session_service.SessionTurnControl(session_id="session-1", turn_id="turn-1")
+
+    def stop_mid_assembly(*_args, **_kwargs):
+        control.request_stop("operator requested stop")
+        return _Assembly()
+
+    _install_full_prepare_reach_harness(monkeypatch, tmp_path, calls=calls, lifecycle=lifecycle)
+    monkeypatch.setattr(session_service, "assemble_conversation_context", stop_mid_assembly)
+
+    worker._run_session_turn_impl(
+        {
+            "session_id": "session-1",
+            "turn_id": "turn-1",
+            "turn_control": control,
+            "user_message": "hello",
+        }
+    )
+
+    stop_stages = [
+        kwargs.get("fields", {}).get("stage")
+        for phase, kwargs in lifecycle
+        if phase == "stop_observed"
+    ]
+    assert stop_stages == ["prepare_history_assembly"]
+    assert "continuation" not in calls
+    assert calls == ["stopped"]
+
+
+def test_run_session_turn_stop_before_model_request_aborts_at_turn_start(monkeypatch, tmp_path) -> None:
+    """The last pre-run checkpoint fires before the first model request handoff."""
+
+    calls: list[str] = []
+    lifecycle: list[tuple[str, dict]] = []
+    control = session_service.SessionTurnControl(session_id="session-1", turn_id="turn-1")
+
+    _install_full_prepare_reach_harness(monkeypatch, tmp_path, calls=calls, lifecycle=lifecycle)
+
+    def stop_mid_redact(messages):
+        control.request_stop("operator requested stop")
+        return list(messages)
+
+    monkeypatch.setattr(worker, "redact_research_history", stop_mid_redact)
+
+    worker._run_session_turn_impl(
+        {
+            "session_id": "session-1",
+            "turn_id": "turn-1",
+            "turn_control": control,
+            "user_message": "hello",
+        }
+    )
+
+    stop_stages = [
+        kwargs.get("fields", {}).get("stage")
+        for phase, kwargs in lifecycle
+        if phase == "stop_observed"
+    ]
+    assert stop_stages == ["prepare_turn_start"]
+    assert "continuation" not in calls
+    assert calls == ["stopped"]
+
+
 def test_turn_llm_usage_tokens_extracts_provider_usage() -> None:
     assert worker._turn_llm_usage_tokens(
         {"llm_usage": {"input_tokens": 80, "output_tokens": 40}}

@@ -381,3 +381,164 @@ def test_empty_claim_drain_still_schedules_continuation(tmp_path, published_sess
     # 新鲜 starting 行阻塞领取 → 空领取返回 False，但自续仍须被调度
     assert drained is False
     assert scheduled == [SESSION_ID]
+
+
+def _seed_hold_conversation(tmp_path, rows: list[dict[str, Any]]) -> None:
+    """Seed rows plus a user-stop queue hold marker on the same conversation."""
+
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "active_conversation_id": SESSION_ID,
+            "conversations": [
+                {
+                    "conversation_id": SESSION_ID,
+                    "title": "Held queue",
+                    "queued_turns": rows,
+                    "queued_turn_hold": {
+                        "reason": "user_stop",
+                        "turnId": "turn-running",
+                        "heldAt": _timestamp(None),
+                    },
+                }
+            ],
+        },
+    )
+
+
+def _persisted_hold(tmp_path) -> dict[str, Any] | None:
+    conversation = load_session_chat_state(tmp_path, SESSION_ID)
+    hold = conversation.get(queued_turns.QUEUED_TURN_HOLD_KEY)
+    return hold if isinstance(hold, dict) and hold else None
+
+
+def test_queue_hold_blocks_drain_until_user_action(tmp_path, published_sessions, monkeypatch):
+    """用户显式停止后，排阘认不再自动续跑：drain 直接返回且行保持原状。"""
+
+    continuations: list[str] = []
+    monkeypatch.setattr(
+        queued_turns,
+        "_schedule_session_queued_turn_drain_continuation",
+        lambda session_id: continuations.append(str(session_id)),
+    )
+    _seed_hold_conversation(tmp_path, [_turn_row("turn-1")])
+
+    drained = queued_turns.drain_session_queued_turns(SESSION_ID)
+
+    assert drained is False
+    assert [(row["id"], row["status"]) for row in _persisted_rows(tmp_path)] == [("turn-1", "queued")]
+    assert _persisted_hold(tmp_path) is not None
+    assert published_sessions == []
+    # 冻结的队列也不该再排自续定时器：那是给「空闲但可能还有行」的场景用的。
+    assert continuations == []
+
+
+def test_user_enqueue_clears_hold(tmp_path, published_sessions, monkeypatch):
+    """用户再发新消息是最明确的续跑意图：清除 hold 并调度 drain。"""
+
+    _seed_hold_conversation(tmp_path, [_turn_row("turn-1")])
+    scheduled: list[str] = []
+    monkeypatch.setattr(session_service, "_schedule_session_queued_turn_drain", scheduled.append)
+    monkeypatch.setattr(queued_turns, "_record_queued_turn_steer_admission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(queued_turns, "capture_model_parameters", lambda *args, **kwargs: {})
+
+    row = queued_turns.enqueue_session_queued_turn(
+        SESSION_ID,
+        content="resume please",
+        attachments=[],
+        references=[],
+        mental_model_enabled=False,
+        runtime_status_enabled=False,
+        turn_mode="",
+        write_intent=False,
+        client_submission_id="sub-resume",
+    )
+
+    assert row["content"] == "resume please"
+    assert _persisted_hold(tmp_path) is None
+    assert [item["id"] for item in _persisted_rows(tmp_path)] == ["turn-1", row["id"]]
+    assert scheduled == [SESSION_ID]
+
+
+def test_queue_edit_clears_hold(tmp_path, published_sessions, monkeypatch):
+    """编辑排队行同样是显式用户动作：清除 hold。"""
+
+    _seed_hold_conversation(tmp_path, [_turn_row("turn-1")])
+    scheduled: list[str] = []
+    monkeypatch.setattr(session_service, "_schedule_session_queued_turn_drain", scheduled.append)
+
+    rows = queued_turns.update_session_queued_turn(SESSION_ID, "turn-1", content="edited")
+
+    assert [item["content"] for item in rows] == ["edited"]
+    assert _persisted_hold(tmp_path) is None
+
+
+def test_send_now_clears_hold(tmp_path, published_sessions, monkeypatch):
+    """send-now 明确要求停止后立即跑某行：清 hold + 请求停止。"""
+
+    _seed_hold_conversation(tmp_path, [_turn_row("turn-1")])
+    stops: list[tuple[str, dict]] = []
+    scheduled: list[str] = []
+    monkeypatch.setattr(
+        session_service,
+        "request_stop_session_turn",
+        lambda session_id, **kwargs: stops.append((session_id, kwargs)) or {"id": session_id},
+    )
+    monkeypatch.setattr(session_service, "_schedule_session_queued_turn_drain", scheduled.append)
+
+    outcome = queued_turns.send_now_session_queued_turn(SESSION_ID, "turn-1", expected_turn_id="turn-running")
+
+    assert outcome["stopRequested"] is True
+    persisted = _persisted_rows(tmp_path)
+    assert len(persisted) == 1 and persisted[0].get("sendNow") is True
+    assert _persisted_hold(tmp_path) is None
+    assert stops == [(SESSION_ID, {"expected_turn_id": "turn-running", "fast_ack": True})]
+    assert scheduled == [SESSION_ID]
+
+
+def test_runtime_notice_keeps_hold(tmp_path, published_sessions, monkeypatch):
+    """机器回传只入队不清 hold：自动通知不能悄悄解冻用户停下的队列。"""
+
+    _seed_hold_conversation(tmp_path, [])
+    scheduled: list[str] = []
+    monkeypatch.setattr(session_service, "_schedule_session_queued_turn_drain", scheduled.append)
+
+    queued_turns.enqueue_session_runtime_notice(
+        SESSION_ID,
+        kind=queued_turns.KIND_TASK_NOTIFICATION,
+        content="child task finished",
+        source_id="notice-1",
+    )
+
+    rows = _persisted_rows(tmp_path)
+    assert len(rows) == 1 and rows[0]["kind"] == queued_turns.KIND_TASK_NOTIFICATION
+    assert _persisted_hold(tmp_path) is not None
+    assert queued_turns.session_queue_hold_active(SESSION_ID) is True
+    assert queued_turns.drain_session_queued_turns(SESSION_ID) is False
+    assert scheduled == [SESSION_ID]
+
+
+def test_stop_route_freezes_queue_with_hold_marker(tmp_path, published_sessions, monkeypatch):
+    """裸停止按钮（stop 路由）在停止信号之后落排队冻结标记。"""
+
+    from core.web.routes import sessions as sessions_routes
+
+    _seed_conversation(tmp_path, [_turn_row("turn-1")])
+    acks: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        sessions_routes,
+        "request_stop_session_turn",
+        lambda session_id, **kwargs: acks.append((session_id, kwargs))
+        or {"id": session_id, "activeTurnId": "turn-running", "stopRequested": True},
+    )
+
+    payload = sessions_routes.session_stop_turn(
+        SESSION_ID, sessions_routes.SessionStopPayload(turnId="turn-run")
+    )
+
+    assert payload["stopRequested"] is True
+    assert acks == [(SESSION_ID, {"expected_turn_id": "turn-run", "fast_ack": True})]
+    hold = _persisted_hold(tmp_path)
+    assert isinstance(hold, dict) and hold["reason"] == "user_stop"
+    assert hold["turnId"] == "turn-run"

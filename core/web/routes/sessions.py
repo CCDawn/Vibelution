@@ -50,6 +50,7 @@ from core.web.services import session_service
 from core.web.services.session.session_pin_ops import set_chat_session_pinned
 from core.web.services.session import document_attachments as session_document_attachments
 from core.web.services.session import session_index_stream
+from core.web.services.session.queued_turns import set_session_queue_hold
 from core.web.services.session.image_attachments import (
     LocalAttachmentReadError,
     read_local_attachment_bytes,
@@ -1430,7 +1431,7 @@ def session_rewind_apply(session_id: str, payload: SessionRewindApplyPayload) ->
 )
 def session_stop_turn(session_id: str, payload: SessionStopPayload) -> dict:
     try:
-        return request_stop_session_turn(
+        ack = request_stop_session_turn(
             session_id,
             expected_turn_id=payload.turnId,
             fast_ack=True,
@@ -1439,6 +1440,15 @@ def session_stop_turn(session_id: str, payload: SessionStopPayload) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except SessionBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    # The plain stop button also freezes the queued rows (ZCode full-stop
+    # parity): they survive and stay editable, but no drain may auto-start
+    # them after the stopped turn settles. The marker lands after the stop
+    # signal so the worker is already waking; send-now keeps resume-on-settle.
+    set_session_queue_hold(
+        session_id,
+        turn_id=str(payload.turnId or ack.get("activeTurnId") or "").strip(),
+    )
+    return ack
 
 
 @router.get(

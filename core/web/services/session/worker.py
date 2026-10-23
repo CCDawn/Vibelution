@@ -1946,6 +1946,16 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                 # 事件里），与 postPrepareEvents/chatStateRead/contextManagers 同一
                 # 时间线，便于重启后分解 D 段收益。
                 prepare_timings["agentCreateMs"] = agent_create_ms
+                if _abort_session_turn_for_stop(
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    turn_control=turn_control,
+                    stage="prepare_agent_runtime",
+                    mental_model_enabled=mental_model_enabled,
+                    context=context,
+                    finish_worker=False,
+                ):
+                    return
                 attachments = s._normalize_message_attachments(context.get("attachments") or [])
                 resolved_llm_model_id = str(getattr(resolved_agent_llm, "model_id", "") or "").strip() or s._session_agent_llm_slot_model_id(
                     agent_instance or historical_agent,
@@ -2080,6 +2090,19 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                 )
                 history_messages = context_assembly.history_messages
                 history_assembly_ms = s._elapsed_ms(history_assembly_started_at)
+                # The ledger walk above is the heaviest pre-run stage on large
+                # sessions; a stop that landed mid-assembly must not wait for
+                # the remaining seed/composition stages too.
+                if _abort_session_turn_for_stop(
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    turn_control=turn_control,
+                    stage="prepare_history_assembly",
+                    mental_model_enabled=mental_model_enabled,
+                    context=context,
+                    finish_worker=False,
+                ):
+                    return
                 full_history_message_count = len(seedable_history_messages)
                 runtime_context_segments = (
                     s._session_context_segments_without_prompt_template(
@@ -2460,6 +2483,18 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                         and not isinstance(prepare_timings.get(key), bool)
                     },
                 )
+                # Last cooperative checkpoint before the first model request:
+                # the agent loop's own head check only fires after this handoff.
+                if _abort_session_turn_for_stop(
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    turn_control=turn_control,
+                    stage="prepare_turn_start",
+                    mental_model_enabled=mental_model_enabled,
+                    context=context,
+                    finish_worker=False,
+                ):
+                    return
                 # TTFT 观测：把「受理/worker 开跑」锚点带给 LLM client，
                 # 首 chunk 时聚合成一条 llm.stream.ttft_breakdown 事件。
                 # 受理锚点缺失（continue 等旁路提交）时该段省略，不造 0。

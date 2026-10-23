@@ -22,6 +22,12 @@ from core.web.services.session.timebase import parse_timestamp_utc
 from .turn_model_parameters import capture_model_parameters
 
 QUEUED_TURN_STATE_KEY = "queued_turns"
+# User-stop queue hold (ZCode full-stop parity): an explicit stop freezes the
+# session's queued rows — they survive, stay editable, and never auto-drain
+# until the user acts on the session again (new message, queue edit, or
+# send-now promote). Machine notices keep enqueueing under a hold and drain
+# once it clears. Internal lifecycle stops and send-now itself do not hold.
+QUEUED_TURN_HOLD_KEY = "queued_turn_hold"
 BRANCH_GENERATION_KEY = "branchGeneration"
 MAX_QUEUED_TURNS_PER_SESSION = 20
 MAX_RUNTIME_NOTICES_PER_SESSION = 20
@@ -194,6 +200,58 @@ def _write_queued_turn_rows(
     s.save_session_chat_state(s.PROJECT_ROOT, session_id, conversation)
 
 
+def _session_queue_hold(conversation: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(conversation, dict):
+        return None
+    hold = conversation.get(QUEUED_TURN_HOLD_KEY)
+    return hold if isinstance(hold, dict) and hold else None
+
+
+def session_queue_hold_active(session_id: str) -> bool:
+    """True while an explicit user stop holds this session's queue."""
+
+    s = _service()
+    normalized = str(session_id or "").strip()
+    if not normalized:
+        return False
+    conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized)
+    return _session_queue_hold(conversation) is not None
+
+
+def set_session_queue_hold(session_id: str, *, turn_id: str, reason: str = "user_stop") -> None:
+    """Freeze the session's queued rows after an explicit user stop."""
+
+    s = _service()
+    normalized = str(session_id or "").strip()
+    if not normalized:
+        return
+    with s._CHAT_STATE_LOCK:
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized)
+        if conversation is None:
+            return
+        conversation[QUEUED_TURN_HOLD_KEY] = {
+            "reason": str(reason or "").strip(),
+            "turnId": str(turn_id or "").strip(),
+            "heldAt": s._now_timestamp(),
+        }
+        conversation["updated_at"] = s._now_timestamp()
+        s.save_session_chat_state(s.PROJECT_ROOT, normalized, conversation)
+
+
+def clear_session_queue_hold_in_conversation(conversation: dict[str, Any], s: Any) -> bool:
+    """Drop the hold marker inside a caller-owned locked state write.
+
+    Returns True when a hold was present; the caller's own save (e.g.
+    ``_write_queued_turn_rows``) persists the removal.
+    """
+
+    if _session_queue_hold(conversation) is None:
+        return False
+    conversation.pop(QUEUED_TURN_HOLD_KEY, None)
+    conversation["updated_at"] = s._now_timestamp()
+    return True
+
+
 def enqueue_session_queued_turn(
     session_id: str,
     *,
@@ -285,6 +343,10 @@ def enqueue_session_queued_turn(
             "createdAt": s._now_timestamp(),
             "updatedAt": s._now_timestamp(),
         }
+        # Sending a new message is an explicit user action: it resumes a queue
+        # an earlier stop froze. Machine notices enqueue elsewhere and must
+        # not lift the hold on their own.
+        clear_session_queue_hold_in_conversation(conversation, s)
         _write_queued_turn_rows(s, normalized_session_id, conversation, [*rows, row])
         created = True
     if created and record_steer_admission and _row_kind(row) == KIND_USER:
@@ -487,6 +549,8 @@ def update_session_queued_turn(
                 row = _clear_send_now_flag(row)
                 rows.pop(index)
                 rows.insert(target, row)
+        # Any explicit queue edit resumes a queue an earlier stop froze.
+        clear_session_queue_hold_in_conversation(conversation, s)
         _write_queued_turn_rows(s, normalized_session_id, conversation, rows)
         normalized_rows = session_queued_turn_rows(conversation)
     s._publish_session_detail_snapshot(normalized_session_id)
@@ -653,6 +717,9 @@ def send_now_session_queued_turn(
         rows = [_clear_send_now_flag(pinned) if pinned.get("sendNow") else pinned for pinned in rows]
         rows.pop(index)
         rows.insert(0, promoted_row)
+        # Send-now explicitly wants the head row to run after the stop, so it
+        # also resumes a queue an earlier stop froze.
+        clear_session_queue_hold_in_conversation(conversation, s)
         _write_queued_turn_rows(s, normalized_session_id, conversation, rows)
         promoted = True
         normalized_rows = session_queued_turn_rows(conversation)
@@ -1279,6 +1346,11 @@ def drain_session_queued_turns(session_id: str) -> bool:
     s = _service()
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
+        return False
+    if session_queue_hold_active(normalized_session_id):
+        # A held queue never auto-drains: the user stopped this session on
+        # purpose and rows must wait for an explicit user action (new message,
+        # queue edit, or send-now) to clear the hold.
         return False
     with _DRAIN_LOCK:
         if normalized_session_id in _DRAINING_SESSIONS:
