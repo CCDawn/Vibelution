@@ -120,7 +120,8 @@ def test_discovery_does_not_authorize_unmapped_get_or_write_operations(monkeypat
     assert by_id["read_logs"]["access"] == "operator_only"
     assert by_id["read_logs"]["executable"] is False
     assert by_id["read_logs"]["tool"] is None
-    assert by_id["delete_agent"]["access"] == "operator_only"
+    assert by_id["delete_agent"]["access"] == "native_action"
+    assert by_id["delete_agent"]["action"] == "agent_archive"
     assert by_id["delete_agent"]["approval"]["tool"] == "personal_assistant_manage_tool"
     assert by_id["delete_agent"]["approval"]["required"] == "native management approval"
     assert by_id["restart_runtime"]["executable"] is False

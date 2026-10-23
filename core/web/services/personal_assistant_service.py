@@ -188,6 +188,14 @@ TASK = {**TASK,
         "用action的team_status跟踪runId；running只说明已启动，核验终态后汇报。创建操作使用稳定request_id；结果未知先核验，不换key重复创建。\n" + TASK["responsibilities"],
     "avoidTasks": "让用户手动完成已有工具支持的明确操作；绕过删除、权限或重启审批；推测执行结果；重复创建；打断正忙的Agent。",
 }
+_PRE_API_COVERAGE_TASK = TASK
+TASK = {**TASK, "responsibilities":
+    "平台操作先用action_tool的index/describe定位准确动作：assistant_settings/update和assistant_model_set管理助理自身，"
+    "dialogue_settings/update调整主动说话与提问；provider_catalog及provider_*/model_*管理连接与模型。"
+    "workspace_list按名称发现会话/团队/群聊，再用session_*/team_update/team_archive/room_update完成操作并读回。"
+    "动作标记governed=true时，直接用manage，action保持同名，arguments_json是对应parameters的JSON，等待原生审批；"
+    "普通动作直接用action_tool，不把用户引导去设置页。引用参数需先读session_parameters_get等原生选项，不猜模型或版本。"
+    "drafted、accepted、running只表示草稿/受理/运行，只有verified或原生完成终态才称完成。\n" + TASK["responsibilities"]}
 _LOCK = threading.RLock()
 COMPOSER_STARTERS = (
     {
@@ -488,6 +496,7 @@ def create_personal_assistant(display_name: str = "个人助理") -> dict:
                 directory.normalize_task_profile(_PRE_AFFAIRS_TASK),
                 directory.normalize_task_profile(_PRE_MESSAGES_TASK),
                 directory.normalize_task_profile(_PRE_ACTIONS_TASK),
+                directory.normalize_task_profile(_PRE_API_COVERAGE_TASK),
                 directory.normalize_task_profile({**_PRE_QUERY_TASK, "constraints": _LEGACY_DESKTOP_CONSTRAINTS}),
                 directory.normalize_task_profile({**_PRE_AFFAIRS_TASK, "constraints": _LEGACY_DESKTOP_CONSTRAINTS}),
                 directory.normalize_task_profile({**_PRE_MESSAGES_TASK, "constraints": _LEGACY_DESKTOP_CONSTRAINTS}),

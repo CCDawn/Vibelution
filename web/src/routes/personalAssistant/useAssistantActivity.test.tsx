@@ -12,6 +12,7 @@ import { fetchSessionDetail } from "../../api/chat";
 import { fetchPetActivity } from "../../api/pet";
 import { fetchPersonalAssistantComputer } from "../../api/personalAssistantComputer";
 import { useAssistantActivity } from "./useAssistantActivity";
+import { PET_PREFERENCES_REFRESH_EVENT } from "../desktopPet/usePetPreferences";
 vi.mock("../../i18n/useShellI18n", () => ({ useShellI18n: () => ({ lang: "zh" }) }));
 vi.mock("../../api/chat", () => ({ fetchSessionDetail: vi.fn() }));
 vi.mock("../../api/pet", () => ({ fetchPetActivity: vi.fn() }));
@@ -24,6 +25,72 @@ beforeEach(() => {
   vi.mocked(fetchPersonalAssistantComputer).mockResolvedValue({
     available: false, status: "idle", message: "", grantId: null, window: null, pending: null,
   });
+});
+
+it("refreshes settings once per own completed native settings call, ignoring unrelated calls and output", async () => {
+  const assistant = { agentId: "settings-agent", directSessionId: "settings-session", displayName: "Assistant", status: "active", setupStatus: "ready", profile: "personal_assistant_v1", renderer: "whale" } satisfies PersonalAssistant;
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity, refetchOnMount: false, gcTime: Infinity } } });
+  const replyKey = queryKeys.personalAssistantReplies(assistant.agentId, assistant.directSessionId);
+  client.setQueryData(queryKeys.petActivity(), { schemaVersion: 1, aggregateTone: "idle", animationState: "idle", activeCount: 0, attentionCount: 0, generatedAt: "", sessions: [] });
+  client.setQueryData(queryKeys.personalAssistantComputer(), { available: false, status: "idle", message: "", grantId: null });
+  const detail = { id: assistant.directSessionId, agentId: assistant.agentId, sessionKind: "main", messages: [] } as unknown as SessionDetail;
+  client.setQueryData(replyKey, detail);
+  const invalidate = vi.spyOn(client, "invalidateQueries");
+  const refresh = vi.fn(); window.addEventListener(PET_PREFERENCES_REFRESH_EVENT, refresh);
+  function Probe() { useAssistantActivity({ enabled: true, assistant, reading: true }); return null; }
+  const container = document.createElement("div"); const root = createRoot(container);
+  const call = { type: "tool_call", callId: "settings-call", toolName: "personal_assistant_action_tool", status: "completed", input: JSON.stringify({ action: "assistant_settings_update" }) };
+  const publish = async (item: Record<string, unknown>, agentId = assistant.agentId, role = "assistant") => {
+    await act(async () => {
+      client.setQueryData(replyKey, { ...detail, agentId, messages: [{ role, turnId: "settings-turn", turnItems: [item] }] });
+      await new Promise(resolve => setTimeout(resolve, 5));
+    });
+  };
+  try {
+    await act(async () => root.render(<QueryClientProvider client={client}><Probe /><Probe /></QueryClientProvider>));
+    await publish(call, "another-agent");
+    await publish({ ...call, toolName: "another_tool" });
+    await publish({ ...call, status: "running" });
+    await publish({ ...call, status: "failed" });
+    await publish({ ...call, input: JSON.stringify({ action: "assistant_settings_get" }), output: call.input });
+    await publish(call, assistant.agentId, "user");
+    expect(refresh).not.toHaveBeenCalled();
+    expect(invalidate).not.toHaveBeenCalled();
+    await publish(call);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.personalAssistant(), exact: true });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["personal-assistant", "settings"], exact: true });
+    await publish({ ...call, output: "new output revision" });
+    await act(async () => root.render(<QueryClientProvider client={client}><Probe /></QueryClientProvider>));
+    expect(refresh).toHaveBeenCalledTimes(1);
+    await publish({ ...call, toolName: "personal_assistant_manage_tool", callId: "model-call", input: JSON.stringify({ action: "assistant_model_set" }) });
+    expect(refresh).toHaveBeenCalledTimes(2);
+    await publish({ ...call, callId: "dialogue-call", input: JSON.stringify({ action: "dialogue_settings_update" }) });
+    expect(refresh).toHaveBeenCalledTimes(3);
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.virtualHumanDialogueSettings(assistant.agentId), exact: true });
+    invalidate.mockClear();
+    const configCall = { ...call, callId: "config-call", input: JSON.stringify({ action: "settings_update" }) };
+    await publish(configCall, "another-agent");
+    await publish({ ...configCall, toolName: "another_tool" });
+    await publish({ ...configCall, input: JSON.stringify({ action: "settings_catalog" }), output: configCall.input });
+    expect(invalidate).not.toHaveBeenCalled();
+    await publish(configCall);
+    expect(invalidate.mock.calls).toEqual([
+      [{ queryKey: queryKeys.configPublic(), exact: true }],
+      [{ queryKey: queryKeys.configWorkspace(), exact: true }],
+    ]);
+    await publish({ ...configCall, output: "changed result" });
+    expect(invalidate).toHaveBeenCalledTimes(2);
+    await publish({ ...configCall, toolName: "personal_assistant_manage_tool", callId: "managed-config-call", input: JSON.stringify({ action: "config_update" }) });
+    expect(invalidate.mock.calls.slice(2)).toEqual([
+      [{ queryKey: queryKeys.configPublic(), exact: true }],
+      [{ queryKey: queryKeys.configWorkspace(), exact: true }],
+    ]);
+    expect(refresh).toHaveBeenCalledTimes(3);
+  } finally {
+    window.removeEventListener(PET_PREFERENCES_REFRESH_EVENT, refresh);
+    await act(async () => root.unmount()); client.clear();
+  }
 });
 
 it.each([

@@ -238,3 +238,36 @@ def test_update_language_remains_the_legitimate_ui_language_writer(monkeypatch):
     summary = config_service.update_language("zh")
     assert persisted["value"]["ui"]["language"] == "zh"
     assert summary["language"] == "zh"
+
+
+@pytest.mark.parametrize("use_alias", [False, True])
+def test_apply_accepts_v2_git_model_reference_without_persisting_runtime_library(tmp_path, monkeypatch, use_alias):
+    fixture = Path(__file__).parent / "fixtures/config/llm_schema_v2_provider.toml"
+    stored = load_public_config(fixture)
+    model_id = "lab_llamacpp_a/qwen3.6-35b-a3b"
+    if use_alias:
+        stored["llm"]["model_aliases"] = {"git-default": model_id}
+        model_id = "git-default"
+    submitted = copy.deepcopy(stored)
+    submitted["git"] = {"commit_message_model_ref": model_id}
+    persisted, _ = _patch_apply_persistence(monkeypatch, tmp_path, stored)
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(persisted["value"]))
+    monkeypatch.setattr(config_service, "_read_raw_public_config", lambda: "")
+    monkeypatch.setattr(config_service, "MODEL_REFERENCE_PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(config_service, "materialize_observed_binding_pins", lambda payload: payload)
+    config_service.apply_config_workspace(submitted)
+    assert persisted["value"]["git"]["commit_message_model_ref"] == model_id
+    assert "model_library" not in persisted["value"]["llm"]
+    assert persisted["value"]["llm"]["providers"] == stored["llm"]["providers"]
+
+
+@pytest.mark.parametrize("model_id,aliases", [
+    ("pixel_relay/missing", {}), ("missing-alias", {}), ("cycle", {"cycle": "cycle"}),
+])
+def test_apply_git_validation_rejects_unknown_and_cyclic_v2_reference(model_id, aliases):
+    fixture = Path(__file__).parent / "fixtures/config/llm_schema_v2_provider.toml"
+    public = load_public_config(fixture)
+    public["llm"]["model_aliases"] = aliases
+    public["git"] = {"commit_message_model_ref": model_id}
+    with pytest.raises(ValueError, match="unknown Git commit message model"):
+        config_service._validate_git_commit_settings(public)

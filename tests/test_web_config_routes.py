@@ -22,7 +22,7 @@ from config.public_config import (
     public_config_hash,
 )
 from config.runtime_capabilities import MODEL_CAPABILITY_CACHE_ENV
-from core.web.app import create_app
+from core.web.app import create_app, ensure_web_routes_registered
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.services.model_reference_service import ModelReferenceConflictError
 from core.web.services import (
@@ -827,6 +827,8 @@ def test_config_bootstrap_matches_full_summary_and_preserves_diagnostics(monkeyp
 
 
 def test_config_bootstrap_http_schema_requires_typed_fields():
+    # A fresh worker has no preceding HTTP request to register lazy routes.
+    ensure_web_routes_registered(client.app)
     schema = client.app.openapi()
     response = schema["paths"]["/api/config/bootstrap"]["get"]["responses"]["200"]
     response_schema = response["content"]["application/json; charset=utf-8"]["schema"]

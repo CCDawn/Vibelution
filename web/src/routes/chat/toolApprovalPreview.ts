@@ -31,6 +31,21 @@ export function toolApprovalActionPreview(
       team_create: ["创建团队", "Create team"], knowledge_ingest: ["知识入库", "Ingest knowledge"],
       team_run: ["创建团队并运行", "Create and run team"],
       config_update: ["修改偏好配置", "Update preferences config"],
+      provider_add: ["添加模型连接", "Add model provider"], provider_update: ["修改模型连接", "Update model provider"],
+      provider_remove: ["移除模型连接", "Remove model provider"], provider_test: ["测试模型连接", "Test model provider"],
+      provider_discover: ["发现连接模型", "Discover provider models"],
+      model_update: ["修改模型", "Update model"], model_remove: ["移除模型", "Remove model"],
+      model_default: ["设置默认模型", "Set default model"],
+      session_pin: ["置顶会话", "Pin session"], session_unpin: ["取消会话置顶", "Unpin session"],
+      session_reasoning_update: ["调整会话推理", "Update session reasoning"],
+      session_model_parameters_update: ["调整会话模型参数", "Update session model parameters"],
+      session_budget_update: ["调整会话预算", "Update session budget"],
+      session_archive: ["归档会话", "Archive session"], session_unarchive: ["恢复归档会话", "Unarchive session"],
+      team_update: ["修改团队信息", "Update team"], team_archive: ["归档团队及成员", "Archive team and members"],
+      room_update: ["修改群聊信息", "Update chat room"],
+      assistant_settings_update: ["修改助理偏好", "Update assistant preferences"],
+      assistant_model_set: ["切换助理模型", "Change assistant model"],
+      dialogue_settings_update: ["调整对话偏好", "Update dialogue preferences"],
     };
     const action = String(summary.assistantAction || "");
     const title = actions[action]?.[lang === "zh" ? 0 : 1] ?? toolApprovalDisplayName(toolName, lang);
@@ -40,7 +55,7 @@ export function toolApprovalActionPreview(
     const targets = summary.assistantTargets;
     const targetLines = targets && typeof targets === "object" && !Array.isArray(targets)
       ? Object.entries(targets).filter(([, value]) => typeof value === "string")
-        .slice(0, 20).map(([key, value]) => `${key}: ${String(value).slice(0, 160)}`) : [];
+        .slice(0, 20).map(([key, value]) => `${key}: ${String(value).slice(0, key === "base_url" ? 512 : 160)}`) : [];
     const fields = Array.isArray(summary.assistantChangedFields) ? summary.assistantChangedFields.slice(0, 20) : [];
     const permissions = Array.isArray(summary.assistantPermissions) ? summary.assistantPermissions.slice(0, 3) : [];
     const plan = summary.assistantPlan;
@@ -57,7 +72,9 @@ export function toolApprovalActionPreview(
       lang === "zh" ? "沿用模板权限；不启用自动恢复、自动合入或部署。"
         : "Keep template permissions; no automatic recovery, integration, or deployment.",
     ] : [];
-    return [title, ...targetLines, ...teamLines,
+    const operationDescription = typeof summary.assistantOperationDescription === "string"
+      ? summary.assistantOperationDescription.slice(0, 300) : "";
+    return [title, operationDescription, ...targetLines, ...teamLines,
       permissions.length ? `${lang === "zh" ? "授予权限" : "Grant permissions"}: ${permissions.join(", ")}` : "",
       fields.length ? `${lang === "zh" ? "修改字段" : "Changed fields"}: ${fields.join(", ")}` : "",
       summary.assistantDetailsOmitted ? (lang === "zh" ? "部分参数值未展示，请核对本次指令。" : "Values omitted; verify the requested scope.") : "",

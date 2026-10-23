@@ -3078,6 +3078,9 @@ def _build_key_tools() -> List[BaseTool]:
         settings_catalog查用户名/头像/壁纸/语言等字段和选项；settings_update的updates为
         [{"section":"user_profile","key":"display_name","value":"新名字"}]。
         model_options查已有模型；model_add在已配置provider添加模型，不接收密钥/网络地址。
+        assistant_settings/update、assistant_model_set管理助理自身；dialogue_settings/update调整主动说话与提问。
+        provider_catalog及provider_*/model_*管理连接和模型；workspace_list按名称查会话/团队/群聊，再用session_*/team_*/room_update操作。
+        index中的governed=true动作使用manage同名action，arguments_json为对应parameters的JSON；不要在日常工具中反复重试。
         team_status: run_id，可选team_id（可省略，由自己的创建记录定位）、wait_seconds最多30秒；完成时返回团队最终产物。
         搭团队并运行使用manage的team_run，单次审批。需要等待完成时用team_status有界等待，勿快速空轮询。
         只以工具成功且verified/原生终态为完成依据；unknown时核验，不能换request_id重复创建。
@@ -3100,6 +3103,9 @@ def _build_key_tools() -> List[BaseTool]:
         一次创建规划/两开发/评审四成员团队，保存原生流程并立即启动；返回teamId/flowId/runId。
         running不等于完成，用action_tool的team_status查询；unknown/partial先核验，禁止换key重建。
         普通Agent改名/模型/档案、用户设置等优先用personal_assistant_action_tool对象参数自动执行。
+        action_tool的index/describe登记的governed=true动作在此用相同action执行，arguments_json遵循其parameters schema。
+        包含provider_add/update/remove/test、model_remove/default，以及session置顶/参数/归档、team_update/archive、room_update。
+        不接受任意HTTP方法或URL；普通连接地址仅可通过provider语义动作变更，跨地址不会沿用旧凭据。
         team_create: name（必填）、description、templateId（如 dev-team；不给则建空团队）。
         knowledge_ingest: inboxSourceId、ownerType、ownerId（必填）、knowledgeBaseId（可选）；
         只按 source_document 模式原样入库已暂存来源，不代写内容，也不替代人工复核。

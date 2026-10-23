@@ -9,6 +9,20 @@ import {
 } from "./toolApprovalPreview";
 
 describe("toolApprovalPreview", () => {
+  it("names semantic API operations and shows concrete targets and impact", () => {
+    const preview = toolApprovalActionPreview({ assistantAction: "provider_update",
+      assistantTargets: { provider_id: "local-ai" }, assistantChangedFields: ["enabled"],
+      assistantOperationDescription: "修改连接名称、启用状态或地址。", assistantDetailsOmitted: true,
+    }, "personal_assistant_manage_tool", "zh");
+    expect(preview).toContain("修改模型连接");
+    expect(preview).toContain("provider_id: local-ai");
+    expect(preview).toContain("修改字段: enabled");
+    expect(preview).toContain("修改连接名称、启用状态或地址");
+    expect(toolApprovalActionPreview({ assistantAction: "session_archive" }, "personal_assistant_manage_tool", "en"))
+      .toContain("Archive session");
+    expect(toolApprovalActionPreview({ assistantAction: "http_proxy" }, "personal_assistant_manage_tool", "zh"))
+      .toContain("参数无法核对");
+  });
   it("explains the one-step team run and rejects an incomplete scope", () => {
     const summary = { assistantAction: "team_run", assistantTargets: { name: "验收团队", template_id: "dev-team" },
       assistantPlan: { memberCount: 4, goalPreview: "核对计算结果", startsImmediately: true, automaticRecovery: false, localIntegration: false } };

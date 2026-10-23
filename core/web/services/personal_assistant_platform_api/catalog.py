@@ -62,6 +62,64 @@ _NATIVE_ACTIONS: dict[tuple[str, str], dict[str, Any]] = {
     },
 }
 
+# The HTTP specification remains the documentation authority. These entries
+# identify bounded semantic adapters, never an operator-token HTTP dispatcher.
+_EXTENDED_ACTIONS = {
+    ("get", "/api/sessions"): "workspace_list",
+    ("get", "/api/session-archive"): "workspace_list",
+    ("get", "/api/teams"): "workspace_list",
+    ("get", "/api/chat-rooms"): "workspace_list",
+    ("get", "/api/personal-assistant/settings"): "assistant_settings",
+    ("patch", "/api/personal-assistant/settings"): "assistant_settings_update",
+    ("patch", "/api/personal-assistant/settings/model"): "assistant_model_set",
+    ("get", "/api/agents/{agent_id}/plugins/virtual-human-life/companions/dialogue-settings"): "dialogue_settings",
+    ("put", "/api/agents/{agent_id}/plugins/virtual-human-life/companions/dialogue-settings"): "dialogue_settings_update",
+    ("post", "/api/config/draft/providers"): "provider_add",
+    ("put", "/api/config/draft/providers/{provider_id}"): "provider_update",
+    ("delete", "/api/config/draft/providers/{provider_id}"): "provider_remove",
+    ("post", "/api/config/draft/providers/{provider_id}/discover"): "provider_discover",
+    ("post", "/api/config/test-llm"): "provider_test",
+    ("post", "/api/config/draft/update-model"): "model_update",
+    ("post", "/api/config/draft/delete-model"): "model_remove",
+    ("delete", "/api/config/draft/providers/{provider_id}/models/{model_key}"): "model_remove",
+    ("put", "/api/tools/image2/default-model"): "model_default",
+    ("post", "/api/sessions/{session_id}/pin"): "session_pin",
+    ("post", "/api/sessions/{session_id}/unpin"): "session_unpin",
+    ("patch", "/api/sessions/{session_id}/reasoning-effort"): "session_reasoning_update",
+    ("patch", "/api/sessions/{session_id}/model-parameters"): "session_model_parameters_update",
+    ("patch", "/api/sessions/{session_id}/budget-parameters"): "session_budget_update",
+    ("post", "/api/sessions/{session_id}/archive"): "session_archive",
+    ("post", "/api/sessions/{session_id}/unarchive"): "session_unarchive",
+    ("patch", "/api/teams/{team_id}"): "team_update",
+    ("delete", "/api/teams/{team_id}"): "team_archive",
+    ("patch", "/api/chat-rooms/{room_id}"): "room_update",
+    ("get", "/api/teams/{team_id}"): "team_get",
+    ("get", "/api/chat-rooms/{room_id}"): "room_get",
+    ("get", "/api/sessions/{session_id}"): "session_get",
+}
+
+
+def _extended_action(method: str, path: str) -> dict | None:
+    from tools.pa_platform_actions import extension_contracts, legacy_manage_contracts
+    legacy = {("delete", "/api/agents/{agent_id}"): "agent_archive",
+              ("post", "/api/sessions"): "session_create", ("patch", "/api/sessions/{session_id}"): "session_update",
+              ("delete", "/api/sessions/{session_id}"): "session_delete", ("post", "/api/sessions/{session_id}/stop"): "session_stop",
+              ("post", "/api/teams"): "team_create"}
+    if (method, path) in legacy:
+        name = legacy[(method, path)]
+        contract = legacy_manage_contracts()[name]
+        return {"action": name, "governed": True, "constraints": [contract["description"], "Use the canonical action schema and native approval."]}
+    name = _EXTENDED_ACTIONS.get((method, path))
+    contract = extension_contracts().get(name)
+    if not contract:
+        return None
+    result = {"action": name, "governed": contract.get("governed", False),
+            "constraints": [contract["description"], "Use the action schema; HTTP payloads are not accepted by the adapter."]}
+    if name == "workspace_list":
+        kind = {"/api/teams": "teams", "/api/chat-rooms": "rooms"}.get(path, "sessions")
+        result["parameters"] = {"kind": kind, **({"archived": True} if path == "/api/session-archive" else {})}
+    return result
+
 
 def get_spec() -> dict[str, Any]:
     """Register web routes and return the current OpenAPI document."""
@@ -260,20 +318,26 @@ def _catalog_entry(
             entry["execution"]["note"] = "Replace each path template parameter with its actual ID."
         return entry
 
-    action = _NATIVE_ACTIONS.get((method, path))
+    action = _NATIVE_ACTIONS.get((method, path)) or _extended_action(method, path)
     if action:
         entry.update(
             {
                 "access": "native_action",
                 "executable": True,
-                "tool": "personal_assistant_action_tool",
+                "tool": "personal_assistant_manage_tool" if action.get("governed") else "personal_assistant_action_tool",
                 "action": action["action"],
+                "capabilitySubset": True,
                 "constraints": list(action["constraints"]),
                 "argumentHelp": {"tool": "personal_assistant_action_tool", "action": "describe", "parameters": {"action": action["action"]}},
             }
         )
         if action["action"] == "agent_update":
             entry["allowedFields"] = list(_SAFE_AGENT_FIELDS)
+        if action.get("parameters"):
+            entry["execution"] = {"action": action["action"], "parameters": action["parameters"]}
+        if action.get("governed"):
+            entry["approval"] = {"tool": "personal_assistant_manage_tool", "required": "native management approval"}
+            entry["execution"] = {"action": action["action"], "arguments_json": "JSON encoding of the action's parameters object"}
         return entry
 
     entry.update(

@@ -209,6 +209,12 @@ def personal_assistant_manage_tool(action: str, arguments_json: str) -> str:
             raise TypeError("管理参数必须是 JSON 对象。")
         if action in {"workflow_recovery_bind", "workflow_recovery_revoke", "workflow_start"}:
             return _workflow_action(action, args, runtime)
+        from tools.pa_platform_actions import extension_contracts, execute_extension
+        if action in extension_contracts():
+            # `governed` is set only here, after the native manage-tool approval;
+            # it is never accepted from model-supplied parameters.
+            return json.dumps({"source": "platform-action-adapter", "untrustedContent": True,
+                               **execute_extension(action, args, runtime, governed=True)}, ensure_ascii=False)
         # Closed dispatch table; signature binding rejects extra fields before
         # invoking any underlying service. Approval stays in native execution.
         from tools import pa_managed_writes
@@ -242,7 +248,7 @@ def personal_assistant_manage_tool(action: str, arguments_json: str) -> str:
             )
         target = dispatch.get(action)
         if target is None:
-            raise ValueError("不支持的管理操作。请通过平台对应管理页面处理。")
+            raise ValueError("尚未登记此操作。请用 action_tool 的 index/describe 或 API catalog 查询准确入口；不要猜测方法或参数。")
         # The manager cannot impersonate a knowledge owner.
         if action == "knowledge_acl_grant" and "actor_agent_id" in args:
             raise ValueError("不得冒用其他 Agent 的知识库权限。")
@@ -251,6 +257,10 @@ def personal_assistant_manage_tool(action: str, arguments_json: str) -> str:
         inspect.signature(target).bind(**args)
         return _receipt(target(**args))
     except (ValueError, TypeError, directory.AgentDirectoryError) as exc:
+        from pydantic import ValidationError
+        if isinstance(exc, ValidationError):
+            fields = [".".join(str(part) for part in item["loc"]) for item in exc.errors(include_input=False, include_url=False)][:8]
+            return _error("参数不符合操作 schema：" + "、".join(fields) + "。请 describe 查询准确格式。")
         return _error(str(exc))
 
 
