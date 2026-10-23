@@ -96,7 +96,9 @@ def action_catalog(action: str = "") -> dict:
 def _agent_receipt(agent: dict, *, reused: bool = False) -> dict:
     return {"ok": True, "verified": True, "status": "completed", "agentId": agent["agentId"],
             "directSessionId": agent.get("directSessionId", ""),
-            "displayName": agent.get("displayName", ""), "reused": reused}
+            "displayName": agent.get("displayName", ""),
+            "avatarImagePath": agent.get("avatarImagePath", ""),
+            "modelId": directory.agent_dialogue_model_id(agent), "reused": reused}
 
 
 def _create(args: AgentCreate, runtime: dict) -> dict:
@@ -155,8 +157,14 @@ def _create(args: AgentCreate, runtime: dict) -> dict:
 
 
 def execute_action(action: str, parameters: dict, runtime: dict) -> dict:
-    if len(json.dumps(parameters, ensure_ascii=False)) > 16000:
+    serialized = json.dumps(parameters, ensure_ascii=False, allow_nan=False)
+    if len(serialized) > 16000:
         raise ValueError("操作参数过长。")
+    # Provider tool arguments are canonical immutable JSON: arrays arrive as
+    # tuples and mappings can be frozen dict subclasses. Restore JSON container
+    # shapes at this adapter boundary before strict DTO validation; do not relax
+    # scalar types or change the native Session/LLM representation.
+    parameters = json.loads(serialized)
     if action == "index":
         Arguments.model_validate(parameters)
         return {"ok": True, **action_catalog()}

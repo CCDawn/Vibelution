@@ -146,6 +146,18 @@ def test_team_plan_approval_is_concrete_and_bounded():
     assert summary["assistantPlan"]["localIntegration"] is False
 
 
+def test_native_frozen_json_arrays_reach_settings_adapter_as_lists(assistant_runtime, monkeypatch):
+    from core.llm.types import _freeze_json_value
+    from tools import pa_settings_actions
+    updates = [{"section": "ui", "key": "language", "value": "en"}]
+    observed = []
+    monkeypatch.setattr(pa_settings_actions, "settings_update", lambda value: observed.append(value) or {"ok": True})
+    frozen = _freeze_json_value({"updates": updates})
+    assert isinstance(frozen["updates"], tuple)
+    assert call("settings_update", frozen)["ok"]
+    assert observed == [updates] and type(observed[0]) is list and type(observed[0][0]) is dict
+
+
 def test_partial_task_update_preserves_other_profile_fields(assistant_runtime, personal_env):
     target = personal_env["other"]
     directory.update_agent_instance(target, role_key="worker", task_profile={"mission": "old", "constraints": "retain"})
