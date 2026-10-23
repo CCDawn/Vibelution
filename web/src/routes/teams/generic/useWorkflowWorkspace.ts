@@ -1,10 +1,10 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import {
-  commandTeamFlowRun, listTeamFlowRuns, listTeamFlows, saveTeamFlow, startTeamFlowRun, teamFlowKeys,
+  commandTeamFlowRun, listTeamFlowRuns, saveTeamFlow, startTeamFlowRun, teamFlowKeys,
 } from "../../../api/genericTeamWorkflows";
 import type { TeamFlowCommand } from "../../../api/types/genericTeamWorkflow";
-import { rememberWorkflowLoadingShape } from "./workflowLoadingShape";
+import { useWorkflowDefinitions } from "./useWorkflowDefinitions";
 import { usePageVisibility } from "../../../app/pollingPolicy";
 import { isEditableWorkflow, mergeSavedFlows, sameFlowContent, type Flow, type Run } from "./workflowModel";
 
@@ -47,11 +47,7 @@ export function useWorkflowWorkspace(teamId: string) {
     void client.invalidateQueries({ queryKey: teamFlowKeys.flows(teamId) }).catch(() => undefined);
     void client.invalidateQueries({ queryKey: teamFlowKeys.runs(teamId) }).catch(() => undefined);
   }
-  const definitions = useQuery({
-    queryKey: teamFlowKeys.flows(teamId),
-    queryFn: ({ signal }) => listTeamFlows(teamId, signal),
-    staleTime: 10_000,
-  });
+  const definitions = useWorkflowDefinitions(teamId);
   const executions = useQuery({
     queryKey: teamFlowKeys.runs(teamId),
     queryFn: ({ signal }) => listTeamFlowRuns(teamId, signal),
@@ -59,7 +55,6 @@ export function useWorkflowWorkspace(teamId: string) {
   });
   useEffect(() => {
     if (definitions.data?.teamId === teamId) {
-      rememberWorkflowLoadingShape(teamId, definitions.data.flows);
       const editable = definitions.data.flows.filter(isEditableWorkflow);
       updateDraft(current => {
         const uncertainSaves = { ...current.uncertainSaves };

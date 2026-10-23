@@ -3,7 +3,7 @@ import { ArrowDown, Bot, CheckCircle2, Circle, Clock3, FileCheck2, Inbox, Loader
 import { VNativeButton, VSkeleton } from "../../../components/vui";
 import { KIND_LABEL, memberName, type Flow, type Run, type StepKind, type WorkflowMember } from "./workflowModel";
 
-type Props = { loading?: boolean; flow: Flow; selectedId: string; mode: "design" | "run"; run?: Run; members: WorkflowMember[]; onSelect: (id: string) => void; onAdd: () => void };
+type Props = { loading?: boolean; flow?: Flow; selectedId: string; mode: "design" | "run"; run?: Run; members: WorkflowMember[]; onSelect: (id: string) => void; onAdd: () => void };
 const kindIcons: Record<StepKind, typeof Bot> = { input: Inbox, agent: Bot, human: UserRound, output: FileCheck2, research: TriangleAlert, session: TriangleAlert };
 const states = {
   configured: { label: "已配置", icon: CheckCircle2, color: "text-[var(--fg-tertiary)]" },
@@ -24,6 +24,9 @@ function nodeState(index: number, mode: Props["mode"], instruction: string, run?
 }
 export function FlowEditor({ loading, flow, selectedId, mode, run, members, onSelect }: Props) {
   const ownerName = (id: string) => memberName(id, members);
+  // Counts are unknowable before the current request returns. Reserve the real
+  // viewport without fabricating nodes that would move when its structure arrives.
+  if (!flow) return <div data-team-flow-editor aria-hidden="true" className={styles.part1}><div className={styles.part2}><div className={styles.preparation}><VSkeleton className={styles.pendingTitle}/><span>正在读取流程结构…</span><VSkeleton className={styles.pendingInstruction}/></div></div></div>;
   return <div data-team-flow-editor aria-hidden={loading || undefined} className={styles.part1}>
     <ol className={styles.part2}>
       {flow.steps.map((step,index) => {

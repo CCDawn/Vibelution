@@ -25,6 +25,7 @@ type Props = {
     saving: boolean;
     pending: boolean;
     loading: boolean;
+    structurePending?: boolean;
     teamPending?: boolean;
     membersPending?: boolean;
     loadingLabel?: string;
@@ -61,6 +62,7 @@ export function WorkbenchShell(props: Props) {
   const { flow, run, mode } = props;
   const active = run?.status === "running" || run?.status === "waiting";
   const currentFlow = mode === "run" && run ? run.flow : flow;
+  const editorVisible = Boolean(currentFlow || props.structurePending);
   const selectStep = (id: string) => { props.onStep(id); props.onInspectorOpen(true); };
   const visibleFlows = props.flows;
   const membersPending = props.membersPending ?? props.teamPending;
@@ -87,13 +89,13 @@ export function WorkbenchShell(props: Props) {
   </div>;
 
   const compactToolbar = <div data-team-workspace-toolbar className={styles.part33}>
-    <div className={styles.part34}><h1 className={styles.part35}>{flow?.name || "流程工作台"}</h1>{flow && <span className={styles.part36}>{props.loading ? <VSkeleton className={styles.pendingSaved}/> : props.dirty ? "未保存" : <><Check size={12}/>已保存</>}</span>}</div>
-    {currentFlow ? <div className={styles.part37}><VTabs aria-label="工作模式" value={mode} onValueChange={value => props.onMode(value as "design" | "run")} items={[{ id: "design", label: "设计" }, { id: "run", label: "运行" }]} listClassName="!h-8 !border-0 !bg-[var(--vui-surface-row)] !p-0.5" triggerClassName="!h-7 !min-h-7 !px-3 !py-0 !text-vui-2xs"/><span className={styles.part31}><VButton variant="ghost" className={quiet} icon={<Save size={13}/>} isPending={props.saving} isDisabled={props.loading || props.saving || props.pending} onClick={props.onSave}>保存</VButton>{mode === "run" && active ? <VButton className={quiet} icon={<Square size={12}/>} isPending={props.pending || Boolean(run?.stopRequested)} isDisabled={props.pending || Boolean(run?.stopRequested)} onClick={props.onStop}>{run?.stopRequested ? "正在停止" : "停止"}</VButton> : <VButton variant="primary" className={primary} icon={<Play size={12}/>} isPending={props.pending} isDisabled={props.loading || props.saving || props.pending} onClick={props.onStart}>{mode === "design" ? "试运行" : "开始运行"}</VButton>}</span></div> : <span className={styles.part38}>输入 → 团队协作 → 交付结果</span>}
+    <div className={styles.part34}><h1 className={styles.part35}>{props.loading && editorVisible ? <VSkeleton className={styles.pendingName}/> : flow?.name || "流程工作台"}</h1>{flow && <span className={styles.part36}>{props.loading ? <VSkeleton className={styles.pendingSaved}/> : props.dirty ? "未保存" : <><Check size={12}/>已保存</>}</span>}</div>
+    {editorVisible ? <div className={styles.part37}><VTabs aria-label="工作模式" value={mode} onValueChange={value => props.onMode(value as "design" | "run")} items={[{ id: "design", label: "设计" }, { id: "run", label: "运行" }]} listClassName="!h-8 !border-0 !bg-[var(--vui-surface-row)] !p-0.5" triggerClassName="!h-7 !min-h-7 !px-3 !py-0 !text-vui-2xs"/><span className={styles.part31}><VButton variant="ghost" className={quiet} icon={<Save size={13}/>} isPending={props.saving} isDisabled={props.loading || props.saving || props.pending} onClick={props.onSave}>保存</VButton>{mode === "run" && active ? <VButton className={quiet} icon={<Square size={12}/>} isPending={props.pending || Boolean(run?.stopRequested)} isDisabled={props.pending || Boolean(run?.stopRequested)} onClick={props.onStop}>{run?.stopRequested ? "正在停止" : "停止"}</VButton> : <VButton variant="primary" className={primary} icon={<Play size={12}/>} isPending={props.pending} isDisabled={props.loading || props.saving || props.pending} onClick={props.onStart}>{mode === "design" ? "试运行" : "开始运行"}</VButton>}</span></div> : <span className={styles.part38}>输入 → 团队协作 → 交付结果</span>}
   </div>;
 
-  const canvas = <div className={styles.part39}>{compactToolbar}{props.error ? <div className={styles.part41}>流程暂未读取成功，请重新读取。</div> : currentFlow ? <>
-    <div className={styles.part42}><span className={styles.part43}><GitBranch size={13}/>{mode === "design" ? "流程编排" : "执行过程"}<span className={styles.part44}>{props.loading ? <VSkeleton className={styles.pendingSaved}/> : <>· {currentFlow.steps.length} 个步骤</>}</span></span>{mode === "design" ? <VButton variant="ghost" className={styles.part45} icon={<Plus size={13}/>} onClick={props.onAddStep}>添加步骤</VButton> : <span className={styles.part46}>{run ? run.stopRequested && run.status === "running" ? "正在停止" : statusLabel[run.status] : "尚未开始"}</span>}</div>
-    <div className={styles.part47}><FlowEditor loading={props.loading} flow={currentFlow} selectedId={props.selectedId || currentFlow.steps[0]?.id || ""} mode={mode} run={run} members={props.members} onSelect={selectStep} onAdd={props.onAddStep}/></div>
+  const canvas = <div className={styles.part39}>{compactToolbar}{props.error ? <div className={styles.part41}>流程暂未读取成功，请重新读取。</div> : editorVisible ? <>
+    <div className={styles.part42}><span className={styles.part43}><GitBranch size={13}/>{mode === "design" ? "流程编排" : "执行过程"}<span className={styles.part44}>{props.loading ? <VSkeleton className={styles.pendingSaved}/> : <>· {currentFlow?.steps.length} 个步骤</>}</span></span>{mode === "design" ? <VButton variant="ghost" className={styles.part45} icon={<Plus size={13}/>} onClick={props.onAddStep}>添加步骤</VButton> : <span className={styles.part46}>{run ? run.stopRequested && run.status === "running" ? "正在停止" : statusLabel[run.status] : "尚未开始"}</span>}</div>
+    <div className={styles.part47}><FlowEditor loading={props.loading} flow={currentFlow} selectedId={props.selectedId || currentFlow?.steps[0]?.id || ""} mode={mode} run={run} members={props.members} onSelect={selectStep} onAdd={props.onAddStep}/></div>
     {mode === "run" && run && <div className={styles.part48}><VTabs aria-label="运行内容" value={bottomTab} onValueChange={setBottomTab} items={[{ id: "messages", label: "协作记录" }, { id: "artifacts", label: "产物" }]} listClassName="!border-0 !bg-transparent !p-0" triggerClassName="!px-2.5"/>{bottomTab === "messages" ? <div className={styles.part49} aria-live="polite">{run.messages.map((message,index) => <p key={index} className={styles.part50}><span className={styles.part44}>{String(index+1).padStart(2,"0")}</span>{message}</p>)}</div> : run.status === "completed" || run.status === "waiting" || run.attempts?.some(attempt => attempt.status === "completed") ? <VButton variant="ghost" onClick={props.onArtifact} className={styles.part51} icon={<FileText size={15}/>}>查看产物</VButton> : <p className={styles.part52}>完成相关步骤后，产物会显示在这里。</p>}</div>}
   </> : <WorkflowStart loading={props.loading} onTemplate={props.onTemplate} onCreate={props.onCreate}/> }</div>;
 

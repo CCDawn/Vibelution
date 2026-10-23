@@ -60,10 +60,10 @@ export function WorkflowDesignFooter({ step, saving, dirty, pending, loading, on
   </>;
 }
 const noop = () => undefined;
-export function WorkflowInspectorLoading({ flow }: { flow: Flow }) {
-  const step = flow.steps[0];
-  return <WorkflowInspectorFrame loading title="节点配置" detail={step ? KIND_LABEL[step.kind] : "流程配置"}
+export function WorkflowInspectorLoading({ flow }: { flow?: Flow }) {
+  const step = flow?.steps[0];
+  return <WorkflowInspectorFrame loading title="节点配置" detail={step ? KIND_LABEL[step.kind] : "正在读取"}
     footer={<WorkflowDesignFooter loading step={step} onSave={noop} onMove={noop} onDelete={noop}/>}>
-    {step && <WorkflowDesignFields loading flow={flow} step={step} members={[]} onStep={noop} onField={noop} onAddField={noop} onRemoveField={noop}/>}
+    {flow && step ? <WorkflowDesignFields loading flow={flow} step={step} members={[]} onStep={noop} onField={noop} onAddField={noop} onRemoveField={noop}/> : <Field label="步骤名称"><PendingSlot loading><VInput aria-label="步骤名称" value="" readOnly className={field}/></PendingSlot></Field>}
   </WorkflowInspectorFrame>;
 }

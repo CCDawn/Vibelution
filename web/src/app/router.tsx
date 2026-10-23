@@ -5,6 +5,7 @@ import { AppShell } from "./AppShell";
 import { GlobalCommandSurfaces } from "./GlobalCommandSurfaces";
 import { LauncherShell } from "./LauncherShell";
 import { RouteLoadingShell, type RouteLoadingLayout } from "./RouteLoadingShell";
+import { WorkflowLoadingBoundary } from "../routes/teams/generic/WorkflowLoadingBoundary";
 import { RouteErrorBoundary, type RouteErrorSurface } from "./RouteErrorBoundary";
 import { HomeRedirect } from "../routes/HomeRedirect";
 import { WorkbenchDomainRoute } from "../routes/WorkbenchDomainRoute";
@@ -154,7 +155,8 @@ function lazyElement(
   surface: RouteErrorSurface = "workbench",
   loadingLayout: RouteLoadingLayout = "default",
 ) {
-  return <Suspense fallback={<RouteLoadingShell surface={surface} layout={loadingLayout} />}>{element}</Suspense>;
+  const content = <Suspense fallback={<RouteLoadingShell surface={surface} layout={loadingLayout} />}>{element}</Suspense>;
+  return loadingLayout === "teams" ? <WorkflowLoadingBoundary>{content}</WorkflowLoadingBoundary> : content;
 }
 
 function routeErrorElement(surface: RouteErrorSurface = "workbench") {

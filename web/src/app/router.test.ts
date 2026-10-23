@@ -74,7 +74,8 @@ function expectLazyFallback(route: RouteObject, expectedLabel: string, expectedS
 
 function lazyFallbackMarkup(route: RouteObject): string {
   expect(isValidElement(route.element)).toBe(true);
-  const fallback = (route.element as ReactElement<{ fallback?: ReactNode }>).props.fallback;
+  const outer = route.element as ReactElement<{ fallback?: ReactNode; children?: ReactElement<{fallback?: ReactNode}> }>;
+  const fallback = outer.props.fallback ?? outer.props.children?.props.fallback;
   expect(isValidElement(fallback)).toBe(true);
   return renderToStaticMarkup(fallback as ReactElement);
 }

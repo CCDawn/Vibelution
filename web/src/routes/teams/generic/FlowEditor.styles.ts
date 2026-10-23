@@ -1,4 +1,5 @@
 const styles = {
+  preparation: "grid gap-2 px-11 py-3 text-vui-2xs text-[var(--fg-tertiary)] max-sm:px-9",
   ownerName: "min-w-0 truncate",
   statusLabel: "flex shrink-0 items-center gap-1",
   pendingNode: "[&>span]:invisible",

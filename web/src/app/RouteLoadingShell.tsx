@@ -128,7 +128,7 @@ export function RouteLoadingShell({
   // Explicit flow navigation already determines the shell before the Teams chunk arrives.
   // Keep ordinary team homes on their existing loading contract.
   if (layout === "teams" && typeof window !== "undefined" && new URLSearchParams(window.location.search).get("teamWorkspace") === "flows") {
-    return <div data-route-loading="teams" data-vui-app={surface} className={styles.workspaceFill}><WorkflowWorkspaceLoading teamId={new URLSearchParams(window.location.search).get("team") || new URLSearchParams(window.location.search).get("teamId") || ""} label={label || "正在打开团队工作台"}/></div>;
+    return <div data-route-loading="teams" data-vui-app={surface} className={styles.workspaceFill}><WorkflowWorkspaceLoading label={label || "正在打开团队工作台"}/></div>;
   }
   if (layout === "chat") {
     return (
