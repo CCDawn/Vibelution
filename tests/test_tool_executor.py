@@ -1950,7 +1950,9 @@ class TestToolExecutorErrorHandling:
 
         assert action is None
         assert "[EXEC FAILURE]" in str(result)
-        event = events[-1]
+        terminal_events = [event for event in events if event["eventCode"] == "tool.execute.failed"]
+        assert len(terminal_events) == 1
+        event = terminal_events[0]
         assert event["eventCode"] == "tool.execute.failed"
         assert event["level"] == "error"
         assert event["outcome"] == "failed"
@@ -2066,7 +2068,9 @@ class TestToolExecutorErrorHandling:
 
         assert action is None
         assert '"status": "degraded"' in str(result)
-        event = events[-1]
+        terminal_events = [event for event in events if event["eventCode"] == "tool.execute.degraded"]
+        assert len(terminal_events) == 1
+        event = terminal_events[0]
         assert event["eventCode"] == "tool.execute.degraded"
         assert event["level"] == "warning"
         assert event["outcome"] == "degraded"
