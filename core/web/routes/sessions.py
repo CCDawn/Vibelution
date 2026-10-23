@@ -49,6 +49,7 @@ from core.web.services.runtime_scene_service import record_runtime_scene_event
 from core.web.services import session_service
 from core.web.services.session.session_pin_ops import set_chat_session_pinned
 from core.web.services.session import document_attachments as session_document_attachments
+from core.web.services.session import session_index_stream
 from core.web.services.session.image_attachments import (
     LocalAttachmentReadError,
     read_local_attachment_bytes,
@@ -126,6 +127,24 @@ router = APIRouter(tags=["sessions"])
 # Initial session projection can perform filesystem work, so keep it off the
 # event loop. Long-lived queue waits use the async subscriber and never occupy
 # these workers.
+
+
+@router.get("/sessions/events", response_class=StreamingResponse)
+async def session_index_events() -> StreamingResponse:
+    """Global session-index delta stream.
+
+    Registered ahead of `/sessions/{session_id}` so the literal path wins the
+    route match. Frames are summary-level only: a session id plus the kind of
+    index change. Transcript delivery stays on the per-session stream.
+    """
+    return StreamingResponse(
+        session_index_stream.stream_session_index_events_async(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        },
+    )
 _SESSION_STREAM_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="session-stream")
 
 
