@@ -71,14 +71,18 @@ import {
 } from "./agentMessageTimeline";
 import {
   buildCodexTranscriptCells,
-  compactCodexTranscriptCellsAcrossMessages,
   type CodexTranscriptCell,
 } from "./codexTranscriptCells";
+import {
+  compactCodexTranscriptCellsIncrementally,
+  type CodexTranscriptCompactionCache,
+} from "./codexTranscriptCompactionCache";
 import { resolveCodexTranscriptSurface, type CodexTranscriptSurface } from "./codexNativeTranscriptSurface";
 import { ConversationToolActivityPills } from "./ConversationToolActivityPills";
 import { type AgentMessageTimelineRowIdentity } from "./agentMessageTimelineRows";
 import { useAgentThread } from "./useAgentThread";
 import { projectAgentMessageTimelineMessages } from "./useAgentMessageTimelineProjection";
+import { conversationLiveTailStartIndex } from "./conversationGuidanceSegments";
 import { projectConversationDisplayMessages } from "./conversationDisplayMessages";
 import {
   imageArtifactForMessage,
@@ -116,6 +120,7 @@ import {
   buildTurnErrorDiagnosticRows,
   buildCurrentTurnErrorRows,
   summarizeCurrentTurnError,
+  resolveIterationLimitNotice,
   resolveConversationTurnErrorType,
   resolveConversationTurnErrorRecoveryAction,
   resolveSessionTurnErrorRecoveryAction,
@@ -443,6 +448,7 @@ export const ConversationView = React.memo(function ConversationView({
   } = useConversationMessageCuration({
     sessionId,
     companionMode,
+    transcriptPending,
     t,
   });
   const {
@@ -540,6 +546,7 @@ export const ConversationView = React.memo(function ConversationView({
     () => displayMessages.some((message) => isTurnErrorMessage(message)),
     [displayMessages],
   );
+  const iterationLimitNotice = resolveIterationLimitNotice(turnError, lang);
   // A persisted turnError can outlive the answer it belongs to (provider error
   // raised after the canonical final_answer was committed). Never duplicate the
   // failure banner under a turn that already rendered its final answer.
@@ -604,15 +611,7 @@ export const ConversationView = React.memo(function ConversationView({
    * a single row.
    */
   const timelineLiveTailStartIndex = useMemo(() => {
-    let index = activeTimelineMessages.length;
-    while (index > 0) {
-      const message = activeTimelineMessages[index - 1];
-      if (!assistantTurnIsStreaming(message) && !assistantTurnIsInFlight(message)) {
-        break;
-      }
-      index -= 1;
-    }
-    return index;
+    return conversationLiveTailStartIndex(activeTimelineMessages);
   }, [activeTimelineMessages]);
   const timelineHistoryMessages = useMemo(
     () => activeTimelineMessages.slice(0, timelineLiveTailStartIndex),
@@ -763,6 +762,10 @@ export const ConversationView = React.memo(function ConversationView({
     }
     return itemsByMessageId;
   }, [agentOperationGroupsByMessageId, agentThread, lang]);
+  // Cross-message compaction is one forward pass whose state resets at every
+  // user row. Keeping its cache across frames is what limits a streaming frame
+  // to the active turn segment instead of the whole transcript.
+  const transcriptCompactionCacheRef = useRef<CodexTranscriptCompactionCache | null>(null);
   const agentCodexSurfacesByMessageId = useMemo(() => {
     const surfacesByMessageId = new Map<string, CodexTranscriptSurface>();
     for (const agentMessage of agentThread.messages) {
@@ -776,13 +779,15 @@ export const ConversationView = React.memo(function ConversationView({
       }
       surfacesByMessageId.set(agentMessage.id, resolveCodexTranscriptSurface(sourceMessage, projectedCells));
     }
-    const compactedCellsByMessageId = compactCodexTranscriptCellsAcrossMessages(
+    transcriptCompactionCacheRef.current = compactCodexTranscriptCellsIncrementally(
+      transcriptCompactionCacheRef.current,
       agentThread.messages.map((agentMessage) => ({
         messageId: agentMessage.id,
         cells: surfacesByMessageId.get(agentMessage.id)?.cells ?? [],
         barrier: agentMessage.role === "user",
       })),
     );
+    const compactedCellsByMessageId = transcriptCompactionCacheRef.current.cellsByMessageId;
     for (const [messageId, surface] of surfacesByMessageId) {
       const compactedCells = compactedCellsByMessageId.get(messageId);
       if (!compactedCells || transcriptCellSequenceMatches(surface.cells, compactedCells)) {
@@ -891,6 +896,7 @@ export const ConversationView = React.memo(function ConversationView({
   } = useConversationComposer({
     sessionId,
     messages,
+    transcriptPending,
     showComposer,
     composerVariant,
     composerValue,
@@ -1572,14 +1578,14 @@ export const ConversationView = React.memo(function ConversationView({
             {turnError?.message && !hasVisibleTurnErrorMessage && !turnErrorSupersededByFinalAnswer ? (
               <div className={styles.turnError} role="status" aria-live="polite">
                 <div className={styles.turnErrorText}>
-                  <span className={styles.turnErrorLabel}>{t("turnErrorLabel")}</span>
+                  <span className={styles.turnErrorLabel}>{iterationLimitNotice ? (lang === "zh" ? "运行提示" : "Turn notice") : t("turnErrorLabel")}</span>
                   <span>{summarizeCurrentTurnError(turnError, lang)}</span>
                   <details className={styles.turnErrorDiagnostics}>
                     <summary className={styles.turnErrorDiagnosticsSummary}>
                       {lang === "zh" ? "诊断详情" : "Diagnostics"}
                     </summary>
                     <div className={styles.turnErrorDiagnosticsBody}>
-                      <span className={styles.turnErrorDetail}>{turnError.message}</span>
+                      {!iterationLimitNotice ? <span className={styles.turnErrorDetail}>{turnError.message}</span> : null}
                       {buildCurrentTurnErrorRows(turnError, lang).map((row) => (
                         <span key={`${row.label}-${row.value}`} className={styles.turnErrorDetail}>
                           {row.label}: {row.value}
@@ -1618,7 +1624,7 @@ export const ConversationView = React.memo(function ConversationView({
                     </VButton>
                   ) : null}
                   {(() => {
-                    const turnErrorTypeLabelKey = turnError ? resolveTurnErrorTypeLabelKey(turnError.errorType) : "";
+                    const turnErrorTypeLabelKey = turnError && !iterationLimitNotice ? resolveTurnErrorTypeLabelKey(turnError.errorType) : "";
                     return turnErrorTypeLabelKey ? (
                       <span className={styles.turnErrorType} title={turnError?.errorType}>{t(turnErrorTypeLabelKey)}</span>
                     ) : null;

@@ -358,6 +358,14 @@ def _project_companion_activity_rows(
     ]
 
 
+def list_virtual_human_companion_bindings() -> list[dict[str, str]]:
+    """Resolve route identity from the canonical directory and enabled bindings."""
+    return [
+        {"agentId": row["agentId"], "directSessionId": row["directSessionId"]}
+        for row in _enabled_companion_directory_rows()
+    ]
+
+
 def list_virtual_human_companion_activity() -> list[dict[str, Any]]:
     """Return a lightweight Companion-only projection of native Session activity."""
 
@@ -418,6 +426,7 @@ def update_agent_plugin_binding(
 __all__ = [
     "list_agent_plugin_catalog",
     "list_agent_plugins",
+    "list_virtual_human_companion_bindings",
     "list_virtual_human_companion_activity",
     "list_virtual_human_companions",
     "update_agent_plugin_binding",

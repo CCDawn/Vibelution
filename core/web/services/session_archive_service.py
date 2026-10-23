@@ -189,6 +189,14 @@ def _sync_directory(conversation: dict[str, Any], *, archive: bool) -> None:
     s._invalidate_session_list_cache()
 
 
+def _publish_index_change(session_id: str, change_type: str) -> None:
+    """Forward one archive-state change to the global session index stream."""
+
+    from core.web.services.session import session_index_stream
+
+    session_index_stream.publish_session_index_change_safely(session_id, change_type)
+
+
 def archive_session(session_id: str) -> dict[str, Any]:
     """Archive one session: metadata flag + directory index seal. Idempotent."""
 
@@ -218,6 +226,9 @@ def archive_session(session_id: str) -> dict[str, Any]:
         s.save_session_chat_state(s.PROJECT_ROOT, normalized, conversation)
     _sync_directory(conversation, archive=True)
     s._publish_session_detail_snapshot(normalized)
+    # Archiving removes the row from the default rail, which is a different
+    # signal than a field change: drop it there instead of refetching.
+    _publish_index_change(normalized, "remove")
     s.record_runtime_scene_event(
         "conversation",
         "chat_state",
@@ -256,6 +267,9 @@ def unarchive_session(session_id: str) -> dict[str, Any]:
         s.save_session_chat_state(s.PROJECT_ROOT, normalized, conversation)
     _sync_directory(conversation, archive=False)
     s._publish_session_detail_snapshot(normalized)
+    # Restoring puts the row back; the rail fetches that one row instead of
+    # rebuilding the whole index.
+    _publish_index_change(normalized, "upsert")
     s.record_runtime_scene_event(
         "conversation",
         "chat_state",

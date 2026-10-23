@@ -337,9 +337,16 @@ def authorize_or_wait(
             except Exception:
                 cancel_reason = ""
             if cancel_reason:
+                cancelled_now = False
                 with _LOCK:
                     if request.status == "pending":
                         _resolve_request_locked(request, "cancel")
+                        cancelled_now = True
+                if not cancelled_now:
+                    # 请求在本分支与决议竞态窗口内已被外部终态化（例如用户
+                    # 恰在取消判定时点了批准）：不得把已落账的决议吞成本分支
+                    # 的取消文案，落到下方终态分发按真实状态返回。
+                    break
                 return ToolApprovalOutcome(
                     False,
                     "approval_cancelled",
@@ -347,12 +354,20 @@ def authorize_or_wait(
                     request.request_id,
                 )
         if time.monotonic() >= request.expires_at:
+            expired_now = False
             with _LOCK:
                 if request.status == "pending":
                     request.status = "expired"
                     request.decision = "cancel"
                     request.resolved_at = _utc_now()
                     request.event.set()
+                    expired_now = True
+            if not expired_now:
+                # 过期边界竞态（E3）：决议恰在过期判定的窗口内到达（如 accept
+                # 先一步落账）。journal 已记 accepted 时按 timeout 拒绝并把
+                # 「禁止以相同参数重试」文案发给用户，等于把用户刚做的批准
+                # 吞掉；此处让位给下方终态分发按真实决议返回。
+                break
             return ToolApprovalOutcome(
                 False,
                 "approval_timeout",
@@ -1126,6 +1141,7 @@ def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
         "agent_create", "agent_update", "agent_archive", "session_create",
         "session_update", "session_stop", "session_delete", "knowledge_acl_grant",
         "restart", "workflow_recovery_bind", "workflow_recovery_revoke", "workflow_start",
+        "team_create", "knowledge_ingest", "config_update",
     }
     action = args.get("action")
     if not isinstance(action, str) or action not in actions:
@@ -1193,6 +1209,38 @@ def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
             result["assistantChangedFields"] = sorted(display_fields.intersection(updates))
         except (ValueError, TypeError, RecursionError):
             result["assistantArgumentsInvalid"] = True
+    if action == "team_create":
+        name = values.get("name")
+        if not isinstance(name, str) or not name.strip():
+            result["assistantArgumentsInvalid"] = True
+        else:
+            targets["name"] = " ".join(name.split())[:120]
+        for key in ("description", "templateId"):
+            value = values.get(key)
+            if isinstance(value, str) and value.strip():
+                targets[key] = " ".join(value.split())[:160]
+    if action == "knowledge_ingest":
+        for key in ("inboxSourceId", "ownerType", "ownerId", "knowledgeBaseId"):
+            value = values.get(key)
+            if isinstance(value, str) and value.strip():
+                targets[key] = " ".join(value.split())[:160]
+        if not all(str(values.get(key) or "").strip() for key in ("inboxSourceId", "ownerType", "ownerId")):
+            result["assistantArgumentsInvalid"] = True
+    if action == "config_update":
+        updates = values.get("updates")
+        if not isinstance(updates, list) or not updates or len(updates) > 20:
+            result["assistantArgumentsInvalid"] = True
+        else:
+            labels: list[str] = []
+            for item in updates:
+                if not isinstance(item, dict) or not {"section", "key", "value"} <= set(item):
+                    result["assistantArgumentsInvalid"] = True
+                    labels = []
+                    break
+                labels.append(f"{item.get('section')}.{item.get('key')}")
+            if labels:
+                # Values are never projected; only which keys are touched.
+                result["assistantChangedFields"] = sorted(labels)[:20]
     result["assistantDetailsOmitted"] = bool(set(values).difference(targets)) or any(
         targets.get(key) != values[key] for key in ("title", "display_name") if key in targets
     )

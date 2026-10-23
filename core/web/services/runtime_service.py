@@ -432,7 +432,9 @@ def _retire_for_user_restart(
     evolution = _stop_active_evolution_runs_before_shutdown(deadline=deadline)
     sources = _stop_active_source_collection_runs_before_shutdown(deadline=deadline)
     rooms = _stop_active_chat_room_rounds_before_shutdown(deadline=deadline)
-    turns = _stop_active_chat_turns_before_shutdown(deadline=deadline, persist_partials=True)
+    turns = _stop_active_chat_turns_before_shutdown(
+        deadline=deadline, persist_partials=True, stop_reason=source,
+    )
     results = [*rooms, *turns, *sources, *evolution, *additional]
     failures = [item for item in results if item.get("error") or item.get("status") in {"failed", "timeout", "skipped"}]
     # Never turn an incomplete/missing owner stop into a 202 pause receipt.
@@ -1746,6 +1748,7 @@ def _stop_active_chat_turns_before_shutdown(
     *,
     deadline: float | None = None,
     persist_partials: bool = False,
+    stop_reason: str = "runtime_shutdown",
 ) -> list[dict[str, object]]:
     """Persist active chat partials before the backend/launcher is closed."""
 
@@ -1788,9 +1791,9 @@ def _stop_active_chat_turns_before_shutdown(
         run_id = str(run.get("runId") or "").strip()
         stop_completed, _, stop_error = _run_with_bounded_wait(
             lambda target_session_id=session_id: (
-                _stop_and_persist_chat_turn_for_restart(target_session_id)
+                _stop_and_persist_chat_turn_for_restart(target_session_id, stop_reason=stop_reason)
                 if persist_partials
-                else request_stop_session_turn(target_session_id)
+                else request_stop_session_turn(target_session_id, stop_reason=stop_reason)
             ),
             timeout_seconds=_remaining_harvest_seconds(deadline),
         )
@@ -1827,14 +1830,16 @@ def _stop_active_chat_turns_before_shutdown(
     return stopped
 
 
-def _stop_and_persist_chat_turn_for_restart(session_id: str) -> None:
+def _stop_and_persist_chat_turn_for_restart(
+    session_id: str, *, stop_reason: str = "runtime_shutdown",
+) -> None:
     """Seal the current turn through the existing journal interruption owner."""
     from . import session_service
     from core.chat.turn_journal import turn_has_terminal_event
 
     # Stop current work (including descendants) before snapshot persistence.
     # fast_ack avoids hydration; persistence below remains synchronous.
-    request_stop_session_turn(session_id, fast_ack=True)
+    request_stop_session_turn(session_id, fast_ack=True, stop_reason=stop_reason)
     controller = session_service._get_session_turn_control(session_id)
     if controller is None:
         return

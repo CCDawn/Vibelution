@@ -54,7 +54,7 @@ def _stub_repairs(monkeypatch: pytest.MonkeyPatch, *, dirty_workspace: bool = Tr
         return True
 
     monkeypatch.setattr(session_service, "_ensure_conversation_workspace_metadata", _workspace_repair)
-    monkeypatch.setattr(session_service, "_agent_lookup_for_conversations", lambda: {})
+    monkeypatch.setattr(session_service, "_agent_lookup_for_conversations", lambda **_kwargs: {})
     monkeypatch.setattr(session_service, "_agent_directory_stub_hidden_team_member_ids", lambda: set())
 
 
@@ -182,6 +182,37 @@ def test_pure_read_detail_target_does_not_take_mutation_lock(monkeypatch: pytest
     assert saves == []
     assert target == {"id": "session-read"}
     assert seen["kwargs"]["ensure_workspace"] is False
+
+
+@pytest.mark.parametrize("fresh_agent_id", ["agent-b", ""])
+def test_partial_detail_lookup_resamples_fresh_binding_under_lock(tmp_path, monkeypatch, fresh_agent_id):
+    session_id = "session-rebound"
+    stale = {"conversation_id": session_id, "agent_id": "agent-a", "session_kind": "child"}
+    fresh = {**stale, "agent_id": fresh_agent_id, "last_turn_status": "ready"}
+    _seed_store(tmp_path, fresh)
+    _stub_repairs(monkeypatch)
+    seen = _spy_normalize(monkeypatch)
+    lookups = []
+    replacement = {"agent-b": {"agentId": "agent-b", "directSessionId": "parent-session"}}
+
+    def resample(**kwargs):
+        lookups.append(kwargs)
+        return replacement
+
+    def verify_binding(row, *, agent_by_id):
+        assert row["agent_id"] == fresh_agent_id
+        assert agent_by_id is replacement
+        return False
+
+    monkeypatch.setattr(session_service, "_agent_lookup_for_conversations", resample)
+    monkeypatch.setattr(session_service, "_ensure_conversation_agent_metadata", verify_binding)
+    session_service._load_conversation_detail_target(
+        session_id, payload={"conversations": [stale]}, repair=True,
+        agent_by_id={"agent-a": {"agentId": "agent-a"}}, agent_lookup_is_partial=True,
+    )
+    assert lookups == ([{"session_id": session_id, "agent_ids": (fresh_agent_id,)}] if fresh_agent_id else [{}])
+    assert seen["kwargs"]["agent_by_id"] is replacement
+    assert load_session_chat_state(tmp_path, session_id)["agent_id"] == fresh_agent_id
 
 
 def test_repair_clean_row_takes_mutation_lock_once_without_write(monkeypatch: pytest.MonkeyPatch) -> None:

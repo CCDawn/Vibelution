@@ -327,6 +327,9 @@ from core.orchestration.turn_carryover import (
     serialize_turn_messages,
 )
 from core.orchestration.turn_compression import (
+    STOP_REASON_EMERGENCY_COMPRESSION,
+    STOP_REASON_ITERATION_LIMIT,
+    build_context_compression_notice,
     compress_turn_messages,
     evaluate_context_budget_preflight,
 )
@@ -347,6 +350,7 @@ from core.orchestration.tool_authorization_binding import (
 from core.orchestration.turn_message_assembly import (
     TurnJournalReplayError,
     assemble_prepared_turn_messages,
+    canonical_compaction_checkpoint_kwargs,
     current_turn_has_journal_conversation_layer,
     insert_pending_volatile_context_messages,
     ledger_conversation_fingerprint_for_messages,
@@ -2080,13 +2084,19 @@ class AgentRuntime:
         return getattr(self, "_base_llm", None)
 
     def _compress_messages(self, messages: list, iteration: int, reason: str = "", trigger_source: str = ""):
-        """执行消息压缩。返回 (messages, should_break)。"""
+        """执行消息压缩。返回 (messages, should_break, stop_reason)。
+
+        ``should_break`` 只表示预算 fail-closed（压缩结果超硬限或切断
+        retention 链）；``stop_reason`` 透出非预算类的收轮理由（迭代上限、
+        非对话模式紧急压缩），由主循环分诊文案与诊断码。
+        """
         (
             compressed,
             should_break,
             applied,
             self._compression_count_this_turn,
             self._last_compression_iteration,
+            stop_reason,
         ) = compress_turn_messages(
             messages=messages,
             iteration=iteration,
@@ -2114,7 +2124,70 @@ class AgentRuntime:
             trigger_source=trigger_source,
         )
         self._last_context_compression_applied = applied
-        return compressed, should_break
+        return compressed, should_break, stop_reason
+
+    def _record_compression_turn_stop(
+        self,
+        *,
+        stop_reason: str,
+        iteration: int,
+        before_tokens: int,
+        after_tokens: int,
+        messages: list,
+    ) -> None:
+        """Record an honest turn-end for non-budget compression stop reasons.
+
+        迭代上限与非对话模式紧急压缩不是预算 fail-closed：压缩已成功完成，
+        收轮必须用真实原因（专属 reason_code/事件码、可重试、可发新消息续跑），
+        不得再伪装成 context_budget_exhausted。
+        """
+        if stop_reason == STOP_REASON_ITERATION_LIMIT:
+            stop_summary = "本轮迭代次数已达上限，压缩完成后主动收束"
+            stop_detail = (
+                f"本轮已迭代 {iteration} 次（超过上限），上下文压缩已成功"
+                f"完成（{before_tokens} → {after_tokens} tokens）；为防失控"
+                "主动收束本轮，发送新消息可继续任务（iteration_limit_reached）。"
+            )
+            stop_reason_code = "iteration_limit_reached"
+            stop_event_code = "agent.iteration_limit_reached"
+            stop_notice = (
+                f"上下文已压缩（{before_tokens} → {after_tokens} tokens）。"
+                "本轮迭代已达上限，主动收束；发送新消息可继续。"
+            )
+        else:
+            stop_summary = "紧急压缩完成，非对话模式防御性收束本轮"
+            stop_detail = (
+                "上下文压力触达紧急压缩级别，压缩已完成；非对话模式按防御"
+                "策略收束本轮（emergency_compression）。"
+            )
+            stop_reason_code = "emergency_compression_completed"
+            stop_event_code = "agent.emergency_compression_turn_end"
+            stop_notice = (
+                f"上下文已压缩（{before_tokens} → {after_tokens} tokens），"
+                "紧急压缩完成，非对话模式收束本轮。"
+            )
+        if bool(getattr(self, "_last_context_compression_applied", False)):
+            messages.append(build_runtime_notice_message(stop_notice))
+        if not bool(getattr(self, "_last_turn_failed", False)):
+            self._record_turn_failure_diagnostic(
+                category="context_error",
+                reason_code=stop_reason_code,
+                reason_summary=stop_summary,
+                reason_detail=stop_detail,
+                chain_stage="llm_preflight",
+                event_code=stop_event_code,
+                retryable=True,
+                recovery_action="send_new_message",
+                fields={
+                    "iteration": iteration,
+                    "compressedTokens": after_tokens,
+                    "beforeTokens": before_tokens,
+                    "messageCount": len(messages),
+                    "compressionApplied": bool(
+                        getattr(self, "_last_context_compression_applied", False)
+                    ),
+                },
+            )
 
     @staticmethod
     def _fallback_mode_policy() -> ModePolicy:
@@ -2223,6 +2296,7 @@ class AgentRuntime:
             if not isinstance(item, dict):
                 continue
             role = str(item.get("role") or "").strip().lower()
+            checkpoint_kwargs = canonical_compaction_checkpoint_kwargs(item)
             assistant_tool_calls = (
                 self._normalize_seeded_tool_calls(item.get("tool_calls") or item.get("toolCalls") or [])
                 if role == "assistant"
@@ -2230,19 +2304,19 @@ class AgentRuntime:
             )
             raw_content = item.get("content")
             content = raw_content if isinstance(raw_content, list) else str(raw_content or "").strip()
-            if isinstance(content, str):
+            if isinstance(content, str) and not checkpoint_kwargs:
                 content = self._sanitize_seeded_chat_content(role, content)
             if not content and not assistant_tool_calls:
                 continue
             if role in {"runtime_context", "runtime", "system"}:
-                restored.append(SystemMessage(content=str(content)))
+                restored.append(SystemMessage(content=str(content), additional_kwargs=checkpoint_kwargs))
             elif role == "user":
                 if isinstance(content, list):
                     restored.append({"role": "user", "content": content})
                 else:
                     restored.append(build_chat_user_message(content))
             elif role == "assistant":
-                assistant_kwargs: Dict[str, Any] = {}
+                assistant_kwargs: Dict[str, Any] = dict(checkpoint_kwargs)
                 seeded_reasoning = str(item.get("reasoning_content") or "").strip()
                 if assistant_tool_calls and seeded_reasoning:
                     # DeepSeek thinking-mode relays require tool-call assistants
@@ -3269,6 +3343,13 @@ class AgentRuntime:
                 "gitRefreshPolicy": "tool_driven",
                 "runtimeStateSyncMs": initial_runtime_sync_ms,
                 "promptBuildMs": initial_prompt_build_ms,
+                "promptBuildCacheHit": bool(
+                    getattr(
+                        self.prompt_manager,
+                        "last_build_stable_cache",
+                        {},
+                    ).get("all_hit")
+                ),
                 "totalMs": max(0, int((time.perf_counter() - initial_context_started) * 1000)),
                 "stableSessionPrompt": stable_session_prompt,
                 "excludedPromptSections": self._excluded_system_prompt_sections_for_turn(
@@ -3587,7 +3668,7 @@ class AgentRuntime:
                     )
                     compression_triggered = True
                 if compression_triggered:
-                    messages, should_break = self._compress_messages(
+                    messages, should_break, compression_stop_reason = self._compress_messages(
                         messages,
                         iteration,
                         reason=compression_reason,
@@ -3599,6 +3680,19 @@ class AgentRuntime:
                         ui.note_context_window(after_tokens, context_limit)
                     except Exception:
                         pass
+                    if compression_stop_reason and not should_break:
+                        # 压缩成功但命中非预算类收轮理由（迭代上限/非对话模式
+                        # 紧急压缩）：说真话收束，不再伪装成预算耗尽。历史上
+                        # 这两类理由借 should_break 通道返回，被下方分支统一
+                        # 误标为 context_budget_exhausted。
+                        self._record_compression_turn_stop(
+                            stop_reason=compression_stop_reason,
+                            iteration=iteration,
+                            before_tokens=current_tokens,
+                            after_tokens=after_tokens,
+                            messages=messages,
+                        )
+                        break
                     if should_break:
                         # 压缩成功但仍触发 fail-closed 时不能静默 break：用户侧
                         # 只看到“压缩完成”然后没有后续输出，会话表现为卡死。
@@ -3642,10 +3736,7 @@ class AgentRuntime:
                         break
                     # 只有实际缩减上下文时才写 notice，禁止把 guard skip 伪装成已压缩。
                     if bool(getattr(self, "_last_context_compression_applied", False)):
-                        messages.append(build_runtime_notice_message(
-                            f"由于上下文超过最大承受能力，现在强制进行了一次压缩"
-                            f"（{current_tokens} → {after_tokens} tokens）。"
-                        ))
+                        messages.append(build_context_compression_notice(current_tokens, after_tokens))
                         if provider_replay_state is not None:
                             # Responses 续锚与轮内压缩互斥：压缩只重写本地
                             # messages，provider 侧历史仍停在旧 response_id；
@@ -3695,6 +3786,13 @@ class AgentRuntime:
                         "runtimeStateSyncMs": runtime_sync_ms,
                         "promptBuildMs": prompt_build_ms,
                         "promptBuildReused": prompt_build_reused,
+                        "promptBuildCacheHit": bool(
+                            getattr(
+                                self.prompt_manager,
+                                "last_build_stable_cache",
+                                {},
+                            ).get("all_hit")
+                        ),
                         "contextEstimateMs": context_estimate_ms,
                         "delegationMs": delegation_ms,
                         # Send-path timing anchors (TTFT dark zone): preflight
@@ -4194,7 +4292,7 @@ class AgentRuntime:
                     requested_source = compression_request_source() or "manual"
                     reason = consume_compression_request()
                     _debug_logger.info(f"[压缩] 感知层请求压缩: {reason}", tag="STATE")
-                    messages, _ = self._compress_messages(
+                    messages, _, _ = self._compress_messages(
                         messages,
                         iteration,
                         reason=reason,

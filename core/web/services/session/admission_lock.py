@@ -33,8 +33,8 @@ class SessionAdmissionLock:
         self.path = conversation_ledger_path(project_root, session_id).with_name("session_admission")
         self._local = threading.local()
 
-    def acquire(self) -> bool:
-        manager = cross_process_file_lock(self.path)
+    def acquire(self, *, timeout: float = 30.0) -> bool:
+        manager = cross_process_file_lock(self.path, timeout=timeout)
         try:
             manager.__enter__()
         except TimeoutError as exc:

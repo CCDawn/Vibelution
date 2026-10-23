@@ -47,7 +47,7 @@ def test_llm_options_model_and_parameters_share_one_agent_revision(monkeypatch, 
 
 
 def _patch_update_dependencies(monkeypatch, *, agent_id="agent-a", model_ref="provider/model-a"):
-    agent = {"agentId": agent_id, "configRevision": 4}
+    agent = {"agentId": agent_id, "configRevision": 4, "llmBindings": {"dialogue": {"modelId": model_ref}}}
     selected = {
         "modelRef": model_ref,
         "reasoningEffortValues": ["low", "high"],
@@ -55,17 +55,19 @@ def _patch_update_dependencies(monkeypatch, *, agent_id="agent-a", model_ref="pr
     updates = []
     monkeypatch.setattr(session_service, "session_agent_lifecycle_transaction", nullcontext)
     monkeypatch.setattr(session_service, "_ensure_session_conversation_record", lambda *_args, **_kwargs: True)
-    monkeypatch.setattr(session_service, "_ensure_session_mutable", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(session_service, "_ensure_session_mutable", lambda *_args, **_kwargs: {"agent_id": agent_id})
     monkeypatch.setattr(session_service, "_session_agent_id_snapshot", lambda *_args, **_kwargs: agent_id)
     monkeypatch.setattr(session_service, "get_agent", lambda *_args, **_kwargs: agent)
+    monkeypatch.setattr(session_service.agent_directory_service, "get_agent_parameter_snapshot", lambda *_args, **_kwargs: agent)
     monkeypatch.setattr(session_service, "_session_fixed_model_choice", lambda *_args, **_kwargs: selected)
+    monkeypatch.setattr(session_service, "_session_llm_model_choices", lambda: [selected])
     monkeypatch.setattr(
         session_service,
         "update_agent_model_parameters_if_current",
         lambda *args, **kwargs: updates.append((args, kwargs)),
     )
     expected_response = {"sessionId": "session-a", "agentId": agent_id, "currentModelId": model_ref}
-    monkeypatch.setattr(session_service, "get_session_llm_options", lambda *_args, **_kwargs: expected_response)
+    monkeypatch.setattr("core.web.services.session.agent_runtime._session_llm_options_from_agent", lambda *_args, **_kwargs: expected_response)
     return updates, expected_response
 
 

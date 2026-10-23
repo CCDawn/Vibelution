@@ -1,10 +1,13 @@
-import { resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { resolveLauncherRuntimeDir } from "../lifecycle/projectStoragePaths.js";
 
 import {
   invalidPythonJsonBridgePayload,
   parsePythonJsonBridgePayload,
   PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS,
   runPythonJsonBridge,
+  PythonJsonBridgeError,
   type PythonJsonBridgeSpawn
 } from "./pythonJsonBridge.js";
 
@@ -18,6 +21,7 @@ export type LauncherServiceStartInput = {
 
 export type LauncherServiceStopInput = LauncherServiceStartInput & {
   launcherBackendPid?: number;
+  readState?: () => unknown;
 };
 
 export type LauncherServiceStopResult = {
@@ -52,6 +56,32 @@ function stopLauncherBridgeArgs(input: LauncherServiceStopInput): string[] {
 }
 
 export async function stopPythonLauncherService(input: LauncherServiceStopInput): Promise<LauncherServiceStopResult> {
+  if (input.signal?.aborted) {
+    throw new PythonJsonBridgeError("aborted", "launcher stop bridge was aborted before spawn");
+  }
+  // Match the bridge's no-owner decision locally. Uncertain or positive
+  // ownership still goes through Python's process identity checks.
+  if (!(Number(input.launcherBackendPid || 0) > 0)) {
+    try {
+      const state = (input.readState ?? (() => JSON.parse(readFileSync(
+        join(resolveLauncherRuntimeDir(input.workspaceRoot), "state.json"), "utf8"
+      ))))();
+      if (state && typeof state === "object" && !Array.isArray(state)) {
+        const record = state as Record<string, unknown>;
+        const statePid = Number(record.launcherBackendPid ?? 0);
+        if (typeof record.runtimeProjectRoot === "string" && record.runtimeProjectRoot.trim()
+          && resolve(record.runtimeProjectRoot).toLowerCase() === resolve(input.workspaceRoot).toLowerCase()
+          && Number.isSafeInteger(statePid) && statePid <= 0) {
+          return {
+            schemaVersion: 1, status: "skipped", reason: "owned_backend_pid_required",
+            expectedBackendPid: 0, launcherBackendPid: statePid, terminatedPids: []
+          };
+        }
+      }
+    } catch {
+      // Missing, corrupt, or unavailable state needs the existing bridge.
+    }
+  }
   const raw = await runPythonJsonBridge({
     pythonPath: input.pythonPath,
     args: stopLauncherBridgeArgs(input),

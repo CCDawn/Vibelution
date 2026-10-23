@@ -2419,3 +2419,99 @@ def test_history_image_seed_stays_inside_retained_window(tmp_path, monkeypatch):
         agent_instance=None,
     )
     assert _seeded_image_user_messages(seeded) == []
+
+
+class TestDynamicContextHashMemo:
+    """dynamic_context_hash 身份+追加前缀备忘录：字节等价、前缀变异失效、LRU、monkeypatch 敏感"""
+
+    @staticmethod
+    def _messages(*contents: str) -> list[dict]:
+        return [{"role": "user", "content": content} for content in contents]
+
+    def test_exact_replay_hits_with_identical_digest(self):
+        from core.chat import context_assembler as ca
+
+        messages = self._messages("甲", "乙")
+        first = ca._dynamic_context_hash_memoized(messages, session_id="memo-hit-1")
+        assert first == ca._hash_messages(messages)
+        # 新列表、同消息对象（journal 复用形态）：精确命中必须同值
+        second = ca._dynamic_context_hash_memoized(list(messages), session_id="memo-hit-1")
+        assert second == first
+
+    def test_prefix_append_is_byte_identical_to_full_hash(self):
+        from core.chat import context_assembler as ca
+
+        full_messages = self._messages("甲", "乙", "丙", "丁")
+        expected = ca._hash_messages(full_messages)
+        seed = ca._dynamic_context_hash_memoized(full_messages[:2], session_id="memo-append-1")
+        assert seed == ca._hash_messages(full_messages[:2])
+        grown = list(full_messages[:2]) + list(full_messages[2:])  # 共享对象前缀 + 追加
+        grown_hash = ca._dynamic_context_hash_memoized(grown, session_id="memo-append-1")
+        assert grown_hash == expected, "追加命中必须与全量 join 的 digest 逐位一致"
+        # 继续追加同样等价
+        grown_more = grown + [{"role": "assistant", "content": "戊"}]
+        assert ca._dynamic_context_hash_memoized(
+            grown_more, session_id="memo-append-1"
+        ) == ca._hash_messages(grown_more)
+
+    def test_prefix_object_replaced_misses_and_recomputes(self):
+        from core.chat import context_assembler as ca
+
+        alpha = {"role": "user", "content": "甲"}
+        beta = {"role": "user", "content": "乙"}
+        first = ca._dynamic_context_hash_memoized([alpha, beta], session_id="memo-rw-1")
+        replaced = {"role": "user", "content": "甲改"}  # 前缀对象换新（内容变异形态）
+        second = ca._dynamic_context_hash_memoized([replaced, beta], session_id="memo-rw-1")
+        assert second == ca._hash_messages([replaced, beta])
+        assert second != first
+
+    def test_shrunk_or_reordered_prefix_misses(self):
+        from core.chat import context_assembler as ca
+
+        alpha = {"role": "user", "content": "甲"}
+        beta = {"role": "user", "content": "乙"}
+        gamma = {"role": "user", "content": "丙"}
+        ca._dynamic_context_hash_memoized([alpha, beta, gamma], session_id="memo-shrink-1")
+        assert ca._dynamic_context_hash_memoized(
+            [alpha, beta], session_id="memo-shrink-1"
+        ) == ca._hash_messages([alpha, beta])
+        assert ca._dynamic_context_hash_memoized(
+            [beta, alpha, gamma], session_id="memo-shrink-1"
+        ) == ca._hash_messages([beta, alpha, gamma])
+
+    def test_monkeypatched_hash_fn_bypasses_memo(self, monkeypatch):
+        from core.chat import context_assembler as ca
+
+        messages = self._messages("patch 敏感")
+        scope = "memo-patch-1"
+        baseline = ca._dynamic_context_hash_memoized(messages, session_id=scope)
+        assert baseline == ca._hash_messages(messages)
+
+        monkeypatch.setattr(ca, "_hash_text", lambda text: "patched-hash")
+        assert ca._dynamic_context_hash_memoized(messages, session_id=scope) == "patched-hash", (
+            "hash callable 被替换后不得用旧值命中"
+        )
+        monkeypatch.undo()
+        assert ca._dynamic_context_hash_memoized(messages, session_id=scope) == baseline
+
+    def test_lru_eviction_recomputes_byte_identical(self):
+        from core.chat import context_assembler as ca
+
+        digests: dict[str, str] = {}
+        for index in range(257):  # 超过 _ASSEMBLY_MEMO 默认 256 上限，早期条目被淘汰
+            scope = f"memo-lru-{index}"
+            digests[scope] = ca._dynamic_context_hash_memoized(
+                self._messages(f"内容{index}"), session_id=scope
+            )
+        assert ca._dynamic_context_hash_memoized(
+            self._messages("内容0"), session_id="memo-lru-0"
+        ) == digests["memo-lru-0"], "淘汰后重算必须与原值逐位一致"
+
+    def test_assemble_result_hash_matches_full_compute(self):
+        """端到端：备忘录路径产出的 dynamic_context_hash 与直算一致。"""
+        from core.chat import context_assembler as ca
+
+        messages = self._messages("端到端一", "端到端二")
+        assert ca._dynamic_context_hash_memoized(
+            list(messages), session_id="memo-e2e-1"
+        ) == ca._hash_messages(messages)

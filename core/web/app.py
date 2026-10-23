@@ -97,6 +97,7 @@ def create_app() -> FastAPI:
     app.state.web_routes_ready_event = None  # set by lifespan when background warm is used
     app.state.web_startup_routes_registered = False
     app.state.web_startup_routes_ready_event = None
+    app.state.web_feature_routes_requested_event = None
     app.state.web_routes_bootstrap = {}
     app.state.web_shell_ready = False
 

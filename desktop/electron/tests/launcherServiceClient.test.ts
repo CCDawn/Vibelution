@@ -4,6 +4,50 @@ import { PythonJsonBridgeError } from "../src/process/pythonJsonBridge.js";
 import { stopPythonLauncherService } from "../src/process/launcherServiceClient.js";
 
 describe("stopPythonLauncherService", () => {
+  it("does not spawn Python when matching state confirms no Launcher owner", async () => {
+    const spawnImpl = vi.fn();
+    await expect(stopPythonLauncherService({
+      workspaceRoot: "C:/repo", pythonPath: "python", operatorConfigPath: "",
+      spawnImpl, readState: () => ({ runtimeProjectRoot: "C:/repo", launcherBackendPid: 0 })
+    })).resolves.toEqual({
+      schemaVersion: 1, status: "skipped", reason: "owned_backend_pid_required",
+      expectedBackendPid: 0, launcherBackendPid: 0, terminatedPids: []
+    });
+    expect(spawnImpl).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { runtimeProjectRoot: "C:/repo", launcherBackendPid: 100 },
+    { runtimeProjectRoot: "C:/another", launcherBackendPid: 0 },
+    { runtimeProjectRoot: "C:/repo", launcherBackendPid: "invalid" },
+    { workspaceRoot: "C:/repo", launcherBackendPid: 0 },
+    null,
+  ])("keeps the identity bridge for uncertain or owned state %j", async (state) => {
+    const child = fakeChildProcess();
+    const spawnImpl = vi.fn(() => child);
+    const pending = stopPythonLauncherService({
+      workspaceRoot: "C:/repo", pythonPath: "python", operatorConfigPath: "",
+      spawnImpl, readState: () => state
+    });
+    child.stdout.emit("data", Buffer.from(JSON.stringify({ schemaVersion: 1, status: "skipped", terminatedPids: [] })));
+    child.emit("close", 0);
+    await pending;
+    expect(spawnImpl).toHaveBeenCalledOnce();
+  });
+
+  it("uses the bridge when local state reading fails", async () => {
+    const child = fakeChildProcess();
+    const spawnImpl = vi.fn(() => child);
+    const pending = stopPythonLauncherService({
+      workspaceRoot: "C:/repo", pythonPath: "python", operatorConfigPath: "", spawnImpl,
+      readState: () => { throw new Error("unavailable"); }
+    });
+    child.stdout.emit("data", Buffer.from(JSON.stringify({ schemaVersion: 1, status: "skipped", terminatedPids: [] })));
+    child.emit("close", 0);
+    await pending;
+    expect(spawnImpl).toHaveBeenCalledOnce();
+  });
+
   it.skipIf(process.platform !== "win32")("routes owned shutdown through the Python desktop entry bridge", async () => {
     const spawnCalls: Array<{ command: string; args: string[]; options: Record<string, unknown> }> = [];
     const child = fakeChildProcess();
@@ -12,6 +56,7 @@ describe("stopPythonLauncherService", () => {
       pythonPath: "C:/Python/python.exe",
       operatorConfigPath: "C:/operator/config.toml",
       launcherBackendPid: 1234,
+      readState: () => ({ runtimeProjectRoot: "C:/repo", launcherBackendPid: 0 }),
       spawnImpl: (command, args, options) => {
         spawnCalls.push({ command, args: [...args], options: options as Record<string, unknown> });
         return child;
@@ -164,6 +209,7 @@ describe("stopPythonLauncherService", () => {
         pythonPath: "C:/Python/python.exe",
         operatorConfigPath: "C:/operator/config.toml",
         spawnImpl,
+        readState: () => ({ runtimeProjectRoot: "C:/repo", launcherBackendPid: 0 }),
         signal: controller.signal
       })
     ).rejects.toMatchObject({ code: "aborted" });

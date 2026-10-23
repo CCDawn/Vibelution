@@ -45,17 +45,45 @@ def _error(message: str) -> str:
     )
 
 
+def _query_identity() -> tuple[dict, str]:
+    """Allow the bundled coordinator's public reads, without manager identity."""
+    from core.web.services.agent_directory.bootstrap import (
+        PLATFORM_PLANNER_PRESET,
+        PLATFORM_PLANNER_ROLE_KEY,
+    )
+
+    runtime = directory.current_agent_runtime()
+    agent_id = str(runtime.get("agentId") or "").strip()
+    session_id = str(runtime.get("sessionId") or "").strip()
+    agent = directory.get_agent(agent_id) if agent_id else None
+    if (
+        agent
+        and agent.get("status") == "active"
+        and agent.get("primaryMode") == "chat"
+        and agent.get("roleKey") == PLATFORM_PLANNER_ROLE_KEY
+        and (agent.get("metadata") or {}).get("builtinPreset") == PLATFORM_PLANNER_PRESET
+    ):
+        if (
+            not session_id
+            or session_id != agent.get("directSessionId")
+            or not service._owns_session(agent, service._session_row(agent))
+        ):
+            raise ValueError("平台规划师原生会话身份不匹配。")
+        return runtime, "platform_planner"
+    return _identity(), "assistant"
+
+
 def personal_assistant_query_tool(resource: str = "index", operation: str = "list", object_id: str = "",
                                   query: str = "", path: str = "", offset: int = 0, limit: int = 20,
                                   line: int = 1, max_lines: int = 80) -> str:
-    """Discover and read registered project sources with canonical identity."""
+    """Read registered sources for the canonical assistant or bundled planner."""
     try:
-        runtime = _identity()
+        runtime, caller = _query_identity()
     except (ValueError, TypeError, directory.AgentDirectoryError):
-        return _error("个人助理原生身份或配置未就绪，请先核对绑定。")
+        return _error("个人助理或平台规划师原生身份未就绪，请先核对绑定。")
     from core.web.services.personal_assistant_project.query import query_project
 
-    return json.dumps(query_project(runtime, resource=resource, operation=operation, object_id=object_id,
+    return json.dumps(query_project(runtime, caller=caller, resource=resource, operation=operation, object_id=object_id,
         query=query, path=path, offset=offset, limit=limit, line=line, max_lines=max_lines), ensure_ascii=False)
 
 
@@ -92,6 +120,7 @@ def _receipt(raw: str) -> str:
         "directSessionId",
         "deletedSessionId",
         "knowledgeBaseId",
+        "knowledgeItemId",
         "targetAgentId",
         "actorAgentId",
         "teamId",
@@ -138,7 +167,8 @@ def personal_assistant_manage_tool(action: str, arguments_json: str) -> str:
 
     Actions: agent_create, agent_update, agent_archive, session_create,
     session_update, session_stop, session_delete, knowledge_acl_grant, restart,
-    workflow_recovery_bind, workflow_recovery_revoke, workflow_start.
+    workflow_recovery_bind, workflow_recovery_revoke, workflow_start,
+    team_create, knowledge_ingest, config_update.
     Arguments use the corresponding canonical tool's named parameters.
     No arbitrary API, command, purge, restore, or private data read is accepted.
     """
@@ -153,6 +183,8 @@ def personal_assistant_manage_tool(action: str, arguments_json: str) -> str:
             return _workflow_action(action, args, runtime)
         # Closed dispatch table; signature binding rejects extra fields before
         # invoking any underlying service. Approval stays in native execution.
+        from tools import pa_managed_writes
+
         dispatch = {
             "agent_create": operations.agent_create_tool,
             "agent_update": operations.agent_update_tool,
@@ -162,6 +194,9 @@ def personal_assistant_manage_tool(action: str, arguments_json: str) -> str:
             "session_stop": operations.session_stop_tool,
             "session_delete": operations.session_delete_tool,
             "knowledge_acl_grant": operations.knowledge_base_acl_grant_tool,
+            "team_create": pa_managed_writes.team_create_tool,
+            "knowledge_ingest": pa_managed_writes.knowledge_ingest_tool,
+            "config_update": pa_managed_writes.config_update_tool,
         }
         if action == "restart":
             if (

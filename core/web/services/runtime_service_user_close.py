@@ -129,7 +129,7 @@ def _stop_chat_turns(deadline: float) -> list[dict]:
         def stop(row=item, target=session_id):
             # This owner signals the turn and descendants with fast_ack before
             # sealing through the unchanged Session Journal interruption path.
-            runtime._stop_and_persist_chat_turn_for_restart(target)
+            runtime._stop_and_persist_chat_turn_for_restart(target, stop_reason="electron_user_close")
             return [{"kind": "chat_turn", "sessionId": target,
                      "runId": str(row.get("runId") or ""), "status": "stopped"}]
 

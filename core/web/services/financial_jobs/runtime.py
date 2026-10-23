@@ -1410,12 +1410,7 @@ def _record_event(
 
 
 def _financial_assistant_ids() -> list[str]:
-    return [
-        str(agent.get("agentId") or "").strip()
-        for agent in financial_assistant_service._agents()
-        if str(agent.get("status") or "active") == "active"
-        and str(agent.get("agentId") or "").strip()
-    ]
+    return financial_assistant_service.active_financial_assistant_ids()
 
 
 __all__ = [

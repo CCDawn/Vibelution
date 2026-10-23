@@ -1,5 +1,5 @@
 import styles from "./GenericWorkflowWorkspace.styles";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ArrowDown, ArrowUp, Check, FileText, Play, Plus, Save, Trash2 } from "lucide-react";
 import { VButton, VCheckbox, VConfirmDialog, VDialog, VInput, VRouteLinkButton, VSelect, VTextarea } from "../../../components/vui";
 import type { Team } from "../../../api/types";
@@ -45,6 +45,7 @@ export function GenericWorkflowWorkspace({ team, teams, onTeam, onDiscussion, on
     const [mode, setMode] = useState<"design" | "run">("design");
     const [selectedId, setSelectedId] = useState("");
     const [launchFlow, setLaunchFlow] = useState<Flow | null>(null);
+    const [launchTeamId, setLaunchTeamId] = useState("");
     const [launchKey, setLaunchKey] = useState("");
     const [values, setValues] = useState<Record<string, string>>({});
     const [optionDrafts, setOptionDrafts] = useState<Record<string, string>>({});
@@ -60,6 +61,7 @@ export function GenericWorkflowWorkspace({ team, teams, onTeam, onDiscussion, on
     const [showArtifact, setShowArtifact] = useState(false);
     const [deleteStepId, setDeleteStepId] = useState("");
     const [inspectorOpen, setInspectorOpen] = useState(false);
+    useEffect(() => { setLaunchFlow(null); setFormError(""); setNotice(""); }, [team.teamId, flowId]);
     const displayedFlow = mode === "run" && run ? run.flow : flow;
     const step = displayedFlow?.steps.find(item => item.id === selectedId) ?? displayedFlow?.steps[0];
     const active = run?.status === "running" || run?.status === "waiting";
@@ -75,13 +77,14 @@ export function GenericWorkflowWorkspace({ team, teams, onTeam, onDiscussion, on
         if (!saved)
             return;
         setLaunchFlow(copyFlow(saved));
+        setLaunchTeamId(team.teamId);
         setLaunchKey(crypto.randomUUID());
         setValues({});
         setFormError("");
     }
     function updateValue(id: string, value: string) { setValues(current => ({ ...current, [id]: value })); setLaunchKey(crypto.randomUUID()); }
     async function startRun() {
-        if (!launchFlow)
+        if (!launchFlow || launchTeamId !== team.teamId || launchFlow.id !== flowId)
             return;
         const missing = missingInputLabels(launchFlow, values);
         if (missing.length) {

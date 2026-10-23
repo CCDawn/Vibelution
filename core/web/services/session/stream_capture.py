@@ -206,7 +206,65 @@ class SessionTurnCapture:
     _committed_content_length: int = 0
     _latest_tool_feedback_sequence: int = 0
     _turn_mismatch_discard_recorded: bool = False
+    _display_order_item_ids: set[str] = field(default_factory=set, repr=False)
+    _native_thought_item_id: str = ""
+    _native_response_item_id: str = ""
+    _display_content_offset: int = 0
     _lock: threading.RLock = field(default_factory=threading.RLock, init=False, repr=False, compare=False)
+
+    def note_protocol_item(self, event: Any) -> None:
+        """Persist one content-free creation anchor before the first UI delta."""
+        item_id = str(getattr(event, "item_id", "") or "").strip()
+        if (
+            not item_id
+            or str(getattr(event, "session_id", "") or "").strip() != self.session_id
+            or str(getattr(event, "turn_id", "") or self.turn_id).strip() != self.turn_id
+            or item_id in self._display_order_item_ids
+        ):
+            return
+        event_kind = str(getattr(event, "kind", "") or "")
+        call_id = str(getattr(event, "call_id", "") or "").strip()
+        if event_kind == "reasoning_delta" and getattr(event, "text", ""):
+            kind = "reasoning"
+        elif event_kind in {"answer_delta", "commentary_delta", "interim_text_delta"} and getattr(event, "text", ""):
+            kind = "agent_message"
+        elif call_id and event_kind in {"tool_call_started", "tool_arguments_delta", "tool_call_ready"}:
+            kind = "tool_call"
+        else:
+            return
+        s = _service()
+        projection_item_id = ""
+        if kind == "reasoning":
+            if self._native_thought_item_id and self._native_thought_item_id != item_id:
+                self.close_latest_thought_boundary()
+            self._native_thought_item_id = item_id
+            feedback_sequence = self._latest_thought_sequence or self._next_feedback_sequence
+            projection_item_id = f"{s._session_turn_item_base_id(self.session_id, self.turn_id)}-reasoning-{feedback_sequence}"
+        elif kind == "agent_message":
+            self._native_response_item_id = item_id
+            self._display_content_offset = len(self.content)
+        self._display_order_item_ids.add(item_id)
+        from .turn_steer import record_display_item_started
+
+        record_display_item_started(
+            self.session_id, self.turn_id, item_id=item_id, kind=kind,
+            projection_item_id=projection_item_id, call_id=call_id, content_offset=len(self.content),
+        )
+
+    def rebase_protocol_content(self) -> None:
+        """A done/clear replacement starts at zero, unlike cumulative deltas."""
+        if not self._native_response_item_id or self._display_content_offset <= 0:
+            return
+        from .turn_steer import record_display_content_rebased
+
+        self._display_content_offset = 0
+        try:
+            record_display_content_rebased(
+                self.session_id, self.turn_id, item_id=self._native_response_item_id,
+            )
+        except Exception:
+            # Display bookkeeping must not interrupt an authoritative response.
+            pass
 
     def note_thought(self, text: str) -> None:
         s = _service()
@@ -397,6 +455,7 @@ class SessionTurnCapture:
 
     def clear_content(self) -> None:
         s = _service()
+        self.rebase_protocol_content()
         self.content = ""
         self._committed_content_length = 0
 
@@ -438,8 +497,7 @@ class SessionTurnCapture:
                 self._last_recorded_thought_text = ""
             self.thought = ""
             # 与 clear_content 同语义：新 attempt 从零累积。
-            self.content = ""
-            self._committed_content_length = 0
+            self.clear_content()
             # 失败 attempt 发出的仍处于 running 的工具调用不可能再被执行（工具
             # 执行发生在两次 invocation 之间，不跨同一 invocation 的 attempt），
             # 从 live 边界摘除；新 attempt 的工具调用事件会重新进入。
@@ -1760,6 +1818,7 @@ def _ensure_session_ui_capture_hooks(ui: Any) -> None:
         if bool(getattr(ui, "_vibelution_session_capture_wrapped", False)):
             return
         originals = {
+            "note_protocol_item": getattr(ui, "note_protocol_item", None),
             "stream_thought": getattr(ui, "stream_thought", None),
             "clear_thought_stream": getattr(ui, "clear_thought_stream", None),
             "stream_response": getattr(ui, "stream_response", None),
@@ -1773,6 +1832,14 @@ def _ensure_session_ui_capture_hooks(ui: Any) -> None:
             if not isinstance(context, dict) or context.get("ui") is not ui:
                 return {}
             return context
+
+        def note_protocol_item_proxy(event: Any) -> None:
+            original = originals.get("note_protocol_item")
+            if callable(original):
+                original(event)
+            capture = active_context().get("capture")
+            if isinstance(capture, SessionTurnCapture):
+                capture.note_protocol_item(event)
 
         def stream_thought_proxy(text: str, done: bool = False):
             s = _service()
@@ -1867,6 +1934,8 @@ def _ensure_session_ui_capture_hooks(ui: Any) -> None:
                 capture.close_latest_thought_boundary()
                 previous = str(capture.content or "")
                 next_content = cleaned if done else f"{previous}{cleaned}" if previous else cleaned
+                if done:
+                    capture.rebase_protocol_content()
                 # Stream callbacks provide deltas until the terminal callback,
                 # which provides the authoritative complete response.
                 capture.content = next_content
@@ -1928,6 +1997,7 @@ def _ensure_session_ui_capture_hooks(ui: Any) -> None:
                 )
 
         setattr(ui, "_vibelution_session_capture_originals", originals)
+        setattr(ui, "note_protocol_item", note_protocol_item_proxy)
         setattr(ui, "stream_thought", stream_thought_proxy)
         setattr(ui, "clear_thought_stream", clear_thought_stream_proxy)
         setattr(ui, "stream_response", stream_response_proxy)

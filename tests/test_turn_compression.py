@@ -7,7 +7,8 @@ emergency vs chat early-exit contract using injected fakes.
 
 from types import SimpleNamespace
 
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+import pytest
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from core.orchestration.agent_modes import AgentMode
 from core.orchestration.turn_compression import (
@@ -218,6 +219,7 @@ def test_next_turn_replays_compression_from_its_own_ledger(monkeypatch, tmp_path
     from core.chat import conversation_ledger as ledger
     from core.chat import turn_journal
     from core.web.services import agent_directory_service
+    from tools.token_manager import CompressionOutput, CompressionResult
 
     monkeypatch.setattr(
         turn_journal, "turn_journal_workspace_root", lambda root: tmp_path / "workspace"
@@ -239,11 +241,14 @@ def test_next_turn_replays_compression_from_its_own_ledger(monkeypatch, tmp_path
             ledger.EVENT_USER_MESSAGE,
             payload={"content": f"original history of {session_id}"},
         )
+    historical_message = HumanMessage(content="original history of workspace-session")
     _run(
-        messages=[AIMessage(content="long-context-message")],
-        compressor=_FakeCompressor(
-            [AIMessage(content="x")], summary="retained task summary"
-        ),
+        messages=[historical_message],
+        compressor=_FakeOutputCompressor(CompressionOutput(
+            [AIMessage(content="x")],
+            CompressionResult("retained task summary", 40, 1),
+            summarized_messages=[historical_message],
+        )),
         config=_feature_config(),
         project_root=str(tmp_path),
         turn_runtime_fn=dict,
@@ -308,8 +313,10 @@ def test_checkpoint_receives_exact_summarized_boundary(monkeypatch, tmp_path):
     )
     assert captured
     assert captured[0]["summarized_messages"] == [folded]
+    assert captured[0]["retained_messages"] == boundary_output.messages
+    assert captured[0]["source_messages"] == [AIMessage(content="long-context-message")]
 
-    # 旧式 (messages, stats) 压缩器证明不了边界：不传参，走既有 blanket 语义。
+    # 旧式压缩器不伪造摘要覆盖域；source/retained 仍显式描述实际替换边界。
     captured.clear()
     _run(
         messages=[AIMessage(content="long-context-message")],
@@ -320,6 +327,8 @@ def test_checkpoint_receives_exact_summarized_boundary(monkeypatch, tmp_path):
     )
     assert captured
     assert "summarized_messages" not in captured[0]
+    assert "source_messages" in captured[0]
+    assert "retained_messages" in captured[0]
 
 
 def test_disabled_feature_or_missing_compressor_skips_without_counting():
@@ -339,8 +348,8 @@ def test_disabled_feature_or_missing_compressor_skips_without_counting():
         extra={},
     )
 
-    assert skipped_disabled == (original, False, False, 0, 0)
-    assert skipped_none == (original, False, False, 0, 0)
+    assert skipped_disabled == (original, False, False, 0, 0, "")
+    assert skipped_none == (original, False, False, 0, 0, "")
     assert compressor.calls == []
 
 
@@ -359,7 +368,7 @@ def test_iteration_gap_and_max_compressions_skip_without_calling_compressor():
         compression_min_iteration_gap=3,
         compression_count_this_turn=1,
     )
-    assert gap == (original, False, False, 1, 4)
+    assert gap == (original, False, False, 1, 4, "")
     assert extras["events"][0]["kwargs"]["fields"]["guardReason"] == "iteration_gap"
 
     extras = {}
@@ -372,7 +381,7 @@ def test_iteration_gap_and_max_compressions_skip_without_calling_compressor():
         last_compression_iteration=0,
         compression_count_this_turn=2,
     )
-    assert maxed == (original, False, False, 2, 0)
+    assert maxed == (original, False, False, 2, 0, "")
     assert extras["events"][0]["kwargs"]["fields"]["guardReason"] == "max_compressions"
     assert compressor.calls == []
 
@@ -398,6 +407,159 @@ def test_successful_compression_updates_count_and_marks_applied():
     assert result[4] == 6
     assert compressor.calls
     assert compressor.calls[0]["use_llm_summary"] is False
+
+
+def test_budget_fallback_continues_when_required_context_exceeds_soft_target():
+    current_request = HumanMessage(content="q" * 700)
+    original = [AIMessage(content="old" * 1000), current_request]
+    rules = SystemMessage(content="r" * 50)
+    extras = {}
+    result = _run(
+        messages=original,
+        compressor=_FakeCompressor([rules, AIMessage(content="k" * 400), current_request]),
+        config=_feature_config(), extra=extras,
+        context_input_hard_limit=1000, post_compression_target_tokens=600,
+    )
+    assert result[0] == [rules, current_request]
+    assert result[1] is False
+    assert result[2] is True
+    assert any(item["args"][1] == "agent.context_compression.target_unreachable" for item in extras["events"])
+    fallback = next(item for item in extras["events"] if item["args"][1] == "agent.context_compression.token_budget_applied")
+    assert fallback["kwargs"]["fields"]["sendTokens"] <= 1000
+    assert fallback["kwargs"]["fields"]["retiredMessageCount"] == 1
+
+
+def test_budget_fallback_reaches_target_even_when_summary_fits_hard_limit():
+    current_request = HumanMessage(content="current request")
+    rules = SystemMessage(content="rules and history summary")
+    original = [AIMessage(content="old" * 1000), current_request]
+    extras = {}
+    result = _run(
+        messages=original,
+        compressor=_FakeCompressor([rules, AIMessage(content="k" * 800), current_request]),
+        config=_feature_config(), extra=extras,
+        context_input_hard_limit=1000, post_compression_target_tokens=600,
+    )
+    assert result[0] == [rules, current_request]
+    assert result[1] is False
+    fallback = next(item for item in extras["events"] if item["args"][1] == "agent.context_compression.token_budget_applied")
+    assert fallback["kwargs"]["fields"]["sendTokens"] <= 600
+    assert fallback["kwargs"]["fields"]["targetUnreachable"] is False
+
+
+def test_budget_window_without_summary_cannot_retire_history_only_in_memory():
+    current_request = HumanMessage(content="current request")
+    original = [AIMessage(content="old" * 1000), current_request]
+    extras = {}
+    result = _run(
+        messages=original,
+        compressor=_FakeCompressor([AIMessage(content="k" * 800), current_request], summary=""),
+        config=_feature_config(), extra=extras,
+        context_input_hard_limit=1000, post_compression_target_tokens=600,
+    )
+    assert result[0] == original
+    assert result[1] is True
+    assert result[2] is False
+    blocked = next(item for item in extras["events"] if item["args"][1] == "agent.context_budget_exhausted")
+    assert blocked["kwargs"]["fields"]["guardReason"] == "budget_window_requires_summary"
+
+
+def test_budget_window_persists_replacement_even_below_savings_threshold(monkeypatch, tmp_path):
+    captured = []
+    extras = {}
+    monkeypatch.setattr(
+        "core.chat.conversation_ledger.append_context_compression_checkpoint",
+        lambda *args, **kwargs: captured.append(kwargs) or object(),
+    )
+    rules, current_request = SystemMessage(content="r" * 20), HumanMessage(content="q" * 850)
+    original = [rules, AIMessage(content="old" * 40), current_request]
+    result = _run(
+        messages=original,
+        compressor=_FakeCompressor([rules, AIMessage(content="k" * 40), current_request]),
+        config=_feature_config(threshold=0.5), project_root=str(tmp_path), extra=extras,
+        context_input_hard_limit=1000, post_compression_target_tokens=600,
+    )
+    assert result[1] is False
+    assert captured, extras
+    assert captured[0]["effectiveness_ratio"] < 0.5
+    assert captured[0]["effective"] is True
+    assert captured[0]["source_messages"] == original
+    assert captured[0]["retained_messages"] == [rules, current_request]
+
+
+@pytest.mark.parametrize("checkpoint_result", ["raises", "none"])
+@pytest.mark.parametrize("attempt_result", ["written", "none", "raises"])
+def test_budget_window_requires_a_real_checkpoint_before_continuing(
+    monkeypatch, tmp_path, checkpoint_result, attempt_result,
+):
+    attempts = []
+
+    def checkpoint(*args, **kwargs):
+        if checkpoint_result == "raises":
+            raise OSError("checkpoint unavailable")
+        return None
+
+    def attempt(*args, **kwargs):
+        attempts.append(kwargs)
+        if attempt_result == "raises":
+            raise OSError("attempt unavailable")
+        return SimpleNamespace(event_id="attempt-only") if attempt_result == "written" else None
+
+    monkeypatch.setattr("core.chat.conversation_ledger.append_context_compression_checkpoint", checkpoint)
+    monkeypatch.setattr("core.chat.conversation_ledger.append_context_compression_attempt", attempt)
+    rules = SystemMessage(content="rules and history summary")
+    current_request = HumanMessage(content="current request")
+    original = [rules, AIMessage(content="old" * 1000), current_request]
+    extras = {}
+    result = _run(
+        messages=original,
+        compressor=_FakeCompressor([rules, AIMessage(content="k" * 800), current_request]),
+        config=_feature_config(), extra=extras, project_root=str(tmp_path),
+        context_input_hard_limit=1000, post_compression_target_tokens=600,
+    )
+    assert result == (original, True, False, 0, 0, "context_budget_exhausted")
+    assert attempts[0]["status"] == "failed_preserved"
+    assert attempts[0]["summary"] == ""
+    assert not extras["ui"].events
+    assert not any(item["args"][1] == "agent.context_compression.token_budget_applied" for item in extras["events"])
+    blocked = next(item for item in extras["events"] if item["args"][1] == "agent.context_budget_exhausted")
+    assert blocked["kwargs"]["fields"]["guardReason"] == "budget_window_checkpoint_not_written"
+    failed = next(item for item in extras["events"] if item["args"][1] == "agent.context_compression_checkpoint_failed")
+    assert failed["kwargs"]["fields"]["stage"] == "checkpoint"
+    assert failed["kwargs"]["fields"]["errorType"] == ("OSError" if checkpoint_result == "raises" else "RuntimeError")
+
+
+def test_unreachable_target_without_removable_history_does_not_report_budget_applied():
+    rules, current_request = SystemMessage(content="r" * 20), HumanMessage(content="q" * 850)
+    extras = {}
+    result = _run(
+        messages=[AIMessage(content="old" * 1000), current_request],
+        compressor=_FakeCompressor([rules, current_request]),
+        config=_feature_config(), extra=extras,
+        context_input_hard_limit=1000, post_compression_target_tokens=600,
+    )
+    assert result[0] == [rules, current_request]
+    assert result[1] is False
+    codes = [item["args"][1] for item in extras["events"]]
+    assert "agent.context_compression.target_unreachable" in codes
+    assert "agent.context_compression.token_budget_applied" not in codes
+
+
+def test_budget_fallback_fails_closed_when_required_context_and_notice_exceed_hard_limit():
+    current_request = HumanMessage(content="q" * 950)
+    rules = SystemMessage(content="r" * 20)
+    original = [AIMessage(content="old" * 1000), current_request]
+    extras = {}
+    result = _run(
+        messages=original, compressor=_FakeCompressor([rules, current_request]),
+        config=_feature_config(), extra=extras,
+        context_input_hard_limit=1000, post_compression_target_tokens=600,
+    )
+    assert result[0] == original
+    assert result[1] is True
+    assert result[2] is False
+    assert any(item["args"][1] == "agent.context_budget_exhausted" for item in extras["events"])
+    assert not extras["ui"].events
 
 
 def test_explicit_trigger_source_overrides_reason_guessing():
@@ -439,7 +601,8 @@ def test_ineffective_compression_still_returns_compressor_output_and_consumes_sl
     assert skipped[0]["kwargs"]["fields"]["guardReason"] == "no_compressible_history"
 
 
-def test_emergency_breaks_non_chat_but_not_chat_mode():
+@pytest.mark.parametrize("iteration", [2, 31, 39])
+def test_emergency_breaks_non_chat_but_not_chat_mode(iteration):
     original = [AIMessage(content="long-context-message")]
     compressed = [AIMessage(content="x")]
     strategy = _FakeStrategy(CompressionLevel.EMERGENCY)
@@ -451,7 +614,7 @@ def test_emergency_breaks_non_chat_but_not_chat_mode():
         extra={},
         mode=AgentMode.CHAT,
         compression_strategy=strategy,
-        iteration=2,
+        iteration=iteration,
     )
     evolution = _run(
         messages=original,
@@ -460,16 +623,21 @@ def test_emergency_breaks_non_chat_but_not_chat_mode():
         extra={},
         mode=AgentMode.SELF_EVOLUTION,
         compression_strategy=strategy,
-        iteration=2,
+        iteration=iteration,
     )
 
     assert chat[1] is False
-    assert evolution[1] is True
+    assert evolution[1] is False
     assert chat[2] is True
     assert evolution[2] is True
+    # 提前收轮走专属 stop_reason，不再借 should_break 预算通道。
+    assert chat[5] == ""
+    assert evolution[5] == "emergency_compression"
 
 
-def test_iteration_over_thirty_breaks_even_in_chat():
+@pytest.mark.parametrize("iteration", [30, 31, 39, 1001])
+@pytest.mark.parametrize("mode", [AgentMode.CHAT, AgentMode.SELF_EVOLUTION])
+def test_standard_compression_does_not_own_turn_iteration_limit(iteration, mode):
     original = [AIMessage(content="long-context-message")]
     compressed = [AIMessage(content="x")]
 
@@ -478,13 +646,16 @@ def test_iteration_over_thirty_breaks_even_in_chat():
         compressor=_FakeCompressor(compressed),
         config=_feature_config(),
         extra={},
-        mode=AgentMode.CHAT,
-        iteration=31,
+        mode=mode,
+        iteration=iteration,
     )
 
-    assert result[1] is True
+    assert result[1] is False
+    assert result[0] == compressed
+    assert result[2] is True
     assert result[3] == 1
-    assert result[4] == 31
+    assert result[4] == iteration
+    assert result[5] == ""
 
 
 def test_compress_coerces_iteration_gap_json_binding_and_rejects_character_split():
@@ -502,7 +673,7 @@ def test_compress_coerces_iteration_gap_json_binding_and_rejects_character_split
         compression_min_iteration_gap="3",
         compression_count_this_turn="1",
     )
-    assert gap == (original, False, False, 1, 4)
+    assert gap == (original, False, False, 1, 4, "")
     assert extras["events"][0]["kwargs"]["fields"]["guardReason"] == "iteration_gap"
     assert extras["events"][0]["kwargs"]["fields"]["iteration"] == 5
 
@@ -815,3 +986,67 @@ def test_ledger_fallback_failure_records_session_ledger_failed(monkeypatch, tmp_
     assert fields["beforeTokens"] > 0
     assert fields["reason"] == "context_pressure"
     assert "secret compression summary" not in str(extras["events"])
+
+
+def test_high_iteration_compression_does_not_report_a_turn_stop():
+    """压缩成功后继续当前轮，轮次上限由主循环统一控制。"""
+    original = [AIMessage(content="long-context-message")]
+    compressed = [AIMessage(content="x")]
+    extras = {}
+
+    result = _run(
+        messages=original,
+        compressor=_FakeCompressor(compressed),
+        config=_feature_config(),
+        extra=extras,
+        mode=AgentMode.CHAT,
+        iteration=39,
+    )
+
+    assert result[1] is False
+    assert result[2] is True
+    assert result[5] == ""
+    warn_logs = [message for level, message in extras["ui"].logs if level == "WARN"]
+    assert not any("已超上限" in message for message in warn_logs)
+    assert not any("安全输入预算" in message for message in warn_logs)
+    assert not any("提前结束当前轮次" in message for message in warn_logs)
+
+
+def test_fail_closed_budget_paths_keep_budget_stop_reason(monkeypatch, tmp_path):
+    """iteration=39 时持久化失败仍须 fail-closed，不能因为允许继续而放行。"""
+    from core.orchestration.turn_compression import STOP_REASON_CONTEXT_BUDGET_EXHAUSTED
+
+    monkeypatch.setattr(
+        "core.chat.conversation_ledger.append_context_compression_checkpoint",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("checkpoint unavailable")),
+    )
+    monkeypatch.setattr(
+        "core.chat.conversation_ledger.append_context_compression_attempt",
+        lambda *args, **kwargs: None,
+    )
+    rules = SystemMessage(content="rules and history summary")
+    current_request = HumanMessage(content="current request")
+    original = [rules, AIMessage(content="old" * 1000), current_request]
+    extras = {}
+
+    result = _run(
+        messages=original,
+        compressor=_FakeCompressor([rules, AIMessage(content="k" * 800), current_request]),
+        config=_feature_config(),
+        extra=extras,
+        project_root=str(tmp_path),
+        mode=AgentMode.CHAT,
+        iteration=39,
+        context_input_hard_limit=1000,
+        post_compression_target_tokens=600,
+    )
+
+    assert result[1] is True
+    assert result[5] == STOP_REASON_CONTEXT_BUDGET_EXHAUSTED
+    exhausted = [
+        item
+        for item in extras["events"]
+        if item["args"][1] == "agent.context_budget_exhausted"
+    ]
+    assert exhausted
+    assert exhausted[0]["kwargs"]["outcome"] == "blocked"

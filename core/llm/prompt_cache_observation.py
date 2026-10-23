@@ -6,7 +6,7 @@
 
 1. 发一条 ``llm.prompt_cache.observed`` 场景事件（component=llm，
    phase=cache），字段：sessionId/turnId/profileId/model +
-   cacheHitTokens/cacheMissTokens/hitRatio/inputTokens（及
+   cachedInputTokens/uncachedInputTokens/hitRatio/inputTokens（及
    cacheUsageObserved / cacheUsageMissingReason 语义位）；
 2. 落一行人读摘要到 conversation debug jsonl（tag=LLM，对齐
    ``LLM TTFT breakdown`` 的落盘链路：core.logging.debug ->
@@ -16,11 +16,16 @@
    ``llm.prompt_cache.hit_ratio_drop`` 观测，提示 prompt 前缀漂移，供归因。
 
 纯观测，不改任何调用行为；合成流量不进入观测——startup warmup
-（``llmWarmup`` 标记，与 ledger 的过滤同源）与显式探测
-（``promptPurpose`` 标记，如 qwen inflight cache keepalive probe）都会被跳过，
-否则探测流量会以高命中率混入相邻轮对比基线。无 session 上下文的调用
-（后台工具/无会话探测）字段留空但事件照发：它们的 cache 遥测仍有观测价值，
-只是不参与「相邻两轮」骤降对比（无会话连续性可言）。
+（``llmWarmup`` 标记，与 ledger 的过滤同源）与显式 cache keepalive 探测
+（``promptPurpose == CACHE_KEEPALIVE_PROMPT_PURPOSE``，qwen inflight
+cache keepalive probe）都会被跳过，否则探测流量会以高命中率混入相邻轮
+对比基线。注意 ``promptPurpose`` 本身不是探测标记：
+``LLMInvocationContext.to_metadata`` 给每个真实轮次都写入
+``promptPurpose``（默认 ``main_reply``），按「带 promptPurpose 即探测」
+过滤会把全部真实会话漏掉（2026-10-22 复盘的真实断点），因此探测判定
+只认精确的 keepalive 目的值。无 session 上下文的调用（后台工具/无会话
+探测）字段留空但事件照发：它们的 cache 遥测仍有观测价值，只是不参与
+「相邻两轮」骤降对比（无会话连续性可言）。
 """
 
 from __future__ import annotations
@@ -33,6 +38,16 @@ from .usage import cache_usage_observation_from_payload
 
 PROMPT_CACHE_OBSERVED_EVENT_CODE = "llm.prompt_cache.observed"
 PROMPT_CACHE_HIT_DROP_EVENT_CODE = "llm.prompt_cache.hit_ratio_drop"
+
+#: 显式 cache keepalive 探测的 promptPurpose 目的值（唯一写入点：
+#: ``core.llm.client`` 的 qwen inflight cache keepalive probe）。探测流量
+#: 命中率恒高，混入相邻轮对比会污染骤降基线，必须跳过；其余 promptPurpose
+#: 取值（main_reply / commit_message / schedule 等）都是真实调用，照常观测。
+CACHE_KEEPALIVE_PROMPT_PURPOSE = "qwen_inflight_cache_keepalive"
+
+#: 跳过观测的探测目的集合：精确匹配，不做前缀/包含推断，避免把真实
+#: 业务目的（如 ``historical_backtest_decision``）误判成探测。
+_PROBE_PROMPT_PURPOSES = frozenset({CACHE_KEEPALIVE_PROMPT_PURPOSE})
 
 #: 骤降告警阈值：上一次（同会话相邻）hitRatio 严格大于该值且本次 == 0 触发。
 PROMPT_CACHE_DROP_PREVIOUS_RATIO_MIN = 0.5
@@ -63,13 +78,19 @@ def _meta_str(metadata: Mapping[str, Any], camel_key: str, snake_key: str) -> st
 
 
 def _is_synthetic_traffic(meta: Mapping[str, Any]) -> bool:
-    """Warmup probes and explicit-purpose probes never enter observation."""
+    """Warmup probes and explicit cache-keepalive probes never enter observation.
+
+    ``promptPurpose`` 是调用目的而不是探测标记（真实轮次恒带
+    ``main_reply`` 等业务目的），只有精确命中的 keepalive 探测目的才算合成
+    流量；判定收紧后真实会话的逐轮观测才真正发生。
+    """
 
     if not isinstance(meta, Mapping):
         return False
     if meta.get(_WARMUP_METADATA_KEY):
         return True
-    return bool(str(meta.get("promptPurpose") or "").strip())
+    purpose = str(meta.get("promptPurpose") or "").strip().lower()
+    return purpose in _PROBE_PROMPT_PURPOSES
 
 
 def _record_scene_event(
@@ -97,6 +118,9 @@ def _record_scene_event(
             outcome=outcome,
             fields=fields or {},
             lifecycle=False,
+            # 观测属于刚收口的轮次：活跃 scene 刚 sealed 的窗口内允许落最近
+            # 完成场景，避免事件落到更早的 pointer 场景或被丢弃。
+            allow_recent_completed=True,
         )
     except Exception:  # noqa: BLE001 - diagnostics about diagnostics stay silent
         return
@@ -154,7 +178,6 @@ def _register_and_detect_drop(
             drop = {
                 "previousTurnId": str(previous.get("turnId", "") or ""),
                 "previousHitRatio": float(previous.get("hitRatio", 0.0) or 0.0),
-                "previousCacheHitTokens": int(previous.get("cacheHitTokens", 0) or 0),
                 "dropTrigger": (
                     f"previousHitRatio>{PROMPT_CACHE_DROP_PREVIOUS_RATIO_MIN} "
                     "and currentHitRatio==0"
@@ -216,14 +239,17 @@ def observe_prompt_cache_usage(
     miss_tokens = max(0, input_tokens - hit_tokens) if cache_observed else 0
 
     # Identity fields lead: scene telemetry keeps only the first 24 field keys.
+    # token 计数字段沿用 usage ledger 的规范名（cachedInputTokens /
+    # uncachedInputTokens）：它们在 scene 遥测的安全计数键白名单内，若用
+    # cacheHitTokens 等自造名会被 SENSITIVE_FIELD_KEYWORDS 打成 [redacted]。
     fields: Dict[str, Any] = {
         "sessionId": session_id,
         "turnId": turn_id,
         "profileId": profile,
         "model": model_name,
         "provider": str(provider or "").strip(),
-        "cacheHitTokens": hit_tokens,
-        "cacheMissTokens": miss_tokens,
+        "cachedInputTokens": hit_tokens,
+        "uncachedInputTokens": miss_tokens,
         "hitRatio": hit_ratio,
         "inputTokens": input_tokens,
         "outputTokens": output_tokens,
@@ -285,6 +311,7 @@ def observe_prompt_cache_usage(
 
 
 __all__ = [
+    "CACHE_KEEPALIVE_PROMPT_PURPOSE",
     "PROMPT_CACHE_DROP_PREVIOUS_RATIO_MIN",
     "PROMPT_CACHE_HIT_DROP_EVENT_CODE",
     "PROMPT_CACHE_OBSERVED_EVENT_CODE",

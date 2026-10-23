@@ -1841,18 +1841,17 @@ describe("AgentsRoute layout contract", () => {
     expect(healthMaintenanceStyles.maintenanceIntro).toBeTruthy();
   });
 
-  it("optimistically removes single-Agent archive and purge actions before backend confirmation", () => {
+  it("keeps archive optimism local and waits for authoritative permanent deletion", () => {
     expect(agentRouteBulkModelSource).toContain("function optimisticArchivedAgent(agent: AgentConfigWorkspaceAgent)");
     expect(routeSource).toContain("optimisticArchivedAgent");
-    expect(workbenchMutationsSource).toContain("queryClient.cancelQueries({ queryKey: queryKeys.agentConfigWorkspace() })");
-    expect(workbenchMutationsSource).toContain("const previousSelectedAgentId = options.getSelectedAgentId()");
-    expect(workbenchMutationsSource).toContain("const previousActivePane = options.getActivePane()");
-    expect(workbenchMutationsSource).toContain("options.archivedWorkspaceCache(current, options.optimisticArchivedAgent(optimisticAgent))");
-    expect(workbenchMutationsSource).toContain("options.purgedWorkspaceCache(current, payload.agentId)");
-    expect(workbenchMutationsSource).toContain("return { previousWorkspace, previousSelectedAgentId, previousActivePane, telemetry }");
-    expect(workbenchMutationsSource).toContain("queryClient.setQueryData(queryKeys.agentConfigWorkspace(), context.previousWorkspace)");
-    expect(workbenchMutationsSource).toContain("options.setSelectedAgentId(context?.previousSelectedAgentId ?? \"\")");
-    expect(workbenchMutationsSource).toContain("options.setActivePane(context?.previousActivePane ?? \"overview\")");
+    expect(workbenchMutationsSource).toContain("options.updatedAgentWorkspaceCache(current, optimistic)");
+    expect(workbenchMutationsSource).toContain("archiveRecovery.begin([payload.agentId])");
+    expect(workbenchMutationsSource).toContain("options.purgedWorkspaceCache(current, result.agentId)");
+    expect(workbenchMutationsSource).toContain("purgeOperations.begin([payload.agentId])");
+    expect(workbenchMutationsSource).toContain("options.getSelectedAgentId() === result.agentId");
+    expect(workbenchMutationsSource).not.toContain("context.previousWorkspace");
+    expect(routeSource).not.toContain("setBulkAgentPending");
+    expect(routeSource).toContain("bulkOperations.isPending(agent.agentId)");
   });
 
   it("offers a governed per-Agent debug reset without archive or membership cleanup", () => {
@@ -2331,7 +2330,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("patch: bulkConfigPatchFromDraft(bulkConfigDraft, bulkConfigApply)");
     expect(routeSource).toContain("promptTemplateId: bulkPromptTemplateId");
     expect(routeSource).toContain("bulkUpdatedAgentWorkspaceCache");
-    expect(routeSource).toContain("requestBulkArchiveAgents<");
+    expect(routeSource).toContain("await archiveAgents(");
     expect(routeSource).toContain("requestBulkPurgeAgents<");
     expect(routeSource).toContain("bulkPurgeWorkspaceCache");
     expect(routeSource).toContain("bulkConfig: selectedBulkAgents.length > 1 ? {");

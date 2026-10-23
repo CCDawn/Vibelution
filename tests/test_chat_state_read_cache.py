@@ -183,8 +183,36 @@ def test_external_store_change_invalidates_cache_via_signature(tmp_path, monkeyp
 
         # epoch 没变，只有签名变了：仍必须重新读存储而不是吐缓存。
         load_session_chat_state(tmp_path, "session-cache")
+        # Once refreshed, the unchanged external signature must become a hit.
+        load_session_chat_state(tmp_path, "session-cache")
 
     assert counter["count"] == 2
+
+
+def test_read_invalidated_during_load_cannot_publish_under_new_write_epoch(tmp_path, monkeypatch):
+    reads = []
+
+    class Repository:
+        def get_session_runtime_state(self, session_id):
+            reads.append(session_id)
+            if len(reads) == 1:
+                # A writer commits after this read took its old row snapshot.
+                chat_state_module._bump_chat_state_write_epoch()
+                return {"title": "Before write"}
+            return {"title": "After write"}
+
+    @contextmanager
+    def repository(_root):
+        yield Repository()
+
+    monkeypatch.setattr(chat_state_module, "_chat_state_repository", repository)
+    # Isolate the epoch guard: a stable/coarse file signature cannot prove the
+    # read survived an in-process write that explicitly invalidated it.
+    monkeypatch.setattr(chat_state_module, "_conversation_store_signature", lambda _root: ((1, 1),))
+    assert load_session_chat_state(tmp_path, "session-cache")["title"] == "Before write"
+    assert load_session_chat_state(tmp_path, "session-cache")["title"] == "After write"
+    assert load_session_chat_state(tmp_path, "session-cache")["title"] == "After write"
+    assert len(reads) == 2
 
 
 def test_missing_session_none_is_cached_then_invalidated_by_save(tmp_path, monkeypatch):

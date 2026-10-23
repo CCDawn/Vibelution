@@ -204,6 +204,19 @@
 - 卡片继续固定在 composer 附近；当前待审批 `requestId` 与 transcript 的 `toolCallId`/`operationId` 没有可靠映射，不以工具名猜测精确关联。
 - 保留一次、始终授权、拒绝的操作按钮及可用快捷键提示。
 
+## 运行中引导工作段
+
+### 功能
+普通会话沿用同一个 Turn，以 Journal 的引导消费回执划分显示段，依次呈现已有步骤、引导、后续步骤。每段复用既有助手消息和工作详情控件，独立折叠；只保留最后一段的流式状态与最终答案操作。
+
+### 适用范围
+原生普通会话的安全/中断引导与历史回放。Companion 投影沿用原路径；没有引导的会话保持原有显示。此显示拆分不创建新 Turn、消息事实、SSE 通道或模型历史。
+
+### 使用方式与状态
+`projectAgentMessageTimelineMessages` 先合并 item revisions，再由 `conversationGuidanceSegments` 按服务端 `guidanceConsumedSequence` 切段。等待中的引导位于当前工作之后，复用 VChip 显示「等待纳入」；drained 回执显示「已纳入」，仅表示执行循环取出该输入。缺少消费回执的终态记录仍放在当前工作之后，保留「已接收」，避免在任务停止或失败时挪动已有步骤。
+
+稳定段身份由 turnId 与 guidanceEventId 定位，刷新和终态回放保持一致；工作项按持久化的首次创建顺序分段，后续 revision 只更新内容和状态。末段和同轮待纳入引导共处实时尾部，避免静态用户行使增长中的工作进入历史虚拟器。节点操作和 token 用量只归最终段，沿用原始后端消息/节点身份。
+
 ## ConversationFollowupQueueBar
 
 ### 功能
@@ -1002,6 +1015,7 @@ Settled ```mermaid fence 的显式渲染块：平时就是明文 + 语言标签 
 ### 功能
 对齐 ZCode 轮次信封的三类轻量分隔行，共用同一结构：两侧细发线（hairline）夹一枚 13px 小图标与一句短标签，占位一行、不打断扫读：
 - **上下文压缩检查点**：assistant 角色的 `context_compression_marker`（metadata 投影或 status turn item 的 `diagnosticSummary` 两种载体都识别）。按结果分三态——applied 正常样式「上下文已压缩」；skipped_low_savings 更安静样式「压缩未应用 · 收益不足」；failed_preserved 警示样式「压缩失败 · 已保留原上下文」。**永不渲染 token 节省数字**——那是簿记，不是转写。
+- **混合回合**：同一 turn 合并压缩状态与回答、思考或工具时，分隔线与其余内容并存；仅从本地显示视图移除已经由分隔线承载的压缩 status，不改写原消息。只有纯检查点且回合已结束时才整行显示分隔线；仍在运行时保留正常等待状态。残留的 marker metadata 也不得遮住回答。
 - **模型切换**：由 `buildConversationModelSwitchBoundaries` 纯派生，挂在开轮 user 行顶部。首个带模型的轮次给 initial「使用 <模型>」，后续换模型给 switch「从 <A> 切换到 <B>」；模型名查 config workspace 的 `modelOptions`，查不到回退原始 modelId；同模型连续轮次不渲染。
 - **分叉来源标记**：`isForkedSessionMarkerMessage` 的休眠钩子——后端目前只在 SESSION 级记 `forkedFrom`，从不投影每条消息的标记；一旦投影，消息行顶部出现「已从其他会话分叉」，消息本体照常渲染。
 
@@ -1024,7 +1038,7 @@ Settled ```mermaid fence 的显式渲染块：平时就是明文 + 语言标签 
 
 ### 非职责
 - 不改写 journal、不算模型路由；边界只从已落库消息的 `metadata.llmUsage.llmModelId` 派生。
-- 不显示 token 数字、不显示模型推理强度；压缩检查点的后端文本（含节省 token 数）整行丢弃，标签只走 `dictionaryChat`。
+- 不显示 token 数字、不显示模型推理强度；只隐藏压缩检查点 status 的后端文本（含节省 token 数），标签只走 `dictionaryChat`，同回合的其余内容照常显示。
 - 不做第二套压缩状态卡；上下文用量详情仍由 composer 上下文入口承载。
 
 ### 视觉与状态
@@ -1033,7 +1047,7 @@ Settled ```mermaid fence 的显式渲染块：平时就是明文 + 语言标签 
 - 模型/分叉行复用同一行样式，不区分 tone；时间戳不渲染（行语义是「边界」不是「事件」）。
 
 ### 实现落点
-- 源码：`web/src/components/conversation/ConversationView.tsx`（`conversationCompressionDividerTone` / `renderTurn` 信封分隔节点）
+- 源码：`web/src/components/conversation/conversationSpecialRows.tsx`（`conversationCompressionDividerTone` / `conversationCompressionTurnBody` 与分隔节点）、`conversationTimelineRows.tsx`（分隔线与正常回合的并存）
 - 纯派生：`web/src/components/conversation/conversationModelSwitch.ts`（`buildConversationModelSwitchBoundaries`）
 - 判定：`web/src/components/conversation/conversationMessagePredicates.ts`（`isContextCompressionMarkerMessage` / `isForkedSessionMarkerMessage`）
 - 样式：`web/src/components/conversation/ConversationView.styles.ts`（`turnDivider*`）

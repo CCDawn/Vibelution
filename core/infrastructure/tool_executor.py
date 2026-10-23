@@ -43,6 +43,11 @@ from core.logging import debug as _debug_logger
 
 IMAGE2_TOOL_TIMEOUT_SECONDS = 300
 
+# 模型请求的工具 timeout 上限（E7）：模型可显式拉长非 spawn 工具超时，但请求
+# 值是无信任输入，必须有天花板防止 timeout=10**9 之类参数把整轮钉死在一个
+# 工具调用上。取 cli_agent_run_tool 的 900s 预算档，长时工具留足余量。
+_MODEL_REQUESTED_TIMEOUT_CEILING_SECONDS = 900
+
 
 def _record_tool_scene_event(
     phase: str,
@@ -865,6 +870,13 @@ class ToolExecutor:
         return probe
 
     def execute(self, tool_name: str, tool_args: dict, *, tool_call_id: str = "") -> tuple:
+        """Execute one tool without conflating notification waits with physical execution."""
+        from core.infrastructure.tool_execution_trace import trace_tool_execution
+
+        with trace_tool_execution(tool_name, tool_call_id) as trace:
+            return self._execute(tool_name, tool_args, tool_call_id=tool_call_id, trace=trace)
+
+    def _execute(self, tool_name: str, tool_args: dict, *, tool_call_id: str, trace: Any) -> tuple:
         """
         执行工具
 
@@ -896,6 +908,9 @@ class ToolExecutor:
         except Exception:
             runtime_identity = {}
 
+        trace.bind(**runtime_identity)
+        effective_timeout = self._resolve_timeout(tool_name, tool_args)
+
         def publish_tool_event(event_name: str, payload: dict[str, Any]) -> None:
             event_payload = {
                 **runtime_identity,
@@ -903,7 +918,11 @@ class ToolExecutor:
                 **payload,
             }
             event_payload["callId"] = call_id
-            self._event_bus.publish(event_name, event_payload)
+            trace.bind(toolCallId=call_id)
+            phase = str(payload.get("lifecyclePhase") or event_name)
+            with trace.phase("notify." + phase, timeoutSeconds=effective_timeout,
+                             timeoutScope="tool_function", eventName=event_name):
+                self._event_bus.publish(event_name, event_payload)
 
         started_at = time.monotonic()
 
@@ -1177,9 +1196,17 @@ class ToolExecutor:
 
             with memory_tool_call_scope(call_id):
                 tool_context = copy_context()
-            future = executor.submit(tool_context.run, func, **call_args)
+            def invoke_tool():
+                with trace.phase("tool_function", timeoutSeconds=timeout, timeoutScope="tool_function"):
+                    result = func(**call_args)
+                    trace.record("tool.execution.function_returned", timeoutSeconds=timeout)
+                    return result
+
+            future = executor.submit(tool_context.run, invoke_tool)
             register_current_tool_future(future, tool_name=tool_name)
             deadline = time.monotonic() + max(float(timeout), 0.1)
+            trace.record("tool.execution.future_submitted", timeoutSeconds=timeout,
+                         timeoutScope="tool_function")
             stop_observed_after_completion = False
             while True:
                 cancel_reason = self._current_cancel_reason(cancel_checker)
@@ -1478,10 +1505,13 @@ class ToolExecutor:
         except (TypeError, ValueError):
             requested_int = 0
 
-        # 除 spawn_agent_tool 外，其它工具允许按调用方显式拉长超时。
+        # 除 spawn_agent_tool 外，其它工具允许按调用方显式拉长超时，但模型
+        # 请求是无信任输入：没有上限时 timeout=10**9 之类参数会把回合钉死
+        # 在一个工具调用上（E7）。上限取 cli_agent_run_tool 的 900s 预算档，
+        # 对合法的长时工具（测试/构建类）留足余量。
         if tool_name != "spawn_agent_tool":
             if requested_int > 0:
-                return max(timeout, requested_int)
+                return min(max(timeout, requested_int), _MODEL_REQUESTED_TIMEOUT_CEILING_SECONDS)
             return timeout
 
         if requested_int <= 0:

@@ -6,6 +6,8 @@ type SessionIndexQueryGateInput = {
   bootstrapIsFetched: boolean;
   bootstrapIsError: boolean;
   bootstrapFetchStatus: SessionBootstrapFetchStatus;
+  /** The first bootstrap supplies this exact unfiltered/default-sort page. */
+  bootstrapMatchesIndex?: boolean;
   /** Directory store readiness from the bootstrap payload; unknown counts as ready. */
   directoryReady?: boolean;
   /** Bounded fallback: the readiness wait expired, so recover via the normal poll. */
@@ -31,15 +33,21 @@ export function shouldEnableSessionIndexQuery({
   bootstrapIsFetched,
   bootstrapIsError,
   bootstrapFetchStatus,
+  bootstrapMatchesIndex = false,
   directoryReady = true,
   directoryReadyWaitExpired = false,
 }: SessionIndexQueryGateInput): boolean {
-  if (!directoryReady && !directoryReadyWaitExpired) {
+  if (!directoryReady && !directoryReadyWaitExpired && !bootstrapIsError) {
     // The backend only serves its startup empty page now; hold the query until
     // the bootstrap payload flips the bit or the bounded fallback expires.
     return false;
   }
-  return hasRouteTarget
+  if (bootstrapMatchesIndex && !bootstrapIsFetched && !bootstrapIsError
+    && bootstrapFetchStatus === "fetching" && !directoryReadyWaitExpired) {
+    return false;
+  }
+  return directoryReadyWaitExpired
+    || hasRouteTarget
     || hasActiveSession
     || bootstrapIsFetched
     || bootstrapIsError

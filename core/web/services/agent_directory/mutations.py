@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import copy
 import re
 import secrets
 import stat as stat_module
@@ -30,6 +31,7 @@ from core.llm.agent_model_parameters import (
     sync_dialogue_reasoning_effort_to_model,
 )
 from .avatar_model_defaults import model_default_avatar_filename
+from .parameter_snapshot import save_parameter_update
 
 # Local default for signature evaluation (facade remains SSOT).
 DEFAULT_AGENT_PRIMARY_MODE = "chat"
@@ -40,6 +42,24 @@ def _service():
     from core.web.services import agent_directory_service
 
     return agent_directory_service
+
+
+def _record_compression_parameter_update(agent: dict[str, Any], *, refreshed: bool, started: float) -> None:
+    s = _service()
+    try:
+        s.record_runtime_scene_event(
+            "agent_directory", "config_change", "agent.compression_parameters.updated",
+            message="Agent compression parameters were persisted.", outcome="updated",
+            fields={
+                "agentId": str(agent.get("agentId") or ""),
+                "configRevision": int(agent.get("configRevision") or 0),
+                "repairedSnapshotRefreshed": refreshed,
+                "durationMs": round((time.perf_counter() - started) * 1000, 1),
+            }, lifecycle=True,
+        )
+    except Exception:
+        # Match _record_agent_event: telemetry cannot fail a committed write.
+        pass
 
 
 def _agent_dialogue_model_ref(agent: dict[str, Any] | None) -> str:
@@ -102,11 +122,14 @@ def update_agent_instance(
     updated_supervision_policy: dict[str, Any] | None = None
     updated_persona_profile: dict[str, Any] | None = None
     updated_task_profile: dict[str, Any] | None = None
+    parameter_snapshot_refreshed = False
+    update_started = time.perf_counter()
     with s._STATE_LOCK:
         state = s.load_state()
         agent = s._find_agent(state, agent_id)
         if agent is None:
             raise s.AgentNotFoundError(f"Agent not found: {agent_id}")
+        previous_agent = copy.deepcopy(agent) if context_compression_policy is not None else {}
         previous_dialogue_model_ref = _agent_dialogue_model_ref(agent)
         try:
             current_config_revision = max(
@@ -359,8 +382,13 @@ def update_agent_instance(
             previous_hash=previous_config_hash,
         )
         agent["updatedAt"] = s.utc_now_iso()
-        s.save_state(state)
+        if context_compression_policy is not None:
+            parameter_snapshot_refreshed = save_parameter_update(state, agent, previous_agent, kind="compression")
+        else:
+            s.save_state(state)
     s._record_agent_event("agent.updated", agent)
+    if context_compression_policy is not None:
+        _record_compression_parameter_update(agent, refreshed=parameter_snapshot_refreshed, started=update_started)
     if updated_tool_policy is not None:
         s._record_agent_tool_policy_event(agent, updated_tool_policy)
     if updated_memory_policy is not None:

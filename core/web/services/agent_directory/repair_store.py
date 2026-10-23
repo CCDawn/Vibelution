@@ -9,6 +9,7 @@ Late-bound facade keeps monkeypatches stable.
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 import re
@@ -1967,6 +1968,57 @@ def _registry_state_signature() -> tuple[str, bool, int, int]:
     return (str(path), True, int(stat.st_mtime_ns), int(stat.st_size))
 
 
+def _agent_record_content_sha(record: dict[str, Any]) -> str:
+    try:
+        payload = json.dumps(record, sort_keys=True, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        return ""
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _repair_context_signature(state: dict[str, Any]) -> str:
+    """Signature over the cross-record context the per-agent repair suite reads.
+
+    The suite resolves display names and agent codes against sibling records
+    and derives policy normalization from the raw registry sections, so a
+    cached per-agent fixpoint verdict only stays valid while the sibling
+    identity triples and the raw memory/tool policy sections are unchanged.
+    """
+    identities = sorted(
+        (
+            str(agent.get("agentId") or ""),
+            str(agent.get("agentCode") or ""),
+            str(agent.get("displayName") or ""),
+        )
+        for agent in state.get("agents") or []
+        if isinstance(agent, dict)
+    )
+    payload = {
+        "identities": identities,
+        "memoryPolicies": state.get("memoryPolicies"),
+        "toolPolicies": state.get("toolPolicies"),
+    }
+    try:
+        blob = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        return ""
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def _repair_external_signature(
+    *,
+    registry_path: Path,
+    available_avatar_filenames: Iterable[str],
+    model_library_ids: Iterable[str],
+) -> tuple[str, tuple[str, ...], tuple[str, ...]]:
+    """Signature over walk-level inputs the suite reads outside the registry."""
+    return (
+        str(registry_path),
+        tuple(sorted(str(name) for name in (available_avatar_filenames or []))),
+        tuple(sorted(str(model_id) for model_id in (model_library_ids or []))),
+    )
+
+
 def _relative_project_path(path: Path) -> str:
     s = _service()
     resolved = Path(path).resolve()
@@ -2328,29 +2380,86 @@ def default_state() -> dict[str, Any]:
 
 
 def load_state() -> dict[str, Any]:
-    global _LOAD_STATE_CACHE_SIGNATURE, _LOAD_STATE_CACHE_STATE
+    """Return an independent mutable snapshot of the complete registry."""
     s = _service()
     with s._STATE_LOCK:
-        before = s._registry_state_signature()
-        if _LOAD_STATE_CACHE_STATE is not None and _LOAD_STATE_CACHE_SIGNATURE == before:
-            # 缓存保存的是规范化后的快照；返回独立副本，调用方（如 repair）可自由修改。
-            return _copy_json_value(_LOAD_STATE_CACHE_STATE)
-        path = s.registry_path()
-        if not path.exists():
-            state = s.default_state()
-        else:
-            payload = s._load_existing_registry_payload_or_raise(path)
-            state = s.default_state()
-            state.update(payload)
-            state["agents"] = list(state.get("agents") or []) if isinstance(state.get("agents"), list) else []
-            state["toolPolicies"] = s._tool_policies(state)
-            state["memoryPolicies"] = s._memory_policies(state)
-        after = s._registry_state_signature()
-        if before == after:
-            # 读取期间签名未变，缓存内容与磁盘严格对应；否则放弃本次缓存。
-            _LOAD_STATE_CACHE_SIGNATURE = after
-            _LOAD_STATE_CACHE_STATE = _copy_json_value(state)
-        return state
+        return _copy_json_value(_load_state_snapshot_locked())
+
+
+def load_agent_record(agent_id: str, *, include_archived: bool = True) -> dict[str, Any] | None:
+    """Copy one raw record without copying or hydrating unrelated Agents."""
+    s = _service()
+    normalized = str(agent_id or "").strip()
+    with s._STATE_LOCK:
+        state = _load_state_snapshot_locked()
+        for agent in state.get("agents") or []:
+            if not isinstance(agent, dict):
+                continue
+            if not include_archived and str(agent.get("status") or "active").strip() == "archived":
+                continue
+            if normalized and str(agent.get("agentId") or "").strip() == normalized:
+                return _copy_json_value(agent)
+    return None
+
+
+def load_agent_records(
+    *, agent_ids: Iterable[str] = (), direct_session_ids: Iterable[str] = (),
+) -> list[dict[str, Any]]:
+    """Copy the identity closure of matching rows in registry order.
+
+    A direct-session match includes all raw rows for that Agent ID, preserving
+    the last-record-wins semantics of full-registry projections. Archived and
+    duplicate rows remain intact; anonymous direct matches are also included.
+    """
+    selected_agent_ids = {str(value or "").strip() for value in agent_ids if str(value or "").strip()}
+    selected_session_ids = {str(value or "").strip() for value in direct_session_ids if str(value or "").strip()}
+    if not selected_agent_ids and not selected_session_ids:
+        return []
+    s = _service()
+    with s._STATE_LOCK:
+        state = _load_state_snapshot_locked()
+        agents = state.get("agents") or []
+        if selected_session_ids:
+            for agent in agents:
+                if not isinstance(agent, dict):
+                    continue
+                if str(agent.get("directSessionId") or "").strip() in selected_session_ids:
+                    agent_id = str(agent.get("agentId") or "").strip()
+                    if agent_id:
+                        selected_agent_ids.add(agent_id)
+        return [
+            _copy_json_value(agent)
+            for agent in agents
+            if isinstance(agent, dict) and (
+                str(agent.get("agentId") or "").strip() in selected_agent_ids
+                or str(agent.get("directSessionId") or "").strip() in selected_session_ids
+            )
+        ]
+
+
+def _load_state_snapshot_locked() -> dict[str, Any]:
+    """Internal snapshot: callers must hold _STATE_LOCK and never mutate it."""
+    global _LOAD_STATE_CACHE_SIGNATURE, _LOAD_STATE_CACHE_STATE
+    s = _service()
+    before = s._registry_state_signature()
+    if _LOAD_STATE_CACHE_STATE is not None and _LOAD_STATE_CACHE_SIGNATURE == before:
+        return _LOAD_STATE_CACHE_STATE
+    path = s.registry_path()
+    if not path.exists():
+        state = s.default_state()
+    else:
+        payload = s._load_existing_registry_payload_or_raise(path)
+        state = s.default_state()
+        state.update(payload)
+        state["agents"] = list(state.get("agents") or []) if isinstance(state.get("agents"), list) else []
+        state["toolPolicies"] = s._tool_policies(state)
+        state["memoryPolicies"] = s._memory_policies(state)
+    after = s._registry_state_signature()
+    if before == after:
+        # 仅签名稳定的快照进入缓存；对外只返回调用方所需部分的独立副本。
+        _LOAD_STATE_CACHE_SIGNATURE = after
+        _LOAD_STATE_CACHE_STATE = state
+    return state
 
 
 def _has_established_config_identity(agent: dict[str, Any]) -> bool:
@@ -2400,6 +2509,22 @@ def repair_agent_directory() -> dict[str, Any]:
         model_library_ids = s._configured_model_library_ids()
         used_agent_codes: set[str] = set()
         policies = s._memory_policies(state)
+        context_signature = _repair_context_signature(state)
+        external_signature = _repair_external_signature(
+            registry_path=s.registry_path(),
+            available_avatar_filenames=available_agent_avatar_filenames,
+            model_library_ids=model_library_ids,
+        )
+        repair_record_shas = (
+            s._REPAIRED_RECORD_SHAS
+            if (
+                context_signature
+                and s._REPAIR_CONTEXT_SIGNATURE == context_signature
+                and s._REPAIR_EXTERNAL_SIGNATURE == external_signature
+                and isinstance(s._REPAIRED_RECORD_SHAS, dict)
+            )
+            else None
+        )
         for agent in state.get("agents") or []:
             if not isinstance(agent, dict):
                 continue
@@ -2420,6 +2545,39 @@ def repair_agent_directory() -> dict[str, Any]:
                 if _has_established_config_identity(agent) and materialize_agent_config_identity(agent):
                     identity_repaired_agents.append(dict(agent))
                     changed = True
+                continue
+            cached_agent_id = str(agent.get("agentId") or "").strip()
+            cached_record_sha = (
+                _agent_record_content_sha(agent) if repair_record_shas is not None else ""
+            )
+            if (
+                repair_record_shas is not None
+                and cached_agent_id
+                and cached_record_sha
+                and repair_record_shas.get(cached_agent_id) == cached_record_sha
+            ):
+                # The registry rewrite did not touch this record and the
+                # identity/policy context is unchanged, so the previous repair
+                # pass already established it as a fixpoint. Skip the
+                # normalization suite and keep only the cross-record
+                # bookkeeping the remaining passes rely on: code reservation
+                # for later duplicate resolution, the private workspace
+                # directory existence, and the derived onboarding refresh --
+                # the one suite tail with an in-memory side effect, so the
+                # skipped snapshot stays byte-identical to a full walk.
+                cached_code = s._normalize_agent_code(agent.get("agentCode"))
+                if cached_code:
+                    used_agent_codes.add(cached_code)
+                s._ensure_agent_workspace(
+                    str(agent.get("workspacePath") or "").strip(),
+                    ensure_shared=False,
+                )
+                s._refresh_agent_onboarding_metadata(
+                    state,
+                    agent,
+                    normalized_tool_policies=normalized_tool_policies,
+                    normalized_memory_policies=policies,
+                )
                 continue
             llm_migration = s._migrate_agent_llm_bindings_to_new_design(agent)
             if llm_migration.get("changed"):
@@ -2628,6 +2786,17 @@ def repair_agent_directory() -> dict[str, Any]:
                 s._record_agent_event("agent.self_evolution_retired_role.archived", retired_agent, lifecycle=True)
             for repaired_agent in identity_repaired_agents:
                 s._record_agent_event("agent.config_identity_repaired", repaired_agent)
+        # 指纹记账取「落盘后再解析」的记录：与下一次走查的输入完全同源，
+        # 免受存储规范化剥除（如 creationSpec.agentId 每轮内存补写、落盘即
+        # 剥离、无消费者）或未落盘的内存态改动干扰比较基准。
+        persisted_state = s.load_state()
+        s._REPAIRED_RECORD_SHAS = {
+            str(agent.get("agentId") or "").strip(): _agent_record_content_sha(agent)
+            for agent in persisted_state.get("agents") or []
+            if isinstance(agent, dict) and str(agent.get("agentId") or "").strip()
+        }
+        s._REPAIR_CONTEXT_SIGNATURE = _repair_context_signature(persisted_state)
+        s._REPAIR_EXTERNAL_SIGNATURE = external_signature
         return state
 
 

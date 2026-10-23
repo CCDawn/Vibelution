@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { ChevronsDownUp, RefreshCw, TerminalSquare } from "lucide-react";
 
-import type { ConversationMessage } from "../../api/types";
+import type { ConversationMessage, SessionTurnItem } from "../../api/types";
 import type { TranslationKey } from "../../i18n/dictionaryTypes";
 import {
   isCliAgentLifecycleMessage,
@@ -38,6 +38,27 @@ function normalizeCompressionDividerTone(raw: unknown): ConversationCompressionD
   return "applied";
 }
 
+function isCompressionStatusItem(item: SessionTurnItem) {
+  return item.type === "status" && (
+    String(item.diagnosticSummary?.kind ?? "").trim() === "context_compression_marker"
+    || ["context_compression_applied", "context_compression_skipped_low_savings", "context_compression_failed_preserved"]
+      .includes(String(item.code ?? "").trim())
+  );
+}
+
+const compressionTurnBodyCache = new WeakMap<ConversationMessage, ConversationMessage>();
+
+/** A local display view: the divider owns checkpoint statuses, never the rest of a turn. */
+export function conversationCompressionTurnBody(message: ConversationMessage): ConversationMessage {
+  if (message.role !== "assistant") return message;
+  const cached = compressionTurnBodyCache.get(message);
+  if (cached) return cached;
+  const turnItems = message.turnItems.filter((item) => !isCompressionStatusItem(item));
+  const body = turnItems.length === message.turnItems.length ? message : { ...message, turnItems };
+  compressionTurnBodyCache.set(message, body);
+  return body;
+}
+
 /**
  * Compression checkpoints reach the timeline through two carriers: server
  * projections with `metadata.kind = "context_compression_marker"` and status
@@ -55,13 +76,10 @@ export function conversationCompressionDividerTone(
     return null;
   }
   for (const item of message.turnItems) {
-    if (item.type !== "status") {
+    if (item.type !== "status" || !isCompressionStatusItem(item)) {
       continue;
     }
-    const summary = item.diagnosticSummary;
-    if (summary && String(summary.kind ?? "").trim() === "context_compression_marker") {
-      return normalizeCompressionDividerTone(summary.status ?? item.code);
-    }
+    return normalizeCompressionDividerTone(item.diagnosticSummary?.status ?? item.code);
   }
   return null;
 }
@@ -73,9 +91,8 @@ export type ConversationSpecialRowsDeps = {
 };
 
 /**
- * Whole-row timeline specials that replace the agent turn body: CLI agent
- * lifecycle notes, session-recovery rows and compression checkpoint dividers.
- * Extracted from ConversationView with identical output.
+ * Timeline specials: lifecycle/recovery notes replace the body; compression
+ * dividers accompany any remaining canonical turn items or in-flight shell.
  */
 export function createConversationSpecialRows({
   lang,

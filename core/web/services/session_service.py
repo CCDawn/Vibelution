@@ -21,7 +21,7 @@ import hashlib
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -306,6 +306,7 @@ from core.web.services.session.agent_sessions import (
     retry_pending_agent_session_purge_cleanup,
     agent_session_purge_cleanup_failure_result,
     archive_agent_sessions,
+    agent_archive_transaction,
     restore_agent_sessions_archive,
     create_child_session,
     list_child_sessions,
@@ -1126,8 +1127,19 @@ class _ChatStateMutationLock:
         self._local = threading.local()
 
     def __enter__(self):
-        self._thread_lock.acquire()
-        transaction = chat_state_transaction(PROJECT_ROOT)
+        return self._enter()
+
+    def _enter(self, timeout: float | None = None):
+        started = time.monotonic()
+        if timeout is None:
+            self._thread_lock.acquire()
+            transaction = chat_state_transaction(PROJECT_ROOT)
+        else:
+            if not self._thread_lock.acquire(timeout=max(0.0, timeout)):
+                raise TimeoutError("Timed out acquiring the chat-state thread lock.")
+            transaction = chat_state_transaction(
+                PROJECT_ROOT, timeout=max(0.0, timeout - (time.monotonic() - started)),
+            )
         try:
             transaction.__enter__()
         except BaseException:
@@ -1139,6 +1151,14 @@ class _ChatStateMutationLock:
             self._local.transactions = stack
         stack.append(transaction)
         return self
+
+    @contextmanager
+    def bounded(self, timeout: float):
+        self._enter(timeout)
+        try:
+            yield self
+        finally:
+            self.__exit__(None, None, None)
 
     def __exit__(self, exc_type, exc_value, traceback):
         stack = getattr(self._local, "transactions", [])
@@ -1167,14 +1187,34 @@ def session_agent_lifecycle_serialized(
     return wrapped
 
 
+def agent_archive_serialized(callback: Callable[..., Any]) -> Callable[..., Any]:
+    """Keep cross-entity archive work admission-first, including rollback."""
+
+    @wraps(callback)
+    def wrapped(agent_id: str, *args: Any, **kwargs: Any) -> Any:
+        with agent_archive_transaction(agent_id):
+            return callback(agent_id, *args, **kwargs)
+
+    return wrapped
+
+
 @contextmanager
-def session_agent_lifecycle_transaction():
+def session_agent_lifecycle_transaction(*, timeout: float | None = None):
     """Hold chat state before the shared Agent lifecycle serialization lock."""
 
-    with (
-        _CHAT_STATE_LOCK,
-        agent_directory_service.agent_session_lifecycle_transaction(),
-    ):
+    if timeout is None:
+        with (
+            _CHAT_STATE_LOCK,
+            agent_directory_service.agent_session_lifecycle_transaction(),
+        ):
+            yield
+        return
+    deadline = time.monotonic() + max(0.0, timeout)
+    with ExitStack() as stack:
+        stack.enter_context(_CHAT_STATE_LOCK.bounded(max(0.0, deadline - time.monotonic())))
+        stack.enter_context(agent_directory_service.agent_session_lifecycle_transaction(
+            timeout=max(0.0, deadline - time.monotonic()),
+        ))
         yield
 
 

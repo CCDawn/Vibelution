@@ -164,6 +164,7 @@ import { getPageInstanceId } from "./pageInstance";
 import { useShellStore } from "../store/shellStore";
 import styles from "./AppShell.styles";
 import { shareRuntimeSummaryIfOnlyVolatileChanged } from "./runtimeSummaryQueryShare";
+import { useChatStartupPrefetch } from "./useChatStartupPrefetch";
 import { useChatRouteSelection } from "../routes/chat/useChatRouteSelection";
 import { CompanionDesktopAttention } from "../routes/companions/CompanionDesktopAttention";
 import { SpecialistAgentMenu } from "./SpecialistAgentMenu";
@@ -1029,6 +1030,7 @@ export function AppShell() {
   const { lang, t, statusLabel } = useShellI18n();
   const queryClient = useQueryClient();
   const location = useLocation();
+  useChatStartupPrefetch({ queryClient, pathname: location.pathname, search: location.search });
   // Router context still updates Outlet; shell polling must not recreate its element.
   const routeContent = useMemo(() => <Outlet />, []);
   const chatRoute = useChatRouteSelection();
@@ -1156,8 +1158,10 @@ export function AppShell() {
     }
   }, [backendHealthQuery.data, configQuery.data]);
   // This is a document-start latch: later route switches do not stop background owners.
+  // The root still needs HomeRedirect to choose its route; it cannot release
+  // this latch before the chat route gets a chance to report startup readiness.
   useEffect(() => {
-    if (shellStartupDataReady && (location.pathname !== "/chat" || routeStartupSettled)) {
+    if (shellStartupDataReady && location.pathname !== "/" && (location.pathname !== "/chat" || routeStartupSettled)) {
       setShellBackgroundReady(true);
     }
   }, [location.pathname, routeStartupSettled, shellStartupDataReady]);

@@ -14,10 +14,14 @@ core/prompt_manager/prompt_manager.py — 系统提示词管理器
 
 from __future__ import annotations
 
+import enum
+import hashlib
 import os
 import re
 import threading
 import time
+from collections import OrderedDict
+from dataclasses import fields as dataclass_fields, is_dataclass, replace as dataclass_replace
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
@@ -140,6 +144,242 @@ def compose_state_memory(
     if len(merged) > 1200:
         merged = merged[:1197].rstrip() + "..."
     return merged
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 跨轮稳定段渲染缓存
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+_UNPROJECTABLE = object()
+
+
+def _project_cache_input(value: Any, *, depth: int = 0) -> Any:
+    """把缓存键输入投影为仅由原语构成的稳定嵌套元组。
+
+    投影必须完整覆盖该输入中影响渲染产物字节的全部字段；任何投影不了
+    （任意对象、超深嵌套、不可排序集合元素）的情况返回哨兵，调用方据此
+    放弃缓存该段（宁可不缓存，不做错配缓存）。
+    """
+    if depth > 6:
+        return _UNPROJECTABLE
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, enum.Enum):
+        return _project_cache_input(value.value, depth=depth + 1)
+    if is_dataclass(value):
+        projected_fields: List[Any] = []
+        for field in dataclass_fields(value):
+            projected = _project_cache_input(
+                getattr(value, field.name, None), depth=depth + 1
+            )
+            if projected is _UNPROJECTABLE:
+                return _UNPROJECTABLE
+            projected_fields.append((field.name, projected))
+        return (type(value).__name__, tuple(projected_fields))
+    if isinstance(value, dict):
+        try:
+            keys = sorted(value.keys(), key=repr)
+        except Exception:
+            return _UNPROJECTABLE
+        projected_items: List[Any] = []
+        for key in keys:
+            projected = _project_cache_input(value[key], depth=depth + 1)
+            if projected is _UNPROJECTABLE:
+                return _UNPROJECTABLE
+            projected_items.append((repr(key), projected))
+        return tuple(projected_items)
+    if isinstance(value, (list, tuple)):
+        projected_items = tuple(
+            _project_cache_input(item, depth=depth + 1) for item in value
+        )
+        if any(item is _UNPROJECTABLE for item in projected_items):
+            return _UNPROJECTABLE
+        return projected_items
+    if isinstance(value, (set, frozenset)):
+        try:
+            ordered = sorted(value, key=repr)
+        except Exception:
+            return _UNPROJECTABLE
+        projected_items = tuple(
+            _project_cache_input(item, depth=depth + 1) for item in ordered
+        )
+        if any(item is _UNPROJECTABLE for item in projected_items):
+            return _UNPROJECTABLE
+        return projected_items
+    return _UNPROJECTABLE
+
+
+def _fingerprint_digest(projection: Any) -> Optional[str]:
+    """把输入投影压缩为指纹摘要；投影不可靠时返回 None（表示禁用缓存）。"""
+    if projection is _UNPROJECTABLE:
+        return None
+    payload = repr(projection).encode("utf-8", errors="ignore")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _identity_stable_for_memo(value: Any, *, depth: int = 0) -> bool:
+    """判断输入对象图是否「身份稳定」：图内不含任何可变容器或可变数据类。
+
+    只有身份稳定的图才允许进身份备忘录——frozen dataclass 字段不可重绑、
+    tuple/frozenset/原语/Enum 不可变，此后同一根对象必然产出同一投影，
+    身份命中即内容命中，杜绝原地变异下的 stale 摘要。含 dict/list/set 或
+    非 frozen dataclass 的图一律返回 False，调用方保持全量计算路径。
+    """
+
+    if depth > 6:
+        return False
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return True
+    if isinstance(value, enum.Enum):
+        return True
+    if is_dataclass(value):
+        params = getattr(type(value), "__dataclass_params__", None)
+        if params is None or not getattr(params, "frozen", False):
+            return False
+        return all(
+            _identity_stable_for_memo(getattr(value, field.name, None), depth=depth + 1)
+            for field in dataclass_fields(value)
+        )
+    if isinstance(value, (dict, list, set)):
+        return False
+    if isinstance(value, (tuple, frozenset)):
+        return all(_identity_stable_for_memo(item, depth=depth + 1) for item in value)
+    return False
+
+
+class _SourceFingerprintMemo:
+    """源对象身份备忘录：同一未变对象图重复求指纹时跳过投影+repr+sha256 整段。
+
+    复用 ``_IdentityListMemo`` / ``_SeededHistoryFingerprintMemo`` 的身份检查
+    约定，适配到单根对象图：
+
+    - 命中=根对象 ``is`` 同一；条目强引用源对象，杜绝 id 复用碰撞；
+    - 只有身份稳定（``_identity_stable_for_memo``）的图才入库，冻结图不可
+      原地变异，身份命中即字节等价命中；digest 字节等价由构造保证——命中
+      返回的正是此前同源全量计算的产物；
+    - 对 monkeypatch 敏感：条目记录产出 digest 时的 ``_project_cache_input``
+      / ``_fingerprint_digest`` 函数身份，模块属性被替换后一律 miss 重算；
+    - LRU 有界；miss 永远走全量计算，只能拿重算换重算。
+    """
+
+    def __init__(self, capacity: int = 64):
+        self._capacity = max(1, int(capacity))
+        self._lock = threading.Lock()
+        # key=id(source)；value=(source, digest, proj_fn, digest_fn)
+        self._entries: "OrderedDict[int, tuple]" = OrderedDict()
+        self.hits = 0
+        self.misses = 0
+
+    def digest_for(self, source: Any) -> Optional[str]:
+        """``_project_cache_input`` → ``_fingerprint_digest`` 链的免重算入口。"""
+
+        cur_proj = globals().get("_project_cache_input")
+        cur_digest = globals().get("_fingerprint_digest")
+        key = id(source)
+        with self._lock:
+            entry = self._entries.get(key)
+            if (
+                entry is not None
+                and entry[0] is source
+                and cur_proj is not None
+                and entry[2] is cur_proj
+                and cur_digest is not None
+                and entry[3] is cur_digest
+            ):
+                self._entries.move_to_end(key)
+                self.hits += 1
+                return entry[1]
+            self.misses += 1
+        projection = _project_cache_input(source)
+        digest = _fingerprint_digest(projection)
+        if digest is not None and _identity_stable_for_memo(source):
+            with self._lock:
+                self._entries[key] = (source, digest, cur_proj, cur_digest)
+                self._entries.move_to_end(key)
+                while len(self._entries) > self._capacity:
+                    self._entries.popitem(last=False)
+        return digest
+
+    def stats(self) -> Dict[str, Any]:
+        with self._lock:
+            return {
+                "entries": len(self._entries),
+                "capacity": self._capacity,
+                "hits": self.hits,
+                "misses": self.misses,
+            }
+
+
+_FINGERPRINT_MEMO_CAPACITY = 64
+_FINGERPRINT_MEMO = _SourceFingerprintMemo(capacity=_FINGERPRINT_MEMO_CAPACITY)
+
+
+def _source_fingerprint_digest(source: Any) -> Optional[str]:
+    """带身份备忘录的源对象指纹；输出与全量计算逐字节一致。"""
+
+    return _FINGERPRINT_MEMO.digest_for(source)
+
+
+class StableSectionRenderCache:
+    """跨轮稳定段渲染缓存：键=(section 名, 输入指纹)，值=渲染文本。
+
+    - 线程安全：单锁保护 OrderedDict LRU；值是不可变 ``str``/``None``，
+      命中直接返回，不需要拷贝。
+    - 有界：超过容量按 LRU 淘汰最旧条目。
+    - 失效语义靠键完成：任何影响输出的输入变化都会改变指纹，旧条目自然
+      失效；``drop_section``/``clear`` 供显式失效路径使用。
+    """
+
+    def __init__(self, capacity: int = 64):
+        self._capacity = max(1, int(capacity))
+        self._lock = threading.Lock()
+        self._entries: "OrderedDict[tuple, Optional[str]]" = OrderedDict()
+        self.hits = 0
+        self.misses = 0
+
+    def get(self, key: tuple) -> tuple[bool, Optional[str]]:
+        with self._lock:
+            if key in self._entries:
+                self._entries.move_to_end(key)
+                self.hits += 1
+                return True, self._entries[key]
+            self.misses += 1
+            return False, None
+
+    def put(self, key: tuple, value: Optional[str]) -> None:
+        with self._lock:
+            self._entries[key] = value
+            self._entries.move_to_end(key)
+            while len(self._entries) > self._capacity:
+                self._entries.popitem(last=False)
+
+    def drop_section(self, name: str) -> None:
+        with self._lock:
+            for key in [key for key in self._entries if key[0] == name]:
+                self._entries.pop(key, None)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._entries.clear()
+
+    def stats(self) -> Dict[str, Any]:
+        with self._lock:
+            return {
+                "entries": len(self._entries),
+                "capacity": self._capacity,
+                "hits": self.hits,
+                "misses": self.misses,
+            }
+
+
+# 纳入跨轮指纹缓存的动态章节白名单：compute 的全部输入都有可靠的稳定投影。
+# 不收录的章节（如 CODEBASE_MAP / RUNTIME_LOG_INDEX / GIT_MEMORY /
+# CONFIG_AWARENESS / ENV_INFO）读取的世界状态缺少廉价完备签名，宁可不缓存。
+_STABLE_RENDER_SECTION_NAMES = frozenset(
+    {"RUNTIME_GOAL", "INTENT_ALIGNMENT", "SPEC_DIGEST"}
+)
+_STABLE_RENDER_CACHE_CAPACITY = 64
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -277,6 +517,18 @@ class PromptManager:
         # 章节级缓存
         self._section_cache = SystemPromptCache()
 
+        # 跨轮稳定段渲染缓存（指纹键控，见 StableSectionRenderCache）
+        self._stable_render_cache = StableSectionRenderCache(
+            capacity=_STABLE_RENDER_CACHE_CAPACITY
+        )
+        self._registry_generation = 0
+        # 最近一次 build 的稳定段缓存命中明细（观测用）
+        self.last_build_stable_cache: Dict[str, Any] = {
+            "hit_sections": [],
+            "miss_sections": [],
+            "all_hit": False,
+        }
+
         # 构建上下文（每轮 build 前更新，MEMORY 章节的 compute 从中读取）
         self._build_context = BuildContext()
 
@@ -351,6 +603,8 @@ class PromptManager:
         """注册或覆盖一个章节。"""
         self._sections[section.name] = section
         self._section_cache.invalidate(section.name)
+        self._registry_generation += 1
+        self._stable_render_cache.drop_section(section.name)
         from core.logging import debug as _debug_logger
         _debug_logger.debug(
             f"[PromptManager] 注册章节: {section.name} "
@@ -362,6 +616,8 @@ class PromptManager:
         if name in self._sections:
             del self._sections[name]
             self._section_cache.invalidate(name)
+            self._registry_generation += 1
+            self._stable_render_cache.drop_section(name)
 
     def set_protocol_adapter(
         self,
@@ -444,6 +700,19 @@ class PromptManager:
         select_duration_ms = (time.perf_counter() - select_started) * 1000
         all_ordered_sections = self._order_sections(list(self._sections.values()))
 
+        # 跨轮稳定段：对输入可完整投影的动态章节套一层指纹缓存，命中直接
+        # 复用上一轮渲染字节（与全量重建逐字节相同，由回归测试钉死）。
+        # outcomes 走局部列表随 build 传递，避免并发构建互相串写观测。
+        stable_outcomes: List[tuple] = []
+        stable_fingerprints = self._stable_section_fingerprints()
+        if stable_fingerprints:
+            selected = [
+                self._wrap_with_stable_render(
+                    section, stable_fingerprints, stable_outcomes
+                )
+                for section in selected
+            ]
+
         # 组装
         render_started = time.perf_counter()
         build_result = get_system_prompt(
@@ -456,6 +725,7 @@ class PromptManager:
         self._last_assembly_manifest = build_result.assembly_manifest.to_public_dict()
         self._assembly_manifest_local.value = self._last_assembly_manifest
         render_duration_ms = (time.perf_counter() - render_started) * 1000
+        self._finalize_stable_cache_stats(stable_outcomes)
 
         # 记录索引（复用本次真实构建结果，避免二次 compute）
         self._last_index = [
@@ -487,6 +757,7 @@ class PromptManager:
                 "string_join_duration_ms": string_duration_ms,
                 "total_duration_ms": (time.perf_counter() - build_started) * 1000,
                 "slow_sections": self._slow_section_timings(build_result),
+                "stable_render_cache": dict(self.last_build_stable_cache),
             }
         )
 
@@ -516,6 +787,90 @@ class PromptManager:
             )
         timings.sort(key=lambda item: float(item["duration_ms"]), reverse=True)
         return timings[:8]
+
+    # ------------------------------------------------------------------------
+    # 跨轮稳定段指纹缓存
+    # ------------------------------------------------------------------------
+
+    def _stable_section_fingerprints(self) -> Dict[str, tuple]:
+        """为本轮可缓存章节计算输入指纹；拿不到可靠投影的章节直接缺席。
+
+        键覆盖该章节渲染产物的全部输入：
+        - RUNTIME_GOAL: 章节注册代数 + runtime_goal_packet 全字段投影
+          （render() 是字段纯函数，已核）；
+        - INTENT_ALIGNMENT: 注册代数 + intent_alignment_packet 投影
+          （dict / dataclass 均按内容投影）；
+        - SPEC_DIGEST: 注册代数 + prompt_mode + packet.max_calls_per_turn。
+          仅当 packet 带正数预算时才缓存——否则 compute 会走授权层解析链，
+          其状态没有廉价完备签名，宁可不缓存。
+        """
+        fingerprints: Dict[str, tuple] = {}
+        generation = self._registry_generation
+        ctx = self._build_context
+
+        goal_digest = _source_fingerprint_digest(ctx.runtime_goal_packet)
+        if goal_digest is not None:
+            fingerprints["RUNTIME_GOAL"] = ("v1", generation, goal_digest)
+
+        intent_digest = _source_fingerprint_digest(ctx.intent_alignment_packet)
+        if intent_digest is not None:
+            fingerprints["INTENT_ALIGNMENT"] = ("v1", generation, intent_digest)
+
+        packet = ctx.runtime_goal_packet
+        packet_max_calls = getattr(packet, "max_calls_per_turn", 0) if packet is not None else 0
+        try:
+            packet_max_calls = int(packet_max_calls or 0)
+        except (TypeError, ValueError):
+            packet_max_calls = 0
+        if packet is not None and packet_max_calls > 0:
+            fingerprints["SPEC_DIGEST"] = (
+                "v1",
+                generation,
+                str(ctx.prompt_mode or ""),
+                packet_max_calls,
+            )
+        return fingerprints
+
+    def _wrap_with_stable_render(
+        self,
+        section: SystemPromptSection,
+        fingerprints: Dict[str, tuple],
+        outcomes: List[tuple],
+    ) -> SystemPromptSection:
+        """给可缓存章节的 compute 套指纹缓存；不在白名单或缺指纹则原样返回。"""
+        fingerprint = fingerprints.get(section.name)
+        if fingerprint is None or section.name not in _STABLE_RENDER_SECTION_NAMES:
+            return section
+        cache = self._stable_render_cache
+        cache_key = (section.name, fingerprint)
+
+        def compute() -> Optional[str]:
+            hit, cached_content = cache.get(cache_key)
+            if hit:
+                outcomes.append((section.name, True))
+                return cached_content
+            content = section.compute()
+            cache.put(cache_key, content)
+            outcomes.append((section.name, False))
+            return content
+
+        return dataclass_replace(section, compute=compute)
+
+    def _finalize_stable_cache_stats(self, outcomes: List[tuple]) -> None:
+        hit_names: List[str] = []
+        miss_names: List[str] = []
+        for name, hit in outcomes:
+            if hit:
+                if name not in hit_names:
+                    hit_names.append(name)
+            elif name not in miss_names:
+                miss_names.append(name)
+        self.last_build_stable_cache = {
+            "hit_sections": hit_names,
+            "miss_sections": miss_names,
+            # 热轮第二轮起（输入未变）应为 True：可缓存段全部命中。
+            "all_hit": bool(hit_names) and not miss_names,
+        }
 
     def _select_sections(
         self,
@@ -938,6 +1293,13 @@ class PromptManager:
             )
             if slow_text:
                 message += f" slow={slow_text}"
+        stable_cache = summary.get("stable_render_cache") or {}
+        if stable_cache:
+            message += (
+                f" stableCache={'hit' if stable_cache.get('all_hit') else 'miss'}"
+                f" hits={','.join(stable_cache.get('hit_sections') or []) or '-'}"
+                f" misses={','.join(stable_cache.get('miss_sections') or []) or '-'}"
+            )
         inclusion_reasons = summary.get("optional_inclusion_reasons") or {}
         if inclusion_reasons:
             reason_text = ",".join(f"{name}:{reason}" for name, reason in inclusion_reasons.items())
@@ -985,6 +1347,9 @@ class PromptManager:
                         ),
                         "budgetTokens": int(assembly.get("budgetTokens") or 0),
                         "decisionCounts": dict(assembly.get("decisionCounts") or {}),
+                        "stableCacheHit": bool(
+                            (summary.get("stable_render_cache") or {}).get("all_hit")
+                        ),
                     },
                     lifecycle=True,
                 )
@@ -1179,6 +1544,10 @@ class PromptManager:
     def invalidate_cache(self, name: Optional[str] = None):
         """清除章节缓存。name 为 None 则清除全部。"""
         self._section_cache.invalidate(name)
+        if name:
+            self._stable_render_cache.drop_section(name)
+        else:
+            self._stable_render_cache.clear()
         from core.logging import debug as _debug_logger
         _debug_logger.debug(
             f"[PromptManager] 清除缓存: {name or '全部'}"

@@ -301,63 +301,75 @@ def get_session_llm_options(session_id: str) -> dict[str, Any]:
         if chain_slot is not None:
             chain_slot["agent"] = agent
         model = s._session_fixed_model_choice(normalized_session_id)
-        model_ref = str(model.get("modelRef") or model.get("modelId") or "").strip()
-        supported_efforts = [
-            s.normalize_reasoning_effort(value)
-            for value in list(model.get("reasoningEffortValues") or [])
-        ]
-        supported_efforts = [value for value in dict.fromkeys(supported_efforts) if value]
-        from core.llm.agent_model_parameters import resolve_agent_model_parameters
-
-        model_parameters = resolve_agent_model_parameters(agent, model_ref)
-        if model_parameters["has_reasoning_effort"]:
-            requested_effort = model_parameters["reasoning_effort"]
-        else:
-            requested_effort = s.normalize_reasoning_effort(
-                s._session_agent_reasoning_effort(agent)
-            )
-        model_default_effort = s.normalize_reasoning_effort(model.get("defaultReasoningEffort"))
-        current_reasoning_effort = (
-            requested_effort
-            if requested_effort in supported_efforts
-            else model_default_effort
-            if model_default_effort in supported_efforts
-            else supported_efforts[0]
-            if supported_efforts
-            else ""
+        return _session_llm_options_from_agent(
+            normalized_session_id, agent, model, choices=s._session_llm_model_choices(),
         )
-        try:
-            resolved = s._resolve_session_agent_llm(agent, "dialogue")
-            resolved_effort = s.normalize_reasoning_effort(resolved.reasoning_effort_requested)
-            current_reasoning_effort = resolved_effort if resolved_effort in supported_efforts else ""
-        except s.SessionValidationError:
-            # Keep metadata readable while an incomplete model configuration
-            # is being repaired through the existing Agent management surface.
-            pass
-        try:
-            context_payload = s._conversation_agent_dialogue_context_window_payload(
-                s.get_config(),
-                {"agentId": agent_id, "_agent": agent},
-            )
-        except Exception:
-            context_payload = {"limit": 0, "maxLimit": 0}
-        model = dict(model)
-        model["contextWindow"] = int(context_payload.get("maxLimit") or 0)
-        return {
-            "sessionId": normalized_session_id,
-            "agentId": agent_id,
-            "configRevision": max(0, int(agent.get("configRevision") or 0)),
-            "currentModelId": model_ref,
-            "currentReasoningEffort": current_reasoning_effort,
-            "contextWindow": int(context_payload.get("limit") or 0),
-            "maxContextWindow": int(context_payload.get("maxLimit") or 0),
-            "model": model,
-            # Full selectable list for per-turn overrides (composer "send once with
-            # model" menu). Same candidate projection as the session default.
-            "choices": s._session_llm_model_choices(),
-        }
     finally:
         _LLM_OPTIONS_CHAIN_MEMO.reset(chain_token)
+
+
+def _session_llm_options_from_agent(
+    session_id: str, agent: dict[str, Any], model: dict[str, Any], *, choices: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build the parameter view from one already validated Agent snapshot."""
+    s = _service()
+    normalized_session_id = str(session_id or "").strip()
+    agent_id = str(agent.get("agentId") or "").strip()
+    model_ref = str(model.get("modelRef") or model.get("modelId") or "").strip()
+    supported_efforts = [
+        s.normalize_reasoning_effort(value)
+        for value in list(model.get("reasoningEffortValues") or [])
+    ]
+    supported_efforts = [value for value in dict.fromkeys(supported_efforts) if value]
+    from core.llm.agent_model_parameters import resolve_agent_model_parameters
+
+    model_parameters = resolve_agent_model_parameters(agent, model_ref)
+    if model_parameters["has_reasoning_effort"]:
+        requested_effort = model_parameters["reasoning_effort"]
+    else:
+        requested_effort = s.normalize_reasoning_effort(
+            s._session_agent_reasoning_effort(agent)
+        )
+    model_default_effort = s.normalize_reasoning_effort(model.get("defaultReasoningEffort"))
+    current_reasoning_effort = (
+        requested_effort
+        if requested_effort in supported_efforts
+        else model_default_effort
+        if model_default_effort in supported_efforts
+        else supported_efforts[0]
+        if supported_efforts
+        else ""
+    )
+    try:
+        resolved = s._resolve_session_agent_llm(agent, "dialogue")
+        resolved_effort = s.normalize_reasoning_effort(resolved.reasoning_effort_requested)
+        current_reasoning_effort = resolved_effort if resolved_effort in supported_efforts else ""
+    except s.SessionValidationError:
+        # Keep metadata readable while an incomplete model configuration
+        # is being repaired through the existing Agent management surface.
+        pass
+    try:
+        context_payload = s._conversation_agent_dialogue_context_window_payload(
+            s.get_config(),
+            {"agentId": agent_id, "_agent": agent},
+        )
+    except Exception:
+        context_payload = {"limit": 0, "maxLimit": 0}
+    model = dict(model)
+    model["contextWindow"] = int(context_payload.get("maxLimit") or 0)
+    return {
+        "sessionId": normalized_session_id,
+        "agentId": agent_id,
+        "configRevision": max(0, int(agent.get("configRevision") or 0)),
+        "currentModelId": model_ref,
+        "currentReasoningEffort": current_reasoning_effort,
+        "contextWindow": int(context_payload.get("limit") or 0),
+        "maxContextWindow": int(context_payload.get("maxLimit") or 0),
+        "model": model,
+        # Full selectable list for per-turn overrides (composer "send once with
+        # model" menu). Same candidate projection as the session default.
+        "choices": choices,
+    }
 
 
 def update_session_model_parameters(
@@ -391,19 +403,23 @@ def update_session_model_parameters(
         if not s._ensure_session_conversation_record(
             normalized_session_id,
             source="session.model_parameters.update",
+            sync_wait=False,
         ):
             raise s.SessionNotFoundError(f"Session not found: {normalized_session_id}")
-        s._ensure_session_mutable(normalized_session_id)
-        agent_id = s._session_agent_id_snapshot(normalized_session_id)
+        conversation = s._ensure_session_mutable(normalized_session_id)
+        agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
         if agent_id != normalized_agent_id:
             raise s.SessionModelParametersConflictError(
                 "Session Agent changed. Refresh and retry."
             )
-        agent = s.get_agent(agent_id, include_archived=False) if agent_id else None
+        agent = s.agent_directory_service.get_agent_parameter_snapshot(agent_id, include_archived=False) if agent_id else None
         if not isinstance(agent, dict):
             raise s.SessionValidationError("当前会话没有可用的 Agent 配置。")
 
-        selected = s._session_fixed_model_choice(normalized_session_id)
+        from .session_ops import _agent_fixed_model_choice
+
+        choices = s._session_llm_model_choices()
+        selected = _agent_fixed_model_choice(s.agent_dialogue_model_id(agent), choices)
         current_model_ref = str(selected.get("modelRef") or selected.get("modelId") or "").strip()
         if current_model_ref != normalized_model_ref:
             raise s.SessionModelParametersConflictError(
@@ -415,7 +431,7 @@ def update_session_model_parameters(
         ]
         supported_efforts = [value for value in dict.fromkeys(supported_efforts) if value]
         try:
-            s.update_agent_model_parameters_if_current(
+            updated_agent = s.update_agent_model_parameters_if_current(
                 agent_id,
                 expected_model_ref=normalized_model_ref,
                 expected_config_revision=expected_config_revision,
@@ -432,7 +448,7 @@ def update_session_model_parameters(
         except AgentModelParametersError as exc:
             raise s.SessionValidationError(str(exc)) from exc
 
-        return s.get_session_llm_options(normalized_session_id)
+        return _session_llm_options_from_agent(normalized_session_id, updated_agent, selected, choices=choices)
 
 
 def _normalize_session_agent_profile_id(value: Any) -> str:

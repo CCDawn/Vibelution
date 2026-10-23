@@ -524,3 +524,79 @@ def test_bulk_archive_failure_rebuilds_dissolved_last_member_room(tmp_path, monk
     detail = chat_room_service.get_chat_room_detail(room["roomId"])
     assert detail is not None
     assert [item["agentId"] for item in detail["participants"]] == [agent["agentId"]]
+
+
+def test_bulk_archive_keeps_registry_mutation_out_until_compensation_finishes(
+    tmp_path, monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    direct = session_service.create_chat_session(title="Bulk Archive Atomic Compensation")
+    team = team_service.create_team(
+        name="Rollback stays fenced", members=[{"agentId": direct["agentId"], "role": "lead"}],
+    )
+    rollback_started = threading.Event()
+    release_rollback = threading.Event()
+    mutation_started = threading.Event()
+    mutation_finished = threading.Event()
+    results: dict[str, object] = {}
+    errors: list[BaseException] = []
+    original_restore = agent_bulk_delete_service.restore_removed_agents_to_teams
+
+    def fail_commit(*args, **kwargs):
+        raise agent_directory_service.AgentDirectoryError("archive registry commit failed")
+
+    def hold_rollback(token):
+        rollback_started.set()
+        assert release_rollback.wait(timeout=5)
+        return original_restore(token)
+
+    monkeypatch.setattr(agent_bulk_delete_service, "archive_agent_instance", fail_commit)
+    monkeypatch.setattr(agent_bulk_delete_service, "restore_removed_agents_to_teams", hold_rollback)
+
+    def archive():
+        try:
+            results["archive"] = agent_bulk_delete_service.bulk_archive_agents([direct["agentId"]])
+        except BaseException as exc:
+            errors.append(exc)
+
+    def mutate():
+        mutation_started.set()
+        try:
+            agent_directory_service.create_agent_instance(display_name="After archive compensation")
+            mutation_finished.set()
+        except BaseException as exc:
+            errors.append(exc)
+
+    archiver = threading.Thread(target=archive, daemon=True)
+    mutator = threading.Thread(target=mutate, daemon=True)
+    archiver.start()
+    try:
+        assert rollback_started.wait(timeout=3)
+        mutator.start()
+        assert mutation_started.wait(timeout=1)
+        assert not mutation_finished.wait(timeout=0.1)
+    finally:
+        release_rollback.set()
+        archiver.join(timeout=5)
+        if mutator.ident is not None:
+            mutator.join(timeout=5)
+    assert not archiver.is_alive()
+    assert not mutator.is_alive()
+    assert errors == []
+    assert mutation_finished.is_set()
+    assert results["archive"]["summary"]["failedCount"] == 1
+    assert agent_directory_service.get_agent(direct["agentId"])["status"] == "active"
+    assert session_service.get_session_detail(direct["id"])["readOnly"] is False
+    assert team_service.get_team(team["teamId"])["members"][0]["agentId"] == direct["agentId"]
+
+
+def test_bulk_archive_missing_agent_remains_skipped_inside_bounded_preflight(
+    tmp_path, monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    result = agent_bulk_delete_service.bulk_archive_agents(["missing-agent"])
+
+    assert result["summary"]["skippedCount"] == 1
+    assert result["summary"]["failedCount"] == 0
+    assert result["skipped"][0]["reason"] == "not_found"

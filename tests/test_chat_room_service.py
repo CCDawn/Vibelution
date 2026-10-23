@@ -6498,6 +6498,9 @@ def test_reconcile_signature_gate_reruns_after_run_index_change(tmp_path, monkey
     chat_room_service._work_run_store().save_run_index(
         chat_room_service.RUN_KIND,
         latest_run_id="round-index-change",
+        # Change the durable input, rather than replaying identical contents
+        # and relying on distinct Windows file timestamps for cache invalidation.
+        recent_run_ids=["round-index-change", "older-terminal-round"],
         active_run_ids=[],
         emit_event=False,
     )
@@ -7272,12 +7275,23 @@ def test_execution_slot_queue_wait_excluded_from_per_call_budget(
     )
 
     real_reserve = session_service.reserve_session_execution_slot
+    slot_granted_at_ms: list[int] = []
+    refresh_windows: list[tuple[int, int]] = []
+    refresh_fence = chat_room_service._refresh_per_call_fence
+
+    def capture_refresh(context):
+        before = int(time.time() * 1000)
+        refresh_fence(context)
+        refresh_windows.append((before, int(time.time() * 1000)))
+
+    monkeypatch.setattr(chat_room_service, "_refresh_per_call_fence", capture_refresh)
 
     @contextmanager
     def slow_reserve(**kwargs):
         # 模拟准入 slot 的排队等待：跨过 launch 时刻的 per-call fence。
         time.sleep(0.4)
         with real_reserve(**kwargs):
+            slot_granted_at_ms.append(int(time.time() * 1000))
             yield
 
     monkeypatch.setattr(session_service, "reserve_session_execution_slot", slow_reserve)
@@ -7309,9 +7323,12 @@ def test_execution_slot_queue_wait_excluded_from_per_call_budget(
     fence_ms = int(
         context[chat_room_service._CHALLENGE_ROOM_PER_CALL_DEADLINE_CONTEXT_KEY]
     )
-    # fence 在槽位到手（排队结束）之后重算：相对 runner 开跑时刻仍有一个
-    # 完整预算，而不是 launch 时刻的旧锚点。
-    assert fence_ms - runner_now_ms["value"] >= 58_000
+    # Check the actual grant/refresh boundary: prompt preparation after the
+    # grant legitimately spends budget and may exceed two seconds under load.
+    refresh_before, refresh_after = refresh_windows[-1]
+    assert refresh_before >= slot_granted_at_ms[-1]
+    assert refresh_before + 60_000 <= fence_ms <= refresh_after + 60_000
+    assert runner_now_ms["value"] >= refresh_before
     assert result["timings"]["executionSlotWaitMs"] >= 300
 
 

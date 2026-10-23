@@ -419,6 +419,67 @@ def test_submit_reuses_open_partial_submission_turn_identity(tmp_path: Path, mon
         _reset_seeded_session_runtime(session_id)
 
 
+def test_lightweight_submit_appends_acceptance_markers_in_one_batch(tmp_path: Path, monkeypatch) -> None:
+    """The acceptance scaffold lands turn_started + user_message in one lock section.
+
+    Both markers share a single journal lock acquisition (same append order
+    and per-event durability as two sequential appends), and the journal ends
+    up with exactly the same two correlated events for the submission.
+    """
+
+    from core.web.services import agent_directory_service
+
+    session_id = _prepare_default_submit_session(tmp_path, monkeypatch)
+    batch_calls: list[list[dict]] = []
+    real_batch = submit.append_turn_events
+
+    def spy_batch(project_root, batch_session_id, batch_turn_id, event_specs):
+        specs = [dict(spec) for spec in event_specs]
+        batch_calls.append(specs)
+        return real_batch(project_root, batch_session_id, batch_turn_id, specs)
+
+    monkeypatch.setattr(submit, "append_turn_events", spy_batch)
+    scheduled: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: scheduled.append(dict(context)),
+    )
+
+    try:
+        receipt = submit.submit_session_message_lightweight(
+            session_id,
+            "batched acceptance markers",
+            client_submission_id="submission-batch-markers",
+            mental_model_enabled=False,
+        )
+
+        assert receipt["turnId"]
+        assert len(batch_calls) == 1
+        assert [spec["event_type"] for spec in batch_calls[0]] == [
+            EVENT_TURN_STARTED,
+            EVENT_USER_MESSAGE,
+        ]
+        assert batch_calls[0][0]["visible_in_model"] is False
+        assert batch_calls[0][1]["payload"]["content"] == "batched acceptance markers"
+        correlated_events = [
+            event
+            for event in load_conversation_events(tmp_path, session_id)
+            if event.correlation_id == "submission-batch-markers"
+        ]
+        assert [event.event_type for event in correlated_events] == [
+            EVENT_TURN_STARTED,
+            EVENT_USER_MESSAGE,
+        ]
+        assert [event.turn_id for event in correlated_events] == [
+            receipt["turnId"],
+            receipt["turnId"],
+        ]
+        assert [context["turn_id"] for context in scheduled] == [receipt["turnId"]]
+    finally:
+        _reset_seeded_session_runtime(session_id)
+
+
 def test_journal_correlation_index_hits_cache_and_refreshes_after_append(tmp_path: Path, monkeypatch) -> None:
     from core.web.services.session import journal_bridge
 
@@ -1148,6 +1209,64 @@ def test_hot_restart_resume_exempt_past_dead_process_work_run_residue(tmp_path: 
         )
         assert result["accepted"] is True
     finally:
+        _reset_seeded_session_runtime(session_id)
+
+
+def test_raw_submit_recovers_past_own_pid_work_run_residue(tmp_path: Path, monkeypatch) -> None:
+    """普通提交要能越过本进程残迹快照恢复，而不是楔死在 busy。
+
+    回归 10-21 预存红：turn 线程崩溃（或调度被吞）会留下 ownerPid=本进程的
+    running 快照，而运行注册表已清。运行注册表才是本进程活轮权威，own-pid
+    残迹不得把后续普通提交挡成「仍在运行」等 reconcile 清扫。
+    """
+
+    session_id = "session-live"
+    store = _prepare_hot_restart_submit_env(tmp_path, monkeypatch, session_id)
+    try:
+        first = submit.submit_session_message_lightweight(
+            session_id,
+            "first turn",
+            mental_model_enabled=False,
+        )
+        assert first["accepted"] is True
+        snapshots = store.load_run_index("chat_turn").get("activeRunIds") or []
+        assert snapshots, "admission should have persisted an active work-run snapshot"
+        # Simulate the crashed-turn-thread state: registry cleared, own-pid
+        # running snapshot still on disk.
+        _reset_seeded_session_runtime(session_id)
+        second = submit.submit_session_message_lightweight(
+            session_id,
+            "second turn",
+            mental_model_enabled=False,
+        )
+        assert second["accepted"] is True
+    finally:
+        _reset_seeded_session_runtime(session_id)
+
+
+def test_raw_submit_rejects_live_foreign_work_run_snapshot(tmp_path: Path, monkeypatch) -> None:
+    """活异进程 writer 的 running 快照对普通提交仍按 busy 拒绝（防脑裂）。"""
+
+    session_id = "session-live"
+    store = _prepare_hot_restart_submit_env(tmp_path, monkeypatch, session_id)
+    child = _spawn_hidden_child("import time; time.sleep(30)")
+    try:
+        _seed_foreign_owner_work_run(
+            store,
+            session_id=session_id,
+            turn_id="turn-live-owner-raw",
+            owner_pid=child.pid,
+            owner_create_time=psutil.Process(child.pid).create_time(),
+        )
+        with pytest.raises(session_service.SessionBusyError):
+            submit.submit_session_message_lightweight(
+                session_id,
+                "普通消息",
+                mental_model_enabled=False,
+            )
+    finally:
+        child.kill()
+        child.wait(timeout=15)
         _reset_seeded_session_runtime(session_id)
 
 

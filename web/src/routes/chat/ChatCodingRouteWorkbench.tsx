@@ -1,3 +1,4 @@
+import { isChatRoomMutationPending } from "./useChatScopedMutationPending";
 import { collapseProjectUtilityRail, selectSessionUtilityRail, setProjectUtilityHost } from "../../app/projectUtilityRail";
 import { useProjectAwareRightRail } from "./useProjectAwareRightRail";
 /**
@@ -37,11 +38,12 @@ import {
 import { createPortal } from "react-dom";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
-import { useChatSessionDetailQueries } from "./useChatSessionDetailQueries";
+import { shouldWaitForChatStartupRestore, useChatSessionDetailQueries } from "./useChatSessionDetailQueries";
 import { useReportWorkbenchStartupReady } from "../../app/workbenchStartupReady";
 import { useChatSessionWarmup } from "./useChatSessionWarmup";
 import { listArchivedChatSessions } from "../../api/sessionArchive";
 import {
+  listVirtualHumanCompanionBindings,
   listVirtualHumanCompanionActivity,
   listVirtualHumanCompanions,
 } from "../../api/agentPlugins";
@@ -63,6 +65,7 @@ import { useChatSessionMutations } from "./useChatSessionMutations";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import type { AgentArchiveResponse } from "../agentWorkspaceCache";
 import { prefetchConversationView } from "../../components/conversation/prefetchConversationView";
+import { isSessionIndexQueryStaleAfterTurn } from "../../api/sessionQueryScope";
 import type { ActiveTurnStreamState } from "../../components/conversation/activeTurnStreamState";
 import type { ComposerQueueItem } from "../../components/conversation/composerFollowupQueueModel";
 import { ConversationRerunFileChoiceDialog } from "../../components/conversation/ConversationRerunFileChoiceDialog";
@@ -222,6 +225,7 @@ import {
 } from "./chatSessionStreamConnect";
 import { useSessionDetailStream } from "./useSessionDetailStream";
 import { useSessionIndexCrossWindowSync } from "../chatSessionIndexSync";
+import { useSessionIndexEventStream } from "./useSessionIndexEventStream";
 import { useGroupRoomStream } from "./useGroupRoomStream";
 import { useGroupRoomTimeline } from "./useGroupRoomTimeline";
 import { useChatSessionSelection } from "./useChatSessionSelection";
@@ -250,7 +254,7 @@ import { useChatSessionRenameMenu } from "./useChatSessionRenameMenu";
 import { useChatAgentDirectoryActions } from "./useChatAgentDirectoryActions";
 import { useChatCliAgentTerminal } from "./useChatCliAgentTerminal";
 import { buildChatCacheDetailViewModel } from "./chatCacheDetailModel";
-import { buildComposerContextRingModel, resolveComposerContextLimit } from "./composerContextModel";
+import { buildComposerContextRingModel, resolveComposerContextLimit, resolveComposerContextUsage } from "./composerContextModel";
 import { useChatCacheDetailDialog } from "./useChatCacheDetailDialog";
 import { useAgentPermissionPresetMutation } from "./useAgentPermissionPresetMutation";
 import { useChatWorkbenchCatalogQueries } from "./useChatWorkbenchCatalogQueries";
@@ -675,11 +679,21 @@ export function ChatCodingRouteWorkbench() {
     requestedSessionId && !requestedCompanionId && !requestedRoomId,
   );
   const companionRouteUpgradeQuery = useQuery({
-    queryKey: queryKeys.virtualHumanCompanionActivity(),
-    queryFn: listVirtualHumanCompanionActivity,
+    queryKey: queryKeys.virtualHumanCompanionBindings(),
+    queryFn: listVirtualHumanCompanionBindings,
     enabled: companionRouteUpgradeLookupEnabled,
     staleTime: 5_000,
   });
+  // The desktop observer remains the sole activity poller. Observe its cache
+  // so binding changes still reach this route after startup without another poll.
+  const companionActivityCache = useQuery({
+    queryKey: queryKeys.virtualHumanCompanionActivity(),
+    queryFn: listVirtualHumanCompanionActivity,
+    enabled: false,
+  });
+  const companionRouteUpgradeRows = companionActivityCache.dataUpdatedAt > companionRouteUpgradeQuery.dataUpdatedAt
+    ? companionActivityCache.data
+    : companionRouteUpgradeQuery.data;
   const companionsQuery = useQuery({
     queryKey: queryKeys.virtualHumanCompanions(),
     queryFn: listVirtualHumanCompanions,
@@ -892,6 +906,9 @@ export function ChatCodingRouteWorkbench() {
   // window: a stream-owning window keeps its index poll off, so metadata flips
   // arrive through the storage-event channel as index invalidations.
   useSessionIndexCrossWindowSync(queryClient);
+  // The rail also follows the server's own index frames, so a turn settling in
+  // another window (or another session) reaches this rail without a list read.
+  useSessionIndexEventStream(queryClient, { enabled: true });
   // Transport visibility for the active-turn status note. `streamConnected`
   // stays tri-state: only a real reconnect loop reports false; route-settling
   // teardowns keep it undefined so the note never flashes a false drop.
@@ -994,6 +1011,17 @@ export function ChatCodingRouteWorkbench() {
     () => (showArchivedSessions ? archivedSessionsQuery.data?.items ?? [] : []),
     [archivedSessionsQuery.data, showArchivedSessions],
   );
+  const routeVisibleSessions = useMemo(() => {
+    const base = sessionsForChatRoute({
+      sessions: sessionsQuery.data,
+      agents: agentsQuery.data,
+      companionRouteVerified: verifiedCompanionMode,
+    });
+    if (!showArchivedSessions || archivedSessions.length === 0) {
+      return base;
+    }
+    return mergeArchivedSessionSummaries(base, archivedSessions);
+  }, [agentsQuery.data, archivedSessions, sessionsQuery.data, showArchivedSessions, verifiedCompanionMode]);
   const {
     sessionArchiveMutation,
     pinSessionMutation,
@@ -1100,6 +1128,14 @@ export function ChatCodingRouteWorkbench() {
     childSessionsQuery,
   } = useChatSessionDetailQueries({
     activeSessionId,
+    // Bare-route selection is committed below by the existing URL authority.
+    // Its fallback always restores a visible direct session when one exists.
+    bareRouteRestorePending: shouldWaitForChatStartupRestore({
+      bareRoute: chatRouteSelection.kind === "bare",
+      directoryGatePending,
+      routeVisibleSessions,
+      agentDirectoryFailed: agentsQuery.isError,
+    }),
     queryClient,
     sessions: sessionsQuery.data,
     directSessionActiveSummary,
@@ -1312,10 +1348,10 @@ export function ChatCodingRouteWorkbench() {
     groupManageModeDraft,
     groupManagePurposeDraft,
     groupManageSessionIds,
-    updateGroupRoomPending: updateGroupRoomMutation.isPending,
-    deleteGroupRoomPending: deleteGroupRoomMutation.isPending,
-    resetGroupRoomPending: resetGroupRoomMutation.isPending,
-    stopGroupRoundPending: stopGroupRoundMutation.isPending,
+    updateGroupRoomPending: isChatRoomMutationPending(updateGroupRoomMutation, activeGroupRoomId),
+    deleteGroupRoomPending: isChatRoomMutationPending(deleteGroupRoomMutation, activeGroupRoomId),
+    resetGroupRoomPending: isChatRoomMutationPending(resetGroupRoomMutation, activeGroupRoomId),
+    stopGroupRoundPending: isChatRoomMutationPending(stopGroupRoundMutation, activeGroupRoomId),
   });
 
   useChatSessionWarmup({
@@ -1642,8 +1678,14 @@ export function ChatCodingRouteWorkbench() {
       ...terminalIndexRefreshKeysBySessionRef.current,
       [activeSessionId]: terminalIndexRefreshKey,
     };
+    // A committed turn only changes the recency of the session that ran it.
+    // Invalidating the whole `sessions` prefix would also refetch the search a
+    // user is typing into and deep cursor pages nobody is looking at.
     void Promise.all([
-      queryClient.invalidateQueries({ queryKey: queryKeys.sessions() }),
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.sessions(),
+        predicate: (query) => isSessionIndexQueryStaleAfterTurn(query.queryKey),
+      }),
       queryClient.invalidateQueries({ queryKey: queryKeys.conversations() }),
       queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() }),
     ]);
@@ -1800,17 +1842,20 @@ export function ChatCodingRouteWorkbench() {
     activeSessionId,
   });
   const composerContextRing = useMemo(() => {
-    const usageUsed = lastContextComposition?.totalTokens ?? detail?.contextUsage?.used ?? 0;
+    const usage = resolveComposerContextUsage({
+      contextUsage: detail?.contextUsage,
+      contextComposition: lastContextComposition,
+    });
     const usageLimit = resolveComposerContextLimit({
       sessionId: activeSessionId,
       agentId: detail?.agentId,
       modelParameters: !financeSurface && !verifiedCompanionMode ? sessionLlmOptionsQuery.data : undefined,
-      observedLimit: lastContextComposition?.limitTokens ?? detail?.contextUsage?.limit ?? 0,
+      observedLimit: usage.limit,
     });
     const runtimeCompression = runtime?.contextCompression;
     const compressionLevels = runtimeCompression?.strategy?.levels ?? [];
     return buildComposerContextRingModel({
-      usageUsed,
+      usageUsed: usage.used,
       usageLimit,
       hitPercent: cacheCompositionPercent,
       detailAvailable: cacheDetailAvailable,
@@ -2304,23 +2349,11 @@ export function ChatCodingRouteWorkbench() {
     }
     return mergeArchivedSessionSummaries(rawSessionsQuery.data, archivedSessions);
   }, [archivedSessions, rawSessionsQuery.data, showArchivedSessions]);
-  const routeVisibleSessions = useMemo(() => {
-    const base = sessionsForChatRoute({
-      sessions: sessionsQuery.data,
-      agents: agentsQuery.data,
-      companionRouteVerified: verifiedCompanionMode,
-    });
-    if (!showArchivedSessions || archivedSessions.length === 0) {
-      return base;
-    }
-    return mergeArchivedSessionSummaries(base, archivedSessions);
-  }, [agentsQuery.data, archivedSessions, sessionsQuery.data, showArchivedSessions, verifiedCompanionMode]);
-
   const requestedCompanionAgentId = useMemo(() => (
     requestedCompanionId
       ? ""
-      : companionAgentIdForDirectSession(companionRouteUpgradeQuery.data, requestedSessionId)
-  ), [companionRouteUpgradeQuery.data, requestedCompanionId, requestedSessionId]);
+      : companionAgentIdForDirectSession(companionRouteUpgradeRows, requestedSessionId)
+  ), [companionRouteUpgradeRows, requestedCompanionId, requestedSessionId]);
 
   useEffect(() => {
     if (!requestedSessionId || requestedCompanionId || requestedRoomId || !requestedCompanionAgentId) {
@@ -3428,8 +3461,8 @@ export function ChatCodingRouteWorkbench() {
               groupSpeakerStreams={groupSpeakerStreams}
               groupSpeakerProgress={groupSpeakerProgress}
               groupTimeline={groupTimeline}
-              startGroupRoundPending={startGroupRoundMutation.isPending}
-              stopGroupRoundPending={stopGroupRoundMutation.isPending}
+              startGroupRoundPending={isChatRoomMutationPending(startGroupRoundMutation, activeGroupRoomId)}
+              stopGroupRoundPending={isChatRoomMutationPending(stopGroupRoundMutation, activeGroupRoomId)}
               formatTime={formatTime}
               statusLabel={statusLabel}
               groupParticipantIdentity={groupParticipantIdentity}
@@ -3655,9 +3688,9 @@ export function ChatCodingRouteWorkbench() {
         avatarInitials={avatarInitials}
         agentRoleClass={agentRoleClass}
         avatarImageUrlFrom={avatarImageUrlFrom}
-        updateGroupRoomPending={updateGroupRoomMutation.isPending}
-        deleteGroupRoomPending={deleteGroupRoomMutation.isPending}
-        resetGroupRoomPending={resetGroupRoomMutation.isPending}
+        updateGroupRoomPending={isChatRoomMutationPending(updateGroupRoomMutation, activeGroupRoomId)}
+        deleteGroupRoomPending={isChatRoomMutationPending(deleteGroupRoomMutation, activeGroupRoomId)}
+        resetGroupRoomPending={isChatRoomMutationPending(resetGroupRoomMutation, activeGroupRoomId)}
         onOpenTeam={(teamId) => navigate(teamWorkspaceRoute(teamId))}
         onApplyGroupRoomManagement={handleApplyGroupRoomManagement}
         onDeleteActiveGroupRoom={handleDeleteActiveGroupRoom}

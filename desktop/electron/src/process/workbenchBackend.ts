@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { dirname, join, resolve as resolvePath } from "node:path";
 import type { Readable } from "node:stream";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { BoundedStdioSink, type BoundedStdioStatus } from "./boundedStdio.js";
 import { pythonBridgeEnv } from "./pythonBridgeEnv.js";
@@ -106,7 +107,7 @@ export type ExecuteMainLineWorkbenchInput = {
   spawnImpl?: WorkbenchBackendSpawn;
   fileExists?: (path: string) => boolean;
   readState?: () => WorkbenchBackendState;
-  writeState?: (state: WorkbenchBackendState) => void;
+  writeState?: (state: WorkbenchBackendState) => void | Promise<void>;
   listActiveWork?: () => ActiveWorkRun[];
   ensureFrontend?: (input: { force: boolean; signal?: AbortSignal }) => Promise<void>;
   now?: () => string;
@@ -560,7 +561,10 @@ export async function mainLineBackendIsReusable(
   });
 }
 
-export function writeLauncherStateFile(path: string, state: WorkbenchBackendState): void {
+export async function writeLauncherStateFile(
+  path: string, state: WorkbenchBackendState, signal?: AbortSignal
+): Promise<void> {
+  signal?.throwIfAborted();
   mkdirSync(dirname(path), { recursive: true });
   // State is published by more than one lifecycle writer. A fixed sibling
   // temp name lets concurrent writers overwrite each other's in-progress
@@ -568,7 +572,22 @@ export function writeLauncherStateFile(path: string, state: WorkbenchBackendStat
   const tmp = `${path}.${process.pid}.${randomUUID()}.tmp`;
   try {
     writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`, "utf8");
-    renameSync(tmp, path);
+    // Windows readers can briefly hold the destination without delete sharing.
+    // Keep the old document intact; retry only transient replacement errors,
+    // with at most 150ms of asynchronous backoff and no delay on success.
+    for (let attempt = 0; ; attempt += 1) {
+      signal?.throwIfAborted();
+      try {
+        // Check + replace stay in one event-loop turn so a superseding intent
+        // cannot interleave while an OS rename is still queued.
+        renameSync(tmp, path);
+        break;
+      } catch (error: unknown) {
+        const code = (error as NodeJS.ErrnoException | null)?.code;
+        if (attempt >= 5 || !["EPERM", "EACCES", "EBUSY"].includes(code ?? "")) throw error;
+        await delay(10 * (attempt + 1), undefined, { signal });
+      }
+    }
   } finally {
     try {
       if (existsSync(tmp)) {
@@ -1461,10 +1480,11 @@ export async function executeMainLineWorkbench(
   const fileExists = input.fileExists ?? existsSync;
   const statePath = launcherStatePath(input.workspaceRoot);
   const readState = input.readState ?? (() => readLauncherStateFile(statePath));
-  const persistState = input.writeState ?? ((state: WorkbenchBackendState) => writeLauncherStateFile(statePath, state));
-  const writeState = (state: WorkbenchBackendState): void => {
+  const persistState = input.writeState ?? ((state: WorkbenchBackendState) => writeLauncherStateFile(statePath, state, input.signal));
+  const writeState = async (state: WorkbenchBackendState): Promise<void> => {
     input.signal?.throwIfAborted();
-    persistState(state);
+    await persistState(state);
+    input.signal?.throwIfAborted();
   };
   const host = DEFAULT_WORKBENCH_HOST;
   const operation = input.operation;
@@ -1536,7 +1556,7 @@ export async function executeMainLineWorkbench(
           code: "backend_retire_incomplete", message: "Owned backend retirement was not verified within the close deadline." };
       }
       clearWorkbenchLauncherRuntimeState(input.workspaceRoot);
-      writeState({
+      await writeState({
         ...previous, desiredState: "closed", observedState: "closed", phase: "steady",
         failureMessage: "", lifecycleWarning: "",
         backendPid: 0, backendLaunchPid: 0, spawnPid: 0,
@@ -1736,7 +1756,7 @@ export async function executeMainLineWorkbench(
     }
     if (!staleReclaim.reclaimed) {
       const message = `backend retirement remains unverified: ${staleReclaim.reason}`;
-      writeState({
+      await writeState({
         ...stateWithoutReconciledBackendHandles(previous, reconciledDeadPids),
         desiredState: "closed",
         observedState: "failed",
@@ -1776,7 +1796,7 @@ export async function executeMainLineWorkbench(
     const lifecycleWarning = lifecycleWarnings.join("; ");
     input.signal?.throwIfAborted();
     clearWorkbenchLauncherRuntimeState(input.workspaceRoot);
-    writeState({
+    await writeState({
       ...previous,
       desiredState: "closed",
       observedState: "closed",
@@ -1834,14 +1854,14 @@ export async function executeMainLineWorkbench(
 
   const previous = readState();
   let reconciledDeadPids: ReadonlySet<number> = new Set();
-  const persistStartPreflightFailure = (error: unknown): void => {
+  const persistStartPreflightFailure = async (error: unknown): Promise<void> => {
     // The error is rethrown by every caller; a superseded intent settles
     // through the supervisor's superseded/ignored outcome instead of a state.
     if (input.signal?.aborted || isSupersededLifecycleIntent(error, input.signal)) {
       return;
     }
     const detail = error instanceof Error ? error.message : String(error);
-    writeState({
+    await writeState({
       ...stateWithoutReconciledBackendHandles(previous, reconciledDeadPids),
       desiredState: "closed",
       observedState: "failed",
@@ -1862,7 +1882,7 @@ export async function executeMainLineWorkbench(
       signal: input.signal
     });
   } catch (error: unknown) {
-    persistStartPreflightFailure(error);
+    await persistStartPreflightFailure(error);
     throw error;
   }
   input.signal?.throwIfAborted();
@@ -1876,7 +1896,7 @@ export async function executeMainLineWorkbench(
     const error = new Error(
       `Runtime Manager daemon pid ${daemonPid} is live but has no verifiable identity; refusing to retire it before starting the workbench.`,
     );
-    persistStartPreflightFailure(error);
+    await persistStartPreflightFailure(error);
     throw error;
   }
   // A PID alone is not ownership evidence: Windows can reuse it after the
@@ -2022,7 +2042,7 @@ export async function executeMainLineWorkbench(
       throw new Error(`Refusing to start while unverified browser/window handles remain: ${[...new Set(unverifiedHandles)].join(",")}`);
     }
   } catch (error: unknown) {
-    persistStartPreflightFailure(error);
+    await persistStartPreflightFailure(error);
     throw error;
   }
   input.signal?.throwIfAborted();
@@ -2037,9 +2057,9 @@ export async function executeMainLineWorkbench(
   const spawnPid = Number(spawned.child.pid || 0);
   const retireOwnedJob = captureTrackedWorkbenchJobRetirement(input.workspaceRoot, spawnPid);
   let backendIdentity: PythonProcessIdentity | null = null;
-  const persistUnretiredStart = (message: string): void => {
+  const persistUnretiredStart = async (message: string): Promise<void> => {
     if (input.signal?.aborted) return;
-    writeState({
+    await writeState({
       ...stateWithoutReconciledBackendHandles(previous, reconciledDeadPids),
       desiredState: "closed",
       observedState: "failed",
@@ -2140,11 +2160,11 @@ export async function executeMainLineWorkbench(
       if (!released) throw new Error(`workbench backend port ${resolved.port} remains occupied`);
     } catch (retirementError: unknown) {
       const message = `workbench backend startup failed and its process tree remains registered: ${retirementError instanceof Error ? retirementError.message : String(retirementError)}`;
-      persistUnretiredStart(message);
+      await persistUnretiredStart(message);
       throw new Error(`${error instanceof Error ? error.message : String(error)}; ${message}`);
     }
     if (input.signal?.aborted) throw error;
-    writeState({
+    await writeState({
       ...stateWithoutReconciledBackendHandles(previous, reconciledDeadPids),
       desiredState: "closed", observedState: "failed", phase: "failed",
       backendPid: 0, backendLaunchPid: 0, spawnPid: 0,
@@ -2159,7 +2179,7 @@ export async function executeMainLineWorkbench(
     throw error;
   }
   input.signal?.throwIfAborted();
-  writeState({
+  await writeState({
     ...previous,
     schemaVersion: 1,
     desiredState: "open",
@@ -2200,12 +2220,12 @@ export async function executeMainLineWorkbench(
     updatedAt: isoNow(input.now)
   });
   if (!input.writeState) {
-    writeLauncherStateFile(launcherPortsPath(input.workspaceRoot), {
+    await writeLauncherStateFile(launcherPortsPath(input.workspaceRoot), {
       schemaVersion: 1,
       backendPort: resolved.port,
       projectRoot: input.workspaceRoot,
       updatedAt: isoNow(input.now)
-    });
+    }, input.signal);
   }
   return accepted(operation, commandId);
 }

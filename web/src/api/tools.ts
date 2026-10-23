@@ -1,4 +1,4 @@
-import { fetchJson } from "./client";
+import { fetchJson, fetchJsonWithTimeout } from "./client";
 import type {
   GeneratedToolDeleteResponse,
   ToolDependencyHealth,
@@ -41,16 +41,19 @@ export function setGeneratedToolEnabled(
   toolId: string,
   enabled: boolean,
 ): Promise<ToolRegistryItem> {
-  return sendJson<ToolRegistryItem>(
+  return fetchJsonWithTimeout<ToolRegistryItem>(
     `/api/tools/generated/${encodeURIComponent(toolId)}/enabled`,
-    "PUT",
-    { enabled },
+    {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }), timeoutMs: 60_000,
+    },
   );
 }
 
 export function deleteTool(toolId: string): Promise<GeneratedToolDeleteResponse> {
-  return fetchJson<GeneratedToolDeleteResponse>(`/api/tools/${encodeURIComponent(toolId)}`, {
+  return fetchJsonWithTimeout<GeneratedToolDeleteResponse>(`/api/tools/${encodeURIComponent(toolId)}`, {
     method: "DELETE",
+    timeoutMs: 60_000,
   });
 }
 

@@ -1,4 +1,4 @@
-import { fetchJson, isFetchJsonHttpError } from "./client";
+import { fetchJson, fetchJsonWithTimeout, isFetchJsonHttpError } from "./client";
 import type {
   ChatRoomDetail,
   ChatRoomMode,
@@ -874,8 +874,9 @@ export function updateChatRoom(
     purpose: string;
   },
 ): Promise<ChatRoomDetail> {
-  return fetchJson<ChatRoomDetail>(`/api/chat-rooms/${encodeURIComponent(roomId)}`, {
+  return fetchJsonWithTimeout<ChatRoomDetail>(`/api/chat-rooms/${encodeURIComponent(roomId)}`, {
     method: "PATCH",
+    timeoutMs: 30_000,
     headers: {
       "Content-Type": "application/json",
     },
@@ -894,20 +895,23 @@ export type ChatRoomDeleteResponse = {
 };
 
 export function deleteChatRoom(roomId: string): Promise<ChatRoomDeleteResponse> {
-  return fetchJson<ChatRoomDeleteResponse>(`/api/chat-rooms/${encodeURIComponent(roomId)}`, {
+  return fetchJsonWithTimeout<ChatRoomDeleteResponse>(`/api/chat-rooms/${encodeURIComponent(roomId)}`, {
     method: "DELETE",
+    timeoutMs: 30_000,
   });
 }
 
 export function resetChatRoom(roomId: string): Promise<ChatRoomDetail> {
-  return fetchJson<ChatRoomDetail>(`/api/chat-rooms/${encodeURIComponent(roomId)}/reset`, {
+  return fetchJsonWithTimeout<ChatRoomDetail>(`/api/chat-rooms/${encodeURIComponent(roomId)}/reset`, {
     method: "POST",
+    timeoutMs: 30_000,
   });
 }
 
 export function stopChatRoomRound(roomId: string): Promise<ChatRoomDetail> {
-  return fetchJson<ChatRoomDetail>(`/api/chat-rooms/${encodeURIComponent(roomId)}/stop`, {
+  return fetchJsonWithTimeout<ChatRoomDetail>(`/api/chat-rooms/${encodeURIComponent(roomId)}/stop`, {
     method: "POST",
+    timeoutMs: 30_000,
   });
 }
 
@@ -947,10 +951,11 @@ export function startChatRoomRound(
   if (options?.preferAsync) {
     headers.Prefer = "respond-async";
   }
-  return fetchJson<ChatRoomDetail | ChatRoomRoundAcceptedResponse>(
+  return fetchJsonWithTimeout<ChatRoomDetail | ChatRoomRoundAcceptedResponse>(
     `/api/chat-rooms/${encodeURIComponent(roomId)}/rounds`,
     {
       method: "POST",
+      timeoutMs: 30_000,
       headers,
       body: JSON.stringify({
         topic: payload.topic,

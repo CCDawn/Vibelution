@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
@@ -11,7 +12,7 @@ from .history_ledger import (
     EVENT_TOOL_CALL,
     EVENT_TOOL_RESULT,
     HistoryEvent,
-    build_history_events,
+    HistoryEventBuilder,
     latest_checkpoint,
 )
 from .tool_result_replacement import (
@@ -34,12 +35,41 @@ from .projection_stickiness import (
     content_digest,
     projection_locks_from_ledger_events,
 )
+from .conversation_invariant import (
+    ConversationSeedInvariantError,
+    canonical_conversation_messages_from_events,
+    canonical_replay_input,
+    check_conversation_payload_invariant,
+    conversation_layer_fingerprint,
+    conversation_layer_messages,
+)
 from .conversation_ledger import (
     ConversationLedgerEvent,
     apply_context_compression_checkpoints,
     conversation_model_messages_from_events,
     fold_active_events,
     latest_context_compression_checkpoint,
+)
+from .turn_journal import (
+    ModelProjectionReplay,
+    _ProjectionResumeBail,
+    EVENT_ASSISTANT_DELTA_COMMITTED,
+    EVENT_ASSISTANT_ITEM_COMMITTED,
+    EVENT_ASSISTANT_MESSAGE,
+    EVENT_ASSISTANT_PARTIAL,
+    EVENT_CLI_SESSION_LIFECYCLE,
+    EVENT_CLI_TASK_RESULT,
+    EVENT_CLI_TASK_SENT,
+    EVENT_TOOL_CALL_STARTED,
+    EVENT_TOOL_RESULT,
+    EVENT_TOOL_RESULT_PROJECTION_LOCK,
+    EVENT_TURN_COMPLETED,
+    EVENT_TURN_CONTEXT,
+    EVENT_TURN_INTERRUPTED,
+    EVENT_TURN_STARTED,
+    EVENT_TURN_STEER,
+    EVENT_SUBAGENT_PROGRESS,
+    EVENT_USER_MESSAGE,
 )
 from .conversation_invariant import (
     ConversationSeedInvariantError,
@@ -119,48 +149,591 @@ _MISS = object()
 _EMPTY = object()
 
 
+@dataclass(frozen=True)
+class _MemoEntry:
+    """One memo slot: the stored input items, the projected value, and any
+    stage-specific bookkeeping (turn ids, flags, carried builders)."""
+
+    items: tuple[Any, ...]
+    value: Any
+    extra: dict[str, Any] = field(default_factory=dict)
+
+
 class _IdentityListMemo:
-    """Identity-keyed memo for pure projections over frozen event/message lists.
+    """Identity + append-prefix memo for pure projections over frozen lists.
 
-    Journal loads reuse parsed prefix objects across appends, so an unchanged
-    list (same length and same first/last object identity) is by construction
-    the same sequence of immutable objects.  Entries keep the first/last
-    references alive, which rules out id-reuse collisions.  Any mismatch just
-    misses and recomputes, so this can only trade a recompute for a recompute.
+    Journal loads reuse parsed prefix objects across appends, so two lists
+    built from the same journal state share object identities element-wise.
+    A plain :meth:`lookup` hits only on an exact element-wise replay (same
+    length, every item ``is`` the stored one). Projection stages that can be
+    extended incrementally use :meth:`entry` plus :func:`_prefix_append_guard`
+    instead: the stored tuple is a shared prefix, and only the appended tail
+    is projected. Stored tuples keep every item referenced, which rules out
+    id-reuse collisions; any mismatch just misses and recomputes, so this can
+    only trade a recompute for a recompute.
 
-    Bounded LRU: scopes used to embed ``current_turn_id``, so every turn of
-    every session leaked a fresh set of entries for the process lifetime.
-    Entries now evict oldest-first past ``max_entries``.
+    Bounded LRU (entries evict oldest-first past ``max_entries``) and
+    thread-safe (one lock around the dict; projections themselves run outside
+    it, so racers only ever store equally-correct values).
     """
 
     def __init__(self, *, max_entries: int = 256) -> None:
-        self._entries: dict[tuple[Any, ...], tuple[Any, Any, int, Any]] = {}
+        self._entries: dict[tuple[Any, ...], _MemoEntry] = {}
         self._max_entries = max(8, int(max_entries))
+        self._lock = threading.Lock()
+
+    def entry(self, scope: tuple[Any, ...]) -> _MemoEntry | None:
+        with self._lock:
+            entry = self._entries.get(scope)
+            if entry is not None:
+                # Refresh recency for the LRU eviction below.
+                self._entries.pop(scope, None)
+                self._entries[scope] = entry
+            return entry
 
     def lookup(self, scope: tuple[Any, ...], items: list[Any]) -> Any:
-        entry = self._entries.get(scope)
+        entry = self.entry(scope)
         if entry is None:
             return _MISS
-        kept_first, kept_last, length, value = entry
-        first = items[0] if items else _EMPTY
-        last = items[-1] if items else _EMPTY
-        if length == len(items) and kept_first is first and kept_last is last:
-            # Refresh recency for the LRU eviction below.
-            self._entries.pop(scope, None)
-            self._entries[scope] = entry
-            return value
-        return _MISS
+        stored = entry.items
+        if len(items) != len(stored):
+            return _MISS
+        for index, kept in enumerate(stored):
+            if items[index] is not kept:
+                return _MISS
+        return entry.value
 
-    def store(self, scope: tuple[Any, ...], items: list[Any], value: Any) -> None:
-        first = items[0] if items else _EMPTY
-        last = items[-1] if items else _EMPTY
-        self._entries[scope] = (first, last, len(items), value)
-        while len(self._entries) > self._max_entries:
-            oldest = next(iter(self._entries))
-            self._entries.pop(oldest, None)
+    def store(
+        self,
+        scope: tuple[Any, ...],
+        items: list[Any],
+        value: Any,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        entry = _MemoEntry(items=tuple(items), value=value, extra=extra or {})
+        with self._lock:
+            self._entries[scope] = entry
+            while len(self._entries) > self._max_entries:
+                oldest = next(iter(self._entries))
+                self._entries.pop(oldest, None)
 
 
 _ASSEMBLY_MEMO = _IdentityListMemo()
+
+
+# Event types whose arrival never rewrites the projection of earlier events:
+# ordinary turn traffic plus out-of-band never-model-visible facts. Anything
+# else — fold markers (branch_rebase), compression checkpoints (covered-range
+# deletion), compression attempts, resilience/recovery facts, terminal failure
+# events, and unknown future types — forces a full recompute.
+_PREFIX_APPEND_SAFE_EVENT_TYPES = frozenset(
+    {
+        EVENT_TURN_STARTED,
+        EVENT_USER_MESSAGE,
+        EVENT_TURN_CONTEXT,
+        EVENT_ASSISTANT_PARTIAL,
+        EVENT_ASSISTANT_DELTA_COMMITTED,
+        EVENT_ASSISTANT_ITEM_COMMITTED,
+        EVENT_ASSISTANT_MESSAGE,
+        EVENT_TOOL_CALL_STARTED,
+        EVENT_TOOL_RESULT,
+        EVENT_TOOL_RESULT_PROJECTION_LOCK,
+        EVENT_CLI_TASK_SENT,
+        EVENT_CLI_TASK_RESULT,
+        EVENT_CLI_SESSION_LIFECYCLE,
+        EVENT_TURN_COMPLETED,
+        EVENT_TURN_INTERRUPTED,
+        EVENT_TURN_STEER,
+        EVENT_SUBAGENT_PROGRESS,
+    }
+)
+
+
+def _prefix_append_guard(
+    stored_items: tuple[Any, ...],
+    items: list[Any],
+    *,
+    known_turn_ids: frozenset[str] | set[str],
+    excluded_turn_id: str = "",
+) -> tuple[list[Any], list[Any]] | None:
+    """Validate an identity-prefix append of safe, unseen-turn events.
+
+    Returns ``(appended_all, visible)`` — the full appended tail and the part
+    of it that survives ``excluded_turn_id`` filtering — or ``None`` when the
+    list shrank, reordered, contains unsafe event types, or appends events of
+    a turn this stage's input already carries (an out-of-order rewrite the
+    incremental path must not guess about).
+    """
+
+    offset = len(stored_items)
+    if len(items) < offset:
+        return None
+    for index in range(offset):
+        if items[index] is not stored_items[index]:
+            return None
+    appended_all = list(items[offset:])
+    visible: list[Any] = []
+    for event in appended_all:
+        if getattr(event, "event_type", "") not in _PREFIX_APPEND_SAFE_EVENT_TYPES:
+            return None
+        turn_id = str(getattr(event, "turn_id", "") or "").strip()
+        if not turn_id:
+            return None
+        if excluded_turn_id and turn_id == excluded_turn_id:
+            continue
+        if turn_id in known_turn_ids:
+            return None
+        visible.append(event)
+    return appended_all, visible
+
+
+def _event_turn_id(event: Any) -> str:
+    return str(getattr(event, "turn_id", "") or "").strip()
+
+
+def _event_type(event: Any) -> str:
+    return str(getattr(event, "event_type", "") or "")
+
+
+def _input_turn_ids(events: list[Any]) -> frozenset[str]:
+    return frozenset(_event_turn_id(event) for event in events if _event_turn_id(event))
+
+
+def _historical_ledger_events_memoized(
+    raw_events: list[ConversationLedgerEvent],
+    *,
+    current_turn_id: str,
+    session_id: str,
+) -> list[ConversationLedgerEvent]:
+    """Memoized :func:`_historical_ledger_events` (fold + current-turn cut).
+
+    Append-only growth of the raw journal under the safe-type guard folds to
+    ``stored_folded + appended`` and the turn cut to
+    ``stored_output + visible``; a turn rollover re-admits the previously
+    excluded stored-turn block (already folded inside ``folded_full``).
+    Anything else recomputes.
+    """
+
+    scope = ("historical_ledger_events", session_id)
+    normalized_turn_id = str(current_turn_id or "").strip()
+    entry = _ASSEMBLY_MEMO.entry(scope)
+    if entry is not None:
+        # The exclusion window rides on current_turn_id, so the exact replay
+        # hit is only valid under the same window.
+        if (
+            entry.extra["turnId"] == normalized_turn_id
+            and len(raw_events) == len(entry.items)
+            and all(raw_events[index] is kept for index, kept in enumerate(entry.items))
+        ):
+            return entry.value
+        extra = entry.extra
+        guard = _prefix_append_guard(
+            entry.items,
+            raw_events,
+            known_turn_ids=extra["knownTurnIds"],
+            excluded_turn_id=normalized_turn_id,
+        )
+        if guard is not None:
+            appended_all, visible = guard
+            if extra["turnId"] == normalized_turn_id:
+                new_output = [*entry.value, *visible]
+            else:
+                new_output = [*extra["foldedFull"], *visible]
+            new_folded_full = [*extra["foldedFull"], *appended_all]
+            new_extra = {
+                "turnId": normalized_turn_id,
+                "foldedFull": new_folded_full,
+                "knownTurnIds": extra["knownTurnIds"]
+                | {turn for turn in map(_event_turn_id, appended_all) if turn},
+            }
+            _ASSEMBLY_MEMO.store(scope, raw_events, new_output, new_extra)
+            return new_output
+    output = _historical_ledger_events(raw_events, current_turn_id=current_turn_id)
+    _ASSEMBLY_MEMO.store(
+        scope,
+        raw_events,
+        output,
+        {
+            "turnId": normalized_turn_id,
+            "foldedFull": fold_active_events(raw_events),
+            "knownTurnIds": _input_turn_ids(raw_events),
+        },
+    )
+    return output
+
+
+def _projection_locks_memoized(
+    raw_events: list[ConversationLedgerEvent],
+    *,
+    session_id: str,
+) -> ProjectionLockIndex:
+    """Memoized :func:`projection_locks_from_ledger_events`.
+
+    The index is first-wins, so an identity-prefix append can only add new
+    records: the cached index is extended in place (keeping object identity
+    for downstream sticky-overlay memos) and returned. Any non-append change
+    rebuilds from scratch.
+    """
+
+    scope = ("projection_locks", session_id)
+    entry = _ASSEMBLY_MEMO.entry(scope)
+    if entry is not None:
+        stored, index, _extra = entry.items, entry.value, entry.extra
+        if len(raw_events) >= len(stored) and all(
+            raw_events[i] is kept for i, kept in enumerate(stored)
+        ):
+            appended = raw_events[len(stored):]
+            if appended:
+                _merge_projection_lock_events(index, appended)
+            if len(raw_events) > len(stored):
+                _ASSEMBLY_MEMO.store(scope, raw_events, index)
+            return index
+    index = projection_locks_from_ledger_events(raw_events)
+    _ASSEMBLY_MEMO.store(scope, raw_events, index)
+    return index
+
+
+def _merge_projection_lock_events(index: ProjectionLockIndex, events: list[Any]) -> None:
+    from .projection_stickiness import _lock_record_from_decision
+
+    for event in events:
+        if _event_type(event) != "tool_result_projection_lock":
+            continue
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        for decision in list(payload.get("decisions") or []):
+            record = _lock_record_from_decision(decision)
+            if record is not None:
+                index.add(record)
+
+
+def _checkpointed_events_memoized(
+    ledger_event_list: list[ConversationLedgerEvent],
+    *,
+    current_turn_id: str,
+    session_id: str,
+) -> list[ConversationLedgerEvent]:
+    """Memoized :func:`apply_context_compression_checkpoints`.
+
+    Checkpoints delete covered earlier events, so any appended checkpoint
+    (unsafe type) misses. A safe append only extends: no new covered ranges
+    can appear, and an appended event's sequence is always past every stored
+    covered range.
+    """
+
+    scope = ("context_compression_checkpoints", session_id)
+    normalized_turn_id = str(current_turn_id or "").strip()
+    entry = _ASSEMBLY_MEMO.entry(scope)
+    if entry is not None:
+        # Checkpoint application keys on current_turn_id, so the exact replay
+        # hit is only valid under the same window.
+        if (
+            entry.extra.get("turnId") == normalized_turn_id
+            and len(ledger_event_list) == len(entry.items)
+            and all(ledger_event_list[index] is kept for index, kept in enumerate(entry.items))
+        ):
+            return entry.value
+        extra = entry.extra
+        guard = _prefix_append_guard(
+            entry.items,
+            ledger_event_list,
+            known_turn_ids=extra["knownTurnIds"],
+            excluded_turn_id=normalized_turn_id,
+        )
+        if guard is not None:
+            appended_all, visible = guard
+            new_output = [*entry.value, *visible]
+            _ASSEMBLY_MEMO.store(
+                scope,
+                ledger_event_list,
+                new_output,
+                {
+                    "turnId": normalized_turn_id,
+                    "knownTurnIds": extra["knownTurnIds"]
+                    | {turn for turn in map(_event_turn_id, appended_all) if turn},
+                },
+            )
+            return new_output
+    output = apply_context_compression_checkpoints(
+        ledger_event_list,
+        current_turn_id=current_turn_id,
+    )
+    _ASSEMBLY_MEMO.store(
+        scope,
+        ledger_event_list,
+        output,
+        {
+            "turnId": normalized_turn_id,
+            "knownTurnIds": _input_turn_ids(ledger_event_list),
+        },
+    )
+    return output
+
+
+def _model_messages_memoized(
+    ledger_replay_events: list[ConversationLedgerEvent],
+    *,
+    session_id: str,
+) -> list[dict[str, Any]]:
+    """Memoized model projection over the checkpointed historical event list.
+
+    Exact element-wise replay of the stored input reuses the cached message
+    list (zero replay) — this covers every re-assembly of an unchanged
+    journal state, including all mid-turn growth of the *current* turn, which
+    the historical window never sees. Appended growth resumes from the stored
+    provenance carry (the batch-8 fix-G follow-up): the projection's
+    sourceIndex baseline and scan state ride the memo, so a safe append
+    replays only the appended turns and must match a cold replay byte for
+    byte. Anything the carry cannot prove — rewinds, marker appends, same-turn
+    rewrites, cross-turn id collisions — recomputes in full.
+    """
+
+    scope = ("conversation_model_messages", session_id)
+    entry = _ASSEMBLY_MEMO.entry(scope)
+    if entry is not None:
+        if len(ledger_replay_events) == len(entry.items) and all(
+            ledger_replay_events[index] is kept for index, kept in enumerate(entry.items)
+        ):
+            return entry.value
+        extra = entry.extra
+        guard = _prefix_append_guard(
+            entry.items,
+            ledger_replay_events,
+            known_turn_ids=extra["knownTurnIds"],
+        )
+        if guard is not None:
+            appended = guard[0]
+            try:
+                replay = ModelProjectionReplay(carry=extra["carry"])
+                replay.feed(extra["pendingEvents"])
+                replay.feed(appended)
+                messages = replay.finish()
+            except _ProjectionResumeBail:
+                messages = None
+            if messages is not None:
+                _ASSEMBLY_MEMO.store(
+                    scope,
+                    ledger_replay_events,
+                    messages,
+                    {
+                        "carry": replay.carry,
+                        "pendingEvents": replay.pending_events,
+                        "knownTurnIds": extra["knownTurnIds"]
+                        | {turn for turn in map(_event_turn_id, appended) if turn},
+                    },
+                )
+                return messages
+    replay = ModelProjectionReplay()
+    replay.feed(ledger_replay_events)
+    messages = replay.finish()
+    _ASSEMBLY_MEMO.store(
+        scope,
+        ledger_replay_events,
+        messages,
+        {
+            "carry": replay.carry,
+            "pendingEvents": replay.pending_events,
+            "knownTurnIds": _input_turn_ids(ledger_replay_events),
+        },
+    )
+    return messages
+
+
+def _canonical_messages_memoized(
+    raw_ledger_event_list: list[ConversationLedgerEvent],
+    *,
+    current_turn_id: str,
+    session_id: str,
+) -> list[dict[str, Any]]:
+    """Memoized canonical replay (fold + current-turn cut + layer filter).
+
+    The canonical window excludes the in-flight turn inside the projection,
+    so journal growth of the *current* turn leaves the value untouched: the
+    cached value is reused while only the stored input tuple rolls forward.
+    A turn rollover admits the previously excluded block — the replay input
+    grows by an identity-checked prefix, and the projection resumes from the
+    stored provenance carry over exactly the admitted delta. Any change the
+    carry cannot prove byte-equivalent recomputes in full, matching a cold
+    assembly byte for byte.
+    """
+
+    scope = ("canonical_conversation_messages", session_id)
+    normalized_turn_id = str(current_turn_id or "").strip()
+    entry = _ASSEMBLY_MEMO.entry(scope)
+    if entry is not None and entry.extra["turnId"] == normalized_turn_id:
+        guard = _prefix_append_guard(
+            entry.items,
+            raw_ledger_event_list,
+            known_turn_ids=entry.extra["knownTurnIds"],
+            excluded_turn_id=normalized_turn_id,
+        )
+        if guard is not None and not guard[1]:
+            # Every appended event belongs to the excluded in-flight turn.
+            _ASSEMBLY_MEMO.store(
+                scope,
+                raw_ledger_event_list,
+                entry.value,
+                entry.extra,
+            )
+            return entry.value
+    replay_input = canonical_replay_input(
+        raw_ledger_event_list,
+        current_turn_id=normalized_turn_id,
+    )
+    messages = None
+    used_carry = None
+    used_pending: list[ConversationLedgerEvent] = []
+    if entry is not None:
+        stored_input = entry.extra["replayInput"]
+        if len(replay_input) > len(stored_input) and all(
+            replay_input[index] is kept for index, kept in enumerate(stored_input)
+        ):
+            block = replay_input[len(stored_input):]
+            try:
+                replay = ModelProjectionReplay(carry=entry.extra["carry"])
+                replay.feed(entry.extra["pendingEvents"])
+                replay.feed(block)
+                model_messages = replay.finish()
+            except _ProjectionResumeBail:
+                model_messages = None
+            if model_messages is not None:
+                messages = conversation_layer_messages(model_messages)
+                used_carry = replay.carry
+                used_pending = replay.pending_events
+    if messages is None:
+        replay = ModelProjectionReplay()
+        replay.feed(replay_input)
+        model_messages = replay.finish()
+        messages = conversation_layer_messages(model_messages)
+        used_carry = replay.carry
+        used_pending = replay.pending_events
+    _ASSEMBLY_MEMO.store(
+        scope,
+        raw_ledger_event_list,
+        messages,
+        {
+            "turnId": normalized_turn_id,
+            "knownTurnIds": _input_turn_ids(raw_ledger_event_list),
+            "carry": used_carry,
+            "pendingEvents": used_pending if used_carry is not None else [],
+            "replayInput": replay_input,
+        },
+    )
+    return messages
+
+
+def _identity_value_memoized(scope: tuple[Any, ...], items: list[Any], compute) -> Any:
+    """Reuse a cached pure value when the input list replays identically."""
+
+    cached = _ASSEMBLY_MEMO.lookup(scope, items)
+    if cached is not _MISS:
+        return cached
+    value = compute()
+    _ASSEMBLY_MEMO.store(scope, items, value)
+    return value
+
+
+def _history_events_memoized(
+    normalized_messages: list[dict[str, Any]],
+    *,
+    session_id: str,
+) -> list[HistoryEvent]:
+    """Memoized :func:`build_history_events` with appended-tail delta.
+
+    The builder's carried tool-call lookup and running message index make the
+    projection resumable: a safe identity-prefix append feeds only the new
+    messages to a forked builder.
+    """
+
+    scope = ("build_history_events", session_id)
+    entry = _ASSEMBLY_MEMO.entry(scope)
+    if entry is not None:
+        stored = entry.items
+        offset = len(stored)
+        if len(normalized_messages) >= offset and all(
+            normalized_messages[index] is kept for index, kept in enumerate(stored)
+        ):
+            appended = normalized_messages[offset:]
+            if not appended:
+                _ASSEMBLY_MEMO.store(scope, normalized_messages, entry.value, entry.extra)
+                return list(entry.value)
+            builder = entry.extra["builder"].fork()
+            delta_events = list(builder.feed(appended))
+            new_events = [*entry.value, *delta_events]
+            _ASSEMBLY_MEMO.store(
+                scope,
+                normalized_messages,
+                new_events,
+                {"builder": builder},
+            )
+            return new_events
+    builder = HistoryEventBuilder(session_id=session_id)
+    builder.feed(normalized_messages)
+    _ASSEMBLY_MEMO.store(scope, normalized_messages, builder.events, {"builder": builder})
+    return builder.events
+
+
+def _clone_overlay_state(state: dict[str, Any]) -> dict[str, Any]:
+    """Content copy of an overlay state dict (one level of list entries)."""
+
+    if not isinstance(state, dict):
+        return state
+    cloned: dict[str, Any] = {}
+    for key, value in state.items():
+        if isinstance(value, list):
+            cloned[key] = [
+                dict(entry) if isinstance(entry, dict) else entry for entry in value
+            ]
+        elif isinstance(value, dict):
+            cloned[key] = dict(value)
+        else:
+            cloned[key] = value
+    return cloned
+
+
+def _sticky_overlay_memoized(
+    scope: tuple[Any, ...],
+    source_messages: list[Any],
+    *,
+    overlay,
+    projection_locks: ProjectionLockIndex | None,
+    session_id: str,
+    state: dict[str, Any],
+) -> tuple[list[Any], dict[str, Any]]:
+    """Memoized sticky overlay with an exact-replay fast path.
+
+    The overlay's per-message projection is cheap, but its *state* accounting
+    (restoration counts) is whole-list: a tail-only replay would under-count
+    locked forms the raw derivation no longer selects. Unchanged windows
+    replay from the cache; any growth takes the full overlay call — identical
+    to an unmemoized assembly — so the returned state always matches a cold
+    round byte for byte.
+    """
+
+    if projection_locks is None:
+        return overlay(source_messages, projection_locks=None, session_id=session_id, state=state)
+    entry = _ASSEMBLY_MEMO.entry(scope)
+    if entry is not None:
+        extra = entry.extra
+        if extra["locks"] is projection_locks and extra["inState"] == state:
+            stored = entry.items
+            offset = len(stored)
+            if len(source_messages) == offset and all(
+                source_messages[index] is kept for index, kept in enumerate(stored)
+            ):
+                return list(entry.value[0]), _clone_overlay_state(entry.value[1])
+    out_list, out_state = overlay(
+        source_messages,
+        projection_locks=projection_locks,
+        session_id=session_id,
+        state=state,
+    )
+    _ASSEMBLY_MEMO.store(
+        scope,
+        source_messages,
+        (out_list, out_state),
+        {"locks": projection_locks, "inState": _clone_overlay_state(state)},
+    )
+    return out_list, out_state
 
 
 def assemble_conversation_context(
@@ -191,9 +764,10 @@ def assemble_conversation_context(
     re-checkpointing; see ``_split_history_checkpoint_messages``.
     """
 
-    ledger_event_list = _historical_ledger_events(
+    ledger_event_list = _historical_ledger_events_memoized(
         list(ledger_events or []),
         current_turn_id=current_turn_id,
+        session_id=session_id,
     )
     raw_ledger_event_list = list(ledger_events or [])
     # Sticky projection locks ride the ledger itself: past assemblies append
@@ -201,33 +775,22 @@ def assemble_conversation_context(
     # projected form. Building the index is a cheap type-filtered scan; for
     # sessions with no lock events yet it stays empty and every overlay below
     # degrades to today's behavior.
-    projection_locks = projection_locks_from_ledger_events(raw_ledger_event_list)
-    ledger_replay_events = apply_context_compression_checkpoints(
+    projection_locks = _projection_locks_memoized(raw_ledger_event_list, session_id=session_id)
+    ledger_replay_events = _checkpointed_events_memoized(
         ledger_event_list,
         current_turn_id=current_turn_id,
+        session_id=session_id,
     )
     # Memo scopes: turn-agnostic projections (model replay, fingerprints,
     # history events) are pure functions of their identity-keyed input lists,
     # so they key on the session only and can be reused whenever the same
     # journal state is assembled again — including under a different turn id.
-    # The canonical replay excludes the in-flight turn inside the projection,
-    # so its scope must keep ``current_turn_id`` (the same raw event list under
-    # a different turn id yields a different canonical window). Identity keys
-    # keep every miss on the safe recompute path.
-    memo_scope = (session_id,)
-    canonical_memo_scope = (session_id, current_turn_id)
-    memoized_model_messages = _ASSEMBLY_MEMO.lookup(
-        ("conversation_model_messages", *memo_scope),
-        ledger_replay_events,
-    )
-    if memoized_model_messages is _MISS:
-        memoized_model_messages = conversation_model_messages_from_events(ledger_replay_events)
-        _ASSEMBLY_MEMO.store(
-            ("conversation_model_messages", *memo_scope),
-            ledger_replay_events,
-            memoized_model_messages,
-        )
-    ledger_messages = memoized_model_messages
+    # Unchanged lists reuse the cached value object; safe appends extend the
+    # cached projection incrementally; anything else recomputes in full. The
+    # canonical replay keys on the session too and handles the current-turn
+    # exclusion window inside its own delta logic (same-turn appends are
+    # invisible to it; a rollover replays the previously excluded block).
+    ledger_messages = _model_messages_memoized(ledger_replay_events, session_id=session_id)
     if enforce_conversation_invariant:
         invariant = check_conversation_payload_invariant(ledger_messages)
         if not invariant.ok:
@@ -236,43 +799,21 @@ def assemble_conversation_context(
                 message=str(invariant.message or "Ledger history seed failed conversation invariant."),
                 details=dict(invariant.details or {}),
             )
-        memoized_canonical = _ASSEMBLY_MEMO.lookup(
-            ("canonical_conversation_messages", *canonical_memo_scope),
+        canonical_history = _canonical_messages_memoized(
             raw_ledger_event_list,
+            current_turn_id=current_turn_id,
+            session_id=session_id,
         )
-        if memoized_canonical is _MISS:
-            memoized_canonical = canonical_conversation_messages_from_events(
-                raw_ledger_event_list,
-                current_turn_id=current_turn_id,
-            )
-            _ASSEMBLY_MEMO.store(
-                ("canonical_conversation_messages", *canonical_memo_scope),
-                raw_ledger_event_list,
-                memoized_canonical,
-            )
-        canonical_history = memoized_canonical
-        memoized_canonical_fingerprint = _ASSEMBLY_MEMO.lookup(
-            ("conversation_layer_fingerprint", *memo_scope),
+        memoized_canonical_fingerprint = _identity_value_memoized(
+            ("conversation_layer_fingerprint", session_id),
             canonical_history,
+            lambda: conversation_layer_fingerprint(canonical_history),
         )
-        if memoized_canonical_fingerprint is _MISS:
-            memoized_canonical_fingerprint = conversation_layer_fingerprint(canonical_history)
-            _ASSEMBLY_MEMO.store(
-                ("conversation_layer_fingerprint", *memo_scope),
-                canonical_history,
-                memoized_canonical_fingerprint,
-            )
-        memoized_model_fingerprint = _ASSEMBLY_MEMO.lookup(
-            ("conversation_layer_fingerprint_model", *memo_scope),
+        memoized_model_fingerprint = _identity_value_memoized(
+            ("conversation_layer_fingerprint_model", session_id),
             ledger_messages,
+            lambda: conversation_layer_fingerprint(ledger_messages),
         )
-        if memoized_model_fingerprint is _MISS:
-            memoized_model_fingerprint = conversation_layer_fingerprint(ledger_messages)
-            _ASSEMBLY_MEMO.store(
-                ("conversation_layer_fingerprint_model", *memo_scope),
-                ledger_messages,
-                memoized_model_fingerprint,
-            )
         if memoized_canonical_fingerprint != memoized_model_fingerprint:
             raise ConversationSeedInvariantError(
                 error_type="ledger_history_projection_mismatch",
@@ -283,18 +824,7 @@ def assemble_conversation_context(
                 },
             )
     normalized_messages = list(ledger_messages)
-    memoized_history_events = _ASSEMBLY_MEMO.lookup(
-        ("build_history_events", *memo_scope),
-        normalized_messages,
-    )
-    if memoized_history_events is _MISS:
-        memoized_history_events = build_history_events(normalized_messages, session_id=session_id)
-        _ASSEMBLY_MEMO.store(
-            ("build_history_events", *memo_scope),
-            normalized_messages,
-            memoized_history_events,
-        )
-    events = memoized_history_events
+    events = _history_events_memoized(normalized_messages, session_id=session_id)
     if recent_message_limit is None:
         recent_start_index = 0
     else:
@@ -326,19 +856,50 @@ def assemble_conversation_context(
     ]
     replacement_state = empty_tool_result_replacement_state(char_limit=tool_result_replacement_char_limit)
     if replace_large_tool_results_for_compression:
-        history_messages, replacement_state = replace_tool_results_for_compression(
-            history_messages,
-            char_limit=tool_result_replacement_char_limit,
-            session_id=session_id,
+        # Memoized deterministic replacement pass: the assembled history list
+        # is identity-stable across memoized upstream stages, so an unchanged
+        # round reuses the cached (list, state) pair. The state is cloned on
+        # reuse because the sticky overlay below appends restoration entries
+        # to it in place; the cached copy must stay pristine.
+        replace_scope = (
+            "replace_large_tool_results",
+            session_id,
+            tool_result_replacement_char_limit,
         )
+        replace_entry = _ASSEMBLY_MEMO.entry(replace_scope)
+        if (
+            replace_entry is not None
+            and len(history_messages) == len(replace_entry.items)
+            and all(history_messages[i] is kept for i, kept in enumerate(replace_entry.items))
+        ):
+            history_messages, replacement_state = replace_entry.value
+            replacement_state = _clone_overlay_state(replacement_state)
+        else:
+            pre_replace_messages = history_messages
+            history_messages, replacement_state = replace_tool_results_for_compression(
+                history_messages,
+                char_limit=tool_result_replacement_char_limit,
+                session_id=session_id,
+            )
+            _ASSEMBLY_MEMO.store(
+                replace_scope,
+                pre_replace_messages,
+                (history_messages, replacement_state),
+            )
     # Sticky form locks: a tool result that already entered an assembled
     # output in a projected (placeholder) form keeps that exact form even
     # when this round's derivation no longer selects it, so previously sent
     # prefix bytes stay stable for DeepSeek-style exact-match prefix caches.
     # The overlay rebuilds the projection from the original content with the
     # locked parameters, so the replayed bytes match what was sent before.
-    history_messages, replacement_state = apply_sticky_tool_result_replacements(
+    # The overlay memo rides on the assembled history list identity plus the
+    # lock-index object identity (the lock memo above reuses one object while
+    # the ledger only appends), so unchanged windows replay from cache and
+    # grown windows only project the appended tail.
+    history_messages, replacement_state = _sticky_overlay_memoized(
+        ("sticky_tool_result_replacements", session_id, tool_result_replacement_char_limit),
         history_messages,
+        overlay=apply_sticky_tool_result_replacements,
         projection_locks=projection_locks if projection_locks.has_mode(LOCK_MODE_REPLACEMENT) else None,
         session_id=session_id,
         state=replacement_state,
@@ -356,7 +917,7 @@ def assemble_conversation_context(
         # stale projection.
         memo_read_enabled = not replacement_state.get("stickyRestored")
         micro_memo_scope = (
-            *memo_scope,
+            session_id,
             micro_compact_keep_recent_groups,
             micro_compact_min_savings_tokens,
             tuple(micro_compact_tool_whitelist or ()),
@@ -381,8 +942,13 @@ def assemble_conversation_context(
                 memoized_micro,
             )
         history_messages, micro_state = memoized_micro
-    history_messages, micro_state = apply_sticky_micro_compact_projection(
+    history_messages, micro_state = _sticky_overlay_memoized(
+        (
+            "sticky_micro_compact_projection",
+            session_id,
+        ),
         history_messages,
+        overlay=apply_sticky_micro_compact_projection,
         projection_locks=projection_locks if projection_locks.has_mode(LOCK_MODE_MICRO_COMPACT) else None,
         session_id=session_id,
         state=micro_state,
@@ -399,7 +965,21 @@ def assemble_conversation_context(
             assistant_message_char_limit=AGENT_INBOX_ASSISTANT_MESSAGE_CHAR_LIMIT,
             projection_locks=projection_locks if projection_locks.has_mode(LOCK_MODE_AGENT_INBOX) else None,
         )
-    history_messages = _promote_leading_context_assistant_messages(history_messages)
+    # Leading context-seed promotion rebuilds every message dict; memoizing it
+    # keeps the post-promotion list identity-stable so the dynamic-context
+    # hash below can hit on unchanged rounds instead of re-hashing O(n).
+    promote_scope = ("promote_leading_context", session_id)
+    promote_entry = _ASSEMBLY_MEMO.entry(promote_scope)
+    if (
+        promote_entry is not None
+        and len(history_messages) == len(promote_entry.items)
+        and all(history_messages[i] is kept for i, kept in enumerate(promote_entry.items))
+    ):
+        history_messages = promote_entry.value
+    else:
+        pre_promote_messages = history_messages
+        history_messages = _promote_leading_context_assistant_messages(history_messages)
+        _ASSEMBLY_MEMO.store(promote_scope, pre_promote_messages, history_messages)
     included_event_ids = _included_event_ids(
         events,
         recent_start_index=recent_start_index,
@@ -466,17 +1046,10 @@ def assemble_conversation_context(
                 cache_policy="dynamic",
             )
         )
-    memoized_dynamic_hash = _ASSEMBLY_MEMO.lookup(
-        ("dynamic_context_hash", *memo_scope),
+    memoized_dynamic_hash = _dynamic_context_hash_memoized(
         history_messages,
+        session_id=session_id,
     )
-    if memoized_dynamic_hash is _MISS:
-        memoized_dynamic_hash = _hash_messages(history_messages)
-        _ASSEMBLY_MEMO.store(
-            ("dynamic_context_hash", *memo_scope),
-            history_messages,
-            memoized_dynamic_hash,
-        )
     return ContextAssemblyResult(
         history_messages=history_messages,
         events=events,
@@ -948,23 +1521,113 @@ def _message_chars(messages: Iterable[dict[str, Any]]) -> int:
     return total
 
 
+def _message_hash_parts(message: dict[str, Any]) -> list[str]:
+    parts: list[str] = []
+    parts.append(str(message.get("role") or ""))
+    parts.append(str(message.get("content") or ""))
+    parts.append(str(message.get("tool_call_id") or message.get("toolCallId") or ""))
+    parts.append(str(message.get("metadata") or ""))
+    for tool in list(message.get("toolCalls") or message.get("tool_calls") or message.get("tools") or []):
+        if isinstance(tool, dict):
+            function_block = tool.get("function") if isinstance(tool.get("function"), dict) else {}
+            parts.append(str(tool.get("id") or tool.get("tool_call_id") or tool.get("toolCallId") or ""))
+            parts.append(str(tool.get("name") or tool.get("toolName") or ""))
+            parts.append(str(function_block.get("name") or ""))
+            parts.append(str(tool.get("arguments") or tool.get("args") or function_block.get("arguments") or ""))
+            parts.append(str(tool.get("status") or tool.get("semanticStatus") or ""))
+            parts.append(str(tool.get("result") or tool.get("resultPreview") or tool.get("error") or ""))
+    return parts
+
+
+def _hash_parts_text(messages: list[dict[str, Any]]) -> str:
+    parts: list[str] = []
+    for message in messages:
+        parts.extend(_message_hash_parts(message))
+    return "\n".join(parts)
+
+
 def _hash_messages(messages: Iterable[dict[str, Any]]) -> str:
-    parts = []
-    for message in list(messages or []):
-        parts.append(str(message.get("role") or ""))
-        parts.append(str(message.get("content") or ""))
-        parts.append(str(message.get("tool_call_id") or message.get("toolCallId") or ""))
-        parts.append(str(message.get("metadata") or ""))
-        for tool in list(message.get("toolCalls") or message.get("tool_calls") or message.get("tools") or []):
-            if isinstance(tool, dict):
-                function_block = tool.get("function") if isinstance(tool.get("function"), dict) else {}
-                parts.append(str(tool.get("id") or tool.get("tool_call_id") or tool.get("toolCallId") or ""))
-                parts.append(str(tool.get("name") or tool.get("toolName") or ""))
-                parts.append(str(function_block.get("name") or ""))
-                parts.append(str(tool.get("arguments") or tool.get("args") or function_block.get("arguments") or ""))
-                parts.append(str(tool.get("status") or tool.get("semanticStatus") or ""))
-                parts.append(str(tool.get("result") or tool.get("resultPreview") or tool.get("error") or ""))
-    return _hash_text("\n".join(parts))
+    return _hash_text(_hash_parts_text(list(messages or [])))
+
+
+# 追加前缀备忘录暂存的拼接文本上限（字符）：超过则只记函数身份、不记文本，
+# 追加路径退回全量重算，防止超大历史把 LRU 条目撑成内存长尾。
+_DYNAMIC_HASH_JOINED_CHAR_LIMIT = 512_000
+
+
+def _dynamic_context_hash_memoized(
+    messages: list[dict[str, Any]],
+    *,
+    session_id: str,
+) -> str:
+    """``dynamic_context_hash`` 的身份 + 追加前缀备忘录。
+
+    复用 ``_IdentityListMemo`` 的身份检查约定（``_ASSEMBLY_MEMO`` 同例）：
+
+    - 精确命中=逐元素 ``is`` 同一（原 lookup 语义）；
+    - 追加命中=新列表在共享前缀上逐元素 ``is`` 延伸：哈希输入文本是逐消息
+      部件的纯拼接，前缀部件不变，故 ``stored_joined + "\\n" + tail_joined``
+      与全量 join 逐字节相同，digest 字节等价由构造保证；条目强引用全部
+      消息对象，杜绝 id 复用碰撞；
+    - 对 monkeypatch 敏感：条目记录产出 digest 时的 ``_hash_text`` /
+      ``_hash_messages`` 函数身份，任一被替换即 miss 重算；
+    - 任何不匹配（缩短、重排、消息对象换新）都退回全量重算，只能拿重算
+      换重算。
+    """
+
+    items = list(messages or [])
+    scope = ("dynamic_context_hash", session_id)
+    cur_hash_fn = globals().get("_hash_text")
+    cur_messages_fn = globals().get("_hash_messages")
+    entry = _ASSEMBLY_MEMO.entry(scope)
+    if (
+        entry is not None
+        and cur_hash_fn is not None
+        and cur_messages_fn is not None
+        and entry.extra.get("hash_fn") is cur_hash_fn
+        and entry.extra.get("messages_fn") is cur_messages_fn
+    ):
+        stored = entry.items
+        if len(items) == len(stored) and all(
+            items[index] is kept for index, kept in enumerate(stored)
+        ):
+            return entry.value
+        stored_joined = entry.extra.get("joined")
+        if (
+            len(items) > len(stored)
+            and isinstance(stored_joined, str)
+            and all(items[index] is kept for index, kept in enumerate(stored))
+        ):
+            tail_parts: list[str] = []
+            for message in items[len(stored):]:
+                tail_parts.extend(_message_hash_parts(message))
+            tail_text = "\n".join(tail_parts)
+            joined = f"{stored_joined}\n{tail_text}" if stored_joined else tail_text
+            digest = cur_hash_fn(joined)
+            _ASSEMBLY_MEMO.store(
+                scope,
+                items,
+                digest,
+                extra={
+                    "joined": joined if len(joined) <= _DYNAMIC_HASH_JOINED_CHAR_LIMIT else None,
+                    "hash_fn": cur_hash_fn,
+                    "messages_fn": cur_messages_fn,
+                },
+            )
+            return digest
+    joined = _hash_parts_text(items)
+    digest = _hash_text(joined) if cur_hash_fn is not None else _hash_messages(items)
+    _ASSEMBLY_MEMO.store(
+        scope,
+        items,
+        digest,
+        extra={
+            "joined": joined if len(joined) <= _DYNAMIC_HASH_JOINED_CHAR_LIMIT else None,
+            "hash_fn": cur_hash_fn,
+            "messages_fn": cur_messages_fn,
+        },
+    )
+    return digest
 
 
 def _hash_text(text: str) -> str:

@@ -16,6 +16,7 @@ import {
   companionUnrepeatedSpeech,
 } from "./companionSpokenDisplay";
 import { chronologicalConversationMessages } from "./conversationMessageOrder";
+import { projectGuidanceWorkSegments } from "./conversationGuidanceSegments";
 import { projectTimelineProcessMessages } from "./timelineMessageProcessProjection";
 
 export type AgentMessageTimelineProjectionInput = {
@@ -301,7 +302,8 @@ dedupeSettledUserSubmissions(dedupeAssistantTurnOverlays([
       ...canonicalTimeline,
       ...(canonicalActiveTurn ? [canonicalActiveTurn] : []),
     ], canonicalActiveTurn)),  );
-  const orderedMessages = chronologicalConversationMessages(folded).filter(hasVisibleTurnData);
+  const ordered = chronologicalConversationMessages(folded);
+  const orderedMessages = (companionMode ? ordered : projectGuidanceWorkSegments(ordered)).filter(hasVisibleTurnData);
   const messages = companionMode
     ? suppressCompanionRestatedFollowups(
       suppressSupersededCompanionInFlightMessages(orderedMessages),

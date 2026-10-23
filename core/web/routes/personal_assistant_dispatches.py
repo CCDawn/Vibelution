@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.web.services import (
+    personal_assistant_dispatches_service as dispatches_service,
+)
 from core.web.services.agent_directory_service import (
     AgentDirectoryError,
     AgentStateConflictError,
 )
-from core.web.services import personal_assistant_dispatches_service as dispatches_service
 from core.web.services.personal_assistant_dispatches_service import (
     DEFAULT_LIMIT,
     MAX_LIMIT,
@@ -18,6 +22,11 @@ from core.web.services.personal_assistant_dispatches_service import (
 )
 
 router = APIRouter(tags=["personal-assistant"])
+
+ReportedTaskStatus = Literal["running", "blocked", "completed", "failed"]
+DispatchTaskStatus = Literal[
+    "awaiting_result", "running", "blocked", "awaiting_confirmation", "completed", "failed", "cancelled"
+]
 
 
 class DispatchReceipt(BaseModel):
@@ -29,6 +38,8 @@ class DispatchReceipt(BaseModel):
     summary: str = ""
     status: str = Field(default="pending", description="pending | consumed | revoked")
     receivedAt: str = ""
+    taskStatus: ReportedTaskStatus | None = None
+    evidenceRefs: list[str] = Field(default_factory=list)
 
 
 class DispatchRecord(BaseModel):
@@ -39,8 +50,10 @@ class DispatchRecord(BaseModel):
     targetAgentId: str = ""
     targetAgentName: str = ""
     targetSessionId: str = ""
+    sourceSessionId: str = ""
     summary: str = ""
     deliveryStatus: str = Field(default="pending", description="pending | consumed | revoked")
+    taskStatus: DispatchTaskStatus = "awaiting_result"
     sentAt: str = ""
     receipts: list[DispatchReceipt] = []
 

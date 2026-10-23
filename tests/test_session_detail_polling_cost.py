@@ -7,6 +7,7 @@ from core.web.services import session_service
 
 def _install_detail_probe(monkeypatch: pytest.MonkeyPatch, *, running: bool):
     calls: dict[str, list[object]] = {
+        "lookup": [],
         "loads": [],
         "sync": [],
         "reconcile": [],
@@ -19,7 +20,10 @@ def _install_detail_probe(monkeypatch: pytest.MonkeyPatch, *, running: bool):
         "last_turn_status": "running" if running else "ready",
     }
 
-    monkeypatch.setattr(session_service, "_agent_lookup_for_conversations", lambda: {})
+    monkeypatch.setattr(
+        session_service, "_agent_lookup_for_conversations",
+        lambda **kwargs: calls["lookup"].append(kwargs) or {},
+    )
     monkeypatch.setattr(
         session_service,
         "load_session_chat_state",
@@ -65,6 +69,23 @@ def test_light_running_poll_skips_directory_write_and_repair_reload(monkeypatch:
         {"active_turn_id": "turn-poll", "reason": "detail_loaded_after_restart"},
     )]
     assert calls["target"][0][1]["repair"] is False
+    assert calls["lookup"] == [{"session_id": "session-poll", "agent_ids": ("agent-poll",)}]
+    assert calls["target"][0][1]["agent_lookup_is_partial"] is True
+
+
+@pytest.mark.parametrize("row, expected", [
+    ({"agent_id": " agent-a ", "agentId": "agent-b"}, {"session_id": "session-poll", "agent_ids": ("agent-a", "agent-b")}),
+    ({"agent_id": "agent-a", "agentId": "agent-a"}, {"session_id": "session-poll", "agent_ids": ("agent-a",)}),
+    ({}, {}),
+])
+def test_detail_scopes_bound_lookup_and_preserves_unbound_fallback(monkeypatch, row, expected):
+    calls = _install_detail_probe(monkeypatch, running=True)
+    monkeypatch.setattr(session_service, "load_session_chat_state", lambda *_args: {
+        "conversation_id": "session-poll", **row,
+    })
+    session_service.get_session_detail("session-poll", include_secondary=False)
+    assert calls["lookup"] == [expected]
+    assert calls["target"][0][1]["agent_lookup_is_partial"] is bool(expected)
 
 
 def test_light_idle_poll_keeps_reconcile_reload_and_repair(monkeypatch: pytest.MonkeyPatch):

@@ -596,7 +596,8 @@ export type ActionCommand =
   | "archive_run"
   | "retry_program_handoff"
   | "record_program_review"
-  | "create_formal_revision";
+  | "create_formal_revision"
+  | "create_full_experiment_run";
 
 export type ActionPayloadByCommand = {
   create_stage_one_run: { questionId: string };
@@ -623,6 +624,7 @@ export type ActionPayloadByCommand = {
   retry_program_handoff: { runId: string; deliveryArtifactRef: string | null };
   record_program_review: { questionId: string; outputRunId: string };
   create_formal_revision: { runId: string; outputRecordId: string };
+  create_full_experiment_run: { questionId: string; sourceRunId: string };
 };
 
 export type ProgramHumanGateKey =

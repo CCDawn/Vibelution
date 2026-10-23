@@ -852,6 +852,16 @@ def test_lightweight_select_returns_transcript_free_handoff(tmp_path, monkeypatc
     for turn_number in range(1, 4):
         _append_window_test_turn(tmp_path, "session-live", turn_number)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    agent = agent_directory_service.ensure_agent_for_session("session-live", display_name="真实会话")
+
+    def unexpected_history_projection(*args, **kwargs):
+        pytest.fail("A transcript-free select must not project history or load a preview")
+
+    from core.web.services.session import projection
+
+    monkeypatch.setattr(session_service, "_session_ledger_visible_messages", unexpected_history_projection)
+    monkeypatch.setattr(projection, "_load_lightweight_conversation_preview", unexpected_history_projection)
 
     response = client.post(
         "/api/sessions/session-live/select",
@@ -862,10 +872,177 @@ def test_lightweight_select_returns_transcript_free_handoff(tmp_path, monkeypatc
     payload = response.json()
     assert payload["id"] == "session-live"
     assert payload["selectedLightweight"] is True
+    assert payload["agentId"] == agent["agentId"]
+    assert payload["ledgerSeq"] > 0
     assert payload["messages"] == []
     assert "messageWindow" not in payload
     # The handoff must not carry any transcript payload in another field.
     assert "窗口回答" not in json.dumps(payload)
+
+
+@pytest.mark.parametrize("before_index, expected_turns", [(None, [2, 3]), (7, [1])])
+def test_session_window_enriches_only_returned_turns(tmp_path, monkeypatch, before_index, expected_turns):
+    from core.chat import file_change_ledger
+
+    _seed_chat_state(tmp_path, task_status="done")
+    for turn_number in range(1, 4):
+        _append_window_test_turn(tmp_path, "session-live", turn_number)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    file_reads = []
+    header_reads = []
+
+    def file_changes(project_root, session_id, turn_id):
+        file_reads.append(turn_id)
+        return [{"path": f"{turn_id}.py", "status": "modified"}]
+
+    def turn_header(session_id, turn_id, **kwargs):
+        header_reads.append(turn_id)
+        return {"turnState": "completed", "turnActiveMs": 123}
+
+    monkeypatch.setattr(file_change_ledger, "turn_file_changes", file_changes)
+    monkeypatch.setattr(session_service, "_assistant_turn_header_fields", turn_header)
+    messages, window, stats = session_service._session_detail_messages_with_window(
+        "session-live",
+        message_limit=4 if before_index is None else 2,
+        before_message_index=before_index,
+        transcript_scope="window",
+    )
+
+    expected_ids = [f"turn-window-{number}" for number in expected_turns]
+    assert file_reads == expected_ids
+    assert header_reads == expected_ids
+    assert window["hasEarlier"] is True
+    assert len(stats) > len(messages)
+    for message in messages:
+        if message["role"] == "assistant":
+            assert message["metadata"]["changedFiles"] == [
+                {"path": f"{message['turnId']}.py", "status": "modified"}
+            ]
+            assert message["turnActiveMs"] == 123
+
+
+@pytest.mark.parametrize("with_live", [False, True])
+@pytest.mark.parametrize("compacted_tokens", [0, 1234])
+def test_session_window_statistics_match_full_normalization(tmp_path, monkeypatch, with_live, compacted_tokens):
+    from core.chat import file_change_ledger
+    from core.web.services.session import projection
+
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_now_timestamp", lambda: "2026-10-22T04:02:00Z")
+    append_conversation_event(
+        tmp_path, "session-live", "turn-1", EVENT_ASSISTANT_ITEM_COMMITTED,
+        status="completed",
+        payload={
+            "kind": "tool_call", "itemId": "tool-stat", "toolName": "rg",
+            "summary": "search result", "input": "query", "output": "found", "revision": 1,
+        },
+    )
+    usage = {
+        "source": "provider_usage", "inputTokens": 8000, "outputTokens": 400,
+        "cachedInputTokens": 6000, "cacheUsageObserved": True,
+        "recordedAt": "2026-10-22T04:00:00Z",
+    }
+    raw = [
+        {"role": "user", "content": "question", "turnId": "turn-1"},
+        {"role": "assistant", "content": "hidden", "metadata": {"kind": "checkpoint"}},
+        {"role": "assistant", "content": "first", "turnId": "turn-1"},
+        {"role": "assistant", "content": "final", "turnId": "turn-1", "metadata": {"llmUsage": usage}},
+        {"role": "user", "content": "next question", "turnId": "turn-2"},
+        {"role": "assistant", "content": "partial", "turnId": "turn-2", "streaming": True,
+         "metadata": {"turnId": "turn-2", "kind": "journal_assistant_partial"}},
+    ]
+    live = {
+        "id": "live-message", "role": "assistant", "turnId": "turn-2", "status": "running",
+        "turnItems": [{"type": "agent_message", "text": "latest partial", "phase": "final_answer"}],
+        "metadata": {"turnId": "turn-2", "llmUsage": usage},
+    } if with_live else None
+    monkeypatch.setattr(session_service, "_ledger_visible_messages_for_session", lambda _: raw)
+    monkeypatch.setattr(session_service, "_build_live_output_message", lambda _: live)
+    monkeypatch.setattr(file_change_ledger, "turn_file_changes", lambda *args: [{"path": "old.py"}])
+    monkeypatch.setattr(
+        projection, "_session_compaction_tokens",
+        lambda *args: (compacted_tokens, "2026-10-22T04:01:00Z" if compacted_tokens else ""),
+    )
+    baseline = session_service._normalize_messages(
+        "session-live", raw, transcript_scope="none", include_timeline=False,
+    )
+    if live is not None:
+        baseline = session_service._without_live_turn_ledger_partials(baseline, live) + [live]
+    _, _, stats = session_service._session_detail_messages_with_window("session-live", message_limit=2)
+    conversation = {"id": "session-live"}
+    expected = session_service._session_runtime_metrics(conversation, baseline)
+
+    assert session_service._session_runtime_metrics(conversation, stats) == expected
+    assert expected["contextUsage"]["userMessageCount"] == 2
+    assert expected["contextUsage"]["assistantMessageCount"] == 2
+    assert expected["contextUsage"]["toolCallCount"] > 0
+    assert expected["llmUsage"]["inputTokens"] == 8000
+    assert expected["contextUsage"]["used"] == (compacted_tokens or 8400)
+
+
+def test_session_window_reuses_one_active_branch_for_all_turns(tmp_path, monkeypatch):
+    from core.chat import turn_journal
+
+    _seed_chat_state(tmp_path, task_status="done")
+    for number in range(1, 9):
+        _append_window_test_turn(tmp_path, "session-live", number)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    raw = session_service._ledger_visible_messages_for_session("session-live")
+    # Isolate the two detail/stat normalizations from replay, timeline and live
+    # projections, which have their own legitimate branch consumers.
+    monkeypatch.setattr(session_service, "_ledger_visible_messages_for_session", lambda _: raw)
+    monkeypatch.setattr(session_service, "_assistant_timeline_events_by_turn", lambda _: {})
+    monkeypatch.setattr(session_service, "_build_live_output_message", lambda _: None)
+    monkeypatch.setattr(session_service, "_assistant_turn_header_fields", lambda *a, **k: {})
+    calls = []
+    build_tree = turn_journal.build_journal_event_tree
+
+    def counted_tree(events):
+        calls.append(1)
+        return build_tree(events)
+
+    monkeypatch.setattr(turn_journal, "build_journal_event_tree", counted_tree)
+    messages, _, stats = session_service._session_detail_messages_with_window(
+        "session-live", message_limit=4, transcript_scope="window",
+    )
+
+    assert len(stats) > len(messages)
+    assert len(calls) == 1
+
+
+def test_session_normalization_reloads_projection_after_journal_append(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    raw = [{"role": "assistant", "content": "fallback", "turnId": "turn-refresh"}]
+
+    def normalize():
+        return session_service._normalize_messages(
+            "session-refresh", raw, transcript_scope="none", include_timeline=False,
+            include_display_metadata=False,
+        )
+
+    before = normalize()
+    append_conversation_event(
+        tmp_path, "session-refresh", "turn-refresh", EVENT_ASSISTANT_ITEM_COMMITTED,
+        payload={"kind": "assistant_message", "itemId": "fresh", "text": "committed"},
+    )
+    after = normalize()
+    assert _visible_conversation_message_text(before[0]) == "fallback"
+    assert _visible_conversation_message_text(after[0]) == "committed"
+    append_conversation_event(
+        tmp_path, "session-refresh", "turn-refresh", "branch_rebase",
+        payload={"operation": "head_select", "fromEventId": ""},
+    )
+    assert _visible_conversation_message_text(normalize()[0]) == "fallback"
+
+
+def test_session_normalization_rejects_cross_session_projection():
+    from core.web.services.session import projection
+
+    with pytest.raises(ValueError, match="session"):
+        session_service._normalize_messages(
+            "other-session", [], journal_projection=projection._SessionJournalProjection("session"),
+        )
 
 
 def test_session_detail_snapshot_publish_uses_windowed_detail_by_default(monkeypatch):

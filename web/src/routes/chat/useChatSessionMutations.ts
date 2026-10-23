@@ -23,6 +23,9 @@ import type { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import type { TranslationKey } from "../../i18n/dictionaryTypes";
 import type { ConversationForkScope } from "../../components/conversation/conversationViewTypes";
 import type { ChatRouteNavigateOptions } from "./useChatRouteSelection";
+import { describeUncertainChatWrite, refreshChatInBackground, useChatScopedMutationPending } from "./useChatScopedMutationPending";
+
+const SESSION_ARCHIVE_MUTATION_KEY = ["chat", "session-archive-write"] as const;
 
 export type ChatSessionMutationsInput = {
   queryClient: QueryClient;
@@ -55,9 +58,12 @@ export function useChatSessionMutations({
   syncSessionDetail,
   openSession,
 }: ChatSessionMutationsInput) {
+  const archivePending = useChatScopedMutationPending(SESSION_ARCHIVE_MUTATION_KEY, "sessionId");
   // Session-level archive (ZCode-style metadata flip). Optimistic cache update
   // keeps the default list clean immediately; the archived listing refetches.
   const sessionArchiveMutation = useMutation({
+    mutationKey: SESSION_ARCHIVE_MUTATION_KEY,
+    retry: false,
     mutationFn: async (payload: { sessionId: string; archive: boolean }) => (
       payload.archive
         ? archiveChatSession(payload.sessionId)
@@ -113,24 +119,24 @@ export function useChatSessionMutations({
       context?.telemetry?.failed(error, { sessionId: variables.sessionId });
       setSessionComposerErrors((current) => ({
         ...current,
-        [variables.sessionId]: describeError(
+        [variables.sessionId]: describeUncertainChatWrite(error, lang, describeError(
           error,
           variables.archive
             ? lang === "zh" ? "归档会话失败" : "Failed to archive session"
             : lang === "zh" ? "取消归档失败" : "Failed to unarchive session",
-        ),
+        )),
       }));
     },
-    onSettled: async (_result, _error, variables) => {
+    onSettled: (_result, _error, variables) => {
       // Read back canonical detail and both directories after success or
       // failure; optimistic summaries cannot own composer admission flags.
-      await Promise.all([
+      refreshChatInBackground(() => Promise.all([
         chatWorkspaceCache.afterSessionChanged({ sessionId: variables.sessionId }),
         queryClient.invalidateQueries({ queryKey: queryKeys.sessionArchive() }),
         queryClient.invalidateQueries({ queryKey: ["sessions", "finance"] }),
         queryClient.invalidateQueries({ queryKey: ["sessions", "finance-archived"] }),
         queryClient.invalidateQueries({ queryKey: queryKeys.financialAssistants() }),
-      ]);
+      ]));
     },
   });
   const pinSessionMutation = useMutation({
@@ -258,5 +264,8 @@ export function useChatSessionMutations({
     [activeSessionId, lang, openSession, queryClient, setSessionComposerErrors, syncSessionDetail, t],
   );
 
-  return { sessionArchiveMutation, pinSessionMutation, renameAgentMutation, handleForkSessionFromNode };
+  return {
+    sessionArchiveMutation: { ...sessionArchiveMutation, ...archivePending },
+    pinSessionMutation, renameAgentMutation, handleForkSessionFromNode,
+  };
 }

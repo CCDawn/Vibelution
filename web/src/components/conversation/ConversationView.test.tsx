@@ -38,6 +38,7 @@ import conversationInlineMarkdownSource from "./conversationInlineMarkdown.tsx?r
 import conversationViewTypesSource from "./conversationViewTypes.ts?raw";
 import chatConversationSurfaceModelSource from "../../routes/chat/useChatConversationSurfaceModel.tsx?raw";
 import { ConversationView } from "./ConversationView";
+import { createConversationCodexSurface, type ConversationCodexSurfaceDeps } from "./conversationCodexSurface";
 import type { ConversationProcessDisplayMode } from "./conversationViewTypes";
 import { shouldShowNextStateSignalInConversation } from "./conversationNextStateSignal";
 import { isAgentInboxMessage } from "./conversationMessagePredicates";
@@ -355,6 +356,58 @@ describe("ConversationView Codex-like transcript adapter integration", () => {
 });
 
 describe("ConversationView failed-turn error presentation", () => {
+  const iterationStopNotice = "本轮已达执行上限，上下文已压缩，发送“继续”可接着处理。";
+  const iterationStopFields = {
+    reasonCode: "iteration_limit_reached",
+    reasonSummary: "本轮迭代次数已达上限，压缩完成后主动收束",
+    reasonDetail: "本轮已迭代 57 次；上下文压缩已成功完成（223016 → 156052 tokens）。",
+    providerErrorMessage: "本轮迭代次数已达上限，压缩完成后主动收束",
+    errorType: "runtime_error",
+    traceId: "1cc13d294d03",
+  };
+  function expectIterationStopNotice(html: string) {
+    expect(html.split(iterationStopNotice)).toHaveLength(2);
+    expect(html).not.toContain("请求错误");
+    expect(html).not.toContain("运行时错误");
+    expect(html).not.toContain("网页工作台这一轮执行失败");
+    expect(html).not.toContain("上游:");
+    expect(html).toContain("156052 tokens");
+    expect(html).toContain("1cc13d294d03");
+    expect(html).toContain("<details");
+    expect(html).not.toMatch(/<details[^>]*\sopen(?:=|\s|>)/);
+  }
+
+  it("renders an iteration-limit current banner as one resumable notice", () => {
+    const html = renderConversation([{ id: "stop-user", role: "user", content: "继续分析", timestamp: "2026-10-23T05:26:28Z" }], {
+      turnError: { ...iterationStopFields, message: "网页工作台这一轮执行失败。", recoverable: true, timestamp: "2026-10-23T05:35:53Z", turnId: "turn-1" },
+    });
+    expectIterationStopNotice(html);
+  });
+
+  it("renders an existing persisted iteration stop without the old runtime-error chip", () => {
+    expectIterationStopNotice(renderConversation([failedTurnMessageFixture(iterationStopFields)]));
+  });
+
+  it("keeps the canonical iteration-stop cell unfinished while presenting a concise notice", () => {
+    const surface = createConversationCodexSurface({
+      lang: "zh",
+      renderResponseText: (text: string) => <span>{text}</span>,
+    } as ConversationCodexSurfaceDeps);
+    const html = renderToStaticMarkup(surface.renderCodexTranscriptCell(failedTurnMessageFixture(iterationStopFields), {
+      id: "iteration-stop-cell",
+      messageId: "assistant-error-1",
+      kind: "error_notice",
+      status: "failed",
+      tone: "error",
+      title: "请求错误",
+      summary: "网页工作台这一轮执行失败。",
+      diagnosticSummary: iterationStopFields,
+      terminal: true,
+    }));
+    expectIterationStopNotice(html);
+    expect(html).toContain('data-codex-transcript-cell-status="failed"');
+  });
+
   function failedTurnMessageFixture(metadata: Record<string, unknown>) {
     return {
       id: "assistant-error-1",
@@ -1193,7 +1246,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(conversationViewSource).not.toContain("nextVisibleMessageLimit");
     // Trailing in-flight rows leave the virtual window as the live-tail block.
     expect(conversationViewSource).toContain("const timelineLiveTailStartIndex = useMemo");
-    expect(conversationViewSource).toContain("!assistantTurnIsStreaming(message) && !assistantTurnIsInFlight(message)");
+    expect(conversationViewSource).toContain("conversationLiveTailStartIndex(activeTimelineMessages)");
     expect(conversationViewSource).toContain("timelineLiveTailMessages.length");
     expect(conversationViewSource).toContain('data-conversation-virtual-host="1"');
     // Follow/anchor semantics keep the production contracts.
@@ -2006,7 +2059,51 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(html).not.toContain("已执行");
     expect(html.match(/aria-label="Edit and resend"/g)?.length).toBe(1);
     expect(html).toContain('data-vui="chip"');
-  });  it("renders user image attachments and composer image chips", () => {
+  });
+
+  it.each([
+    ["pending", undefined, "等待纳入"],
+    ["drained", 30, "已纳入"],
+    ["unconfirmed", undefined, "已接收"],
+  ])("renders the durable guidance state %s without claiming model execution", (state, consumed, label) => {
+    const html = renderConversation([{
+      id: "guide-state", role: "user", content: "检查并行操作",
+      timestamp: "2026-10-22T05:28:00Z",
+      metadata: {
+        kind: "user_guidance", turnId: "turn-state", guidanceState: state,
+        guidanceSequence: 20, guidanceConsumedSequence: consumed,
+      },
+    }]);
+    expect(html).toContain(label);
+    expect(html).toContain(`data-conversation-guidance-status="${state === "unconfirmed" ? "received" : state}"`);
+    expect(html).not.toContain("已执行");
+  });
+
+  it("renders completed work around guidance in the same order as the turn items", () => {
+    const html = renderConversation([
+      {
+        id: "ordered-answer", role: "assistant", turnId: "ordered-turn", status: "completed",
+        timestamp: "2026-10-22T05:30:00Z",
+        ...{ turnState: "completed", turnActiveMs: 90000 },
+        turnItems: [
+          { version: 3, id: "before", itemId: "before", type: "agent_message", sessionId: "ordered-session", turnId: "ordered-turn", channel: "commentary", text: "ORDER_BEFORE_GUIDE", status: "completed", revision: 1, sequence: 10, terminal: true },
+          { version: 3, id: "after", itemId: "after", type: "agent_message", sessionId: "ordered-session", turnId: "ordered-turn", channel: "answer", phase: "final_answer", text: "ORDER_AFTER_GUIDE", status: "completed", revision: 1, sequence: 40, terminal: true },
+        ],
+      },
+      {
+        id: "ordered-guide", role: "user", content: "ORDER_GUIDANCE_INPUT",
+        timestamp: "2026-10-22T05:28:00Z",
+        metadata: { kind: "user_guidance", turnId: "ordered-turn", guidanceEventId: "ordered-guide", guidanceSequence: 20, guidanceConsumedSequence: 30, guidanceState: "drained" },
+      },
+    ]);
+    expect(html.indexOf("ORDER_BEFORE_GUIDE")).toBeGreaterThan(-1);
+    expect(html.indexOf("ORDER_BEFORE_GUIDE")).toBeLessThan(html.indexOf("ORDER_GUIDANCE_INPUT"));
+    expect(html.indexOf("ORDER_GUIDANCE_INPUT")).toBeLessThan(html.indexOf("ORDER_AFTER_GUIDE"));
+    expect(html).toContain("已纳入");
+    expect(html.match(/已工作/g)).toHaveLength(1);
+  });
+
+  it("renders user image attachments and composer image chips", () => {
     const userMessage: ConversationMessage = {
       id: "message-user",
       role: "user",
@@ -2616,7 +2713,7 @@ describe("ConversationView historical failed turn retry", () => {
   it("keeps the retry action wired to the regenerate handler with the busy/pending gates", () => {
     expect(conversationTimelineRowsSource).toContain("const canRetryFailedTurnMessage = message.role === \"assistant\"");
     expect(conversationTimelineRowsSource).toContain(
-      "onClick={() => onRegenerateAssistantMessage?.(message)}",
+      "onClick={() => onRegenerateAssistantMessage?.(sourceMessage)}",
     );
     expect(conversationTimelineRowsSource).toContain("isDisabled={regenerateDisabled}\n                              isPending={regeneratePending}");
     expect(conversationTimelineRowsSource).not.toContain("isDisabled={regenerateDisabled}\n                              isPending={regeneratePending}\n                              title={t(\"regenerateAnswer\")}");

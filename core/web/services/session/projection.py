@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -49,6 +50,51 @@ class _SessionListBuildResult:
     phase_timings: Mapping[str, Any] = field(default_factory=dict)
     summary_projection_ms: int | None = None
     published_signature: tuple[Any, ...] | None = None
+
+
+@dataclass
+class _SessionJournalProjection:
+    """One read's derived active paths; never retained across detail requests."""
+
+    session_id: str
+    _items_events_by_turn: dict[str, list[Any]] | None = field(default=None, init=False)
+    _order_events_by_turn: dict[str, list[Any]] = field(default_factory=dict, init=False)
+
+    def for_turn(self, session_id: str, turn_id: str) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+        if session_id != self.session_id:
+            raise ValueError("Journal projection belongs to a different session")
+        from core.chat.turn_journal import fold_active_events, _session_turn_items_from_active_events
+        from .turn_steer import _display_item_order_provenance_from_active_events, _sequence
+
+        if self._items_events_by_turn is None:
+            events = _service()._load_session_conversation_events_cached(str(session_id or "").strip())
+            items_order = sorted(events, key=lambda event: (event.sequence, event.event_id))
+            active_items = fold_active_events(items_order)
+            # Legacy entry points differ only on tied sequence values. Preserve
+            # stable provenance order rather than silently changing old logs.
+            order_order = (
+                items_order if len({event.sequence for event in events}) == len(events)
+                else sorted(events, key=lambda event: _sequence(getattr(event, "sequence", 0)))
+            )
+            active_order = active_items if all(
+                left is right for left, right in zip(items_order, order_order)
+            ) else fold_active_events(order_order)
+            self._items_events_by_turn = {}
+            for event in active_items:
+                self._items_events_by_turn.setdefault(event.turn_id, []).append(event)
+            for event in active_order:
+                self._order_events_by_turn.setdefault(str(event.turn_id or "").strip(), []).append(event)
+        items = _session_turn_items_from_active_events(self._items_events_by_turn.get(turn_id, []), turn_id=turn_id)
+        # Retain event slices only, never message-owned projected dictionaries.
+        # The canonical projector creates scalar fields afresh; detach its two
+        # nested payload fields from the shared journal event objects as well.
+        for item in items:
+            for key in ("metadata", "diagnosticSummary"):
+                if key in item:
+                    item[key] = deepcopy(item[key])
+        return items, _display_item_order_provenance_from_active_events(
+            self._order_events_by_turn.get(turn_id, []), turn_id,
+        )
 
 
 def list_sessions(
@@ -366,7 +412,6 @@ def get_session_detail(
     # Exact deep links are allowed to recover a real, non-deleted session
     # workspace.  A missing row must not make the client silently switch to an
     # unrelated active conversation.
-    agent_by_id = s._agent_lookup_for_conversations()
     conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
     if conversation is None:
         s._ensure_session_conversation_record(
@@ -374,6 +419,22 @@ def get_session_detail(
             source="session.detail",
         )
         conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
+    bound_agent_ids = tuple(dict.fromkeys(
+        str((conversation or {}).get(key) or "").strip()
+        for key in ("agent_id", "agentId")
+        if str((conversation or {}).get(key) or "").strip()
+    ))
+    # A bound detail needs its declared identities and every competing direct
+    # binding, not avatar/policy projections for the entire Agent directory.
+    # Unbound legacy/recovery reads retain the complete lookup.
+    agent_by_id = (
+        s._agent_lookup_for_conversations(
+            session_id=normalized_session_id,
+            agent_ids=bound_agent_ids,
+        )
+        if bound_agent_ids
+        else s._agent_lookup_for_conversations()
+    )
     if conversation is None:
         fallback = s._agent_directory_session_stub_for_id(normalized_session_id, agent_by_id=agent_by_id)
         if fallback is None:
@@ -412,6 +473,7 @@ def get_session_detail(
         repair=not light_running_poll,
         persist_session_row=True,
         agent_by_id=agent_by_id,
+        agent_lookup_is_partial=bool(bound_agent_ids),
         lightweight=window_requested,
     )
     if target is not None:
@@ -1483,14 +1545,21 @@ def _normalize_messages(
     source_start_index: int = 1,
     transcript_scope: Any = "all",
     include_timeline: bool = True,
+    include_display_metadata: bool = True,
+    journal_projection: _SessionJournalProjection | None = None,
 ) -> list[dict[str, Any]]:
     s = _service()
+    if journal_projection is None:
+        journal_projection = _SessionJournalProjection(conversation_id)
+    elif journal_projection.session_id != conversation_id:
+        raise ValueError("Journal projection belongs to a different session")
     ledger_events_by_turn: dict[str, list[dict[str, Any]]] | None = None
     file_changes_by_turn: dict[str, list[dict[str, Any]]] | None = None
     raw_items = list(items or [])
     timeline_lang = s.get_web_language() if include_timeline else ""
     normalized_start_index = max(1, int(source_start_index or 1))
     normalized_transcript_scope = s._normalize_session_detail_transcript_scope(transcript_scope)
+    guidance_metadata: dict[str, dict[str, Any]] | None = None
     # Startup-recovery supersede marks (display-only): turns whose interrupted
     # partial was superseded by an auto-resume get metadata.recoverySuperseded
     # so the display layer can drop the stale partial. The journal keeps both
@@ -1683,6 +1752,7 @@ def _normalize_messages(
                     source="session_detail",
                     metadata=raw_metadata if isinstance(raw_metadata, dict) else {},
                     stage=raw.get("streamStage"),
+                    journal_projection=journal_projection,
                 )
                 if (
                     turn_items
@@ -1746,6 +1816,15 @@ def _normalize_messages(
         if references:
             entry["references"] = references
         metadata = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}
+        if role == "user" and metadata.get("kind") in {"user_guidance", "user_interrupt_guidance"}:
+            if guidance_metadata is None:
+                from .turn_steer import guidance_metadata_from_events
+
+                guidance_metadata = guidance_metadata_from_events(
+                    s._load_session_conversation_events_cached(conversation_id)
+                )
+            event_id = str(metadata.get("eventId") or "").strip()
+            metadata.update(guidance_metadata.get(event_id) or {})
         if role == "assistant" and turn_id:
             client_submission_id = client_submission_id_by_turn.get(turn_id, "")
             if client_submission_id:
@@ -1754,22 +1833,23 @@ def _normalize_messages(
             # ledger (read-only projection; never written here). Only turns
             # with ledgered changes gain the key, so sessions without
             # checkpoints keep byte-identical message metadata.
-            if file_changes_by_turn is None:
-                file_changes_by_turn = {}
-            if turn_id not in file_changes_by_turn:
-                try:
-                    from core.chat import file_change_ledger
+            if include_display_metadata:
+                if file_changes_by_turn is None:
+                    file_changes_by_turn = {}
+                if turn_id not in file_changes_by_turn:
+                    try:
+                        from core.chat import file_change_ledger
 
-                    file_changes_by_turn[turn_id] = file_change_ledger.turn_file_changes(
-                        s.PROJECT_ROOT,
-                        conversation_id,
-                        turn_id,
-                    )
-                except Exception:
-                    file_changes_by_turn[turn_id] = []
-            turn_changed_files = file_changes_by_turn.get(turn_id) or []
-            if turn_changed_files:
-                metadata["changedFiles"] = turn_changed_files
+                        file_changes_by_turn[turn_id] = file_change_ledger.turn_file_changes(
+                            s.PROJECT_ROOT,
+                            conversation_id,
+                            turn_id,
+                        )
+                    except Exception:
+                        file_changes_by_turn[turn_id] = []
+                turn_changed_files = file_changes_by_turn.get(turn_id) or []
+                if turn_changed_files:
+                    metadata["changedFiles"] = turn_changed_files
         if (
             role == "assistant"
             and turn_id
@@ -1794,6 +1874,7 @@ def _normalize_messages(
                     source="session_detail",
                     metadata=raw_metadata if isinstance(raw_metadata, dict) else {},
                     stage=raw.get("streamStage"),
+                    journal_projection=journal_projection,
                 )
             assistant_status = (
                 "running"
@@ -1821,14 +1902,15 @@ def _normalize_messages(
                 "metadata": dict(metadata) if isinstance(metadata, dict) else {},
                 **({"usageStats": usage_stats} if usage_stats else {}),
             }
-            turn_header = s._assistant_turn_header_fields(
-                conversation_id,
-                turn_id,
-                streaming=bool(raw.get("streaming")),
-                fallback_status=assistant_status,
-            )
-            if turn_header:
-                entry.update(turn_header)
+            if include_display_metadata:
+                turn_header = s._assistant_turn_header_fields(
+                    conversation_id,
+                    turn_id,
+                    streaming=bool(raw.get("streaming")),
+                    fallback_status=assistant_status,
+                )
+                if turn_header:
+                    entry.update(turn_header)
         node_id = str(raw.get("nodeId") or "").strip()
         if node_id:
             entry["nodeId"] = node_id
@@ -2142,11 +2224,13 @@ def _session_detail_messages_with_window(
     raw_start = max(0, start_index - 1)
     raw_end = min(raw_message_count, end_index)
     raw_window = raw_messages[raw_start:raw_end]
+    journal_projection = _SessionJournalProjection(session_id)
     detail_messages = s._normalize_messages(
         session_id,
         raw_window,
         source_start_index=raw_start + 1,
         transcript_scope=normalized_transcript_scope,
+        journal_projection=journal_projection,
     )
     if live_message is not None and start_index <= total_messages <= end_index:
         detail_messages = s._without_live_turn_ledger_partials(detail_messages, live_message) + [live_message]
@@ -2156,6 +2240,10 @@ def _session_detail_messages_with_window(
         raw_messages,
         transcript_scope="none",
         include_timeline=False,
+        # Metrics still need canonical turn items, filtering and coalescing,
+        # but never historical file checkpoints or per-turn work headers.
+        include_display_metadata=False,
+        journal_projection=journal_projection,
     )
     if live_message is not None:
         stat_messages = s._without_live_turn_ledger_partials(stat_messages, live_message) + [live_message]
@@ -2642,6 +2730,7 @@ def _merge_live_reasoning_cells_into_turn_items(
     turn_id: str,
     message_id: str,
     source: str,
+    order_provenance: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], bool]:
     """Merge each feedback reasoning segment by stable identity, never as one turn blob."""
 
@@ -2669,6 +2758,7 @@ def _merge_live_reasoning_cells_into_turn_items(
             continue
         feedback_sequence = s._coerce_nonnegative_int(cell.get("sequence") or index)
         item_id = f"{s._session_turn_item_base_id(session_id, turn_id)}-reasoning-{feedback_sequence}"
+        item_id = str((order_provenance or {}).get(item_id, {}).get("itemId") or item_id)
         live_item["id"] = f"{item_id}:{s._coerce_nonnegative_int(live_item.get('revision'))}"
         live_item["itemId"] = item_id
         live_text = str(live_item.get("text") or live_item.get("summary") or "").strip()
@@ -2717,6 +2807,7 @@ def _build_session_turn_items_projection(
     source: str = "assistant_delta",
     metadata: Mapping[str, Any] | None = None,
     stage: Any = "",
+    journal_projection: _SessionJournalProjection | None = None,
 ) -> list[dict[str, Any]]:
     """Project SessionTurnItem v2 for a turn.
 
@@ -2725,6 +2816,8 @@ def _build_session_turn_items_projection(
     single UI source of truth for the committed body.
     """
     s = _service()
+    if journal_projection is not None and journal_projection.session_id != session_id:
+        raise ValueError("Journal projection belongs to a different session")
     normalized_metadata = dict(metadata or {})
     normalized_turn_id = str(
         turn_id
@@ -2771,11 +2864,24 @@ def _build_session_turn_items_projection(
             turn_id=normalized_turn_id,
         )
     # Require turn_id for journal projection so we never return other turns' items.
+    order_provenance: dict[str, dict[str, Any]] = {}
     if normalized_turn_id:
-        canonical_items = s.conversation_turn_items_from_events(
-            s._load_session_conversation_events_cached(str(session_id or "").strip()),
-            turn_id=normalized_turn_id,
-        )
+        from .turn_steer import display_item_order_provenance
+
+        if journal_projection is None:
+            journal_events = s._load_session_conversation_events_cached(str(session_id or "").strip())
+            order_provenance = display_item_order_provenance(journal_events, normalized_turn_id)
+            canonical_items = s.conversation_turn_items_from_events(journal_events, turn_id=normalized_turn_id)
+        else:
+            canonical_items, order_provenance = journal_projection.for_turn(session_id, normalized_turn_id)
+        response_origin = order_provenance.get("latest:agent_message")
+        if response_origin:
+            order_provenance[s._session_turn_agent_message_item_id(session_id, normalized_turn_id)] = response_origin
+            # Capture content is cumulative across requests. Only the current
+            # native response segment may inhabit its temporary display item.
+            if not done and source in {"assistant_delta", "session_live_overlay"}:
+                offset = s._coerce_nonnegative_int(response_origin.get("contentOffset"))
+                content = str(content or "")[offset:]
         if canonical_items:
             stamped = s._stamp_turn_items_message_id(canonical_items, normalized_message_id)
             stamped = _merge_live_tool_start_metadata_into_turn_items(
@@ -2793,6 +2899,7 @@ def _build_session_turn_items_projection(
                 turn_id=normalized_turn_id,
                 message_id=normalized_message_id,
                 source=source,
+                order_provenance=order_provenance,
             )
             merged = _merge_live_content_into_turn_items(
                 stamped,
@@ -2819,6 +2926,7 @@ def _build_session_turn_items_projection(
                 merged,
                 session_id=session_id,
                 turn_id=normalized_turn_id,
+                order_provenance=order_provenance,
             )
     if (
         str(normalized_metadata.get("kind") or "").strip() == "turn_error"
@@ -2836,6 +2944,7 @@ def _build_session_turn_items_projection(
             ],
             session_id=session_id,
             turn_id=normalized_turn_id,
+            order_provenance=order_provenance,
         )
     if not normalized_message_id:
         return []
@@ -2993,6 +3102,7 @@ def _build_session_turn_items_projection(
         items,
         session_id=session_id,
         turn_id=normalized_turn_id,
+        order_provenance=order_provenance,
     )
 
 
@@ -3001,6 +3111,7 @@ def _canonicalize_session_turn_items_for_protocol(
     *,
     session_id: str,
     turn_id: str,
+    order_provenance: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Emit the v3 SessionTurnItem algebra and discard v2 renderer aliases.
 
@@ -3048,6 +3159,11 @@ def _canonicalize_session_turn_items_for_protocol(
         item_id = str(raw.get("itemId") or raw.get("id") or "").strip()
         if not item_id:
             item_id = f"{s._session_turn_item_base_id(session_id, turn_id or 'turn')}-{index + 1}"
+        origin = (order_provenance or {}).get(item_id) or (order_provenance or {}).get(
+            f"call:{str(raw.get('callId') or '').strip()}"
+        )
+        if origin:
+            item_id = str(origin.get("itemId") or item_id)
         revision = max(0, int(raw.get("revision") or 0))
         text = s._sanitize_message_content(
             "assistant",
@@ -3068,6 +3184,8 @@ def _canonicalize_session_turn_items_for_protocol(
         }
         if raw_item_metadata:
             metadata = {**raw_item_metadata, **metadata}
+        if origin and int(origin.get("orderSequence") or 0) > 0:
+            metadata["orderSequence"] = int(origin["orderSequence"])
         item: dict[str, Any] = {
             "id": f"{item_id}:{revision}",
             "itemId": item_id,
@@ -5046,7 +5164,9 @@ def _ledger_visible_messages_for_session(session_id: str) -> list[dict[str, Any]
     if not events:
         return []
     messages, _active_leaf_id, _active_branch_id = s.visible_messages_with_branch_info(events)
-    return messages
+    from .turn_steer import restore_guidance_display_messages
+
+    return restore_guidance_display_messages(messages, events)
 
 
 def _session_branch_metadata(session_id: str) -> tuple[str, str]:
@@ -5285,17 +5405,27 @@ def _append_agent_directory_conversations(
     return result
 
 
-def _agent_lookup_for_conversations() -> dict[str, dict[str, Any]]:
+def _agent_lookup_for_conversations(
+    *,
+    session_id: str = "",
+    agent_ids: tuple[str, ...] | None = None,
+) -> dict[str, dict[str, Any]]:
     s = _service()
     s._sync_agent_directory_project_root()
-    state = s.agent_directory_service.load_state()
+    if session_id or agent_ids is not None:
+        agents = s.agent_directory_service.load_agent_records(
+            agent_ids=agent_ids or (),
+            direct_session_ids=(session_id,) if session_id else (),
+        )
+    else:
+        agents = s.agent_directory_service.load_state().get("agents") or []
     avatar_url_cache: dict[str, str] = {}
     return {
         str(item.get("agentId") or "").strip(): s._conversation_agent_from_state(
             item,
             avatar_url_cache=avatar_url_cache,
         )
-        for item in state.get("agents") or []
+        for item in agents
         if isinstance(item, dict) and str(item.get("agentId") or "").strip()
     }
 

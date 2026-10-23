@@ -15,6 +15,16 @@ function assistantTurn(turnItems: SessionTurnItem[]): ConversationMessage {
 }
 
 describe("conversationMessageToAgentMessage", () => {
+  it("keeps operation order at creation while a prior item receives a later revision", () => {
+    const base = { version: 3, sessionId: "session-1", turnId: "turn-1", type: "reasoning", status: "completed", revision: 1 } as const;
+    const result = conversationMessageToAgentMessage(assistantTurn([
+      { ...base, id: "later", itemId: "later", sequence: 20, text: "later" },
+      { ...base, id: "earlier-r2", itemId: "earlier", revision: 2, sequence: 40, metadata: { orderSequence: 10 }, text: "updated" },
+    ]));
+    expect(result.parts.map((part) => part.id)).toEqual(["earlier-r2", "later"]);
+    expect(result.parts.map((part) => part.type === "thought" && part.sequence)).toEqual([10, 20]);
+  });
+
   it("skips malformed persisted reasoning without losing the reachable assistant answer", () => {
     const incompleteReasoning = {
       id: "reasoning-1",

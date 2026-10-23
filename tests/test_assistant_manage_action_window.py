@@ -72,14 +72,59 @@ def test_tier_table_is_closed_and_conservative():
         policy.ASSISTANT_MANAGE_HIGH_RISK_ACTIONS
         == policy.ASSISTANT_MANAGE_ACTIONS - policy.ASSISTANT_MANAGE_LOW_RISK_ACTIONS
     )
-    # Explicit red-line actions can never sit in the low-risk tier.
+    # Explicit red-line actions can never sit in the low-risk tier. Managed
+    # writes (team_create/knowledge_ingest/config_update) stay per-call.
     for action in (
         "restart", "agent_create", "agent_update", "agent_archive",
         "session_delete", "knowledge_acl_grant",
         "workflow_recovery_bind", "workflow_recovery_revoke", "workflow_start",
+        "team_create", "knowledge_ingest", "config_update",
     ):
         assert action in policy.ASSISTANT_MANAGE_HIGH_RISK_ACTIONS
         assert action not in policy.ASSISTANT_MANAGE_LOW_RISK_ACTIONS
+
+
+@pytest.mark.parametrize(
+    "action",
+    ["team_create", "knowledge_ingest", "config_update"],
+)
+def test_managed_write_actions_have_no_window_grant_and_stay_per_call(action):
+    # The window grant machine refuses managed writes outright.
+    with pytest.raises(ValueError):
+        policy.grant_assistant_action_window(agent_id="assistant-a", action=action)
+    # While a low-risk window is active, a managed write still prompts and the
+    # card reports the action as window-ineligible.
+    policy.grant_assistant_action_window(agent_id="assistant-a", action="session_stop")
+    worker, request = _authorize_manage_async(
+        action,
+        {
+            "team_create": '{"name": "交付团队"}',
+            "knowledge_ingest": '{"inboxSourceId": "isrc-1", "ownerType": "team", "ownerId": "team-1"}',
+            "config_update": '{"updates": [{"section": "ui", "key": "language", "value": "en"}]}',
+        }[action],
+        call_id=f"call-{action}",
+    )
+    assert request["status"] == "pending"
+    assert "acceptWithActionWindow" not in request["availableDecisions"]
+    assert request.get("assistantActionWindow", {}).get("eligible") is False
+    projection = tool_approvals._argument_summary(
+        policy.ASSISTANT_MANAGE_TOOL_NAME,
+        _manage_args(action, _preview_args(action)),
+    )
+    assert projection.get("assistantAction") == action
+    assert not projection.get("assistantArgumentsInvalid")
+    tool_approvals.resolve_tool_approval_request(
+        "session-a", request["requestId"], decision="cancel"
+    )
+    worker.join(timeout=2)
+
+
+def _preview_args(action):
+    return {
+        "team_create": '{"name": "交付团队", "templateId": "dev-team"}',
+        "knowledge_ingest": '{"inboxSourceId": "isrc-1", "ownerType": "team", "ownerId": "team-1"}',
+        "config_update": '{"updates": [{"section": "ui", "key": "language", "value": "en"}]}',
+    }[action]
 
 
 def test_action_window_bypasses_repeated_prompts_within_window():

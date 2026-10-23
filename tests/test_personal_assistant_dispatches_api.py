@@ -96,6 +96,111 @@ def _receipt_row(message_id: str, *, reply_to: str = "", thread_id: str = "",
     }
 
 
+def _task_receipt(status: str, *, source_session: str = "target-session", evidence=True) -> dict:
+    row = _receipt_row("report-" + status, reply_to="original")
+    row["targetSessionId"] = "assistant-session"
+    row["metadata"] = {
+        "sourceSessionId": source_session,
+        "agentToolMetadataJson": json.dumps({
+            "replyToMessageId": "original",
+            "personalAssistantTask": {
+                "schemaVersion": 1, "dispatchMessageId": "original", "status": status,
+                "evidenceRefs": ["artifact:result-1"] if evidence else [],
+            },
+        }),
+    }
+    return row
+
+
+@pytest.mark.parametrize("status", ["running", "blocked", "completed", "failed"])
+def test_explicit_task_report_is_projected_from_native_message_metadata(seeded, status):
+    original = _dispatch_row("original", status="consumed")
+    original["metadata"] = {"sourceSessionId": "assistant-session"}
+    _write_inbox(seeded, TARGET_ID, [original])
+    _write_inbox(seeded, ASSISTANT_ID, [_task_receipt(status)])
+    dispatch = dispatches_service.list_personal_assistant_dispatches()["dispatches"][0]
+    assert dispatch["taskStatus"] == status
+    assert dispatch["deliveryStatus"] == "consumed"
+    assert dispatch["receipts"][0]["taskStatus"] == status
+
+
+@pytest.mark.parametrize("change", ["wrong-session", "wrong-return-session", "missing-evidence", "thread-only", "wrong-task", "revoked-receipt"])
+def test_unverified_task_report_cannot_close_dispatch(seeded, change):
+    original = _dispatch_row("original", status="consumed")
+    original["metadata"] = {"sourceSessionId": "assistant-session"}
+    row = _task_receipt("completed")
+    if change == "wrong-session":
+        row["metadata"]["sourceSessionId"] = "another-session"
+    elif change == "wrong-return-session":
+        row["targetSessionId"] = "another-assistant-session"
+    elif change == "missing-evidence":
+        row = _task_receipt("completed", evidence=False)
+    elif change == "revoked-receipt":
+        row["status"] = "revoked"
+    else:
+        payload = json.loads(row["metadata"]["agentToolMetadataJson"])
+        if change == "thread-only":
+            payload.pop("replyToMessageId")
+            row["threadId"] = "thread-original"
+        else:
+            payload["personalAssistantTask"]["dispatchMessageId"] = "other-task"
+        row["metadata"]["agentToolMetadataJson"] = json.dumps(payload)
+    _write_inbox(seeded, TARGET_ID, [original])
+    _write_inbox(seeded, ASSISTANT_ID, [row])
+    dispatch = dispatches_service.list_personal_assistant_dispatches()["dispatches"][0]
+    assert dispatch["taskStatus"] == "awaiting_confirmation"
+
+
+def test_ordinary_reply_does_not_complete_task_and_revocation_wins(seeded):
+    original = _dispatch_row("original", status="consumed")
+    _write_inbox(seeded, TARGET_ID, [original])
+    _write_inbox(seeded, ASSISTANT_ID, [_receipt_row("progress", reply_to="original", summary="Still working")])
+    dispatch = dispatches_service.list_personal_assistant_dispatches()["dispatches"][0]
+    assert dispatch["taskStatus"] == "awaiting_confirmation"
+    original["status"] = "revoked"
+    _write_inbox(seeded, TARGET_ID, [original])
+    assert dispatches_service.list_personal_assistant_dispatches()["dispatches"][0]["taskStatus"] == "cancelled"
+
+
+def test_progress_block_resume_and_completion_drive_the_real_dispatch_projection(seeded, monkeypatch):
+    from datetime import datetime, timezone
+    from core.agent_kernel.service import _kernel_inbox_metadata
+    from core.web.services import personal_assistant_patrol_service as patrol, session_service
+
+    original = _dispatch_row("original", status="consumed")
+    original["metadata"] = {"sourceSessionId": "assistant-session"}
+    _write_inbox(seeded, TARGET_ID, [original])
+    monkeypatch.setattr(session_service, "load_session_chat_state", lambda _root, _id: {
+        "id": "target-session", "agentId": TARGET_ID,
+    })
+    monkeypatch.setattr(patrol, "_read_pa_pending_messages", lambda _agent: [])
+    sent = []
+    monkeypatch.setattr(patrol, "_submit_followup_event", lambda **kwargs: sent.append(kwargs) or {"accepted": True})
+    now = datetime.fromisoformat("2026-10-20T12:00:00+00:00").timestamp()
+    patrol.reset_personal_assistant_patrol_for_tests()
+    try:
+        for status, minute, expected_inflight, expected_sent in [
+            ("running", 0, 1, 1), ("blocked", 31, 1, 1),
+            ("running", 62, 1, 2), ("completed", 93, 0, 2),
+        ]:
+            row = _task_receipt(status)
+            row["createdAt"] = datetime.fromtimestamp(now + minute * 60 - 31 * 60, timezone.utc).isoformat()
+            # Exercise the real Kernel filter and serialization used by the
+            # existing tool, rather than directly expanding custom metadata.
+            row["metadata"] = _kernel_inbox_metadata({
+                "eventId": "audit-event", "metadata": row["metadata"],
+                "semanticPayload": {}, "deliveryPolicy": {},
+            }, {"taskId": "audit-task"})
+            _write_inbox(seeded, ASSISTANT_ID, [row])
+            result = patrol.patrol_once(now=now + minute * 60)
+            assert result["digest"]["aggregate"]["inFlightDispatches"] == expected_inflight
+            assert len(sent) == expected_sent
+            assert dispatches_service.list_personal_assistant_dispatches()["dispatches"][0]["taskStatus"] == status
+        assert all(call["metadata"]["targetSessionId"] == "target-session" for call in sent)
+    finally:
+        patrol.reset_personal_assistant_patrol_for_tests()
+
+
 @pytest.fixture
 def seeded(personal_env):
     _seed_agents(personal_env, [
@@ -128,6 +233,110 @@ def test_dispatches_pair_receipts_and_flag_unmatched(seeded):
     assert dispatch["deliveryStatus"] == "consumed"
     assert [r["messageId"] for r in dispatch["receipts"]] == ["receipt-thread"]
     assert [r["messageId"] for r in payload["unmatchedReceipts"]] == ["receipt-foreign"]
+
+
+def test_followups_do_not_count_as_dispatches_or_make_thread_receipts_ambiguous(seeded):
+    original = _dispatch_row("original")
+    followup = _dispatch_row("followup", kind="pa_followup")
+    followup["threadId"] = original["threadId"]
+    followup["metadata"] = {"paFollowupOfMessageId": "original"}
+    legacy_followup = {**followup, "messageId": "legacy-followup", "kind": "agent_message"}
+    _write_inbox(seeded, TARGET_ID, [original, followup, legacy_followup])
+    _write_inbox(seeded, ASSISTANT_ID, [
+        _receipt_row("receipt", thread_id=original["threadId"]),
+    ])
+
+    payload = dispatches_service.list_personal_assistant_dispatches(limit=1)
+
+    assert [row["messageId"] for row in payload["dispatches"]] == ["original"]
+    assert [row["messageId"] for row in payload["dispatches"][0]["receipts"]] == ["receipt"]
+    assert payload["unmatchedReceipts"] == []
+
+
+def test_receipt_to_followup_belongs_to_original_dispatch_and_checks_sender(seeded):
+    original = _dispatch_row("original")
+    followup = _dispatch_row("followup", kind="pa_followup")
+    followup["threadId"] = original["threadId"]
+    followup["metadata"] = {"paFollowupOfMessageId": "original"}
+    _write_inbox(seeded, TARGET_ID, [original, followup])
+    _write_inbox(seeded, ASSISTANT_ID, [
+        _receipt_row("receipt", reply_to="followup"),
+        _receipt_row("wrong-sender", reply_to="followup", source_agent=OTHER_ID),
+    ])
+
+    payload = dispatches_service.list_personal_assistant_dispatches()
+
+    assert [row["messageId"] for row in payload["dispatches"]] == ["original"]
+    assert [row["messageId"] for row in payload["dispatches"][0]["receipts"]] == ["receipt"]
+    assert [row["messageId"] for row in payload["unmatchedReceipts"]] == ["wrong-sender"]
+
+
+@pytest.mark.parametrize("fault", ["duplicate", "wrong-thread", "foreign-inbox"])
+def test_followup_receipt_requires_unique_authoritative_link(seeded, fault):
+    original = _dispatch_row("original")
+    followup = _dispatch_row("followup", kind="pa_followup")
+    followup["threadId"] = original["threadId"] if fault != "wrong-thread" else "unrelated-thread"
+    followup["metadata"] = {"paFollowupOfMessageId": "original"}
+    rows = [original, followup] if fault != "foreign-inbox" else [original]
+    if fault == "duplicate":
+        rows.append(dict(followup))
+    _write_inbox(seeded, TARGET_ID, rows)
+    if fault == "foreign-inbox":
+        _write_inbox(seeded, OTHER_ID, [followup])
+    _write_inbox(seeded, ASSISTANT_ID, [_receipt_row("receipt", reply_to="followup")])
+
+    payload = dispatches_service.list_personal_assistant_dispatches()
+
+    assert payload["dispatches"][0]["receipts"] == []
+    assert [row["messageId"] for row in payload["unmatchedReceipts"]] == ["receipt"]
+
+
+def test_patrol_feedback_never_chases_followups_as_new_dispatches(seeded, monkeypatch):
+    from datetime import datetime, timezone
+
+    from core.web.services import personal_assistant_patrol_service as patrol
+
+    original = _dispatch_row("original")
+    original["metadata"] = {"sourceSessionId": "assistant-session"}
+    inbox_rows = [original]
+    _write_inbox(seeded, TARGET_ID, inbox_rows)
+    _write_inbox(seeded, ASSISTANT_ID, [])
+    now = datetime.fromisoformat("2026-10-20T11:00:00+00:00").timestamp()
+    observed = now
+    sent = []
+    monkeypatch.delenv(patrol.PA_PATROL_ENABLED_ENV, raising=False)
+    monkeypatch.delenv(patrol.PA_PATROL_WAKE_ENABLED_ENV, raising=False)
+    monkeypatch.setattr(patrol, "_read_pa_pending_messages", lambda _agent_id: [])
+    from core.web.services import session_service
+
+    monkeypatch.setattr(session_service, "load_session_chat_state", lambda _root, _id: {
+        "id": "target-session", "agentId": TARGET_ID,
+    })
+
+    def submit(**kwargs):
+        sent.append(kwargs)
+        row = _dispatch_row(
+            f"followup-{len(sent)}", kind=kwargs["metadata"]["inboxKind"],
+            created_at=datetime.fromtimestamp(observed, tz=timezone.utc).isoformat(),
+        )
+        row["threadId"] = kwargs["correlation_id"]
+        row["metadata"] = dict(kwargs["metadata"])
+        inbox_rows.append(row)
+        _write_inbox(seeded, TARGET_ID, inbox_rows)
+        return {"ok": True}
+
+    monkeypatch.setattr(patrol, "_submit_followup_event", submit)
+    patrol.reset_personal_assistant_patrol_for_tests()
+    try:
+        for minutes in (0, 31, 62, 93):
+            observed = now + minutes * 60
+            patrol.patrol_once(now=observed)
+        assert [call["idempotency_key"] for call in sent] == [
+            "pa-followup:original:1", "pa-followup:original:2",
+        ]
+        assert [row["messageId"] for row in dispatches_service.list_personal_assistant_dispatches()["dispatches"]] == ["original"]
+    finally:
+        patrol.reset_personal_assistant_patrol_for_tests()
 
 
 def test_dispatches_receipt_matching_prefers_explicit_id_and_requires_unique_fallback(seeded):

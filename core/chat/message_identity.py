@@ -21,7 +21,11 @@ import hashlib
 import json
 from typing import Any, Iterable
 
-__all__ = ["dedupe_messages_by_identity", "message_identity_key"]
+__all__ = [
+    "dedupe_messages_by_identity",
+    "dedupe_messages_by_identity_indexed",
+    "message_identity_key",
+]
 
 
 def _text(value: Any) -> str:
@@ -77,24 +81,37 @@ def dedupe_messages_by_identity(
     distinct item is never merged even when its text matches. The result keeps
     the order in which each identity first appeared.
     """
+    return [message for _index, message in dedupe_messages_by_identity_indexed(messages)]
+
+
+def dedupe_messages_by_identity_indexed(
+    messages: Iterable[dict[str, Any]],
+) -> list[tuple[int, Any]]:
+    """Indexed form of :func:`dedupe_messages_by_identity`.
+
+    Returns ``(first_appearance_index, winner_message)`` pairs so resumable
+    pipelines can track where each output row entered the stream. The winner
+    selection and output order are identical to
+    :func:`dedupe_messages_by_identity`.
+    """
     order: list[tuple[str, ...]] = []
-    winners: dict[tuple[str, ...], dict[str, Any]] = {}
+    winners: dict[tuple[str, ...], tuple[int, dict[str, Any]]] = {}
     for index, message in enumerate(messages):
         if not isinstance(message, dict):
             passthrough_key = ("passthrough", str(index))
             order.append(passthrough_key)
-            winners[passthrough_key] = message  # type: ignore[assignment]
+            winners[passthrough_key] = (index, message)  # type: ignore[assignment]
             continue
         key = message_identity_key(message)
         current = winners.get(key)
         if current is None:
             order.append(key)
-            winners[key] = message
+            winners[key] = (index, message)
             continue
         metadata = _metadata(message)
-        current_metadata = _metadata(current)
+        current_metadata = _metadata(current[1])
         incoming_rank = (_int_field(metadata, "revision"), _int_field(metadata, "sequence"))
         current_rank = (_int_field(current_metadata, "revision"), _int_field(current_metadata, "sequence"))
         if incoming_rank > current_rank:
-            winners[key] = message
+            winners[key] = (current[0], message)
     return [winners[key] for key in order]

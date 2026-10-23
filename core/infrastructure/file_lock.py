@@ -70,7 +70,7 @@ def cross_process_file_lock(
 ) -> Iterator[None]:
     """Hold one exclusive per-target lock across threads and processes.
 
-    ``timeout`` bounds the wait for the OS lock; ``None`` blocks indefinitely.
+    ``timeout`` bounds the combined thread and OS lock wait; ``None`` blocks indefinitely.
     Same-thread nesting is reentrant. Raises ``TimeoutError`` when the budget
     is exhausted so callers can surface a recognizable contention failure
     instead of hanging.
@@ -91,18 +91,26 @@ def cross_process_file_lock(
                 depth.pop(key, None)
         return
 
+    deadline = None if timeout is None else time.monotonic() + max(0.0, float(timeout))
     with _THREAD_LOCKS_GUARD:
         entry = _THREAD_LOCKS.get(key)
         if entry is None:
             entry = _ThreadLockEntry()
             _THREAD_LOCKS[key] = entry
         entry.users += 1
+    acquired = False
     try:
-        with entry.lock:
+        if deadline is None:
+            acquired = entry.lock.acquire()
+        else:
+            acquired = entry.lock.acquire(timeout=max(0.0, deadline - time.monotonic()))
+        if not acquired:
+            raise TimeoutError(f"Timed out waiting for file lock: {key}")
+        try:
             with _locked_sidecar(
                 sidecar,
                 key=key,
-                timeout=timeout,
+                timeout=None if deadline is None else max(0.0, deadline - time.monotonic()),
                 poll_interval=poll_interval,
             ):
                 depth[key] = 1
@@ -110,6 +118,8 @@ def cross_process_file_lock(
                     yield
                 finally:
                     depth.pop(key, None)
+        finally:
+            entry.lock.release()
     finally:
         with _THREAD_LOCKS_GUARD:
             entry.users -= 1

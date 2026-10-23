@@ -73,9 +73,9 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); client.clear(); });
 async function settle() { await act(async () => new Promise(resolve => setTimeout(resolve, 25))); }
-async function render() {
+async function render(focusItemId?: string, focusRequestKey?: string) {
   await act(async () => root.render(<QueryClientProvider client={client}>
-    <PersonalAssistantAffairs agentId="agent-companion" />
+    <PersonalAssistantAffairs agentId="agent-companion" focusItemId={focusItemId} focusRequestKey={focusRequestKey} />
   </QueryClientProvider>));
   await settle(); await settle();
 }
@@ -95,6 +95,53 @@ async function clickButton(text: string) {
 }
 
 describe("PersonalAssistantAffairs", () => {
+  it("focuses and scrolls a reminder target once, without stealing focus on polling", async () => {
+    const scroll = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { value: scroll, configurable: true });
+    await render("affair-2", "notice-1");
+    expect(document.activeElement?.textContent).toContain("和用户复盘");
+    expect(scroll).toHaveBeenCalledWith({ block: "center" });
+    const input = container.querySelector('input[aria-label="标题"]') as HTMLInputElement;
+    input.focus();
+    await act(async () => client.invalidateQueries({ queryKey: ["agents", "agent-companion", "plugins", "personal-affairs"] }));
+    await settle();
+    expect(document.activeElement).toBe(input);
+    expect(scroll).toHaveBeenCalledTimes(1);
+    await render("affair-2", "notice-2");
+    expect(document.activeElement?.textContent).toContain("和用户复盘");
+    expect(scroll).toHaveBeenCalledTimes(2);
+  });
+
+  it("clears filters once per reminder navigation and allows later user filtering", async () => {
+    vi.mocked(fetchPersonalAffairs).mockImplementation(async (_id, options) => ({
+      ...list, items: list.items.filter(item => !options?.kind || item.kind === options.kind),
+    }));
+    const chooseKind = async () => {
+      await act(async () => (container.querySelector('button[role="combobox"][aria-label="按类型"]') as HTMLButtonElement).click());
+      const option = await vi.waitFor(() => {
+        const found = [...document.body.querySelectorAll('[role="option"]')].find(node => node.textContent === "日程");
+        if (!found) throw new Error("日程 option not rendered yet");
+        return found as HTMLElement;
+      });
+      await act(async () => option.click());
+      await settle();
+    };
+    await render();
+    await chooseKind();
+    expect(container.textContent).not.toContain("整理周报");
+    await render("affair-1", "notice-1");
+    expect(document.activeElement?.textContent).toContain("整理周报");
+    await chooseKind();
+    expect(container.textContent).not.toContain("整理周报");
+    expect(fetchPersonalAffairs).toHaveBeenLastCalledWith("agent-companion", expect.objectContaining({ kind: "schedule" }));
+  });
+
+  it("shows visible feedback for a missing reminder item", async () => {
+    await render("deleted-affair", "notice-1");
+    expect(container.querySelector('[role="status"]')?.textContent).toContain("提醒对应的事务已不存在");
+    expect(container.textContent).toContain("整理周报");
+  });
+
   it("renders backend counts and items with mapped kind, due-state and status labels", async () => {
     await render();
     expect(fetchPersonalAffairs).toHaveBeenCalledWith("agent-companion", expect.objectContaining({ kind: "", status: "" }));

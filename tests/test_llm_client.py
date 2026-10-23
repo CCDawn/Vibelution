@@ -40,6 +40,7 @@ from core.llm.semantic_messages import InvocationScope, SemanticOutputSchema
 from core.llm.types import CanonicalItemIdentity, CanonicalToolCall, LLMError, LLMRouteGateTimeoutError, LLMStreamIdleDeadlineError, LLMStreamTotalDeadlineError, TurnOutcome
 from core.llm.wire.responses import ResponsesWireAdapter
 from core.llm.recovery import plan_recovery
+from core.llm.ttft_breakdown import llm_ttft_chain_context
 from tests.helpers.isolated_config import isolated_settings_config
 
 
@@ -2080,7 +2081,13 @@ def test_responses_stream_exhaustion_after_partial_output_does_not_retry(monkeyp
     assert attempts["count"] == 1
 
 
-def test_chat_reasoning_only_exhaustion_retries_without_exposing_transient_reasoning(monkeypatch):
+def test_chat_reasoning_only_exhaustion_retries_with_restart_boundary_replacement(monkeypatch):
+    """思考流即时投影后，纯思考阶段 exhaustion 仍走重试环且不发半截正文。
+
+    思考增量「transient」已即时跨消费者边界，但正文未出门：瞬态 done 被吞、
+    attempt 以可重试 exhaustion 失败，新 attempt 前发 streamRestart 边界标记，
+    消费端据此替换思考残段——转写里不出现重复/错序的思考内容。
+    """
     config = make_config(
         **{
             "llm.providers.default.kind": "deepseek",
@@ -2092,6 +2099,7 @@ def test_chat_reasoning_only_exhaustion_retries_without_exposing_transient_reaso
         }
     )
     attempts = {"count": 0}
+    statuses = []
 
     def backend(_payload):
         attempts["count"] += 1
@@ -2113,14 +2121,117 @@ def test_chat_reasoning_only_exhaustion_retries_without_exposing_transient_reaso
         )
 
     monkeypatch.setattr("core.llm.client._sleep_with_llm_cancel_check", lambda _seconds: None)
+    monkeypatch.setattr(
+        "core.llm.client._publish_llm_status_event",
+        lambda status, **fields: statuses.append((status, fields)),
+    )
     client = LLMClient(config=config, backend=backend)
 
     events = list(client.stream_events([{"role": "user", "content": "ping"}]))
 
     assert attempts["count"] == 2
+    assert [event.type for event in events] == ["reasoning_delta", "reasoning_delta", "text_delta", "done"]
+    assert [event.text for event in events[:3]] == ["transient", "recovered", "answer"]
+    # 首个思考增量即消费者可见首帧，不再等正文才整体冲刷。
+    assert events[0].type == "reasoning_delta"
+    # 半截思考 + 重试成功：新 attempt 前发边界标记，消费端替换失败残段。
+    restart_statuses = [item for item in statuses if item[1].get("streamRestart")]
+    assert [item[1]["streamRestart"] for item in restart_statuses] == [2]
+
+
+def test_ttft_breakdown_reports_first_reasoning_chunk_ms(monkeypatch):
+    """ttft_breakdown 在首帧即思考增量时透出 firstReasoningChunkMs。"""
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "deepseek",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://api.deepseek.com/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "deepseek-v4-flash",
+        }
+    )
+    chunks = [
+        {"choices": [{"index": 0, "delta": {"reasoning_content": "thinking"}}]},
+        {"choices": [{"index": 0, "delta": {"content": "answer"}, "finish_reason": "stop"}]},
+    ]
+    recorded = []
+    monkeypatch.setattr(
+        "core.llm.client._record_llm_scene_event",
+        lambda *args, **kwargs: recorded.append((args, kwargs)),
+    )
+
+    client = LLMClient(config=config, backend=lambda payload: iter(chunks))
+    with llm_ttft_chain_context(accepted_at_perf=time.perf_counter()):
+        events = list(client.stream_events([{"role": "user", "content": "ping"}]))
+
     assert [event.type for event in events] == ["reasoning_delta", "text_delta", "done"]
-    assert events[0].text == "recovered"
-    assert events[1].text == "answer"
+    breakdown = next(item for item in recorded if item[0][1] == "llm.stream.ttft_breakdown")
+    fields = breakdown[1]["fields"]
+    assert fields["firstReasoningChunkMs"] == fields["firstChunkMs"]
+    assert fields["firstReasoningChunkMs"] >= 0
+
+
+def test_ttft_breakdown_omits_first_reasoning_chunk_ms_without_reasoning(monkeypatch):
+    """无思考增量的流不发明 firstReasoningChunkMs（缺段省略，不虚构）。"""
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "local",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://localhost:8000/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen-32b-awq",
+        }
+    )
+    chunks = [
+        {"choices": [{"index": 0, "delta": {"content": "answer"}, "finish_reason": "stop"}]},
+    ]
+    recorded = []
+    monkeypatch.setattr(
+        "core.llm.client._record_llm_scene_event",
+        lambda *args, **kwargs: recorded.append((args, kwargs)),
+    )
+
+    client = LLMClient(config=config, backend=lambda payload: iter(chunks))
+    with llm_ttft_chain_context(accepted_at_perf=time.perf_counter()):
+        events = list(client.stream_events([{"role": "user", "content": "ping"}]))
+
+    assert [event.type for event in events] == ["text_delta", "done"]
+    breakdown = next(item for item in recorded if item[0][1] == "llm.stream.ttft_breakdown")
+    assert "firstReasoningChunkMs" not in breakdown[1]["fields"]
+
+
+def test_deepseek_reasoning_first_delta_is_first_consumer_chunk_without_waiting_for_answer():
+    """DEEPSEEK_REASONING 协议下首个思考增量即时放行，不等正文/工具调用。"""
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "deepseek",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://api.deepseek.com/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "deepseek-v4-flash",
+        }
+    )
+    consumed = []
+
+    def backend(_payload):
+        def chunks():
+            consumed.append("reasoning")
+            yield {"choices": [{"index": 0, "delta": {"reasoning_content": "thinking"}}]}
+            consumed.append("answer")
+            yield {"choices": [{"index": 0, "delta": {"content": "answer"}, "finish_reason": "stop"}]}
+
+        return chunks()
+
+    client = LLMClient(config=config, backend=backend)
+    events = client.stream_events([{"role": "user", "content": "ping"}])
+    try:
+        first = next(events)
+        assert first.type == "reasoning_delta"
+        assert first.text == "thinking"
+        assert consumed == ["reasoning"], "reasoning was withheld until the provider answer"
+        assert [event.type for event in events] == ["text_delta", "done"]
+    finally:
+        events.close()
 
 
 def test_responses_transport_streams_output_item_done_message_when_no_delta(monkeypatch):
@@ -4013,6 +4124,206 @@ def _bare_llm_client(backend, adapter_id):
     client._cancellable_completion_stream_lock = threading.Lock()
     client._cancellable_completion_request_lock = threading.Lock()
     return client
+
+
+def _request_slot_case(transport):
+    client = _bare_llm_client(_default_completion_backend, (
+        "anthropic_messages_native" if transport.startswith("anthropic") else "openai_chat"
+    ))
+    client._cancellable_responses_stream_lock = client._cancellable_responses_request_lock
+    client._cancellable_completion_stream_lock = client._cancellable_completion_request_lock
+    responses = transport.startswith("responses")
+    lock = (client._cancellable_responses_request_lock if responses
+            else client._cancellable_completion_request_lock)
+    payload = {"input": "ping"} if responses else {"messages": [{"role": "user", "content": "ping"}]}
+    payload["stream"] = transport.endswith("stream")
+    if payload["stream"]:
+        prepare = (client._prepare_cancellable_responses_stream if responses
+                   else client._prepare_cancellable_chat_stream)
+    else:
+        prepare = client._prepare_cancellable_non_stream_request
+    return client, lock, payload, prepare
+
+
+@pytest.mark.parametrize("transport", [
+    "responses_stream", "chat_stream", "anthropic_stream",
+    "responses_invoke", "chat_invoke", "anthropic_invoke",
+])
+def test_client_request_lock_wait_is_bounded_without_touching_holder(monkeypatch, transport):
+    from core.llm import client as module
+
+    client, lock, payload, prepare = _request_slot_case(transport)
+    monkeypatch.setattr(module, "_LLM_ROUTE_GATE_WAIT_LIMIT", 0.04)
+    created = []
+
+    def unexpected_transport(*args):
+        created.append(True)
+        raise RuntimeError("transport must not be created while its slot is occupied")
+
+    monkeypatch.setattr(client, "_get_or_create_cancellable_client", unexpected_transport)
+    result = []
+    done = threading.Event()
+    lock.acquire()
+
+    def attempt():
+        try:
+            with llm_cancel_context(lambda: "", enable_chat_provider_abort=True):
+                _prepared, finish = prepare(payload)
+                finish()
+        except BaseException as exc:
+            result.append(exc)
+        finally:
+            done.set()
+
+    worker = threading.Thread(target=attempt, daemon=True)
+    worker.start()
+    try:
+        assert done.wait(1.0), "request slot waited beyond its budget"
+        assert lock.locked(), "a rejected waiter released the active request's slot"
+        assert created == []
+        assert len(result) == 1 and isinstance(result[0], LLMError)
+        assert result[0].category == "gate_timeout"
+        assert result[0].details["stage"] == "client_request_lock"
+    finally:
+        lock.release()
+        worker.join(2.0)
+    assert not worker.is_alive()
+
+
+@pytest.mark.parametrize("transport", ["responses_stream", "chat_stream", "responses_invoke"])
+@pytest.mark.parametrize("factory_fails", [False, True])
+def test_client_request_lock_handoff_cleans_up_on_success_and_factory_error(
+    monkeypatch, transport, factory_fails,
+):
+    client, lock, payload, prepare = _request_slot_case(transport)
+    handler = SimpleNamespace(close=lambda: pytest.fail("active transport was closed"))
+
+    def factory(attr, _factory, _payload):
+        if factory_fails:
+            raise RuntimeError("fixture factory failure")
+        setattr(client, attr, handler)
+        return handler
+
+    monkeypatch.setattr(client, "_get_or_create_cancellable_client", factory)
+    from core.llm import client as module
+    monkeypatch.setattr(module, "_llm_route_gate_wait_seconds", lambda: 2.0)
+    errors = []
+    waiting = threading.Event()
+    lock.acquire()
+
+    def attempt():
+        try:
+            with llm_cancel_context(lambda: "", enable_chat_provider_abort=True):
+                waiting.set()
+                prepared, finish = prepare(payload)
+                assert prepared["client"] is handler
+                assert lock.locked()
+                finish()
+                finish()
+        except BaseException as exc:
+            errors.append(exc)
+
+    worker = threading.Thread(target=attempt, daemon=True)
+    worker.start()
+    try:
+        assert waiting.wait(1.0)
+    finally:
+        lock.release()
+        worker.join(2.0)
+    assert not worker.is_alive()
+    assert not lock.locked()
+    if factory_fails:
+        assert len(errors) == 1 and str(errors[0]) == "fixture factory failure"
+    else:
+        assert errors == []
+
+
+@pytest.mark.parametrize("source", ["reason", "stop_event", "turn_scope"])
+def test_client_request_lock_cancellation_precedes_even_free_slot(monkeypatch, source):
+    from core.llm import client as module
+
+    client = LLMClient.__new__(LLMClient)
+    checker = lambda: "cancelled" if source == "reason" else ""
+    stop = threading.Event()
+    checker._vibelution_stop_event = stop
+    if source == "stop_event":
+        stop.set()
+    monkeypatch.setattr(module, "_LLM_TURN_CANCEL_STATES", (
+        {"cancelled-slot-turn": ("turn abandoned", time.time())}
+        if source == "turn_scope" else {}
+    ))
+
+    class FreeSlot:
+        def acquire(self, **kwargs):
+            raise AssertionError("cancelled request acquired a transport slot")
+
+    with module.llm_status_context(turnId="cancelled-slot-turn"), llm_cancel_context(checker):
+        with pytest.raises(module.LLMCancelledError):
+            client._acquire_cancellable_request_lock(FreeSlot(), checker)
+
+
+@pytest.mark.parametrize("race", ["cancelled", "expired"])
+def test_client_request_lock_rechecks_handoff_and_releases_only_own_slot(monkeypatch, race):
+    from core.llm import client as module
+
+    client = LLMClient.__new__(LLMClient)
+    state = {"cancelled": False, "expired": False, "releases": 0}
+    checker = lambda: "cancelled at handoff" if state["cancelled"] else ""
+
+    class HandoffSlot:
+        def acquire(self, *, timeout):
+            assert timeout <= 0.05
+            state[race] = True
+            return True
+
+        def release(self):
+            state["releases"] += 1
+
+    monkeypatch.setattr(module, "_llm_route_gate_wait_seconds", lambda: 1.0)
+    # A private clock replacement avoids changing other modules' time source.
+    clock = SimpleNamespace(monotonic=lambda: 2.0 if state["expired"] else 0.0)
+    monkeypatch.setattr(module, "time", clock)
+    expected = module.LLMCancelledError if race == "cancelled" else LLMError
+    with llm_cancel_context(checker), pytest.raises(expected):
+        client._acquire_cancellable_request_lock(HandoffSlot(), checker)
+    assert state["releases"] == 1
+
+
+def test_client_request_lock_can_cancel_while_holder_stays_active(monkeypatch):
+    from core.llm import client as module
+
+    client = LLMClient.__new__(LLMClient)
+    stop = threading.Event()
+    checker = lambda: ""
+    checker._vibelution_stop_event = stop
+    lock = threading.Lock()
+    lock.acquire()
+    entered = threading.Event()
+    done = threading.Event()
+    errors = []
+    monkeypatch.setattr(module, "_llm_route_gate_wait_seconds", lambda: 5.0)
+
+    def wait_for_slot():
+        try:
+            entered.set()
+            client._acquire_cancellable_request_lock(lock, checker)
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            done.set()
+
+    worker = threading.Thread(target=wait_for_slot, daemon=True)
+    worker.start()
+    try:
+        assert entered.wait(1.0)
+        stop.set()
+        assert done.wait(1.0)
+        assert lock.locked()
+        assert len(errors) == 1 and isinstance(errors[0], module.LLMCancelledError)
+    finally:
+        lock.release()
+        worker.join(1.0)
+    assert not worker.is_alive()
 
 
 def _client_with_native_anthropic_route(config):

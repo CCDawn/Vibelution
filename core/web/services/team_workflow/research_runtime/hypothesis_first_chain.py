@@ -5104,6 +5104,175 @@ def _create_stage_one_question_run(
     return result
 
 
+def _create_full_experiment_run(
+    team_id: str,
+    *,
+    question_id: str,
+    source_run_id: str,
+    snapshot: Mapping[str, Any],
+    idempotency_key: str,
+) -> dict[str, Any]:
+    """Create the full 3.0.0 experiment run behind the v2 bridge offer.
+
+    The stage-one chain is COMPLETE and the Challenge Program record is
+    ACCEPTED at this point (the offer only exists in that state and
+    ``_find_allowed_command`` re-authorized against the fresh projection);
+    this handler re-validates the same preconditions and resolves the
+    covering durable CatalogRunAuthorization itself.  Without a covering
+    authorization the creation fails closed with a stable rejection that
+    names the real-batch authorize surface — real experiment launch stays a
+    user-authorized decision.
+    """
+
+    from core.web.services.team_workflow import challenge_cup_real_batch
+    from core.web.services.team_workflow.research_scope import (
+        resolve_research_scope,
+    )
+
+    from .challenge_cup_maintenance_fence import assert_writes_allowed
+    from .formal_read_runtime import get_query_service
+    from .hypothesis_first_state_v2 import (
+        _covering_full_experiment_authorization,
+        _is_full_scope_run,
+    )
+    from .question_launch import QuestionLaunchError, build_question_run_input
+    from .run_creation import (
+        _formal_hypothesis_handoff,
+        create_run,
+    )
+    from .run_lifecycle import run_id_for_create
+    from .service import ResearchWorkflowError
+
+    normalized_question_id = str(question_id or "").strip().upper()
+    normalized_source_run_id = str(source_run_id or "").strip()
+
+    # Same precondition fence as the projection: the accepted program record
+    # must still own the projected delivery, bound to the offered source run.
+    program_delivery = dict(snapshot.get("programDelivery") or {})
+    if (
+        str(program_delivery.get("humanReviewStatus") or "") != "approved"
+        or not normalized_source_run_id
+        or str(program_delivery.get("outputRunId") or "").strip()
+        != normalized_source_run_id
+    ):
+        raise HypothesisFirstChainError(
+            "完整实验运行只能在 Challenge Program 记录通过人工审核（approved）"
+            "且绑定同一交付运行时创建"
+        )
+
+    # Duplicate fence (same rule as the projection): a live full-scope run
+    # for this question blocks a second creation.  The run derived from this
+    # exact idempotency key is the replay identity — create_run replays it
+    # idempotently instead of forking a sibling.
+    run_payload = get_query_service().list_runs(
+        team_id=team_id,
+        workflow_id=CHALLENGE_CUP_WORKFLOW_ID,
+    )
+    question_runs = [
+        dict(item)
+        for item in list(run_payload.get("runs") or [])
+        if str(item.get("questionId") or "").strip().upper()
+        == normalized_question_id
+    ]
+    replay_run_id = run_id_for_create(CHALLENGE_CUP_WORKFLOW_ID, idempotency_key)
+    if any(
+        _is_full_scope_run(item)
+        and str(item.get("runId") or "") != replay_run_id
+        and str(item.get("status") or "").strip().lower() != "archived"
+        for item in question_runs
+    ):
+        raise HypothesisFirstChainError(
+            "该赛题已存在完整实验运行，不能重复创建；请先归档不再继续的运行"
+        )
+
+    authorization = _covering_full_experiment_authorization(
+        team_id,
+        normalized_question_id,
+    )
+    if authorization is None:
+        raise FormalCommandRejectedError(
+            "完整实验运行需要覆盖该赛题的持久 CatalogRunAuthorization：请先在"
+            "真实批次授权面（POST /teams/{teamId}/workflow-orchestration/"
+            "challenge-program/real-batches/{planId}/authorize）完成授权后重试。",
+            code="catalog_run_authorization_required",
+        )
+
+    assert_writes_allowed(team_id, operation="question_launch")
+    try:
+        run_input = build_question_run_input(
+            team_id,
+            question_id=normalized_question_id,
+            safety_limits=challenge_cup_real_batch._default_safety_limits(),
+        )
+        # Seed the accepted convergence round exactly like the formal handoff:
+        # closed round-record snapshots, never live chain candidates.
+        round_id = str(
+            (dict(snapshot.get("convergence") or {}).get(
+                "latestHypothesisRoundId"
+            ))
+            or ""
+        ).strip()
+        if not round_id:
+            raise ResearchWorkflowError(
+                "full experiment bridge requires the accepted hypothesis round",
+                code="formal_hypothesis_handoff_incomplete",
+            )
+        run_input = {
+            **run_input,
+            **_formal_hypothesis_handoff(
+                team_id,
+                normalized_question_id,
+                hypothesis_round_id=round_id,
+            ),
+        }
+        # Re-derive the scope envelope for the full workflow identity: the
+        # question seed pins workflow="hypothesis_first", while the full
+        # definition resolves only for workflow="challenge-cup-research"
+        # (create_run's scope identity check). resolve_research_scope
+        # recomputes the scope hash and locators for the overridden seed.
+        envelope = dict(run_input.get("researchScopeEnvelope") or {})
+        run_input = {
+            **run_input,
+            "researchScopeEnvelope": resolve_research_scope(
+                team_id,
+                agent_id=str(envelope.get("agentId") or ""),
+                scope_seed={**envelope, "workflow": CHALLENGE_CUP_WORKFLOW_ID},
+            ),
+            # Lineage: the accepted stage-one delivery this run is seeded
+            # from. constraintSnapshot is the contract-safe free-form mapping.
+            "constraintSnapshot": {
+                **dict(run_input.get("constraintSnapshot") or {}),
+                "sourceStageOneRunId": normalized_source_run_id,
+            },
+        }
+        # workflow_definition stays None: the canonical full 3.0.0 definition
+        # resolves from the challenge-cup workflow id inside create_run.
+        result = create_run(
+            CHALLENGE_CUP_WORKFLOW_ID,
+            run_input=run_input,
+            idempotency_key=idempotency_key,
+            catalog_run_authorization=authorization,
+        )
+    except (QuestionLaunchError, ResearchWorkflowError) as exc:
+        code = str(getattr(exc, "code", "") or "")
+        raise _formal_command_rejection(
+            ResearchWorkflowError(str(exc), code=code or "run_creation_rejected")
+        ) from exc
+    result = {
+        **dict(result),
+        "sourceRunId": normalized_source_run_id,
+        "sourceHypothesisRoundId": round_id,
+        "authorizationId": str(authorization.get("authorizationId") or ""),
+    }
+    if str(result.get("runId") or "").strip():
+        _auto_start_created_formal_run(
+            team_id,
+            run=result,
+            idempotency_key=idempotency_key,
+        )
+    return result
+
+
 def _question_has_program_output_record(
     team_id: str, question_id: str, run_id: str
 ) -> bool:
@@ -6224,6 +6393,14 @@ def _execute_v2_command_impl(
             result = _create_stage_one_question_run(
                 normalized_team_id,
                 question_id=normalized_question_id,
+                idempotency_key=idempotency_key,
+            )
+        elif command == "create_full_experiment_run":
+            result = _create_full_experiment_run(
+                normalized_team_id,
+                question_id=normalized_question_id,
+                source_run_id=str(payload.get("sourceRunId") or ""),
+                snapshot=snapshot,
                 idempotency_key=idempotency_key,
             )
         elif command == "retry_formal_node":

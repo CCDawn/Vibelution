@@ -2,7 +2,7 @@
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildComposerContextRingModel } from "../../routes/chat/composerContextModel";
+import { buildComposerContextRingModel, resolveComposerContextUsage } from "../../routes/chat/composerContextModel";
 import {
   ComposerContextRing,
   ComposerContextRingPanel,
@@ -54,6 +54,37 @@ const modelFixtureOptions = {
 };
 const model = buildComposerContextRingModel(modelFixtureOptions);
 describe("ComposerContextRing", () => {
+  it("updates the open ring from 100% to post-compaction usage in the same session", async () => {
+    const contextComposition = { totalTokens: 257929, limitTokens: 256000 };
+    const before = resolveComposerContextUsage({ contextComposition });
+    await render(
+      <ComposerContextRing
+        model={buildComposerContextRingModel({ ...modelFixtureOptions, usageUsed: before.used, usageLimit: before.limit })}
+        lang="zh"
+        sessionId="compacted"
+      />,
+    );
+    const trigger = document.querySelector<HTMLButtonElement>('button[data-session="compacted"]')!;
+    expect(trigger.textContent).toBe("100%");
+    await act(() => trigger.click());
+    expect(document.querySelector('[role="progressbar"]')?.getAttribute("aria-valuenow")).toBe("100");
+
+    const after = resolveComposerContextUsage({
+      contextUsage: { used: 175650, limit: 256000 },
+      contextComposition,
+    });
+    await act(() => root.render(
+      <ComposerContextRing
+        model={buildComposerContextRingModel({ ...modelFixtureOptions, usageUsed: after.used, usageLimit: after.limit })}
+        lang="zh"
+        sessionId="compacted"
+      />,
+    ));
+    expect(trigger.textContent).toBe("69%");
+    expect(trigger.getAttribute("aria-label")).toContain("176K / 256K");
+    expect(document.querySelector('[role="progressbar"]')?.getAttribute("aria-valuenow")).toBe("68.61328125");
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("176K / 256K");
+  });
   it("shows capacity and no inferred cache rate", async () => {
     await render(<ComposerContextRingPanel model={model} lang="zh" />);
     expect(

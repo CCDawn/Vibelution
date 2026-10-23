@@ -1221,3 +1221,303 @@ def test_archive_waits_out_submit_admission_window_then_refuses_busy(tmp_path, m
         assert str((detail.get("archiveState") or {}).get("status") or "") != "archived"
     finally:
         session_service._set_session_running(session_id, False)
+
+
+def _archive_via_http(entry, agent_id):
+    if entry == "delete":
+        return client.delete(f"/api/agents/{agent_id}")
+    if entry == "patch":
+        return client.patch(f"/api/agents/{agent_id}", json={"status": "archived"})
+    return client.post("/api/agents/bulk-archive", json={"agentIds": [agent_id]})
+
+
+@pytest.mark.parametrize("entry", ["delete", "patch", "bulk"])
+def test_archive_route_waiting_for_admission_does_not_block_other_session(
+    tmp_path, monkeypatch, entry,
+):
+    from core.web.services.session.admission_lock import SessionAdmissionLock
+
+    direct, _child = _create_agent_with_child_session(tmp_path, monkeypatch)
+    peer = session_service.create_chat_session(title="归档期间仍可操作")
+    waiting = threading.Event()
+    release = threading.Event()
+    peer_completed = threading.Event()
+    result: dict[str, object] = {}
+    original_acquire = SessionAdmissionLock.acquire
+
+    def delayed_acquire(lock, *args, **kwargs):
+        if threading.current_thread().name.startswith("AnyIO worker"):
+            waiting.set()
+            assert release.wait(timeout=5)
+        return original_acquire(lock, *args, **kwargs)
+
+    monkeypatch.setattr(SessionAdmissionLock, "acquire", delayed_acquire)
+
+    def archive():
+        result["response"] = _archive_via_http(entry, direct["agentId"])
+
+    def rename_peer():
+        session_service.update_chat_session_title(peer["id"], "归档等待期间已改名")
+        peer_completed.set()
+
+    archiver = threading.Thread(target=archive, daemon=True)
+    peer_writer = threading.Thread(target=rename_peer, daemon=True)
+    archiver.start()
+    try:
+        assert waiting.wait(timeout=3)
+        peer_writer.start()
+        assert peer_completed.wait(timeout=0.5), (
+            "Waiting for archive admission must not hold the global chat-state lock."
+        )
+    finally:
+        release.set()
+        archiver.join(timeout=10)
+        if peer_writer.ident is not None:
+            peer_writer.join(timeout=10)
+    assert not archiver.is_alive()
+    assert not peer_writer.is_alive()
+    response = result["response"]
+    assert response.status_code == 200, response.text
+
+
+@pytest.mark.parametrize("entry", ["delete", "patch", "bulk"])
+def test_archive_route_and_owned_session_delete_finish_without_lock_inversion(
+    tmp_path, monkeypatch, entry,
+):
+    from core.web.services.session.admission_lock import SessionAdmissionLock
+
+    direct, child = _create_agent_with_child_session(tmp_path, monkeypatch)
+    held = threading.Event()
+    archive_waiting = threading.Event()
+    deletion_completed = threading.Event()
+    results: dict[str, object] = {}
+    original_acquire = SessionAdmissionLock.acquire
+    target_path = session_service._session_submit_admit_lock(child["id"]).path
+
+    def observed_acquire(lock, *, timeout=30.0):
+        if threading.current_thread().name.startswith("AnyIO worker") and lock.path == target_path:
+            archive_waiting.set()
+            # Keep a broken implementation's failure bounded and reclaimable.
+            timeout = min(timeout, 1.0)
+        return original_acquire(lock, timeout=timeout)
+
+    monkeypatch.setattr(SessionAdmissionLock, "acquire", observed_acquire)
+
+    def delete_owned_session():
+        try:
+            with session_service._session_submit_admit_lock(child["id"]):
+                held.set()
+                assert archive_waiting.wait(timeout=3)
+                results["deletion"] = session_service.delete_chat_session(child["id"])
+                deletion_completed.set()
+        except BaseException as exc:
+            results["deletion_error"] = exc
+
+    def archive():
+        results["response"] = _archive_via_http(entry, direct["agentId"])
+
+    deleter = threading.Thread(target=delete_owned_session, daemon=True)
+    archiver = threading.Thread(target=archive, daemon=True)
+    deleter.start()
+    try:
+        assert held.wait(timeout=3)
+        archiver.start()
+        assert deletion_completed.wait(timeout=3), results
+    finally:
+        deleter.join(timeout=5)
+        if archiver.ident is not None:
+            archiver.join(timeout=5)
+    assert not deleter.is_alive()
+    assert not archiver.is_alive()
+    assert "deletion_error" not in results, results
+    assert results["deletion"]["deleted"] is True
+    response = results["response"]
+    assert response.status_code == 200, response.text
+    assert session_service.get_session_detail(direct["id"])["readOnly"] is True
+
+
+@pytest.mark.parametrize("entry", ["delete", "patch", "bulk"])
+def test_archive_refuses_new_owned_session_before_reference_writes(
+    tmp_path, monkeypatch, entry,
+):
+    from core.web.services.session.admission_lock import SessionAdmissionLock
+
+    direct, _child = _create_agent_with_child_session(tmp_path, monkeypatch)
+    room = chat_room_service.create_chat_room(
+        title="归档快照变化仍保留成员", participant_session_ids=[direct["id"]],
+    )
+    original_acquire = SessionAdmissionLock.acquire
+    added: list[str] = []
+
+    def add_session_before_lifecycle(lock, *args, **kwargs):
+        acquired = original_acquire(lock, *args, **kwargs)
+        if not added:
+            added.append("creating")
+            child = session_service.create_child_session(
+                direct["id"], user_request="并发新增", task_title="归档快照之后",
+                auto_start=False, switch_to_child=False,
+            )["childSession"]
+            added[0] = child["id"]
+        return acquired
+
+    monkeypatch.setattr(SessionAdmissionLock, "acquire", add_session_before_lifecycle)
+    response = _archive_via_http(entry, direct["agentId"])
+
+    if entry == "bulk":
+        assert response.status_code == 200, response.text
+        assert response.json()["summary"]["failedCount"] == 1
+        assert response.json()["failed"][0]["reason"] == "busy"
+    else:
+        assert response.status_code == 409, response.text
+    assert agent_directory_service.get_agent(direct["agentId"])["status"] == "active"
+    assert session_service.get_session_detail(added[0])["readOnly"] is False
+    assert chat_room_service.get_chat_room_detail(room["roomId"])["participants"][0]["agentId"] == direct["agentId"]
+
+
+def test_archive_admission_timeout_releases_partially_acquired_session_locks(
+    tmp_path, monkeypatch,
+):
+    direct, child = _create_agent_with_child_session(tmp_path, monkeypatch)
+    first_id, last_id = sorted([direct["id"], child["id"]])
+    held = threading.Event()
+    release = threading.Event()
+    first_available = threading.Event()
+
+    def hold_last():
+        with session_service._session_submit_admit_lock(last_id):
+            held.set()
+            assert release.wait(timeout=5)
+
+    def acquire_first():
+        with session_service._session_submit_admit_lock(first_id):
+            first_available.set()
+
+    holder = threading.Thread(target=hold_last, daemon=True)
+    checker = threading.Thread(target=acquire_first, daemon=True)
+    holder.start()
+    try:
+        assert held.wait(timeout=2)
+        with pytest.raises(session_service.SessionBusyError):
+            with session_service.agent_archive_transaction(direct["agentId"], timeout=0.05):
+                pytest.fail("Archive entered while the final session admission was held.")
+        checker.start()
+        assert first_available.wait(timeout=1)
+    finally:
+        release.set()
+        holder.join(timeout=3)
+        if checker.ident is not None:
+            checker.join(timeout=3)
+    assert not holder.is_alive()
+    assert not checker.is_alive()
+
+
+@pytest.mark.parametrize("entry", ["delete", "patch", "bulk"])
+@pytest.mark.parametrize("held_lock", ["chat_thread", "agent", "state"])
+def test_archive_route_lock_budget_reports_busy_and_releases_all_locks(
+    tmp_path, monkeypatch, entry, held_lock,
+):
+    from core.web.services import runtime_scene_service
+
+    direct, _child = _create_agent_with_child_session(tmp_path, monkeypatch)
+    scene = runtime_scene_service.start_runtime_scene("agent_archive_lock_regression")
+    scene_dir = Path(scene["runtimeSceneDir"])
+    assert scene_dir.is_relative_to(tmp_path)
+    original_transaction = session_service.agent_archive_transaction
+    monkeypatch.setattr(
+        session_service, "agent_archive_transaction",
+        lambda agent_id: original_transaction(agent_id, timeout=0.2),
+    )
+    lock = {
+        "chat_thread": session_service._CHAT_STATE_LOCK._thread_lock,
+        "agent": agent_directory_service._AGENT_SESSION_LIFECYCLE_LOCK,
+        "state": agent_directory_service._STATE_LOCK,
+    }[held_lock]
+    held = threading.Event()
+    release = threading.Event()
+
+    def hold():
+        with lock:
+            held.set()
+            release.wait(timeout=3)  # bounded cleanup even if a route ignores its budget
+
+    holder = threading.Thread(target=hold, daemon=True)
+    holder.start()
+    started = time.monotonic()
+    try:
+        assert held.wait(timeout=2)
+        response = _archive_via_http(entry, direct["agentId"])
+        assert time.monotonic() - started < 2
+        if entry == "bulk":
+            assert response.status_code == 200, response.text
+            assert response.json()["failed"][0]["reason"] == "busy"
+        else:
+            assert response.status_code == 409, response.text
+    finally:
+        release.set()
+        holder.join(timeout=3)
+    assert not holder.is_alive()
+    events = [
+        json.loads(line)
+        for line in (scene_dir / "events" / "conversation.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    lock_events = [event for event in events if event["event_code"].startswith("agent.archive.lock.")]
+    expected_codes = ["agent.archive.lock.requested"]
+    if held_lock != "state":
+        expected_codes.append("agent.archive.lock.waiting")
+    expected_codes.append("agent.archive.lock.busy")
+    assert [event["event_code"] for event in lock_events] == expected_codes
+    busy = lock_events[-1]["fields"]
+    assert busy["agentId"] == direct["agentId"]
+    assert busy["sessionCount"] == (0 if held_lock == "state" else 2)
+    assert busy["stage"] == ("snapshot" if held_lock == "state" else "chat_agent_lifecycle")
+    assert busy["errorType"] == "SessionBusyError"
+    assert 100 <= busy["waitMs"] < 2000
+    assert agent_directory_service.get_agent(direct["agentId"])["status"] == "active"
+    retry = _archive_via_http(entry, direct["agentId"])
+    assert retry.status_code == 200, retry.text
+    assert session_service.get_session_detail(direct["id"])["readOnly"] is True
+
+
+@pytest.mark.parametrize("entry", ["delete", "patch", "bulk"])
+def test_archive_route_waits_for_submit_admission_then_refuses_busy(
+    tmp_path, monkeypatch, entry,
+):
+    from core.web.services.session.admission_lock import SessionAdmissionLock
+
+    direct, _child = _create_agent_with_child_session(tmp_path, monkeypatch)
+    admission = session_service._session_submit_admit_lock(direct["id"])
+    original_acquire = SessionAdmissionLock.acquire
+    waiting = threading.Event()
+    result: dict[str, object] = {}
+
+    def observe_admission(lock, *args, **kwargs):
+        if threading.current_thread().name.startswith("AnyIO worker") and lock.path == admission.path:
+            waiting.set()
+        return original_acquire(lock, *args, **kwargs)
+
+    monkeypatch.setattr(SessionAdmissionLock, "acquire", observe_admission)
+    admission.acquire()
+
+    def archive():
+        result["response"] = _archive_via_http(entry, direct["agentId"])
+
+    archiver = threading.Thread(target=archive, daemon=True)
+    archiver.start()
+    try:
+        assert waiting.wait(timeout=3)
+        # Model the submit admission's final registration before it releases
+        # its fence. No worker or external model call is started by this test.
+        session_service._set_session_running(direct["id"], True, turn_id="archive-admission-race")
+    finally:
+        admission.release()
+        archiver.join(timeout=5)
+        session_service._set_session_running(direct["id"], False)
+    assert not archiver.is_alive()
+    response = result["response"]
+    if entry == "bulk":
+        assert response.status_code == 200, response.text
+        assert response.json()["failed"][0]["reason"] == "busy"
+    else:
+        assert response.status_code == 409, response.text
+    assert agent_directory_service.get_agent(direct["agentId"])["status"] == "active"
+    assert session_service.get_session_detail(direct["id"])["readOnly"] is False

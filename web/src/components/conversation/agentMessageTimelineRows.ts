@@ -74,6 +74,17 @@ function submissionRenderKey(message: AgentMessage) {
 }
 
 function baseTimelineRowKey(message: AgentMessage) {
+  const segmentKey = metadataText(message.metadata, "guidanceSegmentKey")
+    || metadataText(message.source.metadata, "guidanceSegmentKey");
+  if (message.role === "assistant" && segmentKey) {
+    const turnKey = `assistant-turn:${normalizedMessageTurnId(message)}`;
+    return segmentKey === "initial" ? turnKey : `${turnKey}:guide:${segmentKey}`;
+  }
+  const guidanceEventId = metadataText(message.metadata, "guidanceEventId")
+    || metadataText(message.source.metadata, "guidanceEventId");
+  if (message.role === "user" && guidanceEventId) {
+    return `user-guidance:${guidanceEventId}`;
+  }
   const submissionKey = submissionRenderKey(message);
   if (submissionKey) {
     return submissionKey;

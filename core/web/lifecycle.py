@@ -468,6 +468,27 @@ async def _await_startup_prewarm_gate(app: FastAPI | None) -> dict[str, int]:
     }
 
 
+async def _run_session_recovery_after_first_frame(
+    app: FastAPI | None,
+    directory_ready: asyncio.Task[Any],
+    startup_jobs: StartupJobGroup,
+    callback: Callable[..., Any],
+    *,
+    worker_name: str,
+    stop_keyword: str | None = None,
+) -> Any:
+    """Reuse the published store and leave first-frame reads ahead of bulk repair."""
+
+    # load_chat_state otherwise opens a second standalone ConversationStore
+    # against the same SQLite database while its real owner is still opening.
+    await asyncio.shield(directory_ready)
+    if app is not None and _startup_cache_prewarm_gate_enabled():
+        await _await_startup_prewarm_gate(app)
+    if startup_jobs.should_stop():
+        raise asyncio.CancelledError
+    return await startup_jobs.run_sync(worker_name, callback, stop_keyword=stop_keyword)
+
+
 async def _run_config_workspace_prewarm_after_routes_ready(
     app: FastAPI | None, *, startup_jobs: StartupJobGroup | None = None
 ) -> dict[str, Any]:
@@ -527,6 +548,37 @@ async def _run_llm_warmup_after_routes_ready(
     )
 
 
+def _codebase_map_warmup_worker(gate_timings: dict[str, Any] | None = None) -> Any:
+    from core.prompt_manager.codebase_map_builder import warm_codebase_map_cache
+
+    return warm_codebase_map_cache()
+
+
+async def _run_codebase_map_warmup_after_routes_ready(
+    app: FastAPI | None, *, startup_jobs: StartupJobGroup | None = None
+) -> Any:
+    """Defer the CODEBASE_MAP cold build behind the shared heavy-prewarm gate.
+
+    The first ``get_codebase_map`` of a fresh process pays a full-repo AST
+    parse (~12s on this repo) for the task-focused view scoring, even when the
+    persisted map file is still valid. Warming it inside the stagger window
+    means the first turn's prompt assembly only pays the warm read (~0.2s).
+    The warm runs the exact production code path (same locks, same content
+    semantics), never raises, and never runs under pytest.
+    """
+
+    from .services.session.directory_runtime import should_skip_directory_runtime_for_pytest
+
+    if should_skip_directory_runtime_for_pytest():
+        return {"skipped": "pytest"}
+    return await _run_prewarm_heavy_after_routes_ready(
+        app,
+        _codebase_map_warmup_worker,
+        worker_name="codebase-map-prewarm-worker",
+        startup_jobs=startup_jobs,
+    )
+
+
 def is_windows_proactor_disconnect_noise(context: dict[str, Any]) -> bool:
     if os.name != "nt":
         return False
@@ -572,6 +624,8 @@ async def web_workbench_lifespan(app: FastAPI | None):
         # Enable async waiters for non-health requests while routes mount in background.
         app.state.web_routes_ready_event = asyncio.Event()
         app.state.web_startup_routes_ready_event = asyncio.Event()
+        app.state.web_bootstrap_routes_ready_event = asyncio.Event()
+        app.state.web_feature_routes_requested_event = asyncio.Event()
         # Route import/mount is the cold-start bulk cost — do not await before yield so
         # /api/health can pass and Launcher can open the window early.
         startup_routes_task = startup_jobs.start_async(
@@ -601,6 +655,12 @@ async def web_workbench_lifespan(app: FastAPI | None):
     # readiness and no-ops fast when the operator kill switch is set.
     startup_llm_warmup_task = startup_jobs.start_async(
         "startup-llm-warmup", _run_llm_warmup_after_routes_ready(app, startup_jobs=startup_jobs)
+    )
+    # CODEBASE_MAP cold-build warmup（任务视图首建的全仓 AST parse，本仓实测
+    # ~12s）挂同一延迟门；首个正式轮次的 prompt 组装只付温态读成本。
+    startup_codebase_map_warmup_task = startup_jobs.start_async(
+        "startup-codebase-map-warmup",
+        _run_codebase_map_warmup_after_routes_ready(app, startup_jobs=startup_jobs),
     )
     from .services.session.directory_runtime import (
         begin_directory_startup,
@@ -644,8 +704,13 @@ async def web_workbench_lifespan(app: FastAPI | None):
         startup_config_workspace_prewarm_task = startup_jobs.start_thread(
             "startup-config-workspace-prewarm", _prewarm_config_workspace_on_startup
         )
-    startup_agent_inbox_recovery_task = startup_jobs.start_thread(
-        "startup-agent-inbox-recovery", _recover_wakeable_agent_inbox_messages_on_startup
+    startup_agent_inbox_recovery_task = startup_jobs.start_async(
+        "startup-agent-inbox-recovery",
+        _run_session_recovery_after_first_frame(
+            app, startup_directory_task, startup_jobs,
+            _recover_wakeable_agent_inbox_messages_on_startup,
+            worker_name="startup-agent-inbox-recovery-worker",
+        ),
     )
     startup_meeting_driver_recovery_task = _start_meeting_driver_recovery_job(
         startup_jobs
@@ -659,10 +724,14 @@ async def web_workbench_lifespan(app: FastAPI | None):
     # Session startup recovery sweep (interrupted turns + queue drain). Kept
     # adjacent to the other *_recovery_* hooks; later recovery hooks append
     # below this block.
-    startup_session_recovery_task = startup_jobs.start_thread(
+    startup_session_recovery_task = startup_jobs.start_async(
         "startup-session-recovery",
-        _recover_interrupted_session_turns_on_startup,
-        stop_keyword="should_stop",
+        _run_session_recovery_after_first_frame(
+            app, startup_directory_task, startup_jobs,
+            _recover_interrupted_session_turns_on_startup,
+            worker_name="startup-session-recovery-worker",
+            stop_keyword="should_stop",
+        ),
     )
     # Subagent address orphan sweep (crash-left running records). Same
     # best-effort recovery family; see core/orchestration/subagent_address.py.
@@ -682,7 +751,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
         reconcile_external_agent_tasks_forever(startup_jobs=startup_jobs),
     )
     startup_pa_patrol_task = _start_pa_patrol_job(startup_jobs)
-    startup_workflow_runtime_task = _start_workflow_runtime_job(startup_jobs)
+    startup_workflow_runtime_task = _start_workflow_runtime_job(startup_jobs, app=app)
     startup_generic_workflow_task = startup_jobs.start_async(
         "startup-generic-workflows",
         _start_generic_workflows_after_session_recovery(startup_session_recovery_task, startup_jobs),
@@ -691,7 +760,13 @@ async def web_workbench_lifespan(app: FastAPI | None):
 
     startup_virtual_human_life_task = startup_jobs.start_async(
         "startup-virtual-human-life",
-        run_virtual_human_life_runtime(run_sync=startup_jobs.run_sync),
+        run_virtual_human_life_runtime(
+            run_sync=startup_jobs.run_sync,
+            initial_heartbeat_gate=(
+                (lambda: _await_startup_prewarm_gate(app))
+                if app is not None and _startup_cache_prewarm_gate_enabled() else None
+            ),
+        ),
     )
     startup_perception_task = startup_jobs.start_async(
         "startup-agent-perception", _start_perception_after_routes_ready(app, startup_jobs),
@@ -730,6 +805,9 @@ async def web_workbench_lifespan(app: FastAPI | None):
     )
     startup_llm_warmup_task.add_done_callback(
         lambda task: consume_startup_task_result(task, message="LLM startup warmup failed during startup.")
+    )
+    startup_codebase_map_warmup_task.add_done_callback(
+        lambda task: consume_startup_task_result(task, message="CODEBASE_MAP startup warmup failed during startup.")
     )
     startup_directory_task.add_done_callback(
         lambda task: consume_startup_task_result(
@@ -1145,12 +1223,12 @@ async def _shutdown_owned_runtime_resources(*, deadline: float | None = None) ->
 
 
 
-def _start_research_workflow_runtime() -> str:
+def _start_research_workflow_runtime(*, hypothesis_recovery_delay_s: float = 0.0) -> str:
     from .services.team_workflow.research_runtime.runtime_factory import (
         start_production_workflow_runtime,
     )
 
-    return start_production_workflow_runtime()
+    return start_production_workflow_runtime(hypothesis_recovery_delay_s=hypothesis_recovery_delay_s)
 
 
 def _begin_generic_workflow_runtime(*, should_stop: Callable[[], bool] | None = None) -> dict[str, Any]:
@@ -1173,11 +1251,14 @@ async def _start_generic_workflows_after_session_recovery(
     )
 
 
-def _start_workflow_runtime_job(startup_jobs: StartupJobGroup):
+def _start_workflow_runtime_job(startup_jobs: StartupJobGroup, *, app: FastAPI | None = None):
     """Start the Ledger-backed research workflow runtime (workers + reads)."""
 
+    kwargs = {}
+    if app is not None and _startup_cache_prewarm_gate_enabled():
+        kwargs["hypothesis_recovery_delay_s"] = _startup_prewarm_stagger_seconds()
     return startup_jobs.start_thread(
-        "startup-workflow-runtime", _start_research_workflow_runtime
+        "startup-workflow-runtime", _start_research_workflow_runtime, **kwargs,
     )
 
 

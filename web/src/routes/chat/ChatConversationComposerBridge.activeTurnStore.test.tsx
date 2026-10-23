@@ -17,6 +17,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ConversationMessage } from "../../api/types";
+import { postBrowserTelemetry } from "../../app/browserTelemetry";
 import type { ActiveTurnLayerState } from "../chatActiveTurnLayer";
 import { createActiveTurnLayersStore, ActiveTurnLayersStoreProvider } from "./activeTurnLayersStore";
 import { ChatConversationComposerBridge } from "./ChatConversationComposerBridge";
@@ -24,6 +25,8 @@ import { ChatConversationComposerBridge } from "./ChatConversationComposerBridge
 const { lazyViewProps } = vi.hoisted(() => ({
   lazyViewProps: [] as Array<Record<string, unknown>>,
 }));
+
+vi.mock("../../app/browserTelemetry", () => ({ postBrowserTelemetry: vi.fn() }));
 
 vi.mock("../../components/conversation/LazyConversationView", () => ({
   LazyConversationView: (props: Record<string, unknown>) => {
@@ -130,6 +133,7 @@ it("does not expose model controls on a read-only conversation", () => {
 
 beforeEach(() => {
   lazyViewProps.length = 0;
+  vi.mocked(postBrowserTelemetry).mockClear();
 });
 
 afterEach(() => {
@@ -190,6 +194,43 @@ describe("ChatConversationComposerBridge active-turn store isolation", () => {
       store.setActiveTurnLayersBySession((current) => ({ ...current, s1: makeLayer(1) }));
     });
     expect(lazyViewProps[lazyViewProps.length - 1].activeTurnMessage).toBeUndefined();
+  });
+
+  it("withdraws running status with the stop button after restart while retaining the partial message", () => {
+    const store = createActiveTurnLayersStore();
+    const props = baseProps();
+    const renderBridge = (terminal: boolean) => (
+      <ActiveTurnLayersStoreProvider store={store}>
+        <ChatConversationComposerBridge
+          {...props}
+          phase={terminal ? "ready" : "running"}
+          composer={{ ...props.composer, actionMode: terminal ? "send" : "stop", actionDisabled: terminal }}
+          activeTurnAuthority={{
+            id: "s1", currentPhase: terminal ? "ready" : "running",
+            activeTurnId: terminal ? "" : "turn-1",
+            lastTurnTerminalTurnId: terminal ? "turn-1" : "",
+            terminalReason: terminal ? "stopped_by_user" : "running", ledgerSeq: terminal ? 11 : 10,
+          }}
+        />
+      </ActiveTurnLayersStoreProvider>
+    );
+    renderTree(renderBridge(false));
+    act(() => store.setActiveTurnLayersBySession(() => ({ s1: makeLayer(10) })));
+    expect(lazyViewProps.at(-1)?.composerActionMode).toBe("stop");
+    expect((lazyViewProps.at(-1)?.activeTurnMessage as ConversationMessage).status).toBe("running");
+
+    act(() => root!.render(renderBridge(true)));
+    expect(lazyViewProps.at(-1)?.composerActionMode).toBe("send");
+    expect((lazyViewProps.at(-1)?.activeTurnMessage as ConversationMessage).status).toBe("completed");
+    expect(store.getSnapshot().s1).toBeDefined();
+    // A late frame for the stopped turn cannot resurrect its activity note.
+    act(() => store.setActiveTurnLayersBySession(() => ({ s1: makeLayer(11) })));
+    expect((lazyViewProps.at(-1)?.activeTurnMessage as ConversationMessage).status).toBe("completed");
+    expect(postBrowserTelemetry).toHaveBeenCalledTimes(1);
+    expect(postBrowserTelemetry).toHaveBeenCalledWith(expect.objectContaining({
+      eventCode: "browser.session_stream.terminal_activity_reconciled",
+      fields: expect.objectContaining({ sessionId: "s1", turnId: "turn-1", terminalReason: "stopped_by_user" }),
+    }));
   });
 
   it("re-renders for own-session frames through the memo but not for other sessions", () => {

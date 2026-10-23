@@ -36,7 +36,11 @@ GIT_TIMEOUT_SECONDS = 120.0
 R1_PYTEST_TIMEOUT_SECONDS = 1800.0
 R1_ARCHIVE_MAX_MEMBERS = 50_000
 R1_ARCHIVE_MAX_TOTAL_BYTES = 512_000_000
-R1_ARCHIVE_MAX_MEMBER_BYTES = 10_000_000
+# Calibrated 2026-10: HEAD legitimately carries docs assets above the old
+# 10 MB cap (docs/assets/readme/challenge-cup-demo.mp4 23 MB,
+# docs/architecture/index.html 14 MB); the cap still bounds single-member
+# pathology far below the 512 MB total.
+R1_ARCHIVE_MAX_MEMBER_BYTES = 32_000_000
 R1_ARCHIVE_EXTRACT_TIMEOUT_SECONDS = 120.0
 R1_NESTED_PYTEST_EXCLUDES: tuple[str, ...] = (
     "test_manifest_hashes_head_blob_not_dirty_worktree",

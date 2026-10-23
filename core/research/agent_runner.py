@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from time import monotonic
@@ -523,11 +524,7 @@ class LLMResearchAgentRunner(ResearchAgentRunner):
         project_root = _workspace_project_root(workspace)
         matches: list[dict[str, Any]] = []
         expected_role = f"research_{agent_key}"
-        for agent in agent_directory_service.list_agents(
-            include_archived=False,
-            detail="full",
-            project_root=project_root,
-        ):
+        for agent in _research_directory_snapshot(project_root):
             metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
             if str(metadata.get("challengeCupTeamId") or "").strip():
                 continue
@@ -540,7 +537,10 @@ class LLMResearchAgentRunner(ResearchAgentRunner):
                 f"Research AgentDirectory binding is duplicated: {agent_key}"
             )
         if matches:
-            return _profile_from_agent_instance(agent_key, matches[0])
+            # dict() 浅拷贝：快照在同一轮成员间复用，浅拷贝保证每个 profile
+            # 拿到独立的顶层 agent 字典，保留 list_agents 返回值可自由修改的
+            # 历史语义；嵌套字段本实现只读，无写路径。
+            return _profile_from_agent_instance(agent_key, dict(matches[0]))
         raise ValueError(f"Unknown research agent: {agent_key}")
 
     def _mode_bound_agent_profile(self, agent_key: str, workspace: Any) -> dict[str, Any] | None:
@@ -687,6 +687,85 @@ def _workspace_project_root(workspace: Any) -> Path | None:
             return root_path.parent
         return root_path
     return None
+
+
+# AgentDirectory 全量投影的轮内快照缓存：
+# - ``_agent_profile`` 的兜底查找过去每次都调 ``list_agents(detail="full")``：
+#   即使 agent_directory 的 hydration 缓存命中，``_list_agents`` 仍会对全部
+#   agent 逐个跑 ``_agent_to_api`` 全量投影（deepcopy metadata、头像/persona/
+#   task profile 解析等），54-125 个 agent 单次可达秒级。research-team 每轮
+#   每成员至少查一次，m×n 放大后是 GIL 挤兑源。
+# - 同一轮成员间复用一次快照：失效 = 注册表文件签名（path+mtime_ns+size，
+#   与 agent_directory summary 投影缓存同款口径，任何 agent 写路径都会重写
+#   注册表）+ 短 TTL 兜底外部输入；命中只花一次 stat。匹配语义不变。
+# - ``project_root=None`` 仍直连 ``list_agents`` 回落模块级根，不进缓存，
+#   避免全局根改写后读到旧根的快照。
+_DIRECTORY_SNAPSHOT_LOCK = threading.Lock()
+_DIRECTORY_SNAPSHOT_TTL_SECONDS = 5.0
+_DIRECTORY_SNAPSHOT_LIMIT = 32
+_DIRECTORY_SNAPSHOT: dict[str, tuple[tuple[Any, ...], float, list[dict[str, Any]]]] = {}
+
+
+def _registry_file_signature(project_root: Path | None) -> tuple[Any, ...] | None:
+    """Registry file signature (path, mtime_ns, size); None when unusable."""
+
+    try:
+        path = agent_directory_service.registry_path(project_root=project_root)
+    except Exception:
+        return None
+    try:
+        stat = path.stat()
+    except OSError:
+        return (str(path), "missing")
+    return (str(path), stat.st_mtime_ns, stat.st_size)
+
+
+def _research_directory_snapshot(project_root: Path | None) -> list[dict[str, Any]]:
+    """Return non-archived Agent API projections, reusing one snapshot per root.
+
+    同一根、同注册表签名、TTL 内的并发调用共享一次 ``list_agents`` 全量投影；
+    取数在锁内完成，天然收敛同轮成员的雷群请求。显式 ``project_root`` 逐字
+    透传（list_agents 的并发调用方契约）。
+    """
+
+    if project_root is None:
+        return agent_directory_service.list_agents(
+            include_archived=False,
+            detail="full",
+            project_root=None,
+        )
+    signature = _registry_file_signature(project_root)
+    if signature is None:
+        return agent_directory_service.list_agents(
+            include_archived=False,
+            detail="full",
+            project_root=project_root,
+        )
+    cache_key = str(project_root)
+    now = monotonic()
+    with _DIRECTORY_SNAPSHOT_LOCK:
+        cached = _DIRECTORY_SNAPSHOT.get(cache_key)
+        if cached is not None:
+            cached_signature, fetched_at, agents = cached
+            if cached_signature == signature and now - fetched_at <= _DIRECTORY_SNAPSHOT_TTL_SECONDS:
+                return agents
+        agents = agent_directory_service.list_agents(
+            include_archived=False,
+            detail="full",
+            project_root=project_root,
+        )
+        if len(_DIRECTORY_SNAPSHOT) >= _DIRECTORY_SNAPSHOT_LIMIT:
+            oldest_key = min(_DIRECTORY_SNAPSHOT, key=lambda key: _DIRECTORY_SNAPSHOT[key][1])
+            _DIRECTORY_SNAPSHOT.pop(oldest_key, None)
+        _DIRECTORY_SNAPSHOT[cache_key] = (signature, monotonic(), agents)
+        return agents
+
+
+def reset_research_directory_snapshot_cache() -> None:
+    """Clear the snapshot cache; used by tests to isolate stubbed registries."""
+
+    with _DIRECTORY_SNAPSHOT_LOCK:
+        _DIRECTORY_SNAPSHOT.clear()
 
 
 class DeterministicResearchAgentRunner(ResearchAgentRunner):

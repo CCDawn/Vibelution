@@ -1,7 +1,32 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { archiveAgent, bulkArchiveAgents, fetchAgentArchiveState } from "./agents";
+import { resetControlTokenForTests, seedControlTokenForTests } from "./client";
 
 import apiSource from "./agents.ts?raw";
 import mutationSource from "../routes/chat/useAgentPermissionPresetMutation.ts?raw";
+
+describe("bounded Agent archive requests", () => {
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); resetControlTokenForTests(); });
+  it.each([
+    ["single", () => archiveAgent("a/b"), 30_000, "/api/agents/a%2Fb", "DELETE"],
+    ["bulk", () => bulkArchiveAgents(["a", "b"]), 60_000, "/api/agents/bulk-archive", "POST"],
+    ["readback", () => fetchAgentArchiveState("a/b"), 10_000, "/api/agents/a%2Fb", "GET"],
+  ] as const)("bounds %s without retrying its write", async (_label, request, budget, endpoint, method) => {
+    vi.useFakeTimers(); seedControlTokenForTests();
+    const fetchMock = vi.fn((_input: string, init?: RequestInit) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    let failure: unknown;
+    const pending = request().catch(error => { failure = error; });
+    await vi.advanceTimersByTimeAsync(budget + 1);
+    expect(failure).toMatchObject({ name: "TimeoutError" });
+    await pending;
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe(endpoint);
+    expect(fetchMock.mock.calls[0][1]?.method ?? "GET").toBe(method);
+  });
+});
 
 describe("Agent permission preset API", () => {
   it("owns the revision-bound Agent permission transport", () => {
@@ -34,7 +59,7 @@ describe("Agent permission preset API", () => {
     expect(apiSource).toContain("/api/agents/avatar-options");
     expect(apiSource).toContain("export function listAgentAvatarOptions");
     expect(apiSource).toContain("export function createAgent");
-    expect(apiSource).toContain('fetchJson<AgentConfigWorkspaceAgent>("/api/agents"');
+    expect(apiSource).toContain('agentManagementWrite<AgentConfigWorkspaceAgent>("/api/agents"');
     expect(apiSource).toContain("export function updateAgent");
     expect(apiSource).toContain("export function archiveAgent");
     expect(apiSource).toContain("export function resetAgent");

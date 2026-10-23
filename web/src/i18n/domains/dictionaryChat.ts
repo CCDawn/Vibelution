@@ -220,6 +220,9 @@ export const dictionaryChat = {
     composerBudgetMaxCallsLabel: "每回合工具调用额度",
     composerBudgetMaxCallsPlaceholder: "未配置=按模型策略，常见 32",
     composerBudgetClearMaxCalls: "清除工具调用额度，恢复默认",
+    composerBudgetUnlimited: "不限制（关闭每回合工具预算）",
+    composerBudgetUnlimitedHint: "开启后本会话不再按回合截断工具调用；"
+      + "仍受工具授权、迭代上限与上下文预算约束。",
     composerBudgetSave: "保存",
     composerBudgetCancel: "取消",
     composerBudgetLoading: "读取预算配置…",
@@ -460,6 +463,9 @@ export const dictionaryChat = {
     composerBudgetMaxCallsLabel: "Tool calls per turn",
     composerBudgetMaxCallsPlaceholder: "Unset = model policy, commonly 32",
     composerBudgetClearMaxCalls: "Clear tool-call quota, restore default",
+    composerBudgetUnlimited: "Unlimited (disable the per-turn tool budget)",
+    composerBudgetUnlimitedHint: "This session no longer caps tool calls per turn; "
+      + "tool authorization, iteration limits and context budgets still apply.",
     composerBudgetSave: "Save",
     composerBudgetCancel: "Cancel",
     composerBudgetLoading: "Loading budget settings…",

@@ -5,7 +5,7 @@ PA 派出任务后是纯被动方：``delegationPolicy.allowWakeMessages=False``
 个静默语义），过期派遣也没人催。本模块让 PA 侧自己活起来，三个动作全部由
 60s 心跳巡检驱动，任何一轮失败只记日志、绝不杀死循环：
 
-1. 自动催办：``sentAt`` 距今超过阈值且 ``receipts`` 为空的 aged 派遣，经
+1. 自动催办：最近派遣/回执活动超过阈值且任务仍待推进的 aged 派遣，经
    ``submit_agent_message_event`` 以 PA 身份向目标 agent 发跟进消息
    （source=``pa_followup``，wake_target=True）。催办与普通派遣走同一条
    kernel 通道落到目标 agent 收件箱，PA 自己不用醒；催办内容携带原派遣
@@ -248,8 +248,9 @@ def _text(row: dict[str, Any], key: str) -> str:
 
 
 def _metadata(row: dict[str, Any]) -> dict[str, Any]:
-    value = (row or {}).get("metadata")
-    return value if isinstance(value, dict) else {}
+    from .personal_assistant_dispatches_service import _metadata as dispatch_metadata
+
+    return dispatch_metadata(row)
 
 
 def _is_receipt_like(row: dict[str, Any], dispatch_message_ids: set[str]) -> bool:
@@ -283,9 +284,11 @@ def _dispatch_age_seconds(dispatch: dict[str, Any], *, now: float) -> float | No
 
 
 def _is_aged_dispatch(dispatch: dict[str, Any], *, now: float) -> bool:
-    """Aged = no receipts, sent long enough ago, still inside the chase window."""
+    """Chase actionable tasks after quiet time, inside the original send window."""
 
-    if dispatch.get("receipts"):
+    if _text(dispatch, "deliveryStatus").lower() == "revoked" or _text(dispatch, "taskStatus") in {
+        "completed", "failed", "cancelled", "blocked",
+    }:
         return False
     message_id = _text(dispatch, "messageId")
     if not message_id:
@@ -293,7 +296,16 @@ def _is_aged_dispatch(dispatch: dict[str, Any], *, now: float) -> bool:
     age = _dispatch_age_seconds(dispatch, now=now)
     if age is None:
         return False
-    return FOLLOWUP_INITIAL_AGE_SECONDS <= age <= FOLLOWUP_MAX_AGE_SECONDS
+    last_activity = now - age
+    for receipt in dispatch.get("receipts") or []:
+        if isinstance(receipt, dict):
+            received = _parse_iso_timestamp(_text(receipt, "receivedAt"))
+            if received is not None:
+                last_activity = max(last_activity, received)
+    return (
+        0 <= age <= FOLLOWUP_MAX_AGE_SECONDS
+        and now - last_activity >= FOLLOWUP_INITIAL_AGE_SECONDS
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -309,13 +321,26 @@ def _followup_content(dispatch: dict[str, Any], *, round_index: int, age_seconds
         f"[派遣催办]（第 {round_index} 次跟进）",
         (
             f"个人助理此前派给 {target_name} 的任务已等待约 {minutes} 分钟，"
-            "仍未收到回执。"
+            "需要同步任务进展或完成证据。"
         ),
     ]
     if summary:
         lines.append(f"原任务摘要: {summary}")
     lines.append(f"派遣消息ID: {_text(dispatch, 'messageId')}")
-    lines.append("请尽快处理：已完成请回复回执；仍在进行请简短同步当前状态。")
+    lines.extend([
+        "请使用现有 agent_message_tool 回复个人助理，并用 metadata_json 关联原派遣：",
+        f"回复地址 target_session={_text(dispatch, 'sourceSessionId')}；这是原派遣发起会话，请勿猜测其他会话。",
+        json.dumps({
+            "replyToMessageId": _text(dispatch, "messageId"),
+            "personalAssistantTask": {
+                "schemaVersion": 1,
+                "dispatchMessageId": _text(dispatch, "messageId"),
+                "status": "running/blocked/completed/failed",
+                "evidenceRefs": ["可核验的产出或验证记录引用"],
+            },
+        }, ensure_ascii=False),
+        "status 请选择当前真实状态；completed 必须提供 evidenceRefs。普通回执不会关闭任务。",
+    ])
     return "\n".join(lines)
 
 
@@ -337,6 +362,59 @@ def _pa_sender() -> dict[str, Any] | None:
     }
 
 
+def _followup_target_is_current(dispatch: dict[str, Any], pa_agent_id: str) -> bool:
+    """Read native authority only; never recover/create a missing target session."""
+    from . import personal_assistant_dispatches_service as dispatches
+    from . import session_service
+    from .session_archive_service import conversation_is_archived
+
+    target_id = _text(dispatch, "targetAgentId")
+    session_id = _text(dispatch, "targetSessionId")
+    message_id = _text(dispatch, "messageId")
+    if not target_id or not session_id or not message_id or not pa_agent_id:
+        return False
+    targets = [row for row in dispatches._agent_rows() if _text(row, "agentId") == target_id]
+    if len(targets) != 1 or _text(targets[0], "status") != "active":
+        return False
+    target = targets[0]
+    # Native wake redirects a replaced direct session even if it still exists.
+    # Reject that seam here instead of waking a different session.
+    metadata = target.get("metadata") if isinstance(target.get("metadata"), dict) else {}
+    if (
+        _text(metadata, "previousDirectSessionId") == session_id
+        and _text(target, "directSessionId")
+        and _text(target, "directSessionId") != session_id
+    ):
+        return False
+    session = session_service.load_session_chat_state(session_service.PROJECT_ROOT, session_id)
+    if (
+        not isinstance(session, dict)
+        or _text(session, "id") != session_id
+        or _text(session, "agentId") != target_id
+        or conversation_is_archived(session)
+    ):
+        return False
+    # Last read before submit: revocation/source/landing checks use the original
+    # inbox row, never the earlier aggregate or user-supplied custom metadata.
+    originals = dispatches._scan_inbox_reverse(
+        dispatches._inbox_path(target),
+        predicate=lambda row: (_text(row, "messageId") or _text(row, "eventId")) == message_id,
+        cap=2,
+        strict=True,
+    )
+    return bool(
+        len(originals) == 1
+        and _text(originals[0], "sourceAgentId") == pa_agent_id
+        and _text(originals[0], "targetAgentId") == target_id
+        and _text(originals[0], "targetSessionId") == session_id
+        and _text(dispatch, "sourceSessionId")
+        and _text(dispatches._metadata(originals[0]), "sourceSessionId") == _text(dispatch, "sourceSessionId")
+        and _text(originals[0], "threadId") == _text(dispatch, "threadId")
+        and _text(originals[0], "status").lower() != "revoked"
+        and not dispatches._is_followup(originals[0])
+    )
+
+
 def send_followup_for_dispatch(
     dispatch: dict[str, Any],
     *,
@@ -350,20 +428,29 @@ def send_followup_for_dispatch(
     target_agent_id = _text(dispatch, "targetAgentId")
     summary = _clip(_text(dispatch, "summary"), limit=_SUMMARY_LIMIT)
     content = _followup_content(dispatch, round_index=round_index, age_seconds=age_seconds)
+    if (
+        _text(dispatch, "deliveryStatus").lower() == "revoked"
+        or not _followup_target_is_current(dispatch, _text(pa_sender, "agentId"))
+    ):
+        return {"accepted": False, "reason": "dispatch_target_unavailable"}
     return _submit_followup_event(
         source=PATROL_SOURCE,
-        sender=pa_sender,
+        sender={**pa_sender, "sessionId": _text(dispatch, "sourceSessionId")},
         recipient_agent_ids=[target_agent_id],
         content=content,
         correlation_id=_text(dispatch, "threadId") or message_id,
         wake_target=True,
         metadata={
             "sourceSurface": PATROL_SOURCE,
+            "sourceSessionId": _text(dispatch, "sourceSessionId"),
             "inboxKind": PATROL_SOURCE,
-            "messageSummary": _clip(f"催办（第 {round_index} 次）：{summary or '派遣未回执'}", limit=_SUMMARY_LIMIT),
+            "messageSummary": _clip(f"催办（第 {round_index} 次）：{summary or '派遣待更新'}", limit=_SUMMARY_LIMIT),
             "inboxCreatedBy": "pa_patrol",
-            "paFollowupOfMessageId": message_id,
-            "paFollowupRound": int(round_index),
+            "targetSessionId": _text(dispatch, "targetSessionId"),
+            "agentToolMetadataJson": json.dumps({
+                "paFollowupOfMessageId": message_id,
+                "paFollowupRound": int(round_index),
+            }),
         },
         source_id=message_id,
         # 同 (派遣, 轮次) 永远同一个 key：进程内重放与重启后第一轮都由
@@ -382,11 +469,15 @@ def _digest_aggregate(
     in_flight: int,
     aged_due: int,
     undigested_receipts: int,
+    blocked: int = 0,
+    failed: int = 0,
 ) -> dict[str, int]:
     return {
         "inFlightDispatches": max(0, int(in_flight)),
         "agedDueChases": max(0, int(aged_due)),
         "undigestedReceipts": max(0, int(undigested_receipts)),
+        "blockedDispatches": max(0, int(blocked)),
+        "failedDispatches": max(0, int(failed)),
     }
 
 
@@ -398,6 +489,7 @@ def _digest_fingerprint(aggregate: dict[str, int]) -> str:
 def _digest_row(aggregate: dict[str, int], rotation: float) -> dict[str, str]:
     title = _clip(
         "助理派遣摘要：进行中 {inFlightDispatches} · 逾期待催办 {agedDueChases}"
+        " · 阻塞 {blockedDispatches} · 失败 {failedDispatches}"
         " · 未消化回执 {undigestedReceipts}".format(**aggregate)
     )
     body = _clip(
@@ -529,12 +621,14 @@ def patrol_once(*, now: float | None = None) -> dict[str, Any]:
                     continue
                 age = _dispatch_age_seconds(dispatch, now=observed) or FOLLOWUP_INITIAL_AGE_SECONDS
                 try:
-                    send_followup_for_dispatch(
+                    delivery = send_followup_for_dispatch(
                         dispatch,
                         round_index=next_round,
                         age_seconds=age,
                         pa_sender=pa_sender,
                     )
+                    if delivery.get("accepted") is False:
+                        continue
                 except Exception as exc:  # noqa: BLE001 - one failed chase must not stop the rest
                     logger.warning(
                         "PA patrol follow-up submit failed. messageId=%s round=%s error=%s",
@@ -583,11 +677,16 @@ def patrol_once(*, now: float | None = None) -> dict[str, Any]:
             allowed, _round = _followup_gate(_patrol_state, message_id, now=observed)
             if allowed:
                 aged_with_budget += 1
-        in_flight = sum(1 for row in dispatches if not row.get("receipts"))
+        current = [row for row in dispatches if _text(row, "deliveryStatus").lower() != "revoked"]
+        in_flight = sum(
+            1 for row in current if _text(row, "taskStatus") not in {"completed", "failed", "cancelled"}
+        )
         aggregate = _digest_aggregate(
             in_flight=in_flight,
             aged_due=aged_with_budget,
             undigested_receipts=len(undigested),
+            blocked=sum(1 for row in current if _text(row, "taskStatus") == "blocked"),
+            failed=sum(1 for row in current if _text(row, "taskStatus") == "failed"),
         )
         rotated, row = _refresh_digest(_patrol_state, aggregate, now=observed)
         result["digest"] = {"rotated": rotated, "row": row, "aggregate": aggregate}

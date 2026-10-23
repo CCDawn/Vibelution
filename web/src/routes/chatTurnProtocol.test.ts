@@ -23,6 +23,12 @@ describe("canonical SessionTurnItem v3 rendering", () => {
     expect(consolidated[0]).toMatchObject({ id: "answer-r2", text: "新" });
   });
 
+  it("updates a revision without moving its display position past later-created work", () => {
+    const earlier: SessionTurnItem = { ...base, id: "early-r2", itemId: "early", type: "reasoning", text: "updated", status: "completed", revision: 2, sequence: 40, metadata: { orderSequence: 10 } };
+    const later: SessionTurnItem = { ...base, id: "later", itemId: "later", type: "reasoning", text: "later", status: "completed", revision: 1, sequence: 20, metadata: { orderSequence: 20 } };
+    expect(consolidateSessionTurnItemsV2([later, earlier]).map((item) => item.itemId)).toEqual(["early", "later"]);
+  });
+
   it("projects one assistant turn without legacy top-level content", () => {
     const item: SessionTurnItem = {
       ...base, id: "answer-r1", itemId: "answer", type: "agent_message", phase: "final_answer",

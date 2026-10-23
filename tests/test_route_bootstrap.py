@@ -14,6 +14,131 @@ from core.web.route_bootstrap import register_spa_routes
 from core.web.middleware.wait_for_routes import WaitForWebRoutesMiddleware
 
 
+def test_feature_wait_is_demand_driven_latched_and_cancellable(monkeypatch):
+    from core.web import lifecycle, route_bootstrap
+
+    monkeypatch.setattr(lifecycle, "_startup_cache_prewarm_gate_enabled", lambda: True)
+    monkeypatch.setattr(lifecycle, "_startup_prewarm_stagger_seconds", lambda: 60.0)
+
+    async def exercise():
+        app = FastAPI()
+        app.state.web_feature_routes_requested_event = asyncio.Event()
+        waiter = asyncio.create_task(route_bootstrap._await_feature_route_demand(app))
+        await asyncio.sleep(0)
+        assert not waiter.done()
+        route_bootstrap.request_feature_routes(app)
+        assert await asyncio.wait_for(waiter, 1) >= 0
+        # A request that arrived before startup readiness cannot lose its wake.
+        assert await asyncio.wait_for(route_bootstrap._await_feature_route_demand(app), 1) >= 0
+
+        app.state.web_feature_routes_requested_event = asyncio.Event()
+        waiter = asyncio.create_task(route_bootstrap._await_feature_route_demand(app))
+        await asyncio.sleep(0)
+        waiter.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiter
+        assert not app.state.web_feature_routes_requested_event.is_set()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("enabled,timeout", [(True, 0.01), (False, 60.0), (True, 0.0)])
+def test_feature_import_wait_has_a_headless_fallback_and_honors_existing_switch(monkeypatch, enabled, timeout):
+    from core.web import lifecycle, route_bootstrap
+
+    monkeypatch.setattr(lifecycle, "_startup_cache_prewarm_gate_enabled", lambda: enabled)
+    monkeypatch.setattr(lifecycle, "_startup_prewarm_stagger_seconds", lambda: timeout)
+
+    async def exercise():
+        app = FastAPI()
+        app.state.web_feature_routes_requested_event = asyncio.Event()
+        await asyncio.wait_for(route_bootstrap._await_feature_route_demand(app), 1)
+        assert not app.state.web_feature_routes_requested_event.is_set()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("wake_path", ["/api/feature-demand", "/api/runtime/summary"])
+def test_startup_reads_do_not_import_features_until_an_actual_request(monkeypatch, wake_path):
+    from core.web import lifecycle, route_bootstrap
+    from core.web.routes import agent_plugins
+    from core.web.services.agent_directory import bootstrap
+
+    monkeypatch.setattr(lifecycle, "_startup_cache_prewarm_gate_enabled", lambda: True)
+    monkeypatch.setattr(lifecycle, "_startup_prewarm_stagger_seconds", lambda: 60.0)
+    monkeypatch.setattr(bootstrap, "initialize_builtin_agent_catalog", lambda: {})
+    monkeypatch.setattr(route_bootstrap, "register_spa_routes", lambda *args, **kwargs: None)
+    monkeypatch.setattr(agent_plugins, "list_virtual_human_companion_activity", lambda: [])
+    monkeypatch.setattr(agent_plugins, "list_virtual_human_companion_bindings", lambda: [{"agentId": "companion", "directSessionId": "native"}])
+    for name in ("_start_financial_team_coordinator", "_start_financial_job_scheduler", "_start_financial_backtest_worker"):
+        monkeypatch.setattr(route_bootstrap, name, lambda *args, **kwargs: None)
+
+    startup = APIRouter()
+    feature = APIRouter()
+    startup.get("/sessions/bootstrap")(lambda: {"startup": True})
+    startup.get("/runtime/summary")(lambda: {"summary": True})
+    feature.get("/feature-demand")(lambda: {"feature": True})
+
+    async def exercise():
+        app = FastAPI()
+        app.add_middleware(WaitForWebRoutesMiddleware)
+        app.state.web_routes_registered = False
+        app.state.web_routes_ready_event = asyncio.Event()
+        app.state.web_startup_routes_ready_event = asyncio.Event()
+        app.state.web_feature_routes_requested_event = asyncio.Event()
+        imported = asyncio.Event()
+        release = asyncio.Event()
+
+        async def run_sync(name, callback, *args, **kwargs):
+            if name == "web-route-import":
+                if kwargs["startup_only"]:
+                    return [SimpleNamespace(__name__="core.web.routes.sessions", router=startup), agent_plugins]
+                imported.set()
+                await release.wait()
+                return [SimpleNamespace(router=feature)]
+            return callback(*args, **kwargs)
+
+        warming = asyncio.create_task(route_bootstrap.warm_web_routes_in_background(app, run_sync=run_sync))
+        request = None
+        try:
+            await asyncio.wait_for(app.state.web_startup_routes_ready_event.wait(), 1)
+            assert not imported.is_set()
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://127.0.0.1") as client:
+                assert (await client.get("/api/sessions/bootstrap")).json() == {"startup": True}
+                assert not imported.is_set()
+                # Ordinary /chat URLs must resolve Companion identity without
+                # paying for every unrelated feature router before detail loads.
+                activity = await asyncio.wait_for(client.get(
+                    "/api/agent-plugins/virtual-human-life/companion-activity",
+                ), 1)
+                assert activity.json() == []
+                assert not imported.is_set()
+                bindings = await asyncio.wait_for(client.get(
+                    "/api/agent-plugins/virtual-human-life/companion-bindings",
+                ), 1)
+                assert bindings.json() == [{"agentId": "companion", "directSessionId": "native"}]
+                assert not imported.is_set()
+                request = asyncio.create_task(client.get(wake_path))
+                await asyncio.wait_for(imported.wait(), 1)
+                assert not app.state.web_routes_registered
+                if wake_path == "/api/feature-demand":
+                    assert not request.done()
+                else:
+                    assert (await request).json() == {"summary": True}
+                release.set()
+                payload = await asyncio.wait_for(warming, 1)
+                assert payload["featureDemandWaitMs"] >= 0
+                assert app.state.web_routes_registered
+                assert (await request).status_code == 200
+        finally:
+            release.set()
+            if not warming.done():
+                warming.cancel()
+            await asyncio.gather(warming, *([request] if request is not None else []), return_exceptions=True)
+
+    asyncio.run(exercise())
+
+
 def test_shell_and_assets_are_served_while_api_waits_for_bootstrap(tmp_path, monkeypatch):
     from core.web import route_bootstrap
     from core.web.router_registry import register_web_routers_from_modules
@@ -72,6 +197,216 @@ def test_shell_readiness_rejects_missing_referenced_assets(tmp_path):
     register_spa_routes(app, web_dist=tmp_path)
     assert app.state.web_shell_ready is False
     assert "missing asset" in app.state.web_shell_error
+
+
+def test_shell_bootstrap_reads_do_not_wait_for_catalog_but_session_reads_do(tmp_path, monkeypatch):
+    from core.web import route_bootstrap
+    from core.web.control import CONTROL_TOKEN_HEADER, WebControlGuardMiddleware, get_control_token
+    from core.web.services.agent_directory import bootstrap
+
+    app = FastAPI()
+    app.state.web_routes_registered = False
+    app.add_middleware(WebControlGuardMiddleware)
+    app.add_middleware(WaitForWebRoutesMiddleware, timeout_seconds=2)
+    (tmp_path / "index.html").write_text("shell", encoding="utf-8")
+    register_spa_routes(app, web_dist=tmp_path)
+    mounts = []
+    original_include = app.include_router
+
+    def include(router, **kwargs):
+        mounts.append(router)
+        return original_include(router, **kwargs)
+
+    monkeypatch.setattr(app, "include_router", include)
+    config = APIRouter()
+    launcher = APIRouter()
+    sessions = APIRouter()
+    initialized = []
+
+    @config.api_route("/config/bootstrap", methods=["GET", "HEAD"])
+    @launcher.api_route("/launcher/current-instance", methods=["GET", "HEAD"])
+    def shell_read():
+        return {"shell": True}
+
+    @config.get("/config/avatar-image/{filename}")
+    @config.get("/config/theme-background-image/{filename}")
+    def image_read(filename: str):
+        assert initialized == []
+        return {"image": filename}
+
+    @sessions.get("/sessions/bootstrap")
+    def session_read():
+        assert initialized == [True]
+        return {"sessions": True}
+
+    @config.get("/config/public")
+    @config.post("/config/bootstrap")
+    @config.get("/config/bootstrap/extra")
+    @launcher.get("/launcher/status")
+    def full_read():
+        return {"full": True}
+
+    startup_modules = [
+        SimpleNamespace(__name__="core.web.routes.config", router=config),
+        SimpleNamespace(__name__="core.web.routes.launcher", router=launcher),
+        SimpleNamespace(__name__="core.web.routes.sessions", router=sessions),
+    ]
+    monkeypatch.setattr(bootstrap, "initialize_builtin_agent_catalog", lambda: initialized.append(True))
+
+    async def exercise():
+        for name in ("web_routes_ready_event", "web_startup_routes_ready_event", "web_bootstrap_routes_ready_event"):
+            setattr(app.state, name, asyncio.Event())
+        catalog_entered = asyncio.Event()
+        release_catalog = asyncio.Event()
+        remaining_entered = asyncio.Event()
+        release_remaining = asyncio.Event()
+        waiting = asyncio.Event()
+        wait_count = 0
+        original_wait = route_bootstrap.wait_for_web_routes
+        pending = []
+
+        async def observe_wait(*args, **kwargs):
+            nonlocal wait_count
+            if not kwargs.get("bootstrap_only"):
+                wait_count += 1
+                if wait_count == 5:
+                    waiting.set()
+            return await original_wait(*args, **kwargs)
+
+        async def run_sync(name, callback, *args, **kwargs):
+            if name == "web-route-import":
+                if kwargs["startup_only"]:
+                    return startup_modules
+                remaining_entered.set()
+                await release_remaining.wait()
+                return []
+            if name == "builtin-agent-bootstrap":
+                catalog_entered.set()
+                await release_catalog.wait()
+                return callback(*args, **kwargs)
+            return None
+
+        monkeypatch.setattr("core.web.middleware.wait_for_routes.wait_for_web_routes", observe_wait)
+        warming = asyncio.create_task(route_bootstrap.warm_web_routes_in_background(app, web_dist=tmp_path, run_sync=run_sync))
+        try:
+            await asyncio.wait_for(catalog_entered.wait(), 1)
+            assert app.state.web_bootstrap_routes_registered
+            assert not getattr(app.state, "web_startup_routes_registered", False)
+            headers = {CONTROL_TOKEN_HEADER: get_control_token()}
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://127.0.0.1") as client:
+                for path in ("/api/config/bootstrap", "/api/launcher/current-instance"):
+                    assert (await client.get(path, headers=headers)).json() == {"shell": True}
+                    assert (await client.head(path, headers=headers)).status_code == 200
+                    assert (await client.get(path)).status_code == 403
+                    assert (await client.get(path, headers={**headers, "Origin": "https://untrusted.invalid"})).status_code == 403
+                assert initialized == []
+                for path in (
+                    "/api/config/avatar-image/avatar.png",
+                    "/api/config/theme-background-image/background.png",
+                ):
+                    assert (await client.get(path)).status_code == 200
+                    assert (await client.get(path, headers={"Origin": "https://untrusted.invalid"})).status_code == 403
+                    assert not route_bootstrap.is_bootstrap_route_path(path, method="POST")
+                    assert not route_bootstrap.is_bootstrap_route_path(path + "/extra")
+                assert not route_bootstrap.is_bootstrap_route_path("/api/config/theme-background-image")
+                pending = [asyncio.create_task(client.request(method, path, headers=headers)) for method, path in (
+                    ("GET", "/api/sessions/bootstrap"),
+                    ("GET", "/api/config/public"),
+                    ("POST", "/api/config/bootstrap"),
+                    ("GET", "/api/config/bootstrap/extra"),
+                    ("GET", "/api/launcher/status"),
+                )]
+                await asyncio.wait_for(waiting.wait(), 1)
+                assert not any(task.done() for task in pending)
+                release_catalog.set()
+                await asyncio.wait_for(remaining_entered.wait(), 1)
+                assert (await asyncio.wait_for(pending[0], 1)).json() == {"sessions": True}
+                assert not any(task.done() for task in pending[1:])
+                release_remaining.set()
+                await warming
+                assert all(response.json() == {"full": True} for response in await asyncio.gather(*pending[1:]))
+                assert mounts.count(config) == mounts.count(launcher) == mounts.count(sessions) == 1
+        finally:
+            release_catalog.set()
+            release_remaining.set()
+            if not warming.done():
+                warming.cancel()
+            await asyncio.gather(warming, *pending, return_exceptions=True)
+            for name in ("financial_team_coordinator_task", "financial_job_scheduler_task", "financial_backtest_worker_task"):
+                task = getattr(app.state, name, None)
+                if task is not None:
+                    await task
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("stage", ["import", "catalog", "remaining"])
+@pytest.mark.parametrize("cancel", [False, True])
+def test_failed_or_cancelled_warm_releases_waiters_and_preserves_completed_gates(monkeypatch, stage, cancel):
+    from core.web import route_bootstrap
+
+    app = FastAPI()
+    app.state.web_routes_registered = False
+    modules = [SimpleNamespace(__name__="core.web.routes.config", router=APIRouter())]
+    monkeypatch.setattr(route_bootstrap, "register_spa_routes", lambda *a, **k: None)
+    recoveries = []
+
+    def unavailable(*args, **kwargs):
+        recoveries.append(True)
+        raise RuntimeError("recovery unavailable")
+
+    monkeypatch.setattr(route_bootstrap, "ensure_web_routes_registered", unavailable)
+
+    async def exercise():
+        waiting = asyncio.Event()
+        wait_count = 0
+        expected_wait_count = {"import": 3, "catalog": 2, "remaining": 1}[stage]
+
+        class ObservedEvent(asyncio.Event):
+            async def wait(self):
+                nonlocal wait_count
+                wait_count += 1
+                if wait_count == expected_wait_count:
+                    waiting.set()
+                return await super().wait()
+
+        for name in ("web_routes_ready_event", "web_startup_routes_ready_event", "web_bootstrap_routes_ready_event"):
+            setattr(app.state, name, ObservedEvent())
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def run_sync(name, callback, *args, **kwargs):
+            current_stage = "catalog" if name == "builtin-agent-bootstrap" else (
+                "import" if kwargs.get("startup_only") else "remaining"
+            )
+            if current_stage == stage:
+                entered.set()
+                await release.wait()
+                raise RuntimeError("warm unavailable")
+            return modules if current_stage == "import" else None
+
+        warming = asyncio.create_task(route_bootstrap.warm_web_routes_in_background(app, run_sync=run_sync))
+        await asyncio.wait_for(entered.wait(), 1)
+        waiters = [asyncio.create_task(route_bootstrap.wait_for_web_routes(app, **kwargs)) for kwargs in (
+            {"bootstrap_only": True}, {"startup_only": True}, {},
+        )]
+        await asyncio.wait_for(waiting.wait(), 1)
+        if cancel:
+            warming.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await warming
+        else:
+            release.set()
+            with pytest.raises(RuntimeError, match="warm unavailable"):
+                await warming
+        assert await asyncio.wait_for(asyncio.gather(*waiters), 1) == [stage != "import", stage == "remaining", False]
+        assert app.state.web_bootstrap_routes_ready_event.is_set()
+        assert app.state.web_startup_routes_ready_event.is_set()
+        assert app.state.web_routes_ready_event.is_set()
+        if cancel:
+            assert recoveries == []
+
+    asyncio.run(exercise())
 
 
 def test_first_frame_reads_work_before_unrelated_imports_finish(monkeypatch):
@@ -323,6 +658,8 @@ def test_startup_operations_match_only_reviewed_methods_and_complete_route_shape
     from core.web.route_bootstrap import is_startup_route_path
     from core.web.routes import sessions
 
+    assert is_startup_route_path("/api/agent-plugins/virtual-human-life/companion-activity", method="GET")
+    assert is_startup_route_path("/api/agent-plugins/virtual-human-life/companion-bindings", method="GET")
     for path in (
         "/api/config/bootstrap", "/api/launcher/current-instance", "/api/runtime/summary",
         "/api/sessions/bootstrap", "/api/sessions/query", "/api/sessions/active",
@@ -343,6 +680,11 @@ def test_startup_operations_match_only_reviewed_methods_and_complete_route_shape
         actual = "/api" + path.replace("{session_id}", "chat-ready").replace("{request_id}", "approval-ready")
         assert is_startup_route_path(actual + "?limit=20", method=method)
     for method, path in (
+        ("POST", "/api/agent-plugins/virtual-human-life/companion-activity"),
+        ("POST", "/api/agent-plugins/virtual-human-life/companion-bindings"),
+        ("GET", "/api/agent-plugins/virtual-human-life/companions"),
+        ("GET", "/api/agent-plugins/catalog"),
+        ("PUT", "/api/agents/companion/plugins/virtual-human-life/binding"),
         ("GET", "/api/sessions/chat-ready/export-html"),
         ("POST", "/api/sessions/chat-ready/archive"),
         ("GET", "/api/sessions/chat-ready/unknown"),
@@ -390,6 +732,7 @@ def test_startup_import_partition_loads_each_router_once(monkeypatch):
     assert set(first) == {
         "core.web.routes.config", "core.web.routes.launcher",
         "core.web.routes.runtime", "core.web.routes.sessions",
+        "core.web.routes.agent_plugins",
     }
     assert set(first).isdisjoint(later)
     assert len(names) == len(set(names)) == len(router_registry._ROUTE_MODULE_NAMES)

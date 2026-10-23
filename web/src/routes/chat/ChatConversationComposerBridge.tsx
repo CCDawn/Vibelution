@@ -1,13 +1,14 @@
-import { memo, useMemo, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useRef, type ReactNode } from "react";
 
 import type { SessionReferenceAttachment } from "../../api/types";
+import { postBrowserTelemetry } from "../../app/browserTelemetry";
 import { LazyConversationView } from "../../components/conversation/LazyConversationView";
 import type { ComposerQueueItem } from "../../components/conversation/composerFollowupQueueModel";
 import type {
   ConversationComposerAttachment,
   ConversationViewProps,
 } from "../../components/conversation/conversationViewTypes";
-import { projectActiveTurnLayerMessage } from "../chatActiveTurnLayer";
+import { projectActiveTurnLayerMessage, type ActiveTurnAuthority } from "../chatActiveTurnLayer";
 import type { ComposerImageAttachment } from "./chatComposerSubmitModel";
 import {
   useActiveTurnLayerForSession,
@@ -99,6 +100,7 @@ type BridgeManagedConversationProps =
 type ChatConversationComposerBridgeProps = Omit<ConversationViewProps, BridgeManagedConversationProps> & {
   composer: ChatConversationComposerBridgeState;
   fallback: ReactNode;
+  activeTurnAuthority?: ActiveTurnAuthority;
 };
 
 export function mapChatComposerImageAttachments(
@@ -217,6 +219,7 @@ export const ChatConversationComposerBridge = memo(function ChatConversationComp
   composer,
   fallback,
   activeTurnMessage,
+  activeTurnAuthority,
   messages,
   sessionId,
   slashCommandSuggestions,
@@ -232,11 +235,39 @@ export const ChatConversationComposerBridge = memo(function ChatConversationComp
   const streamedActiveTurnMessage = useMemo(
     () => (
       activeTurnLayersStore
-        ? projectActiveTurnLayerMessage(streamedActiveTurnLayer, messages)
+        ? projectActiveTurnLayerMessage(streamedActiveTurnLayer, messages, activeTurnAuthority)
         : activeTurnMessage
     ),
-    [activeTurnLayersStore, streamedActiveTurnLayer, messages, activeTurnMessage],
+    [activeTurnLayersStore, streamedActiveTurnLayer, messages, activeTurnMessage, activeTurnAuthority],
   );
+  const terminalActivityLoggedRef = useRef("");
+  const terminalActivityRetained = Boolean(
+    streamedActiveTurnLayer
+    && streamedActiveTurnMessage?.role === "assistant"
+    && streamedActiveTurnMessage.status === "completed"
+    && streamedActiveTurnMessage.metadata?.processStage === activeTurnAuthority?.terminalReason
+    && activeTurnAuthority?.lastTurnTerminalTurnId === streamedActiveTurnLayer.turnId,
+  );
+  useEffect(() => {
+    if (!terminalActivityRetained || !streamedActiveTurnLayer || !activeTurnAuthority) return;
+    const key = `${sessionId}:${streamedActiveTurnLayer.turnId}:${activeTurnAuthority.terminalReason}`;
+    if (terminalActivityLoggedRef.current === key) return;
+    terminalActivityLoggedRef.current = key;
+    postBrowserTelemetry({
+      phase: "session_stream",
+      eventCode: "browser.session_stream.terminal_activity_reconciled",
+      message: "Terminal session receipt ended the activity presentation while partial output awaits canonical hydration.",
+      level: "info",
+      fields: {
+        sessionId,
+        turnId: streamedActiveTurnLayer.turnId,
+        terminalReason: activeTurnAuthority.terminalReason,
+        terminalLedgerSeq: activeTurnAuthority.ledgerSeq,
+        layerLedgerSeq: streamedActiveTurnLayer.ledgerSeq,
+        retainedItemCount: streamedActiveTurnLayer.turnItems.length,
+      },
+    });
+  }, [terminalActivityRetained, streamedActiveTurnLayer, activeTurnAuthority, sessionId]);
   return (
     <LazyConversationView
       {...props}

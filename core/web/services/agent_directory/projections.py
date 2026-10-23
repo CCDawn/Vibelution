@@ -9,6 +9,7 @@ Late-bound facade keeps monkeypatches stable.
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 import threading
@@ -22,6 +23,24 @@ from ..agent_config_authority import (
     normalize_permission_preset,
     permission_runtime_contract,
 )
+
+
+def _copy_json_safe(value: Any) -> Any:
+    """Deep-copy JSON-shaped values without ``copy.deepcopy`` memo bookkeeping.
+
+    与 ``repair_store._copy_json_value`` 同思路的递归快拷，额外对非 JSON
+    类型（tuple / 自定义对象等注册表状态不应出现的值）回落
+    ``copy.deepcopy``，因此对任意输入与 ``copy.deepcopy`` 结果等价：
+    dict/list 结构性新建，标量（str/int/float/bool/None）不可变直接共享。
+    """
+
+    if isinstance(value, dict):
+        return {key: _copy_json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_copy_json_safe(item) for item in value]
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return copy.deepcopy(value)
 
 
 def _service():
@@ -525,7 +544,7 @@ def _agent_to_api(
 ) -> dict[str, Any]:
     s = _service()
     workspace = str(agent.get("workspacePath") or "").strip()
-    metadata = dict(agent.get("metadata") or {})
+    metadata = copy.deepcopy(agent.get("metadata") or {})
     avatar_path = s.resolve_agent_avatar_path_for_projection({**agent, "metadata": metadata})
     profileless_session_agent = s._is_profileless_session_agent({**agent, "metadata": metadata})
     if profileless_session_agent:
@@ -741,32 +760,23 @@ def _list_agents(*, include_archived: bool, detail: str) -> list[dict[str, Any]]
     hydration_timings: dict[str, float] = {}
     if normalized_detail == "summary":
         timings["hydrate"] = 0.0
-        summary_signature = s._registry_state_signature()
-        cached_summaries = _get_cached_agent_summaries(
-            include_archived=include_archived,
-            signature=summary_signature,
-            now=time.perf_counter(),
-        )
-        if cached_summaries is not None:
-            timings["summary_cache"] = 1.0
-            timings["to_api"] = 0.0
-            agents = cached_summaries
-        else:
-            timings["summary_cache"] = 0.0
-            stage_started = time.perf_counter()
-            avatar_url_cache: dict[str, str] = {}
-            available_avatars = s._available_agent_avatar_filenames()
-            agents = [
-                s._agent_to_api_summary(item, avatar_url_cache=avatar_url_cache, available_avatar_filenames=available_avatars)
-                for item in raw_agents
-            ]
-            timings["to_api"] = round((time.perf_counter() - stage_started) * 1000, 1)
-            _remember_agent_summaries(
-                include_archived=include_archived,
-                signature=summary_signature,
-                agents=agents,
-                now=time.perf_counter(),
+        stage_started = time.perf_counter()
+        avatar_url_cache: dict[str, str] = {}
+        available_avatars = s._available_agent_avatar_filenames()
+        agents = []
+        summary_cache_hits = 0
+        for item in raw_agents:
+            projected, cache_hit = _agent_to_api_summary_cached(
+                item,
+                avatar_url_cache=avatar_url_cache,
+                available_avatar_filenames=available_avatars,
             )
+            summary_cache_hits += 1 if cache_hit else 0
+            agents.append(projected)
+        timings["to_api"] = round((time.perf_counter() - stage_started) * 1000, 1)
+        timings["summary_cache"] = (
+            round(summary_cache_hits / len(raw_agents), 3) if raw_agents else 1.0
+        )
     elif normalized_detail == "config":
         stage_started = time.perf_counter()
         hydration = s._build_agent_api_config_hydration_context(state, raw_agents, timings=hydration_timings)
@@ -834,6 +844,39 @@ def count_active_agents(
         )
 
 
+def find_agent_ids_by_metadata(
+    metadata_key: str,
+    metadata_value: Any,
+    *,
+    status: str = "active",
+    project_root: Path | None = None,
+) -> list[str]:
+    """Find IDs without hydrating policies, copying registry records or building DTOs.
+
+    Reuse the repaired-state authority used by count_active_agents. Return only
+    detached scalar IDs, in the same recency order as list_agents.
+    """
+    s = _service()
+    with s.scoped_project_root(project_root):
+        with s._STATE_LOCK:
+            state, _cache_hit = s._load_repaired_state_for_read()
+            matches = []
+            for agent in state.get("agents") or []:
+                if not isinstance(agent, dict):
+                    continue
+                metadata = agent.get("metadata")
+                if not isinstance(metadata, dict) or metadata.get(metadata_key) != metadata_value:
+                    continue
+                if (str(agent.get("status") or "active").strip() or "active") != status:
+                    continue
+                agent_id = str(agent.get("agentId") or "").strip()
+                if agent_id:
+                    recency = str(agent.get("updatedAt") or "").strip() or str(agent.get("createdAt") or "").strip()
+                    matches.append((recency, agent_id))
+            matches.sort(key=lambda row: row[0], reverse=True)
+            return [agent_id for _recency, agent_id in matches]
+
+
 def prewarm_registry_caches() -> dict[str, Any]:
     """Warm the repaired-state read cache and the summary projection cache.
 
@@ -868,7 +911,10 @@ def _agent_to_api_summary(
 ) -> dict[str, Any]:
     s = _service()
     workspace = str(agent.get("workspacePath") or "").strip()
-    metadata = dict(agent.get("metadata") or {})
+    # 源 agent 来自 repair 层共享快照，输出不得别名共享 metadata；JSON 快拷与
+    # deepcopy 字节等价（_copy_json_safe 对非 JSON 类型回落 deepcopy），热点
+    # 轮询路径免去 memo 簿记开销。
+    metadata = _copy_json_safe(agent.get("metadata") or {})
     avatar_path = s.resolve_agent_avatar_path_for_projection(
         {**agent, "metadata": metadata},
         available_avatar_filenames=available_avatar_filenames,
@@ -1418,21 +1464,28 @@ def _get_agent_api_hydration_cache(signature: tuple[Any, ...]) -> Any | None:
     return None
 
 
-# summary 投影进程内缓存：
+# summary 投影进程内缓存（per-agent 粒度）：
 # - GET /agents?detail=summary 是导航热点路径。summary 虽无活动 hydration，
-#   但重建要跑 85-agent 全量规范化扫描（repair miss 时叠加秒级 repair，且
-#   全程持有 _STATE_LOCK）加每 agent 投影；线上后台 agent 活跃时被 GIL 争用
-#   放大至 ~1s/次（实测 to_api p50≈1.0s、repair p90≈2.6s）。
-# - 失效 = 注册表文件签名（path+mtime_ns+size，任何 agent 写路径都会重写
-#   注册表，自动覆盖创建/更新/删除/归档）+ 短 TTL 兜底（覆盖 avatar 图片
-#   版本参数、模型库上下文窗口等不写注册表的外部输入）。
-# - 命中返回深拷贝，保持 list_agents 调用方可自由修改返回值的历史语义。
+#   但重建要跑 85-agent 全量规范化扫描（repair miss 时叠加秒级 repair）加
+#   每 agent 投影（十几 service 调用 + metadata 拷贝）；UI 轮询反复驱动时，
+#   旧整表缓存（key = 注册表文件签名）只要任一 agent 写入（如
+#   agent.model_parameters.updated 重写注册表）就整体失效，54-125 个 agent
+#   全量重投影（活体日志 to_api 单日 14838s）。
+# - 现按 agent 下沉条目：key = (agentId, agent 记录内容签名 sha256)。内容
+#   签名不变（包括其他 agent 写入导致的注册表重写与重新 parse）即命中，
+#   单个 agent 的参数更新只重投影该 agent；注册表内容不变时连 repair 都
+#   命中共享快照，签名计算只剩每 agent 一次 canonical json.dumps。
+# - 失效语义：内容变化 → 签名变化自动失效；短 TTL（与旧整表缓存一致 5s）
+#   兜底 avatar 目录内容、avatar 图片版本参数、模型库上下文窗口等不写
+#   注册表的外部输入。
+# - 命中返回快照的独立副本（``_copy_json_safe``），保持 list_agents 调用方
+#   可自由修改返回值的历史语义；缓存条目存入后不可变，副本在锁外拷贝。
 _AGENT_SUMMARY_CACHE_LOCK = threading.RLock()
 _AGENT_SUMMARY_CACHE: dict[
-    tuple[bool, tuple[str, bool, int, int]],
-    tuple[list[dict[str, Any]], float],
+    tuple[str, str],
+    tuple[dict[str, Any], float],
 ] = {}
-_AGENT_SUMMARY_CACHE_LIMIT = 4
+_AGENT_SUMMARY_CACHE_LIMIT = 1024
 _AGENT_SUMMARY_CACHE_TTL_SECONDS = 5.0
 
 
@@ -1443,34 +1496,65 @@ def _reset_agent_summary_cache() -> None:
         _AGENT_SUMMARY_CACHE.clear()
 
 
-def _get_cached_agent_summaries(
-    *,
-    include_archived: bool,
-    signature: tuple[str, bool, int, int],
-    now: float,
-) -> list[dict[str, Any]] | None:
-    with _AGENT_SUMMARY_CACHE_LOCK:
-        entry = _AGENT_SUMMARY_CACHE.get((include_archived, signature))
-        if entry is None:
-            return None
-        cached_agents, stored_at = entry
-        if now - stored_at > _AGENT_SUMMARY_CACHE_TTL_SECONDS:
-            return None
-        return copy.deepcopy(cached_agents)
+def _agent_summary_content_signature(agent: dict[str, Any]) -> str:
+    """Content signature over one agent record for per-agent summary caching.
+
+    注册表状态来自 JSON parse，仅含 JSON 类型；``default=str`` 只是为进程内
+    注入的异常值兜底防 TypeError。序列化或摘要失败返回空串，调用方视为
+    签名不可用，绕过缓存走实时投影（失败开放，不缓存失败结果）。
+    """
+
+    try:
+        payload = json.dumps(agent, sort_keys=True, ensure_ascii=True, default=str)
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    except (TypeError, ValueError):
+        return ""
 
 
-def _remember_agent_summaries(
+def _agent_to_api_summary_cached(
+    agent: dict[str, Any],
     *,
-    include_archived: bool,
-    signature: tuple[str, bool, int, int],
-    agents: list[dict[str, Any]],
-    now: float,
-) -> None:
-    with _AGENT_SUMMARY_CACHE_LOCK:
-        _AGENT_SUMMARY_CACHE[(include_archived, signature)] = (agents, now)
-        while len(_AGENT_SUMMARY_CACHE) > _AGENT_SUMMARY_CACHE_LIMIT:
-            oldest_key = min(_AGENT_SUMMARY_CACHE, key=lambda key: _AGENT_SUMMARY_CACHE[key][1])
-            _AGENT_SUMMARY_CACHE.pop(oldest_key, None)
+    avatar_url_cache: dict[str, str] | None = None,
+    available_avatar_filenames: list[str] | None = None,
+) -> tuple[dict[str, Any], bool]:
+    """Per-agent cached ``_agent_to_api_summary``; returns (summary, cache_hit).
+
+    key = (agentId, 内容签名)：无关 agent 的注册表写入不改变本 agent 的
+    内容签名，缓存条目继续命中，命中在锁外快拷返回独立副本。签名不可用
+    时绕过缓存实时投影，不缓存失败结果。
+    """
+
+    s = _service()
+    now = time.perf_counter()
+    agent_id = str(agent.get("agentId") or "").strip()
+    signature = _agent_summary_content_signature(agent) if agent_id else ""
+    if signature:
+        with _AGENT_SUMMARY_CACHE_LOCK:
+            entry = _AGENT_SUMMARY_CACHE.get((agent_id, signature))
+            cached_summary = entry[0] if entry is not None else None
+            cache_valid = entry is not None and now - entry[1] <= _AGENT_SUMMARY_CACHE_TTL_SECONDS
+            if cache_valid:
+                # 滑动续期：键含内容签名，条目有效性不随龄增长而变化；TTL 只负责
+                # 回收不再被访问的垃圾条目，命中即续期让稳态轮询不会在 >TTL 间隙
+                # 后全量重投影。
+                _AGENT_SUMMARY_CACHE[(agent_id, signature)] = (entry[0], now)
+        if cache_valid:
+            return _copy_json_safe(cached_summary), True
+    projected = s._agent_to_api_summary(
+        agent,
+        avatar_url_cache=avatar_url_cache,
+        available_avatar_filenames=available_avatar_filenames,
+    )
+    if signature:
+        with _AGENT_SUMMARY_CACHE_LOCK:
+            _AGENT_SUMMARY_CACHE[(agent_id, signature)] = (
+                _copy_json_safe(projected),
+                time.perf_counter(),
+            )
+            while len(_AGENT_SUMMARY_CACHE) > _AGENT_SUMMARY_CACHE_LIMIT:
+                oldest_key = min(_AGENT_SUMMARY_CACHE, key=lambda key: _AGENT_SUMMARY_CACHE[key][1])
+                _AGENT_SUMMARY_CACHE.pop(oldest_key, None)
+    return projected, False
 
 
 def _agent_api_hydration_event_version() -> int:

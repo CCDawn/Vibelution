@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.services import (
+    agent_directory_service,
     personal_attention_completion_service as completion,
     personal_attention_service as attention,
     pet_activity_service,
@@ -34,6 +35,13 @@ finance_env = _finance_env
 personal_env = _personal_env
 
 NOW = 1_800_000_000.0
+
+
+@pytest.fixture(autouse=True)
+def _isolated_self_wake_agents(monkeypatch):
+    monkeypatch.setattr(
+        agent_directory_service, "find_agent_ids_by_metadata", lambda *_args, **_kwargs: []
+    )
 
 
 def _iso(epoch_seconds: float) -> str:
@@ -243,11 +251,14 @@ def test_run_completed_attention_caps_and_degrades(active_team, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def _pet_row(session_id, updated_at, *, tone="completed", title="量子纠错调研", agent="研究员-01"):
+def _pet_row(
+    session_id, updated_at, *, tone="completed", title="量子纠错调研",
+    agent="研究员-01", agent_id="agent-1",
+):
     return {
         "sessionId": session_id,
         "title": title,
-        "agentId": "agent-1",
+        "agentId": agent_id,
         "agentDisplayName": agent,
         "tone": tone,
         "phase": "completed",
@@ -304,6 +315,65 @@ def test_session_completed_attention_excludes_research_fanout_workers(monkeypatc
     # 科研/自动会话每轮的“完成”不逐条推送，只留用户可见会话。
     assert len(rows) == 1
     assert rows[0]["targetUrl"] == "/chat?session=session-mine"
+
+
+@pytest.mark.parametrize("worker_status", ["active", "archived"])
+def test_session_completed_attention_excludes_self_wake_workers_only(monkeypatch, worker_status):
+    def find_agents(key, value, *, status):
+        if key == "virtualHumanSelfWake" and value is True and status == worker_status:
+            return ["self-wake-worker"]
+        return []
+
+    monkeypatch.setattr(agent_directory_service, "find_agent_ids_by_metadata", find_agents)
+    monkeypatch.setattr(
+        pet_activity_service,
+        "get_pet_activity",
+        lambda: {
+            "sessions": [
+                _pet_row("hidden-work", _iso(NOW - 1), agent_id="self-wake-worker"),
+                _pet_row("visible-probe", _iso(NOW - 2), agent_id="self-wake-worker"),
+                _pet_row("companion-chat", _iso(NOW - 3), agent_id="companion"),
+                # A display name alone must never suppress an ordinary chat.
+                _pet_row("normal-chat", _iso(NOW - 4), agent="洛天依的自主行动"),
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        session_service,
+        "list_sessions",
+        lambda: [
+            {"id": "hidden-work", "sessionKind": "main", "hiddenFromIndex": True},
+            {"id": "visible-probe", "sessionKind": "main", "hiddenFromIndex": False},
+            {"id": "companion-chat", "sessionKind": "main"},
+            {"id": "normal-chat", "sessionKind": "main"},
+        ],
+    )
+
+    rows = completion.collect_session_completed_attention(now=NOW)
+
+    assert [row["targetUrl"] for row in rows] == [
+        "/chat?session=companion-chat", "/chat?session=normal-chat",
+    ]
+    assert rows[1]["body"] == "洛天依的自主行动"
+
+
+def test_session_completed_attention_self_wake_identity_failure_stays_silent(monkeypatch):
+    def unavailable(*_args, **_kwargs):
+        raise RuntimeError("Agent registry unavailable")
+
+    monkeypatch.setattr(agent_directory_service, "find_agent_ids_by_metadata", unavailable)
+    monkeypatch.setattr(
+        pet_activity_service,
+        "get_pet_activity",
+        lambda: {"sessions": [_pet_row("visible-probe", _iso(NOW - 1))]},
+    )
+    monkeypatch.setattr(session_service, "list_sessions", lambda: [])
+    monkeypatch.setattr(completion, "collect_dispatch_receipt_attention", lambda: [{"id": "receipt"}])
+    monkeypatch.setattr(completion, "collect_run_completed_attention", lambda: [{"id": "run"}])
+
+    # Unverified completion candidates stay silent; other attention sources survive.
+    assert completion.collect_session_completed_attention(now=NOW) == []
+    assert completion.collect_completion_attention() == [{"id": "receipt"}, {"id": "run"}]
 
 
 def test_session_completed_attention_new_turn_gets_new_id(monkeypatch):

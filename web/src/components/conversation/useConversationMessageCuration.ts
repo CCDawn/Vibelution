@@ -23,6 +23,8 @@ export type ConversationMessageCurationFeedback = {
 export type UseConversationMessageCurationInput = {
   sessionId: string;
   companionMode: boolean;
+  /** While the transcript is still loading, skip the curation scan. */
+  transcriptPending?: boolean;
   t: (key: TranslationKey) => string;
 };
 
@@ -37,11 +39,13 @@ export type UseConversationMessageCurationResult = {
  * Server map plus an optimistic overlay for instant button feedback; a failed
  * POST rolls the overlay entry back and the 409 copy surfaces briefly on the
  * button title. A session switch drops both so decisions do not inherit.
- * The query stays disabled without a session id or in companion mode.
+ * The query stays disabled without a session id, in companion mode, or while
+ * the transcript is still pending.
  */
 export function useConversationMessageCuration({
   sessionId,
   companionMode,
+  transcriptPending = false,
   t,
 }: UseConversationMessageCurationInput): UseConversationMessageCurationResult {
   // In-chat SFT curation: server map + optimistic overlay for instant button
@@ -54,7 +58,9 @@ export function useConversationMessageCuration({
   const messageCurationQuery = useQuery({
     queryKey: queryKeys.sessionMessageCuration(sessionId),
     queryFn: () => fetchSessionMessageCuration(sessionId),
-    enabled: Boolean(sessionId) && !companionMode,
+    // Curation decorates loaded messages; its queue scan must not compete with
+    // the initial transcript request while there is nothing to annotate yet.
+    enabled: Boolean(sessionId) && !companionMode && !transcriptPending,
   });
   const serverMessageCurationMap = useMemo(
     () => buildMessageCurationMap(messageCurationQuery.data?.items ?? []),

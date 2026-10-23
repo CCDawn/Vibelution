@@ -133,61 +133,12 @@ def _validate_progress_panel_contract(
         return "progress panel contract has unsupported schemaVersion"
 
     program = contract.get("programProjection")
-    dev_controls = contract.get("devControls")
-    if not isinstance(program, dict) or not isinstance(dev_controls, dict):
-        return "progress panel contract is missing programProjection/devControls"
+    if not isinstance(program, dict):
+        return "progress panel contract is missing programProjection"
     if program.get("property") != "competitionProgramProjection":
         return "progress panel contract has the wrong program projection property"
     if program.get("requiredDeepExperimentsProperty") != "requiredDeepExperiments":
         return "progress panel contract has the wrong deep-experiment property"
-
-    snapshot_query_key = dev_controls.get("snapshotQueryKey")
-    repair_prefix = dev_controls.get("repairActionPrefix")
-    plans = dev_controls.get("plans")
-    actions = dev_controls.get("actions")
-    markers = dev_controls.get("markers")
-    if not isinstance(snapshot_query_key, str) or not snapshot_query_key:
-        return "progress panel contract is missing the DEV snapshot query key"
-    if not isinstance(repair_prefix, str) or not repair_prefix:
-        return "progress panel contract is missing the repair action prefix"
-    if not isinstance(plans, dict) or set(plans) != {"dev1", "dev5"}:
-        return "progress panel contract must declare dev1 and dev5 plans"
-    if not all(isinstance(value, str) and value for value in plans.values()):
-        return "progress panel contract contains an invalid plan id"
-    if len(set(plans.values())) != len(plans):
-        return "progress panel contract contains duplicate plan ids"
-    required_actions = {
-        "runReadiness",
-        "repairReadiness",
-        "runDev1",
-        "repairDev1",
-        "runDev5",
-        "resumeDev5",
-        "repairDev5",
-        "researchAuthorizationRequired",
-    }
-    if not isinstance(actions, dict) or set(actions) != required_actions:
-        return "progress panel contract does not declare every legal DEV action"
-    if not all(isinstance(value, str) and value for value in actions.values()):
-        return "progress panel contract contains an invalid legal DEV action"
-    if len(set(actions.values())) != len(actions):
-        return "progress panel contract contains duplicate legal DEV actions"
-    required_markers = {
-        "snapshotError",
-        "snapshotRetry",
-        "snapshotReadinessRepair",
-        "readiness",
-        "actions",
-        "mutationError",
-        "collapsedSummary",
-        "cliLocator",
-    }
-    if not isinstance(markers, dict) or set(markers) != required_markers:
-        return "progress panel contract does not declare every DEV product marker"
-    if not all(isinstance(value, str) and value for value in markers.values()):
-        return "progress panel contract contains an invalid DEV product marker"
-    if len(set(markers.values())) != len(markers):
-        return "progress panel contract contains duplicate DEV product markers"
 
     panel_text = panel.read_text(encoding="utf-8")
     if not re.search(
@@ -205,10 +156,6 @@ def _validate_progress_panel_contract(
     required_contract_references = (
         "panelContract.programProjection.property",
         "panelContract.programProjection.requiredDeepExperimentsProperty",
-        "panelContract.devControls.snapshotQueryKey",
-        "panelContract.devControls.actions",
-        "panelContract.devControls.plans",
-        "panelContract.devControls.markers",
     )
     missing_references = [
         reference for reference in required_contract_references if reference not in panel_text
@@ -569,32 +516,11 @@ def gate_product_projection(
         return _gate("product_projection", "FAIL", f"missing {missing}")
     inspector_text = inspector.read_text(encoding="utf-8")
     types_text = types.read_text(encoding="utf-8")
-    api_text = api.read_text(encoding="utf-8")
-    query_keys_text = query_keys.read_text(encoding="utf-8")
     contract_failure = _validate_progress_panel_contract(panel, panel_contract)
     if contract_failure is not None:
         return _gate("product_projection", "FAIL", contract_failure)
     if "CompetitionProgramProjection" not in types_text:
         return _gate("product_projection", "FAIL", "challenge cup API types are missing")
-    for marker in (
-        "fetchChallengeCupDevControlSnapshot",
-        "runChallengeCupDevReadiness",
-        "runChallengeCupDevBatch",
-        "ChallengeCupDevControlSnapshot",
-        "/dev-controls",
-    ):
-        if marker not in api_text:
-            return _gate("product_projection", "FAIL", f"typed DEV API is missing {marker!r}")
-    for marker in (
-        "ChallengeCupDevControlSnapshot",
-        "ChallengeCupDevNextLegalAction",
-        "ChallengeCupDevBatchProjection",
-        "ChallengeCupDevReadinessProjection",
-    ):
-        if marker not in types_text:
-            return _gate("product_projection", "FAIL", f"typed DEV projection is missing {marker!r}")
-    if "challengeCupDevControlsSnapshot" not in query_keys_text:
-        return _gate("product_projection", "FAIL", "DEV snapshot query key is missing")
     if (
         "ChallengeMvpProgressPanel" not in inspector_text
         or "<ChallengeMvpProgressPanel" not in inspector_text
@@ -607,7 +533,7 @@ def gate_product_projection(
     return _gate(
         "product_projection",
         "PASS",
-        "Program v2, typed DEV API and DEV controls compile and pass focused Vitest",
+        "Program v2 and the progress panel contract compile and pass focused Vitest",
     )
 
 

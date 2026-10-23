@@ -648,6 +648,7 @@ def _load_conversation_detail_target(
     payload: dict[str, Any] | None = None,
     repair: bool = True,
     agent_by_id: dict[str, dict[str, Any]] | None = None,
+    agent_lookup_is_partial: bool = False,
     lightweight: bool = False,
     persist_session_row: bool = False,
 ) -> dict[str, Any] | None:
@@ -693,6 +694,21 @@ def _load_conversation_detail_target(
         if fresh is not None:
             payload = {"conversations": [fresh]}
             conversations = payload["conversations"]
+            if agent_lookup_is_partial:
+                fresh_agent_ids = {
+                    str(fresh.get(key) or "").strip()
+                    for key in ("agent_id", "agentId")
+                    if str(fresh.get(key) or "").strip()
+                }
+                # A writer may have rebound this row since the caller sampled
+                # its identities. Never interpret an unsampled Agent as missing.
+                if not fresh_agent_ids:
+                    agent_by_id = s._agent_lookup_for_conversations()
+                elif not fresh_agent_ids.issubset(agent_by_id):
+                    agent_by_id = s._agent_lookup_for_conversations(
+                        session_id=normalized_session_id,
+                        agent_ids=tuple(sorted(fresh_agent_ids)),
+                    )
         changed = s._repair_child_root_agent_direct_session_bindings(payload, agent_by_id=agent_by_id)
         for raw in conversations:
             if not isinstance(raw, dict):
@@ -1159,6 +1175,7 @@ def _persist_dirty_session_runtime_rows(
     conversations: list[Any],
     *,
     activate_session_id: str = "",
+    batch: bool = False,
 ) -> None:
     """Write only the supplied session runtime rows; do not prune siblings."""
 
@@ -1166,6 +1183,7 @@ def _persist_dirty_session_runtime_rows(
     now = s._now_timestamp()
     activate = str(activate_session_id or "").strip()
     persisted_ids: set[str] = set()
+    batch_rows: list[dict[str, Any]] = []
     for conversation in conversations:
         if not isinstance(conversation, dict):
             continue
@@ -1177,17 +1195,27 @@ def _persist_dirty_session_runtime_rows(
         if not session_id:
             continue
         conversation.setdefault("updated_at", now)
-        s.save_session_chat_state(
-            s.PROJECT_ROOT,
-            session_id,
-            conversation,
-            activate=session_id == activate,
-        )
+        if batch:
+            batch_rows.append(conversation)
+        else:
+            s.save_session_chat_state(
+                s.PROJECT_ROOT,
+                session_id,
+                conversation,
+                activate=session_id == activate,
+            )
         persisted_ids.add(session_id)
     if activate and activate not in persisted_ids:
         current = s.load_session_chat_state(s.PROJECT_ROOT, activate)
         if current is not None:
-            s.save_session_chat_state(s.PROJECT_ROOT, activate, current, activate=True)
+            if batch:
+                batch_rows.append(current)
+            else:
+                s.save_session_chat_state(s.PROJECT_ROOT, activate, current, activate=True)
+    if batch_rows:
+        from core.ui.chat_state import save_session_chat_states
+
+        save_session_chat_states(s.PROJECT_ROOT, batch_rows, activate_session_id=activate)
 
 
 def _repair_stale_running_conversations(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1243,10 +1271,16 @@ def _session_fixed_model_choice(session_id: str) -> dict[str, Any]:
     ).strip()
     if not model_ref:
         raise s.SessionValidationError("当前会话的 Agent 尚未绑定对话模型。")
+    return _agent_fixed_model_choice(model_ref, s._session_llm_model_choices())
+
+
+def _agent_fixed_model_choice(model_ref: str, choices: list[dict[str, Any]]) -> dict[str, Any]:
+    """Resolve the bound model against one request's candidate snapshot."""
+    s = _service()
     selected = next(
         (
             choice
-            for choice in s._session_llm_model_choices()
+            for choice in choices
             if model_ref
             in {
                 str(choice.get("modelRef") or "").strip(),

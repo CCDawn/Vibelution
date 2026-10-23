@@ -27,6 +27,7 @@ export type ElectronWindowLike = {
   reload?(): void;
   isDestroyed(): boolean;
   isFocused(): boolean;
+  isVisible?(): boolean;
   isMinimized?(): boolean;
   restore?(): void;
   on(event: string, listener: ElectronWindowEventListener): unknown;
@@ -568,6 +569,25 @@ export class ElectronWindowProvider {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Whether the pet/assistant surface is actually on screen. A minimized,
+   * hidden, or background surface still accepts `sendToPet`, so attention
+   * delivery must consult this before trusting the in-window channel.
+   */
+  isPetVisible(): boolean {
+    const window = this.petWindow;
+    if (!window || window.isDestroyed() || this.petReadyUrl === null) {
+      return false;
+    }
+    if (typeof window.isVisible !== "function" || !window.isVisible()) {
+      return false;
+    }
+    if (typeof window.isMinimized === "function" && window.isMinimized()) {
+      return false;
+    }
+    return true;
   }
 
   sendToLauncher(channel: string, payload: unknown): boolean {

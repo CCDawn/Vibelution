@@ -10,14 +10,14 @@ import { fetchSessionBudgetParameters, fetchSessionLlmOptions, listSessionChildS
 import { queryKeys } from "../../api/queryKeys";
 import type { ChatRoomDetail, SessionDetail, SessionSummary } from "../../api/types";
 import { postBrowserTelemetry } from "../../app/browserTelemetry";
-import { rootSessionIdFor } from "../conversationIndexModel";
+import { isVisibleDirectSession, rootSessionIdFor } from "../conversationIndexModel";
 import { isTempSessionId } from "../sessionOptimisticIds";
 import {
   resolveChatLiveQueryPolicy,
   type ChatLiveQueryPolicy,
   type ChatLiveQueryPolicyInput,
 } from "../chatLiveQueryPolicy";
-import { fetchSessionDetailWindow } from "./chatSessionDetailHelpers";
+import { fetchSessionDetailWindow, isProvisionalSessionTranscript } from "./chatSessionDetailHelpers";
 import {
   sessionDetailStructuralSharing,
   useStableSessionDetailPlaceholder,
@@ -26,8 +26,22 @@ import type { SessionStreamDecisionSnapshot } from "./chatSessionStreamConnect";
 import { isBusyPhase } from "./chatCodingRouteViewModel";
 import { canLoadSessionParameters } from "./chatSessionSurfaceModel";
 
+/** Wait for the same visible directory used by bare-route canonicalization. */
+export function shouldWaitForChatStartupRestore(options: {
+  bareRoute: boolean;
+  routeVisibleSessions: SessionSummary[] | undefined;
+  agentDirectoryFailed: boolean;
+  directoryGatePending?: boolean;
+}): boolean {
+  if (!options.bareRoute) return false;
+  if (options.directoryGatePending) return true;
+  if (!options.routeVisibleSessions) return !options.agentDirectoryFailed;
+  return options.routeVisibleSessions.some((session) => isVisibleDirectSession(session));
+}
+
 export type UseChatSessionDetailQueriesInput = {
   activeSessionId: string | null;
+  bareRouteRestorePending: boolean;
   queryClient: QueryClient;
   sessions: SessionSummary[] | undefined;
   directSessionActiveSummary: SessionSummary | undefined;
@@ -54,6 +68,7 @@ export type UseChatSessionDetailQueriesInput = {
 
 export function useChatSessionDetailQueries({
   activeSessionId,
+  bareRouteRestorePending,
   queryClient,
   sessions,
   directSessionActiveSummary,
@@ -109,15 +124,22 @@ export function useChatSessionDetailQueries({
       setStartupDetailSettledSessionId("");
       return;
     }
+    if (sessionDetailQuery.isError) {
+      setStartupDetailSettledSessionId((current) => current === activeSessionId ? current : activeSessionId);
+      return;
+    }
     if (
       sessionDetailQuery.isFetching
       || !sessionDetailQuery.data
       || sessionDetailQuery.data.id !== activeSessionId
+      || (!isTempSessionId(activeSessionId) && (
+        sessionDetailQuery.isPlaceholderData || isProvisionalSessionTranscript(sessionDetailQuery.data)
+      ))
     ) {
       return;
     }
     setStartupDetailSettledSessionId((current) => current === activeSessionId ? current : activeSessionId);
-  }, [activeSessionId, sessionDetailQuery.data, sessionDetailQuery.isFetching, setStartupDetailSettledSessionId]);
+  }, [activeSessionId, sessionDetailQuery.data, sessionDetailQuery.isError, sessionDetailQuery.isFetching, sessionDetailQuery.isPlaceholderData, setStartupDetailSettledSessionId]);
   const sessionLlmOptionsQuery = useQuery({
     queryKey: queryKeys.sessionLlmOptions(activeSessionId ?? "none"),
     enabled: secondaryChatDataEnabled && canLoadSessionParameters(activeSessionId, sessionDetailQuery.data) && !isTempSessionId(activeSessionId),
@@ -158,7 +180,14 @@ export function useChatSessionDetailQueries({
     refetchIntervalInBackground: childSessionLiveQueryPolicy.directRefetchIntervalInBackground,
   });
   useEffect(() => {
-    const directReady = Boolean(activeSessionId ? sessionDetailQuery.data : sessions);
+    // A summary shell can paint the frame, but the initial transcript still
+    // needs the connection slots that secondary catalogs would otherwise take.
+    const directReady = activeSessionId
+      ? sessionDetailQuery.isError || Boolean(sessionDetailQuery.data?.id === activeSessionId && (
+          isTempSessionId(activeSessionId)
+          || (!sessionDetailQuery.isPlaceholderData && !isProvisionalSessionTranscript(sessionDetailQuery.data))
+        ))
+      : Boolean(sessions) && !bareRouteRestorePending;
     const groupReady = !standardGroupRoomActive || Boolean(activeGroupRoom);
     if ((financeSurface || sessions) && directReady && groupReady) {
       setChatStartupDataReady(true);
@@ -166,8 +195,11 @@ export function useChatSessionDetailQueries({
   }, [
     activeGroupRoom,
     activeSessionId,
+    bareRouteRestorePending,
     financeSurface,
     sessionDetailQuery.data,
+    sessionDetailQuery.isError,
+    sessionDetailQuery.isPlaceholderData,
     sessions,
     setChatStartupDataReady,
     standardGroupRoomActive,
@@ -179,8 +211,8 @@ export function useChatSessionDetailQueries({
     chatRouteStartupReadyLoggedRef.current = true;
     postBrowserTelemetry({
       phase: "navigation",
-      eventCode: "browser.chat_route.startup_data_ready",
-      message: "Chat route startup data is ready.",
+      eventCode: sessionDetailQuery.isError ? "browser.chat_route.startup_data_failed" : "browser.chat_route.startup_data_ready",
+      message: sessionDetailQuery.isError ? "Chat route startup reached a detail error surface." : "Chat route startup data is ready.",
       fields: {
         durationMs: Math.max(0, Date.now() - chatRouteMountStartedAtRef.current),
         activeSession: Boolean(activeSessionId),
@@ -202,6 +234,7 @@ export function useChatSessionDetailQueries({
     conversations,
     runtime,
     sessionDetailQuery.data,
+    sessionDetailQuery.isError,
     sessions,
     standardGroupRoomActive,
     teams,

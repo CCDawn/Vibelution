@@ -72,7 +72,7 @@ Approximate ownership inside the shell. Line ranges drift; use the map by
 | Image preview mount | conditional React.lazy dialog | keep shell gate |
 | Text-selection quote | quote / copy / reference / side-chat menu | `useConversationSelectionQuote.tsx` |
 | Branch fork dialog | target message, scope, pending, open/close/submit | `useConversationForkSession.ts`; `ConversationForkSessionDialog` JSX stays in the shell |
-| Message curation | optimistic overlay, failure rollback, ~3s 409/error title, session reset, companion query gate | `useConversationMessageCuration.ts`; like/dislike buttons stay in timeline rows |
+| Message curation | optimistic overlay, failure rollback, ~3s 409/error title, session reset, companion and transcript-pending query gates | `useConversationMessageCuration.ts`; like/dislike buttons stay in timeline rows |
 
 ## Ownership map
 

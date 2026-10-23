@@ -226,3 +226,94 @@ def test_explicit_low_base_stays_as_written_without_identity():
     policy = {"maxCallsPerTurn": 5, "allowedTools": ["cli_tool"]}
     resolved, _family = resolve_effective_max_calls_per_turn(policy)
     assert resolved == 5
+
+
+def _memo_session_reads(monkeypatch, *, override: int | None) -> dict[str, int]:
+    """计数会话覆盖权威解析背后的真实 store 读（chat-state + agent registry）。"""
+
+    from core.web.services import session_service
+
+    reads = {"chat_state": 0, "agent": 0}
+
+    def fake_load(_project_root, session_id, *_args, **_kwargs):
+        reads["chat_state"] += 1
+        return {"agent_id": "agent-budget-text", "sessionId": session_id}
+
+    def fake_get_agent(agent_id, *_args, **_kwargs):
+        reads["agent"] += 1
+        metadata = (
+            {"sessionBudgetParameters": {"maxCallsPerTurn": override}}
+            if override is not None
+            else {}
+        )
+        return {"agentId": agent_id, "metadata": metadata}
+
+    monkeypatch.setattr(session_service, "load_session_chat_state", fake_load)
+    monkeypatch.setattr(session_service, "get_agent", fake_get_agent)
+    return reads
+
+
+def _memo_runtime(session_id: str, *, revision: int = 3, config_hash: str = "hash-t1") -> dict:
+    runtime = _fake_runtime(
+        model="deepseek-chat",
+        session_id=session_id,
+        agent={"toolPolicy": dict(_BASE_POLICY), "agentId": "agent-budget-text"},
+    )
+    if revision >= 1 and config_hash:
+        runtime["agentConfigSnapshot"] = {
+            "configRevision": revision,
+            "configHash": config_hash,
+        }
+    return runtime
+
+
+def test_session_override_hot_path_serves_repeat_calls_from_memo(monkeypatch):
+    """热轮路径：同键二次调用零真实 store 读，终值与首次一致。
+
+    读缓存在每轮 chat-state 写后被 epoch 失效，直查在稳态回合近似每轮
+    真实 I/O；prompt 侧会话覆盖读取必须与授权层共用同一份 memo。
+    """
+
+    from core.authorization import tool_authorization_service as auth
+
+    auth.clear_session_override_memo()
+    try:
+        reads = _memo_session_reads(monkeypatch, override=48)
+        runtime = _memo_runtime("sess-memo-hot")
+
+        first, family = resolve_effective_max_calls_per_turn(
+            dict(_BASE_POLICY), runtime=dict(runtime)
+        )
+        assert (first, family) == (48, "deepseek")
+        assert reads["chat_state"] == 1 and reads["agent"] == 1
+
+        for _ in range(2):
+            again, again_family = resolve_effective_max_calls_per_turn(
+                dict(_BASE_POLICY), runtime=dict(runtime)
+            )
+            assert (again, again_family) == (48, "deepseek")
+        # 第二次同键调用零读：只允许首次解析的 1 次 chat-state 读 +
+        # 1 次 agent registry 读。
+        assert reads["chat_state"] == 1 and reads["agent"] == 1
+    finally:
+        auth.clear_session_override_memo()
+
+
+def test_session_override_without_snapshot_identity_keeps_direct_read(monkeypatch):
+    """无可信快照身份（缺 revision/hash）时不 memo：与直接查询行为等价。"""
+
+    from core.authorization import tool_authorization_service as auth
+
+    auth.clear_session_override_memo()
+    try:
+        reads = _memo_session_reads(monkeypatch, override=48)
+        runtime = _memo_runtime("sess-memo-direct", revision=0, config_hash="")
+
+        for _ in range(3):
+            resolved, _family = resolve_effective_max_calls_per_turn(
+                dict(_BASE_POLICY), runtime=dict(runtime)
+            )
+            assert resolved == 48
+        assert reads["chat_state"] == 3 and reads["agent"] == 3
+    finally:
+        auth.clear_session_override_memo()

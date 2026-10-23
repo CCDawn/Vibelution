@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { inspectWorkbenchServingVersion, verifyRestartedServingVersion } from "../src/process/servingVersion.js";
 
 function healthPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -36,6 +36,94 @@ function input(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
+
+describe("serving-version cancellation", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("does not start any probe when already cancelled", async () => {
+    const controller = new AbortController();
+    const reason = new Error("superseded");
+    controller.abort(reason);
+    const fetchHealth = vi.fn();
+    await expect(inspectWorkbenchServingVersion(input({ signal: controller.signal, fetchHealth }))).rejects.toBe(reason);
+    expect(fetchHealth).not.toHaveBeenCalled();
+  });
+
+  it("cancels the HTTP request without treating cancellation as unreachable health", async () => {
+    const controller = new AbortController();
+    const reason = new Error("superseded");
+    let requestSignal: AbortSignal | undefined;
+    const fetchHealth = vi.fn((_url: string, options: RequestInit) => {
+      requestSignal = options.signal as AbortSignal;
+      return new Promise((_resolve, reject) => requestSignal!.addEventListener("abort", () => reject(requestSignal!.reason), { once: true }));
+    });
+    vi.stubGlobal("fetch", fetchHealth);
+    const pending = inspectWorkbenchServingVersion(input({ signal: controller.signal, fetchHealth: undefined }));
+    const rejected = expect(pending).rejects.toBe(reason);
+    expect(requestSignal?.aborted).toBe(false);
+    controller.abort(reason);
+    await rejected;
+    expect(requestSignal?.aborted).toBe(true);
+  });
+
+  it.each([false, true])("stops after a cancelled health body read (rejects: %s)", async (rejects) => {
+    const controller = new AbortController();
+    const reason = new Error("superseded");
+    const currentCode = vi.fn();
+    const fetchHealth = async () => ({ status: 200, json: async () => {
+      controller.abort(reason);
+      if (rejects) throw new Error("body aborted");
+      return healthPayload();
+    } });
+    await expect(inspectWorkbenchServingVersion(input({ signal: controller.signal, fetchHealth, currentCode }))).rejects.toBe(reason);
+    expect(currentCode).not.toHaveBeenCalled();
+  });
+
+  it("cancels only the identity probe child and does not report an identity mismatch", async () => {
+    const controller = new AbortController();
+    const reason = new Error("superseded");
+    const currentCode = vi.fn();
+    const runIdentityBridge = vi.fn(async (options: { signal?: AbortSignal }) => {
+      expect(options.signal).toBe(controller.signal);
+      controller.abort(reason);
+      throw new Error("probe aborted");
+    });
+    await expect(inspectWorkbenchServingVersion(input({
+      signal: controller.signal,
+      readState: () => ({ backendPid: 4000, backendCreateTime: 123.4, backendExecutable: "pythonw.exe" }),
+      runIdentityBridge,
+      currentCode
+    }))).rejects.toBe(reason);
+    expect(runIdentityBridge).toHaveBeenCalledWith(expect.objectContaining({ signal: controller.signal, killPolicy: "child" }));
+    expect(currentCode).not.toHaveBeenCalled();
+  });
+
+  it("discards a successful identity response returned after cancellation", async () => {
+    const controller = new AbortController();
+    const reason = new Error("superseded");
+    const currentCode = vi.fn();
+    await expect(inspectWorkbenchServingVersion(input({
+      signal: controller.signal,
+      readState: () => ({ backendPid: 4000, backendCreateTime: 123.4, backendExecutable: "pythonw.exe" }),
+      runIdentityBridge: async () => { controller.abort(reason); return JSON.stringify({ matches: true }); },
+      currentCode
+    }))).rejects.toBe(reason);
+    expect(currentCode).not.toHaveBeenCalled();
+  });
+
+  it("allows an issued code query to finish but never accepts its late result", async () => {
+    const controller = new AbortController();
+    const reason = new Error("superseded");
+    let finish!: (value: { head: string; dirtyTreeDigest: string }) => void;
+    const currentCode = vi.fn(() => new Promise<{ head: string; dirtyTreeDigest: string }>((resolve) => { finish = resolve; }));
+    const pending = inspectWorkbenchServingVersion(input({ signal: controller.signal, currentCode }));
+    const rejected = expect(pending).rejects.toBe(reason);
+    await vi.waitFor(() => expect(currentCode).toHaveBeenCalledOnce());
+    controller.abort(reason);
+    finish({ head: "head-current", dirtyTreeDigest: "dirty-current" });
+    await rejected;
+  });
+});
 
 describe("shell serving verification", () => {
   it("waits for the asynchronous code fingerprint before accepting the backend", async () => {
@@ -236,6 +324,43 @@ describe("verifyRestartedServingVersion", () => {
       ...overrides,
     };
   }
+
+  it("does not inspect an already cancelled verification", async () => {
+    const controller = new AbortController();
+    const reason = new Error("superseded");
+    controller.abort(reason);
+    const inspect = vi.fn();
+    await expect(verifyRestartedServingVersion({ workspaceRoot: "C:/workspace", signal: controller.signal, inspect })).rejects.toBe(reason);
+    expect(inspect).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])("does not retry or accept a late cancelled inspection (ok: %s)", async (ok) => {
+    const controller = new AbortController();
+    const reason = new Error("superseded");
+    const wait = vi.fn(async () => {});
+    const inspect = vi.fn(async (options: { signal?: AbortSignal }) => {
+      expect(options.signal).toBe(controller.signal);
+      controller.abort(reason);
+      return baseInspection({ ok, reason: ok ? "serving_version_current" : "health_unreachable" }) as never;
+    });
+    await expect(verifyRestartedServingVersion({
+      workspaceRoot: "C:/workspace", signal: controller.signal, inspect, delay: wait
+    })).rejects.toBe(reason);
+    expect(inspect).toHaveBeenCalledOnce();
+    expect(wait).not.toHaveBeenCalled();
+  });
+
+  it("cancels the default retry wait without issuing another health probe", async () => {
+    const controller = new AbortController();
+    const reason = new Error("superseded");
+    const inspect = vi.fn(async () => baseInspection({ ok: false, reason: "health_not_ready" }) as never);
+    const pending = verifyRestartedServingVersion({ workspaceRoot: "C:/workspace", signal: controller.signal, inspect });
+    const rejected = expect(pending).rejects.toMatchObject({ name: "AbortError", cause: reason });
+    await vi.waitFor(() => expect(inspect).toHaveBeenCalledOnce());
+    controller.abort(reason);
+    await rejected;
+    expect(inspect).toHaveBeenCalledOnce();
+  });
 
   it("rejects when the serving process was not replaced after restart", async () => {
     // 2026-09-11: a "restarted" workbench kept serving the old process.

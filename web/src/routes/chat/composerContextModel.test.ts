@@ -5,6 +5,7 @@ import {
   formatTokensPerSecondValue,
   resolveComposerCacheState,
   resolveComposerContextLimit,
+  resolveComposerContextUsage,
 } from "./composerContextModel";
 const base = {
   usageUsed: 85865,
@@ -21,6 +22,40 @@ const base = {
     { key: "current_user", label: "输入", tokens: 9 },
   ],
 };
+
+describe("composer context usage authority", () => {
+  it("shows the post-compression provider window instead of the stale assembly snapshot", () => {
+    const usage = resolveComposerContextUsage({
+      contextUsage: { used: 175650, limit: 256000 },
+      contextComposition: { totalTokens: 257929, limitTokens: 256000 },
+    });
+    const model = buildComposerContextRingModel({ ...base, usageUsed: usage.used, usageLimit: usage.limit });
+    expect(model.usageLabel).toBe("69%");
+    expect(model.usedLabel).toBe("176K / 256K");
+    expect(model.usagePercent).toBeCloseTo(68.61328125);
+  });
+
+  it("uses the backend's compacted checkpoint before another provider usage arrives", () => {
+    expect(resolveComposerContextUsage({
+      contextUsage: { used: 156186, limit: 256000 },
+      contextComposition: { totalTokens: 257929, limitTokens: 256000 },
+    })).toEqual({ used: 156186, limit: 256000 });
+  });
+
+  it("preserves authoritative zero usage and an unknown limit", () => {
+    expect(resolveComposerContextUsage({
+      contextUsage: { used: 0, limit: 0 },
+      contextComposition: { totalTokens: 257929, limitTokens: 256000 },
+    })).toEqual({ used: 0, limit: 0 });
+  });
+
+  it("falls back to the assembly snapshot only when session usage is unavailable", () => {
+    expect(resolveComposerContextUsage({
+      contextComposition: { totalTokens: 12000, limitTokens: 32000 },
+    })).toEqual({ used: 12000, limit: 32000 });
+    expect(resolveComposerContextUsage({})).toEqual({ used: 0, limit: 0 });
+  });
+});
 describe("composerContextModel", () => {
   it("immediately resizes usage from saved Agent parameters without rewriting the observed call", () => {
     const observed = { usageUsed: 4232, usageLimit: 32768 };

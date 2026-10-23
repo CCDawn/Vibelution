@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 /**
  * Unit contract for the session stream keep-warm registry: reference counting,
- * 30s delayed release, single warm slot, parked watermark tracking, dispose.
+ * delayed release, capped LRU warm slots, parked watermark tracking, dispose.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -12,6 +12,7 @@ import {
   hasSessionStreamEntry,
   peekParkedSessionStreamLedgerSeq,
   releaseSessionStream,
+  SESSION_STREAM_WARM_MAX_ENTRIES,
   SESSION_STREAM_WARM_MS,
 } from "./sessionStreamWarmRegistry";
 
@@ -137,7 +138,7 @@ describe("sessionStreamWarmRegistry", () => {
     expect(acquired.stream.closed).toBe(true);
   });
 
-  it("keeps at most one warm session: acquiring another session closes the parked one", () => {
+  it("keeps a second session warm instead of evicting within the cap", () => {
     vi.useFakeTimers();
     const create = factory();
     const first = acquireSessionStream("s1", create);
@@ -145,13 +146,40 @@ describe("sessionStreamWarmRegistry", () => {
     expect(first.stream.closed).toBe(false);
 
     const second = acquireSessionStream("s2", create);
-    expect(first.stream.closed).toBe(true);
-    expect(hasSessionStreamEntry("s1")).toBe(false);
+    // A detour through another session must not cost the first its live stream.
+    expect(first.stream.closed).toBe(false);
+    expect(hasSessionStreamEntry("s1")).toBe(true);
     expect(hasSessionStreamEntry("s2")).toBe(true);
 
     releaseSessionStream("s2", second.stream);
     vi.advanceTimersByTime(SESSION_STREAM_WARM_MS);
     expect(second.stream.closed).toBe(true);
+  });
+
+  it("evicts the least recently parked session once the cap is exceeded", () => {
+    vi.useFakeTimers();
+    const create = factory();
+    const parked = [] as { sessionId: string; stream: { closed: boolean } }[];
+    for (let index = 0; index < SESSION_STREAM_WARM_MAX_ENTRIES; index += 1) {
+      const sessionId = `s${index}`;
+      const acquired = acquireSessionStream(sessionId, create);
+      releaseSessionStream(sessionId, acquired.stream);
+      // Distinct park instants so the least-recently-parked order is unambiguous.
+      vi.advanceTimersByTime(1_000);
+      parked.push({ sessionId, stream: acquired.stream as unknown as { closed: boolean } });
+    }
+    expect(parked.every((item) => item.stream.closed === false)).toBe(true);
+
+    const overflow = acquireSessionStream("s-overflow", create);
+    expect(parked[0].stream.closed).toBe(true);
+    expect(hasSessionStreamEntry(parked[0].sessionId)).toBe(false);
+    for (const item of parked.slice(1)) {
+      expect(item.stream.closed).toBe(false);
+      expect(hasSessionStreamEntry(item.sessionId)).toBe(true);
+    }
+    expect(hasSessionStreamEntry("s-overflow")).toBe(true);
+
+    releaseSessionStream("s-overflow", overflow.stream);
   });
 
   it("records only the ledger watermark from parked frames and consumes it on acquire", () => {

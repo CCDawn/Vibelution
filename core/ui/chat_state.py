@@ -84,7 +84,9 @@ def chat_state_lock_path(project_root: Path) -> Path:
 
 
 @contextmanager
-def chat_state_transaction(project_root: Path):
+def chat_state_transaction(
+    project_root: Path, *, timeout: float | None = _CHAT_STATE_LOCK_TIMEOUT_SECONDS,
+):
     """Serialize chat-state load/mutate/save sequences across threads and processes.
 
     The shared helper keeps the historical ``.chat_state.lock`` sidecar and adds
@@ -97,7 +99,7 @@ def chat_state_transaction(project_root: Path):
     with cross_process_file_lock(
         chat_state_path(project_root),
         lock_path=chat_state_lock_path(project_root),
-        timeout=_CHAT_STATE_LOCK_TIMEOUT_SECONDS,
+        timeout=timeout,
     ):
         yield
 
@@ -485,6 +487,7 @@ def load_session_chat_state(project_root: Path, session_id: str) -> dict[str, An
     # two identical signatures may populate the cache.
     signature_before = _conversation_store_signature(Path(project_root))
     with _SESSION_STATE_READ_CACHE_LOCK:
+        read_epoch = _CHAT_STATE_WRITE_EPOCH
         cached = _SESSION_STATE_READ_CACHE.get(cache_key)
         if (
             cached is not None
@@ -498,12 +501,18 @@ def load_session_chat_state(project_root: Path, session_id: str) -> dict[str, An
     with _SESSION_STATE_READ_CACHE_LOCK:
         if (
             signature_after == signature_before
-            and cache_key not in _SESSION_STATE_READ_CACHE
+            and _CHAT_STATE_WRITE_EPOCH == read_epoch
+            and _SESSION_STATE_READ_CACHE.get(cache_key) is cached
         ):
-            while len(_SESSION_STATE_READ_CACHE) >= _SESSION_STATE_READ_CACHE_MAX_ENTRIES:
+            # Refresh a signature-invalidated entry too. A competing read or
+            # write owns any replacement made since this read began.
+            while (
+                cache_key not in _SESSION_STATE_READ_CACHE
+                and len(_SESSION_STATE_READ_CACHE) >= _SESSION_STATE_READ_CACHE_MAX_ENTRIES
+            ):
                 _SESSION_STATE_READ_CACHE.pop(next(iter(_SESSION_STATE_READ_CACHE), None), None)
             _SESSION_STATE_READ_CACHE[cache_key] = (
-                _CHAT_STATE_WRITE_EPOCH,
+                read_epoch,
                 signature_before,
                 copy.deepcopy(payload),
             )
@@ -563,6 +572,32 @@ def save_session_chat_state(
             CATALOG_GLOBAL_DIRTY_SESSION_ID,
             f"state:{revision}",
         )
+    _bump_chat_state_write_epoch()
+
+
+def save_session_chat_states(
+    project_root: Path,
+    conversations: list[dict[str, Any]],
+    *,
+    activate_session_id: str = "",
+) -> None:
+    """Persist a lifecycle batch with one store open, transaction and wait."""
+    if not conversations:
+        return
+    cleaned, _changed = _drop_legacy_chat_state_messages(
+        {"conversations": [dict(row) for row in conversations]}, project_root=project_root,
+    )
+    rows = cleaned["conversations"]
+    with chat_state_transaction(project_root):
+        with _chat_state_repository(project_root) as repository:
+            result = repository.upsert_session_runtime_states(
+                rows, activate_session_id=activate_session_id,
+            ).result(timeout=5)
+    revision = int((result or {}).get("stateRevision") or 0)
+    for session_id in result.get("sessionIds") or []:
+        notify_session_catalog_dirty(project_root, session_id, f"state:{revision}")
+    if activate_session_id:
+        notify_session_catalog_dirty(project_root, CATALOG_GLOBAL_DIRTY_SESSION_ID, f"state:{revision}")
     _bump_chat_state_write_epoch()
 
 

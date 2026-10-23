@@ -569,10 +569,10 @@ def test_session_list_uses_short_snapshot_cache_and_invalidates_on_update(tmp_pa
     real_load = session_service._load_conversations
     events = []
 
-    def counting_lookup():
+    def counting_lookup(**kwargs):
         nonlocal lookup_calls
         lookup_calls += 1
-        return real_lookup()
+        return real_lookup(**kwargs)
 
     def counting_load(*args, **kwargs):
         nonlocal load_calls

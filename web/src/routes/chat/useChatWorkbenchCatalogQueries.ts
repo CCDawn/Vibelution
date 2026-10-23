@@ -4,13 +4,12 @@
  * chat-room catalog and expanded agent detail windows — not session detail SSE.
  */
 
-import { useInfiniteQuery, useQueries, useQuery, type InfiniteData, type QueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useInfiniteQuery, useQueries, useQuery, type QueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { listAgentSummaries } from "../../api/agents";
 import {
   fetchChatRoomDetail,
-  fetchChatWorkbenchBootstrap,
   listChatRoomModes,
   listChatRoomPurposes,
   queryConversations,
@@ -22,11 +21,7 @@ import { listArchivedChatSessions } from "../../api/sessionArchive";
 import { fetchSkillLibrary } from "../../api/skills";
 import { listTeams } from "../../api/teams";
 import { queryKeys } from "../../api/queryKeys";
-import type {
-  ConversationQueryResponse,
-  SessionQueryResponse,
-  SessionSummary,
-} from "../../api/types";
+import type { ConversationQueryResponse } from "../../api/types";
 import { resolvePollingInterval } from "../../app/pollingPolicy";
 import { shareRuntimeSummaryIfOnlyVolatileChanged } from "../../app/runtimeSummaryQueryShare";
 import {
@@ -34,30 +29,15 @@ import {
   type ChatLiveQueryPolicy,
 } from "../chatLiveQueryPolicy";
 import type { ChatSecondaryPollPolicy } from "../chatSecondaryPollPolicy";
-import { SESSION_INDEX_PAGE_SIZE, useSessionIndexQuery } from "../chatSessionIndexQuery";
+import { useSessionIndexQuery } from "../chatSessionIndexQuery";
 import { shouldEnableSessionIndexQuery } from "../chatSessionStartupGate";
 import { isVisibleDirectSession } from "../conversationIndexModel";
-import { isSessionCreatePreserved, mergePreservedCreatedSessions } from "../sessionCreatePreserve";
-import { filterOutTombstonedConversations, filterOutTombstonedSessions } from "../sessionDeleteTombstone";
-import { isTempSessionId } from "../sessionOptimisticIds";
+import { filterOutTombstonedConversations } from "../sessionDeleteTombstone";
 import { fetchSessionDetailWindow } from "./chatSessionDetailHelpers";
+import { useChatStartupSessionPrefetch } from "./useChatStartupSessionPrefetch";
+import { chatWorkbenchBootstrapQueryOptions, CONVERSATIONS_CATALOG_PAGE_SIZE } from "./chatWorkbenchBootstrapQuery";
 
-/**
- * The unified catalog poll keeps only the group-room half of the conversation
- * index: direct conversations are projected from the session index query plus
- * the agent directory merge, so polling them duplicated ~90% of the payload.
- * Measured against a 144-item index (130 sessions / 14 rooms): full pull
- * ~195 KB across 2 requests vs ~16 KB for this group-room page.
- */
-const CONVERSATIONS_CATALOG_PAGE_SIZE = 100;
-
-/**
- * While the backend reports the directory store as mid-startup, poll the cheap
- * bootstrap endpoint for the flipped bit instead of firing session queries that
- * can only receive the startup empty page.
- */
-const DIRECTORY_READY_POLL_MS = 1_000;
-/** Bounded fallback so a wedged directory startup can never gate the list forever. */
+/** Bound both the first bootstrap and a directory store that stays unready. */
 const DIRECTORY_READY_WAIT_TIMEOUT_MS = 20_000;
 
 export type ChatWorkbenchCatalogQueriesInput = {
@@ -107,6 +87,12 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
     sessionDirectoryEnabled = true,
   } = input;
 
+  useChatStartupSessionPrefetch({
+    queryClient,
+    enabled: sessionDirectoryEnabled && !input.requestedRoomId && !activeGroupRoomId && !projectBusActive,
+    requestedSessionId: input.requestedSessionId,
+  });
+
   const runtimeQuery = useQuery({
     queryKey: queryKeys.runtimeSummary(),
     queryFn: ({ signal }) => fetchRuntimeSummary({ signal }),
@@ -122,106 +108,44 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
   });
   const [selectedAgentId, setSelectedAgentId] = useState("");
   const [directoryReadyWaitExpired, setDirectoryReadyWaitExpired] = useState(false);
+  const directoryWaitStartedAtRef = useRef<number | null>(null);
   const activeSessionBootstrapQuery = useQuery({
-    queryKey: ["sessions", "active-bootstrap"],
+    ...chatWorkbenchBootstrapQueryOptions(queryClient),
     enabled: sessionDirectoryEnabled,
-    queryFn: async ({ signal }) => {
-      const payload = await fetchChatWorkbenchBootstrap({ signal });
-      signal.throwIfAborted();
-      queryClient.setQueryData(queryKeys.agents(), payload.agents);
-      // Seed the group-room catalog with the bootstrap projection so the rail
-      // paints before the paginated catalog query resolves; the catalog query
-      // reconciles (and continues paging) right after.
-      queryClient.setQueryData<InfiniteData<ConversationQueryResponse, string>>(
-        queryKeys.conversationsCatalogQuery(CONVERSATIONS_CATALOG_PAGE_SIZE),
-        (existing) => existing ?? {
-          pages: [{
-            items: payload.conversations,
-            nextCursor: "",
-            totalEstimate: payload.conversations.length,
-            filters: { q: "", agentId: "", teamId: "", type: "group_room", sort: "updatedAt_desc", limit: CONVERSATIONS_CATALOG_PAGE_SIZE, cursor: "" },
-          }],
-          pageParams: [""],
-        },
-      );
-      // Never hard-replace the session index page: create optimism / pins must
-      // survive bootstrap refetch triggered by broad `["sessions"]` invalidation.
-      // Bootstrap uses the server's updatedAt_desc order. Seed both equivalent
-      // default keys, never a searched or differently sorted session index.
-      const bootstrapSessionKeys = ["", "updatedAt_desc"].map((sort) =>
-        queryKeys.sessionQuery("", SESSION_INDEX_PAGE_SIZE, "", sort),
-      );
-      const isOptimisticOnly = (items: SessionSummary[]) => items.length > 0 && items.every((session) =>
-        isTempSessionId(session.id) || isSessionCreatePreserved(session.id),
-      );
-      // Bootstrap only fills a missing index (or an optimistic placeholder).
-      // An index response may have arrived during this request, and loaded
-      // pages/cursors belong to that query rather than this startup projection.
-      const bootstrapSessionCaches = bootstrapSessionKeys.map((key) => {
-        const data = queryClient.getQueryData<InfiniteData<SessionQueryResponse, string>>(key);
-        return {
-          key,
-          items: data?.pages.flatMap((page) => page.items ?? []) ?? [],
-          shouldSeed: !data || data.pages.length === 0 || (
-            data.pages.length === 1 && isOptimisticOnly(data.pages[0].items ?? [])
-          ),
-        };
-      });
-      const previousItems = bootstrapSessionCaches.flatMap((cache) => cache.items);
-      const currentSessions = filterOutTombstonedSessions(queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions()));
-      // Decide before mergePreservedCreatedSessions clears server-acknowledged pins.
-      const preserveCurrentSessions = currentSessions !== undefined && !isOptimisticOnly(currentSessions);
-      const mergedItems = mergePreservedCreatedSessions(payload.sessionPage?.items ?? [], {
-        localItems: previousItems,
-      });
-      const mergedPage = {
-        ...payload.sessionPage,
-        items: mergedItems,
-      };
-      for (const { key, shouldSeed } of bootstrapSessionCaches) {
-        if (shouldSeed) {
-          queryClient.setQueryData(key, { pages: [mergedPage], pageParams: [""] });
-        }
-      }
-      queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions(), (existing) =>
-        mergePreservedCreatedSessions(preserveCurrentSessions ? currentSessions : mergedItems, {
-          localItems: existing ?? previousItems,
-        }),
-      );
-      return {
-        ...payload,
-        sessionPage: mergedPage,
-      };
-    },
-    staleTime: 5_000,
-    // Re-check the directory ready bit while the backend store is mid-startup;
-    // once it flips (or the payload omits it), this stops polling on its own.
-    refetchInterval: (query) =>
-      query.state.data?.directoryReady === false ? DIRECTORY_READY_POLL_MS : false,
   });
-  const bootstrapSettled = !sessionDirectoryEnabled || activeSessionBootstrapQuery.isFetched || activeSessionBootstrapQuery.isError;
+  const bootstrapSettled = !sessionDirectoryEnabled || activeSessionBootstrapQuery.isFetched
+    || activeSessionBootstrapQuery.isError || directoryReadyWaitExpired;
   const bootstrapDirectoryReady = activeSessionBootstrapQuery.data?.directoryReady !== false;
+  const initialBootstrapPending = !activeSessionBootstrapQuery.isFetched
+    && !activeSessionBootstrapQuery.isError && activeSessionBootstrapQuery.fetchStatus === "fetching";
   // Bounded fallback: if the directory never reports ready, open the gate so the
   // index recovers through the normal poll cycle instead of waiting forever.
   useEffect(() => {
-    if (!sessionDirectoryEnabled || bootstrapDirectoryReady || activeSessionBootstrapQuery.isError || directoryReadyWaitExpired) {
+    if (!sessionDirectoryEnabled || (!initialBootstrapPending && bootstrapDirectoryReady)
+      || activeSessionBootstrapQuery.isError || directoryReadyWaitExpired) {
+      directoryWaitStartedAtRef.current = null;
       return;
     }
+    const startedAt = directoryWaitStartedAtRef.current ?? Date.now();
+    directoryWaitStartedAtRef.current = startedAt;
     const timer = window.setTimeout(
       () => setDirectoryReadyWaitExpired(true),
-      DIRECTORY_READY_WAIT_TIMEOUT_MS,
+      Math.max(0, DIRECTORY_READY_WAIT_TIMEOUT_MS - (Date.now() - startedAt)),
     );
     return () => window.clearTimeout(timer);
-  }, [sessionDirectoryEnabled, bootstrapDirectoryReady, activeSessionBootstrapQuery.isError, directoryReadyWaitExpired]);
-  const directoryGatePending = sessionDirectoryEnabled && !bootstrapDirectoryReady && !directoryReadyWaitExpired;
-  // Prefer URL targets immediately. If the bootstrap is cancelled or fails, let
-  // the canonical session index recover instead of leaving the directory gated.
+  }, [sessionDirectoryEnabled, initialBootstrapPending, bootstrapDirectoryReady, activeSessionBootstrapQuery.isError, directoryReadyWaitExpired]);
+  const directoryGatePending = sessionDirectoryEnabled && !bootstrapDirectoryReady
+    && !activeSessionBootstrapQuery.isError && !directoryReadyWaitExpired;
+  // Target detail reads stay independent. Only an equivalent default directory
+  // waits for bootstrap; search/custom ordering and error recovery read normally.
   const sessionIndexQueryEnabled = sessionDirectoryEnabled && shouldEnableSessionIndexQuery({
     hasRouteTarget: Boolean(input.requestedSessionId || input.requestedRoomId),
     hasActiveSession: Boolean(activeSessionId),
     bootstrapIsFetched: activeSessionBootstrapQuery.isFetched,
     bootstrapIsError: activeSessionBootstrapQuery.isError,
     bootstrapFetchStatus: activeSessionBootstrapQuery.fetchStatus,
+    bootstrapMatchesIndex: !sessionQueryText.trim()
+      && (!sessionListSort.trim() || sessionListSort.trim() === "updatedAt_desc"),
     directoryReady: bootstrapDirectoryReady,
     directoryReadyWaitExpired,
   });
@@ -317,10 +241,9 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
   const teamsQuery = useQuery({
     queryKey: queryKeys.teams(),
     queryFn: ({ signal }) => listTeams({ signal }),
-    // Must load whenever the left-rail agent directory is active — not only when the
-    // group-room picker is open. With teams=[], research/evolution members all dump into
-    // 「特殊 Agent」and team rooms fall into 未归属.
-    enabled: sessionDirectoryEnabled && (secondaryChatDataEnabled || sessionIndexQueryEnabled),
+    // Restore the current transcript first. The rail still hydrates its team
+    // grouping afterward; explicit group entry needs the catalog immediately.
+    enabled: sessionDirectoryEnabled && (secondaryChatDataEnabled || groupComposerOpen || standardGroupRoomActive),
     refetchInterval: chatSecondaryPollPolicy.teamsRefetchInterval,
     refetchIntervalInBackground: chatSecondaryPollPolicy.secondaryRefetchIntervalInBackground,
   });

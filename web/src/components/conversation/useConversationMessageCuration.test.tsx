@@ -69,15 +69,18 @@ function mutationResponse(action: SessionMessageCurationAction): SessionMessageC
 function Harness({
   sessionId,
   companionMode = false,
+  transcriptPending = false,
   onResult,
 }: {
   sessionId: string;
   companionMode?: boolean;
+  transcriptPending?: boolean;
   onResult: (result: UseConversationMessageCurationResult) => void;
 }) {
   const result = useConversationMessageCuration({
     sessionId,
     companionMode,
+    transcriptPending,
     t: (key) => (key === "curationActionFailed" ? "Dataset update failed" : key),
   });
   onResult(result);
@@ -114,7 +117,7 @@ describe("useConversationMessageCuration", () => {
     });
   }
 
-  async function mount(props: { sessionId: string; companionMode?: boolean }) {
+  async function mount(props: { sessionId: string; companionMode?: boolean; transcriptPending?: boolean }) {
     if (root) {
       await act(async () => root?.unmount());
     }
@@ -126,12 +129,13 @@ describe("useConversationMessageCuration", () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
-    const render = (next: { sessionId: string; companionMode?: boolean }) => {
+    const render = (next: { sessionId: string; companionMode?: boolean; transcriptPending?: boolean }) => {
       root?.render(
         <QueryClientProvider client={queryClient!}>
           <Harness
             sessionId={next.sessionId}
             companionMode={next.companionMode}
+            transcriptPending={next.transcriptPending}
             onResult={(result) => { resultRef.current = result; }}
           />
         </QueryClientProvider>,
@@ -289,6 +293,19 @@ describe("useConversationMessageCuration", () => {
     expect(fetchSessionMessageCuration).not.toHaveBeenCalled();
 
     await mount({ sessionId: "session-a", companionMode: false });
+    expect(fetchSessionMessageCuration).toHaveBeenCalledWith("session-a");
+    expect(resultRef.current?.messageCurationMap.get(MESSAGE_ID)?.action).toBe("include");
+  });
+
+  it("does not fetch while the transcript is still pending, then fetches once it settles", async () => {
+    vi.mocked(fetchSessionMessageCuration).mockResolvedValue(curationResponse("session-a", "include"));
+    const { render } = await mount({ sessionId: "session-a", transcriptPending: true });
+    expect(fetchSessionMessageCuration).not.toHaveBeenCalled();
+
+    await act(async () => {
+      render({ sessionId: "session-a", transcriptPending: false });
+    });
+    await flush();
     expect(fetchSessionMessageCuration).toHaveBeenCalledWith("session-a");
     expect(resultRef.current?.messageCurationMap.get(MESSAGE_ID)?.action).toBe("include");
   });

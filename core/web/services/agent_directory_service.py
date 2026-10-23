@@ -143,6 +143,7 @@ from .agent_directory.lifecycle import (
     purge_system_team_agent_instance,
     reset_agent_instance,
 )
+from .agent_directory.parameter_snapshot import get_agent_parameter_snapshot
 from .agent_directory.projections import (
     build_agent_runtime_context_block,
     build_agent_runtime_static_lines,
@@ -151,6 +152,7 @@ from .agent_directory.projections import (
     _build_agent_api_hydration_context,
     list_agents,
     count_active_agents,
+    find_agent_ids_by_metadata,
     prewarm_registry_caches,
     _agent_to_api_summary,
     _build_agent_api_config_hydration_context,
@@ -287,6 +289,8 @@ from .agent_directory.repair_store import (
     _with_functional_display_name,
     _workspace_path,
     default_state,
+    load_agent_record,
+    load_agent_records,
     load_state,
     repair_agent_directory,
     save_state,
@@ -834,6 +838,14 @@ def _active_project_root() -> Path:
 
 _REPAIRED_STATE_CACHE_SIGNATURE: tuple[str, bool, int, int] | None = None
 _REPAIRED_STATE_CACHE: dict[str, Any] | None = None
+# Per-agent repair fingerprints from the last completed repair walk. They are
+# content-keyed and self-validating, so unlike the snapshot cache above they
+# deliberately survive `_invalidate_repaired_state_cache()` when a writer
+# rewrites the registry: unchanged records keep their cached fixpoint verdict
+# while only the rewritten records re-run the normalization suite.
+_REPAIRED_RECORD_SHAS: dict[str, str] | None = None
+_REPAIR_CONTEXT_SIGNATURE: str | None = None
+_REPAIR_EXTERNAL_SIGNATURE: tuple[str, tuple[str, ...], tuple[str, ...]] | None = None
 _JSONL_RECENT_CACHE: dict[tuple[str, bool, int, int, int, str, bool], list[dict[str, Any]]] = {}
 _JSONL_COUNT_CACHE: dict[tuple[str, bool, int, int, str], int] = {}
 _JSONL_RECENT_COUNT_CACHE: dict[tuple[str, bool, int, int, int, str], tuple[list[dict[str, Any]], int]] = {}
@@ -933,11 +945,19 @@ update_agent_budget_parameters_if_current = agent_session_lifecycle_serialized(
 ensure_agent_for_session = agent_session_lifecycle_serialized(ensure_agent_for_session)
 reactivate_agent_instance = agent_session_lifecycle_serialized(reactivate_agent_instance)
 @contextmanager
-def agent_session_lifecycle_transaction():
+def agent_session_lifecycle_transaction(*, timeout: float | None = None):
     """Hold the cross-store Agent/session lifecycle serialization lock."""
 
-    with _AGENT_SESSION_LIFECYCLE_LOCK:
+    if timeout is None:
+        acquired = _AGENT_SESSION_LIFECYCLE_LOCK.acquire()
+    else:
+        acquired = _AGENT_SESSION_LIFECYCLE_LOCK.acquire(timeout=max(0.0, float(timeout)))
+    if not acquired:
+        raise TimeoutError("Agent/session lifecycle is busy.")
+    try:
         yield
+    finally:
+        _AGENT_SESSION_LIFECYCLE_LOCK.release()
 
 
 @dataclass(frozen=True)

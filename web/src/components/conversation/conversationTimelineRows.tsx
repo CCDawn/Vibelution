@@ -26,6 +26,7 @@ import type {
   SessionReferenceAttachment,
 } from "../../api/types";
 import type { AgentMessage } from "../../agent-thread/types";
+import { conversationMessageToAgentMessage } from "../../agent-thread/adapters";
 import type { TranslationKey } from "../../i18n/dictionaryTypes";
 import {
   assistantFinalAnswerText,
@@ -56,7 +57,7 @@ import { ConversationImageArtifactView } from "./ConversationImageArtifactView";
 import type { ConversationImagePreviewRequest } from "./ConversationImagePreviewDialog";
 import { ConversationTodoChecklist } from "./ConversationTodoChecklist";
 import { ConversationTurnAvatarContent } from "./ConversationTurnAvatarContent";
-import type { CodexTranscriptSurface } from "./codexNativeTranscriptSurface";
+import { resolveCodexTranscriptSurface, type CodexTranscriptSurface } from "./codexNativeTranscriptSurface";
 import type { createConversationAuxiliaryPanels } from "./conversationAuxiliaryPanels";
 import type { createConversationCodexSurface } from "./conversationCodexSurface";
 import {
@@ -82,6 +83,7 @@ import {
   researchOrgMessageChips,
 } from "./conversationMessagePredicates";
 import type { ConversationModelSwitchBoundary } from "./conversationModelSwitch";
+import { guidanceDisplayState } from "./conversationGuidanceSegments";
 import type { createConversationOperationGroups } from "./conversationOperationGroups";
 import {
   shouldRenderCompactActiveTurnPlaceholder as resolveShouldRenderCompactActiveTurnPlaceholder,
@@ -95,7 +97,11 @@ import type { createConversationResponseBlocks } from "./conversationResponseBlo
 import {
   shouldShowAgentResponseBlock as resolveShouldShowAgentResponseBlock,
 } from "./conversationResponseSegmentPresentation";
-import type { createConversationSpecialRows } from "./conversationSpecialRows";
+import {
+  conversationCompressionDividerTone,
+  conversationCompressionTurnBody,
+  type createConversationSpecialRows,
+} from "./conversationSpecialRows";
 import {
   agentInboxSourceLabel,
   agentInboxSummary,
@@ -109,6 +115,7 @@ import {
   buildConversationTurnErrorReasonRows,
   resolveConversationTurnErrorRecoveryAction,
   resolveConversationTurnErrorType,
+  resolveIterationLimitNotice,
   resolveTurnErrorTypeLabelKey,
 } from "./conversationTurnErrorPresentation";
 import { shouldCompactConversationTurnHeader } from "./conversationTurnHeaderCompaction";
@@ -541,10 +548,11 @@ export function createConversationTimelineRows({
 
   function renderTimelineRow(rowPlan: { index: number; virtualStartPx: number | null }) {
               const index = rowPlan.index;
-              const message = activeTimelineMessages[index];
-              if (!message) {
+              const sourceMessage = activeTimelineMessages[index];
+              if (!sourceMessage) {
                 return null;
               }
+              const message = conversationCompressionTurnBody(sourceMessage);
               const rowIdentity = activeTimelineRowIdentities[index];
               const rowKey = rowIdentity?.rowKey ?? message.id;
               return (
@@ -619,18 +627,22 @@ export function createConversationTimelineRows({
             if (companionTypingMessage?.id === message.id) {
               return null;
             }
-            const specialRow = renderTimelineSpecialRow(message, rowIdentity?.rowKey ?? message.id);
-            if (specialRow) {
+            const specialRow = renderTimelineSpecialRow(sourceMessage, rowIdentity?.rowKey ?? message.id);
+            const compressionTone = conversationCompressionDividerTone(sourceMessage);
+            if (specialRow && (!compressionTone || message.role !== "assistant" || (message.turnItems.length === 0 && !assistantTurnIsInFlight(message)))) {
               return specialRow;
             }
-            const agentMessage = agentMessagesByMessageId.get(message.id);
+            const bodyChanged = message !== sourceMessage;
+            const agentMessage = bodyChanged
+              ? conversationMessageToAgentMessage(message)
+              : agentMessagesByMessageId.get(message.id);
             if (!agentMessage) {
               return null;
             }
-            const baseOperationGroups = agentOperationGroupsByMessageId.get(agentMessage.id)
+            const baseOperationGroups = (bodyChanged ? undefined : agentOperationGroupsByMessageId.get(agentMessage.id))
               ?? buildAgentMessageOperationGroups(agentMessage, operationLabels);
             const operationGroups = operationGroupsWithFeedbackStatusPlaceholder(baseOperationGroups, message, lang);
-            const agentRenderState = agentRenderStatesByMessageId.get(message.id) ?? buildAgentMessageRenderState(agentMessage);
+            const agentRenderState = (bodyChanged ? undefined : agentRenderStatesByMessageId.get(message.id)) ?? buildAgentMessageRenderState(agentMessage);
             const agentSections = agentRenderState.sectionState;
             const processSections = agentRenderState.processSections;
             const responseText = agentSections.answerText;
@@ -666,7 +678,9 @@ export function createConversationTimelineRows({
               previousAgentRenderState?.sectionState,
               agentSections,
             );
-            const codexTranscriptSurface = agentCodexSurfacesByMessageId.get(agentMessage.id);
+            const codexTranscriptSurface = bodyChanged
+              ? resolveCodexTranscriptSurface(message)
+              : agentCodexSurfacesByMessageId.get(agentMessage.id);
             const codexTranscriptCells = codexTranscriptSurface?.cells ?? [];
             // Phase C: display plan picks package_cells vs legacy; single track for final answer.
             const displayPlanSeed = resolveAssistantDisplayPlan({
@@ -676,9 +690,10 @@ export function createConversationTimelineRows({
             const shouldRenderLegacyTurnError = Boolean(
               turnErrorMessage && !displayPlanSeed.suppressProjectedError,
             );
+            const iterationLimitNotice = shouldRenderLegacyTurnError ? resolveIterationLimitNotice(message.metadata, lang) : "";
             // Failure-turn presentation: human-readable errorType chip and a
             // budget-directed recovery action instead of raw codes.
-            const turnErrorTypeLabelKey = shouldRenderLegacyTurnError
+            const turnErrorTypeLabelKey = shouldRenderLegacyTurnError && !iterationLimitNotice
               ? resolveTurnErrorTypeLabelKey(resolveConversationTurnErrorType(message))
               : "";
             const turnErrorRecoveryAction = shouldRenderLegacyTurnError
@@ -709,6 +724,12 @@ export function createConversationTimelineRows({
             const timelineRendersAssistantText = false;
             const showUserContent = agentSections.hasUserContent;
             const steerGuidanceMessage = isSteerGuidanceMessage(message);
+            const guidanceState = guidanceDisplayState(message);
+            const guidanceStatusLabel = guidanceState === "drained"
+              ? (lang === "zh" ? "已纳入" : "Included")
+              : guidanceState === "pending"
+                ? (lang === "zh" ? "等待纳入" : "Waiting")
+                : (lang === "zh" ? "已接收" : "Received");
             const userAuthoredMessage = message.role === "user" && !agentInboxMessage;
             const isStreamingStatusPlaceholder = assistantTurnIsStreaming(message)
               && showResponseBlock
@@ -992,6 +1013,7 @@ export function createConversationTimelineRows({
             ) : null;
             return (
               <>
+                {compressionTone ? specialRow : null}
                 {modelSwitchDividerNode}
                 {forkMarkerDividerNode}
                 <AgentMessageTurnView
@@ -1023,8 +1045,8 @@ export function createConversationTimelineRows({
                     ? <span className={styles.turnEditBadge}>{t("editMessage")}</span>
                     : steerGuidanceMessage
                       ? (
-                        <VChip data-conversation-guidance-status="received">
-                          {resolvedSafeGuidanceLabel} · {lang === "zh" ? "已接收" : "Received"}
+                        <VChip data-conversation-guidance-status={guidanceState}>
+                          {resolvedSafeGuidanceLabel} · {guidanceStatusLabel}
                         </VChip>
                       )
                       : null
@@ -1136,7 +1158,7 @@ export function createConversationTimelineRows({
                       <VButton
                         type="button"
                         className={styles.turnIconButton}
-                        onClick={() => onRegenerateAssistantMessage?.(message)}
+                        onClick={() => onRegenerateAssistantMessage?.(sourceMessage)}
                         isDisabled={regenerateDisabled}
                         isPending={regeneratePending}
                         title={regeneratePending ? t("regeneratePending") : t("regenerateAnswer")}
@@ -1257,7 +1279,7 @@ export function createConversationTimelineRows({
                             <span title={resolveConversationTurnErrorType(message)}>{t(turnErrorTypeLabelKey)}</span>
                           ) : null}
                         </div>
-                        <div className={styles.turnErrorNoticeText}>{renderResponseText(assistantFinalAnswerText(message))}</div>
+                        <div className={iterationLimitNotice ? styles.turnStatusText : styles.turnErrorNoticeText}>{renderResponseText(iterationLimitNotice || assistantFinalAnswerText(message))}</div>
                         {buildConversationTurnErrorReasonRows(message, lang).length > 0 ? (
                           <details className={styles.turnErrorDiagnostics}>
                             <summary className={styles.turnErrorDiagnosticsSummary}>
@@ -1297,7 +1319,7 @@ export function createConversationTimelineRows({
                               type="button"
                               contentLayout="plain"
                               className={styles.turnErrorRetryButton}
-                              onClick={() => onRegenerateAssistantMessage?.(message)}
+                              onClick={() => onRegenerateAssistantMessage?.(sourceMessage)}
                               isDisabled={regenerateDisabled}
                               isPending={regeneratePending}
                               title={regeneratePending ? t("retryFailedTurnPending") : t("retryFailedTurn")}

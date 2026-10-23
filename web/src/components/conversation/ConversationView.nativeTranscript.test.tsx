@@ -876,6 +876,8 @@ describe("ConversationView native Codex transcript surface", () => {
     // The token-saving numbers are timeline bookkeeping, never transcript copy.
     expect(html).not.toContain("节省 5,800 tokens");
     expect(html).not.toContain("5,800");
+    expect(html).not.toContain("data-agent-message-id=");
+    expect(html).not.toContain("data-active-turn-stage=");
     // Generic status-cell chrome no longer applies to checkpoints.
     expect(html).not.toContain(">状态</span>");
   });
@@ -914,6 +916,67 @@ describe("ConversationView native Codex transcript surface", () => {
 
     expect(html).toContain('data-conversation-compression-divider="failed_preserved"');
     expect(html).toContain("压缩失败 · 已保留原上下文");
+  });
+
+  describe.each(["applied", "skipped_low_savings", "failed_preserved"] as const)("mixed compression %s", (outcome) => {
+    const mixedMessage = (carrier: "status" | "metadata" | "both", running = false): ConversationMessage => {
+      const base = {
+        version: 3 as const, sessionId: "session-1", turnId: "turn-mixed-compression",
+        revision: 0, terminal: true, status: "completed" as const,
+      };
+      return {
+        id: "assistant-mixed-compression", role: "assistant", timestamp: "2026-10-22T00:00:00Z",
+        turnId: base.turnId, status: running ? "running" : "completed",
+        ...(carrier !== "status" ? { metadata: { kind: "context_compression_marker", status: outcome } } : {}),
+        turnItems: [
+          ...(carrier !== "metadata" ? [{
+            ...base, id: "compression:0", itemId: "compression", sequence: 1, type: "status" as const,
+            code: `context_compression_${outcome}`, title: "checkpoint bookkeeping", text: "节省 5,800 tokens",
+            diagnosticSummary: { kind: "context_compression_marker", status: outcome },
+          }] : []),
+          {
+            ...base, id: "mixed-tool:0", itemId: "mixed-tool", sequence: 2, type: "tool_call",
+            callId: "mixed-call", toolName: "read_file_tool", input: JSON.stringify({ path: "compression-regression.ts" }),
+            ...(running ? { status: "running", terminal: false } : { output: "file read" }),
+          },
+          {
+            ...base, id: "mixed-answer:0", itemId: "mixed-answer", sequence: 3, type: "agent_message",
+            phase: "final_answer", text: "压缩后的回答必须保留。",
+            ...(running ? { status: "running", terminal: false } : {}),
+          },
+        ],
+      };
+    };
+
+    it.each(["status", "metadata", "both"] as const)("keeps final answer and tool process with %s carrier", (carrier) => {
+      const html = renderConversation([mixedMessage(carrier)]);
+      expect(html).toContain("压缩后的回答必须保留。");
+      expect(html).toContain('data-conversation-part-key="mixed-tool"');
+      expect(html).toContain("file read");
+      expect(html.match(/data-conversation-compression-divider=/g)).toHaveLength(1);
+      expect(html).toContain(`data-conversation-compression-divider="${outcome}"`);
+      expect(html).not.toContain("checkpoint bookkeeping");
+      expect(html).not.toContain("节省 5,800 tokens");
+    });
+
+    it("keeps running tool and streamed answer beside the divider", () => {
+      const html = renderConversation([mixedMessage("both", true)]);
+      expect(html).toContain("压缩后的回答必须保留。");
+      expect(html).toContain("compression-regression.ts");
+      expect(html).toContain('data-codex-tool-subject="true"');
+      expect(html.match(/data-conversation-compression-divider=/g)).toHaveLength(1);
+      expect(html).not.toContain("checkpoint bookkeeping");
+    });
+
+    it("keeps the running placeholder after a checkpoint before the next answer arrives", () => {
+      const message = mixedMessage("both", true);
+      message.turnItems = message.turnItems.filter((item) => item.type === "status");
+      const html = renderConversation([message]);
+      expect(html).toContain("data-active-turn-stage=");
+      expect(html.match(/data-conversation-compression-divider=/g)).toHaveLength(1);
+      expect(html).not.toContain("checkpoint bookkeeping");
+      expect(html).not.toContain("节省 5,800 tokens");
+    });
   });
 
   it("keeps reasoning cells collapsed while streaming and after settle, with a rolling summary", () => {
@@ -1044,7 +1107,7 @@ describe("ConversationView native Codex transcript surface", () => {
     // details, so the body markup exists but starts collapsed).
     expect(withWork).not.toMatch(/<details[^>]*\sopen[=\s>]/);
 
-    // Short turns stay quiet.
+    // Short turns report their real time instead of hiding behind a noise floor.
     const short = renderConversation([{
       ...base,
       id: "assistant-work-header-short",
@@ -1054,7 +1117,7 @@ describe("ConversationView native Codex transcript surface", () => {
           : item
       )),
     }]);
-    expect(short).not.toContain("已工作");
+    expect(short).toContain("已工作");
 
     // In-flight turns stay quiet too.
     const streaming = renderConversation([{ ...base, id: "assistant-work-header-live", status: "running" as const }]);

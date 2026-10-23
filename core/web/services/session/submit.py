@@ -18,7 +18,12 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager, nullcontext
 from typing import Any
 
-from core.chat.turn_journal import TERMINAL_EVENTS, TurnJournalPostTerminalWriteError
+from core.chat.session_catalog import notify_session_catalog_dirty
+from core.chat.turn_journal import (
+    TERMINAL_EVENTS,
+    TurnJournalPostTerminalWriteError,
+    append_turn_events,
+)
 
 from . import conversation_references
 from . import document_attachments
@@ -26,7 +31,6 @@ from . import journal_bridge
 from .admission_lock import (
     SessionAdmissionLock,
     session_active_work_run_owner_alive,
-    session_has_active_work_run,
 )
 from .retry import validate_safe_retry, with_retry_receipt
 from .turn_model_parameters import capture_model_parameters, pin_agent_model_parameters
@@ -827,6 +831,50 @@ def _append_turn_steer_promotion(
             pass
 
 
+def _record_journal_append_failure(
+    s: Any,
+    session_id: str,
+    turn_id: str,
+    event_type: str,
+    exc: BaseException,
+    *,
+    started_at: float | None = None,
+) -> None:
+    """Mirror journal_bridge's append_failed scene event for direct batch appends.
+
+    The acceptance scaffold appends through :func:`append_turn_events` directly
+    (one lock section for both markers), so journal_bridge's own failure
+    recording does not run. Keep the same funnel and field shape so the scene
+    log cannot tell the two append paths apart.
+    """
+
+    try:
+        fields = {
+            "sessionId": str(session_id or "").strip()[:80],
+            "turnId": str(turn_id or "").strip()[:80],
+            "eventType": str(event_type or "").strip()[:80],
+            "errorType": type(exc).__name__,
+            "errorMessageLength": len(str(exc)),
+        }
+        if started_at is not None:
+            try:
+                fields["durationMs"] = s._elapsed_ms(started_at)
+            except Exception:
+                pass
+        s.record_runtime_scene_event(
+            "conversation",
+            "conversation_ledger",
+            "conversation.ledger.append_failed",
+            level="warning",
+            outcome="failed",
+            message="Failed to append a chat conversation ledger event.",
+            fields=fields,
+            lifecycle=True,
+        )
+    except Exception:
+        pass
+
+
 def _append_initial_session_journal_markers(
     *,
     session_id: str,
@@ -930,23 +978,6 @@ def _append_initial_session_journal_markers(
         )
         record_turn_id = partial_turn_id or str(record.get("turnId") or normalized_turn_id).strip()
         timings: dict[str, float] = {}
-        if not partial_turn_id:
-            turn_started_at = s._perf_counter()
-            s._append_session_conversation_event(
-                normalized_session_id,
-                record_turn_id,
-                s.EVENT_TURN_STARTED,
-                status="running",
-                payload={
-                    "agentId": str(record.get("agentId") or agent.get("agentId") or "").strip(),
-                    "leases": list(leases),
-                    "source": source,
-                },
-                source="submit_session_message",
-                visible_in_model=False,
-                correlation_id=normalized_submission_id,
-            )
-            timings["turnStartedJournalMs"] = s._elapsed_ms(turn_started_at)
         event_payload = dict(user_payload)
         event_metadata = event_payload.get("metadata")
         event_metadata = dict(event_metadata) if isinstance(event_metadata, Mapping) else {}
@@ -956,17 +987,80 @@ def _append_initial_session_journal_markers(
             event_metadata["clientSubmissionFingerprint"] = client_submission_fingerprint
         if event_metadata:
             event_payload["metadata"] = event_metadata
-        user_message_started_at = s._perf_counter()
-        user_event = s._append_session_conversation_event(
-            normalized_session_id,
-            record_turn_id,
-            s.EVENT_USER_MESSAGE,
-            status="recorded",
-            payload=event_payload,
-            source="submit_session_message",
-            correlation_id=normalized_submission_id,
-        )
-        timings["userMessageJournalMs"] = s._elapsed_ms(user_message_started_at)
+        if not partial_turn_id:
+            # One journal lock section for the acceptance scaffold: the
+            # turn_started and user_message appends land back to back inside a
+            # single acquisition (same append order and per-event durability
+            # as the previous two sequential appends, half the lock round
+            # trips on the hot submit path).
+            batch_started_at = s._perf_counter()
+            try:
+                acceptance_events = append_turn_events(
+                    s.PROJECT_ROOT,
+                    normalized_session_id,
+                    record_turn_id,
+                    (
+                        {
+                            "event_type": s.EVENT_TURN_STARTED,
+                            "status": "running",
+                            "payload": {
+                                "agentId": str(record.get("agentId") or agent.get("agentId") or "").strip(),
+                                "leases": list(leases),
+                                "source": source,
+                            },
+                            "source": "submit_session_message",
+                            "visible_in_model": False,
+                            "correlation_id": normalized_submission_id,
+                        },
+                        {
+                            "event_type": s.EVENT_USER_MESSAGE,
+                            "status": "recorded",
+                            "payload": event_payload,
+                            "source": "submit_session_message",
+                            "correlation_id": normalized_submission_id,
+                        },
+                    ),
+                )
+            except Exception as exc:
+                _record_journal_append_failure(
+                    s,
+                    normalized_session_id,
+                    record_turn_id,
+                    f"{s.EVENT_TURN_STARTED}+{s.EVENT_USER_MESSAGE}",
+                    exc,
+                    started_at=batch_started_at,
+                )
+                raise
+            timings["turnStartedJournalMs"] = s._elapsed_ms(batch_started_at)
+            # Both markers share the one batch span above; report the elapsed
+            # total once so consumers summing the two fields keep their meaning.
+            timings["userMessageJournalMs"] = 0.0
+            user_event = acceptance_events[-1]
+            journal_bridge.invalidate_session_conversation_events_cache(normalized_session_id)
+            try:
+                sequence = journal_bridge.session_ledger_sequence(
+                    normalized_session_id,
+                    project_root=s.PROJECT_ROOT,
+                )
+            except Exception:
+                sequence = 0
+            notify_session_catalog_dirty(
+                s.PROJECT_ROOT,
+                normalized_session_id,
+                f"journal:{sequence}",
+            )
+        else:
+            user_message_started_at = s._perf_counter()
+            user_event = s._append_session_conversation_event(
+                normalized_session_id,
+                record_turn_id,
+                s.EVENT_USER_MESSAGE,
+                status="recorded",
+                payload=event_payload,
+                source="submit_session_message",
+                correlation_id=normalized_submission_id,
+            )
+            timings["userMessageJournalMs"] = s._elapsed_ms(user_message_started_at)
         resolved_journal_turn_id = record_turn_id
         _append_turn_steer_promotion(
             session_id=normalized_session_id,
@@ -1438,22 +1532,21 @@ def submit_session_message(
             if replay is not None:
                 release_admit_lock()
                 return replay
+        # Busy admission follows snapshot ownership, not mere snapshot
+        # existence: on-disk work-run snapshots outlive their writer, so a
+        # blocking snapshot only proves a busy session when its writer is a
+        # live foreign process.  Own-pid residue defers to this process's
+        # running registry (already consulted above), and a dead or unstamped
+        # writer is abandoned residue — a normal submit must recover from a
+        # crashed turn thread instead of wedging busy until the reconcile
+        # sweep, while a hot-restart resume still refuses to fork a second
+        # parallel resume into the same journal when the backend startup
+        # sweep already owns the turn (split-brain; SessionBusyError stays
+        # transient for the daemon wake retry).
         foreign_work_running = (
             not s._is_session_running(conversation_id)
-            and session_has_active_work_run(s, conversation_id)
+            and session_active_work_run_owner_alive(s, conversation_id)
         )
-        if normalized_message_source == "hot_restart_resume" and foreign_work_running:
-            # The exemption exists to let hot-restart recovery proceed past a
-            # dead process's abandoned work-run residue (on-disk snapshots
-            # outlive their writer): an ownership snapshot whose writer is
-            # dead clears the busy flag again.  A snapshot that proves a live
-            # foreign writer is a concurrent recovery — e.g. the backend
-            # startup sweep already resumed this turn while the runtime
-            # manager wakes it — and keeps the normal busy semantics instead
-            # of forking a second parallel resume into the same journal
-            # (split-brain).  SessionBusyError is transient for the daemon
-            # wake retry.
-            foreign_work_running = session_active_work_run_owner_alive(s, conversation_id)
         if s._is_session_running(conversation_id) or foreign_work_running:
             if queue_if_busy:
                 raise _SessionTurnQueued(
@@ -2612,7 +2705,12 @@ def _resubmit_session_user_message(
                 s.save_session_chat_state(s.PROJECT_ROOT, conversation_id, conversation)
                 raise s.SessionLeaseConflictError(localized_reason)
 
-            if not s._is_session_running(conversation_id) and session_has_active_work_run(s, conversation_id):
+            # Same ownership-based busy semantics as first-submit admission:
+            # a rerun must recover past this process's own crashed-turn
+            # residue and only block on a live foreign writer.
+            if not s._is_session_running(conversation_id) and session_active_work_run_owner_alive(
+                s, conversation_id
+            ):
                 raise _session_still_running_error(s, lang)
             if _safe_retry_expected is not None:
                 s._ensure_conversation_workspace_metadata(conversation)
