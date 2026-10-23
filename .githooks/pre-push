@@ -1,0 +1,22 @@
+#!/bin/sh
+set -eu
+
+zero=0000000000000000000000000000000000000000
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ "$local_sha" = "$zero" ] && continue
+  # Tags pointing to trees/blobs contain no commit attribution.
+  git cat-file -e "$local_sha^{commit}" 2>/dev/null || continue
+  revision=$local_sha
+  if [ "$remote_sha" != "$zero" ] && git cat-file -e "$remote_sha^{commit}" 2>/dev/null; then
+    revision="$remote_sha..$local_sha"
+  fi
+  # A merge of an old branch can restore attribution without creating a new
+  # AI-authored commit. Inspect all commits being introduced by this push.
+  identities=$(git log --format='%ae%n%ce' "$revision")
+  coauthors=$(git log --format=%H --extended-regexp --regexp-ignore-case \
+    --grep='^[[:space:]]*Co-authored-by:[[:space:]].*<(cursoragent@cursor\.com|noreply@commandcode\.ai)>[[:space:]]*$' "$revision")
+  if [ -n "$coauthors" ] || printf '%s\n' "$identities" | grep -Eiq '^(cursoragent@cursor\.com|noreply@commandcode\.ai)$'; then
+    echo "[pre-push] AI attribution found in outgoing history for $remote_ref; repair the legacy author/committer or AI Co-authored-by trailer before pushing." >&2
+    exit 1
+  fi
+done
