@@ -376,3 +376,42 @@ def test_summary_cache_content_signature_stable_and_sensitive():
     assert signature(base) == signature(same_content_reordered)
     assert signature(base) != signature(changed)
     assert signature(base) != ""
+
+
+def test_summary_cache_sliding_ttl_keeps_steady_polling_warm(tmp_path, monkeypatch):
+    """命中即续期：稳态轮询累计间隙超过硬 TTL 也不触发全量重投影。
+
+    键含内容签名，条目有效性不随龄变化；TTL 只回收不再被访问的条目。
+    127-agent 根每 >5s 间隙后全表重投影（0.4s/次 CPU 持有）由此消除。
+    """
+    import time as _time
+
+    _setup(tmp_path, monkeypatch)
+    agent_directory_service.create_agent_instance(display_name="Sliding TTL Agent")
+
+    real_perf = _time.perf_counter
+    offset = {"v": 0.0}
+    monkeypatch.setattr(_time, "perf_counter", lambda: real_perf() + offset["v"])
+
+    calls, counting = _counting_summary(
+        agent_directory_service, agent_directory_service._agent_to_api_summary
+    )
+    monkeypatch.setattr(agent_directory_service, "_agent_to_api_summary", counting)
+    try:
+        agent_directory_service.list_agents(detail="summary")
+        baseline = len(calls)  # 全量冷建（steward + 新建 agent 等）
+
+        offset["v"] = 3.0
+        agent_directory_service.list_agents(detail="summary")
+        assert len(calls) == baseline, "age 3s < TTL must hit and refresh the entry"
+
+        # 距上次存储 3s（累计 6s > 5s 硬 TTL）：硬过期实现会在此全量重投影。
+        offset["v"] = 6.0
+        agent_directory_service.list_agents(detail="summary")
+        assert len(calls) == baseline, "sliding refresh must keep steady polling warm"
+    finally:
+        monkeypatch.setattr(
+            agent_directory_service,
+            "_agent_to_api_summary",
+            agent_directory_projections._agent_to_api_summary,
+        )
