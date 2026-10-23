@@ -110,15 +110,16 @@ def test_pet_action_rejects_unknown_action_and_records_scene_event(monkeypatch, 
     assert event_kwargs["fields"]["action"] == "dance"
 
 
-def test_pet_activity_route_exposes_explicit_safe_contract(monkeypatch, isolated_pet_storage):
+@pytest.mark.parametrize("completed", [False, True])
+def test_pet_activity_route_exposes_explicit_safe_contract(monkeypatch, isolated_pet_storage, completed):
     monkeypatch.setattr(
         pet_activity_service,
         "get_pet_activity",
         lambda: {
             "schemaVersion": 1,
-            "aggregateTone": "running",
-            "animationState": "tooling",
-            "activeCount": 1,
+            "aggregateTone": "completed" if completed else "running",
+            "animationState": "celebrating" if completed else "tooling",
+            "activeCount": 0 if completed else 1,
             "attentionCount": 0,
             "generatedAt": "2026-09-08T02:00:00+00:00",
             "sessions": [
@@ -127,9 +128,11 @@ def test_pet_activity_route_exposes_explicit_safe_contract(monkeypatch, isolated
                     "title": "Agent A 的会话",
                     "agentId": "agent-a",
                     "agentDisplayName": "Agent A",
-                    "tone": "running",
-                    "phase": "tooling",
+                    "tone": "completed" if completed else "running",
+                    "phase": "completed" if completed else "tooling",
                     "updatedAt": "2026-09-08T02:00:00+00:00",
+                    **({"completionIdentity": "turn-a", "completedAt": "2026-09-08T02:00:00+00:00"}
+                       if completed else {}),
                 }
             ],
         },

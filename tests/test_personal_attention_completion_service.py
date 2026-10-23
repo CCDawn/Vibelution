@@ -263,6 +263,8 @@ def _pet_row(
         "tone": tone,
         "phase": "completed",
         "updatedAt": updated_at,
+        "completionIdentity": f"turn-{session_id}-{updated_at}",
+        "completedAt": updated_at,
     }
 
 
@@ -389,6 +391,39 @@ def test_session_completed_attention_new_turn_gets_new_id(monkeypatch):
     second = completion.collect_session_completed_attention(now=NOW)
     # 同一会话下一轮完成是新事件（id 带完成时间戳），不是被账本压住的旧 id。
     assert first[0]["id"] != second[0]["id"]
+
+
+def test_session_completion_id_is_stable_when_directory_recency_changes(monkeypatch):
+    row = {
+        **_pet_row("session-a", _iso(NOW - 5)),
+        "completionIdentity": "same-terminal-turn",
+        "completedAt": _iso(NOW - 5),
+    }
+    monkeypatch.setattr(pet_activity_service, "get_pet_activity", lambda: {"sessions": [row]})
+    monkeypatch.setattr(session_service, "list_sessions", lambda: [])
+    first = completion.collect_session_completed_attention(now=NOW)
+    row["updatedAt"] = _iso(NOW)
+    second = completion.collect_session_completed_attention(now=NOW)
+
+    assert first[0]["id"] == second[0]["id"]
+
+
+def test_different_turns_completed_in_the_same_second_get_different_ids(monkeypatch):
+    row = _pet_row("session-a", _iso(NOW - 5))
+    monkeypatch.setattr(pet_activity_service, "get_pet_activity", lambda: {"sessions": [row]})
+    monkeypatch.setattr(session_service, "list_sessions", lambda: [])
+    first = completion.collect_session_completed_attention(now=NOW)
+    row["completionIdentity"] = "another-terminal-turn"
+    second = completion.collect_session_completed_attention(now=NOW)
+    assert first[0]["id"] != second[0]["id"]
+
+
+def test_directory_time_without_a_terminal_identity_cannot_notify(monkeypatch):
+    row = _pet_row("session-a", _iso(NOW - 5))
+    row.pop("completionIdentity")
+    monkeypatch.setattr(pet_activity_service, "get_pet_activity", lambda: {"sessions": [row]})
+    monkeypatch.setattr(session_service, "list_sessions", lambda: [])
+    assert completion.collect_session_completed_attention(now=NOW) == []
 
 
 def test_session_completed_attention_skips_rows_without_stable_updated_at(monkeypatch):

@@ -29,6 +29,8 @@ export type PetActivitySession = {
   tone: PetActivityTone;
   phase: PetActivityPhase;
   updatedAt: string;
+  completionIdentity?: string | null;
+  completedAt?: string | null;
 };
 
 export type PetActivity = {

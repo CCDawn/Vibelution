@@ -29,6 +29,7 @@ def pet_summary() -> dict:
 @router.get(
     "/pet/activity",
     response_model=PetActivityResponse,
+    response_model_exclude_unset=True,
 )
 def pet_activity() -> dict:
     return pet_activity_service.get_pet_activity()
