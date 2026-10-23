@@ -412,7 +412,6 @@ def get_session_detail(
     # Exact deep links are allowed to recover a real, non-deleted session
     # workspace.  A missing row must not make the client silently switch to an
     # unrelated active conversation.
-    agent_by_id = s._agent_lookup_for_conversations()
     conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
     if conversation is None:
         s._ensure_session_conversation_record(
@@ -420,6 +419,22 @@ def get_session_detail(
             source="session.detail",
         )
         conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
+    bound_agent_ids = tuple(dict.fromkeys(
+        str((conversation or {}).get(key) or "").strip()
+        for key in ("agent_id", "agentId")
+        if str((conversation or {}).get(key) or "").strip()
+    ))
+    # A bound detail needs its declared identities and every competing direct
+    # binding, not avatar/policy projections for the entire Agent directory.
+    # Unbound legacy/recovery reads retain the complete lookup.
+    agent_by_id = (
+        s._agent_lookup_for_conversations(
+            session_id=normalized_session_id,
+            agent_ids=bound_agent_ids,
+        )
+        if bound_agent_ids
+        else s._agent_lookup_for_conversations()
+    )
     if conversation is None:
         fallback = s._agent_directory_session_stub_for_id(normalized_session_id, agent_by_id=agent_by_id)
         if fallback is None:
@@ -458,6 +473,7 @@ def get_session_detail(
         repair=not light_running_poll,
         persist_session_row=True,
         agent_by_id=agent_by_id,
+        agent_lookup_is_partial=bool(bound_agent_ids),
         lightweight=window_requested,
     )
     if target is not None:
@@ -5389,17 +5405,27 @@ def _append_agent_directory_conversations(
     return result
 
 
-def _agent_lookup_for_conversations() -> dict[str, dict[str, Any]]:
+def _agent_lookup_for_conversations(
+    *,
+    session_id: str = "",
+    agent_ids: tuple[str, ...] | None = None,
+) -> dict[str, dict[str, Any]]:
     s = _service()
     s._sync_agent_directory_project_root()
-    state = s.agent_directory_service.load_state()
+    if session_id or agent_ids is not None:
+        agents = s.agent_directory_service.load_agent_records(
+            agent_ids=agent_ids or (),
+            direct_session_ids=(session_id,) if session_id else (),
+        )
+    else:
+        agents = s.agent_directory_service.load_state().get("agents") or []
     avatar_url_cache: dict[str, str] = {}
     return {
         str(item.get("agentId") or "").strip(): s._conversation_agent_from_state(
             item,
             avatar_url_cache=avatar_url_cache,
         )
-        for item in state.get("agents") or []
+        for item in agents
         if isinstance(item, dict) and str(item.get("agentId") or "").strip()
     }
 

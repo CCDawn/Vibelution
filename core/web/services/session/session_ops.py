@@ -648,6 +648,7 @@ def _load_conversation_detail_target(
     payload: dict[str, Any] | None = None,
     repair: bool = True,
     agent_by_id: dict[str, dict[str, Any]] | None = None,
+    agent_lookup_is_partial: bool = False,
     lightweight: bool = False,
     persist_session_row: bool = False,
 ) -> dict[str, Any] | None:
@@ -693,6 +694,21 @@ def _load_conversation_detail_target(
         if fresh is not None:
             payload = {"conversations": [fresh]}
             conversations = payload["conversations"]
+            if agent_lookup_is_partial:
+                fresh_agent_ids = {
+                    str(fresh.get(key) or "").strip()
+                    for key in ("agent_id", "agentId")
+                    if str(fresh.get(key) or "").strip()
+                }
+                # A writer may have rebound this row since the caller sampled
+                # its identities. Never interpret an unsampled Agent as missing.
+                if not fresh_agent_ids:
+                    agent_by_id = s._agent_lookup_for_conversations()
+                elif not fresh_agent_ids.issubset(agent_by_id):
+                    agent_by_id = s._agent_lookup_for_conversations(
+                        session_id=normalized_session_id,
+                        agent_ids=tuple(sorted(fresh_agent_ids)),
+                    )
         changed = s._repair_child_root_agent_direct_session_bindings(payload, agent_by_id=agent_by_id)
         for raw in conversations:
             if not isinstance(raw, dict):
