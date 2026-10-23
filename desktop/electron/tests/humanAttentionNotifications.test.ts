@@ -52,6 +52,8 @@ function attention(
 function makeService(
   options: {
     assistantOpen?: boolean;
+    /** Simulates a hidden/minimized surface that still accepts sends. */
+    assistantVisible?: boolean;
     notificationSupported?: boolean;
     failNotificationCreation?: boolean;
     focusWorkbenchRejects?: boolean;
@@ -72,6 +74,7 @@ function makeService(
       assistantMessages.push({ channel, payload });
       return true;
     }),
+    isAssistantWindowVisible: vi.fn(() => options.assistantVisible !== false),
     sendToWorkbench: vi.fn((channel: string, payload: unknown) => {
       workbenchMessages.push({ channel, payload });
       return true;
@@ -148,6 +151,17 @@ describe("human attention notification service", () => {
     });
     expect(harness.bridge.setWorkbenchAttention).not.toHaveBeenCalled();
     expect(harness.assistantMessages).toHaveLength(0);
+  });
+
+  it("uses the system toast when the assistant window is not on screen", async () => {
+    const harness = makeService({ assistantVisible: false });
+
+    const result = await harness.service.notify(attention({ id: "ha-hidden" }));
+
+    expect(result).toEqual({ delivered: "system_notification" });
+    expect(harness.assistantMessages).toHaveLength(0);
+    expect(harness.notifications).toHaveLength(1);
+    expect(harness.notifications[0]!.shown).toBe(true);
   });
 
   it("flashes the workbench when native notifications are unsupported", async () => {
