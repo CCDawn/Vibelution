@@ -10,6 +10,9 @@ export const MEMBERS = [
   { id: "analyst", name: "分析员", initial: "析", detail: "资料整理与分析" },
   { id: "reviewer", name: "复核员", initial: "核", detail: "事实核验与交叉审查" },
   { id: "writer", name: "撰写员", initial: "撰", detail: "整合结果与交付" },
+  { id: "coordinator", name: "研究统筹", initial: "统", detail: "任务拆解与协作安排" },
+  { id: "methodologist", name: "方法顾问", initial: "方", detail: "研究方法与证据评估" },
+  { id: "data", name: "数据分析员", initial: "数", detail: "数据整理与分析" },
 ];
 
 export const EXAMPLE_FLOWS: Flow[] = [
