@@ -81,6 +81,8 @@ type PendingSessionMutation = {
 };
 
 type ArchiveSessionMutation = PendingSessionMutation & {
+  pendingIds?: ReadonlySet<string>;
+  isPendingFor?: (id: string) => boolean;
   mutate: (variables: { sessionId: string; archive: boolean }) => void;
 };
 
@@ -450,6 +452,7 @@ export function ChatConversationIndexPanel({
               totalCount={Math.max(archivedTotalEstimate, archivedRailSessions.length)}
               sortBy={sessionListPrefs.sortBy}
               loading={archivedSessionsPending}
+              archivePendingSessionIds={sessionArchiveMutation.pendingIds}
               archivePendingSessionId={
                 sessionArchiveMutation.isPending
                   ? String(sessionArchiveMutation.variables?.sessionId || "")
@@ -606,11 +609,8 @@ export function ChatConversationIndexPanel({
                 position={sessionContextMenu}
                 session={contextMenuSession}
                 t={t}
-                archiveDisabled={sessionArchiveMutation.isPending}
-                archivePending={
-                  sessionArchiveMutation.isPending
-                  && sessionArchiveMutation.variables?.sessionId === contextMenuSession.id
-                }
+                archiveDisabled={sessionArchiveMutation.isPendingFor?.(contextMenuSession.id) ?? (sessionArchiveMutation.isPending && sessionArchiveMutation.variables?.sessionId === contextMenuSession.id)}
+                archivePending={sessionArchiveMutation.isPendingFor?.(contextMenuSession.id) ?? (sessionArchiveMutation.isPending && sessionArchiveMutation.variables?.sessionId === contextMenuSession.id)}
                 onAddToReview={handleAddSessionToReview}
                 onArchive={handleArchiveSession}
                 onTogglePin={handleTogglePinSession}

@@ -78,12 +78,12 @@ export function useAgentConfigDraftMutations(options: UseAgentConfigDraftMutatio
         snapshot: payload.snapshot,
         summary: options.lang === "zh" ? "来自 Agent Center 配置编辑器。" : "Saved from the Agent Center configuration editor.",
       }),
-    onSuccess: async (_, variables) => {
+    onSuccess: (_, variables) => {
       options.setNotice({
         tone: "success",
         text: options.lang === "zh" ? "当前配置已保存为草稿，尚未影响运行。" : "The current configuration was saved as a draft and is not running yet.",
       });
-      await queryClient.invalidateQueries({ queryKey: ["agents", "config-changes", variables.agentId] });
+      void queryClient.invalidateQueries({ queryKey: ["agents", "config-changes", variables.agentId] }).catch(() => undefined);
     },
     onError: (error) => {
       const message = error instanceof Error ? error.message : String(error);
@@ -99,12 +99,12 @@ export function useAgentConfigDraftMutations(options: UseAgentConfigDraftMutatio
   const discardAgentConfigDraftMutation = useMutation({
     mutationFn: (payload: { agentId: string; draftId: string }) =>
       discardAgentConfigDraft(payload.agentId, payload.draftId),
-    onSuccess: async (_, variables) => {
+    onSuccess: (_, variables) => {
       options.setNotice({
         tone: "success",
         text: options.lang === "zh" ? "草稿已放弃，发布记录保留不变。" : "Draft discarded; published revisions remain unchanged.",
       });
-      await queryClient.invalidateQueries({ queryKey: ["agents", "config-changes", variables.agentId] });
+      void queryClient.invalidateQueries({ queryKey: ["agents", "config-changes", variables.agentId] }).catch(() => undefined);
     },
     onError: (error) => {
       options.setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
@@ -224,19 +224,21 @@ export function useAgentConfigDraftMutations(options: UseAgentConfigDraftMutatio
           confirmed: true,
         },
       ),
-    onSuccess: async (result) => {
-      options.setConfigDraft(options.draftFromAgent(result.agent));
-      options.draftSyncSourceRef.current = options.draftSyncSourceFromAgent(options.getWorkspace(), result.agent);
+    onSuccess: (result, variables) => {
+      if (options.getSelectedAgentId() === variables.agent.agentId) {
+        options.setConfigDraft(options.draftFromAgent(result.agent));
+        options.draftSyncSourceRef.current = options.draftSyncSourceFromAgent(options.getWorkspace(), result.agent);
+      }
       options.setNotice({
         tone: "success",
         text: options.lang === "zh"
           ? `已固定 ${result.modelRef} 并绑定到当前 Agent`
           : `Pinned ${result.modelRef} and bound it to this Agent`,
       });
-      await Promise.all([
+      void Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.agentSummary(true) }),
-      ]);
+      ]).catch(() => undefined);
       void options.chatWorkspaceCache.afterAgentConfigSaved(result.agent.agentId);
     },
     onError: (error) => {

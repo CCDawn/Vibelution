@@ -22,6 +22,7 @@ type ArchivedSessionRailProps = {
   sortBy: SessionListSortBy;
   loading: boolean;
   archivePendingSessionId: string;
+  archivePendingSessionIds?: ReadonlySet<string>;
   deletePendingSessionId: string;
   deleteAllPending: boolean;
   isBusyPhase: (value: string | null | undefined) => boolean;
@@ -42,6 +43,7 @@ export function ArchivedSessionRail({
   sortBy,
   loading,
   archivePendingSessionId,
+  archivePendingSessionIds,
   deletePendingSessionId,
   deleteAllPending,
   onUnarchive,
@@ -81,7 +83,7 @@ export function ArchivedSessionRail({
         <VStateSurface tone="empty" title={t("noArchivedSessions")} />
       ) : renderSessions(visible, (session) => {
           const busy = isBusyPhase(session.currentPhase || session.status);
-          const unarchivePending = archivePendingSessionId === session.id;
+          const unarchivePending = archivePendingSessionIds?.has(session.id) ?? archivePendingSessionId === session.id;
           const deletePending = deletePendingSessionId === session.id;
           return (
             <>

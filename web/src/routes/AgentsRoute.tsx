@@ -14,6 +14,7 @@ import { lazy, Suspense, type MouseEvent, useEffect, useMemo, useRef, useState }
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import {
+  AgentManagementOutcomeUnknownError,
   bulkPurgeAgents as requestBulkPurgeAgents,
   bulkUpdateAgentConfig,
   bulkUpdateAgentPromptTemplate,
@@ -69,6 +70,7 @@ import { useShellI18n } from "../i18n/useShellI18n";
 import { useAgentConfigDraftMutations } from "./agents/useAgentConfigDraftMutations";
 import { useAgentWorkbenchMutations } from "./agents/useAgentWorkbenchMutations";
 import { archiveSnapshotIsCurrent } from "./agents/agentArchiveRecovery";
+import { createAgentOperationScope } from "./agents/agentOperationScope";
 import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
 import { type AgentActivityTimelineItem } from "./AgentActivityHistoryPanel";
 import {
@@ -459,7 +461,8 @@ export function AgentsRoute() {
   const [bulkPromptTemplateId, setBulkPromptTemplateId] = useState("");
   const [bulkConfigDraft, setBulkConfigDraft] = useState<AgentBulkConfigDraft>(DEFAULT_BULK_CONFIG_DRAFT);
   const [bulkConfigApply, setBulkConfigApply] = useState<AgentBulkConfigApply>(DEFAULT_BULK_CONFIG_APPLY);
-  const [bulkAgentPending, setBulkAgentPending] = useState(false);
+  const [bulkPendingAgentIds, setBulkPendingAgentIds] = useState<ReadonlySet<string>>(new Set());
+  const [bulkOperations] = useState(() => createAgentOperationScope(setBulkPendingAgentIds));
   const [configDraftPresenceDirty, setConfigDraftPresenceDirty] = useState(() => readConfigDraftPresence());
   const draftSyncSourceRef = useRef<AgentDraftSyncSource | null>(null);
   const selectedAgentIdRef = useRef(selectedAgentId);
@@ -1041,6 +1044,7 @@ export function AgentsRoute() {
     archiveAgentMutation,
     archiveAgents,
     isAgentArchivePending,
+    isAgentPurgePending,
     purgeAgentMutation,
     resetAgentMutation,
     updateAvatarMutation,
@@ -1095,11 +1099,13 @@ export function AgentsRoute() {
 
   const selectedAgentAvatarUpdatePending = updateAvatarMutation.isPending && updateAvatarMutation.variables?.agentId === selectedAgent?.agentId;
   const selectedBulkArchivePending = selectedBulkAgents.some(agent => isAgentArchivePending(agent.agentId));
-  const selectedBulkPending = bulkAgentPending || selectedBulkArchivePending;
+  const selectedBulkPending = selectedBulkArchivePending || selectedBulkAgents.some(agent =>
+    bulkPendingAgentIds.has(agent.agentId) || bulkOperations.isPending(agent.agentId) || isAgentPurgePending(agent.agentId));
   const bulkConfigCanSave = selectedBulkAgents.length > 1 && bulkConfigReady(bulkConfigDraft, bulkConfigApply) && !selectedBulkPending;
   const selectedAgentAvatarUploadPending = uploadAvatarMutation.isPending && uploadAvatarMutation.variables?.agentId === selectedAgent?.agentId;
   const selectedAgentConsumeAllPending = consumeAllMessagesMutation.isPending && consumeAllMessagesMutation.variables?.agentId === selectedAgent?.agentId;
-  const selectedAgentConfigPending = updateAgentMutation.isPending && updateAgentMutation.variables?.agentId === selectedAgent?.agentId;
+  const selectedAgentConfigPending = bulkPendingAgentIds.has(selectedAgent?.agentId ?? "")
+    || (updateAgentMutation.isPending && updateAgentMutation.variables?.agentId === selectedAgent?.agentId);
   const selectedAgentConfigDraftSavePending = saveAgentConfigDraftMutation.isPending && saveAgentConfigDraftMutation.variables?.agentId === selectedAgent?.agentId;
   const selectedAgentConfigDraftDiscardPending = discardAgentConfigDraftMutation.isPending && discardAgentConfigDraftMutation.variables?.agentId === selectedAgent?.agentId;
   const selectedAgentPersonaPending = updatePersonaMutation.isPending && updatePersonaMutation.variables?.agentId === selectedAgent?.agentId;
@@ -1108,9 +1114,10 @@ export function AgentsRoute() {
   const selectedAgentToolPolicyPending = updateToolPolicyMutation.isPending && updateToolPolicyMutation.variables?.agentId === selectedAgent?.agentId;
   const selectedAgentMemoryPolicyPending = updateMemoryPolicyMutation.isPending && updateMemoryPolicyMutation.variables?.agentId === selectedAgent?.agentId;
   const selectedAgentRuntimePolicyPending = updateRuntimePolicyMutation.isPending && updateRuntimePolicyMutation.variables?.agentId === selectedAgent?.agentId;
-  const selectedAgentArchivePending = isAgentArchivePending(selectedAgent?.agentId ?? "");
+  const selectedAgentArchivePending = isAgentArchivePending(selectedAgent?.agentId ?? "")
+    || bulkPendingAgentIds.has(selectedAgent?.agentId ?? "") || isAgentPurgePending(selectedAgent?.agentId ?? "");
   const selectedAgentPurgePending = isAgentArchivePending(selectedAgent?.agentId ?? "")
-    || (purgeAgentMutation.isPending && purgeAgentMutation.variables?.agentId === selectedAgent?.agentId);
+    || bulkPendingAgentIds.has(selectedAgent?.agentId ?? "") || isAgentPurgePending(selectedAgent?.agentId ?? "");
   const selectedAgentToolGovernanceCreatePending =
     createToolGovernanceMutation.isPending && createToolGovernanceMutation.variables?.agentId === selectedAgent?.agentId;
 
@@ -1524,7 +1531,7 @@ export function AgentsRoute() {
   };
 
   const bulkApplyAgentConfig = async () => {
-    if (selectedBulkPending) {
+    if (selectedBulkPending || selectedBulkAgents.some(agent => bulkOperations.isPending(agent.agentId))) {
       return;
     }
     if (selectedBulkAgents.length < 2) {
@@ -1536,10 +1543,11 @@ export function AgentsRoute() {
       return;
     }
 
-    setBulkAgentPending(true);
+    const release = bulkOperations.begin(selectedBulkAgents.map(agent => agent.agentId));
     let success = 0;
     let skipped = 0;
     let failed = 0;
+    let unconfirmedMessage = "";
     const notes: string[] = [];
     const agentsById = new Map(selectedBulkAgents.map((agent) => [agent.agentId, agent]));
 
@@ -1559,20 +1567,21 @@ export function AgentsRoute() {
       response.skipped.forEach((item) => notes.push(agentBulkActionItemNote(item, agentsById, copy.bulkSkippedProtected)));
       response.failed.forEach((item) => notes.push(agentBulkActionItemNote(item, agentsById, "")));
     } catch (error) {
-      failed = selectedBulkAgents.length;
+      if (error instanceof AgentManagementOutcomeUnknownError) unconfirmedMessage = error.message;
+      else failed = selectedBulkAgents.length;
       notes.push(error instanceof Error ? error.message : String(error));
     } finally {
-      setBulkAgentPending(false);
+      release();
     }
     setNotice({
-      tone: failed > 0 ? "error" : "success",
-      text: agentBulkActionSummary(copy.bulkConfigResult, success, skipped, failed, notes, lang),
+      tone: failed > 0 || unconfirmedMessage ? "error" : "success",
+      text: unconfirmedMessage || agentBulkActionSummary(copy.bulkConfigResult, success, skipped, failed, notes, lang),
     });
     void chatWorkspaceCache.afterAgentWorkspaceChanged();
   };
 
   const bulkApplyPromptTemplate = async () => {
-    if (selectedBulkPending) {
+    if (selectedBulkPending || selectedBulkAgents.some(agent => bulkOperations.isPending(agent.agentId))) {
       return;
     }
     if (!selectedBulkAgents.length) {
@@ -1584,10 +1593,11 @@ export function AgentsRoute() {
       return;
     }
 
-    setBulkAgentPending(true);
+    const release = bulkOperations.begin(selectedBulkAgents.map(agent => agent.agentId));
     let success = 0;
     let skipped = 0;
     let failed = 0;
+    let unconfirmedMessage = "";
     const notes: string[] = [];
     const agentsById = new Map(selectedBulkAgents.map((agent) => [agent.agentId, agent]));
 
@@ -1606,21 +1616,25 @@ export function AgentsRoute() {
       response.skipped.forEach((item) => notes.push(agentBulkActionItemNote(item, agentsById, copy.bulkSkippedArchived)));
       response.failed.forEach((item) => notes.push(agentBulkActionItemNote(item, agentsById, copy.bulkSkippedActive)));
     } catch (error) {
-      failed = selectedBulkAgents.length;
+      if (error instanceof AgentManagementOutcomeUnknownError) unconfirmedMessage = error.message;
+      else failed = selectedBulkAgents.length;
       notes.push(error instanceof Error ? error.message : String(error));
     } finally {
-      setBulkAgentPending(false);
+      release();
     }
     setNotice({
-      tone: failed > 0 ? "error" : "success",
-      text: agentBulkActionSummary(copy.bulkPromptResult, success, skipped, failed, notes, lang),
+      tone: failed > 0 || unconfirmedMessage ? "error" : "success",
+      text: unconfirmedMessage || agentBulkActionSummary(copy.bulkPromptResult, success, skipped, failed, notes, lang),
     });
-    clearBulkAgents();
+    if (!unconfirmedMessage) {
+      setSelectedBulkAgentIds(current => new Set([...current].filter(id => !agentsById.has(id))));
+      setBulkSelectionAnchorAgentId(current => agentsById.has(current) ? "" : current);
+    }
     void chatWorkspaceCache.afterAgentWorkspaceChanged();
   };
 
   const bulkArchiveAgents = async () => {
-    if (bulkAgentPending) {
+    if (selectedBulkPending || selectedBulkAgents.some(agent => bulkOperations.isPending(agent.agentId))) {
       return;
     }
     if (!selectedBulkAgents.length) {
@@ -1687,7 +1701,7 @@ export function AgentsRoute() {
   };
 
   const bulkPurgeAgents = async () => {
-    if (selectedBulkPending) {
+    if (selectedBulkPending || selectedBulkAgents.some(agent => bulkOperations.isPending(agent.agentId))) {
       return;
     }
     if (!selectedBulkAgents.length) {
@@ -1696,7 +1710,7 @@ export function AgentsRoute() {
     }
     // Confirm UI lives in AgentBulkOperationsPanel (VConfirmDialog).
 
-    setBulkAgentPending(true);
+    const release = bulkOperations.begin(selectedBulkAgents.map(agent => agent.agentId));
     const notes: string[] = [];
     const protectedAgents = selectedBulkAgents.filter((agent) => agentArchiveProtected(agent));
     const activeAgents = selectedBulkAgents.filter((agent) => !agentArchiveProtected(agent) && agent.status !== "archived");
@@ -1709,6 +1723,7 @@ export function AgentsRoute() {
     let success = 0;
     let skipped = protectedAgents.length + activeAgents.length + pendingAgents.length;
     let failed = 0;
+    let unconfirmedMessage = "";
     let purgedSelectedAgent = false;
 
     try {
@@ -1720,7 +1735,7 @@ export function AgentsRoute() {
           queryKeys.agentConfigWorkspace(),
           (current) => bulkPurgeWorkspaceCache(current, response),
         );
-        purgedSelectedAgent = response.success.some((item) => item.agentId === selectedAgent?.agentId);
+        purgedSelectedAgent = response.success.some((item) => item.agentId === selectedAgentIdRef.current);
         response.success.forEach((item) => {
           if (agentBulkPurgeCleanupPending(item)) {
             notes.push(agentBulkActionItemNote(
@@ -1739,10 +1754,11 @@ export function AgentsRoute() {
         failed += response.summary.failedCount;
       }
     } catch (error) {
-      failed += purgeAgents.length;
+      if (error instanceof AgentManagementOutcomeUnknownError) unconfirmedMessage = error.message;
+      else failed += purgeAgents.length;
       notes.push(error instanceof Error ? error.message : String(error));
     } finally {
-      setBulkAgentPending(false);
+      release();
     }
 
     if (purgedSelectedAgent && success > 0) {
@@ -1750,10 +1766,13 @@ export function AgentsRoute() {
       setActivePane("overview");
     }
     setNotice({
-      tone: failed > 0 ? "error" : "success",
-      text: agentBulkActionSummary(copy.bulkPurgeResult, success, skipped, failed, notes, lang),
+      tone: failed > 0 || unconfirmedMessage ? "error" : "success",
+      text: unconfirmedMessage || agentBulkActionSummary(copy.bulkPurgeResult, success, skipped, failed, notes, lang),
     });
-    clearBulkAgents();
+    if (!unconfirmedMessage) {
+      setSelectedBulkAgentIds(current => new Set([...current].filter(id => !agentsById.has(id))));
+      setBulkSelectionAnchorAgentId(current => agentsById.has(current) ? "" : current);
+    }
     void chatWorkspaceCache.afterAgentArchived();
   };
 
