@@ -61,12 +61,14 @@ def test_feature_import_wait_has_a_headless_fallback_and_honors_existing_switch(
 @pytest.mark.parametrize("wake_path", ["/api/feature-demand", "/api/runtime/summary"])
 def test_startup_reads_do_not_import_features_until_an_actual_request(monkeypatch, wake_path):
     from core.web import lifecycle, route_bootstrap
+    from core.web.routes import agent_plugins
     from core.web.services.agent_directory import bootstrap
 
     monkeypatch.setattr(lifecycle, "_startup_cache_prewarm_gate_enabled", lambda: True)
     monkeypatch.setattr(lifecycle, "_startup_prewarm_stagger_seconds", lambda: 60.0)
     monkeypatch.setattr(bootstrap, "initialize_builtin_agent_catalog", lambda: {})
     monkeypatch.setattr(route_bootstrap, "register_spa_routes", lambda *args, **kwargs: None)
+    monkeypatch.setattr(agent_plugins, "list_virtual_human_companion_activity", lambda: [])
     for name in ("_start_financial_team_coordinator", "_start_financial_job_scheduler", "_start_financial_backtest_worker"):
         monkeypatch.setattr(route_bootstrap, name, lambda *args, **kwargs: None)
 
@@ -89,7 +91,7 @@ def test_startup_reads_do_not_import_features_until_an_actual_request(monkeypatc
         async def run_sync(name, callback, *args, **kwargs):
             if name == "web-route-import":
                 if kwargs["startup_only"]:
-                    return [SimpleNamespace(__name__="core.web.routes.sessions", router=startup)]
+                    return [SimpleNamespace(__name__="core.web.routes.sessions", router=startup), agent_plugins]
                 imported.set()
                 await release.wait()
                 return [SimpleNamespace(router=feature)]
@@ -102,6 +104,13 @@ def test_startup_reads_do_not_import_features_until_an_actual_request(monkeypatc
             assert not imported.is_set()
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://127.0.0.1") as client:
                 assert (await client.get("/api/sessions/bootstrap")).json() == {"startup": True}
+                assert not imported.is_set()
+                # Ordinary /chat URLs must resolve Companion identity without
+                # paying for every unrelated feature router before detail loads.
+                activity = await asyncio.wait_for(client.get(
+                    "/api/agent-plugins/virtual-human-life/companion-activity",
+                ), 1)
+                assert activity.json() == []
                 assert not imported.is_set()
                 request = asyncio.create_task(client.get(wake_path))
                 await asyncio.wait_for(imported.wait(), 1)
@@ -643,6 +652,7 @@ def test_startup_operations_match_only_reviewed_methods_and_complete_route_shape
     from core.web.route_bootstrap import is_startup_route_path
     from core.web.routes import sessions
 
+    assert is_startup_route_path("/api/agent-plugins/virtual-human-life/companion-activity", method="GET")
     for path in (
         "/api/config/bootstrap", "/api/launcher/current-instance", "/api/runtime/summary",
         "/api/sessions/bootstrap", "/api/sessions/query", "/api/sessions/active",
@@ -663,6 +673,10 @@ def test_startup_operations_match_only_reviewed_methods_and_complete_route_shape
         actual = "/api" + path.replace("{session_id}", "chat-ready").replace("{request_id}", "approval-ready")
         assert is_startup_route_path(actual + "?limit=20", method=method)
     for method, path in (
+        ("POST", "/api/agent-plugins/virtual-human-life/companion-activity"),
+        ("GET", "/api/agent-plugins/virtual-human-life/companions"),
+        ("GET", "/api/agent-plugins/catalog"),
+        ("PUT", "/api/agents/companion/plugins/virtual-human-life/binding"),
         ("GET", "/api/sessions/chat-ready/export-html"),
         ("POST", "/api/sessions/chat-ready/archive"),
         ("GET", "/api/sessions/chat-ready/unknown"),
@@ -710,6 +724,7 @@ def test_startup_import_partition_loads_each_router_once(monkeypatch):
     assert set(first) == {
         "core.web.routes.config", "core.web.routes.launcher",
         "core.web.routes.runtime", "core.web.routes.sessions",
+        "core.web.routes.agent_plugins",
     }
     assert set(first).isdisjoint(later)
     assert len(names) == len(set(names)) == len(router_registry._ROUTE_MODULE_NAMES)
