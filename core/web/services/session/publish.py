@@ -659,6 +659,14 @@ def _publish_session_detail_snapshot(session_id: str, *, detail: dict[str, Any] 
     publication_generation = _next_session_detail_publish_generation()
     with s._SESSION_STREAM_SUBSCRIBERS_LOCK:
         subscribers = list(s._SESSION_STREAM_SUBSCRIBERS.get(session_id) or [])
+    # The rail holds one global index connection covering every session, so an
+    # index change must fan out even when nobody watches this session's detail
+    # stream. Busy snapshots are skipped: the rail draws a running row from its
+    # own active-turn layer, and only the settled pass changes what the row shows.
+    if not s._is_session_running(session_id):
+        from core.web.services.session import session_index_stream
+
+        session_index_stream.publish_session_index_delta(session_id, "upsert")
     if not subscribers:
         return
     # Running turns can emit progress updates much faster than a full detail
