@@ -133,6 +133,8 @@ export type UseSessionDetailStreamOptions = {
    */
   sessionStreamTerminalFailureRef?: MutableRefObject<SessionStreamTerminalFailure | null>;
   desktopConversationNotifierRef: MutableRefObject<DesktopConversationNotifier>;
+  /** Companion identity and unresolved binding lookups use their dedicated attention path. */
+  ordinarySessionNotificationsEnabled?: boolean;
   createSessionEventStream?: (sessionId: string) => SessionEventStream;
   /** Live title for desktop notifications (detail title or summary title). */
   sessionTitleForNotifications: string;
@@ -157,6 +159,7 @@ export function useSessionDetailStream({
   sessionStreamDecisionSnapshotRef,
   sessionStreamTerminalFailureRef,
   desktopConversationNotifierRef,
+  ordinarySessionNotificationsEnabled = true,
   createSessionEventStream = createDefaultSessionEventStream,
   sessionTitleForNotifications,
   viewedSessionId,
@@ -194,6 +197,8 @@ export function useSessionDetailStream({
   sessionTitleForNotificationsRef.current = sessionTitleForNotifications;
   const viewedSessionIdRef = useRef(viewedSessionId || activeSessionId || "");
   viewedSessionIdRef.current = viewedSessionId || activeSessionId || "";
+  const ordinarySessionNotificationsEnabledRef = useRef(ordinarySessionNotificationsEnabled);
+  ordinarySessionNotificationsEnabledRef.current = ordinarySessionNotificationsEnabled;
 
   // Perf root cause: sessionStreamShouldConnect flaps while the route settles.
   // Keeping it out of the stream effect's dependency list stops close/reopen
@@ -637,10 +642,12 @@ export function useSessionDetailStream({
           fields: decision.telemetry,
         });
       }
-      desktopConversationNotifierRef.current.handleSessionDetail(detail, {
-        sessionTitle: detail.title || detail.agentDisplayName || detail.id,
-        viewedSessionId: viewedSessionIdRef.current,
-      });
+      if (ordinarySessionNotificationsEnabledRef.current) {
+        desktopConversationNotifierRef.current.handleSessionDetail(detail, {
+          sessionTitle: detail.title || detail.agentDisplayName || detail.id,
+          viewedSessionId: viewedSessionIdRef.current,
+        });
+      }
       if (decision.clearActiveLayer) {
         committedAssistantDeltaLayer = undefined;
         setActiveTurnLayersBySession((current) =>

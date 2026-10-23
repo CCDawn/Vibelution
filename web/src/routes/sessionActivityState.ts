@@ -13,6 +13,7 @@ export type SessionActivitySource = {
   lastTurnStatus?: string;
   terminalReason?: string;
   activeTurnId?: string;
+  lastTurnTerminalTurnId?: string;
 };
 
 export type SessionActivityState = {
@@ -62,11 +63,17 @@ export function resolveSessionActivity(
   const rawStatus = status || legacyPhase || child;
   const result: SessionActivityState = { execution: "unknown", phase: "", outcome: "", reason: "", rawStatus };
   const execution = current.map(activityExecution).find(Boolean);
-  if (execution || session.activeTurnId || (options?.runtimeRunning && options.authoritativeRuntime)) {
+  const reason = normalizeActivityValue(session.terminalReason);
+  const activeTurnId = String(session.activeTurnId ?? "").trim();
+  // Terminal projection may arrive before worker owner cleanup. Retire only
+  // that exact settled Turn; live phases and reconciled runtime still win.
+  const settledOwner = Boolean(activeTurnId
+    && activeTurnId === String(session.lastTurnTerminalTurnId ?? "").trim()
+    && activityOutcome(reason));
+  if (execution || (activeTurnId && !settledOwner) || (options?.runtimeRunning && options.authoritativeRuntime)) {
     return { ...result, execution: (execution || "running") as SessionActivityState["execution"], phase };
   }
   if (rawStatus && !activityOutcome(rawStatus) && !isActivityResting(rawStatus)) return result;
-  const reason = normalizeActivityValue(session.terminalReason);
   if (reason && !activityOutcome(reason) && !["ready", "idle", "running"].includes(reason)) return result;
   const terminal = [reason, status, legacyPhase, normalizeActivityValue(session.lastTurnStatus), child].find(activityOutcome);
   if (terminal) return { ...result, execution: "settled", outcome: activityOutcome(terminal), reason: terminal };

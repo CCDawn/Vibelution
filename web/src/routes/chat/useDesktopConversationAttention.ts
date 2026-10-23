@@ -2,7 +2,7 @@ import { useEffect, useRef, type MutableRefObject } from "react";
 
 import type { QueryClient } from "@tanstack/react-query";
 import { queryKeys } from "../../api/queryKeys";
-import type { SessionSummary } from "../../api/types";
+import type { SessionDetail, SessionSummary } from "../../api/types";
 import {
   browserDesktopNotificationBridge,
   subscribeConversationNotificationOpened,
@@ -14,18 +14,22 @@ export type UseDesktopConversationAttentionOptions = {
   sessions: SessionSummary[] | undefined;
   queryClient: QueryClient;
   viewedSessionId: string;
+  viewedSessionDetail?: SessionDetail;
+  viewedSessionDetailEnabled?: boolean;
   notifierRef: MutableRefObject<DesktopConversationNotifier>;
   onOpenSession: (sessionId: string) => void;
 };
 
 /**
- * Watches the session index for background busy→idle completions and
+ * Watches canonical viewed details and the background session index for completions, and
  * routes Electron notification clicks to the owning session.
  */
 export function useDesktopConversationAttention({
   sessions,
   queryClient,
   viewedSessionId,
+  viewedSessionDetail,
+  viewedSessionDetailEnabled = true,
   notifierRef,
   onOpenSession,
 }: UseDesktopConversationAttentionOptions): void {
@@ -33,6 +37,23 @@ export function useDesktopConversationAttention({
   viewedSessionIdRef.current = viewedSessionId;
   const onOpenSessionRef = useRef(onOpenSession);
   onOpenSessionRef.current = onOpenSession;
+
+  useEffect(() => {
+    if (
+      !viewedSessionDetailEnabled
+      || !viewedSessionDetail
+      || viewedSessionDetail.id !== viewedSessionId
+      || viewedSessionDetail.provisionalTranscript
+    ) {
+      return;
+    }
+    // HTTP readback can commit the terminal before (or without) an accepted
+    // SSE detail. Both sources share the notifier's stable turn deduplication.
+    notifierRef.current.handleSessionDetail(viewedSessionDetail, {
+      viewedSessionId,
+      sessionTitle: viewedSessionDetail.title || viewedSessionDetail.agentDisplayName,
+    });
+  }, [notifierRef, viewedSessionDetail, viewedSessionId, viewedSessionDetailEnabled]);
 
   useEffect(() => {
     if (!sessions) {

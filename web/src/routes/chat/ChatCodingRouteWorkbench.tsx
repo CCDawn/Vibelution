@@ -694,6 +694,17 @@ export function ChatCodingRouteWorkbench() {
   const companionRouteUpgradeRows = companionActivityCache.dataUpdatedAt > companionRouteUpgradeQuery.dataUpdatedAt
     ? companionActivityCache.data
     : companionRouteUpgradeQuery.data;
+  const requestedCompanionAgentId = useMemo(() => (
+    requestedCompanionId
+      ? ""
+      : companionAgentIdForDirectSession(companionRouteUpgradeRows, requestedSessionId)
+  ), [companionRouteUpgradeRows, requestedCompanionId, requestedSessionId]);
+  // Apply the same identity gate to stream and query notification delivery.
+  const ordinarySessionNotificationsEnabled = !companionMode
+    && !requestedCompanionAgentId
+    && (!companionRouteUpgradeLookupEnabled || (
+      companionRouteUpgradeQuery.isSuccess && !companionRouteUpgradeQuery.isFetching
+    ));
   const companionsQuery = useQuery({
     queryKey: queryKeys.virtualHumanCompanions(),
     queryFn: listVirtualHumanCompanions,
@@ -899,6 +910,7 @@ export function ChatCodingRouteWorkbench() {
     sessionStreamDecisionSnapshotRef,
     sessionStreamTerminalFailureRef,
     desktopConversationNotifierRef,
+    ordinarySessionNotificationsEnabled,
     sessionTitleForNotifications,
     viewedSessionId: activeSessionId || "",
   });
@@ -2352,12 +2364,6 @@ export function ChatCodingRouteWorkbench() {
     }
     return mergeArchivedSessionSummaries(rawSessionsQuery.data, archivedSessions);
   }, [archivedSessions, rawSessionsQuery.data, showArchivedSessions]);
-  const requestedCompanionAgentId = useMemo(() => (
-    requestedCompanionId
-      ? ""
-      : companionAgentIdForDirectSession(companionRouteUpgradeRows, requestedSessionId)
-  ), [companionRouteUpgradeRows, requestedCompanionId, requestedSessionId]);
-
   useEffect(() => {
     if (!requestedSessionId || requestedCompanionId || requestedRoomId || !requestedCompanionAgentId) {
       return;
@@ -2756,6 +2762,8 @@ export function ChatCodingRouteWorkbench() {
     sessions: allVisibleSessions,
     queryClient,
     viewedSessionId: activeSessionId || "",
+    viewedSessionDetail: sessionDetailQuery.isPlaceholderData ? undefined : sessionDetailQuery.data,
+    viewedSessionDetailEnabled: ordinarySessionNotificationsEnabled,
     notifierRef: desktopConversationNotifierRef,
     onOpenSession: handleOpenDirectSession,
   });

@@ -195,6 +195,14 @@ export default defineConfig({
           : {}),
       },
       output: {
+        // Shared entry modules can form cycles when a size boundary splits
+        // them. Preserve initialization order across those chunk boundaries.
+        strictExecutionOrder: true,
+        // Strict ESM wrapping calls the app init chunk "web". Keep its CSS
+        // under the existing main-entry name and unchanged size budget.
+        assetFileNames: (asset) => asset.names.includes("web.css")
+          ? "assets/index-[hash][extname]"
+          : "assets/[name]-[hash][extname]",
         /**
          * Keep the main `index-*.js` entry as app shell glue.
          * Framework graphs are large, change rarely, and benefit from independent caching.
@@ -242,6 +250,10 @@ export default defineConfig({
             { name: "vendor-react", test: /node_modules[\\/](?:react|use-sync-external-store)[\\/]/, priority: 10 },
             { name: "vendor-query", test: /node_modules[\\/]@tanstack[\\/]/, priority: 10 },
             { name: "vendor-overlay", test: /node_modules[\\/]@(?:radix-ui|floating-ui)[\\/]/, priority: 10 },
+            // Coalesce the existing static entry graph without pulling lazy
+            // routes into startup. Tiny shared files otherwise queue behind
+            // one another on the loopback HTTP/1 connection limit.
+            { name: "initial-deps", tags: ["$initial"], minShareCount: 2, maxSize: 800_000, priority: -10 },
           ],
         },
       },

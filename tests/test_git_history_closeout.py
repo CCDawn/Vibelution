@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -31,6 +32,8 @@ def commit(root: Path, name: str, text: str) -> str:
 
 @pytest.fixture
 def scenario(tmp_path: Path, monkeypatch):
+    # Failed candidates intentionally survive closeout; keep them test-owned.
+    monkeypatch.setattr(history, "tempfile", SimpleNamespace(gettempdir=lambda: str(tmp_path)), raising=False)
     root = tmp_path / "repo"
     root.mkdir()
     git(root, "init", "-b", "main")
@@ -137,6 +140,9 @@ def test_independent_candidate_preserves_source_and_main_changes_and_exact_retry
     assert git(s.root, "rev-parse", "HEAD^1") == main
     assert len(git(s.root, "rev-list", "--parents", "-n", "1", "HEAD").split()) == 3
     assert len(s.validations) == 1 and s.validations[0] != s.source
+    candidate = s.validations[0]
+    assert ".git" not in {part.lower() for part in candidate.parts}
+    assert candidate.parent.parent == Path(history.tempfile.gettempdir()) / "vibelution-history-candidates"
     assert s.verifications == [s.validations[0], s.validations[0]]
     assert not s.validations[0].exists()
     assert "codex/history-" not in git(s.root, "branch", "--list")
@@ -150,6 +156,49 @@ def test_independent_candidate_preserves_source_and_main_changes_and_exact_retry
     calls = list(s.events)
     assert run(s).merge_sha == result.merge_sha
     assert s.events == calls
+
+
+@pytest.mark.parametrize("location", ["external", "foreign", "invalid-id"])
+def test_candidate_cleanup_rejects_unowned_checkouts(scenario, tmp_path, location):
+    s = scenario
+    identifier = uuid.uuid4().hex if location != "invalid-id" else "not-a-uuid"
+    branch = f"codex/history-{identifier}"
+    parent = (tmp_path / "external" if location == "external"
+              else history._candidate_home(s.source))
+    candidate = parent / identifier
+    candidate.parent.mkdir(parents=True, exist_ok=True)
+    if location == "foreign":
+        git(tmp_path, "clone", "--no-hardlinks", str(s.root), str(candidate))
+        git(candidate, "checkout", "-b", branch)
+    else:
+        git(s.root, "worktree", "add", "-b", branch, str(candidate), "main")
+    head = git(candidate, "rev-parse", "HEAD")
+    with pytest.raises(closeout.ManagedCloseoutError, match="history_unsafe_candidate_cleanup"):
+        history._cleanup_candidate(s.context, candidate, branch, head)
+    assert candidate.exists()
+    assert git(candidate, "symbolic-ref", "--short", "HEAD") == branch
+    assert git(candidate, "rev-parse", "HEAD") == head
+
+
+def test_legacy_candidate_receipt_recovers_cleanup_without_moving_checkout(scenario, monkeypatch):
+    s = scenario
+    # An old process already chose the common-dir location. Recovery leaves it
+    # there and still validates the original receipt before removing it.
+    legacy = s.home / "candidates"
+    with monkeypatch.context() as setup:
+        setup.setattr(history, "_candidate_home", lambda root: legacy)
+        setup.setattr(history, "_cleanup_candidate", lambda *args: (_ for _ in ()).throw(OSError("cleanup unavailable")))
+        first = run(s)
+    assert first.merged and first.errors[0].startswith("history_candidate_cleanup_pending:")
+    candidate = s.validations[0]
+    assert candidate.parent == legacy and candidate.exists()
+    calls = list(s.events)
+    before = source_state(s)
+    second = run(s)
+    assert second.merged and not second.errors
+    assert second.merge_sha == first.merge_sha and s.events == calls
+    assert source_state(s) == before and not candidate.exists()
+    assert "codex/history-" not in git(s.root, "branch", "--list")
 
 
 @pytest.mark.parametrize("dirty", ["staged", "unstaged", "untracked"])
