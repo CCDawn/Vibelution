@@ -14,6 +14,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from .control import _stopped_turn_message
+
 from core.chat.turn_journal import turn_has_terminal_event
 from core.web.services.session.turn_failure_classification import classify_turn_failure
 
@@ -454,7 +456,7 @@ def _persist_session_turn_result(
             session_id=session_id,
             turn_id=turn_id,
             status="stopped",
-            summary=s.text_for(lang, zh="本轮已按请求停止。", en="This turn was stopped as requested."),
+            summary=_stopped_turn_message(s._get_session_stop_reason(session_id), lang=lang),
             finished_at=s._now_timestamp(),
         )
         return
@@ -469,7 +471,8 @@ def _persist_session_turn_result(
     stop_requested = result_stop_requested and runtime_stop_requested
     stop_reason = (
         str(
-            result.get("stop_reason")
+            (s._get_session_stop_reason(session_id) if runtime_stop_requested else "")
+            or result.get("stop_reason")
             or result.get("stopReason")
             or ""
         ).strip().lower()
@@ -755,11 +758,7 @@ def _persist_session_turn_result(
             "summary": committed_final_answer_text,
         }
     assistant_text = (
-        s.text_for(
-            lang,
-            zh="本轮已按请求停止。",
-            en="This turn was stopped as requested.",
-        )
+        _stopped_turn_message(stop_reason, lang=lang)
         if stop_requested
         else s._format_visible_reply(result)
     )
@@ -1123,6 +1122,7 @@ def _persist_session_turn_result(
         payload={
             "resultStatus": result_status or "completed",
             "finalStatus": final_status,
+            **({"reason": stop_reason or "user_stop"} if terminal_event == s.EVENT_TURN_INTERRUPTED else {}),
             "marker": s.TURN_INTERRUPTED_MARKER if terminal_event == s.EVENT_TURN_INTERRUPTED else "",
             "errorType": error_type if runtime_failed else "",
             "summary": visible_assistant_text,
