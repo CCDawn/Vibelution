@@ -21,7 +21,7 @@ import { resolveConversationTurnWorkSummary } from "./conversationTurnWorkStatus
 import { resolveActiveTurnProgressStage } from "./conversationActiveTurnStatusPresentation";
 import { conversationChangedFilesFromMetadata, fileDeliveryFollowupDraft } from "./conversationFileDeliveryModel";
 import { buildConversationToolActivityDetailRows } from "./conversationToolActivityDetail";
-import { buildTurnErrorDiagnosticRows } from "./conversationTurnErrorPresentation";
+import { buildTurnErrorDiagnosticRows, resolveIterationLimitNotice } from "./conversationTurnErrorPresentation";
 import {
   completedToolPresentationSummary,
   conversationToolPresentationLabel,
@@ -161,9 +161,10 @@ export function createConversationCodexSurface({
       return renderCodexReasoningSummaryCell(message, cell);
     }
     if (cell.kind === "error_notice") {
+      const iterationLimitNotice = !cell.operationIds?.length ? resolveIterationLimitNotice(cell.diagnosticSummary, lang) : "";
       const rawErrorTitle = cell.title?.trim() || (lang === "zh" ? "执行失败" : "Failed");
       const visibleErrorTitle = conversationToolPresentationLabel(rawErrorTitle, lang === "en" ? "en" : "zh");
-      const errorText = completedToolPresentationSummary({
+      const errorText = iterationLimitNotice || completedToolPresentationSummary({
         cellSummary: cell.summary,
         resultPreview: cell.text,
         toolName: rawErrorTitle,
@@ -171,7 +172,7 @@ export function createConversationCodexSurface({
         language: lang === "en" ? "en" : "zh",
       });
       const diagnosticRows = buildConversationToolActivityDetailRows(cell, lang === "en" ? "en" : "zh");
-      const fallbackDiagnosticRows = diagnosticRows.length > 0
+      const fallbackDiagnosticRows = !iterationLimitNotice && diagnosticRows.length > 0
         ? diagnosticRows
         : buildTurnErrorDiagnosticRows(cell.diagnosticSummary, lang);
       const isCompactToolFailure = Boolean(cell.operationIds?.length);
@@ -230,10 +231,10 @@ export function createConversationCodexSurface({
       return (
         <section
           key={cell.id}
-          className={[styles.codexTranscriptCell, styles.codexTranscriptProcessCell, styles.codexTranscriptCell_error].filter(Boolean).join(" ")}
+          className={[styles.codexTranscriptCell, styles.codexTranscriptProcessCell, iterationLimitNotice ? styles.codexTranscriptCell_neutral : styles.codexTranscriptCell_error].filter(Boolean).join(" ")}
           data-codex-transcript-cell-kind={cell.kind}
           data-codex-transcript-cell-status={cell.status}
-          data-codex-transcript-cell-tone={cell.tone}
+          data-codex-transcript-cell-tone={iterationLimitNotice ? "warning" : cell.tone}
           data-codex-transcript-cell-channel={cell.channel || undefined}
           data-codex-transcript-cell-phase={cell.phase ?? ""}
           data-codex-transcript-cell-terminal={cell.terminal ? "true" : "false"}
@@ -245,7 +246,7 @@ export function createConversationCodexSurface({
           </span>
           <div className={styles.codexTranscriptCellBody}>
             <span className={styles.codexTranscriptCellTitleRow}>
-              <span className={styles.codexTranscriptCellTitle}>{cell.title?.trim() || (lang === "zh" ? "执行失败" : "Failed")}</span>
+              <span className={styles.codexTranscriptCellTitle}>{iterationLimitNotice ? (lang === "zh" ? "运行提示" : "Turn notice") : cell.title?.trim() || (lang === "zh" ? "执行失败" : "Failed")}</span>
             </span>
             {errorText ? (
               <div className={styles.codexTranscriptCellSummary}>{renderResponseText(errorText)}</div>

@@ -21,6 +21,38 @@ const conversationViewSource = readFileSync(
 );
 
 describe("conversationTurnErrorPresentation", () => {
+  it("presents a structured iteration stop without generic failure or upstream diagnostics", () => {
+    const stop = {
+      errorType: "runtime_error",
+      message: "网页工作台这一轮执行失败。",
+      reasonCode: "iteration_limit_reached",
+      reasonSummary: "本轮迭代次数已达上限，压缩完成后主动收束",
+      reasonDetail: "57 iterations; 223016 → 156052 tokens",
+      providerErrorMessage: "本轮迭代次数已达上限，压缩完成后主动收束",
+      traceId: "1cc13d294d03",
+    } as SessionTurnError;
+    expect(summarizeCurrentTurnError(stop, "zh")).toBe("本轮已达执行上限，上下文已压缩，发送“继续”可接着处理。");
+    expect(summarizeCurrentTurnError(stop, "en")).toBe('This turn reached its execution limit. Context has been compressed; send "continue" to keep going.');
+    const rows = buildCurrentTurnErrorRows(stop, "zh");
+    expect(rows).toContainEqual({ label: "详情", value: stop.reasonDetail });
+    expect(rows).toContainEqual({ label: "Trace", value: "1cc13d294d03" });
+    expect(rows).not.toContainEqual(expect.objectContaining({ label: "上游" }));
+    expect(rows).not.toContainEqual(expect.objectContaining({ label: "原因" }));
+    expect(buildTurnErrorDiagnosticRows({ reason_code: stop.reasonCode, reason_detail: stop.reasonDetail, provider_error_message: stop.providerErrorMessage }, "zh"))
+      .toEqual([{ label: "详情", value: stop.reasonDetail }, { label: "代码", value: stop.reasonCode }]);
+  });
+
+  it("does not turn free-text guard mentions or other failures into continuation notices", () => {
+    expect(summarizeCurrentTurnError({
+      message: "provider error mentions iteration_limit_reached",
+      reasonSummary: "上游请求失败",
+      reasonCode: "rate_limited",
+    } as SessionTurnError, "zh")).toBe("上游请求失败");
+    expect(summarizeCurrentTurnError({
+      message: "Runtime error mentions iteration_limit_reached",
+    } as SessionTurnError, "en")).toBe("Runtime error mentions iteration_limit_reached");
+  });
+
   it("keeps turn-error presentation helpers outside ConversationView", () => {
     expect(conversationViewSource).toContain("from \"./conversationTurnErrorPresentation\"");
     expect(conversationViewSource).not.toContain("function turnErrorType(");

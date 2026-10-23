@@ -533,3 +533,126 @@ def test_session_turn_error_does_not_infer_quota_from_generic_400_or_vague_balan
     reason = session_service._provider_error_user_reason(raw_error, lang="zh")
 
     assert reason["code"] != "quota_exhausted"
+
+
+@pytest.mark.parametrize("camel_case", [False, True])
+@pytest.mark.parametrize(
+    ("lang", "expected_message"),
+    [
+        ("zh", "本轮已达执行上限，上下文已压缩，发送“继续”可接着处理。"),
+        (
+            "en",
+            'This turn reached its execution limit. Context has been compressed; send "continue" to keep going.',
+        ),
+    ],
+)
+def test_session_turn_iteration_limit_is_a_localized_stop_with_diagnostics(
+    camel_case, lang, expected_message,
+):
+    from core.web.services import session_service
+
+    detail = "Iteration 57 reached the continuation limit after compaction 223016 -> 156052."
+    failure = {
+        "reason_code": "iteration_limit_reached",
+        "reason_summary": "Internal iteration guard stopped the turn",
+        "reason_detail": detail,
+        "chain_stage": "llm_preflight",
+        "event_code": "agent.iteration_limit_reached",
+        "trace_id": "trace-limit",
+        "protocol": "responses",
+        "http_status": 503,
+        "provider_error_type": "RuntimeError",
+        "provider_error_message": detail,
+        "provider": "openai",
+        "api_base": "https://route.example/v1",
+        "model": "gpt-test",
+        "retryable": True,
+    }
+    if camel_case:
+        failure = {
+            key.split("_")[0] + "".join(part.title() for part in key.split("_")[1:]): value
+            for key, value in failure.items()
+        }
+        failure["baseUrl"] = failure.pop("apiBase")
+
+    turn_error = session_service._make_session_turn_error(
+        detail, lang=lang, turn_id="turn-limit", llm_failure=failure,
+    )
+
+    assert turn_error["message"] == expected_message
+    assert turn_error["reason_summary"] == expected_message
+    assert turn_error["reason_code"] == "iteration_limit_reached"
+    assert turn_error["reason_detail"] == detail
+    assert turn_error["error_type"] == "runtime_error"
+    assert turn_error["recoverable"] is True
+    assert turn_error["turn_id"] == "turn-limit"
+    assert turn_error["chain_stage"] == "llm_preflight"
+    assert turn_error["event_code"] == "agent.iteration_limit_reached"
+    assert turn_error["trace_id"] == "trace-limit"
+    assert turn_error["protocol"] == "responses"
+    assert turn_error["provider"] == "openai"
+    assert turn_error["provider_host"] == "route.example"
+    assert turn_error["model"] == "gpt-test"
+    assert turn_error["provider_error_type"] == ""
+    assert turn_error["provider_error_message"] == ""
+    assert turn_error["http_status"] == 0
+
+    message = session_service._make_turn_error_chat_message(
+        turn_error, error_type="runtime_error", turn_id="turn-limit", provider_failure=False,
+    )
+    assert message["content"] == expected_message
+    assert message["metadata"]["reasonDetail"] == detail
+    assert message["metadata"]["providerFailure"] is False
+
+
+def test_iteration_limit_chat_message_keeps_legacy_reason_only_in_diagnostics():
+    from core.web.services import session_service
+
+    visible_message = "本轮已达执行上限，上下文已压缩，发送“继续”可接着处理。"
+    message = session_service._make_turn_error_chat_message(
+        {
+            "message": visible_message,
+            "reasonCode": "iteration_limit_reached",
+            "reasonSummary": "已达到内部迭代保护上限",
+            "reasonDetail": "iteration=57",
+        },
+        error_type="runtime_error",
+        turn_id="turn-limit",
+        provider_failure=False,
+    )
+
+    assert message["content"] == visible_message
+    assert message["metadata"]["reasonSummary"] == "已达到内部迭代保护上限"
+    assert message["metadata"]["reasonDetail"] == "iteration=57"
+
+
+@pytest.mark.parametrize("failure", [None, {"reason_code": "context_budget_exhausted"}])
+def test_raw_iteration_limit_mention_does_not_override_runtime_or_budget_failure(failure):
+    from core.web.services import session_service
+
+    raw_error = "context_budget_exhausted: diagnostic mentions iteration_limit_reached"
+    turn_error = session_service._make_session_turn_error(raw_error, lang="zh", llm_failure=failure)
+
+    assert "网页工作台这一轮执行失败" in turn_error["message"]
+    assert turn_error["reason_code"] != "iteration_limit_reached"
+    if failure:
+        assert turn_error["reason_code"] == "context_budget_exhausted"
+    assert turn_error["provider_error_message"]
+
+
+def test_provider_error_mentioning_iteration_limit_keeps_provider_diagnostics():
+    from core.web.services import session_service
+
+    raw_error = "provider_protocol_error: litellm.RateLimitError: HTTP 429 mentions iteration_limit_reached"
+    turn_error = session_service._make_session_turn_error(
+        raw_error,
+        lang="zh",
+        llm_failure={"reason_code": "rate_limited", "http_status": 429, "provider_error_type": "rate_limit_error"},
+    )
+
+    assert turn_error["error_type"] == "provider_error"
+    assert turn_error["reason_code"] == "rate_limited"
+    assert turn_error["http_status"] == 429
+    assert turn_error["provider_error_type"] == "rate_limit_error"
+    assert "iteration_limit_reached" in turn_error["provider_error_message"]
+    assert "模型服务上游暂时失败" in turn_error["message"]
