@@ -74,6 +74,17 @@ def test_shared_hook_installer_is_part_of_the_gate_definition() -> None:
     assert "scripts/git_hook_install.py" in gate.validation_surface(["feature.py"])
 
 
+def test_history_compatibility_is_part_of_the_gate_definition() -> None:
+    required = {
+        "scripts/git_history_bridge.py", "scripts/git_history_closeout.py",
+        "scripts/git_hook_dispatch.py", "tests/test_git_history_bridge.py",
+        "tests/test_git_history_closeout.py",
+    }
+    assert required <= gate.GATE_DEFINITION_FILES
+    assert all("tests/test_git_history_bridge.py" in command and "tests/test_git_history_closeout.py" in command
+               for command in gate.GATE_SELF_TEST_COMMANDS)
+
+
 def test_gate_definition_includes_reuse_research_contract() -> None:
     assert "scripts/reuse_research_contract.py" in gate.GATE_DEFINITION_FILES
     assert "scripts/reuse_research_evidence.py" in gate.GATE_DEFINITION_FILES

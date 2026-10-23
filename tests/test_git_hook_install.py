@@ -130,7 +130,7 @@ def test_other_hooks_delegate_to_current_checkout_with_original_io(tmp_path: Pat
     shell = shutil.which("sh") or str(Path(shutil.which("git") or "git").parent.parent / "bin/sh.exe")
     result = subprocess.run(
         [shell, str(shared / name), "argument with spaces"], cwd=task,
-        env=gate.git_hook_isolated_environment(), input="original stdin",
+        env={**gate.git_hook_isolated_environment(), "VIBELUTION_HOOK_PYTHON": sys.executable}, input="original stdin",
         capture_output=True, text=True, check=False,
     )
     assert result.returncode == 7
@@ -161,7 +161,7 @@ def test_installation_is_complete_idempotent_and_checks_damage(tmp_path: Path) -
 def test_guard_source_update_is_detected_and_installed_as_a_new_snapshot(tmp_path: Path) -> None:
     root = repo(tmp_path)
     source = tmp_path / "source"
-    for name in ("scripts/git_claim_guard.py", "scripts/claim_dormancy.py", ".githooks/reference-transaction"):
+    for name in ("scripts/git_claim_guard.py", "scripts/claim_dormancy.py", "scripts/git_history_bridge.py", "scripts/git_hook_dispatch.py", ".githooks/reference-transaction"):
         target = source / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes((SOURCE / name).read_bytes())
@@ -182,3 +182,30 @@ def test_failed_installation_preserves_configuration(tmp_path: Path, monkeypatch
     with pytest.raises(OSError, match="disk failure"):
         installer.install_hooks(root)
     assert git(root, "config", "--get", "core.hooksPath").stdout.strip() == ".githooks"
+
+
+def test_shared_precommit_keeps_checkout_body_but_uses_frozen_claim_calculator(tmp_path: Path) -> None:
+    from scripts.git_hook_dispatch import dispatch
+
+    root = repo(tmp_path)
+    (root / ".githooks").mkdir()
+    (root / "scripts").mkdir()
+    (root / "scripts/git_claim_guard.py").write_text("raise RuntimeError('legacy claim calculator ran')\n")
+    hook = root / ".githooks/pre-commit"
+    hook.write_text(
+        '#!/bin/sh\nrepo_root=$(git rev-parse --show-toplevel)\n'
+        f'"{Path(sys.executable).as_posix()}" "$repo_root/scripts/git_claim_guard.py" ensure-claim --repo "$repo_root"\n'
+        'printf "checkout-specific-check\\n" > "$repo_root/checkout-check.txt"\n',
+        encoding="utf-8",
+    )
+    original = hook.read_bytes()
+    runtime = tmp_path / "shared runtime"
+    (runtime / "scripts").mkdir(parents=True)
+    (runtime / "scripts/git_claim_guard.py").write_text(
+        'from pathlib import Path\nimport sys\nPath(sys.argv[-1], "shared-check.txt").write_text("frozen")\n',
+        encoding="utf-8",
+    )
+    assert dispatch(root, runtime, []) == 0
+    assert (root / "shared-check.txt").read_text() == "frozen"
+    assert (root / "checkout-check.txt").read_text().strip() == "checkout-specific-check"
+    assert hook.read_bytes() == original

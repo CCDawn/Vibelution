@@ -25,6 +25,10 @@
 | --- | --- |
 | GenericWorkflowWorkspace | [product/team-workspace.md](./product/team-workspace.md#genericworkflowworkspace) |
 | WorkbenchShell | [product/team-workspace.md](./product/team-workspace.md#workbenchshell) |
+| WorkflowInspectorFrame | [product/team-workspace.md](./product/team-workspace.md#workflowinspectorframe) |
+| WorkflowDesignFields | [product/team-workspace.md](./product/team-workspace.md#workflowdesignfields) |
+| WorkflowDesignFooter | [product/team-workspace.md](./product/team-workspace.md#workflowdesignfooter) |
+| WorkflowInspectorLoading | [product/team-workspace.md](./product/team-workspace.md#workflowinspectorloading) |
 | WorkflowWorkspaceLoading | [product/team-workspace.md](./product/team-workspace.md#workflowworkspaceloading) |
 | WorkflowStart | [product/team-workspace.md](./product/team-workspace.md#workflowstart) |
 | FlowEditor | [product/team-workspace.md](./product/team-workspace.md#floweditor) |

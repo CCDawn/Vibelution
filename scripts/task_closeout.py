@@ -355,7 +355,7 @@ def resolve_context(
         raise dirty_main_error(
             CloseoutContext(main_root=main_root, task_root=task_root, branch=branch)
         )
-    if gate.git_lines(task_root, "status", "--porcelain"):
+    if gate.git_lines(task_root, "--no-optional-locks", "status", "--porcelain"):
         raise ManagedCloseoutError("dirty_worktree")
     expected_parent = (main_root / ".worktrees").resolve()
     context = CloseoutContext(main_root=main_root, task_root=task_root, branch=branch)
@@ -1030,6 +1030,14 @@ def run_managed_closeout(
             claim_id=claim_id,
             agent_id=agent_id,
         )
+        from scripts import git_history_closeout
+
+        history_result = git_history_closeout.run_if_needed(
+            context, claim_id=claim_id, agent_id=agent_id, base=base,
+            integration_wait_seconds=integration_wait_seconds,
+        )
+        if history_result is not None:
+            return history_result
         validate_development_claim(context, claim_id=claim_id, agent_id=agent_id)
     except (OSError, RuntimeError, ValueError) as error:
         code = getattr(error, "code", "")
