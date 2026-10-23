@@ -14,6 +14,112 @@ from core.web import lifecycle
 from core.web.startup_jobs import StartupJobGroup
 
 
+@pytest.mark.parametrize("web,enabled,expects_gate", [(True, "1", True), (False, "1", False), (True, "0", False)])
+def test_lifespan_only_defers_companion_heartbeat_for_gated_web_startup(monkeypatch, web, enabled, expects_gate):
+    from core.web.services import virtual_human_life_service as life
+
+    class IdleStartupJobs(StartupJobGroup):
+        def start_thread(self, name, _callback, *_args, **_kwargs):
+            return super().start_async(name, asyncio.sleep(0))
+
+        def start_async(self, name, awaitable):
+            awaitable.close()
+            return super().start_async(name, asyncio.sleep(0))
+
+    observed = []
+
+    def runtime(**kwargs):
+        observed.append(kwargs["initial_heartbeat_gate"])
+        return asyncio.sleep(0)
+
+    async def close_runtime(**_kwargs):
+        return {"closed": False}
+
+    monkeypatch.setenv("VIBELUTION_DEFER_STARTUP_CACHE_PREWARM", enabled)
+    monkeypatch.setattr(lifecycle, "StartupJobGroup", IdleStartupJobs)
+    monkeypatch.setattr(lifecycle, "_begin_owned_runtime_lifecycle", lambda: None)
+    monkeypatch.setattr(lifecycle, "_stop_virtual_human_life_runtime", lambda: None)
+    monkeypatch.setattr(lifecycle, "_stop_research_workflow_runtime", lambda: None)
+    monkeypatch.setattr(lifecycle, "_shutdown_owned_runtime_resources", close_runtime)
+    monkeypatch.setattr(life, "run_virtual_human_life_runtime", runtime)
+
+    async def exercise():
+        async with lifecycle.web_workbench_lifespan(FastAPI() if web else None):
+            assert len(observed) == 1
+            assert (observed[0] is not None) is expects_gate
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("cancel_before_heartbeat", [False, True])
+def test_companion_preparation_stays_immediate_while_automatic_heartbeat_waits(monkeypatch, cancel_before_heartbeat):
+    from core.web.services import virtual_human_life_service as life
+
+    monkeypatch.setattr(life, "_RUNTIME_STARTED", threading.Event())
+    monkeypatch.setattr(life, "_RUNTIME_ACCEPTING", threading.Event())
+    monkeypatch.setattr(life, "stop_virtual_human_life_runtime", lambda: life._RUNTIME_ACCEPTING.clear())
+    calls = []
+
+    async def exercise():
+        entered_gate = asyncio.Event()
+        release = asyncio.Event()
+        initial_done = asyncio.Event()
+
+        def heartbeat(**kwargs):
+            calls.append(kwargs)
+            if not kwargs.get("prepare_only"):
+                initial_done.set()
+
+        async def run_sync(_name, callback, **kwargs):
+            return callback(**kwargs)
+
+        async def gate():
+            entered_gate.set()
+            await release.wait()
+
+        monkeypatch.setattr(life, "heartbeat_all_virtual_humans", heartbeat)
+        task = asyncio.create_task(life.run_virtual_human_life_runtime(
+            run_sync=run_sync, initial_heartbeat_gate=gate,
+        ))
+        await asyncio.wait_for(entered_gate.wait(), 1)
+        assert calls == [{"coalesced": True, "prepare_only": True}]
+        assert life._runtime_acceptance_allowed()
+        if not cancel_before_heartbeat:
+            release.set()
+            await asyncio.wait_for(initial_done.wait(), 1)
+            assert calls[-1] == {"coalesced": True}
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert not life._RUNTIME_ACCEPTING.is_set()
+
+    asyncio.run(exercise())
+    assert len(calls) == (1 if cancel_before_heartbeat else 2)
+
+
+def test_companion_preparation_repairs_visibility_without_life_or_transcript_recovery(monkeypatch):
+    from core.agent_plugins.virtual_human_life import native_wakeup
+    from core.web.services import virtual_human_life_service as life
+
+    accepting = threading.Event()
+    accepting.set()
+    monkeypatch.setattr(life, "_RUNTIME_ACCEPTING", accepting)
+    calls = []
+    service = SimpleNamespace(
+        agent_lister=lambda: [{"agentId": "companion"}, {"agentId": "ordinary"}],
+        binding_for=lambda agent_id: {"enabled": True} if agent_id == "companion" else None,
+        heartbeat_agent=lambda *args, **kwargs: pytest.fail("automatic life recovery ran during preparation"),
+    )
+    monkeypatch.setattr(life, "get_virtual_human_life_service", lambda: service)
+    monkeypatch.setattr(native_wakeup, "recover_pending_purges", lambda: calls.append("purges"))
+    monkeypatch.setattr(life, "_reconcile_enabled_companion_directory_visibility",
+                        lambda _service, *, agent_id, binding: calls.append(("visibility", agent_id)) or binding)
+    monkeypatch.setattr(life, "_default_agent_persona_initializer", lambda agent_id: calls.append(("persona", agent_id)))
+
+    assert life.heartbeat_all_virtual_humans(coalesced=True, prepare_only=True) == []
+    assert calls == ["purges", ("visibility", "companion"), ("persona", "companion")]
+
+
 @pytest.mark.parametrize("web,enabled,delay", [(True, "1", 12.0), (False, "1", 0.0), (True, "0", 0.0)])
 def test_only_bulk_hypothesis_recovery_yields_the_startup_budget(monkeypatch, web, enabled, delay):
     monkeypatch.setenv("VIBELUTION_DEFER_STARTUP_CACHE_PREWARM", enabled)

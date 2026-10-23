@@ -1624,7 +1624,7 @@ def filter_virtual_human_tool_names(
         return [name for name in tool_names if not str(name or "").startswith(plugin_prefix)]
 
 
-def heartbeat_all_virtual_humans(*, coalesced: bool = False) -> list[dict[str, Any]]:
+def heartbeat_all_virtual_humans(*, coalesced: bool = False, prepare_only: bool = False) -> list[dict[str, Any]]:
     service = get_virtual_human_life_service()
     from core.agent_plugins.virtual_human_life.native_wakeup import (
         recover_pending_purges,
@@ -1655,6 +1655,11 @@ def heartbeat_all_virtual_humans(*, coalesced: bool = False) -> list[dict[str, A
                     agent_id,
                     type(exc).__name__,
                 )
+            # Keep Companion identity/visibility repair immediate. Automatic
+            # life simulation and transcript recovery can wait for first-frame
+            # requests without exposing an unclassified Companion meanwhile.
+            if prepare_only:
+                continue
             result = service.heartbeat_agent(agent_id, coalesced=coalesced)
             wake_result = service.self_continuity.tick(agent_id, now=service._now(), restarted=coalesced)
             _record_scene(
@@ -1773,6 +1778,7 @@ async def run_virtual_human_life_runtime(
     *,
     interval_seconds: float = 60.0,
     run_sync: Callable[..., Awaitable[Any]] | None = None,
+    initial_heartbeat_gate: Callable[[], Awaitable[Any]] | None = None,
 ) -> None:
     """Run the in-process deterministic heartbeat supervisor."""
 
@@ -1780,13 +1786,21 @@ async def run_virtual_human_life_runtime(
     _RUNTIME_STARTED.set()
     _RUNTIME_ACCEPTING.set()
 
-    async def heartbeat(name: str, *, coalesced: bool) -> None:
+    async def heartbeat(name: str, *, coalesced: bool, prepare_only: bool = False) -> None:
+        kwargs = {"coalesced": coalesced}
+        if prepare_only:
+            kwargs["prepare_only"] = True
         if run_sync is None:
-            await asyncio.to_thread(heartbeat_all_virtual_humans, coalesced=coalesced)
+            await asyncio.to_thread(heartbeat_all_virtual_humans, **kwargs)
             return
-        await run_sync(name, heartbeat_all_virtual_humans, coalesced=coalesced)
+        await run_sync(name, heartbeat_all_virtual_humans, **kwargs)
 
     try:
+        if initial_heartbeat_gate is not None:
+            await heartbeat("virtual-human-startup-preparation", coalesced=True, prepare_only=True)
+            await initial_heartbeat_gate()
+            if not _RUNTIME_ACCEPTING.is_set():
+                return
         await heartbeat("virtual-human-initial-heartbeat", coalesced=True)
         iteration = 0
         while _RUNTIME_ACCEPTING.is_set():

@@ -405,6 +405,31 @@ def ensure_web_routes_registered(app: FastAPI, *, web_dist: Path | None = None) 
             raise
 
 
+def request_feature_routes(app: FastAPI) -> None:
+    """Wake the single route-import owner when a feature is actually needed."""
+    event = getattr(app.state, "web_feature_routes_requested_event", None)
+    if event is not None:
+        event.set()
+
+
+async def _await_feature_route_demand(app: FastAPI) -> float:
+    """Give startup requests priority; demand bypasses the bounded idle wait."""
+    from .lifecycle import _startup_cache_prewarm_gate_enabled, _startup_prewarm_stagger_seconds
+
+    event = getattr(app.state, "web_feature_routes_requested_event", None)
+    if event is None or not _startup_cache_prewarm_gate_enabled():
+        return 0.0
+    timeout = _startup_prewarm_stagger_seconds()
+    if timeout <= 0:
+        return 0.0
+    started = time.perf_counter()
+    try:
+        await asyncio.wait_for(event.wait(), timeout=timeout)
+    except TimeoutError:
+        pass  # Headless/older clients still get a complete API without a request.
+    return max(0.0, (time.perf_counter() - started) * 1000)
+
+
 async def warm_web_routes_in_background(
     app: FastAPI,
     *,
@@ -469,6 +494,7 @@ async def warm_web_routes_in_background(
                 mount_ms += max(0.0, (time.perf_counter() - mount_started) * 1000.0)
                 _mark_startup_routes_ready(app)
         startup_ready_ms = max(0.0, (time.perf_counter() - started) * 1000.0)
+        feature_demand_wait_ms = await _await_feature_route_demand(app)
         remaining_started = time.perf_counter()
         if run_sync is None:
             modules = await asyncio.to_thread(
@@ -505,6 +531,7 @@ async def warm_web_routes_in_background(
                 "totalMs": round(max(0.0, (time.perf_counter() - started) * 1000.0), 1),
                 "moduleImports": module_imports,
                 "startupReadyMs": round(startup_ready_ms, 1),
+                "featureDemandWaitMs": round(feature_demand_wait_ms, 1),
             }
             app.state.web_routes_bootstrap = payload
             _log_routes_bootstrap_summary(payload)
@@ -542,6 +569,8 @@ async def wait_for_web_routes(
             bootstrap_only and bool(getattr(app.state, "web_bootstrap_routes_registered", False))
         )
 
+    if not startup_only and not bootstrap_only:
+        request_feature_routes(app)
     if ready():
         return True
     if bool(getattr(app.state, "web_routes_cancelled", False)):

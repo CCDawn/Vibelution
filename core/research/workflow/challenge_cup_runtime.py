@@ -17,10 +17,12 @@ import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any, Literal, TypedDict
+from typing import TYPE_CHECKING, Annotated, Any, Literal, TypedDict
 
-from langgraph.graph import END, START, StateGraph
-from langgraph.types import Command, interrupt
+from langgraph.constants import END, START
+
+if TYPE_CHECKING:
+    from langgraph.graph import StateGraph
 
 from core.research.workflow.checkpoint_store import (
     ScopeBindingMismatch,
@@ -534,6 +536,8 @@ def _retry_predecessor_for(node_id: str, workflow_version_id: str) -> str | None
 
 def _make_node_fn(node_id: str) -> Callable[[ChallengeCupGraphState], ChallengeCupGraphState]:
     def run_node(state: ChallengeCupGraphState) -> ChallengeCupGraphState:
+        from langgraph.types import interrupt
+
         pending = build_pending_action(state, node_id)
         first_payload = interrupt(pending.to_dict())
         if isinstance(first_payload, dict) and first_payload.get("restart"):
@@ -649,6 +653,8 @@ def build_formal_graph(definition: Any = None) -> StateGraph:
     workflowVersionId. Direct construction defaults to the one current main
     definition and never resolves an unpinned run.
     """
+    from langgraph.graph import StateGraph
+
     resolved = definition or build_challenge_cup_workflow_definition()
     order = [node.nodeId for node in resolved.nodes]
     successors = successor_map_for_definition(resolved)
@@ -956,6 +962,8 @@ class ChallengeCupGraphCoordinator:
             stack.close()
 
     def resume_action(self, dispatch: GraphDispatch) -> GraphDispatchResult:
+        from langgraph.types import Command
+
         if dispatch.receipt is None:
             raise ValueError("resume_action requires an ExecutionReceipt")
         graph, stack = self._compile(dispatch.workflow_version_id)
