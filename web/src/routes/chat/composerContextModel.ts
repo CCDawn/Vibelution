@@ -1,4 +1,15 @@
-import type { SessionCacheCompositionSegment, SessionLlmOptions } from "../../api/types";
+import type { SessionCacheCompositionSegment, SessionDetail, SessionLlmOptions } from "../../api/types";
+
+export function resolveComposerContextUsage(options: {
+  contextUsage?: Pick<NonNullable<SessionDetail["contextUsage"]>, "used" | "limit"> | null;
+  contextComposition?: Pick<NonNullable<SessionDetail["lastContextComposition"]>, "totalTokens" | "limitTokens"> | null;
+}): { used: number; limit: number } {
+  // The backend reconciles compaction checkpoints and provider usage; assembly may predate compaction.
+  return {
+    used: options.contextUsage?.used ?? options.contextComposition?.totalTokens ?? 0,
+    limit: options.contextUsage?.limit ?? options.contextComposition?.limitTokens ?? 0,
+  };
+}
 
 /** Live Agent settings size the composer; the observed call remains immutable. */
 export function resolveComposerContextLimit(options: {
