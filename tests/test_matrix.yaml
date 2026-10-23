@@ -65,8 +65,10 @@ rules:
     paths:
       - "core/infrastructure/tool_executor.py"
       - "core/infrastructure/tool_execution_scope.py"
+      - "core/infrastructure/tool_execution_trace.py"
+      - "tests/test_tool_execution_trace.py"
     commands:
-      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_tool_executor.py -q"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_tool_executor.py tests/test_tool_execution_trace.py -q"
   - id: workflow-worker-shutdown
     description: "Meeting, heartbeat and command queue shutdown preserves durable intent and scheduling ownership."
     executionLayers:
