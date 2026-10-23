@@ -77,8 +77,66 @@ _CONTRACTS = {
 }
 
 
+def extension_modules() -> tuple:
+    from tools import pa_assistant_actions, pa_config_actions, pa_workspace_actions
+    return (pa_assistant_actions, pa_config_actions, pa_workspace_actions)
+
+
+def extension_contracts() -> dict:
+    result = {}
+    for module in extension_modules():
+        for name, contract in module.contracts().items():
+            if name in result or name in _CONTRACTS:
+                raise RuntimeError("Duplicate assistant action contract")
+            result[name] = contract
+    return result
+
+
+def legacy_manage_contracts() -> dict:
+    """Describe existing native dispatch signatures without a second executor."""
+    import inspect
+    from tools import project_operation_tools as native, pa_managed_writes
+    from tools.pa_team_actions import team_run
+    targets = {"agent_archive": native.agent_archive_tool, "session_create": native.session_create_tool,
+               "session_update": native.session_update_tool, "session_stop": native.session_stop_tool,
+               "session_delete": native.session_delete_tool, "knowledge_acl_grant": native.knowledge_base_acl_grant_tool,
+               "team_create": pa_managed_writes.team_create_tool, "team_run": team_run,
+               "knowledge_ingest": pa_managed_writes.knowledge_ingest_tool, "config_update": pa_managed_writes.config_update_tool}
+    result = {}
+    for name, target in targets.items():
+        properties, required = {}, []
+        for parameter in inspect.signature(target).parameters.values():
+            annotation = str(parameter.annotation).replace("<class '", "").replace("'>", "")
+            kind = {"str": "string", "int": "integer", "bool": "boolean", "float": "number", "list": "array", "dict": "object"}.get(annotation, "string")
+            field = {"type": kind}
+            if parameter.default is inspect.Parameter.empty:
+                required.append(parameter.name)
+            else:
+                field["default"] = parameter.default
+            properties[parameter.name] = field
+        result[name] = {"action": name, "governed": True,
+                        "description": (inspect.getdoc(target) or name).split("\n\n")[0][:400],
+                        "parameters": {"type": "object", "properties": properties, "required": required, "additionalProperties": False}}
+    return result
+
+
+def execute_extension(action: str, parameters: dict, runtime: dict, *, governed: bool = False) -> dict:
+    for module in extension_modules():
+        contract = module.contracts().get(action)
+        if contract:
+            if contract.get("governed") and not governed:
+                return {"ok": False, "status": "approval_required", "action": action,
+                        "tool": "personal_assistant_manage_tool",
+                        "message": "使用 manage，action 保持不变，arguments_json 为这些参数的JSON；等待原生审批后执行。"}
+            return module.execute(action, parameters, runtime, governed=governed)
+    raise ValueError("未知操作，请先 index/describe 查询可执行动作。")
+
+
 def action_catalog(action: str = "") -> dict:
+    extended = {**extension_contracts(), **legacy_manage_contracts()}
     if action:
+        if action in extended:
+            return extended[action]
         if action not in _CONTRACTS:
             raise ValueError("未知操作。先 action=index 查看可用操作。")
         model, description = _CONTRACTS[action]
@@ -94,9 +152,12 @@ def action_catalog(action: str = "") -> dict:
             result["example"] = {"agent_id": "<从概览取得>", "updates": {"displayName": "新名字"}}
         return result
     return {
-        "actions": [{"action": key, "description": item[1]} for key, item in _CONTRACTS.items()],
+        "actions": ([{"action": key, "description": item[1], "governed": False} for key, item in _CONTRACTS.items()]
+                    + [{key: value for key, value in item.items() if key in {"action", "description", "governed"}}
+                       for item in extended.values()]),
         "readActions": ["index", "describe", "settings_catalog", "model_options", "avatar_options"],
-        "governedActions": {"tool": "personal_assistant_manage_tool", "actions": ["team_run", "agent_archive", "session_stop", "session_delete", "knowledge_acl_grant", "restart"]},
+        "governedActions": {"tool": "personal_assistant_manage_tool", "actions": ["team_run", "agent_archive", "session_create", "session_update", "session_stop", "session_delete", "knowledge_acl_grant", "restart"]
+                            + [name for name, item in extended.items() if item.get("governed") and name not in {"team_run", "agent_archive", "session_create", "session_update", "session_stop", "session_delete", "knowledge_acl_grant", "restart"}]},
         "hint": "describe 的 parameters 是对象；直接传 parameters，不要嵌套 JSON 字符串。创建时使用稳定 request_id，结果未知先核验，不换 key 重建。",
     }
 
@@ -222,7 +283,7 @@ def execute_action(action: str, parameters: dict, runtime: dict) -> dict:
             return {"ok": True, **directory.list_agent_avatar_options()}
     contract = _CONTRACTS.get(action)
     if not contract:
-        raise ValueError("此操作不可通过日常工具执行；请查询目录，高风险操作使用 personal_assistant_manage_tool 的原生审批。")
+        return execute_extension(action, parameters, runtime)
     args = contract[0].model_validate(parameters)
     if action == "agent_create":
         return _create(args, runtime)

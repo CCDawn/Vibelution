@@ -273,6 +273,26 @@ def _model_library_has_model_ref(public_config: dict[str, Any], model_ref: str) 
     if not normalized_model_ref:
         return False
     llm = public_config.get("llm", {}) if isinstance(public_config, dict) else {}
+    if isinstance(llm, dict) and llm.get("schema_version") == 2:
+        # Persisted v2 owns models under providers, not the derived runtime
+        # model_library. Resolve aliases with the same native resolver used by
+        # the v2 projection without materializing that projection into config.
+        from config.llm_identity import split_model_ref
+        from config.models import LLMConfig
+
+        aliases = llm.get("model_aliases")
+        if aliases is not None and not isinstance(aliases, dict):
+            return False
+        try:
+            canonical = LLMConfig.model_construct(model_aliases=aliases or {}).resolve_model_ref(normalized_model_ref)
+            provider_id, model_key = split_model_ref(canonical)
+        except (ValueError, TypeError):
+            return False
+        providers = llm.get("providers", {})
+        provider = providers.get(provider_id) if isinstance(providers, dict) else None
+        models = provider.get("models", {}) if isinstance(provider, dict) else {}
+        model = models.get(model_key) if isinstance(models, dict) else None
+        return isinstance(model, dict) and bool(str(model.get("upstream_id") or "").strip())
     model_library = llm.get("model_library", {}) if isinstance(llm, dict) else {}
     return isinstance(model_library, dict) and normalized_model_ref in model_library
 
@@ -310,8 +330,7 @@ def _public_config_for_git_commit_model(public_config: dict[str, Any], model_id:
     llm = payload.setdefault("llm", {})
     if not isinstance(llm, dict):
         raise ValueError("llm must be an object")
-    model_library = llm.get("model_library", {})
-    if not isinstance(model_library, dict) or normalized_model_id not in model_library:
+    if not _model_library_has_model_ref(payload, normalized_model_id):
         raise ValueError(f"unknown Git commit message model: {normalized_model_id}")
     profiles = llm.setdefault("profiles", {})
     if not isinstance(profiles, dict):
@@ -328,9 +347,7 @@ def update_git_commit_message_model(model_id: str) -> dict[str, Any]:
 
     normalized_model_id = str(model_id or "").strip()
     public_config = with_git_config_defaults(load_public_config())
-    llm = public_config.get("llm", {}) if isinstance(public_config, dict) else {}
-    model_library = llm.get("model_library", {}) if isinstance(llm, dict) else {}
-    if normalized_model_id and (not isinstance(model_library, dict) or normalized_model_id not in model_library):
+    if normalized_model_id and not _model_library_has_model_ref(public_config, normalized_model_id):
         _record_git_scene_event(
             "commit_message_config",
             "git.commit_message_model.update_rejected",

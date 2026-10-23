@@ -91,14 +91,14 @@
 | Agent | Restore | **无公开通用 restore** | `PATCH` **拒绝** archived→active 隐式复活；`reactivate_agent_instance` 仅供内部系统服务（team repair、supervised、bulk delete）使用，不是通用公开入口 |
 | Agent | Reset | `POST /api/agents/{agent_id}/reset`（`agent_reset`） | 重置 Agent 运行时/策略；高风险 |
 | Session | Delete | `DELETE /api/sessions/{session_id}`（`session_delete`） | **删除该 Session**；busy/validation 失败返回 409/422 |
-| Session | Archive/Restore | **无公开单 Session archive/restore** | Agent archive 会协调其关联 Session 归档；不存在独立公开的 session_archive/session_restore 端点 |
+| Session | Archive/Unarchive | `POST /api/sessions/{session_id}/archive`、`POST /api/sessions/{session_id}/unarchive` | 单会话归档可逆、幂等并清除置顶；恢复不解除 Agent 归档形成的只读封存。原生 owner 为 `session_archive_service`，Agent archive 仍协调其关联 Session lifecycle |
 | Session | Stop | `POST /api/sessions/{session_id}/stop`（`session_stop_turn`） | **202 异步受理**停止请求；成功证据是经 session detail / events 观察到终止/暂停/停止类稳定状态；失败边界 404（NotFound）/ 409（Busy） |
 
 硬规则：
 1. **Purge 前必须 Archive**；Purge 不可逆，`OPERATOR_ONLY`，仅接受 `status=archived` 的 Agent。
 2. **Agent archive 不是无条件可用**：仅当 Agent 当前可归档（对象非 protected）且关联 Session 不处于 queued / running / stopping / paused 状态时允许；满足条件时**合法的 active Agent 也可以 archive**。
 3. Archive/Purge 引用清理失败必须整批回滚，不得半删。
-4. 不存在公开的通用 Agent restore 或单 Session archive/restore；不要发明或调用不存在的端点。
+4. 不存在公开的通用 Agent restore；单 Session 使用上表 archive/unarchive，不能借此恢复已归档 Agent。
 5. 仅**业务对象**按各自 lifecycle 执行（Agent/Session 见上表）；**卡片是投影，无独立归档生命周期**，只更新 `sources`/`revision` 投影，不做 archive 优先。
 
 ## 5. P0 Agent / Session 标准操作矩阵
@@ -155,7 +155,7 @@ Phase 2 已实现以下 canonical governed tools（`tools/project_operation_tool
 1. `agent_update_tool` 不接受 `status`；Agent 归档只能走 `agent_archive_tool`，不能借普通更新绕过 lifecycle。
 2. `agent_inbox_list_tool` / consume 工具在 Agent runtime 中只能操作当前 Agent 自身；跨 Agent inbox 必须留给受控操作者，不能通过显式 `agent_id` 冒充。
 3. `knowledge_base_acl_grant_tool` 不接受 actor 参数、不允许 wildcard、不接受不存在或 archived 的目标 Agent；只有当前 runtime Agent 自身具备 owner/review 权限时可用。
-4. **无 pause/resume、无通用 restore、无单 Session archive/restore 工具** — 这些能力不存在或为内部服务，**不要发明**对应工具名。
+4. **无 pause/resume、无通用 Agent restore 工具**；个人助理可用 manage 的 `session_archive` / `session_unarchive` 复用原生单会话归档服务，不要发明独立的 `session_restore_tool`。
 5. 新 Agent 创建完成后，如需项目知识库，必须显式调用 `knowledge_base_acl_grant_tool`；不得硬编码某个 KB，也不得直接改知识状态文件。
 6. 附件暂存不是正式入库；Agent 自有库检索只覆盖当前 Agent，Team 检索和提案审核仍需显式授权。附件来源和提案的重试应复用相同 `Idempotency-Key`，避免响应超时后重复创建。
 

@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  readPetPreferences, savePetPreferences, savePetPreferencesToBackend,
+  fetchPetPreferencesFromBackend, readPetPreferences, savePetPreferences, savePetPreferencesToBackend,
   subscribePetPreferences, syncPetPreferencesWithBackend, type DesktopPetPreferences,
 } from "./desktopPetPreferences";
+
+export const PET_PREFERENCES_REFRESH_EVENT = "vibelution:assistant-preferences-refresh";
 
 // All consumers in this renderer share one order: migration, edits and focus
 // refreshes cannot overtake one another or replay an older backend snapshot.
@@ -28,23 +30,30 @@ export function usePetPreferences(enabled = true) {
   useEffect(() => {
     if (!enabled) return;
     let disposed = false;
-    async function refresh() {
+    async function refresh(migrate = false) {
       const version = revision.current;
       const isCurrent = () => !disposed && version === revision.current;
       try {
         await enqueuePetPreferenceOperation(async () => {
           if (!isCurrent()) return;
-          const next = await syncPetPreferencesWithBackend(current.current, isCurrent);
-          if (!isCurrent()) return;
+          const next = migrate ? await syncPetPreferencesWithBackend(current.current, isCurrent)
+            : await fetchPetPreferencesFromBackend();
+          if (!next || !isCurrent()) return;
           current.current = next;
           setPreferences(next);
           savePetPreferences(next);
         });
       } catch { /* Retain the local cache while the settings service is unavailable. */ }
     }
-    void refresh();
-    window.addEventListener("focus", refresh);
-    return () => { disposed = true; window.removeEventListener("focus", refresh); };
+    const read = () => { void refresh(); };
+    void refresh(true);
+    window.addEventListener("focus", read);
+    window.addEventListener(PET_PREFERENCES_REFRESH_EVENT, read);
+    return () => {
+      disposed = true;
+      window.removeEventListener("focus", read);
+      window.removeEventListener(PET_PREFERENCES_REFRESH_EVENT, read);
+    };
   }, [enabled]);
 
   function updatePreferences(patch: Partial<DesktopPetPreferences>) {
