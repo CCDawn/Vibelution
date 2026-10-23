@@ -27,6 +27,7 @@ export type ElectronWindowLike = {
   reload?(): void;
   isDestroyed(): boolean;
   isFocused(): boolean;
+  isVisible?(): boolean;
   isMinimized?(): boolean;
   restore?(): void;
   on(event: string, listener: ElectronWindowEventListener): unknown;
