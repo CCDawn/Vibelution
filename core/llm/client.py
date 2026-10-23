@@ -170,7 +170,7 @@ def _clamp_env_seconds(
 
 
 def _llm_route_gate_wait_seconds() -> float:
-    """Bounded wait budget for the per-route concurrency gate."""
+    """Wait budget for route capacity and per-client request slots."""
 
     override = _LLM_ROUTE_GATE_WAIT_LIMIT
     if isinstance(override, (int, float)) and not isinstance(override, bool) and override > 0:
@@ -3175,6 +3175,47 @@ class LLMClient:
             lifecycle=False,
         )
 
+    def _acquire_cancellable_request_lock(
+        self, request_lock: Any, checker: Callable[[], str] | None,
+    ) -> None:
+        """Wait for this client's transport without abandoning or closing its owner.
+
+        Request slots share the route admission budget. No logging or EventBus
+        callback runs here: those synchronous consumers cannot bound this wait.
+        """
+        budget = _llm_route_gate_wait_seconds()
+        deadline = time.monotonic() + budget
+
+        def check_cancelled() -> None:
+            reason = _cancel_watch_reason(checker) or _current_llm_cancel_reason()
+            if reason:
+                raise LLMCancelledError(reason)
+
+        def check_deadline() -> float:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise LLMError(
+                    "gate_timeout",
+                    f"LLM client request lock waited {budget:g}s; request was not sent to the provider",
+                    retryable=True,
+                    details={"stage": "client_request_lock", "waitSeconds": budget},
+                )
+            return remaining
+
+        while True:
+            check_cancelled()
+            remaining = check_deadline()
+            if request_lock.acquire(timeout=min(0.05, remaining)):
+                try:
+                    # Cancellation/deadline can win as the previous owner lets
+                    # go. Release only our newly acquired slot in that race.
+                    check_cancelled()
+                    check_deadline()
+                except BaseException:
+                    request_lock.release()
+                    raise
+                return
+
     def _prepare_cancellable_responses_stream(
         self,
         payload: Dict[str, Any],
@@ -3204,13 +3245,7 @@ class LLMClient:
         ):
             return payload, lambda: None
 
-        while not self._cancellable_responses_stream_lock.acquire(timeout=0.05):
-            try:
-                reason = str(checker() or "").strip()
-            except Exception:
-                reason = ""
-            if reason:
-                raise LLMCancelledError(reason)
+        self._acquire_cancellable_request_lock(self._cancellable_responses_stream_lock, checker)
         try:
             with self._cancellable_responses_http_handler_lock:
                 handler = self._get_or_create_cancellable_client(
@@ -3302,13 +3337,7 @@ class LLMClient:
             if native_adapter
             else _new_cancellable_completion_http_handler
         )
-        while not self._cancellable_completion_stream_lock.acquire(timeout=0.05):
-            try:
-                reason = str(checker() or "").strip()
-            except Exception:
-                reason = ""
-            if reason:
-                raise LLMCancelledError(reason)
+        self._acquire_cancellable_request_lock(self._cancellable_completion_stream_lock, checker)
         try:
             with self._cancellable_completion_http_handler_lock:
                 handler = self._get_or_create_cancellable_client(
@@ -3423,13 +3452,7 @@ class LLMClient:
             factory = None
         if not enabled or handler_lock is None or request_lock is None or factory is None:
             return payload, lambda: None
-        while not request_lock.acquire(timeout=0.05):
-            try:
-                reason = str(checker() or "").strip()
-            except Exception:
-                reason = ""
-            if reason:
-                raise LLMCancelledError(reason)
+        self._acquire_cancellable_request_lock(request_lock, checker)
         with handler_lock:
             try:
                 handler = self._get_or_create_cancellable_client(handler_attr, factory, payload)
