@@ -242,6 +242,10 @@ export default defineConfig({
             { name: "vendor-react", test: /node_modules[\\/](?:react|use-sync-external-store)[\\/]/, priority: 10 },
             { name: "vendor-query", test: /node_modules[\\/]@tanstack[\\/]/, priority: 10 },
             { name: "vendor-overlay", test: /node_modules[\\/]@(?:radix-ui|floating-ui)[\\/]/, priority: 10 },
+            // Coalesce the existing static entry graph without pulling lazy
+            // routes into startup. Tiny shared files otherwise queue behind
+            // one another on the loopback HTTP/1 connection limit.
+            { name: "initial-deps", tags: ["$initial"], minShareCount: 2, maxSize: 800_000, priority: -10 },
           ],
         },
       },
