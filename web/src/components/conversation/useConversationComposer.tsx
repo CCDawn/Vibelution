@@ -108,6 +108,7 @@ const COMPOSER_PASTE_NOTICE_VISIBLE_MS = 8000;
 export type UseConversationComposerInput = {
   sessionId: string;
   messages: ConversationMessage[];
+  transcriptPending?: boolean;
   showComposer: boolean;
   composerVariant: ConversationComposerVariant;
   composerValue: string;
@@ -193,6 +194,7 @@ export type UseConversationComposerInput = {
 export function useConversationComposer({
   sessionId,
   messages,
+  transcriptPending = false,
   showComposer,
   composerVariant,
   composerValue,
@@ -281,8 +283,9 @@ export function useConversationComposer({
     {
       sessionId,
       language: lang,
-      suggestionEnabled: promptSuggestionEnabled && !composerDisabled && !editingMessageId,
-      starterEnabled: !composerDisabled && !editingMessageId,
+      suggestionEnabled: !transcriptPending && promptSuggestionEnabled && !composerDisabled && !editingMessageId,
+      // An unhydrated transcript is unknown, rather than an empty session.
+      starterEnabled: !transcriptPending && !composerDisabled && !editingMessageId,
       busy: resolvedActionMode === "stop" || composerPending,
       draft: composerValue,
       hasConversation: messages.length > 0,

@@ -39,6 +39,7 @@ import { VButton } from "@/components/vui";
 - 不承担会话列表/历史职责。
 
 ### 视觉与状态
+- 消息仍在载入时保留加载态，不请求起点卡或 AI 续写建议；确认 transcript 为空后才加载起点，已有消息时不发起起点请求。
 - 默认：panel 底、subtle 边框；hover：accent 边框 + muted 底；focus：2px accent outline。
 - 3 列网格（窄屏降为 1 列），仅在 `messages.length === 0 && !composerDisabled` 时渲染。
 

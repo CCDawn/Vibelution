@@ -927,6 +927,7 @@ export const ConversationView = React.memo(function ConversationView({
   } = useConversationComposer({
     sessionId,
     messages,
+    transcriptPending,
     showComposer,
     composerVariant,
     composerValue,
