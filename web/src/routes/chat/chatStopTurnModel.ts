@@ -12,11 +12,18 @@ export function resolveSessionStopTurnId(
   detail: SessionDetail | undefined,
   activeLayerTurnId = "",
 ) {
-  const activeTurnId = clean(activeLayerTurnId);
-  if (activeTurnId) {
-    return activeTurnId.startsWith("optimistic-") ? "" : activeTurnId;
+  const layerTurnId = clean(activeLayerTurnId);
+  if (layerTurnId.startsWith("optimistic-")) return "";
+  const ownerTurnId = clean(detail?.activeTurnId);
+  const terminalTurnId = clean(detail?.lastTurnTerminalTurnId);
+  // A terminal overlay can remain until its transcript settles. It must not
+  // override the next turn's owner, even while the overlay still says running.
+  if (layerTurnId && (layerTurnId !== terminalTurnId || layerTurnId === ownerTurnId)) {
+    return layerTurnId;
   }
-  return clean(detail?.activeTurnId) || latestUserTurnId(detail);
+  if (ownerTurnId) return ownerTurnId;
+  const userTurnId = latestUserTurnId(detail);
+  return userTurnId === terminalTurnId ? "" : userTurnId;
 }
 
 export type StopTurnOptimisticContext = {

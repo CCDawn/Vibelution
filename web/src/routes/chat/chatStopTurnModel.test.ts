@@ -66,6 +66,34 @@ describe("chat stop turn model", () => {
     expect(resolveSessionStopTurnId(detail({ activeTurnId: "turn-stale" }), "optimistic-submit-1")).toBe("");
   });
 
+  it("targets the current owner when an old terminal overlay remains", () => {
+    expect(resolveSessionStopTurnId(detail({
+      activeTurnId: "turn-next",
+      lastTurnTerminalTurnId: "turn-completed",
+      terminalReason: "success",
+    }), "turn-completed")).toBe("turn-next");
+  });
+
+  it("defers stopping while only the previous terminal turn is known", () => {
+    const settled = detail({
+      activeTurnId: "",
+      lastTurnTerminalTurnId: "turn-completed",
+      messages: [{
+        id: "user-previous", role: "user", content: "hello", timestamp: "",
+        metadata: { turnId: "turn-completed" },
+      }],
+    });
+    expect(resolveSessionStopTurnId(settled, "turn-completed")).toBe("");
+    expect(resolveSessionStopTurnId(settled)).toBe("");
+  });
+
+  it("keeps the current owner target while its terminal receipt is settling", () => {
+    expect(resolveSessionStopTurnId(detail({
+      activeTurnId: "turn-stopping",
+      lastTurnTerminalTurnId: "turn-stopping",
+    }), "turn-stopping")).toBe("turn-stopping");
+  });
+
   it("falls back to the latest accepted user turn", () => {
     expect(resolveSessionStopTurnId(detail({
       messages: [
