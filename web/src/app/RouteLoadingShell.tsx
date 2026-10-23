@@ -1,3 +1,4 @@
+import { shouldOfferGenericWorkspace } from "../routes/teams/generic/workspaceRouteModel";
 import { ChatRouteLoadingShell } from "./ChatRouteLoadingShell";
 import { PageFrameLoading, type PageFrameLayout } from "./PageFrameLoadingShell";
 import { FinanceResearchLoading } from "../routes/finance/FinanceResearchFrame";
@@ -127,7 +128,7 @@ export function RouteLoadingShell({
   if (layout === "finance") return <FinanceResearchLoading />;
   // Explicit flow navigation already determines the shell before the Teams chunk arrives.
   // Keep ordinary team homes on their existing loading contract.
-  if (layout === "teams" && typeof window !== "undefined" && new URLSearchParams(window.location.search).get("teamWorkspace") === "flows") {
+  if (layout === "teams" && typeof window !== "undefined" && new URLSearchParams(window.location.search).get("teamWorkspace") === "flows" && shouldOfferGenericWorkspace({}, new URLSearchParams(window.location.search))) {
     return <div data-route-loading="teams" data-vui-app={surface} className={styles.workspaceFill}><WorkflowWorkspaceLoading label={label || "正在打开团队工作台"}/></div>;
   }
   if (layout === "chat") {

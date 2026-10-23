@@ -81,3 +81,11 @@ it("keeps one cold request alive across the lazy-route handoff", async () => {
     expect(host.querySelector("[data-ready]")?.textContent).toBe(String(flow.steps.length));
   } finally { act(() => root.unmount()); queryClient.clear(); }
 });
+
+it.each(["/teams?team=team-a", "/teams?teamWorkspace=flows&session=native", "/teams?teamWorkspace=flows&workflowWorkspace=legacy"])("does not preload flows for retained native entry %s", async path => {
+  const queryClient = client(), root = createRoot(document.createElement("div"));
+  try {
+    await act(async () => root.render(<QueryClientProvider client={queryClient}><MemoryRouter initialEntries={[path]}><WorkflowLoadingBoundary><WorkflowWorkspaceLoading teamId="team-a"/></WorkflowLoadingBoundary></MemoryRouter></QueryClientProvider>));
+    expect(api.flows).not.toHaveBeenCalled();
+  } finally { act(() => root.unmount()); queryClient.clear(); }
+});

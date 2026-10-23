@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { usePageVisibility } from "../../../app/pollingPolicy";
 import { useTeamsCatalogQueries } from "../useTeamsCatalogQueries";
 import { useWorkflowDefinitions } from "./useWorkflowDefinitions";
+import { shouldOfferGenericWorkspace } from "./workspaceRouteModel";
 
 const LoadingTeam = createContext({ teamId: "", teams: [] as { id: string; label: string }[] });
 export const useWorkflowLoadingTeam = () => useContext(LoadingTeam);
@@ -23,5 +24,5 @@ function PrepareWorkflow({ children }: { children: ReactNode }) {
 
 export function WorkflowLoadingBoundary({ children }: { children: ReactNode }) {
   const [params] = useSearchParams();
-  return params.get("teamWorkspace") === "flows" ? <PrepareWorkflow>{children}</PrepareWorkflow> : children;
+  return params.get("teamWorkspace") === "flows" && shouldOfferGenericWorkspace({}, params) ? <PrepareWorkflow>{children}</PrepareWorkflow> : children;
 }

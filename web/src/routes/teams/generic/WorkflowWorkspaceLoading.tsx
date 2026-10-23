@@ -19,7 +19,8 @@ export function WorkflowWorkspaceLoading({
   const prepared = useWorkflowLoadingTeam();
   const teamId = requestedTeamId || prepared.teamId;
   const teams = requestedTeams?.length ? requestedTeams : prepared.teams;
-  const definitions = useWorkflowDefinitions(teamId);
+  // Presentation observes the request owner; it must not fetch on legacy team homes.
+  const definitions = useWorkflowDefinitions(teamId, false);
   const known = definitions.isSuccess && definitions.data.teamId === teamId;
   const flows = known ? definitions.data.flows.filter(isEditableWorkflow) : [];
   const flow = flows[0];
