@@ -1942,6 +1942,7 @@ export function ChatCodingRouteWorkbench() {
     composerDisabled,
     conversationComposer,
   } = useChatComposerBridgeState({
+    continueEnabled: !financeSurface && !verifiedCompanionMode,
     activeSessionId,
     sessionDrafts,
     sessionFollowupQueues,
@@ -2086,6 +2087,7 @@ export function ChatCodingRouteWorkbench() {
 
   const {
     handleSubmitTurn,
+    handleContinueTurn,
     handleStopTurn,
     handleSubmitGuidance,
     handleFollowupQueueUpdate,
@@ -2114,6 +2116,7 @@ export function ChatCodingRouteWorkbench() {
     handleRemoveComposerReference,
     rebaseComposerPreviewOwners,
   } = useChatComposerSubmitActions({
+    continueEnabled: !financeSurface && !verifiedCompanionMode,
     queryClient,
     setActiveTurnLayersBySession,
     lang,
@@ -3065,6 +3068,7 @@ export function ChatCodingRouteWorkbench() {
   }, [activeGroupRoomId, activeSessionId, detail?.sessionKind, groupPanelActive, ordinaryChangeRail]);
 
   const conversationModel = useChatConversationSurfaceModel({
+    handleContinueTurn,
     activeAgentAvatarFallback,
     activeAgentAvatarImageUrl,
     activeAgentDisplayName,

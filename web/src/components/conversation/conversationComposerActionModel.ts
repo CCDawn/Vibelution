@@ -2,7 +2,7 @@
  * Conversation composer primary-action pure resolution (claim: composer action state).
  * Pure: no React / DOM.
  */
-export type ComposerActionMode = "send" | "stop" | string;
+export type ComposerActionMode = "send" | "stop" | "continue" | string;
 
 export function resolveComposerActionMode(composerActionMode?: ComposerActionMode | null) {
   return composerActionMode ?? "send";
@@ -15,7 +15,13 @@ export function resolveComposerActionDisabled(input: {
   composerValue: string;
   hasAttachments: boolean;
   hasReferences: boolean;
+  hasContinueHandler?: boolean;
 }) {
+  if (input.actionMode === "continue") {
+    return input.composerDisabled
+      || input.composerActionDisabled === true
+      || !input.hasContinueHandler;
+  }
   if (input.composerActionDisabled !== undefined) {
     return input.composerActionDisabled;
   }
@@ -29,8 +35,10 @@ export function resolveComposerActionDisabled(input: {
 export function resolveComposerActionLabels(input: {
   actionMode: ComposerActionMode;
   stopLabel?: string;
+  continueLabel?: string;
   submitLabel?: string;
   stopPendingLabel?: string;
+  continuePendingLabel?: string;
   submitPendingLabel?: string;
   fallbackStop: string;
   fallbackSend: string;
@@ -38,11 +46,18 @@ export function resolveComposerActionLabels(input: {
   fallbackSendPending: string;
 }) {
   const isStop = input.actionMode === "stop";
+  const isContinue = input.actionMode === "continue";
   return {
-    actionLabel: isStop ? (input.stopLabel ?? input.fallbackStop) : (input.submitLabel ?? input.fallbackSend),
+    actionLabel: isStop
+      ? (input.stopLabel ?? input.fallbackStop)
+      : isContinue
+        ? (input.continueLabel ?? "Continue task")
+        : (input.submitLabel ?? input.fallbackSend),
     pendingLabel: isStop
       ? (input.stopPendingLabel ?? input.fallbackStopPending)
-      : (input.submitPendingLabel ?? input.fallbackSendPending),
+      : isContinue
+        ? (input.continuePendingLabel ?? "Continuing…")
+        : (input.submitPendingLabel ?? input.fallbackSendPending),
   };
 }
 
@@ -72,7 +87,7 @@ export function resolveComposerPrimaryActionFlags(input: {
   };
 }
 
-export type ComposerEnterDelivery = "none" | "send" | "queue" | "steer";
+export type ComposerEnterDelivery = "none" | "send" | "continue" | "queue" | "steer";
 
 /**
  * Composer Enter delivery (claim: composer action state). User decision
@@ -81,8 +96,9 @@ export type ComposerEnterDelivery = "none" | "send" | "queue" | "steer";
  * Enter immediately steers the draft into the running turn via the existing
  * safe-guidance channel; when that channel cannot carry the payload (no
  * handler, or attachments/references riding the draft) Enter queues instead
- * of dropping the message. Idle Enter sends. Shift (newline), alt, and IME
- * composition stay guarded. The ctrl/meta fields are kept for call-site
+ * of dropping the message. Idle Enter sends or continues according to the
+ * selected action mode. Shift (newline), alt, and IME composition stay
+ * guarded. The ctrl/meta fields are kept for call-site
  * compatibility but intentionally ignored. Pure: no React / DOM.
  */
 export function resolveComposerEnterDelivery(input: {
@@ -100,6 +116,9 @@ export function resolveComposerEnterDelivery(input: {
   }
   if (input.actionMode === "stop") {
     return input.canDeliverImmediately ? "steer" : "queue";
+  }
+  if (input.actionMode === "continue") {
+    return "continue";
   }
   return "send";
 }

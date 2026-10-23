@@ -4,6 +4,7 @@ import {
   buildComposerImageInputGuidance,
   buildConversationComposerBridgeState,
   mapChatComposerImageAttachments,
+  type ChatConversationComposerBridgeInput,
   type ChatConversationComposerBridgeLabels,
 } from "./ChatConversationComposerBridge";
 import { dictionary } from "../../i18n/dictionary";
@@ -72,6 +73,80 @@ describe("ChatConversationComposerBridge", () => {
       sizeBytes: 42,
       contentType: "image/png",
     }]);
+  });
+
+  it("offers continue only for an empty, idle, editable composer", () => {
+    const state = buildConversationComposerBridgeState({
+      ...emptyStateInput(),
+      continueAvailable: true,
+    });
+
+    expect(state.actionMode).toBe("continue");
+    expect(state.actionDisabled).toBe(false);
+    expect(state.disabled).toBe(false);
+  });
+
+  it.each([
+    ["text", { value: "continue this draft" }],
+    ["image attachment", { imageAttachments: [{
+      id: "image-continue-fallback",
+      filename: "diagram.png",
+      previewUrl: "blob:image",
+      sizeBytes: 42,
+      contentType: "image/png",
+    }] }],
+    ["reference", { references: [{
+      referenceId: "reference-continue-fallback",
+      kind: "session" as const,
+      sessionId: "other-session",
+      title: "Other session",
+    }] }],
+  ] as const)("keeps send mode when %s content exists", (_kind, content) => {
+    const state = buildConversationComposerBridgeState({
+      ...emptyStateInput(),
+      continueAvailable: true,
+      ...content,
+    });
+
+    expect(state.actionMode).toBe("send");
+    expect(state.actionDisabled).toBe(false);
+  });
+
+  it.each([
+    ["queued follow-up", { followupQueue: [{ id: "queue-1", text: "later" }] }],
+    ["message editing", { editTargetMessageId: "message-1" }],
+    ["read-only session", { readOnly: true }],
+  ] as const)("does not enable continue for %s", (_state, override) => {
+    const input: ChatConversationComposerBridgeInput = {
+      ...emptyStateInput(),
+      continueAvailable: true,
+      ...override,
+    };
+    const state = buildConversationComposerBridgeState(input);
+
+    expect(state.actionDisabled).toBe(true);
+    if (_state !== "read-only session") {
+      expect(state.actionMode).toBe("send");
+    }
+  });
+
+  it.each([
+    { name: "busy", state: { sessionBusy: true }, pending: false, actionDisabled: false },
+    { name: "submit pending", state: { submitPending: true }, pending: false, actionDisabled: false },
+    { name: "stopping", state: { sessionStopping: true }, pending: true, actionDisabled: true },
+    { name: "busy with pending submit", state: { sessionBusy: true, submitPending: true }, pending: false, actionDisabled: false },
+    { name: "busy while stop is pending", state: { sessionBusy: true, stopPending: true }, pending: true, actionDisabled: true },
+    { name: "busy with submit pending and stopping", state: { sessionBusy: true, submitPending: true, sessionStopping: true }, pending: true, actionDisabled: true },
+  ])("prioritizes stop over continue when $name", ({ state: overrides, pending, actionDisabled }) => {
+    const state = buildConversationComposerBridgeState({
+      ...emptyStateInput(),
+      ...overrides,
+      continueAvailable: true,
+    });
+
+    expect(state.actionMode).toBe("stop");
+    expect(state.pending).toBe(pending);
+    expect(state.actionDisabled).toBe(actionDisabled);
   });
 
   it("switches active-send controls into stop mode while preserving route-owned stop pending state", () => {

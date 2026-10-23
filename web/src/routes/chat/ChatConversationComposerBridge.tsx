@@ -49,13 +49,14 @@ export type ChatConversationComposerBridgeInput = {
   sessionStopping: boolean;
   stopPending: boolean;
   submitPending: boolean;
+  continueAvailable?: boolean;
   value: string;
 };
 
 export type ChatConversationComposerBridgeState = {
   readOnly?: boolean;
   actionDisabled: boolean;
-  actionMode: "send" | "stop";
+  actionMode: "send" | "stop" | "continue";
   attachmentInputDisabled: boolean;
   attachments: ConversationComposerAttachment[];
   disabled: boolean;
@@ -153,19 +154,21 @@ export function buildConversationComposerBridgeState(
   // Keep the stop affordance visible until the server confirms a terminal
   // snapshot. This makes the click feedback explicit and prevents a pending
   // submit from looking like a new-message spinner.
-  const actionMode = input.sessionBusy || input.submitPending || input.sessionStopping ? "stop" : "send";
+  const hasDraftContent = Boolean(input.value.trim());
+  const hasAttachments = input.imageAttachments.length > 0;
+  const hasReferences = input.references.length > 0;
+  const canContinue = input.continueAvailable && !isEditingMessage && !hasDraftContent && !hasAttachments && !hasReferences
+    && !input.followupQueue?.length;
+  const actionMode = input.sessionBusy || input.submitPending || input.sessionStopping ? "stop" : canContinue ? "continue" : "send";
   const pending = actionMode === "stop"
     ? input.stopPending || input.sessionStopping
     : input.submitPending;
   const disabled = Boolean(input.readOnly) || !hasSession
     || (input.submitPending && (input.sessionBusy || input.sessionStopping));
-  const hasDraftContent = Boolean(input.value.trim());
-  const hasAttachments = input.imageAttachments.length > 0;
-  const hasReferences = input.references.length > 0;
   const actionDisabled = Boolean(input.readOnly) || !hasSession || (
     actionMode === "stop"
       ? input.sessionStopping || input.stopPending
-      : input.submitPending || (!hasDraftContent && !hasAttachments && !hasReferences)
+      : input.submitPending || (actionMode !== "continue" && !hasDraftContent && !hasAttachments && !hasReferences)
   );
   // ZCode chatPlaceholder tri-state parity: while a turn runs the composer
   // always names the queueing semantics instead of going blank — the empty

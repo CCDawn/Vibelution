@@ -1,0 +1,11 @@
+{
+  "content": "继续",
+  "contentUtf8Base64": "57un57ut",
+  "queueIfBusy": false,
+  "continuation": {
+    "turnId": "turn-stopped",
+    "headId": "leaf-stopped",
+    "ledgerSeq": 12,
+    "agentId": "A001"
+  }
+}

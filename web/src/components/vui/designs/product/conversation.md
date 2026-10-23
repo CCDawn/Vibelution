@@ -20,6 +20,20 @@
 - Windows 的最小化、最大化和关闭由 Electron `titleBarOverlay` 提供，网页保持原生 caption 区留白。
 - 顶栏保留原导航、操作与原生 Windows 控件留白，浏览器使用 44px 高的浅灰平面，Electron 跟随原生 caption 的 40px 高度；普通导航为 regular、当前项为 medium。Agent 目录保留 36px 头像、62px 最小行高、多行身份信息与 medium 标题；会话条目沿用原内容。
 
+## 会话输入区主按钮
+
+### 功能
+普通会话停止、中断或达到迭代上限后，空输入区的主按钮显示 Play 图标，提示和无障碍名称为「继续任务」。有文字、附件或引用时恢复发送；执行中使用原停止按钮。正常完成不显示继续，真实请求失败保留原重试入口。
+
+### 适用范围
+Chat 的可写普通原生 Session；不用于 Finance、Companion、只读历史或仍有排队消息的会话。
+
+### 使用方式
+沿用 ConversationView 原主按钮的 VButton、位置、尺寸和键盘规则。点击或空框 Enter 通过原提交链路新增可见的「继续」消息，不重新生成旧请求；Shift+Enter 与输入法组合键仍由原 composer 处理。提交中保持原停止能力，防止连续点击重复发送。
+
+### 实现落点与边界
+`useChatComposerBridgeState` 与 `conversationContinuationModel` 派生显示状态，`useChatContinueTurn` 复用原 mutation；服务端在接受锁内检查 Turn、分支和日志序号，旧快照只读拒绝。没有第二套 transcript、恢复 worker 或压缩状态；保留原生历史与压缩摘要。
+
 ## ChatSessionIndexToolbar
 
 ### 功能

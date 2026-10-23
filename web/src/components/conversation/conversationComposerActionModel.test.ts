@@ -28,6 +28,21 @@ describe("conversationComposerActionModel", () => {
       hasAttachments: false,
       hasReferences: false,
     })).toBe(false);
+    expect(resolveComposerActionDisabled({
+      actionMode: "continue",
+      composerDisabled: false,
+      composerValue: "",
+      hasAttachments: false,
+      hasReferences: false,
+      hasContinueHandler: true,
+    })).toBe(false);
+    expect(resolveComposerActionDisabled({
+      actionMode: "continue",
+      composerDisabled: false,
+      composerValue: "",
+      hasAttachments: false,
+      hasReferences: false,
+    })).toBe(true);
     expect(resolveComposerActionLabels({
       actionMode: "stop",
       fallbackStop: "Stop",
@@ -35,6 +50,22 @@ describe("conversationComposerActionModel", () => {
       fallbackStopPending: "Stopping",
       fallbackSendPending: "Sending",
     })).toEqual({ actionLabel: "Stop", pendingLabel: "Stopping" });
+    expect(resolveComposerActionLabels({
+      actionMode: "continue",
+      continueLabel: "继续任务",
+      continuePendingLabel: "正在继续…",
+      fallbackStop: "Stop",
+      fallbackSend: "Send",
+      fallbackStopPending: "Stopping",
+      fallbackSendPending: "Sending",
+    })).toEqual({ actionLabel: "继续任务", pendingLabel: "正在继续…" });
+    expect(resolveComposerActionLabels({
+      actionMode: "continue",
+      fallbackStop: "Stop",
+      fallbackSend: "Send",
+      fallbackStopPending: "Stopping",
+      fallbackSendPending: "Sending",
+    })).toEqual({ actionLabel: "Continue task", pendingLabel: "Continuing…" });
   });
 
   it("resolves edit mode and guidance UI flags", () => {
@@ -104,6 +135,22 @@ describe("conversationComposerActionModel", () => {
     expect(resolveComposerEnterDelivery(idle)).toBe("send");
     expect(resolveComposerEnterDelivery({ ...idle, ctrlKey: true })).toBe("send");
     expect(resolveComposerEnterDelivery({ ...idle, metaKey: true })).toBe("send");
+  });
+
+  it("resolves empty Enter to continue while preserving Shift and IME guards", () => {
+    const continuation = {
+      key: "Enter",
+      shiftKey: false,
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      isComposing: false,
+      actionMode: "continue" as const,
+      canDeliverImmediately: false,
+    };
+    expect(resolveComposerEnterDelivery(continuation)).toBe("continue");
+    expect(resolveComposerEnterDelivery({ ...continuation, shiftKey: true })).toBe("none");
+    expect(resolveComposerEnterDelivery({ ...continuation, isComposing: true })).toBe("none");
   });
 
   it("resolves enter delivery: running Enter steers immediately regardless of modifiers", () => {

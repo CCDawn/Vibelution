@@ -543,6 +543,14 @@ export function registerSessionImageAttachmentFromPath(
   );
 }
 
+/** Exact native snapshot the operator chose to continue; stale clicks fail closed. */
+export type SessionContinuationExpectation = {
+  turnId: string;
+  headId: string;
+  ledgerSeq: number;
+  agentId: string;
+};
+
 export function submitSessionMessage(
   sessionId: string,
   payload: {
@@ -556,6 +564,7 @@ export function submitSessionMessage(
     turnStatusTail?: unknown;
     /** Opt in to the server queue when a turn is already running. */
     queueIfBusy?: boolean;
+    continuation?: SessionContinuationExpectation;
     /** One-shot per-turn model override; absent/undefined follows the session default. */
     modelSelection?: SessionModelSelection | null;
   },

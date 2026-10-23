@@ -33,6 +33,11 @@ from .admission_lock import (
     session_active_work_run_owner_alive,
 )
 from .retry import validate_safe_retry, with_retry_receipt
+from .continuation import (
+    continuation_fingerprint_base,
+    normalize_continuation_expected,
+    validate_continuation,
+)
 from .turn_model_parameters import capture_model_parameters, pin_agent_model_parameters
 from .admission import (
     DevelopmentSubmissionAdmissionConfigurationError,
@@ -268,6 +273,7 @@ def _validate_submission_event_fingerprint(
     message_source: str,
     model_selection: Mapping[str, Any] | None,
     turn_status_tail: Mapping[str, Any] | None,
+    allow_legacy_replay: bool = True,
 ) -> None:
     payload = getattr(event, "payload", {})
     payload = payload if isinstance(payload, Mapping) else {}
@@ -283,7 +289,8 @@ def _validate_submission_event_fingerprint(
     # equivalent text-only request; other legacy payloads do not carry enough
     # facts to prove that a reused ID means the same submission.
     legacy_text_only_match = (
-        str(payload.get("content") or "") == str(content or "")
+        allow_legacy_replay
+        and str(payload.get("content") or "") == str(content or "")
         and not list(payload.get("attachments") or [])
         and not list(payload.get("references") or [])
         and not list(attachment_ids or [])
@@ -319,6 +326,7 @@ def _existing_submission_replay(
     message_source: str,
     model_selection: Mapping[str, Any] | None,
     turn_status_tail: Mapping[str, Any] | None,
+    allow_legacy_replay: bool = True,
 ) -> dict[str, Any] | None:
     events = journal_bridge.load_session_conversation_events_by_correlation(
         session_id,
@@ -345,6 +353,7 @@ def _existing_submission_replay(
         message_source=message_source,
         model_selection=model_selection,
         turn_status_tail=turn_status_tail,
+        allow_legacy_replay=allow_legacy_replay,
     )
     turn_id = str(getattr(event, "turn_id", "") or "").strip()
     if not turn_id:
@@ -1416,6 +1425,7 @@ def submit_session_message(
     _client_submission_fingerprint: str = "",
     _client_submission_fingerprint_base: str = "",
     _model_parameters_snapshot: dict[str, Any] | None = None,
+    _continuation_expected: dict[str, Any] | None = None,
 ) -> dict:
     """Persist a user message and start a single web chat turn.
 
@@ -1447,7 +1457,10 @@ def submit_session_message(
     )
     development_admission_runtime = None
     existing_development_admission: dict[str, Any] | None = None
-    if normalized_client_submission_id:
+    # Conditional sends must reject stale snapshots before opening the optional
+    # SQLite control store. Their accepted identity still comes from the native
+    # journal bridge below; a control-only receipt cannot bypass their CAS.
+    if normalized_client_submission_id and _continuation_expected is None:
         try:
             development_admission_runtime = get_development_submission_admission_runtime(
                 s.PROJECT_ROOT
@@ -1460,6 +1473,12 @@ def submit_session_message(
                 client_submission_id=normalized_client_submission_id,
             )
     message = _resolve_user_message_content(content, content_utf8_base64=content_utf8_base64)
+    continuation_expected = normalize_continuation_expected(s, _continuation_expected)
+    if continuation_expected is not None and (
+        message != "继续" or attachment_ids or references or queue_if_busy
+        or not normalized_client_submission_id or str(message_source or "raw") != "raw"
+    ):
+        raise s.SessionValidationError("继续只接受固定消息、提交标识和会话快照，不能附加内容或入队。")
     normalized_message_source = str(message_source or "").strip() or "raw"
     client_submission_fingerprint_base = str(_client_submission_fingerprint_base or "").strip()
     if not client_submission_fingerprint_base:
@@ -1475,6 +1494,10 @@ def submit_session_message(
             turn_status_tail=turn_status_tail,
             model_selection=normalized_model_selection,
         )
+        if continuation_expected is not None:
+            client_submission_fingerprint_base = continuation_fingerprint_base(
+                client_submission_fingerprint_base, continuation_expected,
+            )
     client_submission_fingerprint = str(_client_submission_fingerprint or "").strip()
     if not client_submission_fingerprint:
         client_submission_fingerprint = _session_submission_fingerprint_from_base(
@@ -1528,10 +1551,13 @@ def submit_session_message(
                 message_source=normalized_message_source,
                 model_selection=normalized_model_selection,
                 turn_status_tail=turn_status_tail,
+                allow_legacy_replay=continuation_expected is None,
             )
             if replay is not None:
                 release_admit_lock()
                 return replay
+        if continuation_expected is not None:
+            validate_continuation(s, conversation_id, continuation_expected)
         # Busy admission follows snapshot ownership, not mere snapshot
         # existence: on-disk work-run snapshots outlive their writer, so a
         # blocking snapshot only proves a busy session when its writer is a
@@ -1600,11 +1626,12 @@ def submit_session_message(
                     en="The previous turn ended before accepting this message. Send again with a new submission id.",
                 ))
         ledger_started_at = s._perf_counter()
-        s._reconcile_stale_session_ledger(
-            conversation_id,
-            active_turn_id=partial_submission_turn_id,
-            reason="new_turn_submitted",
-        )
+        if continuation_expected is None:
+            s._reconcile_stale_session_ledger(
+                conversation_id,
+                active_turn_id=partial_submission_turn_id,
+                reason="new_turn_submitted",
+            )
         previous_messages = s._session_ledger_visible_messages(conversation_id)
         submit_timing_fields["ledgerReconcileMs"] = s._elapsed_ms(ledger_started_at)
         prepare_started_at = s._perf_counter()
@@ -1655,7 +1682,8 @@ def submit_session_message(
             conversation_id,
             conversation=conversation,
         )
-        s._ensure_conversation_workspace_metadata(conversation)
+        if continuation_expected is None:
+            s._ensure_conversation_workspace_metadata(conversation)
         image_ids, document_ids = document_attachments.partition_session_attachment_ids(
             conversation,
             attachment_ids or [],
@@ -1795,6 +1823,8 @@ def submit_session_message(
         lease_decision = s._check_chat_turn_lease_decision(requested_leases)
         if not lease_decision.allowed:
             localized_reason = s._localize_lease_conflict(lease_decision.reason, lang=lang)
+            if continuation_expected is not None:
+                raise s.SessionLeaseConflictError(localized_reason)
             s._persist_session_preflight_rejection(
                 conversation,
                 message=message,
@@ -1812,6 +1842,8 @@ def submit_session_message(
             # must treat it as a persistent rejection instead of a busy race.
             raise s.SessionLeaseConflictError(localized_reason)
 
+        if continuation_expected is not None:
+            s._ensure_conversation_workspace_metadata(conversation)
         if prepared_agent is None:
             s._ensure_conversation_agent_metadata(conversation)
             agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
@@ -2380,6 +2412,7 @@ def submit_session_message_lightweight(
     queue_if_busy: bool = False,
     model_selection: Mapping[str, Any] | None = None,
     trace_context_carrier: Mapping[str, Any] | None = None,
+    _continuation_expected: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Submit a user message and return the smallest accepted-turn payload."""
 
@@ -2398,6 +2431,7 @@ def submit_session_message_lightweight(
         queue_if_busy=queue_if_busy,
         model_selection=model_selection,
         trace_context_carrier=trace_context_carrier,
+        _continuation_expected=_continuation_expected,
         include_started_turn_id=True,
         lightweight_response=True,
     )

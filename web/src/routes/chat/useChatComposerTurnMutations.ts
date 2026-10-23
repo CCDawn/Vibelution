@@ -14,6 +14,7 @@ import {
   submitSessionMessage,
   switchSessionHead,
 } from "../../api/chat";
+import type { SessionContinuationExpectation } from "../../api/chat";
 import { submitVirtualHumanConversationMessage } from "../../api/virtualHumanLife";
 import { queryKeys } from "../../api/queryKeys";
 import type {
@@ -185,6 +186,7 @@ export type SubmitTurnVariables = {
   sessionId: string;
   clientSubmissionId: string;
   content: string;
+  continuation?: SessionContinuationExpectation;
   draftRecoveryGuard?: SessionDraftRecoveryGuard | null;
   mentalModelEnabled: boolean;
   runtimeStatusEnabled: boolean;
@@ -463,6 +465,7 @@ export function useChatComposerTurnMutations({
         references,
         queuedBehindActiveTurn,
         modelSelection,
+        continuation,
       }: SubmitTurnVariables,
     ) => {
       const resolvedTail = turnStatusTail ?? loadTurnStatusTailConfig(sessionId);
@@ -496,6 +499,7 @@ export function useChatComposerTurnMutations({
       return submitSessionMessage(sessionId, {
         ...payload,
         queueIfBusy: Boolean(queuedBehindActiveTurn),
+        ...(continuation ? { continuation } : {}),
       });
     },
     onMutate: async (variables) => {
@@ -801,7 +805,7 @@ export function useChatComposerTurnMutations({
           setActiveTurnLayerForSession(current, variables.sessionId, undefined)
         );
       }
-      restoreSubmittedDraftAfterFailure(
+      if (!variables.continuation) restoreSubmittedDraftAfterFailure(
         setSessionDrafts,
         variables.sessionId,
         variables.content,

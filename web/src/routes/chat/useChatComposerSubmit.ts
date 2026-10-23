@@ -117,6 +117,7 @@ import {
   type ChatComposerTurnMutations,
 } from "./useChatComposerTurnMutations";
 import { useComposerFollowupQueue } from "./useComposerFollowupQueue";
+import { useChatContinueTurn } from "./useChatContinueTurn";
 
 export {
   QUEUED_TURN_STUCK_HINT_MS,
@@ -167,6 +168,7 @@ export type UseChatComposerSubmitActionsOptions = ChatComposerTurnMutations & {
   setMentalModelEnabledForNextTurn: Dispatch<SetStateAction<boolean>>;
   setRuntimeStatusEnabledForNextTurn: Dispatch<SetStateAction<boolean>>;
   companionAgentId?: string;
+  continueEnabled?: boolean;
   /** Synchronous Agent-scoped settings-save gate; omitted on other surfaces. */
   isModelParametersSavePending?: () => boolean;
 };
@@ -188,6 +190,7 @@ export type UseChatComposerSubmitActionsResult = {
   handleAddComposerReference: (reference: SessionReferenceAttachment) => void;
   handleRemoveComposerReference: (referenceId: string) => void;
   handleSubmitTurn: () => void;
+  handleContinueTurn: () => void;
   handleStopTurn: () => void;
   handleSubmitGuidance: (mode: SessionGuidanceMode) => void;
   handleFollowupQueueUpdate: (id: string, text: string) => void;
@@ -215,6 +218,7 @@ export type UseChatComposerSubmitActionsResult = {
  * Composer submit/stop/guidance/edit handlers. Call after composerDisabled is derived.
  */
 export function useChatComposerSubmitActions({
+  continueEnabled,
   queryClient,
   setActiveTurnLayersBySession,
   lang,
@@ -259,6 +263,18 @@ export function useChatComposerSubmitActions({
     () => Boolean(isModelParametersSavePending?.()),
     [isModelParametersSavePending],
   );
+  const handleContinueTurn = useChatContinueTurn({
+    queryClient, activeSessionId, detail, activeDraftEffective,
+    hasAttachments: activeImageAttachments.length > 0,
+    hasReferences: activeReferenceAttachments.length > 0,
+    blocked: !continueEnabled || Boolean(companionAgentId) || composerDisabled || sessionBusy || sessionStopping || Boolean(resolvedEditTarget)
+      || Boolean(activeSessionId && sessionFollowupQueues[activeSessionId]?.length),
+    isModelParametersSavePending: isModelParametersSavePendingNow,
+    submitTurnMutation,
+    mentalModelEnabled: mentalModelEnabledForNextTurn,
+    runtimeStatusEnabled: runtimeStatusEnabledForNextTurn,
+    modelSelection: turnModelSelection,
+  });
   const pendingStopAfterAcceptRef = useRef<Map<string, DeferredStopIntent>>(new Map());
   // Uploading attachments happens before React Query creates the submit/edit
   // mutation. Keep the same submission identity visible to Stop during that
@@ -1265,6 +1281,7 @@ export function useChatComposerSubmitActions({
   // stopped immediately, without being applied to a newer turn.
 
   return {
+    handleContinueTurn,
     handleComposerChange,
     handleMentalModelEnabledChange,
     handleRuntimeStatusEnabledChange,

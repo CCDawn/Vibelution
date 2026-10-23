@@ -98,6 +98,7 @@ type ChatConversationComposerChromeKey =
   | "onAddComposerReference"
   | "onRemoveComposerReference"
   | "onSubmit"
+  | "onContinueTurn"
   | "onStop"
   | "onSafeGuidance"
   | "onInterruptGuidance";
@@ -195,6 +196,7 @@ export type ChatConversationSurfaceModelInput = {
   handleStopTurn: () => void;
   handleSubmitGuidance: (mode: SessionGuidanceMode) => void;
   handleSubmitTurn: () => void;
+  handleContinueTurn?: () => void;
   handleSwitchMessageVersion: NonNullable<ConversationViewProps["onSwitchMessageVersion"]>;
   lang: "zh" | "en";
   loadEarlierSessionMessagesMutation: { isPending: boolean };
@@ -286,6 +288,7 @@ export function useChatConversationSurfaceModel({
   handleStopTurn,
   handleSubmitGuidance,
   handleSubmitTurn,
+  handleContinueTurn,
   handleSwitchMessageVersion,
   lang,
   loadEarlierSessionMessagesMutation,
@@ -507,6 +510,7 @@ export function useChatConversationSurfaceModel({
       onCancelComposerMode: resolvedEditTarget ? handleCancelEditMessage : undefined,
       onLoadEarlierMessages: handleLoadEarlierSessionMessages,
       onSubmit: handleSubmitTurn,
+      onContinueTurn: !financeSurface && !verifiedCompanionMode ? handleContinueTurn : undefined,
       onStop: handleStopTurn,
       onSafeGuidance: () => handleSubmitGuidance("safe"),
       onInterruptGuidance: () => handleSubmitGuidance("interrupt"),
@@ -568,6 +572,7 @@ export function useChatConversationSurfaceModel({
       handleStopTurn,
       handleSubmitGuidance,
       handleSubmitTurn,
+      handleContinueTurn,
       handleSwitchMessageVersion,
       lang,
       loadEarlierSessionMessagesMutation,
@@ -678,6 +683,7 @@ export function useChatConversationSurfaceModel({
       onCancelComposerMode: true,
       onLoadEarlierMessages: true,
       onSubmit: true,
+      onContinueTurn: true,
       onStop: true,
       onSafeGuidance: true,
       onInterruptGuidance: true,
@@ -753,6 +759,7 @@ export function useChatConversationSurfaceModel({
       onAddComposerReference: model.onAddComposerReference,
       onRemoveComposerReference: model.onRemoveComposerReference,
       onSubmit: model.onSubmit,
+      onContinueTurn: model.onContinueTurn,
       onStop: model.onStop,
       onSafeGuidance: model.onSafeGuidance,
       onInterruptGuidance: model.onInterruptGuidance,

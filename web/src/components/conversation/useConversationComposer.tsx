@@ -9,6 +9,7 @@ import {
   Link2,
   LoaderCircle,
   MessageSquareText,
+  Play,
   Quote,
   RefreshCw,
   Square,
@@ -118,7 +119,7 @@ export type UseConversationComposerInput = {
   composerFocusSignal: string;
   onComposerFocusRequestSettled?: (focusSignal: string) => void;
   composerActionDisabled?: boolean;
-  composerActionMode?: "send" | "stop";
+  composerActionMode?: "send" | "stop" | "continue";
   composerPending: boolean;
   composerSafeGuidancePending: boolean;
   composerInterruptGuidancePending: boolean;
@@ -159,6 +160,7 @@ export type UseConversationComposerInput = {
   onRemoveComposerReference?: (referenceId: string) => void;
   onSubmit: () => void;
   onStop?: () => void;
+  onContinueTurn?: () => void;
   onSafeGuidance?: () => void;
   onFollowupQueueUpdate?: (id: string, text: string) => void;
   onFollowupQueueRemove?: (id: string) => void;
@@ -245,6 +247,7 @@ export function useConversationComposer({
   onRemoveComposerReference,
   onSubmit,
   onStop,
+  onContinueTurn,
   onSafeGuidance,
   onFollowupQueueUpdate,
   onFollowupQueueRemove,
@@ -315,12 +318,15 @@ export function useConversationComposer({
     composerValue,
     hasAttachments: hasComposerAttachments,
     hasReferences: hasComposerReferences,
+    hasContinueHandler: Boolean(onContinueTurn),
   });
   const { actionLabel: resolvedActionLabel, pendingLabel: resolvedPendingLabel } = resolveComposerActionLabels({
     actionMode: resolvedActionMode,
     stopLabel,
+    continueLabel: lang === "zh" ? "继续任务" : "Continue task",
     submitLabel,
     stopPendingLabel,
+    continuePendingLabel: lang === "zh" ? "正在继续…" : "Continuing…",
     submitPendingLabel,
     fallbackStop: t("stop"),
     fallbackSend: t("send"),
@@ -732,7 +738,9 @@ export function useConversationComposer({
 
   const handlePrimaryAction = resolvedActionMode === "stop"
     ? (onStop ?? onSubmit)
-    : handleSendAndFollowLatest;
+    : resolvedActionMode === "continue"
+      ? (onContinueTurn ?? (() => undefined))
+      : handleSendAndFollowLatest;
 
   useEffect(() => {
     const focusSignal = String(editingMessageId || "").trim();
@@ -846,7 +854,7 @@ export function useConversationComposer({
                 : resolvedBusyPrimaryHint
               : composerPending
                 ? resolvedPendingLabel
-                : primaryActionIsEditSubmit
+                : primaryActionIsEditSubmit || resolvedActionMode === "continue"
                   ? resolvedActionLabel
                   : t("composerSendEnterHint")
           }
@@ -866,7 +874,9 @@ export function useConversationComposer({
               ? (composerSafeGuidancePending ? resolvedSafeGuidancePendingLabel : resolvedBusyPrimaryLabel)
             : (composerPending || composerSafeGuidancePending
               ? <LoaderCircle className={styles.statusSpinner} size={17} aria-hidden="true" />
-              : <ArrowUp size={16} aria-hidden="true" />)}
+              : resolvedActionMode === "continue"
+                ? <Play size={16} aria-hidden="true" />
+                : <ArrowUp size={16} aria-hidden="true" />)}
         </VButton>
       ) : null}
       {runningGuidanceActionsEnabled ? (
@@ -1408,7 +1418,11 @@ export function useConversationComposer({
               });
               if (composerEnterDelivery !== "none") {
                 event.preventDefault();
-                if (
+                if (composerEnterDelivery === "continue") {
+                  if (!resolvedActionDisabled && onContinueTurn) {
+                    onContinueTurn();
+                  }
+                } else if (
                   composerEnterDelivery === "send"
                   && !resolvedActionDisabled
                   && (composerValue.trim() || hasComposerAttachments || hasComposerReferences)

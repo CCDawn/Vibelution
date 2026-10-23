@@ -278,6 +278,15 @@ class SessionModelSelectionPayload(BaseModel):
     reasoningEffort: str | None = None
 
 
+class SessionContinuationPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    turnId: str = Field(min_length=1, max_length=160, pattern=r"\S", strict=True)
+    headId: str = Field(min_length=1, max_length=200, pattern=r"\S", strict=True)
+    ledgerSeq: int = Field(ge=1, strict=True)
+    agentId: str = Field(min_length=1, max_length=160, pattern=r"\S", strict=True)
+
+
 class SessionMessagePayload(BaseModel):
     clientSubmissionId: str = Field(default_factory=_new_client_submission_id, max_length=128)
     content: str = ""
@@ -291,6 +300,7 @@ class SessionMessagePayload(BaseModel):
     writeIntent: bool | None = None
     queueIfBusy: bool = False
     modelSelection: SessionModelSelectionPayload | None = None
+    continuation: SessionContinuationPayload | None = None
 
 
 class SessionMessageEditPayload(SessionMessagePayload):
@@ -1050,6 +1060,7 @@ async def session_upload_attachment(session_id: str, request: Request) -> dict:
 def session_submit_message(session_id: str, payload: SessionMessagePayload, request: Request) -> dict:
     client_submission_id = str(payload.clientSubmissionId or "").strip() or _new_client_submission_id()
     model_selection = payload.modelSelection.model_dump() if payload.modelSelection is not None else None
+    continuation = payload.continuation.model_dump() if payload.continuation is not None else None
     try:
         if "respond-async" in str(request.headers.get("prefer") or "").lower():
             return submit_session_message_lightweight(
@@ -1066,6 +1077,7 @@ def session_submit_message(session_id: str, payload: SessionMessagePayload, requ
                 write_intent=payload.writeIntent,
                 queue_if_busy=payload.queueIfBusy,
                 model_selection=model_selection,
+                _continuation_expected=continuation,
             )
         return submit_session_message(
             session_id,
@@ -1081,6 +1093,7 @@ def session_submit_message(session_id: str, payload: SessionMessagePayload, requ
             write_intent=payload.writeIntent,
             queue_if_busy=payload.queueIfBusy,
             model_selection=model_selection,
+            _continuation_expected=continuation,
         )
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

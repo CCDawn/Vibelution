@@ -141,7 +141,7 @@ export type ConversationViewProps = {
   composerFocusSignal?: string;
   onComposerFocusRequestSettled?: (focusSignal: string) => void;
   composerActionDisabled?: boolean;
-  composerActionMode?: "send" | "stop";
+  composerActionMode?: "send" | "stop" | "continue";
   composerPending: boolean;
   composerSafeGuidancePending?: boolean;
   composerInterruptGuidancePending?: boolean;
@@ -234,6 +234,7 @@ export type ConversationViewProps = {
   onLoadEarlierMessages?: () => void;
   onSubmit: () => void;
   onStop?: () => void;
+  onContinueTurn?: () => void;
   onSafeGuidance?: () => void;
   onInterruptGuidance?: () => void;
   onFollowupQueueUpdate?: (id: string, text: string) => void;

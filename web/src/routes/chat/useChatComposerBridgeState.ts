@@ -30,6 +30,7 @@ import {
   modelImageInputSupport,
 } from "./chatRoutePresentation";
 import { latestVisibleTurnErrorMessage } from "./chatSessionDetailHelpers";
+import { resolveConversationContinuation } from "./conversationContinuationModel";
 
 /**
  * Module-level shared defaults: `lookup ?? []` with a fresh literal would hand
@@ -75,6 +76,7 @@ export interface UseChatComposerBridgeStateParams {
     variables?: { sessionId?: string; mode?: SessionGuidanceMode };
   };
   activeTurnSettledByDetail: boolean;
+  continueEnabled?: boolean;
 }
 
 export interface ChatComposerBridgeStateResult {
@@ -102,6 +104,7 @@ export interface ChatComposerBridgeStateResult {
 }
 
 export function useChatComposerBridgeState({
+  continueEnabled,
   activeSessionId,
   sessionDrafts,
   sessionFollowupQueues,
@@ -218,6 +221,7 @@ export function useChatComposerBridgeState({
     && guidanceMutationMatchesActiveSession
     && sessionGuidanceMutation.variables?.mode === "interrupt";
 
+  const continueAvailable = Boolean(continueEnabled && resolveConversationContinuation(detail, activeSessionId));
   const conversationComposer = useMemo(
     () => buildConversationComposerBridgeState({
       editTargetMessageId: resolvedEditTarget?.messageId,
@@ -248,9 +252,11 @@ export function useChatComposerBridgeState({
       sessionStopping,
       stopPending: composerStopPending,
       submitPending,
+      continueAvailable,
       value: activeDraftEffective,
     }),
     [
+      continueAvailable,
       activeAgentImageInputUnsupported,
       activeComposerError,
       activeDraftEffective,
