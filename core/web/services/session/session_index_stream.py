@@ -23,7 +23,7 @@ import queue
 import threading
 import time
 from datetime import datetime, timezone
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Mapping
 
 SESSION_INDEX_CHANGE_UPSERTED = "session.upserted"
 SESSION_INDEX_CHANGE_REMOVED = "session.removed"
@@ -85,11 +85,50 @@ def _offer(subscriber: queue.Queue[dict[str, Any]], payload: dict[str, Any]) -> 
         pass
 
 
-def publish_session_index_delta(session_id: str, change_type: str) -> int:
+_INDEX_PATCH_FIELDS = (
+    "lastActive",
+    "updatedAt",
+    "status",
+    "currentPhase",
+    "lastTurnStatus",
+    "lastTurnTerminalTurnId",
+    "terminalReason",
+    "pinnedAtMs",
+    "archiveState",
+    "taskSummary",
+)
+
+
+def _normalize_index_patch(patch: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Keep only the index-row fields a rail can apply without a refetch.
+
+    Empty values are preserved on purpose: clearing a terminal reason is a real
+    change, and dropping the key would leave the stale value on screen.
+    """
+
+    if not patch:
+        return {}
+    normalized: dict[str, Any] = {}
+    for field_name in _INDEX_PATCH_FIELDS:
+        if field_name in patch:
+            normalized[field_name] = patch[field_name]
+    return normalized
+
+
+def publish_session_index_delta(
+    session_id: str,
+    change_type: str,
+    *,
+    patch: Mapping[str, Any] | None = None,
+) -> int:
     """Fan out one index change. Returns how many subscribers accepted it.
 
     Returns 0 without doing any work when nobody is listening, which is the
     common case for headless runs and for tests that never open the rail.
+
+    ``patch`` carries the index-row fields this change actually moved. The rail
+    applies them in place; a frame without a patch still means "this row moved",
+    so the client falls back to a single index read.
     """
 
     normalized_session_id = str(session_id or "").strip()
@@ -99,11 +138,14 @@ def publish_session_index_delta(session_id: str, change_type: str) -> int:
         subscribers = list(_SUBSCRIBERS)
     if not subscribers:
         return 0
-    payload = {
+    payload: dict[str, Any] = {
         "type": normalize_session_index_change_type(change_type),
         "sessionId": normalized_session_id,
         "at": _utc_now_text(),
     }
+    normalized_patch = _normalize_index_patch(patch)
+    if normalized_patch:
+        payload["patch"] = normalized_patch
     for subscriber in subscribers:
         _offer(subscriber, payload)
     return len(subscribers)

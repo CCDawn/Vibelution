@@ -225,6 +225,7 @@ import {
 } from "./chatSessionStreamConnect";
 import { useSessionDetailStream } from "./useSessionDetailStream";
 import { useSessionIndexCrossWindowSync } from "../chatSessionIndexSync";
+import { useSessionIndexEventStream } from "./useSessionIndexEventStream";
 import { useGroupRoomStream } from "./useGroupRoomStream";
 import { useGroupRoomTimeline } from "./useGroupRoomTimeline";
 import { useChatSessionSelection } from "./useChatSessionSelection";
@@ -905,6 +906,9 @@ export function ChatCodingRouteWorkbench() {
   // window: a stream-owning window keeps its index poll off, so metadata flips
   // arrive through the storage-event channel as index invalidations.
   useSessionIndexCrossWindowSync(queryClient);
+  // The rail also follows the server's own index frames, so a turn settling in
+  // another window (or another session) reaches this rail without a list read.
+  useSessionIndexEventStream(queryClient, { enabled: true });
   // Transport visibility for the active-turn status note. `streamConnected`
   // stays tri-state: only a real reconnect loop reports false; route-settling
   // teardowns keep it undefined so the note never flashes a false drop.
