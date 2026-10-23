@@ -96,7 +96,8 @@ PUBLIC_DYNAMIC_PATHS = frozenset(
     }
 )
 DENIED_STATIC_PATHS = frozenset(
-    {"/api/chat-rooms", "/api/sessions", "/api/sessions/query", "/api/sessions/bootstrap"}
+    {"/api/chat-rooms", "/api/sessions", "/api/sessions/query", "/api/sessions/bootstrap",
+     "/api/agents", "/api/agents/config-workspace"}
 )
 
 

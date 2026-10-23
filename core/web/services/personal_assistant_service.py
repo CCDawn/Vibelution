@@ -71,7 +71,8 @@ _PRE_PLATFORM_TOOLS = (*_PRE_AFFAIRS_TOOLS, "personal_affairs_tool")
 _PRE_MESSAGES_TOOLS = (*_PRE_PLATFORM_TOOLS, "personal_assistant_platform_api_tool")
 # Cross-agent collaboration generation: the assistant can dispatch work to other
 # agents' sessions via agent_message_tool and collect receipts in its inbox.
-TOOLS = (*_PRE_MESSAGES_TOOLS, "agent_message_tool")
+_PRE_ACTIONS_TOOLS = (*_PRE_MESSAGES_TOOLS, "agent_message_tool")
+TOOLS = (*_PRE_ACTIONS_TOOLS, "personal_assistant_action_tool")
 # Older provisioning toolsets that may still live in persisted snapshots; each
 # generation stays recognizable so explicit re-provisioning upgrades it to TOOLS.
 _TOOLSET_GENERATIONS = (_LEGACY_TOOLS + _DESKTOP_TOOLS, _PRE_COMPUTER_TOOLS)
@@ -176,6 +177,16 @@ TASK = {
     )),
     "preferredTasks": "事务梳理、目标跟进、平台状态解释、Agent 和任务管理、跨 agent 派遣与统筹协调。",
     "avoidTasks": "未经用户确认执行变更；用推测冒充执行或派发结果；重复创建已存在的助理；打断正忙的 agent。",
+}
+_PRE_ACTIONS_TASK = TASK
+TASK = {**TASK,
+    "responsibilities":
+        "用户明确提出平台操作就负责办完：普通Agent创建、改名、模型/档案、头像、用户名、壁纸和设置用personal_assistant_action_tool；"
+        "先index/describe或settings_catalog发现准确对象参数，不猜字段，不让用户手抄ID或打开设置。新Agent可默认沿用当前对话模型。"
+        "全平台API用途和参数用personal_assistant_platform_api_tool的path=catalog/describe查询；目录不扩大执行权限。"
+        "一句话搭团队并运行：manage的team_run接收name/goal/request_id，单次原生审批后创建四角色团队并启动原生流程；"
+        "用action的team_status跟踪runId；running只说明已启动，核验终态后汇报。创建操作使用稳定request_id；结果未知先核验，不换key重复创建。\n" + TASK["responsibilities"],
+    "avoidTasks": "让用户手动完成已有工具支持的明确操作；绕过删除、权限或重启审批；推测执行结果；重复创建；打断正忙的Agent。",
 }
 _LOCK = threading.RLock()
 COMPOSER_STARTERS = (
@@ -306,10 +317,14 @@ def _provisioning_snapshot_bases() -> tuple[dict, ...]:
         _PRE_AFFAIRS_TOOLS,
         _PRE_PLATFORM_TOOLS,
         _PRE_MESSAGES_TOOLS,
+        _PRE_ACTIONS_TOOLS,
         TOOLS,
     ):
         bases.append({**PRIVATE_V2_POLICY, "networkAccess": "restricted",
             "allowedTools": list(toolset), "preferredTools": list(toolset)})
+    bases.append({**PRIVATE_V2_POLICY, "networkAccess": "restricted",
+        "allowedTools": list(_PRE_ACTIONS_TOOLS), "preferredTools": list(_PRE_ACTIONS_TOOLS),
+        "approvalOverrides": {"agent_message_tool": "never"}})
     return tuple(bases)
 
 
@@ -472,6 +487,7 @@ def create_personal_assistant(display_name: str = "个人助理") -> dict:
                 directory.normalize_task_profile(_PRE_QUERY_TASK),
                 directory.normalize_task_profile(_PRE_AFFAIRS_TASK),
                 directory.normalize_task_profile(_PRE_MESSAGES_TASK),
+                directory.normalize_task_profile(_PRE_ACTIONS_TASK),
                 directory.normalize_task_profile({**_PRE_QUERY_TASK, "constraints": _LEGACY_DESKTOP_CONSTRAINTS}),
                 directory.normalize_task_profile({**_PRE_AFFAIRS_TASK, "constraints": _LEGACY_DESKTOP_CONSTRAINTS}),
                 directory.normalize_task_profile({**_PRE_MESSAGES_TASK, "constraints": _LEGACY_DESKTOP_CONSTRAINTS}),

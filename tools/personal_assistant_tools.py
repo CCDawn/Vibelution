@@ -87,7 +87,8 @@ def personal_assistant_query_tool(resource: str = "index", operation: str = "lis
         query=query, path=path, offset=offset, limit=limit, line=line, max_lines=max_lines), ensure_ascii=False)
 
 
-def personal_assistant_platform_api_tool(path: str = "index", query: str = "", tag: str = "") -> str:
+def personal_assistant_platform_api_tool(path: str = "index", query: str = "", tag: str = "",
+                                       operation_id: str = "", offset: int = 0, limit: int = 20) -> str:
     """Read platform management state through the loopback workbench API (GET-only)."""
     try:
         _identity()
@@ -99,14 +100,38 @@ def personal_assistant_platform_api_tool(path: str = "index", query: str = "", t
     )
 
     normalized = str(path or "").strip()
+    if normalized in {"catalog", "describe"}:
+        from core.web.services.personal_assistant_platform_api.catalog import api_catalog, api_describe
+        try:
+            result = api_describe(operation_id) if normalized == "describe" else api_catalog(query=query, tag=tag, offset=offset, limit=limit)
+            return json.dumps(result, ensure_ascii=False)
+        except (ValueError, TypeError) as exc:
+            return _error(str(exc))
     if normalized == "index":
         return json.dumps(platform_api_index(tag=tag), ensure_ascii=False)
     return json.dumps(platform_api_get(normalized, query=query), ensure_ascii=False)
 
 
-def _receipt(raw: str) -> str:
+def personal_assistant_action_tool(action: str = "index", parameters: dict | None = None) -> str:
+    """Execute an explicitly registered everyday action using object parameters."""
+    try:
+        runtime = _identity()
+        if parameters is not None and not isinstance(parameters, dict):
+            raise ValueError("parameters 必须是对象。")
+        from tools.pa_platform_actions import execute_action
+        return json.dumps({"source": "platform-action-adapter", "untrustedContent": True,
+                           **execute_action(action, parameters or {}, runtime)}, ensure_ascii=False)
+    except (ValueError, TypeError, directory.AgentDirectoryError) as exc:
+        from pydantic import ValidationError
+        if isinstance(exc, ValidationError):
+            fields = [".".join(str(part) for part in item["loc"]) for item in exc.errors(include_input=False, include_url=False)][:8]
+            return _error("参数不符合操作 schema：" + "、".join(fields) + "。请 describe 查询准确格式。")
+        return _error(str(exc))
+
+
+def _receipt(raw: str | dict) -> str:
     """Preserve native outcome and object ids without returning private objects."""
-    result = json.loads(raw)
+    result = json.loads(raw) if isinstance(raw, str) else raw
     if not isinstance(result, dict):
         raise TypeError("管理操作未返回有效回执。")
     allowed = {
@@ -128,6 +153,9 @@ def _receipt(raw: str) -> str:
         "runId",
         "bindingId",
         "expiresAt",
+        "verified",
+        "reused",
+        "requestId",
     }
     return json.dumps(
         {
@@ -184,6 +212,7 @@ def personal_assistant_manage_tool(action: str, arguments_json: str) -> str:
         # Closed dispatch table; signature binding rejects extra fields before
         # invoking any underlying service. Approval stays in native execution.
         from tools import pa_managed_writes
+        from tools.pa_team_actions import team_run
 
         dispatch = {
             "agent_create": operations.agent_create_tool,
@@ -195,6 +224,7 @@ def personal_assistant_manage_tool(action: str, arguments_json: str) -> str:
             "session_delete": operations.session_delete_tool,
             "knowledge_acl_grant": operations.knowledge_base_acl_grant_tool,
             "team_create": pa_managed_writes.team_create_tool,
+            "team_run": team_run,
             "knowledge_ingest": pa_managed_writes.knowledge_ingest_tool,
             "config_update": pa_managed_writes.config_update_tool,
         }

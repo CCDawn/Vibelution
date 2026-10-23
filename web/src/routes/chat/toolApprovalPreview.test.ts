@@ -9,6 +9,19 @@ import {
 } from "./toolApprovalPreview";
 
 describe("toolApprovalPreview", () => {
+  it("explains the one-step team run and rejects an incomplete scope", () => {
+    const summary = { assistantAction: "team_run", assistantTargets: { name: "验收团队", template_id: "dev-team" },
+      assistantPlan: { memberCount: 4, goalPreview: "核对计算结果", startsImmediately: true, automaticRecovery: false, localIntegration: false } };
+    const preview = toolApprovalActionPreview(summary, "personal_assistant_manage_tool", "zh");
+    expect(preview).toContain("创建团队并运行");
+    expect(preview).toContain("核对计算结果");
+    expect(preview).toContain("规划师 → 开发 A → 开发 B → 评审员");
+    expect(preview).toContain("立即启动");
+    expect(preview).toContain("不启用自动恢复、自动合入或部署");
+    expect(toolApprovalActionPreview(summary, "personal_assistant_manage_tool", "en")).toContain("Create 4 members");
+    expect(toolApprovalActionPreview({ ...summary, assistantPlan: undefined }, "personal_assistant_manage_tool", "zh"))
+      .toContain("运行范围无法核对");
+  });
   it("shows the assistant operation and concrete target in both languages", () => {
     const summary = { assistantAction: "session_create", assistantTargets: { agent_id: "agent-a", title: "Acceptance" } };
     expect(toolApprovalActionPreview(summary, "personal_assistant_manage_tool", "zh"))

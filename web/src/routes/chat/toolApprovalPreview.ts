@@ -29,6 +29,7 @@ export function toolApprovalActionPreview(
       restart: ["重启平台", "Restart platform"], workflow_recovery_bind: ["绑定失败恢复流程", "Bind failure recovery"],
       workflow_recovery_revoke: ["撤销失败恢复绑定", "Revoke failure recovery"], workflow_start: ["启动工作流", "Start workflow"],
       team_create: ["创建团队", "Create team"], knowledge_ingest: ["知识入库", "Ingest knowledge"],
+      team_run: ["创建团队并运行", "Create and run team"],
       config_update: ["修改偏好配置", "Update preferences config"],
     };
     const action = String(summary.assistantAction || "");
@@ -42,7 +43,21 @@ export function toolApprovalActionPreview(
         .slice(0, 20).map(([key, value]) => `${key}: ${String(value).slice(0, 160)}`) : [];
     const fields = Array.isArray(summary.assistantChangedFields) ? summary.assistantChangedFields.slice(0, 20) : [];
     const permissions = Array.isArray(summary.assistantPermissions) ? summary.assistantPermissions.slice(0, 3) : [];
-    return [title, ...targetLines,
+    const plan = summary.assistantPlan;
+    const teamPlan = plan && typeof plan === "object" && !Array.isArray(plan)
+      ? plan as Record<string, unknown> : null;
+    if (action === "team_run" && (!teamPlan || teamPlan.memberCount !== 4 || teamPlan.startsImmediately !== true
+      || teamPlan.automaticRecovery !== false || teamPlan.localIntegration !== false)) {
+      return `${title}\n${lang === "zh" ? "运行范围无法核对，请拒绝并重新发起。" : "Run scope cannot be verified. Decline and request again."}`;
+    }
+    const teamLines = action === "team_run" && teamPlan ? [
+      `${lang === "zh" ? "目标" : "Goal"}: ${String(teamPlan.goalPreview || "").slice(0, 160)}`,
+      lang === "zh" ? "创建 4 名成员：规划师 → 开发 A → 开发 B → 评审员；立即启动原生工作流。"
+        : "Create 4 members: planner → developer A → developer B → reviewer; start the native workflow immediately.",
+      lang === "zh" ? "沿用模板权限；不启用自动恢复、自动合入或部署。"
+        : "Keep template permissions; no automatic recovery, integration, or deployment.",
+    ] : [];
+    return [title, ...targetLines, ...teamLines,
       permissions.length ? `${lang === "zh" ? "授予权限" : "Grant permissions"}: ${permissions.join(", ")}` : "",
       fields.length ? `${lang === "zh" ? "修改字段" : "Changed fields"}: ${fields.join(", ")}` : "",
       summary.assistantDetailsOmitted ? (lang === "zh" ? "部分参数值未展示，请核对本次指令。" : "Values omitted; verify the requested scope.") : "",

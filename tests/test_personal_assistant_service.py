@@ -785,7 +785,7 @@ def test_pre_toolset_snapshot_upgrades_to_search_and_compress_tools(personal_env
 def test_agent_message_generation_is_provisioned_and_described(personal_env):
     from core.web.services import tool_catalog
 
-    assert service.TOOLS == (*service._PRE_MESSAGES_TOOLS, "agent_message_tool")
+    assert service.TOOLS == (*service._PRE_MESSAGES_TOOLS, "agent_message_tool", "personal_assistant_action_tool")
     row = service.create_personal_assistant()["assistant"]
     agent = directory.get_agent(row["agentId"])
     assert "agent_message_tool" in agent["toolPolicy"]["allowedTools"]

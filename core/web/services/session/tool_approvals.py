@@ -1141,7 +1141,7 @@ def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
         "agent_create", "agent_update", "agent_archive", "session_create",
         "session_update", "session_stop", "session_delete", "knowledge_acl_grant",
         "restart", "workflow_recovery_bind", "workflow_recovery_revoke", "workflow_start",
-        "team_create", "knowledge_ingest", "config_update",
+        "team_create", "team_run", "knowledge_ingest", "config_update",
     }
     action = args.get("action")
     if not isinstance(action, str) or action not in actions:
@@ -1219,6 +1219,19 @@ def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
             value = values.get(key)
             if isinstance(value, str) and value.strip():
                 targets[key] = " ".join(value.split())[:160]
+    if action == "team_run":
+        # Display facts only; validation and execution stay in the fixed adapter.
+        name, goal, request_id = (values.get(key) for key in ("name", "goal", "request_id"))
+        template_id = values.get("template_id", "dev-team")
+        if (not isinstance(name, str) or not name.strip() or not isinstance(goal, str) or not goal.strip()
+                or not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,95}", request_id)
+                or template_id != "dev-team"):
+            result["assistantArgumentsInvalid"] = True
+        else:
+            targets.update(name=" ".join(name.split())[:120], template_id=template_id, request_id=request_id)
+            result["assistantPlan"] = {"memberCount": 4, "workflow": "planner, developer_a, developer_b, reviewer",
+                "goalPreview": " ".join(goal.split())[:160], "startsImmediately": True,
+                "automaticRecovery": False, "localIntegration": False}
     if action == "knowledge_ingest":
         for key in ("inboxSourceId", "ownerType", "ownerId", "knowledgeBaseId"):
             value = values.get(key)

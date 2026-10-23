@@ -15,7 +15,7 @@ from tests.test_personal_assistant_tools import assistant_runtime
 from tests.test_personal_assistant_service import finance_env, personal_env
 
 RAW_SPEC = {
-    "/api/agents": {"get": {"tags": ["agents"], "summary": "List agents"}},
+    "/api/agents/avatar-options": {"get": {"tags": ["agents"], "summary": "List agents"}},
     "/api/runtime/tasks": {"get": {"tags": ["runtime-tasks"], "summary": "List runtime tasks"}},
     "/api/sessions/{sessionId}/messages": {"get": {"tags": ["sessions"], "summary": "Messages"}},
     "/api/teams/{team_id}/member-messages": {"get": {"tags": ["teams"], "summary": "Member messages"}},
@@ -50,7 +50,7 @@ class _FakeResponse(io.BytesIO):
 
 def test_filter_drops_private_tags_post_ops_and_private_path_words():
     result = api._filter_get_endpoints(RAW_SPEC)
-    assert set(result) == {"/api/agents", "/api/runtime/tasks", "/api/runtime/messaging-status"}
+    assert set(result) == {"/api/agents/avatar-options", "/api/runtime/tasks", "/api/runtime/messaging-status"}
 
 
 def test_denied_path_matching_is_word_level_not_substring():
@@ -63,6 +63,12 @@ def test_denied_path_matching_is_word_level_not_substring():
     # unrelated words that merely share letters stay visible
     for path in ("/api/runtime/messaging-status", "/api/agents/messagesdigest"):
         assert api._has_denied_path_word(path) is False, path
+
+
+def test_agent_full_config_projections_are_documented_but_not_readable():
+    paths = {path: {"get": {"tags": ["agents"]}} for path in
+             ("/api/agents", "/api/agents/config-workspace", "/api/agents/avatar-options")}
+    assert set(api._filter_get_endpoints(paths)) == {"/api/agents/avatar-options"}
 
 
 def test_index_overview_counts_only_allowlisted_tags(monkeypatch):
@@ -127,12 +133,12 @@ def test_get_passes_query_through_untouched_and_omits_empty(monkeypatch):
 
     _patch_urlopen(monkeypatch, handler)
     # the server owns query parsing; the gateway forwards verbatim
-    result = api.platform_api_get("/api/agents", query="filter=a/b&flag=")
+    result = api.platform_api_get("/api/agents/avatar-options", query="filter=a/b&flag=")
     assert result["ok"] is True
-    assert seen["url"].endswith("/api/agents?filter=a/b&flag=")
-    assert api.platform_api_get("/api/agents")["ok"] is True
-    assert seen["url"].endswith("/api/agents")
-    assert "?" not in seen["url"].rsplit("/api/agents", 1)[-1]
+    assert seen["url"].endswith("/api/agents/avatar-options?filter=a/b&flag=")
+    assert api.platform_api_get("/api/agents/avatar-options")["ok"] is True
+    assert seen["url"].endswith("/api/agents/avatar-options")
+    assert "?" not in seen["url"].rsplit("/api/agents/avatar-options", 1)[-1]
 
 
 def test_get_builds_loopback_hostname_and_port(monkeypatch):
@@ -147,7 +153,7 @@ def test_get_builds_loopback_hostname_and_port(monkeypatch):
         return _FakeResponse(b"{}")
 
     _patch_urlopen(monkeypatch, handler)
-    assert api.platform_api_get("/api/agents")["ok"] is True
+    assert api.platform_api_get("/api/agents/avatar-options")["ok"] is True
 
 
 def test_get_substituted_object_id_roundtrip_on_loopback(monkeypatch):
@@ -289,7 +295,7 @@ def test_session_index_contains_only_active_id_and_audited_config_routes(monkeyp
 def test_get_maps_success_truncation_and_untrusted_content(monkeypatch):
     _patch_endpoints(monkeypatch)
     _patch_urlopen(monkeypatch, lambda *_a, **_k: _FakeResponse(b'{"items": [1, 2, 3]}'))
-    result = api.platform_api_get("/api/agents")
+    result = api.platform_api_get("/api/agents/avatar-options")
     assert result["ok"] is True
     assert result["httpStatus"] == 200 and result["truncated"] is False
     assert result["data"] == {"items": [1, 2, 3]}
@@ -297,12 +303,12 @@ def test_get_maps_success_truncation_and_untrusted_content(monkeypatch):
 
     big = "x" * (api.MAX_RESPONSE_CHARS + 10)
     _patch_urlopen(monkeypatch, lambda *_a, **_k: _FakeResponse(big.encode()))
-    truncated = api.platform_api_get("/api/agents")
+    truncated = api.platform_api_get("/api/agents/avatar-options")
     assert truncated["truncated"] is True
     assert len(truncated["data"]) == api.MAX_RESPONSE_CHARS
 
     _patch_urlopen(monkeypatch, lambda *_a, **_k: _FakeResponse(b"plain text, not json"))
-    textual = api.platform_api_get("/api/agents")
+    textual = api.platform_api_get("/api/agents/avatar-options")
     assert textual["ok"] is True and textual["data"].startswith("plain text")
 
 
@@ -318,7 +324,7 @@ def test_get_sends_control_token_header_in_process(monkeypatch):
     monkeypatch.setattr(
         "core.web.control.get_control_token", lambda: "test-token-value"
     )
-    assert api.platform_api_get("/api/agents")["ok"] is True
+    assert api.platform_api_get("/api/agents/avatar-options")["ok"] is True
     assert seen["token"] == "test-token-value"
 
 
@@ -331,7 +337,7 @@ def test_get_maps_http_error_detail_and_unreachable(monkeypatch):
         )
 
     _patch_urlopen(monkeypatch, raise_http_error)
-    missing = api.platform_api_get("/api/agents")
+    missing = api.platform_api_get("/api/agents/avatar-options")
     assert missing["ok"] is False and missing["httpStatus"] == 404
     assert missing["message"] == "agent not found"
 
@@ -339,7 +345,7 @@ def test_get_maps_http_error_detail_and_unreachable(monkeypatch):
         raise urllib.error.URLError("connection refused")
 
     _patch_urlopen(monkeypatch, raise_unreachable)
-    down = api.platform_api_get("/api/agents")
+    down = api.platform_api_get("/api/agents/avatar-options")
     assert down["ok"] is False and "unreachable" in down["message"]
 
 
@@ -350,7 +356,7 @@ def test_shell_tool_returns_json_envelope_and_navigates(assistant_runtime, monke
     listing = json.loads(
         tools.personal_assistant_platform_api_tool(path="index", tag="agents")
     )
-    assert listing["endpoints"][0]["path"] == "/api/agents"
+    assert listing["endpoints"][0]["path"] == "/api/agents/avatar-options"
     blocked = json.loads(tools.personal_assistant_platform_api_tool(path="/api/memory/agents"))
     assert blocked["ok"] is False
 
@@ -359,5 +365,5 @@ def test_shell_tool_blocks_unbound_identity(personal_env, monkeypatch):
     monkeypatch.setattr(
         tools.directory, "current_agent_runtime", lambda: {"agentId": personal_env["owner"]}
     )
-    result = json.loads(tools.personal_assistant_platform_api_tool(path="/api/agents"))
+    result = json.loads(tools.personal_assistant_platform_api_tool(path="/api/agents/avatar-options"))
     assert result["ok"] is False and result["status"] == "blocked"
