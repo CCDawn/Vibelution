@@ -504,7 +504,7 @@ describe("useSessionDetailStream stream lifecycle stability", () => {
     vi.useRealTimers();
   });
 
-  it("closes the old stream synchronously on route switch and reuses grace only for the same session", () => {
+  it("parks the old stream on route switch so the same session can reuse it", () => {
     vi.useFakeTimers();
     const { options } = baseOptions({});
     const root = mount(options);
@@ -512,13 +512,13 @@ describe("useSessionDetailStream stream lifecycle stability", () => {
       FakeEventSource.instances[0].open();
     });
 
-    // Route switch to a different session must close the old EventSource
-    // immediately — without waiting for SESSION_STREAM_ROUTE_SWITCH_GRACE_MS.
-    // The release parks the old stream, but the keep-warm registry holds a
-    // single warm slot, so acquiring the new session closes it synchronously
-    // inside the same commit.
+    // Route switch to a different session releases the old stream. Keep-warm
+    // parks it inside the same commit instead of tearing it down, so a switch
+    // back within SESSION_STREAM_WARM_MS reuses the live connection instead of
+    // paying a cold reconnect. Only the oldest parked entry is evicted past
+    // SESSION_STREAM_WARM_MAX_ENTRIES.
     rerender(root, { ...options, activeSessionId: "s2" } as UseSessionDetailStreamOptions);
-    expect(FakeEventSource.instances[0].closed).toBe(true);
+    expect(FakeEventSource.instances[0].closed).toBe(false);
     expect(FakeEventSource.instances).toHaveLength(2);
     expect(FakeEventSource.instances[1].closed).toBe(false);
     unmount(root);
@@ -549,8 +549,9 @@ describe("useSessionDetailStream stream lifecycle stability", () => {
     expect(syncSessionDetailSpy).toHaveBeenCalledTimes(1);
 
     // Route switch cleanup must discard the pending snapshot, not apply it.
+    // The old stream is parked rather than closed, but it stops projecting.
     rerender(root, { ...options, activeSessionId: "s2" } as UseSessionDetailStreamOptions);
-    expect(FakeEventSource.instances[0].closed).toBe(true);
+    expect(FakeEventSource.instances[0].closed).toBe(false);
     act(() => {
       vi.advanceTimersByTime(100_000);
     });
@@ -577,9 +578,9 @@ describe("useSessionDetailStream stream lifecycle stability", () => {
     expect(setActiveTurnLayersBySessionSpy).not.toHaveBeenCalled();
     expect(handleAssistantDeltaNotifierSpy).not.toHaveBeenCalled();
 
-    // Switch before the frame runs: the old stream closes and the frame is cancelled.
+    // Switch before the frame runs: the old stream is parked and the frame is cancelled.
     rerender(root, { ...options, activeSessionId: "s2" } as UseSessionDetailStreamOptions);
-    expect(FakeEventSource.instances[0].closed).toBe(true);
+    expect(FakeEventSource.instances[0].closed).toBe(false);
     act(() => {
       vi.advanceTimersByTime(64);
     });
@@ -764,7 +765,7 @@ describe("useSessionDetailStream stream lifecycle stability", () => {
     expect(peekParkedSessionStreamLedgerSeq("s1")).toBe(3);
   });
 
-  it("keeps a single warm slot: mounting another session closes the parked one", () => {
+  it("keeps the previous session warm while the warm-entry cap allows it", () => {
     vi.useFakeTimers();
     const { options } = baseOptions({});
     const root = mount(options);
@@ -776,7 +777,9 @@ describe("useSessionDetailStream stream lifecycle stability", () => {
 
     const second = baseOptions({ activeSessionId: "s2" });
     const root2 = mount(second.options);
-    expect(FakeEventSource.instances[0].closed).toBe(true);
+    // One more session still fits under SESSION_STREAM_WARM_MAX_ENTRIES, so the
+    // parked stream survives and switching back reuses it.
+    expect(FakeEventSource.instances[0].closed).toBe(false);
     expect(FakeEventSource.instances).toHaveLength(2);
     expect(FakeEventSource.instances[1].closed).toBe(false);
     unmount(root2);
