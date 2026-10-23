@@ -115,15 +115,22 @@ function toIsoInputValue(value: string): string {
   return date.toISOString();
 }
 
-export function PersonalAssistantAffairs({ agentId, headerAction, focusItemId, focusRequestKey,
-  focusRequestResult, onFocusRequestHandled }: {
+type PersonalAssistantAffairsProps = {
   agentId: string;
   headerAction?: ReactNode;
   focusItemId?: string;
   focusRequestKey?: string;
   focusRequestResult?: "found" | "missing";
   onFocusRequestHandled?: (requestKey: string, result: "found" | "missing") => void;
-}) {
+};
+
+export function PersonalAssistantAffairs(props: PersonalAssistantAffairsProps) {
+  // Agent identity owns drafts, errors and pending requests, including A → B → A.
+  return <PersonalAssistantAffairsContent key={props.agentId} {...props} />;
+}
+
+function PersonalAssistantAffairsContent({ agentId, headerAction, focusItemId, focusRequestKey,
+  focusRequestResult, onFocusRequestHandled }: PersonalAssistantAffairsProps) {
   const { lang } = useShellI18n();
   const copy = COPY[lang];
   const queryClient = useQueryClient();
@@ -138,8 +145,11 @@ export function PersonalAssistantAffairs({ agentId, headerAction, focusItemId, f
   const [newTitle, setNewTitle] = useState("");
   const [newDue, setNewDue] = useState("");
   const [adding, setAdding] = useState(false);
+  const addingRef = useRef(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [actingKey, setActingKey] = useState<string | null>(null);
+  const pendingItems = useRef(new Set<string>());
+  const [itemActions, setItemActions] = useState<Record<string, string>>({});
+  const [itemErrors, setItemErrors] = useState<Record<string, string>>({});
   const [dueEditor, setDueEditor] = useState<{ itemId: string; value: string } | null>(null);
   const affairs = useQuery({
     queryKey: queryKeys.personalAffairs(agentId, kindFilter, statusFilter),
@@ -185,9 +195,10 @@ export function PersonalAssistantAffairs({ agentId, headerAction, focusItemId, f
   }
 
   async function addItem() {
-    if (!agentId || adding) return;
+    if (!agentId || addingRef.current) return;
     const title = newTitle.trim();
     if (!title) return;
+    addingRef.current = true;
     setAdding(true);
     setActionError(null);
     try {
@@ -202,38 +213,35 @@ export function PersonalAssistantAffairs({ agentId, headerAction, focusItemId, f
     } catch (error) {
       setActionError(error instanceof Error ? error.message : copy.saveFailed);
     } finally {
+      addingRef.current = false;
       setAdding(false);
     }
   }
 
-  async function runItemAction(itemId: string, action: "complete" | "cancel" | "reopen") {
-    if (actingKey) return;
-    setActingKey(`${itemId}:${action}`);
-    setActionError(null);
+  async function runItemAction(itemId: string, action: "complete" | "cancel" | "reopen" | "due", value = "") {
+    // The ref closes the same-event-loop gap before React renders disabled buttons.
+    if (!agentId || pendingItems.current.has(itemId)) return;
+    pendingItems.current.add(itemId);
+    setItemActions(current => ({ ...current, [itemId]: action }));
+    setItemErrors(current => ({ ...current, [itemId]: "" }));
     try {
       if (action === "complete") await completePersonalAffair(agentId, itemId);
       else if (action === "cancel") await cancelPersonalAffair(agentId, itemId);
-      else await reopenPersonalAffair(agentId, itemId);
+      else if (action === "due") {
+        await setPersonalAffairDue(agentId, itemId, toIsoInputValue(value));
+        setDueEditor(current => current?.itemId === itemId ? null : current);
+      } else await reopenPersonalAffair(agentId, itemId);
       await refresh();
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : copy.saveFailed);
+      const message = error instanceof Error ? error.message : copy.saveFailed;
+      setItemErrors(current => ({ ...current, [itemId]: message }));
     } finally {
-      setActingKey(null);
-    }
-  }
-
-  async function saveDue(itemId: string, value: string) {
-    if (actingKey) return;
-    setActingKey(`${itemId}:due`);
-    setActionError(null);
-    try {
-      await setPersonalAffairDue(agentId, itemId, toIsoInputValue(value));
-      setDueEditor(null);
-      await refresh();
-    } catch (error) {
-      setActionError(error instanceof Error ? error.message : copy.saveFailed);
-    } finally {
-      setActingKey(null);
+      pendingItems.current.delete(itemId);
+      setItemActions(current => {
+        const next = { ...current };
+        delete next[itemId];
+        return next;
+      });
     }
   }
 
@@ -241,9 +249,8 @@ export function PersonalAssistantAffairs({ agentId, headerAction, focusItemId, f
   const filtered = Boolean(kindFilter || statusFilter);
 
   function actionButton(item: PersonalAffairItem, action: "complete" | "cancel" | "reopen", label: string) {
-    const key = `${item.itemId}:${action}`;
     return <VButton variant={action === "complete" ? "secondary" : "ghost"} density="compact"
-      isPending={actingKey === key} isDisabled={actingKey !== null && actingKey !== key}
+      isPending={itemActions[item.itemId] === action} isDisabled={Boolean(itemActions[item.itemId])}
       onClick={() => void runItemAction(item.itemId, action)}>{label}</VButton>;
   }
 
@@ -327,27 +334,31 @@ export function PersonalAssistantAffairs({ agentId, headerAction, focusItemId, f
                 {item.status === "open" ? <span className={styles.itemActions}>
                   {actionButton(item, "complete", copy.markDone)}
                   {actionButton(item, "cancel", copy.cancelItem)}
-                  <VButton variant="ghost" density="compact" isDisabled={actingKey !== null}
-                    onClick={() => setDueEditor(dueEditor?.itemId === item.itemId
-                      ? null : { itemId: item.itemId, value: toLocalInputValue(item.dueAt) })}>{copy.setDue}</VButton>
+                  <VButton variant="ghost" density="compact" isDisabled={Boolean(itemActions[item.itemId])}
+                    onClick={() => {
+                      if (pendingItems.current.has(item.itemId)) return;
+                      setDueEditor(current => current?.itemId === item.itemId
+                        ? null : { itemId: item.itemId, value: toLocalInputValue(item.dueAt) });
+                    }}>{copy.setDue}</VButton>
                 </span> : <span className={styles.itemActions}>
                   {actionButton(item, "reopen", copy.reopenItem)}
                 </span>}
               </div>
+              {itemErrors[item.itemId] ? <p className={styles.error} role="alert">{itemErrors[item.itemId]}</p> : null}
               {dueEditor?.itemId === item.itemId ? <div className={styles.dueEditor}>
                 <label className={styles.addField}>
                   <span>{copy.addDue}</span>
                   <VInput type="datetime-local" aria-label={`${copy.setDue}: ${item.title}`}
-                    value={dueEditor.value} isDisabled={actingKey !== null}
+                    value={dueEditor.value} isDisabled={Boolean(itemActions[item.itemId])}
                     onChange={event => setDueEditor({ itemId: item.itemId, value: event.target.value })} />
                 </label>
                 <div className={styles.dueEditorRow}>
                   <span className={styles.dueEditorHint}>{copy.dueEditorHint}</span>
                   <span className={styles.itemActions}>
-                    <VButton variant="primary" density="compact" isPending={actingKey === `${item.itemId}:due`}
-                      isDisabled={actingKey !== null && actingKey !== `${item.itemId}:due`}
-                      onClick={() => void saveDue(item.itemId, dueEditor.value)}>{copy.saveDue}</VButton>
-                    <VButton variant="ghost" density="compact" isDisabled={actingKey !== null}
+                    <VButton variant="primary" density="compact" isPending={itemActions[item.itemId] === "due"}
+                      isDisabled={Boolean(itemActions[item.itemId])}
+                      onClick={() => void runItemAction(item.itemId, "due", dueEditor.value)}>{copy.saveDue}</VButton>
+                    <VButton variant="ghost" density="compact" isDisabled={Boolean(itemActions[item.itemId])}
                       onClick={() => setDueEditor(null)}>{copy.cancelEdit}</VButton>
                   </span>
                 </div>

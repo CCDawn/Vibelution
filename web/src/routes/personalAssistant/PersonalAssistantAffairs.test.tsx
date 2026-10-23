@@ -64,7 +64,7 @@ const list: PersonalAffairList = {
 
 let root: Root, container: HTMLDivElement, client: QueryClient;
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   vi.mocked(fetchPersonalAffairs).mockResolvedValue({ ...list, items: list.items.map(item => ({ ...item })), counts: { ...list.counts } });
   vi.mocked(completePersonalAffair).mockResolvedValue({ agentId: "agent-companion", item: { ...list.items[0], status: "done", dueState: "none" } });
   vi.mocked(addPersonalAffair).mockResolvedValue({ agentId: "agent-companion", item: { ...list.items[0], itemId: "affair-new" } });
@@ -73,9 +73,9 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); client.clear(); });
 async function settle() { await act(async () => new Promise(resolve => setTimeout(resolve, 25))); }
-async function render(focusItemId?: string, focusRequestKey?: string) {
+async function render(focusItemId?: string, focusRequestKey?: string, agentId = "agent-companion") {
   await act(async () => root.render(<QueryClientProvider client={client}>
-    <PersonalAssistantAffairs agentId="agent-companion" focusItemId={focusItemId} focusRequestKey={focusRequestKey} />
+    <PersonalAssistantAffairs agentId={agentId} focusItemId={focusItemId} focusRequestKey={focusRequestKey} />
   </QueryClientProvider>));
   await settle(); await settle();
 }
@@ -83,6 +83,22 @@ function setInputValue(input: HTMLInputElement, value: string) {
   const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
   setter.call(input, value);
   input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+function itemRow(title: string) {
+  const row = [...container.querySelectorAll("li")].find(node => node.querySelector("strong")?.textContent === title);
+  if (!row) throw new Error(`${title} row not rendered`);
+  return row;
+}
+function itemButton(title: string, label: string) {
+  const button = [...itemRow(title).querySelectorAll("button")].find(node => node.textContent === label);
+  if (!button) throw new Error(`${title}: ${label} button not rendered`);
+  return button as HTMLButtonElement;
 }
 async function clickButton(text: string) {
   const button = await vi.waitFor(() => {
@@ -95,6 +111,168 @@ async function clickButton(text: string) {
 }
 
 describe("PersonalAssistantAffairs", () => {
+  it("keeps other items available while one item is slow and blocks same-tick duplicate/sibling actions", async () => {
+    const slow = deferred<Awaited<ReturnType<typeof completePersonalAffair>>>();
+    vi.mocked(fetchPersonalAffairs).mockResolvedValue({ ...list, items: list.items.map(item => ({ ...item, status: "open" })) });
+    vi.mocked(completePersonalAffair).mockImplementation((_agentId, itemId) => itemId === "affair-1"
+      ? slow.promise : Promise.resolve({ agentId: list.agentId, item: list.items[1] }));
+    await render();
+    try {
+      const complete = itemButton("整理周报", "完成");
+      await act(async () => { complete.click(); complete.click(); });
+      expect(itemButton("和用户复盘", "完成").disabled).toBe(false);
+      expect(itemButton("和用户复盘", "取消").disabled).toBe(false);
+      expect(itemButton("和用户复盘", "设截止").disabled).toBe(false);
+      expect(completePersonalAffair).toHaveBeenCalledTimes(1);
+      expect(cancelPersonalAffair).not.toHaveBeenCalled();
+      expect(itemButton("整理周报", "取消").disabled).toBe(true);
+      expect(itemButton("整理周报", "设截止").disabled).toBe(true);
+      await act(async () => itemButton("和用户复盘", "完成").click());
+      expect(completePersonalAffair).toHaveBeenLastCalledWith("agent-companion", "affair-2");
+      await settle();
+      expect(itemButton("整理周报", "取消").disabled).toBe(true);
+      await act(async () => itemButton("和用户复盘", "取消").click());
+      expect(cancelPersonalAffair).toHaveBeenCalledWith("agent-companion", "affair-2");
+      await settle();
+      await act(async () => itemButton("和用户复盘", "设截止").click());
+      const editor = itemRow("和用户复盘").querySelector("input") as HTMLInputElement;
+      expect(editor.disabled).toBe(false);
+      await act(async () => { setInputValue(editor, "2026-10-22T09:00"); });
+      await act(async () => itemButton("和用户复盘", "保存").click());
+      expect(setPersonalAffairDue).toHaveBeenCalledWith("agent-companion", "affair-2", new Date("2026-10-22T09:00").toISOString());
+    } finally {
+      await act(async () => slow.resolve({ agentId: list.agentId, item: list.items[0] }));
+      await settle();
+    }
+  });
+
+  it("refreshes authoritative results after out-of-order item mutations and stays pending through refresh", async () => {
+    const slowA = deferred<Awaited<ReturnType<typeof completePersonalAffair>>>();
+    const slowB = deferred<Awaited<ReturnType<typeof cancelPersonalAffair>>>();
+    const finalRefresh = deferred<PersonalAffairList>();
+    const server: PersonalAffairList = { ...list, items: list.items.map(item => ({ ...item, status: "open" })) };
+    vi.mocked(fetchPersonalAffairs).mockImplementation(async () => structuredClone(server));
+    vi.mocked(completePersonalAffair).mockReturnValue(slowA.promise);
+    vi.mocked(cancelPersonalAffair).mockReturnValue(slowB.promise);
+    await render();
+    await act(async () => itemButton("整理周报", "完成").click());
+    await act(async () => itemButton("和用户复盘", "取消").click());
+    expect(cancelPersonalAffair).toHaveBeenCalledWith(list.agentId, "affair-2");
+    server.items[1].status = "cancelled";
+    await act(async () => slowB.resolve({ agentId: list.agentId, item: server.items[1] }));
+    await settle();
+    expect(itemRow("和用户复盘").textContent).toContain("已取消");
+    expect(itemButton("整理周报", "完成").disabled).toBe(true);
+    server.items[0].status = "done";
+    server.counts = { open: 0, overdue: 0, done: 1 };
+    vi.mocked(fetchPersonalAffairs).mockReturnValueOnce(finalRefresh.promise);
+    await act(async () => slowA.resolve({ agentId: list.agentId, item: server.items[0] }));
+    await settle();
+    expect(itemButton("整理周报", "取消").disabled).toBe(true);
+    expect(itemButton("和用户复盘", "重新打开").disabled).toBe(false);
+    await act(async () => finalRefresh.resolve(structuredClone(server)));
+    await settle();
+    expect(itemRow("整理周报").textContent).toContain("已完成");
+    expect(itemRow("和用户复盘").textContent).toContain("已取消");
+    expect(container.textContent).toContain("进行中 0");
+    expect(fetchPersonalAffairs).toHaveBeenCalledTimes(3);
+  });
+
+  it("associates failures with the item and allows retry while another item is pending", async () => {
+    const slowA = deferred<Awaited<ReturnType<typeof completePersonalAffair>>>();
+    const slowB = deferred<Awaited<ReturnType<typeof cancelPersonalAffair>>>();
+    vi.mocked(fetchPersonalAffairs).mockResolvedValue({ ...list, items: list.items.map(item => ({ ...item, status: "open" })) });
+    vi.mocked(completePersonalAffair).mockReturnValueOnce(slowA.promise);
+    vi.mocked(cancelPersonalAffair).mockReturnValueOnce(slowB.promise);
+    await render();
+    await act(async () => itemButton("整理周报", "完成").click());
+    await act(async () => itemButton("和用户复盘", "取消").click());
+    await act(async () => slowA.reject(new Error("A 保存失败")));
+    expect(itemRow("整理周报").querySelector('[role="alert"]')?.textContent).toBe("A 保存失败");
+    expect(itemRow("和用户复盘").querySelector('[role="alert"]')).toBeNull();
+    expect(itemButton("和用户复盘", "完成").disabled).toBe(true);
+    expect(itemButton("整理周报", "完成").disabled).toBe(false);
+    await act(async () => itemButton("整理周报", "完成").click());
+    await settle();
+    expect(completePersonalAffair).toHaveBeenCalledTimes(2);
+    expect(itemRow("整理周报").querySelector('[role="alert"]')).toBeNull();
+    expect(itemButton("和用户复盘", "完成").disabled).toBe(true);
+    await act(async () => slowB.resolve({ agentId: list.agentId, item: list.items[1] }));
+    await settle();
+    expect(itemButton("和用户复盘", "完成").disabled).toBe(false);
+  });
+
+  it.each(["success", "failure"])("keeps B's due draft when A's save finishes with %s and rejects same-tick sibling actions", async outcome => {
+    const slow = deferred<Awaited<ReturnType<typeof setPersonalAffairDue>>>();
+    vi.mocked(fetchPersonalAffairs).mockResolvedValue({ ...list, items: list.items.map(item => ({ ...item, status: "open" })) });
+    vi.mocked(setPersonalAffairDue).mockReturnValueOnce(slow.promise);
+    await render();
+    await act(async () => itemButton("整理周报", "设截止").click());
+    const save = itemButton("整理周报", "保存");
+    const complete = itemButton("整理周报", "完成");
+    const cancel = itemButton("整理周报", "取消");
+    await act(async () => { save.click(); save.click(); complete.click(); cancel.click(); });
+    expect(setPersonalAffairDue).toHaveBeenCalledTimes(1);
+    expect(completePersonalAffair).not.toHaveBeenCalled();
+    expect(cancelPersonalAffair).not.toHaveBeenCalled();
+    expect((itemRow("整理周报").querySelector("input") as HTMLInputElement).disabled).toBe(true);
+    await act(async () => itemButton("和用户复盘", "设截止").click());
+    await act(async () => setInputValue(itemRow("和用户复盘").querySelector("input") as HTMLInputElement, "2026-10-24T09:30"));
+    await act(async () => {
+      if (outcome === "success") slow.resolve({ agentId: list.agentId, item: list.items[0] });
+      else slow.reject(new Error("A 截止保存失败"));
+    });
+    await settle();
+    const editorB = itemRow("和用户复盘").querySelector("input") as HTMLInputElement;
+    expect(editorB.value).toBe("2026-10-24T09:30");
+    expect(editorB.disabled).toBe(false);
+    if (outcome === "failure") {
+      expect(itemRow("整理周报").querySelector('[role="alert"]')?.textContent).toBe("A 截止保存失败");
+      expect(itemRow("和用户复盘").querySelector('[role="alert"]')).toBeNull();
+    }
+  });
+
+  it.each(["success", "failure", "return-success", "return-failure"])("isolates old %s from pending, errors and drafts after switching agents", async outcome => {
+    const oldDue = deferred<Awaited<ReturnType<typeof setPersonalAffairDue>>>();
+    const oldAdd = deferred<Awaited<ReturnType<typeof addPersonalAffair>>>();
+    const current = deferred<Awaited<ReturnType<typeof completePersonalAffair>>>();
+    vi.mocked(setPersonalAffairDue).mockReturnValueOnce(oldDue.promise);
+    vi.mocked(addPersonalAffair).mockReturnValueOnce(oldAdd.promise);
+    await render();
+    await act(async () => itemButton("整理周报", "设截止").click());
+    await act(async () => itemButton("整理周报", "保存").click());
+    await act(async () => setInputValue(container.querySelector('input[aria-label="标题"]') as HTMLInputElement, "旧草稿"));
+    await act(async () => [...container.querySelectorAll("button")].find(button => button.textContent === "添加")!.click());
+    await render(undefined, undefined, "agent-other");
+    const currentAgent = outcome.startsWith("return-") ? list.agentId : "agent-other";
+    if (currentAgent === list.agentId) await render();
+    expect(itemButton("整理周报", "完成").disabled).toBe(false);
+    expect(container.querySelector('input[aria-label="设截止: 整理周报"]')).toBeNull();
+    expect((container.querySelector('input[aria-label="标题"]') as HTMLInputElement).value).toBe("");
+    await act(async () => setInputValue(container.querySelector('input[aria-label="标题"]') as HTMLInputElement, "新草稿"));
+    await act(async () => itemButton("整理周报", "设截止").click());
+    await act(async () => setInputValue(itemRow("整理周报").querySelector("input") as HTMLInputElement, "2026-10-25T09:00"));
+    vi.mocked(completePersonalAffair).mockReturnValueOnce(current.promise);
+    await act(async () => itemButton("整理周报", "完成").click());
+    await act(async () => {
+      if (outcome.endsWith("success")) {
+        oldDue.resolve({ agentId: list.agentId, item: list.items[0] });
+        oldAdd.resolve({ agentId: list.agentId, item: list.items[0] });
+      } else {
+        oldDue.reject(new Error("旧助理保存失败"));
+        oldAdd.reject(new Error("旧助理新增失败"));
+      }
+    });
+    await settle();
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect((container.querySelector('input[aria-label="标题"]') as HTMLInputElement).value).toBe("新草稿");
+    expect((itemRow("整理周报").querySelector("input") as HTMLInputElement).value).toBe("2026-10-25T09:00");
+    expect(itemButton("整理周报", "取消").disabled).toBe(true);
+    expect(completePersonalAffair).toHaveBeenLastCalledWith(currentAgent, "affair-1");
+    await act(async () => current.resolve({ agentId: currentAgent, item: list.items[0] }));
+    await settle();
+  });
+
   it("focuses and scrolls a reminder target once, without stealing focus on polling", async () => {
     const scroll = vi.fn();
     Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { value: scroll, configurable: true });
@@ -158,8 +336,10 @@ describe("PersonalAssistantAffairs", () => {
 
   it("adds an affair with the selected kind and an ISO due time", async () => {
     await render();
-    setInputValue(container.querySelector('input[aria-label="标题"]') as HTMLInputElement, "周会");
-    setInputValue(container.querySelector('input[aria-label="截止时间"]') as HTMLInputElement, "2026-10-20T10:30");
+    await act(async () => {
+      setInputValue(container.querySelector('input[aria-label="标题"]') as HTMLInputElement, "周会");
+      setInputValue(container.querySelector('input[aria-label="截止时间"]') as HTMLInputElement, "2026-10-20T10:30");
+    });
     await clickButton("添加");
     expect(addPersonalAffair).toHaveBeenCalledWith("agent-companion", {
       kind: "todo",
@@ -189,12 +369,12 @@ describe("PersonalAssistantAffairs", () => {
     const editor = container.querySelector('input[aria-label="设截止: 整理周报"]') as HTMLInputElement;
     expect(editor).not.toBeNull();
     expect(editor.value).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/);
-    setInputValue(editor, "2026-10-22T09:00");
+    await act(async () => setInputValue(editor, "2026-10-22T09:00"));
     await clickButton("保存");
     expect(setPersonalAffairDue).toHaveBeenCalledWith("agent-companion", "affair-1", new Date("2026-10-22T09:00").toISOString());
     await clickButton("设截止");
     const cleared = container.querySelector('input[aria-label="设截止: 整理周报"]') as HTMLInputElement;
-    setInputValue(cleared, "");
+    await act(async () => setInputValue(cleared, ""));
     await clickButton("保存");
     expect(setPersonalAffairDue).toHaveBeenLastCalledWith("agent-companion", "affair-1", "");
   });

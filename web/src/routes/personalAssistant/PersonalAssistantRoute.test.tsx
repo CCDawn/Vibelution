@@ -32,7 +32,8 @@ vi.mock("./PersonalAssistantOverview", () => ({ PersonalAssistantOverview: ({ he
 vi.mock("./PersonalAssistantComputerPanel", () => ({ PersonalAssistantComputerPanel: ({ active, onCollapse }: { active: boolean; onCollapse: () => void }) =>
   <div data-computer-panel={String(active)}><button onClick={onCollapse}>收起电脑操作栏</button></div> }));
 vi.mock("./PersonalAssistantAffairs", () => ({ PersonalAssistantAffairs: () => <div data-affairs-panel="true">事务面板</div> }));
-vi.mock("./PersonalAssistantDispatches", () => ({ PersonalAssistantDispatches: () => <div data-dispatches-panel="true">派遣面板</div> }));
+vi.mock("./PersonalAssistantDispatches", () => ({ PersonalAssistantDispatches: ({ onOpenSession }: { onOpenSession?: (id: string) => void }) =>
+  <div data-dispatches-panel="true">派遣面板<button onClick={() => onOpenSession?.("worker-session")}>打开测试执行会话</button></div> }));
 vi.mock("../desktopPet/WhaleRigCharacter", () => ({ WhaleRigCharacter: ({ tone, animationState }: { tone: string; animationState: string }) => <span data-whale-tone={tone} data-whale-animation={animationState}>大肥鲸</span> }));
 const locale = vi.hoisted(() => ({ lang: "zh" as "zh" | "en" }));
 vi.mock("../../i18n/useShellI18n", () => ({ useShellI18n: () => ({ lang: locale.lang }) }));
@@ -66,6 +67,31 @@ async function render(path: string, desktop = false) {
   await settle(); await settle();
 }
 describe("personal assistant page admission", () => {
+  it("opens the shared assistant settings from a narrow workbench", async () => {
+    Object.defineProperty(window, "innerWidth", { value: 390, configurable: true });
+    vi.mocked(window.matchMedia).mockImplementation(query => ({ matches: true, media: query, addEventListener: vi.fn(), removeEventListener: vi.fn(),
+      addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn(), onchange: null } as MediaQueryList));
+    await render("/personal-assistant");
+    const open = [...container.querySelectorAll("button")].find(button => button.textContent === "助理设置");
+    expect(open).toBeDefined();
+    await act(async () => open!.click()); await settle();
+    expect(document.querySelector('[role="dialog"][aria-labelledby]')).not.toBeNull();
+    expect(fetchPersonalAssistantSettings).toHaveBeenCalled();
+  });
+
+  it("opens the original dispatch session from a narrow dialog and closes the overlay", async () => {
+    Object.defineProperty(window, "innerWidth", { value: 390, configurable: true });
+    vi.mocked(window.matchMedia).mockImplementation(query => ({ matches: true, media: query, addEventListener: vi.fn(), removeEventListener: vi.fn(),
+      addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn(), onchange: null } as MediaQueryList));
+    await render("/personal-assistant");
+    await act(async () => [...container.querySelectorAll("button")].find(button => button.textContent === "派遣")!.click()); await settle();
+    const open = [...document.querySelectorAll("button")].find(button => button.textContent === "打开测试执行会话");
+    expect(open).toBeDefined();
+    await act(async () => open!.click()); await settle();
+    expect(container.querySelector("output")?.textContent).toBe("/chat?session=worker-session");
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
   it("switches rail labels in both directions without replacing the native session", async () => {
     await render("/personal-assistant");
     const chat = container.querySelector("[data-native-session-chat]");

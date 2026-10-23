@@ -30,7 +30,7 @@ AppShell 中唯一桌面助理返回订阅；普通桌宠和其他会话通知�
 ### 非职责
 不持有 transcript、composer、记忆副本或执行进度；原生 Session/SSE 与审批持有权威。
 ### 视觉与状态
-聊天为主体，右栏用 VTabs 切换平台概览与电脑操作，沿用可调整与可收起侧栏；加载、错误与身份冲突用 VStateSurface；窄屏顶栏分别打开概览和电脑操作 VDialog，收起后入口保留。页面根节点在横向 VWorkbenchFrame 中占满可用宽度并参与伸展，避免按内容宽度缩成左侧窄列。
+聊天为主体，右栏用 VTabs 切换平台概览与电脑操作，沿用可调整与可收起侧栏；加载、错误与身份冲突用 VStateSurface；窄屏操作条自动换行，保留各面板及「助理设置」入口，设置复用现有名称、外观、模型 VDialog。页面根节点在横向 VWorkbenchFrame 中占满可用宽度并参与伸展，避免按内容宽度缩成左侧窄列。
 ### 实现落点
 `routes/PersonalAssistantRoute.tsx`、`routes/personalAssistant/*`。
 ### 反冗余
@@ -174,11 +174,11 @@ severity 用 `--state-error`/`--state-warning` 与 `--vui-border-subtle`/`--vui-
 ### 适用范围
 `/personal-assistant` 工作台右侧 VTabs 的「对话偏好」标签（宽屏）与窄屏 VDialog 入口；窄屏不渲染侧栏时仍可从顶部操作条打开。不承担角色形象/模型切换（归 PersonalAssistantSettings）、不创建提案（提案只能由绑定直连会话内的结构化工具在真实用户回合产生）。
 ### 使用方式
-`<PersonalAssistantDialoguePreferences agentId headerAction? />`。设置组每行 VStringSelect（选项为后端封闭枚举），选择即 PUT `dialogue-settings`，成功后失效设置 query；失败 role=alert 行内提示并保持服务端值。提案列表 GET `preference-proposals`（5s 轮询，与 overview 节奏一致），待确认行展示类型/建议值（枚举值映射为中文行为词，自由文本直显）+ 采纳/保留原样（互斥 pending，决策后同时失效提案与设置缓存）；已处理仅保留最近 6 条。读取失败 VStateSurface error + 重试。文案 zh/en 双语。
+`<PersonalAssistantDialoguePreferences agentId headerAction? />`。设置组每行 VStringSelect（选项为后端封闭枚举），选择进入按 QueryClient/Agent 隔离的短生命周期保存队列；每次 PUT `dialogue-settings` 提交最新成功快照的完整三字段，避免全量接口把其他偏好重置为默认。保存字段禁用，其他字段仍可选择并显示等待保存，同字段排队意图保留最新值；已接受操作跨标签/弹窗卸载继续完成，同 Agent 重挂载复用队列。成功响应更新唯一设置 query；失败 role=alert 行内提示并可重试，其他已排队字段继续处理。提案列表 GET `preference-proposals`（5s 轮询，与 overview 节奏一致），待确认行展示类型/建议值（枚举值映射为中文行为词，自由文本直显）+ 采纳/保留原样（互斥 pending，决策后同时失效提案与设置缓存）；已处理仅保留最近 6 条。读取失败 VStateSurface error + 重试。文案 zh/en 双语。
 ### 非职责
 不写 Agent 目录、不绕过提案状态机直接改偏好情节记忆（采纳走后端 accept 及其回执）、不做提案的催办/通知（归双通道通知链）、不在组件内持久化任何本地缓存。
 ### 视觉与状态
-面板结构对齐 PersonalAssistantOverview（pinned header + 滚动 content）；设置行卡片化（field 边框卡 + 标签 + 提示语）；提案行左文案右操作；空态复用 empty 图标+文案模式；保存/决策中按钮 isPending 且兄弟按钮禁用。
+面板结构对齐 PersonalAssistantOverview（pinned header + 滚动 content）；设置行卡片化（field 边框卡 + 标签 + 提示语），逐字段显示保存中、等待保存、已保存或失败；提案行左文案右操作；空态复用 empty 图标+文案模式；同一提案决策中兄弟按钮禁用。
 ### 实现落点
 `routes/personalAssistant/PersonalAssistantDialoguePreferences.tsx`（组合 VStringSelect/VButton/VStateSurface）+ 同名 `.styles.ts`；API 客户端 `api/virtualHumanLife.ts`，query key `virtualHumanDialogueSettings/virtualHumanPreferenceProposals`。
 ### 反冗余
@@ -191,11 +191,11 @@ severity 用 `--state-error`/`--state-warning` 与 `--vui-border-subtle`/`--vui-
 ### 适用范围
 `/personal-assistant` 工作台右侧 VTabs 的「事务」标签（宽屏）与窄屏 VDialog 入口。不承担主动提醒推送（归 A2 提醒链）、不写 Agent 目录、不提供第二套与工具侧不同的状态机（一切状态迁移都走后端路由，前端只失效缓存）。
 ### 使用方式
-`<PersonalAssistantAffairs agentId headerAction? focusItemId? focusRequestKey? focusRequestResult? onFocusRequestHandled? />`。列表 GET `personal-affairs/affairs`（5s 轮询，与偏好面板节奏一致，kind/status 筛选进 query key）；动作互斥 actingKey，动作后失效整个 personal-affairs 前缀缓存；读取失败 VStateSurface error + 重试；动作失败 role=alert 行内提示。截止时间展示用本地 locale，编辑往返用 datetime-local 值与 ISO 转换。文案 zh/en 双语。提醒导航以路由 key 为定位请求：清除当时的类型/状态筛选，待无筛选列表读取完成后聚焦并滚动至目标行；每次导航只定位一次，后续轮询和用户筛选不重置焦点。定位完成后通过回调把 found/missing 结果交给 Route，重挂载时用已消费结果恢复提示并跳过定位。条目不存在时在固定头部显示可见状态提示，列表仍可正常管理。
+`<PersonalAssistantAffairs agentId headerAction? focusItemId? focusRequestKey? focusRequestResult? onFocusRequestHandled? />`。列表 GET `personal-affairs/affairs`（5s 轮询，与偏好面板节奏一致，kind/status 筛选进 query key）；动作按 itemId 互斥，后端对原账本完整读改写持有跨线程与进程文件锁；动作后失效整个 personal-affairs 前缀缓存；读取失败 VStateSurface error + 重试；动作失败 role=alert 行内提示。截止时间展示用本地 locale，编辑往返用 datetime-local 值与 ISO 转换。文案 zh/en 双语。提醒导航以路由 key 为定位请求：清除当时的类型/状态筛选，待无筛选列表读取完成后聚焦并滚动至目标行；每次导航只定位一次，后续轮询和用户筛选不重置焦点。定位完成后通过回调把 found/missing 结果交给 Route，重挂载时用已消费结果恢复提示并跳过定位。条目不存在时在固定头部显示可见状态提示，列表仍可正常管理。
 ### 非职责
 不解析自然语言建事务（对话中的结构化工具才是创建入口之一，面板只做手工补录与管理）、不做催办通知、不在前端持久化任何本地缓存或草稿。
 ### 视觉与状态
-面板结构对齐 PersonalAssistantOverview/DialoguePreferences（pinned header + 滚动 content）；计数徽标横排、逾期计数用 error 色；新增表单与筛选行卡片化；事务行左文案右操作，行内截止编辑器以细分隔线展开；空态复用图标+文案模式并区分「无事务」与「筛选无结果」；动作中按钮 isPending 且兄弟按钮禁用。
+面板结构对齐 PersonalAssistantOverview/DialoguePreferences（pinned header + 滚动 content）；计数徽标横排、逾期计数用 error 色；新增表单与筛选行卡片化；事务行左文案右操作，行内截止编辑器以细分隔线展开；空态复用图标+文案模式并区分「无事务」与「筛选无结果」；按 itemId 防重并显示 pending，同条目兄弟动作禁用，其他条目继续操作；失败提示留在对应行，截止保存只关闭本条目的编辑器。
 ### 实现落点
 `routes/personalAssistant/PersonalAssistantAffairs.tsx`（组合 VStringSelect/VInput/VButton/VStateSurface）+ 同名 `.styles.ts`；API 客户端 `api/personalAffairs.ts`，DTO `api/types/personalAffairs.ts`，query key `personalAffairs`。
 ### 反冗余
@@ -208,7 +208,7 @@ severity 用 `--state-error`/`--state-warning` 与 `--vui-border-subtle`/`--vui-
 ### 适用范围
 `/personal-assistant` 工作台右侧 VTabs 的「派遣」标签（宽屏）与窄屏 VDialog 入口。只读跟踪；派遣的创建入口是对话中的结构化工具，不归本面板。
 ### 使用方式
-`<PersonalAssistantDispatches agentId headerAction? />`。列表 GET `/api/personal-assistant/dispatches?limit=50`（5s 轮询，与事务面板节奏一致，隐藏时停止）；类型与 query key 内联在 `api/personalAssistantDispatches.ts`，不改 `api/queryKeys.ts`。读取失败 VStateSurface error + 重试；空态显示「还没有派遣记录」加一句对话引导。回执展开是纯组件本地 state，不进缓存。文案 zh/en 双语。
+`<PersonalAssistantDispatches agentId headerAction? onOpenSession? />`。列表 GET `/api/personal-assistant/dispatches?limit=50`（5s 轮询，与事务面板节奏一致，隐藏时停止）；类型与 query key 内联在 `api/personalAssistantDispatches.ts`，不改 `api/queryKeys.ts`。原 targetSessionId 存在且提供回调时显示「打开执行会话」，复用普通会话导航；窄屏先关闭弹窗再跳转，不重新派发任务。读取失败 VStateSurface error + 重试；空态显示「还没有派遣记录」加一句对话引导。回执展开是纯组件本地 state，不进缓存。文案 zh/en 双语。
 ### 非职责
 不创建/重发/撤回派遣、不修改 deliveryStatus 或回执已读状态（后端投递链权威）、不持有消息 transcript、不做催办通知（归双通道通知链）。
 ### 视觉与状态

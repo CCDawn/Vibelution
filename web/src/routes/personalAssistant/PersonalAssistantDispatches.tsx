@@ -26,6 +26,7 @@ const COPY = {
     receiptCount: (n: number) => `${n} 条回执`,
     showReceipts: "回执",
     hideReceipts: "收起回执",
+    openSession: "打开执行会话",
     empty: "还没有派遣记录",
     emptyHint: "对助理说「把任务派给某某」即可开始。",
     loadFailed: "派遣记录读取失败",
@@ -43,6 +44,7 @@ const COPY = {
     receiptCount: (n: number) => `${n} ${n === 1 ? "receipt" : "receipts"}`,
     showReceipts: "Receipts",
     hideReceipts: "Hide receipts",
+    openSession: "Open execution session",
     empty: "No dispatches yet",
     emptyHint: "Tell the assistant to dispatch a task to an agent to start.",
     loadFailed: "Failed to load dispatches",
@@ -63,9 +65,10 @@ function formatTime(iso: string, lang: "zh" | "en"): string {
   });
 }
 
-export function PersonalAssistantDispatches({ agentId, headerAction }: {
+export function PersonalAssistantDispatches({ agentId, headerAction, onOpenSession }: {
   agentId: string;
   headerAction?: ReactNode;
+  onOpenSession?: (sessionId: string) => void;
 }) {
   const { lang } = useShellI18n();
   const copy = COPY[lang];
@@ -136,12 +139,15 @@ export function PersonalAssistantDispatches({ agentId, headerAction }: {
                     </span>
                     {item.summary ? <span className={styles.itemNote}>{item.summary}</span> : null}
                   </span>
-                  {item.receipts.length ? <span className={styles.itemActions}>
-                    <VButton variant="ghost" density="compact" aria-expanded={expandedId === item.messageId}
+                  {item.receipts.length || (item.targetSessionId && onOpenSession) ? <span className={styles.itemActions}>
+                    {item.targetSessionId && onOpenSession ? <VButton variant="secondary" density="compact"
+                      aria-label={`${copy.openSession}: ${item.targetAgentName || item.targetAgentId}`}
+                      onClick={() => onOpenSession(item.targetSessionId)}>{copy.openSession}</VButton> : null}
+                    {item.receipts.length ? <VButton variant="ghost" density="compact" aria-expanded={expandedId === item.messageId}
                       aria-label={`${copy.showReceipts}: ${item.targetAgentName || item.targetAgentId}`}
                       onClick={() => setExpandedId(expandedId === item.messageId ? null : item.messageId)}>
                       {expandedId === item.messageId ? copy.hideReceipts : copy.showReceipts}
-                    </VButton>
+                    </VButton> : null}
                   </span> : null}
                 </div>
                 {expandedId === item.messageId && item.receipts.length ? <ul className={styles.receiptList}>

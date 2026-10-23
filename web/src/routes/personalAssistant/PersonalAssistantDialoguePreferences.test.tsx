@@ -59,7 +59,7 @@ const proposals: VirtualHumanPreferenceProposalList = {
 
 let root: Root, container: HTMLDivElement, client: QueryClient;
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   vi.mocked(fetchVirtualHumanDialogueSettings).mockResolvedValue({ ...settings });
   vi.mocked(fetchVirtualHumanPreferenceProposals).mockResolvedValue({
     agentId: proposals.agentId,
@@ -70,11 +70,20 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); client.clear(); });
 async function settle() { await act(async () => new Promise(resolve => setTimeout(resolve, 25))); }
-async function render() {
-  await act(async () => root.render(<QueryClientProvider client={client}>
-    <PersonalAssistantDialoguePreferences agentId="agent-companion" />
-  </QueryClientProvider>));
+async function render(agentId = "agent-companion", strict = false) {
+  const panel = <QueryClientProvider client={client}>
+    <PersonalAssistantDialoguePreferences agentId={agentId} />
+  </QueryClientProvider>;
+  await act(async () => root.render(strict ? <React.StrictMode>{panel}</React.StrictMode> : panel));
   await settle(); await settle();
+}
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: Error) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise; reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
 }
 async function chooseOption(ariaLabel: string, optionText: string) {
   const trigger = document.querySelector(`button[role="combobox"][aria-label="${ariaLabel}"]`) as HTMLButtonElement;
@@ -103,15 +112,221 @@ describe("PersonalAssistantDialoguePreferences", () => {
     vi.mocked(updateVirtualHumanDialogueSettings).mockResolvedValue({ ...settings, speakingInitiative: "talkative" });
     await render();
     await chooseOption("说话主动性", "健谈");
-    expect(updateVirtualHumanDialogueSettings).toHaveBeenCalledWith("agent-companion", { speakingInitiative: "talkative" });
+    expect(updateVirtualHumanDialogueSettings).toHaveBeenCalledWith("agent-companion", {
+      speakingInitiative: "talkative", questionInitiative: "natural", preferenceProposalMode: "ask_first",
+    });
+    expect(document.body.textContent).toContain("已保存");
   });
 
   it("surfaces a save failure as an alert without crashing", async () => {
     vi.mocked(updateVirtualHumanDialogueSettings).mockRejectedValue(new Error("助理未启用对话偏好"));
     await render();
     await chooseOption("提问主动性", "主动");
-    expect(updateVirtualHumanDialogueSettings).toHaveBeenCalledWith("agent-companion", { questionInitiative: "proactive" });
+    expect(updateVirtualHumanDialogueSettings).toHaveBeenCalledWith("agent-companion", {
+      speakingInitiative: "natural", questionInitiative: "proactive", preferenceProposalMode: "ask_first",
+    });
     expect(document.querySelector('p[role="alert"]')?.textContent).toContain("助理未启用对话偏好");
+  });
+
+  it("keeps a second field selection while a delayed first save is running", async () => {
+    const first = deferred<VirtualHumanDialogueSettings>();
+    vi.mocked(updateVirtualHumanDialogueSettings)
+      .mockImplementationOnce(() => first.promise)
+      .mockResolvedValueOnce({ ...settings, speakingInitiative: "talkative", questionInitiative: "proactive" });
+    await render();
+    await chooseOption("说话主动性", "健谈");
+    await chooseOption("提问主动性", "主动");
+    expect(updateVirtualHumanDialogueSettings).toHaveBeenCalledTimes(1);
+    expect(document.body.textContent).toContain("正在保存…");
+    expect(document.body.textContent).toContain("等待保存…");
+    expect((document.querySelector('button[aria-label="说话主动性"]') as HTMLButtonElement).disabled).toBe(true);
+    expect((document.querySelector('button[aria-label="提问主动性"]') as HTMLButtonElement).disabled).toBe(false);
+    await act(async () => first.resolve({ ...settings, speakingInitiative: "talkative" }));
+    await settle();
+    expect(updateVirtualHumanDialogueSettings).toHaveBeenCalledTimes(2);
+    expect(updateVirtualHumanDialogueSettings).toHaveBeenLastCalledWith("agent-companion", {
+      speakingInitiative: "talkative", questionInitiative: "proactive", preferenceProposalMode: "ask_first",
+    });
+    expect(document.querySelector('button[aria-label="说话主动性"]')?.textContent).toContain("健谈");
+    expect(document.querySelector('button[aria-label="提问主动性"]')?.textContent).toContain("主动");
+  });
+
+  it("preserves other customized fields in the replacement PUT", async () => {
+    const customized: VirtualHumanDialogueSettings = {
+      ...settings, speakingInitiative: "restrained", questionInitiative: "few", preferenceProposalMode: "manual_only",
+    };
+    vi.mocked(fetchVirtualHumanDialogueSettings).mockResolvedValue(customized);
+    vi.mocked(updateVirtualHumanDialogueSettings).mockResolvedValue({ ...customized, speakingInitiative: "talkative" });
+    await render();
+    await chooseOption("说话主动性", "健谈");
+    expect(updateVirtualHumanDialogueSettings).toHaveBeenCalledWith("agent-companion", {
+      speakingInitiative: "talkative", questionInitiative: "few", preferenceProposalMode: "manual_only",
+    });
+  });
+
+  it("keeps the latest queued choice and prevents duplicate saves of the active field", async () => {
+    const first = deferred<VirtualHumanDialogueSettings>();
+    vi.mocked(updateVirtualHumanDialogueSettings)
+      .mockImplementationOnce(() => first.promise)
+      .mockResolvedValueOnce({ ...settings, speakingInitiative: "talkative", questionInitiative: "few" });
+    await render();
+    await chooseOption("说话主动性", "健谈");
+    await act(async () => (document.querySelector('button[aria-label="说话主动性"]') as HTMLButtonElement).click());
+    expect(document.querySelector('[role="option"]')).toBeNull();
+    await chooseOption("提问主动性", "主动");
+    await chooseOption("提问主动性", "少问");
+    expect(updateVirtualHumanDialogueSettings).toHaveBeenCalledTimes(1);
+    await act(async () => first.resolve({ ...settings, speakingInitiative: "talkative" }));
+    await settle();
+    expect(updateVirtualHumanDialogueSettings).toHaveBeenCalledTimes(2);
+    expect(updateVirtualHumanDialogueSettings).toHaveBeenLastCalledWith("agent-companion", {
+      speakingInitiative: "talkative", questionInitiative: "few", preferenceProposalMode: "ask_first",
+    });
+  });
+
+  it("continues queued fields after failure and lets the failed choice be retried", async () => {
+    const first = deferred<VirtualHumanDialogueSettings>();
+    vi.mocked(updateVirtualHumanDialogueSettings)
+      .mockImplementationOnce(() => first.promise)
+      .mockResolvedValueOnce({ ...settings, questionInitiative: "proactive" })
+      .mockResolvedValueOnce({ ...settings, speakingInitiative: "talkative", questionInitiative: "proactive" });
+    await render();
+    await chooseOption("说话主动性", "健谈");
+    await chooseOption("提问主动性", "主动");
+    await act(async () => first.reject(new Error("保存暂时失败")));
+    await settle();
+    expect(updateVirtualHumanDialogueSettings).toHaveBeenCalledTimes(2);
+    expect(updateVirtualHumanDialogueSettings).toHaveBeenLastCalledWith("agent-companion", {
+      speakingInitiative: "natural", questionInitiative: "proactive", preferenceProposalMode: "ask_first",
+    });
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain("保存暂时失败");
+    expect((document.querySelector('button[aria-label="说话主动性"]') as HTMLButtonElement).disabled).toBe(false);
+    expect(document.querySelector('button[aria-label="说话主动性"]')?.textContent).toContain("自然");
+    await chooseOption("说话主动性", "健谈");
+    expect(updateVirtualHumanDialogueSettings).toHaveBeenCalledTimes(3);
+    expect(updateVirtualHumanDialogueSettings).toHaveBeenLastCalledWith("agent-companion", {
+      speakingInitiative: "talkative", questionInitiative: "proactive", preferenceProposalMode: "ask_first",
+    });
+    expect(document.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it("keeps accepted saves serial across StrictMode unmount and remount of the same Agent", async () => {
+    const first = deferred<VirtualHumanDialogueSettings>();
+    const second = deferred<VirtualHumanDialogueSettings>();
+    const stored = { ...settings };
+    const update = vi.mocked(updateVirtualHumanDialogueSettings);
+    vi.mocked(fetchVirtualHumanDialogueSettings).mockImplementation(async () => ({ ...stored }));
+    update.mockImplementation(async (_agentId, payload) => {
+      const response = update.mock.calls.length === 1
+        ? await first.promise
+        : update.mock.calls.length === 2
+          ? await second.promise
+          : { ...stored, ...payload };
+      Object.assign(stored, response);
+      return response;
+    });
+    await render("agent-companion", true);
+    await chooseOption("说话主动性", "健谈");
+    await chooseOption("提问主动性", "主动");
+    await act(async () => root.render(null));
+    await render("agent-companion", true);
+    await chooseOption("提问主动性", "少问");
+    expect(update).toHaveBeenCalledTimes(1);
+    await act(async () => root.render(null));
+    await act(async () => first.resolve({ ...settings, speakingInitiative: "talkative" }));
+    await settle();
+    expect(updateVirtualHumanDialogueSettings).toHaveBeenCalledTimes(2);
+    await render("agent-companion", true);
+    expect(document.body.textContent).toContain("正在保存…");
+    expect(document.querySelector('button[aria-label="提问主动性"]')?.textContent).toContain("少问");
+    expect((document.querySelector('button[aria-label="提问主动性"]') as HTMLButtonElement).disabled).toBe(true);
+    await chooseOption("偏好建议", "仅手动");
+    expect(updateVirtualHumanDialogueSettings).toHaveBeenCalledTimes(2);
+    expect(document.body.textContent).toContain("等待保存…");
+    await act(async () => second.resolve({ ...settings, speakingInitiative: "talkative", questionInitiative: "few" }));
+    await settle();
+    expect(updateVirtualHumanDialogueSettings).toHaveBeenCalledTimes(3);
+    expect(updateVirtualHumanDialogueSettings).toHaveBeenLastCalledWith("agent-companion", {
+      speakingInitiative: "talkative", questionInitiative: "few", preferenceProposalMode: "manual_only",
+    });
+  });
+
+  it("cancels an old remount GET before it can overwrite successful saves", async () => {
+    const first = deferred<VirtualHumanDialogueSettings>();
+    const staleRead = deferred<VirtualHumanDialogueSettings>();
+    let remountSignal: AbortSignal | undefined;
+    vi.mocked(fetchVirtualHumanDialogueSettings)
+      .mockResolvedValueOnce({ ...settings })
+      .mockImplementationOnce((_agentId, options) => { remountSignal = options?.signal; return staleRead.promise; });
+    vi.mocked(updateVirtualHumanDialogueSettings)
+      .mockImplementationOnce(() => first.promise)
+      .mockResolvedValueOnce({ ...settings, speakingInitiative: "talkative", questionInitiative: "proactive" });
+    await render();
+    await chooseOption("说话主动性", "健谈");
+    await chooseOption("提问主动性", "主动");
+    await act(async () => root.render(null));
+    await render();
+    expect(remountSignal?.aborted).toBe(false);
+    await act(async () => first.resolve({ ...settings, speakingInitiative: "talkative" }));
+    await settle();
+    expect(remountSignal?.aborted).toBe(true);
+    await act(async () => staleRead.resolve({ ...settings }));
+    await settle();
+    expect(updateVirtualHumanDialogueSettings).toHaveBeenLastCalledWith("agent-companion", {
+      speakingInitiative: "talkative", questionInitiative: "proactive", preferenceProposalMode: "ask_first",
+    });
+    expect(document.querySelector('button[aria-label="说话主动性"]')?.textContent).toContain("健谈");
+    expect(document.querySelector('button[aria-label="提问主动性"]')?.textContent).toContain("主动");
+  });
+
+  it("shows a save failure that finished while hidden on remount and allows retry", async () => {
+    const first = deferred<VirtualHumanDialogueSettings>();
+    vi.mocked(updateVirtualHumanDialogueSettings)
+      .mockImplementationOnce(() => first.promise)
+      .mockResolvedValueOnce({ ...settings, speakingInitiative: "talkative" });
+    await render();
+    await chooseOption("说话主动性", "健谈");
+    await act(async () => root.render(null));
+    await act(async () => first.reject(new Error("隐藏期间保存失败")));
+    await settle();
+    await render();
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain("隐藏期间保存失败");
+    await chooseOption("说话主动性", "健谈");
+    expect(updateVirtualHumanDialogueSettings).toHaveBeenCalledTimes(2);
+    expect(document.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it.each(["success", "failure"] as const)("isolates an old Agent's in-flight %s while completing its accepted queue", async outcome => {
+    const oldSave = deferred<VirtualHumanDialogueSettings>();
+    const newSave = deferred<VirtualHumanDialogueSettings>();
+    const newSettings = { ...settings, agentId: "agent-new", preferenceProposalMode: "manual_only" as const };
+    vi.mocked(fetchVirtualHumanDialogueSettings).mockImplementation(async agentId => agentId === "agent-new" ? newSettings : settings);
+    vi.mocked(updateVirtualHumanDialogueSettings)
+      .mockImplementationOnce(() => oldSave.promise)
+      .mockImplementationOnce(() => newSave.promise)
+      .mockResolvedValueOnce({ ...settings, speakingInitiative: outcome === "success" ? "talkative" : "natural", questionInitiative: "proactive" });
+    await render();
+    await chooseOption("说话主动性", "健谈");
+    await chooseOption("提问主动性", "主动");
+    await render("agent-new");
+    expect(document.body.textContent).not.toContain("等待保存…");
+    await chooseOption("说话主动性", "克制");
+    await act(async () => {
+      if (outcome === "success") oldSave.resolve({ ...settings, speakingInitiative: "talkative" });
+      else oldSave.reject(new Error("旧助理保存失败"));
+    });
+    await settle();
+    expect(updateVirtualHumanDialogueSettings).toHaveBeenCalledTimes(3);
+    expect(updateVirtualHumanDialogueSettings).toHaveBeenLastCalledWith("agent-companion", {
+      speakingInitiative: outcome === "success" ? "talkative" : "natural", questionInitiative: "proactive", preferenceProposalMode: "ask_first",
+    });
+    expect(document.body.textContent).not.toContain("旧助理保存失败");
+    expect((document.querySelector('button[aria-label="说话主动性"]') as HTMLButtonElement).disabled).toBe(true);
+    expect(document.querySelector('button[aria-label="说话主动性"]')?.textContent).toContain("克制");
+    expect(document.querySelector('button[aria-label="偏好建议"]')?.textContent).toContain("仅手动");
+    await act(async () => newSave.resolve({ ...newSettings, speakingInitiative: "restrained" }));
+    await settle();
+    expect((document.querySelector('button[aria-label="说话主动性"]') as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("lists pending proposals with mapped type and value labels and decides them", async () => {

@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from core.agent_plugins.virtual_human_life.storage import VirtualHumanLifeStore
+from core.infrastructure.file_lock import cross_process_file_lock
 
 AFFAIRS_SCHEMA_VERSION = 1
 AFFAIR_KINDS = ("todo", "schedule", "goal")
@@ -246,9 +247,10 @@ class PersonalAffairsService:
             "completedAt": "",
             "sourceTurnId": str(source_turn_id or "").strip()[:200],
         }
-        rows = self._rows(agent_id)
-        rows.append(item)
-        self._write_rows(agent_id, rows)
+        with cross_process_file_lock(self.store._path(agent_id, "affairs/items.jsonl")):
+            rows = self._rows(agent_id)
+            rows.append(item)
+            self._write_rows(agent_id, rows)
         return deepcopy_item(item)
 
     def complete_item(self, agent_id: str, *, item_id: str) -> dict[str, Any]:
@@ -273,12 +275,13 @@ class PersonalAffairsService:
     def set_due(self, agent_id: str, *, item_id: str, due_at: object) -> dict[str, Any]:
         self._require_agent(agent_id)
         normalized_due = _normalize_due_at(due_at)
-        rows = self._rows(agent_id)
-        index, item = self._find(rows, item_id)
-        item["dueAt"] = normalized_due
-        item["updatedAt"] = _iso(self._now())
-        rows[index] = item
-        self._write_rows(agent_id, rows)
+        with cross_process_file_lock(self.store._path(agent_id, "affairs/items.jsonl")):
+            rows = self._rows(agent_id)
+            index, item = self._find(rows, item_id)
+            item["dueAt"] = normalized_due
+            item["updatedAt"] = _iso(self._now())
+            rows[index] = item
+            self._write_rows(agent_id, rows)
         return deepcopy_item(item)
 
     def _transition(
@@ -291,16 +294,17 @@ class PersonalAffairsService:
     ) -> dict[str, Any]:
         self._require_agent(agent_id)
         normalized_status = _normalize_status(status)
-        rows = self._rows(agent_id)
-        index, item = self._find(rows, item_id)
-        if str(item.get("status") or "") == normalized_status:
-            return deepcopy_item(item)
-        item["status"] = normalized_status
-        item["updatedAt"] = _iso(self._now())
-        for key, value in (extra or {}).items():
-            item[key] = value
-        rows[index] = item
-        self._write_rows(agent_id, rows)
+        with cross_process_file_lock(self.store._path(agent_id, "affairs/items.jsonl")):
+            rows = self._rows(agent_id)
+            index, item = self._find(rows, item_id)
+            if str(item.get("status") or "") == normalized_status:
+                return deepcopy_item(item)
+            item["status"] = normalized_status
+            item["updatedAt"] = _iso(self._now())
+            for key, value in (extra or {}).items():
+                item[key] = value
+            rows[index] = item
+            self._write_rows(agent_id, rows)
         return deepcopy_item(item)
 
     def list_items(

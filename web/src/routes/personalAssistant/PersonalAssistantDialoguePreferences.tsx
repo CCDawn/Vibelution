@@ -1,5 +1,5 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type ReactNode } from "react";
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useState, useSyncExternalStore, type ReactNode } from "react";
 import { CheckCircle2, HeartHandshake } from "lucide-react";
 import {
   acceptVirtualHumanPreferenceProposal,
@@ -57,6 +57,7 @@ const COPY = {
     } as Record<string, Record<string, string>>,
     statusLabels: { pending: "待确认", accepted: "已采纳", rejected: "已保留原样", expired: "已过期" } as Record<string, string>,
     saveFailed: "保存失败，请稍后重试。",
+    saveStatus: { saving: "正在保存…", queued: "等待保存…", saved: "已保存", failed: "保存失败，可重新选择重试。" },
     loadFailed: "偏好读取失败",
     retry: "重试",
     loading: "正在读取偏好…",
@@ -96,6 +97,7 @@ const COPY = {
     } as Record<string, Record<string, string>>,
     statusLabels: { pending: "Pending", accepted: "Accepted", rejected: "Kept as is", expired: "Expired" } as Record<string, string>,
     saveFailed: "Failed to save; please retry later.",
+    saveStatus: { saving: "Saving…", queued: "Waiting to save…", saved: "Saved", failed: "Failed to save; select again to retry." },
     loadFailed: "Failed to load preferences",
     retry: "Retry",
     loading: "Loading preferences…",
@@ -125,14 +127,105 @@ function proposalValueText(
   return mapped || text;
 }
 
+type DialogueSaveState = {
+  savingField: VirtualHumanDialogueSettingsField | null;
+  pendingValues: VirtualHumanDialogueSettingsUpdate;
+  saveStatuses: Partial<Record<VirtualHumanDialogueSettingsField, keyof typeof COPY.zh.saveStatus>>;
+  error: string | null;
+};
+type DialogueSaveQueue = {
+  getSnapshot: () => DialogueSaveState;
+  subscribe: (listener: () => void) => () => void;
+  save: <K extends VirtualHumanDialogueSettingsField>(field: K, value: VirtualHumanDialogueSettings[K], fallback: VirtualHumanDialogueSettings) => Promise<void>;
+};
+const dialogueSaveQueues = new WeakMap<QueryClient, Map<string, DialogueSaveQueue>>();
+
+/** Accepted changes outlive the panel. At most one pending value per field. */
+function dialogueSaveQueue(queryClient: QueryClient, agentId: string): DialogueSaveQueue {
+  let queues = dialogueSaveQueues.get(queryClient);
+  if (!queues) { queues = new Map(); dialogueSaveQueues.set(queryClient, queues); }
+  const existing = queues.get(agentId);
+  if (existing) return existing;
+  const registry = queues;
+  const queryKey = queryKeys.virtualHumanDialogueSettings(agentId);
+  const pending = new Map<VirtualHumanDialogueSettingsField, VirtualHumanDialogueSettings[VirtualHumanDialogueSettingsField]>();
+  const listeners = new Set<() => void>();
+  let unseenFailure = false;
+  let snapshot: DialogueSaveState = { savingField: null, pendingValues: {}, saveStatuses: {}, error: null };
+  const publish = (changes: Partial<DialogueSaveState>) => {
+    snapshot = { ...snapshot, ...changes };
+    listeners.forEach(listener => listener());
+  };
+  const release = () => {
+    // Keep StrictMode's immediate unsubscribe/resubscribe on the same queue.
+    queueMicrotask(() => {
+      if (!pending.size && !listeners.size && !unseenFailure && registry.get(agentId) === queue) registry.delete(agentId);
+    });
+  };
+  const queue: DialogueSaveQueue = {
+    getSnapshot: () => snapshot,
+    subscribe: listener => {
+      listeners.add(listener);
+      unseenFailure = false;
+      registry.set(agentId, queue);
+      return () => { listeners.delete(listener); release(); };
+    },
+    async save(field, value, fallback) {
+      const cached = queryClient.getQueryData<VirtualHumanDialogueSettings>(queryKey) ?? fallback;
+      if (snapshot.savingField === field || value === (pending.get(field) ?? cached[field])) return;
+      pending.set(field, value);
+      unseenFailure = false;
+      publish({ pendingValues: { ...snapshot.pendingValues, [field]: value }, saveStatuses: { ...snapshot.saveStatuses, [field]: "queued" }, error: null });
+      if (snapshot.savingField) return;
+      let confirmed = cached;
+      while (pending.size) {
+        const [nextField, nextValue] = pending.entries().next().value!;
+        publish({ savingField: nextField, saveStatuses: { ...snapshot.saveStatuses, [nextField]: "saving" } });
+        // PUT replaces all settings. A stale GET cannot replace this drain's successful baseline.
+        const payload: VirtualHumanDialogueSettingsUpdate = {
+          speakingInitiative: confirmed.speakingInitiative,
+          questionInitiative: confirmed.questionInitiative,
+          preferenceProposalMode: confirmed.preferenceProposalMode,
+          [nextField]: nextValue,
+        };
+        try {
+          confirmed = await updateVirtualHumanDialogueSettings(agentId, payload);
+          await queryClient.cancelQueries({ queryKey, exact: true });
+          queryClient.setQueryData(queryKey, confirmed);
+          publish({ saveStatuses: { ...snapshot.saveStatuses, [nextField]: "saved" } });
+        } catch (error) {
+          unseenFailure = !listeners.size;
+          publish({ error: error instanceof Error ? error.message : "", saveStatuses: { ...snapshot.saveStatuses, [nextField]: "failed" } });
+        } finally {
+          pending.delete(nextField);
+          const pendingValues = { ...snapshot.pendingValues };
+          delete pendingValues[nextField];
+          publish({ pendingValues, savingField: null });
+        }
+      }
+      release();
+    },
+  };
+  registry.set(agentId, queue);
+  return queue;
+}
+
 export function PersonalAssistantDialoguePreferences({ agentId, headerAction }: {
+  agentId: string;
+  headerAction?: ReactNode;
+}) {
+  return <DialoguePreferencesForAgent key={agentId} agentId={agentId} headerAction={headerAction} />;
+}
+
+function DialoguePreferencesForAgent({ agentId, headerAction }: {
   agentId: string;
   headerAction?: ReactNode;
 }) {
   const { lang } = useShellI18n();
   const copy = COPY[lang];
   const queryClient = useQueryClient();
-  const [savingField, setSavingField] = useState<VirtualHumanDialogueSettingsField | null>(null);
+  const [saves] = useState(() => dialogueSaveQueue(queryClient, agentId));
+  const { savingField, pendingValues, saveStatuses, error: saveError } = useSyncExternalStore(saves.subscribe, saves.getSnapshot);
   const [actionError, setActionError] = useState<string | null>(null);
   const [decidingKey, setDecidingKey] = useState<string | null>(null);
   const settings = useQuery({
@@ -151,23 +244,13 @@ export function PersonalAssistantDialoguePreferences({ agentId, headerAction }: 
   });
   const data = settings.data;
 
-  async function saveField<K extends VirtualHumanDialogueSettingsField>(
+  function saveField<K extends VirtualHumanDialogueSettingsField>(
     field: K,
     value: VirtualHumanDialogueSettings[K],
   ) {
-    if (!data || savingField || value === data[field]) return;
-    setSavingField(field);
+    if (!data) return;
     setActionError(null);
-    try {
-      const payload: VirtualHumanDialogueSettingsUpdate = {};
-      payload[field] = value;
-      await updateVirtualHumanDialogueSettings(agentId, payload);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.virtualHumanDialogueSettings(agentId) });
-    } catch (error) {
-      setActionError(error instanceof Error ? error.message : copy.saveFailed);
-    } finally {
-      setSavingField(null);
-    }
+    void saves.save(field, value, data);
   }
 
   async function decideProposal(proposalId: string, decision: "accept" | "reject") {
@@ -211,31 +294,34 @@ export function PersonalAssistantDialoguePreferences({ agentId, headerAction }: 
         {settings.error instanceof Error ? settings.error.message : ""}
       </VStateSurface> : null}
       {settings.isPending ? <VStateSurface density="compact" tone="loading" busy skeletonLines title={copy.loading} /> : null}
-      {actionError ? <p className={styles.error} role="alert">{actionError}</p> : null}
+      {actionError || saveError !== null ? <p className={styles.error} role="alert">{actionError ?? (saveError || copy.saveFailed)}</p> : null}
       {data ? <div className={styles.fields}>
         <label className={styles.field}>
           <span className={styles.fieldLabel}>{copy.speaking}</span>
-          <VStringSelect ariaLabel={copy.speaking} value={data.speakingInitiative}
+          <VStringSelect ariaLabel={copy.speaking} value={pendingValues.speakingInitiative ?? data.speakingInitiative}
             isDisabled={savingField === "speakingInitiative"}
             onValueChange={value => void saveField("speakingInitiative", value as VirtualHumanDialogueSettings["speakingInitiative"])}
             options={SPEAKING_OPTIONS.map(value => ({ value, label: copy.settingsOptions.speakingInitiative[value] }))} />
           <span className={styles.hint}>{copy.speakingHint}</span>
+          {saveStatuses.speakingInitiative ? <span className={styles.hint} role="status">{copy.saveStatus[saveStatuses.speakingInitiative]}</span> : null}
         </label>
         <label className={styles.field}>
           <span className={styles.fieldLabel}>{copy.question}</span>
-          <VStringSelect ariaLabel={copy.question} value={data.questionInitiative}
+          <VStringSelect ariaLabel={copy.question} value={pendingValues.questionInitiative ?? data.questionInitiative}
             isDisabled={savingField === "questionInitiative"}
             onValueChange={value => void saveField("questionInitiative", value as VirtualHumanDialogueSettings["questionInitiative"])}
             options={QUESTION_OPTIONS.map(value => ({ value, label: copy.settingsOptions.questionInitiative[value] }))} />
           <span className={styles.hint}>{copy.questionHint}</span>
+          {saveStatuses.questionInitiative ? <span className={styles.hint} role="status">{copy.saveStatus[saveStatuses.questionInitiative]}</span> : null}
         </label>
         <label className={styles.field}>
           <span className={styles.fieldLabel}>{copy.proposalMode}</span>
-          <VStringSelect ariaLabel={copy.proposalMode} value={data.preferenceProposalMode}
+          <VStringSelect ariaLabel={copy.proposalMode} value={pendingValues.preferenceProposalMode ?? data.preferenceProposalMode}
             isDisabled={savingField === "preferenceProposalMode"}
             onValueChange={value => void saveField("preferenceProposalMode", value as VirtualHumanDialogueSettings["preferenceProposalMode"])}
             options={PROPOSAL_MODE_OPTIONS.map(value => ({ value, label: copy.settingsOptions.preferenceProposalMode[value] }))} />
           <span className={styles.hint}>{copy.proposalModeHint}</span>
+          {saveStatuses.preferenceProposalMode ? <span className={styles.hint} role="status">{copy.saveStatus[saveStatuses.preferenceProposalMode]}</span> : null}
         </label>
       </div> : null}
       {proposals.data ? <>

@@ -15,6 +15,7 @@ import { usePersonalAssistant } from "./personalAssistant/usePersonalAssistant";
 import { useAssistantNarrowLayout } from "./personalAssistant/useAssistantNarrowLayout";
 import styles from "./personalAssistant/PersonalAssistant.styles";
 import { PersonalAssistantCharacterRail } from "./personalAssistant/PersonalAssistantCharacterRail";
+import { PersonalAssistantSettings } from "./personalAssistant/PersonalAssistantSettings";
 import { PersonalAssistantComputerPanel } from "./personalAssistant/PersonalAssistantComputerPanel";
 import computerStyles from "./personalAssistant/PersonalAssistantComputerPanel.styles";
 import { useShellI18n } from "../i18n/useShellI18n";
@@ -46,6 +47,7 @@ export function PersonalAssistantRoute() {
   const [rightTab, setRightTab] = useState(() => (dispatchesDeepLink ? "dispatches" : affairsDeepLink ? "affairs" : "overview"));
   const [computerOpen, setComputerOpen] = useState(false);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [affairsOpen, setAffairsOpen] = useState(affairsDeepLink);
   const [dispatchesOpen, setDispatchesOpen] = useState(dispatchesDeepLink);
   useEffect(() => {
@@ -78,6 +80,7 @@ export function PersonalAssistantRoute() {
       <VButton variant="secondary" isDisabled={!state.verified} onClick={() => setPreferencesOpen(true)}>{copy.dialoguePreferences}</VButton>
       <VButton variant="secondary" isDisabled={!state.verified} onClick={() => setAffairsOpen(true)}>{copy.affairs}</VButton>
       <VButton variant="secondary" isDisabled={!state.verified} onClick={() => setDispatchesOpen(true)}>{copy.dispatches}</VButton>
+      <VButton variant="secondary" isDisabled={!state.verified} onClick={() => setSettingsOpen(true)}>{copy.settings}</VButton>
       <VButton variant="secondary" isDisabled={!state.verified} isPending={desktopPending} onClick={() => void openDesktop()}>{copy.desktopMode}</VButton>
     </div> : null}
     {desktopErrorText ? <p className={styles.error} role="alert">{desktopErrorText}</p> : null}
@@ -104,6 +107,7 @@ export function PersonalAssistantRoute() {
             headerAction={<VIconButton variant="ghost" label={copy.collapseOverview}
               icon={<PanelRightClose size={14} />} onClick={() => setOverviewCollapsed(true)} />} /> },
           { id: "dispatches", label: copy.dispatches, content: <PersonalAssistantDispatches agentId={assistantAgentId}
+            onOpenSession={id => state.route.openSession(id, { surface: "chat", replace: false })}
             headerAction={<VIconButton variant="ghost" label={copy.collapseOverview}
               icon={<PanelRightClose size={14} />} onClick={() => setOverviewCollapsed(true)} />} /> },
         ]} /> : undefined} />
@@ -125,7 +129,9 @@ export function PersonalAssistantRoute() {
         focusRequestResult={focusRequestResult} onFocusRequestHandled={onAffairFocusHandled} /></div>
     </VDialog>
     <VDialog open={narrow && dispatchesOpen && state.verified} onOpenChange={setDispatchesOpen} title={copy.dispatches} size="sm">
-      <div className={styles.narrowOverview}><PersonalAssistantDispatches agentId={assistantAgentId} /></div>
+      <div className={styles.narrowOverview}><PersonalAssistantDispatches agentId={assistantAgentId}
+        onOpenSession={id => { setDispatchesOpen(false); state.route.openSession(id, { surface: "chat", replace: false }); }} /></div>
     </VDialog>
+    <PersonalAssistantSettings open={narrow && settingsOpen && state.verified} onOpenChange={setSettingsOpen} />
   </div>;
 }

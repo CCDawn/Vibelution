@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from threading import Event
+
+import pytest
 
 from core.agent_plugins.personal_affairs.service import (
     AFFAIR_KINDS,
@@ -128,6 +132,125 @@ class TestAffairLedgerCrud:
         assert root.name == "personal-affairs"
         assert (root / "affairs" / "items.jsonl").is_file()
         assert list((root / "affairs").glob(".vhl-*")) == []
+
+
+class TestAffairConcurrentWrites:
+    @pytest.mark.parametrize("first_action,second_action", [
+        ("complete", "due"), ("due", "add"), ("add", "complete"),
+    ])
+    def test_service_instances_preserve_concurrent_mutations(
+        self, tmp_path, monkeypatch, first_action, second_action,
+    ) -> None:
+        now = datetime(2026, 10, 19, 12, 0, tzinfo=UTC)
+        first = _make_service(tmp_path, now)
+        second = _make_service(tmp_path, now)
+        item_a = first.add_item("agent-a", kind="todo", title="A")
+        item_b = first.add_item("agent-a", kind="todo", title="B")
+        first_read, release_first, second_read, second_started = (Event() for _ in range(4))
+        read_first, read_second = first._rows, second._rows
+
+        def pause_first(agent_id):
+            rows = read_first(agent_id)
+            first_read.set()
+            assert release_first.wait(3)
+            return rows
+
+        def observe_second(agent_id):
+            rows = read_second(agent_id)
+            second_read.set()
+            return rows
+
+        def mutate(service, action):
+            if action == "add":
+                return service.add_item("agent-a", kind="goal", title="new")
+            if action == "due":
+                return service.set_due("agent-a", item_id=item_b["itemId"], due_at="2026-10-21")
+            return service.complete_item("agent-a", item_id=item_a["itemId"])
+
+        def run_second():
+            second_started.set()
+            return mutate(second, second_action)
+
+        monkeypatch.setattr(first, "_rows", pause_first)
+        monkeypatch.setattr(second, "_rows", observe_second)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first_result = pool.submit(mutate, first, first_action)
+            try:
+                assert first_read.wait(2)
+                second_result = pool.submit(run_second)
+                assert second_started.wait(2)
+                # Without a transaction the second writer reads the same snapshot
+                # and commits before the first writer, deterministically losing it.
+                if second_read.wait(0.2):
+                    second_result.result(timeout=2)
+            finally:
+                release_first.set()
+            first_result.result(timeout=2)
+            second_result.result(timeout=2)
+        rows = {row["itemId"]: row for row in read_first("agent-a")}
+        if "complete" in (first_action, second_action):
+            assert rows[item_a["itemId"]]["status"] == "done"
+        if "due" in (first_action, second_action):
+            assert rows[item_b["itemId"]]["dueAt"].startswith("2026-10-21")
+        if "add" in (first_action, second_action):
+            assert {row["title"] for row in rows.values()} == {"A", "B", "new"}
+
+    def test_unrelated_agent_can_write_while_another_ledger_is_busy(self, tmp_path, monkeypatch) -> None:
+        service = PersonalAffairsService(tmp_path)
+        other = PersonalAffairsService(tmp_path)
+        item = service.add_item("agent-a", kind="todo", title="A")
+        entered, release = Event(), Event()
+        read_rows = service._rows
+
+        def pause(agent_id):
+            rows = read_rows(agent_id)
+            entered.set()
+            assert release.wait(3)
+            return rows
+
+        monkeypatch.setattr(service, "_rows", pause)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            busy = pool.submit(service.complete_item, "agent-a", item_id=item["itemId"])
+            try:
+                assert entered.wait(2)
+                independent = pool.submit(other.add_item, "agent-b", kind="todo", title="B")
+                assert independent.result(timeout=2)["title"] == "B"
+            finally:
+                release.set()
+            busy.result(timeout=2)
+
+    @pytest.mark.parametrize("action", ["add", "complete", "due"])
+    def test_lock_timeout_leaves_ledger_unchanged(self, tmp_path, monkeypatch, action) -> None:
+        from core.agent_plugins.personal_affairs import service as module
+        from core.infrastructure.file_lock import cross_process_file_lock
+
+        service = PersonalAffairsService(tmp_path)
+        item = service.add_item("agent-a", kind="todo", title="A")
+        path = service.store._path("agent-a", "affairs/items.jsonl")
+        before = path.read_bytes()
+        entered, release = Event(), Event()
+
+        def hold():
+            with cross_process_file_lock(path):
+                entered.set()
+                assert release.wait(3)
+
+        monkeypatch.setattr(module, "cross_process_file_lock", lambda path: cross_process_file_lock(path, timeout=0.03))
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            holder = pool.submit(hold)
+            try:
+                assert entered.wait(2)
+                with pytest.raises(TimeoutError):
+                    if action == "add":
+                        service.add_item("agent-a", kind="goal", title="new")
+                    elif action == "due":
+                        service.set_due("agent-a", item_id=item["itemId"], due_at="2026-10-21")
+                    else:
+                        service.complete_item("agent-a", item_id=item["itemId"])
+                assert path.read_bytes() == before
+            finally:
+                release.set()
+            holder.result(timeout=2)
 
 
 class TestAffairProjection:

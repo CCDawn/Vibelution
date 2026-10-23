@@ -52,6 +52,7 @@ const list: PersonalAssistantDispatchList = {
 };
 
 let root: Root, container: HTMLDivElement, client: QueryClient;
+const openSession = vi.fn();
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(fetchPersonalAssistantDispatches).mockResolvedValue(list);
@@ -62,12 +63,29 @@ afterEach(async () => { await act(async () => root.unmount()); container.remove(
 async function settle() { await act(async () => new Promise(resolve => setTimeout(resolve, 25))); }
 async function render() {
   await act(async () => root.render(<QueryClientProvider client={client}>
-    <PersonalAssistantDispatches agentId="assistant-agent" />
+    <PersonalAssistantDispatches agentId="assistant-agent" onOpenSession={openSession} />
   </QueryClientProvider>));
   await settle(); await settle();
 }
 
 describe("personal assistant dispatches panel", () => {
+  it("opens the original execution session without expanding receipts or resending", async () => {
+    await render();
+    const open = container.querySelector<HTMLButtonElement>('button[aria-label="打开执行会话: 写作助手"]');
+    expect(open).not.toBeNull();
+    await act(async () => open!.click());
+    expect(openSession).toHaveBeenCalledExactlyOnceWith("session-writer");
+    expect(container.textContent).not.toContain("周报摘要已完成");
+  });
+
+  it("does not offer navigation when the dispatch has no target session", async () => {
+    vi.mocked(fetchPersonalAssistantDispatches).mockResolvedValue({
+      ...list, dispatches: [{ ...list.dispatches[0], targetSessionId: "" }], unmatchedReceipts: [],
+    });
+    await render();
+    expect(container.querySelector('button[aria-label^="打开执行会话"]')).toBeNull();
+  });
+
   it.each([
     ["blocked", "遇到阻塞"], ["failed", "对方报告失败"], ["completed", "对方报告完成"], ["cancelled", "已取消"],
   ] as const)("renders authoritative task state %s separately from delivery", async (taskStatus, label) => {

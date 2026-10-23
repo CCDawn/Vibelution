@@ -2,7 +2,7 @@ const styles = {
   sessionsHeaderRow: "flex shrink-0 items-center justify-between gap-2",
   overviewHeaderActions: "ml-auto flex shrink-0 items-center gap-1",
   root: "flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden text-[var(--fg-primary)]",
-  narrowActions: "flex min-w-0 shrink-0 items-center justify-end gap-2 px-2 py-1",
+  narrowActions: "flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-2 px-2 py-1",
   actions: "flex items-center gap-2",
   main: "flex h-full min-h-0 min-w-0 flex-col overflow-hidden",
   split: "min-h-0 flex-1",
