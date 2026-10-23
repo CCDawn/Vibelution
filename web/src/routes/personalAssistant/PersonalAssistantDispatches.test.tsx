@@ -68,12 +68,27 @@ async function render() {
 }
 
 describe("personal assistant dispatches panel", () => {
+  it.each([
+    ["blocked", "遇到阻塞"], ["failed", "对方报告失败"], ["completed", "对方报告完成"], ["cancelled", "已取消"],
+  ] as const)("renders authoritative task state %s separately from delivery", async (taskStatus, label) => {
+    vi.mocked(fetchPersonalAssistantDispatches).mockResolvedValue({
+      ...list, dispatches: [{ ...list.dispatches[1], taskStatus }], unmatchedReceipts: [],
+    });
+    await render();
+    expect(container.textContent).toContain("对方已接收");
+    expect(container.textContent).toContain(label);
+    expect(container.textContent).not.toContain("对方已处理");
+  });
+
   it("renders sent dispatches with status, receipt count and an expandable receipt list", async () => {
     await render();
     expect(container.textContent).toContain("写作助手");
     expect(container.textContent).toContain("把周报整理成摘要");
-    expect(container.textContent).toContain("待对方处理");
-    expect(container.textContent).toContain("对方已处理");
+    expect(container.textContent).toContain("待对方接收");
+    expect(container.textContent).toContain("对方已接收");
+    expect(container.textContent).toContain("收到回复，结果待确认");
+    expect(container.textContent).toContain("进行中");
+    expect(container.textContent).not.toContain("对方报告完成");
     expect(container.textContent).toContain("2 条回执");
     expect(container.textContent).not.toContain("周报摘要已完成");
     const expand = container.querySelector('button[aria-label="回执: 写作助手"]') as HTMLButtonElement;
