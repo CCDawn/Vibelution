@@ -865,6 +865,13 @@ class ToolExecutor:
         return probe
 
     def execute(self, tool_name: str, tool_args: dict, *, tool_call_id: str = "") -> tuple:
+        """Execute one tool without conflating notification waits with physical execution."""
+        from core.infrastructure.tool_execution_trace import trace_tool_execution
+
+        with trace_tool_execution(tool_name, tool_call_id) as trace:
+            return self._execute(tool_name, tool_args, tool_call_id=tool_call_id, trace=trace)
+
+    def _execute(self, tool_name: str, tool_args: dict, *, tool_call_id: str, trace: Any) -> tuple:
         """
         执行工具
 
@@ -896,6 +903,9 @@ class ToolExecutor:
         except Exception:
             runtime_identity = {}
 
+        trace.bind(**runtime_identity)
+        effective_timeout = self._resolve_timeout(tool_name, tool_args)
+
         def publish_tool_event(event_name: str, payload: dict[str, Any]) -> None:
             event_payload = {
                 **runtime_identity,
@@ -903,7 +913,11 @@ class ToolExecutor:
                 **payload,
             }
             event_payload["callId"] = call_id
-            self._event_bus.publish(event_name, event_payload)
+            trace.bind(toolCallId=call_id)
+            phase = str(payload.get("lifecyclePhase") or event_name)
+            with trace.phase("notify." + phase, timeoutSeconds=effective_timeout,
+                             timeoutScope="tool_function", eventName=event_name):
+                self._event_bus.publish(event_name, event_payload)
 
         started_at = time.monotonic()
 
@@ -1177,9 +1191,17 @@ class ToolExecutor:
 
             with memory_tool_call_scope(call_id):
                 tool_context = copy_context()
-            future = executor.submit(tool_context.run, func, **call_args)
+            def invoke_tool():
+                with trace.phase("tool_function", timeoutSeconds=timeout, timeoutScope="tool_function"):
+                    result = func(**call_args)
+                    trace.record("tool.execution.function_returned", timeoutSeconds=timeout)
+                    return result
+
+            future = executor.submit(tool_context.run, invoke_tool)
             register_current_tool_future(future, tool_name=tool_name)
             deadline = time.monotonic() + max(float(timeout), 0.1)
+            trace.record("tool.execution.future_submitted", timeoutSeconds=timeout,
+                         timeoutScope="tool_function")
             stop_observed_after_completion = False
             while True:
                 cancel_reason = self._current_cancel_reason(cancel_checker)

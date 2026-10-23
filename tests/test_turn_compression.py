@@ -601,7 +601,8 @@ def test_ineffective_compression_still_returns_compressor_output_and_consumes_sl
     assert skipped[0]["kwargs"]["fields"]["guardReason"] == "no_compressible_history"
 
 
-def test_emergency_breaks_non_chat_but_not_chat_mode():
+@pytest.mark.parametrize("iteration", [2, 31, 39])
+def test_emergency_breaks_non_chat_but_not_chat_mode(iteration):
     original = [AIMessage(content="long-context-message")]
     compressed = [AIMessage(content="x")]
     strategy = _FakeStrategy(CompressionLevel.EMERGENCY)
@@ -613,7 +614,7 @@ def test_emergency_breaks_non_chat_but_not_chat_mode():
         extra={},
         mode=AgentMode.CHAT,
         compression_strategy=strategy,
-        iteration=2,
+        iteration=iteration,
     )
     evolution = _run(
         messages=original,
@@ -622,7 +623,7 @@ def test_emergency_breaks_non_chat_but_not_chat_mode():
         extra={},
         mode=AgentMode.SELF_EVOLUTION,
         compression_strategy=strategy,
-        iteration=2,
+        iteration=iteration,
     )
 
     assert chat[1] is False
@@ -634,7 +635,9 @@ def test_emergency_breaks_non_chat_but_not_chat_mode():
     assert evolution[5] == "emergency_compression"
 
 
-def test_iteration_over_thirty_breaks_even_in_chat():
+@pytest.mark.parametrize("iteration", [30, 31, 39, 1001])
+@pytest.mark.parametrize("mode", [AgentMode.CHAT, AgentMode.SELF_EVOLUTION])
+def test_standard_compression_does_not_own_turn_iteration_limit(iteration, mode):
     original = [AIMessage(content="long-context-message")]
     compressed = [AIMessage(content="x")]
 
@@ -643,14 +646,16 @@ def test_iteration_over_thirty_breaks_even_in_chat():
         compressor=_FakeCompressor(compressed),
         config=_feature_config(),
         extra={},
-        mode=AgentMode.CHAT,
-        iteration=31,
+        mode=mode,
+        iteration=iteration,
     )
 
     assert result[1] is False
+    assert result[0] == compressed
+    assert result[2] is True
     assert result[3] == 1
-    assert result[4] == 31
-    assert result[5] == "iteration_limit_reached"
+    assert result[4] == iteration
+    assert result[5] == ""
 
 
 def test_compress_coerces_iteration_gap_json_binding_and_rejects_character_split():
@@ -983,10 +988,8 @@ def test_ledger_fallback_failure_records_session_ledger_failed(monkeypatch, tmp_
     assert "secret compression summary" not in str(extras["events"])
 
 
-def test_iteration_limit_stop_reason_says_what_happened_not_budget():
-    """回归：10-23 事故——iteration>30 借 should_break 返回，调用方误标为
-    context_budget_exhausted（压缩明明成功）。新契约下 stop_reason 专属，
-    UI 文案与日志都说「迭代上限」而非「预算」。"""
+def test_high_iteration_compression_does_not_report_a_turn_stop():
+    """压缩成功后继续当前轮，轮次上限由主循环统一控制。"""
     original = [AIMessage(content="long-context-message")]
     compressed = [AIMessage(content="x")]
     extras = {}
@@ -1002,60 +1005,15 @@ def test_iteration_limit_stop_reason_says_what_happened_not_budget():
 
     assert result[1] is False
     assert result[2] is True
-    assert result[5] == "iteration_limit_reached"
+    assert result[5] == ""
     warn_logs = [message for level, message in extras["ui"].logs if level == "WARN"]
-    assert any("已超上限" in message and "迭代 39" in message for message in warn_logs)
+    assert not any("已超上限" in message for message in warn_logs)
     assert not any("安全输入预算" in message for message in warn_logs)
     assert not any("提前结束当前轮次" in message for message in warn_logs)
 
 
-def test_iteration_at_limit_boundary_keeps_running():
-    original = [AIMessage(content="long-context-message")]
-    compressed = [AIMessage(content="x")]
-
-    result = _run(
-        messages=original,
-        compressor=_FakeCompressor(compressed),
-        config=_feature_config(),
-        extra={},
-        mode=AgentMode.CHAT,
-        iteration=30,
-    )
-
-    assert result[1] is False
-    assert result[5] == ""
-
-
-def test_emergency_chat_reports_iteration_limit_instead_of_emergency():
-    original = [AIMessage(content="long-context-message")]
-    compressed = [AIMessage(content="x")]
-
-    low_iter = _run(
-        messages=original,
-        compressor=_FakeCompressor(compressed),
-        config=_feature_config(),
-        extra={},
-        mode=AgentMode.CHAT,
-        compression_strategy=_FakeStrategy(CompressionLevel.EMERGENCY),
-        iteration=2,
-    )
-    over_limit = _run(
-        messages=original,
-        compressor=_FakeCompressor(compressed),
-        config=_feature_config(),
-        extra={},
-        mode=AgentMode.CHAT,
-        compression_strategy=_FakeStrategy(CompressionLevel.EMERGENCY),
-        iteration=31,
-    )
-
-    assert low_iter[5] == ""
-    assert over_limit[5] == "iteration_limit_reached"
-
-
 def test_fail_closed_budget_paths_keep_budget_stop_reason(monkeypatch, tmp_path):
-    """retention/预算 fail-closed 路径的 stop_reason 必须仍是预算语义，且优先
-    于迭代上限分支：iteration=39 时真实预算失败不得被「迭代上限」文案吞掉。"""
+    """iteration=39 时持久化失败仍须 fail-closed，不能因为允许继续而放行。"""
     from core.orchestration.turn_compression import STOP_REASON_CONTEXT_BUDGET_EXHAUSTED
 
     monkeypatch.setattr(

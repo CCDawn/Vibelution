@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from core.logging import debug as _debug_logger
+from core.infrastructure.tool_execution_trace import record_tool_process_event
 from core.infrastructure.codex_sandbox.environment import (
     sandbox_process_environment as _adapter_sandbox_process_environment,
     sandbox_temp_root as _adapter_sandbox_temp_root,
@@ -104,6 +105,12 @@ def _log_outcome(
     started_at: float | None = None,
     exit_code: int | None = None,
 ) -> None:
+    record_tool_process_event(
+        "tool.execution.process_outcome", commandHash=command_hash,
+        processStatus=status, reason=reason, exitCode=exit_code,
+        durationMs=(max(0, int((time.monotonic() - started_at) * 1000))
+                    if started_at is not None else None),
+    )
     fields = [
         f"commandHash={command_hash}",
         f"status={status}",
@@ -854,6 +861,10 @@ def execute_codex_sandbox_command(
             **_sandbox_popen_kwargs(platform=_host_platform()),
         )
         deadline = started_at + timeout_seconds
+        record_tool_process_event(
+            "tool.execution.process_started", commandHash=command_hash,
+            processId=getattr(process, "pid", None), route=route_label, timeoutSeconds=timeout_seconds,
+        )
         while True:
             cancellation_reason = ""
             if callable(_cancel_checker):
@@ -897,6 +908,10 @@ def execute_codex_sandbox_command(
             try:
                 stdout, stderr = process.communicate(
                     timeout=min(_POLL_INTERVAL_SECONDS, remaining)
+                )
+                record_tool_process_event(
+                    "tool.execution.process_exit_observed", commandHash=command_hash,
+                    processId=getattr(process, "pid", None), exitCode=process.returncode,
                 )
                 result = _format_output(
                     str(stdout or ""),
