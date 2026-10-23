@@ -3,7 +3,7 @@ const styles = {
   header: "flex h-[52px] shrink-0 items-center justify-between gap-2 border-b border-vui-border-subtle px-5 max-[1279px]:hidden",
   title: "text-vui-2xs [line-height:var(--tw-leading,var(--vui-line-slot-base))] font-semibold",
   detail: "text-vui-micro-10 [line-height:var(--vui-line-readable)] text-[var(--fg-secondary)]",
-  body: "grid min-h-0 flex-1 content-start gap-5 overflow-auto p-5",
+  body: "grid min-h-0 flex-1 content-start gap-5 overflow-auto [scrollbar-gutter:stable] p-5",
   footer: "flex shrink-0 flex-wrap gap-2 border-t border-vui-border-subtle p-4",
   row1: "flex min-w-0 items-center justify-between gap-2",
   heading1: "text-vui-xs [line-height:var(--tw-leading,var(--vui-line-slot-sm))] font-semibold text-[var(--fg-primary)]",

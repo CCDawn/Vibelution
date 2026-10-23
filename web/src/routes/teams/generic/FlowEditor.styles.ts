@@ -7,7 +7,7 @@ const styles = {
   pendingTitle: "!my-2 !w-1/2",
   pendingInstruction: "!mt-4 !w-5/6",
   pendingMeta: "!mt-5 !w-1/3",
-  part1: "h-full min-h-0 overflow-auto border-t border-[var(--vui-border-subtle)] bg-[var(--vui-surface-raised)] bg-[radial-gradient(var(--vui-border-subtle)_0.8px,transparent_0.8px)] bg-[length:18px_18px]",
+  part1: "h-full min-h-0 overflow-auto [scrollbar-gutter:stable] border-t border-[var(--vui-border-subtle)] bg-[var(--vui-surface-raised)] bg-[radial-gradient(var(--vui-border-subtle)_0.8px,transparent_0.8px)] bg-[length:18px_18px]",
   part2: "mx-auto max-w-[600px] px-7 pb-6 pt-6 max-sm:px-3",
   part3: "relative flex gap-4 pb-6 max-sm:gap-2.5",
   part4: "pointer-events-none absolute bottom-[-14px] left-[13px] top-11 w-px bg-[var(--vui-border-subtle)]",
