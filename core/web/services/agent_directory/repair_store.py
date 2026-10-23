@@ -881,35 +881,60 @@ def _is_challenge_cup_agent_config_authority(agent: dict[str, Any]) -> bool:
     )
 
 
-# 每回合 chat turn 都会 ensure 一次 agent workspace；目录结构稳定后这是
-# 纯重复的 realpath + stat 风暴。命中缓存后只做 root+子目录的 is_dir 校验
-# （外部删除任一子目录即回落全量 ensure 重建），首次全量结果已含
-# agents-root 校验；resolve 结果随缓存复用，不再每回合 realpath。
+# Remember successful preparation, but resolve and validate the current target
+# before reuse so scoped roots and retargeted links cannot reuse an old Path.
+# One enumeration verifies the required children, including external deletion.
 _AGENT_WORKSPACE_ENSURE_CACHE: dict[str, Path] = {}
 
 
-def _agent_workspace_cache_entry_valid(s: Any, cached: Path) -> bool:
-    if not cached.is_dir():
-        return False
-    return all((cached / subdir).is_dir() for subdir in s.AGENT_WORKSPACE_SUBDIRS)
+def _missing_agent_workspace_subdirs(s: Any, path: Path) -> list[str] | None:
+    required = {os.path.normcase(name): name for name in s.AGENT_WORKSPACE_SUBDIRS}
+    try:
+        # On Windows DirEntry carries directory attributes from enumeration;
+        # checking every child through Path.is_dir repeats filesystem probes.
+        with os.scandir(path) as entries:
+            for entry in entries:
+                key = os.path.normcase(entry.name)
+                if key in required and entry.is_dir(follow_symlinks=True):
+                    del required[key]
+                    if not required:
+                        break
+    except OSError:
+        # Enumeration may be denied while attribute reads are allowed. Keep
+        # the previous per-path behavior in that case, including its errors.
+        if not path.is_dir():
+            return None
+        return [name for name in s.AGENT_WORKSPACE_SUBDIRS if not (path / name).is_dir()]
+    return list(required.values())
 
 
-def _ensure_agent_workspace(path_value: str, *, ensure_shared: bool = True) -> Path:
+def _ensure_agent_workspace(
+    path_value: str, *, ensure_shared: bool = True, agents_root: Path | None = None,
+) -> Path:
     s = _service()
     raw = str(path_value or "").strip()
     cached = _AGENT_WORKSPACE_ENSURE_CACHE.get(raw)
-    if cached is not None and _agent_workspace_cache_entry_valid(s, cached):
-        return cached
-    path = s._resolve_project_path(path_value)
-    agents_root = s._workspace_path("agents").resolve()
+    parts = Path(raw).parts
+    if (
+        agents_root is not None and len(parts) >= 2
+        and parts[0].lower() == "workspace"
+        and os.path.normcase(parts[1]) == os.path.normcase("agents")
+    ):
+        path = agents_root.joinpath(*parts[2:]).resolve()
+    else:
+        path = s._resolve_project_path(path_value)
+    if agents_root is None:
+        agents_root = s._workspace_path("agents").resolve()
     if not path.is_relative_to(agents_root):
         raise s.AgentDirectoryError(f"Invalid agent workspace path: {path}")
-    if not path.is_dir():
+    missing = _missing_agent_workspace_subdirs(s, path)
+    if cached == path and missing == []:
+        return path
+    if missing is None:
         path.mkdir(parents=True, exist_ok=True)
-    for subdir in s.AGENT_WORKSPACE_SUBDIRS:
-        target = path / subdir
-        if not target.is_dir():
-            target.mkdir(parents=True, exist_ok=True)
+        missing = list(s.AGENT_WORKSPACE_SUBDIRS)
+    for subdir in missing:
+        (path / subdir).mkdir(parents=True, exist_ok=True)
     if ensure_shared:
         s.ensure_agent_shared_workspace()
     _AGENT_WORKSPACE_ENSURE_CACHE[raw] = path
@@ -2525,6 +2550,12 @@ def repair_agent_directory() -> dict[str, Any]:
             )
             else None
         )
+        # A formal repair uses one routing snapshot under the registry lock.
+        # Keep developer sandbox seeding on its existing per-path route.
+        agents_root = (
+            None if s._developer_sandbox_module().is_developer_mode_enabled()
+            else s._workspace_path("agents").resolve()
+        )
         for agent in state.get("agents") or []:
             if not isinstance(agent, dict):
                 continue
@@ -2571,6 +2602,7 @@ def repair_agent_directory() -> dict[str, Any]:
                 s._ensure_agent_workspace(
                     str(agent.get("workspacePath") or "").strip(),
                     ensure_shared=False,
+                    agents_root=agents_root,
                 )
                 s._refresh_agent_onboarding_metadata(
                     state,
@@ -2721,7 +2753,7 @@ def repair_agent_directory() -> dict[str, Any]:
                 agent["workspacePath"] = workspace_path
                 changed = True
                 territory_changed = True
-            s._ensure_agent_workspace(workspace_path, ensure_shared=False)
+            s._ensure_agent_workspace(workspace_path, ensure_shared=False, agents_root=agents_root)
             memory_policy_id = str(agent.get("memoryPolicyId") or "").strip() or f"memory-{agent.get('agentId')}"
             if str(agent.get("memoryPolicyId") or "").strip() != memory_policy_id:
                 agent["memoryPolicyId"] = memory_policy_id

@@ -185,6 +185,100 @@ def test_ensure_agent_workspace_only_creates_missing_directories(tmp_path, monke
     assert missing.is_dir()
 
 
+def test_workspace_ensure_uses_bound_root_without_repeating_routing(tmp_path, monkeypatch):
+    root = (tmp_path / "agents").resolve()
+
+    def unexpected_resolution(*args, **kwargs):
+        pytest.fail("A bound formal repair must not repeat workspace routing")
+
+    monkeypatch.setattr(agent_directory_service, "_resolve_project_path", unexpected_resolution)
+    monkeypatch.setattr(agent_directory_service, "_workspace_path", unexpected_resolution)
+    result = agent_directory_service._ensure_agent_workspace(
+        "workspace/agents/bounded", ensure_shared=False, agents_root=root,
+    )
+    assert result == root / "bounded"
+    assert all((result / name).is_dir() for name in agent_directory_service.AGENT_WORKSPACE_SUBDIRS)
+    with pytest.raises(agent_directory_service.AgentDirectoryError, match="Invalid agent workspace path"):
+        agent_directory_service._ensure_agent_workspace(
+            "workspace/agents/../escape", ensure_shared=False, agents_root=root,
+        )
+    assert not (tmp_path / "escape").exists()
+
+
+def test_workspace_ensure_cache_does_not_cross_bound_roots(tmp_path):
+    first_root = (tmp_path / "first" / "agents").resolve()
+    second_root = (tmp_path / "second" / "agents").resolve()
+    first = agent_directory_service._ensure_agent_workspace(
+        "workspace/agents/same-agent", ensure_shared=False, agents_root=first_root,
+    )
+    second = agent_directory_service._ensure_agent_workspace(
+        "workspace/agents/same-agent", ensure_shared=False, agents_root=second_root,
+    )
+    assert first == first_root / "same-agent"
+    assert second == second_root / "same-agent"
+    assert second != first
+    assert second.is_dir()
+
+
+def test_workspace_ensure_revalidates_retargeted_link_before_cache_reuse(tmp_path):
+    root = (tmp_path / "agents").resolve()
+    inside = root / "inside"
+    outside = tmp_path / "outside"
+    inside.mkdir(parents=True)
+    outside.mkdir()
+    link = root / "linked-agent"
+    try:
+        link.symlink_to(inside, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"Directory symlinks unavailable: {error}")
+    agent_directory_service._ensure_agent_workspace(
+        "workspace/agents/linked-agent", ensure_shared=False, agents_root=root,
+    )
+    link.unlink()
+    link.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(agent_directory_service.AgentDirectoryError, match="Invalid agent workspace path"):
+        agent_directory_service._ensure_agent_workspace(
+            "workspace/agents/linked-agent", ensure_shared=False, agents_root=root,
+        )
+    assert list(outside.iterdir()) == []
+
+
+def test_workspace_ensure_falls_back_when_enumeration_is_denied(tmp_path, monkeypatch):
+    from core.web.services.agent_directory import repair_store
+
+    root = (tmp_path / "agents").resolve()
+    target = agent_directory_service._ensure_agent_workspace(
+        "workspace/agents/enumeration-denied", ensure_shared=False, agents_root=root,
+    )
+
+    def denied_scan(*args, **kwargs):
+        raise PermissionError("enumeration denied")
+
+    def unexpected_mkdir(*args, **kwargs):
+        pytest.fail("Attribute-readable existing directories must not require writes")
+
+    monkeypatch.setattr(repair_store.os, "scandir", denied_scan)
+    monkeypatch.setattr(Path, "mkdir", unexpected_mkdir)
+    assert agent_directory_service._ensure_agent_workspace(
+        "workspace/agents/enumeration-denied", ensure_shared=False, agents_root=root,
+    ) == target
+
+
+def test_workspace_ensure_rejects_file_in_place_of_required_directory(tmp_path):
+    root = (tmp_path / "agents").resolve()
+    target = agent_directory_service._ensure_agent_workspace(
+        "workspace/agents/file-collision", ensure_shared=False, agents_root=root,
+    )
+    child = target / agent_directory_service.AGENT_WORKSPACE_SUBDIRS[0]
+    child.rmdir()
+    child.write_text("occupied", encoding="utf-8")
+    with pytest.raises(FileExistsError):
+        agent_directory_service._ensure_agent_workspace(
+            "workspace/agents/file-collision", ensure_shared=False, agents_root=root,
+        )
+    assert child.read_text(encoding="utf-8") == "occupied"
+
+
 def test_memory_policy_normalize_defaults_enabled_and_keeps_explicit_false(
     tmp_path, monkeypatch
 ):
