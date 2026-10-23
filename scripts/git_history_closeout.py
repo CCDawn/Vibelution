@@ -1,13 +1,15 @@
 """Integrate an old-line task through a private, independently validated DAG.
 
-The source checkout is observation-only. All commits, junctions and disposable
-worktrees belong to this adapter, beneath the repository's common directory.
+The source checkout is observation-only. Disposable candidate checkouts live in
+a repository-scoped system temp directory; receipts and evidence stay in the
+repository's common directory. All candidate resources belong to this adapter.
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import os
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Any
@@ -36,9 +38,20 @@ def _git(root: Path, *args: str, input_text: str | None = None,
     return result.stdout.strip()
 
 
+def _common_dir(root: Path) -> Path:
+    return Path(_git(root, "rev-parse", "--path-format=absolute", "--git-common-dir")).resolve()
+
+
 def _home(root: Path) -> Path:
-    common = Path(_git(root, "rev-parse", "--path-format=absolute", "--git-common-dir"))
-    return common.resolve() / "vibelution-cache" / "history-bridge"
+    return _common_dir(root) / "vibelution-cache" / "history-bridge"
+
+
+def _candidate_home(root: Path) -> Path:
+    # Source tools (including Vite's default fs.deny) reject paths below .git.
+    # Hash the common-dir identity so every worktree shares one short temp root.
+    identity = os.path.normcase(str(_common_dir(root))).encode("utf-8")
+    return (Path(tempfile.gettempdir()).resolve() / "vibelution-history-candidates"
+            / hashlib.sha256(identity).hexdigest()[:16])
 
 
 def _atomic(path: Path, payload: dict[str, Any]) -> None:
@@ -165,14 +178,24 @@ def _manifest_binding(path: Path, candidate, head: str, main_sha: str, claim_id:
 def _cleanup_candidate(context, candidate_root: Path, candidate_branch: str, head: str) -> None:
     """Remove only our clean merged candidate, without force or traversal."""
     closeout = _closeout()
-    candidates = (_home(context.task_root) / "candidates").resolve()
-    if (candidate_root.resolve().parent != candidates
-            or not candidate_branch.startswith("codex/history-")
-            or candidate_root.name != candidate_branch.removeprefix("codex/history-")):
+    identifier = candidate_branch.removeprefix("codex/history-")
+    try:
+        valid_id = uuid.UUID(hex=identifier).hex == identifier
+    except ValueError:
+        valid_id = False
+    # Old receipts remain recoverable in place; never relocate their checkouts.
+    allowed_parents = {_candidate_home(context.task_root), _home(context.task_root) / "candidates"}
+    resolved = candidate_root.resolve()
+    if (not valid_id or candidate_branch != f"codex/history-{identifier}"
+            or resolved.parent not in allowed_parents or resolved.name != identifier
+            or closeout._is_link_or_junction(candidate_root)):
         raise closeout.ManagedCloseoutError("history_unsafe_candidate_cleanup")
+    candidate_root = resolved
     if not gate.is_ancestor(context.main_root, head, "HEAD"):
         raise closeout.ManagedCloseoutError("history_candidate_not_merged")
     if candidate_root.exists():
+        if _common_dir(candidate_root) != _common_dir(context.main_root):
+            raise closeout.ManagedCloseoutError("history_unsafe_candidate_cleanup")
         if _git(candidate_root, "symbolic-ref", "--short", "HEAD") != candidate_branch:
             raise closeout.ManagedCloseoutError("history_candidate_changed")
         if _git(candidate_root, "rev-parse", "HEAD") != head or _git(candidate_root, "status", "--porcelain"):
@@ -358,7 +381,7 @@ def run_if_needed(context, *, claim_id: str, agent_id: str, base: str = "main",
         head = _candidate_head(context.task_root, main_sha, translated.head)
         identifier = uuid.uuid4().hex
         candidate_branch = f"codex/history-{identifier}"
-        candidate_root = _home(context.task_root) / "candidates" / identifier
+        candidate_root = _candidate_home(context.task_root) / identifier
         candidate_root.parent.mkdir(parents=True, exist_ok=True)
         _git(context.main_root, "worktree", "add", "-b", candidate_branch, str(candidate_root), head)
         candidate = closeout.CloseoutContext(context.main_root, candidate_root, candidate_branch)

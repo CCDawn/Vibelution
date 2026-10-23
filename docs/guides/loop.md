@@ -105,6 +105,8 @@ powershell -NoProfile -File .\scripts\doctor.ps1
 
 已授权的署名历史清理以 Git common-dir 中逐对象校验的映射收据连接旧任务。旧任务继续保留自己的分支、索引和未提交文件；从根 `main` 调当前 `scripts/task_closeout.py --task-worktree <旧任务路径> --retain-worktree`，由私有候选翻译旧父线并合并最新 `main` 后重新验证。原任务的旧 manifest 不能复用到候选，冲突或验证期间任一基线移动都停止合入。原任务资源默认保留，只清理本次创建的私有候选；禁止用 replace refs、放宽原始署名检查或直接把旧任务 tree 接到新 main 来绕过兼容验证。
 
+候选源码 checkout 位于系统临时目录的 `vibelution-history-candidates/<Git common-dir 身份哈希>/<uuid>`，避免源码落在 `.git` 下而被 Vite 等工具的默认文件保护拒绝；mapping、receipt、复用证据与验证日志仍写入 Git common-dir。已有 common-dir `vibelution-cache/history-bridge/candidates/<uuid>` 收据继续原位恢复和清理，不移动候选或原任务。清理仅接受这两个已知位置中 UUID 与分支匹配、同一仓库、HEAD 未变、干净且已合入的候选。
+
 Config 真源：`%USERPROFILE%\Documents\Vibelution\config\config.toml`
 Override：`VIBELUTION_CONFIG_PATH` / `VIBELUTION_CONFIG_HOME`
 
