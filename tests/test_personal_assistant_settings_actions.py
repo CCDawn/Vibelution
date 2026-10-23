@@ -72,6 +72,23 @@ def test_settings_update_persists_verified_preferences_and_preserves_provider(op
     assert "publicConfig" not in result
 
 
+@pytest.mark.parametrize("key", ["display_name", "bio"])
+def test_clear_native_empty_profile_value_after_temporary_update(operator_config, key):
+    before = read_config(operator_config)
+    result = actions.settings_update([update("user_profile", key, "")])
+    assert result["ok"] and result["verified"]
+    expected = read_config(operator_config)
+    assert expected["user_profile"][key] == ""
+    assert actions.settings_update([update("user_profile", key, "Temporary")])["verified"]
+    assert actions.settings_update([update("user_profile", key, "")])["verified"]
+    assert read_config(operator_config) == expected
+    assert expected["llm"] == before["llm"]
+    option = next(x for x in actions.settings_catalog()["settings"] if x["path"] == "user_profile." + key)
+    assert option["value"] == "" and option["allowEmpty"]
+    assert not actions.settings_update([update("user_profile", key, ""), update("user_profile", key, "again")])["ok"]
+    assert read_config(operator_config) == expected
+
+
 @pytest.mark.parametrize("bad", [
     update("llm", "providers.pixel_relay.base_url", "https://evil.test"),
     update("ui", "credential_ref", "secret"),

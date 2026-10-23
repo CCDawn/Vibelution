@@ -107,8 +107,14 @@ def _validate_updates(updates: Any, path: Path) -> list[tuple[tuple[str, ...], s
         else:
             if key not in _PREFERENCE_KEYS.get(section, set()):
                 raise ValueError("not a preference")
-            # Keep the previously reviewed preference types and ranges.
-            table, leaf, value = managed._validate_one_update(section, key, value)
+            if section == "user_profile" and key in {"display_name", "bio"} and isinstance(value, str) and not value.strip():
+                # Both native settings default to empty. Clearing a temporary
+                # value must be as usable as setting it; keep avatar enum and
+                # nonempty text validation in the existing validator below.
+                table, leaf, value = (section,), key, ""
+            else:
+                # Keep the previously reviewed preference types and ranges.
+                table, leaf, value = managed._validate_one_update(section, key, value)
             if table == ("user_profile",) and leaf == "avatar_preset" and value not in _avatar_options():
                 raise ValueError("unknown avatar preset")
             if leaf == "preferences" and any(not isinstance(v, str) for v in item["value"]):
@@ -192,8 +198,8 @@ def settings_catalog() -> dict:
         path = _config_path()
         config = _read_config(path)
         specs = [
-            ("user_profile", "display_name", "", {"maxLength": 120}),
-            ("user_profile", "bio", "", {"maxLength": 2000}),
+            ("user_profile", "display_name", "", {"maxLength": 120, "allowEmpty": True}),
+            ("user_profile", "bio", "", {"maxLength": 2000, "allowEmpty": True}),
             ("user_profile", "preferences", [], {"maxItems": 50, "maxItemLength": 200}),
             ("user_profile", "avatar_preset", "default", {"options": _avatar_options()}),
             ("ui", "language", "zh", {"options": sorted(managed._UI_LANGUAGE_VALUES)}),
