@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TeamFlow, TeamFlowRun } from "./types/genericTeamWorkflow";
 
 const transport = vi.hoisted(() => vi.fn());
-vi.mock("./client", () => ({ fetchJson: transport }));
+vi.mock("./client", () => ({ fetchJson: transport, fetchJsonWithTimeout: transport }));
 import {
   commandTeamFlowRun,
   getTeamFlowRecoveryBinding,
@@ -18,7 +18,7 @@ import {
 const flow: TeamFlow = { id: "flow-1", name: "My flow", description: "", fields: [], steps: [], revision: 3, updatedAt: "" };
 
 describe("team-scoped user workflow transport", () => {
-  beforeEach(() => transport.mockReset());
+  beforeEach(() => { transport.mockReset(); });
   it("preserves an exact Session source without adding execution fields", async () => {
     const supervisor: TeamFlow = { ...flow, steps: [{ id: "source", label: "Session task", kind: "session",
       owner: "", instruction: "", sessionSource: { sessionId: "session-1", turnId: "turn-1", agentId: "agent-1" } }] };
@@ -109,5 +109,18 @@ describe("team-scoped user workflow transport", () => {
   it("rejects empty team scope before transport", () => {
     expect(() => listTeamFlows("")).toThrow("请先选择团队");
     expect(transport).not.toHaveBeenCalled();
+  });
+  it("bounds management writes and reports uncertain timeouts without resending", async () => {
+    transport.mockRejectedValue(new DOMException("timed out", "TimeoutError"));
+    const failure = await startTeamFlowRun("team-a", flow, {}, "stable-submit").catch(error => error);
+    expect(failure.message).toContain("结果尚未确认");
+    expect(failure.name).toBe("TeamFlowWriteOutcomeUnknownError");
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(transport.mock.calls[0][1].timeoutMs).toBe(60_000);
+  });
+  it("bounds and cancels the authoritative flow readback", async () => {
+    const signal = new AbortController().signal;
+    await listTeamFlows("team-a", signal);
+    expect(transport.mock.calls[0]).toEqual(["/api/teams/team-a/workflows", { signal, timeoutMs: 10_000 }]);
   });
 });

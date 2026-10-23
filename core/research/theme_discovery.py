@@ -14,6 +14,7 @@ from .agent_runner import (
     LLMResearchAgentRunner,
     ResearchAgentRunner,
     _profile_from_agent_instance,
+    _research_directory_snapshot,
     _workspace_project_root,
 )
 from .agent_templates import RESEARCH_PROMPT_FILES, ensure_research_prompt_defaults
@@ -1169,11 +1170,10 @@ class ResearchThemeDiscoveryService:
         project_root = _workspace_project_root(workspace)
         agents: list[dict[str, Any]] = []
         seen_keys: set[str] = set()
-        for agent in agent_directory_service.list_agents(
-            include_archived=False,
-            detail="full",
-            project_root=project_root,
-        ):
+        # 每研究轮该解析被 _model_profile 与 _research_prompt_profile 各调一次，
+        # 逐次 list_agents(detail="full") 是秒级全量投影（GIL 挤兑源之一）；
+        # 走 agent_runner 的每根注册表签名快照收敛为同轮共享一次。
+        for agent in _research_directory_snapshot(project_root):
             metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
             if str(metadata.get("challengeCupTeamId") or "").strip():
                 continue
@@ -1187,7 +1187,7 @@ class ResearchThemeDiscoveryService:
                         f"Research AgentDirectory binding is duplicated: {key}"
                     )
                 seen_keys.add(key)
-                agents.append(_profile_from_agent_instance(key, agent))
+                agents.append(_profile_from_agent_instance(key, dict(agent)))
         agents.sort(key=lambda item: str(item.get("key") or ""))
         return {
             "configPath": str(agent_directory_service.registry_path(project_root=project_root)),

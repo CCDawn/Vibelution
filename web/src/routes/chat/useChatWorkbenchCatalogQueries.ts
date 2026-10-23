@@ -41,6 +41,7 @@ import { isSessionCreatePreserved, mergePreservedCreatedSessions } from "../sess
 import { filterOutTombstonedConversations, filterOutTombstonedSessions } from "../sessionDeleteTombstone";
 import { isTempSessionId } from "../sessionOptimisticIds";
 import { fetchSessionDetailWindow } from "./chatSessionDetailHelpers";
+import { useChatStartupSessionPrefetch } from "./useChatStartupSessionPrefetch";
 
 /**
  * The unified catalog poll keeps only the group-room half of the conversation
@@ -106,6 +107,12 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
     groupStreamConnected,
     sessionDirectoryEnabled = true,
   } = input;
+
+  useChatStartupSessionPrefetch({
+    queryClient,
+    enabled: sessionDirectoryEnabled && !input.requestedRoomId && !activeGroupRoomId && !projectBusActive,
+    requestedSessionId: input.requestedSessionId,
+  });
 
   const runtimeQuery = useQuery({
     queryKey: queryKeys.runtimeSummary(),

@@ -18,6 +18,12 @@ vi.mock("@tanstack/react-query", async (original) => ({
   ...await original<typeof import("@tanstack/react-query")>(),
   useMutation: (options: unknown) => ({ options }),
 }));
+// This callback-only fixture has no mounted query provider. Pending subscriptions
+// are exercised with the real provider in chatOperationIsolation.test.tsx.
+vi.mock("./useChatScopedMutationPending", async original => ({
+  ...await original<typeof import("./useChatScopedMutationPending")>(),
+  useChatScopedMutationPending: () => ({ pendingIds: new Set<string>(), isPendingFor: () => false }),
+}));
 vi.mock("../../app/userActionTelemetry", () => ({
   startUserAction: () => ({ succeeded: vi.fn(), failed: vi.fn(), blocked: vi.fn() }),
 }));

@@ -14,6 +14,7 @@ from core.web.route_bootstrap import (
     is_bootstrap_route_path,
     is_early_ready_path,
     is_startup_route_path,
+    request_feature_routes,
     routes_not_ready_response,
     wait_for_web_routes,
 )
@@ -32,6 +33,10 @@ class WaitForWebRoutesMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         app = request.app
+        # Existing clients request this optional summary after their primary
+        # startup data. It can also wake features when no feature URL is used.
+        if request.method in {"GET", "HEAD"} and path == "/api/runtime/summary":
+            request_feature_routes(app)
         if bool(getattr(app.state, "web_shell_ready", False)) and path != "/api" and not path.startswith("/api/"):
             return await call_next(request)
         admission_started = time.perf_counter()

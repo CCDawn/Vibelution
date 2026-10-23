@@ -776,6 +776,8 @@ export type VirtualHumanCompanion = {
   snapshot: VirtualHumanSnapshot;
 };
 
+export type VirtualHumanCompanionBinding = Pick<VirtualHumanCompanion, "agentId" | "directSessionId">;
+
 export type VirtualHumanCompanionActivity = Pick<
   VirtualHumanCompanion,
   "agentId" | "displayName" | "directSessionId" | "sessionActivity"

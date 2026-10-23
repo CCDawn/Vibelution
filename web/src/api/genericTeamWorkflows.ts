@@ -1,4 +1,4 @@
-import { fetchJson } from "./client";
+import { fetchJson, fetchJsonWithTimeout } from "./client";
 import type {
   TeamFlow,
   TeamFlowArtifact,
@@ -11,6 +11,18 @@ import type {
 } from "./types/genericTeamWorkflow";
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
+// These requests admit or update a run; execution itself remains asynchronous.
+async function writeWorkflow<T>(path: string, init: RequestInit): Promise<T> {
+  try { return await fetchJsonWithTimeout<T>(path, { ...init, timeoutMs: 60_000 }); }
+  catch (error) {
+    if (typeof error === "object" && error !== null && "name" in error && error.name === "TimeoutError") {
+      const uncertain = new Error("操作超时，结果尚未确认。请重新读取并核对状态，不要重复提交。");
+      uncertain.name = "TeamFlowWriteOutcomeUnknownError";
+      throw uncertain;
+    }
+    throw error;
+  }
+}
 
 export const teamFlowKeys = {
   flows: (teamId: string) => ["teams", teamId, "user-workflows"] as const,
@@ -24,11 +36,11 @@ function teamPath(teamId: string) {
 }
 
 export function listTeamFlows(teamId: string, signal?: AbortSignal) {
-  return fetchJson<{ schemaVersion: number; teamId: string; flows: TeamFlow[] }>(`${teamPath(teamId)}/workflows`, { signal });
+  return fetchJsonWithTimeout<{ schemaVersion: number; teamId: string; flows: TeamFlow[] }>(`${teamPath(teamId)}/workflows`, { signal, timeoutMs: 10_000 });
 }
 
 export function saveTeamFlow(teamId: string, flow: TeamFlow) {
-  return fetchJson<TeamFlow>(`${teamPath(teamId)}/workflows/${encodeURIComponent(flow.id)}`, {
+  return writeWorkflow<TeamFlow>(`${teamPath(teamId)}/workflows/${encodeURIComponent(flow.id)}`, {
     method: "PUT", headers: JSON_HEADERS, body: JSON.stringify({ flow, expectedRevision: flow.revision }),
   });
 }
@@ -44,14 +56,14 @@ export function startTeamFlowRun(
   idempotencyKey: string,
   localIntegration?: TeamFlowLocalIntegrationRequest,
 ) {
-  return fetchJson<TeamFlowRun>(`${teamPath(teamId)}/workflows/${encodeURIComponent(flow.id)}/runs`, {
+  return writeWorkflow<TeamFlowRun>(`${teamPath(teamId)}/workflows/${encodeURIComponent(flow.id)}/runs`, {
     method: "POST", headers: JSON_HEADERS,
     body: JSON.stringify({ values, expectedRevision: flow.revision, idempotencyKey, ...(localIntegration === undefined ? {} : { localIntegration }) }),
   });
 }
 
 export function commandTeamFlowRun(teamId: string, run: TeamFlowRun, action: TeamFlowCommand, evidenceRef?: string) {
-  return fetchJson<TeamFlowRun>(`${teamPath(teamId)}/workflow-runs/${encodeURIComponent(run.id)}/commands`, {
+  return writeWorkflow<TeamFlowRun>(`${teamPath(teamId)}/workflow-runs/${encodeURIComponent(run.id)}/commands`, {
     method: "POST", headers: JSON_HEADERS,
     body: JSON.stringify({ action, expectedRevision: run.revision, ...(evidenceRef === undefined ? {} : { evidenceRef }) }),
   });
