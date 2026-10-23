@@ -66,6 +66,13 @@ type NotificationFactoryInput = {
 export type HumanAttentionWindowBridge = {
   /** Deliver to the live pet/assistant surface; false when it is closed or not ready. */
   sendToAssistantWindow(channel: string, payload: unknown): boolean;
+  /**
+   * Whether the assistant surface is actually on screen. An in-window card on a
+   * hidden or minimized surface is never seen, so delivery has to fall through
+   * to the system toast instead of stopping at channel 1. Optional for
+   * backwards compatibility: absent means "assume visible".
+   */
+  isAssistantWindowVisible?(): boolean;
   sendToWorkbench(channel: string, payload: unknown): boolean;
   focusWorkbench(): Promise<unknown>;
   setWorkbenchAttention(options: {
@@ -352,7 +359,12 @@ export function createHumanAttentionNotificationService(
       }
 
       // Channel 1: the assistant surface renders the attention card in-window.
-      if (options.windowBridge.sendToAssistantWindow(options.openedChannel, { ...notification })) {
+      // Only a surface the user can actually see counts as delivery: a hidden or
+      // minimized assistant window would swallow the card, and the notification
+      // would never reach the user while still consuming its dedup slot.
+      const assistantVisible = options.windowBridge.isAssistantWindowVisible?.() ?? true;
+      if (assistantVisible
+        && options.windowBridge.sendToAssistantWindow(options.openedChannel, { ...notification })) {
         const result: DesktopHumanAttentionNotifyResult = { delivered: "assistant_window" };
         rememberDelivery(notification.id, { delivered: "assistant_window" });
         recordOutcome(notification, result, false);
