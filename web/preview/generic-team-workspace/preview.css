@@ -9,12 +9,7 @@
 html, body, #root { height: 100%; margin: 0; }
 
 /* This stylesheet belongs to the standalone preview entry. */
-html[data-theme="light"] {
-  --vui-surface-rail: #f6f7f9;
-  --vui-surface-row: #f0f2f5;
-  --vui-surface-base: #fafbfc;
-  --vui-border-subtle: #e4e7ec;
-}
+[data-vui="checkbox"] { --accent-cool: #256c58; }
 @media (max-width: 639px) {
   [data-vui="canvas-workbench-responsive-controls"] {
     border: 0;
@@ -24,23 +19,13 @@ html[data-theme="light"] {
   }
   [data-vui="canvas-workbench-responsive-controls"] button {
     min-height: 44px;
-    border-color: var(--vui-border-subtle);
+    border-color: #d7e3da;
     background: #fff;
     padding-inline: 12px;
-    color: var(--fg-secondary);
+    color: #456653;
   }
   [data-vui="button"], [role="tab"], [role="combobox"], [data-vui="checkbox"] {
-    min-height: 44px !important;
+    min-height: 44px;
   }
   [data-vui="input"], [data-vui="textarea"] { font-size: 16px !important; }
-}
-
-@media (max-width:639px) {
-  [data-preview-topbar] {height:56px;}
-  [data-preview-topbar] [role="tablist"] {height:48px !important;}
-  [data-preview-topbar] [role="tab"] {padding-inline:10px !important;}
-}
-
-@media (max-width:1279px) {
-  [role="dialog"] [data-preview-inspector-header] {display:none;}
 }

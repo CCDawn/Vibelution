@@ -23,6 +23,10 @@
 
 | 组件 | 设计说明 |
 | --- | --- |
+| GenericWorkflowWorkspace | [product/team-workspace.md](./product/team-workspace.md#genericworkflowworkspace) |
+| WorkbenchShell | [product/team-workspace.md](./product/team-workspace.md#workbenchshell) |
+| WorkflowStart | [product/team-workspace.md](./product/team-workspace.md#workflowstart) |
+| FlowEditor | [product/team-workspace.md](./product/team-workspace.md#floweditor) |
 | 团队左栏管理 | [product/team-directory.md](./product/team-directory.md) |
 | `SupervisedConversationWorkspace` | [product/evolution.md](./product/evolution.md#supervisedconversationworkspace) |
 | `SelfEvolutionConversationWorkspace` | [product/evolution.md](./product/evolution.md#selfevolutionconversationworkspace) |

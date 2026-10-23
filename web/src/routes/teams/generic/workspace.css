@@ -7,7 +7,7 @@
     gap: 8px;
   }
   .generic-team-workspace [data-vui="canvas-workbench-responsive-controls"] button {
-    min-height: 44px;
+    min-height: 44px !important;
     border-color: var(--vui-border-subtle);
     background: var(--vui-surface-panel);
     padding-inline: 12px;

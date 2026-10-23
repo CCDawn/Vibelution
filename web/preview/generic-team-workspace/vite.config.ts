@@ -19,7 +19,7 @@ export default defineConfig({
     },
   }],
   resolve: { dedupe: ["react", "react-dom"], alias: { "@radix-ui/react-compose-refs": fileURLToPath(new URL("../../src/vendor/radixComposeRefs.ts", import.meta.url)) } },
-  cacheDir: join(tmpdir(), "vibelution-compact-team-preview", "vite-cache"),
+  cacheDir: join(tmpdir(), "vibelution-generic-team-preview", "vite-cache"),
   server: { host: "127.0.0.1", port: 5237, strictPort: true, open: false },
-  build: { outDir: join(tmpdir(), "vibelution-compact-team-preview", "dist"), emptyOutDir: false, rollupOptions: { input: fileURLToPath(new URL("./index.html", import.meta.url)) } },
+  build: { outDir: join(tmpdir(), "vibelution-generic-team-preview", "dist"), emptyOutDir: false, rollupOptions: { input: fileURLToPath(new URL("./index.html", import.meta.url)) } },
 });

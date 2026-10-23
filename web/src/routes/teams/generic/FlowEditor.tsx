@@ -1,112 +1,48 @@
 import styles from "./FlowEditor.styles";
-import { useEffect, useId, useRef, useState } from "react";
-import { Bot, CheckCircle2, Circle, Clock3, FileCheck2, Inbox, LoaderCircle, PauseCircle, Plus, TriangleAlert, UserRound } from "lucide-react";
-import { VButton } from "../../../components/vui";
+import { ArrowDown, Bot, CheckCircle2, Circle, Clock3, FileCheck2, Inbox, LoaderCircle, PauseCircle, TriangleAlert, UserRound } from "lucide-react";
+import { VNativeButton } from "../../../components/vui";
 import { KIND_LABEL, memberName, type Flow, type Run, type StepKind, type WorkflowMember } from "./workflowModel";
-type Props = {
-    flow: Flow;
-    selectedId: string;
-    mode: "design" | "run";
-    run?: Run;
-    members: WorkflowMember[];
-    onSelect: (id: string) => void;
-    onAdd: () => void;
-};
-const NODE_HEIGHT = 184;
-const COLUMN_GAP = 40;
-const ROW_GAP = 44;
-const INSET = 20;
+
+type Props = { flow: Flow; selectedId: string; mode: "design" | "run"; run?: Run; members: WorkflowMember[]; onSelect: (id: string) => void; onAdd: () => void };
 const kindIcons: Record<StepKind, typeof Bot> = { input: Inbox, agent: Bot, human: UserRound, output: FileCheck2, research: TriangleAlert, session: TriangleAlert };
 const states = {
-    configured: { label: "已配置", icon: CheckCircle2, color: styles.text1 },
-    draft: { label: "待配置", icon: Circle, color: styles.text2 },
-    pending: { label: "未开始", icon: Circle, color: styles.text2 },
-    completed: { label: "已完成", icon: CheckCircle2, color: styles.text3 },
-    running: { label: "执行中", icon: LoaderCircle, color: styles.text3 },
-    waiting: { label: "等待人工确认", icon: Clock3, color: styles.text4 },
-    failed: { label: "执行失败", icon: TriangleAlert, color: styles.text5 },
-    stopped: { label: "已停止", icon: PauseCircle, color: styles.text6 },
+  configured: { label: "已配置", icon: CheckCircle2, color: "text-[var(--fg-tertiary)]" },
+  draft: { label: "待配置", icon: Circle, color: "text-[var(--fg-tertiary)]" },
+  pending: { label: "未开始", icon: Circle, color: "text-[var(--fg-tertiary)]" },
+  completed: { label: "已完成", icon: CheckCircle2, color: "text-[var(--state-success)]" },
+  running: { label: "执行中", icon: LoaderCircle, color: "text-[var(--accent-cool)]" },
+  waiting: { label: "等待人工确认", icon: Clock3, color: "text-[var(--vui-status-warning-fg)]" },
+  failed: { label: "执行失败", icon: TriangleAlert, color: "text-[var(--vui-status-danger-fg)]" },
+  stopped: { label: "已停止", icon: PauseCircle, color: "text-[var(--fg-tertiary)]" },
 };
 function nodeState(index: number, mode: Props["mode"], instruction: string, run?: Run): keyof typeof states {
-    if (mode === "design")
-        return instruction.trim() ? "configured" : "draft";
-    if (!run)
-        return "pending";
-    if (run.status === "completed" || index < run.current)
-        return "completed";
-    if (index > run.current)
-        return "pending";
-    return run.status;
+  if (mode === "design") return instruction.trim() ? "configured" : "draft";
+  if (!run) return "pending";
+  if (run.status === "completed" || index < run.current) return "completed";
+  if (index > run.current) return "pending";
+  return run.status;
 }
-export function FlowEditor({ flow, selectedId, mode, run, members, onSelect, onAdd }: Props) {
-    const ownerName = (id: string) => memberName(id, members);
-    const viewport = useRef<HTMLDivElement>(null);
-    const [width, setWidth] = useState(0);
-    const arrowId = `flow-arrow-${useId().replace(/:/g, "")}`;
-    useEffect(() => {
-        const element = viewport.current;
-        if (!element)
-            return;
-        const observer = new ResizeObserver(entries => setWidth(entries[0]?.contentRect.width ?? 0));
-        observer.observe(element);
-        return () => observer.disconnect();
-    }, []);
-    const columns = width < 540 ? 1 : width < 900 ? 2 : 3;
-    const cardWidth = Math.max(0, (width - INSET * 2 - COLUMN_GAP * (columns - 1)) / columns);
-    const rows = Math.ceil(flow.steps.length / columns);
-    const height = rows ? INSET * 2 + rows * NODE_HEIGHT + (rows - 1) * ROW_GAP : 0;
-    // Alternate row direction so every connector joins consecutive steps at adjacent ports.
-    const positions = flow.steps.map((_, index) => {
-        const row = Math.floor(index / columns);
-        const column = row % 2 ? columns - 1 - index % columns : index % columns;
-        return { x: INSET + column * (cardWidth + COLUMN_GAP), y: INSET + row * (NODE_HEIGHT + ROW_GAP), row };
-    });
-    const selected = selectedId || flow.steps[0]?.id;
-    return <div className={styles.column1} data-team-flow-editor="true">
-    <div className={styles.row1}>
-      <div ref={viewport} className={styles.control1}>
-        {width > 0 && <div className={styles.control2} style={{ height }}>
-          <svg className={styles.control3} width={width} height={height} aria-hidden="true">
-            <defs><marker id={arrowId} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--vui-workflow-edge)"/></marker></defs>
-            {positions.slice(0, -1).map((from, index) => {
-                const to = positions[index + 1];
-                const sameRow = from.row === to.row;
-                const forward = to.x > from.x;
-                const x1 = sameRow ? from.x + (forward ? cardWidth : 0) : from.x + cardWidth / 2;
-                const y1 = from.y + (sameRow ? NODE_HEIGHT / 2 : NODE_HEIGHT);
-                const x2 = sameRow ? to.x + (forward ? 0 : cardWidth) : to.x + cardWidth / 2;
-                const y2 = to.y + (sameRow ? NODE_HEIGHT / 2 : 0);
-                return <path key={flow.steps[index].id} d={`M ${x1} ${y1} L ${x2} ${y2}`} fill="none" stroke="var(--vui-workflow-edge)" strokeWidth="1.6" markerEnd={`url(#${arrowId})`}/>;
-            })}
-          </svg>
-          {flow.steps.map((step, index) => {
-                const stateKey = nodeState(index, mode, step.instruction, run);
-                const state = states[stateKey];
-                const KindIcon = kindIcons[step.kind];
-                const StatusIcon = state.icon;
-                const isSelected = selected === step.id;
-                return <div key={step.id} className={styles.control4} style={{ left: positions[index].x, top: positions[index].y, width: cardWidth, height: NODE_HEIGHT }}>
-              <VButton contentLayout="plain" onClick={() => onSelect(step.id)} aria-pressed={isSelected} aria-label={`${index + 1}. ${step.label}，${ownerName(step.owner)}，${state.label}`} className={[styles.column2, isSelected ? styles.control5 : styles.control6].filter(Boolean).join(" ")}>
-                <span className={styles.row2}>
-                  <span className={styles.caption1}><span className={styles.row3}><KindIcon size={16} aria-hidden="true"/></span><span className={styles.control7}>{KIND_LABEL[step.kind]}</span></span>
-                  <span className={styles.caption2}>{String(index + 1).padStart(2, "0")}</span>
-                </span>
-                <span className={styles.heading1} title={step.label}>{step.label || "未命名步骤"}</span>
-                <span className={styles.text7}>{step.instruction || "添加执行要求，告诉成员这一步需要完成什么。"}</span>
-                <span className={styles.caption3}>
-                  <span className={styles.row4}><UserRound size={12} className={styles.control8} aria-hidden="true"/><span className={styles.control7} title={ownerName(step.owner)}> {ownerName(step.owner) || "未分配"}</span></span>
-                  <span className={[styles.row5, state.color].filter(Boolean).join(" ")}><StatusIcon size={12} className={stateKey === "running" ? styles.control9 : ""} aria-hidden="true"/>{state.label}</span>
-                </span>
-              </VButton>
-            </div>;
-            })}
-        </div>}
-      </div>
-      <div className={styles.control10}>
-        {flow.steps.length === 0 && <p className={styles.text8}>还没有步骤，从添加第一个步骤开始。</p>}
-        {mode === "design" && <VButton icon={<Plus size={15}/>} onClick={onAdd} className={styles.surface1}>添加步骤</VButton>}
-        <p className={styles.caption4}>{mode === "design" ? "按箭头顺序执行 · 点击步骤进行配置" : "点击步骤查看本次执行详情"}</p>
-      </div>
-    </div>
+export function FlowEditor({ flow, selectedId, mode, run, members, onSelect }: Props) {
+  const ownerName = (id: string) => memberName(id, members);
+  return <div data-team-flow-editor className={styles.part1}>
+    <ol className={styles.part2}>
+      {flow.steps.map((step,index) => {
+        const stateKey = nodeState(index,mode,step.instruction,run);
+        const state = states[stateKey];
+        const Icon = kindIcons[step.kind];
+        const Status = state.icon;
+        const selected = (selectedId || flow.steps[0]?.id) === step.id;
+        return <li key={step.id} className={styles.part3}>
+          {index < flow.steps.length - 1 && <span aria-hidden="true" className={styles.part4}><ArrowDown size={12} className={styles.part5}/></span>}
+          <span className={"relative mt-4 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border bg-[var(--vui-surface-chat)] font-mono text-vui-micro-11 " + (selected ? "border-[var(--accent-cool)] text-[var(--accent-cool)]" : "border-[var(--vui-border-subtle)] text-[var(--fg-tertiary)]")}>{String(index+1).padStart(2,"0")}</span>
+          <VNativeButton aria-pressed={selected} aria-label={(index+1)+". "+step.label+"，"+ownerName(step.owner)+"，"+state.label} onClick={() => onSelect(step.id)} className={"relative flex min-w-0 flex-1 flex-col gap-0 rounded-xl border bg-[var(--vui-surface-chat)] px-4 py-3 text-left shadow-[0_2px_4px_#00000003] transition-colors " + (selected ? "border-[var(--accent-cool)] ring-2 ring-[var(--vui-status-info-bg)]" : "border-[var(--vui-border-subtle)] hover:border-[var(--fg-tertiary)]")}>
+            <span className={styles.part6}><span className={"flex h-7 w-7 shrink-0 items-center justify-center rounded-lg " + (step.kind === "human" ? "bg-[var(--vui-status-warning-bg)] text-[var(--vui-status-warning-fg)]" : selected ? "bg-[var(--vui-status-info-bg)] text-[var(--accent-cool)]" : "bg-[var(--vui-surface-row)] text-[var(--fg-secondary)]")}><Icon size={15}/></span><span className={styles.part7} title={step.label}>{step.label || "未命名步骤"}</span><span className={styles.part8}>{KIND_LABEL[step.kind]}</span></span>
+            <span className={styles.part9}>{step.instruction || "点击配置这一步的执行要求。"}</span>
+            <span className={styles.part10}><span className={styles.part11}><UserRound size={11}/>{ownerName(step.owner) || "未分配"}</span><span className={"flex items-center gap-1 "+state.color}><Status size={11} className={stateKey === "running" ? "animate-spin motion-reduce:animate-none" : ""}/>{state.label}</span></span>
+          </VNativeButton>
+        </li>;
+      })}
+      <li className={styles.part12}><span className={styles.part13}><span className={styles.part14}/></span><span className={styles.part15}>{mode === "design" ? "交付完成后结束本次流程" : "运行记录保留在当前预览中"}</span></li>
+    </ol>
   </div>;
 }

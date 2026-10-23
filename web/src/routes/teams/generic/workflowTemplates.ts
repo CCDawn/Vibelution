@@ -50,3 +50,8 @@ export function createWorkflow(name: string, template: string, members: Workflow
   return flow;
 }
 export const workflowTemplateOptions = [{ id: "blank", label: "空白流程" }, ...EXAMPLE_FLOWS.map(flow => ({ id: flow.id, label: `${flow.name}模板` }))];
+
+export const workflowTemplatePreviews = EXAMPLE_FLOWS.map(flow => ({
+  id: flow.id, name: flow.name, description: flow.description,
+  stepCount: flow.steps.length, stepLabels: flow.steps.map(step => step.label),
+}));

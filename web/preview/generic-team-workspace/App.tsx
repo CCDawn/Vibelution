@@ -1,10 +1,10 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { ArrowDown, ArrowUp, Check, FileText, Play, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, FileText, Play, Plus, Save, Trash2 } from "lucide-react";
 import { VButton, VCheckbox, VDialog, VInput, VSelect, VTextarea } from "../../src/components/vui";
 import { WorkbenchShell } from "./WorkbenchShell";
 import { copyFlow, EXAMPLE_FLOWS, KIND_LABEL, MEMBERS, ownerName, type Flow, type InputField, type Run, type Step, type StepKind } from "./fixtures";
 
-const primary = "!border-[var(--accent-cool)] !bg-[var(--accent-cool)] !text-white";
+const primary = "!border-[#256c58] !bg-[#256c58] !text-white hover:!bg-[#1d5848]";
 const fieldClass = "!h-9 !text-sm";
 const muted = "text-[var(--fg-secondary)]";
 const statusLabel = { running: "运行中", waiting: "等待确认", completed: "已完成", failed: "执行失败", stopped: "已停止" } as const;
@@ -17,9 +17,9 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 
 export function App() {
   const [flows, setFlows] = useState<Flow[]>(() => EXAMPLE_FLOWS.map(copyFlow));
-  const [flowId, setFlowId] = useState(() => new URLSearchParams(window.location.search).get("scene") === "empty" ? "" : "analysis");
+  const [flowId, setFlowId] = useState("analysis");
   const [mode, setMode] = useState<"design" | "run">("design");
-  const [selectedId, setSelectedId] = useState("collect");
+  const [selectedId, setSelectedId] = useState("");
   const [dirtyIds, setDirtyIds] = useState<string[]>([]);
   const [runs, setRuns] = useState<Run[]>([]);
   const [runId, setRunId] = useState<string | null>(null);
@@ -108,7 +108,7 @@ export function App() {
     if (scene === "empty") { setFlowId(""); setRunId(null); return; }
     const current = flow ?? flows[0]; if (!current) return;
     setFlowId(current.id);
-    if (scene === "design") { setMode("design"); setSelectedId(current.steps.find(item => item.kind === "agent")?.id || current.steps[0]?.id || ""); setRunId(null); return; }
+    if (scene === "design") { setMode("design"); setSelectedId(""); return; }
     const status = scene === "waiting" ? "waiting" : scene === "failed" ? "failed" : "completed";
     const currentIndex = status === "waiting" ? current.steps.findIndex(item => item.kind === "human") : status === "failed" ? Math.min(2, current.steps.length - 1) : current.steps.length;
     if (currentIndex < 0) { setNotice("这条流程没有人工确认步骤，可以在设计流程中添加。"); return; }
@@ -118,10 +118,11 @@ export function App() {
   }
 
   const inspector = displayedFlow && <div className="flex h-full min-h-0 flex-col">
-    <div data-preview-inspector-header className="flex h-[52px] shrink-0 items-center justify-between gap-2 border-b border-[var(--vui-border-subtle)] px-5"><h2 className="text-xs font-semibold">{mode === "design" ? "节点配置" : "运行详情"}</h2><span className="text-[10px] text-[var(--fg-tertiary)]">{mode === "design" ? step ? KIND_LABEL[step.kind] : "流程配置" : run ? statusLabel[run.status] : "准备运行"}</span></div>
+    <div className="border-b border-black/5 px-5 py-4"><div className={`mb-1 text-xs ${muted}`}>{mode === "design" ? "节点配置" : "运行详情"}</div><h2 className="text-base font-semibold">{mode === "design" ? step?.label ?? "流程配置" : run ? statusLabel[run.status] : "准备运行"}</h2></div>
     <div className="grid min-h-0 flex-1 content-start gap-5 overflow-auto p-5">
       {mode === "design" && step ? <>
         <Field label="步骤名称"><VInput aria-label="步骤名称" value={step.label} onChange={event => editStep({ label: event.target.value })} className={fieldClass} /></Field>
+        <div className="flex items-center gap-2 text-xs"><span className={`rounded-md bg-slate-100 px-2 py-1 ${muted}`}>{KIND_LABEL[step.kind]}</span></div>
         {step.kind === "input" ? <>
           <SectionTitle extra={<VButton variant="ghost" onClick={addField} icon={<Plus size={14} />}>添加输入</VButton>}>运行时收集</SectionTitle>
           {displayedFlow.fields.length === 0 && <p className={`text-xs leading-6 ${muted}`}>可以直接运行，也可以添加这条流程需要的信息。</p>}
@@ -134,7 +135,7 @@ export function App() {
           </div>)}
         </> : <>
           {step.kind !== "human" && <Field label="负责成员"><VSelect aria-label="负责成员" selectedKey={step.owner} onSelectionChange={key => editStep({ owner: String(key) })} options={MEMBERS.map(item => ({ id: item.id, label: item.name }))} /></Field>}
-          <Field label={step.kind === "human" ? "确认说明" : "执行要求"}><VTextarea aria-label="步骤要求" value={step.instruction} rows={5} onChange={event => editStep({ instruction: event.target.value })} className="!min-h-[152px] !resize-y !text-sm !leading-6" /></Field>
+          <Field label={step.kind === "human" ? "确认说明" : "执行要求"}><VTextarea aria-label="步骤要求" value={step.instruction} rows={5} onChange={event => editStep({ instruction: event.target.value })} className="!text-sm leading-6" /></Field>
           <p className={`text-xs leading-6 ${muted}`}>{step.kind === "human" ? "流程到达这里时暂停，等待用户确认后继续。" : "此步骤使用本次运行的输入，以及前序步骤的结果。"}</p>
         </>}
       </> : mode === "run" && run ? <>
@@ -145,7 +146,7 @@ export function App() {
       </> : <><p className={`text-sm leading-7 ${muted}`}>开始一次运行，填写这条流程定义的输入。</p><div className="grid gap-2">{displayedFlow.fields.map(item => <div key={item.id} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-3 text-sm"><span>{item.label}</span><span className={`text-xs ${muted}`}>{item.required ? "必填" : "选填"}</span></div>)}</div></>}
     </div>
     <div className="flex shrink-0 flex-wrap gap-2 border-t border-black/5 p-4">
-      {mode === "design" ? <><span className="flex flex-1 items-center text-[11px] text-[var(--fg-tertiary)]">{dirty ? "更改尚未保存" : "流程已保存"}</span>{step && step.kind !== "input" && step.kind !== "output" && <><VButton aria-label="上移步骤" onClick={() => moveStep(-1)} isIconOnly><ArrowUp size={14} /></VButton><VButton aria-label="下移步骤" onClick={() => moveStep(1)} isIconOnly><ArrowDown size={14} /></VButton><VButton aria-label="删除步骤" onClick={() => { editFlow(current => ({ ...current, steps: current.steps.filter(item => item.id !== selectedId) })); setSelectedId("input"); }} isIconOnly><Trash2 size={14} /></VButton></>}</> : run?.status === "waiting" ? <><VButton density="normal" variant="primary" className={`${primary} flex-1`} onClick={confirmRun} icon={<Check size={15} />}>确认并继续</VButton><VButton density="normal" onClick={() => updateRun(current => ({ ...current, status: "running", current: Math.max(1, current.current - 1), messages: [...current.messages, "用户 · 请补充材料后再次确认。"] }))}>退回补充</VButton></> : run?.status === "failed" ? <VButton density="normal" variant="primary" className={`${primary} w-full`} onClick={() => updateRun(current => ({ ...current, status: "running", messages: [...current.messages, "用户 · 已重试当前步骤。"] }))}>重试当前步骤</VButton> : run?.status === "completed" ? <VButton density="normal" variant="primary" className={`${primary} w-full`} onClick={() => setShowArtifact(true)} icon={<FileText size={14} />}>查看交付文档</VButton> : !active ? <VButton density="normal" variant="primary" className={`${primary} w-full`} onClick={openRun} icon={<Play size={14} />}>开始新运行</VButton> : <span className={`text-xs ${muted}`}>执行记录会随流程更新</span>}
+      {mode === "design" ? <><VButton variant="primary" density="normal" className={`${primary} !h-10 !min-h-10 flex-1`} onClick={() => save()} icon={<Save size={14} />}>保存流程</VButton>{step && step.kind !== "input" && step.kind !== "output" && <><VButton aria-label="上移步骤" onClick={() => moveStep(-1)} isIconOnly><ArrowUp size={14} /></VButton><VButton aria-label="下移步骤" onClick={() => moveStep(1)} isIconOnly><ArrowDown size={14} /></VButton><VButton aria-label="删除步骤" onClick={() => { editFlow(current => ({ ...current, steps: current.steps.filter(item => item.id !== selectedId) })); setSelectedId("input"); }} isIconOnly><Trash2 size={14} /></VButton></>}</> : run?.status === "waiting" ? <><VButton density="normal" variant="primary" className={`${primary} flex-1`} onClick={confirmRun} icon={<Check size={15} />}>确认并继续</VButton><VButton density="normal" onClick={() => updateRun(current => ({ ...current, status: "running", current: Math.max(1, current.current - 1), messages: [...current.messages, "用户 · 请补充材料后再次确认。"] }))}>退回补充</VButton></> : run?.status === "failed" ? <VButton density="normal" variant="primary" className={`${primary} w-full`} onClick={() => updateRun(current => ({ ...current, status: "running", messages: [...current.messages, "用户 · 已重试当前步骤。"] }))}>重试当前步骤</VButton> : run?.status === "completed" ? <VButton density="normal" variant="primary" className={`${primary} w-full`} onClick={() => setShowArtifact(true)} icon={<FileText size={14} />}>查看交付文档</VButton> : !active ? <VButton density="normal" variant="primary" className={`${primary} w-full`} onClick={openRun} icon={<Play size={14} />}>开始新运行</VButton> : <span className={`text-xs ${muted}`}>执行记录会随流程更新</span>}
     </div>
   </div>;
 
@@ -155,7 +156,6 @@ export function App() {
     onSave={() => save()} onStart={openRun}
     onStop={() => updateRun(current => ({ ...current, status: "stopped", messages: [...current.messages, "用户 · 已停止本次运行。"] }))}
     onCreate={() => { setNewName(""); setCreateTemplate("blank"); setShowCreate(true); }}
-    onTemplate={id => { setNewName(EXAMPLE_FLOWS.find(item => item.id === id)?.name || ""); setCreateTemplate(id); setShowCreate(true); }}
     onAddStep={() => { setStepName(""); setShowAddStep(true); }} onMembers={() => setShowMembers(true)}
     onArtifact={() => setShowArtifact(true)} onDismiss={() => setNotice("")} onScene={previewScene} />
     <VDialog className="max-sm:[&_button]:!min-h-11 max-sm:[&_[aria-label=Close]]:!min-w-11" open={Boolean(launchFlow)} onOpenChange={open => { if (!open) setLaunchFlow(null); }} title="开始一次运行" description={launchFlow?.name} size="lg" footer={<><VButton density="normal" onClick={() => setLaunchFlow(null)}>取消</VButton><VButton type="submit" form="launch-form" density="normal" variant="primary" className={primary} icon={<Play size={14} />}>开始运行</VButton></>}>
