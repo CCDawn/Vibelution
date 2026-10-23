@@ -45,17 +45,45 @@ def _error(message: str) -> str:
     )
 
 
+def _query_identity() -> tuple[dict, str]:
+    """Allow the bundled coordinator's public reads, without manager identity."""
+    from core.web.services.agent_directory.bootstrap import (
+        PLATFORM_PLANNER_PRESET,
+        PLATFORM_PLANNER_ROLE_KEY,
+    )
+
+    runtime = directory.current_agent_runtime()
+    agent_id = str(runtime.get("agentId") or "").strip()
+    session_id = str(runtime.get("sessionId") or "").strip()
+    agent = directory.get_agent(agent_id) if agent_id else None
+    if (
+        agent
+        and agent.get("status") == "active"
+        and agent.get("primaryMode") == "chat"
+        and agent.get("roleKey") == PLATFORM_PLANNER_ROLE_KEY
+        and (agent.get("metadata") or {}).get("builtinPreset") == PLATFORM_PLANNER_PRESET
+    ):
+        if (
+            not session_id
+            or session_id != agent.get("directSessionId")
+            or not service._owns_session(agent, service._session_row(agent))
+        ):
+            raise ValueError("平台规划师原生会话身份不匹配。")
+        return runtime, "platform_planner"
+    return _identity(), "assistant"
+
+
 def personal_assistant_query_tool(resource: str = "index", operation: str = "list", object_id: str = "",
                                   query: str = "", path: str = "", offset: int = 0, limit: int = 20,
                                   line: int = 1, max_lines: int = 80) -> str:
-    """Discover and read registered project sources with canonical identity."""
+    """Read registered sources for the canonical assistant or bundled planner."""
     try:
-        runtime = _identity()
+        runtime, caller = _query_identity()
     except (ValueError, TypeError, directory.AgentDirectoryError):
-        return _error("个人助理原生身份或配置未就绪，请先核对绑定。")
+        return _error("个人助理或平台规划师原生身份未就绪，请先核对绑定。")
     from core.web.services.personal_assistant_project.query import query_project
 
-    return json.dumps(query_project(runtime, resource=resource, operation=operation, object_id=object_id,
+    return json.dumps(query_project(runtime, caller=caller, resource=resource, operation=operation, object_id=object_id,
         query=query, path=path, offset=offset, limit=limit, line=line, max_lines=max_lines), ensure_ascii=False)
 
 
