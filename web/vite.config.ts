@@ -195,6 +195,9 @@ export default defineConfig({
           : {}),
       },
       output: {
+        // Shared entry modules can form cycles when a size boundary splits
+        // them. Preserve initialization order across those chunk boundaries.
+        strictExecutionOrder: true,
         /**
          * Keep the main `index-*.js` entry as app shell glue.
          * Framework graphs are large, change rarely, and benefit from independent caching.
