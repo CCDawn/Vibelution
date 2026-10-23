@@ -3,6 +3,16 @@ set -eu
 
 # These tool identities were found in this repository's commit history.
 # Reject attribution rather than silently rewriting the submitted message.
+for role in AUTHOR COMMITTER; do
+  # Git exports the pending commit's identity, including --author and the
+  # original author retained by --amend, to commit hooks.
+  identity=$(git var "GIT_${role}_IDENT")
+  if printf '%s\n' "$identity" | grep -Eiq '<(cursoragent@cursor\.com|noreply@commandcode\.ai)>'; then
+    echo "[commit-msg] AI author/committer attribution is disabled for this repository; use the actual human identity ($role)." >&2
+    exit 1
+  fi
+done
+
 if grep -Eiq '^[[:space:]]*Co-authored-by:[[:space:]].*<(cursoragent@cursor\.com|noreply@commandcode\.ai)>[[:space:]]*$' "$1"; then
   echo "[commit-msg] AI co-author attribution is disabled for this repository; remove the AI Co-authored-by trailer." >&2
   exit 1

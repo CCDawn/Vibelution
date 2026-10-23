@@ -14,6 +14,13 @@ from typing import Any
 
 _RUNTIME_STOP_REASONS = frozenset({"electron_user_restart", "electron_user_close", "runtime_shutdown"})
 
+#: Public read-only view of the runtime stop reasons. Lifecycle-stop recovery
+#: sweeps (knowledge sideflow dead-turn gate) import this to recognize turns
+#: killed by a workbench restart/close — those are machine-recoverable, while
+#: an operator stop writes the ``user_stops`` chat signal instead (the two
+#: paths are mutually exclusive). Do not mutate; it backs ``_RUNTIME_STOP_REASONS``.
+RUNTIME_STOP_REASONS = _RUNTIME_STOP_REASONS
+
 
 def _stopped_turn_message(reason: str, *, lang: str, queued: bool = False) -> str:
     s = _service()
