@@ -150,6 +150,38 @@ def test_image2_default_accepts_native_image_discovery_candidate(operator):
     assert after["llm"] == before["llm"]
 
 
+def test_image2_default_roundtrip_restores_configured_placeholder_without_discovery(operator, monkeypatch):
+    from config.operator_config_transaction import append_toml_table
+    from core.infrastructure import image_model_discovery
+    for name in ("discover_image_models", "resolve_image_model"):
+        monkeypatch.setattr(image_model_discovery, name, lambda **kwargs: pytest.fail("selection must not discover or request images"))
+    text = operator.read_text(encoding="utf-8")
+    for key, upstream in (("image2", "image2"), ("image_v1", "gpt-image-1")):
+        text = append_toml_table(text, ("llm", "providers", "pixel_relay", "models", key),
+                                {"upstream_id": upstream, "enabled": True})
+    text = append_toml_table(text, ("tools", "image2"), {"default_model_ref": "pixel_relay/image2"})
+    operator.write_text(text, encoding="utf-8")
+    before = read(operator)
+    changed = call("model_default", {"model_id": "pixel_relay/image_v1", "target": "image2"}, governed=True)
+    assert changed["ok"] and changed["verified"]
+    assert call("model_defaults", {})["imageModelId"] == "pixel_relay/image_v1"
+    restored = call("model_default", {"model_id": "pixel_relay/image2", "target": "image2"}, governed=True)
+    assert restored["ok"] and restored["verified"], restored
+    assert call("model_defaults", {})["imageModelId"] == "pixel_relay/image2"
+    assert read(operator) == before
+
+
+@pytest.mark.parametrize("upstream", ["image", "images", "image2", "default_image", "default-image"])
+def test_image2_accepts_native_configured_image_placeholders(operator, upstream):
+    from config.operator_config_transaction import append_toml_table
+    operator.write_text(append_toml_table(operator.read_text(encoding="utf-8"),
+        ("llm", "providers", "pixel_relay", "models", "legacy_image_alias"),
+        {"upstream_id": upstream, "enabled": True}), encoding="utf-8")
+    result = call("model_default", {"model_id": "pixel_relay/legacy_image_alias", "target": "image2"}, governed=True)
+    assert result["ok"] and result["verified"], result
+    assert read(operator)["tools"]["image2"]["default_model_ref"] == "pixel_relay/legacy_image_alias"
+
+
 def test_context_window_null_clears_only_its_override_and_schema_matches(operator):
     schema = actions.contracts()["model_update"]["updatesSchema"]["properties"]
     assert {item.get("type") for item in schema["context_window"]["anyOf"]} == {"integer", "null"}

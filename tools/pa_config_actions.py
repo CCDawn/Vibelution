@@ -497,9 +497,16 @@ def execute(action: str, parameters: dict, runtime: dict, governed: bool = False
                     return _failure("unknown_profile")
                 profile["model_ref"] = selected_id
             elif args.target == "image2":
-                from core.infrastructure.image_model_discovery import is_probable_image_model
-                if selected_id and not is_probable_image_model(str(model.get("upstream_id") or "")):
-                    return _failure("image_model_required")
+                from core.infrastructure.image_model_discovery import IMAGE_MODEL_PLACEHOLDERS, is_probable_image_model
+                if selected_id:
+                    upstream = str(model.get("upstream_id") or "").strip()
+                    # Native placeholders are selectable configured aliases:
+                    # they ask image2's later invocation to discover its actual
+                    # image model. The discovery heuristic excludes them only
+                    # from *discovered concrete candidates*, not selection.
+                    # Reuse that closed native set without network discovery.
+                    if upstream.lower() not in IMAGE_MODEL_PLACEHOLDERS and not is_probable_image_model(upstream):
+                        return _failure("image_model_required")
                 table = ("tools", "image2")
                 candidate.setdefault("tools", {}).setdefault("image2", {})["default_model_ref"] = selected_id
             else:
