@@ -19,8 +19,21 @@
 ### 适用范围
 编辑、运行、加载、失败与无流程状态。无流程时隐藏保存状态、工作模式、保存和试运行。loading/error 不展示模板起步页。
 
+加载时保留正式框架：显式 `teamWorkspace=flows` 的首屏路由占位、团队元数据读取和流程读取复用同一个 WorkbenchShell，始终撑满可用高度，沿用实际栏宽记忆、52px 标题栏和响应式抽屉。未知数据用 VSkeleton 原位占位，不展示“还没有流程”或虚假的成员数量；已知流程保留真实编辑器及 Inspector。首屏占位不可交互，保存/试运行在流程读取期间禁用。
+
 ### 使用方式
 使用 VCanvasWorkbenchPage 的 embedded chrome；侧栏默认 224px、检查栏默认 312px，沿用共享尺寸持久化。窄屏由 recipe 转为抽屉，Inspector 自身标题在抽屉中隐藏以避免重复。所有新建、成员、讨论、历史、保存和运行操作都回调既有 owner；停止 pending/stopRequested 必须防止重复提交。
+
+## WorkflowWorkspaceLoading
+
+### 功能
+在页面模块和团队数据读取期间立即呈现真实 WorkbenchShell，保持全高、顶部、侧栏及底部成员区的实际几何关系。
+
+### 适用范围
+显式流程路由的首次加载与 GenericTeamWorkspaceRoute 的元数据读取；不替代普通团队讨论页的既有加载框架。
+
+### 使用方式
+只组合 WorkbenchShell 与 VSkeleton，不复制页面布局或维护另一套尺寸。数据未确定前不声称流程为空或成员为零，加载框架不可交互；静态起步内容的占位复用 WorkflowStart 实际标记。共享样式随 App shell 提前加载，避免等待 Teams CSS 时退化成无布局内容。
 
 ## WorkflowStart
 
@@ -32,6 +45,8 @@
 
 ### 使用方式
 模板名称、说明、步数和步骤标签均从 workflowTemplates 的同一份定义派生；不在 UI 复制模板数据。桌面双列、窄屏单列，内容靠上、限宽、左对齐。复用 VButton，现成模板可编辑，空白流程不预置业务字段。
+
+首屏占位复用同一份卡片与文字布局，在真实文字边界内显示 VSkeleton；不另建固定高度的假画板。占位内容从可访问树隐藏，并禁用创建操作，直到流程列表确认。
 
 ## FlowEditor
 

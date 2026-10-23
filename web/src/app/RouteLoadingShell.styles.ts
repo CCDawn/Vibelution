@@ -1,4 +1,5 @@
 const styles = {
+  workspaceFill: "flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden",
   surface: "grid min-h-[min(520px,calc(100dvh_-_96px))] w-full p-3 sm:p-4",
   surfaceQuiet: "min-h-[min(520px,calc(100dvh_-_96px))] w-full",
   surfaceStructured: "content-start",

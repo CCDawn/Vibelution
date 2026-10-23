@@ -9,6 +9,7 @@ import { usePageVisibility } from "../../../app/pollingPolicy";
 import { useTeamsCatalogQueries } from "../useTeamsCatalogQueries";
 import { isChallengeCupResearchWorkflowTeam } from "../teamKindModel";
 import { GenericWorkflowWorkspace } from "./GenericWorkflowWorkspace";
+import { WorkflowWorkspaceLoading } from "./WorkflowWorkspaceLoading";
 import { workflowTeamParams } from "./workspaceRouteModel";
 export function GenericTeamWorkspaceRoute({ forcedTeamId, legacy }: {
     forcedTeamId?: string;
@@ -24,7 +25,7 @@ export function GenericTeamWorkspaceRoute({ forcedTeamId, legacy }: {
     if (catalog.teamsQuery.isError || detail.isError)
         return <div role="alert" className={styles.grid1}><p>{catalog.teamsQuery.error?.message || detail.error?.message}</p><VButton onClick={() => { void catalog.teamsQuery.refetch(); void detail.refetch(); }}>重新读取团队</VButton></div>;
     if (catalog.teamsQuery.isPending || detail.isPending && teamId)
-        return <div role="status" className={styles.grid2}>正在读取团队工作台…</div>;
+        return <WorkflowWorkspaceLoading teamId={teamId} teams={catalog.visibleTeams.map(item => ({ id: item.teamId, label: item.name }))}/>;
     if (!team)
         return legacy;
     // Ordinary team homes retain their native discussion/task entry. The flow selector

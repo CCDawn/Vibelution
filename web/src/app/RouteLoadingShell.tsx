@@ -1,6 +1,7 @@
 import { ChatRouteLoadingShell } from "./ChatRouteLoadingShell";
 import { PageFrameLoading, type PageFrameLayout } from "./PageFrameLoadingShell";
 import { FinanceResearchLoading } from "../routes/finance/FinanceResearchFrame";
+import { WorkflowWorkspaceLoading } from "../routes/teams/generic/WorkflowWorkspaceLoading";
 import { type RouteErrorSurface } from "./RouteErrorBoundary";
 import styles from "./RouteLoadingShell.styles";
 
@@ -124,6 +125,11 @@ export function RouteLoadingShell({
 }: RouteLoadingShellProps) {
   const pageChrome = ["default", "companions", "usage", "pet", "reset"].includes(layout) ? "surface" : "workspace";
   if (layout === "finance") return <FinanceResearchLoading />;
+  // Explicit flow navigation already determines the shell before the Teams chunk arrives.
+  // Keep ordinary team homes on their existing loading contract.
+  if (layout === "teams" && typeof window !== "undefined" && new URLSearchParams(window.location.search).get("teamWorkspace") === "flows") {
+    return <div data-route-loading="teams" data-vui-app={surface} className={styles.workspaceFill}><WorkflowWorkspaceLoading label={label || "正在打开团队工作台"}/></div>;
+  }
   if (layout === "chat") {
     return (
       <ChatRouteLoadingShell

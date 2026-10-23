@@ -25,6 +25,7 @@
 | --- | --- |
 | GenericWorkflowWorkspace | [product/team-workspace.md](./product/team-workspace.md#genericworkflowworkspace) |
 | WorkbenchShell | [product/team-workspace.md](./product/team-workspace.md#workbenchshell) |
+| WorkflowWorkspaceLoading | [product/team-workspace.md](./product/team-workspace.md#workflowworkspaceloading) |
 | WorkflowStart | [product/team-workspace.md](./product/team-workspace.md#workflowstart) |
 | FlowEditor | [product/team-workspace.md](./product/team-workspace.md#floweditor) |
 | 团队左栏管理 | [product/team-directory.md](./product/team-directory.md) |

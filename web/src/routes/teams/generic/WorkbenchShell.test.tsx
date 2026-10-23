@@ -15,6 +15,7 @@ vi.mock("../../../components/vui", () => {
     <button aria-label={props["aria-label"] ?? label} aria-pressed={props["aria-pressed"]}
       aria-busy={isPending || undefined} disabled={isDisabled} onClick={onClick}>{children ?? label}</button>;
   return {
+    VSkeleton: ({ className }: { className?: string }) => <span data-vui="skeleton" className={className}/>,
     VButton: Button, VIconButton: Button, VNativeButton: Button,
     VCanvasWorkbenchPage: ({ rail, canvas, inspector }: { rail: ReactNode; canvas: ReactNode; inspector: ReactNode }) =>
       <div>{rail}{canvas}{inspector}</div>,
@@ -79,18 +80,39 @@ it("shows real template previews and creation actions without draft controls bef
   expect(props.onCreate).toHaveBeenCalledOnce();
 });
 
-it.each(["loading", "error"] as const)("does not present the empty starting page while %s", async state => {
-  const props = shellProps(state === "loading" ? { loading: true } : { error: "读取失败，请稍后重试" });
+it("reserves the real starting-page geometry while loading without announcing an empty workspace or enabling creation", async () => {
+  const props = shellProps({ loading: true, teamPending: true });
+  await render(props);
+  expect(host.querySelector('[data-team-workspace-start]')?.getAttribute("aria-hidden")).toBe("true");
+  expect(host.querySelector('[data-team-workspace-loading]')?.getAttribute("aria-busy")).toBe("true");
+  expect(host.querySelector('[role="status"]')?.textContent).toBe("正在读取流程…");
+  expect(host.textContent).not.toContain("还没有流程");
+  expect(host.textContent).not.toContain("位成员可用");
+  expect(button("创建流程")?.disabled).toBe(true);
+  expect(button("使用模板")?.disabled).toBe(true);
+  expect(button("新建流程")?.disabled).toBe(true);
+  await act(async () => button("创建流程")!.click());
+  expect(props.onCreate).not.toHaveBeenCalled();
+});
+
+it("keeps the actual editor and inspector in place when loading with known flow data", async () => {
+  await render(shellProps({ loading: true, flow, flows: [flow], inspector: <div aria-label="节点配置内容"/> }));
+  expect(host.querySelector('[aria-label="流程编辑器"]')).not.toBeNull();
+  expect(host.querySelector('[aria-label="节点配置内容"]')).not.toBeNull();
+  expect(host.querySelector('[data-team-workspace-start]')).toBeNull();
+  expect(button("保存")?.disabled).toBe(true);
+  expect(button("试运行")?.disabled).toBe(true);
+});
+
+it("does not present the empty starting page after an error", async () => {
+  const props = shellProps({ error: "读取失败，请稍后重试" });
   await render(props);
   expect(host.textContent).not.toContain("从一个流程开始协作");
   expect(button("使用模板")).toBeUndefined();
   expect(button("创建流程")).toBeUndefined();
-  if (state === "loading") expect(host.querySelector('[role="status"]')?.textContent).toBe("正在读取流程…");
-  else {
-    expect(host.querySelector('[role="alert"]')?.textContent).toContain(props.error);
-    await act(async () => button("重新读取")!.click());
-    expect(props.onReload).toHaveBeenCalledOnce();
-  }
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain(props.error);
+  await act(async () => button("重新读取")!.click());
+  expect(props.onReload).toHaveBeenCalledOnce();
 });
 
 it("keeps design controls available for a selected saved flow", async () => {

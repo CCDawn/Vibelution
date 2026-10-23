@@ -54,6 +54,16 @@
 @source "../routes/finance/**/*.{ts,tsx}";
 @source not "../routes/finance/**/*.test.{ts,tsx}";
 
+/* Flow loading mounts the real shell before the lazy Teams chunk and its CSS. */
+@source "../routes/teams/generic/WorkflowWorkspaceLoading.tsx";
+@source "../routes/teams/generic/WorkflowWorkspaceLoading.styles.ts";
+@source "../routes/teams/generic/WorkbenchShell.tsx";
+@source "../routes/teams/generic/WorkbenchShell.styles.ts";
+@source "../routes/teams/generic/WorkflowStart.tsx";
+@source "../routes/teams/generic/WorkflowStart.styles.ts";
+@source "../routes/teams/generic/FlowEditor.tsx";
+@source "../routes/teams/generic/FlowEditor.styles.ts";
+
 :where(small) {
   font-size: var(--vui-font-xs);
   line-height: var(--vui-line-readable);

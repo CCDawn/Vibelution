@@ -8,7 +8,6 @@ import { WorkflowArtifactDialog } from "./WorkflowArtifactDialog";
 import { useWorkflowWorkspace } from "./useWorkflowWorkspace";
 import { createWorkflow, workflowTemplateOptions } from "./workflowTemplates";
 import { copyFlow, KIND_LABEL, memberName, missingInputLabels, workflowMembers, type Flow, type InputField, type Step } from "./workflowModel";
-import "./workspace.css";
 const primary = styles.surface1;
 const field = styles.text1;
 const muted = styles.text2;

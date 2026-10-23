@@ -1,4 +1,8 @@
 const styles = {
+  loadingText: "relative block",
+  loadingMeasure: "invisible",
+  loadingBar: "!absolute left-0 top-1/2 !w-3/4 -translate-y-1/2",
+  loadingIcons: "[&_svg]:invisible",
   part1: "min-h-0 flex-1 overflow-auto bg-[var(--vui-surface-chat)]",
   part2: "mx-auto max-w-[960px] px-8 pb-10 pt-14 max-sm:px-5 max-sm:pt-8",
   part3: "flex items-center gap-3",
