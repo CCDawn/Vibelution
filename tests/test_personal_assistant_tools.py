@@ -46,6 +46,18 @@ def assistant_runtime(personal_env, monkeypatch):
     return row
 
 
+@pytest.fixture
+def planner_runtime(personal_env, monkeypatch):
+    from core.web.services.agent_directory import bootstrap
+
+    row, _ = bootstrap._ensure_platform_planner([])
+    row = directory.get_agent(row["agentId"])
+    monkeypatch.setattr(directory, "current_agent_runtime", lambda: {
+        "agentId": row["agentId"], "sessionId": row["directSessionId"],
+    })
+    return row
+
+
 def _blocked(raw):
     result = json.loads(raw)
     assert result["ok"] is False and result["status"] == "blocked"
@@ -53,6 +65,57 @@ def _blocked(raw):
 
 def _forbid(*_args, **_kwargs):
     pytest.fail("blocked tool reached a platform operation")
+
+
+@pytest.mark.parametrize("changes", [
+    {"roleKey": "ordinary"},
+    {"primaryMode": "general"},
+    {"status": "archived"},
+    {"metadata": {}},
+    {"metadata": {"builtinPreset": "ordinary"}},
+])
+def test_planner_query_rejects_incomplete_or_archived_builtin_identity(
+    planner_runtime, monkeypatch, changes
+):
+    from core.web.services.personal_assistant_project import query as project_query
+
+    _corrupt_agent(planner_runtime["agentId"], **changes)
+    monkeypatch.setattr(project_query, "query_project", _forbid)
+    _blocked(tools.personal_assistant_query_tool())
+
+
+@pytest.mark.parametrize("corruption", ["foreign_session", "foreign_owner", "archived_session", "missing_session"])
+def test_planner_query_requires_own_active_native_session(
+    personal_env, planner_runtime, monkeypatch, corruption
+):
+    row = planner_runtime
+    if corruption in {"foreign_session", "missing_session"}:
+        monkeypatch.setattr(directory, "current_agent_runtime", lambda: {
+            "agentId": row["agentId"], "sessionId": "foreign" if corruption == "foreign_session" else "",
+        })
+    else:
+        session = session_service.load_session_chat_state(personal_env["root"], row["directSessionId"])
+        if corruption == "foreign_owner":
+            session["agentId"] = session["agent_id"] = personal_env["other"]
+        else:
+            session["archive_state"] = session["archiveState"] = {"status": "archived"}
+        session_service.save_session_chat_state(personal_env["root"], row["directSessionId"], session)
+    _blocked(tools.personal_assistant_query_tool())
+
+
+def test_planner_query_does_not_grant_assistant_management_or_raw_api(planner_runtime, monkeypatch):
+    from core.web.services import personal_assistant_platform_api as api
+
+    monkeypatch.setattr(service, "get_platform_overview", _forbid)
+    monkeypatch.setattr(tools.operations, "agent_archive_tool", _forbid)
+    monkeypatch.setattr(api, "platform_api_get", _forbid)
+    monkeypatch.setattr(api, "platform_api_index", _forbid)
+    with pytest.raises(ValueError):
+        tools._identity()
+    _blocked(tools.personal_assistant_overview_tool())
+    _blocked(tools.personal_assistant_manage_tool("agent_archive", '{"agent_id":"other"}'))
+    _blocked(tools.personal_assistant_platform_api_tool())
+    _blocked(tools.personal_assistant_platform_api_tool("/api/agents"))
 
 
 @pytest.mark.parametrize("runtime", ["missing", "ordinary", "foreign_session"])

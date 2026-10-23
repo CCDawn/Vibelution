@@ -117,7 +117,22 @@ def _status(row: dict[str, Any]) -> str:
 
 
 def _metadata(row: dict[str, Any]) -> dict[str, Any]:
-    return row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+    native = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+    result = dict(native)
+    encoded = native.get("agentToolMetadataJson")
+    if not isinstance(encoded, str) or len(encoded) > 8192:
+        return result
+    try:
+        custom = json.loads(encoded)
+    except (ValueError, RecursionError):
+        return result
+    if isinstance(custom, dict):
+        # Custom protocol fields survive the Kernel through its existing JSON
+        # envelope. Never let that envelope replace native identity/routing.
+        for key in ("replyToMessageId", "paFollowupOfMessageId", "paFollowupRound", "personalAssistantTask"):
+            if key not in result and key in custom:
+                result[key] = custom[key]
+    return result
 
 
 def _is_followup(row: dict[str, Any]) -> bool:
@@ -134,7 +149,50 @@ def _receipt_row(row: dict[str, Any]) -> dict[str, Any]:
         "summary": _text(row, "summary"),
         "status": _status(row),
         "receivedAt": _text(row, "createdAt"),
+        "taskStatus": None,
+        "evidenceRefs": [],
     }
+
+
+def _task_report(row: dict[str, Any], dispatch: dict[str, Any]) -> dict[str, Any]:
+    """Select an explicit, session-bound report; prose/turn completion is not one."""
+    metadata, origin = _metadata(row), _metadata(dispatch)
+    report = metadata.get("personalAssistantTask")
+    if (
+        _status(row) == "revoked"
+        or not isinstance(report, dict)
+        or type(report.get("schemaVersion")) is not int
+        or report["schemaVersion"] != 1
+        or not _text(metadata, "replyToMessageId")
+        or _text(report, "dispatchMessageId") != (_text(dispatch, "messageId") or _text(dispatch, "eventId"))
+        or _text(report, "status") not in {"running", "blocked", "completed", "failed"}
+        or _text(row, "sourceAgentId") != _text(dispatch, "targetAgentId")
+        or not _text(dispatch, "targetSessionId")
+        or _text(metadata, "sourceSessionId") != _text(dispatch, "targetSessionId")
+        or not _text(origin, "sourceSessionId")
+        or (_text(row, "targetSessionId") or _text(metadata, "targetSessionId")) != _text(origin, "sourceSessionId")
+    ):
+        return {}
+    refs = report.get("evidenceRefs", [])
+    if not isinstance(refs, list) or len(refs) > 5 or any(
+        not isinstance(ref, str) or not ref.strip() or len(ref) > 200 or any(ord(c) < 32 for c in ref)
+        for ref in refs
+    ):
+        return {}
+    if report["status"] == "completed" and not refs:
+        return {}
+    return {"taskStatus": report["status"], "evidenceRefs": [ref.strip() for ref in refs]}
+
+
+def _dispatch_task_status(delivery_status: str, receipts: list[dict[str, Any]]) -> str:
+    if delivery_status == "revoked":
+        return "cancelled"
+    reports = [row for row in receipts if row.get("taskStatus")]
+    if reports:
+        return str(reports[-1]["taskStatus"])
+    if receipts:
+        return "awaiting_confirmation"
+    return "running" if delivery_status == "consumed" else "awaiting_result"
 
 
 def list_personal_assistant_dispatches(*, limit: int = DEFAULT_LIMIT) -> dict[str, Any]:
@@ -325,6 +383,7 @@ def list_personal_assistant_dispatches(*, limit: int = DEFAULT_LIMIT) -> dict[st
             ):
                 target_dispatch = visible_rows[0]
         if target_dispatch is not None:
+            receipt.update(_task_report(row, target_dispatch))
             receipts_by_message_id.setdefault(
                 _text(target_dispatch, "messageId") or _text(target_dispatch, "eventId"), []
             ).append(receipt)
@@ -342,8 +401,10 @@ def list_personal_assistant_dispatches(*, limit: int = DEFAULT_LIMIT) -> dict[st
                 "targetAgentId": _text(dispatch_row, "targetAgentId"),
                 "targetAgentName": _text(dispatch_row, "targetAgentName"),
                 "targetSessionId": _text(dispatch_row, "targetSessionId"),
+                "sourceSessionId": _text(_metadata(dispatch_row), "sourceSessionId"),
                 "summary": _text(dispatch_row, "summary"),
                 "deliveryStatus": _status(dispatch_row),
+                "taskStatus": _dispatch_task_status(_status(dispatch_row), matched),
                 "sentAt": _text(dispatch_row, "createdAt"),
                 "receipts": matched,
             }
