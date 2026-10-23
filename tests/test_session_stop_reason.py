@@ -129,6 +129,40 @@ def test_worker_settlement_retains_controller_cause(interrupted_session, monkeyp
     assert expected in terminal[0].payload["summary"]
 
 
+@pytest.mark.parametrize("controller_reason", ["操作者请求停止当前轮。", "electron_user_restart"])
+@pytest.mark.parametrize("reason_field", ["stop_reason", "stopReason"])
+def test_challenge_deadline_result_survives_later_operator_stop(
+    interrupted_session, monkeypatch, controller_reason, reason_field,
+):
+    deadline_reason = "challenge_logical_task_deadline_exhausted"
+    monkeypatch.setattr(session_service, "_is_session_stop_requested", lambda _: True)
+    monkeypatch.setattr(session_service, "_get_session_stop_reason", lambda _: controller_reason)
+    monkeypatch.setattr(session_service, "_is_session_turn_current", lambda *args: True)
+    session_service._persist_session_turn_result(
+        "session-stop", {
+            "status": "stopped", "summary": "Challenge 已达到逻辑任务截止时间。",
+            "raw_output": "Challenge 已达到逻辑任务截止时间。", "stop_requested": True,
+            reason_field: deadline_reason,
+        }, turn_id="turn-stop",
+    )
+
+    stored = load_session_chat_state(interrupted_session, "session-stop")
+    assert stored["last_turn_status"] == "cancelled"
+    assert stored["last_turn_terminal_problem_code"] == deadline_reason
+    assert stored["last_turn_terminal_reason"] == deadline_reason
+    snapshot = session_service.get_session_turn_completion_snapshot("session-stop", "turn-stop")
+    assert snapshot["terminal"] is True
+    assert snapshot["terminalStatus"] == "cancelled"
+    assert snapshot["terminalProblemCode"] == deadline_reason
+    assert snapshot["terminalReason"] == deadline_reason
+    terminal = [event for event in load_conversation_events(interrupted_session, "session-stop")
+                if event.event_type == EVENT_TURN_INTERRUPTED]
+    assert len(terminal) == 1
+    assert terminal[0].payload["reason"] == deadline_reason
+    assert terminal[0].payload["finalStatus"] == "cancelled"
+    assert terminal[0].payload["summary"] == "Challenge 已达到逻辑任务截止时间。"
+
+
 @pytest.mark.parametrize("reason", ["electron_user_restart", "electron_user_close", "runtime_shutdown"])
 def test_runtime_snapshot_helper_passes_internal_reason(monkeypatch, reason):
     calls = []
