@@ -57,6 +57,15 @@ class VirtualHumanCompanionResponse(BaseModel):
     snapshot: dict[str, Any]
 
 
+class VirtualHumanCompanionBindingResponse(BaseModel):
+    """Enabled Companion identity without native Session activity hydration."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    agentId: str
+    directSessionId: str
+
+
 class VirtualHumanCompanionActivityResponse(BaseModel):
     """Lightweight native Session activity for hidden Companion entries."""
 

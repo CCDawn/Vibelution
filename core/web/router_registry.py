@@ -79,6 +79,9 @@ _STARTUP_ROUTE_MODULE_NAMES = frozenset({
     "core.web.routes.launcher",
     "core.web.routes.sessions",
     "core.web.routes.config",
+    # /chat must classify legacy Companion links before optional feature work.
+    # Admission still restricts this router to the reviewed activity read.
+    "core.web.routes.agent_plugins",
 })
 
 

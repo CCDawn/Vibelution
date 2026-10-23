@@ -23,12 +23,15 @@ import {
   resolveAgentOpenSessionId,
 } from "./chatAgentSessionMemory";
 
+import { isChatRoomMutationPending } from "./useChatScopedMutationPending";
+
 type ChatWorkspaceCache = ReturnType<typeof createChatWorkspaceCache>;
 type RightIndexPanel = "conversations" | "members";
 
 type MutateLike<TVariables> = {
   mutate: (variables: TVariables) => void;
   isPending: boolean;
+  isPendingFor?: (id: string) => boolean;
   variables?: TVariables;
 };
 
@@ -325,7 +328,7 @@ export function useChatWorkspaceActions({
   ]);
 
   const handleToggleGroupManageSession = useCallback((sessionId: string) => {
-    if (!sessionId || activeGroupTeamOwned || groupRoundActive || updateGroupRoomMutation.isPending) {
+    if (!sessionId || activeGroupTeamOwned || groupRoundActive || isChatRoomMutationPending(updateGroupRoomMutation, activeGroupRoom?.roomId)) {
       return;
     }
     setGroupRoomActionError("");
@@ -339,7 +342,8 @@ export function useChatWorkspaceActions({
     groupRoundActive,
     setGroupManageSessionIds,
     setGroupRoomActionError,
-    updateGroupRoomMutation.isPending,
+    activeGroupRoom?.roomId,
+    updateGroupRoomMutation,
   ]);
 
   const handleToggleGroupComposer = useCallback(() => {
@@ -394,7 +398,7 @@ export function useChatWorkspaceActions({
 
   const handleStartGroupRound = useCallback(() => {
     const topic = groupTopicDraft.trim();
-    if (!standardGroupRoomActive || !activeGroupRoom?.roomId || !topic || startGroupRoundMutation.isPending || groupRoundActive) {
+    if (!standardGroupRoomActive || !activeGroupRoom?.roomId || !topic || isChatRoomMutationPending(startGroupRoundMutation, activeGroupRoom?.roomId) || groupRoundActive) {
       return;
     }
     startGroupRoundMutation.mutate({
@@ -414,7 +418,7 @@ export function useChatWorkspaceActions({
   ]);
 
   const handleStopGroupRound = useCallback(() => {
-    if (!standardGroupRoomActive || !activeGroupRoom?.roomId || !groupRoundRunning || stopGroupRoundMutation.isPending) {
+    if (!standardGroupRoomActive || !activeGroupRoom?.roomId || !groupRoundRunning || isChatRoomMutationPending(stopGroupRoundMutation, activeGroupRoom?.roomId)) {
       return;
     }
     stopGroupRoundMutation.mutate({

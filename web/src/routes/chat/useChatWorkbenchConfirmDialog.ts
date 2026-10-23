@@ -1,3 +1,4 @@
+import { isChatRoomMutationPending } from "./useChatScopedMutationPending";
 import { useCallback, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import type { UseMutationResult } from "@tanstack/react-query";
 
@@ -27,8 +28,8 @@ export type UseChatWorkbenchConfirmDialogInput = {
     { sessionId: string; agentId: string },
     unknown
   >;
-  deleteGroupRoomMutation: UseMutationResult<unknown, Error, { roomId: string }, unknown>;
-  resetGroupRoomMutation: UseMutationResult<unknown, Error, { roomId: string }, unknown>;
+  deleteGroupRoomMutation: UseMutationResult<unknown, Error, { roomId: string }, unknown> & { isPendingFor?: (id: string) => boolean };
+  resetGroupRoomMutation: UseMutationResult<unknown, Error, { roomId: string }, unknown> & { isPendingFor?: (id: string) => boolean };
   setSessionComposerErrors: Dispatch<SetStateAction<Record<string, string>>>;
   lang: "zh" | "en";
   t: (key: TranslationKey) => string;
@@ -159,15 +160,13 @@ export function useChatWorkbenchConfirmDialog({
     if (pendingConfirm.kind === "delete-group") {
       return {
         confirmLabel: lang === "zh" ? "删除群聊" : "Delete group",
-        confirmPending: deleteGroupRoomMutation.isPending
-          && deleteGroupRoomMutation.variables?.roomId === activeGroupRoom?.roomId,
+        confirmPending: isChatRoomMutationPending(deleteGroupRoomMutation, activeGroupRoom?.roomId),
         title: t("deleteGroupConfirm").replace("{title}", roomTitle || activeGroupRoom?.roomId || ""),
       };
     }
     return {
       confirmLabel: lang === "zh" ? "重置群聊" : "Reset group",
-      confirmPending: resetGroupRoomMutation.isPending
-        && resetGroupRoomMutation.variables?.roomId === activeGroupRoom?.roomId,
+      confirmPending: isChatRoomMutationPending(resetGroupRoomMutation, activeGroupRoom?.roomId),
       title: t("resetGroupConfirm").replace("{title}", roomTitle || activeGroupRoom?.roomId || ""),
     };
   }, [
@@ -175,13 +174,13 @@ export function useChatWorkbenchConfirmDialog({
     activeGroupRoom?.title,
     clearSessionHistoryMutation.isPending,
     clearSessionHistoryMutation.variables?.sessionId,
-    deleteGroupRoomMutation.isPending,
+    deleteGroupRoomMutation,
     deleteGroupRoomMutation.variables?.roomId,
     deleteSessionMutation.isPending,
     deleteSessionMutation.variables?.sessionId,
     lang,
     pendingConfirm,
-    resetGroupRoomMutation.isPending,
+    resetGroupRoomMutation,
     resetGroupRoomMutation.variables?.roomId,
     t,
   ]);

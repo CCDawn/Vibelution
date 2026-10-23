@@ -1045,6 +1045,13 @@ function optimisticToolEnabled(tool: ToolRegistryItem, enabled: boolean): ToolRe
   };
 }
 
+function isToolWriteOutcomeUncertain(error: unknown): boolean {
+  const status = error instanceof Error ? (error as Error & { status?: number }).status : undefined;
+  return typeof status !== "number" || status >= 500 || status === 408;
+}
+
+class ToolWriteInProgressError extends Error {}
+
 export function ToolsRoute() {
   const { lang, t, dictionaryReady } = useAppI18n({ domains: ["tools"] });
   const [searchParams, setSearchParams] = useSearchParams();
@@ -1082,6 +1089,19 @@ export function ToolsRoute() {
   const [selectedToolIds, setSelectedToolIds] = useState<Set<string>>(() => new Set());
   const [bulkSelectionAnchorToolId, setBulkSelectionAnchorToolId] = useState<string | null>(null);
   const [bulkToolPending, setBulkToolPending] = useState(false);
+  const toolWriteOwners = useRef(new Map<string, object>());
+  const [pendingToolWrites, setPendingToolWrites] = useState<ReadonlyMap<string, "enable" | "delete">>(new Map());
+  function beginToolWrite(toolId: string, kind: "enable" | "delete") {
+    if (toolWriteOwners.current.has(toolId)) throw new ToolWriteInProgressError("Tool operation in progress");
+    const owner = {};
+    toolWriteOwners.current.set(toolId, owner);
+    setPendingToolWrites(current => new Map(current).set(toolId, kind));
+    return () => {
+      if (toolWriteOwners.current.get(toolId) !== owner) return;
+      toolWriteOwners.current.delete(toolId);
+      setPendingToolWrites(current => { const next = new Map(current); next.delete(toolId); return next; });
+    };
+  }
   const [toolConfirm, setToolConfirm] = useState<null | {
     kind: "bulk-delete" | "delete-one";
     toolId?: string;
@@ -1367,17 +1387,24 @@ export function ToolsRoute() {
     mutationFn: (payload: { toolId: string; enabled: boolean }) =>
       setGeneratedToolEnabled(payload.toolId, payload.enabled),
     onMutate: async (payload) => {
-      await queryClient.cancelQueries({ queryKey: queryKeys.tools() });
-      const previousTools = queryClient.getQueryData<ToolRegistryPayload>(queryKeys.tools());
-      queryClient.setQueryData<ToolRegistryPayload | undefined>(
-        queryKeys.tools(),
-        (current) => updatedToolRegistryPayload(
-          current,
-          payload.toolId,
-          (tool) => optimisticToolEnabled(tool, payload.enabled),
-        ),
-      );
-      return { previousTools };
+      const release = beginToolWrite(payload.toolId, "enable");
+      try {
+        await queryClient.cancelQueries({ queryKey: queryKeys.tools() });
+        const previousTool = queryClient.getQueryData<ToolRegistryPayload>(queryKeys.tools())?.tools.find(tool => tool.id === payload.toolId);
+        queryClient.setQueryData<ToolRegistryPayload | undefined>(
+          queryKeys.tools(),
+          (current) => updatedToolRegistryPayload(
+            current,
+            payload.toolId,
+            (tool) => optimisticToolEnabled(tool, payload.enabled),
+          ),
+        );
+        const optimisticTool = queryClient.getQueryData<ToolRegistryPayload>(queryKeys.tools())?.tools.find(tool => tool.id === payload.toolId);
+        return { previousTool, optimisticTool, release };
+      } catch (error) {
+        release();
+        throw error;
+      }
     },
     onSuccess: (tool) => {
       queryClient.setQueryData<ToolRegistryPayload | undefined>(
@@ -1392,56 +1419,53 @@ export function ToolsRoute() {
       });
       refresh();
     },
-    onError: (error, _variables, context) => {
-      if (context?.previousTools) {
-        queryClient.setQueryData(queryKeys.tools(), context.previousTools);
+    onError: (error, variables, context) => {
+      if (error instanceof ToolWriteInProgressError) return;
+      if (context?.previousTool) {
+        queryClient.setQueryData<ToolRegistryPayload | undefined>(queryKeys.tools(), current => updatedToolRegistryPayload(
+          current, variables.toolId, tool => tool === context.optimisticTool ? context.previousTool! : tool,
+        ));
       }
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+      setNotice({ tone: "error", text: isToolWriteOutcomeUncertain(error)
+        ? lang === "zh" ? "工具启用状态尚未确认，正在刷新工具状态；请核对后再决定是否重试。" : "The tool state is unconfirmed. Refreshing; check its state before retrying."
+        : error instanceof Error ? error.message : String(error) });
       refresh();
     },
+    onSettled: (_tool, _error, _variables, context) => context?.release(),
   });
 
   const deleteMutation = useMutation({
     mutationFn: (toolId: string) =>
       deleteTool(toolId),
-    onMutate: async (toolId) => {
-      await queryClient.cancelQueries({ queryKey: queryKeys.tools() });
-      const previousTools = queryClient.getQueryData<ToolRegistryPayload>(queryKeys.tools());
-      const previousActiveToolId = activeToolId;
-      const previousSelectedToolIds = new Set(selectedToolIds);
+    onMutate: (toolId) => ({ release: beginToolWrite(toolId, "delete") }),
+    // Keep the row until the server confirms deletion. A failed request then
+    // has no structure or selection snapshot that could undo another tool.
+    onSuccess: (payload, toolId) => {
+      if (!payload.deleted || payload.toolId !== toolId) {
+        setNotice({ tone: "error", text: lang === "zh" ? "工具删除结果尚未确认，请刷新核对后再决定是否重试。" : "Tool deletion is unconfirmed. Refresh and check before retrying." });
+        refresh();
+        return;
+      }
       queryClient.setQueryData<ToolRegistryPayload | undefined>(
         queryKeys.tools(),
         (current) => removedToolRegistryPayload(current, toolId),
       );
-      if (toolId === activeToolId) {
-        setActiveToolId(null);
-      }
-      setSelectedToolIds((current) => {
-        const next = new Set(current);
-        next.delete(toolId);
-        return next;
+      setActiveToolId(current => current === toolId ? null : current);
+      setSelectedToolIds(current => {
+        if (!current.has(toolId)) return current;
+        const next = new Set(current); next.delete(toolId); return next;
       });
-      return { previousTools, previousActiveToolId, previousSelectedToolIds };
-    },
-    onSuccess: (payload) => {
-      queryClient.setQueryData<ToolRegistryPayload | undefined>(
-        queryKeys.tools(),
-        (current) => removedToolRegistryPayload(current, payload.toolId),
-      );
       setNotice({ tone: "success", text: payload.summary });
       refresh();
     },
-    onError: (error, _toolId, context) => {
-      if (context?.previousTools) {
-        queryClient.setQueryData(queryKeys.tools(), context.previousTools);
-      }
-      if (context) {
-        setActiveToolId(context.previousActiveToolId);
-        setSelectedToolIds(new Set(context.previousSelectedToolIds));
-      }
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    onError: (error) => {
+      if (error instanceof ToolWriteInProgressError) return;
+      setNotice({ tone: "error", text: isToolWriteOutcomeUncertain(error)
+        ? lang === "zh" ? "工具删除结果尚未确认，正在刷新工具状态；请核对后再决定是否重试。" : "Tool deletion is unconfirmed. Refreshing; check its state before retrying."
+        : error instanceof Error ? error.message : String(error) });
       refresh();
     },
+    onSettled: (_payload, _error, _toolId, context) => context?.release(),
   });
 
   const validateToolPolicyMutation = useMutation({
@@ -1567,15 +1591,15 @@ export function ToolsRoute() {
   const activeIsGenerated = activeTool?.source === "generated";
   const activeToolTestKey = toolTestKey(activeTool?.id, activeAgentScope.id, activePolicyAgent?.agentId);
   const visibleTestResult = testResult?.key === activeToolTestKey ? testResult.result : null;
-  const activeToolEnablePending = enableMutation.isPending && enableMutation.variables?.toolId === activeTool?.id;
-  const activeToolDeletePending = deleteMutation.isPending && deleteMutation.variables === activeTool?.id;
+  const activeToolEnablePending = pendingToolWrites.get(activeTool?.id ?? "") === "enable";
+  const activeToolDeletePending = pendingToolWrites.get(activeTool?.id ?? "") === "delete";
   const activeToolTestPending = testMutation.isPending && toolTestKey(
     testMutation.variables?.toolId,
     testMutation.variables?.agentScopeId,
     testMutation.variables?.agentId,
   ) === activeToolTestKey;
   const activePolicyAgentPending = updateToolPolicyMutation.isPending && updateToolPolicyMutation.variables?.agent.agentId === activePolicyAgent?.agentId;
-  const activeCanDelete = Boolean(activeTool?.deleteAllowed) && !activeToolDeletePending;
+  const activeCanDelete = Boolean(activeTool?.deleteAllowed) && !activeToolDeletePending && !activeToolEnablePending;
   const activeCanToggle = Boolean(activeIsGenerated && activeTool?.validated && activeTool.status === "validated");
   const activeIsImage2Tool = activeTool?.name === IMAGE2_TOOL_NAME;
   const activeIsWebSearchTool = activeTool?.name === WEB_SEARCH_TOOL_NAME;
@@ -2690,7 +2714,7 @@ export function ToolsRoute() {
                   type="button"
                   variant="secondary"
                   className={styles.secondaryButton}
-                  isDisabled={!activeCanToggle || activeToolEnablePending}
+                  isDisabled={!activeCanToggle || activeToolEnablePending || activeToolDeletePending}
                   onPress={() => {
                     if (!activeTool) {
                       return;

@@ -24,6 +24,19 @@ export type ActiveTurnLayerState = {
   clientDeltaTiming?: { turnId: string; ledgerSeq: number; appliedAtMs: number };
 };
 
+/** The session authority can end execution before its message window hydrates. */
+export type ActiveTurnAuthority = Pick<SessionDetail,
+  "id" | "currentPhase" | "activeTurnId" | "lastTurnTerminalTurnId" | "terminalReason" | "ledgerSeq"
+>;
+
+const EXECUTION_TERMINAL_REASONS = new Set([
+  "success", "failed_runtime", "failed_provider", "needs_continue", "paused_limit",
+  "stopped_by_user", "aborted", "superseded", "cancelled",
+]);
+const EXECUTION_TERMINAL_PHASES = new Set([
+  "ready", "completed", "failed", "stopped", ...EXECUTION_TERMINAL_REASONS,
+]);
+
 export type OptimisticActiveTurnLayerInput = {
   sessionId: string;
   turnId?: string;
@@ -379,10 +392,32 @@ export function isActiveTurnSettledByMessages(
 export function projectActiveTurnLayerMessage(
   layer: ActiveTurnLayerState | undefined,
   messages: ConversationMessage[] | undefined,
+  authority?: ActiveTurnAuthority,
 ): ConversationMessage | undefined {
-  return isActiveTurnSettledByMessages(layer, messages)
-    ? undefined
-    : activeTurnLayerToConversationMessage(layer);
+  if (isActiveTurnSettledByMessages(layer, messages)) return undefined;
+  const message = activeTurnLayerToConversationMessage(layer);
+  if (!message || message.role !== "assistant" || !layer || !isActiveTurnExecutionEnded(layer, authority)) return message;
+  // Keep partial output until the canonical message window replaces it. A
+  // terminal session receipt ends the activity affordance, not the transcript.
+  return {
+    ...message,
+    status: "completed",
+    metadata: {
+      ...message.metadata,
+      interrupted: authority?.terminalReason !== "success",
+      processStage: authority?.terminalReason,
+    },
+  };
+}
+
+function isActiveTurnExecutionEnded(layer: ActiveTurnLayerState, authority?: ActiveTurnAuthority) {
+  if (!authority || authority.id !== layer.sessionId || !layer.turnId) return false;
+  if (compactText(authority.activeTurnId) || compactText(authority.lastTurnTerminalTurnId) !== layer.turnId) return false;
+  if (!EXECUTION_TERMINAL_REASONS.has(compactText(authority.terminalReason).toLowerCase())) return false;
+  const phase = compactText(authority.currentPhase).toLowerCase();
+  if (!EXECUTION_TERMINAL_PHASES.has(phase)) return false;
+  const sequence = normalizedLedgerSeq(authority.ledgerSeq);
+  return sequence > 0 && sequence >= normalizedLedgerSeq(layer.ledgerSeq);
 }
 
 export function settleActiveTurnLayerFromDetail(

@@ -16,8 +16,6 @@ from threading import RLock
 from typing import Any
 from uuid import uuid4
 
-from langgraph.checkpoint.sqlite import SqliteSaver
-
 from core.research.workflow.contracts._validation import ContractValidationError
 from core.research.workflow.contracts.discussion_scope import (
     CANDIDATE_REVIEW_SCOPE_KIND,
@@ -499,6 +497,8 @@ def open_sqlite_checkpointer(path: Path | str | None = None) -> Any:
     LangGraph saver never opens an unconfigured (delete-journal, no
     busy-timeout) handle behind our back.
     """
+
+    from langgraph.checkpoint.sqlite import SqliteSaver
 
     target = ensure_checkpoint_parent(Path(path) if path else default_checkpoint_path())
     connection = _connect_checkpoint_sqlite(target, read_only=False)

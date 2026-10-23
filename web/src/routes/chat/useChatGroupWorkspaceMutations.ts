@@ -4,6 +4,7 @@
  * so they stay in this hook and the hook is called at the original site.
  */
 import { useMutation } from "@tanstack/react-query";
+import { describeUncertainChatWrite, refreshChatInBackground, useChatScopedMutationPending } from "./useChatScopedMutationPending";
 import {
   createChatRoom,
   deleteChatRoom,
@@ -29,6 +30,11 @@ import {
   removeTempGroupRoomConversations,
 } from "../groupRoomOptimisticIds";
 import type { UseChatWorkspaceLifecycleOptions } from "./useChatWorkspaceLifecycle";
+
+const ROOM_WRITE_KEYS = {
+  start: ["chat", "room-start"], stop: ["chat", "room-stop"],
+  update: ["chat", "room-update"], delete: ["chat", "room-delete"], reset: ["chat", "room-reset"],
+} as const;
 
 export type UseChatGroupWorkspaceMutationsInput = Pick<
   UseChatWorkspaceLifecycleOptions,
@@ -80,6 +86,13 @@ export function useChatGroupWorkspaceMutations({
   setGroupManagePurposeDraft,
   setProjectBusDraft,
 }: UseChatGroupWorkspaceMutationsInput) {
+  const startPending = useChatScopedMutationPending(ROOM_WRITE_KEYS.start, "roomId");
+  const stopPending = useChatScopedMutationPending(ROOM_WRITE_KEYS.stop, "roomId");
+  const updatePending = useChatScopedMutationPending(ROOM_WRITE_KEYS.update, "roomId");
+  const deletePending = useChatScopedMutationPending(ROOM_WRITE_KEYS.delete, "roomId");
+  const resetPending = useChatScopedMutationPending(ROOM_WRITE_KEYS.reset, "roomId");
+  const viewingRoom = (roomId: string) => routeSelectionRef.current.kind === "room"
+    && routeSelectionRef.current.roomId === roomId;
   const createGroupRoomMutation = useMutation({
     mutationFn: async (
       { title, agentIds, mode, purpose }: { title: string; agentIds: string[]; mode: string; purpose: string },
@@ -188,7 +201,7 @@ export function useChatGroupWorkspaceMutations({
         ...current,
         __sessions__: "",
       }));
-      void chatWorkspaceCache.afterChatRoomChanged(room.roomId);
+      refreshChatInBackground(() => chatWorkspaceCache.afterChatRoomChanged(room.roomId));
     },
     onError: (error, _variables, context) => {
       context?.telemetry?.failed(error);
@@ -215,6 +228,8 @@ export function useChatGroupWorkspaceMutations({
   });
 
   const startGroupRoundMutation = useMutation({
+    mutationKey: ROOM_WRITE_KEYS.start,
+    retry: false,
     mutationFn: async (
       { roomId, topic, mode, purpose }: { roomId: string; topic: string; mode: string; purpose: string },
     ) =>
@@ -232,18 +247,22 @@ export function useChatGroupWorkspaceMutations({
         roundId: accepted.roundId,
         asyncAccepted: true,
       });
-      setGroupTopicDraft("");
-      setGroupRoomActionError("");
-      void chatWorkspaceCache.afterGroupRoundStarted(accepted.roomId);
+      if (viewingRoom(accepted.roomId)) {
+        setGroupTopicDraft("");
+        setGroupRoomActionError("");
+      }
+      refreshChatInBackground(() => chatWorkspaceCache.afterGroupRoundStarted(accepted.roomId));
     },
     onError: (error, variables, context) => {
       context?.telemetry?.failed(error, { roomId: variables.roomId });
-      setGroupRoomActionError(describeError(error, lang === "zh" ? "启动群聊讨论失败" : "Run group discussion failed"));
-      void chatWorkspaceCache.afterChatRoomChanged(routeSelectionRef.current.kind === "room" ? routeSelectionRef.current.roomId : "");
+      if (viewingRoom(variables.roomId)) setGroupRoomActionError(describeUncertainChatWrite(error, lang, describeError(error, lang === "zh" ? "启动群聊讨论失败" : "Run group discussion failed")));
+      refreshChatInBackground(() => chatWorkspaceCache.afterChatRoomChanged(variables.roomId));
     },
   });
 
   const stopGroupRoundMutation = useMutation({
+    mutationKey: ROOM_WRITE_KEYS.stop,
+    retry: false,
     mutationFn: async ({ roomId }: { roomId: string }) =>
       stopChatRoomRound(roomId),
     onMutate: (variables) => ({
@@ -251,14 +270,14 @@ export function useChatGroupWorkspaceMutations({
     }),
     onSuccess: (room, _variables, context) => {
       context?.telemetry?.succeeded({ roomId: room.roomId });
-      setGroupRoomActionError("");
+      if (viewingRoom(room.roomId)) setGroupRoomActionError("");
       syncChatRoomDetail(room);
-      void chatWorkspaceCache.afterGroupRoundStopped(room.roomId);
+      refreshChatInBackground(() => chatWorkspaceCache.afterGroupRoundStopped(room.roomId));
     },
     onError: (error, variables, context) => {
       context?.telemetry?.failed(error, { roomId: variables.roomId });
-      setGroupRoomActionError(describeError(error, lang === "zh" ? "停止群聊讨论失败" : "Stop group discussion failed"));
-      void chatWorkspaceCache.afterGroupRoundStopped(variables.roomId);
+      if (viewingRoom(variables.roomId)) setGroupRoomActionError(describeUncertainChatWrite(error, lang, describeError(error, lang === "zh" ? "停止群聊讨论失败" : "Stop group discussion failed")));
+      refreshChatInBackground(() => chatWorkspaceCache.afterGroupRoundStopped(variables.roomId));
     },
   });
 
@@ -283,12 +302,12 @@ export function useChatGroupWorkspaceMutations({
       context?.telemetry?.succeeded();
       setProjectBusDraft("");
       setGroupRoomActionError("");
-      void chatWorkspaceCache.afterProjectBusChanged();
+      refreshChatInBackground(() => chatWorkspaceCache.afterProjectBusChanged());
     },
     onError: (error, _variables, context) => {
       context?.telemetry?.failed(error);
       setGroupRoomActionError(describeError(error, lang === "zh" ? "发送总群引导失败" : "Send project bus guidance failed"));
-      void chatWorkspaceCache.afterProjectBusFailed();
+      refreshChatInBackground(() => chatWorkspaceCache.afterProjectBusFailed());
     },
   });
 
@@ -304,16 +323,18 @@ export function useChatGroupWorkspaceMutations({
     onSuccess: (_payload, _variables, context) => {
       context?.telemetry?.succeeded();
       setGroupRoomActionError("");
-      void chatWorkspaceCache.afterProjectBusChanged();
+      refreshChatInBackground(() => chatWorkspaceCache.afterProjectBusChanged());
     },
     onError: (error, variables, context) => {
       context?.telemetry?.failed(error, { eventId: variables.eventId });
       setGroupRoomActionError(describeError(error, lang === "zh" ? "撤回总群消息失败" : "Recall project bus message failed"));
-      void chatWorkspaceCache.afterProjectBusFailed();
+      refreshChatInBackground(() => chatWorkspaceCache.afterProjectBusFailed());
     },
   });
 
   const updateGroupRoomMutation = useMutation({
+    mutationKey: ROOM_WRITE_KEYS.update,
+    retry: false,
     mutationFn: async (
       { roomId, title, sessionIds, mode, purpose }: {
         roomId: string;
@@ -341,30 +362,33 @@ export function useChatGroupWorkspaceMutations({
         roomId: room.roomId,
         participantCount: room.participants.length,
       });
-      setGroupManageTitleDraft(room.title || "");
-      setGroupManageSessionIds(room.participants.map((participant) => participant.sessionId));
-      setGroupManageModeDraft(room.mode || "round_robin");
-      setGroupManagePurposeDraft(room.purpose || "discussion");
-      setGroupRoomActionError("");
+      if (viewingRoom(room.roomId)) {
+        setGroupManageTitleDraft(room.title || "");
+        setGroupManageSessionIds(room.participants.map((participant) => participant.sessionId));
+        setGroupManageModeDraft(room.mode || "round_robin");
+        setGroupManagePurposeDraft(room.purpose || "discussion");
+        setGroupRoomActionError("");
+      }
       queryClient.setQueryData(queryKeys.chatRoom(room.roomId), room);
-      void chatWorkspaceCache.afterChatRoomChanged(room.roomId);
+      refreshChatInBackground(() => chatWorkspaceCache.afterChatRoomChanged(room.roomId));
     },
     onError: (error, variables, context) => {
       context?.telemetry?.failed(error, { roomId: variables.roomId });
-      setGroupRoomActionError(describeError(error, lang === "zh" ? "更新群聊失败" : "Update group failed"));
-      if (routeSelectionRef.current.kind === "room") {
-        void chatWorkspaceCache.afterChatRoomChanged(routeSelectionRef.current.roomId);
-      }
+      if (viewingRoom(variables.roomId)) setGroupRoomActionError(describeUncertainChatWrite(error, lang, describeError(error, lang === "zh" ? "更新群聊失败" : "Update group failed")));
+      refreshChatInBackground(() => chatWorkspaceCache.afterChatRoomChanged(variables.roomId));
     },
   });
 
   const deleteGroupRoomMutation = useMutation({
+    mutationKey: ROOM_WRITE_KEYS.delete,
+    retry: false,
     mutationFn: async ({ roomId }: { roomId: string }) =>
       deleteChatRoom(roomId),
     onMutate: (variables) => ({
       telemetry: startUserAction("group_room_delete", { roomId: variables.roomId }, { destructive: true }),
     }),
     onSuccess: (_payload, variables, context) => {
+      const targetStillActive = viewingRoom(variables.roomId);
       const routeReplaced = chatRoute.replaceIfStillViewing(
         { kind: "room", roomId: variables.roomId },
         { kind: "bare" },
@@ -373,23 +397,28 @@ export function useChatGroupWorkspaceMutations({
         roomId: variables.roomId,
         routeReplaced,
       });
-      setRightIndexPanel("conversations");
-      setGroupTopicDraft("");
-      setGroupRoomActionError("");
-      setGroupManageTitleDraft("");
-      setGroupManageSessionIds([]);
-      setGroupManageModeDraft("round_robin");
+      if (targetStillActive) {
+        setRightIndexPanel("conversations");
+        setGroupTopicDraft("");
+        setGroupRoomActionError("");
+        setGroupManageTitleDraft("");
+        setGroupManageSessionIds([]);
+        setGroupManageModeDraft("round_robin");
+      }
       queryClient.removeQueries({ queryKey: queryKeys.chatRoom(variables.roomId), exact: true });
       // Only leave the deleted room while the user is still on its route.
-      void chatWorkspaceCache.afterChatRoomChanged(variables.roomId);
+      refreshChatInBackground(() => chatWorkspaceCache.afterChatRoomChanged(variables.roomId));
     },
     onError: (error, variables, context) => {
       context?.telemetry?.failed(error, { roomId: variables.roomId });
-      setGroupRoomActionError(describeError(error, lang === "zh" ? "删除群聊失败" : "Delete group failed"));
+      if (viewingRoom(variables.roomId)) setGroupRoomActionError(describeUncertainChatWrite(error, lang, describeError(error, lang === "zh" ? "删除群聊失败" : "Delete group failed")));
+      refreshChatInBackground(() => chatWorkspaceCache.afterChatRoomChanged(variables.roomId));
     },
   });
 
   const resetGroupRoomMutation = useMutation({
+    mutationKey: ROOM_WRITE_KEYS.reset,
+    retry: false,
     mutationFn: async ({ roomId }: { roomId: string }) =>
       resetChatRoom(roomId),
     onMutate: (variables) => ({
@@ -397,27 +426,25 @@ export function useChatGroupWorkspaceMutations({
     }),
     onSuccess: (room, _variables, context) => {
       context?.telemetry?.succeeded({ roomId: room.roomId });
-      setGroupRoomActionError("");
+      if (viewingRoom(room.roomId)) setGroupRoomActionError("");
       syncChatRoomDetail(room);
-      void chatWorkspaceCache.afterChatRoomChanged(room.roomId);
+      refreshChatInBackground(() => chatWorkspaceCache.afterChatRoomChanged(room.roomId));
     },
     onError: (error, variables, context) => {
       context?.telemetry?.failed(error, { roomId: variables.roomId });
-      setGroupRoomActionError(describeError(error, lang === "zh" ? "重置群聊失败" : "Reset group failed"));
-      if (routeSelectionRef.current.kind === "room") {
-        void chatWorkspaceCache.afterChatRoomChanged(routeSelectionRef.current.roomId);
-      }
+      if (viewingRoom(variables.roomId)) setGroupRoomActionError(describeUncertainChatWrite(error, lang, describeError(error, lang === "zh" ? "重置群聊失败" : "Reset group failed")));
+      refreshChatInBackground(() => chatWorkspaceCache.afterChatRoomChanged(variables.roomId));
     },
   });
 
   return {
     createGroupRoomMutation,
-    startGroupRoundMutation,
-    stopGroupRoundMutation,
+    startGroupRoundMutation: { ...startGroupRoundMutation, ...startPending },
+    stopGroupRoundMutation: { ...stopGroupRoundMutation, ...stopPending },
     sendProjectBusMessageMutation,
     revokeProjectBusMessageMutation,
-    updateGroupRoomMutation,
-    deleteGroupRoomMutation,
-    resetGroupRoomMutation,
+    updateGroupRoomMutation: { ...updateGroupRoomMutation, ...updatePending },
+    deleteGroupRoomMutation: { ...deleteGroupRoomMutation, ...deletePending },
+    resetGroupRoomMutation: { ...resetGroupRoomMutation, ...resetPending },
   };
 }

@@ -40,7 +40,6 @@ from .challenge_turn_policy import (
     remaining_challenge_task_ms,
 )
 from .ids import new_id
-from .agent_node_execution import _formal_task_authorities
 from .formal_hypothesis_fanout import (
     HypothesisAuthorityUnavailable as _HypothesisAuthorityUnavailable,
 )
@@ -93,6 +92,25 @@ from .hypothesis_session_scope_mode import (
 _HYPOTHESIS_SELECTION_MISSING = (
     "hypothesis_design requires a current hypothesis selection"
 )
+
+
+def _formal_task_authorities(
+    *,
+    action: Any,
+    input_snapshot: Mapping[str, Any],
+    agent_id: str,
+    workflow_id: str | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    # Keep this patchable authority bridge without importing Agent execution
+    # while the production runtime only assembles its ports.
+    from .agent_node_execution import _formal_task_authorities as resolve
+
+    return resolve(
+        action=action,
+        input_snapshot=input_snapshot,
+        agent_id=agent_id,
+        workflow_id=workflow_id,
+    )
 
 
 def _positive_contract_tokens(value: object) -> int | None:

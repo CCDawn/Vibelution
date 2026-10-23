@@ -1,4 +1,4 @@
-import { fetchJson, fetchJsonWithTimeout, isFetchJsonHttpError } from "./client";
+import { detectUiLanguage, fetchJson, fetchJsonWithTimeout, isFetchJsonHttpError } from "./client";
 import type {
   AgentAvatarOptionsPayload,
   AgentAvatarUploadResponse,
@@ -70,7 +70,7 @@ export function listAgentAvatarOptions(options?: {
 }
 
 export function createAgent(payload: object): Promise<AgentConfigWorkspaceAgent> {
-  return fetchJson<AgentConfigWorkspaceAgent>("/api/agents", {
+  return agentManagementWrite<AgentConfigWorkspaceAgent>("/api/agents", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -81,7 +81,7 @@ export function updateAgent(
   agentId: string,
   payload: Record<string, unknown>,
 ): Promise<AgentConfigWorkspaceAgent> {
-  return fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(agentId)}`, {
+  return agentManagementWrite<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(agentId)}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -106,11 +106,26 @@ export function isAgentArchiveOutcomeUncertain(error: unknown): boolean {
   return !isFetchJsonHttpError(error) || error.status >= 500 || error.status === 408;
 }
 
+export class AgentManagementOutcomeUnknownError extends Error {
+  constructor(readonly cause: unknown) {
+    super(detectUiLanguage() === "en"
+      ? "The operation result is unconfirmed. The server may have processed it; check the latest state before retrying."
+      : "操作结果尚未确认，服务端可能已处理；请核对最新状态后再操作。");
+  }
+}
+
+function agentManagementWrite<T>(input: string, init: RequestInit): Promise<T> {
+  return fetchJsonWithTimeout<T>(input, { ...init, timeoutMs: 60_000 }).catch(error => {
+    if (isAgentArchiveOutcomeUncertain(error)) throw new AgentManagementOutcomeUnknownError(error);
+    throw error;
+  });
+}
+
 export function resetAgent<T = AgentDirectSessionResetResponse>(
   agentId: string,
   payload: object,
 ): Promise<T> {
-  return fetchJson<T>(`/api/agents/${encodeURIComponent(agentId)}/reset`, {
+  return agentManagementWrite<T>(`/api/agents/${encodeURIComponent(agentId)}/reset`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -151,7 +166,7 @@ export function saveAgentConfigDraft(
     summary: string;
   },
 ): Promise<NonNullable<AgentConfigChanges["activeDraft"]>> {
-  return fetchJson<NonNullable<AgentConfigChanges["activeDraft"]>>(
+  return agentManagementWrite<NonNullable<AgentConfigChanges["activeDraft"]>>(
     `/api/agents/${encodeURIComponent(agentId)}/config-drafts`,
     {
       method: "POST",
@@ -165,7 +180,7 @@ export function discardAgentConfigDraft(
   agentId: string,
   draftId: string,
 ): Promise<{ draftId: string; status: string }> {
-  return fetchJson<{ draftId: string; status: string }>(
+  return agentManagementWrite<{ draftId: string; status: string }>(
     `/api/agents/${encodeURIComponent(agentId)}/config-drafts/${encodeURIComponent(draftId)}`,
     { method: "DELETE" },
   );
@@ -176,7 +191,7 @@ export function promoteAgentModel<T = { agent: AgentConfigWorkspaceAgent; modelR
   slot: string,
   payload: object,
 ): Promise<T> {
-  return fetchJson<T>(
+  return agentManagementWrite<T>(
     `/api/agents/${encodeURIComponent(agentId)}/llm-bindings/${encodeURIComponent(slot)}/promote`,
     {
       method: "POST",
@@ -245,7 +260,7 @@ export function bulkUpdateAgentConfig<T>(payload: {
   applyFields: string[];
   patch: Record<string, unknown>;
 }): Promise<T> {
-  return fetchJson<T>("/api/agents/bulk-config", {
+  return agentManagementWrite<T>("/api/agents/bulk-config", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -256,7 +271,7 @@ export function bulkUpdateAgentPromptTemplate<T>(payload: {
   agentIds: string[];
   promptTemplateId: string;
 }): Promise<T> {
-  return fetchJson<T>("/api/agents/bulk-prompt-template", {
+  return agentManagementWrite<T>("/api/agents/bulk-prompt-template", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -273,7 +288,7 @@ export function bulkArchiveAgents<T>(agentIds: string[]): Promise<T> {
 }
 
 export function bulkPurgeAgents<T>(agentIds: string[]): Promise<T> {
-  return fetchJson<T>("/api/agents/bulk-purge", {
+  return agentManagementWrite<T>("/api/agents/bulk-purge", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ agentIds }),
@@ -284,7 +299,7 @@ export function updateAgentAvatar(
   agentId: string,
   payload: { avatarImagePath?: string; resetToDefault?: boolean },
 ): Promise<AgentConfigWorkspaceAgent> {
-  return fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(agentId)}/avatar`, {
+  return agentManagementWrite<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(agentId)}/avatar`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -298,7 +313,7 @@ export function uploadAgentAvatarImage(
   agentId: string,
   payload: { filename: string; contentType: string; dataBase64: string },
 ): Promise<AgentAvatarUploadResponse> {
-  return fetchJson<AgentAvatarUploadResponse>(`/api/agents/${encodeURIComponent(agentId)}/avatar-image`, {
+  return agentManagementWrite<AgentAvatarUploadResponse>(`/api/agents/${encodeURIComponent(agentId)}/avatar-image`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -309,7 +324,7 @@ export function updateAgentModeMembership<T = AgentModeBindings>(
   agentId: string,
   draft: Record<string, unknown>,
 ): Promise<T> {
-  return fetchJson<T>(`/api/agents/${encodeURIComponent(agentId)}/mode-membership`, {
+  return agentManagementWrite<T>(`/api/agents/${encodeURIComponent(agentId)}/mode-membership`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(draft),
@@ -328,7 +343,7 @@ export function createAgentToolGovernanceRequest(
     applyMode: string;
   },
 ): Promise<AgentToolGovernanceRequest> {
-  return fetchJson<AgentToolGovernanceRequest>(
+  return agentManagementWrite<AgentToolGovernanceRequest>(
     `/api/agents/${encodeURIComponent(agentId)}/tool-governance-requests`,
     {
       method: "POST",
@@ -343,7 +358,7 @@ export function resolveAgentCenterToolGovernanceRequest(
   requestId: string,
   decision: "approve" | "reject",
 ): Promise<AgentToolGovernanceRequest> {
-  return fetchJson<AgentToolGovernanceRequest>(
+  return agentManagementWrite<AgentToolGovernanceRequest>(
     `/api/agents/${encodeURIComponent(agentId)}/tool-governance-requests/${encodeURIComponent(requestId)}`,
     {
       method: "PATCH",
@@ -362,7 +377,7 @@ export function consumeAgentInboxMessage(
   messageId: string,
   payload: { consumedBySessionId: string; consumedByTurnId: string },
 ): Promise<AgentInboxMessage> {
-  return fetchJson<AgentInboxMessage>(
+  return agentManagementWrite<AgentInboxMessage>(
     `/api/agents/${encodeURIComponent(agentId)}/messages/${encodeURIComponent(messageId)}/consume`,
     {
       method: "POST",
@@ -376,7 +391,7 @@ export function consumeAllAgentInboxMessages<T>(
   agentId: string,
   payload: { consumedBySessionId: string; consumedByTurnId: string },
 ): Promise<T> {
-  return fetchJson<T>(
+  return agentManagementWrite<T>(
     `/api/agents/${encodeURIComponent(agentId)}/messages/consume-all`,
     {
       method: "POST",
@@ -387,7 +402,7 @@ export function consumeAllAgentInboxMessages<T>(
 }
 
 export function purgeArchivedAgent<T = AgentPurgeResponse>(agentId: string): Promise<T> {
-  return fetchJson<T>(`/api/agents/${encodeURIComponent(agentId)}/purge`, {
+  return agentManagementWrite<T>(`/api/agents/${encodeURIComponent(agentId)}/purge`, {
     method: "DELETE",
   });
 }
@@ -411,7 +426,7 @@ export function updatePromptTemplate(
   templateId: string,
   payload: Record<string, unknown>,
 ): Promise<PromptTemplate> {
-  return fetchJson<PromptTemplate>(`/api/prompt-templates/${encodeURIComponent(templateId)}`, {
+  return agentManagementWrite<PromptTemplate>(`/api/prompt-templates/${encodeURIComponent(templateId)}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -419,7 +434,7 @@ export function updatePromptTemplate(
 }
 
 export function resetPromptTemplate(templateId: string): Promise<PromptTemplate> {
-  return fetchJson<PromptTemplate>(`/api/prompt-templates/${encodeURIComponent(templateId)}/reset`, {
+  return agentManagementWrite<PromptTemplate>(`/api/prompt-templates/${encodeURIComponent(templateId)}/reset`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
   });
@@ -429,7 +444,7 @@ export function validateAgentToolPolicy(
   agentId: string,
   toolPolicy: Record<string, unknown>,
 ): Promise<AgentToolPolicyConfiguration> {
-  return fetchJson<AgentToolPolicyConfiguration>(
+  return agentManagementWrite<AgentToolPolicyConfiguration>(
     `/api/agents/${encodeURIComponent(agentId)}/tool-policy/validate`,
     {
       method: "POST",
@@ -448,7 +463,7 @@ export function updateAgentToolPolicy(
     confirmed: boolean;
   },
 ): Promise<AgentToolPolicyConfiguration> {
-  return fetchJson<AgentToolPolicyConfiguration>(
+  return agentManagementWrite<AgentToolPolicyConfiguration>(
     `/api/agents/${encodeURIComponent(agentId)}/tool-policy`,
     {
       method: "PUT",
@@ -480,7 +495,7 @@ export function resolveAgentProjectMemoryUpdate<T = AgentProjectMemoryUpdateProp
   proposalId: string,
   payload: { status: string; resolvedBy: string; resolutionNote: string },
 ): Promise<T> {
-  return fetchJson<T>(
+  return agentManagementWrite<T>(
     `/api/agents/${encodeURIComponent(agentId)}/project-memory-updates/${encodeURIComponent(proposalId)}`,
     {
       method: "PATCH",
@@ -494,7 +509,7 @@ export function resolveAgentToolGovernanceRequest(
   request: AgentToolGovernanceRequest,
   decision: "approve" | "reject",
 ): Promise<AgentToolGovernanceRequest> {
-  return fetchJson<AgentToolGovernanceRequest>(
+  return agentManagementWrite<AgentToolGovernanceRequest>(
     `/api/agents/${encodeURIComponent(request.targetAgentId)}/tool-governance-requests/${encodeURIComponent(request.requestId)}`,
     {
       method: "PATCH",
@@ -528,7 +543,7 @@ function isAgentConfigRevisionConflict(error: unknown): boolean {
 export function updateAgentPermissionPreset(
   payload: UpdateAgentPermissionPresetPayload,
 ) {
-  return fetchJson<AgentConfigWorkspaceAgent>(
+  return agentManagementWrite<AgentConfigWorkspaceAgent>(
     `/api/agents/${encodeURIComponent(payload.agentId)}`,
     {
       method: "PATCH",
@@ -554,8 +569,9 @@ export async function updateAgentPermissionPresetWithRevisionRetry(
     if (!isAgentConfigRevisionConflict(error)) {
       throw error;
     }
-    const latest = await fetchJson<AgentConfigWorkspaceAgent>(
+    const latest = await fetchJsonWithTimeout<AgentConfigWorkspaceAgent>(
       `/api/agents/${encodeURIComponent(payload.agentId)}`,
+      { timeoutMs: 10_000 },
     );
     const latestRevision = Number(latest.configRevision);
     if (!Number.isFinite(latestRevision) || latestRevision < 1) {

@@ -7,13 +7,13 @@ import * as api from "../../api/agents";
 import { FetchJsonHttpError } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
 import type { AgentConfigWorkspace, AgentConfigWorkspaceAgent } from "../../api/types";
-import { archivedWorkspaceCache, updatedAgentWorkspaceCache } from "../agentWorkspaceCache";
+import { archivedWorkspaceCache, updatedAgentWorkspaceCache, purgedWorkspaceCache } from "../agentWorkspaceCache";
 import { optimisticArchivedAgent } from "./agentRouteBulkModel";
 import { useAgentWorkbenchMutations, type UseAgentWorkbenchMutationsOptions } from "./useAgentWorkbenchMutations";
 
 vi.mock("../../api/agents", async importOriginal => ({
   ...await importOriginal<typeof import("../../api/agents")>(),
-  archiveAgent: vi.fn(), bulkArchiveAgents: vi.fn(), fetchAgentArchiveState: vi.fn(),
+  archiveAgent: vi.fn(), bulkArchiveAgents: vi.fn(), fetchAgentArchiveState: vi.fn(), purgeArchivedAgent: vi.fn(),
 }));
 vi.mock("../../app/userActionTelemetry", () => ({ startUserAction: () => ({ succeeded: vi.fn(), failed: vi.fn() }) }));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -37,7 +37,7 @@ function Consumer() {
     setSelectedAgentId: (value: string) => { selected = value; },
     setActivePane: (value: string) => { pane = value; },
     agentLabel: (value: AgentConfigWorkspaceAgent) => value.displayName,
-    archivedWorkspaceCache, updatedAgentWorkspaceCache, optimisticArchivedAgent,
+    archivedWorkspaceCache, updatedAgentWorkspaceCache, optimisticArchivedAgent, purgedWorkspaceCache,
   } as unknown as UseAgentWorkbenchMutationsOptions);
   return null;
 }
@@ -53,6 +53,47 @@ beforeEach(async () => {
   await act(async () => root.render(<QueryClientProvider client={client}><Consumer /></QueryClientProvider>));
 });
 afterEach(async () => { await act(async () => root.unmount()); client.clear(); node.remove(); });
+
+it("a failed purge preserves another Agent's completed archive and the current navigation", async () => {
+  const first = deferred<never>();
+  vi.mocked(api.purgeArchivedAgent).mockReturnValue(first.promise);
+  vi.mocked(api.archiveAgent).mockResolvedValue(agent("b", "archived"));
+  let a!: Promise<unknown>;
+  await act(async () => { a = mutations.purgeAgentMutation.mutateAsync({ agentId: "a" }).catch(error => error); });
+  selected = "b"; pane = "activity";
+  await act(async () => { await mutations.archiveAgentMutation.mutateAsync({ agentId: "b" }); });
+  selected = "b"; pane = "activity";
+  await act(async () => { first.reject(new FetchJsonHttpError("refused", { status: 400 })); await a; });
+  expect(current().agents.find(row => row.agentId === "b")?.status).toBe("archived");
+  expect(selected).toBe("b"); expect(pane).toBe("activity");
+});
+
+it("a late purge success removes only its Agent without closing the newly selected pane", async () => {
+  const first = deferred<Awaited<ReturnType<typeof api.purgeArchivedAgent>>>();
+  vi.mocked(api.purgeArchivedAgent).mockReturnValue(first.promise);
+  let a!: Promise<unknown>;
+  await act(async () => { a = mutations.purgeAgentMutation.mutateAsync({ agentId: "a" }); });
+  expect(current().agents.some(row => row.agentId === "a")).toBe(true);
+  selected = "b"; pane = "activity";
+  await act(async () => { first.resolve({ agentId: "a", purgeSummary: { sessions: { cleanupPending: false } } } as Awaited<ReturnType<typeof api.purgeArchivedAgent>>); await a; });
+  expect(current().agents.some(row => row.agentId === "a")).toBe(false);
+  expect(selected).toBe("b"); expect(pane).toBe("activity");
+});
+
+it("keeps every purge target pending while allowing independent Agent deletion", async () => {
+  const first = deferred<Awaited<ReturnType<typeof api.purgeArchivedAgent>>>();
+  vi.mocked(api.purgeArchivedAgent).mockImplementation(id => id === "a" ? first.promise : Promise.resolve({ agentId: "b", purgeSummary: { sessions: { cleanupPending: false } } } as Awaited<ReturnType<typeof api.purgeArchivedAgent>>));
+  let pending!: Promise<unknown>;
+  await act(async () => { pending = mutations.purgeAgentMutation.mutateAsync({ agentId: "a" }); });
+  await act(async () => { await mutations.purgeAgentMutation.mutateAsync({ agentId: "b" }); });
+  expect(mutations.isAgentPurgePending("a")).toBe(true);
+  expect(mutations.isAgentPurgePending("b")).toBe(false);
+  await act(async () => { await mutations.purgeAgentMutation.mutateAsync({ agentId: "a" }).catch(() => undefined); });
+  expect(api.purgeArchivedAgent).toHaveBeenCalledTimes(2);
+  expect(mutations.isAgentPurgePending("a")).toBe(true);
+  await act(async () => { first.resolve({ agentId: "a", purgeSummary: { sessions: { cleanupPending: false } } } as Awaited<ReturnType<typeof api.purgeArchivedAgent>>); await pending; });
+  expect(mutations.isAgentPurgePending("a")).toBe(false);
+});
 
 it("a failed archive rolls back only its Agent and preserves another completed archive", async () => {
   const first = deferred<AgentConfigWorkspaceAgent>();

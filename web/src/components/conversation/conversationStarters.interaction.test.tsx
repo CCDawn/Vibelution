@@ -110,6 +110,7 @@ describe("conversation starter cards and builtin slash commands", () => {
 
   async function renderConversation(options: {
     messages?: ConversationMessage[];
+    transcriptPending?: boolean;
     composerValue?: string;
     onCreateSession?: () => void;
     onOpenComposerContextDetail?: () => void;
@@ -127,7 +128,7 @@ describe("conversation starter cards and builtin slash commands", () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
-    await act(async () => {
+    const render = () => act(async () => {
       root?.render(
         <QueryClientProvider client={queryClient}>
           <ConversationView
@@ -135,6 +136,7 @@ describe("conversation starter cards and builtin slash commands", () => {
             title="Session"
             phase="ready"
             messages={options.messages ?? []}
+            transcriptPending={options.transcriptPending}
             showHeader={false}
             showSessionOverview={false}
             showComposer
@@ -157,7 +159,27 @@ describe("conversation starter cards and builtin slash commands", () => {
       );
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
+    await render();
+    return async (next: Partial<typeof options>) => {
+      options = { ...options, ...next };
+      await render();
+    };
   }
+
+  it.each([false, true])("waits for transcript hydration before considering starters, with messages=%s", async (hasMessages) => {
+    const fetchMock = fetchRoutes({ command: backendStarters[0].command, starters: backendStarters });
+    vi.stubGlobal("fetch", fetchMock);
+    seedControlTokenForTests();
+    const render = await renderConversation({ transcriptPending: true, onComposerChange: () => undefined });
+    const exampleCalls = () => fetchMock.mock.calls.filter(([input]) => String(input).includes("/composer-example"));
+
+    expect(exampleCalls()).toHaveLength(0);
+    await render({ transcriptPending: false, messages: hasMessages ? [userMessage] : [] });
+    expect(exampleCalls()).toHaveLength(hasMessages ? 0 : 1);
+    if (!hasMessages) {
+      expect(container?.querySelector('[data-vui="conversation-starter-cards"]')).toBeTruthy();
+    }
+  });
 
   it("renders backend starter cards in an empty session and fills the composer without submitting", async () => {
     const fetchMock = fetchRoutes({ command: backendStarters[0].command, starters: backendStarters });

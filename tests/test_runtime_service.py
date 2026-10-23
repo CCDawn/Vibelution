@@ -203,7 +203,7 @@ def test_user_close_dispatches_session_owners_without_waiting_for_previous_callb
         {"sessionId": "blocked", "runId": "turn-1"}, {"sessionId": "other", "runId": "turn-2"},
     ])
 
-    def persist(session_id):
+    def persist(session_id, **kwargs):
         release.wait(2) if session_id == "blocked" else saved.set()
 
     # Scheduling only: production persistence still shares the Session lock.

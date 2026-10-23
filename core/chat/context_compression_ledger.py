@@ -272,6 +272,34 @@ def append_context_compression_checkpoint(
             event for event in source_events
             if event.event_id not in covered_ids and event.event_id not in retained_ids
         ]
+        if not retired_events:
+            # Message-level identity matching under-covers whenever the payload
+            # was rewritten downstream (redaction, tool-result replacement,
+            # truncation): the folded messages no longer compare equal to their
+            # journal events, so a replacement retired nothing and the next
+            # replay rebuilt the full history, re-triggering compression every
+            # turn. Fall back to the proven kept-window boundary: every coverable
+            # event older than the oldest retained event that the summary did not
+            # fold was dropped by the replacement. Without a provable retained
+            # boundary we retire nothing, because retiring too much loses history.
+            retained_sequences = [
+                sequence
+                for sequence in (
+                    int(getattr(event, "sequence", 0) or 0)
+                    for event in coverable
+                    if event.event_id in retained_ids
+                )
+                if sequence > 0
+            ]
+            if retained_sequences:
+                retained_boundary = min(retained_sequences)
+                retired_events = [
+                    event
+                    for event in coverable
+                    if event.event_id not in covered_ids
+                    and event.event_id not in retained_ids
+                    and 0 < int(getattr(event, "sequence", 0) or 0) < retained_boundary
+                ]
         include_sequence_range = False
     elif summarized_messages is None:
         covered_events = coverable

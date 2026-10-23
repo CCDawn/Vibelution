@@ -1,4 +1,4 @@
-import { fetchJson } from "./client";
+import { fetchJson, fetchJsonWithTimeout } from "./client";
 import type { SessionSummary } from "./types";
 
 /**
@@ -26,9 +26,9 @@ export async function archiveChatSession(
   sessionId: string,
   options?: { signal?: AbortSignal },
 ): Promise<SessionArchiveCommandResponse> {
-  return await fetchJson<SessionArchiveCommandResponse>(
+  return await fetchJsonWithTimeout<SessionArchiveCommandResponse>(
     `/api/sessions/${encodeURIComponent(sessionId)}/archive`,
-    { method: "POST", signal: options?.signal },
+    { method: "POST", signal: options?.signal, timeoutMs: 30_000 },
   );
 }
 
@@ -36,9 +36,9 @@ export async function unarchiveChatSession(
   sessionId: string,
   options?: { signal?: AbortSignal },
 ): Promise<SessionArchiveCommandResponse> {
-  return await fetchJson<SessionArchiveCommandResponse>(
+  return await fetchJsonWithTimeout<SessionArchiveCommandResponse>(
     `/api/sessions/${encodeURIComponent(sessionId)}/unarchive`,
-    { method: "POST", signal: options?.signal },
+    { method: "POST", signal: options?.signal, timeoutMs: 30_000 },
   );
 }
 
