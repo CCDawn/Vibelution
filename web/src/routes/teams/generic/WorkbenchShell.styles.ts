@@ -1,4 +1,8 @@
 const styles = {
+  pendingSaved: "!w-12",
+  pendingFlowTitle: "relative block",
+  pendingInvisible: "invisible",
+  pendingFill: "!absolute inset-x-0 top-1/2 !w-full -translate-y-1/2",
   pendingTeam: "flex h-8 min-w-0 flex-1 items-center",
   pendingName: "!w-28",
   pendingFlowRow: "flex items-start gap-2.5 rounded-lg border border-transparent px-3 py-3",

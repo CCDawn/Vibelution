@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { Flow, Run } from "./workflowModel";
+import { readWorkflowLoadingShape } from "./workflowLoadingShape";
 import { useWorkflowWorkspace } from "./useWorkflowWorkspace";
 import { createWorkflow } from "./workflowTemplates";
 import { teamFlowKeys } from "../../../api/genericTeamWorkflows";
@@ -263,4 +264,13 @@ it("keeps the initially selected flow when saving reorders the server cache", as
   expect(state.flow?.id).toBe(initial.id);
   expect(state.flow?.name).toBe("编辑后的流程");
   expect(state.dirty).toBe(false);
+});
+
+it("records server structure without letting unsaved drafts replace the loading hint", async () => {
+  const expected = initial.steps.map(step => step.kind);
+  act(() => state.addFlow(createWorkflow("新草稿", "analysis", [])));
+  expect(readWorkflowLoadingShape("team-a")?.[0].steps.map(step => step.kind)).toEqual(expected);
+  await act(async () => { client.setQueryData(teamFlowKeys.flows("team-a"), {schemaVersion:1,teamId:"team-a",flows:[]}); });
+  await flush();
+  expect(readWorkflowLoadingShape("team-a")).toEqual([]);
 });

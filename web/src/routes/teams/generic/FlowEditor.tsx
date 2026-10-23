@@ -1,9 +1,9 @@
 import styles from "./FlowEditor.styles";
 import { ArrowDown, Bot, CheckCircle2, Circle, Clock3, FileCheck2, Inbox, LoaderCircle, PauseCircle, TriangleAlert, UserRound } from "lucide-react";
-import { VNativeButton } from "../../../components/vui";
+import { VNativeButton, VSkeleton } from "../../../components/vui";
 import { KIND_LABEL, memberName, type Flow, type Run, type StepKind, type WorkflowMember } from "./workflowModel";
 
-type Props = { flow: Flow; selectedId: string; mode: "design" | "run"; run?: Run; members: WorkflowMember[]; onSelect: (id: string) => void; onAdd: () => void };
+type Props = { loading?: boolean; flow: Flow; selectedId: string; mode: "design" | "run"; run?: Run; members: WorkflowMember[]; onSelect: (id: string) => void; onAdd: () => void };
 const kindIcons: Record<StepKind, typeof Bot> = { input: Inbox, agent: Bot, human: UserRound, output: FileCheck2, research: TriangleAlert, session: TriangleAlert };
 const states = {
   configured: { label: "已配置", icon: CheckCircle2, color: "text-[var(--fg-tertiary)]" },
@@ -22,9 +22,9 @@ function nodeState(index: number, mode: Props["mode"], instruction: string, run?
   if (index > run.current) return "pending";
   return run.status;
 }
-export function FlowEditor({ flow, selectedId, mode, run, members, onSelect }: Props) {
+export function FlowEditor({ loading, flow, selectedId, mode, run, members, onSelect }: Props) {
   const ownerName = (id: string) => memberName(id, members);
-  return <div data-team-flow-editor className={styles.part1}>
+  return <div data-team-flow-editor aria-hidden={loading || undefined} className={styles.part1}>
     <ol className={styles.part2}>
       {flow.steps.map((step,index) => {
         const stateKey = nodeState(index,mode,step.instruction,run);
@@ -35,10 +35,11 @@ export function FlowEditor({ flow, selectedId, mode, run, members, onSelect }: P
         return <li key={step.id} className={styles.part3}>
           {index < flow.steps.length - 1 && <span aria-hidden="true" className={styles.part4}><ArrowDown size={12} className={styles.part5}/></span>}
           <span className={"relative mt-4 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border bg-[var(--vui-surface-chat)] font-mono text-vui-micro-11 " + (selected ? "border-[var(--accent-cool)] text-[var(--accent-cool)]" : "border-[var(--vui-border-subtle)] text-[var(--fg-tertiary)]")}>{String(index+1).padStart(2,"0")}</span>
-          <VNativeButton aria-pressed={selected} aria-label={(index+1)+". "+step.label+"，"+ownerName(step.owner)+"，"+state.label} onClick={() => onSelect(step.id)} className={"relative flex min-w-0 flex-1 flex-col gap-0 rounded-xl border bg-[var(--vui-surface-chat)] px-4 py-3 text-left shadow-[0_2px_4px_#00000003] transition-colors " + (selected ? "border-[var(--accent-cool)] ring-2 ring-[var(--vui-status-info-bg)]" : "border-[var(--vui-border-subtle)] hover:border-[var(--fg-tertiary)]")}>
+          <VNativeButton aria-pressed={selected} aria-label={(index+1)+". "+step.label+"，"+ownerName(step.owner)+"，"+state.label} onClick={() => onSelect(step.id)} className={(loading ? styles.pendingNode + " " : "") + "relative flex min-w-0 flex-1 flex-col gap-0 rounded-xl border bg-[var(--vui-surface-chat)] px-4 py-3 text-left shadow-[0_2px_4px_#00000003] transition-colors " + (selected ? "border-[var(--accent-cool)] ring-2 ring-[var(--vui-status-info-bg)]" : "border-[var(--vui-border-subtle)] hover:border-[var(--fg-tertiary)]")}>
+            {loading && <div className={styles.pendingOverlay}><VSkeleton className={styles.pendingTitle}/><VSkeleton className={styles.pendingInstruction}/><VSkeleton className={styles.pendingMeta}/></div>}
             <span className={styles.part6}><span className={"flex h-7 w-7 shrink-0 items-center justify-center rounded-lg " + (step.kind === "human" ? "bg-[var(--vui-status-warning-bg)] text-[var(--vui-status-warning-fg)]" : selected ? "bg-[var(--vui-status-info-bg)] text-[var(--accent-cool)]" : "bg-[var(--vui-surface-row)] text-[var(--fg-secondary)]")}><Icon size={15}/></span><span className={styles.part7} title={step.label}>{step.label || "未命名步骤"}</span><span className={styles.part8}>{KIND_LABEL[step.kind]}</span></span>
             <span className={styles.part9}>{step.instruction || "点击配置这一步的执行要求。"}</span>
-            <span className={styles.part10}><span className={styles.part11}><UserRound size={11}/>{ownerName(step.owner) || "未分配"}</span><span className={"flex items-center gap-1 "+state.color}><Status size={11} className={stateKey === "running" ? "animate-spin motion-reduce:animate-none" : ""}/>{state.label}</span></span>
+            <span className={styles.part10}><span className={styles.part11}><UserRound size={11}/><span className={styles.ownerName} title={ownerName(step.owner)}>{ownerName(step.owner) || "未分配"}</span></span><span className={styles.statusLabel+" "+state.color}><Status size={11} className={stateKey === "running" ? "animate-spin motion-reduce:animate-none" : ""}/>{state.label}</span></span>
           </VNativeButton>
         </li>;
       })}

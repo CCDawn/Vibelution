@@ -25,7 +25,7 @@ export function GenericTeamWorkspaceRoute({ forcedTeamId, legacy }: {
     if (catalog.teamsQuery.isError || detail.isError)
         return <div role="alert" className={styles.grid1}><p>{catalog.teamsQuery.error?.message || detail.error?.message}</p><VButton onClick={() => { void catalog.teamsQuery.refetch(); void detail.refetch(); }}>重新读取团队</VButton></div>;
     if (catalog.teamsQuery.isPending || detail.isPending && teamId)
-        return <WorkflowWorkspaceLoading teamId={teamId} teams={catalog.visibleTeams.map(item => ({ id: item.teamId, label: item.name }))}/>;
+        return <WorkflowWorkspaceLoading teamId={teamId || forcedTeamId || params.get("team") || params.get("teamId") || ""} teams={catalog.visibleTeams.map(item => ({ id: item.teamId, label: item.name }))}/>;
     if (!team)
         return legacy;
     // Ordinary team homes retain their native discussion/task entry. The flow selector

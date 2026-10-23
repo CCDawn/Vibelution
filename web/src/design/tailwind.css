@@ -73,3 +73,6 @@
   font-size: var(--vui-font-xs);
   line-height: var(--vui-line-readable);
 }
+
+@source "../routes/teams/generic/WorkflowInspector.tsx";
+@source "../routes/teams/generic/WorkflowInspector.styles.ts";

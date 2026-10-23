@@ -4,6 +4,7 @@ import {
   commandTeamFlowRun, listTeamFlowRuns, listTeamFlows, saveTeamFlow, startTeamFlowRun, teamFlowKeys,
 } from "../../../api/genericTeamWorkflows";
 import type { TeamFlowCommand } from "../../../api/types/genericTeamWorkflow";
+import { rememberWorkflowLoadingShape } from "./workflowLoadingShape";
 import { usePageVisibility } from "../../../app/pollingPolicy";
 import { isEditableWorkflow, mergeSavedFlows, sameFlowContent, type Flow, type Run } from "./workflowModel";
 
@@ -58,6 +59,7 @@ export function useWorkflowWorkspace(teamId: string) {
   });
   useEffect(() => {
     if (definitions.data?.teamId === teamId) {
+      rememberWorkflowLoadingShape(teamId, definitions.data.flows);
       const editable = definitions.data.flows.filter(isEditableWorkflow);
       updateDraft(current => {
         const uncertainSaves = { ...current.uncertainSaves };
@@ -182,7 +184,7 @@ export function useWorkflowWorkspace(teamId: string) {
     flows, flow, runs, run, dirty: Boolean(flow && dirtyIds.includes(flow.id)),
     selectFlow, editFlow, addFlow, save, start, command,
     selectRun: (id: string | null) => updateDraft(current => ({ ...current, runId: id, error: "" })),
-    saving, pending, loading: definitions.isPending, error: error || (definitions.error ? errorText(definitions.error) : "") || (executions.error ? errorText(executions.error) : ""),
+    saving, pending, loading: definitions.isPending || (definitions.isSuccess && !drafts[teamId]), error: error || (definitions.error ? errorText(definitions.error) : "") || (executions.error ? errorText(executions.error) : ""),
     clearError: () => updateDraft(current => ({ ...current, error: "" })), reload: () => { void definitions.refetch(); void executions.refetch(); },
   };
 }

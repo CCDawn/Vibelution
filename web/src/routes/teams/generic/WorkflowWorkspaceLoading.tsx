@@ -1,5 +1,7 @@
 import type { ComponentProps } from "react";
 import styles from "./WorkflowWorkspaceLoading.styles";
+import { readWorkflowLoadingShape, unknownWorkflowLoadingShape } from "./workflowLoadingShape";
+import { WorkflowInspectorLoading } from "./WorkflowInspector";
 import { WorkbenchShell } from "./WorkbenchShell";
 
 const noop = () => undefined;
@@ -12,11 +14,13 @@ export function WorkflowWorkspaceLoading({
   teams?: { id: string; label: string }[];
   label?: string;
 }) {
+  const flows = readWorkflowLoadingShape(teamId) ?? unknownWorkflowLoadingShape();
+  const flow = flows[0];
   const props: ComponentProps<typeof WorkbenchShell> = {
-    teamId, teams, teamPending: !teams.some(team => team.id === teamId),
-    flows: [], members: [], runs: [], mode: "design", selectedId: "",
+    teamId, teams, teamPending: !teams.some(team => team.id === teamId), membersPending: true,
+    flows, flow, members: [], runs: [], mode: "design", selectedId: "",
     saving: false, pending: false, dirty: false, loading: true, loadingLabel: label,
-    error: "", notice: "", inspector: null, inspectorOpen: false,
+    error: "", notice: "", inspector: flow ? <WorkflowInspectorLoading flow={flow}/> : null, inspectorOpen: false,
     onTeam: noop, onDiscussion: noop, onHistory: noop, onReload: noop,
     onInspectorOpen: noop, onMode: noop, onFlow: noop, onStep: noop, onRun: noop,
     onSave: noop, onStart: noop, onStop: noop, onCreate: noop, onTemplate: noop,
