@@ -143,8 +143,10 @@ def test_ready_uses_actual_last_turn_outcome():
     session = _session("s", status="ready")
     session["lastTurnStatus"] = "completed"
     assert pet_activity_service._resolve_tone(session, runtime_running=False, needs_approval=False, now=NOW) == "completed"
+    # ``ready`` is the idle phase, never a turn outcome. Treating it as a
+    # success made a settled session announce a completion it never had.
     session["lastTurnStatus"] = "ready"
-    assert pet_activity_service._resolve_tone(session, runtime_running=False, needs_approval=False, now=NOW) == "completed"
+    assert pet_activity_service._resolve_tone(session, runtime_running=False, needs_approval=False, now=NOW) == "idle"
     session["lastTurnStatus"] = "stopped_by_user"
     assert pet_activity_service._resolve_tone(session, runtime_running=False, needs_approval=False, now=NOW) == "idle"
 
@@ -166,3 +168,26 @@ def test_historical_errors_stay_accessible_without_masking_live_work(monkeypatch
 def test_legacy_local_timestamps_use_session_timebase():
     local_time = NOW.astimezone().replace(tzinfo=None)
     assert pet_activity_service._parse_timestamp(local_time.isoformat()) == NOW
+
+
+def test_running_candidate_wins_over_stale_success_outcome():
+    # A child session reports childStatus first and it can lag behind the rest of
+    # the projection. When that stale "ready" was primary, the tone fell through
+    # to the previous turn's success and fired a completion mid-turn.
+    session = {
+        **_session("s", status="streaming"),
+        "sessionKind": "child",
+        "childStatus": "ready",
+        "lastTurnStatus": "completed",
+    }
+    assert pet_activity_service._resolve_tone(
+        session, runtime_running=False, needs_approval=False, now=NOW,
+    ) == "running"
+
+
+def test_settled_success_still_reports_completion():
+    # Guard the happy path: a genuinely settled success keeps its completion.
+    session = {**_session("s", status="ready"), "lastTurnStatus": "completed"}
+    assert pet_activity_service._resolve_tone(
+        session, runtime_running=False, needs_approval=False, now=NOW,
+    ) == "completed"

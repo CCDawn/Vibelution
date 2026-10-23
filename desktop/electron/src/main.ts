@@ -850,6 +850,7 @@ function resolveHumanAttentionNotificationService(): HumanAttentionNotificationS
     windowBridge: {
       sendToAssistantWindow: (channel, payload) =>
         windowProvider?.sendToPet(channel, payload) === true,
+      isAssistantWindowVisible: () => windowProvider?.isPetVisible() === true,
       sendToWorkbench: (channel, payload) =>
         windowProvider?.sendToWorkbench(channel, payload) === true,
       focusWorkbench: () => windowProvider?.focusWorkbench() ?? Promise.resolve(),
