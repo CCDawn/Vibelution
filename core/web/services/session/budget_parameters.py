@@ -16,6 +16,7 @@ from typing import Any
 from core.orchestration.session_budget_resolve import (
     SESSION_MAX_CALLS_PER_TURN_MAX,
     SESSION_MAX_CALLS_PER_TURN_MIN,
+    SESSION_MAX_CALLS_PER_TURN_UNLIMITED,
     SessionBudgetParametersValueError,
     session_budget_parameters_from_agent,
     validate_session_budget_override,
@@ -107,7 +108,7 @@ def update_session_budget_parameters(
             else validate_session_budget_override(
                 max_calls_per_turn,
                 field="maxCallsPerTurn",
-                minimum=SESSION_MAX_CALLS_PER_TURN_MIN,
+                minimum=SESSION_MAX_CALLS_PER_TURN_UNLIMITED,
                 maximum=SESSION_MAX_CALLS_PER_TURN_MAX,
             )
         )

@@ -1,11 +1,15 @@
 import { RotateCcw } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import { VButton, VIconButton, VNativeInput, VPopover } from "../../components/vui";
+import { VButton, VIconButton, VNativeInput, VPopover, VSwitch } from "../../components/vui";
 import styles from "./ChatComposerBudgetPopover.styles";
 
 /** Server validation domain for per-turn tool-call quota. */
 export const SESSION_BUDGET_MAX_CALLS_LIMITS = { min: 1, max: 200 } as const;
+
+/** Sentinel persisted for "no per-turn tool cap"; 0 mirrors the
+ * execution layer's unlimited value and differs from null (fall back). */
+export const SESSION_BUDGET_UNLIMITED = 0;
 
 /** PATCH payload the popover hands to the workbench mutation. */
 export type ChatComposerBudgetParametersPatch = {
@@ -23,6 +27,8 @@ export type ChatComposerBudgetPanelLabels = {
   composerBudgetCancel: string;
   composerBudgetLoading: string;
   composerBudgetLoadFailed: string;
+  composerBudgetUnlimited: string;
+  composerBudgetUnlimitedHint: string;
 };
 
 /** Workbench-injected budget control state; presence gates the plus-menu entry. */
@@ -116,27 +122,33 @@ export function ChatComposerBudgetPopover({
   const [open, setOpen] = useState(false);
   const [maxCallsDraft, setMaxCallsDraft] = useState(() => budgetDraft(maxCallsPerTurn));
   const [dirty, setDirty] = useState(false);
+  const [unlimited, setUnlimited] = useState(
+    () => maxCallsPerTurn === SESSION_BUDGET_UNLIMITED,
+  );
   const previousPendingRef = useRef(pending);
 
   const maxCallsValidation = validateSessionBudgetField(maxCallsDraft, SESSION_BUDGET_MAX_CALLS_LIMITS, lang);
-  const maxCallsError = dirty ? maxCallsValidation.error : "";
-  const valuesChanged = maxCallsValidation.value !== (maxCallsPerTurn ?? null);
+  const maxCallsError = dirty && !unlimited ? maxCallsValidation.error : "";
+  const nextMaxCalls = unlimited ? SESSION_BUDGET_UNLIMITED : maxCallsValidation.value;
+  const valuesChanged = nextMaxCalls !== (maxCallsPerTurn ?? null);
   const saveDisabled = Boolean(
     pending
       || loading
       || error
       || revision === undefined
-      || !maxCallsValidation.valid
+      || (!unlimited && !maxCallsValidation.valid)
       || !valuesChanged,
   );
 
   function resetDraft() {
     setMaxCallsDraft(budgetDraft(maxCallsPerTurn));
+    setUnlimited(maxCallsPerTurn === SESSION_BUDGET_UNLIMITED);
     setDirty(false);
   }
 
   useEffect(() => {
     setMaxCallsDraft(budgetDraft(maxCallsPerTurn));
+    setUnlimited(maxCallsPerTurn === SESSION_BUDGET_UNLIMITED);
     setDirty(false);
   // Identity change starts a new editing scope. Revision refreshes are
   // intentionally excluded so an optimistic operator's draft survives 409s.
@@ -144,8 +156,9 @@ export function ChatComposerBudgetPopover({
   }, [sessionId]);
 
   useEffect(() => {
-    if (!dirty || maxCallsValidation.value === (maxCallsPerTurn ?? null)) {
+    if (!dirty || nextMaxCalls === (maxCallsPerTurn ?? null)) {
       setMaxCallsDraft(budgetDraft(maxCallsPerTurn));
+      setUnlimited(maxCallsPerTurn === SESSION_BUDGET_UNLIMITED);
       setDirty(false);
     }
   // Validation results are derived from the drafts; recompute inline instead
@@ -158,6 +171,7 @@ export function ChatComposerBudgetPopover({
     previousPendingRef.current = pending;
     if (saved) {
       setMaxCallsDraft(budgetDraft(maxCallsPerTurn));
+      setUnlimited(maxCallsPerTurn === SESSION_BUDGET_UNLIMITED);
       setDirty(false);
     }
   }, [pending, errorMessage, maxCallsPerTurn]);
@@ -188,6 +202,22 @@ export function ChatComposerBudgetPopover({
         {error ? <p className={styles.error} role="alert">{labels.composerBudgetLoadFailed}</p> : null}
         <div className={styles.fields}>
           <div className={styles.field}>
+            <div className={styles.fieldRow}>
+              <span className={styles.fieldLabel}>{labels.composerBudgetUnlimited}</span>
+              <VSwitch
+                isSelected={unlimited}
+                isDisabled={pending || loading || error}
+                data-testid="chat-composer-budget-unlimited"
+                aria-label={labels.composerBudgetUnlimited}
+                onChange={(nextSelected: boolean) => {
+                  setUnlimited(nextSelected);
+                  setDirty(true);
+                }}
+              />
+            </div>
+            <span className={styles.fieldLabel}>{labels.composerBudgetUnlimitedHint}</span>
+          </div>
+          <div className={styles.field}>
             <label className={styles.fieldLabel} htmlFor="chat-composer-budget-max-calls">
               {labels.composerBudgetMaxCallsLabel}
             </label>
@@ -203,7 +233,7 @@ export function ChatComposerBudgetPopover({
                 placeholder={labels.composerBudgetMaxCallsPlaceholder}
                 aria-label={labels.composerBudgetMaxCallsLabel}
                 aria-invalid={Boolean(maxCallsError)}
-                disabled={pending || loading || error}
+                disabled={pending || loading || error || unlimited}
                 data-vui="chat-composer-budget-max-calls-input"
                 value={maxCallsDraft}
                 onChange={(event) => {
@@ -248,7 +278,7 @@ export function ChatComposerBudgetPopover({
               }
               onSave({
                 revision,
-                maxCallsPerTurn: maxCallsValidation.value,
+                maxCallsPerTurn: nextMaxCalls,
               });
             }}
           >

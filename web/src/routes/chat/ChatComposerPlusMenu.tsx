@@ -344,6 +344,8 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
         composerBudgetCancel: "取消",
         composerBudgetLoading: "读取预算配置…",
         composerBudgetLoadFailed: "预算配置读取失败",
+        composerBudgetUnlimited: "不限制工具调用次数（关闭每回合预算）",
+        composerBudgetUnlimitedHint: "开启后本会话不再按回合限制工具调用；仍受工具授权与迭代上限约束。",
       }
     : {
         composerAttachFiles: "Attach files",
@@ -364,6 +366,8 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
         composerBudgetCancel: "Cancel",
         composerBudgetLoading: "Loading budget settings…",
         composerBudgetLoadFailed: "Failed to load budget settings",
+        composerBudgetUnlimited: "No per-turn tool-call limit",
+        composerBudgetUnlimitedHint: "Removes the per-turn cap for this session; tool authorization and the iteration limit still apply.",
       };
   const resolvedLabels = { ...defaultLabels, ...labels };
   const t = (key: keyof ChatComposerPlusMenuLabels) => resolvedLabels[key];

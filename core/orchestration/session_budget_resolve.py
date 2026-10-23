@@ -32,6 +32,9 @@ SESSION_BUDGET_PARAMETERS_METADATA_KEY = "sessionBudgetParameters"
 
 SESSION_MAX_CALLS_PER_TURN_MIN = 1
 SESSION_MAX_CALLS_PER_TURN_MAX = 200
+# 0 is a sentinel, not a quota: it disables the per-turn cap entirely
+# and matches ``resolve_max_calls_per_turn``'s unlimited return value.
+SESSION_MAX_CALLS_PER_TURN_UNLIMITED = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,7 +81,7 @@ def normalize_session_budget_parameters(raw: Any) -> SessionBudgetParameters | N
         return None
     max_calls = _coerce_override_int(
         raw.get("maxCallsPerTurn"),
-        minimum=SESSION_MAX_CALLS_PER_TURN_MIN,
+        minimum=SESSION_MAX_CALLS_PER_TURN_UNLIMITED,
         maximum=SESSION_MAX_CALLS_PER_TURN_MAX,
     )
     # Legacy payloads may still carry a ``thinkingBudgetChars`` key; it is
@@ -156,6 +159,7 @@ __all__ = [
     "SESSION_BUDGET_PARAMETERS_METADATA_KEY",
     "SESSION_MAX_CALLS_PER_TURN_MAX",
     "SESSION_MAX_CALLS_PER_TURN_MIN",
+    "SESSION_MAX_CALLS_PER_TURN_UNLIMITED",
     "SessionBudgetParameters",
     "SessionBudgetParametersValueError",
     "get_session_budget_parameters",

@@ -333,7 +333,9 @@ def test_patch_stale_revision_conflicts(budget_service_env) -> None:
 @pytest.mark.parametrize(
     "field,kwargs",
     [
-        ("maxCallsPerTurn", {"max_calls_per_turn": 0}),
+        # 0 is the explicit unlimited sentinel and is accepted; -1 is the
+        # lowest value outside the domain.
+        ("maxCallsPerTurn", {"max_calls_per_turn": -1}),
         ("maxCallsPerTurn", {"max_calls_per_turn": 201}),
         ("maxCallsPerTurn", {"max_calls_per_turn": "64"}),
         ("maxCallsPerTurn", {"max_calls_per_turn": True}),
@@ -698,3 +700,24 @@ def test_status_bar_renders_token_budget_from_agent_counters() -> None:
     cleared = agent_module.AgentRuntime._apply_turn_status_bar(stub, [HumanMessage("hi")], iteration=3)
     cleared_text = str(getattr(cleared[-1], "content", ""))
     assert "tokens: used" not in cleared_text
+
+def test_unlimited_override_disables_the_per_turn_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    """0 is the "no cap" sentinel and must survive validate -> normalize -> install."""
+
+    assert validate_session_budget_override(
+        0,
+        field="maxCallsPerTurn",
+        minimum=session_budget_resolve.SESSION_MAX_CALLS_PER_TURN_UNLIMITED,
+        maximum=session_budget_resolve.SESSION_MAX_CALLS_PER_TURN_MAX,
+    ) == 0
+    assert normalize_session_budget_parameters(
+        {"maxCallsPerTurn": 0}
+    ) == SessionBudgetParameters(maxCallsPerTurn=0)
+    context = _install(
+        monkeypatch,
+        model="deepseek-v3",
+        provider="deepseek",
+        override=SessionBudgetParameters(maxCallsPerTurn=0),
+    )
+    # The installed cap is the unlimited sentinel, not the family default 64.
+    assert context.max_calls_per_turn == 0
