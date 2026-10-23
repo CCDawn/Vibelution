@@ -4144,10 +4144,15 @@ class VirtualHumanLifeService:
         agent_id: str,
         *,
         settings: Mapping[str, Any],
+        _allow_unbound: bool = False,
     ) -> dict[str, Any]:
         normalized_agent_id = str(agent_id or "").strip()
         with self._lock_for(normalized_agent_id):
-            self._require_enabled_binding(normalized_agent_id)
+            if _allow_unbound:
+                # Internal facade authorization only; never enables Companion.
+                self.require_agent(normalized_agent_id, include_archived=False)
+            else:
+                self._require_enabled_binding(normalized_agent_id)
             source = dict(settings or {})
             for field, allowed in (
                 ("speakingInitiative", SPEAKING_INITIATIVES),

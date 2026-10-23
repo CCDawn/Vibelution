@@ -2025,8 +2025,33 @@ def update_virtual_human_dialogue_settings(
     settings: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     service = get_virtual_human_life_service()
-    updated = service.update_dialogue_settings(agent_id, settings=settings or {})
-    return {"agentId": str(agent_id or "").strip(), **updated}
+    normalized_agent_id = str(agent_id or "").strip()
+    binding = service.binding_for(normalized_agent_id)
+    allow_unbound = False
+    if not (binding and binding.get("enabled")):
+        from . import personal_assistant_service
+
+        candidate = _default_agent_loader(normalized_agent_id) or {}
+        if (candidate.get("metadata") or {}).get("personalAssistantProfile") == personal_assistant_service.PROFILE:
+            from .agent_directory_service import AgentStateConflictError
+            from core.agent_plugins.virtual_human_life.service import BindingConflictError
+
+            try:
+                assistant = personal_assistant_service.profile_agent()
+            except AgentStateConflictError as exc:
+                raise BindingConflictError(str(exc)) from exc
+            allow_unbound = bool(
+                assistant
+                and assistant.get("agentId") == normalized_agent_id
+                and assistant.get("status") == "active"
+            )
+    if allow_unbound:
+        updated = service.update_dialogue_settings(
+            normalized_agent_id, settings=settings or {}, _allow_unbound=True
+        )
+    else:
+        updated = service.update_dialogue_settings(normalized_agent_id, settings=settings or {})
+    return {"agentId": normalized_agent_id, **updated}
 
 
 def virtual_human_preference_proposals(
