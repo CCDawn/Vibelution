@@ -3646,9 +3646,16 @@ async function orchestrateLauncherLifecycle(
         packagedShellBlocksReuse = await packagedDesktopShellIsStale();
       }
     }
-    const servingVersion = frontendCheckedForReuse && !frontendReleaseChanged && !packagedShellBlocksReuse
-      ? await inspectWorkbenchServingVersion({ workspaceRoot: paths.workspaceRoot, readiness: "shell" })
-      : { ok: false, reason: "release_or_shell_changed" };
+    let servingVersion = { ok: false, reason: "release_or_shell_changed" };
+    try {
+      if (frontendCheckedForReuse && !frontendReleaseChanged && !packagedShellBlocksReuse) {
+        servingVersion = await inspectWorkbenchServingVersion({ workspaceRoot: paths.workspaceRoot, readiness: "shell", signal: lifecycleSignal });
+      }
+      lifecycleSignal.throwIfAborted();
+    } catch (error: unknown) {
+      launcherLifecycleSupervisor.clearSlotIfCurrent(intentLease);
+      throw error;
+    }
     if (!servingVersion.ok && servingVersion.reason !== "release_or_shell_changed") {
       console.warn(`main-line backend reuse rejected: ${servingVersion.reason}`);
     }
@@ -4164,8 +4171,10 @@ async function openWorkbenchAfterLifecycleReady(
   const servingVerification = await verifyRestartedServingVersion({
     workspaceRoot: paths.workspaceRoot,
     readiness: "shell",
+    signal: lease.signal,
     previousBackendIdentity: previousBackendIdentity ?? null
   });
+  lease.signal.throwIfAborted();
   if (!servingVerification.ok) {
     const detail = `Workbench serving verification failed after ${lease.instanceId} start: ${servingVerification.reason}`;
     console.error(detail);

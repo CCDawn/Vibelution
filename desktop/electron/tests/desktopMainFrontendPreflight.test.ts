@@ -23,6 +23,7 @@ function harness(options: { live?: boolean; releaseChanged?: boolean; packaged?:
   const ensure = vi.fn(async (_input: { signal?: AbortSignal }) => ({ skipped: !options.releaseChanged }));
   const reachable = vi.fn(async () => options.live ?? false);
   const reusable = vi.fn(async () => true);
+  const servingInspect = vi.fn(async (_input: { signal?: AbortSignal }) => ({ ok: true }));
   const opened = vi.fn(async () => undefined);
   const notify = vi.fn();
   const trayNotify = vi.fn();
@@ -58,7 +59,7 @@ function harness(options: { live?: boolean; releaseChanged?: boolean; packaged?:
     shouldDeferOrchestratedWindowClose: () => false,
     mainLineBackendIsReachable: reachable,
     mainLineBackendIsReusable: reusable,
-    inspectWorkbenchServingVersion: async () => ({ ok: true }),
+    inspectWorkbenchServingVersion: servingInspect,
     ensureFrontendRelease: ensure,
     runWithFrontendBuildGate,
     updateLauncherWindowTruth: notify,
@@ -93,7 +94,7 @@ function harness(options: { live?: boolean; releaseChanged?: boolean; packaged?:
     { compilerOptions: { target: ScriptTarget.ES2022 } }
   ).outputText, sandbox);
   return {
-    ensure, reachable, reusable, opened, closed, inspect, fullInspect, launchInspect, unpackagedInspect, notify, trayNotify, promote, lifecycle, supervisor,
+    ensure, reachable, reusable, servingInspect, opened, closed, inspect, fullInspect, launchInspect, unpackagedInspect, notify, trayNotify, promote, lifecycle, supervisor,
     run: sandbox.orchestrateUnderTest as (
       operation: string, payload: object, provenance?: string, signal?: AbortSignal
     ) => Promise<{ accepted: boolean; code?: string }>
@@ -103,6 +104,81 @@ function harness(options: { live?: boolean; releaseChanged?: boolean; packaged?:
 afterEach(resetFrontendBuildStateForTests);
 
 describe("main-line frontend startup preflight", () => {
+  it.each([false, true])("cancels live serving verification when stop supersedes open (late result: %s)", async (lateResult) => {
+    const h = harness({ live: true });
+    let probeSignal: AbortSignal | undefined;
+    h.servingInspect.mockImplementation(({ signal }) => {
+      probeSignal = signal;
+      return new Promise((resolve, reject) => signal!.addEventListener("abort", () => {
+        if (lateResult) resolve({ ok: false });
+        else reject(signal!.reason);
+      }, { once: true }));
+    });
+    const opening = h.run("start", {}).catch((error: unknown) => error);
+    await vi.waitFor(() => expect(h.servingInspect).toHaveBeenCalledOnce());
+    await expect(h.run("force-stop", {})).resolves.toMatchObject({ accepted: true });
+    expect(probeSignal?.aborted).toBe(true);
+    expect(await opening).toBe(probeSignal?.reason);
+    expect(h.reusable).not.toHaveBeenCalled();
+    expect(h.opened).not.toHaveBeenCalled();
+    expect(h.lifecycle.mock.calls.map(([input]) => input.operation)).toEqual(["force-stop"]);
+    expect(h.supervisor.snapshot("main")?.desiredState).toBe("closed");
+  });
+
+  it("clears the current intent when only the caller cancels live serving verification", async () => {
+    const h = harness({ live: true });
+    const controller = new AbortController();
+    const reason = new Error("caller cancelled");
+    h.servingInspect.mockImplementation(({ signal }) => new Promise((_resolve, reject) => {
+      signal!.addEventListener("abort", () => reject(signal!.reason), { once: true });
+    }));
+    const opening = h.run("start", {}, undefined, controller.signal).catch((error: unknown) => error);
+    await vi.waitFor(() => expect(h.servingInspect).toHaveBeenCalledOnce());
+    controller.abort(reason);
+    expect(await opening).toBe(reason);
+    expect(h.supervisor.snapshot("main")).toBeNull();
+    expect(h.opened).not.toHaveBeenCalled();
+    expect(h.lifecycle).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("cancels the post-start verifier before ready claims, failure reporting or opening (late result: %s)", async (lateResult) => {
+    const source = readFileSync(fileURLToPath(new URL("../src/main.ts", import.meta.url)), "utf8");
+    const begin = source.indexOf("async function openWorkbenchAfterLifecycleReady(");
+    const end = source.indexOf("\nasync function retireIsolatedBackendAfterStartFailure", begin);
+    expect(begin).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(begin);
+    const supervisor = new LauncherLifecycleSupervisor();
+    const lease = supervisor.beginIntent({ instanceId: "main", operation: "start", desiredState: "open" });
+    const opened = vi.fn();
+    const failed = vi.fn();
+    const claimReady = vi.spyOn(supervisor, "claimReady");
+    const verify = vi.fn(({ signal }: { signal: AbortSignal }) => new Promise((resolve, reject) => {
+      expect(signal).toBe(lease.signal);
+      signal.addEventListener("abort", () => {
+        if (lateResult) resolve({ ok: false, reason: "health_unreachable" });
+        else reject(signal.reason);
+      }, { once: true });
+    }));
+    const sandbox: Record<string, unknown> = {
+      launcherLifecycleSupervisor: supervisor,
+      verifyRestartedServingVersion: verify,
+      openWorkbenchAtCurrentLauncherUrl: opened,
+      console: { error: failed }
+    };
+    runInNewContext(transpileModule(
+      source.slice(begin, end) + "\nglobalThis.openUnderTest = openWorkbenchAfterLifecycleReady;",
+      { compilerOptions: { target: ScriptTarget.ES2022 } }
+    ).outputText, sandbox);
+    const open = sandbox.openUnderTest as (...args: unknown[]) => Promise<void>;
+    const pending = open({ workspaceRoot: "C:/workspace" }, {}, {}, lease, 100).catch((error: unknown) => error);
+    supervisor.beginIntent({ instanceId: "main", operation: "stop", desiredState: "closed" });
+    expect(await pending).toBe(lease.signal.reason);
+    expect(verify).toHaveBeenCalledOnce();
+    expect(claimReady).not.toHaveBeenCalled();
+    expect(opened).not.toHaveBeenCalled();
+    expect(failed).not.toHaveBeenCalled();
+  });
+
   it("cancels the unpackaged shell probe when close supersedes startup", async () => {
     const h = harness();
     let probeSignal: AbortSignal | undefined;

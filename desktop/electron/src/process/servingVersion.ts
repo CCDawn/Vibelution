@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import {
   launcherPortsPath,
   launcherStatePath,
@@ -8,7 +9,7 @@ import {
   readLauncherStateFile,
   sameProjectRoot
 } from "./workbenchBackend.js";
-import { workbenchHealthPayloadReady, workbenchHealthUrl, type WorkbenchReadiness } from "./workbenchBackendHealth.js";
+import { BACKEND_HEALTH_HTTP_TIMEOUT_MS, defaultFetchWorkbenchHealth, workbenchHealthPayloadReady, workbenchHealthUrl, type WorkbenchReadiness } from "./workbenchBackendHealth.js";
 import { runPythonJsonBridge, PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS, type PythonProcessIdentity } from "./pythonJsonBridge.js";
 import { readOnlyGitText } from "./gitProcess.js";
 
@@ -27,6 +28,7 @@ export type ServingVersionInspection = {
 
 type ServingVersionInput = {
   workspaceRoot: string;
+  signal?: AbortSignal;
   readiness?: WorkbenchReadiness;
   port?: number;
   expectedBuildKey?: string;
@@ -73,11 +75,14 @@ async function servingChildIdentityMatches(
       cwd: input.workspaceRoot,
       failureLabel: "workbench serving process identity",
       timeoutMs: PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS,
+      signal: input.signal,
       killPolicy: "child"
     });
+    input.signal?.throwIfAborted();
     const result: unknown = JSON.parse(raw);
     return isRecord(result) && result.matches === true;
   } catch {
+    input.signal?.throwIfAborted();
     return false;
   }
 }
@@ -120,14 +125,6 @@ async function currentBackendCode(workspaceRoot: string): Promise<{ head: string
   };
 }
 
-async function defaultFetchHealth(url: string): Promise<{ status: number; json?: () => Promise<unknown> }> {
-  return await fetch(url, {
-    method: "GET",
-    redirect: "manual",
-    signal: AbortSignal.timeout(1500)
-  });
-}
-
 function servingHealthPayload(body: Record<string, unknown>): {
   apiContractVersion: string;
   buildKey: string;
@@ -161,14 +158,21 @@ function servingHealthPayload(body: Record<string, unknown>): {
 }
 
 export async function inspectWorkbenchServingVersion(input: ServingVersionInput): Promise<ServingVersionInspection> {
+  input.signal?.throwIfAborted();
   const port = Math.trunc(input.port || preferredWorkbenchPort({ workspaceRoot: input.workspaceRoot }));
   if (!Number.isFinite(port) || port <= 0) {
     return { ok: false, reason: "invalid_backend_port", port };
   }
   let response: { status: number; json?: () => Promise<unknown> };
   try {
-    response = await (input.fetchHealth || defaultFetchHealth)(workbenchHealthUrl(port));
+    const fetchHealth = input.fetchHealth ?? defaultFetchWorkbenchHealth({
+      httpTimeoutMs: BACKEND_HEALTH_HTTP_TIMEOUT_MS,
+      signal: input.signal
+    });
+    response = await fetchHealth(workbenchHealthUrl(port));
+    input.signal?.throwIfAborted();
   } catch {
+    input.signal?.throwIfAborted();
     return { ok: false, reason: "health_unreachable", port };
   }
   if (response.status !== 200 || typeof response.json !== "function") {
@@ -177,7 +181,9 @@ export async function inspectWorkbenchServingVersion(input: ServingVersionInput)
   let raw: unknown;
   try {
     raw = await response.json();
+    input.signal?.throwIfAborted();
   } catch {
+    input.signal?.throwIfAborted();
     return { ok: false, reason: "health_invalid_json", port };
   }
   if (!isRecord(raw) || !workbenchHealthPayloadReady(raw, input.readiness)) {
@@ -233,6 +239,7 @@ export async function inspectWorkbenchServingVersion(input: ServingVersionInput)
       { pid: serving.backendPid, createTime: healthCreateTime, executable: healthExecutable }
     )
   ));
+  input.signal?.throwIfAborted();
   if (!identityMatches) {
     return {
       ok: false,
@@ -263,7 +270,11 @@ export async function inspectWorkbenchServingVersion(input: ServingVersionInput)
       health: raw
     };
   }
+  input.signal?.throwIfAborted();
   const current = await (input.currentCode || currentBackendCode)(input.workspaceRoot);
+  // An already issued read-only Git query may finish, but a superseded
+  // observer must never accept its result or start another verification.
+  input.signal?.throwIfAborted();
   if (!current.head || !current.dirtyTreeDigest || serving.code.head !== current.head || serving.code.dirtyTreeDigest !== current.dirtyTreeDigest) {
     return {
       ok: false,
@@ -339,6 +350,7 @@ function sameProcessIdentity(
  */
 export async function verifyRestartedServingVersion(input: {
   workspaceRoot: string;
+  signal?: AbortSignal;
   readiness?: WorkbenchReadiness;
   previousBackendIdentity?: ServingProcessIdentity | null;
   inspect?: typeof inspectWorkbenchServingVersion;
@@ -349,7 +361,7 @@ export async function verifyRestartedServingVersion(input: {
   const inspect = input.inspect ?? inspectWorkbenchServingVersion;
   const attempts = Math.max(1, Math.trunc(input.attempts ?? 3));
   const delayMs = Math.max(0, Math.trunc(input.delayMs ?? 1_000));
-  const delay = input.delay ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const wait = input.delay ?? ((ms: number) => delay(ms, undefined, { signal: input.signal }));
   const previous = input.previousBackendIdentity ?? null;
   const hasPrevious = Boolean(
     previous && Number.isFinite(previous.pid) && previous.pid > 0
@@ -358,10 +370,13 @@ export async function verifyRestartedServingVersion(input: {
 
   let last: RestartedServingVerification = { ok: false, reason: "verification_not_run", inspection: null };
   for (let attempt = 0; attempt < attempts; attempt += 1) {
+    input.signal?.throwIfAborted();
     if (attempt > 0) {
-      await delay(delayMs);
+      await wait(delayMs);
+      input.signal?.throwIfAborted();
     }
-    const inspection = await inspect({ workspaceRoot: input.workspaceRoot, readiness: input.readiness });
+    const inspection = await inspect({ workspaceRoot: input.workspaceRoot, readiness: input.readiness, signal: input.signal });
+    input.signal?.throwIfAborted();
     if (!inspection.ok) {
       last = { ok: false, reason: inspection.reason, inspection };
       if (!TRANSIENT_VERIFICATION_REASONS.has(inspection.reason)) {

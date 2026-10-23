@@ -487,6 +487,7 @@ def load_session_chat_state(project_root: Path, session_id: str) -> dict[str, An
     # two identical signatures may populate the cache.
     signature_before = _conversation_store_signature(Path(project_root))
     with _SESSION_STATE_READ_CACHE_LOCK:
+        read_epoch = _CHAT_STATE_WRITE_EPOCH
         cached = _SESSION_STATE_READ_CACHE.get(cache_key)
         if (
             cached is not None
@@ -500,12 +501,18 @@ def load_session_chat_state(project_root: Path, session_id: str) -> dict[str, An
     with _SESSION_STATE_READ_CACHE_LOCK:
         if (
             signature_after == signature_before
-            and cache_key not in _SESSION_STATE_READ_CACHE
+            and _CHAT_STATE_WRITE_EPOCH == read_epoch
+            and _SESSION_STATE_READ_CACHE.get(cache_key) is cached
         ):
-            while len(_SESSION_STATE_READ_CACHE) >= _SESSION_STATE_READ_CACHE_MAX_ENTRIES:
+            # Refresh a signature-invalidated entry too. A competing read or
+            # write owns any replacement made since this read began.
+            while (
+                cache_key not in _SESSION_STATE_READ_CACHE
+                and len(_SESSION_STATE_READ_CACHE) >= _SESSION_STATE_READ_CACHE_MAX_ENTRIES
+            ):
                 _SESSION_STATE_READ_CACHE.pop(next(iter(_SESSION_STATE_READ_CACHE), None), None)
             _SESSION_STATE_READ_CACHE[cache_key] = (
-                _CHAT_STATE_WRITE_EPOCH,
+                read_epoch,
                 signature_before,
                 copy.deepcopy(payload),
             )
