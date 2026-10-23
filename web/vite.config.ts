@@ -198,6 +198,11 @@ export default defineConfig({
         // Shared entry modules can form cycles when a size boundary splits
         // them. Preserve initialization order across those chunk boundaries.
         strictExecutionOrder: true,
+        // Strict ESM wrapping calls the app init chunk "web". Keep its CSS
+        // under the existing main-entry name and unchanged size budget.
+        assetFileNames: (asset) => asset.names.includes("web.css")
+          ? "assets/index-[hash][extname]"
+          : "assets/[name]-[hash][extname]",
         /**
          * Keep the main `index-*.js` entry as app shell glue.
          * Framework graphs are large, change rarely, and benefit from independent caching.
