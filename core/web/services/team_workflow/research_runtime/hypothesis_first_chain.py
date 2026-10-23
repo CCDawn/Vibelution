@@ -3677,6 +3677,250 @@ DEFAULT_AUTO_ADVANCE_SWEEP_BUDGET_MS = 5_000
 _AUTO_ADVANCE_SWEEP_BUDGET_ENV = "VIBELUTION_AUTO_ADVANCE_SWEEP_BUDGET_MS"
 
 
+# Bounded automated dead-turn redrive (auto-advance, between the budget
+# recovery and the transient auto_advance_not_ready retry).  The repeated
+# production incident: a parallel merge → workbench rebuild+refresh kills the
+# backend while a research workflow turn is in flight; the conversation layer
+# mislabels EVERY killed turn ``stopped``/``stopped_by_user``, the dead-turn
+# gate skipped the status, and the parent run parked ``blocked`` forever with
+# no automated driver.  The step below redrives formal runs (and knowledge
+# sideflow children) whose latest blocked attempt carries the canonical
+# ``agent_turn_terminal_failed`` problem — for ``stopped`` only when the
+# runtime-stop evidence gate in ``knowledge_sideflow_service`` passes —
+# through the SAME offer-gated retry channel as the transient auto-retry
+# (``_submit_formal_v2_command`` reuses the offer's own idempotency key).
+DEAD_TURN_REDRIVE_PROBLEM_CODE = "agent_turn_terminal_failed"
+DEFAULT_AUTO_DEAD_TURN_REDRIVE_MAX_PER_NODE = 3
+AUTO_DEAD_TURN_REDRIVE_MAX_PER_NODE_ENV = (
+    "VIBELUTION_AUTO_DEAD_TURN_REDRIVE_MAX"
+)
+
+#: Config gate for the automated dead-turn redrive step (default ON).  Set to
+#: ``0`` / ``false`` / ``off`` to restore the purely manual retry_node contract
+#: (digest-TTL env style: absent or any other value keeps the step enabled).
+AUTO_DEAD_TURN_REDRIVE_ENV = "VIBELUTION_AUTO_DEAD_TURN_REDRIVE"
+
+#: System actor for the recovery_records audit rows: ledger evidence stays
+#: distinguishable from human retries (same pattern as AUTO_BUDGET_RECOVERY_ACTOR_ID).
+AUTO_DEAD_TURN_REDRIVE_ACTOR_ID = "system:dead-turn-redrive"
+
+
+def auto_dead_turn_redrive_enabled() -> bool:
+    """Configured ON/OFF switch for the automated dead-turn redrive step."""
+
+    raw = str(os.environ.get(AUTO_DEAD_TURN_REDRIVE_ENV) or "").strip().lower()
+    return raw not in {"0", "false", "off"}
+
+
+def auto_dead_turn_redrive_max_redrives() -> int:
+    """Configured per-node automated redrive cap (nonpositive → default)."""
+
+    raw = str(
+        os.environ.get(AUTO_DEAD_TURN_REDRIVE_MAX_PER_NODE_ENV) or ""
+    ).strip()
+    if not raw:
+        return DEFAULT_AUTO_DEAD_TURN_REDRIVE_MAX_PER_NODE
+    try:
+        normalized = int(raw)
+    except ValueError:
+        return DEFAULT_AUTO_DEAD_TURN_REDRIVE_MAX_PER_NODE
+    if normalized <= 0:
+        return DEFAULT_AUTO_DEAD_TURN_REDRIVE_MAX_PER_NODE
+    return normalized
+
+
+def _latest_dead_turn_blocked_attempt(
+    store: Any,
+    run_id: str,
+) -> tuple[str, int, dict[str, Any]] | None:
+    """Newest ``(nodeId, attemptNo, problem)`` blocked on a dead agent turn.
+
+    Same latest-per-node resolution as ``_latest_budget_precheck_blocked_attempt``
+    (attempt number first, then wall-clock), keyed on the canonical
+    ``agent_turn_terminal_failed`` problem via the shared fail-closed parser
+    (``dead_agent_turn_block_problem``): only ``interrupted``/``failed``
+    statuses qualify directly, a ``stopped`` status additionally requires the
+    runtime-stop evidence gate to pass inside the parser.  Only a node whose
+    *latest* attempt is still blocked with exactly this shape qualifies; a
+    newer attempt that re-blocked on anything else means the run moved on.
+    ``None`` means the caller must not touch the run.
+    """
+
+    from .knowledge_sideflow_service import dead_agent_turn_block_problem
+
+    latest_by_node: dict[str, tuple[int, int, Any]] = {}
+    for attempt in store.list_attempts(run_id):
+        node_id = str(getattr(attempt, "node_id", "") or "").strip()
+        if not node_id:
+            continue
+        key = (
+            int(getattr(attempt, "attempt", 0) or 0),
+            int(getattr(attempt, "updated_at_ms", 0) or 0),
+        )
+        current = latest_by_node.get(node_id)
+        if current is None or key > (current[0], current[1]):
+            latest_by_node[node_id] = (key[0], key[1], attempt)
+    best_key: tuple[int, int] | None = None
+    best: tuple[str, int, dict[str, Any]] | None = None
+    for node_id, (attempt_no, updated_at_ms, attempt) in latest_by_node.items():
+        if str(getattr(attempt, "status", "") or "").strip() != "blocked":
+            continue
+        problem = dead_agent_turn_block_problem(
+            getattr(attempt, "problem_json", None)
+        )
+        if problem is None:
+            continue
+        key = (updated_at_ms, attempt_no)
+        if best_key is None or key > best_key:
+            best_key = key
+            best = (node_id, attempt_no, problem)
+    return best
+
+
+def _knowledge_child_dead_turn_reconcile_owned(store: Any, run_id: str) -> bool:
+    """True when a live knowledge invocation still owns this blocked child.
+
+    The dedicated knowledge dead-turn pass (``recover_dead_turn_children``)
+    drives the parent reconcile for knowledge sideflow children: it fails the
+    invocation fail-closed from the child's durable problem, cascades the
+    replan into the child and re-ensures within the knowledge retry budget.
+    The formal ``retry_node`` redrive must not double-act on the same child,
+    so a child with a live invocation is left entirely to that pass; a child
+    without any invocation (or with a terminal one) falls back here.  A read
+    failure fails closed (leave the child to its owner).
+    """
+
+    from .knowledge_sideflow_service import (
+        KNOWLEDGE_INVOCATION_TERMINAL_STATUSES,
+    )
+
+    def read(uow):
+        invocation = uow.repository.find_knowledge_invocation_by_child_run(run_id)
+        if invocation is None:
+            return False
+        return (
+            str(getattr(invocation, "status", "") or "").strip()
+            not in KNOWLEDGE_INVOCATION_TERMINAL_STATUSES
+        )
+
+    try:
+        return bool(
+            store.submit(read, force_flush=True).result(timeout=10)
+        )
+    except Exception:  # noqa: BLE001 - unknown ownership must fail closed
+        return True
+
+
+def _count_auto_dead_turn_redrives(
+    store: Any, *, run_id: str, node_id: str
+) -> int:
+    """Automated dead-turn redrives already applied for one blocked node.
+
+    Reads the recovery_records audit trail this module writes (actor
+    ``system:dead-turn-redrive``, action ``auto_redrive``, exact quoted
+    nodeId match), so the cap survives process restarts without extra state.
+    """
+
+    marker = f'"nodeId":"{node_id}"'
+    rows = store.submit(
+        lambda uow: uow.repository.execute(
+            "SELECT COUNT(*) FROM recovery_records "
+            "WHERE run_id = ? AND problem_code = ? AND status = 'resolved' "
+            "AND INSTR(evidence_json, ?) > 0 "
+            "AND INSTR(evidence_json, '\"action\":\"auto_redrive\"') > 0 "
+            "AND INSTR(evidence_json, ?) > 0",
+            (
+                run_id,
+                DEAD_TURN_REDRIVE_PROBLEM_CODE,
+                marker,
+                f'"actor":"{AUTO_DEAD_TURN_REDRIVE_ACTOR_ID}"',
+            ),
+        ).fetchone(),
+        force_flush=True,
+    ).result(timeout=10)
+    try:
+        return int(rows[0] or 0) if rows else 0
+    except (TypeError, ValueError, IndexError):
+        return 0
+
+
+def _record_auto_dead_turn_redrive(
+    store: Any,
+    *,
+    run_id: str,
+    node_id: str,
+    attempt_no: int,
+    action: str,
+    resolution: dict[str, Any],
+    now_ms: int,
+) -> bool:
+    """Write one deterministic audit row into ``recovery_records``.
+
+    The recovery id derives from (run, node, attempt, action), so re-running
+    the sweep can never duplicate an entry.  Rows are written ``resolved`` —
+    an ``open`` recovery_record is a readiness blocker, and a decline must
+    not harden the stop it only explains (same contract as
+    ``_record_auto_budget_recovery``).  Best-effort: audit failures never
+    break the sweep.
+    """
+
+    import hashlib
+
+    from .ids import new_id
+
+    digest = hashlib.sha256(
+        f"{run_id}:{node_id}:{attempt_no}:{action}".encode()
+    ).hexdigest()[:16]
+    recovery_id = f"rec-auto-dead-turn-{digest}"
+    # Compact separators: the cap counter matches exact `"key":"value"`
+    # substrings inside evidence_json, so the serialized shape is normative.
+    evidence = json.dumps(
+        {
+            "actor": AUTO_DEAD_TURN_REDRIVE_ACTOR_ID,
+            "action": action,
+            "nodeId": node_id,
+            "attempt": attempt_no,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    resolution_json = json.dumps(
+        resolution, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+
+    def mutate(uow):
+        existing = uow.repository.execute(
+            "SELECT 1 FROM recovery_records WHERE recovery_id = ?",
+            (recovery_id,),
+        ).fetchone()
+        if existing is not None:
+            return False
+        uow.repository.execute(
+            "INSERT INTO recovery_records ("
+            "recovery_id, run_id, problem_code, evidence_json, status, "
+            "resolution_json, created_at_ms, resolved_at_ms"
+            ") VALUES (?, ?, ?, ?, 'resolved', ?, ?, ?)",
+            (
+                recovery_id or new_id("rec"),
+                run_id,
+                DEAD_TURN_REDRIVE_PROBLEM_CODE,
+                evidence,
+                resolution_json,
+                now_ms,
+                now_ms,
+            ),
+        )
+        return True
+
+    try:
+        return bool(
+            store.submit(mutate, force_flush=True).result(timeout=10)
+        )
+    except Exception:  # noqa: BLE001 - audit must never break the recovery
+        return False
+
+
 def _fenced_review_redrive_plan(
     team_id: str,
     meeting: Mapping[str, Any],
