@@ -928,7 +928,18 @@ def record_knowledge_sideflow_child_success(
 #: turn journal already settled the turn, so no liveness probing is allowed —
 #: only this ledger field decides (fail-closed).
 DEAD_AGENT_TURN_BLOCK_CODE = "agent_turn_terminal_failed"
-DEAD_AGENT_TURN_TERMINAL_STATUSES = frozenset({"interrupted", "failed"})
+DEAD_AGENT_TURN_TERMINAL_STATUSES = frozenset({"interrupted", "failed", "stopped"})
+
+#: ``stopped`` is conversation-layer ambiguous: the settle path synthesizes
+#: ``terminalReason="stopped_by_user"`` for EVERY killed turn, so a workbench
+#: restart that murders an in-flight research turn is indistinguishable from a
+#: real operator stop at this field alone.  A ``stopped`` status therefore only
+#: counts as dead when the runtime-stop evidence gate
+#: (:func:`runtime_stop_evidence_confirmed`) passes: the turn journal's
+#: ``EVENT_TURN_INTERRUPTED`` reason is one of the lifecycle stop reasons AND
+#: no ``user_stops`` chat signal exists for the turn.  Evidence missing,
+#: unreadable, or unrecognized → fail-closed (the child stays blocked).
+DEAD_AGENT_TURN_RUNTIME_EVIDENCE_STATUSES = frozenset({"stopped"})
 
 _DEAD_TURN_AUDIT_FIELDS = (
     "code",
@@ -945,8 +956,11 @@ def _dead_turn_problem_shape(problem: Mapping[str, Any]) -> dict[str, Any] | Non
     """One shape check: canonical dead-turn rejection with a dead terminal status.
 
     ``agent_turn_terminal_failed`` with ``terminalStatus`` in
-    ``{interrupted, failed}`` proves the blocking turn is failure-terminal;
-    every other code or terminal status returns ``None`` (fail-closed).
+    ``{interrupted, failed, stopped}`` proves the blocking turn is
+    failure-terminal; every other code or terminal status returns ``None``
+    (fail-closed).  A ``stopped`` hit is only a CANDIDATE: the caller
+    (:func:`dead_agent_turn_block_problem`) must still pass the runtime-stop
+    evidence gate before treating it as dead.
     """
     if str(problem.get("code") or "").strip() != DEAD_AGENT_TURN_BLOCK_CODE:
         return None
@@ -954,6 +968,58 @@ def _dead_turn_problem_shape(problem: Mapping[str, Any]) -> dict[str, Any] | Non
     if terminal_status not in DEAD_AGENT_TURN_TERMINAL_STATUSES:
         return None
     return dict(problem)
+
+
+def runtime_stop_evidence_confirmed(dead_turn: Mapping[str, Any]) -> bool:
+    """The only release gate for a ``stopped`` dead turn.
+
+    True ONLY when the turn journal proves a lifecycle kill and the operator
+    does not: (a) the session journal carries an ``EVENT_TURN_INTERRUPTED``
+    event for exactly this turn whose ``payload.reason`` is one of the
+    runtime stop reasons (``runtime_shutdown`` / ``electron_user_restart`` /
+    ``electron_user_close`` — the same set the lifecycle stop paths write),
+    and (b) no ``user_stops`` chat next-state signal exists for the turn
+    (the user-stop path writes that signal and never a runtime reason — the
+    two are mutually exclusive by construction, and if both ever appear the
+    user signal wins).  A missing session/turn identity, an unreadable
+    journal, or an unrecognized reason all fail closed.  Read-only: uses the
+    existing session journal / signal read APIs, no new storage.
+    """
+    session_id = str(dead_turn.get("sessionId") or "").strip()
+    turn_id = str(dead_turn.get("turnId") or "").strip()
+    if not session_id or not turn_id:
+        return False
+    try:
+        from core.chat.conversation_ledger import (
+            EVENT_TURN_INTERRUPTED,
+            load_conversation_events,
+        )
+        from core.evaluation.chat_next_state_signals import (
+            list_chat_next_state_signals,
+        )
+        from core.web.services import session_service
+        from core.web.services.session.control import RUNTIME_STOP_REASONS
+
+        project_root = session_service.PROJECT_ROOT
+        runtime_stop = any(
+            str(getattr(event, "event_type", "") or "") == EVENT_TURN_INTERRUPTED
+            and str(getattr(event, "turn_id", "") or "") == turn_id
+            and str(
+                (getattr(event, "payload", None) or {}).get("reason") or ""
+            ).strip() in RUNTIME_STOP_REASONS
+            for event in load_conversation_events(project_root, session_id)
+        )
+        user_stops = any(
+            str(item.get("kind") or "").strip() == "user_stops"
+            for item in list_chat_next_state_signals(
+                project_root=project_root,
+                session_id=session_id,
+                turn_id=turn_id,
+            )
+        )
+    except Exception:  # noqa: BLE001 - evidence failure must fail closed
+        return False
+    return runtime_stop and not user_stops
 
 
 def dead_agent_turn_block_problem(raw_problem_json: str | None) -> dict[str, Any] | None:
@@ -968,6 +1034,15 @@ def dead_agent_turn_block_problem(raw_problem_json: str | None) -> dict[str, Any
     actually died.  Every other blocked reason (budget, fence, waiting,
     unknown shapes, non-failure terminal statuses) returns ``None`` — the
     caller must leave the deliberately non-terminal blocked child alone.
+
+    ``terminalStatus="stopped"`` is ambiguous at this field alone (a killed
+    turn is conversation-layer mislabeled ``stopped_by_user``), so a stopped
+    hit additionally requires :func:`runtime_stop_evidence_confirmed` — the
+    turn journal must prove a lifecycle kill and no ``user_stops`` signal may
+    exist.  Missing/contradicting evidence fails closed here, so EVERY caller
+    (maintenance sweep, reconcile dead-turn branch, future auto redrives)
+    inherits the gate from this single point.  ``interrupted``/``failed``
+    keep their original evidence-free behavior unchanged.
     """
     try:
         problem = json.loads(str(raw_problem_json or "") or "{}")
@@ -975,7 +1050,7 @@ def dead_agent_turn_block_problem(raw_problem_json: str | None) -> dict[str, Any
         return None
     if not isinstance(problem, Mapping):
         return None
-    direct = _dead_turn_problem_shape(problem)
+    direct = _runtime_evidence_gated_shape(problem)
     if direct is not None:
         return direct
     # 包装形态：adapter_execution_exception 的 detail 内嵌原始异常 JSON。
@@ -987,7 +1062,21 @@ def dead_agent_turn_block_problem(raw_problem_json: str | None) -> dict[str, Any
             return None
     if not isinstance(detail, Mapping):
         return None
-    return _dead_turn_problem_shape(detail)
+    return _runtime_evidence_gated_shape(detail)
+
+
+def _runtime_evidence_gated_shape(problem: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Shape hit plus the runtime-stop evidence gate for ``stopped`` hits."""
+    shape = _dead_turn_problem_shape(problem)
+    if shape is None:
+        return None
+    if (
+        str(shape.get("terminalStatus") or "").strip().lower()
+        in DEAD_AGENT_TURN_RUNTIME_EVIDENCE_STATUSES
+        and not runtime_stop_evidence_confirmed(shape)
+    ):
+        return None
+    return shape
 
 
 def record_knowledge_sideflow_child_failure(

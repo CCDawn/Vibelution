@@ -963,6 +963,225 @@ def auto_extend_budget_blocked_nodes(
 
 
 
+def auto_redrive_dead_turn_blocked_nodes(
+    team_id: str,
+    *,
+    question_id: str,
+) -> dict[str, Any]:
+    """Auto-redrive formal nodes blocked on a dead agent turn.
+
+    Dead-turn auto-recovery, step two-seven (after the budget recovery, before
+    the transient ``auto_advance_not_ready`` retry).  A parallel merge that
+    triggers a workbench rebuild kills the backend mid-turn; the run lands
+    blocked on the canonical ``agent_turn_terminal_failed`` problem and — for
+    restart kills mislabeled ``stopped`` — only the runtime-stop evidence gate
+    in ``knowledge_sideflow_service.dead_agent_turn_block_problem`` can tell
+    them from a real operator stop (user stops fail closed and are never
+    touched).  This helper enumerates the question's blocked runs (formal AND
+    knowledge sideflow children, same ``list_runs`` read as the budget step),
+    keeps runs whose latest blocked ledger attempt carries exactly the
+    dead-turn shape, and submits the retry through the identical offer-gated
+    channel as ``auto_retry_blocked_formal_nodes`` (``_submit_formal_v2_command``):
+    the offer projection is re-read at submit time and its own
+    ``offer:{runId}:{nodeId}:retry_node:...`` idempotency key is reused, so a
+    readiness-blocked or stale offer ends as a structured wait and the next
+    tick retries — readiness is never bypassed.
+
+    Bounded and idempotent: at most
+    ``auto_dead_turn_redrive_max_redrives()`` automated redrives per blocked
+    node (counted from the ``recovery_records`` audit trail this step writes,
+    so the cap survives restarts); once the cap is spent the existing
+    human-visible stop is left intact and a decline ``recovery_record`` states
+    why (never an ``open`` record).  Best-effort: nothing raises; every
+    outcome is counted and, when it acts, recorded as a scene event.
+    """
+
+    normalized_question_id = str(question_id or "").strip().upper()
+    summary: dict[str, Any] = {
+        "blockedRuns": 0,
+        "redriven": 0,
+        "declined": 0,
+        "skipped": 0,
+        "ineligible": 0,
+        "failed": 0,
+    }
+    if not auto_dead_turn_redrive_enabled():
+        return summary
+    if not normalized_question_id:
+        return summary
+    try:
+        from .formal_read_runtime import get_query_service
+
+        blocked_runs: list[tuple[str, dict[str, Any]]] = []
+        seen_run_ids: set[str] = set()
+        for workflow_id in (CHALLENGE_CUP_WORKFLOW_ID, KNOWLEDGE_SIDEFLOW_WORKFLOW_ID):
+            payload = get_query_service().list_runs(
+                team_id=team_id, workflow_id=workflow_id
+            )
+            for run in list((payload or {}).get("runs") or []):
+                if not isinstance(run, Mapping):
+                    continue
+                if (
+                    str(run.get("questionId") or "").strip().upper()
+                    != normalized_question_id
+                    or str(run.get("status") or "").strip().lower() != "blocked"
+                ):
+                    continue
+                run_id = str(run.get("runId") or "").strip()
+                if run_id and run_id not in seen_run_ids:
+                    seen_run_ids.add(run_id)
+                    blocked_runs.append((workflow_id, dict(run)))
+    except Exception:  # noqa: BLE001 - formal runtime absent (command line)
+        return summary
+    from .runtime_factory import production_workflow_runtime
+
+    runtime = production_workflow_runtime()
+    if runtime is None:
+        return summary
+
+    now_ms = int(time.time() * 1000)
+    for workflow_id, run in blocked_runs:
+        summary["blockedRuns"] += 1
+        run_id = str(run.get("runId") or "").strip()
+        node_id = ""
+        attempt_no = 0
+        problem: dict[str, Any] = {}
+        if not run_id:
+            continue
+        try:
+            target = _latest_dead_turn_blocked_attempt(runtime.store, run_id)
+            if target is None:
+                # Blocked on a live readiness gap / budget / user stop: the
+                # auto-redrive never touches this run.
+                summary["ineligible"] += 1
+                continue
+            node_id, attempt_no, problem = target
+            if (
+                workflow_id == KNOWLEDGE_SIDEFLOW_WORKFLOW_ID
+                and _knowledge_child_dead_turn_reconcile_owned(
+                    runtime.store, run_id
+                )
+            ):
+                # A live knowledge invocation owns this child: the dedicated
+                # knowledge dead-turn pass drives its parent reconcile (fail
+                # → replan → budgeted re-ensure); a direct retry_node here
+                # would double-act on the same child.
+                summary["ineligible"] += 1
+                continue
+            applied = _count_auto_dead_turn_redrives(
+                runtime.store, run_id=run_id, node_id=node_id
+            )
+            cap = auto_dead_turn_redrive_max_redrives()
+            if applied >= cap:
+                # Cap spent: leave the human-visible stop intact and only
+                # record WHY the auto actor declines (deterministic id —
+                # one entry per blocked attempt, never a loop).
+                _record_auto_dead_turn_redrive(
+                    runtime.store,
+                    run_id=run_id,
+                    node_id=node_id,
+                    attempt_no=attempt_no,
+                    action="declined",
+                    resolution={
+                        "reason": "auto_redrive_cap_exhausted",
+                        "autoRedrivesApplied": applied,
+                        "maxAutoRedrives": cap,
+                        "terminalStatus": str(
+                            problem.get("terminalStatus") or ""
+                        ),
+                        "recovery": "manual retry_node",
+                    },
+                    now_ms=now_ms,
+                )
+                summary["declined"] += 1
+                _record_scene_event(
+                    "hypothesis_first.auto_dead_turn_redrive",
+                    outcome="declined",
+                    fields={
+                        "teamId": team_id,
+                        "questionId": normalized_question_id,
+                        "runId": run_id,
+                        "nodeId": node_id,
+                        "reason": "auto_redrive_cap_exhausted",
+                    },
+                )
+                continue
+            _submit_formal_v2_command(
+                team_id,
+                run_id=run_id,
+                node_id=node_id,
+                command="retry_node",
+                # The retry offer carries its own idempotency key and
+                # _submit_formal_v2_command always submits with it; this
+                # deterministic value only satisfies the signature.
+                idempotency_key=(
+                    f"hf2:auto-dead-turn-redrive:{run_id}:{node_id}"
+                    f":retry_node:a{attempt_no}"
+                ),
+            )
+        except HypothesisFirstChainError as exc:
+            # The offer gate kept the retry out: readiness still blocks the
+            # offer or the run version moved on.  Wait for the next tick.
+            summary["skipped"] += 1
+            _record_scene_event(
+                "hypothesis_first.auto_dead_turn_redrive",
+                outcome="waited_for_offer",
+                fields={
+                    "teamId": team_id,
+                    "questionId": normalized_question_id,
+                    "runId": run_id,
+                    "nodeId": node_id,
+                    "reason": str(exc)[:200],
+                },
+            )
+            continue
+        except Exception as exc:  # noqa: BLE001 - one broken run is isolated
+            summary["failed"] += 1
+            _record_scene_event(
+                "hypothesis_first.auto_dead_turn_redrive",
+                outcome="failed",
+                level="warning",
+                fields={
+                    "teamId": team_id,
+                    "questionId": normalized_question_id,
+                    "runId": run_id,
+                    "reason": type(exc).__name__,
+                    "error": str(exc)[:400],
+                },
+            )
+            continue
+        summary["redriven"] += 1
+        _record_auto_dead_turn_redrive(
+            runtime.store,
+            run_id=run_id,
+            node_id=node_id,
+            attempt_no=attempt_no,
+            action="auto_redrive",
+            resolution={
+                "terminalStatus": str(problem.get("terminalStatus") or ""),
+                "sessionId": str(problem.get("sessionId") or ""),
+                "turnId": str(problem.get("turnId") or ""),
+                "idempotencyKey": (
+                    f"hf2:auto-dead-turn-redrive:{run_id}:{node_id}"
+                    f":retry_node:a{attempt_no}"
+                ),
+            },
+            now_ms=now_ms,
+        )
+        _record_scene_event(
+            "hypothesis_first.auto_dead_turn_redrive",
+            outcome="submitted",
+            fields={
+                "teamId": team_id,
+                "questionId": normalized_question_id,
+                "runId": run_id,
+                "nodeId": node_id,
+                "terminalStatus": str(problem.get("terminalStatus") or ""),
+            },
+        )
+    return summary
+
+
 def _auto_advance_sweep_budget_ms() -> int:
     """Configured wall-clock budget in ms for one sweep pass.
 
@@ -3014,7 +3233,10 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
     created and started, runs blocked on the stage-boundary budget precheck
     get the extend_budget → retry_node contract driven automatically within
     the per-node extension cap (formal runs and knowledge sideflow children
-    alike), and formal nodes blocked on the transient
+    alike), formal nodes blocked on a dead agent turn (interrupted/failed
+    directly, stopped only behind the runtime-stop evidence gate) get their
+    offer-gated retry redriven within the per-node redrive cap, and formal
+    nodes blocked on the transient
     ``auto_advance_not_ready`` gate get their offer-gated retry resubmitted.
     Nothing here raises: one broken team or question is isolated and
     counted; questions whose latest round is not an unadjudicated exhausted
@@ -3038,6 +3260,8 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
         "budgetExtends": 0,
         "budgetRetries": 0,
         "budgetDeclined": 0,
+        "deadTurnRedriven": 0,
+        "deadTurnDeclined": 0,
         "retried": 0,
         "fencedReviewsRedriven": 0,
         "closedGenerationsRetried": 0,
@@ -3228,6 +3452,21 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
                 summary["budgetDeclined"] += int(
                     budget_recovery.get("declined") or 0
                 )
+                # Step two-seven, every question every pass: redrive formal
+                # runs (and knowledge sideflow children) blocked on a dead
+                # agent turn — interrupted/failed directly, stopped only when
+                # the runtime-stop evidence gate proves a lifecycle kill —
+                # through the offer-gated retry channel, bounded per node and
+                # config-gated; read-only unless an eligible block exists.
+                dead_turn_redrive = auto_redrive_dead_turn_blocked_nodes(
+                    team_id, question_id=question_id
+                )
+                summary["deadTurnRedriven"] += int(
+                    dead_turn_redrive.get("redriven") or 0
+                )
+                summary["deadTurnDeclined"] += int(
+                    dead_turn_redrive.get("declined") or 0
+                )
                 # Step three, every question every pass: resubmit the
                 # offer-gated retry for formal nodes blocked on the transient
                 # auto_advance_not_ready verdict (read-only unless an eligible
@@ -3284,6 +3523,8 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
             "budgetExtends": int(summary["budgetExtends"]),
             "budgetRetries": int(summary["budgetRetries"]),
             "budgetDeclined": int(summary["budgetDeclined"]),
+            "deadTurnRedriven": int(summary["deadTurnRedriven"]),
+            "deadTurnDeclined": int(summary["deadTurnDeclined"]),
             "retried": int(summary["retried"]),
             "fencedReviewsRedriven": int(summary["fencedReviewsRedriven"]),
             "closedGenerationsRetried": int(summary["closedGenerationsRetried"]),
@@ -3375,6 +3616,7 @@ _EXPORTS = (
     "auto_create_formal_run_after_convergence",
     "auto_retry_blocked_formal_nodes",
     "auto_extend_budget_blocked_nodes",
+    "auto_redrive_dead_turn_blocked_nodes",
     "_auto_advance_sweep_budget_ms",
     "auto_redrive_fenced_review_meeting",
     "auto_retry_fenced_generation_attempt",

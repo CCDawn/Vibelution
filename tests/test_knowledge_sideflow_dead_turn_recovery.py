@@ -855,3 +855,261 @@ def test_operator_child_turn_failure_retains_retryable_invocation(tmp_path, monk
         assert store.get_run("operator-child").status == "blocked"
     finally:
         store.close()
+
+
+# --------------------------------------------------------------------------
+# stopped 死回合：运行时停止证据门（2026-10 并行合码重启事故）
+#
+# 会话层把被杀回合一律合成 terminalStatus="stopped"/terminalReason=
+# "stopped_by_user"，但 journal 的 EVENT_TURN_INTERRUPTED payload.reason
+# 原样保留运行时停止原因；用户真停走互斥的 user_stops 信号。stopped 只有
+# 在「运行时停止原因成立且无用户信号」时才算死回合，其余一律 fail-closed。
+# --------------------------------------------------------------------------
+
+
+_STOPPED_DEAD_TURN_PROBLEM = dict(
+    _DEAD_TURN_PROBLEM,
+    terminalStatus="stopped",
+    terminalReason="stopped_by_user",
+)
+
+
+def _seed_turn_stop_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    session_id: str = "sess-dead-turn",
+    turn_id: str = "turn-dead-turn",
+    reason: str | None,
+    user_stops: bool = False,
+) -> None:
+    """在 tmp 根写入真实 journal/信号 fixture（与生产同一套读写 API）。"""
+    from core.chat.conversation_ledger import (
+        EVENT_TURN_INTERRUPTED,
+        append_conversation_event,
+    )
+    from core.evaluation.chat_next_state_signals import (
+        append_chat_next_state_signal,
+    )
+    from core.web.services import session_service
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    if reason is not None:
+        append_conversation_event(
+            tmp_path,
+            session_id,
+            turn_id,
+            EVENT_TURN_INTERRUPTED,
+            status="stopped",
+            payload={"reason": reason, "summary": "本轮因工作台重启中断。"},
+        )
+    if user_stops:
+        append_chat_next_state_signal(
+            project_root=tmp_path,
+            session_id=session_id,
+            turn_id=turn_id,
+            source="user",
+            kind="user_stops",
+            polarity="negative",
+            mode="directive",
+            related_event_code="conversation.user_stop_requested",
+            summary="用户请求停止当前对话轮次。",
+            record_scene=False,
+        )
+
+
+def test_dead_turn_parser_accepts_stopped_with_runtime_stop_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """stopped + journal runtime_shutdown 证据 → 死回合成立。"""
+    _seed_turn_stop_evidence(
+        monkeypatch, tmp_path, reason="runtime_shutdown"
+    )
+    parsed = dead_agent_turn_block_problem(json.dumps(_STOPPED_DEAD_TURN_PROBLEM))
+    assert parsed is not None
+    assert parsed["terminalStatus"] == "stopped"
+    assert parsed["terminalReason"] == "stopped_by_user"
+    # 生产包装形态同样命中（证据门作用于内层 sessionId/turnId）。
+    wrapped = {
+        "code": "adapter_execution_exception",
+        "detail": json.dumps(_STOPPED_DEAD_TURN_PROBLEM, ensure_ascii=False),
+        "actionId": "act-wrapped-stopped",
+    }
+    assert dead_agent_turn_block_problem(json.dumps(wrapped)) is not None
+
+
+@pytest.mark.parametrize(
+    "reason,user_stops",
+    [
+        # 证据缺失：journal 里根本没有该回合的 interrupted 事件。
+        (None, False),
+        # 用户真停：interrupted 原因是操作者文案（不在运行时停止原因集合）。
+        ("操作者请求停止当前轮。", False),
+        # 运行时原因与用户信号并存 → 用户信号赢，fail-closed。
+        ("runtime_shutdown", True),
+    ],
+)
+def test_dead_turn_parser_fails_closed_for_user_stopped_turns(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    reason: str | None,
+    user_stops: bool,
+) -> None:
+    """用户真停的运行绝不能被自动复活（fail-closed）。"""
+    _seed_turn_stop_evidence(
+        monkeypatch, tmp_path, reason=reason, user_stops=user_stops
+    )
+    assert (
+        dead_agent_turn_block_problem(json.dumps(_STOPPED_DEAD_TURN_PROBLEM))
+        is None
+    )
+    # 包装形态同样 fail-closed。
+    wrapped = {
+        "code": "adapter_execution_exception",
+        "detail": json.dumps(_STOPPED_DEAD_TURN_PROBLEM, ensure_ascii=False),
+        "actionId": "act-wrapped-stopped",
+    }
+    assert dead_agent_turn_block_problem(json.dumps(wrapped)) is None
+
+
+def test_dead_turn_parser_fails_closed_without_turn_identity() -> None:
+    """sessionId/turnId 缺失 → 无从取证，一律 fail-closed。"""
+    problem = {
+        "code": "agent_turn_terminal_failed",
+        "terminalStatus": "stopped",
+        "terminalReason": "stopped_by_user",
+    }
+    assert dead_agent_turn_block_problem(json.dumps(problem)) is None
+
+
+def test_dead_turn_parser_fails_closed_when_journal_read_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """journal 读不到（读取抛错）→ fail-closed。"""
+    from core.chat import conversation_ledger
+
+    def _boom(*_args: Any, **_kwargs: Any) -> list[Any]:
+        raise OSError("journal unreadable")
+
+    monkeypatch.setattr(conversation_ledger, "load_conversation_events", _boom)
+    assert (
+        dead_agent_turn_block_problem(json.dumps(_STOPPED_DEAD_TURN_PROBLEM))
+        is None
+    )
+
+
+def test_dead_turn_parser_keeps_interrupted_failed_evidence_free() -> None:
+    """interrupted/failed 保持既有无证据门行为（不回归既有恢复路径）。"""
+    # 本用例不做任何 journal/monkeypatch 准备。
+    assert dead_agent_turn_block_problem(json.dumps(_DEAD_TURN_PROBLEM)) is not None
+    failed = dict(_DEAD_TURN_PROBLEM, terminalStatus="failed")
+    assert dead_agent_turn_block_problem(json.dumps(failed)) is not None
+
+
+@pytest.mark.parametrize(
+    "child_problem",
+    [
+        json.dumps(_STOPPED_DEAD_TURN_PROBLEM, ensure_ascii=False),
+        # 生产包装形态（外层 adapter_execution_exception）。
+        json.dumps(
+            {
+                "code": "adapter_execution_exception",
+                "detail": json.dumps(
+                    _STOPPED_DEAD_TURN_PROBLEM, ensure_ascii=False
+                ),
+                "actionId": "act-stopped-dispatch",
+            },
+            ensure_ascii=False,
+        ),
+    ],
+)
+def test_maintenance_sweep_recovers_stopped_child_with_runtime_stop_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    child_problem: str,
+) -> None:
+    """重启杀掉的 stopped 回合：sweep 自动对账清死锁 + 预算内重发。"""
+    # 复用 _seed_blocked_parent_with_dead_turn_child 的固定 run-deadlock 家族。
+    _seed_problem_artifact(monkeypatch, tmp_path, "run-deadlock")
+    _seed_turn_stop_evidence(
+        monkeypatch, tmp_path, reason="electron_user_restart"
+    )
+    runtime = _build_runtime(tmp_path)
+    try:
+        run_id = _seed_blocked_parent_with_dead_turn_child(
+            runtime.store, child_problem_json=child_problem
+        )
+
+        runtime.run_maintenance_once(limit=4)
+
+        invocations = runtime.store.read(
+            lambda repo: repo.list_knowledge_invocations_for_parent(run_id)
+        )
+        by_id = {item.invocation_id: item for item in invocations}
+        original = by_id["ki-deadlock"]
+        assert original.status == "failed"
+        error = json.loads(str(original.error_json))
+        assert error["code"] == "knowledge_sideflow_child_failed_dead_turn"
+        assert error["deadTurn"]["terminalStatus"] == "stopped"
+        assert error["deadTurn"]["terminalReason"] == "stopped_by_user"
+        # 预算内自动重新发起 → 全新 invocation。
+        retries = [
+            item for item in invocations if item.invocation_id != "ki-deadlock"
+        ]
+        assert len(retries) == 1
+        assert retries[0].request_hash != original.request_hash
+    finally:
+        runtime.close()
+
+
+@pytest.mark.parametrize(
+    "reason,user_stops",
+    [
+        (None, False),
+        ("操作者请求停止当前轮。", False),
+        ("runtime_shutdown", True),
+    ],
+)
+def test_maintenance_sweep_never_recovers_user_stopped_child(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    reason: str | None,
+    user_stops: bool,
+) -> None:
+    """用户真停/证据缺失：sweep 不对账、不标 FAILED、不重发（fail-closed）。"""
+    _seed_problem_artifact(monkeypatch, tmp_path, "run-deadlock")
+    _seed_turn_stop_evidence(
+        monkeypatch,
+        tmp_path,
+        session_id="sess-user-stop",
+        turn_id="turn-user-stop",
+        reason=reason,
+        user_stops=user_stops,
+    )
+    child_problem = dict(
+        _STOPPED_DEAD_TURN_PROBLEM,
+        sessionId="sess-user-stop",
+        turnId="turn-user-stop",
+    )
+    runtime = _build_runtime(tmp_path)
+    try:
+        run_id = _seed_blocked_parent_with_dead_turn_child(
+            runtime.store, child_problem_json=json.dumps(child_problem)
+        )
+
+        runtime.run_maintenance_once(limit=4)
+
+        invocations = runtime.store.read(
+            lambda repo: repo.list_knowledge_invocations_for_parent(run_id)
+        )
+        # 原 invocation 保持 live，无 dead_turn 审计，也没有重发请求。
+        assert len(invocations) == 1
+        original = invocations[0]
+        assert original.invocation_id == "ki-deadlock"
+        assert original.status == "running"
+        assert original.error_json is None
+        child_run = runtime.store.get_run("run-deadlock-child")
+        assert child_run is not None
+        assert child_run.status == "blocked"
+    finally:
+        runtime.close()
