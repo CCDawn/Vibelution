@@ -2756,6 +2756,14 @@ export function ChatCodingRouteWorkbench() {
     sessions: allVisibleSessions,
     queryClient,
     viewedSessionId: activeSessionId || "",
+    viewedSessionDetail: sessionDetailQuery.isPlaceholderData ? undefined : sessionDetailQuery.data,
+    // Companion intent is synchronous; direct-session identity must finish
+    // binding lookup before this ordinary query fallback can observe it.
+    viewedSessionDetailEnabled: !companionMode
+      && !requestedCompanionAgentId
+      && (!companionRouteUpgradeLookupEnabled || (
+        companionRouteUpgradeQuery.isSuccess && !companionRouteUpgradeQuery.isFetching
+      )),
     notifierRef: desktopConversationNotifierRef,
     onOpenSession: handleOpenDirectSession,
   });
