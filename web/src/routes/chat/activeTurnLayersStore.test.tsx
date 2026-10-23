@@ -21,6 +21,7 @@ import {
   ActiveTurnLayersStoreProvider,
   useActiveTurnLayerForSession,
   useActiveTurnLayersSignal,
+  useActiveTurnLayersSignalFlag,
   type ActiveTurnLayersStore,
 } from "./activeTurnLayersStore";
 import type { ActiveTurnLayerState } from "../chatActiveTurnLayer";
@@ -89,6 +90,31 @@ afterEach(() => {
 });
 
 describe("activeTurnLayersStore", () => {
+  it("updates an owner's turn signals before its returned Provider without per-frame rerenders", () => {
+    const store = createActiveTurnLayersStore();
+    function Owner() {
+      const turnId = useActiveTurnLayersSignal((layers) => layers.s1?.turnId ?? "", store);
+      const running = useActiveTurnLayersSignalFlag((layers) => layers.s1?.status === "running", store);
+      renderCounts.owner = (renderCounts.owner ?? 0) + 1;
+      return <ActiveTurnLayersStoreProvider store={store}>
+        <div data-owner-turn={turnId} data-owner-running={String(running)} />
+      </ActiveTurnLayersStoreProvider>;
+    }
+    renderTree(<Owner />);
+    act(() => store.setActiveTurnLayersBySession({ s1: makeLayer("s1", 1) }));
+    expect(container.querySelector("[data-owner-turn]")?.getAttribute("data-owner-turn")).toBe("turn-1");
+    expect(container.querySelector("[data-owner-running]")?.getAttribute("data-owner-running")).toBe("true");
+    const runningRenders = renderCounts.owner;
+    act(() => store.setActiveTurnLayersBySession({ s1: makeLayer("s1", 2) }));
+    expect(renderCounts.owner).toBe(runningRenders);
+    act(() => store.setActiveTurnLayersBySession({ s1: { ...makeLayer("s1", 3), turnId: "turn-next" } }));
+    expect(container.querySelector("[data-owner-turn]")?.getAttribute("data-owner-turn")).toBe("turn-next");
+    expect(renderCounts.owner).toBe(runningRenders + 1);
+    act(() => store.setActiveTurnLayersBySession({ s1: { ...makeLayer("s1", 4), turnId: "turn-next", status: "completed" } }));
+    expect(container.querySelector("[data-owner-running]")?.getAttribute("data-owner-running")).toBe("false");
+    expect(renderCounts.owner).toBe(runningRenders + 2);
+  });
+
   it("keeps useState setter semantics: functional updaters apply, reference-equal results never notify", () => {
     const store = createActiveTurnLayersStore();
     let notifications = 0;

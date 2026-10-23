@@ -121,11 +121,15 @@ export function useActiveTurnLayerForSession(
  * Primitive-valued selector subscription for the workbench. `select` must be
  * referentially stable (wrap in `useCallback`) and return a string; the caller
  * only re-renders when the selected primitive actually changes.
+ * The owner passes its store explicitly because its returned Provider only
+ * supplies context to descendants.
  */
 export function useActiveTurnLayersSignal(
   select: (state: ActiveTurnLayersState) => string,
+  ownerStore?: ActiveTurnLayersStore,
 ): string {
-  const store = useContext(ActiveTurnLayersStoreContext);
+  const contextStore = useContext(ActiveTurnLayersStoreContext);
+  const store = ownerStore ?? contextStore;
   const getSnapshot = store ? () => select(store.getSnapshot()) : readNoSignal;
   return useSyncExternalStore(store?.subscribe ?? NOOP_SUBSCRIBE, getSnapshot);
 }
@@ -136,8 +140,10 @@ export function useActiveTurnLayersSignal(
  */
 export function useActiveTurnLayersSignalFlag(
   select: (state: ActiveTurnLayersState) => boolean,
+  ownerStore?: ActiveTurnLayersStore,
 ): boolean {
-  const store = useContext(ActiveTurnLayersStoreContext);
+  const contextStore = useContext(ActiveTurnLayersStoreContext);
+  const store = ownerStore ?? contextStore;
   const getSnapshot = store ? () => select(store.getSnapshot()) : readNoFlag;
   return useSyncExternalStore(store?.subscribe ?? NOOP_SUBSCRIBE, getSnapshot);
 }

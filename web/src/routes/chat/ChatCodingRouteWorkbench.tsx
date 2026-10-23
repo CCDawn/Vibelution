@@ -1646,10 +1646,10 @@ export function ChatCodingRouteWorkbench() {
   const activeTurnSessionKey = activeSessionId ?? "";
   const activeTurnSettledByDetail = useActiveTurnLayersSignalFlag(useCallback((layers) => {
     return isActiveTurnSettledByMessages(layers[activeTurnSessionKey], detail?.messages);
-  }, [activeTurnSessionKey, detail?.messages]));
+  }, [activeTurnSessionKey, detail?.messages]), activeTurnLayersStore);
   const terminalIndexRefreshKey = useActiveTurnLayersSignal(useCallback((layers) => {
     return activeTurnTerminalRefreshKey(layers[activeTurnSessionKey], detail);
-  }, [activeTurnSessionKey, detail]));
+  }, [activeTurnSessionKey, detail]), activeTurnLayersStore);
   const activeTurnRunningSessionKey = useActiveTurnLayersSignal(useCallback((layers) => {
     const runningSessionIds: string[] = [];
     Object.entries(layers).forEach(([sessionId, layer]) => {
@@ -1659,14 +1659,14 @@ export function ChatCodingRouteWorkbench() {
     });
     runningSessionIds.sort();
     return runningSessionIds.join("|");
-  }, []));
+  }, []), activeTurnLayersStore);
   // The bridge input only needs the active session's turn id; subscribing to
   // the primitive id (not the whole layer) keeps per-frame commits from
   // re-rendering the workbench while the turn id itself still updates once
   // per turn.
   const activeTurnIdSignal = useActiveTurnLayersSignal(useCallback((layers) => {
     return layers[activeTurnSessionKey]?.turnId ?? "";
-  }, [activeTurnSessionKey]));
+  }, [activeTurnSessionKey]), activeTurnLayersStore);
   useEffect(() => {
     if (!activeSessionId || !terminalIndexRefreshKey) {
       return;
