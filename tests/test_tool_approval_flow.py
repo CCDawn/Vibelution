@@ -1586,3 +1586,54 @@ def test_non_approval_denial_in_approval_flow_carries_rule_id_and_reason(monkeyp
     assert allowed.allowed is True
     assert allowed.rule_id == ""
     assert allowed.reason_code == ""
+
+
+def test_declined_approval_does_not_burn_call_budget(monkeypatch, _agent_directory_state):
+    """E5：额度在审批等待前预扣，被拒调用没执行任何工具——必须退款。
+
+    额度上限设为 1：修复前第一次被拒就把 call_count 顶到 1，第二次调用
+    直接撞 call_budget_exhausted 熔断（零执行烧穿预算），且不会再出现
+    第二个待审批请求。
+    """
+
+    _runtime(monkeypatch)
+    _install(("web_search_tool", "on_request", "network"))
+    calls = []
+    executor = ToolExecutor()
+    executor.register_tool("web_search_tool", lambda **kwargs: calls.append(kwargs) or "ok")
+    result_box = {}
+
+    def _worker():
+        _install(("web_search_tool", "on_request", "network"))
+        context = tool_authorization_service.current_execution_authorization()
+        context.max_calls_per_turn = 1
+        result_box["context"] = context
+        result_box["first"] = executor.execute(
+            "web_search_tool", {"query": "one"}, tool_call_id="call-decline-budget-1",
+        )
+        result_box["second"] = executor.execute(
+            "web_search_tool", {"query": "two"}, tool_call_id="call-decline-budget-2",
+        )
+
+    worker = threading.Thread(target=_worker)
+    worker.start()
+    first_request = _wait_for_pending()
+    tool_approvals.resolve_tool_approval_request(
+        "session-a", first_request["requestId"], decision="decline",
+    )
+    second_request = _wait_for_pending()
+    tool_approvals.resolve_tool_approval_request(
+        "session-a", second_request["requestId"], decision="decline",
+    )
+    worker.join(timeout=2)
+
+    first_result, _first_action = result_box["first"]
+    second_result, second_action = result_box["second"]
+    assert "用户拒绝" in first_result
+    # 第二次仍须到达审批，而不是零执行就撞额度熔断
+    assert "用户拒绝" in second_result
+    assert "额度已用尽" not in second_result
+    assert second_action is None
+    assert calls == []
+    # 两次被拒的调用都退了款
+    assert result_box["context"].call_count == 0

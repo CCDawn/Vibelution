@@ -355,3 +355,29 @@ def test_retry_rechecks_a_replaced_claim_at_its_new_expiry(tmp_path, published_s
     assert len(timers) == 2
     assert queued_turns._PENDING_STARTING_RETRIES[SESSION_ID][0] == new["updatedAt"]
     assert _persisted_rows(tmp_path)[0]["updatedAt"] == new["updatedAt"]
+
+
+def test_empty_claim_drain_still_schedules_continuation(tmp_path, published_sessions, monkeypatch):
+    """R1：空领取的 drain 也必须调度自续。
+
+    并发入队的唤醒可能刚被单飞窗口（空领取 → finally 丢弃标记）静默丢弃，
+    空闲会话上的机发行没有 settle 兜底，漏醒即停滞到下次用户动作或重启。
+    自续自身带运行过滤与滚动窗上限，无条件调度是安全的。
+    """
+
+    _seed_conversation(
+        tmp_path,
+        [_turn_row("turn-live", status="starting", age=timedelta(minutes=1))],
+    )
+    scheduled: list[str] = []
+    monkeypatch.setattr(
+        queued_turns,
+        "_schedule_session_queued_turn_drain_continuation",
+        lambda session_id: scheduled.append(str(session_id)),
+    )
+
+    drained = queued_turns.drain_session_queued_turns(SESSION_ID)
+
+    # 新鲜 starting 行阻塞领取 → 空领取返回 False，但自续仍须被调度
+    assert drained is False
+    assert scheduled == [SESSION_ID]

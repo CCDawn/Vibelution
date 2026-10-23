@@ -1022,6 +1022,12 @@ def authorize_tool_execution(
                 tool_name=normalized_tool,
             )
         if not approval_outcome.allowed:
+            # 额度在审批等待前已预扣（见上方 call_count_lock 段），但被拒/超时/
+            # 取消的调用没有执行任何工具：退还这一格，否则零执行也能撞熔断。
+            # 交付豁免类走独立计数、未动 call_count，不退。
+            if not _is_delivery_exempt_tool(normalized_tool):
+                with context.call_count_lock:
+                    context.call_count = max(0, context.call_count - 1)
             return ToolExecutionAuthorizationResult(
                 enforced=True,
                 allowed=False,

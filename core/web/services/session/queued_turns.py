@@ -1284,7 +1284,6 @@ def drain_session_queued_turns(session_id: str) -> bool:
         if normalized_session_id in _DRAINING_SESSIONS:
             return False
         _DRAINING_SESSIONS.add(normalized_session_id)
-    processed_unit = False
     try:
         # Keep the claim valid until submit/settlement, including cross-process TTL recovery.
         with s._session_submit_admit_lock(normalized_session_id):
@@ -1311,7 +1310,6 @@ def drain_session_queued_turns(session_id: str) -> bool:
                         error=None,
                         keep_queued=False,
                     )
-                processed_unit = True
                 return True
             queued_turn_ids = [str(item.get("id") or "") for item in batch if str(item.get("id") or "").strip()]
             batch_kinds: list[str] = []
@@ -1450,15 +1448,18 @@ def drain_session_queued_turns(session_id: str) -> bool:
                         error=None,
                         keep_queued=False,
                     )
-            processed_unit = True
             return True
     finally:
         with _DRAIN_LOCK:
             _DRAINING_SESSIONS.discard(normalized_session_id)
-        if processed_unit:
-            # Only after leaving the single-flight set: an earlier schedule
-            # would be dropped by it and the queue would stall.
-            _schedule_session_queued_turn_drain_continuation(normalized_session_id)
+        # Unconditional: an enqueue whose schedule raced this drain's
+        # [empty-claim -> finally-discard] window was silently dropped by the
+        # single-flight set, and machine rows on an idle session have no
+        # settle hook to wake the queue later. The continuation self-filters
+        # (running sessions, no drainable rows) and is rolling-window capped,
+        # so scheduling even after an empty claim is safe. Only after leaving
+        # the single-flight set: an earlier schedule would be dropped by it.
+        _schedule_session_queued_turn_drain_continuation(normalized_session_id)
 
 
 def schedule_session_queued_turn_drain(session_id: str) -> None:
