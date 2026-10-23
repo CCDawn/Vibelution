@@ -16,6 +16,7 @@ from core.web.routes.agent_plugin_models import (
     AgentPluginCatalogEntryResponse,
     AgentPluginListResponse,
     VirtualHumanCompanionActivityResponse,
+    VirtualHumanCompanionBindingResponse,
     VirtualHumanCompanionResponse,
 )
 from core.web.routes.virtual_human_life_models import VirtualHumanLocationResponse
@@ -23,6 +24,7 @@ from core.web.services.agent_plugin_service import (
     list_agent_plugin_catalog,
     list_agent_plugins,
     list_virtual_human_companion_activity,
+    list_virtual_human_companion_bindings,
     list_virtual_human_companions,
     update_agent_plugin_binding,
 )
@@ -46,6 +48,15 @@ def agent_plugin_catalog() -> list[dict]:
 )
 def virtual_human_companion_list() -> list[dict]:
     return list_virtual_human_companions()
+
+
+@router.get(
+    "/agent-plugins/virtual-human-life/companion-bindings",
+    response_model=list[VirtualHumanCompanionBindingResponse],
+    response_model_exclude_unset=True,
+)
+def virtual_human_companion_binding_list() -> list[dict[str, str]]:
+    return list_virtual_human_companion_bindings()
 
 
 @router.get(

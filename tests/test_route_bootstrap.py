@@ -69,6 +69,7 @@ def test_startup_reads_do_not_import_features_until_an_actual_request(monkeypatc
     monkeypatch.setattr(bootstrap, "initialize_builtin_agent_catalog", lambda: {})
     monkeypatch.setattr(route_bootstrap, "register_spa_routes", lambda *args, **kwargs: None)
     monkeypatch.setattr(agent_plugins, "list_virtual_human_companion_activity", lambda: [])
+    monkeypatch.setattr(agent_plugins, "list_virtual_human_companion_bindings", lambda: [{"agentId": "companion", "directSessionId": "native"}])
     for name in ("_start_financial_team_coordinator", "_start_financial_job_scheduler", "_start_financial_backtest_worker"):
         monkeypatch.setattr(route_bootstrap, name, lambda *args, **kwargs: None)
 
@@ -111,6 +112,11 @@ def test_startup_reads_do_not_import_features_until_an_actual_request(monkeypatc
                     "/api/agent-plugins/virtual-human-life/companion-activity",
                 ), 1)
                 assert activity.json() == []
+                assert not imported.is_set()
+                bindings = await asyncio.wait_for(client.get(
+                    "/api/agent-plugins/virtual-human-life/companion-bindings",
+                ), 1)
+                assert bindings.json() == [{"agentId": "companion", "directSessionId": "native"}]
                 assert not imported.is_set()
                 request = asyncio.create_task(client.get(wake_path))
                 await asyncio.wait_for(imported.wait(), 1)
@@ -653,6 +659,7 @@ def test_startup_operations_match_only_reviewed_methods_and_complete_route_shape
     from core.web.routes import sessions
 
     assert is_startup_route_path("/api/agent-plugins/virtual-human-life/companion-activity", method="GET")
+    assert is_startup_route_path("/api/agent-plugins/virtual-human-life/companion-bindings", method="GET")
     for path in (
         "/api/config/bootstrap", "/api/launcher/current-instance", "/api/runtime/summary",
         "/api/sessions/bootstrap", "/api/sessions/query", "/api/sessions/active",
@@ -674,6 +681,7 @@ def test_startup_operations_match_only_reviewed_methods_and_complete_route_shape
         assert is_startup_route_path(actual + "?limit=20", method=method)
     for method, path in (
         ("POST", "/api/agent-plugins/virtual-human-life/companion-activity"),
+        ("POST", "/api/agent-plugins/virtual-human-life/companion-bindings"),
         ("GET", "/api/agent-plugins/virtual-human-life/companions"),
         ("GET", "/api/agent-plugins/catalog"),
         ("PUT", "/api/agents/companion/plugins/virtual-human-life/binding"),

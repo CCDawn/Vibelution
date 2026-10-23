@@ -68,6 +68,7 @@ _STARTUP_ROUTE_OPERATIONS = (
     (frozenset({"GET", "HEAD"}), "/api/launcher/current-instance"),
     (frozenset({"GET", "HEAD"}), "/api/runtime/summary"),
     (frozenset({"GET"}), "/api/agent-plugins/virtual-human-life/companion-activity"),
+    (frozenset({"GET"}), "/api/agent-plugins/virtual-human-life/companion-bindings"),
     (frozenset({"GET", "HEAD"}), "/api/sessions/bootstrap"),
     (frozenset({"GET", "HEAD"}), "/api/sessions/query"),
     (frozenset({"GET", "HEAD"}), "/api/sessions/active"),

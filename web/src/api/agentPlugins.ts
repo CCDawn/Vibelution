@@ -6,6 +6,7 @@ import type {
   AgentPluginList,
   VirtualHumanCompanion,
   VirtualHumanCompanionActivity,
+  VirtualHumanCompanionBinding,
   VirtualHumanLocation,
 } from "./types";
 
@@ -44,6 +45,15 @@ export function updateAgentPluginBinding(
 export function listVirtualHumanCompanions(options?: { signal?: AbortSignal }): Promise<VirtualHumanCompanion[]> {
   return fetchJson<VirtualHumanCompanion[]>(
     "/api/agent-plugins/virtual-human-life/companions",
+    { signal: options?.signal },
+  );
+}
+
+export function listVirtualHumanCompanionBindings(
+  options?: { signal?: AbortSignal },
+): Promise<VirtualHumanCompanionBinding[]> {
+  return fetchJson<VirtualHumanCompanionBinding[]>(
+    "/api/agent-plugins/virtual-human-life/companion-bindings",
     { signal: options?.signal },
   );
 }

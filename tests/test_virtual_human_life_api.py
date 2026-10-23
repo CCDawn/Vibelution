@@ -1215,6 +1215,14 @@ def test_companion_lobby_omits_unbound_and_sessionless_agents(tmp_path, monkeypa
             "directSessionId": "session-nora",
             "sessionActivity": response.json()[0]["sessionActivity"],
         }]
+        def reject_activity(*_args, **_kwargs):
+            raise AssertionError("route identity must not hydrate Session activity or journals")
+
+        monkeypatch.setattr("core.web.services.agent_plugin_service._companion_activity_rows", reject_activity)
+        monkeypatch.setattr("core.web.services.agent_plugin_service._native_session_activity_by_id", reject_activity)
+        bindings = client.get("/api/agent-plugins/virtual-human-life/companion-bindings")
+        assert bindings.status_code == 200, bindings.text
+        assert bindings.json() == [{"agentId": "enabled", "directSessionId": "session-nora"}]
     finally:
         set_virtual_human_life_service_for_tests(None)
 
