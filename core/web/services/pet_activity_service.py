@@ -40,7 +40,7 @@ _RUNNING_STATUSES = {
     "starting",
     "stopping",
 }
-_SUCCESS_STATUSES = {"ready", "completed", "done", "success", "succeeded"}
+_SUCCESS_STATUSES = {"completed", "done", "success", "succeeded"}
 _COMPLETION_PULSE_SECONDS = 15.0
 _ERROR_ATTENTION_SECONDS = 300.0
 _TONE_PRIORITY = {"approval": 0, "error": 1, "running": 2, "completed": 3, "idle": 4}
@@ -139,6 +139,8 @@ def _resolve_tone(
     # so a remaining active item is the live authority when the persisted
     # Session projection still says ready from the previous turn.
     if runtime_running:
+        return "running"
+    if any(candidate in _RUNNING_STATUSES for candidate in candidates):
         return "running"
     primary = candidates[0] if candidates else ""
     # A settled ready/idle projection carries its outcome in lastTurnStatus.
