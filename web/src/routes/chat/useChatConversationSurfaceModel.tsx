@@ -38,6 +38,7 @@ type ConversationBridgeProps = Omit<ComponentProps<typeof ChatConversationCompos
 type ChatConversationTranscriptKey =
   | "title"
   | "phase"
+  | "activeTurnAuthority"
   | "sessionWorkspacePath"
   | "transcriptPending"
   | "hasEarlierMessages"
@@ -327,6 +328,14 @@ export function useChatConversationSurfaceModel({
       sessionId: activeSessionId ?? detail.id,
       title: detail.title,
       phase: detail.currentPhase,
+      activeTurnAuthority: {
+        id: detail.id,
+        currentPhase: detail.currentPhase,
+        activeTurnId: detail.activeTurnId,
+        lastTurnTerminalTurnId: detail.lastTurnTerminalTurnId,
+        terminalReason: detail.terminalReason,
+        ledgerSeq: detail.ledgerSeq,
+      },
       // Session summary carries an absolute workspace root (backend resolves
       // relative paths against PROJECT_ROOT); markdown workspace-file links
       // resolve against it. Undefined keeps links inert (legacy behavior).
@@ -599,6 +608,7 @@ export function useChatConversationSurfaceModel({
       sessionId: true,
       title: true,
       phase: true,
+      activeTurnAuthority: true,
       sessionWorkspacePath: true,
       messages: true,
       transcriptPending: true,
@@ -683,6 +693,7 @@ export function useChatConversationSurfaceModel({
       transcript: {
       title: model.title,
       phase: model.phase,
+      activeTurnAuthority: model.activeTurnAuthority,
       sessionWorkspacePath: model.sessionWorkspacePath,
       transcriptPending: model.transcriptPending,
       hasEarlierMessages: model.hasEarlierMessages,

@@ -5,6 +5,7 @@ import * as chatActiveTurnLayerModule from "./chatActiveTurnLayer";
 import {
   activeTurnLayerToConversationMessage,
   type ActiveTurnLayerState,
+  type ActiveTurnAuthority,
   activeTurnLayerTextLength,
   activeTurnTerminalRefreshKey,
   createOptimisticActiveTurnLayer,
@@ -42,6 +43,53 @@ function assistantDelta(
 }
 
 describe("chat active turn layer", () => {
+  it("ends activity after a matching terminal receipt while preserving partial output until hydration", () => {
+    const layer = mergeAssistantDeltaIntoActiveTurnLayer(undefined, assistantDelta({
+      ledgerSeq: 10,
+      turnItems: [{
+        id: "commentary:1", itemId: "commentary", version: 3,
+        sessionId: "session-1", turnId: "turn-1", type: "agent_message",
+        phase: "commentary", status: "completed", terminal: false,
+        revision: 1, sequence: 1, text: "partial output",
+        createdAt: "2026-10-23T01:20:00Z", updatedAt: "2026-10-23T01:20:00Z",
+      }],
+    }))!;
+    const authority: ActiveTurnAuthority = {
+      id: "session-1", currentPhase: "ready", activeTurnId: "",
+      lastTurnTerminalTurnId: "turn-1", terminalReason: "stopped_by_user", ledgerSeq: 11,
+    };
+    const projected = projectActiveTurnLayerMessage(layer, [], authority)!;
+    expect(projected.status).toBe("completed");
+    expect(projected.metadata).toMatchObject({ interrupted: true, processStage: "stopped_by_user" });
+    expect(projected.turnItems).toBe(layer.turnItems);
+    expect(layer.status).toBe("running");
+    expect(isActiveTurnSettledByDetail(layer, { ...authority, messages: [] } as SessionDetail)).toBe(false);
+    const canonicalMessage = {
+      ...projected, id: "canonical-final", metadata: {},
+      turnItems: [{ ...layer.turnItems[0], phase: "final_answer", terminal: true }],
+    } as ConversationMessage;
+    expect(projectActiveTurnLayerMessage(layer, [canonicalMessage], authority)).toBeUndefined();
+  });
+
+  it.each([
+    { id: "another-session" },
+    { lastTurnTerminalTurnId: "previous-turn" },
+    { activeTurnId: "next-turn" },
+    { currentPhase: "running" },
+    { currentPhase: "" },
+    { terminalReason: "running" },
+    { ledgerSeq: 9 },
+    { ledgerSeq: 0 },
+  ])("keeps activity when the terminal receipt does not prove this layer has ended: %j", (patch) => {
+    const layer = mergeAssistantDeltaIntoActiveTurnLayer(undefined, assistantDelta({ ledgerSeq: 10 }))!;
+    const authority: ActiveTurnAuthority = {
+      id: "session-1", currentPhase: "ready", activeTurnId: "",
+      lastTurnTerminalTurnId: "turn-1", terminalReason: "stopped_by_user", ledgerSeq: 11,
+      ...patch,
+    };
+    expect(projectActiveTurnLayerMessage(layer, [], authority)?.status).toBe("running");
+  });
+
   it("shows sending before admission and sent only after acceptance", () => {
     expect(createOptimisticActiveTurnLayer({ sessionId: "session-1", accepted: false })?.processStage).toBe("sending");
     expect(createOptimisticActiveTurnLayer({ sessionId: "session-1", accepted: true })?.processStage).toBe("user_submit");

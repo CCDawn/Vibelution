@@ -12,6 +12,30 @@ from __future__ import annotations
 from typing import Any
 
 
+_RUNTIME_STOP_REASONS = frozenset({"electron_user_restart", "electron_user_close", "runtime_shutdown"})
+
+
+def _stopped_turn_message(reason: str, *, lang: str, queued: bool = False) -> str:
+    s = _service()
+    if reason == "electron_user_restart":
+        return s.text_for(
+            lang,
+            zh="本轮因工作台重启中断，尚未开始执行。" if queued else "本轮因工作台重启中断。",
+            en="This turn was interrupted by a workbench restart before it started." if queued else "This turn was interrupted by a workbench restart.",
+        )
+    if reason in {"electron_user_close", "runtime_shutdown"}:
+        return s.text_for(
+            lang,
+            zh="本轮因工作台关闭中断，尚未开始执行。" if queued else "本轮因工作台关闭中断。",
+            en="This turn was interrupted by workbench shutdown before it started." if queued else "This turn was interrupted by workbench shutdown.",
+        )
+    return s.text_for(
+        lang,
+        zh="本轮已按请求停止，尚未开始执行。" if queued else "本轮已按请求停止。",
+        en="This turn was stopped before it started." if queued else "This turn was stopped as requested.",
+    )
+
+
 def _service():
     from core.web.services import session_service
 
@@ -24,12 +48,16 @@ def request_stop_session_turn(
     expected_turn_id: str = "",
     fast_ack: bool = False,
     cascade: bool = True,
+    stop_reason: str = "",
 ) -> dict:
     """Interrupt the active web chat turn after optional identity validation.
 
     Interactive HTTP callers always provide ``expected_turn_id``. Trusted
     internal shutdown paths may omit it to retain explicit stop-current
     behavior.
+
+    ``stop_reason`` is reserved for trusted internal lifecycle callers. Public
+    stop requests keep the existing operator-stop reason and signal.
 
     Signal the controller before any hydration. With ``fast_ack`` the
     running-turn stop is acknowledged without rebuilding session detail: the
@@ -73,7 +101,7 @@ def request_stop_session_turn(
         )
 
     controller.request_stop(
-        s.text_for(
+        str(stop_reason or "").strip() or s.text_for(
             lang,
             zh="操作者请求停止当前轮。",
             en="The operator requested this turn to stop.",
@@ -81,37 +109,47 @@ def request_stop_session_turn(
     )
     stop_snapshot = controller.snapshot()
     stop_turn_id = str(stop_snapshot.get("turnId") or controller.turn_id)
+    effective_reason = str(stop_snapshot.get("stopReason") or "").strip()
     if cascade:
         # Explicit cancel of this turn closes the whole descendant subtree:
         # stop each active descendant task and seal its completion
         # notifications so a late return can never wake the settled turn.
         # Failures inside the cascade never fail the user-facing stop.
         try:
-            _cascade_stop_descendant_runtime_tasks(conversation_id, turn_id=stop_turn_id)
+            _cascade_stop_descendant_runtime_tasks(
+                conversation_id, turn_id=stop_turn_id,
+                stop_reason=effective_reason if effective_reason in _RUNTIME_STOP_REASONS else "",
+            )
         except Exception:
             pass
     queued_turn_cancelled = s._cancel_queued_session_turn(
         conversation_id,
         stop_turn_id,
     )
-    s._record_chat_next_state_signal(
-        session_id=conversation_id,
-        turn_id=stop_turn_id,
-        source="user",
-        kind="user_stops",
-        polarity="negative",
-        mode="directive",
-        related_event_code="conversation.user_stop_requested",
-        summary=s.text_for(
-            lang,
-            zh="用户请求停止当前对话轮次。",
-            en="The user requested the current chat turn to stop.",
-        ),
-        metadata={
-            "stopReason": stop_snapshot.get("stopReason") or "",
-            "stopRequestedAt": stop_snapshot.get("stopRequestedAt") or "",
-        },
-    )
+    if effective_reason in _RUNTIME_STOP_REASONS:
+        s._record_session_turn_lifecycle_event(
+            conversation_id, "runtime_stop_requested", turn_id=stop_turn_id,
+            outcome="requested", fields={"source": effective_reason, "stopReason": effective_reason},
+        )
+    else:
+        s._record_chat_next_state_signal(
+            session_id=conversation_id,
+            turn_id=stop_turn_id,
+            source="user",
+            kind="user_stops",
+            polarity="negative",
+            mode="directive",
+            related_event_code="conversation.user_stop_requested",
+            summary=s.text_for(
+                lang,
+                zh="用户请求停止当前对话轮次。",
+                en="The user requested the current chat turn to stop.",
+            ),
+            metadata={
+                "stopReason": stop_snapshot.get("stopReason") or "",
+                "stopRequestedAt": stop_snapshot.get("stopRequestedAt") or "",
+            },
+        )
     if queued_turn_cancelled or controller_was_restored:
         s._persist_session_interrupted_snapshot(
             conversation_id,
@@ -144,7 +182,9 @@ def request_stop_session_turn(
     }
 
 
-def _cascade_stop_descendant_runtime_tasks(session_id: str, *, turn_id: str) -> list[dict[str, Any]]:
+def _cascade_stop_descendant_runtime_tasks(
+    session_id: str, *, turn_id: str, stop_reason: str = "",
+) -> list[dict[str, Any]]:
     """Stop and seal the active descendant task subtree of one session.
 
     The registry owns the ledger: targets are collected breadth-first via
@@ -192,7 +232,7 @@ def _cascade_stop_descendant_runtime_tasks(session_id: str, *, turn_id: str) -> 
             )
             entry["sealed"] = True
             if kind == runtime_tasks.KIND_CHILD_SESSION:
-                request_stop_session_turn(task_id, cascade=False)
+                request_stop_session_turn(task_id, cascade=False, stop_reason=stop_reason)
                 entry["stopResult"] = "session_stop_requested"
             else:
                 entry["stopResult"] = "stop_intent_recorded"
@@ -233,10 +273,10 @@ def _persist_session_interrupted_snapshot(
     live_feedback_events = s._extract_chat_feedback_events({"feedback_events": live_feedback_events}, final_status="stopped")
     live_mental = s._normalize_mental_snapshot(getattr(live_state, "mental_snapshot", None) if live_state else None)
     live_stage = str(getattr(live_state, "stage", "") if live_state else "").strip().lower()
-    stop_text = s.text_for(
+    stop_text = _stopped_turn_message(reason, lang=lang) + s.text_for(
         lang,
-        zh="本轮已按请求停止。可发送“继续”恢复这次未完成的任务。",
-        en='This turn was stopped as requested. Send "continue" to resume the unfinished task.',
+        zh="可发送“继续”恢复这次未完成的任务。",
+        en=' Send "continue" to resume the unfinished task.',
     )
     assistant_text = f"{live_content}\n\n{stop_text}".strip() if live_content else stop_text
     queued_before_worker = (
@@ -264,11 +304,7 @@ def _persist_session_interrupted_snapshot(
             return
         if queued_before_worker:
             stopped_at = str(stop_snapshot.get("stopRequestedAt") or "").strip() or s._now_timestamp()
-            notice_message = s.text_for(
-                lang,
-                zh="本轮已按请求停止，尚未开始执行。",
-                en="This turn was stopped before it started.",
-            )
+            notice_message = _stopped_turn_message(reason, lang=lang, queued=True)
             conversation["runtime_notices"] = s._append_session_runtime_notice(
                 conversation.get("runtime_notices") or conversation.get("runtimeNotices") or [],
                 {
