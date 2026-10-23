@@ -15,6 +15,7 @@ const styles = {
   filters: "mt-3 grid grid-cols-2 gap-1.5",
   sectionTitle: "mt-4 px-1 text-vui-micro-11 font-medium text-[var(--fg-secondary)]",
   list: "mt-2 space-y-1.5",
+  focusItem: "rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--vui-primary-face)]",
   item: "grid gap-1.5 rounded-md border border-[var(--vui-border-subtle)] px-3 py-2.5",
   itemHead: "flex min-w-0 items-start justify-between gap-2",
   itemCopy: "grid min-w-0 flex-1 gap-0.5 [&>strong]:truncate [&>strong]:text-vui-2xs [&>strong]:[line-height:var(--tw-leading,var(--vui-line-slot-xs))] [&>strong]:font-medium",

@@ -3,6 +3,9 @@
 import io
 import json
 import urllib.error
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Thread
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -130,6 +133,157 @@ def test_get_passes_query_through_untouched_and_omits_empty(monkeypatch):
     assert api.platform_api_get("/api/agents")["ok"] is True
     assert seen["url"].endswith("/api/agents")
     assert "?" not in seen["url"].rsplit("/api/agents", 1)[-1]
+
+
+def test_get_builds_loopback_hostname_and_port(monkeypatch):
+    _patch_endpoints(monkeypatch)
+    monkeypatch.setenv("VIBELUTION_PORT", "8123")
+
+    def handler(request, **_kwargs):
+        parsed = urlsplit(request.full_url)
+        assert parsed.hostname == "127.0.0.1"
+        assert parsed.port == 8123
+        assert request.get_method() == "GET"
+        return _FakeResponse(b"{}")
+
+    _patch_urlopen(monkeypatch, handler)
+    assert api.platform_api_get("/api/agents")["ok"] is True
+
+
+def test_get_substituted_object_id_roundtrip_on_loopback(monkeypatch):
+    _patch_endpoints(monkeypatch, {
+        "/api/sessions/{session_id}/llm-options": {"get": {"tags": ["sessions"]}},
+    })
+    monkeypatch.setattr("core.web.control.get_control_token", lambda: "test-loopback-token")
+    received = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            received.append((self.path, self.headers.get("X-Vibelution-Control-Token")))
+            body = b'{"state": "ready"}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            pass
+
+    with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
+        monkeypatch.setenv("VIBELUTION_PORT", str(server.server_port))
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            result = api.platform_api_get("/api/sessions/session-123/llm-options", "filter=a/b&flag=")
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)
+    assert result["ok"] is True
+    assert result["data"] == {"state": "ready"}
+    assert received == [("/api/sessions/session-123/llm-options?filter=a/b&flag=", "test-loopback-token")]
+    assert "test-loopback-token" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("path", [
+    "https://example.com/api/sessions/x/llm-options", "//example.com/api/sessions/x/llm-options",
+    "/api/sessions/x/llm-options?limit=1", "/api/sessions/x/llm-options#fragment",
+    "/api/sessions/x/../llm-options", "/api/sessions/../llm-options", "/api/sessions/./llm-options",
+    "/api/sessions/x%2fother/llm-options", "/api/sessions/x%5Cother/llm-options",
+    "/api/sessions/%2e%2e/llm-options", "/api/sessions/%252e%252e/llm-options",
+    "/api/sessions/x\\other/llm-options", "/api/sessions//llm-options",
+    "/api/sessions/{session_id}/llm-options", "/api/sessions/x/llm-options/extra",
+    "/api/sessions/x\n/llm-options", "/api/sessions/x%3Fq=1/llm-options",
+])
+def test_dynamic_path_rejects_routing_bypasses(monkeypatch, path):
+    _patch_endpoints(monkeypatch, {
+        "/api/sessions/{session_id}/llm-options": {"get": {"tags": ["sessions"]}},
+    })
+    _patch_urlopen(monkeypatch, lambda *_a, **_k: pytest.fail("blocked path opened a socket"))
+    assert api.platform_api_get(path)["ok"] is False
+
+
+@pytest.mark.parametrize("suffix", ["llm-options", "budget-parameters"])
+def test_only_audited_dynamic_metadata_routes_are_listed_and_callable(monkeypatch, suffix):
+    template = f"/api/sessions/{{session_id}}/{suffix}"
+    raw = {
+        template: {"get": {"tags": ["sessions"]}},
+        "/api/agents/{agent_id}": {"get": {"tags": ["agents"]}},
+        "/api/sessions/{session_id}/future-detail": {"get": {"tags": ["sessions"]}},
+    }
+    _patch_endpoints(monkeypatch, raw)
+    assert set(api._filter_get_endpoints(raw)) == {template}
+    assert api.platform_api_index(tag="sessions")["endpoints"][0]["path"] == template
+    _patch_urlopen(monkeypatch, lambda *_a, **_k: _FakeResponse(b"{}"))
+    assert api.platform_api_get(f"/api/sessions/session-123/{suffix}")["ok"] is True
+    _patch_urlopen(monkeypatch, lambda *_a, **_k: pytest.fail("private path opened a socket"))
+    assert api.platform_api_get("/api/agents/agent-123")["ok"] is False
+    assert api.platform_api_get("/api/sessions/session-123/future-detail")["ok"] is False
+
+
+def test_session_private_details_are_hidden(monkeypatch):
+    raw = {
+        "/api/sessions/query": {"get": {"tags": ["sessions"]}},
+        "/api/sessions/{session_id}": {"get": {"tags": ["sessions"]}},
+        "/api/sessions/{session_id}/queued-turns": {"get": {"tags": ["sessions"]}},
+        "/api/sessions/{session_id}/artifacts/{artifact_id}": {"get": {"tags": ["sessions"]}},
+        "/api/sessions/{session_id}/messages": {"get": {"tags": ["sessions"]}},
+        "/api/sessions/{session_id}/events": {"get": {"tags": ["sessions"]}},
+        "/api/chat-rooms/{room_id}": {"get": {"tags": ["chat-rooms"]}},
+        "/api/chat-rooms": {"get": {"tags": ["chat-rooms"]}},
+    }
+    _patch_endpoints(monkeypatch, raw)
+    assert api._filter_get_endpoints(raw) == {}
+    assert api.platform_api_index(tag="sessions")["endpointCount"] == 0
+    _patch_urlopen(monkeypatch, lambda *_a, **_k: pytest.fail("private path opened a socket"))
+    for path in ("/api/sessions/other", "/api/sessions/{session_id}",
+                 "/api/sessions/other/queued-turns", "/api/sessions/other/artifacts/file",
+                 "/api/sessions/other/messages", "/api/sessions/other/events",
+                 "/api/chat-rooms/room-123", "/api/chat-rooms"):
+        assert api.platform_api_get(path, query="transcriptScope=none")["ok"] is False
+
+
+@pytest.mark.parametrize("template,path", [
+    ("/api/sessions", "/api/sessions"),
+    ("/api/sessions/query", "/api/sessions/query"),
+    ("/api/sessions/bootstrap", "/api/sessions/bootstrap"),
+    ("/api/sessions/{session_id}/child-sessions", "/api/sessions/other/child-sessions"),
+])
+def test_raw_session_catalogs_with_body_previews_are_blocked(monkeypatch, template, path):
+    _patch_endpoints(monkeypatch, {template: {"get": {"tags": ["sessions"]}}})
+    requests = []
+
+    def handler(request, **_kwargs):
+        requests.append(request.full_url)
+        return _FakeResponse(b'{"items": [{"taskSummary": "private-preview", "searchSnippets": ["private-body"]}]}')
+
+    _patch_urlopen(monkeypatch, handler)
+    result = api.platform_api_get(path, query="q=private-body&limit=1")
+    assert result["ok"] is False
+    assert "personal_assistant_query_tool" in result["message"]
+    assert "private-preview" not in json.dumps(result)
+    assert "private-body" not in json.dumps(result)
+    assert requests == []
+    assert api.platform_api_index(tag="sessions")["endpoints"] == []
+
+
+def test_session_index_contains_only_active_id_and_audited_config_routes(monkeypatch):
+    raw = {
+        path: {"get": {"tags": ["sessions"]}}
+        for path in (
+            "/api/sessions", "/api/sessions/query", "/api/sessions/bootstrap",
+            "/api/sessions/active", "/api/sessions/{session_id}/child-sessions",
+            "/api/sessions/{session_id}/llm-options",
+            "/api/sessions/{session_id}/budget-parameters",
+        )
+    }
+    _patch_endpoints(monkeypatch, raw)
+    assert {entry["path"] for entry in api.platform_api_index(tag="sessions")["endpoints"]} == {
+        "/api/sessions/active", "/api/sessions/{session_id}/llm-options",
+        "/api/sessions/{session_id}/budget-parameters",
+    }
+    _patch_urlopen(monkeypatch, lambda *_a, **_k: _FakeResponse(b'{"activeSessionId": "current"}'))
+    assert api.platform_api_get("/api/sessions/active")["data"] == {"activeSessionId": "current"}
 
 
 def test_get_maps_success_truncation_and_untrusted_content(monkeypatch):
