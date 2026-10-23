@@ -38,6 +38,7 @@ def _dispatch(
         "targetAgentId": target_agent_id,
         "targetAgentName": "研究员",
         "targetSessionId": "session-1",
+        "sourceSessionId": "session-pa-original",
         "summary": summary,
         "deliveryStatus": "pending",
         "sentAt": _iso(now - sent_age_seconds),
@@ -109,6 +110,7 @@ class _Harness:
             "messageId": row["messageId"], "sourceAgentId": pa_agent_id,
             "targetAgentId": row["targetAgentId"], "targetSessionId": row["targetSessionId"],
             "threadId": row["threadId"], "status": row["deliveryStatus"],
+            "metadata": {"sourceSessionId": row["sourceSessionId"]},
         } for row in dispatches or []]
         monkeypatch.setattr(dispatch_service, "_agent_rows", lambda: self.target_agents)
         monkeypatch.setattr(dispatch_service, "_inbox_path", lambda _row: None)
@@ -268,6 +270,7 @@ def test_revoked_dispatch_never_chases_target(monkeypatch):
     "missing_session", "foreign_session", "archived_session", "missing_agent", "archived_agent",
     "replaced_direct", "revoked_original", "missing_original", "duplicate_original", "foreign_source",
     "foreign_target", "changed_session", "changed_thread", "missing_session_id",
+    "missing_source_session", "missing_original_source_session", "foreign_source_session",
 ])
 def test_target_authority_failures_do_not_send_or_consume_round(monkeypatch, invalid):
     dispatch = _dispatch("m-unsafe")
@@ -300,6 +303,12 @@ def test_target_authority_failures_do_not_send_or_consume_round(monkeypatch, inv
         harness.originals[0]["threadId"] = "other"
     elif invalid == "missing_session_id":
         dispatch["targetSessionId"] = ""
+    elif invalid == "missing_source_session":
+        dispatch["sourceSessionId"] = ""
+    elif invalid == "missing_original_source_session":
+        harness.originals[0]["metadata"].pop("sourceSessionId")
+    elif invalid == "foreign_source_session":
+        harness.originals[0]["metadata"]["sourceSessionId"] = "other-source-session"
     result = patrol.patrol_once(now=NOW)
     assert result["followupsSent"] == []
     assert harness.followup_calls == []
@@ -314,18 +323,43 @@ def test_followup_metadata_survives_native_kernel_inbox_projection(monkeypatch):
     patrol.patrol_once(now=NOW)
     call = harness.followup_calls[0]
     assert call["metadata"]["targetSessionId"] == "session-1"  # original != current direct
+    assert call["sender"]["sessionId"] == "session-pa-original"
+    assert call["metadata"]["sourceSessionId"] == "session-pa-original"
     assert "paFollowupOfMessageId" not in call["metadata"]
     stored = kernel._kernel_inbox_metadata(
         {"eventId": "e-followup", "metadata": call["metadata"]}, {"taskId": "t-followup"},
     )
     stored = json.loads(json.dumps(stored))  # native JSON persistence round-trip
     assert stored["targetSessionId"] == "session-1"
+    assert stored["sourceSessionId"] == "session-pa-original"
     custom = dispatches._metadata({"metadata": stored})
     assert custom["paFollowupOfMessageId"] == "m-origin"
     assert custom["paFollowupRound"] == 1
     assert "agent_message_tool" in call["content"]
     assert '"dispatchMessageId": "m-origin"' in call["content"]
     assert "completed 必须提供 evidenceRefs" in call["content"]
+
+
+def test_followup_wake_prompt_exposes_exact_original_reply_session(monkeypatch):
+    from core.web.services.session.agent_sessions import _format_agent_inbox_wake_prompt
+
+    harness = _Harness(monkeypatch, dispatches=[_dispatch("m-addressable")])
+    patrol.patrol_once(now=NOW)
+    call = harness.followup_calls[0]
+    # Native wake formatting serializes message body, not source-session metadata.
+    # The receiver must get a concrete tool target from that actual prompt.
+    prompt = _format_agent_inbox_wake_prompt({
+        "messageId": "m-followup", "kind": patrol.PATROL_SOURCE,
+        "sourceAgentId": "agent-pa", "sourceAgentName": "个人助理",
+        "content": call["content"], "summary": call["metadata"]["messageSummary"],
+        "metadata": {"sourceSessionId": "metadata-is-not-in-the-prompt"},
+    })
+    assert "target_session=session-pa-original" in prompt
+    assert "metadata-is-not-in-the-prompt" not in prompt
+    assert "agent_message_tool" in prompt
+    assert '"replyToMessageId": "m-addressable"' in prompt
+    assert '"dispatchMessageId": "m-addressable"' in prompt
+    assert "completed 必须提供 evidenceRefs" in prompt
 
 
 def test_nested_reply_to_is_a_receipt(monkeypatch):
