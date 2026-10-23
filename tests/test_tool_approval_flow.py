@@ -1494,6 +1494,66 @@ def test_approval_timeout_message_declares_terminal_rejection(monkeypatch):
     assert "结束回合" in outcome.message
 
 
+def _run_expiry_race(monkeypatch, *, cancel_reason: str, tag: str):
+    """E3 过期边界竞态：决议恰在过期判定的同一轮询窗口内落账。
+
+    用可控单调钟构造确定性序列：cancel_checker 在第一次被轮询时先把 pending
+    请求 resolve 成 accept（模拟用户恰好点击批准），随后把钟拨过 expires_at
+    再返回。修复前过期分支不看 status 是否仍 pending，无条件返回
+    approval_timeout，把已落账的批准吞成终态拒绝。
+    """
+
+    session_id = f"session-race-{tag}"
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(tool_approvals.time, "monotonic", lambda: clock["now"])
+
+    def checker():
+        pending = tool_approvals.list_tool_approval_requests(session_id, status="pending")
+        if pending:
+            tool_approvals.resolve_tool_approval_request(
+                session_id,
+                pending[0]["requestId"],
+                decision="accept",
+            )
+            clock["now"] = 1000.0 + 10.0
+        return cancel_reason
+
+    return tool_approvals.authorize_or_wait(
+        session_id=session_id,
+        turn_id=f"turn-race-{tag}",
+        agent_id="agent-race",
+        call_id=f"call-expiry-race-{tag}",
+        tool_name="web_fetch_tool",
+        tool_args={"url": "https://docs.example.com/race"},
+        approval="on_request",
+        risk="network",
+        decision_fingerprint="decision-race",
+        config_revision=3,
+        config_hash="config-hash-a",
+        permission_preset="request_approval",
+        timeout_seconds=0.1,
+        cancel_checker=checker,
+    )
+
+
+def test_expiry_race_returns_concurrent_accept_not_timeout(monkeypatch):
+    """过期判定窗口内到达的 accept 必须按批准返回，不得吞成 approval_timeout。"""
+
+    outcome = _run_expiry_race(monkeypatch, cancel_reason="", tag="expiry")
+
+    assert outcome.allowed is True
+    assert outcome.code == "approved"
+
+
+def test_cancel_race_returns_concurrent_accept_not_cancelled(monkeypatch):
+    """取消判定窗口内到达的 accept 同型：按批准返回，不得吞成 approval_cancelled。"""
+
+    outcome = _run_expiry_race(monkeypatch, cancel_reason="user requested stop", tag="cancel")
+
+    assert outcome.allowed is True
+    assert outcome.code == "approved"
+
+
 def test_non_approval_denial_in_approval_flow_carries_rule_id_and_reason(monkeypatch):
     """审批协商之外的授权拒绝返回可审计结构：gateId=code，决策规则带 ruleId+reasonCode。"""
 

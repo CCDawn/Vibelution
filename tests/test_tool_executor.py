@@ -72,6 +72,21 @@ class TestToolExecutorInit:
 
         assert executor._resolve_timeout("source_collection_context_tool", {}) == 90
 
+    def test_model_requested_timeout_is_capped_at_ceiling(self):
+        """模型请求的 timeout 是无信任输入：无上限会把回合钉死在一个工具调用上（E7）。"""
+        executor = ToolExecutor()
+
+        assert executor._resolve_timeout("web_fetch_tool", {"timeout": 10**9}) == 900
+        assert executor._resolve_timeout("web_fetch_tool", {"timeout": 10**12}) == 900
+
+    def test_model_requested_timeout_below_ceiling_passes_through(self):
+        """天花板只挡天文数字；合法的显式拉长（长时测试/构建工具）照常生效。"""
+        executor = ToolExecutor()
+
+        assert executor._resolve_timeout("web_fetch_tool", {"timeout": 300}) == 300
+        assert executor._resolve_timeout("web_fetch_tool", {"timeout": 900}) == 900
+        assert executor._resolve_timeout("web_fetch_tool", {}) == 30
+
     def test_get_tool_executor_singleton(self):
         """测试单例模式"""
         executor1 = get_tool_executor()
