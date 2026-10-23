@@ -589,8 +589,12 @@ def test_chat_workbench_bootstrap_reuses_agent_projection_for_session_query(monk
 
     class _Repository:
         @staticmethod
+        def get_active_session_id():
+            return "session-a"
+
+        @staticmethod
         def get_chat_state_directory_overlay():
-            return "session-a", {}
+            raise AssertionError("Bootstrap must not reread all experiment bindings for the active ID")
 
     class _Store:
         repository = _Repository()

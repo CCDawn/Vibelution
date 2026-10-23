@@ -429,6 +429,7 @@ from core.web.services.session.conversation_index import (
     _normalize_forked_from_metadata,
     _make_empty_conversation,
     _record_agent_directory_conversation_index_event,
+    _record_agent_directory_conversation_index_events,
     _record_agent_direct_session_collision_repaired_event,
     _record_agent_directory_conversation_materialized_event,
     _record_session_agent_legacy_model_fields_repaired_event,

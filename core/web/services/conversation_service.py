@@ -175,7 +175,7 @@ def build_chat_workbench_bootstrap(
     store = directory_runtime.get_open_directory_store()
     active_session_id = ""
     if store is not None:
-        active_session_id, _bindings = store.repository.get_chat_state_directory_overlay()
+        active_session_id = store.repository.get_active_session_id()
     return {
         "activeSessionId": str(active_session_id or "").strip(),
         "sessionPage": session_page,
