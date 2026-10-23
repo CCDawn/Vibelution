@@ -468,20 +468,25 @@ def _persist_session_turn_result(
         conversation["last_prompt_assembly"] = prompt_assembly
     source_collection_stage_task_metadata = s._source_collection_stage_task_turn_metadata(messages, turn_id)
     result_stop_requested = bool(result.get("stop_requested")) if isinstance(result, dict) else False
-    stop_requested = result_stop_requested and runtime_stop_requested
-    stop_reason = (
-        str(
-            (s._get_session_stop_reason(session_id) if runtime_stop_requested else "")
-            or result.get("stop_reason")
-            or result.get("stopReason")
-            or ""
-        ).strip().lower()
+    result_stop_reason = (
+        str(result.get("stop_reason") or result.get("stopReason") or "").strip().lower()
         if isinstance(result, dict)
         else ""
     )
     challenge_deadline_cancelled = (
         result_stop_requested
-        and stop_reason == _CHALLENGE_DEADLINE_PROBLEM_CODE
+        and result_stop_reason == _CHALLENGE_DEADLINE_PROBLEM_CODE
+    )
+    # A completed business cancellation keeps its outcome when a later
+    # operator stop/restart is observed while the result is being persisted.
+    stop_requested = result_stop_requested and runtime_stop_requested and not challenge_deadline_cancelled
+    stop_reason = (
+        result_stop_reason
+        if challenge_deadline_cancelled
+        else str(
+            (s._get_session_stop_reason(session_id) if runtime_stop_requested else "")
+            or result_stop_reason
+        ).strip().lower()
     )
     # Extracted once for every terminal shape: failed_provider turns must land
     # the usage their (partial) attempt produced just like completed turns.
