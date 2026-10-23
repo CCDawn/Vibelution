@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -37,6 +38,7 @@ def _dispatch(
         "targetAgentId": target_agent_id,
         "targetAgentName": "研究员",
         "targetSessionId": "session-1",
+        "sourceSessionId": "session-pa-original",
         "summary": summary,
         "deliveryStatus": "pending",
         "sentAt": _iso(now - sent_age_seconds),
@@ -97,6 +99,24 @@ class _Harness:
         self.pending_inbox = pending_inbox or []
         self.followup_calls: list[dict] = []
         self.wake_calls: list[dict] = []
+        from core.web.services import personal_assistant_dispatches_service as dispatch_service
+        from core.web.services import session_service
+
+        self.target_agents = [{
+            "agentId": target_id, "status": "active", "directSessionId": "different-direct",
+        } for target_id in {row["targetAgentId"] for row in dispatches or []}]
+        self.session = {"id": "session-1", "agentId": "agent-researcher"}
+        self.originals = [{
+            "messageId": row["messageId"], "sourceAgentId": pa_agent_id,
+            "targetAgentId": row["targetAgentId"], "targetSessionId": row["targetSessionId"],
+            "threadId": row["threadId"], "status": row["deliveryStatus"],
+            "metadata": {"sourceSessionId": row["sourceSessionId"]},
+        } for row in dispatches or []]
+        monkeypatch.setattr(dispatch_service, "_agent_rows", lambda: self.target_agents)
+        monkeypatch.setattr(dispatch_service, "_inbox_path", lambda _row: None)
+        monkeypatch.setattr(dispatch_service, "_scan_inbox_reverse", lambda _path, *, predicate, cap, strict:
+                            [row for row in self.originals if predicate(row)][:cap])
+        monkeypatch.setattr(session_service, "load_session_chat_state", lambda _root, _id: self.session)
         monkeypatch.setattr(patrol, "_load_dispatches", lambda: dict(self.listing))
         monkeypatch.setattr(
             patrol, "_read_pa_pending_messages", lambda _agent_id: list(self.pending_inbox)
@@ -156,7 +176,7 @@ def test_aged_threshold_boundary_is_inclusive(monkeypatch):
     assert len(harness.followup_calls) == 1
 
 
-def test_dispatch_with_receipt_is_never_chased(monkeypatch):
+def test_recent_receipt_defers_chase_without_completing_task(monkeypatch):
     receipt = {
         "messageId": "r-1",
         "sourceAgentId": "agent-researcher",
@@ -171,6 +191,10 @@ def test_dispatch_with_receipt_is_never_chased(monkeypatch):
     result = patrol.patrol_once(now=NOW)
     assert result["agedMessageIds"] == []
     assert harness.followup_calls == []
+    result = patrol.patrol_once(now=NOW + patrol.FOLLOWUP_INITIAL_AGE_SECONDS - 60)
+    assert result["agedMessageIds"] == ["m-done"]
+    assert len(harness.followup_calls) == 1
+    assert result["digest"]["aggregate"]["inFlightDispatches"] == 1
 
 
 def test_dispatch_beyond_chase_window_is_not_chased(monkeypatch):
@@ -192,6 +216,184 @@ def test_dispatch_without_parsable_sent_at_is_never_chased(monkeypatch):
     result = patrol.patrol_once(now=NOW)
     assert result["agedMessageIds"] == []
     assert harness.followup_calls == []
+
+
+@pytest.mark.parametrize("task_status", ["completed", "failed", "cancelled", "blocked"])
+def test_terminal_or_blocked_task_is_not_chased_but_attention_remains(monkeypatch, task_status):
+    dispatch = _dispatch("m-state")
+    dispatch["taskStatus"] = task_status
+    harness = _Harness(monkeypatch, dispatches=[dispatch])
+    result = patrol.patrol_once(now=NOW)
+    assert harness.followup_calls == []
+    aggregate = result["digest"]["aggregate"]
+    assert aggregate["inFlightDispatches"] == int(task_status == "blocked")
+    assert aggregate["blockedDispatches"] == int(task_status == "blocked")
+    assert aggregate["failedDispatches"] == int(task_status == "failed")
+    if task_status in {"blocked", "failed"}:
+        assert result["digest"]["row"] is not None
+
+
+@pytest.mark.parametrize("task_status", ["running", "awaiting_confirmation", "awaiting_result", ""])
+def test_old_progress_receipt_keeps_actionable_task_followable(monkeypatch, task_status):
+    dispatch = _dispatch("m-progress", receipts=[{"receivedAt": _iso(NOW - 1800)}])
+    dispatch["taskStatus"] = task_status
+    harness = _Harness(monkeypatch, dispatches=[dispatch])
+    result = patrol.patrol_once(now=NOW)
+    assert len(harness.followup_calls) == 1
+    assert result["digest"]["aggregate"]["inFlightDispatches"] == 1
+
+
+def test_latest_receipt_wins_and_does_not_extend_original_send_window(monkeypatch):
+    dispatch = _dispatch("m-progress", receipts=[
+        {"receivedAt": _iso(NOW - 1801)}, {"receivedAt": "invalid"},
+        {"receivedAt": _iso(NOW - 1)},
+    ])
+    harness = _Harness(monkeypatch, dispatches=[dispatch])
+    assert patrol.patrol_once(now=NOW)["agedMessageIds"] == []
+    dispatch["sentAt"] = _iso(NOW - patrol.FOLLOWUP_MAX_AGE_SECONDS - 1)
+    assert patrol.patrol_once(now=NOW + 1800)["agedMessageIds"] == []
+    assert harness.followup_calls == []
+
+
+def test_revoked_dispatch_never_chases_target(monkeypatch):
+    dispatch = _dispatch("m-revoked")
+    dispatch["deliveryStatus"] = "revoked"
+    harness = _Harness(monkeypatch, dispatches=[dispatch])
+    result = patrol.patrol_once(now=NOW)
+    assert result["agedMessageIds"] == []
+    assert harness.followup_calls == []
+    assert harness.wake_calls == []
+    assert result["digest"]["aggregate"]["inFlightDispatches"] == 0
+
+
+@pytest.mark.parametrize("invalid", [
+    "missing_session", "foreign_session", "archived_session", "missing_agent", "archived_agent",
+    "replaced_direct", "revoked_original", "missing_original", "duplicate_original", "foreign_source",
+    "foreign_target", "changed_session", "changed_thread", "missing_session_id",
+    "missing_source_session", "missing_original_source_session", "foreign_source_session",
+])
+def test_target_authority_failures_do_not_send_or_consume_round(monkeypatch, invalid):
+    dispatch = _dispatch("m-unsafe")
+    harness = _Harness(monkeypatch, dispatches=[dispatch])
+    if invalid == "missing_session":
+        harness.session = None
+    elif invalid == "foreign_session":
+        harness.session["agentId"] = "other"
+    elif invalid == "archived_session":
+        harness.session["archive_state"] = {"status": "archived"}
+    elif invalid == "missing_agent":
+        harness.target_agents = []
+    elif invalid == "archived_agent":
+        harness.target_agents[0]["status"] = "archived"
+    elif invalid == "replaced_direct":
+        harness.target_agents[0]["metadata"] = {"previousDirectSessionId": "session-1"}
+    elif invalid == "revoked_original":
+        harness.originals[0]["status"] = "revoked"
+    elif invalid == "missing_original":
+        harness.originals = []
+    elif invalid == "duplicate_original":
+        harness.originals *= 2
+    elif invalid == "foreign_source":
+        harness.originals[0]["sourceAgentId"] = "impostor"
+    elif invalid == "foreign_target":
+        harness.originals[0]["targetAgentId"] = "other"
+    elif invalid == "changed_session":
+        harness.originals[0]["targetSessionId"] = "other"
+    elif invalid == "changed_thread":
+        harness.originals[0]["threadId"] = "other"
+    elif invalid == "missing_session_id":
+        dispatch["targetSessionId"] = ""
+    elif invalid == "missing_source_session":
+        dispatch["sourceSessionId"] = ""
+    elif invalid == "missing_original_source_session":
+        harness.originals[0]["metadata"].pop("sourceSessionId")
+    elif invalid == "foreign_source_session":
+        harness.originals[0]["metadata"]["sourceSessionId"] = "other-source-session"
+    result = patrol.patrol_once(now=NOW)
+    assert result["followupsSent"] == []
+    assert harness.followup_calls == []
+    assert patrol._patrol_state.followups == {}
+
+
+def test_followup_metadata_survives_native_kernel_inbox_projection(monkeypatch):
+    from core.agent_kernel import service as kernel
+    from core.web.services import personal_assistant_dispatches_service as dispatches
+
+    harness = _Harness(monkeypatch, dispatches=[_dispatch("m-origin")])
+    patrol.patrol_once(now=NOW)
+    call = harness.followup_calls[0]
+    assert call["metadata"]["targetSessionId"] == "session-1"  # original != current direct
+    assert call["sender"]["sessionId"] == "session-pa-original"
+    assert call["metadata"]["sourceSessionId"] == "session-pa-original"
+    assert "paFollowupOfMessageId" not in call["metadata"]
+    stored = kernel._kernel_inbox_metadata(
+        {"eventId": "e-followup", "metadata": call["metadata"]}, {"taskId": "t-followup"},
+    )
+    stored = json.loads(json.dumps(stored))  # native JSON persistence round-trip
+    assert stored["targetSessionId"] == "session-1"
+    assert stored["sourceSessionId"] == "session-pa-original"
+    custom = dispatches._metadata({"metadata": stored})
+    assert custom["paFollowupOfMessageId"] == "m-origin"
+    assert custom["paFollowupRound"] == 1
+    assert "agent_message_tool" in call["content"]
+    assert '"dispatchMessageId": "m-origin"' in call["content"]
+    assert "completed 必须提供 evidenceRefs" in call["content"]
+
+
+def test_followup_wake_prompt_exposes_exact_original_reply_session(monkeypatch):
+    from core.web.services.session.agent_sessions import _format_agent_inbox_wake_prompt
+
+    harness = _Harness(monkeypatch, dispatches=[_dispatch("m-addressable")])
+    patrol.patrol_once(now=NOW)
+    call = harness.followup_calls[0]
+    # Native wake formatting serializes message body, not source-session metadata.
+    # The receiver must get a concrete tool target from that actual prompt.
+    prompt = _format_agent_inbox_wake_prompt({
+        "messageId": "m-followup", "kind": patrol.PATROL_SOURCE,
+        "sourceAgentId": "agent-pa", "sourceAgentName": "个人助理",
+        "content": call["content"], "summary": call["metadata"]["messageSummary"],
+        "metadata": {"sourceSessionId": "metadata-is-not-in-the-prompt"},
+    })
+    assert "target_session=session-pa-original" in prompt
+    assert "metadata-is-not-in-the-prompt" not in prompt
+    assert "agent_message_tool" in prompt
+    assert '"replyToMessageId": "m-addressable"' in prompt
+    assert '"dispatchMessageId": "m-addressable"' in prompt
+    assert "completed 必须提供 evidenceRefs" in prompt
+
+
+def test_nested_reply_to_is_a_receipt(monkeypatch):
+    row = _receipt_row(kind="agent_message")
+    row["metadata"] = {"agentToolMetadataJson": json.dumps({"replyToMessageId": "m-1"})}
+    harness = _Harness(monkeypatch, dispatches=[_dispatch("m-1")], pending_inbox=[row])
+    assert patrol.patrol_once(now=NOW)["wake"]["attempted"] is True
+    assert len(harness.wake_calls) == 1
+
+
+@pytest.mark.parametrize("revoked_after_listing", [False, True])
+def test_followup_rechecks_native_inbox_without_session_repair(tmp_path, monkeypatch, revoked_after_listing):
+    from core.web.services import personal_assistant_dispatches_service as dispatches
+    from core.web.services import session_service
+
+    scan = dispatches._scan_inbox_reverse
+    harness = _Harness(monkeypatch, dispatches=[_dispatch("m-disk")])
+    original = harness.originals[0]
+    if revoked_after_listing:
+        original["status"] = "revoked"
+    inbox = tmp_path / "agent_inbox_messages.jsonl"
+    inbox.write_text(json.dumps(original) + "\n", encoding="utf-8")
+    before = inbox.read_bytes()
+    monkeypatch.setattr(dispatches, "_scan_inbox_reverse", scan)
+    monkeypatch.setattr(dispatches, "_inbox_path", lambda _row: inbox)
+
+    def _no_repair(*_args, **_kwargs):
+        pytest.fail("follow-up must use a side-effect-free persisted session read")
+
+    monkeypatch.setattr(session_service, "get_session_detail", _no_repair)
+    result = patrol.patrol_once(now=NOW)
+    assert len(result["followupsSent"]) == int(not revoked_after_listing)
+    assert len(harness.followup_calls) == int(not revoked_after_listing)
+    assert inbox.read_bytes() == before
 
 
 # ---------------------------------------------------------------------------

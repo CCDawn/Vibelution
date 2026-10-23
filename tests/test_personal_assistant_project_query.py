@@ -8,7 +8,7 @@ import pytest
 
 from core.web.services import personal_assistant_service as service, session_service
 from tools import personal_assistant_tools as tools
-from tests.test_personal_assistant_tools import assistant_runtime
+from tests.test_personal_assistant_tools import assistant_runtime, planner_runtime
 from tests.test_personal_assistant_service import personal_env, finance_env
 
 
@@ -26,6 +26,60 @@ def test_index_describes_all_queries_without_reading_their_stores(assistant_runt
     assert {"list", "search", "read"} <= set(card["operations"])
     assert card["authority"] and card["limits"] and card["examples"]
     assert card["operationParameters"]["read"] == ["path", "line", "max_lines"]
+
+
+def test_planner_index_and_dispatch_share_the_public_resource_filter(planner_runtime, monkeypatch):
+    from core.web.services.personal_assistant_project import workspace
+
+    def forbidden(*_, **__):
+        pytest.fail("planner must not read checkout source")
+
+    monkeypatch.setattr(workspace, "discover_sources", forbidden)
+    monkeypatch.setattr(workspace, "read_source", forbidden)
+    result = query()
+    assert result["ok"]
+    names = {row["resource"] for row in result["data"]["resources"]}
+    assert names == {"index", "project", "overview", "agents", "sessions", "attention", "inbox", "tasks", "runtime", "capabilities", "workflows"}
+    assert "code.search/read" not in result["data"]["guidance"]
+    for name in names:
+        assert query("index", "describe", object_id=name)["ok"]
+    assert not query("index", "describe", object_id="code")["ok"]
+    assert query("index", query="code")["data"]["resources"] == []
+    for operation in ("list", "search", "read"):
+        assert query("code", operation)["status"] == "blocked"
+
+
+def test_planner_reads_public_state_and_own_inbox_without_consuming_messages(
+    planner_runtime, personal_env, monkeypatch
+):
+    monkeypatch.setattr(service, "get_platform_overview", lambda **_: {
+        "agents": [{"id": personal_env["other"], "displayName": "执行者", "status": "active", "privateMemory": "private"}],
+        "sessions": [{"id": "work", "agentId": personal_env["other"], "status": "running", "turnId": "turn",
+                      "transcript": "foreign transcript", "prompt": "foreign prompt"}],
+        "pagination": {"revision": "v1", "nextOffset": None},
+    })
+    assert query("agents")["data"]["items"] == [{"id": personal_env["other"], "displayName": "执行者", "status": "active"}]
+    assert query("sessions", "get", object_id="work")["data"] == {
+        "id": "work", "agentId": personal_env["other"], "status": "running", "turnId": "turn", "revision": "v1",
+    }
+    directory = tools.directory
+    message = directory.write_agent_inbox_message(planner_runtime["agentId"], content="执行回执", source_agent_id=personal_env["other"],
+        source_session_id="worker-session", thread_id="coordination", metadata={"replyToMessageId": "dispatch-message", "privateField": "hidden"})
+    directory.write_agent_inbox_message(personal_env["other"], content="foreign private message")
+    before = directory.list_agent_inbox_messages_for_agent(planner_runtime["agentId"], status="", limit=100)
+    result = query("inbox")
+    assert result["ok"]
+    rows = result["data"]["items"]
+    receipt = next(row for row in rows if row["messageId"] == message["messageId"])
+    assert receipt["sourceAgentId"] == personal_env["other"]
+    assert receipt["sourceSessionId"] == "worker-session"
+    assert receipt["targetAgentId"] == planner_runtime["agentId"]
+    assert receipt["targetSessionId"] == planner_runtime["directSessionId"]
+    assert receipt["threadId"] == "coordination"
+    assert receipt["metadata"] == {"replyToMessageId": "dispatch-message"}
+    assert "foreign private message" not in json.dumps(result)
+    assert not query("inbox", object_id=personal_env["other"])["ok"]
+    assert directory.list_agent_inbox_messages_for_agent(planner_runtime["agentId"], status="", limit=100) == before
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows source adapter")
@@ -76,7 +130,8 @@ def test_capabilities_do_not_claim_configured_tools_are_executable(assistant_run
     assert result["executableTools"] is None
 
 
-def test_registered_wrapper_is_executable_under_native_default_policy(assistant_runtime):
+@pytest.mark.parametrize("identity", ["assistant_runtime", "planner_runtime"])
+def test_registered_wrapper_is_executable_under_native_default_policy(identity, request):
     from langchain_core.tools import tool
     from tests.test_financial_report_registry import definition
     from core.authorization.tool_policy_evaluator import evaluate_tool_policy, normalize_legacy_tool_policy
@@ -89,10 +144,12 @@ def test_registered_wrapper_is_executable_under_native_default_policy(assistant_
     descriptor = tool_catalog.build_tool_descriptor(wrapper.name, args_schema=schema)
     assert descriptor.risk == "read" and descriptor.approval == "never"
     assert wrapper.name in tool_catalog.explicit_allow_tool_names()
-    agent = tools.directory.get_agent(assistant_runtime["agentId"])
-    descriptors = [tool_catalog.build_tool_descriptor(name, args_schema=schema if name == wrapper.name else {}) for name in service.TOOLS]
+    runtime = request.getfixturevalue(identity)
+    agent = tools.directory.get_agent(runtime["agentId"])
+    names = agent["toolPolicy"]["allowedTools"]
+    descriptors = [tool_catalog.build_tool_descriptor(name, args_schema=schema if name == wrapper.name else {}) for name in names]
     decision = evaluate_tool_policy(agent_id=agent["agentId"],
-        policy=normalize_legacy_tool_policy(agent["toolPolicy"], registered_tool_names=service.TOOLS, policy_id=agent["toolPolicyId"]),
+        policy=normalize_legacy_tool_policy(agent["toolPolicy"], registered_tool_names=names, policy_id=agent["toolPolicyId"]),
         grant=TurnToolGrant(turn_id="query-turn", source="session", allowed_capabilities=descriptor.capabilities,
             denied_tools=(), approval_mode="on_request"), descriptors=descriptors, registry_version=1, registry_fingerprint="test")
     assert wrapper.name in decision.executable_tools

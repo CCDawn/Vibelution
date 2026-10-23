@@ -7,6 +7,7 @@ import {
   personalAssistantDispatchesQueryKey,
   type PersonalAssistantDispatchReceipt,
   type PersonalAssistantDispatchStatus,
+  type PersonalAssistantTaskStatus,
 } from "../../api/personalAssistantDispatches";
 import { VButton, VStateSurface } from "../../components/vui";
 import { useShellI18n } from "../../i18n/useShellI18n";
@@ -19,7 +20,8 @@ const COPY = {
     subtitle: "查看助理派给其他智能体的任务和收到的回执。",
     sentSection: "派出",
     unmatchedSection: "收到的回执（未配对）",
-    statusLabels: { pending: "待对方处理", consumed: "对方已处理", revoked: "已撤销" } as Record<PersonalAssistantDispatchStatus, string>,
+    statusLabels: { pending: "待对方接收", consumed: "对方已接收", revoked: "已撤销" } as Record<PersonalAssistantDispatchStatus, string>,
+    taskStatusLabels: { awaiting_result: "等待结果", running: "进行中", blocked: "遇到阻塞", awaiting_confirmation: "收到回复，结果待确认", completed: "对方报告完成", failed: "对方报告失败", cancelled: "已取消" } as Record<PersonalAssistantTaskStatus, string>,
     receiptStatusLabels: { pending: "未读", consumed: "已读", revoked: "已撤销" } as Record<PersonalAssistantDispatchStatus, string>,
     receiptCount: (n: number) => `${n} 条回执`,
     showReceipts: "回执",
@@ -35,7 +37,8 @@ const COPY = {
     subtitle: "Track the tasks the assistant delegated to other agents and their receipts.",
     sentSection: "Sent",
     unmatchedSection: "Receipts (unmatched)",
-    statusLabels: { pending: "Awaiting agent", consumed: "Handled", revoked: "Revoked" } as Record<PersonalAssistantDispatchStatus, string>,
+    statusLabels: { pending: "Awaiting delivery", consumed: "Received by agent", revoked: "Revoked" } as Record<PersonalAssistantDispatchStatus, string>,
+    taskStatusLabels: { awaiting_result: "Awaiting result", running: "In progress", blocked: "Blocked", awaiting_confirmation: "Reply received; result unconfirmed", completed: "Reported complete", failed: "Reported failed", cancelled: "Cancelled" } as Record<PersonalAssistantTaskStatus, string>,
     receiptStatusLabels: { pending: "Unread", consumed: "Read", revoked: "Revoked" } as Record<PersonalAssistantDispatchStatus, string>,
     receiptCount: (n: number) => `${n} ${n === 1 ? "receipt" : "receipts"}`,
     showReceipts: "Receipts",
@@ -87,9 +90,11 @@ export function PersonalAssistantDispatches({ agentId, headerAction }: {
           <span className={receipt.status === "pending" ? styles.badgePending : styles.badge}>
             {copy.receiptStatusLabels[receipt.status]}
           </span>
+          {receipt.taskStatus ? <span className={styles.badge}>{copy.taskStatusLabels[receipt.taskStatus]}</span> : null}
           {receipt.receivedAt ? <span className={styles.itemNote}>{formatTime(receipt.receivedAt, lang)}</span> : null}
         </span>
         {receipt.summary ? <span className={styles.itemNote}>{receipt.summary}</span> : null}
+        {receipt.evidenceRefs?.length ? <span className={styles.itemNote}>{receipt.evidenceRefs.join(" · ")}</span> : null}
       </div>
     </li>;
   }
@@ -122,6 +127,9 @@ export function PersonalAssistantDispatches({ agentId, headerAction }: {
                     <span className={styles.itemMeta}>
                       <span className={item.deliveryStatus === "pending" ? styles.badgePending : styles.badge}>
                         {copy.statusLabels[item.deliveryStatus]}
+                      </span>
+                      <span className={styles.badge}>
+                        {copy.taskStatusLabels[item.taskStatus ?? (item.deliveryStatus === "revoked" ? "cancelled" : item.receipts.length ? "awaiting_confirmation" : item.deliveryStatus === "consumed" ? "running" : "awaiting_result")]}
                       </span>
                       {item.receipts.length ? <span className={styles.badge}>{copy.receiptCount(item.receipts.length)}</span> : null}
                       {item.sentAt ? <span className={styles.itemNote}>{formatTime(item.sentAt, lang)}</span> : null}

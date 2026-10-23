@@ -4,6 +4,8 @@ export const PERSONAL_ASSISTANT_DISPATCH_LIMIT = 50;
 
 /** Closed enum from the dispatch projection; values arrive from the backend. */
 export type PersonalAssistantDispatchStatus = "pending" | "consumed" | "revoked";
+export type PersonalAssistantReportedTaskStatus = "running" | "blocked" | "completed" | "failed";
+export type PersonalAssistantTaskStatus = PersonalAssistantReportedTaskStatus | "awaiting_result" | "awaiting_confirmation" | "cancelled";
 
 export type PersonalAssistantDispatchReceipt = {
   messageId: string;
@@ -12,6 +14,8 @@ export type PersonalAssistantDispatchReceipt = {
   summary: string;
   status: PersonalAssistantDispatchStatus;
   receivedAt: string;
+  taskStatus?: PersonalAssistantReportedTaskStatus | null;
+  evidenceRefs?: string[];
 };
 
 export type PersonalAssistantDispatch = {
@@ -20,8 +24,10 @@ export type PersonalAssistantDispatch = {
   targetAgentId: string;
   targetAgentName: string;
   targetSessionId: string;
+  sourceSessionId?: string;
   summary: string;
   deliveryStatus: PersonalAssistantDispatchStatus;
+  taskStatus?: PersonalAssistantTaskStatus;
   sentAt: string;
   receipts: PersonalAssistantDispatchReceipt[];
 };
