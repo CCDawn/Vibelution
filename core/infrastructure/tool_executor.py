@@ -43,6 +43,11 @@ from core.logging import debug as _debug_logger
 
 IMAGE2_TOOL_TIMEOUT_SECONDS = 300
 
+# 模型请求的工具 timeout 上限（E7）：模型可显式拉长非 spawn 工具超时，但请求
+# 值是无信任输入，必须有天花板防止 timeout=10**9 之类参数把整轮钉死在一个
+# 工具调用上。取 cli_agent_run_tool 的 900s 预算档，长时工具留足余量。
+_MODEL_REQUESTED_TIMEOUT_CEILING_SECONDS = 900
+
 
 def _record_tool_scene_event(
     phase: str,
@@ -1500,10 +1505,13 @@ class ToolExecutor:
         except (TypeError, ValueError):
             requested_int = 0
 
-        # 除 spawn_agent_tool 外，其它工具允许按调用方显式拉长超时。
+        # 除 spawn_agent_tool 外，其它工具允许按调用方显式拉长超时，但模型
+        # 请求是无信任输入：没有上限时 timeout=10**9 之类参数会把回合钉死
+        # 在一个工具调用上（E7）。上限取 cli_agent_run_tool 的 900s 预算档，
+        # 对合法的长时工具（测试/构建类）留足余量。
         if tool_name != "spawn_agent_tool":
             if requested_int > 0:
-                return max(timeout, requested_int)
+                return min(max(timeout, requested_int), _MODEL_REQUESTED_TIMEOUT_CEILING_SECONDS)
             return timeout
 
         if requested_int <= 0:
