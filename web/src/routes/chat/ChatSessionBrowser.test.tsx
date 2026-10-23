@@ -152,14 +152,18 @@ describe("ChatSessionBrowser", () => {
       updatedAt: timestamp,
       lastActive: timestamp,
     });
+    const failedResting = session("failed-resting", {
+      status: "ready", currentPhase: "ready", lastTurnStatus: "failed_runtime",
+    });
     markSessionActivitySeen(readCompleted.id, sessionActivityStamp(readCompleted));
 
     const preview = await mount(props({
-      sessions: [activeCompleted, readCompleted, stillRunning],
+      sessions: [activeCompleted, readCompleted, stillRunning, failedResting],
       activeSessionId: activeCompleted.id,
     }));
     try {
       const completedFilter = preview.host.querySelector<HTMLButtonElement>('[data-session-status-filter="completed"]')!;
+      expect(completedFilter.textContent).toBe("已结束");
       await act(async () => completedFilter.click());
       expect([...preview.host.querySelectorAll<HTMLElement>("[data-session-browser-id]")]
         .map((row) => row.dataset.sessionBrowserId))

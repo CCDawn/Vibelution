@@ -8,6 +8,7 @@ import {
   resolveSessionActivityTone,
   sessionActivityStamp,
   sessionIsRunningStatus,
+  sessionActivityLabel,
 } from "./sessionActivityIndicator";
 
 describe("sessionActivityIndicator", () => {
@@ -109,6 +110,23 @@ describe("sessionActivityIndicator", () => {
   it("detects running phases", () => {
     expect(sessionIsRunningStatus("tooling")).toBe(true);
     expect(sessionIsRunningStatus("ready")).toBe(false);
+  });
+
+  it("does not let the previous turn's failure hide current execution", () => {
+    expect(resolveSessionActivityTone({
+      id: "new-turn", status: "running", currentPhase: "reading", lastTurnStatus: "failed_provider",
+    })).toBe("running");
+  });
+
+  it("labels an unread indicator without claiming successful execution", () => {
+    expect(sessionActivityLabel("completed", "zh")).toBe("有新消息");
+    expect(resolveSessionActivityTone({ id: "stopped", status: "stopped_by_user" })).toBe("completed");
+  });
+
+  it("does not revive historical running status after the session became idle", () => {
+    expect(resolveSessionActivityTone({
+      id: "settled", status: "ready", currentPhase: "ready", lastTurnStatus: "running",
+    })).toBe("none");
   });
 
   it("treats runtime-running as in-session while the status is not terminal", () => {

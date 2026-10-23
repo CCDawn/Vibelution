@@ -135,6 +135,9 @@ describe("AgentSessionTabStrip", () => {
 
   it("maps status: green running, red error, yellow approval, blue completed, none idle", () => {
     expect(agentSessionStatusTone("running")).toBe("running");
+    expect(agentSessionStatusTone("running", {
+      session: session({ status: "", currentPhase: "ready", childStatus: "", sessionKind: "child" }),
+    })).toBe("none");
     expect(agentSessionStatusTone("thinking")).toBe("running");
     expect(agentSessionStatusTone("failed")).toBe("error");
     expect(agentSessionStatusTone("failed_runtime")).toBe("error");
@@ -166,7 +169,8 @@ describe("AgentSessionTabStrip", () => {
     expect(markup).toContain("当前会话");
     expect(markup).toContain("data-session-tab-active=\"true\"");
     expect(markup).toContain("data-session-tab-active=\"false\"");
-    expect(markup).toContain("agentSessionTabStatusRunning");
+    // The child's historical childStatus cannot override its current idle fields.
+    expect(markup).not.toContain("agentSessionTabStatusRunning");
     expect(markup).toContain("agentSessionTabMainActionActive");
     expect(markup).not.toContain("agentSessionTabCurrentBadge");
     expect(markup).toContain("agentSessionTabTitleActive");

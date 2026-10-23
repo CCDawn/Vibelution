@@ -1,3 +1,6 @@
+import { ACTIVITY_CONTRACT } from "../../api/generated/activityContract";
+import { activityPhase } from "../sessionActivityState";
+
 function decodeJsonFragment(raw: string): string {
   try {
     return JSON.parse(`"${raw}"`) as string;
@@ -44,11 +47,26 @@ export function agentRunSummary(summary: string | undefined): string {
   return text;
 }
 
-export function agentRunStatusLabel(status: string, lang: "zh" | "en"): string {
-  const labels: Record<string, string> = {
-    completed: "已完成", succeeded: "已成功", running: "进行中", queued: "排队中",
-    failed: "失败", cancelled: "已取消", blocked: "已阻塞", pending: "待处理",
-    idle: "空闲", waiting: "等待中", paused: "已暂停", timed_out: "已超时",
-  };
-  return lang === "zh" ? labels[status] || status : status;
+function lookup(table: Readonly<Record<string, string>>, value: string): string {
+  return Object.prototype.hasOwnProperty.call(table, value) ? table[value] : "";
+}
+
+export function agentRunStatusLabel(status: string | undefined, lang: "zh" | "en"): string {
+  const value = String(status ?? "").trim().toLowerCase();
+  const contract = ACTIVITY_CONTRACT.agentRun;
+  const normalized = lookup(contract.labels, value) ? value : lookup(contract.aliases, value) || "unknown";
+  return lang === "zh" ? lookup(contract.labels, normalized) : normalized;
+}
+
+export function agentRunPhaseLabel(value: string | undefined, lang: "zh" | "en"): string {
+  const phase = activityPhase(value);
+  return lang === "zh" ? lookup(ACTIVITY_CONTRACT.session.phaseLabels, phase) : phase;
+}
+
+export function agentRunReasonLabel(value: string | undefined, lang: "zh" | "en"): string {
+  if (!value) return "";
+  const reason = value.trim().toLowerCase();
+  return lang === "zh"
+    ? lookup(ACTIVITY_CONTRACT.agentRun.reasonLabels, reason) || agentRunStatusLabel(reason, lang)
+    : reason;
 }

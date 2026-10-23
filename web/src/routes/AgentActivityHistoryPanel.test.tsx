@@ -2,7 +2,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import type { AgentConfigWorkspaceAgent, AgentInboxMessage } from "../api/types";
+import type { AgentConfigWorkspaceAgent, AgentInboxMessage, AgentRunHistory } from "../api/types";
 import { AgentActivityHistoryPanel, type AgentActivityHistoryPanelCopy } from "./AgentActivityHistoryPanel";
 
 const copy: AgentActivityHistoryPanelCopy = {
@@ -32,6 +32,25 @@ const copy: AgentActivityHistoryPanelCopy = {
 };
 
 describe("AgentActivityHistoryPanel", () => {
+  it("uses canonical run status and never translates runKind as a status", () => {
+    const markup = renderToStaticMarkup(<AgentActivityHistoryPanel
+      agent={{} as AgentConfigWorkspaceAgent} copy={copy} lang="zh"
+      activityTimeline={[]} isActivityLoading={false}
+      runHistory={{ runs: [
+        { runId: "missing", runKind: "agent_run", status: "", currentPhase: "" },
+        { runId: "stopped", runKind: "agent_run", status: "force_stopped", executionStatus: "stopped", activityPhase: "" },
+      ], subAgentRuns: [] } as unknown as AgentRunHistory}
+      isRunHistoryLoading={false} inboxMessages={[]} isInboxLoading={false}
+      inboxPendingCount={0} focusedMessageId="" pendingMessageId="" isConsumeAllPending={false}
+      onOpenSession={() => undefined} onOpenLogs={() => undefined} onFocusMessage={() => undefined}
+      onConsumeAllMessages={() => undefined} onConsumeInboxMessage={() => undefined}
+    />);
+    expect(markup).toContain("未知状态");
+    expect(markup).toContain("已停止");
+    expect(markup).not.toContain(">agent_run</strong>");
+    expect(markup).not.toContain(">force_stopped</strong>");
+  });
+
   it("moves session and activity metadata to focusable tooltip triggers", () => {
     const markup = renderToStaticMarkup(
       <AgentActivityHistoryPanel

@@ -1,5 +1,8 @@
 import type { ConversationMessage, SessionDetail, SessionStreamEvent } from "../api/types";
 import type { BrowserTelemetryEventInput } from "../app/browserTelemetry";
+import {
+  activityOutcome, hasExecutionOwnership, resolveSessionActivity, sessionTerminalStatus,
+} from "./sessionActivityState";
 
 export type DesktopConversationCompletionNotification = {
   schemaVersion: 1;
@@ -52,7 +55,6 @@ export type SessionCompletionSummary = {
   completionIdentity?: string;
 };
 
-const SUCCESS_TERMINAL_STATUSES = new Set(["ready", "completed", "done", "success"]);
 // The turn finished its reply but explicitly waits for a user "继续" to
 // advance; reporting it as plain "已结束" hides the pending follow-up step.
 const CONTINUATION_TERMINAL_STATUSES = new Set(["needs_continue"]);
@@ -66,62 +68,14 @@ export type DesktopConversationNotifier = {
   handleSessionSummaries(sessions: SessionCompletionSummary[], context?: NotificationContext): string[];
 };
 
-const BUSY_PHASES = new Set([
-  "queued",
-  "running",
-  "thinking",
-  "tooling",
-  "answering",
-  "planning",
-  "reading",
-  "editing",
-  "verifying",
-  "stopping",
-  "paused",
-]);
-
-const TERMINAL_PHASES = new Set([
-  "ready",
-  "completed",
-  "done",
-  "success",
-  "failed",
-  "failed_provider",
-  "failed_runtime",
-  "error",
-  "timeout",
-  "timed_out",
-  "blocked",
-  "cancelled",
-  "canceled",
-  "stopped",
-  "stopped_by_user",
-  "needs_continue",
-  "paused_limit",
-  "aborted",
-  "superseded",
-]);
-
 export function normalizeNotificationText(value: unknown): string {
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
 
-function isBusyPhase(value: unknown): boolean {
-  return BUSY_PHASES.has(normalizeNotificationText(value).toLowerCase());
-}
-
-function terminalPhaseForValue(...values: unknown[]): string {
-  for (const value of values) {
-    const phase = normalizeNotificationText(value).toLowerCase();
-    if (TERMINAL_PHASES.has(phase)) {
-      return phase;
-    }
-  }
-  return "";
-}
-
 function notificationStatusForTerminalPhase(phase: string): string {
-  return SUCCESS_TERMINAL_STATUSES.has(phase) ? "completed" : phase;
+  // Only the Companion path accepts resting state with a changed completion identity.
+  // Ordinary Session details reject ready before this conversion.
+  return phase === "ready" || activityOutcome(phase) === "completed" ? "completed" : phase;
 }
 
 export function sanitizeSessionLabel(raw: unknown, sessionId: string): string {
@@ -148,7 +102,7 @@ export function buildConversationNotificationCopy(options: {
   terminalStatus: string;
 }): { title: string; body: string } {
   const label = options.sessionLabel || "当前会话";
-  if (SUCCESS_TERMINAL_STATUSES.has(options.terminalStatus)) {
+  if (activityOutcome(options.terminalStatus) === "completed") {
     return {
       title: "对话已完成",
       body: `「${label}」已完成一轮回复。`,
@@ -435,14 +389,8 @@ export function createDesktopConversationNotifier(
         return;
       }
 
-      const phase = normalizeNotificationText(detail.currentPhase || detail.status);
-      const busy = isBusyPhase(phase);
-      const terminalPhase = terminalPhaseForValue(
-        detail.terminalReason,
-        detail.lastTurnStatus,
-        detail.currentPhase,
-        detail.status,
-      );
+      const busy = hasExecutionOwnership(resolveSessionActivity(detail).execution);
+      const terminalPhase = sessionTerminalStatus(detail);
       const wasBusy = lastBusyBySession.get(sessionId) ?? false;
       lastBusyBySession.set(sessionId, busy);
       const pendingTurnId = pendingStreamTurnBySession.get(sessionId);
@@ -494,13 +442,8 @@ export function createDesktopConversationNotifier(
         if (sessionId === normalizeNotificationText(context?.viewedSessionId) && !companionAgentId) {
           continue;
         }
-        const busy = isBusyPhase(session.currentPhase || session.status);
-        const terminalPhase = terminalPhaseForValue(
-          session.terminalReason,
-          session.lastTurnStatus,
-          session.currentPhase,
-          session.status,
-        );
+        const busy = hasExecutionOwnership(resolveSessionActivity(session).execution);
+        const terminalPhase = sessionTerminalStatus(session);
         const completionIdentity = normalizeNotificationText(session.completionIdentity);
         const suppressWhenFocused = companionAgentId
           ? normalizeNotificationText(context?.viewedSessionId) === sessionId

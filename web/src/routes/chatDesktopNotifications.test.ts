@@ -361,6 +361,33 @@ describe("desktop conversation notifier", () => {
     expect(notify).not.toHaveBeenCalled();
   });
 
+  it("uses a successful outcome alias without treating ready as success", () => {
+    const notify = vi.fn();
+    const notifier = createDesktopConversationNotifier({ bridge: { notifyConversationCompleted: notify }, postTelemetry: vi.fn() });
+    notifier.handleAssistantDelta(assistantDelta());
+    notifier.handleSessionDetail(detail({ terminalReason: "succeeded" }));
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ terminalStatus: "completed", title: "对话已完成" }));
+    expect(buildConversationNotificationCopy({ sessionLabel: "会话", terminalStatus: "ready" }).title).toBe("对话已结束");
+  });
+
+  it("does not emit a previous outcome while another current field proves execution", () => {
+    const notify = vi.fn();
+    const notifier = createDesktopConversationNotifier({ bridge: { notifyConversationCompleted: notify }, postTelemetry: vi.fn() });
+    notifier.handleAssistantDelta(assistantDelta());
+    notifier.handleSessionDetail(detail({ status: "running", currentPhase: "ready", terminalReason: "success" }));
+    notifier.handleSessionDetail(detail({ activeTurnId: "next-turn", terminalReason: "success" }));
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("does not infer completion from unknown current state or outcome", () => {
+    const notify = vi.fn();
+    const notifier = createDesktopConversationNotifier({ bridge: { notifyConversationCompleted: notify }, postTelemetry: vi.fn() });
+    notifier.handleAssistantDelta(assistantDelta());
+    notifier.handleSessionDetail(detail({ status: "future_state", lastTurnStatus: "completed" }));
+    notifier.handleSessionDetail(detail({ terminalReason: "future_reason", lastTurnStatus: "completed" }));
+    expect(notify).not.toHaveBeenCalled();
+  });
+
   it("does not notify for a user stop", () => {
     const notify = vi.fn();
     const notifier = createDesktopConversationNotifier({

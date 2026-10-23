@@ -191,3 +191,23 @@ def test_settled_success_still_reports_completion():
     assert pet_activity_service._resolve_tone(
         session, runtime_running=False, needs_approval=False, now=NOW,
     ) == "completed"
+
+
+def test_previous_turn_running_is_not_current_execution():
+    session = {**_session("s", status="ready"), "lastTurnStatus": "running"}
+    assert pet_activity_service._resolve_tone(
+        session, runtime_running=False, needs_approval=False, now=NOW,
+    ) == "idle"
+
+
+def test_explicit_unknown_current_status_does_not_fall_back_to_success():
+    session = {**_session("s", status="future_status"), "lastTurnStatus": "completed"}
+    assert pet_activity_service._resolve_tone(
+        session, runtime_running=False, needs_approval=False, now=NOW,
+    ) == "idle"
+
+
+def test_live_status_only_work_run_does_not_hide_current_activity_phase():
+    assert pet_activity_service._resolve_phase(
+        _session("s", status="reading"), live_item={"status": "running", "currentPhase": "running"}, tone="running",
+    ) == "reading"

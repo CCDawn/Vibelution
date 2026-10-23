@@ -4,15 +4,20 @@
  * Green spinner  = session in progress
  * Yellow spinner = needs approval
  * Red light      = error
- * Blue light     = completed (unread); clears after read
+ * Blue light     = unread message; clears after read, without claiming success
  * No indicator   = idle / already read
  *
- * `ready` is the persisted resting state after a successful turn, not an
+ * `ready` is a persisted resting state, not a successful Turn verdict or an
  * unread event. Historical ready sessions stay idle until a previously read
  * session gets a new completion identity (last preview / turn status), not a
  * recency timestamp tick.
  */
 
+import {
+  activityExecution, activityOutcome, isActivityResting, resolveSessionActivity,
+} from "./sessionActivityState";
+
+// `completed` is the legacy unread-reply indicator, not a successful Turn verdict.
 export type SessionActivityTone = "running" | "approval" | "error" | "completed" | "none";
 
 const SEEN_STORAGE_KEY = "vibelution.session-activity-seen.v1";
@@ -155,67 +160,23 @@ export function hasPriorSessionActivitySeen(sessionId: string) {
   return seenStampsFor(readSeenMap(), id).length > 0;
 }
 
-/** Idle resting state after a successful turn, not an unread completion. */
+/** Resting state, independent of the previous Turn's result. */
 export function sessionIsIdleRestingStatus(value: string | null | undefined) {
-  const status = String(value ?? "").trim().toLowerCase();
-  return status === "ready" || status === "idle";
+  return isActivityResting(value);
 }
 
 export function sessionIsErrorStatus(value: string | null | undefined) {
-  const status = String(value ?? "").trim().toLowerCase();
-  return [
-    "error",
-    "failed",
-    "failure",
-    "failed_runtime",
-    "failed_provider",
-    "blocked",
-    "danger",
-    "crashed",
-    "unhealthy",
-  ].includes(status);
+  return activityOutcome(value) === "failed";
 }
 
 export function sessionIsRunningStatus(value: string | null | undefined) {
-  const status = String(value ?? "").trim().toLowerCase();
-  return [
-    "queued",
-    "running",
-    "active",
-    "thinking",
-    "tooling",
-    "tool",
-    "answering",
-    "streaming",
-    "checking",
-    "planning",
-    "reading",
-    "editing",
-    "verifying",
-    "working",
-    "in_progress",
-    "starting",
-    "stopping",
-  ].includes(status);
+  return Boolean(activityExecution(value));
 }
 
 export function sessionIsCompletedStatus(value: string | null | undefined) {
-  const status = String(value ?? "").trim().toLowerCase();
-  return [
-    "ready",
-    "completed",
-    "done",
-    "success",
-    "succeeded",
-    "needs_continue",
-    "paused",
-    "paused_limit",
-    "stopped",
-    "stopped_by_user",
-    "cancelled",
-    "canceled",
-    "superseded",
-  ].includes(status);
+  // Compatibility API used by unread/history filters; it means settled, not success.
+  const outcome = activityOutcome(value);
+  return value?.trim().toLowerCase() === "ready" || Boolean(outcome && outcome !== "failed");
 }
 
 export function sessionStatusCandidates(
@@ -227,11 +188,9 @@ export function sessionStatusCandidates(
     sessionKind?: string;
   },
 ) {
-  const isChild = String(session.sessionKind ?? "").trim() === "child";
-  const ordered = isChild
-    ? [session.childStatus, session.currentPhase, session.status, session.lastTurnStatus]
-    : [session.currentPhase, session.status, session.lastTurnStatus];
-  return ordered.map((value) => String(value ?? "").trim()).filter(Boolean);
+  // Compatibility export: callers receive one resolved current interpretation,
+  // rather than independently combining current and historical fields again.
+  return [sessionPrimaryStatus(session)].filter(Boolean);
 }
 
 export function sessionPrimaryStatus(
@@ -243,7 +202,8 @@ export function sessionPrimaryStatus(
     sessionKind?: string;
   },
 ) {
-  return sessionStatusCandidates(session)[0] || "";
+  const state = resolveSessionActivity(session);
+  return state.phase || (activityExecution(state.execution) ? state.execution : state.reason || state.rawStatus);
 }
 
 export function resolveSessionActivityTone(
@@ -271,22 +231,15 @@ export function resolveSessionActivityTone(
   if (options?.needsApproval) {
     return "approval";
   }
-  const candidates = sessionStatusCandidates(session);
-  // Any field may report the live phase; prefer error/running over a stale primary.
-  if (candidates.some((value) => sessionIsErrorStatus(value))) {
+  const state = resolveSessionActivity(session, { runtimeRunning: options?.isRuntimeRunning });
+  if (activityExecution(state.execution)) {
+    return "running";
+  }
+  if (state.outcome === "failed") {
     return "error";
   }
-  // A real live phase always reports running. The runtime-running flag only
-  // covers lagging statuses and must not override a terminal authoritative one.
-  if (candidates.some((value) => sessionIsRunningStatus(value))) {
-    return "running";
-  }
-  const status = candidates[0] || "";
-  if (options?.isRuntimeRunning && !sessionIsCompletedStatus(status)) {
-    return "running";
-  }
   const inboxPending = Number(session.agentInboxPendingCount || 0) > 0;
-  if (sessionIsCompletedStatus(status) || inboxPending) {
+  if (state.execution === "settled" || (state.execution === "idle" && state.rawStatus === "ready") || inboxPending) {
     if (options?.isActive) {
       return "none";
     }
@@ -295,7 +248,7 @@ export function resolveSessionActivityTone(
     if (isSessionActivitySeen(sessionId, stamp)) {
       return "none";
     }
-    if (!inboxPending && sessionIsIdleRestingStatus(status) && !hasPriorSessionActivitySeen(sessionId)) {
+    if (!inboxPending && state.execution === "idle" && !hasPriorSessionActivitySeen(sessionId)) {
       return "none";
     }
     return "completed";
@@ -333,7 +286,7 @@ export function sessionActivityLabel(tone: SessionActivityTone, lang: "zh" | "en
     return lang === "zh" ? "出错" : "Error";
   }
   if (tone === "completed") {
-    return lang === "zh" ? "已完成" : "Completed";
+    return lang === "zh" ? "有新消息" : "Unread message";
   }
   return "";
 }

@@ -10,12 +10,9 @@ import { avatarImageUrlFrom, avatarInitials, renderAgentAvatar } from "./chatRou
 import {
   resolveSessionActivityTone,
   sessionActivityLabel,
-  sessionIsCompletedStatus,
-  sessionIsErrorStatus,
-  sessionIsRunningStatus,
-  sessionStatusCandidates,
   type SessionActivityTone,
 } from "../sessionActivityIndicator";
+import { resolveSessionActivity } from "../sessionActivityState";
 import styles from "./ChatSessionBrowser.styles";
 
 export type ChatSessionBrowserProps = {
@@ -46,7 +43,7 @@ const COPY = {
     create: "新建会话",
     search: "搜索会话、Agent 或团队",
     filterLabel: "按状态筛选会话",
-    filters: { all: "全部", running: "进行中", attention: "待处理", completed: "已完成", ready: "可继续" },
+    filters: { all: "全部", running: "进行中", attention: "待处理", completed: "已结束", ready: "可继续" },
     resultCount: (count: number) => `${count} 个会话`,
     groups: { today: "今天", yesterday: "昨天", thisWeek: "本周", earlier: "更早", undated: "日期未知" },
     unknownAgent: "未知 Agent",
@@ -72,7 +69,7 @@ const COPY = {
     create: "New session",
     search: "Search sessions, Agents, or teams",
     filterLabel: "Filter sessions by status",
-    filters: { all: "All", running: "In progress", attention: "Needs attention", completed: "Completed", ready: "Ready" },
+    filters: { all: "All", running: "In progress", attention: "Needs attention", completed: "Ended", ready: "Ready" },
     resultCount: (count: number) => `${count} sessions`,
     groups: { today: "Today", yesterday: "Yesterday", thisWeek: "This week", earlier: "Earlier", undated: "Date unknown" },
     unknownAgent: "Unknown Agent",
@@ -116,10 +113,9 @@ function toneMatches(tone: SessionActivityTone, filter: SessionStatusFilter, isC
 }
 
 function hasCompletedLifecycle(session: SessionSummary) {
-  const candidates = sessionStatusCandidates(session);
-  return !candidates.some(sessionIsErrorStatus)
-    && !candidates.some(sessionIsRunningStatus)
-    && candidates.some(sessionIsCompletedStatus);
+  const state = resolveSessionActivity(session);
+  return (state.execution === "settled" && state.outcome !== "failed")
+    || (state.execution === "idle" && state.rawStatus === "ready");
 }
 
 function activityLabel(tone: SessionActivityTone, lang: "zh" | "en") {

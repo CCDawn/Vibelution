@@ -33,6 +33,9 @@ describe("chat coding route view model", () => {
     expect(isBusyPhase("thinking")).toBe(true);
     expect(isBusyPhase("stopping")).toBe(true);
     expect(isBusyPhase("ready")).toBe(false);
+    expect(isBusyPhase("paused")).toBe(false);
+    expect(isBusyPhase("paused_limit")).toBe(false);
+    expect(isBusyPhase("future_state")).toBe(false);
   });
 
   it("formats token speed without inventing a value for missing samples", () => {
