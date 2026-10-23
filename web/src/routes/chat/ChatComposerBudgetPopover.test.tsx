@@ -22,6 +22,8 @@ const labels: ChatComposerBudgetPanelLabels = {
   composerBudgetCancel: "取消",
   composerBudgetLoading: "读取预算配置…",
   composerBudgetLoadFailed: "预算配置读取失败",
+  composerBudgetUnlimited: "不限制（关闭每回合工具预算）",
+  composerBudgetUnlimitedHint: "开启后本会话不再按回合截断工具调用。",
 };
 
 describe("validateSessionBudgetField", () => {
@@ -249,5 +251,23 @@ describe("ChatComposerBudgetPopover draft + save contract", () => {
     await renderPanel({ revision: undefined, maxCallsPerTurn: 32 });
     setInputValue(inputByLabel("每回合工具调用额度")!, "64");
     expect(buttonByText("保存")?.disabled).toBe(true);
+  });
+
+  it("saves the unlimited sentinel when the switch disables the cap", async () => {
+    const onSave = vi.fn();
+    await renderPanel({ maxCallsPerTurn: 32, onSave });
+    const toggle = document.body.querySelector<HTMLElement>(
+      '[data-testid="chat-composer-budget-unlimited"]',
+    );
+    expect(toggle).not.toBeNull();
+
+    await act(async () => toggle?.click());
+    expect(buttonByText("保存")?.disabled).toBe(false);
+
+    await act(async () => buttonByText("保存")?.click());
+    expect(onSave).toHaveBeenCalledExactlyOnceWith({
+      revision: 3,
+      maxCallsPerTurn: 0,
+    });
   });
 });

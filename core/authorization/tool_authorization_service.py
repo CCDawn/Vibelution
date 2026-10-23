@@ -595,8 +595,11 @@ def clear_session_override_memo() -> None:
         _SESSION_OVERRIDE_MEMO.clear()
 
 
-def _session_override_max_calls_per_turn(runtime: Mapping[str, Any]) -> int:
+def _session_override_max_calls_per_turn(runtime: Mapping[str, Any]) -> int | None:
     """Session-configured maxCallsPerTurn override (session > family > base).
+
+    Returns ``None`` when no override applies and ``0`` when the session
+    explicitly disables the per-turn cap; both differ from a positive quota.
 
     Best-effort: unknown sessions, missing bindings, and read failures keep the
     family/base resolution already computed by the caller. Repeat lookups for
@@ -609,7 +612,7 @@ def _session_override_max_calls_per_turn(runtime: Mapping[str, Any]) -> int:
         agent = _as_mapping(runtime.get("agent"))
         session_id = _coerce_text(agent.get("directSessionId")).strip()
     if not session_id:
-        return 0
+        return None
     agent_id = _coerce_text(runtime.get("agentId")).strip()
     if not agent_id:
         agent = _as_mapping(runtime.get("agent"))
@@ -622,7 +625,7 @@ def _session_override_max_calls_per_turn(runtime: Mapping[str, Any]) -> int:
     try:
         from core.orchestration.session_budget_resolve import get_session_budget_parameters
     except Exception:  # noqa: BLE001 - override lookup must never break install
-        return 0
+        return None
     if memo_key is not None:
         with _SESSION_OVERRIDE_MEMO_LOCK:
             cached = _SESSION_OVERRIDE_MEMO.get(memo_key)
@@ -632,12 +635,12 @@ def _session_override_max_calls_per_turn(runtime: Mapping[str, Any]) -> int:
     try:
         parameters = get_session_budget_parameters(session_id)
     except Exception:  # noqa: BLE001 - override lookup must never break install
-        return 0
+        return None
     value = parameters.maxCallsPerTurn if parameters is not None else None
     try:
-        resolved = int(value) if value else 0
+        resolved = int(value) if value is not None else None
     except (TypeError, ValueError):
-        resolved = 0
+        resolved = None
     if memo_key is not None:
         with _SESSION_OVERRIDE_MEMO_LOCK:
             _SESSION_OVERRIDE_MEMO[memo_key] = (get_session_budget_parameters, resolved)
@@ -712,7 +715,8 @@ def install_execution_authorization(
     # Session-configured override wins over the family/base resolution; the
     # installed cap is the one the Turn Status Bar displays as the final value.
     session_max_calls = _session_override_max_calls_per_turn(runtime)
-    if session_max_calls > 0:
+    # 0 is an explicit 'no cap' from the session; None means no override.
+    if session_max_calls is not None:
         max_calls_per_turn = session_max_calls
     max_calls_ms = (perf_counter() - phase_started) * 1000
     phase_started = perf_counter()

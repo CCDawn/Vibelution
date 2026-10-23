@@ -396,6 +396,8 @@ export function useChatConversationSurfaceModel({
             composerBudgetCancel: t("composerBudgetCancel"),
             composerBudgetLoading: t("composerBudgetLoading"),
             composerBudgetLoadFailed: t("composerBudgetLoadFailed"),
+            composerBudgetUnlimited: t("composerBudgetUnlimited"),
+            composerBudgetUnlimitedHint: t("composerBudgetUnlimitedHint"),
           }}
           mentalModelEnabled={mentalModelEnabledForNextTurn}
           runtimeStatusEnabled={runtimeStatusEnabledForNextTurn}
