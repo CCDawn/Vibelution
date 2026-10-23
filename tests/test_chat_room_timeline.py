@@ -1,6 +1,7 @@
 """Chat room append-only timeline log: store, write points and endpoint."""
 
 import json
+import threading
 
 import pytest
 
@@ -149,6 +150,21 @@ def _stub_round_runner(monkeypatch):
     )
 
 
+def _track_round_timeline_publication(monkeypatch, room_id):
+    published = threading.Event()
+    append_artifacts = chat_room_service._append_dev_artifact_timeline_event
+
+    def append_and_signal(room, round_payload):
+        result = append_artifacts(room, round_payload)
+        if room.get("roomId") == room_id:
+            # This step follows the terminal event, including for non-dev rooms.
+            published.set()
+        return result
+
+    monkeypatch.setattr(chat_room_service, "_append_dev_artifact_timeline_event", append_and_signal)
+    return published
+
+
 @pytest.mark.slow
 def test_room_round_writes_timeline_events_and_endpoint_serves_them(tmp_path, monkeypatch):
     _seed_chat_sessions(tmp_path)
@@ -162,6 +178,7 @@ def test_room_round_writes_timeline_events_and_endpoint_serves_them(tmp_path, mo
             "purpose": "chat",
         },
     ).json()
+    timeline_published = _track_round_timeline_publication(monkeypatch, room["roomId"])
     round_response = client.post(
         f"/api/chat-rooms/{room['roomId']}/rounds",
         json={"topic": "验证时间线写入"},
@@ -171,6 +188,8 @@ def test_room_round_writes_timeline_events_and_endpoint_serves_them(tmp_path, mo
 
     detail = wait_for_chat_room_round_completed(client, room["roomId"], timeout_s=8.0)
     latest_round = detail["rounds"][-1]
+    # The round store commits before its append-only terminal timeline event.
+    assert timeline_published.wait(8.0), "completed round did not finish timeline publication"
 
     response = client.get(f"/api/chat-rooms/{room['roomId']}/timeline")
     assert response.status_code == 200
@@ -371,7 +390,9 @@ def test_dev_board_room_round_finish_appends_artifact_event(tmp_path, monkeypatc
         participant_session_ids=["session-a"],
         config={"teamId": "team-dev", "teamTemplateId": "dev-team"},
     )
+    timeline_published = _track_round_timeline_publication(monkeypatch, room["roomId"])
     detail = _run_room_round_and_wait(room["roomId"], "交付验证")
+    assert timeline_published.wait(8.0), "completed round did not finish timeline publication"
     round_id = detail["rounds"][-1]["roundId"]
 
     payload = client.get(f"/api/chat-rooms/{room['roomId']}/timeline").json()
@@ -401,7 +422,9 @@ def test_non_dev_room_round_finish_appends_no_artifact_event(tmp_path, monkeypat
         participant_session_ids=["session-a"],
         config={"teamId": "team-dev", "teamTemplateId": "research"},
     )
+    timeline_published = _track_round_timeline_publication(monkeypatch, room["roomId"])
     _run_room_round_and_wait(room["roomId"], "研究讨论")
+    assert timeline_published.wait(8.0), "completed round did not finish timeline publication"
 
     payload = client.get(f"/api/chat-rooms/{room['roomId']}/timeline").json()
     assert [item for item in payload["events"] if item["type"] == "artifact"] == []
