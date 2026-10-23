@@ -29,6 +29,11 @@ describe("ordinary Agent model authority", () => {
   it("sizes the context ring from saved scoped parameters instead of only the last call", () => {
     const start = workbenchSource.indexOf("const composerContextRing = useMemo");
     const ring = workbenchSource.slice(start, workbenchSource.indexOf("\n  const {", start));
+    expect(ring).toContain("resolveComposerContextUsage({");
+    expect(ring).toContain("contextUsage: detail?.contextUsage");
+    expect(ring).toContain("contextComposition: lastContextComposition");
+    expect(ring).toContain("usageUsed: usage.used");
+    expect(ring).toContain("observedLimit: usage.limit");
     expect(ring).toContain("resolveComposerContextLimit({");
     expect(ring).toContain("modelParameters: !financeSurface && !verifiedCompanionMode ? sessionLlmOptionsQuery.data : undefined");
     expect(ring).toContain("agentId: detail?.agentId");

@@ -254,7 +254,7 @@ import { useChatSessionRenameMenu } from "./useChatSessionRenameMenu";
 import { useChatAgentDirectoryActions } from "./useChatAgentDirectoryActions";
 import { useChatCliAgentTerminal } from "./useChatCliAgentTerminal";
 import { buildChatCacheDetailViewModel } from "./chatCacheDetailModel";
-import { buildComposerContextRingModel, resolveComposerContextLimit } from "./composerContextModel";
+import { buildComposerContextRingModel, resolveComposerContextLimit, resolveComposerContextUsage } from "./composerContextModel";
 import { useChatCacheDetailDialog } from "./useChatCacheDetailDialog";
 import { useAgentPermissionPresetMutation } from "./useAgentPermissionPresetMutation";
 import { useChatWorkbenchCatalogQueries } from "./useChatWorkbenchCatalogQueries";
@@ -1842,17 +1842,20 @@ export function ChatCodingRouteWorkbench() {
     activeSessionId,
   });
   const composerContextRing = useMemo(() => {
-    const usageUsed = lastContextComposition?.totalTokens ?? detail?.contextUsage?.used ?? 0;
+    const usage = resolveComposerContextUsage({
+      contextUsage: detail?.contextUsage,
+      contextComposition: lastContextComposition,
+    });
     const usageLimit = resolveComposerContextLimit({
       sessionId: activeSessionId,
       agentId: detail?.agentId,
       modelParameters: !financeSurface && !verifiedCompanionMode ? sessionLlmOptionsQuery.data : undefined,
-      observedLimit: lastContextComposition?.limitTokens ?? detail?.contextUsage?.limit ?? 0,
+      observedLimit: usage.limit,
     });
     const runtimeCompression = runtime?.contextCompression;
     const compressionLevels = runtimeCompression?.strategy?.levels ?? [];
     return buildComposerContextRingModel({
-      usageUsed,
+      usageUsed: usage.used,
       usageLimit,
       hitPercent: cacheCompositionPercent,
       detailAvailable: cacheDetailAvailable,
