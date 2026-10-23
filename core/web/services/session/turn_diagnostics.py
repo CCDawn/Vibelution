@@ -2379,6 +2379,19 @@ def _provider_error_user_reason(raw_error: Any, *, lang: str | None = None) -> d
             "模型返回了违反协议的响应（例如重复的工具调用 id）",
             "the model returned a protocol-violating response (for example a duplicated tool call id)",
         )
+    # DeepSeek 思考模式回传 400：``errors.classify_exception`` 按 09-10 实证把
+    # 这个签名归为 server_error 瞬态（同 body 重放必过，是网关路由的非确定
+    # 性拒绝），那只是 client 重试语义。展示层不能沿用该重试分类——嵌套体是
+    # invalid_request_error 协议族、包装层自身就是 provider_protocol_error，
+    # 若照 server_error 映射成 upstream_unavailable，_make_session_turn_error
+    # 的降级分支会把 errorType 改写成 provider_error，与协议级 headline 文案
+    # 自相矛盾。这里保持协议级呈现，瞬态可重试语义由 reason_summary 告知。
+    if "reasoning_content" in lower and "thinking mode" in lower and "passed back" in lower:
+        return reason(
+            "provider_protocol_error",
+            "模型思考模式回传被网关瞬时拒绝（同一请求重试通常可通过）",
+            "the gateway transiently rejected the thinking-mode roundtrip payload; retrying the same request usually passes",
+        )
 
     nested_category = ""
     normalized_nested_type = re.sub(r"[^a-z0-9]+", "_", nested_provider_type.lower()).strip("_")
