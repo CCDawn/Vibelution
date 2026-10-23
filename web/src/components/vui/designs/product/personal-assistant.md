@@ -174,7 +174,7 @@ severity 用 `--state-error`/`--state-warning` 与 `--vui-border-subtle`/`--vui-
 ### 适用范围
 `/personal-assistant` 工作台右侧 VTabs 的「对话偏好」标签（宽屏）与窄屏 VDialog 入口；窄屏不渲染侧栏时仍可从顶部操作条打开。不承担角色形象/模型切换（归 PersonalAssistantSettings）、不创建提案（提案只能由绑定直连会话内的结构化工具在真实用户回合产生）。
 ### 使用方式
-`<PersonalAssistantDialoguePreferences agentId headerAction? />`。设置组每行 VStringSelect（选项为后端封闭枚举），选择进入按 QueryClient/Agent 隔离的短生命周期保存队列；每次 PUT `dialogue-settings` 提交最新成功快照的完整三字段，避免全量接口把其他偏好重置为默认。保存字段禁用，其他字段仍可选择并显示等待保存，同字段排队意图保留最新值；已接受操作跨标签/弹窗卸载继续完成，同 Agent 重挂载复用队列。成功响应更新唯一设置 query；失败 role=alert 行内提示并可重试，其他已排队字段继续处理。提案列表 GET `preference-proposals`（5s 轮询，与 overview 节奏一致），待确认行展示类型/建议值（枚举值映射为中文行为词，自由文本直显）+ 采纳/保留原样（互斥 pending，决策后同时失效提案与设置缓存）；已处理仅保留最近 6 条。读取失败 VStateSurface error + 重试。文案 zh/en 双语。
+`<PersonalAssistantDialoguePreferences agentId headerAction? />`。设置组每行 VStringSelect（选项为后端封闭枚举），选择进入按 QueryClient/Agent 隔离的短生命周期保存队列；每次 PUT `dialogue-settings` 提交最新成功快照的完整三字段，避免全量接口把其他偏好重置为默认。保存字段禁用，其他字段仍可选择并显示等待保存，同字段排队意图保留最新值；已接受操作跨标签/弹窗卸载继续完成，同 Agent 重挂载复用队列。成功响应更新唯一设置 query；失败 role=alert 行内提示并可重试，其他已排队字段继续处理。未启用 Companion 的规范个人助理通过专属身份校验保存，不创建 binding；每轮由个人助理专属动态 Prompt 扩展读取封闭枚举，限当前直属会话，保留权限与高风险确认。提案列表 GET `preference-proposals`（5s 轮询，与 overview 节奏一致），待确认行展示类型/建议值（枚举值映射为中文行为词，自由文本直显）+ 采纳/保留原样（互斥 pending，决策后同时失效提案与设置缓存）；已处理仅保留最近 6 条。读取失败 VStateSurface error + 重试。文案 zh/en 双语。
 ### 非职责
 不写 Agent 目录、不绕过提案状态机直接改偏好情节记忆（采纳走后端 accept 及其回执）、不做提案的催办/通知（归双通道通知链）、不在组件内持久化任何本地缓存。
 ### 视觉与状态

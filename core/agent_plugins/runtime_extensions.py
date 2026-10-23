@@ -85,8 +85,9 @@ def installed_runtime_extensions() -> tuple[AgentPluginRuntimeExtension, ...]:
     from .virtual_human_life.runtime_extension import (
         VIRTUAL_HUMAN_LIFE_RUNTIME_EXTENSION,
     )
+    from .personal_assistant_dialogue import PERSONAL_ASSISTANT_DIALOGUE_RUNTIME_EXTENSION
 
-    return (VIRTUAL_HUMAN_LIFE_RUNTIME_EXTENSION,)
+    return (VIRTUAL_HUMAN_LIFE_RUNTIME_EXTENSION, PERSONAL_ASSISTANT_DIALOGUE_RUNTIME_EXTENSION)
 
 
 def runtime_extension(plugin_id: str) -> AgentPluginRuntimeExtension | None:
