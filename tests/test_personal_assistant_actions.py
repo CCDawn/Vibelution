@@ -160,6 +160,31 @@ def test_native_frozen_json_arrays_reach_settings_adapter_as_lists(assistant_run
     assert observed == [updates] and type(observed[0]) is list and type(observed[0][0]) is dict
 
 
+def test_model_options_are_compact_paginated_and_keep_exact_current_model(monkeypatch):
+    from core.web.services import config_service
+    rows = [{"model_id": f"provider/model-{i}", "provider_id": "provider", "model": f"upstream-{i}",
+             "label": f"Model {i}", "supports_image_input": True,
+             "provider": {"api_key": "must-not-leak"}, "details": {"prompt": "x" * 10000}}
+            for i in range(80)]
+    monkeypatch.setattr(config_service, "get_agent_model_options_workspace", lambda: {"modelOptions": rows})
+    monkeypatch.setattr(directory, "get_agent", lambda _: {"llmBindings": {"dialogue": {"modelId": "provider/model-79"}}})
+    result = actions.execute_action("model_options", {}, {"agentId": "pa"})
+    assert len(result["modelOptions"]) == 20 and result["total"] == 80 and result["truncated"]
+    assert result["currentModel"]["modelId"] == "provider/model-79"
+    assert result["currentModel"]["providerId"] == "provider"
+    assert result["currentModel"]["upstreamId"] == "upstream-79"
+    assert "must-not-leak" not in json.dumps(result) and "details" not in json.dumps(result)
+    assert len(json.dumps(result)) < 6000
+    last = actions.execute_action("model_options", {"offset": 79, "limit": 1}, {"agentId": "pa"})
+    assert last["modelOptions"] == [result["currentModel"]] and not last["truncated"]
+    exact = actions.execute_action("model_options", {"model_id": "provider/model-3"}, {"agentId": "pa"})
+    assert exact["total"] == 1 and exact["modelOptions"][0]["upstreamId"] == "upstream-3"
+    searched = actions.execute_action("model_options", {"query": "UPSTREAM-79"}, {"agentId": "pa"})
+    assert searched["total"] == 1
+    with pytest.raises(ValueError):
+        actions.execute_action("model_options", {"limit": 1000}, {"agentId": "pa"})
+
+
 def test_partial_task_update_preserves_other_profile_fields(assistant_runtime, personal_env):
     target = personal_env["other"]
     directory.update_agent_instance(target, role_key="worker", task_profile={"mission": "old", "constraints": "retain"})

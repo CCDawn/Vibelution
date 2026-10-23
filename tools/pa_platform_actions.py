@@ -48,6 +48,13 @@ class ModelAdd(Arguments):
     label: str = Field(default="", max_length=120)
 
 
+class ModelOptions(Arguments):
+    query: str = Field(default="", max_length=200)
+    model_id: str = Field(default="", max_length=200)
+    offset: int = Field(default=0, ge=0, le=50000)
+    limit: int = Field(default=20, ge=1, le=30)
+
+
 class TeamStatus(Arguments):
     team_id: str | int = ""
     run_id: str = Field(min_length=1, max_length=128)
@@ -65,6 +72,7 @@ _CONTRACTS = {
     "agent_avatar": (AgentAvatar, "使用 avatar_options 中的现有图片或恢复模型默认头像。"),
     "settings_update": (SettingsUpdate, "更新应用用户名、头像预设、壁纸与普通设置；先 settings_catalog 取得 section/key/选项。"),
     "model_add": (ModelAdd, "为已配置 Provider 添加模型；不接收密钥或新网络地址。"),
+    "model_options": (ModelOptions, "精简分页模型目录；始终返回助理当前模型及其 providerId/upstreamId。可 query 搜索、model_id 精确查询，offset/limit 翻页。"),
     "team_status": (TeamStatus, "用 run_id 读取自己所建团队的状态和完成产物；team_id 可省略，将从自己的创建记录定位。可 wait_seconds 最多30秒。"),
 }
 
@@ -99,6 +107,31 @@ def _agent_receipt(agent: dict, *, reused: bool = False) -> dict:
             "displayName": agent.get("displayName", ""),
             "avatarImagePath": agent.get("avatarImagePath", ""),
             "modelId": directory.agent_dialogue_model_id(agent), "reused": reused}
+
+
+def _model_options(args: ModelOptions, runtime: dict) -> dict:
+    from core.web.services.config_service import get_agent_model_options_workspace
+
+    current_id = directory.agent_dialogue_model_id(directory.get_agent(runtime["agentId"]) or {})
+    options = []
+    for raw in get_agent_model_options_workspace().get("modelOptions", []):
+        # The native UI DTO includes routing/configuration details. Only project
+        # the public identifiers needed for model selection into tool context.
+        options.append({
+            "modelId": str(raw.get("model_id") or "")[:200],
+            "providerId": str(raw.get("provider_id") or "")[:80],
+            "upstreamId": str(raw.get("model") or "")[:200],
+            "label": str(raw.get("label") or "")[:200],
+            "supportsImageInput": raw.get("supports_image_input") if type(raw.get("supports_image_input")) is bool else None,
+        })
+    current = next((item for item in options if item["modelId"] == current_id), None)
+    query = args.query.casefold().strip()
+    matches = [item for item in options if (not args.model_id or item["modelId"] == args.model_id)
+               and (not query or query in " ".join(str(value) for value in item.values()).casefold())]
+    page = matches[args.offset:args.offset + args.limit]
+    return {"ok": True, "currentModelId": current_id, "currentModel": current,
+            "modelOptions": page, "total": len(matches), "offset": args.offset,
+            "limit": args.limit, "truncated": args.offset + len(page) < len(matches)}
 
 
 def _create(args: AgentCreate, runtime: dict) -> dict:
@@ -178,15 +211,15 @@ def execute_action(action: str, parameters: dict, runtime: dict) -> dict:
         if set(parameters) != {"action"} or not isinstance(parameters["action"], str):
             raise ValueError("describe 只接受 {action: 操作名}。")
         return {"ok": True, **action_catalog(parameters["action"])}
-    if action in {"settings_catalog", "avatar_options", "model_options"}:
+    if action == "model_options":
+        return _model_options(ModelOptions.model_validate(parameters), runtime)
+    if action in {"settings_catalog", "avatar_options"}:
         Arguments.model_validate(parameters)
         if action == "settings_catalog":
             from tools.pa_settings_actions import settings_catalog
             return {"ok": True, **settings_catalog()}
         if action == "avatar_options":
             return {"ok": True, **directory.list_agent_avatar_options()}
-        from core.web.services.config_service import get_agent_model_options_workspace
-        return {"ok": True, **get_agent_model_options_workspace()}
     contract = _CONTRACTS.get(action)
     if not contract:
         raise ValueError("此操作不可通过日常工具执行；请查询目录，高风险操作使用 personal_assistant_manage_tool 的原生审批。")

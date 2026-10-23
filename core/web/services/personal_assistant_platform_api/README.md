@@ -27,7 +27,7 @@
 | agent_update | agent_id、updates 对象。字段用 API camelCase；仅名称、模型、提示词、人物/任务档案、推理与压缩设置。局部档案更新保留其他字段，默认使用当前配置版本进行并发检查。 |
 | agent_avatar | agent_id、avatar_image_path，或 reset_to_default=true；先 avatar_options 取得现有图片。 |
 | settings_catalog / settings_update | 查看可用设置及现值，随后 updates=[{section,key,value}]。支持应用显示名、头像预设、偏好、语言、普通界面设置与现有壁纸。整批校验后事务写入并读回核验。 |
-| model_options / model_add | 查看可用模型，随后 provider_id、upstream_id，可选 model_key、label。在已配置 Provider 增加模型，不接受凭据、网络地址或 Provider 修改。 |
+| model_options / model_add | 精简目录始终包含助理 currentModel（providerId、upstreamId）；可 query 搜索、model_id 精确查询、offset/limit 分页（默认20，最多30）。随后 provider_id、upstream_id，可选 model_key、label。在已配置 Provider 增加模型，不接受凭据、网络地址或 Provider 修改。 |
 | team_status | run_id，可选 team_id、wait_seconds（0–30）。省略团队 ID 时从自己的创建回执定位，数字形式也必须匹配自己的原始 ID。只读取自有团队原生状态、Session/Turn 引用及最终团队产物，不打开任意参与者会话正文。 |
 
 删除、权限和重启仍走 `personal_assistant_manage_tool` 原生审批。
