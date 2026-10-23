@@ -43,6 +43,7 @@ import { useReportWorkbenchStartupReady } from "../../app/workbenchStartupReady"
 import { useChatSessionWarmup } from "./useChatSessionWarmup";
 import { listArchivedChatSessions } from "../../api/sessionArchive";
 import {
+  listVirtualHumanCompanionBindings,
   listVirtualHumanCompanionActivity,
   listVirtualHumanCompanions,
 } from "../../api/agentPlugins";
@@ -677,11 +678,21 @@ export function ChatCodingRouteWorkbench() {
     requestedSessionId && !requestedCompanionId && !requestedRoomId,
   );
   const companionRouteUpgradeQuery = useQuery({
-    queryKey: queryKeys.virtualHumanCompanionActivity(),
-    queryFn: listVirtualHumanCompanionActivity,
+    queryKey: queryKeys.virtualHumanCompanionBindings(),
+    queryFn: listVirtualHumanCompanionBindings,
     enabled: companionRouteUpgradeLookupEnabled,
     staleTime: 5_000,
   });
+  // The desktop observer remains the sole activity poller. Observe its cache
+  // so binding changes still reach this route after startup without another poll.
+  const companionActivityCache = useQuery({
+    queryKey: queryKeys.virtualHumanCompanionActivity(),
+    queryFn: listVirtualHumanCompanionActivity,
+    enabled: false,
+  });
+  const companionRouteUpgradeRows = companionActivityCache.dataUpdatedAt > companionRouteUpgradeQuery.dataUpdatedAt
+    ? companionActivityCache.data
+    : companionRouteUpgradeQuery.data;
   const companionsQuery = useQuery({
     queryKey: queryKeys.virtualHumanCompanions(),
     queryFn: listVirtualHumanCompanions,
@@ -2334,8 +2345,8 @@ export function ChatCodingRouteWorkbench() {
   const requestedCompanionAgentId = useMemo(() => (
     requestedCompanionId
       ? ""
-      : companionAgentIdForDirectSession(companionRouteUpgradeQuery.data, requestedSessionId)
-  ), [companionRouteUpgradeQuery.data, requestedCompanionId, requestedSessionId]);
+      : companionAgentIdForDirectSession(companionRouteUpgradeRows, requestedSessionId)
+  ), [companionRouteUpgradeRows, requestedCompanionId, requestedSessionId]);
 
   useEffect(() => {
     if (!requestedSessionId || requestedCompanionId || requestedRoomId || !requestedCompanionAgentId) {

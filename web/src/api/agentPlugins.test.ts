@@ -1,10 +1,35 @@
-import { describe, expect, it } from "vitest";
+/** @vitest-environment happy-dom */
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { listVirtualHumanCompanionBindings } from "./agentPlugins";
+import { clearControlToken, seedControlTokenForTests } from "./client";
 
 import apiSource from "./agentPlugins.ts?raw";
 import lifeApiSource from "./virtualHumanLife.ts?raw";
 import typeSource from "./types/virtualHumanLife.ts?raw";
 
 describe("virtual human life frontend API", () => {
+  afterEach(() => {
+    clearControlToken();
+    vi.unstubAllGlobals();
+  });
+
+  it("reads only route bindings through the typed transport and forwards cancellation", async () => {
+    seedControlTokenForTests();
+    const rows = [{ agentId: "companion", directSessionId: "native-session" }];
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(rows), {
+      headers: { "Content-Type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    await expect(listVirtualHumanCompanionBindings({ signal: controller.signal })).resolves.toEqual(rows);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain("/api/agent-plugins/virtual-human-life/companion-bindings");
+    expect(init.signal).toBe(controller.signal);
+  });
+
   it("owns plugin binding and companion-lobby transports outside routes", () => {
     expect(apiSource).toContain("listAgentPlugins");
     expect(apiSource).toContain("updateAgentPluginBinding");
