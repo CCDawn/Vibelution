@@ -10,11 +10,8 @@ import {
   createCodexTranscriptToolActivity,
   shouldAttachToolApprovalToActivity,
 } from "./conversationToolActivityModel";
-import {
-  dedupeCodexTranscriptCellsForDisplay,
-  settleCodexTranscriptActiveStatuses,
-  type CodexTranscriptCell,
-} from "./codexTranscriptCells";
+import { type CodexTranscriptCell } from "./codexTranscriptCells";
+import { projectVisibleTranscriptCells } from "./codexTranscriptVisibleCells";
 import {
   isNoFinalAnswerStatusContent,
   isStreamingStatusPlaceholderContent,
@@ -359,12 +356,8 @@ export function createConversationCodexSurface({
     isCompanionMode = false,
     companionVisibleSpeech = "",
   ) {
-    const visibleCells = dedupeCodexTranscriptCellsForDisplay(
-      settleCodexTranscriptActiveStatuses(
-        cells.filter((cell) => cell.kind !== "user"),
-        { turnStreaming: assistantTurnIsStreaming(message) },
-      ),
-    );
+    const turnStreaming = assistantTurnIsStreaming(message);
+    const visibleCells = projectVisibleTranscriptCells(cells, turnStreaming);
     const companionSpeech = isCompanionMode ? companionVisibleSpeech.trim() : "";
     const companionErrors = isCompanionMode
       ? visibleCells.filter((cell) => cell.kind === "error_notice")
@@ -375,7 +368,7 @@ export function createConversationCodexSurface({
     const isFinalResponseCell = (cell: CodexTranscriptCell) => (
       cell.kind === "assistant_markdown" && cell.phase !== "commentary"
     );
-    const streaming = assistantTurnIsStreaming(message);
+    const streaming = turnStreaming;
     const processCells = isCompanionMode
       ? []
       : visibleCells.filter((cell) => !isFinalResponseCell(cell));
