@@ -77,6 +77,8 @@ def test_create_bounded_worker_and_replay_does_not_duplicate(assistant_runtime, 
     assert all(result["ok"] for result in results) and len(calls) == 1
     assert calls[0]["tool_policy"]["allowedTools"] == ["agent_message_tool"]
     assert calls[0]["primary_mode"] == "chat"
+    assert "personalAssistantTask" in calls[0]["task_profile"]["responsibilities"]
+    assert "evidenceRefs" in calls[0]["task_profile"]["responsibilities"]
     with pytest.raises(ValueError, match="request_id"):
         actions.execute_action("agent_create", {**parameters, "display_name": "different"}, runtime)
 

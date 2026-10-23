@@ -135,7 +135,13 @@ def _create(args: AgentCreate, runtime: dict) -> dict:
             agent = create_agent_from_catalog_request(
                 display_name=args.display_name.strip(), primary_mode="chat", role_key="assistant_worker",
                 prompt_template_id="prompt-chat-default", llm_bindings={"dialogue": {"modelId": model_id}},
-                task_profile={"mission": args.mission or "执行用户或个人助理明确交办的任务，报告结果和依据。"},
+                task_profile={
+                    "mission": args.mission or "执行用户或个人助理明确交办的任务，报告结果和依据。",
+                    "responsibilities": "接到派遣后执行并核验任务。使用 agent_message_tool 回复原消息的来源会话，wake_target=false，thread_id沿用原消息。"
+                    "metadata_json 包含 replyToMessageId=原派遣messageId，以及 personalAssistantTask={schemaVersion:1,dispatchMessageId:原派遣messageId,"
+                    "status:completed,evidenceRefs:[session:自身sessionId#turn:当前turnId]}。仅在实际完成且有依据时使用completed；未完成报告blocked或failed。"
+                    "身份、原消息ID和turnId取自原生上下文，不得猜造；拿不到所需ID时明确报告缺口。",
+                },
                 tool_policy={"allowedTools": ["agent_message_tool"], "preferredTools": ["agent_message_tool"],
                              "networkAccess": "none", "mutationAccess": "controlled", "writeScopes": ["private"],
                              "approvalOverrides": {"agent_message_tool": "never"}, "maxCallsPerTurn": 8},
