@@ -169,8 +169,8 @@ existing.refCount += 1;
       const parkedLedgerSeq = existing.parkedLedgerSeq;
       existing.parkedLedgerSeq = 0;
       existing.parkedAtMs = 0;
-      closeExcessWarmEntries(key);      return { stream: existing.stream, reusedWarm: true, parkedLedgerSeq };
-    }
+closeExcessWarmEntries(key);
+      return { stream: existing.stream, reusedWarm: true, parkedLedgerSeq };    }
     // A closed stream can never go warm again; drop the stale entry.
     removeEntry(key, existing);
   }
@@ -185,8 +185,8 @@ closeExcessWarmEntries(key);
       parkedAtMs: 0,
       parkedListeners: [],
     });
-  }  return { stream, reusedWarm: false, parkedLedgerSeq: 0 };
 }
+  return { stream, reusedWarm: false, parkedLedgerSeq: 0 };}
 
 /**
  * Release one reference. When the count reaches zero the stream is parked:
