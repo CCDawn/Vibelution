@@ -115,6 +115,7 @@ import {
   buildConversationTurnErrorReasonRows,
   resolveConversationTurnErrorRecoveryAction,
   resolveConversationTurnErrorType,
+  resolveIterationLimitNotice,
   resolveTurnErrorTypeLabelKey,
 } from "./conversationTurnErrorPresentation";
 import { shouldCompactConversationTurnHeader } from "./conversationTurnHeaderCompaction";
@@ -689,9 +690,10 @@ export function createConversationTimelineRows({
             const shouldRenderLegacyTurnError = Boolean(
               turnErrorMessage && !displayPlanSeed.suppressProjectedError,
             );
+            const iterationLimitNotice = shouldRenderLegacyTurnError ? resolveIterationLimitNotice(message.metadata, lang) : "";
             // Failure-turn presentation: human-readable errorType chip and a
             // budget-directed recovery action instead of raw codes.
-            const turnErrorTypeLabelKey = shouldRenderLegacyTurnError
+            const turnErrorTypeLabelKey = shouldRenderLegacyTurnError && !iterationLimitNotice
               ? resolveTurnErrorTypeLabelKey(resolveConversationTurnErrorType(message))
               : "";
             const turnErrorRecoveryAction = shouldRenderLegacyTurnError
@@ -1277,7 +1279,7 @@ export function createConversationTimelineRows({
                             <span title={resolveConversationTurnErrorType(message)}>{t(turnErrorTypeLabelKey)}</span>
                           ) : null}
                         </div>
-                        <div className={styles.turnErrorNoticeText}>{renderResponseText(assistantFinalAnswerText(message))}</div>
+                        <div className={iterationLimitNotice ? styles.turnStatusText : styles.turnErrorNoticeText}>{renderResponseText(iterationLimitNotice || assistantFinalAnswerText(message))}</div>
                         {buildConversationTurnErrorReasonRows(message, lang).length > 0 ? (
                           <details className={styles.turnErrorDiagnostics}>
                             <summary className={styles.turnErrorDiagnosticsSummary}>

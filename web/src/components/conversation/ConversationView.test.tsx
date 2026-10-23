@@ -38,6 +38,7 @@ import conversationInlineMarkdownSource from "./conversationInlineMarkdown.tsx?r
 import conversationViewTypesSource from "./conversationViewTypes.ts?raw";
 import chatConversationSurfaceModelSource from "../../routes/chat/useChatConversationSurfaceModel.tsx?raw";
 import { ConversationView } from "./ConversationView";
+import { createConversationCodexSurface, type ConversationCodexSurfaceDeps } from "./conversationCodexSurface";
 import type { ConversationProcessDisplayMode } from "./conversationViewTypes";
 import { shouldShowNextStateSignalInConversation } from "./conversationNextStateSignal";
 import { isAgentInboxMessage } from "./conversationMessagePredicates";
@@ -355,6 +356,58 @@ describe("ConversationView Codex-like transcript adapter integration", () => {
 });
 
 describe("ConversationView failed-turn error presentation", () => {
+  const iterationStopNotice = "本轮已达执行上限，上下文已压缩，发送“继续”可接着处理。";
+  const iterationStopFields = {
+    reasonCode: "iteration_limit_reached",
+    reasonSummary: "本轮迭代次数已达上限，压缩完成后主动收束",
+    reasonDetail: "本轮已迭代 57 次；上下文压缩已成功完成（223016 → 156052 tokens）。",
+    providerErrorMessage: "本轮迭代次数已达上限，压缩完成后主动收束",
+    errorType: "runtime_error",
+    traceId: "1cc13d294d03",
+  };
+  function expectIterationStopNotice(html: string) {
+    expect(html.split(iterationStopNotice)).toHaveLength(2);
+    expect(html).not.toContain("请求错误");
+    expect(html).not.toContain("运行时错误");
+    expect(html).not.toContain("网页工作台这一轮执行失败");
+    expect(html).not.toContain("上游:");
+    expect(html).toContain("156052 tokens");
+    expect(html).toContain("1cc13d294d03");
+    expect(html).toContain("<details");
+    expect(html).not.toMatch(/<details[^>]*\sopen(?:=|\s|>)/);
+  }
+
+  it("renders an iteration-limit current banner as one resumable notice", () => {
+    const html = renderConversation([{ id: "stop-user", role: "user", content: "继续分析", timestamp: "2026-10-23T05:26:28Z" }], {
+      turnError: { ...iterationStopFields, message: "网页工作台这一轮执行失败。", recoverable: true, timestamp: "2026-10-23T05:35:53Z", turnId: "turn-1" },
+    });
+    expectIterationStopNotice(html);
+  });
+
+  it("renders an existing persisted iteration stop without the old runtime-error chip", () => {
+    expectIterationStopNotice(renderConversation([failedTurnMessageFixture(iterationStopFields)]));
+  });
+
+  it("keeps the canonical iteration-stop cell unfinished while presenting a concise notice", () => {
+    const surface = createConversationCodexSurface({
+      lang: "zh",
+      renderResponseText: (text: string) => <span>{text}</span>,
+    } as ConversationCodexSurfaceDeps);
+    const html = renderToStaticMarkup(surface.renderCodexTranscriptCell(failedTurnMessageFixture(iterationStopFields), {
+      id: "iteration-stop-cell",
+      messageId: "assistant-error-1",
+      kind: "error_notice",
+      status: "failed",
+      tone: "error",
+      title: "请求错误",
+      summary: "网页工作台这一轮执行失败。",
+      diagnosticSummary: iterationStopFields,
+      terminal: true,
+    }));
+    expectIterationStopNotice(html);
+    expect(html).toContain('data-codex-transcript-cell-status="failed"');
+  });
+
   function failedTurnMessageFixture(metadata: Record<string, unknown>) {
     return {
       id: "assistant-error-1",

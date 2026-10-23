@@ -129,6 +129,7 @@ import {
   buildTurnErrorDiagnosticRows,
   buildCurrentTurnErrorRows,
   summarizeCurrentTurnError,
+  resolveIterationLimitNotice,
   resolveConversationTurnErrorType,
   resolveConversationTurnErrorRecoveryAction,
   resolveSessionTurnErrorRecoveryAction,
@@ -578,6 +579,7 @@ export const ConversationView = React.memo(function ConversationView({
     () => displayMessages.some((message) => isTurnErrorMessage(message)),
     [displayMessages],
   );
+  const iterationLimitNotice = resolveIterationLimitNotice(turnError, lang);
   // A persisted turnError can outlive the answer it belongs to (provider error
   // raised after the canonical final_answer was committed). Never duplicate the
   // failure banner under a turn that already rendered its final answer.
@@ -1657,14 +1659,14 @@ export const ConversationView = React.memo(function ConversationView({
             {turnError?.message && !hasVisibleTurnErrorMessage && !turnErrorSupersededByFinalAnswer ? (
               <div className={styles.turnError} role="status" aria-live="polite">
                 <div className={styles.turnErrorText}>
-                  <span className={styles.turnErrorLabel}>{t("turnErrorLabel")}</span>
+                  <span className={styles.turnErrorLabel}>{iterationLimitNotice ? (lang === "zh" ? "运行提示" : "Turn notice") : t("turnErrorLabel")}</span>
                   <span>{summarizeCurrentTurnError(turnError, lang)}</span>
                   <details className={styles.turnErrorDiagnostics}>
                     <summary className={styles.turnErrorDiagnosticsSummary}>
                       {lang === "zh" ? "诊断详情" : "Diagnostics"}
                     </summary>
                     <div className={styles.turnErrorDiagnosticsBody}>
-                      <span className={styles.turnErrorDetail}>{turnError.message}</span>
+                      {!iterationLimitNotice ? <span className={styles.turnErrorDetail}>{turnError.message}</span> : null}
                       {buildCurrentTurnErrorRows(turnError, lang).map((row) => (
                         <span key={`${row.label}-${row.value}`} className={styles.turnErrorDetail}>
                           {row.label}: {row.value}
@@ -1703,7 +1705,7 @@ export const ConversationView = React.memo(function ConversationView({
                     </VButton>
                   ) : null}
                   {(() => {
-                    const turnErrorTypeLabelKey = turnError ? resolveTurnErrorTypeLabelKey(turnError.errorType) : "";
+                    const turnErrorTypeLabelKey = turnError && !iterationLimitNotice ? resolveTurnErrorTypeLabelKey(turnError.errorType) : "";
                     return turnErrorTypeLabelKey ? (
                       <span className={styles.turnErrorType} title={turnError?.errorType}>{t(turnErrorTypeLabelKey)}</span>
                     ) : null;
