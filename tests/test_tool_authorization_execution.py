@@ -919,11 +919,35 @@ def test_session_override_memo_keeps_unset_result_negative(monkeypatch):
     monkeypatch.setattr(session_budget_resolve, "get_session_budget_parameters", fake_resolve)
 
     runtime = _override_runtime(session_id="session-unset")
-    assert tool_authorization_service._session_override_max_calls_per_turn(dict(runtime)) == 0
-    assert tool_authorization_service._session_override_max_calls_per_turn(dict(runtime)) == 0
+    assert tool_authorization_service._session_override_max_calls_per_turn(dict(runtime)) is None
+    assert tool_authorization_service._session_override_max_calls_per_turn(dict(runtime)) is None
     assert calls["resolve"] == 1
 
     tool_authorization_service.clear_session_override_memo()
+
+
+def test_session_override_memo_distinguishes_explicit_unlimited_from_unset(monkeypatch):
+    from core.orchestration import session_budget_resolve
+
+    calls = []
+
+    def fake_resolve(session_id):
+        calls.append(session_id)
+        return SimpleNamespace(maxCallsPerTurn=0) if session_id == "session-unlimited" else None
+
+    monkeypatch.setattr(session_budget_resolve, "get_session_budget_parameters", fake_resolve)
+    tool_authorization_service.clear_session_override_memo()
+    try:
+        for _ in range(2):
+            assert tool_authorization_service._session_override_max_calls_per_turn(
+                _override_runtime(session_id="session-unlimited")
+            ) == 0
+            assert tool_authorization_service._session_override_max_calls_per_turn(
+                _override_runtime(session_id="session-unset")
+            ) is None
+        assert calls == ["session-unlimited", "session-unset"]
+    finally:
+        tool_authorization_service.clear_session_override_memo()
 
 
 def test_install_execution_authorization_records_sub_anchor_timing():
