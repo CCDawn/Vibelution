@@ -28,6 +28,7 @@ _RECEIPT_WINDOW_MULTIPLIER = 2
 # Auto-acknowledgements the assistant itself sent back (kind
 # ``agent_inbox_reply``) are responses, not PA-initiated dispatches.
 _REPLY_KIND = "agent_inbox_reply"
+_FOLLOWUP_KIND = "pa_followup"
 
 
 class PersonalAssistantDispatchesError(Exception):
@@ -119,6 +120,12 @@ def _metadata(row: dict[str, Any]) -> dict[str, Any]:
     return row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
 
 
+def _is_followup(row: dict[str, Any]) -> bool:
+    return _text(row, "kind") == _FOLLOWUP_KIND or bool(
+        _text(_metadata(row), "paFollowupOfMessageId")
+    )
+
+
 def _receipt_row(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "messageId": _text(row, "messageId") or _text(row, "eventId"),
@@ -149,6 +156,7 @@ def list_personal_assistant_dispatches(*, limit: int = DEFAULT_LIMIT) -> dict[st
         return (
             _text(payload, "sourceAgentId") == assistant_agent_id
             and _text(payload, "kind") != _REPLY_KIND
+            and not _is_followup(payload)
         )
 
     agent_rows = _agent_rows()
@@ -186,6 +194,47 @@ def list_personal_assistant_dispatches(*, limit: int = DEFAULT_LIMIT) -> dict[st
     )
 
     thread_match_cache: dict[tuple[str, str], str | None] = {}
+    followup_match_cache: dict[tuple[str, str], str | None] = {}
+
+    def _followup_origin_id(message_id: str, target_agent_id: str) -> str | None:
+        """Resolve an explicit reply to a chase in its authoritative target inbox."""
+        key = (message_id, target_agent_id)
+        if key in followup_match_cache:
+            return followup_match_cache[key]
+        target = agent_rows_by_id.get(target_agent_id)
+        if target is None or target_agent_id == assistant_agent_id:
+            return None
+        try:
+            candidates = _scan_inbox_reverse(
+                _inbox_path(target),
+                predicate=lambda payload: (
+                    (_text(payload, "messageId") or _text(payload, "eventId")) == message_id
+                    and _text(payload, "sourceAgentId") == assistant_agent_id
+                    and _text(payload, "targetAgentId") == target_agent_id
+                    and _is_followup(payload)
+                ),
+                cap=2, strict=True,
+            )
+        except Exception as exc:
+            _debug_logger.warning(
+                f"Follow-up receipt scan failed. agentId={target_agent_id} error={type(exc).__name__}"
+            )
+            candidates = []
+        origin_id = None
+        if len(candidates) == 1:
+            followup = candidates[0]
+            parent_id = _text(_metadata(followup), "paFollowupOfMessageId")
+            parents = [
+                row for row in dispatch_rows
+                if (_text(row, "messageId") or _text(row, "eventId")) == parent_id
+                and _text(row, "targetAgentId") == target_agent_id
+                and _text(row, "threadId") == _text(followup, "threadId")
+                and dispatch_inbox_agent_by_row_id.get(id(row)) == target_agent_id
+            ]
+            if len(parents) == 1:
+                origin_id = parent_id
+        followup_match_cache[key] = origin_id
+        return origin_id
 
     def _unique_thread_dispatch_id(thread_id: str, target_agent_id: str) -> str | None:
         cache_key = (thread_id, target_agent_id)
@@ -245,6 +294,14 @@ def list_personal_assistant_dispatches(*, limit: int = DEFAULT_LIMIT) -> dict[st
                 for dispatch_row in dispatch_rows
                 if reply_to == (_text(dispatch_row, "messageId") or _text(dispatch_row, "eventId"))
             ]
+            if not explicit_rows and source_agent_id:
+                parent_id = _followup_origin_id(reply_to, source_agent_id)
+                explicit_rows = [
+                    dispatch_row for dispatch_row in dispatch_rows
+                    if parent_id and parent_id == (
+                        _text(dispatch_row, "messageId") or _text(dispatch_row, "eventId")
+                    )
+                ]
             if (
                 len(explicit_rows) == 1
                 and source_agent_id

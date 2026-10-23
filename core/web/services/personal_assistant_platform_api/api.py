@@ -84,6 +84,21 @@ REQUEST_TIMEOUT_SECONDS = 10.0
 MAX_RESPONSE_CHARS = 48_000
 INDEX_ENDPOINTS_CAP = 80
 
+# Dynamic GETs were previously unreachable with concrete IDs. Enable only
+# audited metadata projections, rather than opening every tagged detail route.
+# Session detail defaults to transcriptScope=all; queued turns, artifacts and
+# room detail/list projections also expose conversation content. Session
+# catalogs/child catalogs carry lastPreview and journal searchSnippets too.
+PUBLIC_DYNAMIC_PATHS = frozenset(
+    {
+        "/api/sessions/{session_id}/llm-options",
+        "/api/sessions/{session_id}/budget-parameters",
+    }
+)
+DENIED_STATIC_PATHS = frozenset(
+    {"/api/chat-rooms", "/api/sessions", "/api/sessions/query", "/api/sessions/bootstrap"}
+)
+
 
 def platform_api_index(*, tag: str = "") -> dict[str, Any]:
     """Navigate the allowlisted GET surface of the live API."""
@@ -124,14 +139,16 @@ def platform_api_index(*, tag: str = "") -> dict[str, Any]:
 def platform_api_get(path: str, query: str = "") -> dict[str, Any]:
     """Execute one allowlisted GET against the loopback workbench API."""
 
-    normalized = str(path or "").strip()
+    normalized = str(path or "")
+    if not _is_concrete_api_path(normalized) or _has_denied_path_word(normalized):
+        return _blocked("path must be a concrete /api/ path without URL, query, fragment or encoding")
     endpoints = _allowlisted_get_endpoints()
-    if normalized not in endpoints:
+    if not any(_matches_path(template, normalized) for template in endpoints):
         return _blocked(
-            "path is not a registered GET endpoint in the allowlisted surface; call index first"
+            "path is not a registered public GET endpoint; call index or personal_assistant_query_tool"
         )
     suffix = str(query or "").strip()
-    url = f"http://127.0.0.1{_workbench_port()}{normalized}"
+    url = f"http://127.0.0.1:{_workbench_port()}{normalized}"
     if suffix:
         url = f"{url}?{suffix}"
     request = urllib.request.Request(url, method="GET")
@@ -200,11 +217,41 @@ def _filter_get_endpoints(paths: dict[str, Any]) -> dict[str, dict[str, Any]]:
             continue
         if _has_denied_path_word(str(path)):
             continue
+        if str(path) in DENIED_STATIC_PATHS:
+            continue
+        if "{" in str(path) and str(path) not in PUBLIC_DYNAMIC_PATHS:
+            continue
         result[str(path)] = {
             "tags": tags,
             "summary": str(get_op.get("summary") or "")[:120],
         }
     return result
+
+
+def _is_concrete_api_path(path: str) -> bool:
+    """Accept one unencoded path, never URL syntax or routing normalization.
+
+    IDs on the audited routes are plain identifiers. Reject encoded input
+    altogether so ASGI/proxy decoding cannot turn an ID into another path.
+    Query values keep their separate, existing passthrough semantics.
+    """
+
+    return (
+        path.startswith("/api/")
+        and not any(character in path for character in "\\?#{}%")
+        and all(32 < ord(character) < 127 for character in path)
+        and all(segment not in {"", ".", ".."} for segment in path.split("/")[1:])
+    )
+
+
+def _matches_path(template: str, path: str) -> bool:
+    """Match complete path segments; a parameter consumes exactly one ID."""
+
+    expected, actual = template.split("/"), path.split("/")
+    return len(expected) == len(actual) and all(
+        item == value or (item.startswith("{") and item.endswith("}"))
+        for item, value in zip(expected, actual)
+    )
 
 
 def _has_denied_path_word(path: str) -> bool:

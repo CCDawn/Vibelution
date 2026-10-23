@@ -25,6 +25,8 @@ AppShell 中唯一桌面助理返回订阅；普通桌宠和其他会话通知�
 仅 `/personal-assistant`，与炒股智能体、虚拟人入口并列；普通会话与虚拟人保留原有页面。
 ### 使用方式
 组合 VSplitWorkspace、VButton 与 PersonalAssistantOverview。`WORKBENCH_LAYOUT_IDS.personalAssistant` 持有概览宽度记忆。首次访问幂等创建或恢复助理；身份与原生 Session detail 的 agentId/directSessionId 均一致后才挂载 ChatCodingRoute。桌面按钮先检查原生能力，打开助理窗口并保留工作台任务。
+
+通知深链 `?panel=dispatches` 打开派遣，`?panel=affairs&item=<URL 编码的 itemId>` 打开事务并定位条目。每次路由导航（含相同 URL 再次导航）均恢复已收起的右栏并切换目标 tab；窄屏打开对应 VDialog。Route 保存本次定位的消费结果，切换 tab 或关闭再手动打开 dialog 导致事务组件重挂载时不重复定位；缺失提示仍保留，新导航 key 重新处理。普通重渲染与轮询不改变用户选择的 tab 或收起状态。
 ### 非职责
 不持有 transcript、composer、记忆副本或执行进度；原生 Session/SSE 与审批持有权威。
 ### 视觉与状态
@@ -189,7 +191,7 @@ severity 用 `--state-error`/`--state-warning` 与 `--vui-border-subtle`/`--vui-
 ### 适用范围
 `/personal-assistant` 工作台右侧 VTabs 的「事务」标签（宽屏）与窄屏 VDialog 入口。不承担主动提醒推送（归 A2 提醒链）、不写 Agent 目录、不提供第二套与工具侧不同的状态机（一切状态迁移都走后端路由，前端只失效缓存）。
 ### 使用方式
-`<PersonalAssistantAffairs agentId headerAction? />`。列表 GET `personal-affairs/affairs`（5s 轮询，与偏好面板节奏一致，kind/status 筛选进 query key）；动作互斥 actingKey，动作后失效整个 personal-affairs 前缀缓存；读取失败 VStateSurface error + 重试；动作失败 role=alert 行内提示。截止时间展示用本地 locale，编辑往返用 datetime-local 值与 ISO 转换。文案 zh/en 双语。
+`<PersonalAssistantAffairs agentId headerAction? focusItemId? focusRequestKey? focusRequestResult? onFocusRequestHandled? />`。列表 GET `personal-affairs/affairs`（5s 轮询，与偏好面板节奏一致，kind/status 筛选进 query key）；动作互斥 actingKey，动作后失效整个 personal-affairs 前缀缓存；读取失败 VStateSurface error + 重试；动作失败 role=alert 行内提示。截止时间展示用本地 locale，编辑往返用 datetime-local 值与 ISO 转换。文案 zh/en 双语。提醒导航以路由 key 为定位请求：清除当时的类型/状态筛选，待无筛选列表读取完成后聚焦并滚动至目标行；每次导航只定位一次，后续轮询和用户筛选不重置焦点。定位完成后通过回调把 found/missing 结果交给 Route，重挂载时用已消费结果恢复提示并跳过定位。条目不存在时在固定头部显示可见状态提示，列表仍可正常管理。
 ### 非职责
 不解析自然语言建事务（对话中的结构化工具才是创建入口之一，面板只做手工补录与管理）、不做催办通知、不在前端持久化任何本地缓存或草稿。
 ### 视觉与状态

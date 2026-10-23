@@ -8,6 +8,7 @@ import { fetchSessionDetail } from "../../api/chat";
 import { fetchPersonalAssistant, fetchPersonalAssistantSettings } from "../../api/personalAssistant";
 import { controlDesktopAssistant, getDesktopAssistantContext, setDesktopPetExpanded } from "../../api/desktopPet";
 import { fetchPetActivity } from "../../api/pet";
+import { fetchPersonalAffairs } from "../../api/personalAffairs";
 import type { SessionDetail } from "../../api/types";
 import type { PersonalAssistant } from "../../api/types/personalAssistant";
 import { PersonalAssistantRoute } from "../PersonalAssistantRoute";
@@ -33,6 +34,7 @@ vi.mock("../../api/desktopPet", () => ({
   controlDesktopAssistant: vi.fn(),
 }));
 vi.mock("../../api/pet", () => ({ fetchPetActivity: vi.fn() }));
+vi.mock("../../api/personalAffairs", () => ({ fetchPersonalAffairs: vi.fn() }));
 vi.mock("../../api/personalAssistantComputer", () => ({
   fetchPersonalAssistantComputer: vi.fn(async () => ({
     available: false, status: "idle", message: "", grantId: null, window: null, pending: null,
@@ -45,9 +47,13 @@ vi.mock("./PersonalAssistantOverview", () => ({
 vi.mock("./PersonalAssistantComputerPanel", () => ({
   PersonalAssistantComputerPanel: () => <div data-computer-panel="true" />,
 }));
-vi.mock("./PersonalAssistantAffairs", () => ({ PersonalAssistantAffairs: () => <div data-affairs-panel="true" /> }));
+vi.mock("./PersonalAssistantAffairs", async importOriginal => {
+  const actual = await importOriginal<typeof import("./PersonalAssistantAffairs")>();
+  return { PersonalAssistantAffairs: (props: React.ComponentProps<typeof actual.PersonalAssistantAffairs>) =>
+    <div data-affairs-panel="true" data-focus-item={props.focusItemId}><actual.PersonalAssistantAffairs {...props} /></div> };
+});
 vi.mock("./PersonalAssistantDispatches", () => ({
-  PersonalAssistantDispatches: () => <div data-dispatches-panel="true">派遣面板</div>,
+  PersonalAssistantDispatches: ({ headerAction }: { headerAction?: React.ReactNode }) => <div data-dispatches-panel="true">{headerAction}派遣面板</div>,
 }));
 vi.mock("../desktopPet/WhaleRigCharacter", () => ({
   WhaleRigCharacter: () => <span>大肥鲸</span>,
@@ -72,6 +78,11 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(fetchPersonalAssistant).mockResolvedValue({ assistant });
   vi.mocked(fetchPersonalAssistantSettings).mockResolvedValue({ settings: null });
+  vi.mocked(fetchPersonalAffairs).mockResolvedValue({
+    schemaVersion: 1, agentId: assistant.agentId, updatedAt: "", counts: { open: 1, overdue: 0, done: 0 },
+    items: [{ schemaVersion: 1, itemId: "affair/two words", kind: "todo", title: "提醒目标", note: "", status: "open",
+      dueAt: "", createdAt: "", updatedAt: "", completedAt: "", sourceTurnId: "", dueState: "none" }],
+  });
   vi.mocked(fetchSessionDetail).mockResolvedValue({
     id: assistant.directSessionId,
     agentId: assistant.agentId,
@@ -124,6 +135,90 @@ async function render(path: string, innerWidth: number) {
 }
 
 describe("personal assistant dispatch deep link for completion notices", () => {
+  it("retains missing-target feedback after consumption and panel remount", async () => {
+    await render("/personal-assistant?panel=affairs&item=deleted-item", 1200);
+    expect(container.querySelector('[data-affairs-panel="true"] [role="status"]')?.textContent).toContain("提醒对应的事务已不存在");
+    await act(async () => container.querySelector('[role="tab"][id$="overview"]')!
+      .dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })));
+    await settle();
+    expect(container.querySelector('[data-affairs-panel="true"]')).toBeNull();
+    await act(async () => container.querySelector('[role="tab"][id$="affairs"]')!
+      .dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })));
+    await settle();
+    expect(container.querySelector('[data-affairs-panel="true"] [role="status"]')?.textContent).toContain("提醒对应的事务已不存在");
+  });
+
+  it.each([1200, 640])("consumes an affair navigation across real panel remounts at %ipx", async width => {
+    const scroll = vi.fn();
+    if (!HTMLElement.prototype.scrollIntoView) HTMLElement.prototype.scrollIntoView = () => {};
+    vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(scroll);
+    const path = "/personal-assistant?panel=affairs&item=affair%2Ftwo%20words";
+    await render(path, width);
+    expect(scroll).toHaveBeenCalledTimes(1);
+    const toggleTab = async (tab: string) => {
+      await act(async () => container.querySelector(`[role="tab"][id$="${tab}"]`)!
+        .dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })));
+      await settle();
+    };
+    if (width === 1200) {
+      await toggleTab("overview");
+      expect(container.querySelector('[data-affairs-panel="true"]')).toBeNull();
+      await toggleTab("affairs");
+    } else {
+      await act(async () => (document.body.querySelector('[role="dialog"] button[aria-label="Close"]') as HTMLButtonElement).click());
+      await settle();
+      expect(document.body.querySelector('[data-affairs-panel="true"]')).toBeNull();
+      await act(async () => ([...container.querySelectorAll("button")].find(button => button.textContent === "事务") as HTMLButtonElement).click());
+      await settle();
+    }
+    expect(document.body.querySelector('[data-affairs-panel="true"]')).not.toBeNull();
+    expect(scroll).toHaveBeenCalledTimes(1);
+    await act(async () => router.navigate(path));
+    await settle();
+    expect(scroll).toHaveBeenCalledTimes(2);
+  });
+
+  it("restores a collapsed aside when navigating to dispatches", async () => {
+    await render("/personal-assistant", 1200);
+    const collapse = container.querySelector('button[aria-label="收起平台概览"]') as HTMLButtonElement;
+    expect(collapse).not.toBeNull();
+    await act(async () => collapse.click());
+    expect(container.querySelector('[data-vui="split-aside"]')?.getAttribute("data-collapsed")).toBe("true");
+    await act(async () => router.navigate("/personal-assistant?panel=dispatches"));
+    await settle();
+    expect(container.querySelector('[data-dispatches-panel="true"]')).not.toBeNull();
+    expect(container.querySelector('[data-vui="split-aside"]')?.getAttribute("data-collapsed")).toBe("false");
+  });
+
+  it("restores dispatches after the same notification URL is clicked again", async () => {
+    await render("/personal-assistant?panel=dispatches", 1200);
+    await act(async () => (container.querySelector('button[aria-label="收起平台概览"]') as HTMLButtonElement).click());
+    await act(async () => router.navigate("/personal-assistant?panel=dispatches"));
+    await settle();
+    expect(container.querySelector('[data-dispatches-panel="true"]')).not.toBeNull();
+    expect(container.querySelector('[data-vui="split-aside"]')?.getAttribute("data-collapsed")).toBe("false");
+  });
+
+  it.each([1200, 640])("opens an affair reminder and forwards its decoded item id at %ipx", async width => {
+    await render("/personal-assistant?panel=affairs&item=affair%2Ftwo%20words", width);
+    expect(document.body.querySelector('[data-affairs-panel="true"]')?.getAttribute("data-focus-item")).toBe("affair/two words");
+    if (width === 1200) expect(container.querySelector('[role="tab"][id$="affairs"]')?.getAttribute("data-state")).toBe("active");
+    else expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
+  });
+
+  it("reopens a dismissed narrow dialog on the same notification URL", async () => {
+    const path = "/personal-assistant?panel=dispatches";
+    await render(path, 640);
+    const close = document.body.querySelector('[role="dialog"] button[aria-label="Close"]') as HTMLButtonElement;
+    expect(close).not.toBeNull();
+    await act(async () => close.click());
+    await settle();
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+    await act(async () => router.navigate(path));
+    await settle();
+    expect(document.body.querySelector('[data-dispatches-panel="true"]')).not.toBeNull();
+  });
+
   it("wide layout: ?panel=dispatches activates the dispatches rail tab", async () => {
     await render("/personal-assistant?panel=dispatches", 1200);
     const tab = container.querySelector('[role="tab"][id$="dispatches"]');

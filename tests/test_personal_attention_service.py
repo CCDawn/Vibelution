@@ -1077,13 +1077,27 @@ def test_affair_reminder_attention_maps_due_open_items_with_day_scoped_ids(monke
     assert rows[0]["severity"] == "high"
     assert rows[0]["title"] == "事务提醒：整理 周报"
     assert rows[0]["body"].startswith("截止 ")
-    assert rows[0]["targetUrl"] == "/personal-assistant"
+    assert rows[0]["targetUrl"] == "/personal-assistant?panel=affairs&item=affair-overdue"
     assert rows[1]["severity"] == "medium"
     day_key = rows[0]["id"].rsplit(":", 1)[1]
     assert len(day_key) == 8 and day_key.isdigit()
     assert {row["id"].split(":")[1] for row in rows}.isdisjoint(
         {"affair-done", "affair-cancelled", "affair-upcoming", "affair-nodue"}
     )
+
+
+def test_affair_reminder_deep_link_encodes_the_item_id(monkeypatch):
+    from urllib.parse import parse_qs, urlsplit
+
+    item_id = "事务 /?&通知"
+    fake = _FakeAffairsService([_affair(item_id)])
+    affairs_web = _patch_affairs(monkeypatch, fake)
+    monkeypatch.setattr(service, "profile_agent", lambda: {"agentId": "assistant-agent"})
+
+    target = urlsplit(affairs_web.collect_affair_reminder_attention()[0]["targetUrl"])
+
+    assert target.path == "/personal-assistant"
+    assert parse_qs(target.query) == {"panel": ["affairs"], "item": [item_id]}
 
 
 def test_affair_reminder_attention_caps_and_degrades_safely(monkeypatch):

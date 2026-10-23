@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ClipboardList } from "lucide-react";
 
 import {
@@ -51,6 +51,7 @@ const COPY = {
     retry: "重试",
     loading: "正在读取事务…",
     saveFailed: "操作失败，请稍后重试。",
+    missingTarget: "提醒对应的事务已不存在，可能已被删除。",
   },
   en: {
     title: "Affairs",
@@ -80,6 +81,7 @@ const COPY = {
     retry: "Retry",
     loading: "Loading affairs…",
     saveFailed: "Failed to apply; please retry later.",
+    missingTarget: "The affair for this reminder no longer exists; it may have been deleted.",
   },
 } as const;
 
@@ -113,15 +115,25 @@ function toIsoInputValue(value: string): string {
   return date.toISOString();
 }
 
-export function PersonalAssistantAffairs({ agentId, headerAction }: {
+export function PersonalAssistantAffairs({ agentId, headerAction, focusItemId, focusRequestKey,
+  focusRequestResult, onFocusRequestHandled }: {
   agentId: string;
   headerAction?: ReactNode;
+  focusItemId?: string;
+  focusRequestKey?: string;
+  focusRequestResult?: "found" | "missing";
+  onFocusRequestHandled?: (requestKey: string, result: "found" | "missing") => void;
 }) {
   const { lang } = useShellI18n();
   const copy = COPY[lang];
   const queryClient = useQueryClient();
   const [kindFilter, setKindFilter] = useState<PersonalAffairKind | "">("");
   const [statusFilter, setStatusFilter] = useState<PersonalAffairStatus | "">("");
+  const itemRefs = useRef(new Map<string, HTMLLIElement>());
+  const [pendingTarget, setPendingTarget] = useState<{
+    itemId: string; requestKey?: string; agentId: string;
+  } | null>(null);
+  const [missingTarget, setMissingTarget] = useState(false);
   const [newKind, setNewKind] = useState<PersonalAffairKind>("todo");
   const [newTitle, setNewTitle] = useState("");
   const [newDue, setNewDue] = useState("");
@@ -139,6 +151,34 @@ export function PersonalAssistantAffairs({ agentId, headerAction }: {
     refetchIntervalInBackground: false,
   });
   const data = affairs.data;
+
+  useEffect(() => {
+    // Route 保存已消费结果，tab/dialog 重挂载不重置筛选或重复定位。
+    if (focusRequestResult) {
+      setMissingTarget(focusRequestResult === "missing");
+      return;
+    }
+    setMissingTarget(false);
+    setPendingTarget(focusItemId ? { itemId: focusItemId, requestKey: focusRequestKey, agentId } : null);
+    if (focusItemId) {
+      setKindFilter("");
+      setStatusFilter("");
+    }
+  }, [agentId, focusItemId, focusRequestKey, focusRequestResult]);
+
+  useEffect(() => {
+    // 等待无筛选的权威列表；定位完成后不因轮询或用户改筛选再抢焦点。
+    if (focusRequestResult || !pendingTarget || pendingTarget.itemId !== focusItemId || pendingTarget.requestKey !== focusRequestKey
+      || pendingTarget.agentId !== agentId || kindFilter || statusFilter || !affairs.isSuccess || affairs.isFetching) return;
+    const item = itemRefs.current.get(pendingTarget.itemId);
+    if (item) {
+      item.focus({ preventScroll: true });
+      item.scrollIntoView?.({ block: "center" });
+    } else setMissingTarget(true);
+    setPendingTarget(null);
+    if (pendingTarget.requestKey) onFocusRequestHandled?.(pendingTarget.requestKey, item ? "found" : "missing");
+  }, [pendingTarget, focusItemId, focusRequestKey, focusRequestResult, onFocusRequestHandled,
+    agentId, kindFilter, statusFilter, affairs.isSuccess, affairs.isFetching, data]);
 
   async function refresh() {
     await queryClient.invalidateQueries({ queryKey: ["agents", agentId, "plugins", "personal-affairs"] });
@@ -216,6 +256,7 @@ export function PersonalAssistantAffairs({ agentId, headerAction }: {
         </div>
         <div className={styles.headerActions}>{headerAction}</div>
       </header>
+      {missingTarget ? <p className={styles.error} role="status">{copy.missingTarget}</p> : null}
     </div>
     <div className={styles.content}>
       {affairs.isError ? <VStateSurface density="compact" tone="error" title={copy.loadFailed}
@@ -266,7 +307,8 @@ export function PersonalAssistantAffairs({ agentId, headerAction }: {
               ...STATUS_OPTIONS.map(value => ({ value, label: copy.statusLabels[value] }))]} />
         </div>
         {items.length ? <ul className={styles.list}>
-          {items.map(item => <li key={item.itemId}>
+          {items.map(item => <li key={item.itemId} tabIndex={-1} className={styles.focusItem}
+            ref={node => { if (node) itemRefs.current.set(item.itemId, node); else itemRefs.current.delete(item.itemId); }}>
             <div className={styles.item}>
               <div className={styles.itemHead}>
                 <span className={styles.itemCopy}>
