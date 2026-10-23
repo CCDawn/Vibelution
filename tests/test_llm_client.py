@@ -4126,6 +4126,206 @@ def _bare_llm_client(backend, adapter_id):
     return client
 
 
+def _request_slot_case(transport):
+    client = _bare_llm_client(_default_completion_backend, (
+        "anthropic_messages_native" if transport.startswith("anthropic") else "openai_chat"
+    ))
+    client._cancellable_responses_stream_lock = client._cancellable_responses_request_lock
+    client._cancellable_completion_stream_lock = client._cancellable_completion_request_lock
+    responses = transport.startswith("responses")
+    lock = (client._cancellable_responses_request_lock if responses
+            else client._cancellable_completion_request_lock)
+    payload = {"input": "ping"} if responses else {"messages": [{"role": "user", "content": "ping"}]}
+    payload["stream"] = transport.endswith("stream")
+    if payload["stream"]:
+        prepare = (client._prepare_cancellable_responses_stream if responses
+                   else client._prepare_cancellable_chat_stream)
+    else:
+        prepare = client._prepare_cancellable_non_stream_request
+    return client, lock, payload, prepare
+
+
+@pytest.mark.parametrize("transport", [
+    "responses_stream", "chat_stream", "anthropic_stream",
+    "responses_invoke", "chat_invoke", "anthropic_invoke",
+])
+def test_client_request_lock_wait_is_bounded_without_touching_holder(monkeypatch, transport):
+    from core.llm import client as module
+
+    client, lock, payload, prepare = _request_slot_case(transport)
+    monkeypatch.setattr(module, "_LLM_ROUTE_GATE_WAIT_LIMIT", 0.04)
+    created = []
+
+    def unexpected_transport(*args):
+        created.append(True)
+        raise RuntimeError("transport must not be created while its slot is occupied")
+
+    monkeypatch.setattr(client, "_get_or_create_cancellable_client", unexpected_transport)
+    result = []
+    done = threading.Event()
+    lock.acquire()
+
+    def attempt():
+        try:
+            with llm_cancel_context(lambda: "", enable_chat_provider_abort=True):
+                _prepared, finish = prepare(payload)
+                finish()
+        except BaseException as exc:
+            result.append(exc)
+        finally:
+            done.set()
+
+    worker = threading.Thread(target=attempt, daemon=True)
+    worker.start()
+    try:
+        assert done.wait(1.0), "request slot waited beyond its budget"
+        assert lock.locked(), "a rejected waiter released the active request's slot"
+        assert created == []
+        assert len(result) == 1 and isinstance(result[0], LLMError)
+        assert result[0].category == "gate_timeout"
+        assert result[0].details["stage"] == "client_request_lock"
+    finally:
+        lock.release()
+        worker.join(2.0)
+    assert not worker.is_alive()
+
+
+@pytest.mark.parametrize("transport", ["responses_stream", "chat_stream", "responses_invoke"])
+@pytest.mark.parametrize("factory_fails", [False, True])
+def test_client_request_lock_handoff_cleans_up_on_success_and_factory_error(
+    monkeypatch, transport, factory_fails,
+):
+    client, lock, payload, prepare = _request_slot_case(transport)
+    handler = SimpleNamespace(close=lambda: pytest.fail("active transport was closed"))
+
+    def factory(attr, _factory, _payload):
+        if factory_fails:
+            raise RuntimeError("fixture factory failure")
+        setattr(client, attr, handler)
+        return handler
+
+    monkeypatch.setattr(client, "_get_or_create_cancellable_client", factory)
+    from core.llm import client as module
+    monkeypatch.setattr(module, "_llm_route_gate_wait_seconds", lambda: 2.0)
+    errors = []
+    waiting = threading.Event()
+    lock.acquire()
+
+    def attempt():
+        try:
+            with llm_cancel_context(lambda: "", enable_chat_provider_abort=True):
+                waiting.set()
+                prepared, finish = prepare(payload)
+                assert prepared["client"] is handler
+                assert lock.locked()
+                finish()
+                finish()
+        except BaseException as exc:
+            errors.append(exc)
+
+    worker = threading.Thread(target=attempt, daemon=True)
+    worker.start()
+    try:
+        assert waiting.wait(1.0)
+    finally:
+        lock.release()
+        worker.join(2.0)
+    assert not worker.is_alive()
+    assert not lock.locked()
+    if factory_fails:
+        assert len(errors) == 1 and str(errors[0]) == "fixture factory failure"
+    else:
+        assert errors == []
+
+
+@pytest.mark.parametrize("source", ["reason", "stop_event", "turn_scope"])
+def test_client_request_lock_cancellation_precedes_even_free_slot(monkeypatch, source):
+    from core.llm import client as module
+
+    client = LLMClient.__new__(LLMClient)
+    checker = lambda: "cancelled" if source == "reason" else ""
+    stop = threading.Event()
+    checker._vibelution_stop_event = stop
+    if source == "stop_event":
+        stop.set()
+    monkeypatch.setattr(module, "_LLM_TURN_CANCEL_STATES", (
+        {"cancelled-slot-turn": ("turn abandoned", time.time())}
+        if source == "turn_scope" else {}
+    ))
+
+    class FreeSlot:
+        def acquire(self, **kwargs):
+            raise AssertionError("cancelled request acquired a transport slot")
+
+    with module.llm_status_context(turnId="cancelled-slot-turn"), llm_cancel_context(checker):
+        with pytest.raises(module.LLMCancelledError):
+            client._acquire_cancellable_request_lock(FreeSlot(), checker)
+
+
+@pytest.mark.parametrize("race", ["cancelled", "expired"])
+def test_client_request_lock_rechecks_handoff_and_releases_only_own_slot(monkeypatch, race):
+    from core.llm import client as module
+
+    client = LLMClient.__new__(LLMClient)
+    state = {"cancelled": False, "expired": False, "releases": 0}
+    checker = lambda: "cancelled at handoff" if state["cancelled"] else ""
+
+    class HandoffSlot:
+        def acquire(self, *, timeout):
+            assert timeout <= 0.05
+            state[race] = True
+            return True
+
+        def release(self):
+            state["releases"] += 1
+
+    monkeypatch.setattr(module, "_llm_route_gate_wait_seconds", lambda: 1.0)
+    # A private clock replacement avoids changing other modules' time source.
+    clock = SimpleNamespace(monotonic=lambda: 2.0 if state["expired"] else 0.0)
+    monkeypatch.setattr(module, "time", clock)
+    expected = module.LLMCancelledError if race == "cancelled" else LLMError
+    with llm_cancel_context(checker), pytest.raises(expected):
+        client._acquire_cancellable_request_lock(HandoffSlot(), checker)
+    assert state["releases"] == 1
+
+
+def test_client_request_lock_can_cancel_while_holder_stays_active(monkeypatch):
+    from core.llm import client as module
+
+    client = LLMClient.__new__(LLMClient)
+    stop = threading.Event()
+    checker = lambda: ""
+    checker._vibelution_stop_event = stop
+    lock = threading.Lock()
+    lock.acquire()
+    entered = threading.Event()
+    done = threading.Event()
+    errors = []
+    monkeypatch.setattr(module, "_llm_route_gate_wait_seconds", lambda: 5.0)
+
+    def wait_for_slot():
+        try:
+            entered.set()
+            client._acquire_cancellable_request_lock(lock, checker)
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            done.set()
+
+    worker = threading.Thread(target=wait_for_slot, daemon=True)
+    worker.start()
+    try:
+        assert entered.wait(1.0)
+        stop.set()
+        assert done.wait(1.0)
+        assert lock.locked()
+        assert len(errors) == 1 and isinstance(errors[0], module.LLMCancelledError)
+    finally:
+        lock.release()
+        worker.join(1.0)
+    assert not worker.is_alive()
+
+
 def _client_with_native_anthropic_route(config):
     """Build a real LLMClient whose route is forced to anthropic_messages_native.
 
