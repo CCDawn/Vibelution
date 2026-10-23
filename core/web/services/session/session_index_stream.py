@@ -99,6 +99,22 @@ _INDEX_PATCH_FIELDS = (
 )
 
 
+def index_patch_from_detail(detail: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Pick the index-row fields a settled detail projection can hand the rail.
+
+    Only keys the detail actually carries are forwarded: an absent key must not
+    clear the row's current value, so the rail keeps whatever it already shows.
+    """
+
+    if not isinstance(detail, Mapping):
+        return {}
+    return {
+        field_name: detail[field_name]
+        for field_name in _INDEX_PATCH_FIELDS
+        if field_name in detail
+    }
+
+
 def _normalize_index_patch(patch: Mapping[str, Any] | None) -> dict[str, Any]:
     """Keep only the index-row fields a rail can apply without a refetch.
 
@@ -151,6 +167,25 @@ def publish_session_index_delta(
     return len(subscribers)
 
 
+def publish_session_index_change_safely(
+    session_id: str,
+    change_type: str,
+    *,
+    patch: Mapping[str, Any] | None = None,
+) -> int:
+    """Publish one index change without letting a rail failure reach the caller.
+
+    Removal and archive are metadata flips: nothing about them may fail a user
+    action just because nobody holds a rail connection, so every transport
+    problem degrades to "no listeners" instead of surfacing.
+    """
+
+    try:
+        return publish_session_index_delta(session_id, change_type, patch=patch)
+    except Exception:
+        return 0
+
+
 def encode_session_index_sse_frame(payload: dict[str, Any]) -> str:
     body = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     event_type = str(payload.get("type") or "message")
@@ -199,8 +234,10 @@ __all__ = [
     "SESSION_INDEX_CHANGE_REMOVED",
     "SESSION_INDEX_CHANGE_UPSERTED",
     "encode_session_index_sse_frame",
+    "index_patch_from_detail",
     "normalize_session_index_change_type",
     "publish_session_index_delta",
+    "publish_session_index_change_safely",
     "session_index_subscriber_count",
     "stream_session_index_events_async",
     "subscribe_session_index_events",
