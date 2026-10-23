@@ -7,6 +7,7 @@
 
 | 文件 | Status | 说明 |
 | --- | --- | --- |
+| [2026-10-23-launcher-personal-assistant-migration.md](2026-10-23-launcher-personal-assistant-migration.md) | PROPOSED（未实施） | Launcher 托管常驻助理：独立运行包与会话、跨项目授权/API、数据迁移、团队恢复、分阶段验收与回滚；仅方案 |
 | [2026-10-18-platform-a2a-evolution-harness.md](2026-10-18-platform-a2a-evolution-harness.md) | 产品方向已确认；待实施 | 复用既有 Agent 通信的个人助理→总监→开发/独立验收自迭代；补调度、结果关联和授权合入；部署由用户决定；仅方案 |
 | [2026-09-12-session-ledger-archival-constraints.md](2026-09-12-session-ledger-archival-constraints.md) | PROPOSED（未实施） | 账本归档设计约束（9 条必处理 + 8 风险点）+ 2026-09-12 体检基线（854 个 / 98.1MB）；配套只读工具 `scripts/report_session_ledgers.py` |
 | [research-flow-v2.md](research-flow-v2.md) | 通用科研流程在研入口 | 三阶段（方向与假说、基线实验、按证据迭代）与决策 Agent；CUDA 第三阶段验收不再作为关闭条件 |
