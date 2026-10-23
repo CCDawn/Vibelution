@@ -218,3 +218,24 @@ def test_custom_prompt_has_private_template_and_preserves_existing_customization
     public_presets.ensure_public_agent_presets()
     assert prompt_template_service.get_prompt_template(template_id)["content"] == "用户修改后的工作约定"
     assert prompt_template_service.get_prompt_template("prompt-chat-default") == original_shared
+
+
+def test_catalog_prompt_template_ids_resolve_through_runtime_registry(tmp_path, monkeypatch):
+    """每个公共预设透传的 promptTemplateId 必须能被运行时解析，否则新装环境角色提示词静默为空。"""
+    from core.web.services import prompt_template_service
+
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path))
+    monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
+    for preset in public_presets.load_public_agent_presets():
+        if str(preset.get("promptContent") or "").strip():
+            continue  # 自带正文的预设物化私有模板，不消费注册表 templateId
+        template_id = str(preset.get("promptTemplateId") or "").strip()
+        assert template_id, f"preset {preset['key']} has neither promptContent nor promptTemplateId"
+        context = prompt_template_service.build_agent_prompt_template_context(template_id, project_root=tmp_path)
+        assert context["reason"] == "", (preset["key"], template_id, context["reason"])
+        assert context["contextBlock"].strip(), (preset["key"], template_id)
+    audit = prompt_template_service.build_agent_prompt_template_context(
+        "prompt-code-delivery-audit", project_root=tmp_path)
+    assert audit["reason"] == ""
+    assert audit["promptTemplateId"] == "prompt-code-delivery-audit"
+    assert "## 工作流" in audit["contextBlock"]
