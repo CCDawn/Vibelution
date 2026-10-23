@@ -290,6 +290,7 @@ from .agent_directory.repair_store import (
     _workspace_path,
     default_state,
     load_agent_record,
+    load_agent_records,
     load_state,
     repair_agent_directory,
     save_state,

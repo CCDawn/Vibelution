@@ -509,3 +509,144 @@ def test_load_agent_record_is_thread_safe(agent_registry_env):
     with ThreadPoolExecutor(max_workers=8) as pool:
         list(pool.map(read_and_mutate, range(8)))
     assert agent_directory_service.load_state()["agents"][0]["metadata"]["values"] == ["original"]
+
+
+@pytest.mark.parametrize("warm", [False, True])
+def test_load_agent_records_copies_only_matching_rows(agent_registry_env, monkeypatch, warm):
+    from core.web.services.agent_directory import repair_store
+
+    agent_directory_service.save_state({"agents": [
+        {"agentId": "by-id", "metadata": {"nested": ["original"]}},
+        {"agentId": "unrelated", "metadata": {"large": ["untouched"] * 100}},
+        {"agentId": "by-session", "directSessionId": "direct", "metadata": {"nested": ["original"]}},
+    ]})
+    if warm:
+        agent_directory_service.load_state()
+    original_copy = repair_store._copy_json_value
+    copied_agents = []
+
+    def tracked_copy(value):
+        if isinstance(value, dict) and "agentId" in value:
+            assert value["agentId"] != "unrelated"
+            copied_agents.append(value["agentId"])
+        assert not (isinstance(value, dict) and "agents" in value)
+        return original_copy(value)
+
+    def unexpected_full_read_or_write(*args, **kwargs):
+        pytest.fail("Targeted reads must not copy the full registry, repair, or write")
+
+    monkeypatch.setattr(repair_store, "_copy_json_value", tracked_copy)
+    monkeypatch.setattr(agent_directory_service, "load_state", unexpected_full_read_or_write)
+    monkeypatch.setattr(agent_directory_service, "repair_agent_directory", unexpected_full_read_or_write)
+    monkeypatch.setattr(agent_directory_service, "save_state", unexpected_full_read_or_write)
+    first = agent_directory_service.load_agent_records(agent_ids=(value for value in [" by-id ", "by-id"]), direct_session_ids=[" direct "])
+    assert copied_agents == ["by-id", "by-session"]
+    first[0]["metadata"]["nested"].append("local mutation")
+    first[1]["metadata"]["nested"].append("local mutation")
+    first.append({"agentId": "local"})
+    second = agent_directory_service.load_agent_records(agent_ids=["by-id"], direct_session_ids=["direct"])
+    assert copied_agents == ["by-id", "by-session", "by-id", "by-session"]
+    assert [row["metadata"]["nested"] for row in second] == [["original"], ["original"]]
+    assert agent_directory_service.load_agent_records(agent_ids=["missing"], direct_session_ids=["missing"]) == []
+
+
+def test_load_agent_records_does_not_visit_unrelated_nested_values(agent_registry_env, monkeypatch):
+    from core.web.services.agent_directory import repair_store
+
+    class UnrelatedContents(dict):
+        def items(self):
+            pytest.fail("Unselected record contents must not be traversed")
+
+    snapshot = {"agents": [
+        {"agentId": "unrelated", "metadata": UnrelatedContents(secret="untouched")},
+        {"agentId": "selected", "metadata": {"nested": ["original"]}},
+    ]}
+    monkeypatch.setattr(repair_store, "_load_state_snapshot_locked", lambda: snapshot)
+    assert agent_directory_service.load_agent_records(agent_ids=["selected"]) == [snapshot["agents"][1]]
+
+
+@pytest.mark.parametrize("selection", [{}, {"agent_ids": ["", " "]}, {"direct_session_ids": ["", " "]}])
+def test_load_agent_records_empty_selection_does_not_widen_or_load(monkeypatch, selection):
+    from core.web.services.agent_directory import repair_store
+
+    def unexpected_load():
+        pytest.fail("Empty selection must not load or copy the registry")
+
+    monkeypatch.setattr(repair_store, "_load_state_snapshot_locked", unexpected_load)
+    monkeypatch.setattr(repair_store, "_copy_json_value", unexpected_load)
+    assert agent_directory_service.load_agent_records(**selection) == []
+
+
+def test_load_agent_records_preserves_union_collisions_archived_and_duplicate_order(agent_registry_env):
+    agents = [
+        {"agentId": "duplicate", "directSessionId": "shared", "status": "archived", "displayName": "First"},
+        {"agentId": "unrelated", "directSessionId": "other"},
+        {"agentId": "duplicate", "directSessionId": "different", "status": "active", "displayName": "Second"},
+        {"agentId": "collision", "directSessionId": "shared", "status": "archived", "displayName": "Third"},
+        {"agentId": "duplicate", "directSessionId": "shared", "status": "active", "displayName": "Fourth"},
+    ]
+    agent_directory_service.save_state({"agents": agents})
+    rows = agent_directory_service.load_agent_records(agent_ids=["duplicate"], direct_session_ids=(value for value in ["shared", "shared"]))
+    assert [row["displayName"] for row in rows] == ["First", "Second", "Third", "Fourth"]
+    assert [row["status"] for row in rows] == ["archived", "active", "archived", "active"]
+
+
+def test_load_agent_records_direct_match_includes_last_duplicate_identity_record(agent_registry_env):
+    agent_directory_service.save_state({"agents": [
+        {"agentId": "duplicate", "directSessionId": "target", "status": "active", "displayName": "Earlier"},
+        {"agentId": "unrelated", "directSessionId": "other", "status": "active"},
+        {"agentId": "duplicate", "directSessionId": "other", "status": "archived", "displayName": "Last"},
+    ]})
+    full_rows = agent_directory_service.load_state()["agents"]
+    rows = agent_directory_service.load_agent_records(direct_session_ids=["target"])
+
+    assert [row["displayName"] for row in rows] == ["Earlier", "Last"]
+    assert {row["agentId"]: row for row in rows} == {
+        row["agentId"]: row for row in full_rows if row["agentId"] == "duplicate"
+    }
+    assert rows[-1]["status"] == "archived"
+    assert rows[-1]["directSessionId"] == "other"
+
+
+def test_load_agent_records_does_not_expand_anonymous_direct_matches(monkeypatch):
+    from core.web.services.agent_directory import repair_store
+
+    matched = {"directSessionId": "target", "displayName": "Anonymous match"}
+    unrelated = {"agentId": "", "directSessionId": "other", "displayName": "Unrelated anonymous"}
+    monkeypatch.setattr(repair_store, "_load_state_snapshot_locked", lambda: {"agents": [matched, unrelated]})
+    assert agent_directory_service.load_agent_records(direct_session_ids=["target"]) == [matched]
+
+
+@pytest.mark.parametrize("write_mode", ["save", "external", "replace", "delete"])
+def test_load_agent_records_observes_registry_changes(agent_registry_env, write_mode):
+    agent_directory_service.save_state({"agents": [{"agentId": "target", "directSessionId": "before"}]})
+    assert agent_directory_service.load_agent_records(direct_session_ids=["before"])[0]["agentId"] == "target"
+    state = agent_directory_service.load_state()
+    state["agents"][0]["directSessionId"] = "after-external-change"
+    registry = agent_directory_service.registry_path()
+    if write_mode == "save":
+        agent_directory_service.save_state(state)
+    elif write_mode == "external":
+        registry.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    elif write_mode == "replace":
+        replacement = registry.with_name("replacement.json")
+        replacement.write_text(json.dumps(state, indent=2), encoding="utf-8")
+        replacement.replace(registry)
+    else:
+        registry.unlink()
+    assert agent_directory_service.load_agent_records(direct_session_ids=["before"]) == []
+    rows = agent_directory_service.load_agent_records(direct_session_ids=["after-external-change"])
+    assert rows == [] if write_mode == "delete" else rows[0]["agentId"] == "target"
+
+
+def test_load_agent_records_isolates_project_roots(agent_registry_env):
+    root, _ = agent_registry_env
+    other_root = root.parent / "other-project"
+    other_root.mkdir()
+    _write_identity(other_root, "other-project")
+    agent_directory_service.save_state({"agents": [{"agentId": "same-id", "directSessionId": "same-direct", "displayName": "First"}]})
+    assert agent_directory_service.load_agent_records(agent_ids=["same-id"])[0]["displayName"] == "First"
+    with agent_directory_service.scoped_project_root(other_root):
+        agent_directory_service.save_state({"agents": [{"agentId": "same-id", "directSessionId": "same-direct", "displayName": "Second"}]})
+        assert agent_directory_service.load_agent_records(direct_session_ids=["same-direct"])[0]["displayName"] == "Second"
+    assert agent_directory_service.load_agent_records(direct_session_ids=["same-direct"])[0]["displayName"] == "First"

@@ -2402,6 +2402,41 @@ def load_agent_record(agent_id: str, *, include_archived: bool = True) -> dict[s
     return None
 
 
+def load_agent_records(
+    *, agent_ids: Iterable[str] = (), direct_session_ids: Iterable[str] = (),
+) -> list[dict[str, Any]]:
+    """Copy the identity closure of matching rows in registry order.
+
+    A direct-session match includes all raw rows for that Agent ID, preserving
+    the last-record-wins semantics of full-registry projections. Archived and
+    duplicate rows remain intact; anonymous direct matches are also included.
+    """
+    selected_agent_ids = {str(value or "").strip() for value in agent_ids if str(value or "").strip()}
+    selected_session_ids = {str(value or "").strip() for value in direct_session_ids if str(value or "").strip()}
+    if not selected_agent_ids and not selected_session_ids:
+        return []
+    s = _service()
+    with s._STATE_LOCK:
+        state = _load_state_snapshot_locked()
+        agents = state.get("agents") or []
+        if selected_session_ids:
+            for agent in agents:
+                if not isinstance(agent, dict):
+                    continue
+                if str(agent.get("directSessionId") or "").strip() in selected_session_ids:
+                    agent_id = str(agent.get("agentId") or "").strip()
+                    if agent_id:
+                        selected_agent_ids.add(agent_id)
+        return [
+            _copy_json_value(agent)
+            for agent in agents
+            if isinstance(agent, dict) and (
+                str(agent.get("agentId") or "").strip() in selected_agent_ids
+                or str(agent.get("directSessionId") or "").strip() in selected_session_ids
+            )
+        ]
+
+
 def _load_state_snapshot_locked() -> dict[str, Any]:
     """Internal snapshot: callers must hold _STATE_LOCK and never mutate it."""
     global _LOAD_STATE_CACHE_SIGNATURE, _LOAD_STATE_CACHE_STATE
