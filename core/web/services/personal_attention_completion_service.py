@@ -24,7 +24,7 @@
 3. 每次采集条数上限：三个来源各自设上限，聚合层再设全局上限，单次轮询
    最多涌入 ``MAX_COMPLETION_ITEMS`` 条，堆叠卡片（上限 3）不会被淹没。
    科研/自动会话的每轮“完成”由 run 级通道聚合承载，会话级通道排除
-   child/有父会话的研究扇出 worker，不逐轮刷屏。
+   child/有父会话的研究扇出 worker，以及自主行动 Agent 的后台会话，不逐轮刷屏。
 
 通知语气统一 ``info``（不占用停靠/异常的 critical/high）。行结构沿用
 humanAttention 契约：``id``/``kind``/``severity``/``title``/``targetUrl``/
@@ -261,10 +261,11 @@ def collect_session_completed_attention(
     会话进入候选；child / 有父会话的研究扇出 worker 被排除——它们的每轮
     “完成”由 ``run_completed`` 在 run 级聚合承载，不逐轮刷屏。id 携带完成
     时间戳：同一轮重复轮询是同一 id（账本压住），下一轮完成是新的 id（应
-    再次提醒）。
+    再次提醒）。自主行动 worker 按 Agent 身份排除，包括额外创建的可见会话；
+    虚拟人本人的正常聊天仍保留完成提醒。
     """
 
-    from . import pet_activity_service
+    from . import agent_directory_service, pet_activity_service
     from .session_service import list_sessions
 
     observed = time.time() if now is None else now
@@ -278,6 +279,19 @@ def collect_session_completed_attention(
         if isinstance(row, dict) and row.get("tone") == "completed"
     ]
     if not completed_rows:
+        return []
+
+    # Auxiliary user_chat sessions can reference a hidden self-wake Agent.
+    # Use persisted identity, not session visibility or an editable display name.
+    try:
+        self_wake_agent_ids = {
+            agent_id
+            for status in ("active", "archived")
+            for agent_id in agent_directory_service.find_agent_ids_by_metadata(
+                "virtualHumanSelfWake", True, status=status
+            )
+        }
+    except Exception:  # noqa: BLE001 - unverified completion identities stay silent
         return []
 
     # 完成候选存在时才做一次会话清单对照（list_sessions 有自己的缓存），
@@ -302,6 +316,8 @@ def collect_session_completed_attention(
     for row in completed_rows:
         session_id = str(row.get("sessionId") or "").strip()
         if not session_id or session_id in automated_session_ids:
+            continue
+        if str(row.get("agentId") or "").strip() in self_wake_agent_ids:
             continue
         # id 的时间戳段必须来自行内稳定字段：缺 updatedAt 的行拿不到稳定
         # 完成时刻（退到 observed 会让 15s 脉冲内每次轮询都生成新 id，账本
