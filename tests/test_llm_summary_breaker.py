@@ -280,7 +280,7 @@ def test_single_llm_failure_falls_back_to_rule_summary_with_event():
     compressor = _compressor_with(_FailingSummaryLlm())
     config = _feature_config(threshold=3)
 
-    compressed, should_break, applied, count, last_iter = _run_compression(
+    compressed, should_break, applied, count, last_iter, _stop_reason = _run_compression(
         compressor=compressor,
         config=config,
         trigger_source="auto",
@@ -334,7 +334,7 @@ def test_three_consecutive_failures_trip_breaker_and_pause_auto_compression():
     # Next automatic compression under token pressure: explicitly degraded.
     events.clear()
     ui = _FakeUi()
-    compressed, should_break, applied, count, last_iter = _run_compression(
+    compressed, should_break, applied, count, last_iter, _stop_reason = _run_compression(
         compressor=compressor,
         config=config,
         trigger_source="auto",

@@ -109,7 +109,7 @@ def test_agent_compression_checks_receive_the_same_payload_aware_estimator(monke
 
     def compress(**kwargs):
         seen.append(kwargs["estimate_tokens_fn"](kwargs["messages"]))
-        return kwargs["messages"], True, False, 0, 0
+        return kwargs["messages"], True, False, 0, 0, "context_budget_exhausted"
 
     monkeypatch.setattr(agent, "compress_turn_messages", compress)
     runtime._compress_messages([call_message()], iteration=1)
