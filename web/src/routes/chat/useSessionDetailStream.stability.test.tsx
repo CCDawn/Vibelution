@@ -818,6 +818,23 @@ describe("useSessionDetailStream stream lifecycle stability", () => {
     unmount(root);
   });
 
+  it("keeps Companion detail projection while its ordinary notification path is disabled", () => {
+    const { options } = baseOptions({ ordinarySessionNotificationsEnabled: false });
+    const detailNotifier = options.desktopConversationNotifierRef.current.handleSessionDetail as ReturnType<typeof vi.fn>;
+    const sync = options.syncSessionDetail as ReturnType<typeof vi.fn>;
+    const root = mount(options);
+    const stream = FakeEventSource.instances[0];
+    act(() => {
+      stream.emit("session_detail", sessionDetailEvent({
+        ledgerSeq: 40, status: "ready", currentPhase: "ready", terminalReason: "success",
+        activeTurnId: "settled", lastTurnTerminalTurnId: "settled",
+      }));
+    });
+    expect(sync).toHaveBeenCalledTimes(1);
+    expect(detailNotifier).not.toHaveBeenCalled();
+    unmount(root);
+  });
+
   it("rejects a stale detail before notification but still accepts the cached ledger", () => {
     const { options, queryClient } = baseOptions({});
     queryClient.setQueryData(queryKeys.session("s1"), {

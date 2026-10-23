@@ -694,6 +694,17 @@ export function ChatCodingRouteWorkbench() {
   const companionRouteUpgradeRows = companionActivityCache.dataUpdatedAt > companionRouteUpgradeQuery.dataUpdatedAt
     ? companionActivityCache.data
     : companionRouteUpgradeQuery.data;
+  const requestedCompanionAgentId = useMemo(() => (
+    requestedCompanionId
+      ? ""
+      : companionAgentIdForDirectSession(companionRouteUpgradeRows, requestedSessionId)
+  ), [companionRouteUpgradeRows, requestedCompanionId, requestedSessionId]);
+  // Apply the same identity gate to stream and query notification delivery.
+  const ordinarySessionNotificationsEnabled = !companionMode
+    && !requestedCompanionAgentId
+    && (!companionRouteUpgradeLookupEnabled || (
+      companionRouteUpgradeQuery.isSuccess && !companionRouteUpgradeQuery.isFetching
+    ));
   const companionsQuery = useQuery({
     queryKey: queryKeys.virtualHumanCompanions(),
     queryFn: listVirtualHumanCompanions,
@@ -899,6 +910,7 @@ export function ChatCodingRouteWorkbench() {
     sessionStreamDecisionSnapshotRef,
     sessionStreamTerminalFailureRef,
     desktopConversationNotifierRef,
+    ordinarySessionNotificationsEnabled,
     sessionTitleForNotifications,
     viewedSessionId: activeSessionId || "",
   });
@@ -2352,12 +2364,6 @@ export function ChatCodingRouteWorkbench() {
     }
     return mergeArchivedSessionSummaries(rawSessionsQuery.data, archivedSessions);
   }, [archivedSessions, rawSessionsQuery.data, showArchivedSessions]);
-  const requestedCompanionAgentId = useMemo(() => (
-    requestedCompanionId
-      ? ""
-      : companionAgentIdForDirectSession(companionRouteUpgradeRows, requestedSessionId)
-  ), [companionRouteUpgradeRows, requestedCompanionId, requestedSessionId]);
-
   useEffect(() => {
     if (!requestedSessionId || requestedCompanionId || requestedRoomId || !requestedCompanionAgentId) {
       return;
@@ -2757,13 +2763,7 @@ export function ChatCodingRouteWorkbench() {
     queryClient,
     viewedSessionId: activeSessionId || "",
     viewedSessionDetail: sessionDetailQuery.isPlaceholderData ? undefined : sessionDetailQuery.data,
-    // Companion intent is synchronous; direct-session identity must finish
-    // binding lookup before this ordinary query fallback can observe it.
-    viewedSessionDetailEnabled: !companionMode
-      && !requestedCompanionAgentId
-      && (!companionRouteUpgradeLookupEnabled || (
-        companionRouteUpgradeQuery.isSuccess && !companionRouteUpgradeQuery.isFetching
-      )),
+    viewedSessionDetailEnabled: ordinarySessionNotificationsEnabled,
     notifierRef: desktopConversationNotifierRef,
     onOpenSession: handleOpenDirectSession,
   });
