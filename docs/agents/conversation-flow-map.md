@@ -2,6 +2,31 @@
 
 这份文档用于维护 Chat/Coding 从用户发送消息到模型内容返回 UI 的主链路。它不是重构方案，而是后续学习、诊断和小步优化时的共同地图。
 
+## 状态与活动的读取契约
+
+`core/chat/session_activity.py` 统一 Session 活动词汇与读取规则，
+`core/runtime_manager/agent_run_status.py` 统一 AgentRun 生命周期词汇；它们均不替代
+下述 Journal、worker 和 WorkRun 的事实写入权威。前端词汇由
+`scripts/generate_activity_contract.py` 生成，Python/Vitest 共用
+`tests/fixtures/activity_contract_cases.json` 行为样例。
+
+| 事实 | 读取契约 | 边界 |
+| --- | --- | --- |
+| 当前执行 | Session 当前状态与实时 WorkRun | 不从 `lastTurnStatus`、`terminalReason` 推断正在运行 |
+| 活动阶段 | `thinking/tooling/answering/planning/reading/editing/verifying` | 旧 `currentPhase` 中的状态只在读取边界解码；新 AgentRun 终态清空阶段 |
+| 本轮结果 | 明确的结果与终态原因 | `ready/idle` 不证明成功；`paused_limit/needs_continue` 表示本轮结束但可继续 |
+| 未读指示 | 既有回复身份与已读记录 | 蓝色指示表示有新消息，不证明任务成功；通知与宠物庆祝须有明确成功结果 |
+| 未知状态 | 保留原始状态，读取结果为 unknown | 不回落到上一轮成功；生命周期阻塞仍保守保护未知 WorkRun |
+
+AgentRun 历史 API 新增可选 `executionStatus`、`activityPhase`、`terminalReason`、
+`rawStatus`，以可加字段迁移。新界面优先消费前两项；旧 `status/currentPhase` 保留原有
+wire 镜像兼容，不能继续作为新消费者的混合字段入口。新快照内部将状态、阶段分开存储，
+历史文件只在读取时适配，不批量重写。移除旧 wire 镜像前须完成消费者迁移并独立评审。
+
+前端 runtime hint 可以晚于终态快照，因此只填补缺失的运行态；后端宠物使用已完成
+reconcile 的实时 WorkRun，可以覆盖滞后的 Session 壳。普通通知仍须有对应 Turn 的终态，
+流式显示层仍须校验 Turn 身份与 `ledgerSeq`。Companion 的完成身份策略单独保留。
+
 ## 范围
 
 主路径：

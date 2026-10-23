@@ -1,4 +1,5 @@
 import type { ConversationMessage, SessionDetail, SessionStreamEvent, SessionTurnItem } from "../api/types";
+import { activityOutcome, isActivityResting } from "./sessionActivityState";
 import {
   activeTurnProtocolTextLength,
   consolidateSessionTurnItemsV2,
@@ -28,14 +29,6 @@ export type ActiveTurnLayerState = {
 export type ActiveTurnAuthority = Pick<SessionDetail,
   "id" | "currentPhase" | "activeTurnId" | "lastTurnTerminalTurnId" | "terminalReason" | "ledgerSeq"
 >;
-
-const EXECUTION_TERMINAL_REASONS = new Set([
-  "success", "failed_runtime", "failed_provider", "needs_continue", "paused_limit",
-  "stopped_by_user", "aborted", "superseded", "cancelled",
-]);
-const EXECUTION_TERMINAL_PHASES = new Set([
-  "ready", "completed", "failed", "stopped", ...EXECUTION_TERMINAL_REASONS,
-]);
 
 export type OptimisticActiveTurnLayerInput = {
   sessionId: string;
@@ -404,7 +397,7 @@ export function projectActiveTurnLayerMessage(
     status: "completed",
     metadata: {
       ...message.metadata,
-      interrupted: authority?.terminalReason !== "success",
+      interrupted: activityOutcome(authority?.terminalReason) !== "completed",
       processStage: authority?.terminalReason,
     },
   };
@@ -413,9 +406,9 @@ export function projectActiveTurnLayerMessage(
 function isActiveTurnExecutionEnded(layer: ActiveTurnLayerState, authority?: ActiveTurnAuthority) {
   if (!authority || authority.id !== layer.sessionId || !layer.turnId) return false;
   if (compactText(authority.activeTurnId) || compactText(authority.lastTurnTerminalTurnId) !== layer.turnId) return false;
-  if (!EXECUTION_TERMINAL_REASONS.has(compactText(authority.terminalReason).toLowerCase())) return false;
+  if (!activityOutcome(authority.terminalReason)) return false;
   const phase = compactText(authority.currentPhase).toLowerCase();
-  if (!EXECUTION_TERMINAL_PHASES.has(phase)) return false;
+  if (!isActivityResting(phase) && !activityOutcome(phase)) return false;
   const sequence = normalizedLedgerSeq(authority.ledgerSeq);
   return sequence > 0 && sequence >= normalizedLedgerSeq(layer.ledgerSeq);
 }

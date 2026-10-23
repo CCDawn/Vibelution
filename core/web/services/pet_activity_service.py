@@ -6,41 +6,12 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
+from core.chat.session_activity import resolve_session_activity
+
 from .session.timebase import parse_timestamp_utc
 from .session.tool_approvals import list_tool_approval_requests
 from .session_service import list_sessions, load_chat_turn_work_run_summary
 
-_ERROR_STATUSES = {
-    "error",
-    "failed",
-    "failure",
-    "failed_runtime",
-    "failed_provider",
-    "blocked",
-    "danger",
-    "crashed",
-    "unhealthy",
-}
-_RUNNING_STATUSES = {
-    "queued",
-    "running",
-    "active",
-    "thinking",
-    "tooling",
-    "tool",
-    "answering",
-    "streaming",
-    "checking",
-    "planning",
-    "reading",
-    "editing",
-    "verifying",
-    "working",
-    "in_progress",
-    "starting",
-    "stopping",
-}
-_SUCCESS_STATUSES = {"completed", "done", "success", "succeeded"}
 _COMPLETION_PULSE_SECONDS = 15.0
 _ERROR_ATTENTION_SECONDS = 300.0
 _TONE_PRIORITY = {"approval": 0, "error": 1, "running": 2, "completed": 3, "idle": 4}
@@ -134,36 +105,17 @@ def _resolve_tone(
 ) -> str:
     if needs_approval:
         return "approval"
-    candidates = _status_candidates(session)
     # This summary reconciles stale chat-turn work runs before returning them,
     # so a remaining active item is the live authority when the persisted
     # Session projection still says ready from the previous turn.
-    if runtime_running:
+    state = resolve_session_activity(session, runtime_running=runtime_running, authoritative_runtime=True)
+    if state["execution"] in {"queued", "running", "stopping"}:
         return "running"
-    if any(candidate in _RUNNING_STATUSES for candidate in candidates):
-        return "running"
-    primary = candidates[0] if candidates else ""
-    # A settled ready/idle projection carries its outcome in lastTurnStatus.
-    if primary in {"ready", "idle"}:
-        primary = str(session.get("lastTurnStatus") or session.get("terminalReason") or "idle").strip().lower()
-    if primary in _ERROR_STATUSES:
+    if state["outcome"] == "failed":
         return "error"
-    if primary in _RUNNING_STATUSES:
-        return "running"
-    if primary in _SUCCESS_STATUSES and _is_recent(session, now=now):
+    if state["outcome"] == "completed" and _is_recent(session, now=now):
         return "completed"
     return "idle"
-
-
-def _status_candidates(session: dict[str, Any]) -> list[str]:
-    values = (
-        session.get("childStatus") if str(session.get("sessionKind") or "").strip() == "child" else None,
-        session.get("currentPhase"),
-        session.get("status"),
-        session.get("lastTurnStatus"),
-        session.get("terminalReason"),
-    )
-    return [normalized for value in values if (normalized := str(value or "").strip().lower())]
 
 
 def _resolve_phase(
@@ -178,19 +130,13 @@ def _resolve_phase(
         return "error"
     if tone == "completed":
         return "completed"
-    candidates = []
-    if live_item is not None:
-        candidates.extend((live_item.get("currentPhase"), live_item.get("status")))
-    candidates.extend(_status_candidates(session))
-    normalized = [str(value or "").strip().lower() for value in candidates]
-    if any(value in {"verifying", "checking"} for value in normalized):
-        return "verifying"
-    if any(value in {"editing", "tooling", "tool"} for value in normalized):
+    # A WorkRun may only carry execution status. Fill phase from another phase,
+    # never from its status or the previous Turn's outcome.
+    phase = resolve_session_activity(live_item or {})["phase"] or resolve_session_activity(session)["phase"]
+    if phase == "editing":
         return "tooling"
-    if any(value == "reading" for value in normalized):
-        return "reading"
-    if any(value in {"answering", "streaming"} for value in normalized):
-        return "answering"
+    if phase in {"verifying", "tooling", "reading", "answering"}:
+        return phase
     return "thinking"
 
 

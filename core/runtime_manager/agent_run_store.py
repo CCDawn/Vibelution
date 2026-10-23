@@ -10,22 +10,17 @@ from typing import Any
 from core.chat.chat_task_types import trim_lines
 
 from . import work_run_store
-
+from .agent_run_status import (
+    RUN_ACTIVE_STATUSES,
+    RUN_TERMINAL_STATUSES,
+    normalize_run_status,
+    public_run_activity,
+    run_activity_fields,
+)
 
 AGENT_RUN_KIND = "agent_run"
 SUB_AGENT_RUN_KIND = "sub_agent_run"
 _SAFE_RUN_FRAGMENT_RE = re.compile(r"[^A-Za-z0-9_.-]+")
-_ACTIVE_RUN_STATUSES = {"queued", "running", "stopping", "paused"}
-_TERMINAL_RUN_STATUSES = {
-    "completed",
-    "done",
-    "failed",
-    "stopped",
-    "cancelled",
-    "paused_limit",
-    "needs_continue",
-    "stopped_by_user",
-}
 _PUBLIC_AGENT_RUN_KEYS = {
     "runId",
     "runKind",
@@ -43,6 +38,10 @@ _PUBLIC_AGENT_RUN_KEYS = {
     "sessionId",
     "status",
     "currentPhase",
+    "executionStatus",
+    "activityPhase",
+    "terminalReason",
+    "rawStatus",
     "summary",
     "toolCallCount",
     "startedAt",
@@ -60,6 +59,10 @@ _PUBLIC_SUB_AGENT_RUN_KEYS = {
     "contextMode",
     "status",
     "currentPhase",
+    "executionStatus",
+    "activityPhase",
+    "terminalReason",
+    "rawStatus",
     "summary",
     "toolCallCount",
     "depth",
@@ -74,7 +77,7 @@ _PUBLIC_SUB_AGENT_RUN_KEYS = {
 def result_status(result: dict[str, Any]) -> str:
     status = str(result.get("status") or result.get("currentPhase") or "").strip().lower()
     if status:
-        return status
+        return normalize_run_status(status)
     if result.get("error") or result.get("errorType") or result.get("error_type"):
         return "failed"
     return "completed"
@@ -103,7 +106,8 @@ def persist_agent_run_snapshot(
     previous = _store().load_snapshot(AGENT_RUN_KIND, run_id) or {}
     started_at = str(result.get("startedAt") or result.get("createdAt") or previous.get("startedAt") or timestamp).strip()
     updated_at = str(result.get("updatedAt") or timestamp).strip()
-    normalized_status = status or str(previous.get("status") or "completed").strip() or "completed"
+    activity = run_activity_fields(status or result_status(result), result, previous)
+    normalized_status = activity["status"]
     snapshot = {
         **previous,
         "runId": run_id,
@@ -120,16 +124,15 @@ def persist_agent_run_snapshot(
         "memoryPolicyId": str(agent.get("memoryPolicyId") or "").strip(),
         "workspacePath": str(agent.get("workspacePath") or "").strip(),
         "sessionId": str(session_id or "").strip(),
-        "status": normalized_status,
-        "currentPhase": normalized_status,
+        **activity,
         "summary": summary,
         "toolCallCount": max(0, int(tool_call_count or 0)),
         "startedAt": started_at,
         "updatedAt": updated_at,
-        "finishedAt": str(result.get("finishedAt") or "").strip()
-        or (updated_at if normalized_status in _TERMINAL_RUN_STATUSES else ""),
+        "finishedAt": (str(result.get("finishedAt") or "").strip() or updated_at)
+        if normalized_status in RUN_TERMINAL_STATUSES else "",
     }
-    active_run_id = run_id if normalized_status in _ACTIVE_RUN_STATUSES else ""
+    active_run_id = run_id if normalized_status in RUN_ACTIVE_STATUSES or normalized_status == "unknown" else ""
     return _store().persist_snapshot(AGENT_RUN_KIND, snapshot, active_run_id=active_run_id)
 
 
@@ -145,7 +148,8 @@ def persist_sub_agent_run_snapshot(
 ) -> dict[str, Any]:
     run_id = _sub_agent_run_id(parent_run_id, sub_run_id)
     previous = _store().load_snapshot(SUB_AGENT_RUN_KIND, run_id) or {}
-    normalized_status = status or str(previous.get("status") or "completed").strip() or "completed"
+    activity = run_activity_fields(status or result_status(result), result, previous)
+    normalized_status = activity["status"]
     updated_at = str(result.get("updatedAt") or timestamp).strip()
     snapshot = {
         **previous,
@@ -157,8 +161,7 @@ def persist_sub_agent_run_snapshot(
         "parentSessionId": str(result.get("parentSessionId") or previous.get("parentSessionId") or "").strip(),
         "agentId": str(result.get("agentId") or previous.get("agentId") or "").strip(),
         "contextMode": str(result.get("contextMode") or previous.get("contextMode") or "isolated").strip(),
-        "status": normalized_status,
-        "currentPhase": normalized_status,
+        **activity,
         "summary": summary,
         "toolCallCount": max(0, int(tool_call_count or 0)),
         "depth": _safe_int(result.get("depth") or previous.get("depth")),
@@ -166,10 +169,10 @@ def persist_sub_agent_run_snapshot(
         "resultRef": str(result.get("resultRef") or previous.get("resultRef") or "").strip(),
         "createdAt": str(result.get("createdAt") or previous.get("createdAt") or timestamp).strip(),
         "updatedAt": updated_at,
-        "endedAt": str(result.get("endedAt") or "").strip()
-        or (updated_at if normalized_status in _TERMINAL_RUN_STATUSES else ""),
+        "endedAt": (str(result.get("endedAt") or "").strip() or updated_at)
+        if normalized_status in RUN_TERMINAL_STATUSES else "",
     }
-    active_run_id = run_id if normalized_status in _ACTIVE_RUN_STATUSES else ""
+    active_run_id = run_id if normalized_status in RUN_ACTIVE_STATUSES or normalized_status == "unknown" else ""
     return _store().persist_snapshot(SUB_AGENT_RUN_KIND, snapshot, active_run_id=active_run_id)
 
 
@@ -245,7 +248,13 @@ def _load_work_run_snapshots(run_kind: str, *, limit: int | None = None) -> list
 
 
 def _public_snapshot(snapshot: dict[str, Any], allowed_keys: set[str]) -> dict[str, Any]:
-    return {key: snapshot.get(key) for key in sorted(allowed_keys) if key in snapshot}
+    projected = {**snapshot, **public_run_activity(snapshot)}
+    # New consumers use executionStatus/activityPhase. Keep the legacy wire
+    # mirrors during migration; no old client needs to understand a new enum.
+    if "rawStatus" in snapshot:
+        projected["status"] = projected["rawStatus"]
+        projected["currentPhase"] = projected["rawStatus"]
+    return {key: projected.get(key) for key in sorted(allowed_keys) if key in projected}
 
 
 def _run_sort_key(snapshot: dict[str, Any]) -> tuple[str, str, str, str]:

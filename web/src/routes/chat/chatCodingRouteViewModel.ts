@@ -1,5 +1,6 @@
 import { isFetchJsonHttpError } from "../../api/chat";
 import type { TranslationKey } from "../../i18n/dictionary";
+import { activityExecution, isActivityBusy } from "../sessionActivityState";
 
 export type ResizableSide = "left" | "right";
 
@@ -215,18 +216,15 @@ export function shouldSuppressComposerErrorForTurnError(
 }
 
 export function isRunningPhase(value: string | null | undefined) {
-  const phase = String(value ?? "").trim().toLowerCase();
-  return ["queued", "running", "thinking", "tooling", "answering", "planning", "reading", "editing", "verifying"].includes(phase);
+  return ["queued", "running"].includes(activityExecution(value));
 }
 
 export function isStoppingPhase(value: string | null | undefined) {
-  const phase = String(value ?? "").trim().toLowerCase();
-  return phase === "stopping";
+  return activityExecution(value) === "stopping";
 }
 
 export function isBusyPhase(value: string | null | undefined) {
-  const phase = String(value ?? "").trim().toLowerCase();
-  return isRunningPhase(phase) || phase === "stopping";
+  return isActivityBusy(value);
 }
 
 export function formatTokenSpeedValue(tokensPerSecond: number | null | undefined) {

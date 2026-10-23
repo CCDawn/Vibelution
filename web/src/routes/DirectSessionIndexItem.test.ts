@@ -85,6 +85,11 @@ function renderDirectItem(overrides: Partial<Parameters<typeof DirectSessionInde
 }
 
 describe("DirectSessionIndexItem helpers", () => {
+  it("uses current execution instead of a previous result when fields disagree", () => {
+    expect(sessionStatusValue(makeSession({ status: "running", currentPhase: "reading", lastTurnStatus: "failed" }))).toBe("reading");
+    expect(sessionStatusValue(makeSession({ status: "ready", currentPhase: "ready", lastTurnStatus: "running" }))).toBe("ready");
+  });
+
   it("keeps current state semantic and rail-based without a redundant badge", () => {
     const markup = renderDirectItem();
 
@@ -178,7 +183,8 @@ describe("DirectSessionIndexItem helpers", () => {
     expect(markup).not.toContain("sessionCurrentBadge");
     expect(markup).not.toContain("sessionUnreadBadge");
     expect(markup).toContain("sessionActivityCompleted");
-    expect(markup).toContain("已完成");
+    expect(markup).toContain("有新消息");
+    expect(markup).not.toContain("已完成");
   });
 
   it("shows running sessions with a green spinner indicator", () => {
@@ -259,7 +265,8 @@ describe("DirectSessionIndexItem helpers", () => {
     expect(sessionRunningBadgeLabel("zh")).toBe("会话进行");
     expect(sessionRunningBadgeTitle("工具调用中", "zh")).toBe("会话进行：工具调用中");
     expect(sessionStatusValue(makeSession({ currentPhase: "idle", status: "running" })).toLowerCase()).toMatch(/running|idle/);
-    expect(sessionStatusValue(makeSession({ childStatus: "thinking", currentPhase: "idle", sessionKind: "child", status: "idle" }))).toBe("thinking");
+    expect(sessionStatusValue(makeSession({ childStatus: "thinking", currentPhase: "idle", sessionKind: "child", status: "idle" }))).toBe("idle");
+    expect(sessionStatusValue(makeSession({ childStatus: "thinking", currentPhase: "", sessionKind: "child", status: "" }))).toBe("thinking");
   });
 
   it("builds the compact direct session item view model for normal sessions", () => {

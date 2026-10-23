@@ -43,6 +43,18 @@ function assistantDelta(
 }
 
 describe("chat active turn layer", () => {
+  it.each(["success", "completed", "done", "succeeded", " COMPLETED "])("does not mark successful outcome %s as interrupted", (terminalReason) => {
+    const layer = mergeAssistantDeltaIntoActiveTurnLayer(undefined, assistantDelta({
+      ledgerSeq: 10,
+      turnItems: [{ type: "agent_message", phase: "commentary", text: "partial" } as SessionTurnItem],
+    }))!;
+    const authority: ActiveTurnAuthority = {
+      id: "session-1", currentPhase: "ready", activeTurnId: "",
+      lastTurnTerminalTurnId: "turn-1", terminalReason, ledgerSeq: 11,
+    };
+    expect(projectActiveTurnLayerMessage(layer, [], authority)?.metadata?.interrupted).toBe(false);
+  });
+
   it("ends activity after a matching terminal receipt while preserving partial output until hydration", () => {
     const layer = mergeAssistantDeltaIntoActiveTurnLayer(undefined, assistantDelta({
       ledgerSeq: 10,

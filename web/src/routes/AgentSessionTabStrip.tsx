@@ -53,7 +53,7 @@ export type CliAgentRunTab = {
  * - green spinner  running  = 会话进行中
  * - yellow spinner approval = 需要审批
  * - red light      error    = 出错
- * - blue light     completed = 已完成（未读）
+ * - blue light     completed = 有新消息（未读，不表示执行成功）
  * - none           idle / already read
  * Selection is a separate border/ring on the active tab.
  */
@@ -83,12 +83,7 @@ export function agentSessionStatusTone(
 ): AgentSessionStatusTone {
   if (options?.session) {
     return resolveSessionActivityTone(
-      {
-        ...options.session,
-        status: options.session.status || status,
-        currentPhase: options.session.currentPhase || status,
-        childStatus: options.session.childStatus || status,
-      },
+      options.session,
       {
         needsApproval: options.needsApproval,
         isRuntimeRunning: options.isRuntimeRunning,
@@ -97,7 +92,7 @@ export function agentSessionStatusTone(
     );
   }
   return resolveSessionActivityTone(
-    { status, currentPhase: status, childStatus: status },
+    { status },
     {
       needsApproval: options?.needsApproval,
       isRuntimeRunning: options?.isRuntimeRunning,

@@ -10,12 +10,9 @@ import { avatarImageUrlFrom, avatarInitials, renderAgentAvatar } from "./chatRou
 import {
   resolveSessionActivityTone,
   sessionActivityLabel,
-  sessionIsCompletedStatus,
-  sessionIsErrorStatus,
-  sessionIsRunningStatus,
-  sessionStatusCandidates,
   type SessionActivityTone,
 } from "../sessionActivityIndicator";
+import { resolveSessionActivity } from "../sessionActivityState";
 import styles from "./ChatSessionBrowser.styles";
 
 export type ChatSessionBrowserProps = {
@@ -116,10 +113,9 @@ function toneMatches(tone: SessionActivityTone, filter: SessionStatusFilter, isC
 }
 
 function hasCompletedLifecycle(session: SessionSummary) {
-  const candidates = sessionStatusCandidates(session);
-  return !candidates.some(sessionIsErrorStatus)
-    && !candidates.some(sessionIsRunningStatus)
-    && candidates.some(sessionIsCompletedStatus);
+  const state = resolveSessionActivity(session);
+  return (state.execution === "settled" && state.outcome !== "failed")
+    || (state.execution === "idle" && state.rawStatus === "ready");
 }
 
 function activityLabel(tone: SessionActivityTone, lang: "zh" | "en") {

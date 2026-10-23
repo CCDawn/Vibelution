@@ -134,14 +134,7 @@ export function sessionUnreadBadgeTitle(count: number, lang: "zh" | "en") {
 }
 
 export function sessionStatusValue(session: Pick<SessionSummary, "childStatus" | "currentPhase" | "status" | "sessionKind" | "lastTurnStatus">) {
-  const primary = sessionPrimaryStatus(session);
-  if (sharedSessionIsRunningStatus(primary)) {
-    return primary;
-  }
-  const candidates = isChildSession(session)
-    ? [session.childStatus, session.currentPhase, session.status, session.lastTurnStatus]
-    : [session.currentPhase, session.status, session.lastTurnStatus];
-  return candidates.find((value) => String(value ?? "").trim()) || "";
+  return sessionPrimaryStatus(session);
 }
 
 export function sessionIsRunningStatus(value: string | null | undefined) {
