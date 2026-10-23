@@ -33,9 +33,17 @@ def snapshot_files(source_root: Path) -> dict[str, bytes]:
         "scripts/__init__.py": b"",
         "scripts/git_claim_guard.py": (source_root / "scripts/git_claim_guard.py").read_bytes(),
         "scripts/claim_dormancy.py": (source_root / "scripts/claim_dormancy.py").read_bytes(),
+        "scripts/git_history_bridge.py": (source_root / "scripts/git_history_bridge.py").read_bytes(),
+        "scripts/git_hook_dispatch.py": (source_root / "scripts/git_hook_dispatch.py").read_bytes(),
         "hooks/reference-transaction": reference.encode("utf-8"),
     }
-    for name in ("pre-commit", "commit-msg", "pre-push", "post-merge"):
+    # Preserve the original checkout hook's body and invoke the shared guard
+    # inside it, so old task copies calculate claims against the old baseline.
+    pre_commit = reference.rsplit("exec ", 1)[0]
+    files["hooks/pre-commit"] = (
+        pre_commit + 'exec "$project_python" "$runtime_root/scripts/git_hook_dispatch.py" "$@"\n'
+    ).encode("utf-8")
+    for name in ("commit-msg", "pre-push", "post-merge"):
         # exec preserves the checkout hook's shebang, stdin, arguments and exit status.
         files[f"hooks/{name}"] = (
             '#!/bin/sh\nset -eu\nrepo_root=$(git rev-parse --show-toplevel)\n'

@@ -103,6 +103,8 @@ powershell -NoProfile -File .\scripts\doctor.ps1
 
 入口分工：`scripts/local_quality_gate.py` 只做度量（验证 + 写 manifest），`scripts/task_closeout.py` 是唯一的集成入口（校验 → 租约 → ff-only 合入 → 清理）。不要用 gate 的 closeout 子命令代替集成。
 
+已授权的署名历史清理以 Git common-dir 中逐对象校验的映射收据连接旧任务。旧任务继续保留自己的分支、索引和未提交文件；从根 `main` 调当前 `scripts/task_closeout.py --task-worktree <旧任务路径> --retain-worktree`，由私有候选翻译旧父线并合并最新 `main` 后重新验证。原任务的旧 manifest 不能复用到候选，冲突或验证期间任一基线移动都停止合入。原任务资源默认保留，只清理本次创建的私有候选；禁止用 replace refs、放宽原始署名检查或直接把旧任务 tree 接到新 main 来绕过兼容验证。
+
 Config 真源：`%USERPROFILE%\Documents\Vibelution\config\config.toml`
 Override：`VIBELUTION_CONFIG_PATH` / `VIBELUTION_CONFIG_HOME`
 

@@ -196,8 +196,21 @@ def staged_paths(root: Path) -> tuple[str, ...]:
 
 
 def committed_task_paths(root: Path) -> tuple[str, ...]:
+    from scripts import git_history_bridge as history
+
+    receipt = history.load_active_mapping(root)
+    revision = "main...HEAD"
+    if receipt is not None:
+        # Use the canonical DAG's logical merge base, including mixed old/clean
+        # parent lines. No source ref, index or checkout content is changed.
+        contains_main = _run_git(root, "--no-replace-objects", "merge-base", "--is-ancestor", "main", "HEAD")
+        if contains_main.returncode not in {0, 1}:
+            raise ClaimGuardError("task_paths_unavailable")
+        if contains_main.returncode:
+            translated = history.translate_task_dag(root, "HEAD", receipt)
+            revision = f"main...{translated.head}"
     completed = subprocess.run(
-        ["git", "diff", "--name-only", "-z", "main...HEAD"],
+        ["git", "--no-replace-objects", "diff", "--name-only", "-z", revision],
         cwd=root,
         capture_output=True,
         check=False,

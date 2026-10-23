@@ -15,6 +15,51 @@ from scripts import local_quality_gate as gate
 from scripts import task_closeout as closeout
 
 
+@pytest.mark.parametrize("mixed_parent_lines", [False, True])
+def test_rewritten_main_claim_uses_verified_old_fork_without_expanding_scope(tmp_path: Path, mixed_parent_lines: bool) -> None:
+    import json
+    from scripts import git_history_bridge as history
+
+    root = _repo(tmp_path)
+    _git(root, "commit", "--allow-empty", "--author", "Cursor <cursoragent@cursor.com>", "-m", "legacy")
+    bot = _git(root, "rev-parse", "HEAD").stdout.strip()
+    task = tmp_path / "old-task"
+    _git(root, "worktree", "add", str(task), "-b", "codex/old-task")
+    (task / "task.txt").write_text("task work\n")
+    _git(task, "add", "task.txt")
+    _git(task, "commit", "-m", "task")
+    (root / "unrelated.txt").write_text("other merged code\n")
+    _git(root, "add", "unrelated.txt")
+    _git(root, "commit", "-m", "unrelated main advance")
+    old = _git(root, "rev-parse", "HEAD").stdout.strip()
+    ref = "refs/vibelution-backups/history-test/main-before"
+    _git(root, "update-ref", ref, old)
+    directory = root / ".git/vibelution-cache/history-bridge/test"
+    receipt = history.rewrite_commit_dag(
+        root, old, author_fixes={bot: b"Claim Guard Test <claim-guard@test.local>"},
+        backup_zip=directory / "raw.zip", receipt_path=directory / "mapping.json", backup_refs={ref: old},
+    )
+    _git(root, "update-ref", "refs/heads/main", receipt.newmain, old)
+    (directory.parent / "active.json").write_text(json.dumps({"receipt": str(receipt.receipt_path), "digest": receipt.digest}))
+    if mixed_parent_lines:
+        # A task may already have merged clean main while retaining raw old
+        # parents. A later main advance must not expand that task's claim.
+        _git(task, "merge", "--no-edit", "main")
+        (root / "later-main.txt").write_text("later unrelated main work\n")
+        _git(root, "add", "later-main.txt")
+        _git(root, "commit", "-m", "later main advance")
+    (task / "task.txt").write_text("staged task work\n")
+    _git(task, "add", "task.txt")
+    (task / "task.txt").write_text("unstaged task work\n")
+    (task / "untracked.txt").write_text("untracked\n")
+    before = (_git(task, "rev-parse", "HEAD").stdout, _git(task, "diff", "--cached").stdout,
+              _git(task, "diff").stdout, (task / "untracked.txt").read_bytes())
+    assert guard.committed_task_paths(task) == ("task.txt",)
+    after = (_git(task, "rev-parse", "HEAD").stdout, _git(task, "diff", "--cached").stdout,
+             _git(task, "diff").stdout, (task / "untracked.txt").read_bytes())
+    assert before == after
+
+
 def _git(root: Path, *args: str, env: dict[str, str] | None = None, check: bool = True):
     return subprocess.run(
         ["git", *args],
