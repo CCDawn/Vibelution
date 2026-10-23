@@ -126,6 +126,18 @@ describe("viewed conversation query completion", () => {
     } finally { await h.close(); }
   });
 
+  it("settles a query receipt that still carries its own worker owner", async () => {
+    const h = harness();
+    try {
+      await h.render(viewed("previous", { status: "running", currentPhase: "running", activeTurnId: "current" }));
+      await h.render(viewed("current", { activeTurnId: "current" }));
+      expect(h.notify).toHaveBeenCalledTimes(1);
+      expect(h.notify).toHaveBeenLastCalledWith(expect.objectContaining({ turnId: "current", terminalStatus: "completed" }));
+      await h.render(viewed("current", { activeTurnId: "" }));
+      expect(h.notify).toHaveBeenCalledTimes(1);
+    } finally { await h.close(); }
+  });
+
   it("leaves Companion, unresolved or refetching identity on its existing attention path", async () => {
     const h = harness();
     try {

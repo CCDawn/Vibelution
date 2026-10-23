@@ -71,11 +71,20 @@ def resolve_session_activity(
     raw = status or legacy_phase or child
     result = {"execution": "unknown", "phase": "", "outcome": "", "reason": "", "rawStatus": raw}
     execution = next((activity_execution(value) for value in current if activity_execution(value)), "")
-    if execution or session.get("activeTurnId") or (runtime_running and authoritative_runtime):
+    reason = normalize_activity_value(session.get("terminalReason"))
+    active_turn_id = str(session.get("activeTurnId") or "").strip()
+    # A terminal projection can precede the worker's in-memory owner cleanup.
+    # Only the exact Journal terminal identity can retire that stale owner;
+    # a live phase or reconciled runtime still takes precedence below.
+    settled_owner = bool(
+        active_turn_id
+        and active_turn_id == str(session.get("lastTurnTerminalTurnId") or "").strip()
+        and activity_outcome(reason)
+    )
+    if execution or (active_turn_id and not settled_owner) or (runtime_running and authoritative_runtime):
         return {**result, "execution": execution or "running", "phase": phase}
     if raw and not (activity_outcome(raw) or raw in SESSION_ACTIVITY_CONTRACT["resting"]):
         return result
-    reason = normalize_activity_value(session.get("terminalReason"))
     # Ready/running are historical placeholders in terminalReason, not outcomes.
     if reason and not activity_outcome(reason) and reason not in {"ready", "idle", "running"}:
         return result
