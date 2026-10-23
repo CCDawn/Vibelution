@@ -837,6 +837,14 @@ def _active_project_root() -> Path:
 
 _REPAIRED_STATE_CACHE_SIGNATURE: tuple[str, bool, int, int] | None = None
 _REPAIRED_STATE_CACHE: dict[str, Any] | None = None
+# Per-agent repair fingerprints from the last completed repair walk. They are
+# content-keyed and self-validating, so unlike the snapshot cache above they
+# deliberately survive `_invalidate_repaired_state_cache()` when a writer
+# rewrites the registry: unchanged records keep their cached fixpoint verdict
+# while only the rewritten records re-run the normalization suite.
+_REPAIRED_RECORD_SHAS: dict[str, str] | None = None
+_REPAIR_CONTEXT_SIGNATURE: str | None = None
+_REPAIR_EXTERNAL_SIGNATURE: tuple[str, tuple[str, ...], tuple[str, ...]] | None = None
 _JSONL_RECENT_CACHE: dict[tuple[str, bool, int, int, int, str, bool], list[dict[str, Any]]] = {}
 _JSONL_COUNT_CACHE: dict[tuple[str, bool, int, int, str], int] = {}
 _JSONL_RECENT_COUNT_CACHE: dict[tuple[str, bool, int, int, int, str], tuple[list[dict[str, Any]], int]] = {}

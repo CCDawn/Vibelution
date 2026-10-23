@@ -1533,6 +1533,11 @@ def _agent_to_api_summary_cached(
             entry = _AGENT_SUMMARY_CACHE.get((agent_id, signature))
             cached_summary = entry[0] if entry is not None else None
             cache_valid = entry is not None and now - entry[1] <= _AGENT_SUMMARY_CACHE_TTL_SECONDS
+            if cache_valid:
+                # 滑动续期：键含内容签名，条目有效性不随龄增长而变化；TTL 只负责
+                # 回收不再被访问的垃圾条目，命中即续期让稳态轮询不会在 >TTL 间隙
+                # 后全量重投影。
+                _AGENT_SUMMARY_CACHE[(agent_id, signature)] = (entry[0], now)
         if cache_valid:
             return _copy_json_safe(cached_summary), True
     projected = s._agent_to_api_summary(
