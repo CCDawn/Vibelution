@@ -11,19 +11,33 @@
  * - This registry (together with useSessionDetailStream as its only caller) is
  *   the sole owner of /api/sessions/:id/events connections; at most one
  *   connection per sessionId exists at any time.
- * - At most one session is kept warm: acquiring a session closes every other
- *   parked entry so parked connections cannot accumulate.
- * - While parked, incoming frames are not projected: the parked listeners only
+* - At most SESSION_STREAM_WARM_MAX_ENTRIES sessions stay warm: acquiring a
+ *   session evicts the least recently parked entries beyond the cap, so parked
+ *   connections cannot accumulate while a detour through a second or third
+ *   session keeps its stream live. * - While parked, incoming frames are not projected: the parked listeners only
  *   track the latest ledger watermark, and the consuming hook decides on one
  *   authoritative refresh when the watermark advanced over the cached detail.
  */
 import type { SessionEventStream } from "./sessionEventStream";
 
-/** How long an unreferenced stream stays parked (open) after the last owner unmounts. */
-export const SESSION_STREAM_WARM_MS = 30_000;
+/**
+ * How long an unreferenced stream stays parked (open) after the last owner
+ * unmounts. Five minutes spans a real "switch page and come back" detour (read
+ * a doc, scan logs, answer a message) instead of only a quick tab flip. A
+ * parked entry projects nothing — it holds the SSE connection plus a ledger
+ * watermark — so the wider window costs one idle stream, not stale UI.
+ */
+export const SESSION_STREAM_WARM_MS = 5 * 60_000;
 
-const PARKED_LEDGER_EVENT_TYPES = [
-  "session_detail",
+/**
+ * How many sessions may stay warm at once. Switching through a second or third
+ * session to check something and coming back is normal, so a single warm slot
+ * pushed the first stream into a cold reconnect + full resync. Referenced
+ * entries never count against eviction — the cap only trims parked ones.
+ */
+export const SESSION_STREAM_WARM_MAX_ENTRIES = 3;
+
+const PARKED_LEDGER_EVENT_TYPES = [  "session_detail",
   "session_initial",
   "assistant_delta",
   "session_journal_event",
@@ -36,9 +50,10 @@ type WarmSessionStreamEntry = {
   refCount: number;
   /** Highest ledger watermark observed while parked (0 = none). */
   parkedLedgerSeq: number;
+  /** Wall clock when this entry became parked; 0 while it is still referenced. */
+  parkedAtMs: number;
   parkedListeners: Array<{ type: string; callback: EventListener }>;
 };
-
 export type AcquiredSessionStream = {
   stream: SessionEventStream;
   /** True when the stream was reused from a parked (warm) entry. */
@@ -108,18 +123,27 @@ function clearWarmTimer(entry: WarmSessionStreamEntry): void {
   }
 }
 
-function closeOtherWarmEntries(exceptSessionId: string): void {
-  for (const [sessionId, entry] of [...warmEntries.entries()]) {
-    if (sessionId === exceptSessionId || entry.refCount > 0) {
-      continue;
-    }
-    clearWarmTimer(entry);
-    detachParkedListeners(entry);
-    entry.stream.close();
-    warmEntries.delete(sessionId);
+function closeExcessWarmEntries(exceptSessionId: string): void {
+  const parked = [...warmEntries.entries()].filter(
+    ([sessionId, entry]) => sessionId !== exceptSessionId && entry.refCount <= 0,
+  );
+  // The session being acquired occupies one slot, so only the rest of the cap
+  // may stay parked. Oldest-parked goes first: a stream nobody came back for
+  // is the one least likely to be reclaimed.
+  const allowedParked = Math.max(0, SESSION_STREAM_WARM_MAX_ENTRIES - 1);
+  if (parked.length <= allowedParked) {
+    return;
   }
+  parked
+    .sort((left, right) => left[1].parkedAtMs - right[1].parkedAtMs)
+    .slice(0, parked.length - allowedParked)
+    .forEach(([sessionId, entry]) => {
+      clearWarmTimer(entry);
+      detachParkedListeners(entry);
+      entry.stream.close();
+      warmEntries.delete(sessionId);
+    });
 }
-
 function removeEntry(sessionId: string, entry: WarmSessionStreamEntry): void {
   clearWarmTimer(entry);
   detachParkedListeners(entry);
@@ -141,21 +165,27 @@ export function acquireSessionStream(
     if (existing.stream.readyState !== 2) {
       clearWarmTimer(existing);
       detachParkedListeners(existing);
-      existing.refCount += 1;
+existing.refCount += 1;
       const parkedLedgerSeq = existing.parkedLedgerSeq;
       existing.parkedLedgerSeq = 0;
-      closeOtherWarmEntries(key);
-      return { stream: existing.stream, reusedWarm: true, parkedLedgerSeq };
+      existing.parkedAtMs = 0;
+      closeExcessWarmEntries(key);      return { stream: existing.stream, reusedWarm: true, parkedLedgerSeq };
     }
     // A closed stream can never go warm again; drop the stale entry.
     removeEntry(key, existing);
   }
-  closeOtherWarmEntries(key);
+closeExcessWarmEntries(key);
   const stream = factory(sessionId);
   if (key) {
-    warmEntries.set(key, { stream, timer: null, refCount: 1, parkedLedgerSeq: 0, parkedListeners: [] });
-  }
-  return { stream, reusedWarm: false, parkedLedgerSeq: 0 };
+    warmEntries.set(key, {
+      stream,
+      timer: null,
+      refCount: 1,
+      parkedLedgerSeq: 0,
+      parkedAtMs: 0,
+      parkedListeners: [],
+    });
+  }  return { stream, reusedWarm: false, parkedLedgerSeq: 0 };
 }
 
 /**
@@ -179,10 +209,10 @@ export function releaseSessionStream(sessionId: string, stream: SessionEventStre
     removeEntry(key, entry);
     return;
   }
-  attachParkedListeners(entry);
+attachParkedListeners(entry);
   clearWarmTimer(entry);
-  entry.timer = window.setTimeout(() => {
-    const current = warmEntries.get(key);
+  entry.parkedAtMs = Date.now();
+  entry.timer = window.setTimeout(() => {    const current = warmEntries.get(key);
     if (!current || current !== entry || current.refCount > 0) {
       return;
     }
