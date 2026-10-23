@@ -1168,6 +1168,9 @@ def reconcile_stale_chat_turn_work_runs(*, now: datetime | None = None) -> list[
 def _complete_turn_error_visible_content(content: Any, metadata: dict[str, Any]) -> str:
     s = _service()
     visible = str(content or "").strip()
+    if str(metadata.get("reasonCode") or metadata.get("reason_code") or "").strip() == "iteration_limit_reached":
+        # Controlled-stop details belong in diagnostics, including on readback.
+        return visible
     reason_summary = str(metadata.get("reasonSummary") or metadata.get("reason_summary") or "").strip()
     reason_detail = str(metadata.get("reasonDetail") or metadata.get("reason_detail") or "").strip()
     http_status = s._coerce_nonnegative_int(metadata.get("httpStatus") or metadata.get("http_status"))
@@ -2213,6 +2216,21 @@ def _make_session_turn_error(
     # has the original failure text to show.
     if structured_failure and not reason_detail:
         reason_detail = s.trim_lines(str(raw_error or ""), max_lines=2)
+    controlled_stop_message = ""
+    # Only the structured runtime reason owns this local stop. A provider error
+    # that merely mentions the guard code must keep its original presentation.
+    if _failure_text("reason_code", "reasonCode") == "iteration_limit_reached":
+        controlled_stop_message = s.text_for(
+            lang,
+            zh="本轮已达执行上限，上下文已压缩，发送“继续”可接着处理。",
+            en='This turn reached its execution limit. Context has been compressed; send "continue" to keep going.',
+        )
+        reason_summary = controlled_stop_message
+        provider_diagnostics.update(
+            http_status=0,
+            provider_error_type="",
+            provider_error_message="",
+        )
     chain_stage = _failure_text("chain_stage", "chainStage")
     event_code = _failure_text("event_code", "eventCode")
     trace_id = _failure_text("trace_id", "traceId") or str(payload_trace.get("traceId") or "").strip()
@@ -2225,13 +2243,14 @@ def _make_session_turn_error(
         "network_error",
     }
     return {
-        # User-visible failure text (raw_error already human-readable, e.g. an
+        # A local controlled stop has its own concise continuation notice.
+        # Otherwise, user-visible failure text (raw_error already human-readable, e.g. an
         # image-route failure) wins over the internal llm_failure diagnostic so
         # the operator sees the actual problem first; llm_failure details stay
         # in reason_summary/reason_detail/chainStage diagnostics fields.
         # An empty raw_error yields no user-visible text, so the structured
         # llm_failure message still surfaces.
-        "message": (
+        "message": controlled_stop_message or (
             s._user_visible_failure_summary(summary_error, lang=lang, provider_reason=provider_reason)
             if str(raw_error or "").strip()
             else ""
@@ -2278,8 +2297,9 @@ def _make_turn_error_chat_message(
     timestamp = str(turn_error.get("timestamp") or s._now_timestamp()).strip()
     reason_summary = str(turn_error.get("reason_summary") or turn_error.get("reasonSummary") or "").strip()
     reason_detail = str(turn_error.get("reason_detail") or turn_error.get("reasonDetail") or "").strip()
+    reason_code = str(turn_error.get("reason_code") or turn_error.get("reasonCode") or "").strip()
     visible_message = str(turn_error.get("message") or "").strip()
-    if reason_summary and reason_summary not in visible_message:
+    if reason_code != "iteration_limit_reached" and reason_summary and reason_summary not in visible_message:
         visible_message = f"{visible_message} 原因：{reason_summary}。".strip()
     message = s._make_chat_message(
         "assistant",
@@ -2290,7 +2310,7 @@ def _make_turn_error_chat_message(
             "turnId": str(turn_id or "").strip(),
             "recoverable": bool(turn_error.get("recoverable")),
             "providerFailure": bool(provider_failure),
-            "reasonCode": str(turn_error.get("reason_code") or turn_error.get("reasonCode") or "").strip(),
+            "reasonCode": reason_code,
             "reasonSummary": reason_summary,
             "reasonDetail": reason_detail,
             "httpStatus": s._coerce_nonnegative_int(turn_error.get("http_status") or turn_error.get("httpStatus")) or None,

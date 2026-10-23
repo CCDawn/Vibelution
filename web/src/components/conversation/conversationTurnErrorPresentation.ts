@@ -43,6 +43,18 @@ function metadataText(metadata: Record<string, unknown> | undefined, key: string
   return "";
 }
 
+/** Structured turn stops remain unfinished, but are not provider request errors. */
+export function resolveIterationLimitNotice(
+  metadata: Record<string, unknown> | null | undefined,
+  lang: ConversationLanguage,
+): string {
+  const code = metadataText(metadata ?? undefined, "reasonCode") || metadataText(metadata ?? undefined, "reason_code");
+  if (code !== "iteration_limit_reached") return "";
+  return lang === "zh"
+    ? "本轮已达执行上限，上下文已压缩，发送“继续”可接着处理。"
+    : 'This turn reached its execution limit. Context has been compressed; send "continue" to keep going.';
+}
+
 function turnErrorLabel(lang: ConversationLanguage, zh: string, en: string) {
   return lang === "zh" ? zh : en;
 }
@@ -109,6 +121,7 @@ export function buildTurnErrorDiagnosticRows(
   metadata: Record<string, unknown> | undefined,
   lang: ConversationLanguage,
 ): TurnErrorDiagnosticRow[] {
+  const iterationStop = Boolean(resolveIterationLimitNotice(metadata, lang));
   const summary = metadataText(metadata, "reasonSummary") || metadataText(metadata, "reason_summary");
   const detail = metadataText(metadata, "reasonDetail") || metadataText(metadata, "reason_detail");
   const code = metadataText(metadata, "reasonCode") || metadataText(metadata, "reason_code");
@@ -123,13 +136,13 @@ export function buildTurnErrorDiagnosticRows(
   const traceId = metadataText(metadata, "traceId") || metadataText(metadata, "trace_id");
 
   return [
-    httpStatus ? { label: turnErrorLabel(lang, "状态码", "Status"), value: httpStatus } : null,
-    summary ? { label: turnErrorLabel(lang, "原因", "Reason"), value: summary } : null,
+    httpStatus && !iterationStop ? { label: turnErrorLabel(lang, "状态码", "Status"), value: httpStatus } : null,
+    summary && !iterationStop ? { label: turnErrorLabel(lang, "原因", "Reason"), value: summary } : null,
     detail ? { label: turnErrorLabel(lang, "详情", "Detail"), value: detail } : null,
     chainStage ? { label: turnErrorLabel(lang, "阶段", "Stage"), value: chainStage } : null,
     protocol ? { label: turnErrorLabel(lang, "协议", "Protocol"), value: protocol } : null,
-    providerErrorType ? { label: turnErrorLabel(lang, "类型", "Type"), value: providerErrorType } : null,
-    providerErrorMessage ? { label: turnErrorLabel(lang, "上游", "Upstream"), value: providerErrorMessage } : null,
+    providerErrorType && !iterationStop ? { label: turnErrorLabel(lang, "类型", "Type"), value: providerErrorType } : null,
+    providerErrorMessage && !iterationStop ? { label: turnErrorLabel(lang, "上游", "Upstream"), value: providerErrorMessage } : null,
     provider || providerHost ? { label: turnErrorLabel(lang, "通道", "Provider"), value: [provider, providerHost].filter(Boolean).join(" · ") } : null,
     model ? { label: turnErrorLabel(lang, "模型", "Model"), value: model } : null,
     code ? { label: turnErrorLabel(lang, "代码", "Code"), value: code } : null,
@@ -147,14 +160,15 @@ export function buildCurrentTurnErrorRows(
   lang: ConversationLanguage,
 ): TurnErrorDiagnosticRow[] {
   const retryAttempts = turnErrorRetryAttempts(turnError);
+  const iterationStop = Boolean(resolveIterationLimitNotice(turnError, lang));
   return [
-    turnError.httpStatus ? { label: turnErrorLabel(lang, "状态码", "Status"), value: String(turnError.httpStatus) } : null,
-    turnError.reasonSummary ? { label: turnErrorLabel(lang, "原因", "Reason"), value: turnError.reasonSummary } : null,
+    turnError.httpStatus && !iterationStop ? { label: turnErrorLabel(lang, "状态码", "Status"), value: String(turnError.httpStatus) } : null,
+    turnError.reasonSummary && !iterationStop ? { label: turnErrorLabel(lang, "原因", "Reason"), value: turnError.reasonSummary } : null,
     turnError.reasonDetail ? { label: turnErrorLabel(lang, "详情", "Detail"), value: turnError.reasonDetail } : null,
     turnError.chainStage ? { label: turnErrorLabel(lang, "阶段", "Stage"), value: turnError.chainStage } : null,
     turnError.protocol ? { label: turnErrorLabel(lang, "协议", "Protocol"), value: turnError.protocol } : null,
-    turnError.providerErrorType ? { label: turnErrorLabel(lang, "类型", "Type"), value: turnError.providerErrorType } : null,
-    turnError.providerErrorMessage ? { label: turnErrorLabel(lang, "上游", "Upstream"), value: turnError.providerErrorMessage } : null,
+    turnError.providerErrorType && !iterationStop ? { label: turnErrorLabel(lang, "类型", "Type"), value: turnError.providerErrorType } : null,
+    turnError.providerErrorMessage && !iterationStop ? { label: turnErrorLabel(lang, "上游", "Upstream"), value: turnError.providerErrorMessage } : null,
     turnError.provider || turnError.providerHost ? { label: turnErrorLabel(lang, "通道", "Provider"), value: [turnError.provider, turnError.providerHost].filter(Boolean).join(" · ") } : null,
     turnError.model ? { label: turnErrorLabel(lang, "模型", "Model"), value: turnError.model } : null,
     turnError.reasonCode ? { label: turnErrorLabel(lang, "代码", "Code"), value: turnError.reasonCode } : null,
@@ -176,6 +190,8 @@ function resolveTurnErrorSummaryText(
   turnError: SessionTurnError,
   lang: ConversationLanguage,
 ) {
+  const iterationStop = resolveIterationLimitNotice(turnError, lang);
+  if (iterationStop) return iterationStop;
   const reasonSummary = String(turnError.reasonSummary || "").trim();
   if (reasonSummary) {
     return reasonSummary;
