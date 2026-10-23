@@ -3437,34 +3437,60 @@ def _record_agent_directory_conversation_index_event(
     *,
     session_id: str,
 ) -> None:
+    _record_agent_directory_conversation_index_events([(agent, session_id)])
+
+
+def _record_agent_directory_conversation_index_events(
+    entries: list[tuple[dict[str, Any], str]],
+) -> None:
+    """Record bounded index diagnostics without one scene write per stub.
+
+    Keep identity-level deduplication and every identity field. A single entry
+    retains the existing event contract; batches fit the scene field item cap.
+    """
+    if not entries:
+        return
     s = _service()
-    normalized_session_id = str(session_id or "").strip()
-    agent_id = str(agent.get("agentId") or "").strip()
-    if not normalized_session_id or not agent_id:
-        return
-    dedupe_key = (str(s.PROJECT_ROOT.resolve()), normalized_session_id, agent_id)
-    if not s._claim_index_event_key_once(s._AGENT_DIRECTORY_INDEX_EVENT_KEYS, dedupe_key):
-        return
-    try:
-        s.record_runtime_scene_event(
-            "conversation",
-            "agent_directory_index",
-            "session.agent_directory_index_added",
-            level="info",
-            outcome="indexed",
-            message="Agent Directory direct session added to the conversation index.",
-            fields={
-                "sessionId": normalized_session_id,
-                "agentId": agent_id,
-                "agentCode": str(agent.get("agentCode") or "").strip(),
-                "primaryMode": str(agent.get("primaryMode") or "").strip(),
-                "roleKey": str(agent.get("roleKey") or "").strip(),
-                "promptTemplateId": str(agent.get("promptTemplateId") or "").strip(),
-            },
-            lifecycle=True,
-        )
-    except Exception:
-        return
+    project_root = str(s.PROJECT_ROOT.resolve())
+    pending: list[dict[str, str]] = []
+    for agent, session_id in entries:
+        normalized_session_id = str(session_id or "").strip()
+        agent_id = str(agent.get("agentId") or "").strip()
+        if not normalized_session_id or not agent_id:
+            continue
+        dedupe_key = (project_root, normalized_session_id, agent_id)
+        if not s._claim_index_event_key_once(s._AGENT_DIRECTORY_INDEX_EVENT_KEYS, dedupe_key):
+            continue
+        pending.append({
+            "sessionId": normalized_session_id,
+            "agentId": agent_id,
+            "agentCode": str(agent.get("agentCode") or "").strip(),
+            "primaryMode": str(agent.get("primaryMode") or "").strip(),
+            "roleKey": str(agent.get("roleKey") or "").strip(),
+            "promptTemplateId": str(agent.get("promptTemplateId") or "").strip(),
+        })
+    # Runtime scene telemetry retains up to 24 list items. Stay below that cap
+    # and split rather than dropping identities from a large directory.
+    for offset in range(0, len(pending), 16):
+        batch = pending[offset:offset + 16]
+        single = len(batch) == 1
+        try:
+            s.record_runtime_scene_event(
+                "conversation",
+                "agent_directory_index",
+                "session.agent_directory_index_added" if single else "session.agent_directory_index_added.batch",
+                level="info",
+                outcome="indexed",
+                message=(
+                    "Agent Directory direct session added to the conversation index." if single
+                    else "Agent Directory direct sessions added to the conversation index."
+                ),
+                fields=batch[0] if single else {"indexedCount": len(batch), "indexedSessions": batch},
+                lifecycle=True,
+            )
+        except Exception:
+            # Index diagnostics remain best-effort, as for the single event.
+            continue
 
 
 def _record_agent_direct_session_collision_repaired_event(

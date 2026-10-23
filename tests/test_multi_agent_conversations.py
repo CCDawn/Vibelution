@@ -1328,14 +1328,15 @@ def test_agent_directory_index_logging_is_deduplicated_per_agent_session(tmp_pat
 
     assert any(item["id"] == agent["directSessionId"] for item in first)
     assert any(item["id"] == agent["directSessionId"] for item in second)
-    index_events = [
-        event for event in recorded_events
-        if event[0][2] == "session.agent_directory_index_added"
-        and event[1]["fields"]["agentId"] == agent["agentId"]
-    ]
-    assert len(index_events) == 1
-    assert index_events[0][1]["fields"]["sessionId"] == agent["directSessionId"]
-    assert index_events[0][1]["fields"]["agentId"] == agent["agentId"]
+    index_rows = []
+    for args, kwargs in recorded_events:
+        if args[2] == "session.agent_directory_index_added":
+            index_rows.append(kwargs["fields"])
+        elif args[2] == "session.agent_directory_index_added.batch":
+            index_rows.extend(kwargs["fields"]["indexedSessions"])
+    agent_rows = [row for row in index_rows if row["agentId"] == agent["agentId"]]
+    assert len(agent_rows) == 1
+    assert agent_rows[0]["sessionId"] == agent["directSessionId"]
 
 
 def test_missing_agent_hidden_index_logging_is_deduplicated_per_session(tmp_path, monkeypatch):

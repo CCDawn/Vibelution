@@ -5371,6 +5371,7 @@ def _append_agent_directory_conversations(
         if isinstance(item, dict) and str(item.get("id") or "").strip()
     }
     result = list(conversations)
+    indexed_sessions: list[tuple[dict[str, Any], str]] = []
     try:
         agents = list((agent_by_id if agent_by_id is not None else s._agent_lookup_for_conversations()).values())
     except Exception:
@@ -5401,7 +5402,8 @@ def _append_agent_directory_conversations(
         )
         result.append(conversation)
         by_session_id[session_id] = conversation
-        s._record_agent_directory_conversation_index_event(agent, session_id=session_id)
+        indexed_sessions.append((agent, session_id))
+    s._record_agent_directory_conversation_index_events(indexed_sessions)
     return result
 
 
