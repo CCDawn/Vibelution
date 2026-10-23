@@ -3142,6 +3142,11 @@ def delete_chat_session_lightweight(session_id: str, *, activate_replacement: bo
 
     deleted_session_id = str(session_id or "").strip()
     delete_result = s._delete_chat_session_state(deleted_session_id, activate_replacement=activate_replacement)
+    # The row is gone for good, so every rail drops it now instead of
+    # waiting for the next index read to notice.
+    from core.web.services.session import session_index_stream
+
+    session_index_stream.publish_session_index_change_safely(deleted_session_id, "remove")
     return {
         "deleted": True,
         "deletedSessionId": deleted_session_id,
