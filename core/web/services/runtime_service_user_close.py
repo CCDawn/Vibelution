@@ -148,36 +148,40 @@ def _remaining_work(deadline: float) -> list[dict]:
 
 
 def retire_for_user_close(lang: str) -> dict[str, object]:
-    deadline = time.monotonic() + USER_CLOSE_SAVE_WAIT_SECONDS
-    # Producer owners are dispatched first; each applies its existing stop
-    # controls before persistence. Chat saving never waits for their completion.
-    jobs = {
-        "autonomous": _stop_autonomous,
-        "formal_review": _stop_formal_review,
-        "self_evolution_run": lambda: _stopped_evolution("self_evolution_run", runtime._force_cancel_self_evolution_for_shutdown),
-        "supervised_evolution_run": lambda: _stopped_evolution("supervised_evolution_run", runtime._force_cancel_supervised_evolution_for_shutdown),
-        "supervised_worktree_evolution_run": lambda: _stopped_evolution("supervised_worktree_evolution_run", runtime._force_cancel_supervised_worktree_evolution_for_shutdown),
-        "sources": lambda: _stop_sources(deadline),
-        "rooms": lambda: _stop_rooms(deadline),
-        "turns": lambda: _stop_chat_turns(deadline),
-    }
-    harvested = _parallel(jobs, deadline)
-    results = [item for rows in harvested.values() for item in rows]
-    failures = [item for item in results if item.get("error") or item.get("status") in {"failed", "timeout", "skipped"}]
-    if not failures:
-        failures.extend({**item, "error": "user_close_pause_not_settled"} for item in _remaining_work(deadline))
-    runtime._record_shutdown_event(
-        "runtime.shutdown.user_close_pause_failed" if failures else "runtime.shutdown.user_close_paused",
-        message="Operator close task cleanup failed." if failures else "Operator close task cleanup settled.",
-        outcome="failed" if failures else "accepted", level="error" if failures else "info",
-        fields={"source": "electron_user_close", "taskCount": len(results), "failedCount": len(failures), "pauseResults": results},
-    )
-    if failures:
-        raise runtime.RuntimeRestartPauseFailed(failures)
-    response = runtime._electron_retire_local_shutdown(
-        lang, source="electron_user_close", stopped_chat_turns=harvested["turns"],
-        stopped_chat_room_rounds=harvested["rooms"], stopped_source_collection_runs=harvested["sources"],
-        stopped_evolution_runs=[item for kind in ("self_evolution_run", "supervised_evolution_run", "supervised_worktree_evolution_run") for item in harvested[kind]],
-    )
-    response["otherWorkRuns"] = [*harvested["autonomous"], *harvested["formal_review"]]
-    return response
+    # 整个并行收割窗口包在运行时停止原因上下文里：_parallel 在新线程里执行
+    # 各 owner 停止器，域内组件对会话回合发起的无 stop_reason 停止请求依赖
+    # 模块级（跨线程）上下文继承 electron_user_close，而不是冒充用户停止。
+    with runtime.runtime_stop_reason_context("electron_user_close"):
+        deadline = time.monotonic() + USER_CLOSE_SAVE_WAIT_SECONDS
+        # Producer owners are dispatched first; each applies its existing stop
+        # controls before persistence. Chat saving never waits for their completion.
+        jobs = {
+            "autonomous": _stop_autonomous,
+            "formal_review": _stop_formal_review,
+            "self_evolution_run": lambda: _stopped_evolution("self_evolution_run", runtime._force_cancel_self_evolution_for_shutdown),
+            "supervised_evolution_run": lambda: _stopped_evolution("supervised_evolution_run", runtime._force_cancel_supervised_evolution_for_shutdown),
+            "supervised_worktree_evolution_run": lambda: _stopped_evolution("supervised_worktree_evolution_run", runtime._force_cancel_supervised_worktree_evolution_for_shutdown),
+            "sources": lambda: _stop_sources(deadline),
+            "rooms": lambda: _stop_rooms(deadline),
+            "turns": lambda: _stop_chat_turns(deadline),
+        }
+        harvested = _parallel(jobs, deadline)
+        results = [item for rows in harvested.values() for item in rows]
+        failures = [item for item in results if item.get("error") or item.get("status") in {"failed", "timeout", "skipped"}]
+        if not failures:
+            failures.extend({**item, "error": "user_close_pause_not_settled"} for item in _remaining_work(deadline))
+        runtime._record_shutdown_event(
+            "runtime.shutdown.user_close_pause_failed" if failures else "runtime.shutdown.user_close_paused",
+            message="Operator close task cleanup failed." if failures else "Operator close task cleanup settled.",
+            outcome="failed" if failures else "accepted", level="error" if failures else "info",
+            fields={"source": "electron_user_close", "taskCount": len(results), "failedCount": len(failures), "pauseResults": results},
+        )
+        if failures:
+            raise runtime.RuntimeRestartPauseFailed(failures)
+        response = runtime._electron_retire_local_shutdown(
+            lang, source="electron_user_close", stopped_chat_turns=harvested["turns"],
+            stopped_chat_room_rounds=harvested["rooms"], stopped_source_collection_runs=harvested["sources"],
+            stopped_evolution_runs=[item for kind in ("self_evolution_run", "supervised_evolution_run", "supervised_worktree_evolution_run") for item in harvested[kind]],
+        )
+        response["otherWorkRuns"] = [*harvested["autonomous"], *harvested["formal_review"]]
+        return response

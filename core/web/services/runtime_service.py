@@ -45,6 +45,7 @@ from .i18n import get_web_language, text_for
 from .avatar_image_service import avatar_image_url
 from .runtime_manager_control_service import current_runtime_manager_pid
 from .session.timebase import parse_timestamp_utc
+from .session.control import RUNTIME_STOP_REASONS, runtime_stop_reason_context
 from .session_service import (
     cancel_agent_execution_reservation,
     get_active_session_summary,
@@ -424,7 +425,18 @@ def _retire_for_user_restart(
 
     This is the backend half of an operator close/restart in Electron's serialized
     lifecycle queue. It must never enqueue another lifecycle operation.
+
+    整个收割窗口包在运行时停止原因上下文里：窗口内任何无显式 stop_reason 的
+    进程内停止请求（如资料搜集级联取消）继承收割原因，而不是冒充操作者停止。
     """
+    with runtime_stop_reason_context(source):
+        return _retire_for_user_restart_harvest(lang, source=source)
+
+
+def _retire_for_user_restart_harvest(
+    lang: str, *, source: str = "electron_user_restart",
+) -> dict[str, object]:
+    """``_retire_for_user_restart`` 的原收割函数体，运行在其原因上下文内。"""
     deadline = time.monotonic() + SHUTDOWN_HARVEST_TOTAL_WAIT_SECONDS
     # Stop orchestrators before their chat turns so they cannot enqueue a new
     # child turn between the chat harvest and backend retirement.
@@ -756,8 +768,34 @@ def _electron_retire_local_shutdown(
     local exit here keeps the retire contract without touching the daemon.
     When the caller already harvested in-flight work, those results are reused
     instead of running a second bounded harvest pass.
-    """
 
+    自身也开一个运行时停止原因窗口：无 body 退休的默认 source
+    ``electron_retire`` 不在运行时停止原因集合里，映射为 ``runtime_shutdown``
+    （与其自身 chat-turn 收割默认一致）；上游已带运行时原因（重启/关闭收割）
+    时原样继承。嵌套窗口 nesting-safe，内层退出恢复外层值。
+    """
+    harvest_reason = source if source in RUNTIME_STOP_REASONS else "runtime_shutdown"
+    with runtime_stop_reason_context(harvest_reason):
+        return _electron_retire_local_shutdown_harvest(
+            lang,
+            source=source,
+            stopped_chat_room_rounds=stopped_chat_room_rounds,
+            stopped_chat_turns=stopped_chat_turns,
+            stopped_source_collection_runs=stopped_source_collection_runs,
+            stopped_evolution_runs=stopped_evolution_runs,
+        )
+
+
+def _electron_retire_local_shutdown_harvest(
+    lang: str,
+    *,
+    source: str = "electron_retire",
+    stopped_chat_room_rounds: list[dict[str, object]] | None = None,
+    stopped_chat_turns: list[dict[str, object]] | None = None,
+    stopped_source_collection_runs: list[dict[str, object]] | None = None,
+    stopped_evolution_runs: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    """``_electron_retire_local_shutdown`` 的原收割函数体，运行在其原因上下文内。"""
     stopped_chat_room_rounds = (
         _stop_active_chat_room_rounds_before_shutdown()
         if stopped_chat_room_rounds is None

@@ -9,6 +9,8 @@ Late-bound facade keeps monkeypatches stable.
 
 from __future__ import annotations
 
+import threading
+from contextlib import contextmanager
 from typing import Any
 
 
@@ -20,6 +22,48 @@ _RUNTIME_STOP_REASONS = frozenset({"electron_user_restart", "electron_user_close
 #: an operator stop writes the ``user_stops`` chat signal instead (the two
 #: paths are mutually exclusive). Do not mutate; it backs ``_RUNTIME_STOP_REASONS``.
 RUNTIME_STOP_REASONS = _RUNTIME_STOP_REASONS
+
+# 收割窗口上下文：进程级模块状态（非线程本地、非 contextvars）。user_close
+# 的并行收割在新线程里执行各 owner 停止器，域内组件（资料搜集等）可能在任意
+# 线程对会话回合发起无 stop_reason 的停止请求；只有模块级状态才能让整条收割
+# 链路共享同一个窗口。栈结构支持嵌套（内层退出恢复外层值）。
+_RUNTIME_STOP_REASON_LOCK = threading.Lock()
+_ACTIVE_RUNTIME_STOP_REASONS: list[str] = []
+
+
+def active_runtime_stop_reason() -> str:
+    """当前收割窗口注入的运行时停止原因；空串表示没有活跃收割上下文。"""
+    with _RUNTIME_STOP_REASON_LOCK:
+        return _ACTIVE_RUNTIME_STOP_REASONS[-1] if _ACTIVE_RUNTIME_STOP_REASONS else ""
+
+
+def _push_runtime_stop_reason(reason: str) -> None:
+    with _RUNTIME_STOP_REASON_LOCK:
+        _ACTIVE_RUNTIME_STOP_REASONS.append(str(reason or "").strip())
+
+
+def _pop_runtime_stop_reason() -> None:
+    with _RUNTIME_STOP_REASON_LOCK:
+        if _ACTIVE_RUNTIME_STOP_REASONS:
+            _ACTIVE_RUNTIME_STOP_REASONS.pop()
+
+
+@contextmanager
+def runtime_stop_reason_context(reason: str):
+    """收割窗口上下文：窗口内无显式 stop_reason 的停止请求继承收割原因。
+
+    退休收割（重启/关闭）触发的进程内停止请求可能不带 stop_reason，若按
+    操作者默认文案处理，被杀回合会被永久误标为用户停止（写 ``user_stops``
+    信号），证据门随对其 fail-closed。收割是进程级状态：进入窗口后，任何
+    无显式原因的停止都继承这里的机器可识别原因，走 ``runtime_stop_requested``
+    生命周期事件路径。Nesting-safe：内层退出恢复外层值。
+    """
+    normalized = str(reason or "").strip()
+    _push_runtime_stop_reason(normalized)
+    try:
+        yield normalized
+    finally:
+        _pop_runtime_stop_reason()
 
 
 def _stopped_turn_message(reason: str, *, lang: str, queued: bool = False) -> str:
@@ -107,8 +151,16 @@ def request_stop_session_turn(
             )
         )
 
+    # 原因解析：显式 stop_reason 永远优先；为空且收割窗口活跃且其值属于
+    # 运行时停止原因集合 → 继承收割原因（机器可识别，走 runtime 生命周期
+    # 事件路径）；两者皆无 → 维持操作者默认文案与 user_stops 信号现状。
+    normalized_stop_reason = str(stop_reason or "").strip()
+    if not normalized_stop_reason:
+        harvest_reason = active_runtime_stop_reason()
+        if harvest_reason in _RUNTIME_STOP_REASONS:
+            normalized_stop_reason = harvest_reason
     controller.request_stop(
-        str(stop_reason or "").strip() or s.text_for(
+        normalized_stop_reason or s.text_for(
             lang,
             zh="操作者请求停止当前轮。",
             en="The operator requested this turn to stop.",
