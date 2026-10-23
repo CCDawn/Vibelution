@@ -640,7 +640,7 @@ def _unresolved_pair_messages() -> list:
 
 def test_unresolved_tool_call_is_normalized_before_the_retention_gate():
     messages = _unresolved_pair_messages()
-    (compressed, should_break, _applied, _count, _last_iter), events, _ui = _run_compress(
+    (compressed, should_break, _applied, _count, _last_iter, _stop_reason), events, _ui = _run_compress(
         messages=messages,
         compressor=_TailKeepingCompressor(),
         context_input_hard_limit=HARD_LIMIT,
@@ -676,7 +676,7 @@ def test_unresolved_tool_call_is_normalized_before_the_retention_gate():
 
 def test_broken_chain_from_compressor_fails_closed_before_normalize():
     messages = _unresolved_pair_messages()
-    (compressed, should_break, _applied, _count, _last_iter), events, _ui = _run_compress(
+    (compressed, should_break, _applied, _count, _last_iter, _stop_reason), events, _ui = _run_compress(
         messages=messages,
         compressor=_ChainBreakingCompressor(),
         context_input_hard_limit=HARD_LIMIT,
@@ -705,7 +705,7 @@ def test_broken_chain_from_compressor_fails_closed_before_normalize():
 
 def test_compression_fails_closed_when_still_over_hard_limit():
     messages = _unresolved_pair_messages()
-    (compressed, should_break, _applied, _count, _last_iter), events, _ui = _run_compress(
+    (compressed, should_break, _applied, _count, _last_iter, _stop_reason), events, _ui = _run_compress(
         messages=messages,
         compressor=_NonShrinkingCompressor(),
         context_input_hard_limit=50,

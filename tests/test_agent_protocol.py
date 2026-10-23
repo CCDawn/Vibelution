@@ -5877,7 +5877,7 @@ class TestLocalProviderBootstrap:
             compress_calls.append((iteration, reason, len(messages), trigger_source))
             # Match real compress path: only then does the main loop append a runtime notice.
             agent._last_context_compression_applied = True
-            return list(messages[:2]), False
+            return list(messages[:2]), False, ""
 
         def fake_estimate(messages, threshold=None):
             # Gate helper and precise estimator share this stub in the test.
@@ -6686,7 +6686,7 @@ class TestLocalProviderBootstrap:
         def fake_compress(messages, iteration, reason="", trigger_source=""):
             compress_calls.append({"reason": reason, "triggerSource": trigger_source})
             agent._last_context_compression_applied = True
-            return list(messages[:2]), False
+            return list(messages[:2]), False, ""
 
         agent._compress_messages = fake_compress
         agent._invoke_llm = invoke
@@ -7911,7 +7911,7 @@ class TestRuntimeStateMemoryFlow:
         monkeypatch.setattr(conversation_ledger, "append_context_compression_attempt", attempt)
         messages = [{"role": "user", "content": "旧上下文"}] * 5
 
-        result, should_break = agent._compress_messages(messages, iteration=3, reason="context_pressure")
+        result, should_break, _stop_reason = agent._compress_messages(messages, iteration=3, reason="context_pressure")
 
         assert result is compressed
         assert should_break is False
@@ -8005,7 +8005,7 @@ class TestRuntimeStateMemoryFlow:
         scene_event = MagicMock()
         monkeypatch.setattr(agent_module, "_record_agent_scene_event", scene_event)
 
-        result, should_break = agent._compress_messages(
+        result, should_break, _stop_reason = agent._compress_messages(
             messages,
             iteration=1,
             reason="达到配置的上下文压缩阈值",
@@ -8080,11 +8080,83 @@ class TestRuntimeStateMemoryFlow:
         monkeypatch.setattr(agent_module, "get_ui", lambda: ui)
         monkeypatch.setattr(agent_module, "get_state_manager", lambda: SimpleNamespace(set_state=MagicMock()))
 
-        result, should_break = agent._compress_messages(messages, iteration=1, reason="context_pressure")
+        result, should_break, _stop_reason = agent._compress_messages(messages, iteration=1, reason="context_pressure")
 
         assert result is compressed
         assert should_break is False
         assert not any("提前结束当前轮次" in str(call.args[0]) for call in ui.add_log.call_args_list)
+
+    def test_iteration_limit_turn_stop_reports_real_reason_not_budget_exhaustion(self):
+        """回归 10-23 事故：压缩成功 + iteration>30 收轮时，诊断必须说
+        迭代上限，不得再误标 context_budget_exhausted。"""
+        agent = AgentRuntime.__new__(AgentRuntime)
+        agent._last_context_compression_applied = True
+        agent._last_turn_failed = False
+        diagnostics = []
+        agent._record_turn_failure_diagnostic = lambda **kwargs: diagnostics.append(kwargs)
+        messages = []
+
+        agent._record_compression_turn_stop(
+            stop_reason="iteration_limit_reached",
+            iteration=39,
+            before_tokens=222785,
+            after_tokens=156400,
+            messages=messages,
+        )
+
+        assert len(diagnostics) == 1
+        diagnostic = diagnostics[0]
+        assert diagnostic["reason_code"] == "iteration_limit_reached"
+        assert diagnostic["event_code"] == "agent.iteration_limit_reached"
+        assert diagnostic["retryable"] is True
+        assert diagnostic["recovery_action"] == "send_new_message"
+        assert "预算" not in diagnostic["reason_summary"]
+        assert "预算" not in diagnostic["reason_detail"]
+        assert diagnostic["fields"]["iteration"] == 39
+        assert diagnostic["fields"]["beforeTokens"] == 222785
+        assert diagnostic["fields"]["compressedTokens"] == 156400
+        assert messages, "压缩已应用时必须追加用户可见 notice"
+        notice_text = str(getattr(messages[-1], "content", "") or "")
+        assert "迭代已达上限" in notice_text
+        assert "发送新消息可继续" in notice_text
+        assert "仍未满足安全输入预算" not in notice_text
+
+    def test_emergency_turn_stop_reports_dedicated_reason(self):
+        agent = AgentRuntime.__new__(AgentRuntime)
+        agent._last_context_compression_applied = True
+        agent._last_turn_failed = False
+        diagnostics = []
+        agent._record_turn_failure_diagnostic = lambda **kwargs: diagnostics.append(kwargs)
+
+        agent._record_compression_turn_stop(
+            stop_reason="emergency_compression",
+            iteration=9,
+            before_tokens=200000,
+            after_tokens=90000,
+            messages=[],
+        )
+
+        assert diagnostics[0]["reason_code"] == "emergency_compression_completed"
+        assert diagnostics[0]["event_code"] == "agent.emergency_compression_turn_end"
+
+    def test_compression_turn_stop_suppressed_after_prior_failure(self):
+        agent = AgentRuntime.__new__(AgentRuntime)
+        agent._last_context_compression_applied = True
+        agent._last_turn_failed = True
+        diagnostics = []
+        agent._record_turn_failure_diagnostic = lambda **kwargs: diagnostics.append(kwargs)
+        messages = []
+
+        agent._record_compression_turn_stop(
+            stop_reason="iteration_limit_reached",
+            iteration=39,
+            before_tokens=1000,
+            after_tokens=500,
+            messages=messages,
+        )
+
+        assert diagnostics == []
+        assert messages, "notice 与诊断抑制解耦：压缩事实仍要可见"
 
     def test_chat_checkpoint_failure_records_failed_preserved_attempt(
         self,
@@ -8148,7 +8220,7 @@ class TestRuntimeStateMemoryFlow:
         monkeypatch.setattr(conversation_ledger, "append_context_compression_attempt", attempt)
         messages = [{"role": "user", "content": "旧上下文"}] * 5
 
-        result, should_break = agent._compress_messages(messages, iteration=4, reason="context_pressure")
+        result, should_break, _stop_reason = agent._compress_messages(messages, iteration=4, reason="context_pressure")
 
         assert result is compressed
         assert should_break is False
