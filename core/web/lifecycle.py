@@ -625,6 +625,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
         app.state.web_routes_ready_event = asyncio.Event()
         app.state.web_startup_routes_ready_event = asyncio.Event()
         app.state.web_bootstrap_routes_ready_event = asyncio.Event()
+        app.state.web_feature_routes_requested_event = asyncio.Event()
         # Route import/mount is the cold-start bulk cost — do not await before yield so
         # /api/health can pass and Launcher can open the window early.
         startup_routes_task = startup_jobs.start_async(
@@ -759,7 +760,13 @@ async def web_workbench_lifespan(app: FastAPI | None):
 
     startup_virtual_human_life_task = startup_jobs.start_async(
         "startup-virtual-human-life",
-        run_virtual_human_life_runtime(run_sync=startup_jobs.run_sync),
+        run_virtual_human_life_runtime(
+            run_sync=startup_jobs.run_sync,
+            initial_heartbeat_gate=(
+                (lambda: _await_startup_prewarm_gate(app))
+                if app is not None and _startup_cache_prewarm_gate_enabled() else None
+            ),
+        ),
     )
     startup_perception_task = startup_jobs.start_async(
         "startup-agent-perception", _start_perception_after_routes_ready(app, startup_jobs),

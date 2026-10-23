@@ -11,9 +11,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from langgraph.graph import START
+from langgraph.constants import START
 
-from core.research.workflow.challenge_cup_graph import compile_challenge_cup_graph
 from core.research.workflow.checkpoint_store import open_sqlite_checkpointer
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
 from core.research.workflow.models import WorkflowDefinition
@@ -32,6 +31,8 @@ def prepare_initial_checkpoint(
     definition: WorkflowDefinition | None = None,
 ) -> str:
     """Create a durable initial checkpoint with the first definition node scheduled."""
+    from core.research.workflow.challenge_cup_graph import compile_challenge_cup_graph
+
     pinned = _pinned_definition(definition)
     with open_sqlite_checkpointer(checkpoint_path) as checkpointer:
         graph = compile_challenge_cup_graph(checkpointer, definition=pinned)
@@ -55,6 +56,8 @@ def latest_checkpoint_id(
     Offer building must fail soft: an unreadable or missing checkpoint store
     keeps the revise offer unavailable instead of failing the snapshot read.
     """
+    from core.research.workflow.challenge_cup_graph import compile_challenge_cup_graph
+
     pinned = _pinned_definition(definition)
     try:
         with open_sqlite_checkpointer(checkpoint_path) as checkpointer:
@@ -76,6 +79,8 @@ def advance_checkpoint(
     definition: WorkflowDefinition | None = None,
 ) -> tuple[str, list[str]]:
     """Commit a validated node result and return the scheduled successors."""
+    from core.research.workflow.challenge_cup_graph import compile_challenge_cup_graph
+
     pinned = _pinned_definition(definition)
     with open_sqlite_checkpointer(checkpoint_path) as checkpointer:
         graph = compile_challenge_cup_graph(checkpointer, definition=pinned)
@@ -107,6 +112,8 @@ def fork_checkpoint_at_node(
     definition: WorkflowDefinition | None = None,
 ) -> str:
     """Clone source values into a new thread and schedule one correction node."""
+    from core.research.workflow.challenge_cup_graph import compile_challenge_cup_graph
+
     pinned = _pinned_definition(definition)
     with open_sqlite_checkpointer(checkpoint_path) as checkpointer:
         graph = compile_challenge_cup_graph(checkpointer, definition=pinned)
