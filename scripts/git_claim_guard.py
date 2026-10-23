@@ -433,6 +433,44 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def check_incoming_attribution(root: Path, old_sha: str, new_sha: str) -> None:
+    """Reject bot attribution in newly reachable commits, including merge parents.
+
+    Existing main history and recovery refs are deliberately outside this range:
+    checking them would freeze unrelated work without repairing that history.
+    """
+    zero = "0" * 40
+    if old_sha == new_sha or new_sha == zero:
+        return
+    revision = new_sha if old_sha == zero else f"{old_sha}..{new_sha}"
+    emails = {"cursoragent@cursor.com", "noreply@commandcode.ai"}
+    arguments = ("--no-replace-objects", "log", "--no-use-mailmap")
+    identities = _run_git(root, *arguments, "--format=%H%x00%ae%x00%ce", revision, "--")
+    if identities.returncode != 0:
+        raise ClaimGuardError("incoming_attribution_check_failed")
+    for line in identities.stdout.splitlines():
+        fields = line.split("\0")
+        if len(fields) != 3:
+            raise ClaimGuardError("incoming_attribution_check_failed")
+        commit_sha, author, committer = fields
+        for role, email in (("author", author), ("committer", committer)):
+            if email.lower() in emails:
+                raise ClaimGuardError(f"incoming_ai_attribution:{role}:{commit_sha}")
+
+    # Search complete messages: attribution can occur before later prose and
+    # would be missed by interpret-trailers. Plain textual email mentions pass.
+    coauthors = _run_git(
+        root, *arguments, "--format=%H", "--max-count=1",
+        "--regexp-ignore-case", "--extended-regexp",
+        r"--grep=^[[:space:]]*Co-authored-by:[[:space:]].*<(cursoragent@cursor\.com|noreply@commandcode\.ai)>[[:space:]]*$",
+        revision, "--",
+    )
+    if coauthors.returncode != 0:
+        raise ClaimGuardError("incoming_attribution_check_failed")
+    if coauthors.stdout.strip():
+        raise ClaimGuardError(f"incoming_ai_attribution:coauthor:{coauthors.stdout.strip()}")
+
+
 def issue_main_permit(
     root: Path | str,
     *,
@@ -443,8 +481,10 @@ def issue_main_permit(
 ) -> Path:
     if not integration_claim_id or len(old_sha) != 40 or len(new_sha) != 40:
         raise ClaimGuardError("invalid_main_update_permit")
+    root_path = repository_root(root)
+    check_incoming_attribution(root_path, old_sha, new_sha)
     issued_at = now or _utc_now()
-    path = _permit_path(repository_root(root))
+    path = _permit_path(root_path)
     _write_json_atomic(
         path,
         {
@@ -525,6 +565,9 @@ def check_reference_transaction(
             raise ClaimGuardError("main_update_permit_invalid") from error
         if (now or _utc_now()) > expires_at:
             raise ClaimGuardError("main_update_permit_expired")
+        # Older task worktrees may issue permits without the attribution check.
+        # The integration checkout independently verifies the actual ref move.
+        check_incoming_attribution(root_path, *update)
     elif phase in {"committed", "aborted"}:
         clear_main_permit(root_path)
 

@@ -68,6 +68,12 @@ def test_managed_closeout_is_part_of_the_gate_definition() -> None:
     )
 
 
+def test_shared_hook_installer_is_part_of_the_gate_definition() -> None:
+    assert {"scripts/git_hook_install.py", "tests/test_git_hook_install.py"} <= gate.GATE_DEFINITION_FILES
+    assert all("tests/test_git_hook_install.py" in command for command in gate.GATE_SELF_TEST_COMMANDS)
+    assert "scripts/git_hook_install.py" in gate.validation_surface(["feature.py"])
+
+
 def test_gate_definition_includes_reuse_research_contract() -> None:
     assert "scripts/reuse_research_contract.py" in gate.GATE_DEFINITION_FILES
     assert "scripts/reuse_research_evidence.py" in gate.GATE_DEFINITION_FILES

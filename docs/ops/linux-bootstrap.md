@@ -29,9 +29,9 @@ For a Linux checkout, activate the tracked hooks after the source is present:
 
 ```sh
 git config core.autocrlf false
-git config core.hooksPath .githooks
 git checkout-index -f -- .githooks/pre-commit .githooks/post-merge
 chmod 755 .githooks/pre-commit .githooks/post-merge
+.venv/bin/python scripts/git_hook_install.py
 ```
 
 This is intentionally targeted: it preserves the worktree while restoring the

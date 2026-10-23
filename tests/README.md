@@ -228,7 +228,7 @@ Vibelution 支持通过 `pytest-xdist` 做进程级并行。直接运行 pytest 
 
 同一 HEAD、同一命令且相关源码、测试、配置和依赖未变化时，开发期复用已有通过结果。HEAD、命令、输入或本地 `main` 基线变化后必须重新验证；普通 pytest 输出和 Agent 文本报告不能替代 manifest。
 
-首次配置 hook 使用 `git config core.hooksPath .githooks`。`powershell -ExecutionPolicy Bypass -File scripts/doctor.ps1 -Json` 只读报告 `checks.validation_toolchain`、`checks.git_hooks_path` 及固定修复命令，不会创建 `.venv`、Junction 或静默写 Git 配置。CI/`workflow_dispatch` 按需使用，不是默认日常本地闭环；remote push 也不是默认本地闭环的一部分。
+首次配置或修复 hook 使用 `python scripts/git_hook_install.py`，把版本化引用守卫放在 Git common-dir；其他 hook 仍委托给当前 checkout。managed closeout 在合入前刷新守卫。`powershell -ExecutionPolicy Bypass -File scripts/doctor.ps1 -Json` 只读检查 `checks.validation_toolchain`、`checks.git_hooks_path`（含快照版本和内容）及固定修复命令，不会创建 `.venv`、Junction 或静默写 Git 配置。CI/`workflow_dispatch` 按需使用，不是默认日常本地闭环；remote push 也不是默认本地闭环的一部分。
 
 Outcome 必须结合 mode 解释，每个组合只对应一个恢复动作：
 

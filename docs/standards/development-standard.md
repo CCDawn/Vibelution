@@ -624,7 +624,7 @@ git status --short --branch
 
 Never use `git add .`. Stage only files belonging to the current task.
 
-Every commit uses the tracked pre-commit hook and `scripts/local_quality_gate.py commit`. This light gate reads Git-index staged content for `git diff --cached --check` and Python fatal Ruff, and rejects staged/unstaged overlap on gate-definition paths. Gate behavior tests run once in final closeout rather than again at commit. If `core.hooksPath` is wrong, `scripts/doctor.ps1` reports the read-only repair hint `git config core.hooksPath .githooks`; the doctor must not silently write Git configuration.
+Every commit uses the tracked pre-commit hook and `scripts/local_quality_gate.py commit`. This light gate reads Git-index staged content for `git diff --cached --check` and Python fatal Ruff, and rejects staged/unstaged overlap on gate-definition paths. Gate behavior tests run once in final closeout rather than again at commit. `scripts/git_hook_install.py` installs a versioned reference guard in Git common-dir and delegates other hooks to the invoking checkout. Managed closeout refreshes it before integration. If the path, content or version is wrong, `scripts/doctor.ps1` reports the read-only repair hint `python scripts/git_hook_install.py`; the doctor must not silently write Git configuration.
 
 Run Git commands non-interactively in automation and agent workflows. Do not start `git commit`, `git merge --continue`, or similar commands in a way that can open an editor unless the user explicitly asked for interactive Git. Supply a message, use `--no-edit` when appropriate, or set a bounded non-interactive editor for scripted flows.
 

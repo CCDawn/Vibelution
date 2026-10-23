@@ -19,7 +19,7 @@ def _git(root: Path, *args: str, env: dict[str, str] | None = None, check: bool 
     return subprocess.run(
         ["git", *args],
         cwd=root,
-        env=env,
+        env=gate.git_hook_isolated_environment() if env is None else env,
         check=check,
         capture_output=True,
         text=True,
@@ -232,7 +232,9 @@ def test_reference_transaction_allows_same_sha_repack_without_permit(
 def test_main_permit_is_exact_expiring_and_one_use(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     old_sha = _git(root, "rev-parse", "HEAD").stdout.strip()
-    new_sha = "1" * 40
+    new_sha = _git(
+        root, "commit-tree", f"{old_sha}^{{tree}}", "-p", old_sha, "-m", "next human commit"
+    ).stdout.strip()
     now = datetime(2026, 9, 3, tzinfo=timezone.utc)
     guard.issue_main_permit(
         root,
@@ -285,10 +287,7 @@ def test_main_permit_is_exact_expiring_and_one_use(tmp_path: Path) -> None:
         )
 
 
-def test_real_hook_blocks_manual_main_update_and_accepts_one_permit(
-    tmp_path: Path,
-) -> None:
-    root = _repo(tmp_path)
+def _install_reference_hook(root: Path) -> dict[str, str]:
     project_root = Path(__file__).resolve().parents[1]
     (root / "scripts").mkdir()
     shutil.copy2(project_root / "scripts" / "git_claim_guard.py", root / "scripts")
@@ -296,10 +295,19 @@ def test_real_hook_blocks_manual_main_update_and_accepts_one_permit(
     hooks = root / ".githooks"
     hooks.mkdir()
     shutil.copy2(project_root / ".githooks" / "reference-transaction", hooks)
-    _git(root, "switch", "-c", "codex/example")
+    (root / ".git" / "info" / "exclude").write_text("/scripts/\n/.githooks/\n", encoding="utf-8")
+    _git(root, "config", "core.hooksPath", ".githooks")
+    return {**gate.git_hook_isolated_environment(), "VIBELUTION_HOOK_PYTHON": sys.executable}
+
+
+def test_real_hook_blocks_manual_main_update_and_accepts_one_permit(
+    tmp_path: Path,
+) -> None:
+    root = _repo(tmp_path)
+    env = _install_reference_hook(root)
+    _git(root, "switch", "-c", "codex/example", env=env)
     (root / "README.md").write_text("next\n", encoding="utf-8")
     _git(root, "add", "README.md")
-    env = {**os.environ, "VIBELUTION_HOOK_PYTHON": sys.executable}
     _git(root, "-c", "core.hooksPath=", "commit", "-m", "next", env=env)
     new_sha = _git(root, "rev-parse", "HEAD").stdout.strip()
     old_sha = _git(root, "rev-parse", "main").stdout.strip()
@@ -324,6 +332,93 @@ def test_real_hook_blocks_manual_main_update_and_accepts_one_permit(
     assert replay.returncode != 0
 
 
+@pytest.mark.parametrize("source", ["author", "committer", "coauthor", "coauthor_nonterminal"])
+@pytest.mark.parametrize("email", ["cursoragent@cursor.com", "NOREPLY@COMMANDCODE.AI"])
+def test_local_integration_rejects_ai_ancestor_before_main_moves(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str, email: str,
+) -> None:
+    root = _repo(tmp_path)
+    old_sha = _git(root, "rev-parse", "main").stdout.strip()
+    _git(root, "switch", "-c", "codex/legacy")
+    (root / "legacy.txt").write_text("preserve legacy code\n", encoding="utf-8")
+    _git(root, "add", "legacy.txt")
+    env = gate.git_hook_isolated_environment()
+    message = "legacy work"
+    if source in {"author", "committer"}:
+        role = source.upper()
+        env.update({f"GIT_{role}_NAME": "Tool", f"GIT_{role}_EMAIL": email})
+    else:
+        message += f"\n\nCo-authored-by: Tool <{email}>"
+        if source == "coauthor_nonterminal":
+            message += "\n\nMigration notes after the attribution line."
+    _git(root, "commit", "-m", message, env=env)
+    ai_sha = _git(root, "rev-parse", "HEAD").stdout.strip()
+    _git(root, "switch", "-c", "codex/incoming", old_sha)
+    (root / "human.txt").write_text("preserve human code\n", encoding="utf-8")
+    _git(root, "add", "human.txt")
+    _git(root, "commit", "-m", "human work")
+    _git(root, "merge", "--no-ff", "codex/legacy", "-m", "human-authored merge")
+    candidate = _git(root, "rev-parse", "HEAD").stdout.strip()
+    # A mailmap must not disguise the raw identity inside the merged ancestry.
+    mailmap = tmp_path / "mailmap"
+    mailmap.write_text(f"Human <human@example.com> Tool <{email}>\n", encoding="utf-8")
+    _git(root, "config", "mailmap.file", str(mailmap))
+    _git(root, "switch", "main")
+    env = _install_reference_hook(root)
+    monkeypatch.setenv("VIBELUTION_HOOK_PYTHON", sys.executable)
+    context = closeout.CloseoutContext(main_root=root, task_root=root, branch="codex/incoming")
+
+    with pytest.raises(guard.ClaimGuardError, match="incoming_ai_attribution") as rejected:
+        closeout.merge_ff_only(context, integration_claim_id="claim-int", target_sha=candidate)
+    assert ai_sha in str(rejected.value)
+    assert not guard._permit_path(root).exists()
+    assert _git(root, "rev-parse", "main").stdout.strip() == old_sha
+    assert not (root / "human.txt").exists()
+    assert not (root / "legacy.txt").exists()
+
+    # Simulate an older closeout writer that can still issue a valid permit.
+    # The independently loaded real hook must reject its main ref transaction.
+    with monkeypatch.context() as legacy_writer:
+        legacy_writer.setattr(guard, "check_incoming_attribution", lambda *_args: None)
+        guard.issue_main_permit(root, old_sha=old_sha, new_sha=candidate, integration_claim_id="claim-int")
+    blocked = _git(root, "update-ref", "refs/heads/main", candidate, old_sha, env=env, check=False)
+    assert blocked.returncode != 0
+    assert "incoming_ai_attribution" in blocked.stderr
+    assert _git(root, "rev-parse", "main").stdout.strip() == old_sha
+    assert _git(root, "rev-parse", "codex/incoming").stdout.strip() == candidate
+    assert _git(root, "show", f"{candidate}:legacy.txt").stdout == "preserve legacy code\n"
+    assert _git(root, "show", f"{candidate}:human.txt").stdout == "preserve human code\n"
+
+
+def test_integration_allows_humans_without_rewriting_existing_history(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    _git(root, "commit", "--allow-empty", "--author", "Cursor <cursoragent@cursor.com>", "-m", "existing debt")
+    old_sha = _git(root, "rev-parse", "main").stdout.strip()
+    _git(root, "update-ref", "refs/vibelution-backups/preserved", old_sha)
+    _git(root, "switch", "-c", "codex/human")
+    message = (
+        "Document cursoragent@cursor.com as a historical example.\n\n"
+        "Co-authored-by: Third Human <third@example.com>"
+    )
+    _git(root, "commit", "--allow-empty", "--author", "Other Human <other@example.com>", "-m", message)
+    new_sha = _git(root, "rev-parse", "HEAD").stdout.strip()
+    expected = _git(root, "cat-file", "commit", new_sha).stdout
+    env = _install_reference_hook(root)
+    guard.issue_main_permit(root, old_sha=old_sha, new_sha=new_sha, integration_claim_id="claim-int")
+    _git(root, "update-ref", "refs/heads/main", new_sha, old_sha, env=env)
+    assert _git(root, "cat-file", "commit", new_sha).stdout == expected
+    assert _git(root, "rev-parse", "refs/vibelution-backups/preserved").stdout.strip() == old_sha
+    assert _git(root, "rev-parse", "codex/human").stdout.strip() == new_sha
+
+
+def test_main_attribution_check_fails_closed_for_missing_commit(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    old_sha = _git(root, "rev-parse", "main").stdout.strip()
+    with pytest.raises(guard.ClaimGuardError, match="incoming_attribution_check_failed"):
+        guard.issue_main_permit(root, old_sha=old_sha, new_sha="1" * 40, integration_claim_id="claim-int")
+    assert not guard._permit_path(root).exists()
+
+
 def test_closeout_merge_issues_exact_main_permit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -340,6 +435,10 @@ def test_closeout_merge_issues_exact_main_permit(
         lambda root, _revision: (
             "new-sha" if Path(root) == context.task_root else "old-sha"
         ),
+    )
+    monkeypatch.setattr(
+        closeout.hook_install, "install_hooks",
+        lambda root: calls.append(("hooks", Path(root))),
     )
     monkeypatch.setattr(
         closeout.claim_guard,
@@ -364,6 +463,7 @@ def test_closeout_merge_issues_exact_main_permit(
         closeout.merge_ff_only(context, integration_claim_id="claim-int") == "new-sha"
     )
     assert calls == [
+        ("hooks", context.main_root),
         (
             "permit",
             (

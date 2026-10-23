@@ -16,6 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts import git_claim_guard as claim_guard
+from scripts import git_hook_install as hook_install
 from scripts import local_quality_gate as gate
 
 INTEGRATION_WAIT_SECONDS = 15.0
@@ -602,6 +603,7 @@ def merge_ff_only(context: CloseoutContext, *, integration_claim_id: str, target
         raise dirty_main_error(context)
     target_sha = gate.rev_parse(context.task_root, target_sha or "HEAD")
     old_sha = gate.rev_parse(context.main_root, "HEAD")
+    hook_install.install_hooks(context.main_root)
     claim_guard.issue_main_permit(
         context.main_root,
         old_sha=old_sha,

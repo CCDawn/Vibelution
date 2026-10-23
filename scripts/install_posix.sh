@@ -117,9 +117,9 @@ fi
 step "Project git hooks"
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   git config core.autocrlf false
-  git config core.hooksPath .githooks
   chmod 755 .githooks/* 2>/dev/null || true
-  info "Activated .githooks (core.hooksPath)"
+  .venv/bin/python scripts/git_hook_install.py
+  info "Activated shared reference guard and checkout-local hooks"
 else
   info "Not a git checkout; skipped"
 fi

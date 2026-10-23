@@ -90,10 +90,10 @@ def test_doctor_reports_critical_imports_and_pytest(doctor_report):
 def test_doctor_reports_local_quality_gate_and_hook_configuration(doctor_report):
     report = doctor_report
 
-    assert report["checks"]["git_hooks_path"]["expected"] == ".githooks"
+    assert "/vibelution-cache/git-hooks/" in report["checks"]["git_hooks_path"]["expected"]
     assert (
         report["checks"]["git_hooks_path"]["repair"]
-        == "git config core.hooksPath .githooks"
+        == "python scripts/git_hook_install.py"
     )
     assert report["checks"]["pre_commit_hook"]["ok"] is True
     assert report["checks"]["local_quality_gate"]["ok"] is True

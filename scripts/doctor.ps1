@@ -56,9 +56,21 @@ if ((Test-Path $bootstrapPython) -and (Test-Path $toolchainScript)) {
 $toolchainOk = ($null -ne $toolchainPayload) -and [bool]$toolchainPayload.ok
 $expectedPython = if ($toolchainOk) { [string]$toolchainPayload.pythonExecutable } else { $integrationPython }
 $selectedPython = $expectedPython
-$expectedHooksPath = ".githooks"
+$expectedHooksPath = "shared Git common-dir hook snapshot"
 $configuredHooksPath = (& git -C $resolvedRoot config --get core.hooksPath 2>$null)
-$hooksPathOk = ($LASTEXITCODE -eq 0) -and (($configuredHooksPath -join "").Trim() -eq $expectedHooksPath)
+$hooksPathOk = $false
+$hookInstallScript = Join-Path $resolvedRoot "scripts\git_hook_install.py"
+if ((Test-Path $bootstrapPython) -and (Test-Path $hookInstallScript)) {
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $hookOutput = & $bootstrapPython $hookInstallScript --project $resolvedRoot --check 2>$null
+    $ErrorActionPreference = $previousPreference
+    try {
+        $hookPayload = ($hookOutput -join "`n") | ConvertFrom-Json
+        $expectedHooksPath = [string]$hookPayload.expected
+        $hooksPathOk = [bool]$hookPayload.ok
+    } catch { $hooksPathOk = $false }
+}
 $preCommitHook = Join-Path $resolvedRoot ".githooks\pre-commit"
 $qualityGateScript = Join-Path $resolvedRoot "scripts\local_quality_gate.py"
 
@@ -138,7 +150,7 @@ $report = [PSCustomObject]@{
             ok = $hooksPathOk
             expected = $expectedHooksPath
             configured = (($configuredHooksPath -join "").Trim())
-            repair = "git config core.hooksPath .githooks"
+            repair = "python scripts/git_hook_install.py"
         }
         pre_commit_hook = [PSCustomObject]@{
             ok = $preCommitHookOk
