@@ -164,6 +164,7 @@ import { getPageInstanceId } from "./pageInstance";
 import { useShellStore } from "../store/shellStore";
 import styles from "./AppShell.styles";
 import { shareRuntimeSummaryIfOnlyVolatileChanged } from "./runtimeSummaryQueryShare";
+import { useChatStartupPrefetch } from "./useChatStartupPrefetch";
 import { useChatRouteSelection } from "../routes/chat/useChatRouteSelection";
 import { CompanionDesktopAttention } from "../routes/companions/CompanionDesktopAttention";
 import { SpecialistAgentMenu } from "./SpecialistAgentMenu";
@@ -1029,6 +1030,7 @@ export function AppShell() {
   const { lang, t, statusLabel } = useShellI18n();
   const queryClient = useQueryClient();
   const location = useLocation();
+  useChatStartupPrefetch({ queryClient, pathname: location.pathname, search: location.search });
   // Router context still updates Outlet; shell polling must not recreate its element.
   const routeContent = useMemo(() => <Outlet />, []);
   const chatRoute = useChatRouteSelection();
