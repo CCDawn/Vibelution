@@ -40,6 +40,21 @@ def test_tool_semantics_do_not_claim_success_without_business_success(payload):
     assert semantics["failureClass"] == ("no_result" if payload is None else "business_failure")
 
 
+@pytest.mark.parametrize("text", [
+    "[安全拦截] 命令未执行",
+    "[安全拦截 | SANDBOX_UNVERIFIED] 命令未执行，也未回退",
+])
+def test_owned_security_block_tags_never_report_business_success(text):
+    semantics = extract_tool_result_semantics(text)
+    assert semantics["semanticStatus"] == "blocked"
+    assert semantics["failureClass"] == "security_block"
+    assert infer_tool_business_success(text) is False
+
+
+def test_security_explanation_text_is_not_a_block_receipt():
+    assert extract_tool_result_semantics("[安全拦截机制说明] 文档内容")["semanticStatus"] == "succeeded"
+
+
 class TestTruncateResult:
     """truncate_result 测试"""
 

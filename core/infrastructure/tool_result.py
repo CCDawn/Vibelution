@@ -47,6 +47,10 @@ BUSINESS_FAILURE_STATUSES = {
     "timed_out",
 }
 
+# Shell security receipts may include a machine-readable reason in the tag.
+# Keep this prefix decoder shared by presentation and business-success checks.
+_SECURITY_BLOCK_RECEIPT = re.compile(r"^\[安全拦截(?:\s*\|[^\]\r\n]*)?\]")
+
 # 这些字段描述的是某个工作流下一步应如何编排，而不是工具已经观察到的事实。
 # 它们可以留在原始结果或运行时遥测中，但绝不能作为 ToolMessage 回灌给对话模型。
 MODEL_HIDDEN_RESULT_KEYS = frozenset(
@@ -260,7 +264,7 @@ def extract_tool_result_semantics(result: Any) -> dict[str, Any]:
     elif text.startswith("[跨平台警告]"):
         semantics["semanticStatus"] = "degraded"
         semantics["failureClass"] = semantics["failureClass"] or "cross_platform_command"
-    elif text.startswith("[安全拦截]"):
+    elif _SECURITY_BLOCK_RECEIPT.match(text):
         semantics["semanticStatus"] = "blocked"
         semantics["failureClass"] = semantics["failureClass"] or "security_block"
     elif text.startswith("[运行测试] 未找到对应测试文件"):
@@ -373,6 +377,8 @@ def infer_tool_business_success(result: Any) -> bool:
         stripped = _normalize_text_payload(result)
         if stripped.lower() in BUSINESS_FAILURE_STATUSES:
             return False
+        if _SECURITY_BLOCK_RECEIPT.match(stripped):
+            return False
         if stripped.startswith((
             "[错误]",
             "[超时]",
@@ -382,7 +388,6 @@ def infer_tool_business_success(result: Any) -> bool:
             "[WARNING | Exit Code",
             "[执行失败",
             "[跨平台警告]",
-            "[安全拦截]",
             "[运行测试] 未找到对应测试文件",
         )):
             return False
