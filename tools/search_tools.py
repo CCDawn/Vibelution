@@ -541,8 +541,9 @@ def _format_grep_results(
     if not results:
         if incomplete:
             reason_note = f"已取消: {cancel_reason}" if cancel_reason else "已超时截断"
+            receipt = "[取消] " if cancel_reason else ""
             return (
-                f"[搜索] 未完成完整扫描（{reason_note}）；已收集 0 个匹配"
+                f"{receipt}[搜索] 未完成完整扫描（{reason_note}）；已收集 0 个匹配"
                 "（结果不完整，建议收窄 pattern 或指定 search_dir）\n"
                 f"正则: {regex_pattern}\n目录: {display_dir}\n类型: {include_ext}"
             )
@@ -625,11 +626,11 @@ def _format_grep_results(
         output_lines.append("\n[阅读导航] 若需要更多上下文，请围绕上面命中的目标文件、行号或实体读取，不要默认线性翻页")
 
     output_lines.append("\n" + "=" * 80)
-    output_lines.append(f"[搜索完成] 共 {len(results)} 个匹配")
+    output_lines.append(f"[搜索{'部分结果' if incomplete else '完成'}] 共 {len(results)} 个匹配")
     if incomplete:
         if cancel_reason:
-            output_lines.append(
-                f"[搜索] 已按停止请求中止扫描：{cancel_reason}；已收集 {len(results)} 个匹配"
+            output_lines.insert(0,
+                f"[取消] 已按停止请求中止扫描：{cancel_reason}；已收集 {len(results)} 个匹配"
                 "（结果不完整，建议收窄 pattern 或指定 search_dir）"
             )
         else:

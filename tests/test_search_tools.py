@@ -1357,8 +1357,18 @@ class TestRipgrepRealIntegration:
         finally:
             st.reset_ripgrep_detection()
 
-
-
+@pytest.mark.parametrize("partial", [False, True])
+def test_cancelled_search_receipt_keeps_partial_results_but_never_claims_success(partial, tmp_path):
+    from tools.search_tools import _format_grep_results
+    from core.infrastructure.tool_result import extract_tool_result_semantics, infer_tool_business_success
+    rows = [("sample.txt", 1, "found", ["found"])] if partial else []
+    result = _format_grep_results(rows, "found", tmp_path, ".txt", 0, 8000,
+                                  incomplete=True, cancel_reason="user stop")
+    assert result.startswith("[取消]")
+    assert "结果不完整" in result
+    assert ("found" in result) if partial else ("0 个匹配" in result)
+    assert extract_tool_result_semantics(result)["semanticStatus"] == "cancelled"
+    assert infer_tool_business_success(result) is False
 
 
 if __name__ == "__main__":

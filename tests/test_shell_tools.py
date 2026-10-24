@@ -1458,6 +1458,17 @@ def test_run_test_for_falls_back_to_project_root_tests(tmp_path: Path, monkeypat
     assert "FAKE-PASSED" in result
     assert str(main_root / "tests" / "test_legacy.py") in captured["cmd"]
 
+def test_glob_partial_cancel_receipt_is_authoritative(monkeypatch, tmp_path):
+    from tools import shell_tools
+    from core.infrastructure.tool_result import extract_tool_result_semantics, infer_tool_business_success
+    (tmp_path / "a.py").write_text("pass", encoding="utf-8")
+    monkeypatch.setattr(shell_tools.glob_module, "iglob", lambda *args, **kwargs: iter(["a.py", "b.py"]))
+    checks = iter(["", "user stop"])
+    result = shell_tools.glob_files("*.py", search_dir=str(tmp_path), _cancel_checker=lambda: next(checks, "user stop"))
+    assert result.startswith("[取消]")
+    assert "a.py" in result
+    assert extract_tool_result_semantics(result)["semanticStatus"] == "cancelled"
+    assert infer_tool_business_success(result) is False
 
 
 if __name__ == "__main__":

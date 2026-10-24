@@ -217,7 +217,7 @@ def glob_files(
             f"[超时] 搜索达到 {GLOB_DEADLINE_SECONDS:g} 秒时限，以上为部分结果；请收窄 pattern 或 search_dir。"
         )
     if cancel_reason:
-        lines.append(f"[取消] 搜索已被终止：{cancel_reason}；以上为部分结果。")
+        lines.insert(0, f"[取消] 搜索已被终止：{cancel_reason}；以下为部分结果。")
     if midway_error:
         lines.append(f"[Glob] 错误：搜索中途失败：{midway_error}；以上为部分结果。")
 

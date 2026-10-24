@@ -216,6 +216,7 @@ vi.mock("./SelfEvolutionConversationWorkspace", async () => {
           type: "button",
           "data-testid": "self-workspace-run",
           "data-run-key": run.id,
+          "data-run-status": run.status,
           onClick: run.onSelect,
         },
         run.title,
@@ -526,6 +527,21 @@ describe("EvolutionRoute unified workspace run selection", () => {
     expect(elementByTestId("workbench-page").getAttribute("data-evolution-track")).toBe("self");
     expect(elementByTestId("route-location").textContent).toBe("/supervised-evolution");
     expect(elementByTestId("self-selected-run").textContent).toBe("self-latest-run");
+  });
+
+  it.each([
+    ["terminated", "已终止"],
+    ["boundary_violation", "越界异常"],
+  ])("uses observation labels in navigation for %s", async (status, expected) => {
+    apiMocks.fetchSelfEvolutionWorkspaceSnapshot.mockResolvedValue({
+      overview: {}, transactions: [], worktreeActiveRun: null,
+      autonomousActiveRun: null, autonomousLatestRun: null,
+      observationActiveRun: { runId: "observation-terminal", status, goal: "观察验收" },
+    });
+    await renderRoute();
+    await click(elementByTestId("switch-self"));
+    await waitFor(() => expect(host?.querySelector('[data-run-key="self:observation:observation-terminal"]')
+      ?.getAttribute("data-run-status")).toBe(`${expected} · terminal`));
   });
 
   it("loads a selected historical worktree for conversation and review while stop targets the live run", async () => {

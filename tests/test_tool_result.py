@@ -43,16 +43,32 @@ def test_tool_semantics_do_not_claim_success_without_business_success(payload):
 @pytest.mark.parametrize("text", [
     "[安全拦截] 命令未执行",
     "[安全拦截 | SANDBOX_UNVERIFIED] 命令未执行，也未回退",
+    "[安全拦截 | SANDBOX_UNVERIFIED] prior verification timed out",
 ])
 def test_owned_security_block_tags_never_report_business_success(text):
     semantics = extract_tool_result_semantics(text)
     assert semantics["semanticStatus"] == "blocked"
     assert semantics["failureClass"] == "security_block"
+    assert semantics["timedOut"] is False
     assert infer_tool_business_success(text) is False
 
 
 def test_security_explanation_text_is_not_a_block_receipt():
     assert extract_tool_result_semantics("[安全拦截机制说明] 文档内容")["semanticStatus"] == "succeeded"
+
+
+@pytest.mark.parametrize("reason", ["操作者请求停止当前轮。", "operator stopped after an earlier request timed out"])
+def test_explicit_cancel_receipt_is_not_business_success(reason):
+    payload = "[取消] 命令已因停止请求终止：" + reason
+    semantics = extract_tool_result_semantics(payload)
+    assert semantics["semanticStatus"] == "cancelled"
+    assert semantics["timedOut"] is False
+    assert infer_tool_business_success(payload) is False
+    assert package_tool_result(payload).semantic_status == "cancelled"
+
+
+def test_body_mentioning_cancelled_is_not_a_cancel_receipt():
+    assert extract_tool_result_semantics("文件内容说明\n[取消] 是界面标签")["semanticStatus"] == "succeeded"
 
 
 class TestTruncateResult:

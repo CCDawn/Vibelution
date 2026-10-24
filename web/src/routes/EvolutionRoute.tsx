@@ -15,7 +15,7 @@ import {
   EVOLUTION_WORKBENCH_POLL_INTERVAL_MS,
 } from "../api/evolution";
 import { queryKeys } from "../api/queryKeys";
-import { selfObservationPollingInterval } from "./selfObservationPresentation";
+import { selfObservationPollingInterval, selfObservationStatusLabel } from "./selfObservationPresentation";
 import {
   EvolutionActiveRun,
   EvolutionActiveRunAgentBinding,
@@ -2166,7 +2166,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
         id: run.key,
         title: run.title,
         history: isEvolutionRunHistory(run),
-        status: `${statusLabel(run.status)} · ${run.runId.slice(-8)}`,
+        status: `${run.kind === "observation" ? selfObservationStatusLabel(run.status, lang) : statusLabel(run.status)} · ${run.runId.slice(-8)}`,
         selected: activeTrack === track && run.key === (track === "supervised" ? selectedSupervisedWorkspaceRun?.key : selectedSelfWorkspaceRun?.key),
         onSelect: () => {
           setActionFeedback("");
