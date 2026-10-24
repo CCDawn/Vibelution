@@ -518,6 +518,8 @@ describe("failed composer draft recovery", () => {
           status: "completed",
           currentPhase: "completed",
           activeTurnId: "accepted-terminal-turn",
+          terminalReason: "success",
+          lastTurnTerminalTurnId: "accepted-terminal-turn",
           messages: [
             {
               id: "terminal-canonical-user",
