@@ -20,6 +20,9 @@ def isolated_validation_authority(monkeypatch, tmp_path):
 
 def install_validation_authority(monkeypatch, tmp_path):
     """Model passed validation; keep the production permit and Git merge real."""
+    # These disposable repositories have no dependency runtime of their own.
+    # Use the hook's supported interpreter input while keeping its permit real.
+    monkeypatch.setenv("VIBELUTION_HOOK_PYTHON", sys.executable)
     def binding(candidate):
         branch = _git(candidate, "branch", "--show-current").stdout.strip()
         if not branch.startswith("codex/"):
@@ -340,6 +343,7 @@ def test_revert_candidate_commit_creates_auditable_revert(tmp_path):
         manifest_root=tmp_path / "manifests",
     )
 
+    _git(project, "switch", "-c", "codex/revert")
     result = service.revert_candidate_commit(
         project_root=project,
         integration_commit=str(integrated["commitSha"]),
@@ -350,6 +354,7 @@ def test_revert_candidate_commit_creates_auditable_revert(tmp_path):
     assert result["revertedCommit"] == integrated["commitSha"]
     assert result["revertCommit"] == _git(project, "rev-parse", "HEAD").stdout.strip()
     assert result["revertCommit"] != integrated["commitSha"]
+    assert _git(project, "rev-parse", "main").stdout.strip() == integrated["commitSha"]
     assert _git(project, "status", "--porcelain=v1").stdout == ""
     assert (project / "agent.py").read_text(encoding="utf-8") == "BASELINE = True\n"
     assert not (project / "tests" / "candidate_marker.py").exists()
@@ -470,10 +475,14 @@ def test_completed_merge_recovers_without_guard_validation_or_second_merge(tmp_p
     approved = args["expected_candidate_commit"]
     assert _git(project, "rev-parse", "HEAD").stdout.strip() == approved
     _git(project, "worktree", "remove", str(args["candidate_root"]))
-    (project / "later.txt").write_text("later owner\n", encoding="utf-8")
-    _git(project, "add", "later.txt")
-    _git(project, "commit", "-m", "later owner")
-    later = _git(project, "rev-parse", "HEAD").stdout.strip()
+    later_owner = tmp_path / "later-owner"
+    _git(project, "worktree", "add", "-b", "codex/later-owner", str(later_owner))
+    (later_owner / "later.txt").write_text("later owner\n", encoding="utf-8")
+    _git(later_owner, "add", "later.txt")
+    _git(later_owner, "commit", "-m", "later owner")
+    later = _git(later_owner, "rev-parse", "HEAD").stdout.strip()
+    service._merge_validated_candidate(project, later_owner, expected_head=approved, candidate_head=later)
+    _git(project, "worktree", "remove", str(later_owner))
     reflog_before = service._main_reflog_path(project).read_bytes()
     monkeypatch.setattr(service, "_validate_managed_candidate", lambda *a: pytest.fail("completed fact needs no validation"))
     monkeypatch.setattr(service.task_closeout, "merge_ff_only", lambda *a, **kw: pytest.fail("must not merge twice"))
