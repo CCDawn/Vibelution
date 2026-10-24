@@ -37,11 +37,42 @@ def _write_project(root: Path, *, source: str = "export const app = 1;\n") -> Pa
 def _stub_build_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(frontend_build, "_run_version", lambda _command: "v1")
     monkeypatch.setattr(frontend_build, "_run_version_command", lambda _command: "v1")
+    monkeypatch.setattr(frontend_build, "_npm_package_version", lambda _command: "v1")
     monkeypatch.setattr(
         frontend_build,
         "_capture_git",
         lambda _root, args: "a" * 40 if args[-1] == "HEAD" else "tree-a",
     )
+
+
+@pytest.mark.parametrize("version", ["11.12.1", "12.0.0-beta.1+build.2"])
+def test_npm_version_reads_selected_package_without_starting_cli(tmp_path, monkeypatch, version):
+    cli = tmp_path / "selected-npm/bin/npm-cli.js"
+    cli.parent.mkdir(parents=True)
+    cli.write_text("// selected npm entry", encoding="utf-8")
+    metadata = cli.parent.parent / "package.json"
+    metadata.write_text(json.dumps({"name": "npm", "version": version}), encoding="utf-8")
+    monkeypatch.setattr(frontend_build, "_npm_cli", lambda _node: str(cli))
+    monkeypatch.setattr(frontend_build, "_run_version_command", lambda _args: pytest.fail("npm --version must not start"))
+    assert frontend_build._npm_package_version("selected-node") == version
+    # An npm upgrade must immediately change the next BuildKey input.
+    metadata.write_text(json.dumps({"name": "npm", "version": "13.1.0"}), encoding="utf-8")
+    assert frontend_build._npm_package_version("selected-node") == "13.1.0"
+
+
+@pytest.mark.parametrize("payload", [None, b"\xff", b"{broken", b"[]",
+    b'{"name":"other","version":"11.12.1"}', b'{"name":"npm","version":"unknown"}'])
+def test_npm_version_uses_original_cli_when_metadata_is_unusable(tmp_path, monkeypatch, payload):
+    cli = tmp_path / "selected-npm/bin/npm-cli.js"
+    cli.parent.mkdir(parents=True)
+    cli.write_text("// selected npm entry", encoding="utf-8")
+    if payload is not None:
+        (cli.parent.parent / "package.json").write_bytes(payload)
+    calls = []
+    monkeypatch.setattr(frontend_build, "_npm_cli", lambda _node: str(cli))
+    monkeypatch.setattr(frontend_build, "_run_version_command", lambda args: calls.append(args) or "7.8.9")
+    assert frontend_build._npm_package_version("selected-node") == "7.8.9"
+    assert calls == [["selected-node", str(cli), "--version"]]
 
 
 def _release(root: Path, name: str, *, schema: int = 2, key: str = "old") -> Path:

@@ -385,10 +385,26 @@ def _toolchain_versions(command: str, manager: str) -> tuple[str, str]:
             manager_version = _run_version("bun")
         else:
             try:
-                manager_version = _run_version_command([command, _npm_cli(command), "--version"])
+                manager_version = _npm_package_version(command)
             except RuntimeError:
                 manager_version = "unavailable"
     return node_version, manager_version
+
+
+def _npm_package_version(node_command: str) -> str:
+    """Read npm's own version source without starting its command runtime."""
+    npm_cli = _npm_cli(node_command)
+    try:
+        metadata_path = Path(npm_cli).resolve().parent.parent / "package.json"
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        version = str(metadata.get("version") or "").strip() if isinstance(metadata, dict) else ""
+        if (isinstance(metadata, dict) and metadata.get("name") == "npm"
+            and re.fullmatch(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?", version)):
+            return version
+    except (OSError, UnicodeError, ValueError):
+        pass
+    # Keep custom/incomplete installations on their existing selected entry.
+    return _run_version_command([node_command, npm_cli, "--version"])
 
 
 def build_inputs(project_root: Path | str, *, package_manager: str | None = None) -> dict[str, Any]:
