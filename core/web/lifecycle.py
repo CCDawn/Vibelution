@@ -229,12 +229,54 @@ def _start_research_task_recovery_job(startup_jobs: StartupJobGroup, session_rec
     # Other lifespan tests must never repair the operator's live task store.
     if os.environ.get("PYTEST_CURRENT_TEST"):
         return None
-    from .services.research_task_recovery import run_research_task_recovery
-
     return startup_jobs.start_async(
         "research-task-recovery",
-        run_research_task_recovery(
-            startup_jobs=startup_jobs, session_recovery=session_recovery,
+        _run_research_task_recovery_after_session(startup_jobs, session_recovery),
+    )
+
+
+async def _run_research_task_recovery_after_session(
+    startup_jobs: StartupJobGroup, session_recovery: Any,
+) -> None:
+    # This service imports the Session graph but cannot act until native
+    # recovery settles. Keep both its import and repair behind that same owner.
+    await asyncio.shield(session_recovery)
+    if startup_jobs.should_stop():
+        return
+    from .services.research_task_recovery import run_research_task_recovery
+
+    await run_research_task_recovery(
+        startup_jobs=startup_jobs, session_recovery=session_recovery,
+    )
+
+
+def _load_virtual_human_life_runtime() -> Callable[..., Any]:
+    from .services.virtual_human_life_service import run_virtual_human_life_runtime
+
+    return run_virtual_human_life_runtime
+
+
+async def _run_virtual_human_life_after_startup_imports(
+    app: FastAPI | None, startup_jobs: StartupJobGroup,
+) -> None:
+    # agent_plugins already loads this service in the serial startup importer.
+    # Wait for that import pass (before catalog bootstrap), rather than race
+    # its circular service graph from another worker or block lifespan yield.
+    imports_ready = getattr(getattr(app, "state", None), "web_bootstrap_routes_ready_event", None)
+    if imports_ready is not None:
+        await imports_ready.wait()
+    if startup_jobs.should_stop():
+        return
+    runtime = await startup_jobs.run_sync(
+        "startup-virtual-human-life-import", _load_virtual_human_life_runtime,
+    )
+    if startup_jobs.should_stop():
+        return
+    await runtime(
+        run_sync=startup_jobs.run_sync,
+        initial_heartbeat_gate=(
+            (lambda: _await_startup_prewarm_gate(app))
+            if app is not None and _startup_cache_prewarm_gate_enabled() else None
         ),
     )
 
@@ -756,17 +798,9 @@ async def web_workbench_lifespan(app: FastAPI | None):
         "startup-generic-workflows",
         _start_generic_workflows_after_session_recovery(startup_session_recovery_task, startup_jobs),
     )
-    from .services.virtual_human_life_service import run_virtual_human_life_runtime
-
     startup_virtual_human_life_task = startup_jobs.start_async(
         "startup-virtual-human-life",
-        run_virtual_human_life_runtime(
-            run_sync=startup_jobs.run_sync,
-            initial_heartbeat_gate=(
-                (lambda: _await_startup_prewarm_gate(app))
-                if app is not None and _startup_cache_prewarm_gate_enabled() else None
-            ),
-        ),
+        _run_virtual_human_life_after_startup_imports(app, startup_jobs),
     )
     startup_perception_task = startup_jobs.start_async(
         "startup-agent-perception", _start_perception_after_routes_ready(app, startup_jobs),

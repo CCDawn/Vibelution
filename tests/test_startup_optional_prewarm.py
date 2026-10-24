@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import builtins
 import threading
+import time
 from types import SimpleNamespace
 
 from fastapi import FastAPI
@@ -20,16 +21,22 @@ def test_lifespan_only_defers_companion_heartbeat_for_gated_web_startup(monkeypa
 
     class IdleStartupJobs(StartupJobGroup):
         def start_thread(self, name, _callback, *_args, **_kwargs):
+            if name == "startup-virtual-human-life-import":
+                return super().start_thread(name, _callback, *_args, **_kwargs)
             return super().start_async(name, asyncio.sleep(0))
 
         def start_async(self, name, awaitable):
+            if name == "startup-virtual-human-life":
+                return super().start_async(name, awaitable)
             awaitable.close()
             return super().start_async(name, asyncio.sleep(0))
 
     observed = []
+    runtime_started = asyncio.Event()
 
     def runtime(**kwargs):
         observed.append(kwargs["initial_heartbeat_gate"])
+        runtime_started.set()
         return asyncio.sleep(0)
 
     async def close_runtime(**_kwargs):
@@ -44,9 +51,79 @@ def test_lifespan_only_defers_companion_heartbeat_for_gated_web_startup(monkeypa
     monkeypatch.setattr(life, "run_virtual_human_life_runtime", runtime)
 
     async def exercise():
-        async with lifecycle.web_workbench_lifespan(FastAPI() if web else None):
+        app = FastAPI() if web else None
+        async with lifecycle.web_workbench_lifespan(app):
+            assert observed == []
+            if app is not None:
+                app.state.web_bootstrap_routes_ready_event.set()
+            await asyncio.wait_for(runtime_started.wait(), 1)
             assert len(observed) == 1
             assert (observed[0] is not None) is expects_gate
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("finish", ["run", "stop", "shutdown"])
+def test_companion_import_waits_for_serial_routes_and_keeps_worker_owned(monkeypatch, finish):
+    imports_ready = asyncio.Event()
+    app = FastAPI()
+    app.state.web_bootstrap_routes_ready_event = imports_ready
+    import_entered = threading.Event()
+    import_release = threading.Event()
+    runtime_started = asyncio.Event()
+    calls = []
+    loop_thread = threading.get_ident()
+
+    async def runtime(**kwargs):
+        calls.append(("runtime", threading.get_ident(), kwargs["initial_heartbeat_gate"]))
+        runtime_started.set()
+
+    def load_runtime():
+        calls.append(("import", threading.get_ident()))
+        import_entered.set()
+        assert import_release.wait(2)
+        return runtime
+
+    monkeypatch.setattr(lifecycle, "_load_virtual_human_life_runtime", load_runtime)
+
+    async def exercise():
+        jobs = StartupJobGroup()
+        task = jobs.start_async(
+            "startup-virtual-human-life",
+            lifecycle._run_virtual_human_life_after_startup_imports(app, jobs),
+        )
+        await asyncio.sleep(0)
+        assert calls == []
+        imports_ready.set()
+        try:
+            assert await asyncio.to_thread(import_entered.wait, 1)
+            # A held import leaves the loop responsive and is physically owned.
+            assert len(calls) == 1
+            assert calls[0][0] == "import"
+            assert calls[0][1] != loop_thread
+            if finish == "stop":
+                jobs.request_stop()
+            if finish == "shutdown":
+                closing = asyncio.create_task(jobs.shutdown(deadline=time.monotonic() + 1))
+                await asyncio.sleep(0)
+                assert not closing.done()
+                import_release.set()
+                assert (await closing)["closed"] is True
+                assert task.cancelled()
+            else:
+                import_release.set()
+                await asyncio.wait_for(task, 1)
+            if finish != "run":
+                assert not runtime_started.is_set()
+            else:
+                assert runtime_started.is_set()
+                assert calls[1][1] == loop_thread
+                assert calls[1][2] is not None
+        finally:
+            import_release.set()
+            closed = await jobs.shutdown(deadline=time.monotonic() + 1)
+        assert closed["closed"] is True
+        assert closed["pendingWorkers"] == []
 
     asyncio.run(exercise())
 

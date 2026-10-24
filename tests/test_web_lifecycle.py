@@ -1,4 +1,5 @@
 import asyncio
+import builtins
 import gc
 import os
 import subprocess
@@ -21,6 +22,71 @@ from core.web.router_registry import (
 from core.web.services import cli_agent_terminal_service, session_service
 from core.web.services import virtual_human_life_service
 from core.web.startup_jobs import StartupJobGroup
+
+
+@pytest.mark.parametrize("recovery_fails", [False, True])
+def test_research_recovery_import_waits_for_native_session_owner(monkeypatch, recovery_fails):
+    imported = []
+    called = []
+    original_import = builtins.__import__
+
+    async def recover(**kwargs):
+        called.append(kwargs)
+
+    def observe_import(name, *args, **kwargs):
+        if name == "services.research_task_recovery":
+            imported.append(name)
+            return SimpleNamespace(run_research_task_recovery=recover)
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", observe_import)
+
+    async def exercise():
+        jobs = StartupJobGroup()
+        session_recovery = asyncio.get_running_loop().create_future()
+        task = asyncio.create_task(
+            lifecycle._run_research_task_recovery_after_session(jobs, session_recovery),
+        )
+        await asyncio.sleep(0)
+        assert imported == []
+        if recovery_fails:
+            session_recovery.set_exception(RuntimeError("native recovery failed"))
+            with pytest.raises(RuntimeError, match="native recovery failed"):
+                await task
+            assert imported == []
+            assert called == []
+        else:
+            session_recovery.set_result(None)
+            await task
+            assert imported == ["services.research_task_recovery"]
+            assert called == [{"startup_jobs": jobs, "session_recovery": session_recovery}]
+
+    asyncio.run(exercise())
+
+
+def test_research_recovery_cancellation_preserves_native_session_owner(monkeypatch):
+    original_import = builtins.__import__
+
+    def forbid_import(name, *args, **kwargs):
+        if name == "services.research_task_recovery":
+            pytest.fail("research recovery imported before the native owner settled")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", forbid_import)
+
+    async def exercise():
+        session_recovery = asyncio.get_running_loop().create_future()
+        task = asyncio.create_task(lifecycle._run_research_task_recovery_after_session(
+            StartupJobGroup(), session_recovery,
+        ))
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert not session_recovery.done()
+        session_recovery.set_result(None)
+
+    asyncio.run(exercise())
 
 
 def test_shutdown_step_preserves_deferred_owner_cleanup_result():
