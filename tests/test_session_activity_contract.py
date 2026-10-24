@@ -44,6 +44,23 @@ def test_native_notification_policy_is_generated_from_backend_receipts():
     assert SESSION_NOTIFICATION_CONTRACT["continuationTerminalStatuses"] == ["needs_continue", "paused_limit"]
 
 
+def test_native_lifecycle_policy_is_generated_from_work_run_authority():
+    from scripts.generate_activity_contract import NATIVE_WORK_RUN_OUTPUT, render_work_run_lifecycle_contract
+
+    assert NATIVE_WORK_RUN_OUTPUT.read_text(encoding="utf-8") == render_work_run_lifecycle_contract()
+
+
+def test_self_observation_terminal_and_active_vocabulary_has_bilingual_labels():
+    from core.runtime_manager.self_observation_status import SELF_OBSERVATION_CONTRACT
+
+    contract = SELF_OBSERVATION_CONTRACT
+    active, terminal = set(contract["activeStatuses"]), set(contract["terminalStatuses"])
+    assert not active.intersection(terminal)
+    assert {"terminated", "boundary_violation", "stopped", "done", "failed", "cancelled"} <= terminal
+    assert active | terminal <= contract["labels"].keys()
+    assert contract["labels"].keys() == contract["labelsEn"].keys()
+
+
 def test_every_canonical_run_state_and_phase_has_a_display_mapping():
     from core.chat.session_activity import SESSION_ACTIVITY_CONTRACT
     from core.runtime_manager.agent_run_status import (

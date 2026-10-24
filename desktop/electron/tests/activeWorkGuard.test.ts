@@ -2,6 +2,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import workRunCases from "../../../tests/fixtures/work_run_activity_cases.json";
 
 import {
   ACTIVE_WORK_STALE_SNAPSHOT_GRACE_MS,
@@ -42,6 +43,19 @@ function writeRun(
 }
 
 describe("activeWorkGuard", () => {
+  it.each(workRunCases)("matches backend lifecycle protection: $name", ({ snapshot, expected }) => {
+    expect(activeWorkPayloadBlocks(snapshot, { ignoreStale: true })).toBe(expected.blocksLifecycle);
+  });
+
+  it.each(["force_stopped", "aborted", "canceled", "success", "succeeded", "failure", "error"])("releases settled alias %s without requiring a timestamp", (status) => {
+    expect(activeWorkPayloadBlocks({ status }, { ignoreStale: true })).toBe(false);
+  });
+
+  it("decodes whitespace and independent end receipts without washing out unknown state", () => {
+    expect(activeWorkPayloadBlocks({ status: " ", currentPhase: " completed " })).toBe(false);
+    expect(activeWorkPayloadBlocks({ status: "future_status", currentPhase: "completed" })).toBe(true);
+    expect(activeWorkPayloadBlocks({ status: "running", finishedAt: " ", endedAt: "2026-10-24T00:00:00Z" })).toBe(false);
+  });
   it("ignores blocking snapshots older than the six-hour crash-recovery grace", () => {
     const nowMs = Date.parse("2026-08-21T00:00:00.000Z");
     const stale = new Date(nowMs - ACTIVE_WORK_STALE_SNAPSHOT_GRACE_MS - 1).toISOString();

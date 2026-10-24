@@ -267,6 +267,42 @@ export const ACTIVITY_CONTRACT = {
       ]
     }
   },
+  "selfObservation": {
+    "activeStatuses": [
+      "queued",
+      "running"
+    ],
+    "terminalStatuses": [
+      "boundary_violation",
+      "cancelled",
+      "done",
+      "failed",
+      "stopped",
+      "terminated"
+    ],
+    "labels": {
+      "queued": "排队中",
+      "running": "运行中",
+      "done": "已完成",
+      "failed": "运行失败",
+      "terminated": "已终止",
+      "cancelled": "已取消",
+      "stopped": "已停止",
+      "boundary_violation": "越界异常",
+      "unknown": "未知状态"
+    },
+    "labelsEn": {
+      "queued": "Queued",
+      "running": "Running",
+      "done": "Completed",
+      "failed": "Run failed",
+      "terminated": "Terminated",
+      "cancelled": "Cancelled",
+      "stopped": "Stopped",
+      "boundary_violation": "Boundary violation",
+      "unknown": "Unknown state"
+    }
+  },
   "agentRun": {
     "labels": {
       "queued": "排队中",

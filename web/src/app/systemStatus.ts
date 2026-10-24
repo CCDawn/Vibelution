@@ -1,5 +1,6 @@
 import type { BackendHealth, CodeFreshnessVerdict, RuntimeSummary, WorkRunSnapshot } from "../api/types";
 import { shellDictionary, type ShellTranslationKey } from "../i18n/shellDictionary";
+import { resolveWorkRunActivity, workRunHasExecution } from "../routes/workRunActivityState";
 
 export type SystemStatusTone = "idle" | "running" | "failed" | "caution";
 
@@ -456,7 +457,7 @@ export function deriveActiveWorkIndicator(
   // conversation stays visible instead of vanishing behind a parent that
   // already finished or failed.
   const liveSupervisedRuns = supervisedRuns.filter(
-    (run) => !isTerminalWorkRunStatus(normalizeWorkRunStatus(run)),
+    (run) => workRunHasExecution(run),
   );
   const supervisedSessionIds = supervisedChildSessionIds(liveSupervisedRuns);
   const visibleChatItems = Array.isArray(activeItems?.chat_turn)
@@ -668,9 +669,10 @@ function buildActiveWorkCandidate(
     return null;
   }
 
-  const status = normalizeWorkRunStatus(run);
-  const terminal = isTerminalWorkRunStatus(status);
-  if (terminal && !isFailedWorkRunStatus(status)) {
+  const activity = resolveWorkRunActivity(run);
+  const status = activity.outcome || activity.execution;
+  const terminal = !activity.blocksLifecycle;
+  if (terminal && activity.outcome !== "failed") {
     return null;
   }
   // A failed round left in the active slot becomes a stale-failure item: it
@@ -700,11 +702,11 @@ function buildActiveWorkCandidate(
     label,
     summary,
     fullSummary,
-    status: status || "running",
+    status,
     runId,
     href,
     detail: detailParts.join(" · "),
-    tone: staleFailure ? "caution" : activeWorkTone(status),
+    tone: staleFailure || activity.execution !== "running" ? "caution" : "running",
     staleFailure: staleFailure || undefined,
   };
 }
@@ -744,36 +746,6 @@ function compactActiveWorkSummary(value: string, maxLength = 72): string {
   return `${normalized.slice(0, maxLength - 1).trimEnd()}…`;
 }
 
-function normalizeWorkRunStatus(run: ActiveWorkRunSnapshot): string {
-  return firstTextValue(run, ["status", "currentPhase", "phase", "runtimeStatus"]).toLowerCase();
-}
-
-function isTerminalWorkRunStatus(status: string): boolean {
-  return new Set([
-    "done",
-    "completed",
-    "success",
-    "failed",
-    "failed_provider",
-    "failed_runtime",
-    "cancelled",
-    "canceled",
-    "stopped",
-    "stopped_by_user",
-    "closed",
-    "terminated",
-    "needs_continue",
-    "paused_limit",
-    "superseded",
-    "error",
-  ]).has(status);
-}
-
-/** Only genuine failures become visible stale leftovers; neutral finals stay hidden. */
-function isFailedWorkRunStatus(status: string): boolean {
-  return ["failed", "failed_provider", "failed_runtime", "error"].includes(status);
-}
-
 const staleWorkLabelKeys: Record<ActiveWorkKind, ShellTranslationKey> = {
   supervised: "activeWorkStale_supervised",
   self: "activeWorkStale_self",
@@ -806,13 +778,6 @@ function staleWorkSummary(kind: ActiveWorkKind, run: ActiveWorkRunSnapshot): str
   }
   return firstTextValue(run, ["topic", "summary", "currentTask", "currentGoal", "goal"])
     || lastToolError;
-}
-
-function activeWorkTone(status: string): SystemStatusTone {
-  if (["queued", "paused", "pause_requested", "pausing", "stopping"].includes(status)) {
-    return "caution";
-  }
-  return "running";
 }
 
 /** Newer kinds resolve their labels through the shared shell dictionary. */

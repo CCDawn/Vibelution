@@ -36,6 +36,7 @@ import {
   type SupervisedConversationWorkspaceStep,
 } from "./SupervisedConversationWorkspace";
 import styles from "./SelfEvolutionConversationWorkspace.styles";
+import { selfObservationIsActive, selfObservationStatusLabel } from "./selfObservationPresentation";
 
 export type SelfEvolutionRunKind = "autonomous" | "observation" | "worktree";
 
@@ -181,8 +182,8 @@ export function buildSelfEvolutionConversationPhases(
     return [{
       id: "observation",
       label: lang === "zh" ? "观察会话" : "Observation conversation",
-      statusLabel: statusLabel(observation.status, lang),
-      current: ["queued", "running"].includes(text(observation.status).toLowerCase()),
+      statusLabel: selfObservationStatusLabel(observation.status, lang),
+      current: selfObservationIsActive(observation.status),
       disabled: !sessionId,
       sessionId,
       summary: text(observation.report || observation.latestMessage),
@@ -243,7 +244,7 @@ export function canConfirmAutonomousAction(input: {
 
 export function canConfirmObservationAction(run: SelfObservationRun | null, requestedRunId: string, pending: boolean) {
   return Boolean(run && run.runId === requestedRunId && !pending
-    && ["queued", "running"].includes(text(run.status).toLowerCase())
+    && selfObservationIsActive(run.status)
     && run.actionStates?.terminate?.enabled);
 }
 
@@ -329,6 +330,8 @@ export function SelfEvolutionConversationWorkspace({
       : selectedRunKind === "worktree" && worktreeRun ? runTitle(worktreeRun) : "";
   const selectedStatus = selectedRunKind === "autonomous" ? autonomousRun?.status
     : selectedRunKind === "observation" ? observationRun?.status : worktreeRun?.status;
+  const selectedStatusLabel = selectedRunKind === "observation"
+    ? selfObservationStatusLabel(selectedStatus, lang) : statusLabel(selectedStatus, lang);
   const durationSeconds = Number(observationDuration);
   const durationValid = Number.isInteger(durationSeconds) && durationSeconds >= 30 && durationSeconds <= 3600;
   const observationGoalValid = observationInputMode === "blank" || Boolean(observationGoal.trim());
@@ -516,7 +519,7 @@ export function SelfEvolutionConversationWorkspace({
     </>;
     return null;
   })();
-  const observationAction = selectedRunKind === "observation" && observationRun?.runId && ["queued", "running"].includes(text(observationRun.status).toLowerCase())
+  const observationAction = selectedRunKind === "observation" && observationRun?.runId && selfObservationIsActive(observationRun.status)
     ? <VButton type="button" variant="danger" icon={<Square size={14} />} isDisabled={observationActionPending || !observationRun.actionStates?.terminate?.enabled} title={observationRun.actionStates?.terminate?.reason} onPress={() => setConfirmation({ kind: "terminate-observation", runId: observationRun.runId })}>{lang === "zh" ? "终止观察" : "Stop observation"}</VButton>
     : null;
   const worktreeActions = selectedRunKind === "worktree" && worktreeRun ? <>
@@ -525,7 +528,7 @@ export function SelfEvolutionConversationWorkspace({
     {actionEnabled(worktreeRun, "terminate") ? <VButton type="button" variant="danger" icon={<Square size={14} />} isDisabled={worktreeActionPending} onPress={() => setConfirmation({ kind: "worktree-action", runId: worktreeRun.runId, action: "terminate" })}>{lang === "zh" ? "终止运行" : "Stop run"}</VButton> : null}
     {actionEnabled(worktreeRun, "discard") ? <VButton type="button" variant="danger" isDisabled={worktreeActionPending || worktreeRunLocked} onPress={() => setConfirmation({ kind: "worktree-action", runId: worktreeRun.runId, action: "discard" })}>{lang === "zh" ? "丢弃候选" : "Discard candidate"}</VButton> : null}
   </> : null;
-  const failed = selectedStatus === "failed";
+  const failed = selectedStatus === "failed" || (selectedRunKind === "observation" && selectedStatus === "boundary_violation");
   const autonomousRetry = selectedRunKind === "autonomous" && autonomousRun
     && (failed && autonomousRun.phase === "integration_failed" || autonomousRun.phase === "cleanup_failed");
   const awaitingReview = selectedStatus === "awaiting_user_approval"
@@ -563,7 +566,7 @@ export function SelfEvolutionConversationWorkspace({
         : (lang === "zh" ? "当前没有可执行操作，可继续查看对话与证据。" : "No action is available now. Review the conversation and evidence.");
   const actionErrors = [autonomousActionError, observationActionError, worktreeActionError, startWorktreeError, observationStartError, guardNotice].map(text).filter(Boolean).join("\n");
   const footer = selectedRun ? <div className={styles.footerContent}>
-    <div className={styles.footerStatus}><VStatusChip tone={failed ? "danger" : autonomousRetry || awaitingReview || canMerge ? "warning" : selectedStatus === "completed" || selectedStatus === "done" ? "success" : "neutral"}>{statusLabel(selectedStatus, lang)}</VStatusChip></div>
+    <div className={styles.footerStatus}><VStatusChip tone={failed ? "danger" : autonomousRetry || awaitingReview || canMerge ? "warning" : selectedStatus === "completed" || selectedStatus === "done" ? "success" : "neutral"}>{selectedStatusLabel}</VStatusChip></div>
     <h3 className={styles.footerHeading}>{resultTitle}</h3>
     <p className={styles.footerReason}>{statusReason}</p>
     <div className={styles.footerActions}>{autonomousActions}{observationAction}{worktreeActions}</div>
@@ -675,7 +678,7 @@ export function SelfEvolutionConversationWorkspace({
         {selectedRun ? <dl className={styles.contextFacts}>
           <div><dt>{lang === "zh" ? "运行类型" : "Run type"}</dt><dd>{selectedRunKind === "autonomous" ? (lang === "zh" ? "自主闭环" : "Autonomous loop") : selectedRunKind === "observation" ? (lang === "zh" ? "只读观察" : "Read-only observation") : (lang === "zh" ? "隔离工作树" : "Isolated worktree")}</dd></div>
           <div><dt>{lang === "zh" ? "运行 ID" : "Run ID"}</dt><dd>{selectedRun.runId}</dd></div>
-          <div><dt>{lang === "zh" ? "状态" : "Status"}</dt><dd>{statusLabel(selectedStatus, lang)}</dd></div>
+          <div><dt>{lang === "zh" ? "状态" : "Status"}</dt><dd>{selectedStatusLabel}</dd></div>
           {selectedRunKind === "autonomous" ? <div><dt>{lang === "zh" ? "迭代预算" : "Iteration budget"}</dt><dd>1</dd></div> : null}
           {selectedRunKind === "observation" ? <div><dt>{lang === "zh" ? "观察边界" : "Observation boundary"}</dt><dd>{lang === "zh" ? "只读，不创建工作树" : "Read-only; no worktree"}</dd></div> : null}
         </dl> : <p>{lang === "zh" ? "新建运行后，这里会显示目标与实际返回的上下文。" : "The goal and returned context will appear here after a run is created."}</p>}

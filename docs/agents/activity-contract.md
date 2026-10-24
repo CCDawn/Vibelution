@@ -44,6 +44,8 @@ WorkRun 的 `status → currentPhase → phase → runtimeStatus` 是异构快�
 | 领域 | 权威 | 消费契约 |
 | --- | --- | --- |
 | 原生通知 | `session_activity.py` 的 `SESSION_NOTIFICATION_CONTRACT` | 生成 `conversationNotificationContract.generated.ts`；传输只接受规范成功值，失败和待继续保留原因。`ready`、用户停止和未知值不产生完成提醒；`--check` 同时检查 web 与 Electron 生成文件。 |
+| 顶栏与 Electron 生命周期保护 | `work_run_status.py` 的 WorkRun 解码契约 | 顶栏复用 `resolveWorkRunActivity`，只有明确执行所有权才隐藏父任务下的活动子会话；缺失和未知显示警示，不推断运行。Electron 从同一权威生成 `workRunActivityContract.generated.ts`，结束时间与终态别名解除保护；原有历史快照过期策略及扫描 kind 范围独立保留。 |
+| 自主观察任务 | `self_observation_status.py` 的 `SELF_OBSERVATION_CONTRACT`，由控制服务写入状态 | 生成标签和终态集合；`terminated`、`boundary_violation` 与其余终态使用结束后的轮询频率。只解释 observation，worktree/autonomous 等领域继续使用各自契约。 |
 | 后续输入队列 | `session/queued_turns.py` 的持久化记录和原生 admission | `queued/starting/paused/blocked` 描述输入项，队列暂停不等于当前 Turn 执行暂停。领取竞争保留原提交身份，用户停止形成的 hold 不由机器通知解除。 |
 | Runtime 命令队列 | `command_queue.py` 的 inbox / processing / results 与 `commandId` | `accepted/completed/ok` 分别表示接收、结算和操作结果；取消、替代与执行失败分别展示。缺少结果证据保持未知，结果列表和结果事件采用同一解释。 |
 | CLI Task / Terminal | task kernel 记录任务结果，terminal runtime 记录进程与交互能力 | reader 已发布的运行/终态不能被提交确认覆盖；`alive` 不等于允许输入。停止收尾仍可读输出，不能再输入、恢复或启动。 |

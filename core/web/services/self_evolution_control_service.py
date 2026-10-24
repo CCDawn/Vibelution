@@ -44,6 +44,10 @@ from core.runtime_manager.evolution_store import (
     persist_run_snapshot as persist_manager_run_snapshot,
 )
 from core.runtime_manager.restart_coordinator import create_restart_intent
+from core.runtime_manager.self_observation_status import (
+    SELF_OBSERVATION_FINAL_STATUSES as _OBSERVATION_FINAL_STATUSES,
+    SELF_OBSERVATION_OPERATOR_TERMINAL_STATUSES as _OBSERVATION_OPERATOR_TERMINAL_STATUSES,
+)
 from core.runtime_manager.work_run_leases import (
     EVOLUTION_TRANSACTION_LEASE,
     MEMORY_WRITE_LEASE,
@@ -133,12 +137,6 @@ _RUN_SUBSCRIBERS: dict[str, set[queue.Queue[dict[str, Any]]]] = {}
 _RUN_EXECUTING_STATUSES = {"queued", "running", "stopping"}
 _RUN_LOCKED_STATUSES = {"queued", "running", "stopping", "paused"}
 _RUN_FINAL_STATUSES = {"done", "failed", "cancelled"}
-_OBSERVATION_OPERATOR_TERMINAL_STATUSES = {"terminated", "cancelled", "stopped"}
-_OBSERVATION_FINAL_STATUSES = _OBSERVATION_OPERATOR_TERMINAL_STATUSES | {
-    "done",
-    "failed",
-    "boundary_violation",
-}
 _SELF_OBSERVATION_DEADLINE_FINALIZATION_GRACE_SECONDS = 2.0
 _OBSERVATION_RUN_STATE_LOCK = threading.RLock()
 _OBSERVATION_RUNS: dict[str, dict[str, Any]] = {}

@@ -15,6 +15,7 @@ import {
   EVOLUTION_WORKBENCH_POLL_INTERVAL_MS,
 } from "../api/evolution";
 import { queryKeys } from "../api/queryKeys";
+import { selfObservationPollingInterval } from "./selfObservationPresentation";
 import {
   EvolutionActiveRun,
   EvolutionActiveRunAgentBinding,
@@ -427,9 +428,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     // R3: 2s only while the selected observation run is still active/in-flight.
     refetchInterval: (query) => {
       const run = query.state.data as SelfObservationRun | undefined;
-      const status = String(run?.status || "").toLowerCase();
-      const active = Boolean(status) && !["completed", "failed", "cancelled", "archived", "done", "success"].includes(status);
-      return resolvePollingInterval(pageVisible, active ? 2_000 : 10_000);
+      return selfObservationPollingInterval(run?.status, pageVisible);
     },
     refetchIntervalInBackground: false,
     enabled: Boolean(selfTrackQueriesEnabled && selectedSelfObservationRunId),

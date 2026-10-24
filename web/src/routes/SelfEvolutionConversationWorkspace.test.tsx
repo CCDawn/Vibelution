@@ -119,6 +119,17 @@ function renderMarkup(overrides: Partial<Parameters<typeof SelfEvolutionConversa
 }
 
 describe("SelfEvolutionConversationWorkspace", () => {
+  it.each([
+    ["terminated", "zh", "已终止"], ["terminated", "en", "Terminated"],
+    ["boundary_violation", "zh", "越界异常"], ["boundary_violation", "en", "Boundary violation"],
+  ] as const)("presents observation terminal %s in %s", (status, lang, label) => {
+    const run = { ...observationRun(), status };
+    const phases = buildSelfEvolutionConversationPhases("observation", run, lang);
+    expect(phases[0]).toMatchObject({ statusLabel: label, current: false });
+    const markup = renderMarkup({ lang, selectedRunKind: "observation", observationRun: run });
+    expect(markup).toContain(label);
+    expect(canConfirmObservationAction(run, run.runId, false)).toBe(false);
+  });
   it("maps autonomous phases only to their canonical session IDs", () => {
     const run = autonomousRun({
       phase: "reporting",

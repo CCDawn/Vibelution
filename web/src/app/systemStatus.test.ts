@@ -885,7 +885,7 @@ describe("systemStatus", () => {
     expect(indicator?.items).toHaveLength(1);
   });
 
-  it("keeps a live child conversation visible when its supervised parent is terminal", () => {
+  it.each(["failed", "force_stopped", "aborted", "canceled", "succeeded", "partial", "routed"])("keeps a live child visible after parent outcome %s", (status) => {
     // A terminal parent is a leftover (or gone), not a live supervisor: the
     // hidden child-session set must come from live candidates only, or a
     // surviving child would vanish from the top bar entirely.
@@ -894,7 +894,7 @@ describe("systemStatus", () => {
         supervised_worktree_evolution_run: {
           runId: "swte-candidate-1",
           runKind: "supervised_worktree_evolution_run",
-          status: "failed",
+          status,
           workflowSteps: [
             {
               id: "baseline_eval",
@@ -917,7 +917,7 @@ describe("systemStatus", () => {
     expect(indicator?.items.map((item) => item.kind)).toEqual(["chat"]);
     expect(indicator?.items[0]?.runId).toBe("turn-supervised-baseline");
     // The failed parent still surfaces as a stale leftover beside it.
-    expect(indicator?.staleFailures.map((item) => item.kind)).toEqual(["supervised"]);
+    expect(indicator?.staleFailures.map((item) => item.kind)).toEqual(status === "failed" ? ["supervised"] : []);
   });
 
   it("hides a child conversation while its supervised parent is genuinely live", () => {
@@ -1251,7 +1251,7 @@ describe("systemStatus", () => {
       kind: "chat",
       label: "Chat",
       summary: "audit launcher shutdown",
-      status: "tooling",
+      status: "running",
     });
   });
 
@@ -1537,7 +1537,6 @@ describe("systemStatus", () => {
   it.each([
     "stopped",
     "closed",
-    "terminated",
     "needs_continue",
     "paused_limit",
     "stopped_by_user",
@@ -1559,6 +1558,21 @@ describe("systemStatus", () => {
       ).toBeNull();
     },
   );
+
+  it.each(["", "future_status", "terminated"])("preserves unproven WorkRun status %s as caution instead of running or success", (status) => {
+    const indicator = deriveActiveWorkIndicator(runtimeWithActiveWork({
+      chat_turn: { runId: "unknown-turn", runKind: "chat_turn", status },
+    }));
+    expect(indicator?.items[0]).toMatchObject({ status: "unknown", tone: "caution" });
+    expect(indicator?.staleFailures).toHaveLength(0);
+  });
+
+  it("releases a stale active projection with an authoritative end receipt", () => {
+    const indicator = deriveActiveWorkIndicator(runtimeWithActiveWork({
+      chat_turn: { runId: "ended-turn", runKind: "chat_turn", status: "running", finishedAt: "2026-10-24T00:00:00Z" },
+    }));
+    expect(indicator).toBeNull();
+  });
 
   it.each([
     "failed",

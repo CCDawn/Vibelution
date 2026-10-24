@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { resolveRuntimeManagerDir } from "../lifecycle/projectStoragePaths.js";
+import { WORK_RUN_LIFECYCLE_CONTRACT } from "./workRunActivityContract.generated.js";
 
 export const ACTIVE_WORK_BLOCK_MESSAGE_STOP =
   "有进行中的任务，无法停止 Vibelution。请等待任务完成或先停止任务。";
@@ -9,37 +10,9 @@ export const ACTIVE_WORK_BLOCK_MESSAGE_RESTART =
   "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。";
 export const ACTIVE_WORK_STALE_SNAPSHOT_GRACE_MS = 6 * 60 * 60 * 1000;
 
-const BLOCKING_STATUSES = new Set([
-  "",
-  "active",
-  "queued",
-  "running",
-  "stopping",
-  "started",
-  "in_progress",
-  "pausing",
-  "resuming",
-  "force_stopping"
-]);
-
-const NON_BLOCKING_STATUSES = new Set([
-  "cancelled",
-  "closed",
-  "completed",
-  "done",
-  "failed",
-  "failed_provider",
-  "failed_runtime",
-  "idle",
-  "needs_continue",
-  "partial",
-  "paused_limit",
-  "ready",
-  "routed",
-  "stopped",
-  "stopped_by_user",
-  "stop_failed",
-  "superseded"
+const NON_BLOCKING_STATUSES = new Set<string>([
+  ...WORK_RUN_LIFECYCLE_CONTRACT.resting,
+  ...WORK_RUN_LIFECYCLE_CONTRACT.terminalStatuses
 ]);
 
 const WORK_RUN_KIND_DIRS = [
@@ -76,20 +49,14 @@ function readJsonRecord(path: string): Record<string, unknown> | null {
 }
 
 function payloadStatus(payload: Record<string, unknown>): string {
-  return String(payload.status || payload.currentPhase || payload.phase || payload.runtimeStatus || "")
-    .trim()
-    .toLowerCase();
+  return WORK_RUN_LIFECYCLE_CONTRACT.statusFields
+    .map((field) => String(payload[field] ?? "").trim().toLowerCase())
+    .find(Boolean) || "";
 }
 
 export function activeWorkStatusBlocks(status: string): boolean {
   const normalized = String(status || "").trim().toLowerCase();
-  if (NON_BLOCKING_STATUSES.has(normalized)) {
-    return false;
-  }
-  if (BLOCKING_STATUSES.has(normalized)) {
-    return true;
-  }
-  return Boolean(normalized);
+  return !NON_BLOCKING_STATUSES.has(normalized);
 }
 
 function snapshotTimestampMs(payload: Record<string, unknown>): number | null {
@@ -110,7 +77,7 @@ export function activeWorkPayloadBlocks(
   payload: Record<string, unknown>,
   options: ActiveWorkPayloadOptions = {}
 ): boolean {
-  if (String(payload.finishedAt || payload.endedAt || "").trim()) {
+  if ([payload.finishedAt, payload.endedAt].some((value) => String(value ?? "").trim())) {
     return false;
   }
   if (!options.ignoreStale && snapshotIsStale(payload, options.nowMs)) {
