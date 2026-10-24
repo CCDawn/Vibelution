@@ -1,5 +1,14 @@
 import { randomBytes } from "node:crypto";
 
+// Settlement may need a durable queue fingerprint before the Python daemon has
+// ever provisioned state.json. Keep this local to the actual queued object;
+// promises must never leak into queue snapshots or protocol payloads.
+const intentPersistenceByCommand = new WeakMap<object, () => Promise<void>>();
+
+export async function waitForMainLineIntentPersistence(command: object): Promise<void> {
+  await intentPersistenceByCommand.get(command)?.();
+}
+
 export type MainLineLifecycleOperation =
   | "start"
   | "stop"
@@ -196,6 +205,15 @@ export function createMainLineCommandQueue(options: {
       if (latestPersistCommandId !== command.commandId) return;
       return options.persistIntent?.(snapshot);
     }).catch(() => undefined);
+    if (options.persistIntent) {
+      intentPersistenceByCommand.set(command, async () => {
+        let observed: Promise<unknown>;
+        do {
+          observed = intentPersistence;
+          await observed;
+        } while (observed !== intentPersistence);
+      });
+    }
     try {
       void Promise.resolve(options.writeOwnerMarker?.()).catch(() => undefined);
     } catch {

@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { PythonJsonBridgeError } from "../../process/pythonJsonBridge.js";
 import { appendSupervisorEventFallback } from "../supervisorEventFallback.js";
 import type { MainLineLifecycleResult, MainLineQueuedCommand } from "./commandQueue.js";
+import { waitForMainLineIntentPersistence } from "./commandQueue.js";
+import { readMainLineIntent } from "./commandIntent.js";
 
 /**
  * Durable settlement evidence for main-line lifecycle commands that Electron
@@ -106,12 +108,17 @@ export async function recordMainLineCommandSettlement(
     runMs: settledAtMs - input.startedAtMs
   };
   try {
-    // The runtime-manager surface is provisioned by the daemon (its state.json
-    // exists long before Electron ever executes a main-line command). Requiring
-    // that fingerprint keeps synthetic workspace roots (unit tests, dry
-    // checkouts) from accumulating fabricated evidence directories.
+    // Electron provisions its own durable queue intent on a fresh checkout;
+    // the retired Python daemon need not have created state.json. Either
+    // authority proves this is a real queue surface, while dry roots still
+    // remain untouched. A newer intent may already exist while an older
+    // queued command settles, so its commandId must not suppress that result.
     if (!existsSync(join(input.runtimeManagerDir, "state.json"))) {
-      return null;
+      // Close execution itself stays independent of disk I/O. Only its
+      // best-effort settlement waits, so an immediately settled command cannot
+      // race the queue's first asynchronous intent write on a fresh checkout.
+      await waitForMainLineIntentPersistence(input.command);
+      if (!(await readMainLineIntent(input.runtimeManagerDir))) return null;
     }
   } catch {
     return null;

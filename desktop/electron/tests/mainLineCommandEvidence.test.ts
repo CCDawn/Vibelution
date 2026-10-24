@@ -9,6 +9,8 @@ import {
   recordMainLineCommandSettlement,
 } from "../src/lifecycle/mainLine/commandEvidence.js";
 import type { MainLineQueuedCommand } from "../src/lifecycle/mainLine/commandQueue.js";
+import { createMainLineCommandQueue } from "../src/lifecycle/mainLine/commandQueue.js";
+import { writeMainLineIntent } from "../src/lifecycle/mainLine/commandIntent.js";
 
 function restartCommand(commandId: string): MainLineQueuedCommand {
   return { commandId, type: "restart", operation: "restart", noBrowser: true };
@@ -24,6 +26,35 @@ function makeRuntimeTree(): { root: string; runtimeManagerDir: string } {
 }
 
 describe("mainLineCommandEvidence", () => {
+  it("settles a fresh Electron queue without creating retired daemon state", async () => {
+    const root = mkdtempSync(join(tmpdir(), "vibelution-main-line-fresh-"));
+    const runtimeManagerDir = join(root, ".runtime", "runtime-manager");
+    let commandId = "";
+    try {
+      const queue = createMainLineCommandQueue({
+        persistIntent: (intent) => writeMainLineIntent(runtimeManagerDir, intent),
+      });
+      await queue.submit({
+        operation: "stop",
+        noBrowser: true,
+        execute: async (command) => {
+          commandId = command.commandId;
+          const result = { schemaVersion: 1 as const, accepted: true, operation: "stop" };
+          await recordMainLineCommandSettlement({
+            workspaceRoot: root, runtimeManagerDir, command, result,
+            startedAtMs: 0, settledAtMs: 10,
+          });
+          return result;
+        },
+      });
+      expect(existsSync(join(runtimeManagerDir, "state.json"))).toBe(false);
+      expect(JSON.parse(readFileSync(mainLineCommandResultPath(runtimeManagerDir, commandId), "utf8")))
+        .toMatchObject({ commandId, source: "electron_main", accepted: true, ok: true, completed: true });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("records a rejected restart settlement in results/ and the supervisor fallback", async () => {
     const { root, runtimeManagerDir } = makeRuntimeTree();
     try {
