@@ -77,6 +77,7 @@ def test_startup_reads_do_not_import_features_until_an_actual_request(monkeypatc
     feature = APIRouter()
     startup.get("/sessions/bootstrap")(lambda: {"startup": True})
     startup.get("/runtime/summary")(lambda: {"summary": True})
+    startup.post("/launcher/runtime-scene/events")(lambda: {"recorded": True})
     feature.get("/feature-demand")(lambda: {"feature": True})
 
     async def exercise():
@@ -105,6 +106,8 @@ def test_startup_reads_do_not_import_features_until_an_actual_request(monkeypatc
             assert not imported.is_set()
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://127.0.0.1") as client:
                 assert (await client.get("/api/sessions/bootstrap")).json() == {"startup": True}
+                assert not imported.is_set()
+                assert (await client.post("/api/launcher/runtime-scene/events")).json() == {"recorded": True}
                 assert not imported.is_set()
                 # Ordinary /chat URLs must resolve Companion identity without
                 # paying for every unrelated feature router before detail loads.
@@ -234,6 +237,18 @@ def test_shell_bootstrap_reads_do_not_wait_for_catalog_but_session_reads_do(tmp_
         assert initialized == []
         return {"image": filename}
 
+    @launcher.post("/launcher/desktop-sessions")
+    @launcher.put("/launcher/desktop-sessions/{desktop_session_id}/windows/{role}")
+    @launcher.post("/launcher/desktop-sessions/{desktop_session_id}/heartbeat")
+    def shell_bookkeeping():
+        assert initialized == []
+        return {"recorded": True}
+
+    @launcher.post("/launcher/runtime-scene/events")
+    def shell_diagnostic():
+        assert initialized == [True]
+        return {"recorded": True}
+
     @sessions.get("/sessions/bootstrap")
     def session_read():
         assert initialized == [True]
@@ -256,6 +271,7 @@ def test_shell_bootstrap_reads_do_not_wait_for_catalog_but_session_reads_do(tmp_
     async def exercise():
         for name in ("web_routes_ready_event", "web_startup_routes_ready_event", "web_bootstrap_routes_ready_event"):
             setattr(app.state, name, asyncio.Event())
+        app.state.web_feature_routes_requested_event = asyncio.Event()
         catalog_entered = asyncio.Event()
         release_catalog = asyncio.Event()
         remaining_entered = asyncio.Event()
@@ -269,7 +285,7 @@ def test_shell_bootstrap_reads_do_not_wait_for_catalog_but_session_reads_do(tmp_
             nonlocal wait_count
             if not kwargs.get("bootstrap_only"):
                 wait_count += 1
-                if wait_count == 5:
+                if wait_count == 6:
                     waiting.set()
             return await original_wait(*args, **kwargs)
 
@@ -309,8 +325,21 @@ def test_shell_bootstrap_reads_do_not_wait_for_catalog_but_session_reads_do(tmp_
                     assert not route_bootstrap.is_bootstrap_route_path(path, method="POST")
                     assert not route_bootstrap.is_bootstrap_route_path(path + "/extra")
                 assert not route_bootstrap.is_bootstrap_route_path("/api/config/theme-background-image")
+                for method, path in (
+                    ("POST", "/api/launcher/desktop-sessions"),
+                    ("PUT", "/api/launcher/desktop-sessions/desktop/windows/workbench"),
+                    ("POST", "/api/launcher/desktop-sessions/desktop/heartbeat"),
+                ):
+                    response = await asyncio.wait_for(client.request(method, path, headers=headers), 1)
+                    assert response.json() == {"recorded": True}
+                    assert (await client.request(method, path)).status_code == 403
+                    assert (await client.request(method, path, headers={**headers, "Origin": "https://untrusted.invalid"})).status_code == 403
+                assert initialized == []
+                assert not app.state.web_feature_routes_requested_event.is_set()
+                assert not remaining_entered.is_set()
                 pending = [asyncio.create_task(client.request(method, path, headers=headers)) for method, path in (
                     ("GET", "/api/sessions/bootstrap"),
+                    ("POST", "/api/launcher/runtime-scene/events"),
                     ("GET", "/api/config/public"),
                     ("POST", "/api/config/bootstrap"),
                     ("GET", "/api/config/bootstrap/extra"),
@@ -321,10 +350,11 @@ def test_shell_bootstrap_reads_do_not_wait_for_catalog_but_session_reads_do(tmp_
                 release_catalog.set()
                 await asyncio.wait_for(remaining_entered.wait(), 1)
                 assert (await asyncio.wait_for(pending[0], 1)).json() == {"sessions": True}
-                assert not any(task.done() for task in pending[1:])
+                assert (await asyncio.wait_for(pending[1], 1)).json() == {"recorded": True}
+                assert not any(task.done() for task in pending[2:])
                 release_remaining.set()
                 await warming
-                assert all(response.json() == {"full": True} for response in await asyncio.gather(*pending[1:]))
+                assert all(response.json() == {"full": True} for response in await asyncio.gather(*pending[2:]))
                 assert mounts.count(config) == mounts.count(launcher) == mounts.count(sessions) == 1
         finally:
             release_catalog.set()
@@ -338,6 +368,43 @@ def test_shell_bootstrap_reads_do_not_wait_for_catalog_but_session_reads_do(tmp_
                     await task
 
     asyncio.run(exercise())
+
+
+def test_bootstrap_bookkeeping_admits_only_mounted_exact_operations():
+    from core.web import route_bootstrap
+    from core.web.routes import launcher
+
+    for method, path in (
+        ("POST", "/launcher/desktop-sessions"),
+        ("PUT", "/launcher/desktop-sessions/{desktop_session_id}/windows/{role}"),
+        ("POST", "/launcher/desktop-sessions/{desktop_session_id}/heartbeat"),
+    ):
+        assert "core.web.routes.launcher" in route_bootstrap._BOOTSTRAP_ROUTE_MODULE_NAMES
+        assert any(route.path == path and method in route.methods for route in launcher.router.routes)
+        actual = "/api" + path.replace("{desktop_session_id}", "desktop").replace("{role}", "workbench")
+        assert route_bootstrap.is_bootstrap_route_path(actual + "?trace=1", method=method)
+        assert not route_bootstrap.is_bootstrap_route_path(actual + "/extra", method=method)
+        assert not route_bootstrap.is_bootstrap_route_path(actual, method="GET")
+        assert not route_bootstrap.is_bootstrap_route_path(actual, method="HEAD")
+        assert not route_bootstrap.is_bootstrap_route_path(actual, method="DELETE")
+    for method, path in (
+        ("POST", "/api/launcher/desktop-sessions/desktop/windows/workbench"),
+        ("PUT", "/api/launcher/desktop-sessions/desktop/heartbeat"),
+        ("PUT", "/api/launcher/runtime-scene/events"),
+        ("POST", "/api/launcher/desktop-sessions//heartbeat"),
+        ("PUT", "/api/launcher/desktop-sessions/desktop/windows/"),
+        ("POST", "/api/launcher/start"),
+        ("POST", "/api/launcher/stop"),
+        ("POST", "/api/launcher/restart"),
+        ("POST", "/api/launcher/intent"),
+        ("POST", "/api/launcher/actions/action/claim"),
+    ):
+        assert not route_bootstrap.is_bootstrap_route_path(path, method=method)
+    assert any(route.path == "/launcher/runtime-scene/events" and "POST" in route.methods for route in launcher.router.routes)
+    assert route_bootstrap.is_startup_route_path("/api/launcher/runtime-scene/events", method="POST")
+    assert not route_bootstrap.is_bootstrap_route_path("/api/launcher/runtime-scene/events", method="POST")
+    assert not route_bootstrap.is_startup_route_path("/api/launcher/runtime-scene/events/extra", method="POST")
+    assert not route_bootstrap.is_startup_route_path("/api/launcher/runtime-scene/events", method="GET")
 
 
 @pytest.mark.parametrize("stage", ["import", "catalog", "remaining"])

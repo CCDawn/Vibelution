@@ -27,35 +27,34 @@ EARLY_READY_PATHS = frozenset(
 )
 
 
-_BOOTSTRAP_ROUTE_PATHS = frozenset({
-    "/api/config/bootstrap",
-    "/api/launcher/current-instance",
-})
 _BOOTSTRAP_ROUTE_MODULE_NAMES = frozenset({
     "core.web.routes.config",
     "core.web.routes.launcher",
 })
-_BOOTSTRAP_IMAGE_ROUTE_MATCHERS = tuple(
-    compile_path(path)[0] for path in (
-        "/api/config/avatar-image/{filename}",
-        "/api/config/theme-background-image/{filename}",
-    )
+_BOOTSTRAP_ROUTE_OPERATIONS = (
+    (frozenset({"GET", "HEAD"}), "/api/config/bootstrap"),
+    (frozenset({"GET", "HEAD"}), "/api/launcher/current-instance"),
+    (frozenset({"GET"}), "/api/config/avatar-image/{filename}"),
+    (frozenset({"GET"}), "/api/config/theme-background-image/{filename}"),
+    # Electron publishes window identity before the first
+    # Session reads finish. These handlers already mount with Launcher and
+    # need no Agent catalog; treating them as feature demand defeats the lazy
+    # import gate and starts every optional router against the first screen.
+    (frozenset({"POST"}), "/api/launcher/desktop-sessions"),
+    (frozenset({"PUT"}), "/api/launcher/desktop-sessions/{desktop_session_id}/windows/{role}"),
+    (frozenset({"POST"}), "/api/launcher/desktop-sessions/{desktop_session_id}/heartbeat"),
+)
+_BOOTSTRAP_ROUTE_MATCHERS = tuple(
+    (methods, compile_path(path)[0]) for methods, path in _BOOTSTRAP_ROUTE_OPERATIONS
 )
 
 
 def is_bootstrap_route_path(path: str, *, method: str = "GET") -> bool:
-    """These shell reads do not depend on the Session/Agent catalog."""
+    """Match mounted shell operations that do not need the Session/Agent catalog."""
     normalized = str(path or "").split("?", 1)[0]
-    return (
-        method in {"GET", "HEAD"} and normalized in _BOOTSTRAP_ROUTE_PATHS
-    ) or (
-        # These validated file handlers already mount with the config router.
-        # Native image loads cannot carry a control token and must not occupy
-        # an HTTP connection until unrelated feature routers finish warming.
-        method == "GET" and any(
-            pattern.fullmatch(normalized) is not None
-            for pattern in _BOOTSTRAP_IMAGE_ROUTE_MATCHERS
-        )
+    return any(
+        method in methods and pattern.fullmatch(normalized) is not None
+        for methods, pattern in _BOOTSTRAP_ROUTE_MATCHERS
     )
 
 
@@ -67,6 +66,9 @@ _STARTUP_ROUTE_OPERATIONS = (
     (frozenset({"GET", "HEAD"}), "/api/config/bootstrap"),
     (frozenset({"GET", "HEAD"}), "/api/launcher/current-instance"),
     (frozenset({"GET", "HEAD"}), "/api/runtime/summary"),
+    # Normal Electron diagnostics need no optional router. Malformed-payload
+    # alerts can access the Agent catalog, so retain its readiness prerequisite.
+    (frozenset({"POST"}), "/api/launcher/runtime-scene/events"),
     (frozenset({"GET"}), "/api/agent-plugins/virtual-human-life/companion-activity"),
     (frozenset({"GET"}), "/api/agent-plugins/virtual-human-life/companion-bindings"),
     (frozenset({"GET", "HEAD"}), "/api/sessions/bootstrap"),
