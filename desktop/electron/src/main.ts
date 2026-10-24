@@ -4445,6 +4445,7 @@ async function runIsolatedRegistryMutation(input: {
         }
         await waitForBackendHealthy({
           port,
+          readiness: "shell",
           signal: input.signal,
           childError: () => {
             const spawnError = spawned.spawnError();
