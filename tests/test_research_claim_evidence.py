@@ -25,6 +25,81 @@ def _payload(**overrides):
     return payload
 
 
+def test_versioned_snapshot_reuses_only_unchanged_strict_records(tmp_path, monkeypatch):
+    from core.research.evidence import claim_evidence as module
+
+    store = ClaimEvidenceStore(tmp_path)
+    record = store.register("snapshot-team", _payload())
+    parses = []
+    original_read = module._read_jsonl
+
+    def counted_read(path):
+        parses.append(path)
+        return original_read(path)
+
+    monkeypatch.setattr(module, "_read_jsonl", counted_read)
+    version, records = store.read_versioned("snapshot-team")
+    assert records is not None
+    assert store.read_versioned("snapshot-team", previous_version=version) == (version, None)
+    assert len(parses) == 1
+    records[0]["locator"]["page"] = 999
+    assert store.list("snapshot-team")[0]["locator"]["page"] == 7
+
+    store.review("snapshot-team", record["claimEvidenceId"], decision="accepted", reviewed_by="human")
+    reviewed_version, reviewed = store.read_versioned("snapshot-team", previous_version=version)
+    assert reviewed_version != version
+    assert reviewed[0]["reviewStatus"] == "accepted"
+    store.reconcile_source_revision(
+        "snapshot-team", source_id=record["sourceId"], current_revision="sha256:" + "b" * 64
+    )
+    stale_version, stale = store.read_versioned("snapshot-team", previous_version=reviewed_version)
+    assert stale_version != reviewed_version
+    assert stale[0]["reviewStatus"] == "stale"
+
+    path = store._path("snapshot-team")
+    replacement = path.with_suffix(".replacement")
+    replacement.write_text(path.read_text(encoding="utf-8") + "{broken\n", encoding="utf-8")
+    replacement.replace(path)
+    with pytest.raises(ClaimEvidenceError, match="line 2"):
+        store.read_versioned("snapshot-team", previous_version=stale_version)
+
+
+def test_versioned_snapshot_rejects_records_changed_during_parse(tmp_path, monkeypatch):
+    from core.research.evidence import claim_evidence as module
+
+    store = ClaimEvidenceStore(tmp_path)
+    store.register("snapshot-team", _payload())
+    original_read = module._read_jsonl
+
+    def replacing_read(path):
+        records = original_read(path)
+        module._write_jsonl_atomic(path, records)
+        return records
+
+    monkeypatch.setattr(module, "_read_jsonl", replacing_read)
+    with pytest.raises(ClaimEvidenceError, match="changed during snapshot"):
+        store.read_versioned("snapshot-team")
+
+
+def test_versioned_snapshot_detects_same_size_replacement_with_preserved_mtime(tmp_path):
+    import os
+
+    store = ClaimEvidenceStore(tmp_path)
+    store.register("snapshot-team", _payload())
+    version, _ = store.read_versioned("snapshot-team")
+    path = store._path("snapshot-team")
+    previous_stat = path.stat()
+    replacement = path.with_suffix(".replacement")
+    replacement.write_bytes(path.read_bytes().replace(b'"page": 7', b'"page": 8'))
+    os.utime(replacement, ns=(previous_stat.st_atime_ns, previous_stat.st_mtime_ns))
+    replacement.replace(path)
+    assert path.stat().st_size == previous_stat.st_size
+    assert path.stat().st_mtime_ns == previous_stat.st_mtime_ns
+    changed_version, records = store.read_versioned("snapshot-team", previous_version=version)
+    assert changed_version != version
+    assert records[0]["locator"]["page"] == 8
+
+
 def test_third_party_catalog_pins_reusable_research_components():
     catalog = research_component_catalog()
 

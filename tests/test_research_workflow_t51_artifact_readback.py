@@ -34,6 +34,147 @@ from tests._support.adapter_fakes import FakeDomainPorts
 from tests._support.command_helpers import CommandHarness
 
 
+def _seed_snapshot_evidence(tmp_path, monkeypatch):
+    import core.infrastructure.path_containment as containment
+    from core.research.evidence import ClaimEvidenceStore, claim_evidence
+    from core.web.services.team_workflow.research_runtime import artifact_readback_registry as registry
+
+    monkeypatch.setattr(containment, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(claim_evidence, "_record_event", lambda *args, **kwargs: None)
+    store = ClaimEvidenceStore(tmp_path)
+    record = store.register("snapshot-team", {
+        "claimId": "claim", "candidateId": "candidate", "sourceId": "source",
+        "sourceRevision": "sha256:" + "a" * 64,
+        "locator": {"kind": "pdf_page", "page": 1}, "quote": "Scoped evidence.",
+        "evidenceKind": "primary_result", "reasoningRole": "fact", "supportLevel": "supports",
+        "extractionMethod": "manual", "extractorAgentId": "extractor",
+        "sourceCollectionRunId": "source-run", "workflowRunId": "workflow-run",
+    })
+
+    def current_ref():
+        payload = registry.load_scoped_artifact_payload(
+            "evidence_card_batch", team_id="snapshot-team", authority_run_id="source-run"
+        )
+        return registry.build_canonical_ref(
+            kind="evidence_card_batch", team_id="snapshot-team", authority_run_id="source-run",
+            content_hash=registry.canonical_sha256(payload),
+        )
+
+    return store, record, current_ref, registry
+
+
+def test_evidence_validation_parses_team_once_and_hashes_scope_once(tmp_path, monkeypatch):
+    from core.research.evidence import claim_evidence
+
+    store, _, current_ref, registry = _seed_snapshot_evidence(tmp_path, monkeypatch)
+    ref = current_ref()
+    parses, scopes = [], []
+    original_read, original_scope = claim_evidence._read_jsonl, registry._scope_evidence_records
+
+    def counted_read(path):
+        parses.append(path)
+        return original_read(path)
+
+    def counted_scope(*args, **kwargs):
+        scopes.append(kwargs["authority_run_id"])
+        return original_scope(*args, **kwargs)
+
+    monkeypatch.setattr(claim_evidence, "_read_jsonl", counted_read)
+    monkeypatch.setattr(registry, "_scope_evidence_records", counted_scope)
+    with registry.artifact_readback_validation() as validation:
+        for index in range(40):
+            # Distinct forged hashes exercise scope reuse independently of ref memoization.
+            forged = ref.rsplit("/", 1)[0] + "/" + f"{index:064x}"
+            assert registry.read_domain_artifact(forged) is None
+            assert registry.read_domain_artifact(ref) is not None
+        assert validation.unchanged()
+    assert len(parses) == 1
+    assert scopes == ["source-run"]
+
+    # Mutation of a separately returned nested payload cannot poison the snapshot.
+    with registry.artifact_readback_validation():
+        assert registry.read_domain_artifact(ref) is not None
+        payload = registry.load_scoped_artifact_payload(
+            "evidence_card_batch", team_id="snapshot-team", authority_run_id="source-run"
+        )
+        payload["evidenceCards"][0]["locator"]["page"] = 999
+        assert registry.read_domain_artifact(ref) is not None
+    assert store.list("snapshot-team")[0]["locator"]["page"] == 1
+
+
+@pytest.mark.parametrize("change", ["review", "reconcile", "register", "replace", "bad_json", "bad_record"])
+def test_evidence_validation_sees_live_changes_and_rejects_bad_rows(tmp_path, monkeypatch, change):
+    from core.research.evidence import ClaimEvidenceError
+
+    store, record, current_ref, registry = _seed_snapshot_evidence(tmp_path, monkeypatch)
+    old_ref = current_ref()
+    with registry.artifact_readback_validation() as validation:
+        assert registry.read_domain_artifact(old_ref) is not None
+        if change == "review":
+            store.review("snapshot-team", record["claimEvidenceId"], decision="accepted", reviewed_by="human")
+        elif change == "reconcile":
+            store.reconcile_source_revision("snapshot-team", source_id="source", current_revision="sha256:" + "b" * 64)
+        elif change == "register":
+            store.register("snapshot-team", {**record, "claimId": "second-claim"})
+        else:
+            path = store._path("snapshot-team")
+            replacement = path.with_suffix(".replacement")
+            content = path.read_text(encoding="utf-8")
+            if change == "replace":
+                rows = [json.loads(line) for line in content.splitlines()]
+                rows[0]["quote"] = "External replacement."
+                content = "".join(json.dumps(row) + "\n" for row in rows)
+            else:
+                content += "{broken\n" if change == "bad_json" else "[]\n"
+            replacement.write_text(content, encoding="utf-8")
+            replacement.replace(path)
+        assert registry.read_domain_artifact(old_ref) is None
+        assert not validation.unchanged()
+        if change.startswith("bad_"):
+            with pytest.raises(ClaimEvidenceError, match="line 2"):
+                store.list("snapshot-team")
+        else:
+            assert registry.read_domain_artifact(current_ref()) is not None
+
+
+def test_evidence_validation_isolates_team_run_and_nested_operations(tmp_path, monkeypatch):
+    store, record, current_ref, registry = _seed_snapshot_evidence(tmp_path, monkeypatch)
+    ref = current_ref()
+    store.register("other-team", {**record, "claimId": "other-claim"})
+    with registry.artifact_readback_validation() as outer:
+        assert registry.read_domain_artifact(ref) is not None
+        assert registry.read_domain_artifact(ref.replace("snapshot-team", "other-team")) is None
+        assert registry.read_domain_artifact(ref.replace("source-run", "other-run")) is None
+        with registry.artifact_readback_validation() as inner:
+            assert inner is not outer
+            assert registry.read_domain_artifact(ref) is not None
+        assert registry.read_domain_artifact(ref) is not None
+        assert outer.unchanged()
+    assert registry._READBACK_VALIDATION.get() is None
+
+
+def test_oversized_evidence_snapshots_are_not_retained(tmp_path, monkeypatch):
+    from core.research.evidence import claim_evidence
+
+    _, _, current_ref, registry = _seed_snapshot_evidence(tmp_path, monkeypatch)
+    ref = current_ref()
+    monkeypatch.setattr(registry._EvidenceReadbackValidation, "_MAX_BYTES", 1)
+    parses = []
+    original_read = claim_evidence._read_jsonl
+
+    def counted_read(path):
+        parses.append(path)
+        return original_read(path)
+
+    monkeypatch.setattr(claim_evidence, "_read_jsonl", counted_read)
+    with registry.artifact_readback_validation() as validation:
+        assert registry.read_domain_artifact(ref) is not None
+        assert registry.read_domain_artifact(ref) is not None
+        assert validation._bytes == 0
+        assert validation._hashes == {}
+    assert len(parses) == 2
+
+
 def test_synthetic_read_back_no_longer_accepts_arbitrary_ref() -> None:
     """Former stub returned ArtifactReadBack with empty hash for any string."""
     result = _read_back_real_artifact("source_candidate_batch:deadbeefdeadbeef")

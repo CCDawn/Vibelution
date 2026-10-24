@@ -100,6 +100,34 @@ class ClaimEvidenceStore:
             records = [item for item in records if item.get("claimId") == claim_id]
         return records
 
+    def read_version(self, team_id: str) -> tuple[int, ...]:
+        """Identify atomic writes and ordinary timestamped in-place edits.
+
+        This is a file version, not a defense against external tools preserving
+        all metadata while rewriting bytes in place (ctime is birth time on Windows).
+        Canonical store writers always replace the file atomically.
+        """
+        return _file_version(self._path(_safe_id(team_id, field="teamId")))
+
+    def read_versioned(
+        self, team_id: str, *, previous_version: tuple[int, ...] | None = None
+    ) -> tuple[tuple[int, ...], list[dict[str, Any]] | None]:
+        """Read one strict snapshot, or report an unchanged caller-owned snapshot.
+
+        No records are retained by the store. Callers may reuse their snapshot
+        only with the returned version, and must keep that reuse bounded.
+        """
+        path = self._path(_safe_id(team_id, field="teamId"))
+        with _LOCK:
+            for _attempt in range(3):
+                before = _file_version(path)
+                if before == previous_version:
+                    return before, None
+                records = _read_jsonl(path)
+                if before == _file_version(path):
+                    return before, records
+        raise ClaimEvidenceError("Claim evidence changed during snapshot read.")
+
     def reconcile_source_revision(self, team_id: str, *, source_id: str, current_revision: str) -> dict[str, Any]:
         team = _safe_id(team_id, field="teamId")
         normalized_source_id = _required_text(source_id, "sourceId", 300)
@@ -507,6 +535,14 @@ def _stable_hash(payload: Any) -> str:
 
 def _sha256_text(text: str) -> str:
     return f"sha256:{hashlib.sha256(text.encode('utf-8')).hexdigest()}"
+
+
+def _file_version(path: Path) -> tuple[int, ...]:
+    try:
+        stat = path.stat()
+    except FileNotFoundError:
+        return ()
+    return (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 
 import { queryKeys } from "../../api/queryKeys";
+import { prefetchConversationView } from "../../components/conversation/prefetchConversationView";
 import { isSessionDeleteTombstoned } from "../sessionDeleteTombstone";
 import { isTempSessionId } from "../sessionOptimisticIds";
 import { fetchSessionDetailWindow, SESSION_DETAIL_PREFETCH_STALE_MS } from "./chatSessionDetailHelpers";
@@ -19,6 +20,9 @@ export function useChatStartupSessionPrefetch({ queryClient, enabled, requestedS
   useEffect(() => {
     if (!allowed || !rememberedSessionId || isTempSessionId(rememberedSessionId)
       || isSessionDeleteTombstoned(rememberedSessionId)) return;
+    // Overlap the required body module with the first reads, before catalog/URL
+    // restoration. A failed speculative import leaves the lazy view free to retry.
+    void prefetchConversationView().catch(() => {});
     const queryKey = queryKeys.session(rememberedSessionId);
     if (queryClient.getQueryState(queryKey)?.fetchStatus === "fetching") return;
     // This read is speculative: errors must not tombstone rows or navigate.

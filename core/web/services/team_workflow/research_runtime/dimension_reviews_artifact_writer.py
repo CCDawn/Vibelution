@@ -27,6 +27,7 @@ from core.research.workflow.contracts.model_invocation_receipt import (
 )
 
 from .artifact_readback_registry import (
+    artifact_readback_validation,
     build_canonical_ref,
     parse_canonical_ref,
     read_domain_artifact,
@@ -161,6 +162,22 @@ def _validate_rows(
     review: Mapping[str, Any] | Sequence[Any] | None,
     candidates: Sequence[Mapping[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[str]]:
+    with artifact_readback_validation() as validation:
+        rows, blockers = _validate_rows_snapshot(review, candidates, validation)
+        try:
+            unchanged = validation.unchanged()
+        except Exception:
+            unchanged = False
+        if not unchanged:
+            blockers.append("dimension_review_evidence_ref_unreadable")
+        return rows, list(dict.fromkeys(blockers))
+
+
+def _validate_rows_snapshot(
+    review: Mapping[str, Any] | Sequence[Any] | None,
+    candidates: Sequence[Mapping[str, Any]],
+    validation: Any,
+) -> tuple[list[dict[str, Any]], list[str]]:
     candidate_id_list = [
         _candidate_id(item)
         for item in candidates
@@ -176,6 +193,7 @@ def _validate_rows(
         blockers.append("hypotheses_missing_or_not_unique")
 
     rows: list[dict[str, Any]] = []
+    readability: dict[tuple[Any, ...], bool] = {}
     seen: set[tuple[str, str]] = set()
     raw_rows = _review_rows(review)
     if not raw_rows:
@@ -212,10 +230,16 @@ def _validate_rows(
                 blockers.append("dimension_review_evidence_ref_invalid")
                 continue
             try:
-                readback = read_domain_artifact(ref)
+                key = validation.ref_key(ref)
+                if key is not None and key in readability:
+                    readable = readability[key]
+                else:
+                    readable = read_domain_artifact(ref) is not None
+                    if key is not None and len(readability) < 256:
+                        readability[key] = readable
             except Exception:
-                readback = None
-            if readback is None:
+                readable = False
+            if not readable:
                 blockers.append("dimension_review_evidence_ref_unreadable")
         rows.append(
             {

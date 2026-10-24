@@ -74,6 +74,51 @@ def _review_payload() -> dict[str, object]:
     }
 
 
+def test_validation_reads_each_complete_evidence_ref_once_per_version(monkeypatch):
+    calls = []
+    monkeypatch.setattr(writer, "read_domain_artifact", lambda ref: calls.append(ref) or object())
+    payload = _review_payload()
+    other_team = _EVIDENCE_REF.replace("team-1", "team-2")
+    other_run = _EVIDENCE_REF.replace("source-1", "source-2")
+    other_hash = _EVIDENCE_REF[:-1] + "0"
+    payload["dimensionReviews"][0]["evidence_refs"] += [other_team, other_run, other_hash]
+
+    _, blockers = writer._validate_rows(payload, _BASE["candidates"])
+    assert blockers == []
+    assert calls == [_EVIDENCE_REF, other_team, other_run, other_hash]
+    writer._validate_rows(payload, _BASE["candidates"])
+    assert len(calls) == 8  # No ref cache survives this validation.
+
+
+@pytest.mark.parametrize("row_count", [1, 14])
+def test_validation_blocks_if_evidence_changes_after_read(tmp_path, monkeypatch, row_count):
+    import core.infrastructure.path_containment as containment
+    from core.research.evidence import ClaimEvidenceStore
+    from core.research.evidence import claim_evidence
+
+    monkeypatch.setattr(containment, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(claim_evidence, "_record_event", lambda *args, **kwargs: None)
+    store = ClaimEvidenceStore(tmp_path)
+    path = store._path("team-1")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{}\n", encoding="utf-8")
+
+    calls = []
+
+    def changing_read(ref):
+        calls.append(ref)
+        if len(calls) == 1:
+            claim_evidence._write_jsonl_atomic(path, [{"changed": True}])
+        return object()
+
+    # The final freshness check is required even if no subsequent ref is read.
+    payload = {"dimensionReviews": _review_rows()[:row_count]}
+    monkeypatch.setattr(writer, "read_domain_artifact", changing_read)
+    _, blockers = writer._validate_rows(payload, _BASE["candidates"])
+    assert "dimension_review_evidence_ref_unreadable" in blockers
+    assert len(calls) == (1 if row_count == 1 else 2)
+
+
 def _reflection_receipt(candidate_id: str) -> dict[str, object]:
     return ModelInvocationReceipt.from_invocation(
         receipt_id=f"receipt-reflection-{candidate_id}",

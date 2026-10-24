@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider, QueryObserver, useQuery } from "@tans
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { queryKeys } from "../api/queryKeys";
+import { prefetchConversationView } from "../components/conversation/prefetchConversationView";
 import { fetchChatWorkbenchBootstrap, querySessions } from "../api/chat";
 import { chatWorkbenchBootstrapQueryOptions } from "../routes/chat/chatWorkbenchBootstrapQuery";
 import { fetchSessionDetailWindow } from "../routes/chat/chatSessionDetailHelpers";
@@ -22,6 +23,7 @@ vi.mock("../api/agents", () => ({ listAgentSummaries: vi.fn(async () => []) }));
 vi.mock("../routes/chat/chatSessionDetailHelpers", () => ({ fetchSessionDetailWindow: vi.fn(), SESSION_DETAIL_PREFETCH_STALE_MS: 30_000 }));
 vi.mock("../routes/chat/useChatSelectionPersistence", () => ({ readCurrentChatSelectionPreference: vi.fn() }));
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+vi.mock("../components/conversation/prefetchConversationView", () => ({ prefetchConversationView: vi.fn(async () => undefined) }));
 afterEach(() => { vi.clearAllMocks(); resetSessionDeleteTombstonesForTests(); });
 
 function deferred<T>() {
@@ -77,6 +79,7 @@ describe("shell Chat startup prefetch", () => {
     const page = await mount({ pathname, search: "" }, <Route />, client);
     try {
       expect(loadRoute).toHaveBeenCalledOnce();
+      expect(prefetchConversationView).toHaveBeenCalledOnce();
       expect(fetchChatWorkbenchBootstrap).toHaveBeenCalledOnce();
       expect(fetchSessionDetailWindow).toHaveBeenCalledOnce();
       expect(querySessions).not.toHaveBeenCalled();

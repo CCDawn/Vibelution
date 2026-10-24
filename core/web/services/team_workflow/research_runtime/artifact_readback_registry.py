@@ -7,6 +7,8 @@ store, ClaimEvidenceStore, and SC graph records — never data/domain_artifacts.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -310,6 +312,21 @@ def _load_scoped_evidence(
         records = ClaimEvidenceStore(PROJECT_ROOT).list(team_id)
     except Exception:
         return None
+    return _scope_evidence_records(
+        records,
+        team_id=team_id,
+        authority_run_id=authority_run_id,
+        workflow_run_id=workflow_run_id,
+    )
+
+
+def _scope_evidence_records(
+    records: list[dict[str, Any]],
+    *,
+    team_id: str,
+    authority_run_id: str,
+    workflow_run_id: str = "",
+) -> list[dict[str, Any]] | None:
     scoped = [
         item
         for item in records
@@ -331,6 +348,112 @@ def _load_scoped_evidence(
         scoped,
         key=lambda item: str(item.get("claimEvidenceId") or item.get("claimId") or ""),
     )
+
+
+class _EvidenceReadbackValidation:
+    """Bounded, operation-local snapshots; never expose cached mutable rows."""
+
+    _MAX_TEAMS = 16
+    _MAX_BYTES = 8 * 1024 * 1024
+    _MAX_SCOPES = 64
+
+    def __init__(self) -> None:
+        self._teams: dict[tuple[Path, str], dict[str, Any]] = {}
+        self._hashes: dict[tuple[Any, ...], str | None] = {}
+        self._bytes = 0
+        self._changed = False
+
+    def _team(self, team_id: str) -> dict[str, Any] | None:
+        from core.infrastructure.path_containment import PROJECT_ROOT
+        from core.research.evidence import ClaimEvidenceStore
+
+        key = (Path(PROJECT_ROOT), team_id)
+        entry = self._teams.get(key)
+        if entry is None and len(self._teams) < self._MAX_TEAMS:
+            store = ClaimEvidenceStore(PROJECT_ROOT)
+            entry = {"store": store, "initial": store.read_version(team_id), "team": team_id}
+            self._teams[key] = entry
+        return entry
+
+    def ref_key(self, ref: str) -> tuple[Any, ...] | None:
+        """Memoize only evidence refs whose live authority version is checked."""
+        parsed = parse_canonical_ref(ref)
+        if parsed is None or parsed["kind"] != "evidence_card_batch":
+            return None
+        entry = self._team(parsed["teamId"])
+        if entry is None:
+            return None
+        version = entry["store"].read_version(entry["team"])
+        self._changed |= version != entry["initial"]
+        return (ref, version)
+
+    def evidence_hash(self, team_id: str, authority_run_id: str) -> str | None:
+        entry = self._team(team_id)
+        if entry is None:
+            payload = load_scoped_artifact_payload(
+                "evidence_card_batch", team_id=team_id, authority_run_id=authority_run_id
+            )
+            return canonical_sha256(payload) if payload is not None else None
+        version, records = entry["store"].read_versioned(
+            team_id, previous_version=entry.get("version")
+        )
+        self._changed |= version != entry["initial"]
+        if records is None:
+            records = entry["records"]
+        else:
+            old_size = entry.pop("size", 0)
+            self._bytes -= old_size
+            entry.pop("records", None)
+            entry.pop("version", None)
+            size = version[2] if version else 0
+            if self._bytes + size <= self._MAX_BYTES:
+                entry.update(version=version, records=records, size=size)
+                self._bytes += size
+        key = (entry["store"].project_root, team_id, authority_run_id, version)
+        if key in self._hashes:
+            return self._hashes[key]
+        cards = _scope_evidence_records(
+            records, team_id=team_id, authority_run_id=authority_run_id
+        )
+        result = canonical_sha256(_evidence_card_payload(
+            team_id, authority_run_id, cards
+        )) if cards is not None else None
+        if "records" in entry and len(self._hashes) < self._MAX_SCOPES:
+            self._hashes[key] = result
+        return result
+
+    def unchanged(self) -> bool:
+        return not self._changed and all(
+            entry["store"].read_version(entry["team"]) == entry["initial"]
+            for entry in self._teams.values()
+        )
+
+
+_READBACK_VALIDATION: ContextVar[_EvidenceReadbackValidation | None] = ContextVar(
+    "evidence_readback_validation", default=None
+)
+
+
+@contextmanager
+def artifact_readback_validation():
+    """Share evidence work within one validation; callers must check unchanged()."""
+    validation = _EvidenceReadbackValidation()
+    token = _READBACK_VALIDATION.set(validation)
+    try:
+        yield validation
+    finally:
+        _READBACK_VALIDATION.reset(token)
+
+
+def _evidence_card_payload(
+    team_id: str, authority_run_id: str, cards: list[dict[str, Any]]
+) -> dict[str, Any]:
+    return {
+        "teamId": team_id,
+        "sourceCollectionRunId": authority_run_id,
+        "evidenceCards": cards,
+        "cardCount": len(cards),
+    }
 
 
 def load_workflow_bound_evidence_cards(
@@ -570,12 +693,7 @@ def load_scoped_artifact_payload(
         )
         if cards is None:
             return None
-        return {
-            "teamId": normalized_team,
-            "sourceCollectionRunId": normalized_authority,
-            "evidenceCards": cards,
-            "cardCount": len(cards),
-        }
+        return _evidence_card_payload(normalized_team, normalized_authority, cards)
 
     if normalized_kind == "evidence_relation_graph":
         return load_evidence_relation_graph_payload(
@@ -915,6 +1033,15 @@ def read_domain_artifact(
     team_id = parsed["teamId"]
     authority_run_id = parsed["authorityRunId"]
     content_hash = parsed["contentHash"]
+    validation = _READBACK_VALIDATION.get()
+    if kind == "evidence_card_batch" and validation is not None:
+        try:
+            recomputed = validation.evidence_hash(team_id, authority_run_id)
+        except Exception:
+            return None
+        if recomputed != content_hash:
+            return None
+        return _verified_readback(kind, team_id, authority_run_id, content_hash)
     payload = load_scoped_artifact_payload(
         kind,
         team_id=team_id,
@@ -945,6 +1072,12 @@ def read_domain_artifact(
     recomputed = canonical_sha256(payload)
     if recomputed != content_hash:
         return None
+    return _verified_readback(kind, team_id, authority_run_id, content_hash)
+
+
+def _verified_readback(
+    kind: str, team_id: str, authority_run_id: str, content_hash: str
+) -> ArtifactReadBack:
     schema_version = "1.0.0"
     domain_revision = canonical_sha256(
         {
