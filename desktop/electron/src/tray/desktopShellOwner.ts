@@ -28,9 +28,14 @@ export function captureElectronOwnerIdentity(
   nowSeconds = Date.now() / 1000,
   uptimeSeconds = process.uptime(),
 ): DesktopShellOwnerIdentity {
+  // Node uptime starts after native process creation; slow Electron startup
+  // can put that estimate outside the owner identity tolerance.
+  const nativeCreationTime = pid === process.pid ? process.getCreationTime?.() : null;
   return {
     pid,
-    createTime: nowSeconds - uptimeSeconds,
+    createTime: typeof nativeCreationTime === "number" && Number.isFinite(nativeCreationTime) && nativeCreationTime > 0
+      ? nativeCreationTime / 1000
+      : nowSeconds - uptimeSeconds,
     executable,
   };
 }

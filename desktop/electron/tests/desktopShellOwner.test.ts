@@ -1,10 +1,11 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { resolveDesktopShellOwnerPaths } from "../src/lifecycle/projectStoragePaths.js";
 import {
+  captureElectronOwnerIdentity,
   claimElectronDesktopShellOwner,
   desktopShellOwnerPath,
   releaseElectronDesktopShellOwner
@@ -23,11 +24,23 @@ function seedWorkspace(): { root: string; projectsHome: string } {
 
 describe("desktopShellOwner", () => {
   afterEach(() => {
+    vi.unstubAllGlobals();
     if (previousProjectsHome === undefined) {
       delete process.env.VIBELUTION_PROJECTS_HOME;
     } else {
       process.env.VIBELUTION_PROJECTS_HOME = previousProjectsHome;
     }
+  });
+
+  it("uses native creation time even when Electron initialization exceeds the owner tolerance", () => {
+    vi.stubGlobal("process", { ...process, getCreationTime: () => 100_000 });
+    expect(captureElectronOwnerIdentity(process.pid, "electron.exe", 115, 10).createTime).toBe(100);
+    expect(captureElectronOwnerIdentity(process.pid + 1, "other.exe", 115, 10).createTime).toBe(105);
+  });
+
+  it.each([null, NaN, Infinity, 0, -1, undefined])("retains the portable fallback for invalid native time %s", (value) => {
+    vi.stubGlobal("process", { ...process, getCreationTime: value === undefined ? undefined : () => value });
+    expect(captureElectronOwnerIdentity(process.pid, "electron.exe", 115, 10).createTime).toBe(105);
   });
 
   it("claims and releases only the canonical tray owner file", () => {
