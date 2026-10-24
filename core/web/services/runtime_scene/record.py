@@ -3394,7 +3394,9 @@ def _record_runtime_scene_event_impl(
                         must_refresh_now = periodic_refresh_ran or reconciliation_closed
                         now = monotonic()
                         if must_refresh_now or s._scene_package_refresh_window_open(now):
-                            if not periodic_refresh_ran:
+                            if not periodic_refresh_ran or reconciliation_closed:
+                                # A periodic refresh ran before reconciliation;
+                                # persist the newly closed manifest as well.
                                 s._note_scene_package_refresh_started(now)
                                 started_at = monotonic()
                                 try:
