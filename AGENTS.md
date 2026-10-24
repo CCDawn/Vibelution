@@ -21,6 +21,7 @@
 - 根 `main` 是只读的本地集成工作区。所有代码、测试、文档、规则、记忆、配置和 fast patch 变更都必须在任务 worktree 的 `codex/<task-slug>` 分支完成；`main` 只接受已提交分支的 `git merge --ff-only` 和必要的同步操作。
 - 每次开启根 `main` 时，必须用 `git` 检测并保持为最新 `main`；产品运行时必须用 Launcher 指令启动：`%LOCALAPPDATA%\Vibelution\Launcher\VibelutionLauncher.exe --project "<project-root>" start`。
 - 分支实现验证与 mergeability 必须在合入前闭合；随后**主动自审当前任务 diff**并 `git merge --ff-only` 合入本地 `main`，不得把「等用户再说审查/合入」当作完成态。除用户要求隔离/交接或存在精确 blocker 外，未主动自审并合入本地 `main` 即未完成。合入后只清理本任务资源；清理失败不改变已合入事实，只恢复清理，不重测或重合。发布后方可观察的用户目标按 §5 与开发标准 §22.1 继续验收，不能因合入而宣称目标完成。push/PR/发布、远端删除仍需明确授权。
+- 合入后的安全本地清理由任务 owner 自动收尾：安全切回主目录，核实并释放本任务占用，保留历史备份，再清理任务目录和分支；按[安全清理恢复](docs/agents/worktree-collaboration.md#safe-cleanup-recovery)核对会话、磁盘与 Git 实际状态，不把常规恢复交给用户催办，不动其他任务。
 - 不覆盖、回滚、删除或重置无关的用户/Agent 改动；发现重叠先检查 claim 和 diff。
 - 远端 push、PR、发布需要用户明确授权和远端同步门；force、覆盖或远端删除需要破坏性确认。
 - **Windows 产品运行时禁止任何可见控制台弹窗**：这是无控制台弹窗红线。Launcher、Workbench、Runtime Manager、后台 Git/轮询和服务子进程不得弹出 `cmd.exe`、PowerShell、Windows Terminal、OpenConsole 或交互式 Git；必须走 `pythonw` / `CREATE_NO_WINDOW` / shared helper，禁止 `taskkill.exe`、裸 Git wrapper、`npm`/`cmd` 后台壳。用户明确打开的 CLI 面板除外；细则见 [development-standard.md](docs/standards/development-standard.md) §8.0。

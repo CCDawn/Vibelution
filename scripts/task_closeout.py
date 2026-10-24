@@ -881,12 +881,8 @@ def cleanup_task_resources(context: CloseoutContext, *, agent_id: str) -> None:
                 "branch_delete_failed",
                 _bounded_error(branch_deleted.stderr or branch_deleted.stdout),
             )
-    pruned = gate.run_process(["git", "worktree", "prune"], context.main_root)
-    if pruned.returncode != 0:
-        raise ManagedCloseoutError(
-            "worktree_prune_failed",
-            _bounded_error(pruned.stderr or pruned.stdout),
-        )
+    # Targeted removal already unregisters this task. A repository-wide prune
+    # could discard recovery metadata for another task's unavailable checkout.
 
 
 def resolve_cleanup_context(
