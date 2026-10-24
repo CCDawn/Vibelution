@@ -877,7 +877,7 @@ def complete_command(path: Path, result: dict[str, Any]) -> None:
         "type": str(result.get("type") or command_payload.get("type") or ""),
         "requestedBy": str(result.get("requestedBy") or command_payload.get("requestedBy") or ""),
         "resultPath": result_path.name,
-        "ok": bool(result.get("ok")),
+        "ok": result.get("ok") if isinstance(result.get("ok"), bool) else None,
         "completed": bool(result.get("completed")),
         "message": truncate_event_text(str(result.get("message") or "")),
         "errorType": str(result.get("errorType") or ""),

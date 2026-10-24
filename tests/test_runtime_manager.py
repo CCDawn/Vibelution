@@ -16,6 +16,8 @@ from core.infrastructure import atomic_io
 from core.launcher import desktop_session_store
 from core.runtime_manager import cli as runtime_cli
 from core.runtime_manager import command_queue
+
+
 from core.runtime_manager import daemon
 from core.runtime_manager import constants
 from core.runtime_manager import evolution_store
@@ -28,6 +30,24 @@ from core.runtime_manager import workbench_controller
 from core.runtime_manager.work_run_store import WorkRunStore
 
 pytestmark = pytest.mark.serial
+
+
+@pytest.mark.parametrize(("result", "expected"), [({}, None), ({"ok": None}, None), ({"ok": "false"}, None), ({"ok": False}, False), ({"ok": True}, True)])
+def test_command_result_event_preserves_unknown_operation_result(tmp_path, monkeypatch, result, expected):
+    for name in ("INBOX_DIR", "PROCESSING_DIR", "RESULTS_DIR"):
+        path = tmp_path / name.lower()
+        path.mkdir()
+        monkeypatch.setattr(command_queue, name, path)
+    events_path = tmp_path / "events.jsonl"
+    monkeypatch.setattr(command_queue, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(command_queue, "clear_lifecycle_interrupt", lambda *_: None)
+    monkeypatch.setattr(command_queue, "record_runtime_manager_scene_event", lambda *args, **kwargs: None)
+    path = tmp_path / "command.json"
+    path.write_text(json.dumps({"commandId": "contract", "type": "open_workbench"}), encoding="utf-8")
+    command_queue.complete_command(path, {"commandId": "contract", "completed": True, **result})
+    event = json.loads(events_path.read_text(encoding="utf-8").splitlines()[-1])
+    assert event["payload"]["ok"] is expected
 
 
 @pytest.fixture(autouse=True)
