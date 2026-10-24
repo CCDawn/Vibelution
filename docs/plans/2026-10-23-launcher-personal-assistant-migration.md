@@ -3,6 +3,7 @@
 - Status: PROPOSED，待实施；本文不表示迁移已经生效，也不替代现行 ADR。
 - 日期: 2026-10-23，Asia/Shanghai。
 - 初始化配置设计补充: 2026-10-24；对应本地源码基线 729f390f5，以下新增预设与初始化流程仍待实施。
+- Launcher 产品形态与外部调研补充: 2026-10-24；本地基线 b1ecf1709；完整助理入口、打开即桌面形象和关闭常驻契约见第 8 节，外部固定源码与借鉴裁决见第 13.3 节。
 - 代码基线: 245f325166f4ebde2a3b7b353f9b1e23fb8c1d24；这是本地核对基线，远端刷新因本机代理连接失败而未完成。
 - 交付范围: 架构、职责、接口、数据迁移、实施依赖、验收、切换与回滚方案。本轮仅文档。
 - 完成条件: M0–M7 全部关闭，原生桌面、真实模型、断线恢复和回滚演练均有证据；届时更新状态并按 [ADR 0005](../adr/0005-docs-authority-and-archive-policy.md) 归档。
@@ -12,15 +13,19 @@
 
 推荐架构是“Launcher 托管一个独立个人助理运行时，各项目保留自己的执行器”。助理的对话、偏好、模型绑定和恢复记录独立于项目；创建 Agent、运行团队、修改项目配置等操作仍由目标项目的原生服务执行。
 
+产品形态进一步确定为：Launcher 提供个人助理的完整功能入口，用户主动打开 Launcher 或助理时即可看到桌面形象，点击形象唤起完整面板。桌面形象、完整面板和工作台快捷入口共享同一助理，不分别创建 Agent、会话或后台规划器。平台业务的执行权威仍在原生服务，无需再复制整套项目管理页面。
+
 用户只需表达结果，例如“在项目 A 建一个开发、审查和测试团队并运行”“把项目 B 的 Agent 模型换掉”“重启项目 A，完成后继续刚才的任务”。助理负责识别目标、检查能力、执行、等待回执和报告结果。只有目标存在实质歧义、缺少凭据、超出授权或确需破坏性确认时，才提出一个合并后的问题。
 
 ### 1.1 必须实现的结果
 
 | 场景 | 迁移后的行为 |
 | --- | --- |
+| 主动打开 Launcher，尚未启动任何项目 | 默认显示收起态桌面形象；完整助理、自己的设置和模型恢复入口可用；项目离线不阻断展示 |
+| 使用个人助理的任何既有功能 | 从 Launcher 助理面板可达；桌宠提供快捷交互；不要求先打开项目设置页或启动默认项目 |
 | 项目启动、停止、重启或构建失败 | 助理进程和对话保持可用；依赖该项目的步骤显示等待或失败原因 |
 | 多项目和同项目多实例 | 操作绑定明确的 projectId、instanceId 和配置权威，不因窗口切换而改目标 |
-| 关闭工作台窗口 | 助理仍由 Launcher 托管；关闭助理面板只隐藏界面 |
+| 关闭工作台、Launcher 主窗口、助理面板或桌面形象 | 只改变对应窗口的展示；助理由 Launcher 与托盘继续托管，明确退出 Launcher 才关停服务 |
 | 新建 Agent、改配置、用户名、头像、壁纸、设置 | 通过已有受控动作完成，按真实作用域说明影响范围 |
 | 一句话创建并运行团队 | 自动形成团队规格、创建角色、启动原生工作流并跟踪成果 |
 | 连接中断或写入响应丢失 | 先查原操作和目标状态；不重复创建对象或启动团队 |
@@ -42,6 +47,7 @@
 | [Journal](../../core/chat/turn_journal.py) 能按根目录读写；完整 Session 链仍有项目依赖 | 可以复用原生 Session 引擎和 Journal，仍需独立启动宿主与隔离证明 |
 | [存储解析](../../vibelution_storage.py) 默认按项目和实例分目录，也支持全局覆盖 | 新增独立助理路径解析；禁止用全局 data_home 覆盖把现有项目合并到同一目录 |
 | [桌宠窗口](../../desktop/electron/src/windows/petWindow.ts) 和设置读取仍依赖工作台 origin | 面板、桌宠资源和数据连接都必须迁离项目 origin |
+| Launcher 的随包页面、工作台个人助理页和桌面助理页属于不同入口；当前桌宠需显式 openPet，关闭时销毁窗口 | 需要 Launcher 专属助理入口、启动显示与隐藏规则；保留 BrowserWindow 不能证明项目停机时聊天仍可用 |
 | 现有工作台 Job 随 workspace 终止整组进程 | 复用无控制台启动原语，新增助理专属 owner 与进程组 |
 | 模型目录属于外部 operator config；事务已有锁和校验 | 复用同一配置真源及事务，新增全局助理引用保护；不复制一套可编辑 Provider 目录 |
 | [工具审批](../../core/web/services/session/tool_approvals.py) 的 pending、Session grant 以及低风险操作窗口当前是进程内状态 | 旧临时批准不能跨进程或改绑到新 Session；持久 ToolPolicy 与待处理意图分别迁移 |
@@ -56,7 +62,9 @@
 
 ~~~mermaid
 flowchart TB
-    U["用户：助理面板与桌宠"] --> E["Electron main：身份校验、生命周期与连接代理"]
+    U["Launcher 完整助理面板"] --> E["Electron main：身份校验、生命周期与连接代理"]
+    V["桌面形象：打开即显示"] --> E
+    V -.->|"点击唤起同一助理"| U
     E <-->|"私有运行通道"| A["独立 Python 助理服务"]
     A --> S["助理专属存储：原生 Session、偏好、操作记录"]
     A <-->|"受控项目请求"| B["Electron main 项目连接代理"]
@@ -383,7 +391,58 @@ manifest 记录源/目标作用域、数据版本、Journal 水位、文件哈�
 
 Launcher 使用随包资源承载独立助理路由。桌宠和面板连接同一全局 Session，不因项目窗口、前台标签或后端 origin 改变而切换身份。UI 继续使用 VUI 产品 API、现有 recipe 与统一 pane persistence；新增组件先登记 designs，并通过既有守卫。
 
-交互要求：
+### 8.1 Launcher 承载完整个人助理
+
+“完整集成”的验收对象是用户能完成的助理场景，不以增加一个跳转按钮或显示形象作为完成。以下既有能力全部在 Launcher 助理面板可达，并复用原页面的业务模块；项目业务编辑器仍可作为成果详情打开。
+
+| 能力 | Launcher 中的交互 | 后端与复用边界 |
+| --- | --- | --- |
+| 对话、历史、附件和流式输出 | 直接进入同一活动会话；可查原生历史，输入与附件在切换展示时保留 | 复用 ChatCodingRoute/原生 composer 和 Session DTO，不另建聊天状态机或 transcript |
+| 平台、项目与实例管理 | 在面板固定目标，查看状态，一句话启动、停止、重启、切换和管理 | Launcher 原生项目注册及命令队列；实际对象与权限仍由目标域校验 |
+| Agent 与团队 | 一句话新建、改配置、换模型、建团队并运行，显示分步成果 | 第 4.6 节预设及原生 action/team workflow；创建和运行分别核验 |
+| 派遣、进度、审批与恢复 | 在同一操作卡查看进度、批准必要差异、停止任务、继续观察和打开成果 | 复用原生审批、Inbox、WorkRun 与持久回执，不以本地卡片状态替代结果 |
+| 个人事务、记忆与偏好 | 待办、日程、目标、对话偏好和可见的记忆管理在面板内完成 | 助理自己的原生插件和设置服务；不读其他 Agent 私有记忆 |
+| 模型与助理设置 | 直接选择有效模型、诊断连接，修改人物、主动程度、通知和形象 | 复用原生配置 DTO、校验和凭据入口，不复制 Provider 目录 |
+| 用户资料、头像、壁纸和普通平台设置 | 自然语言完成，必要时在面板内展示结构化选择及结果 | 使用现有受控动作及资产服务；明确 operator/project/assistant 作用域 |
+| 电脑操作与能力说明 | 在面板内发现能力、处理原生同意、查看受控操作及未支持原因 | 保留现有观察/执行授权；不向 Launcher renderer 开放任意系统命令 |
+
+“全部既有功能迁移”与“全部 HTTP API 开放”分别统计。第 2.1 节已接入能力必须零遗漏，尚未支持的 API 按第 5.4 节分类；迁移不能把受限或内部 API 自动变成任意调用工具。
+
+Launcher 主界面、桌面形象、托盘和工作台入口最终都唤起同一助理面板。嵌入视图与独立面板复用同一功能模块和 domain transport；项目上下文由明确目标参数传入，不重新初始化助理。不得通过伪装成 Workbench 窗口放宽原有 IPC 权限；为 Launcher/助理窗口新增窄的、校验角色和来源的专用方法。
+
+### 8.2 打开即显示的桌面形象
+
+首版复用现有 DesktopPetCharacter、大飞鱼/小洛 renderer、透明窗口、边界钳制与展开聊天能力。形象资产随助理包交付，与页面和配置一起脱离项目 origin；启动时无需先下载模型、启动项目或成功连接 LLM。缺模型时形象仍可显示，并提供连接修复入口。
+
+| 用户动作或事件 | 预期行为 |
+| --- | --- |
+| 首次安装或用户主动打开 Launcher/个人助理 | 默认启动已启用的助理并显示一个收起态形象；已有窗口时复用，不重复创建。明确禁用助理的设置仍受尊重 |
+| 点击形象或托盘“打开助理” | 一步唤起完整面板并定位当前会话；只在用户主动操作时将输入焦点交给面板 |
+| 后台自启、通知和恢复连接 | 遵循明确的自启/可见性偏好；不抢焦点、不突然展开面板；事件不会把刚隐藏的形象重新弹出 |
+| 关闭聊天区 | 收起聊天；保留形象和后台服务，未发送输入不丢失 |
+| 隐藏形象 | 只隐藏展示；托盘/Launcher 一步恢复，进行中操作继续 |
+| 拖动形象、调整大小、切换屏幕 | 复用窗口位置与边界 helper；屏幕移除、DPI/任务栏变化后仍在可见工作区；尺寸和位置不写回项目配置 |
+| 形象资产加载失败 | 使用随包的轻量占位形象及恢复入口，不让聊天、任务或设置不可用 |
+
+透明的非交互区域必须允许鼠标穿透；拖动区域、菜单和聊天区保留命中测试。默认采用包围形象的有限窗口，不照搬跨全部显示器的全屏透明覆盖层。显示使用不抢焦点的原生方式，不能为展示常驻而持续获取鼠标或键盘焦点。
+
+动画只投影权威事件：受理/模型输出、受控动作执行、等待用户、等待项目、失败和有证据的完成分别展示；idle/ready 只能表示等待或就绪，不能显示为任务成功。投影关联 sessionId、turnId、operationId 及原生来源，过期回执不覆盖当前状态；不为形象改写普通 Session 或统一各领域状态枚举。
+
+Live2D、VRM、口型、语音输入输出和复杂动作作为可选增强，采用 renderer 适配边界。它们不成为本次迁移的必装依赖，也不另建对话、记忆或权限内核；任何角色资产和 SDK 的许可证分别核对。
+
+### 8.3 关闭、常驻与退出
+
+| 操作 | 窗口与服务生命周期 |
+| --- | --- |
+| 关闭项目工作台 | 关闭该窗口，项目是否停止按现有规则；常驻助理和桌面形象独立 |
+| 关闭 Launcher 主窗口或助理面板 | 隐藏对应界面，托盘与助理运行时继续；首次发生时用简短提示解释，无需每次确认 |
+| 关闭桌面形象 | 隐藏形象，不清空会话、不停止派遣、不终止服务；后续明确打开可恢复 |
+| 隐藏全部窗口 | 托盘仍可恢复；窗口数量为零不能自动触发退出或清除服务 owner |
+| 明确退出 Launcher | 按第 9.1 节停止新受理、保存并关停自己的服务；不自动终止项目中已派出的任务 |
+
+开机自启是独立的显式用户偏好，不因“常驻”自动开启。用户本轮确认的是打开 Launcher 后具备完整助理与形象；本机后台安装、系统服务与开机常驻不在授权范围内。
+
+### 8.4 共享交互与最小改造面
 
 - 保留当前输入、流式输出、附件、偏好和待审批操作意图；审批是否有效按当前 scope 与原生状态判断，不能搬用旧临时批准。窗口隐藏只降低展示更新频率，不关闭后台执行。
 - 操作卡清楚展示项目/实例、实际作用域、变更摘要、当前步骤与成功证据。共享用户名、模型或壁纸变更标明影响所有使用该配置源的实例。
@@ -392,6 +451,18 @@ Launcher 使用随包资源承载独立助理路由。桌宠和面板连接同�
 - 提供“继续观察、停止任务、打开成果、修复连接”的受控动作；取消观察与停止任务使用不同文案。
 - 偏好通过 revision 和成功事件更新，窗口重新显示时做一次读回；不让旧异步响应覆盖新设置。
 - 工作台内保留轻量入口和嵌入视图，连接全局服务。浏览器单独访问项目时仅展示受控状态/跳转，不向普通网页下发全局服务凭证。
+
+本地源码落点已经核对：
+
+| 现有实现 | 直接复用 | 必要适配 |
+| --- | --- | --- |
+| [PersonalAssistantRoute](../../web/src/routes/PersonalAssistantRoute.tsx)、personalAssistant/ | 全功能模块、偏好、概览、事务和操作 UI | 移除必须处于 Workbench 壳内的装配依赖，注入助理 transport 与目标作用域 |
+| [DesktopAssistantRoute](../../web/src/routes/desktopPet/DesktopAssistantRoute.tsx) 与 DesktopPetCharacter | 收起形象、展开聊天、同一身份和活动投影 | 改用全局助理连接和随包资产；完整管理能力由同一面板承接，不塞入另一套概览 |
+| [petWindow](../../desktop/electron/src/windows/petWindow.ts)、petWindowBounds | 透明安全窗口、位置恢复、屏幕边界 | URL 不再从 Workbench origin 派生；打开时自动显示；关闭改为隐藏 |
+| [petSettingsControl](../../desktop/electron/src/windows/petSettingsControl.ts)、preload/IPC | 窗口请求的集中校验与单实例控制 | 增加独立助理窗口角色与窄方法；移除由某个项目 origin 独占形象的语义，不放开通用控制接口 |
+| [electronWindowProvider](../../desktop/electron/src/windows/electronWindowProvider.ts) 与 Launcher 随包协议 | 窗口复用、托盘存活、资源协议与安全默认值 | 固定助理独立资源和生命周期 owner，工作台启停不影响助理 |
+
+先完成“无项目启动 Launcher → 显示已有形象 → 打开完整面板 → 一次真实对话”的切片，再迁移全部功能。可复用内容以现有模块为单位提取，不重新实现聊天页、角色引擎或一套 Launcher 专用设置页。
 
 本方案不规定最终视觉布局；可见 UI 改动实施前按项目现行 UI 契约完成预览或明确复用路径，禁止临时引入第二套设计系统。
 
@@ -441,7 +512,7 @@ flowchart LR
 | M1 独立宿主 | Launcher owner；新增 process/assistantRuntime、bootstrap、路径与打包清单 | 无项目可启动；单例、无控制台、固定包、健康、独立进程组、崩溃退避通过 |
 | M2 原生数据与迁移 | Session/存储 owner；助理专属 bootstrap/paths、只读历史导入、OperationStore、迁移工具 | 首次初始化及重入恢复；无模型可修复；自定义配置保持；dry-run/apply/resume/rollback；哈希与水位核对；普通 Session 核心回归 |
 | M3 项目连接与授权 | Launcher/业务授权 owner；连接代理、项目 capabilities/action gateway、受控代理身份 | project/instance/config 权威绑定；恶意目标、跨项目批准、过期凭据、策略撤销拒绝；读回和去重契约通过 |
-| M4 面板与桌宠 | 前端 owner；独立随包路由、typed IPC/domain API、VUI 与 pet origin | 项目停机仍能对话；单一会话、输入保留、设置同步、目标和风险清楚；VUI 与类型检查通过 |
+| M4 面板与桌宠 | 前端 owner；Launcher 全功能助理入口、独立随包路由、typed IPC/domain API、VUI 与 pet origin | 打开即显示形象；关闭仅隐藏；项目停机仍可显示和对话；既有功能零遗漏、单一会话、输入/设置同步；VUI 与类型检查通过 |
 | M5 动作与恢复 | 各原生领域 owner；pa_* adapters、模型引用、Team/Kernel/原生任务关联 | 已接入能力零遗漏；Agent/团队预设实际可执行；团队分步恢复；并发配置保护；未知结果不重做；生成全 API 分类清单 |
 | M6 兼容切换 | 单一迁移 owner；feature flag、manifest、owner epoch、旧入口转接 | 单写者证明；多项目逐项切换；legacy/bridge 状态可见；回滚演练通过 |
 | M7 发布前验收 | 独立验收者与集成 owner；故障注入、原生桌面、真实模型与包 provenance | 第 11 节全部强制场景有证据；关闭高风险缺口后才切默认；部署/发布另需授权 |
@@ -486,7 +557,9 @@ flowchart LR
 | 迁移过程中任一点崩溃 | 每个状态前后停止进程；resume/rollback 幂等，历史哈希一致，资产与派遣引用完整 |
 | 迁移后回滚 | 有新对话、新配置、新任务时演练；不丢数据、不重复任务、不出现双 owner |
 | 个人事务迁移与回滚 | resident 期间增改删待办/日程/目标后回滚；稳定 ID、删除标记、完成状态和提醒游标一致，只有一个 collector，旧提醒不复发 |
-| 桌宠/面板与工作台解耦 | 项目停止时实际桌宠和面板可用；两入口同一 Session，输入及设置保持 |
+| 桌宠/面板与工作台解耦 | 无项目冷启动即出现随包形象；项目停止/重启时实际形象与完整面板可用，真实对话成功；两入口同一 Session，输入及设置保持 |
+| Launcher 功能完整性与操作成本 | 按第 8.1 节逐项以真实模型执行并读回；用户无需打开项目设置页；点击形象/托盘一步打开完整助理，必要确认集中展示 |
+| 窗口隐藏、恢复与桌面交互 | 隐藏全部窗口后 PID/Session/操作继续；再次打开无重复实例；多屏/DPI、鼠标穿透、拖动、焦点和资产失败回退在原生桌面验证 |
 | 普通 Agent/Session 回归 | admission、Journal、worker、persist、SSE、归档和工具授权关键回归保持原行为；Companion 无越界 |
 | 无控制台与资源成本 | 原生桌面观察启动/崩溃恢复/项目重启/升级均无弹窗；空闲无模型请求、无全项目唤醒 |
 | 升级与发布包 | 实际运行的 Electron、助理 Python/UI、依赖与协议指纹匹配；旧包回退和数据兼容证明 |
@@ -545,3 +618,25 @@ flowchart LR
 | 旧 UI、旧服务包被误判最新 | provenance 同时覆盖 Electron、Python、依赖、UI；核对实际运行资产 |
 
 M0 冻结契约后，M1 与 M3 应先交付“无需项目即可启动的最小宿主 + 只读项目握手 + 一条带去重的受控写操作”的联合验证切片。该切片通过后再扩展数据迁移、所有现有动作和界面，避免先搬动全部个人助理代码后再补身份与恢复边界。
+
+### 13.3 相关高价值项目调研与借鉴裁决
+
+调研日期为 2026-10-24。先检查本地个人助理、桌宠、Launcher 和任务简报列出的已有参考，再查以下官方仓库、文档、发布页与许可证。仓库 HEAD 由只读 ls-remote 固定；源码以该提交读取，不执行外部代码、不安装新依赖。本轮是静态调研，不代表候选已在本机或 Vibelution 中通过运行验收。
+
+| 优先级与项目 | 高价值部分及证据 | 许可证、维护信号与适配成本 | 本项目裁决 |
+| --- | --- | --- | --- |
+| 1：[AIRI](https://github.com/moeru-ai/airi) | 桌面人物、聊天/设置窗口组织、透明形象与独立展示；固定源码的 [main window](https://github.com/moeru-ai/airi/blob/d759427ba696db2875b5d4ce72f7701c54feba28/apps/stage-tamagotchi/src/main/windows/main/index.ts) 包含透明窗口、hide-on-close 与不抢焦点的展示路径 | 固定 HEAD d759427ba696db2875b5d4ce72f7701c54feba28；[代码 MIT](https://github.com/moeru-ai/airi/blob/d759427ba696db2875b5d4ce72f7701c54feba28/LICENSE)；[发布页](https://github.com/moeru-ai/airi/releases) 可见 v0.12.0。整体 UI/人物与服务栈搬入成本高，局部窗口交互参考成本低；角色资产不随代码许可证自动获准 | 优先参考形象/面板共存、窗口生命周期、渲染适配与测试场景；首版仍复用本项目现有形象，不引入整套 AIRI 或其聊天内核 |
+| 2：[OpenClaw](https://github.com/openclaw/openclaw) | [常驻 Gateway 架构](https://docs.openclaw.ai/concepts/architecture)、多个客户端连接同一执行权威；[固定架构源码](https://github.com/openclaw/openclaw/blob/b7b7415ae65bb230632a31ee5bcc302d23cf31a2/docs/concepts/architecture.md) 区分 accepted 与最终结果、握手身份及事件通道 | 固定 HEAD b7b7415ae65bb230632a31ee5bcc302d23cf31a2；[MIT](https://github.com/openclaw/openclaw/blob/b7b7415ae65bb230632a31ee5bcc302d23cf31a2/LICENSE)；[发布页](https://github.com/openclaw/openclaw/releases) 可见 2026.10.6。引入其完整 Gateway/Agent/插件栈会重复现有能力；只参考边界和故障用例成本低 | 参考常驻服务与客户端解耦、身份握手、版本和回执；保留 Electron 控制面、原生 Session/ToolPolicy，不引入第二个 Gateway 内核或默认系统 daemon |
+| 3：[OpenCode](https://github.com/anomalyco/opencode) | [官方 Server 文档](https://opencode.ai/docs/server/) 展示 OpenAPI、生成 SDK、全局/会话 SSE 与多客户端接口；与本项目 API 解释文档及 transport 适配直接相关 | 固定 HEAD 43f7997bfa7b6cd710ea08274a5eb9b603a73a40；[MIT](https://github.com/anomalyco/opencode/blob/43f7997bfa7b6cd710ea08274a5eb9b603a73a40/LICENSE)；[固定 README](https://github.com/anomalyco/opencode/blob/43f7997bfa7b6cd710ea08274a5eb9b603a73a40/README.md) 已指向 v2，桌面端标记 BETA。发布页仍有更新，但公开 Server 文档与当前开发头必须分开看；旧 event-reducer 路径在此 HEAD 已不存在 | 只参考由 schema 生成能力文档/客户端、共享事件连接和缓存隔离；不按本地旧参考路径复制代码，不替换本项目会话引擎，不将公开文档直接当当前 v2 可调用契约 |
+| 4：[Open-LLM-VTuber](https://github.com/Open-LLM-VTuber/Open-LLM-VTuber) / [Web](https://github.com/Open-LLM-VTuber/Open-LLM-VTuber-Web) | [固定 WindowManager](https://github.com/Open-LLM-VTuber/Open-LLM-VTuber-Web/blob/d176e7df2366952e3bacbf12cf9a8b18a4315932/src/main/window-manager.ts) 提供 window/pet 模式、窗口位置、鼠标穿透和显示切换；[发布说明](https://github.com/Open-LLM-VTuber/Open-LLM-VTuber/releases) 描述模式间共享上下文 | 前端固定 HEAD d176e7df2366952e3bacbf12cf9a8b18a4315932；[Open-LLM-VTuber License 1.0](https://github.com/Open-LLM-VTuber/Open-LLM-VTuber-Web/blob/d176e7df2366952e3bacbf12cf9a8b18a4315932/LICENSE) 有额外商用条件，不能按后端历史 MIT 推定前端可直接集成；发布页可见 v1.2.1。还需独立核对 Live2D 资产；整套接入成本高 | 仅参考窗口/形象共享上下文及鼠标交互。源码中的 sandbox=false、nodeIntegration=true 与本项目更严格默认值不兼容，不复制安全配置或全屏透明窗口实现 |
+
+借鉴顺序是：先用 AIRI 对照桌面体验，用 OpenClaw 对照常驻边界，用 OpenCode 对照接口投影；Open-LLM-VTuber 仅补交互参考。排名按本任务适配价值，不按 stars，也不是对稳定性或安全性的认证。许可证描述是本轮固定文件的观察，不给未来版本或附带资产作授权结论。
+
+可以立即转入实施清单的四项：
+
+1. **统一助理模块与传输**：复用现有个人助理模块、Session/LLM/Journal、动作 schema 和配置事务，只增加独立宿主及窄 transport，不维护两份聊天与设置逻辑。
+2. **独立窗口 owner**：复用本项目透明窗口和边界 helper，参考 AIRI 的展示/隐藏/焦点分工，先实现已有形象随 Launcher 冷启动可见。
+3. **可解释能力目录**：从本项目注册表生成说明、参数和支持状态，参考 OpenCode 的 schema/SDK 思路；文档、工具与执行授权使用同一能力版本。
+4. **持续服务与恢复**：参考 OpenClaw 的客户端握手和受理/完成区分，使用本项目原生游标、审批与回执补重连负例；不为桌宠再建状态库或任务调度器。
+
+新增 Live2D/VRM 或外部模块前另做窄验证：许可证及资产来源明确，renderer 可替换，不携带新的 LLM/记忆内核；测量实际 Windows 启动、空闲资源、焦点、鼠标穿透和断线恢复。当前常驻迁移无需等待这些增强，也没有新增第三方运行依赖。
