@@ -232,13 +232,30 @@ export async function inspectWorkbenchServingVersion(input: ServingVersionInput)
   const sameProcess = statePid === serving.backendPid
     && Math.abs(stateCreateTime - healthCreateTime) <= 0.001
     && normalizeExecutable(stateExecutable) === normalizeExecutable(healthExecutable);
-  const identityMatches = identitiesComplete && (sameProcess || (
-    statePid !== serving.backendPid && await servingChildIdentityMatches(
+  const probeCurrentCode = async () => {
+    try {
+      return { current: await (input.currentCode || currentBackendCode)(input.workspaceRoot) };
+    } catch (error) {
+      return { error };
+    }
+  };
+  let currentProbe: ReturnType<typeof probeCurrentCode> | undefined;
+  let identityMatches = identitiesComplete && sameProcess;
+  if (identitiesComplete && statePid !== serving.backendPid) {
+    // Consume both outcomes immediately: cancellation can throw before the
+    // identity await, and an earlier identity/release failure wins over Git.
+    const identityProbe = servingChildIdentityMatches(
       input,
       { pid: statePid, createTime: stateCreateTime, executable: stateExecutable },
       { pid: serving.backendPid, createTime: healthCreateTime, executable: healthExecutable }
-    )
-  ));
+    ).then((matches) => ({ matches }), (error: unknown) => ({ error }));
+    input.signal?.throwIfAborted();
+    currentProbe = probeCurrentCode();
+    const identity = await identityProbe;
+    input.signal?.throwIfAborted();
+    if ("error" in identity) throw identity.error;
+    identityMatches = identity.matches;
+  }
   input.signal?.throwIfAborted();
   if (!identityMatches) {
     return {
@@ -271,10 +288,12 @@ export async function inspectWorkbenchServingVersion(input: ServingVersionInput)
     };
   }
   input.signal?.throwIfAborted();
-  const current = await (input.currentCode || currentBackendCode)(input.workspaceRoot);
+  const code = await (currentProbe ?? probeCurrentCode());
   // An already issued read-only Git query may finish, but a superseded
   // observer must never accept its result or start another verification.
   input.signal?.throwIfAborted();
+  if ("error" in code) throw code.error;
+  const current = code.current;
   if (!current.head || !current.dirtyTreeDigest || serving.code.head !== current.head || serving.code.dirtyTreeDigest !== current.dirtyTreeDigest) {
     return {
       ok: false,

@@ -294,7 +294,7 @@ describe("Electron main Launcher IPC facade", () => {
   });
 
   it("waits for the Electron control plane before dispatching startup and second-instance lifecycle commands", () => {
-    const bootstrapIndex = mainSource.indexOf("launcherBootstrap = await bootstrapMainOwnedLauncher(paths);");
+    const bootstrapIndex = mainSource.indexOf("launcherBootstrap = await bootstrapMainOwnedLauncher(paths, initialWorkbenchUrl);");
     const readyResolveIndex = mainSource.indexOf("resolveLauncherControlPlaneReady?.();");
     expect(bootstrapIndex).toBeGreaterThan(0);
     expect(readyResolveIndex).toBeGreaterThan(bootstrapIndex);

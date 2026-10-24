@@ -42,7 +42,7 @@ describe("Electron main startup sequence", () => {
     const source = readFileSync(mainSourcePath, "utf8");
     const startup = source.slice(source.indexOf("app.whenReady()"));
     const refreshIndex = startup.indexOf("await refreshPackagedDesktopShellIfStale(");
-    const bootstrapIndex = startup.indexOf("launcherBootstrap = await bootstrapMainOwnedLauncher(paths)");
+    const bootstrapIndex = startup.indexOf("launcherBootstrap = await bootstrapMainOwnedLauncher(paths, initialWorkbenchUrl)");
     const watcherIndex = startup.indexOf("startPeriodicShellFreshnessWatch()");
     const refresh = source.slice(
       source.indexOf("async function refreshPackagedDesktopShellIfStale("),
@@ -119,6 +119,93 @@ describe("Electron main startup sequence", () => {
     expect(startupIndex).toBeGreaterThan(0);
     expect(deferIndex).toBeGreaterThan(startupIndex);
     expect(source.slice(startupIndex, deferIndex)).not.toContain("openLauncher");
+  });
+});
+
+describe("initial workbench discovery and shell readiness", () => {
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    let reject!: (reason: unknown) => void;
+    const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+    return { promise, resolve, reject };
+  }
+
+  function harness() {
+    const source = readFileSync(mainSourcePath, "utf8");
+    const resolver = source.slice(source.indexOf("async function resolveInitialWorkbenchUrl("),
+      source.indexOf("async function bootstrapMainOwnedLauncher("));
+    const startup = source.slice(source.indexOf("const initialWorkbenchUrlController ="),
+      source.indexOf('electronStartupStage = "tray_ready";'));
+    const readiness = deferred<boolean>();
+    const url = deferred<string>();
+    let signal!: AbortSignal;
+    const sandbox = {
+      AbortController,
+      Error,
+      console: { warn: vi.fn() },
+      paths: { workspaceRoot: "C:/repo" },
+      desktopCliArgs: {},
+      desktopEnvironment: () => ({ VIBELUTION_PYTHON_PATH: "C:/repo/python.exe" }),
+      resolveWorkbenchUrlFromBridge: vi.fn((input: { signal: AbortSignal }) => {
+        signal = input.signal;
+        signal.addEventListener("abort", () => url.reject(new Error("discovery cancelled")), { once: true });
+        return url.promise;
+      }),
+      thenLifecycleFromDesktopCli: () => "start",
+      refreshPackagedDesktopShellIfStale: vi.fn(() => readiness.promise),
+      registerPackagedDeepLinks: vi.fn(() => ({})),
+      bootstrapMainOwnedLauncher: vi.fn(async (_paths: unknown, pending: Promise<string>) => ({ url: await pending })),
+      launcherBootstrap: null as unknown,
+    };
+    const pending = runInNewContext(transpileModule(`${resolver}\n(async () => { ${startup}\nreturn launcherBootstrap; })()`, {
+      compilerOptions: { target: ScriptTarget.ES2022 },
+    }).outputText, sandbox) as Promise<unknown>;
+    return { ...sandbox, sandbox, readiness, url, pending, signal: () => signal };
+  }
+
+  it("starts both reads together but publishes bootstrap only after readiness and discovery", async () => {
+    const h = harness();
+    expect(h.resolveWorkbenchUrlFromBridge).toHaveBeenCalledOnce();
+    expect(h.refreshPackagedDesktopShellIfStale).toHaveBeenCalledOnce();
+    expect(h.bootstrapMainOwnedLauncher).not.toHaveBeenCalled();
+    h.readiness.resolve(false);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(h.bootstrapMainOwnedLauncher).toHaveBeenCalledOnce();
+    expect(h.sandbox.launcherBootstrap).toBeNull();
+    h.url.resolve("http://127.0.0.1:8002/");
+    await expect(h.pending).resolves.toEqual({ url: "http://127.0.0.1:8002/" });
+    expect(h.signal().aborted).toBe(true);
+    expect(h.resolveWorkbenchUrlFromBridge).toHaveBeenCalledOnce();
+  });
+
+  it("cancels and drains discovery without publishing an old shell when refresh takes over", async () => {
+    const h = harness();
+    h.readiness.resolve(true);
+    await expect(h.pending).resolves.toBeUndefined();
+    expect(h.signal().aborted).toBe(true);
+    expect(h.bootstrapMainOwnedLauncher).not.toHaveBeenCalled();
+    expect(h.registerPackagedDeepLinks).not.toHaveBeenCalled();
+    expect(h.console.warn).not.toHaveBeenCalled();
+  });
+
+  it("keeps the readiness error authoritative while retiring pending discovery", async () => {
+    const h = harness();
+    const failure = new Error("refresh failed");
+    h.readiness.reject(failure);
+    await expect(h.pending).rejects.toBe(failure);
+    expect(h.signal().aborted).toBe(true);
+    expect(h.bootstrapMainOwnedLauncher).not.toHaveBeenCalled();
+    expect(h.console.warn).not.toHaveBeenCalled();
+  });
+
+  it("handles an early discovery rejection and keeps fallback behind readiness", async () => {
+    const h = harness();
+    h.url.reject(new Error("discovery failed"));
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(h.console.warn).toHaveBeenCalledWith("discovery failed");
+    expect(h.bootstrapMainOwnedLauncher).not.toHaveBeenCalled();
+    h.readiness.resolve(false);
+    await expect(h.pending).resolves.toEqual({ url: "" });
   });
 });
 

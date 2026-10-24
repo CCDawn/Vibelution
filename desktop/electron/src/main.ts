@@ -873,27 +873,35 @@ function resolveHumanAttentionNotificationService(): HumanAttentionNotificationS
   return humanAttentionNotificationService;
 }
 
-async function bootstrapMainOwnedLauncher(paths: DesktopPaths): Promise<LauncherBootstrapResult | null> {
+async function resolveInitialWorkbenchUrl(paths: DesktopPaths, signal?: AbortSignal): Promise<string> {
   // T9: Electron main is the Launcher control plane. The Python :8765 service
   // is no longer spawned; the workbench URL is resolved through a no-console
   // Python bridge (env → ports.json → config → default).
   const desktopEnv = desktopEnvironment();
   const pythonPath = String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
-  electronStartupStage = "control_plane_attach";
-  const stageStartedAtMs = performance.now();
-  let workbenchUrl = "";
   if (pythonPath) {
     try {
-      workbenchUrl = await resolveWorkbenchUrlFromBridge({
+      return await resolveWorkbenchUrlFromBridge({
         workspaceRoot: paths.workspaceRoot,
         pythonPath,
-        operatorConfigPath: String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim()
+        operatorConfigPath: String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
+        signal
       });
     } catch (error: unknown) {
-      console.warn(error instanceof Error ? error.message : String(error));
+      if (!signal?.aborted) console.warn(error instanceof Error ? error.message : String(error));
     }
   }
-  workbenchUrl = resolveWorkbenchUrl(desktopEnv, workbenchUrl || undefined);
+  return "";
+}
+
+async function bootstrapMainOwnedLauncher(
+  paths: DesktopPaths,
+  pendingWorkbenchUrl = resolveInitialWorkbenchUrl(paths)
+): Promise<LauncherBootstrapResult | null> {
+  const desktopEnv = desktopEnvironment();
+  electronStartupStage = "control_plane_attach";
+  const stageStartedAtMs = performance.now();
+  const workbenchUrl = resolveWorkbenchUrl(desktopEnv, (await pendingWorkbenchUrl) || undefined);
   const bootstrapIdentity = `electron-${process.pid}-${Date.now().toString(36)}`;
   const result: LauncherBootstrapResult = {
     schemaVersion: 1,
@@ -5310,11 +5318,21 @@ app.whenReady()
       await runSmokeAndQuit(paths);
       return;
     }
-    if (await refreshPackagedDesktopShellIfStale(thenLifecycleFromDesktopCli(desktopCliArgs))) {
-      return;
+    // URL discovery is read-only and independent of shell readiness. Publish
+    // the control plane only after readiness; retire the child on refresh/error.
+    const initialWorkbenchUrlController = new AbortController();
+    const initialWorkbenchUrl = resolveInitialWorkbenchUrl(paths, initialWorkbenchUrlController.signal);
+    let deepLinkRegistration: ReturnType<typeof registerPackagedDeepLinks>;
+    try {
+      if (await refreshPackagedDesktopShellIfStale(thenLifecycleFromDesktopCli(desktopCliArgs))) {
+        return;
+      }
+      deepLinkRegistration = registerPackagedDeepLinks(paths);
+      launcherBootstrap = await bootstrapMainOwnedLauncher(paths, initialWorkbenchUrl);
+    } finally {
+      initialWorkbenchUrlController.abort();
+      await initialWorkbenchUrl;
     }
-    const deepLinkRegistration = registerPackagedDeepLinks(paths);
-    launcherBootstrap = await bootstrapMainOwnedLauncher(paths);
     electronStartupStage = "tray_ready";
     const trayStartedAtMs = performance.now();
     windowProvider = createWindowProvider(paths, launcherBootstrap);

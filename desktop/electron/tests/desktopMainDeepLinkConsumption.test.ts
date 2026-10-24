@@ -84,7 +84,7 @@ describe("Electron main public deep-link consumption", () => {
     expect(deferIndex).toBeGreaterThan(startupIndex);
     expect(source.slice(startupIndex, deferIndex)).not.toContain("openLauncher");
     expect(source).toContain("bootstrapMainOwnedLauncher(paths)");
-    expect(source).toContain("resolveWorkbenchUrl(desktopEnv, workbenchUrl || undefined)");
+    expect(source).toContain("resolveWorkbenchUrl(desktopEnv, (await pendingWorkbenchUrl) || undefined)");
     expect(source).not.toContain("bootstrapPythonLauncherService(");
   });
 });

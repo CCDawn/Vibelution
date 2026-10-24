@@ -37,6 +37,16 @@ function input(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 describe("serving-version cancellation", () => {
   afterEach(() => vi.unstubAllGlobals());
 
@@ -123,6 +133,27 @@ describe("serving-version cancellation", () => {
     finish({ head: "head-current", dirtyTreeDigest: "dirty-current" });
     await rejected;
   });
+
+  it.each([false, true])("discards concurrent probe results after cancellation (code rejects: %s)", async (rejects) => {
+    const controller = new AbortController();
+    const reason = new Error("superseded");
+    const identity = deferred<string>();
+    const code = deferred<{ head: string; dirtyTreeDigest: string }>();
+    const currentCode = vi.fn(() => code.promise);
+    const pending = inspectWorkbenchServingVersion(input({
+      signal: controller.signal,
+      readState: () => ({ backendPid: 4000, backendCreateTime: 123.4, backendExecutable: "pythonw.exe" }),
+      runIdentityBridge: () => identity.promise,
+      currentCode
+    }));
+    const rejected = expect(pending).rejects.toBe(reason);
+    await vi.waitFor(() => expect(currentCode).toHaveBeenCalledOnce());
+    controller.abort(reason);
+    if (rejects) code.reject(new Error("late Git failure"));
+    else code.resolve({ head: "head-current", dirtyTreeDigest: "dirty-current" });
+    identity.resolve(JSON.stringify({ matches: true }));
+    await rejected;
+  });
 });
 
 describe("shell serving verification", () => {
@@ -150,6 +181,116 @@ describe("shell serving verification", () => {
 });
 
 describe("workbench serving-version handshake", () => {
+  it.each(["identity", "code"])("overlaps the identity bridge and code query (%s finishes first)", async (first) => {
+    const identity = deferred<string>();
+    const code = deferred<{ head: string; dirtyTreeDigest: string }>();
+    const runIdentityBridge = vi.fn(() => identity.promise);
+    const currentCode = vi.fn(() => code.promise);
+    let settled = false;
+    const pending = inspectWorkbenchServingVersion(input({
+      readState: () => ({ backendPid: 4000, backendCreateTime: 123.4, backendExecutable: "pythonw.exe" }),
+      runIdentityBridge,
+      currentCode
+    })).then((result) => { settled = true; return result; });
+    await vi.waitFor(() => {
+      expect(runIdentityBridge).toHaveBeenCalledOnce();
+      expect(currentCode).toHaveBeenCalledOnce();
+    });
+    expect(settled).toBe(false);
+    if (first === "identity") identity.resolve(JSON.stringify({ matches: true }));
+    else code.resolve({ head: "head-current", dirtyTreeDigest: "dirty-current" });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    if (first === "identity") code.resolve({ head: "head-current", dirtyTreeDigest: "dirty-current" });
+    else identity.resolve(JSON.stringify({ matches: true }));
+    expect((await pending).ok).toBe(true);
+  });
+
+  it.each([
+    [false, "serving_backend_identity_mismatch"],
+    [false, "active_release_missing"],
+    [false, "serving_release_mismatch"],
+    [true, "serving_backend_identity_mismatch"],
+    [true, "active_release_missing"],
+    [true, "serving_release_mismatch"]
+  ])("keeps earlier validation ahead of code failure (synchronous: %s, reason: %s)", async (synchronous, reason) => {
+    const identity = deferred<string>();
+    const failure = new Error("Git failure");
+    const currentCode = vi.fn(() => {
+      if (synchronous) throw failure;
+      return Promise.reject(failure);
+    });
+    const pending = inspectWorkbenchServingVersion(input({
+      readState: () => ({ backendPid: 4000, backendCreateTime: 123.4, backendExecutable: "pythonw.exe" }),
+      runIdentityBridge: () => identity.promise,
+      readActive: () => reason === "active_release_missing"
+        ? { buildKey: "", release: "" }
+        : { buildKey: "build-new", release: "release-new" },
+      currentCode
+    }));
+    await vi.waitFor(() => expect(currentCode).toHaveBeenCalledOnce());
+    identity.resolve(JSON.stringify({ matches: reason !== "serving_backend_identity_mismatch" }));
+    expect((await pending).reason).toBe(reason);
+  });
+
+  it("does not wait for speculative code before rejecting an invalid identity", async () => {
+    const identity = deferred<string>();
+    const code = deferred<{ head: string; dirtyTreeDigest: string }>();
+    const currentCode = vi.fn(() => code.promise);
+    const pending = inspectWorkbenchServingVersion(input({
+      readState: () => ({ backendPid: 4000, backendCreateTime: 123.4, backendExecutable: "pythonw.exe" }),
+      runIdentityBridge: () => identity.promise,
+      currentCode
+    }));
+    await vi.waitFor(() => expect(currentCode).toHaveBeenCalledOnce());
+    identity.resolve(JSON.stringify({ matches: false }));
+    expect((await pending).reason).toBe("serving_backend_identity_mismatch");
+    code.reject(new Error("late Git failure"));
+  });
+
+  it.each([false, true])("propagates a code failure after identity and release pass (synchronous: %s)", async (synchronous) => {
+    const failure = new Error("Git failure");
+    await expect(inspectWorkbenchServingVersion(input({
+      readState: () => ({ backendPid: 4000, backendCreateTime: 123.4, backendExecutable: "pythonw.exe" }),
+      runIdentityBridge: async () => JSON.stringify({ matches: true }),
+      currentCode: () => {
+        if (synchronous) throw failure;
+        return Promise.reject(failure);
+      }
+    }))).rejects.toBe(failure);
+  });
+
+  it.each([
+    { head: "head-other", dirtyTreeDigest: "dirty-current" },
+    { head: "head-current", dirtyTreeDigest: "dirty-other" }
+  ])("rejects code drift after overlapping identity verification: %s", async (current) => {
+    const result = await inspectWorkbenchServingVersion(input({
+      readState: () => ({ backendPid: 4000, backendCreateTime: 123.4, backendExecutable: "pythonw.exe" }),
+      runIdentityBridge: async () => JSON.stringify({ matches: true }),
+      currentCode: async () => current
+    }));
+    expect(result.reason).toBe("backend_code_mismatch");
+  });
+
+  it.each([
+    [{ routesReady: false }, "health_not_ready"],
+    [{ serving: {} }, "serving_contract_missing"],
+    [{ apiContractVersion: "v0" }, "api_contract_mismatch:v0"],
+    [{ workspaceRoot: "C:/other-workspace" }, "serving_workspace_mismatch"]
+  ])("does not start identity or code probes for rejected health: %s", async (overrides, reason) => {
+    const runIdentityBridge = vi.fn();
+    const currentCode = vi.fn();
+    const result = await inspectWorkbenchServingVersion(input({
+      fetchHealth: async () => ({ status: 200, json: async () => healthPayload(overrides as Record<string, unknown>) }),
+      readState: () => ({ backendPid: 4000, backendCreateTime: 123.4, backendExecutable: "pythonw.exe" }),
+      runIdentityBridge,
+      currentCode
+    }));
+    expect(result.reason).toBe(reason);
+    expect(runIdentityBridge).not.toHaveBeenCalled();
+    expect(currentCode).not.toHaveBeenCalled();
+  });
+
   it("accepts the verified interpreter child of a Windows venv launcher", async () => {
     const runIdentityBridge = vi.fn(async () => JSON.stringify({ matches: true }));
     const result = await inspectWorkbenchServingVersion(input({
@@ -200,14 +341,16 @@ describe("workbench serving-version handshake", () => {
 
   it("does not treat a reused PID or incomplete launch identity as a child", async () => {
     const runIdentityBridge = vi.fn(async () => JSON.stringify({ matches: true }));
+    const currentCode = vi.fn();
     for (const state of [
       { backendPid: 4321, backendCreateTime: 999, backendExecutable: "python.exe" },
       { backendPid: 4000, backendCreateTime: 0, backendExecutable: "pythonw.exe" }
     ]) {
-      const result = await inspectWorkbenchServingVersion(input({ readState: () => state, runIdentityBridge }));
+      const result = await inspectWorkbenchServingVersion(input({ readState: () => state, runIdentityBridge, currentCode }));
       expect(result.reason).toBe("serving_backend_identity_mismatch");
     }
     expect(runIdentityBridge).not.toHaveBeenCalled();
+    expect(currentCode).not.toHaveBeenCalled();
   });
 
   it("accepts a healthy backend whose release and code match disk", async () => {
