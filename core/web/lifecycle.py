@@ -1287,12 +1287,18 @@ async def _shutdown_owned_runtime_resources(*, deadline: float | None = None) ->
 
 
 
-def _start_research_workflow_runtime(*, hypothesis_recovery_delay_s: float = 0.0) -> str:
+def _start_research_workflow_runtime(
+    *, hypothesis_recovery_delay_s: float = 0.0,
+    should_stop: Callable[[], bool] | None = None,
+) -> str:
     from .services.team_workflow.research_runtime.runtime_factory import (
         start_production_workflow_runtime,
     )
 
-    return start_production_workflow_runtime(hypothesis_recovery_delay_s=hypothesis_recovery_delay_s)
+    return start_production_workflow_runtime(
+        hypothesis_recovery_delay_s=hypothesis_recovery_delay_s,
+        should_stop=should_stop,
+    )
 
 
 def _begin_generic_workflow_runtime(*, should_stop: Callable[[], bool] | None = None) -> dict[str, Any]:
@@ -1321,9 +1327,40 @@ def _start_workflow_runtime_job(startup_jobs: StartupJobGroup, *, app: FastAPI |
     kwargs = {}
     if app is not None and _startup_cache_prewarm_gate_enabled():
         kwargs["hypothesis_recovery_delay_s"] = _startup_prewarm_stagger_seconds()
-    return startup_jobs.start_thread(
-        "startup-workflow-runtime", _start_research_workflow_runtime, **kwargs,
+        event = getattr(app.state, "web_startup_routes_ready_event", None)
+        if event is not None:
+            def can_start():
+                return (not startup_jobs.should_stop()
+                        and getattr(app.state, "web_startup_routes_registered", False)
+                        and not getattr(app.state, "web_routes_error", "")
+                        and not getattr(app.state, "web_routes_cancelled", False))
+
+            async def after_startup_reads():
+                from .route_bootstrap import _await_feature_route_demand
+
+                await event.wait()
+                if not can_start():
+                    return None
+                # Reuse the latched feature demand and its bounded headless
+                # fallback; this is not another fixed startup delay.
+                await _await_feature_route_demand(app)
+                if not can_start():
+                    return None
+                return await startup_jobs.run_sync(
+                    "startup-workflow-runtime-worker", _start_research_workflow_runtime,
+                    stop_keyword="should_stop", **kwargs,
+                )
+
+            task = startup_jobs.start_async("startup-workflow-runtime", after_startup_reads())
+            app.state.web_workflow_runtime_startup_task = task
+            return task
+    task = startup_jobs.start_thread(
+        "startup-workflow-runtime", _start_research_workflow_runtime,
+        stop_keyword="should_stop", **kwargs,
     )
+    if app is not None:
+        app.state.web_workflow_runtime_startup_task = task
+    return task
 
 
 def _stop_research_workflow_runtime() -> None:

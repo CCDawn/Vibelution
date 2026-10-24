@@ -878,7 +878,10 @@ def wake_production_workflow_runtime() -> bool:
     return True
 
 
-def start_production_workflow_runtime(*, hypothesis_recovery_delay_s: float = 0.0) -> str:
+def start_production_workflow_runtime(
+    *, hypothesis_recovery_delay_s: float = 0.0,
+    should_stop: Callable[[], bool] | None = None,
+) -> str:
     """Open the Ledger-backed runtime or fail closed (no JSON fallback).
 
     The singleton build is serialized behind ``_LIFECYCLE_LOCK``. A start
@@ -902,6 +905,11 @@ def start_production_workflow_runtime(*, hypothesis_recovery_delay_s: float = 0.
     if not _LIFECYCLE_LOCK.acquire(blocking=False):
         raise ProductionRuntimeBusyError()
     try:
+        # An importing startup callback can arrive after the canonical stop
+        # already observed an empty singleton. Check its owner under the same
+        # lock as build/attach/stop, preventing a late runtime resurrection.
+        if should_stop is not None and should_stop():
+            return "unavailable"
         if _PRODUCTION is not None:
             return "ready"
         data_root = research_workflow_data_root()

@@ -511,6 +511,12 @@ async def warm_web_routes_in_background(
                 on_module_imported=on_module_imported,
             )
         import_ms += max(0.0, (time.perf_counter() - remaining_started) * 1000.0)
+        # First-frame reads are already admitted. Full feature readiness also
+        # owns runtime composition, so a cold formal request cannot race its
+        # startup after waking both owners through the same demand event.
+        workflow_startup = getattr(app.state, "web_workflow_runtime_startup_task", None)
+        if workflow_startup is not None:
+            await asyncio.shield(workflow_startup)
         with _REGISTER_LOCK:
             if bool(getattr(app.state, "web_routes_registered", False)):
                 _start_financial_team_coordinator(app, run_sync=run_sync)

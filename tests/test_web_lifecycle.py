@@ -24,6 +24,88 @@ from core.web.services import virtual_human_life_service
 from core.web.startup_jobs import StartupJobGroup
 
 
+@pytest.mark.parametrize("outcome", [
+    "demand", "route_error", "route_cancelled", "stop",
+    "error_after_ready", "cancel_after_ready", "stop_after_ready",
+])
+def test_workflow_composition_waits_for_startup_and_feature_demand(monkeypatch, outcome):
+    monkeypatch.setattr(lifecycle, "_startup_cache_prewarm_gate_enabled", lambda: True)
+    monkeypatch.setattr(lifecycle, "_startup_prewarm_stagger_seconds", lambda: 60.0)
+    called = []
+    monkeypatch.setattr(lifecycle, "_start_research_workflow_runtime", lambda **kw: called.append(kw) or "ready")
+
+    async def exercise():
+        app = FastAPI()
+        app.state.web_startup_routes_ready_event = asyncio.Event()
+        app.state.web_bootstrap_routes_ready_event = asyncio.Event()
+        app.state.web_feature_routes_requested_event = asyncio.Event()
+        jobs = StartupJobGroup()
+        task = lifecycle._start_workflow_runtime_job(jobs, app=app)
+        try:
+            await asyncio.sleep(0)
+            app.state.web_bootstrap_routes_ready_event.set()
+            await asyncio.sleep(0)
+            assert not called
+            assert not task.done()
+            app.state.web_startup_routes_registered = True
+            if outcome == "route_error":
+                app.state.web_routes_error = "synthetic failure"
+            if outcome == "route_cancelled":
+                app.state.web_routes_cancelled = True
+            if outcome == "stop":
+                jobs.request_stop()
+            app.state.web_startup_routes_ready_event.set()
+            await asyncio.sleep(0)
+            assert not called
+            if outcome.endswith("_after_ready"):
+                assert not task.done()
+                if outcome == "error_after_ready":
+                    app.state.web_routes_error = "synthetic feature failure"
+                elif outcome == "cancel_after_ready":
+                    app.state.web_routes_cancelled = True
+                else:
+                    jobs.request_stop()
+                app.state.web_feature_routes_requested_event.set()
+            if outcome == "demand":
+                assert not task.done()
+                app.state.web_feature_routes_requested_event.set()
+                assert await asyncio.wait_for(task, 1) == "ready"
+                assert len(called) == 1
+                assert called[0]["hypothesis_recovery_delay_s"] == 60.0
+                assert called[0]["should_stop"]() is False
+            else:
+                assert await asyncio.wait_for(task, 1) is None
+                assert not called
+        finally:
+            result = await jobs.shutdown(deadline=time.monotonic() + 1)
+            assert result["closed"] is True
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("mode", ["no_app", "no_event", "disabled", "headless"])
+def test_workflow_startup_keeps_legacy_and_bounded_headless_paths(monkeypatch, mode):
+    monkeypatch.setattr(lifecycle, "_startup_cache_prewarm_gate_enabled", lambda: mode != "disabled")
+    monkeypatch.setattr(lifecycle, "_startup_prewarm_stagger_seconds", lambda: 0.01)
+    called = []
+    monkeypatch.setattr(lifecycle, "_start_research_workflow_runtime", lambda **kw: called.append(kw) or "ready")
+
+    async def exercise():
+        app = FastAPI() if mode != "no_app" else None
+        if app is not None and mode != "no_event":
+            app.state.web_startup_routes_ready_event = asyncio.Event()
+            app.state.web_startup_routes_ready_event.set()
+            app.state.web_startup_routes_registered = True
+            app.state.web_feature_routes_requested_event = asyncio.Event()
+        jobs = StartupJobGroup()
+        task = lifecycle._start_workflow_runtime_job(jobs, app=app)
+        assert await asyncio.wait_for(task, 1) == "ready"
+        assert len(called) == 1
+        assert (await jobs.shutdown(deadline=time.monotonic() + 1))["closed"] is True
+
+    asyncio.run(exercise())
+
+
 @pytest.mark.parametrize("recovery_fails", [False, True])
 def test_research_recovery_import_waits_for_native_session_owner(monkeypatch, recovery_fails):
     imported = []

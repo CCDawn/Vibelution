@@ -47,6 +47,39 @@ from core.web.services.team_workflow.research_runtime.runtime_factory import (
 from tests._support.workflow_ledger_helpers import build_run_record
 
 
+def test_stopped_startup_callback_cannot_reopen_runtime(tmp_path, monkeypatch):
+    import threading
+    from core.web.services.team_workflow.research_runtime import runtime_factory
+
+    runtime_factory.stop_production_workflow_runtime()
+    stopped = threading.Event()
+    release = threading.Event()
+    called = []
+    result = []
+    monkeypatch.setattr(runtime_factory, "build_workflow_runtime", lambda *a, **kw: called.append(True))
+
+    def late_callback():
+        assert release.wait(1)
+        result.append(runtime_factory.start_production_workflow_runtime(should_stop=stopped.is_set))
+
+    worker = threading.Thread(target=late_callback)
+    worker.start()
+    try:
+        stopped.set()
+        runtime_factory.stop_production_workflow_runtime()
+        release.set()
+        worker.join(1)
+        assert not worker.is_alive()
+        assert result == ["unavailable"]
+        assert not called
+        assert runtime_factory.production_workflow_runtime() is None
+        assert runtime_factory._PUMP is None
+    finally:
+        release.set()
+        worker.join(1)
+        runtime_factory.stop_production_workflow_runtime()
+
+
 def test_essential_serial_workers_do_not_run_bulk_history_scans(tmp_path, monkeypatch):
     from core.web.services.team_workflow.research_runtime.runtime_factory import WorkflowRuntime
 

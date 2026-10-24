@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
@@ -87,6 +89,19 @@ def test_startup_reads_do_not_import_features_until_an_actual_request(monkeypatc
         app.state.web_routes_ready_event = asyncio.Event()
         app.state.web_startup_routes_ready_event = asyncio.Event()
         app.state.web_feature_routes_requested_event = asyncio.Event()
+        from core.web.startup_jobs import StartupJobGroup
+
+        jobs = StartupJobGroup()
+        compose_started = threading.Event()
+        compose_release = threading.Event()
+
+        def compose(**_kwargs):
+            compose_started.set()
+            assert compose_release.wait(3)
+            return "ready"
+
+        monkeypatch.setattr(lifecycle, "_start_research_workflow_runtime", compose)
+        workflow_ready = lifecycle._start_workflow_runtime_job(jobs, app=app)
         imported = asyncio.Event()
         release = asyncio.Event()
 
@@ -101,6 +116,14 @@ def test_startup_reads_do_not_import_features_until_an_actual_request(monkeypatc
 
         warming = asyncio.create_task(route_bootstrap.warm_web_routes_in_background(app, run_sync=run_sync))
         request = None
+        formal_request = None
+        side_effects = []
+
+        @feature.post("/feature-command")
+        def formal_command():
+            side_effects.append("submitted")
+            return {"submitted": True}
+
         try:
             await asyncio.wait_for(app.state.web_startup_routes_ready_event.wait(), 1)
             assert not imported.is_set()
@@ -123,21 +146,38 @@ def test_startup_reads_do_not_import_features_until_an_actual_request(monkeypatc
                 assert not imported.is_set()
                 request = asyncio.create_task(client.get(wake_path))
                 await asyncio.wait_for(imported.wait(), 1)
+                assert await asyncio.to_thread(compose_started.wait, 1)
+                formal_request = asyncio.create_task(client.post("/api/feature-command"))
                 assert not app.state.web_routes_registered
                 if wake_path == "/api/feature-demand":
                     assert not request.done()
                 else:
                     assert (await request).json() == {"summary": True}
                 release.set()
+                await asyncio.sleep(0)
+                await asyncio.sleep(0)
+                assert not app.state.web_routes_registered
+                # Cold optional requests must wait for runtime composition;
+                # already admitted first-frame reads remain usable meanwhile.
+                assert (await client.get("/api/sessions/bootstrap")).json() == {"startup": True}
+                assert side_effects == []
+                assert not formal_request.done()
+                compose_release.set()
+                assert await asyncio.wait_for(workflow_ready, 1) == "ready"
                 payload = await asyncio.wait_for(warming, 1)
                 assert payload["featureDemandWaitMs"] >= 0
                 assert app.state.web_routes_registered
                 assert (await request).status_code == 200
+                assert (await formal_request).json() == {"submitted": True}
+                assert side_effects == ["submitted"]
         finally:
+            compose_release.set()
             release.set()
             if not warming.done():
                 warming.cancel()
-            await asyncio.gather(warming, *([request] if request is not None else []), return_exceptions=True)
+            await asyncio.gather(warming, *([request] if request is not None else []),
+                                 *([formal_request] if formal_request is not None else []), return_exceptions=True)
+            assert (await jobs.shutdown(deadline=time.monotonic() + 1))["closed"] is True
 
     asyncio.run(exercise())
 
