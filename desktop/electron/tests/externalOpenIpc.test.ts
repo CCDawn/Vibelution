@@ -28,7 +28,7 @@ describe("Electron main external-open IPC facade", () => {
   it("validates the sender before touching the shell on every channel", () => {
     for (const channelKey of ["openExternalUrl", "openPath", "showItemInFolder"] as const) {
       const source = handlerSourceFor(channelKey);
-      expect(source, channelKey).toContain("assertTrustedIpcSender(event, trustedIpcOrigins())");
+      expect(source, channelKey).toContain("assertTrustedIpcSender(event, trustedIpcOrigins(event))");
     }
   });
 

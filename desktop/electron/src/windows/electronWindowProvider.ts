@@ -76,7 +76,7 @@ export type ElectronWindowProviderOptions = {
   onWorkbenchOpenRequest?: () => void | Promise<void>;
   openExternalUrl?: (url: string) => void | Promise<void>;
   onInstanceCloseRequest?: (instanceId: string) => void | Promise<void>;
-  onWorkbenchFocusAttentionClear?: () => void;
+  onWorkbenchFocusAttentionClear?: (sender: ElectronWindowLike["webContents"]) => void;
   onOsSessionEnd?: (event: "query-session-end" | "session-end", role: ElectronWindowRole) => void;
   hungCloseDestroyAfterMs?: number;
 };
@@ -140,7 +140,7 @@ export class ElectronWindowProvider {
   private readonly onWorkbenchOpenRequest: () => void | Promise<void>;
   private readonly openExternalUrl: (url: string) => void | Promise<void>;
   private readonly onInstanceCloseRequest: (instanceId: string) => void | Promise<void>;
-  private readonly onWorkbenchFocusAttentionClear: () => void;
+  private readonly onWorkbenchFocusAttentionClear: (sender: ElectronWindowLike["webContents"]) => void;
   private readonly onOsSessionEnd: (event: "query-session-end" | "session-end", role: ElectronWindowRole) => void;
   private workbenchUrl: string;
   private workbenchReadyUrl: string | null = null;
@@ -506,6 +506,42 @@ export class ElectronWindowProvider {
     );
   }
 
+  /** Bind branch privileges to the exact registered WebContents, not a loopback port or renderer PID. */
+  trustedWorkbenchOrigin(sender: ElectronWindowLike["webContents"], senderUrl: string): string | null {
+    const candidates = [
+      { window: this.workbenchWindow, readyUrl: this.workbenchReadyUrl },
+      ...this.instanceWindows.values()
+    ];
+    for (const { window, readyUrl } of candidates) {
+      if (!window || window.isDestroyed() || window.webContents !== sender || !readyUrl) continue;
+      try {
+        const origin = new URL(readyUrl).origin;
+        if (new URL(senderUrl).origin === origin && new URL(sender.getURL()).origin === origin) return origin;
+      } catch { /* Missing or navigating windows have no privileges. */ }
+    }
+    return null;
+  }
+
+  notificationTargetForSender(sender: ElectronWindowLike["webContents"], senderUrl: string) {
+    const origin = this.trustedWorkbenchOrigin(sender, senderUrl);
+    if (!origin) return null;
+    const window = [this.workbenchWindow, ...[...this.instanceWindows.values()].map(entry => entry.window)]
+      .find(window => window?.webContents === sender)!;
+    const live = () => this.trustedWorkbenchOrigin(sender, senderUrl) === origin;
+    return {
+      isWorkbenchFocused: () => live() && window.isFocused(),
+      focusWorkbench: async () => { if (live()) presentElectronWindow(window); },
+      sendToWorkbench: (channel: string, payload: unknown) => {
+        if (!live() || !sender.send) return false;
+        sender.send(channel, payload);
+        return true;
+      },
+      setWorkbenchAttention: (options: WorkbenchAttentionOptions) => {
+        if (live()) this.setWindowAttention(window, options);
+      }
+    };
+  }
+
   sendToWorkbench(channel: string, payload: unknown): boolean {
     const window = this.workbenchWindow;
     if (!window || window.isDestroyed() || this.workbenchReadyUrl === null) {
@@ -604,18 +640,22 @@ export class ElectronWindowProvider {
       return;
     }
 
+    this.setWindowAttention(this.workbenchWindow, options);
+  }
+
+  private setWindowAttention(window: ElectronWindowLike, options: WorkbenchAttentionOptions): void {
     const unreadCount = Number.isFinite(options.unreadCount) ? Math.max(0, Math.round(options.unreadCount)) : 0;
     const hasUnread = unreadCount > 0;
     const description = hasUnread
       ? options.description || `${unreadCount} completed conversation${unreadCount === 1 ? "" : "s"}`
       : "";
 
-    if (typeof this.workbenchWindow.setOverlayIcon === "function") {
-      this.workbenchWindow.setOverlayIcon(hasUnread ? options.overlayIcon ?? null : null, description);
+    if (typeof window.setOverlayIcon === "function") {
+      window.setOverlayIcon(hasUnread ? options.overlayIcon ?? null : null, description);
     }
 
-    if (typeof this.workbenchWindow.flashFrame === "function") {
-      this.workbenchWindow.flashFrame(Boolean(options.flash && hasUnread));
+    if (typeof window.flashFrame === "function") {
+      window.flashFrame(Boolean(options.flash && hasUnread));
     }
   }
 
@@ -723,6 +763,10 @@ export class ElectronWindowProvider {
       return;
     }
     this.attachedWindows.add(window);
+    window.on("focus", () => {
+      this.onWorkbenchFocusAttentionClear(window.webContents);
+      this.setWindowAttention(window, { unreadCount: 0 });
+    });
     window.on("close", (event) => {
       const entry = this.instanceWindows.get(instanceId);
       if (
@@ -871,7 +915,7 @@ export class ElectronWindowProvider {
     });
     window.on("focus", () => {
       if (role === "workbench") {
-        this.onWorkbenchFocusAttentionClear();
+        this.onWorkbenchFocusAttentionClear(window.webContents);
         this.setWorkbenchAttention({ unreadCount: 0 });
       }
       if (role !== "pet") {

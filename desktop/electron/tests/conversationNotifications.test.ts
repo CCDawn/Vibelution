@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { createDesktopConversationNotifier } from "../../../web/src/routes/chatDesktopNotifications";
 import {
   createConversationNotificationService,
   type DesktopConversationCompletionNotification
@@ -64,6 +65,31 @@ function makeService(options: { focused?: boolean; notificationSupported?: boole
 }
 
 describe("conversation notification service", () => {
+  it.each(["failed_runtime", "failed_provider", "paused_limit", "aborted", "superseded"])(
+    "accepts the real renderer payload for %s without calling it success", async terminalReason => {
+      const payloads: DesktopConversationCompletionNotification[] = [];
+      const notifier = createDesktopConversationNotifier({
+        bridge: { notifyConversationCompleted: payload => { payloads.push(payload); } }, postTelemetry: vi.fn()
+      });
+      notifier.handleSessionDetail({ id: "session-1", status: "running", currentPhase: "running", activeTurnId: "turn-1" } as never);
+      notifier.handleSessionDetail({ id: "session-1", status: "ready", currentPhase: "ready", terminalReason,
+        activeTurnId: "", lastTurnTerminalTurnId: "turn-1", messages: [] } as never);
+      expect(payloads).toHaveLength(1);
+      const { service, notifications } = makeService({ focused: false });
+      expect((await service.notify(payloads[0])).status).toBe("notified");
+      expect(notifications[0].title).toBe(terminalReason === "paused_limit" ? "对话待继续" : "对话已结束");
+    }
+  );
+  it.each(["ready", "idle", "running", "paused", "stopped", "stopped_by_user", "force_stopped", "unknown", ""])(
+    "does not turn %s into a native completion or taskbar alert", async terminalStatus => {
+      const { service, provider, notifications } = makeService({ focused: false });
+      const result = await service.notify(completion({ terminalStatus }));
+      expect(result.status).toBe("invalid_payload");
+      expect(result.unreadCount).toBe(0);
+      expect(notifications).toHaveLength(0);
+      expect(provider.setWorkbenchAttention).not.toHaveBeenCalled();
+    }
+  );
   it("suppresses native notifications for the viewed session without clearing background unread", async () => {
     const { service, provider, notifications } = makeService({ focused: true });
 

@@ -193,6 +193,47 @@ const desktopPaths: DesktopPaths = {
 };
 
 describe("Electron window provider state", () => {
+  it("binds branch IPC and notification focus, click and attention to its registered WebContents", async () => {
+    const main = new FakeWindow(42, "", 4242);
+    const branch = new FakeWindow(43, "", 4343);
+    const clearAttention = vi.fn();
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createWorkbenchWindow: url => new URL(url).port === "8001" ? branch : main,
+      onWorkbenchFocusAttentionClear: clearAttention,
+    });
+    await provider.openOrFocusWorkbench();
+    await provider.openOrFocusInstanceWorkbench({ instanceId: "branch", url: "http://127.0.0.1:8001/" });
+    branch.blur();
+    expect(provider.trustedWorkbenchOrigin(branch.webContents, "http://127.0.0.1:8001/chat")).toBe("http://127.0.0.1:8001");
+    expect(provider.trustedWorkbenchOrigin(main.webContents, "http://127.0.0.1:8001/chat")).toBeNull();
+    expect(provider.trustedWorkbenchOrigin({ ...branch.webContents }, "http://127.0.0.1:8001/chat")).toBeNull();
+    const target = provider.notificationTargetForSender(branch.webContents, "http://127.0.0.1:8001/")!;
+    expect(target.isWorkbenchFocused()).toBe(false);
+    target.setWorkbenchAttention({ unreadCount: 1, flash: true });
+    expect(branch.flashCalls.at(-1)).toBe(true);
+    expect(main.flashCalls).toEqual([]);
+    const mainFocus = main.focusCount;
+    await target.focusWorkbench();
+    branch.emit("focus");
+    expect(clearAttention).toHaveBeenLastCalledWith(branch.webContents);
+    expect(branch.flashCalls.at(-1)).toBe(false);
+    expect(target.sendToWorkbench("opened", { sessionId: "branch-session" })).toBe(true);
+    expect(branch.sentIpc).toEqual([{ channel: "opened", payload: { sessionId: "branch-session" } }]);
+    expect(main.focusCount).toBe(mainFocus);
+    expect(main.sentIpc).toEqual([]);
+    await branch.loadURL("http://127.0.0.1:9999/");
+    expect(provider.trustedWorkbenchOrigin(branch.webContents, "http://127.0.0.1:8001/")).toBeNull();
+    expect(target.sendToWorkbench("opened", {})).toBe(false);
+    await target.focusWorkbench();
+    expect(main.focusCount).toBe(mainFocus);
+    await provider.openOrFocusInstanceWorkbench({ instanceId: "branch", url: "http://127.0.0.1:8002/", present: false });
+    const replacement = provider.notificationTargetForSender(branch.webContents, "http://127.0.0.1:8002/")!;
+    expect(target.sendToWorkbench("old-toast", {})).toBe(false);
+    expect(replacement.sendToWorkbench("new-toast", {})).toBe(true);
+    expect(branch.sentIpc.at(-1)).toEqual({ channel: "new-toast", payload: {} });
+    branch.destroy();
+    expect(target.isWorkbenchFocused()).toBe(false);
+  });
   it.each(["main", "branch"])("focuses and delivers only to the %s workbench owning the assistant origin", async owner => {
     const main = new FakeWindow(42, "", 4242);
     const branch = new FakeWindow(43, "", 4343);

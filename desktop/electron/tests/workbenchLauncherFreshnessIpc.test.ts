@@ -47,8 +47,8 @@ function launcherWindowHandlers(bindings: {
   return handlers;
 }
 
-function trustedIpcOriginsForTest(): string[] {
-  const start = mainSource.indexOf("function trustedIpcOrigins(): string[] {");
+function trustedIpcOriginsForTest(event?: IpcMainInvokeEvent, trustedWorkbenchOrigin = vi.fn((): string | null => null)): string[] {
+  const start = mainSource.indexOf("function trustedIpcOrigins(event?: IpcMainInvokeEvent): string[] {");
   const end = mainSource.indexOf("\n}\n\nasync function stopMainRuntimeForApprovedShutdown", start);
   expect(start).toBeGreaterThanOrEqual(0);
   expect(end).toBeGreaterThan(start);
@@ -56,7 +56,9 @@ function trustedIpcOriginsForTest(): string[] {
   const compiled = ts.transpileModule(source, {
     compilerOptions: { target: ts.ScriptTarget.ES2022 }
   }).outputText;
-  return runInNewContext(`${compiled}\ntrustedIpcOrigins()`, {
+  return runInNewContext(`${compiled}\ntrustedIpcOrigins(event)`, {
+    event,
+    windowProvider: { trustedWorkbenchOrigin },
     URL,
     desktopEnvironment: () => ({}),
     currentWorkbenchUrl: "http://127.0.0.1:8000/",
@@ -75,6 +77,25 @@ function eventFor(url: string): IpcMainInvokeEvent {
 }
 
 describe("workbench Launcher awareness IPC", () => {
+  it("adds a branch origin only for its registered main-frame sender", () => {
+    const frame = { url: "http://127.0.0.1:8001/chat" };
+    const event = { senderFrame: frame, sender: { mainFrame: frame } } as unknown as IpcMainInvokeEvent;
+    const lookup = vi.fn(() => "http://127.0.0.1:8001");
+    const origins = trustedIpcOriginsForTest(event, lookup);
+    expect(() => assertTrustedIpcSender(event, origins)).not.toThrow();
+    expect(lookup).toHaveBeenCalledWith(event.sender, frame.url);
+    expect(() => assertTrustedIpcSender(event, trustedIpcOriginsForTest(event))).toThrow("blocked ipc sender origin");
+    const subframe = { ...event, senderFrame: { url: frame.url } } as unknown as IpcMainInvokeEvent;
+    lookup.mockClear();
+    expect(() => assertTrustedIpcSender(subframe, trustedIpcOriginsForTest(subframe, lookup))).toThrow("blocked ipc sender origin");
+    expect(lookup).not.toHaveBeenCalled();
+    for (const channel of ["getDesktopShellSummary", "notifyConversationCompleted"]) {
+      expect(extractIpcHandler(channel)).toContain("assertTrustedIpcSender(event, trustedIpcOrigins(event))");
+    }
+    for (const channel of ["launcherInvoke", "getLauncherState", "refreshLauncherState"]) {
+      expect(extractIpcHandler(channel)).toContain("assertTrustedIpcSender(event, launcherIpcTrustedOrigins())");
+    }
+  });
   it("exposes only the two narrow Launcher awareness methods on main workbench preload", () => {
     expect(ipcSource).toContain('getLauncherFreshness: "launcher:get-freshness"');
     expect(ipcSource).toContain('showLauncherWindow: "launcher:show-window"');
@@ -110,7 +131,7 @@ describe("workbench Launcher awareness IPC", () => {
     expect(readFreshness).toHaveBeenCalledTimes(2);
 
     const body = extractIpcHandler("getLauncherFreshness");
-    expect(body).toContain("assertTrustedIpcSender(event, trustedIpcOrigins())");
+    expect(body).toContain("assertTrustedIpcSender(event, trustedIpcOrigins(event))");
     expect(body).toContain("currentLauncherUpdateFreshness()");
     expect(body).not.toContain("resolveLauncherIpcHost");
     expect(body).not.toContain("orchestrateLauncherLifecycle");
@@ -129,7 +150,7 @@ describe("workbench Launcher awareness IPC", () => {
     expect(freshness).not.toHaveBeenCalled();
 
     const body = extractIpcHandler("showLauncherWindow");
-    expect(body).toContain("assertTrustedIpcSender(event, trustedIpcOrigins())");
+    expect(body).toContain("assertTrustedIpcSender(event, trustedIpcOrigins(event))");
     expect(body).toContain("windowProvider.openLauncher()");
     expect(body).not.toContain("resolveLauncherIpcHost");
     expect(body).not.toContain("orchestrateLauncherLifecycle");

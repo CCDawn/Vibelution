@@ -69,10 +69,17 @@ export type ConversationNotificationService = {
   clearAttention(): void;
 };
 
-const SUCCESS_TERMINAL_STATUSES = new Set(["ready", "completed", "done", "success"]);
+const SUCCESS_TERMINAL_STATUSES = new Set(["completed"]);
 // The turn finished its reply but explicitly waits for a user "继续" to
 // advance; reporting it as plain "已结束" hides the pending follow-up step.
-const CONTINUATION_TERMINAL_STATUSES = new Set(["needs_continue"]);
+const CONTINUATION_TERMINAL_STATUSES = new Set(["needs_continue", "paused_limit"]);
+// The renderer canonicalizes success, but preserves native failure/continuation
+// reasons. Keep those receipts; resting and user-stop values cannot notify.
+const NOTIFIABLE_TERMINAL_STATUSES = new Set([
+  "completed", "needs_continue", "paused_limit", "failed", "failure", "error",
+  "failed_runtime", "failed_provider", "timeout", "timed_out", "blocked", "danger",
+  "crashed", "unhealthy", "aborted", "interrupted", "cancelled", "canceled", "superseded"
+]);
 
 function normalizeText(value: unknown): string {
   return String(value ?? "").replace(/\s+/g, " ").trim();
@@ -197,7 +204,8 @@ export function createConversationNotificationService(
       const sessionId = String(payload?.sessionId || "").trim();
       const companionAgentId = String(payload?.companionAgentId || "").trim();
       const companionAgentIdValid = !companionAgentId || /^[A-Za-z0-9._:-]{1,128}$/.test(companionAgentId);
-      if (payload?.schemaVersion !== 1 || !notificationKey || !sessionId || !companionAgentIdValid) {
+      if (payload?.schemaVersion !== 1 || !notificationKey || !sessionId || !companionAgentIdValid
+        || !NOTIFIABLE_TERMINAL_STATUSES.has(String(payload.terminalStatus ?? "").trim())) {
         const focused = options.windowProvider.isWorkbenchFocused();
         unreadCount = Math.max(0, unreadCount);
         const invalidPayload: DesktopConversationCompletionNotification = {

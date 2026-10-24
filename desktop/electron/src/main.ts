@@ -384,7 +384,7 @@ const desktopSessionMutations = new DesktopSessionMutationQueue();
 const desktopSessionMirror = new DesktopSessionMirrorQueue((error: unknown) => {
   console.warn(error instanceof Error ? error.message : String(error));
 });
-let conversationNotificationService: ConversationNotificationService | null = null;
+let workbenchNotificationServices = new WeakMap<object, { origin: string; service: ConversationNotificationService }>();
 let humanAttentionNotificationService: HumanAttentionNotificationService | null = null;
 const desktopLaunchArgv = process.argv.slice(1);
 const desktopCliArgs = parseDesktopCliArgs(desktopLaunchArgv);
@@ -559,7 +559,7 @@ async function recordElectronStartupSummaryOnce(
 
 function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapResult | null): ElectronWindowProvider {
   const desktopEnv = desktopEnvironment();
-  conversationNotificationService = null;
+  workbenchNotificationServices = new WeakMap();
   const launcherDistRootInput = {
     resourcesRoot: paths.resourcesRoot,
     workspaceRoot: paths.workspaceRoot,
@@ -629,8 +629,8 @@ function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapR
           console.warn(error instanceof Error ? error.message : String(error));
         }
       },
-      onWorkbenchFocusAttentionClear: () => {
-        conversationNotificationService?.clearAttention();
+      onWorkbenchFocusAttentionClear: (sender) => {
+        workbenchNotificationServices.get(sender)?.service.clearAttention();
       },
       onOsSessionEnd: (event, role) => {
         const recovery = desktopLifecycleCoordinator.recordSessionEnd();
@@ -813,15 +813,14 @@ function failedConversationNotificationResult(
   };
 }
 
-function resolveConversationNotificationService(): ConversationNotificationService | null {
-  if (conversationNotificationService !== null) {
-    return conversationNotificationService;
-  }
-  if (windowProvider === null) {
-    return null;
-  }
-  conversationNotificationService = createConversationNotificationService({
-    windowProvider,
+function resolveConversationNotificationService(event: IpcMainInvokeEvent): ConversationNotificationService | null {
+  const target = windowProvider?.notificationTargetForSender(event.sender, event.senderFrame?.url ?? "");
+  if (!target) return null;
+  const origin = new URL(event.senderFrame!.url).origin;
+  const existing = workbenchNotificationServices.get(event.sender);
+  if (existing?.origin === origin) return existing.service;
+  const service = createConversationNotificationService({
+    windowProvider: target,
     notificationSupported: () => Notification.isSupported(),
     createNotification: ({ title, body, onClick }) => {
       const notification = new Notification({ title, body, silent: false });
@@ -837,7 +836,8 @@ function resolveConversationNotificationService(): ConversationNotificationServi
       });
     }
   });
-  return conversationNotificationService;
+  workbenchNotificationServices.set(event.sender, { origin, service });
+  return service;
 }
 
 function resolveHumanAttentionNotificationService(): HumanAttentionNotificationService {
@@ -2278,13 +2278,16 @@ function safeOrigin(value: string): string {
   }
 }
 
-function trustedIpcOrigins(): string[] {
+function trustedIpcOrigins(event?: IpcMainInvokeEvent): string[] {
   const desktopEnv = desktopEnvironment();
   const workbenchUrl = currentWorkbenchUrl || resolveWorkbenchUrl(desktopEnv, launcherBootstrap?.workbenchUrl);
   return Array.from(
     new Set([
       launcherAppOriginFor(resolveLauncherWindowUrl(desktopEnv)),
-      new URL(workbenchUrl).origin
+      new URL(workbenchUrl).origin,
+      ...(event?.senderFrame && event.senderFrame === event.sender.mainFrame
+        ? [windowProvider?.trustedWorkbenchOrigin(event.sender, event.senderFrame.url) ?? ""].filter(Boolean)
+        : [])
     ])
   );
 }
@@ -3327,12 +3330,12 @@ async function runTrayLifecycle(operation: WorkbenchLifecycleOperation, label: s
 }
 
 ipcMain.handle(IPC_CHANNELS.getVersion, (event) => {
-  assertTrustedIpcSender(event, trustedIpcOrigins());
+  assertTrustedIpcSender(event, trustedIpcOrigins(event));
   return app.getVersion();
 });
 
 ipcMain.handle(IPC_CHANNELS.getDesktopShellSummary, (event) => {
-  assertTrustedIpcSender(event, trustedIpcOrigins());
+  assertTrustedIpcSender(event, trustedIpcOrigins(event));
   return {
     schemaVersion: 1,
     provider: "electron",
@@ -3486,8 +3489,8 @@ ipcMain.handle(IPC_CHANNELS.requestDesktopShellExit, async (event) => {
 });
 
 ipcMain.handle(IPC_CHANNELS.notifyConversationCompleted, async (event, payload: DesktopConversationCompletionNotification) => {
-  assertTrustedIpcSender(event, trustedIpcOrigins());
-  const service = resolveConversationNotificationService();
+  assertTrustedIpcSender(event, trustedIpcOrigins(event));
+  const service = resolveConversationNotificationService(event);
   if (service === null) {
     return failedConversationNotificationResult(payload);
   }
@@ -3502,7 +3505,7 @@ ipcMain.handle(IPC_CHANNELS.notifyHumanAttention, async (event, payload: unknown
 });
 
 ipcMain.handle(IPC_CHANNELS.openExternalUrl, async (event, rawUrl: unknown) => {
-  assertTrustedIpcSender(event, trustedIpcOrigins());
+  assertTrustedIpcSender(event, trustedIpcOrigins(event));
   if (!isExternalOpenableUrl(rawUrl)) {
     return false;
   }
@@ -3515,7 +3518,7 @@ ipcMain.handle(IPC_CHANNELS.openExternalUrl, async (event, rawUrl: unknown) => {
 });
 
 ipcMain.handle(IPC_CHANNELS.openPath, async (event, rawPath: unknown) => {
-  assertTrustedIpcSender(event, trustedIpcOrigins());
+  assertTrustedIpcSender(event, trustedIpcOrigins(event));
   const target = normalizeAbsoluteOpenPath(rawPath);
   if (target === null) {
     return "";
@@ -3524,7 +3527,7 @@ ipcMain.handle(IPC_CHANNELS.openPath, async (event, rawPath: unknown) => {
 });
 
 ipcMain.handle(IPC_CHANNELS.showItemInFolder, (event, rawPath: unknown) => {
-  assertTrustedIpcSender(event, trustedIpcOrigins());
+  assertTrustedIpcSender(event, trustedIpcOrigins(event));
   const target = normalizeAbsoluteOpenPath(rawPath);
   if (target === null) {
     return false;
@@ -5093,12 +5096,12 @@ ipcMain.handle(IPC_CHANNELS.requestWindowClose, (event) => {
 });
 
 ipcMain.handle(IPC_CHANNELS.getLauncherFreshness, async (event) => {
-  assertTrustedIpcSender(event, trustedIpcOrigins());
+  assertTrustedIpcSender(event, trustedIpcOrigins(event));
   return await currentLauncherUpdateFreshness();
 });
 
 ipcMain.handle(IPC_CHANNELS.showLauncherWindow, async (event) => {
-  assertTrustedIpcSender(event, trustedIpcOrigins());
+  assertTrustedIpcSender(event, trustedIpcOrigins(event));
   if (windowProvider === null) {
     throw new Error("Launcher window is unavailable.");
   }
