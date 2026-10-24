@@ -378,6 +378,19 @@ def _git_audit_inputs(root: Path) -> dict[str, str]:
     return {"sourceCommit": commit, "frontendTree": _frontend_tree_for_commit(root, commit)}
 
 
+def _toolchain_versions(command: str, manager: str) -> tuple[str, str]:
+    with _build_phase("toolchainMs"):
+        node_version = _run_version(command)
+        if manager == "bun":
+            manager_version = _run_version("bun")
+        else:
+            try:
+                manager_version = _run_version_command([command, _npm_cli(command), "--version"])
+            except RuntimeError:
+                manager_version = "unavailable"
+    return node_version, manager_version
+
+
 def build_inputs(project_root: Path | str, *, package_manager: str | None = None) -> dict[str, Any]:
     root = Path(project_root).resolve()
     web_dir = root / "web"
@@ -386,23 +399,16 @@ def build_inputs(project_root: Path | str, *, package_manager: str | None = None
         "bun" if manager == "bun" else ("node.exe" if os.name == "nt" else "node")
     )
     # Git provenance is independent of the working-file/toolchain fingerprint.
-    # Keep its two dependent queries together, pinned to the captured commit,
-    # while overlapping them with the full (uncached) production-input scan.
-    # The scoped executor joins on failure too; no inspection work outlives its
-    # build lock or publication's final mutation check.
-    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="frontend-git-audit") as audit_pool:
-        audit = audit_pool.submit(_git_audit_inputs, root)
+    # Keep its dependent queries pinned to one commit. Toolchain probes are
+    # independent too, so overlap both with the full uncached source scan.
+    # Copy the timing context and join every worker on failures as well; none
+    # may outlive the build lock or publication's final mutation check.
+    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="frontend-inspection") as inspection_pool:
+        audit = inspection_pool.submit(_git_audit_inputs, root)
+        versions = inspection_pool.submit(contextvars.copy_context().run, _toolchain_versions, command, manager)
         with _build_phase("sourceScanMs"):
             source_digest, input_count, input_state_digest = _scan_production_inputs(web_dir)
-        with _build_phase("toolchainMs"):
-            node_version = _run_version(command)
-            if manager == "bun":
-                manager_version = _run_version("bun")
-            else:
-                try:
-                    manager_version = _run_version_command([command, _npm_cli(command), "--version"])
-                except RuntimeError:
-                    manager_version = "unavailable"
+        node_version, manager_version = versions.result()
         with _build_phase("gitAuditWaitMs"):
             git_inputs = audit.result()
     return {

@@ -445,11 +445,44 @@ def test_git_audit_overlaps_file_scan_and_keeps_commit_pinned(monkeypatch, tmp_p
     assert result["productionInputCount"] > 0
 
 
-def test_failed_file_scan_joins_git_audit_before_releasing_inspection(monkeypatch, tmp_path):
+def test_toolchain_probes_overlap_full_file_scan_and_preserve_timings(monkeypatch, tmp_path):
+    _write_project(tmp_path)
+    _stub_build_identity(monkeypatch)
+    scan_entered = threading.Event()
+    toolchain_entered = threading.Event()
+    original_scan = frontend_build._scan_production_inputs
+
+    def version(_command):
+        toolchain_entered.set()
+        assert scan_entered.wait(5), "toolchain inspection must overlap file inspection"
+        return "node-test-version"
+
+    def scan(web_dir):
+        scan_entered.set()
+        assert toolchain_entered.wait(5), "file inspection must not finish before toolchain probing starts"
+        return original_scan(web_dir)
+
+    monkeypatch.setattr(frontend_build, "_run_version", version)
+    monkeypatch.setattr(frontend_build, "_scan_production_inputs", scan)
+    timings = {}
+    token = frontend_build._FRONTEND_BUILD_TIMINGS.set(timings)
+    try:
+        result = frontend_build.build_inputs(tmp_path)
+    finally:
+        frontend_build._FRONTEND_BUILD_TIMINGS.reset(token)
+    assert result["nodeVersion"] == "node-test-version"
+    assert result["packageManagerVersion"] == "v1"
+    assert result["productionInputCount"] > 0
+    assert timings["sourceScanMs"] >= 0
+    assert timings["toolchainMs"] >= 0
+
+
+def test_failed_file_scan_joins_all_inspection_workers_before_releasing_inspection(monkeypatch, tmp_path):
     _write_project(tmp_path)
     _stub_build_identity(monkeypatch)
     scan_failed = threading.Event()
     audit_finished = threading.Event()
+    toolchain_finished = threading.Event()
 
     def audit(_root):
         assert scan_failed.wait(5)
@@ -460,11 +493,18 @@ def test_failed_file_scan_joins_git_audit_before_releasing_inspection(monkeypatc
         scan_failed.set()
         raise OSError("production input disappeared")
 
+    def version(_command):
+        assert scan_failed.wait(5)
+        toolchain_finished.set()
+        return "v1"
+
     monkeypatch.setattr(frontend_build, "_git_audit_inputs", audit)
     monkeypatch.setattr(frontend_build, "_scan_production_inputs", scan)
+    monkeypatch.setattr(frontend_build, "_run_version", version)
     with pytest.raises(OSError, match="production input disappeared"):
         frontend_build.build_inputs(tmp_path)
     assert audit_finished.is_set()
+    assert toolchain_finished.is_set()
 
 
 @pytest.mark.parametrize("object_id_length", [40, 64])
