@@ -1982,7 +1982,7 @@ def test_archive_team_releases_team_lock_before_archiving_agents(tmp_path, monke
 
     def blocking_archive(agent_id, *args, **kwargs):
         entered_agent_archive.set()
-        assert release_agent_archive.wait(timeout=2)
+        assert release_agent_archive.wait(timeout=10)
         return original_archive(agent_id, *args, **kwargs)
 
     def probe_team_lock():
@@ -1994,7 +1994,7 @@ def test_archive_team_releases_team_lock_before_archiving_agents(tmp_path, monke
     monkeypatch.setattr(agent_bulk_delete_service, "archive_agent_instance", blocking_archive)
     archive_thread = threading.Thread(target=lambda: team_service.archive_team(team["teamId"]), daemon=True)
     archive_thread.start()
-    assert entered_agent_archive.wait(timeout=2)
+    assert entered_agent_archive.wait(timeout=10)
     try:
         probe_thread = threading.Thread(target=probe_team_lock, daemon=True)
         probe_thread.start()
@@ -2002,7 +2002,9 @@ def test_archive_team_releases_team_lock_before_archiving_agents(tmp_path, monke
         probe_thread.join(timeout=1)
     finally:
         release_agent_archive.set()
-        archive_thread.join(timeout=2)
+        # The 0.5s lock probe above is the contract. This join owns real
+        # Session/filesystem cleanup, which can exceed 2s under xdist load.
+        archive_thread.join(timeout=10)
     assert not archive_thread.is_alive()
 
 
@@ -2016,7 +2018,7 @@ def test_create_team_releases_team_lock_before_direct_session_ensure(tmp_path, m
 
     def blocking_ensure(*args, **kwargs):
         entered_session_ensure.set()
-        assert release_session_ensure.wait(timeout=2)
+        assert release_session_ensure.wait(timeout=10)
         return original_ensure(*args, **kwargs)
 
     def probe_team_lock():
@@ -2034,7 +2036,7 @@ def test_create_team_releases_team_lock_before_direct_session_ensure(tmp_path, m
         daemon=True,
     )
     create_thread.start()
-    assert entered_session_ensure.wait(timeout=2)
+    assert entered_session_ensure.wait(timeout=10)
     try:
         probe_thread = threading.Thread(target=probe_team_lock, daemon=True)
         probe_thread.start()
@@ -2042,7 +2044,8 @@ def test_create_team_releases_team_lock_before_direct_session_ensure(tmp_path, m
         probe_thread.join(timeout=1)
     finally:
         release_session_ensure.set()
-        create_thread.join(timeout=2)
+        # Preserve the lock deadline while joining the physical IO owner.
+        create_thread.join(timeout=10)
     assert not create_thread.is_alive()
 
 
