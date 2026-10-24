@@ -3,11 +3,14 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.IO.Pipes;
+using System.Globalization;
 using System.Text;
 using System.Net;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
+using System.Web.Script.Serialization;
 
 internal static class VibelutionLauncher
 {
@@ -1203,6 +1206,10 @@ internal static class VibelutionLauncher
 
     private static void LaunchCurrentElectronMain(string projectDir, string thenLifecycle, bool openWorkbench, bool hiddenPresentation)
     {
+        if (thenLifecycle == "start" && openWorkbench && !hiddenPresentation && TryNativeStart(projectDir))
+        {
+            return;
+        }
         // Startup covers the 600s frontend bridge and 180s readiness stages.
         // 810s settlement + 30s retry + 60s launch/exit margin stay bounded.
         // Status/open and stop operations keep their existing outer budget.
@@ -1211,6 +1218,214 @@ internal static class VibelutionLauncher
             || string.Equals(thenLifecycle, "rebuild-and-start", StringComparison.OrdinalIgnoreCase);
         int bridgeTimeoutMs = startup ? 900000 : 240000;
         RunPythonBridge(projectDir, "launch-desktop-shell", true, true, thenLifecycle, openWorkbench, bridgeTimeoutMs, hiddenPresentation);
+    }
+
+    internal sealed class NativeStartTarget
+    {
+        public int Pid;
+        public double CreateTime;
+        public string Executable;
+        public string PipeName;
+        public string Token;
+    }
+
+    internal sealed class NativeProcessIdentity
+    {
+        public double CreateTime;
+        public string Executable;
+    }
+
+    // This is transport admission, never a freshness or lifecycle verdict.
+    // A ready Electron main performs those checks and returns the original
+    // command result; cold/old/branch layouts retain the existing Python bridge.
+    internal static NativeStartTarget ReadNativeStartTarget(string projectDir)
+    {
+        try
+        {
+            string root = Path.GetFullPath(projectDir);
+            string gitDir = Path.Combine(root, ".git");
+            if (!Directory.Exists(gitDir) || File.ReadAllText(Path.Combine(gitDir, "HEAD")).Trim() != "ref: refs/heads/main")
+            {
+                return null;
+            }
+            string projectId = NativeJsonText(ReadNativeJson(Path.Combine(root, ".vibelution", "project.json")), "projectId").Trim().ToLowerInvariant();
+            if (!Regex.IsMatch(projectId, "^[a-z0-9][a-z0-9_-]*$")) return null;
+            string instanceId = InstanceIdForProject(root);
+            string home = Path.Combine(ResolveProjectsHome(), projectId, "instances", instanceId);
+            var migration = ReadNativeJson(Path.Combine(home, "storage-migration.json"));
+            if (NativeJsonText(migration, "schemaVersion") != "1" || NativeJsonText(migration, "status") != "completed"
+                || NativeJsonText(migration, "projectId") != projectId || NativeJsonText(migration, "instanceId") != instanceId)
+            {
+                return null;
+            }
+            var record = ReadNativeJson(Path.Combine(home, "runtime", "launcher", "native-start-transport.json"));
+            int pid;
+            double created;
+            string executable = NativeJsonText(record, "executable");
+            string pipeName = NativeJsonText(record, "pipeName");
+            string token = NativeJsonText(record, "token");
+            if (NativeJsonText(record, "schemaVersion") != "1" || NativeJsonText(record, "protocolVersion") != "1"
+                || !SameNativePath(NativeJsonText(record, "workspaceRoot"), root)
+                || !int.TryParse(NativeJsonText(record, "pid"), out pid) || pid <= 0
+                || !double.TryParse(NativeJsonText(record, "createTime"), NumberStyles.Float, CultureInfo.InvariantCulture, out created)
+                || double.IsNaN(created) || double.IsInfinity(created) || created <= 0
+                || !SameNativePath(executable, Path.Combine(root, "dist", "desktop", "win-unpacked", "Vibelution.exe"))
+                || !Regex.IsMatch(pipeName, "^vibelution-native-start-[0-9]+-[a-f0-9-]{16,64}$")
+                || !Regex.IsMatch(token, "^[a-f0-9]{64}$"))
+            {
+                return null;
+            }
+            return new NativeStartTarget { Pid = pid, CreateTime = created, Executable = executable, PipeName = pipeName, Token = token };
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetNamedPipeServerProcessId(IntPtr pipe, out uint serverPid);
+
+    internal static bool NativeIdentityMatches(NativeStartTarget target, int serverPid, NativeProcessIdentity actual)
+    {
+        return target != null && serverPid == target.Pid && actual != null
+            && actual.CreateTime > 0 && !double.IsNaN(actual.CreateTime) && !double.IsInfinity(actual.CreateTime)
+            && Math.Abs(actual.CreateTime - target.CreateTime) <= 2
+            && SameNativePath(actual.Executable, target.Executable);
+    }
+
+    private static bool TryNativeStart(string projectDir, int responseTimeoutMs = 900000)
+    {
+        NativeStartTarget target = ReadNativeStartTarget(projectDir);
+        if (target == null) return false;
+        bool mayHaveSent = false;
+        try
+        {
+            using (var pipe = new NamedPipeClientStream(".", target.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous))
+            {
+                pipe.Connect(200);
+                uint serverPid;
+                if (!GetNamedPipeServerProcessId(pipe.SafePipeHandle.DangerousGetHandle(), out serverPid) || serverPid != target.Pid)
+                {
+                    return false;
+                }
+                using (Process process = Process.GetProcessById(target.Pid))
+                {
+                    if (process.HasExited || !NativeIdentityMatches(target, (int)serverPid, new NativeProcessIdentity {
+                        CreateTime = (process.StartTime.ToUniversalTime() - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds,
+                        Executable = process.MainModule.FileName
+                    })) return false;
+                }
+                string requestId = "launch_" + Guid.NewGuid().ToString("N");
+                var request = new Dictionary<string, object> {
+                    { "schemaVersion", 1 }, { "protocolVersion", 1 }, { "requestId", requestId },
+                    { "workspaceRoot", Path.GetFullPath(projectDir) }, { "operation", "start" }, { "token", target.Token }
+                };
+                byte[] bytes = Encoding.UTF8.GetBytes(new JavaScriptSerializer().Serialize(request) + "\n");
+                if (bytes.Length > 2048) return false;
+                // A failed/partial write can already have notified main. From
+                // this point no generic error is permission to dispatch twice.
+                mayHaveSent = true;
+                IAsyncResult writing = pipe.BeginWrite(bytes, 0, bytes.Length, null, null);
+                using (var completed = writing.AsyncWaitHandle)
+                {
+                    if (!completed.WaitOne(1500)) throw new TimeoutException("Native start write timed out.");
+                    pipe.EndWrite(writing);
+                }
+                string response = ReadNativeStartResponse(pipe, responseTimeoutMs);
+                var result = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(response);
+                int verdict = ValidateNativeStartResult(result, projectDir, requestId);
+                if (verdict < 0) return false; // Main explicitly proved no dispatch; use the compatibility bridge.
+                if (verdict != 0)
+                {
+                    throw NativeStartFailure(result == null ? "" : NativeJsonText(result, "message"));
+                }
+                WriteNativeEntryLog(projectDir, "native_action.local_start_completed", "pid=" + target.Pid.ToString());
+                return true;
+            }
+        }
+        catch (BridgeFailureException)
+        {
+            throw;
+        }
+        catch
+        {
+            if (!mayHaveSent) return false;
+            // Never include metadata, token or raw frames in errors/logs.
+            throw NativeStartFailure("启动命令已发送，但结果未确认；请查看 Launcher 状态，未重复发送命令。");
+        }
+    }
+
+    internal static int ValidateNativeStartResult(Dictionary<string, object> result, string projectDir, string requestId)
+    {
+        object accepted;
+        if (result == null || NativeJsonText(result, "schemaVersion") != "1" || NativeJsonText(result, "protocolVersion") != "1"
+            || NativeJsonText(result, "requestId") != requestId || !SameNativePath(NativeJsonText(result, "workspaceRoot"), projectDir)
+            || !result.TryGetValue("accepted", out accepted) || !(accepted is bool)) return 3;
+        string commandId = NativeJsonText(result, "commandId");
+        string code = NativeJsonText(result, "code");
+        object notDispatched;
+        bool definitelyNotDispatched = result.TryGetValue("notDispatched", out notDispatched) && notDispatched is bool && (bool)notDispatched;
+        if (!(bool)accepted && definitelyNotDispatched && code == "native_requires_legacy_launch" && commandId.Length == 0) return -1;
+        if (!(bool)accepted || definitelyNotDispatched || code == "restart-latest-shell") return 3;
+        // The original queue result or already-verified reuse result belongs
+        // to this request, not whichever global intent happened to run later.
+        return Regex.IsMatch(commandId, "^cmd_[A-Za-z0-9_-]+$")
+            || (code.Length == 0 && Regex.IsMatch(commandId, "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$")) ? 0 : 3;
+    }
+
+    private static BridgeFailureException NativeStartFailure(string message)
+    {
+        string detail = string.IsNullOrWhiteSpace(message) ? "Launcher 未确认本次启动成功。" : ShortStaticMessage(message);
+        string payload = new JavaScriptSerializer().Serialize(new {
+            lifecycleSettlement = new { accepted = false, message = detail }
+        });
+        return new BridgeFailureException(3, detail, payload);
+    }
+
+    private static string ReadNativeStartResponse(NamedPipeClientStream pipe, int timeoutMs)
+    {
+        using (var output = new MemoryStream())
+        {
+            byte[] buffer = new byte[1024];
+            var elapsed = Stopwatch.StartNew();
+            while (output.Length < 8192)
+            {
+                IAsyncResult reading = pipe.BeginRead(buffer, 0, buffer.Length, null, null);
+                int count;
+                using (var completed = reading.AsyncWaitHandle)
+                {
+                    int remaining = (int)Math.Max(0, timeoutMs - elapsed.ElapsedMilliseconds);
+                    if (remaining <= 0) throw new TimeoutException("Native start result timed out.");
+                    if (!completed.WaitOne(remaining)) throw new TimeoutException("Native start result timed out.");
+                    count = pipe.EndRead(reading);
+                }
+                if (count == 0) throw new EndOfStreamException();
+                int newline = Array.IndexOf(buffer, (byte)10, 0, count);
+                output.Write(buffer, 0, newline >= 0 ? newline : count);
+                if (output.Length > 8192) throw new InvalidDataException();
+                if (newline >= 0) return new UTF8Encoding(false, true).GetString(output.ToArray());
+            }
+            throw new InvalidDataException();
+        }
+    }
+
+    private static Dictionary<string, object> ReadNativeJson(string path)
+    {
+        if (new FileInfo(path).Length > 8192) throw new InvalidDataException();
+        return new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(path)) ?? new Dictionary<string, object>();
+    }
+
+    private static string NativeJsonText(Dictionary<string, object> value, string key)
+    {
+        object field;
+        return value.TryGetValue(key, out field) ? Convert.ToString(field, CultureInfo.InvariantCulture) : "";
+    }
+
+    private static bool SameNativePath(string left, string right)
+    {
+        return !string.IsNullOrWhiteSpace(left) && Path.IsPathRooted(left)
+            && string.Equals(Path.GetFullPath(left), Path.GetFullPath(right), StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool HasArgument(List<string> args, params string[] accepted)

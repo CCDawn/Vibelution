@@ -380,6 +380,115 @@ def test_disabling_optional_delay_still_reuses_the_directory_owner(monkeypatch):
     assert calls == ["recovered"]
 
 
+@pytest.mark.parametrize("finish", ["run", "optout", "shutdown_directory", "shutdown_settle", "stop_settle"])
+def test_lifespan_bulk_recoveries_share_directory_and_first_request_budget(monkeypatch, finish):
+    recoveries = {
+        "startup-meeting-driver-recovery": "_recover_challenge_meeting_drivers_on_startup",
+        "startup-chat-room-round-recovery": "_recover_orphaned_chat_room_rounds_on_startup",
+        "startup-command-attempt-recovery": "_recover_hypothesis_command_attempts_on_startup",
+        "startup-subagent-address-recovery": "_recover_stale_subagent_addresses_on_startup",
+    }
+    directory_gate = asyncio.Event()
+    settle_gate = asyncio.Event()
+    all_waiting = asyncio.Event()
+    scans_finished = threading.Event()
+    waiting = []
+    scans = []
+    owners = {}
+    groups = []
+    scheduled = []
+    loop_thread = threading.get_ident()
+
+    class BulkRecoveryJobs(StartupJobGroup):
+        def __init__(self):
+            super().__init__()
+            groups.append(self)
+
+        def start_thread(self, name, callback, *args, **kwargs):
+            scheduled.append(("thread", name))
+            assert name not in recoveries, "bulk scan bypassed the first-request gate"
+            if name == "startup-session-directory":
+                return super().start_async(name, directory_gate.wait())
+            if name in {f"{owner}-worker" for owner in recoveries}:
+                return super().start_thread(name, callback, *args, **kwargs)
+            return super().start_async(name, asyncio.sleep(0))
+
+        def start_async(self, name, awaitable):
+            scheduled.append(("async", name))
+            if name in recoveries:
+                owners[name] = super().start_async(name, awaitable)
+                return owners[name]
+            awaitable.close()
+            return super().start_async(name, asyncio.sleep(0))
+
+    async def wait_for_first_requests(_app):
+        waiting.append(asyncio.current_task().get_name())
+        if len(waiting) == len(recoveries):
+            all_waiting.set()
+        await settle_gate.wait()
+
+    def scan(name, **kwargs):
+        if name == "startup-subagent-address-recovery":
+            assert not kwargs["should_stop"]()
+        else:
+            assert kwargs == {}
+        scans.append((name, threading.get_ident()))
+        if len(scans) == len(recoveries):
+            scans_finished.set()
+
+    async def closed_runtime(**_kwargs):
+        return {"closed": True}
+
+    monkeypatch.setenv("VIBELUTION_DEFER_STARTUP_CACHE_PREWARM", "0" if finish == "optout" else "1")
+    monkeypatch.setattr(lifecycle, "StartupJobGroup", BulkRecoveryJobs)
+    monkeypatch.setattr(lifecycle, "_await_startup_prewarm_gate", wait_for_first_requests)
+    monkeypatch.setattr(lifecycle, "_begin_owned_runtime_lifecycle", lambda: None)
+    monkeypatch.setattr(lifecycle, "_stop_virtual_human_life_runtime", lambda: None)
+    monkeypatch.setattr(lifecycle, "_stop_research_workflow_runtime", lambda: None)
+    monkeypatch.setattr(lifecycle, "_shutdown_owned_runtime_resources", closed_runtime)
+    monkeypatch.setattr(lifecycle, "shutdown_session_catalog_on_shutdown", lambda **_kwargs: {"closed": True})
+    monkeypatch.setattr(lifecycle, "_shutdown_transcript_writer", lambda **_kwargs: {"closed": True, "drained": True})
+    monkeypatch.setattr(lifecycle, "mark_server_shutdown_clean", lambda: None)
+    monkeypatch.setattr("core.web.route_bootstrap.register_spa_routes", lambda _app: None)
+    for name, callback in recoveries.items():
+        monkeypatch.setattr(lifecycle, callback, lambda name=name, **kwargs: scan(name, **kwargs))
+
+    async def exercise():
+        async with lifecycle.web_workbench_lifespan(FastAPI()):
+            assert set(owners) == set(recoveries)
+            assert ("thread", "startup-challenge-fence-validation") in scheduled
+            assert ("async", "startup-external-agent-reconcile") in scheduled
+            await asyncio.sleep(0)
+            assert scans == []
+            assert waiting == []
+            if finish != "shutdown_directory":
+                directory_gate.set()
+                if finish != "optout":
+                    await asyncio.wait_for(all_waiting.wait(), 1)
+                    assert set(waiting) == set(recoveries)
+                    assert scans == []
+                if finish in {"run", "optout", "stop_settle"}:
+                    if finish == "stop_settle":
+                        groups[0].request_stop()
+                    settle_gate.set()
+                    await asyncio.wait_for(asyncio.gather(*owners.values(), return_exceptions=True), 2)
+        # Releasing both gates after shutdown must never revive cancelled scans.
+        directory_gate.set()
+        settle_gate.set()
+        await asyncio.sleep(0)
+
+    asyncio.run(exercise())
+    if finish in {"run", "optout"}:
+        assert scans_finished.is_set()
+        assert {name for name, _thread in scans} == set(recoveries)
+        assert all(thread != loop_thread for _name, thread in scans)
+        if finish == "optout":
+            assert waiting == []
+    else:
+        assert scans == []
+    assert not groups[0]._workers
+
+
 @pytest.mark.parametrize("worker", ["_prewarm_key_tool_definitions", "_prewarm_web_search_availability"])
 def test_tool_imports_execute_in_owned_worker_not_on_event_loop(monkeypatch, worker):
     loop_thread = threading.get_ident()

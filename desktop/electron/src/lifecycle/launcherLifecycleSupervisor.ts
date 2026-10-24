@@ -95,6 +95,11 @@ export class LauncherLifecycleSupervisor {
   private readonly generations = new Map<string, number>();
   private readonly mutationTails = new Map<string, Promise<void>>();
 
+  /** Read-only admission fence; clearing a slot never erases its generation. */
+  intentGeneration(instanceId: string): number {
+    return this.generations.get(instanceId.trim()) ?? 0;
+  }
+
   beginIntent(intent: LauncherLifecycleIntent): LauncherLifecycleLease {
     return this.beginIntentWithOptions(intent).lease;
   }

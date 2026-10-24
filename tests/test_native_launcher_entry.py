@@ -1,4 +1,7 @@
 import os
+import json
+import shutil
+import time
 import re
 import subprocess
 from pathlib import Path
@@ -303,3 +306,234 @@ def test_native_launcher_source_compiles_as_windows_executable(tmp_path: Path):
 
     assert result.returncode == 0, result.stderr or result.stdout
     assert output_path.is_file()
+
+
+@pytest.fixture(scope="module")
+def native_start_harness(tmp_path_factory):
+    if os.name != "nt":
+        pytest.skip("Windows native pipe admission and server identity")
+    directory = tmp_path_factory.mktemp("native-start-harness")
+    harness = directory / "Harness.cs"
+    harness.write_text(r'''
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.IO.Pipes;
+using System.Reflection;
+using System.Text;
+using System.Threading;
+using System.Web.Script.Serialization;
+internal static class NativeStartHarness {
+ public static int Main(string[] args) {
+  string root=args[0], mode=args[1];
+  if (mode=="client-only") {
+   try {
+    var call=typeof(VibelutionLauncher).GetMethod("TryNativeStart",BindingFlags.NonPublic|BindingFlags.Static);
+    Console.WriteLine((bool)call.Invoke(null,new object[]{root,5000})?"completed":"fallback");
+   } catch(TargetInvocationException) {Console.WriteLine("rejected");}
+   return 0;
+  }
+  if (!mode.StartsWith("pipe-")) {
+   var target=VibelutionLauncher.ReadNativeStartTarget(root);
+   if (target==null) { Console.WriteLine("fallback"); return 0; }
+   var identity=new VibelutionLauncher.NativeProcessIdentity {CreateTime=mode=="pid-reused"?103:100,
+    Executable=mode=="same-basename"?Path.Combine(root,"other","Vibelution.exe"):target.Executable};
+   Console.WriteLine(VibelutionLauncher.NativeIdentityMatches(target,mode=="wrong-server"?99:42,identity)?"eligible":"fallback");
+   return 0;
+  }
+  string metadata=args[2], pipeName="vibelution-native-start-"+Process.GetCurrentProcess().Id+"-"+Guid.NewGuid().ToString("N");
+  var json=new JavaScriptSerializer();
+  using (var self=Process.GetCurrentProcess())
+  using (var server=new NamedPipeServerStream(pipeName,PipeDirection.InOut,1,PipeTransmissionMode.Byte,PipeOptions.Asynchronous)) {
+   File.WriteAllText(metadata,json.Serialize(new Dictionary<string,object> {
+    {"schemaVersion",1},{"protocolVersion",1},{"workspaceRoot",root},{"pipeName",pipeName},{"token",new string('a',64)},
+    {"pid",self.Id},{"createTime",(self.StartTime.ToUniversalTime()-new DateTime(1970,1,1,0,0,0,DateTimeKind.Utc)).TotalSeconds},
+    {"executable",self.MainModule.FileName}
+   }));
+   int received=0;
+   var worker=new Thread(()=> {
+    try {
+     server.WaitForConnection();
+     using (var reader=new StreamReader(server,new UTF8Encoding(false),false,1024,true))
+     using (var writer=new StreamWriter(server,new UTF8Encoding(false),1024,true)) {
+      var request=json.Deserialize<Dictionary<string,object>>(reader.ReadLine());
+      Interlocked.Increment(ref received);
+      if (mode=="pipe-disconnect") return;
+      if (mode=="pipe-timeout") {Thread.Sleep(300);return;}
+      var reply=new Dictionary<string,object> {
+       {"schemaVersion",1},{"protocolVersion",1},{"workspaceRoot",root},
+       {"requestId",mode=="pipe-wrong-request"?"launch_other":request["requestId"]},
+       {"accepted",mode!="pipe-reject"&&mode!="pipe-explicit-fallback"},
+       {"commandId",mode=="pipe-explicit-fallback"?"":"cmd_owned_request"},
+       {"code",mode=="pipe-explicit-fallback"?"native_requires_legacy_launch":"started"},
+       {"message","测试启动结算"},{"notDispatched",mode=="pipe-explicit-fallback"}
+      };
+      writer.WriteLine(json.Serialize(reply));writer.Flush();server.WaitForPipeDrain();
+     }
+    } catch(IOException) {} catch(ObjectDisposedException) {}
+    finally {try {server.Disconnect();} catch {} }
+   });
+   worker.IsBackground=true;worker.Start();
+   string verdict;
+   try {
+    var method=typeof(VibelutionLauncher).GetMethod("TryNativeStart",BindingFlags.NonPublic|BindingFlags.Static);
+    verdict=(bool)method.Invoke(null,new object[]{root,mode=="pipe-timeout"?75:5000})?"completed":"fallback";
+   } catch(TargetInvocationException error) {
+    var field=error.InnerException.GetType().GetField("ExitCode");
+    verdict="rejected:"+(field==null?"unknown":field.GetValue(error.InnerException).ToString());
+   }
+   worker.Join(1000);
+   Console.WriteLine(verdict+"|received="+received);
+  }
+  return 0;
+ }
+}
+''', encoding="utf-8")
+    compiler = Path(os.environ["SystemRoot"]) / "Microsoft.NET/Framework64/v4.0.30319/csc.exe"
+    executable = directory / "Harness.exe"
+    result = subprocess.run(
+        [str(compiler), "/nologo", "/target:exe", "/main:NativeStartHarness", "/reference:System.Windows.Forms.dll",
+         "/reference:System.Drawing.dll", "/reference:System.Web.Extensions.dll", f"/out:{executable}",
+         str(NATIVE_ENTRY_SOURCE), str(harness)], capture_output=True, text=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    return executable
+
+
+def _seed_native_start(root, projects):
+    digest = 2166136261
+    for byte in str(root).lower().encode("utf-8"):
+        digest = ((digest ^ byte) * 16777619) & 0xffffffff
+    instance = f"{digest:08x}"
+
+    def put(path, value):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(value) if isinstance(value, dict) else value, encoding="utf-8")
+
+    put(root / ".git/HEAD", "ref: refs/heads/main")
+    put(root / ".vibelution/project.json", {"projectId": "test-project"})
+    home = projects / "test-project/instances" / instance
+    put(home / "storage-migration.json", {"schemaVersion": 1, "status": "completed", "projectId": "test-project", "instanceId": instance})
+    metadata = home / "runtime/launcher/native-start-transport.json"
+    record = {"schemaVersion": 1, "protocolVersion": 1, "workspaceRoot": str(root), "pid": 42, "createTime": 100,
+              "executable": str(root / "dist/desktop/win-unpacked/Vibelution.exe"),
+              "pipeName": "vibelution-native-start-42-" + "b" * 32, "token": "a" * 64}
+    put(metadata, record)
+    return metadata, record, put
+
+
+@pytest.mark.parametrize("mode", [
+    "eligible", "pid-reused", "wrong-server", "same-basename", "wrong-root", "unknown-protocol",
+    "missing-identity", "unsafe-pipe", "missing-token", "old-shell", "malformed", "branch", "worktree",
+    "wrong-migration", "oversized",
+])
+def test_native_start_metadata_and_connected_identity_fail_closed(native_start_harness, tmp_path, mode):
+    root, projects = tmp_path / "project with spaces", tmp_path / "projects"
+    metadata, record, put = _seed_native_start(root, projects)
+    if mode == "wrong-root": record["workspaceRoot"] = str(tmp_path / "other")
+    if mode == "unknown-protocol": record["protocolVersion"] = 2
+    if mode == "missing-identity": record.pop("createTime")
+    if mode == "unsafe-pipe": record["pipeName"] = r"\\remote\pipe\start"
+    if mode == "missing-token": record.pop("token")
+    put(metadata, "{" if mode == "malformed" else (" " * 8193 if mode == "oversized" else record))
+    if mode == "old-shell": metadata.unlink()
+    if mode == "branch": put(root / ".git/HEAD", "ref: refs/heads/codex/task")
+    if mode == "worktree":
+        (root / ".git/HEAD").unlink(); (root / ".git").rmdir(); put(root / ".git", "gitdir: elsewhere")
+    if mode == "wrong-migration": put(metadata.parents[2] / "storage-migration.json", {"schemaVersion": 1, "status": "pending"})
+    result = subprocess.run(
+        [str(native_start_harness), str(root), mode], env={**os.environ, "VIBELUTION_PROJECTS_HOME": str(projects)},
+        capture_output=True, text=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == ("eligible" if mode == "eligible" else "fallback")
+
+
+@pytest.mark.parametrize("mode,expected", [
+    ("pipe-success", "completed"), ("pipe-reject", "rejected:3"), ("pipe-disconnect", "rejected:3"),
+    ("pipe-timeout", "rejected:3"), ("pipe-wrong-request", "rejected:3"), ("pipe-explicit-fallback", "fallback"),
+])
+def test_native_start_uses_real_local_pipe_and_never_retries_unknown_outcomes(native_start_harness, tmp_path, mode, expected):
+    root, projects = tmp_path / "project", tmp_path / "projects"
+    metadata, _, _ = _seed_native_start(root, projects)
+    executable = root / "dist/desktop/win-unpacked/Vibelution.exe"
+    executable.parent.mkdir(parents=True)
+    shutil.copy2(native_start_harness, executable)
+    result = subprocess.run(
+        [str(executable), str(root), mode, str(metadata)],
+        env={**os.environ, "VIBELUTION_PROJECTS_HOME": str(projects)},
+        capture_output=True, text=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == f"{expected}|received=1"
+
+
+def test_native_start_marks_possible_delivery_before_writing_and_keeps_legacy_bridge():
+    source = _source()
+    forward = source.split("private static bool TryNativeStart", 1)[1].split("internal static int ValidateNativeStartResult", 1)[0]
+    assert forward.index("mayHaveSent = true") < forward.index("pipe.BeginWrite")
+    assert "if (!mayHaveSent) return false" in forward
+    assert "GetNamedPipeServerProcessId" in forward
+    assert '"launch-desktop-shell"' not in forward
+    assert 'RunPythonBridge(projectDir, "launch-desktop-shell"' in source
+
+
+def test_native_client_interoperates_with_the_real_node_transport(native_start_harness, tmp_path):
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node runtime unavailable")
+    root, projects = tmp_path / "project", tmp_path / "projects"
+    metadata, _, _ = _seed_native_start(root, projects)
+    metadata.unlink()
+    executable = root / "dist/desktop/win-unpacked/Vibelution.exe"
+    executable.parent.mkdir(parents=True)
+    try:
+        os.link(node, executable)
+    except OSError:
+        shutil.copy2(node, executable)
+    module = PROJECT_ROOT / "desktop/electron/src/process/nativeLauncherStart.ts"
+    server_source = tmp_path / "server.mjs"
+    calls_path = tmp_path / "calls.json"
+    server_source.write_text(
+        f"import {{startNativeLauncherStartTransport}} from {json.dumps(module.as_uri())};\n"
+        "import {writeFileSync} from 'node:fs';\n"
+        "let calls=0; const [root,runtime,callsPath]=process.argv.slice(2);\n"
+        "const transport=await startNativeLauncherStartTransport({workspaceRoot:root,runtimeDir:runtime,"
+        "identity:{pid:process.pid,createTime:Date.now()/1000-process.uptime(),executable:process.execPath},"
+        "onStart:async()=>{writeFileSync(callsPath,JSON.stringify(++calls));"
+        "return {schemaVersion:1,accepted:true,operation:'start',commandId:'cmd_node_interop',code:'started'};}});\n"
+        "process.stdin.once('data',async()=>{await transport.close();process.exit(0);});\n",
+        encoding="utf-8",
+    )
+    env = {**os.environ, "VIBELUTION_PROJECTS_HOME": str(projects)}
+    server = subprocess.Popen(
+        [str(executable), "--experimental-strip-types", str(server_source), str(root), str(metadata.parent), str(calls_path)],
+        env=env, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    try:
+        deadline = time.monotonic() + 10
+        while not metadata.exists() and server.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.02)
+        if not metadata.exists():
+            if server.poll() is None:
+                raise AssertionError("Native Node test transport did not publish")
+            raise AssertionError(server.stderr.read().decode(errors="replace")[-2000:])
+        result = subprocess.run(
+            [str(native_start_harness), str(root), "client-only"], env=env,
+            capture_output=True, text=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "completed"
+        assert json.loads(calls_path.read_text()) == 1
+    finally:
+        if server.poll() is None:
+            try:
+                server.communicate(b"close\n", timeout=5)
+            except subprocess.TimeoutExpired:
+                server.terminate()
+                server.communicate(timeout=5)
+        server.wait(timeout=5)
+    assert not metadata.exists()
