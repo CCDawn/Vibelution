@@ -145,20 +145,22 @@ def test_restart_preserves_operator_configuration_and_does_not_duplicate(fresh_d
                                     llm_bindings={"dialogue": {"modelId": "my-own-model"}},
                                     task_profile={"mission": "保留我的工作约定"})
     before = directory.get_agent(role_id)
-    list_agents = directory.list_agents
+    from core.web.services.agent_directory import parameter_snapshot
+    list_agents = parameter_snapshot.list_agent_identity_snapshots
     queries = []
 
     def summaries(**kwargs):
         queries.append(kwargs)
         return list_agents(**kwargs)
 
-    monkeypatch.setattr(directory, "list_agents", summaries)
+    monkeypatch.setattr(parameter_snapshot, "list_agent_identity_snapshots", summaries)
+    monkeypatch.setattr(directory, "list_agents", lambda **kwargs: pytest.fail("seed discovery must not build UI projections"))
     second = ensure_builtin_agents()
     after = directory.get_agent(role_id)
     assert second["createdAgentIds"] == []
     assert second["researchAgentIds"] == seeded["researchAgentIds"]
     assert after == before
-    assert queries == [{"include_archived": True, "detail": "summary"}]
+    assert queries == [{"include_archived": True}]
 
 
 def test_restart_does_not_resurrect_archived_starter(fresh_deployment):
@@ -167,6 +169,38 @@ def test_restart_does_not_resurrect_archived_starter(fresh_deployment):
     second = ensure_builtin_agents()
     assert second["createdAgentIds"] == []
     assert directory.get_agent(seeded["generalAssistantId"], include_archived=True)["status"] == "archived"
+
+
+def test_completed_bindings_do_not_repeat_direct_session_ui_hydration(fresh_deployment, monkeypatch):
+    first = ensure_builtin_agents()
+    monkeypatch.setattr(
+        session_service, "ensure_agent_direct_session",
+        lambda **kwargs: pytest.fail("a completed binding needs no new Agent UI hydration"),
+    )
+    second = ensure_builtin_agents()
+    assert second["createdAgentIds"] == []
+    assert second["generalAssistantId"] == first["generalAssistantId"]
+    assert second["platformPlannerId"] == first["platformPlannerId"]
+
+
+@pytest.mark.parametrize("kind", ["generalAssistantId", "platformPlannerId"])
+def test_deleted_builtin_direct_session_still_uses_native_repair(fresh_deployment, monkeypatch, kind):
+    first = ensure_builtin_agents()
+    agent_id = first[kind]
+    session_id = directory.get_agent(agent_id)["directSessionId"]
+    session_service._mark_session_workspace_intentionally_deleted(session_id)
+    original = session_service.ensure_agent_direct_session
+    calls = []
+
+    def repair(**kwargs):
+        calls.append(kwargs["agent_id"])
+        return original(**kwargs)
+
+    monkeypatch.setattr(session_service, "ensure_agent_direct_session", repair)
+    second = ensure_builtin_agents()
+    assert second["createdAgentIds"] == []
+    assert calls == [agent_id]
+    assert directory.get_agent(agent_id)["directSessionId"] != session_id
 
 
 def test_interrupted_seed_recovers_missing_session_without_duplicate_agent(fresh_deployment, monkeypatch):

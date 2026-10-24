@@ -144,10 +144,11 @@ def _finish_seed(agent: dict[str, Any], preset: dict[str, Any]) -> None:
 def ensure_public_agent_presets() -> dict[str, Any]:
     """Create missing presets and resume only interrupted, owned seed records."""
     from core.web.services import agent_directory_service as directory
+    from .parameter_snapshot import list_agent_identity_snapshots
 
     presets = load_public_agent_presets()
     with _SEED_LOCK:
-        agents = directory.list_agents(include_archived=True, detail="summary")
+        agents = list_agent_identity_snapshots(include_archived=True)
         created: list[str] = []
         ids: list[str] = []
         for preset in presets:

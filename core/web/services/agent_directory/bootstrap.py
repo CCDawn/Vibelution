@@ -90,6 +90,17 @@ def _finish_platform_planner_seed(agent_id: str) -> None:
     )
 
 
+def _ensure_builtin_direct_session(agent: dict[str, Any]) -> None:
+    from core.web.services import session_service
+
+    session_id = str(agent.get("directSessionId") or "").strip()
+    if session_id and not session_service._is_session_workspace_intentionally_deleted(session_id):
+        return
+    session_service.ensure_agent_direct_session(
+        agent_id=agent["agentId"], title=agent["displayName"], created_by="deployment_bootstrap",
+    )
+
+
 def _ensure_platform_planner(agents: list[dict[str, Any]]) -> tuple[dict[str, Any], bool]:
     """Seed the Platform Planner coordinator; archived assets stay archived."""
     from core.web.services import agent_directory_service as directory, session_service
@@ -119,11 +130,7 @@ def _ensure_platform_planner(agents: list[dict[str, Any]]) -> tuple[dict[str, An
         # customized planner (or an archived one) is left untouched.
         if (planner.get("metadata") or {}).get(PLATFORM_PLANNER_SEED_COMPLETE_KEY) is not True:
             _finish_platform_planner_seed(planner["agentId"])
-        session_service.ensure_agent_direct_session(
-            agent_id=planner["agentId"],
-            title=planner["displayName"],
-            created_by="deployment_bootstrap",
-        )
+        _ensure_builtin_direct_session(planner)
     return planner, created
 
 
@@ -131,9 +138,10 @@ def ensure_builtin_agents() -> dict[str, Any]:
     """Seed public defaults once, without importing any operator's Agent data."""
     from core.web.services import agent_directory_service as directory
     from core.web.services import session_service, team_service
+    from .parameter_snapshot import list_agent_identity_snapshots
 
     with _BOOTSTRAP_LOCK:
-        agents = directory.list_agents(include_archived=True, detail="summary")
+        agents = list_agent_identity_snapshots(include_archived=True)
         created_ids: list[str] = []
         general = next(
             (agent for agent in agents if (agent.get("metadata") or {}).get("builtinPreset") == GENERAL_ASSISTANT_PRESET),
@@ -151,11 +159,7 @@ def ensure_builtin_agents() -> dict[str, Any]:
             )
             created_ids.append(general["agentId"])
         if general.get("status") != "archived":
-            session_service.ensure_agent_direct_session(
-                agent_id=general["agentId"],
-                title=general["displayName"],
-                created_by="deployment_bootstrap",
-            )
+            _ensure_builtin_direct_session(general)
 
         planner, planner_created = _ensure_platform_planner(agents)
         if planner_created:

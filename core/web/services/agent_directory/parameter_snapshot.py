@@ -38,6 +38,38 @@ def get_agent_parameter_snapshot(agent_id: str, *, include_archived: bool = True
         return copy.deepcopy(agent)
 
 
+def list_agent_identity_snapshots(*, include_archived: bool = True) -> list[dict[str, Any]]:
+    """Read detached identity/binding fields for internal startup discovery.
+
+    Use the repaired registry owner and list_agents' ordering/filtering. These
+    are internal records, not UI DTOs: no avatars, policy derivation, activity
+    hydration or per-Agent workspace reads are needed to find bundled assets.
+    """
+    from core.web.services import agent_directory_service as s
+
+    with s._STATE_LOCK:
+        state, _ = s._load_repaired_state_for_read()
+        agents = [
+            {
+                "agentId": str(agent.get("agentId") or "").strip(),
+                "agentCode": s._normalize_agent_code(agent.get("agentCode")) or s._fallback_agent_code(agent.get("agentId")),
+                "displayName": str(agent.get("displayName") or "").strip(),
+                "status": str(agent.get("status") or "active").strip() or "active",
+                "directSessionId": str(agent.get("directSessionId") or "").strip(),
+                "roleKey": s._normalize_role_key(agent.get("roleKey")) or s._infer_agent_role_key(agent),
+                "createdBy": str(agent.get("createdBy") or "").strip(),
+                "metadata": copy.deepcopy(agent.get("metadata") or {}),
+                "createdAt": str(agent.get("createdAt") or "").strip(),
+                "updatedAt": str(agent.get("updatedAt") or "").strip(),
+            }
+            for agent in state.get("agents") or []
+            if isinstance(agent, dict)
+            and (include_archived or str(agent.get("status") or "active") != "archived")
+        ]
+    agents.sort(key=lambda agent: str(agent.get("updatedAt") or agent.get("createdAt") or ""), reverse=True)
+    return agents
+
+
 def save_parameter_update(
     state: dict[str, Any], agent: dict[str, Any], previous_agent: dict[str, Any], *, kind: ParameterKind,
 ) -> bool:

@@ -137,17 +137,19 @@ def test_completed_marker_preserves_user_changes_and_lifecycle(fresh_deployment,
     if archive_after_seed:
         directory.archive_agent_instance(agent_id)
     before = directory.get_agent(agent_id, include_archived=True)
-    list_agents = directory.list_agents
+    from core.web.services.agent_directory import parameter_snapshot
+    list_agents = parameter_snapshot.list_agent_identity_snapshots
     queries = []
 
     def summaries(**kwargs):
         queries.append(kwargs)
         return list_agents(**kwargs)
 
-    monkeypatch.setattr(directory, "list_agents", summaries)
+    monkeypatch.setattr(parameter_snapshot, "list_agent_identity_snapshots", summaries)
+    monkeypatch.setattr(directory, "list_agents", lambda **kwargs: pytest.fail("seed discovery must not build UI projections"))
     assert public_presets.ensure_public_agent_presets() == {"publicPresetAgentIds": [agent_id], "createdAgentIds": []}
     assert directory.get_agent(agent_id, include_archived=True) == before
-    assert queries == [{"include_archived": True, "detail": "summary"}]
+    assert queries == [{"include_archived": True}]
 
 
 def test_interrupted_seed_resumes_same_identity_and_finishes_once(fresh_deployment, preset, monkeypatch):
