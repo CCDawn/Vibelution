@@ -22,6 +22,7 @@ from .reconcile_run import build_reconcile_run_offer
 from .resolve_human import build_resolve_human_offers
 from .retry_node import build_retry_node_offers
 from .start_node import build_start_node_offers
+from .run_scheduling import build_run_scheduling_offers
 from .revision_context import OfferRevisionContext
 
 def build_command_offers(
@@ -76,6 +77,7 @@ def build_command_offers(
     offers.append(build_reconcile_run_offer(run=run))
     offers.append(build_archive_run_offer(run=run))
     offers.append(build_cancel_run_offer(run=run))
+    offers.extend(build_run_scheduling_offers(run=run, attempts=attempts))
     offers.extend(build_knowledge_collection_offers(run=run, invocations=invocations))
     return offers
 

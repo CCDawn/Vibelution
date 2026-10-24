@@ -7,6 +7,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.routes.research import router as research_router
 from core.web.routes.team_workflows import research_runtime as research_runtime_module
 from core.web.services.team_workflow.research_runtime.formal_read_runtime import (
@@ -61,6 +62,7 @@ def test_snapshot_and_create_return_503_when_ledger_unavailable() -> None:
     snapshot = client.get(
         "/api/research/workflow-runs/run-missing/snapshot",
         params={"teamId": "research-team"},
+        headers={CONTROL_TOKEN_HEADER: get_control_token()},
     )
     assert snapshot.status_code == 503
     assert snapshot.json()["detail"]["code"] == "workflow_ledger_unavailable"

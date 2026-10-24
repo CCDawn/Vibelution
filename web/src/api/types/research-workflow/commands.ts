@@ -3,6 +3,8 @@
 export type WorkflowCommandKind =
   | "start_node"
   | "retry_node"
+  | "pause_run"
+  | "resume_run"
   | "cancel_node"
   | "resolve_human_task"
   | "rebind_node"
@@ -60,7 +62,8 @@ export function isOperatorGatedOffer(
   offer: Pick<CommandOffer, "requiresOperator" | "authorizationStatus"> | null | undefined,
 ): boolean {
   if (!offer) return false;
-  return Boolean(offer.requiresOperator) || offer.authorizationStatus === "operator_required";
+  return offer.authorizationStatus === "operator_required"
+    || (Boolean(offer.requiresOperator) && offer.authorizationStatus !== "authorized");
 }
 
 export type CommandReceipt = {

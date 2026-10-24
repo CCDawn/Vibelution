@@ -454,6 +454,17 @@ class AdapterDispatchWorker:
         return repaired
 
     def _handle(self, outbox: Any) -> None:
+        from .dispatch_governance import defer_dispatch_for_pause
+        # These durable continuations belong to execution already admitted
+        # before the hold. Keep its completion cursor intact and let it settle.
+        problem = json.loads(outbox.last_problem_json or "{}")
+        settling_execution = problem.get("code") in {
+            "agent_completion_dependency_pending", "live_turn_wait",
+        }
+        if not settling_execution and self._store.submit(lambda uow: defer_dispatch_for_pause(
+            uow.repository, action=outbox, owner=self._owner, now_ms=self._now(),
+        ), force_flush=True).result(timeout=30):
+            return
         action = PendingAction.from_dict(json.loads(outbox.payload_json))
         action = _heal_pending_action_identity(outbox, action)
         adapter = self._registry.get(action.action_kind)
@@ -1016,9 +1027,10 @@ class AdapterDispatchWorker:
                     )
                 )
             if (
-                action.node_id == "result_package"
-                or operator_baseline_terminal
-                or operator_round_terminal
+                run.status != RunStatus.PAUSED.value
+                and (action.node_id == "result_package"
+                     or operator_baseline_terminal
+                     or operator_round_terminal)
             ):
                 if operator_baseline_terminal:
                     completion_kind, terminal_reason = (
@@ -2124,14 +2136,15 @@ def _park_agent_route_for_human(
         problem_json=problem_json,
         finished_at_ms=now_ms,
     )
-    uow.repository.update_run_status(
-        action.run_id,
-        run.team_id,
-        RunStatus.WAITING_HUMAN.value,
-        now_ms,
-        active_node_id=action.node_id,
-        blocked_problem_json=problem_json,
-    )
+    if run.status != RunStatus.PAUSED.value:
+        uow.repository.update_run_status(
+            action.run_id,
+            run.team_id,
+            RunStatus.WAITING_HUMAN.value,
+            now_ms,
+            active_node_id=action.node_id,
+            blocked_problem_json=problem_json,
+        )
     uow.repository.insert_human_task(
         task_id=new_id("ht"),
         run_id=action.run_id,

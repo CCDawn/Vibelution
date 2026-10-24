@@ -58,6 +58,24 @@ from tests._support.workflow_ledger_helpers import (
 AUTH_KEY = "test-signing-key"
 
 
+@pytest.mark.parametrize("roles,authorized", [((), False), (("viewer",), False), (("operator",), True)])
+def test_scheduling_offer_authorization_uses_server_roles(roles, authorized):
+    from core.web.services.team_workflow.research_runtime.operator_authorization import server_operator_scope
+    offers = [CommandOffer(command=kind, node_id=None, available=True, label=kind.value,
+        reason_code="ready", blocker_ids=(), idempotency_key=kind.value, expected_run_version=7)
+        for kind in (WorkflowCommandKind.PAUSE_RUN, WorkflowCommandKind.RESUME_RUN)]
+    with server_operator_scope("trusted-principal", roles=roles):
+        envelopes = build_offer_authorizations(run_id="run-auth", run_version=7,
+            offers=offers, now_ms=FIXED_NOW_MS, key=AUTH_KEY)
+    for envelope in envelopes:
+        assert envelope["requiresOperator"] is True
+        assert envelope["authorizationStatus"] == ("authorized" if authorized else "operator_required")
+        assert verify_offer_authorization(envelope, key=AUTH_KEY, run_id="run-auth", now_ms=FIXED_NOW_MS)[0]
+    # Leaving the trusted request scope cannot leave a usable operator projection.
+    assert all(item["authorizationStatus"] == "operator_required" for item in build_offer_authorizations(
+        run_id="run-auth", run_version=7, offers=offers, now_ms=FIXED_NOW_MS, key=AUTH_KEY))
+
+
 def _invocation(
     invocation_id: str,
     *,
@@ -187,7 +205,8 @@ def _query(harness: CommandHarness) -> WorkflowQueryService:
     )
 
 
-def test_snapshot_projects_knowledge_invocation_badges(tmp_path: Path) -> None:
+def test_snapshot_projects_knowledge_invocation_badges(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("VIBELUTION_AUTO_ADVANCE_SWEEP_INTERVAL_MS", "30000")
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
         _seed_run_with_invocations(harness)

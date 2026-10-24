@@ -18,7 +18,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from core.research.workflow.contracts import ExecutionReceipt
+from core.research.workflow.contracts import WorkflowCommandKind
 from core.research.workflow.models import WorkflowRunStatus
 from core.research.workflow.transitions import (
     RunStatus,
@@ -109,6 +112,87 @@ def _run_record(harness: GraphHarness):
 
 
 # --------------------------------------------------------------------- status
+
+
+def test_manual_pause_still_gates_dispatch_with_automatic_governance_disabled(tmp_path):
+    graph = GraphHarness(tmp_path)
+    try:
+        graph.seed()
+        graph.commands.service.submit(graph.commands.request())
+        graph.commands.service.submit(graph.commands.request(
+            command=WorkflowCommandKind.PAUSE_RUN, node_id=None,
+            expected_run_version=2, idempotency_key="manual-pause-with-governance-off",
+        ))
+        worker = _build_worker(graph, governance=GovernancePolicy.disabled())
+        assert worker.run_claim_one()
+        pending = graph.commands.store.list_pending_outbox("run-test")
+        assert len(pending) == 1
+        assert pending[0].action_kind == "graph_dispatch"
+        assert json.loads(pending[0].last_problem_json)["code"] == "run_paused"
+        assert pending[0].attempt_count == 0
+        assert graph.latest_adapter_pending() is None
+    finally:
+        graph.close()
+
+
+@pytest.mark.parametrize("action_kind", ["graph_dispatch", "adapter_dispatch"])
+def test_paused_expired_lease_recovery_preserves_prior_execution_attempt_count(tmp_path, action_kind):
+    graph = GraphHarness(tmp_path)
+    try:
+        graph.seed()
+        graph.commands.service.submit(graph.commands.request())
+        ports = None
+        if action_kind == "adapter_dispatch":
+            from core.web.services.team_workflow.research_runtime.action_registry import ActionRegistry
+            from core.web.services.team_workflow.research_runtime.adapter_dispatch_worker import AdapterDispatchWorker
+            from core.web.services.team_workflow.research_runtime.adapters.domain_adapters import AgentActionAdapter
+            from tests._support.adapter_fakes import FakeDomainPorts
+            assert graph.worker.run_claim_one()
+            ports = FakeDomainPorts()
+            registry = ActionRegistry()
+            registry.register(AgentActionAdapter(ports))
+            worker = AdapterDispatchWorker(store=graph.commands.store, registry=registry,
+                ports=ports, now_provider=lambda: FIXED_NOW_MS + 1000)
+        else:
+            worker = _build_worker(graph, governance=GovernancePolicy.disabled())
+        action = graph.commands.store.list_pending_outbox("run-test")[0]
+        assert action.action_kind == action_kind
+        graph.commands.service.submit(graph.commands.request(
+            command=WorkflowCommandKind.PAUSE_RUN, node_id=None,
+            expected_run_version=2, idempotency_key="pause-before-lease-recovery",
+        ))
+        graph.commands.store.submit(lambda uow: uow.repository.execute(
+            "UPDATE outbox_actions SET status='leased', attempt_count=2, "
+            "lease_owner='expired-worker', lease_expires_at_ms=? WHERE action_id=?",
+            (FIXED_NOW_MS, action.action_id),
+        ), force_flush=True).result(timeout=10)
+        assert worker.run_claim_one()
+        held = graph.commands.store.read(lambda repo: repo.get_outbox(action.action_id))
+        assert held.status == "pending"
+        assert held.attempt_count == 2
+        assert json.loads(held.last_problem_json)["code"] == "run_paused"
+        assert graph.commands.store.read(lambda repo: repo.execute(
+            "SELECT lease_recovery_count FROM outbox_actions WHERE action_id=?",
+            (action.action_id,),
+        ).fetchone()[0]) == 1
+        if ports is not None:
+            assert ports.calls == []
+        else:
+            assert graph.latest_adapter_pending() is None
+        graph.commands.service.submit(graph.commands.request(
+            command=WorkflowCommandKind.RESUME_RUN, node_id=None,
+            expected_run_version=3, idempotency_key="resume-after-lease-recovery",
+        ))
+        assert worker.run_claim_one()
+        finished = graph.commands.store.read(lambda repo: repo.get_outbox(action.action_id))
+        assert finished.status == "succeeded"
+        assert finished.attempt_count == 3  # only this pending execution claim adds one
+        if ports is not None:
+            assert ports.calls.count("create_agent_task") == 1
+        else:
+            assert graph.latest_adapter_pending() is not None
+    finally:
+        graph.close()
 
 
 def test_paused_is_a_recoverable_hold_never_reached_from_blocked() -> None:

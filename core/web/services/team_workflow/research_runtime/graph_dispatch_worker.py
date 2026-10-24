@@ -306,10 +306,6 @@ class GraphDispatchWorker:
             )
             return 0
 
-    def _run_is_paused(self, run_id: str) -> bool:
-        run = self._store.get_run(run_id)
-        return run is not None and str(run.status) == "paused"
-
     def _node_type_wip_full(
         self, node_id: str, node_run_id: str, wip_limit: int
     ) -> bool:
@@ -599,26 +595,18 @@ class GraphDispatchWorker:
         except ChallengeCupMaintenanceError as exc:
             self._defer_for_maintenance(action, dispatch, str(exc))
             return
-        # P2-e governance gates. Only NEW work (a ``start`` dispatch) is
-        # gated: settlement receipts of in-flight nodes keep landing so a
-        # paused run waits for its in-flight work to settle, exactly like the
-        # reference scheduler drains its active loops before pausing.
-        if dispatch.dispatch_kind == "start":
-            if self._governance.pause_gates_enabled and self._run_is_paused(
-                dispatch.run_id
-            ):
-                self._defer_gated_dispatch(
-                    action,
-                    dispatch,
-                    retry_ms=GATED_DISPATCH_RETRY_MS,
-                    problem={
-                        "code": "run_paused",
-                        "detail": "run is paused; dispatch deferred until resume",
-                    },
-                    event_code="graph_dispatch.paused_deferred",
-                    outcome="paused_deferred",
-                )
+        # New graph work waits during a hold. Failed/blocked receipts still
+        # settle; successful adapter receipts have already landed in Ledger
+        # and their graph action waits before advancing to a successor.
+        if dispatch.dispatch_kind == "start" or (
+            dispatch.receipt is not None and dispatch.receipt.outcome == "succeeded"
+        ):
+            from .dispatch_governance import defer_dispatch_for_pause
+            if self._submit(lambda uow: defer_dispatch_for_pause(
+                uow.repository, action=action, owner=self._owner, now_ms=self._now(),
+            )).result(timeout=30):
                 return
+        if dispatch.dispatch_kind == "start":
             if self._governance.wip_enabled:
                 wip_limit = self._governance.wip_limit_for(dispatch.node_id)
                 if wip_limit is not None and self._node_type_wip_full(
@@ -960,6 +948,12 @@ class GraphDispatchWorker:
             run = self._store.get_run(dispatch.run_id)
 
             def ack_only(uow):
+                from .dispatch_governance import defer_dispatch_for_pause
+                if defer_dispatch_for_pause(
+                    uow.repository, action=action, owner=self._owner, now_ms=now_ms,
+                    execution_started=True,
+                ):
+                    return
                 acked = uow.repository.ack_outbox(
                     action.action_id, self._owner, now_ms
                 )
@@ -1143,15 +1137,18 @@ class GraphDispatchWorker:
         now_ms = self._now()
 
         def mutate(uow):
+            from .dispatch_governance import defer_dispatch_for_pause
+            if action is not None and defer_dispatch_for_pause(
+                uow.repository, action=action, owner=self._owner, now_ms=now_ms,
+                execution_started=True,
+            ):
+                return
             if action is not None:
                 acked = uow.repository.ack_outbox(action.action_id, self._owner, now_ms)
                 if not acked:
                     return
-            # P2-e: a pause committed between the pre-invoke gate and this
-            # successor commit must hold — the paused run does not gain new
-            # node dispatches. The upstream accept already committed, so the
-            # graph checkpoint simply waits interrupted at this successor
-            # until an ordinary retry/resume redrive re-derives the dispatch.
+            # Legacy recovery calls without an outbox identity still cannot
+            # create a new successor while the run is paused.
             paused_run = uow.repository.get_run(dispatch.run_id)
             if paused_run is not None and str(paused_run.status) == "paused":
                 return
@@ -1910,6 +1907,12 @@ class GraphDispatchWorker:
         )
 
         def mutate(uow):
+            from .dispatch_governance import defer_dispatch_for_pause
+            if defer_dispatch_for_pause(
+                uow.repository, action=action, owner=self._owner, now_ms=now_ms,
+                execution_started=True,
+            ):
+                return
             acked = uow.repository.ack_outbox(action.action_id, self._owner, now_ms)
             if not acked:
                 return

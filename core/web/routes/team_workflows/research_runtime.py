@@ -451,14 +451,18 @@ def research_workflow_activate_experiment(
 )
 def research_workflow_run_snapshot(
     run_id: str,
+    request: Request,
     team_id: str = Query(..., alias="teamId", min_length=1),
 ) -> dict:
     try:
-        snapshot = get_query_service().get_snapshot(
-            team_id=_canonical_team_id(team_id),
-            run_id=run_id,
-        )
-        return snapshot.to_dict()
+        with server_operator_scope_from_http(request):
+            snapshot = get_query_service().get_snapshot(
+                team_id=_canonical_team_id(team_id),
+                run_id=run_id,
+            )
+            return snapshot.to_dict()
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail={"code": "command_forbidden"}) from exc
     except Exception as exc:
         raise _map_query_error(exc) from exc
 
@@ -471,14 +475,18 @@ def research_workflow_run_snapshot(
 def research_workflow_node_detail(
     run_id: str,
     node_id: str,
+    request: Request,
     team_id: str = Query(..., alias="teamId", min_length=1),
 ) -> dict:
     try:
-        return get_query_service().get_node_detail(
-            team_id=_canonical_team_id(team_id),
-            run_id=run_id,
-            node_id=node_id,
-        ).to_dict()
+        with server_operator_scope_from_http(request):
+            return get_query_service().get_node_detail(
+                team_id=_canonical_team_id(team_id),
+                run_id=run_id,
+                node_id=node_id,
+            ).to_dict()
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail={"code": "command_forbidden"}) from exc
     except Exception as exc:
         raise _map_query_error(exc) from exc
 

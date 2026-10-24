@@ -87,11 +87,16 @@ export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspector
     ? pickPrimaryCommandOffer(offers)
     : null;
   const primaryOffer = props.primaryActionOwnedByWorkspace ? null : selectedPrimaryOffer;
+  const schedulingOffers = isCurrentTask ? offers.filter((offer) => (
+    offer.command === "pause_run" || offer.command === "resume_run"
+  )) : [];
   const restOffers = props.primaryActionOwnedByWorkspace
     ? []
     : isCurrentTask && adapter.actorKind === "agent"
       ? remainingCommandOffers(offers, selectedPrimaryOffer)
       : isCurrentTask ? offers : [];
+  const visibleSecondaryOffers = (!primaryOffer || primaryOffer.available ? restOffers : [])
+    .filter((offer) => offer.command !== "pause_run" && offer.command !== "resume_run");
   const showHypothesisNav = Boolean(
     props.onNavigateHypothesis
     && (props.hypothesisNavLabel || (primaryOffer && isHypothesisFirstMeetingBlocker(primaryOffer))),
@@ -191,7 +196,7 @@ export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspector
           disabled primary with its reason, not a row of dead buttons). */}
       <NodeCommandSection
         advanced={adapter.actorKind === "agent"}
-        offers={!primaryOffer || primaryOffer.available ? restOffers : []}
+        offers={[...visibleSecondaryOffers, ...schedulingOffers]}
         busy={props.busy}
         onOffer={props.onOffer}
         lang={lang}

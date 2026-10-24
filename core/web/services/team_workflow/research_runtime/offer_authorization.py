@@ -11,8 +11,9 @@ Signature scheme (deliberately minimal):
   ``expectedRunVersion``/``signedAtMs``/``expiresAtMs``, keyed by the existing
   web control-plane secret (``core.web.control.get_control_token`` — env
   ``VIBELUTION_WEB_CONTROL_TOKEN`` or a per-process generated secret; never
-  committed).  ``authorizationStatus`` is ``authorized`` only when the server
-  signed the exact (scope, run version) pair and the window has not expired.
+  committed).  Operator authorization is projected from the trusted request
+  principal and per-command role checks. Commands independently authorize on
+  submission; an offer never grants a write capability.
 """
 
 from __future__ import annotations
@@ -168,6 +169,10 @@ def build_offer_authorizations(
     signed_at = int(now_ms if now_ms is not None else time.time() * 1000)
     expires_at = signed_at + int(ttl_ms)
     operator_only = operator_only_command_ids()
+    from .operator_authorization import current_server_operator
+    from .operator_permissions import operator_has_privileged_role, require_operator_permission
+
+    operator = current_server_operator()
     authorizations: list[dict[str, Any]] = []
     for offer in offers:
         raw_command = getattr(offer, "command", None)
@@ -179,6 +184,16 @@ def build_offer_authorizations(
         if not idempotency_key or not command_value:
             continue
         requires_operator = command_value in operator_only
+        authorized = not requires_operator
+        if requires_operator and operator is not None:
+            try:
+                require_operator_permission(
+                    operator_id=operator.operator_id, roles=operator.roles, command=command_value,
+                )
+                # archive_run has an additional role gate in the command service.
+                authorized = command_value != "archive_run" or operator_has_privileged_role(operator.roles)
+            except PermissionError:
+                authorized = False
         signature = sign_offer_authorization(
             key=resolved_key,
             run_id=run_id,
@@ -196,14 +211,11 @@ def build_offer_authorizations(
                 "nodeId": node_id,
                 "requiresOperator": requires_operator,
                 "authorizationStatus": (
-                    AUTHORIZATION_STATUS_OPERATOR_REQUIRED
-                    if requires_operator
-                    else AUTHORIZATION_STATUS_AUTHORIZED
+                    AUTHORIZATION_STATUS_AUTHORIZED if authorized
+                    else AUTHORIZATION_STATUS_OPERATOR_REQUIRED
                 ),
                 "authorizationReason": (
-                    OPERATOR_PERMISSION_REASON
-                    if requires_operator
-                    else AUTHORIZED_REASON
+                    AUTHORIZED_REASON if authorized else OPERATOR_PERMISSION_REASON
                 ),
                 "signedAt": signed_at,
                 "expiresAt": expires_at,

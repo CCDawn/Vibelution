@@ -264,6 +264,8 @@ _OPERATOR_ONLY_COMMANDS = frozenset(
     {
         WorkflowCommandKind.CANCEL_NODE,
         WorkflowCommandKind.CANCEL_RUN,
+        WorkflowCommandKind.PAUSE_RUN,
+        WorkflowCommandKind.RESUME_RUN,
         WorkflowCommandKind.REBIND_NODE,
         WorkflowCommandKind.EXTEND_BUDGET,
         WorkflowCommandKind.RESOLVE_HUMAN_TASK,
@@ -785,6 +787,8 @@ class WorkflowCommandService:
         self._handlers: dict[WorkflowCommandKind, Callable] = {
             WorkflowCommandKind.START_NODE: self._handle_start_node,
             WorkflowCommandKind.RETRY_NODE: self._handle_retry_node,
+            WorkflowCommandKind.PAUSE_RUN: self._handle_run_scheduling,
+            WorkflowCommandKind.RESUME_RUN: self._handle_run_scheduling,
             WorkflowCommandKind.CANCEL_NODE: self._handle_cancel_node,
             WorkflowCommandKind.CANCEL_RUN: self._handle_cancel_run,
             WorkflowCommandKind.RESOLVE_HUMAN_TASK: self._handle_resolve_human_task,
@@ -913,7 +917,10 @@ class WorkflowCommandService:
                 ),
                 force_flush=True,
             )
-        elif request.command in {WorkflowCommandKind.CANCEL_RUN, WorkflowCommandKind.ARCHIVE_RUN}:
+        elif request.command in {
+            WorkflowCommandKind.CANCEL_RUN, WorkflowCommandKind.ARCHIVE_RUN,
+            WorkflowCommandKind.PAUSE_RUN, WorkflowCommandKind.RESUME_RUN,
+        }:
             future = self._store.submit(
                 lambda uow: handler(
                     uow, request, request_hash, operator_id=authorized_operator_id,
@@ -1415,6 +1422,56 @@ class WorkflowCommandService:
         )
 
     # ------------------------------------------------------- handlers
+
+    def _handle_run_scheduling(
+        self, uow, request: CommandRequest, request_hash: str, *, operator_id: str,
+    ) -> CommandReceipt:
+        from core.research.workflow.transitions import can_pause_run
+        from .dispatch_governance import _commit_pause, resume_paused_run
+
+        run = uow.repository.get_run(request.run_id)
+        if run is None:
+            raise RunNotFoundError(request.run_id)
+        pausing = request.command is WorkflowCommandKind.PAUSE_RUN
+        if request.node_id:
+            raise WorkflowCommandError("run scheduling commands do not take nodeId")
+        if pausing:
+            if run.status not in {RunStatus.RUNNING.value, RunStatus.WAITING_HUMAN.value} or not can_pause_run(RunStatus(run.status)):
+                raise CommandNotAllowedError("only live scheduling can be paused")
+            if not uow.repository.list_attempts(request.run_id):
+                raise CommandNotAllowedError("run has not started scheduling")
+        elif run.status != RunStatus.PAUSED.value:
+            raise CommandNotAllowedError("only a paused run can be resumed")
+        now_ms = self._clock()
+        accepted_version, sequence = _bump(uow, request, event_count=1, now_ms=now_ms)
+        command_id = new_id("cmd")
+        uow.repository.insert_command(_command_record(
+            command_id=command_id, request=request, request_hash=request_hash,
+            accepted_run_version=accepted_version, now_ms=now_ms,
+        ))
+        uow.repository.insert_event(_event_record(
+            run_id=request.run_id, sequence=sequence, event_id=new_id("evt"),
+            run_version=accepted_version, event_type="command_accepted",
+            correlation_id=request.idempotency_key,
+            payload={"commandId": command_id, "command": request.command.value},
+            now_ms=now_ms,
+        ))
+        # Re-read after CAS so governance events quote the accepted version.
+        run = uow.repository.get_run(request.run_id)
+        if pausing:
+            changed = _commit_pause(uow.repository, run=run, problem={
+                "code": "operator_paused", "pauseKind": "operator",
+                "detail": str(request.payload.get("reason") or "operator paused scheduling")[:500],
+            }, now_ms=now_ms, actor_id=operator_id, actor_type="operator")
+        else:
+            target = RunStatus.WAITING_HUMAN if uow.repository.list_pending_human_tasks(request.run_id) else RunStatus.RUNNING
+            changed = resume_paused_run(uow.repository, run_id=request.run_id,
+                team_id=request.team_id, now_ms=now_ms, actor_id=operator_id,
+                actor_type="operator", target=target)
+            uow.after_commit(self._wake_worker)
+        if not changed:
+            raise CommandNotAllowedError("run scheduling changed before acceptance")
+        return _receipt(uow, request, command_id, accepted_version, sequence + 1, now_ms)
 
     def _handle_start_node(
         self, uow, request: CommandRequest, request_hash: str

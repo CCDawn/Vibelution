@@ -4,11 +4,19 @@ import { describe, expect, it } from "vitest";
 
 import type { ResearchWorkflowSnapshot } from "./core";
 import type { CommandOffer } from "./commands";
+import { isOperatorGatedOffer } from "./commands";
 import type { WorkflowEventEnvelope } from "./events";
 
 const coreSource = readFileSync(resolve(import.meta.dirname, "core.ts"), "utf8");
 
 describe("researchWorkflow formal contracts (T6)", () => {
+  it("requires an explicit authorized envelope to enable an operator offer", () => {
+    expect(isOperatorGatedOffer({ requiresOperator: true })).toBe(true);
+    expect(isOperatorGatedOffer({ requiresOperator: true, authorizationStatus: "operator_required" })).toBe(true);
+    expect(isOperatorGatedOffer({ requiresOperator: true, authorizationStatus: "unknown" })).toBe(true);
+    expect(isOperatorGatedOffer({ requiresOperator: true, authorizationStatus: "authorized" })).toBe(false);
+    expect(isOperatorGatedOffer({ requiresOperator: false, authorizationStatus: "operator_required" })).toBe(true);
+  });
   it("snapshot type forbids UI-only fields in source", () => {
     expect(coreSource).not.toMatch(/selectedNodeId\s*:/);
     expect(coreSource).not.toMatch(/viewport\s*:/);

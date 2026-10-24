@@ -13,6 +13,8 @@ from ._canonical import sha256_hex
 class WorkflowCommandKind(str, Enum):
     START_NODE = "start_node"
     RETRY_NODE = "retry_node"
+    PAUSE_RUN = "pause_run"
+    RESUME_RUN = "resume_run"
     CANCEL_NODE = "cancel_node"
     RESOLVE_HUMAN_TASK = "resolve_human_task"
     REBIND_NODE = "rebind_node"

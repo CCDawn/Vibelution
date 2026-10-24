@@ -1100,6 +1100,7 @@ class WorkflowLedgerRepository:
                     record,
                     status="leased",
                     attempt_count=claimed_attempt,
+                    claim_attempt_incremented=record.status == "pending",
                     lease_owner=owner,
                     lease_expires_at_ms=now_ms + lease_ms,
                     updated_at_ms=now_ms,

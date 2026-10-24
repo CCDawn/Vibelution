@@ -59,6 +59,26 @@ Adapter 执行 → Domain read-back → Receipt → Handoff → 下一节点 Rea
 
 ## 核心流程
 
+### 手动暂停与恢复调度
+
+正式 `/research/workflow-runs/{run_id}/commands` 接受 `pause_run` 与 `resume_run`，
+沿用 team、server operator 角色、`expectedRunVersion`、幂等键与原有命令回执；
+这是兼容新增输入枚举和 command offers，不改变已有请求或回执字段。
+`pause_run` 只接受已经产生节点尝试的 `running` / `waiting_human` Run，
+不启动 `created` Run。`resume_run` 保留同一个 Run、节点尝试、Session 和 Turn；
+仍有待决人工任务时恢复到 `waiting_human`，否则回到 `running`。
+
+暂停只阻止新的 graph / adapter 派发。在飞执行继续落账，已有完成游标和 live-turn
+等待继续按原动作收口；完成回执仍按现有最长 5 秒重排窗口读取，不要求暂停期间即时唤醒。
+真实失败仍进入既有 `blocked`，成功收口不自动解除暂停。暂停与后继提交并发时，
+graph outbox 保留待恢复动作；恢复后复用 checkpoint，避免再次调用已完成的图步骤。
+恢复事务只提前本 Run 中因 `run_paused` 重排且仍为 pending 的 graph / adapter 动作，
+不清重试计数、不抢 leased 动作、不缩短其他退避；提交成功后才唤醒 worker。
+界面复用 snapshot / node detail 的 command offers 与节点通用操作区。
+只读投影沿用经 control token 验证的 server operator；有对应命令权限时才签发
+`authorized`，缺少上下文或角色不足仍显示 operator 权限门。提交时独立重新鉴权，
+快照签名、客户端身份头和 `requestedBy` 均不能赋予写权限。
+
 ```text
 Command transaction (WorkflowCommandService)
   -> graph_dispatch outbox (graph_dispatch_factory.py 唯一构造)
@@ -98,8 +118,8 @@ Command transaction (WorkflowCommandService)
   repository 层强制校验（`repository._require_*_transition`）。
 - `fork_revision` 与人工 `revise` 决策在同一 Ledger 事务内创建 child Run（parent lineage），
   并产出 child `graph_dispatch`；不再把 revise 压成 failed receipt。
-- 高影响命令（cancel/rebind/extend_budget/resolve_human/fork_revision/reconcile）要求
-  可验证的 operator 身份（`requested_by.actor_type`）。
+- 高影响命令（pause/resume/cancel/rebind/extend_budget/resolve_human/fork_revision/reconcile）
+  要求可信 server operator 上下文，并按命令执行角色授权。
 - Adapter 用冻结 `RunAgentBindingSnapshot` 解析 agentId/roleKey（不再 `agent-{nodeId}` 伪造）；
   budget `reserve_budget` 返回值贯穿到 budget_receipt，commit 后 `settle_budget` 落 ledger。
 

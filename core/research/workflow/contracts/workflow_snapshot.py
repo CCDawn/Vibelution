@@ -337,6 +337,24 @@ class CommandOfferAuthorization:
         }
 
 
+def _serialize_command_offers(
+    offers: tuple[CommandOffer, ...],
+    authorizations: tuple[CommandOfferAuthorization, ...],
+) -> list[dict[str, Any]]:
+    auth_by_key = {item.idempotency_key: item for item in authorizations}
+    serialized: list[dict[str, Any]] = []
+    for offer in offers:
+        payload = offer.to_dict()
+        authorization = auth_by_key.get(str(offer.idempotency_key))
+        if authorization is not None:
+            merged = authorization.to_dict()
+            # The offer owns its expected version; authorization adds evidence.
+            merged.pop("expectedRunVersion", None)
+            payload.update(merged)
+        serialized.append(payload)
+    return serialized
+
+
 @dataclass(frozen=True, slots=True)
 class ResearchWorkflowNodeDetail:
     run_id: str
@@ -366,6 +384,7 @@ class ResearchWorkflowNodeDetail:
     root_session: Mapping[str, Any] | None = None
     scoped_sessions: tuple[Mapping[str, Any], ...] = ()
     blocked_reason: str = ""
+    command_authorizations: tuple[CommandOfferAuthorization, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -383,7 +402,7 @@ class ResearchWorkflowNodeDetail:
                 self.latest_attempt.to_dict() if self.latest_attempt is not None else None
             ),
             "attempts": [item.to_dict() for item in self.attempts],
-            "commandOffers": [offer.to_dict() for offer in self.command_offers],
+            "commandOffers": _serialize_command_offers(self.command_offers, self.command_authorizations),
             "latestEventSequence": self.latest_event_sequence,
             "generatedAt": self.generated_at,
             "agentId": self.agent_id,
@@ -439,20 +458,7 @@ class ResearchWorkflowSnapshot:
     command_authorizations: tuple[CommandOfferAuthorization, ...] = ()
 
     def _serialized_command_offers(self) -> list[dict[str, Any]]:
-        auth_by_key = {
-            item.idempotency_key: item for item in self.command_authorizations
-        }
-        offers: list[dict[str, Any]] = []
-        for offer in self.command_offers:
-            payload = offer.to_dict()
-            authorization = auth_by_key.get(str(offer.idempotency_key))
-            if authorization is not None:
-                merged = authorization.to_dict()
-                # expectedRunVersion already exists on the offer payload.
-                merged.pop("expectedRunVersion", None)
-                payload.update(merged)
-            offers.append(payload)
-        return offers
+        return _serialize_command_offers(self.command_offers, self.command_authorizations)
 
     def to_dict(self) -> dict[str, Any]:
         return {

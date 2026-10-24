@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -104,6 +104,8 @@ class OutboxRecord:
     last_problem_json: str | None
     created_at_ms: int
     updated_at_ms: int
+    # Local provenance of this claim result, not a persisted row/API field.
+    claim_attempt_incremented: bool = field(default=False, compare=False, repr=False)
 
 
 @dataclass(frozen=True)

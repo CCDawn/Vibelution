@@ -10,6 +10,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.routes.team_workflows import research_runtime as research_runtime_module
 from core.web.routes.team_workflows.research_runtime_models import (
     ResearchWorkflowBindingConfigResponse,
@@ -343,7 +344,8 @@ def test_research_runtime_json_routes_keep_unknown_fields(monkeypatch) -> None:
             return _Snapshot()
 
     monkeypatch.setattr(research_runtime_module, "get_query_service", lambda: _Query())
-    snapshot = client.get("/api/research/workflow-runs/run-1/snapshot", params={"teamId": "research-team"})
+    snapshot = client.get("/api/research/workflow-runs/run-1/snapshot", params={"teamId": "research-team"},
+        headers={CONTROL_TOKEN_HEADER: get_control_token()})
     assert snapshot.status_code == 200
     assert snapshot.json() == expected_snapshot
 
@@ -548,6 +550,7 @@ def test_research_runtime_node_detail_route_reads_scoped_sessions_from_formal_le
         response = client.get(
             f"/api/research/workflow-runs/{run_id}/nodes/hypothesis_design",
             params={"teamId": "research-team"},
+            headers={CONTROL_TOKEN_HEADER: get_control_token()},
         )
 
     assert response.status_code == 200, response.text
@@ -677,6 +680,7 @@ def test_research_runtime_budget_projects_canonical_receipt_usage(
         snapshot_response = client.get(
             f"/api/research/workflow-runs/{run_id}/snapshot",
             params={"teamId": "research-team"},
+            headers={CONTROL_TOKEN_HEADER: get_control_token()},
         )
 
     assert response.status_code == 200, response.text

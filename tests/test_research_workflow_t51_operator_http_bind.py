@@ -31,6 +31,83 @@ def _baseline_run_input() -> dict:
     return json.loads(fixture_path.read_text(encoding="utf-8"))["runInput"]
 
 
+def _scheduling_client(tmp_path, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from tests._support.command_helpers import CommandHarness
+    from core.web.services.team_workflow.research_runtime.query_service import WorkflowQueryService
+    harness = CommandHarness(tmp_path / "ledger.sqlite")
+    harness.seed_run()
+    harness.service.submit(harness.request())
+    query = WorkflowQueryService(store=harness.store, readiness_service=harness.readiness,
+        readiness_context=lambda: harness.context)
+    monkeypatch.setattr(research_runtime_routes, "get_query_service", lambda: query)
+    monkeypatch.setattr(research_runtime_routes, "get_command_service", lambda: harness.command_service)
+    app = FastAPI()
+    app.include_router(research_runtime_routes.router, prefix="/api")
+    return TestClient(app), harness
+
+
+@pytest.mark.parametrize("suffix", ["snapshot", "nodes/problem_understanding"])
+@pytest.mark.parametrize("credentials", ["missing", "invalid", "forged_operator"])
+def test_scheduling_offer_get_requires_control_principal(tmp_path, monkeypatch, suffix, credentials):
+    client, harness = _scheduling_client(tmp_path, monkeypatch)
+    headers = ({CONTROL_TOKEN_HEADER: "invalid-token"} if credentials == "invalid" else
+        {OPERATOR_ID_HEADER: "forged", OPERATOR_ROLES_HEADER: "admin"} if credentials == "forged_operator" else {})
+    try:
+        response = client.get(f"/api/research/workflow-runs/run-test/{suffix}?teamId=research-team", headers=headers)
+        assert response.status_code == 403
+        assert response.json()["detail"]["code"] == "command_forbidden"
+    finally:
+        client.close()
+        harness.close()
+
+
+@pytest.mark.parametrize("role", ["operator", "viewer"])
+def test_scheduling_offer_get_and_post_use_same_server_authority(tmp_path, monkeypatch, role):
+    from core.web.services.team_workflow.research_runtime.offer_authorization import verify_offer_authorization
+    monkeypatch.setenv(CONTROL_OPERATOR_ROLES_ENV, role)
+    client, harness = _scheduling_client(tmp_path, monkeypatch)
+    headers = {CONTROL_TOKEN_HEADER: get_control_token(),
+        OPERATOR_ID_HEADER: "forged-operator", OPERATOR_ROLES_HEADER: "admin"}
+    try:
+        attempts = harness.store.list_attempts("run-test")
+        response = client.get("/api/research/workflow-runs/run-test/snapshot?teamId=research-team", headers=headers)
+        assert response.status_code == 200, response.text
+        offer = next(o for o in response.json()["commandOffers"] if o["command"] == "pause_run")
+        assert offer["requiresOperator"] is True
+        assert offer["authorizationStatus"] == ("authorized" if role == "operator" else "operator_required")
+        assert verify_offer_authorization(offer, key=get_control_token(), run_id="run-test")[0]
+        projected_node = client.get("/api/research/workflow-runs/run-test/nodes/problem_understanding?teamId=research-team", headers=headers)
+        assert projected_node.status_code == 200
+        node_offer = next(o for o in projected_node.json()["commandOffers"] if o["command"] == "pause_run")
+        assert node_offer["authorizationStatus"] == offer["authorizationStatus"]
+        body = {key: offer[key] for key in ("command", "nodeId", "expectedRunVersion", "idempotencyKey", "payload")}
+        body["teamId"] = "research-team"
+        result = client.post("/api/research/workflow-runs/run-test/commands", headers=headers, json=body)
+        if role == "viewer":
+            assert result.status_code == 403
+            assert harness.store.get_run("run-test").status == "running"
+            return
+        assert result.status_code == 202, result.text
+        assert harness.store.get_run("run-test").status == "paused"
+        detail = client.get("/api/research/workflow-runs/run-test/nodes/problem_understanding?teamId=research-team", headers=headers)
+        assert detail.status_code == 200, detail.text
+        resume = next(o for o in detail.json()["commandOffers"] if o["command"] == "resume_run")
+        assert resume["available"] is True
+        assert resume["requiresOperator"] is True
+        assert resume["authorizationStatus"] == "authorized"
+        body = {key: resume[key] for key in ("command", "nodeId", "expectedRunVersion", "idempotencyKey", "payload")}
+        body["teamId"] = "research-team"
+        result = client.post("/api/research/workflow-runs/run-test/commands", headers=headers, json=body)
+        assert result.status_code == 202, result.text
+        assert harness.store.get_run("run-test").status == "running"
+        assert harness.store.list_attempts("run-test") == attempts
+    finally:
+        client.close()
+        harness.close()
+
+
 def _seeded_service(tmp_path: Path):
     store = WorkflowRunStore(tmp_path / "runs")
     svc = reset_research_workflow_runtime_service_for_tests(

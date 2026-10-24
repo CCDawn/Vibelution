@@ -9,8 +9,8 @@ loop; here the hold must survive process restarts, so it is a ledger status):
   from the ledger; at ``max_consecutive_errors`` the run transitions to
   ``PAUSED`` with a structured reason. Like the reference, the pause waits
   for in-flight work to settle: nothing in flight is cancelled, and only
-  NEW work (``start`` dispatches) is gated off — settlement receipts of
-  already-running nodes keep landing.
+  NEW graph/adapter work is gated off — settlement receipts of already-running
+  nodes keep landing, while their graph continuations wait for resume.
 - **Deadlock pause** — a serial maintenance sweep classifies live runs whose
   ready set is empty (no active attempt, no queued outbox action, no
   accepted-handoff successor awaiting repair) while a blocked-node inventory
@@ -28,8 +28,8 @@ loop; here the hold must survive process restarts, so it is a ledger status):
 PAUSED is a recoverable hold, not a failure: ``resume_from_pause`` (and the
 ordinary start/retry command path, which writes ``RUNNING``) clears it.
 
-Behavior conservation: with no consecutive errors, no deadlock and no WIP
-limits configured, none of these paths mutate any ledger row.
+Behavior conservation: with no explicit hold, consecutive errors, deadlock or
+WIP limits, none of these paths mutate any ledger row.
 """
 
 from __future__ import annotations
@@ -74,6 +74,34 @@ DEADLOCK_SWEEP_LIMIT = 100
 CONSECUTIVE_ERRORS_PAUSE_CODE = "consecutive_errors_paused"
 DEADLOCK_PAUSE_CODE = "deadlock_paused"
 RUN_PAUSED_EVENT_TYPE = "run_paused"
+
+
+def defer_dispatch_for_pause(
+    repository: Any, *, action: Any, owner: str, now_ms: int,
+    execution_started: bool = False,
+) -> bool:
+    """Atomically retain this lease as pending while its run is held.
+
+    The status read and requeue share the writer transaction with resume, so
+    resume cannot race a late requeue into another sixty-second sleep.
+    """
+    run = repository.get_run(action.run_id)
+    if run is None or str(run.status) != RunStatus.PAUSED.value:
+        return False
+    requeued = repository.requeue_outbox(
+        action.action_id, owner, now_ms,
+        retry_at_ms=now_ms + GATED_DISPATCH_RETRY_MS,
+        problem_json=json.dumps({"code": "run_paused", "detail": "scheduling held until resume"}),
+    )
+    if requeued and not execution_started and getattr(action, "claim_attempt_incremented", False):
+        # Only pending -> leased claims add an execution attempt. Recovering
+        # an expired lease preserves its count, so it must never be decremented.
+        repository.execute(
+            "UPDATE outbox_actions SET attempt_count = MAX(0, attempt_count - 1) WHERE action_id = ?",
+            (action.action_id,),
+        )
+    # A lost lease is fenced as well: the caller must never execute it.
+    return True
 
 
 @dataclass(frozen=True)
@@ -458,6 +486,7 @@ def _commit_pause(
     problem: dict[str, Any],
     now_ms: int,
     actor_id: str,
+    actor_type: str = "system",
 ) -> bool:
     if not repository.update_run_status(
         run.run_id,
@@ -479,7 +508,7 @@ def _commit_pause(
             run_version=run.run_version,
             event_type=RUN_PAUSED_EVENT_TYPE,
             actor_json=json.dumps(
-                {"actorType": "system", "actorId": actor_id},
+                {"actorType": actor_type, "actorId": actor_id},
                 ensure_ascii=False,
             ),
             correlation_id=run.run_id,
@@ -531,46 +560,49 @@ def resume_from_pause(
     for redrives that bypass a command (e.g. a scheduler sweep resuming after
     the blocking condition is gone).
     """
-    if target not in _ALLOWED_RESUME_TARGETS:
-        raise ValueError(f"illegal resume target {target.value}")
-
     def mutate(uow: Any) -> bool:
-        repository = uow.repository
-        run = repository.get_run(run_id)
-        if run is None or str(run.status) != RunStatus.PAUSED.value:
-            return False
-        if not repository.update_run_status(
-            run_id,
-            team_id,
-            target.value,
-            now_ms,
-            active_node_id=str(getattr(run, "active_node_id", "") or ""),
-            blocked_problem_json=None,
-        ):
-            return False
-        sequence = repository.advance_last_sequence(run_id, 1, now_ms)
-        if sequence is None:
-            return True
-        repository.insert_event(
-            EventRecord(
-                run_id=run_id,
-                sequence=sequence,
-                event_id=new_id("evt"),
-                run_version=run.run_version,
-                event_type="run_resumed",
-                actor_json=json.dumps(
-                    {"actorType": "system", "actorId": actor_id},
-                    ensure_ascii=False,
-                ),
-                correlation_id=run_id,
-                causation_id=None,
-                payload_json=json.dumps(
-                    {"resumedFromPause": True, "target": target.value},
-                    ensure_ascii=False,
-                ),
-                occurred_at_ms=now_ms,
-            )
+        return resume_paused_run(
+            uow.repository, run_id=run_id, team_id=team_id,
+            now_ms=now_ms, actor_id=actor_id, target=target,
         )
-        return True
 
     return bool(store.submit(mutate, force_flush=True).result(timeout=30))
+
+
+def resume_paused_run(
+    repository: Any, *, run_id: str, team_id: str, now_ms: int,
+    actor_id: str, target: RunStatus = RunStatus.RUNNING, actor_type: str = "system",
+) -> bool:
+    """Resume inside the caller's writer transaction, preserving dispatch identity."""
+    if target not in _ALLOWED_RESUME_TARGETS:
+        raise ValueError(f"illegal resume target {target.value}")
+    run = repository.get_run(run_id)
+    if run is None or run.team_id != team_id or str(run.status) != RunStatus.PAUSED.value:
+        return False
+    if not repository.update_run_status(
+        run_id, team_id, target.value, now_ms,
+        active_node_id=str(getattr(run, "active_node_id", "") or ""),
+        blocked_problem_json=None,
+    ):
+        return False
+    # Only this hold's pending actions are released. Never steal a lease,
+    # restart a completed action, or shorten an unrelated transient backoff.
+    repository.execute(
+        """UPDATE outbox_actions SET available_at_ms = ?, updated_at_ms = ?
+           WHERE run_id = ? AND status = 'pending'
+             AND action_kind IN ('graph_dispatch', 'adapter_dispatch')
+             AND json_valid(last_problem_json)
+             AND json_extract(last_problem_json, '$.code') = 'run_paused'""",
+        (now_ms, now_ms, run_id),
+    )
+    sequence = repository.advance_last_sequence(run_id, 1, now_ms)
+    if sequence is not None:
+        repository.insert_event(EventRecord(
+            run_id=run_id, sequence=sequence, event_id=new_id("evt"),
+            run_version=run.run_version, event_type="run_resumed",
+            actor_json=json.dumps({"actorType": actor_type, "actorId": actor_id}),
+            correlation_id=run_id, causation_id=None,
+            payload_json=json.dumps({"resumedFromPause": True, "target": target.value}),
+            occurred_at_ms=now_ms,
+        ))
+    return True

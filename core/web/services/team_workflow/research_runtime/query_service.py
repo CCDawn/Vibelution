@@ -259,7 +259,8 @@ class WorkflowQueryService:
             snap, latest, anchor = load(self._store)  # type: ignore[arg-type]
         attempts = snap.node_attempts.get(node_id, ())
         offers = tuple(
-            offer for offer in snap.command_offers if offer.node_id == node_id
+            offer for offer in snap.command_offers
+            if offer.node_id == node_id or offer.command.value in {"pause_run", "resume_run"}
         )
         frozen = _frozen_binding_for(snap, node_id)
         session = _session_fields(
@@ -341,6 +342,8 @@ class WorkflowQueryService:
             latest_attempt=latest,
             attempts=attempts,
             command_offers=offers,
+            command_authorizations=tuple(auth for auth in snap.command_authorizations
+                if any(offer.idempotency_key == auth.idempotency_key for offer in offers)),
             latest_event_sequence=snap.latest_event_sequence,
             generated_at=snap.generated_at,
             agent_id=session["agent_id"],

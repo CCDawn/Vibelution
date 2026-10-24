@@ -1,4 +1,6 @@
-import React from "react";
+/** @vitest-environment happy-dom */
+import React, { act } from "react";
+import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup as renderReactMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
@@ -8,6 +10,8 @@ import type { CommandOffer } from "../../../api/types/research-workflow/commands
 import type { ResearchWorkflowNodeDetail } from "../../../api/types/research-workflow/core";
 import { ResearchProcessNodeInspector } from "./ResearchProcessNodeInspector";
 import { getNodeAdapter } from "./nodeAdapterModel";
+import { submitResearchWorkflowCommandOffer } from "../../../api/research-workflow/commands";
+import { resetControlTokenForTests, seedControlTokenForTests } from "../../../api/client";
 
 function renderToStaticMarkup(node: React.ReactNode) {
   const client = new QueryClient({
@@ -162,6 +166,63 @@ describe("ResearchProcessNodeInspector command rendering", () => {
     expect(markup).not.toContain("启动 资料寻找");
     expect(markup).not.toContain('data-vui="node-commands"');
     expect(markup).toContain('data-testid="node-inspector-model-trigger" disabled');
+  });
+
+  it("keeps run scheduling offers when the workspace owns node actions", () => {
+    const markup = renderInspector(makeDetail({ commandOffers: [
+      offer({ command: "start_node", label: "节点主操作" }),
+      offer({ command: "pause_run", nodeId: null, label: "暂停调度" }),
+    ] }), { primaryActionOwnedByWorkspace: true });
+    expect(markup).toContain("暂停调度");
+    expect(markup).not.toContain("节点主操作");
+  });
+
+  it.each(["pause_run", "resume_run"] as const)("submits %s through the existing command offer path", async (command) => {
+    seedControlTokenForTests();
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({
+      commandId: "cmd-scheduling", runId: "run-1", status: "accepted",
+      acceptedRunVersion: 2, idempotencyKey: `offer:${command}`, latestEventSequence: 3,
+      problem: null,
+    }), { status: 202, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const client = new QueryClient({ defaultOptions: { queries: { enabled: false } } });
+    const scheduling = offer({ command, nodeId: null, label: "调度操作",
+      requiresOperator: true, authorizationStatus: "authorized" });
+    const onOffer = vi.fn((selected: CommandOffer) => submitResearchWorkflowCommandOffer({
+      teamId: "research-team", runId: "run-1", offer: selected,
+    }).then(() => undefined));
+    try {
+      await act(async () => root.render(
+        <QueryClientProvider client={client}><MemoryRouter>
+          <ResearchProcessNodeInspector teamId="research-team" nodeId="source_finding"
+            adapter={getNodeAdapter("source_finding")} detail={makeDetail({ commandOffers: [scheduling] })}
+            effectiveBindings={[]} budget={null} handoffPending={false} busy={false}
+            primaryActionOwnedByWorkspace onOffer={onOffer} />
+        </MemoryRouter></QueryClientProvider>,
+      ));
+      const findButton = (text: string) => Array.from(container.querySelectorAll("button"))
+        .find((button) => button.textContent === text);
+      await act(async () => findButton("高级操作")?.click());
+      expect(findButton("调度操作")?.disabled).toBe(false);
+      await act(async () => findButton("调度操作")?.click());
+      expect(onOffer).toHaveBeenCalledWith(scheduling);
+      const commandCalls = fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/commands"));
+      expect(commandCalls).toHaveLength(1);
+      const [endpoint, init] = commandCalls[0] as [string, RequestInit];
+      expect(endpoint).toBe("/api/research/workflow-runs/run-1/commands");
+      expect(JSON.parse(String(init.body))).toEqual({ teamId: "research-team", command,
+        expectedRunVersion: 1, idempotencyKey: `offer:${command}`, payload: {} });
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+      client.clear();
+      resetControlTokenForTests();
+      vi.unstubAllGlobals();
+    }
   });
 
   it("renders fork_revision from the signed offer label", () => {
