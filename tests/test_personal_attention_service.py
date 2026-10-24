@@ -723,6 +723,17 @@ def test_overview_route_appends_new_sources_without_touching_existing_rows(
 
 ):
 
+    from core.web.services import session_service
+
+    # Counts consume native execution/result facts; pet rows only supply attention.
+    monkeypatch.setattr(session_service, "list_sessions", lambda: [
+        {"id": "approval", "status": "ready", "currentPhase": "ready"},
+        {"id": "failed", "status": "ready", "currentPhase": "ready", "terminalReason": "failed_runtime"},
+        {"id": "live", "status": "running", "currentPhase": "thinking", "activeTurnId": "live-turn"},
+    ])
+    monkeypatch.setattr(session_service, "current_session_turn_id", lambda sid: "live-turn" if sid == "live" else "")
+    monkeypatch.setattr(session_service, "load_chat_turn_work_run_summary", lambda: {"activeItems": []})
+
     _patch_teams(monkeypatch, _team("team-research", "材料团队"))
 
     _patch_formal_root(monkeypatch, tmp_path)
