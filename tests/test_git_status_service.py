@@ -402,6 +402,54 @@ def test_with_git_config_defaults_repairs_stale_commit_model_ref_to_primary_mode
     assert payload["git"]["commit_message_model_ref"] == "current_model"
 
 
+@pytest.fixture
+def git_v2_config(tmp_path, monkeypatch):
+    fixture = Path(__file__).parent / "fixtures/config/llm_schema_v2_provider.toml"
+    path = tmp_path / "config.toml"
+    path.write_text(fixture.read_text(encoding="utf-8"), encoding="utf-8")
+    monkeypatch.setenv("VIBELUTION_CONFIG_PATH", str(path))
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path / "data"))
+    monkeypatch.setattr(git_status_service, "load_public_config", lambda: load_public_config(path))
+    monkeypatch.setattr(git_status_service, "save_public_config", lambda payload: save_public_config(payload, path))
+    return path
+
+
+def test_git_model_defaults_keep_v2_registry_reference_without_legacy_library(git_v2_config, monkeypatch):
+    public = load_public_config(git_v2_config)
+    selected = "lab_llamacpp_a/qwen3.6-35b-a3b"
+    public["git"] = {"commit_message_model_ref": selected}
+    original = copy.deepcopy(public)
+    monkeypatch.setattr(git_status_service, "load_public_config", lambda: copy.deepcopy(public))
+    assert git_status_service._git_commit_config()["commit_message_model_ref"] == selected
+    assert public == original and "model_library" not in public["llm"]
+
+
+def test_git_model_update_roundtrip_accepts_v2_and_runtime_binding(git_v2_config):
+    selected = "lab_llamacpp_a/qwen3.6-35b-a3b"
+    result = git_status_service.update_git_commit_message_model(selected)
+    assert result["modelId"] == selected
+    persisted = load_public_config(git_v2_config)
+    assert persisted["git"]["commit_message_model_ref"] == selected
+    assert "model_library" not in persisted["llm"]
+    assert git_status_service._git_commit_config()["commit_message_model_ref"] == selected
+    runtime_public = git_status_service._public_config_for_git_commit_model(persisted, selected)
+    runtime = git_status_service.build_effective_config(runtime_public)
+    profile = runtime.llm.get_profile(profile_id=git_status_service.GIT_COMMIT_MESSAGE_PROFILE_ID)
+    assert profile.model_ref == selected
+    assert profile.model == "qwen3.6-35b-a3b"
+    assert profile.provider_id == "lab_llamacpp_a"
+    assert git_status_service.GIT_COMMIT_MESSAGE_PROFILE_ID not in persisted["llm"]["profiles"]
+
+
+def test_git_model_reference_v2_aliases_use_native_resolver(git_v2_config):
+    public = load_public_config(git_v2_config)
+    public["llm"]["model_aliases"] = {"commit-default": "pixel_relay/gpt-5.6-luna"}
+    assert git_status_service._model_library_has_model_ref(public, "commit-default")
+    assert not git_status_service._model_library_has_model_ref(public, "pixel_relay/missing")
+    public["llm"]["model_aliases"] = {"cycle": "cycle"}
+    assert not git_status_service._model_library_has_model_ref(public, "cycle")
+
+
 def test_git_config_defaults_round_trip_through_public_toml(tmp_path):
     config_path = tmp_path / "config.toml"
     public_config = git_status_service.with_git_config_defaults(load_public_config())

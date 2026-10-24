@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchPersonalAssistantSettings, updatePersonalAssistantSettings } from "../../api/personalAssistant";
 import { DEFAULT_PET_PREFERENCES, readPetPreferences } from "./desktopPetPreferences";
-import { usePetPreferences } from "./usePetPreferences";
+import { PET_PREFERENCES_REFRESH_EVENT, usePetPreferences } from "./usePetPreferences";
 
 vi.mock("../../api/personalAssistant", () => ({
   fetchPersonalAssistantSettings: vi.fn(), updatePersonalAssistantSettings: vi.fn(),
@@ -110,6 +110,48 @@ describe("shared assistant preferences", () => {
     await act(async () => { release(); await update; });
     expect(updatePersonalAssistantSettings).toHaveBeenNthCalledWith(2, { preferences: { characterId: "xiaoluo" } });
     expect(readPetPreferences().characterId).toBe("xiaoluo");
+  });
+  it("refreshes tool changes without running first-run migration again", async () => {
+    await render();
+    vi.mocked(fetchPersonalAssistantSettings).mockResolvedValue({ settings: {
+      ...settings().settings, preferencesConfigured: false,
+      preferences: { ...DEFAULT_PET_PREFERENCES, characterId: "xiaoluo" },
+    } });
+    await act(async () => { window.dispatchEvent(new Event(PET_PREFERENCES_REFRESH_EVENT)); });
+    await settle();
+    expect(container.textContent).toBe("xiaoluo/xiaoluo");
+    expect(updatePersonalAssistantSettings).not.toHaveBeenCalled();
+  });
+  it("keeps an edit newer than an in-flight tool refresh", async () => {
+    function Single() { first = usePetPreferences(); return <span>{first.preferences.characterId}</span>; }
+    await act(async () => root.render(<Single />)); await settle();
+    let release!: () => void;
+    vi.mocked(fetchPersonalAssistantSettings).mockImplementationOnce(() => new Promise(resolve => {
+      release = () => resolve(settings());
+    }));
+    await act(async () => { window.dispatchEvent(new Event(PET_PREFERENCES_REFRESH_EVENT)); await Promise.resolve(); });
+    let update!: ReturnType<typeof first.updatePreferences>;
+    await act(async () => {
+      update = first.updatePreferences({ characterId: "xiaoluo" });
+      release(); await update;
+    });
+    expect(container.textContent).toBe("xiaoluo");
+    expect(readPetPreferences().characterId).toBe("xiaoluo");
+  });
+  it("queues a tool refresh behind pending local edits", async () => {
+    await render();
+    let release!: () => void;
+    vi.mocked(updatePersonalAssistantSettings).mockImplementationOnce(() => new Promise(resolve => {
+      release = () => resolve(settings({ ...DEFAULT_PET_PREFERENCES, showStatus: false }));
+    }));
+    let update!: ReturnType<typeof first.updatePreferences>;
+    await act(async () => { update = first.updatePreferences({ showStatus: false }); await Promise.resolve(); });
+    const reads = vi.mocked(fetchPersonalAssistantSettings).mock.calls.length;
+    await act(async () => { window.dispatchEvent(new Event(PET_PREFERENCES_REFRESH_EVENT)); await Promise.resolve(); });
+    expect(fetchPersonalAssistantSettings).toHaveBeenCalledTimes(reads);
+    vi.mocked(fetchPersonalAssistantSettings).mockResolvedValue(settings({ ...DEFAULT_PET_PREFERENCES, showStatus: false, characterId: "xiaoluo" }));
+    await act(async () => { release(); await update; }); await settle();
+    expect(first.preferences).toMatchObject({ showStatus: false, characterId: "xiaoluo" });
   });
   it("reports offline backend saving while keeping local preferences usable", async () => {
     await render();

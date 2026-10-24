@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 from . import native, store
 from .models import Command, Flow, Run, StartRun
+from core.web.services.team import team_admission
 
 MAX_ATTEMPTS = 120
 SUCCESS = frozenset({"ready", "completed", "done", "success", "succeeded"})
@@ -73,6 +74,17 @@ def _wake() -> None:
     from .runtime import wake
 
     wake()
+
+
+def _commit_new_run(team_id: str, target, record: dict) -> None:
+    # The caller holds flow/run file locks before this short metadata commit.
+    # Archive reserves its lease under that same metadata lock, never waits
+    # for a workflow file lock, and performs its cascade after releasing it.
+    try:
+        with team_admission.workflow_commit_admission(team_id):
+            store.write(target, record)
+    except (store.team_service.TeamLockedError, store.team_service.TeamNotFoundError) as exc:
+        raise store.Conflict("Team archive or lifecycle change blocks workflow admission.") from exc
 
 
 def start_run(team_id: str, flow_id: str, payload: dict) -> dict:
@@ -160,7 +172,7 @@ def _start_run(team_id: str, flow_id: str, payload: dict, *, source_hint=None, s
             if request.localIntegration is not None:
                 from .code_repair import authorize
                 authorize(record, request.localIntegration.model_dump())
-            store.write(target, record)
+            _commit_new_run(team_id, target, record)
             result = public(record)
     _wake()
     return result
@@ -249,7 +261,7 @@ def create_repair_run(team_id: str, *, run_id: str, flow: dict, incident: str, p
                          status="running", current=0, revision=1, messages=["总监修复任务已创建。"],
                          createdAt=timestamp, updatedAt=timestamp).model_dump()
             record.update(_createFingerprint=fingerprint, _recoveryParent=parent, _taskRosterVersion=1)
-            store.write(target, record)
+            _commit_new_run(team_id, target, record)
             created = True
     if created:
         _wake()

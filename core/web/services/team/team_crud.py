@@ -15,6 +15,7 @@ from uuid import uuid4
 from core.chat.chat_task_types import trim_lines
 from core.web.services import agent_directory_service, chat_room_service, project_agent_bus_service
 from core.web.services.team.kind_helpers import team_is_system_managed
+from core.web.services.team import team_admission
 
 
 def _service():
@@ -280,6 +281,8 @@ def update_team(
         if team is None:
             raise s.TeamNotFoundError("Team not found.")
         _reject_locked_team_update(team)
+        if members is not None or status is not None:
+            team_admission.assert_roster_mutation_allowed(normalized_team_id)
         if name is not None:
             normalized_name = trim_lines(name or "", max_lines=1).strip()
             if not normalized_name:
@@ -449,6 +452,10 @@ def restore_removed_agents_to_teams(restore_token: dict[str, Any] | None) -> dic
         state = s._load_index()
         teams = [item for item in list(state.get("teams") or []) if isinstance(item, dict)]
         by_id = {str(item.get("teamId") or "").strip(): index for index, item in enumerate(teams)}
+        # Validate the complete restore set before changing any Team snapshot.
+        for snapshot in snapshots:
+            if str(snapshot.get("teamId") or "").strip() in by_id:
+                team_admission.assert_restore_allowed(snapshot)
         for snapshot in snapshots:
             team_id = str(snapshot.get("teamId") or "").strip()
             if not team_id or team_id not in by_id:
@@ -467,7 +474,16 @@ def restore_removed_agents_to_teams(restore_token: dict[str, Any] | None) -> dic
     return {"restoredTeamIds": restored_ids}
 
 
-def archive_team(team_id: str) -> dict[str, Any]:
+def archive_team(team_id: str, *, protected_agent_ids: tuple[str, ...] = ()) -> dict[str, Any]:
+    s = _service()
+    normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
+    if not isinstance(protected_agent_ids, tuple) or any(not isinstance(item, str) or not item.strip() for item in protected_agent_ids):
+        raise s.TeamServiceError("Protected Agent identifiers must be a tuple of nonempty strings.")
+    with team_admission.archive_admission(normalized_team_id, protected_agent_ids=protected_agent_ids):
+        return _archive_team_admitted(normalized_team_id)
+
+
+def _archive_team_admitted(team_id: str) -> dict[str, Any]:
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
     already_archived = False

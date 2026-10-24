@@ -1143,6 +1143,9 @@ def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
         "restart", "workflow_recovery_bind", "workflow_recovery_revoke", "workflow_start",
         "team_create", "team_run", "knowledge_ingest", "config_update",
     }
+    from tools.pa_platform_actions import extension_contracts
+    extended = extension_contracts()
+    actions.update(extended)
     action = args.get("action")
     if not isinstance(action, str) or action not in actions:
         return {"assistantArgumentsInvalid": True}
@@ -1168,6 +1171,35 @@ def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
         if isinstance(value, str):
             targets[key] = " ".join(value.split())[:120]
     result["assistantTargets"] = targets
+    if action in extended:
+        contract = extended[action]
+        schema = contract["parameters"]
+        properties = schema.get("properties", {})
+        if (set(values) - set(properties) or set(schema.get("required", [])) - set(values)):
+            return {**result, "assistantArgumentsInvalid": True}
+        for key in ("provider_id", "source_provider_id", "model_id", "target", "profile_id", "room_id",
+                    "expected_agent_id", "expected_model_ref", "name", "title"):
+            value = values.get(key)
+            if isinstance(value, str) and value.strip():
+                targets[key] = " ".join(value.split())[:160]
+        if "base_url" in values and values["base_url"]:
+            from urllib.parse import urlsplit
+            try:
+                parsed = urlsplit(values["base_url"])
+                if (parsed.scheme not in {"http", "https"} or not parsed.hostname
+                        or parsed.username is not None or parsed.password is not None
+                        or parsed.query or parsed.fragment or len(values["base_url"]) > 512):
+                    raise ValueError("invalid endpoint preview")
+                targets["base_url"] = values["base_url"]
+            except (ValueError, TypeError, AttributeError):
+                return {**result, "assistantArgumentsInvalid": True}
+        # Field names and explicit public targets are enough for the preview;
+        # provider secrets, full config and user content never enter it.
+        changes = values.get("updates")
+        result["assistantChangedFields"] = sorted(changes if isinstance(changes, dict) else values)[:20]
+        result["assistantOperationDescription"] = contract["description"][:300]
+        result["assistantDetailsOmitted"] = True
+        return result
     if action.startswith("workflow_"):
         payload = values.get("payload")
         if not isinstance(payload, dict):

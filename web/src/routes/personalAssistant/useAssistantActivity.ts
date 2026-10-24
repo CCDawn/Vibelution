@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { fetchSessionDetail } from "../../api/chat";
 import { fetchPetActivity } from "../../api/pet";
 import { fetchPersonalAssistantComputer } from "../../api/personalAssistantComputer";
@@ -8,14 +8,19 @@ import type { PersonalAssistant } from "../../api/types/personalAssistant";
 import type { PetActivityTone, PetAnimationState } from "../../api/types/petActivity";
 import { useShellI18n } from "../../i18n/useShellI18n";
 import { petActivityRefetchInterval, petPhaseLabel, petToneLabel } from "../desktopPet/desktopPetModel";
+import { PET_PREFERENCES_REFRESH_EVENT } from "../desktopPet/usePetPreferences";
 import { personalAssistantSessionMatches } from "./personalAssistantModel";
 import { assistantReplyIds, assistantReplyStore } from "./assistantReplyActivity";
+
+// Shared by mounted surfaces and retained across remounts, bounded to native IDs.
+const settingsRefreshes = new WeakMap<QueryClient, Set<string>>();
 
 /** Read-only adapter. Native Session transcript, admission and SSE are unchanged. */
 export function useAssistantActivity({ enabled, assistant, reading, showCompletion = true, idleMessage = "" }: {
   enabled: boolean; assistant?: PersonalAssistant | null; reading: boolean; showCompletion?: boolean; idleMessage?: string;
 }) {
   const { lang } = useShellI18n();
+  const queryClient = useQueryClient();
   const query = useQuery({ queryKey: queryKeys.petActivity(), queryFn: fetchPetActivity, enabled,
     refetchInterval: q => petActivityRefetchInterval(q.state.data), refetchIntervalInBackground: false, retry: false });
   const sessionId = assistant?.directSessionId ?? "";
@@ -35,6 +40,42 @@ export function useAssistantActivity({ enabled, assistant, reading, showCompleti
   // the bounded fallback also catches replies absent from the activity projection.
   const activityHint = JSON.stringify([ownActivity?.updatedAt, ownActivity?.tone, ownActivity?.phase]);
   const identity = `${assistant?.agentId ?? ""}:${sessionId}`;
+  useEffect(() => {
+    if (!enabled || !assistant || replies.isError || !personalAssistantSessionMatches(assistant, replies.data)) return;
+    const seen = settingsRefreshes.get(queryClient) ?? new Set<string>();
+    settingsRefreshes.set(queryClient, seen);
+    let refreshAssistant = false;
+    let refreshConfig = false;
+    for (const message of replies.data!.messages ?? []) {
+      if (message.role !== "assistant" || !message.turnId) continue;
+      for (const item of message.turnItems ?? []) {
+        if (item.type !== "tool_call" || !["personal_assistant_action_tool", "personal_assistant_manage_tool"].includes(item.toolName)
+          || item.status !== "completed" || !item.callId) continue;
+        // Only the native call's own arguments are a hint. Tool output/text is never interpreted.
+        let action: unknown;
+        try { action = (JSON.parse(item.input ?? "null") as { action?: unknown } | null)?.action; } catch { continue; }
+        const assistantAction = ["assistant_settings_update", "assistant_model_set", "dialogue_settings_update"].includes(String(action));
+        const configAction = ["settings_update", "config_update"].includes(String(action));
+        if (!assistantAction && !configAction) continue;
+        const id = `${identity}:${message.turnId}:${item.callId}`;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        while (seen.size > 128) seen.delete(seen.values().next().value!);
+        refreshAssistant ||= assistantAction;
+        refreshConfig ||= configAction;
+      }
+    }
+    if (refreshAssistant) {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.personalAssistant(), exact: true });
+      void queryClient.invalidateQueries({ queryKey: ["personal-assistant", "settings"], exact: true });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.virtualHumanDialogueSettings(assistant.agentId), exact: true });
+      window.dispatchEvent(new Event(PET_PREFERENCES_REFRESH_EVENT));
+    }
+    if (refreshConfig) {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.configPublic(), exact: true });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.configWorkspace(), exact: true });
+    }
+  }, [enabled, assistant, identity, replies.data, replies.isError, queryClient]);
   const previousHint = useRef({ identity, hint: activityHint });
   const { refetch: refreshReplies } = replies;
   useEffect(() => {

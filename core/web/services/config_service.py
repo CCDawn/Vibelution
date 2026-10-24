@@ -87,7 +87,11 @@ from config.llm_security import validate_llm_provider_target
 from config.settings import reload_config
 
 from .config_editor_schema import build_editor_meta, build_editor_sections
-from .git_status_service import validate_git_commit_message_prompt, with_git_config_defaults
+from .git_status_service import (
+    _model_library_has_model_ref,
+    validate_git_commit_message_prompt,
+    with_git_config_defaults,
+)
 from .i18n import resolve_language, text_for
 from .model_capability_service import model_record_image_input_support
 from .model_reference_service import (
@@ -3287,9 +3291,7 @@ def _validate_git_commit_settings(public_config: dict[str, Any]) -> None:
     model_id = str(git_config.get("commit_message_model_ref") or "").strip()
     if not model_id:
         return
-    llm = public_config.get("llm", {}) if isinstance(public_config, dict) else {}
-    model_library = llm.get("model_library", {}) if isinstance(llm, dict) else {}
-    if not isinstance(model_library, dict) or model_id not in model_library:
+    if not _model_library_has_model_ref(public_config, model_id):
         _record_config_scene_event(
             "validate",
             "config.git_commit_model_ref.rejected",
