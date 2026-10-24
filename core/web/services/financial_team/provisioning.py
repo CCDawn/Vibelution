@@ -345,16 +345,7 @@ def _agent_config(agent_id: str) -> dict[str, Any] | None:
     normalized = str(agent_id or "").strip()
     if not normalized:
         return None
-    state = directory.load_state()
-    raw = next(
-        (
-            item
-            for item in state.get("agents", [])
-            if isinstance(item, dict)
-            and str(item.get("agentId") or "").strip() == normalized
-        ),
-        None,
-    )
+    raw = directory.load_agent_record(normalized)
     if not isinstance(raw, dict):
         return None
     return directory._agent_to_api(raw, include_activity=False)

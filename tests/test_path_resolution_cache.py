@@ -445,6 +445,52 @@ def test_load_agent_record_copies_only_selected_record(agent_registry_env, monke
     assert agent_directory_service.load_state()["agents"][0] == second
 
 
+@pytest.mark.parametrize("consumer", ["territory", "financial_config"])
+def test_background_agent_consumers_never_copy_unrelated_registry_rows(agent_registry_env, monkeypatch, consumer):
+    from core.web.services.agent_directory import repair_store
+    from core.web.services.financial_team import provisioning
+
+    agent_directory_service.save_state({"agents": [
+        {"agentId": "selected", "status": "archived", "workspacePath": "workspace/agents/selected",
+         "metadata": {"nested": ["original"]}},
+        {"agentId": "unrelated", "metadata": {"nested": ["unrelated"]}},
+    ]})
+    copied_agents = []
+    original_copy = repair_store._copy_json_value
+
+    def tracked_copy(value):
+        if isinstance(value, dict) and "agentId" in value:
+            copied_agents.append(value["agentId"])
+        return original_copy(value)
+
+    def forbidden_full_copy():
+        raise AssertionError("single-Agent reads must not copy the full registry")
+
+    monkeypatch.setattr(repair_store, "_copy_json_value", tracked_copy)
+    monkeypatch.setattr(agent_directory_service, "load_state", forbidden_full_copy)
+    if consumer == "territory":
+        read = agent_directory_service.resolve_agent_workspace_territory
+        first = read(" selected ")
+        assert first["privateRoot"] == "workspace/agents/selected"
+        first["subdirs"]["artifacts"] = "local mutation"
+        assert read("selected")["subdirs"]["artifacts"] != "local mutation"
+        assert read("missing") == {}
+        assert read("") == {}
+    else:
+        def project(raw, *, include_activity):
+            assert include_activity is False
+            return raw
+
+        monkeypatch.setattr(agent_directory_service, "_agent_to_api", project)
+        first = provisioning._agent_config(" selected ")
+        assert first["status"] == "archived"
+        first["metadata"]["nested"].append("local mutation")
+        assert provisioning._agent_config("selected")["metadata"]["nested"] == ["original"]
+        assert provisioning._agent_config("missing") is None
+        assert provisioning._agent_config("") is None
+    assert copied_agents == ["selected", "selected"]
+
+
 def test_load_agent_record_preserves_archived_selection_order(agent_registry_env):
     from core.web.services import agent_tool_governance_service
 

@@ -1949,8 +1949,7 @@ def save_registry_payload(
 
 def resolve_agent_workspace_territory(agent_id: str) -> dict[str, Any]:
     s = _service()
-    state = s.load_state()
-    agent = s._find_agent(state, agent_id)
+    agent = s.load_agent_record(agent_id)
     if agent is None:
         return {}
     return s._agent_workspace_territory(agent)
