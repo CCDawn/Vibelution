@@ -546,9 +546,9 @@ def _migrate_legacy_chat_state_once(
     from core.chat.conversation_store import LegacyChatStateImporter
     from core.ui.chat_state import chat_state_path, formal_chat_state_path
 
-    existing = store.repository.get_chat_state()
-    if existing:
-        return False, len(existing.get("conversations") or []), False
+    existing_count = store.repository.get_existing_chat_state_session_count()
+    if existing_count is not None:
+        return False, existing_count, False
     source_path = chat_state_path(project_root)
     if not source_path.exists() and source_path != formal_chat_state_path(project_root):
         source_path = formal_chat_state_path(project_root)

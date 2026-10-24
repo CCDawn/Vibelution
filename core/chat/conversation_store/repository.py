@@ -987,6 +987,18 @@ class WorkspaceChatStateDao:
         payload["conversations"] = conversations
         return payload
 
+    def existing_session_count(self) -> int | None:
+        """Check migration completion without decoding any session payloads.
+
+        An absent root differs from an initialized, empty workspace. Read the
+        root and count in one statement so the result belongs to one snapshot.
+        """
+        row = self._connection.execute(
+            "SELECT (SELECT COUNT(*) FROM session_runtime_state) AS session_count "
+            "FROM workspace_chat_state WHERE id=1"
+        ).fetchone()
+        return int(row["session_count"]) if row is not None else None
+
     def list_session_ids(self) -> list[str]:
         rows = self._connection.execute(
             "SELECT session_id FROM session_runtime_state ORDER BY position ASC"
@@ -1670,6 +1682,10 @@ class ConversationRepository:
     def get_chat_state(self) -> dict[str, Any]:
         with self._database.reader() as connection:
             return WorkspaceChatStateDao(connection).get()
+
+    def get_existing_chat_state_session_count(self) -> int | None:
+        with self._database.reader() as connection:
+            return WorkspaceChatStateDao(connection).existing_session_count()
 
     def get_session_runtime_state(self, session_id: str) -> dict[str, Any] | None:
         with self._database.reader() as connection:
