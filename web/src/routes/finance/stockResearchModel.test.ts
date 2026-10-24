@@ -175,6 +175,8 @@ describe("stock research projections", () => {
     expect(researchRecordStatus({ status: "ready", terminalReason: "paused_limit" })).toBe("待继续");
     expect(researchRecordStatus({ status: "ready", terminalReason: "failed_provider" })).toBe("失败");
     expect(researchRecordStatus({ status: "running", terminalReason: "success" })).toBe("研究中");
+    expect(researchRecordStatus({ status: "paused", terminalReason: "success" })).toBe("已暂停");
+    expect(researchRecordStatus({ status: "future_state", terminalReason: "success" })).toBe("状态未知");
     expect(researchRecordStatus({ status: "ready" })).toBe("研究会话");
   });
 

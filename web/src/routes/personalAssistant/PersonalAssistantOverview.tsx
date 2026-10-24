@@ -1,3 +1,4 @@
+import { resolveSessionActivity, sessionActivityGroup, sessionActivityStatusLabel, type SessionActivitySource } from "../sessionActivityState";
 import { useQuery } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
@@ -32,12 +33,8 @@ export function PersonalAssistantOverview({ onOpenSession, desktop = false, show
   const data = overview.data;
   function choose(id: string) { setTab(id as Tab); setSearch(""); setFilter("all"); setPage(1); }
   function selectStatus(value: string) { choose("sessions"); setFilter(value); }
-  function sessionGroup(id: string, status: string) {
-    if (data?.attention.some(row => row.sessionId === id && row.kind === "approval")) return "waiting";
-    if (/approval|waiting/.test(status)) return "waiting";
-    if (/failed|error|timeout/.test(status)) return "failed";
-    if (["running", "thinking", "reading", "tooling", "answering", "verifying", "queued", "planning", "editing", "stopping"].includes(status)) return "running";
-    return "idle";
+  function sessionGroup(row: SessionActivitySource & { id: string }) {
+    return sessionActivityGroup(row, Boolean(data?.attention.some(item => item.sessionId === row.id && item.kind === "approval")));
   }
   // 会话派生 attention 行 + 独立 humanAttention 通道（复核停靠/异常升级）合并展示。
   const attentionRows = data ? [...data.attention, ...(data.humanAttention ?? [])] : [];
@@ -45,8 +42,8 @@ export function PersonalAssistantOverview({ onOpenSession, desktop = false, show
     title: showTitles ? row.title : copy.item(i + 1), status: row.kind === "approval" ? copy.waitingConfirmation : copy.needsReview, sessionId: row.sessionId, targetUrl: row.targetUrl }))
     : tab === "agents" ? data.agents.map((row, i) => ({ id: row.id, title: showTitles ? row.displayName || row.id : copy.agent(i + 1),
       status: assistantStatusLabel(row.status, lang), sessionId: undefined, targetUrl: undefined }))
-      : data.sessions.filter(row => filter === "all" || sessionGroup(row.id, row.currentPhase || row.status) === filter).map((row, i) => ({ id: row.id,
-        title: showTitles ? row.title || copy.untitledSession : copy.session(i + 1), status: assistantStatusLabel(row.currentPhase || row.status, lang), sessionId: row.id, targetUrl: undefined }));
+      : data.sessions.filter(row => filter === "all" || sessionGroup(row) === filter).map((row, i) => ({ id: row.id,
+        title: showTitles ? row.title || copy.untitledSession : copy.session(i + 1), status: sessionActivityStatusLabel(resolveSessionActivity(row), lang), sessionId: row.id, targetUrl: undefined }));
   const filtered = rows.filter(row => row.title.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, pages);

@@ -149,12 +149,7 @@ type SessionStreamDecisionSnapshotShape = {
   routeSwitchGraceMsRemaining: number;
 };
 
-function sessionDetailEvent(overrides: {
-  id?: string;
-  ledgerSeq?: number;
-  currentPhase?: string;
-  activeTurnId?: string;
-} = {}) {
+function sessionDetailEvent(overrides: Partial<SessionDetail> = {}) {
   const id = overrides.id ?? "s1";
   const ledgerSeq = overrides.ledgerSeq ?? 1;
   return JSON.stringify({
@@ -164,10 +159,10 @@ function sessionDetailEvent(overrides: {
     detail: {
       id,
       ledgerSeq,
-      currentPhase: overrides.currentPhase ?? "running",
-      ...(overrides.activeTurnId === undefined ? {} : { activeTurnId: overrides.activeTurnId }),
+      currentPhase: "running",
       title: "Session 1",
       messages: [],
+      ...overrides,
     },
   });
 }
@@ -862,6 +857,8 @@ describe("useSessionDetailStream stream lifecycle stability", () => {
       stream.emit("session_detail", sessionDetailEvent({
         ledgerSeq: 40,
         activeTurnId: "turn-1",
+        lastTurnTerminalTurnId: "turn-1",
+        terminalReason: "success",
         currentPhase: "completed",
       }));
     });

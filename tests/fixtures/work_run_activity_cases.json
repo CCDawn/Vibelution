@@ -1,0 +1,159 @@
+[
+  {
+    "name": "paused owner",
+    "snapshot": {
+      "status": "paused"
+    },
+    "expected": {
+      "execution": "paused",
+      "phase": "",
+      "outcome": "",
+      "reason": "",
+      "rawStatus": "paused",
+      "blocksLifecycle": true
+    }
+  },
+  {
+    "name": "unknown is a blocker only",
+    "snapshot": {
+      "status": "blocked",
+      "currentPhase": "completed"
+    },
+    "expected": {
+      "execution": "unknown",
+      "phase": "",
+      "outcome": "",
+      "reason": "",
+      "rawStatus": "blocked",
+      "blocksLifecycle": true
+    }
+  },
+  {
+    "name": "missing is not live evidence",
+    "snapshot": {},
+    "expected": {
+      "execution": "unknown",
+      "phase": "",
+      "outcome": "",
+      "reason": "",
+      "rawStatus": "",
+      "blocksLifecycle": true
+    }
+  },
+  {
+    "name": "timestamp ends without success",
+    "snapshot": {
+      "status": "running",
+      "endedAt": "2026-10-24T00:00:00Z"
+    },
+    "expected": {
+      "execution": "settled",
+      "phase": "",
+      "outcome": "",
+      "reason": "",
+      "rawStatus": "running",
+      "blocksLifecycle": false
+    }
+  },
+  {
+    "name": "force stop retains reason",
+    "snapshot": {
+      "status": "stopped",
+      "runtimeStatus": "force_stopped"
+    },
+    "expected": {
+      "execution": "settled",
+      "phase": "",
+      "outcome": "stopped",
+      "reason": "force_stopped",
+      "rawStatus": "stopped",
+      "blocksLifecycle": false
+    }
+  },
+  {
+    "name": "success alias",
+    "snapshot": {
+      "status": "succeeded"
+    },
+    "expected": {
+      "execution": "settled",
+      "phase": "",
+      "outcome": "completed",
+      "reason": "succeeded",
+      "rawStatus": "succeeded",
+      "blocksLifecycle": false
+    }
+  },
+  {
+    "name": "explicit unknown beats lower terminal",
+    "snapshot": {
+      "status": "future_state",
+      "currentPhase": "completed",
+      "terminalReason": "success"
+    },
+    "expected": {
+      "execution": "unknown",
+      "phase": "",
+      "outcome": "",
+      "reason": "",
+      "rawStatus": "future_state",
+      "blocksLifecycle": true
+    }
+  },
+  {
+    "name": "ready is idle",
+    "snapshot": {
+      "status": "ready"
+    },
+    "expected": {
+      "execution": "idle",
+      "phase": "",
+      "outcome": "",
+      "reason": "",
+      "rawStatus": "ready",
+      "blocksLifecycle": false
+    }
+  },
+  {
+    "name": "needs continue is settled",
+    "snapshot": {
+      "status": "needs_continue"
+    },
+    "expected": {
+      "execution": "settled",
+      "phase": "",
+      "outcome": "needs_continue",
+      "reason": "needs_continue",
+      "rawStatus": "needs_continue",
+      "blocksLifecycle": false
+    }
+  },
+  {
+    "name": "phase is live",
+    "snapshot": {
+      "currentPhase": "tooling"
+    },
+    "expected": {
+      "execution": "running",
+      "phase": "tooling",
+      "outcome": "",
+      "reason": "",
+      "rawStatus": "tooling",
+      "blocksLifecycle": true
+    }
+  },
+  {
+    "name": "partial is distinct",
+    "snapshot": {
+      "status": "partial"
+    },
+    "expected": {
+      "execution": "settled",
+      "phase": "",
+      "outcome": "partial",
+      "reason": "partial",
+      "rawStatus": "partial",
+      "blocksLifecycle": false
+    }
+  }
+]

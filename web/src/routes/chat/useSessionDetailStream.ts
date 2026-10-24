@@ -1,3 +1,4 @@
+import { resolveSessionActivity, sessionOwnsExecution, sessionIsAtRest, type SessionActivitySource } from "../sessionActivityState";
 import { useCallback, useEffect, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 
@@ -28,7 +29,7 @@ import {
   type SessionStreamApplyStats,
 } from "../chatStreamApplyController";
 import { createSessionAssistantDeltaScheduler } from "../sessionAssistantDeltaScheduler";
-import { chatStreamPerformanceNowMs, isBusyPhase } from "./chatCodingRouteViewModel";
+import { chatStreamPerformanceNowMs } from "./chatCodingRouteViewModel";
 import { supersededEditDelta } from "./chatEditResubmitState";
 import {
   createAssistantDeltaSeqGate,
@@ -286,32 +287,25 @@ export function useSessionDetailStream({
     }
     const initialCachedDetail = queryClient.getQueryData<SessionDetail>(queryKeys.session(streamSessionId));
     let authoritativeLedgerSeq = normalizedLedgerSeq(initialCachedDetail?.ledgerSeq);
-    let authoritativePhase = String(initialCachedDetail?.currentPhase || initialCachedDetail?.status || "")
-      .trim()
-      .toLowerCase();
+    let authoritativeActivity = resolveSessionActivity(initialCachedDetail ?? {});
     let authoritativeTurnId = normalizedTurnId(initialCachedDetail?.activeTurnId)
-      || (isBusyPhase(authoritativePhase) ? latestUserTurnId(initialCachedDetail) : "");
-    const noteAuthorityState = (snapshot: {
-      ledgerSeq?: number;
-      activeTurnId?: string;
-      currentPhase?: string;
-      status?: string;
-    }) => {
+      || (sessionOwnsExecution(initialCachedDetail) ? latestUserTurnId(initialCachedDetail) : "");
+    const noteAuthorityState = (snapshot: SessionActivitySource & { ledgerSeq?: number }) => {
       const incomingLedgerSeq = normalizedLedgerSeq(snapshot.ledgerSeq);
       if (authoritativeLedgerSeq > 0 && (incomingLedgerSeq === 0 || incomingLedgerSeq < authoritativeLedgerSeq)) {
         return;
       }
       authoritativeLedgerSeq = Math.max(authoritativeLedgerSeq, incomingLedgerSeq);
-      const phase = String(snapshot.currentPhase || snapshot.status || "").trim().toLowerCase();
+      const activity = resolveSessionActivity(snapshot);
       if (snapshot.activeTurnId !== undefined) {
         authoritativeTurnId = normalizedTurnId(snapshot.activeTurnId);
-      } else if (phase && isBusyPhase(phase)) {
+      } else if (sessionOwnsExecution(snapshot)) {
         authoritativeTurnId = latestUserTurnId(snapshot as SessionDetail) || authoritativeTurnId;
-      } else if (phase && !isBusyPhase(phase)) {
+      } else if (sessionIsAtRest(snapshot)) {
         authoritativeTurnId = "";
       }
-      if (phase) {
-        authoritativePhase = phase;
+      if (activity.rawStatus || activity.execution !== "unknown") {
+        authoritativeActivity = activity;
       }
     };
     const currentAuthorityState = () => {
@@ -322,7 +316,7 @@ export function useSessionDetailStream({
       return {
         ledgerSeq: authoritativeLedgerSeq,
         turnId: authoritativeTurnId,
-        phase: authoritativePhase,
+        atRest: ["idle", "settled"].includes(authoritativeActivity.execution),
       };
     };
     const shouldDropDeltaAgainstAuthority = (
@@ -330,7 +324,7 @@ export function useSessionDetailStream({
     ) => {
       const authority = currentAuthorityState();
       const incomingLedgerSeq = normalizedLedgerSeq(payload.ledgerSeq);
-      const authorityIsTerminal = Boolean(authority.phase && !isBusyPhase(authority.phase));
+      const authorityIsTerminal = authority.atRest;
       if (
         authorityIsTerminal
         && authority.turnId
@@ -364,7 +358,7 @@ export function useSessionDetailStream({
       if (authority.turnId && payload.turnId !== authority.turnId) {
         return true;
       }
-      return !authority.turnId && Boolean(authority.phase && !isBusyPhase(authority.phase));
+      return !authority.turnId && authority.atRest;
     };
     let pendingDetail: SessionDetail | null = null;
     let pendingDetailTrace: SessionStreamProtocolTrace | null = null;
@@ -375,11 +369,8 @@ export function useSessionDetailStream({
     let appendGapLogged = false;
     let journalReplayLogged = false;
     const sessionStreamAppendReassembler = createSessionStreamAppendReassembler();
-    const initialDetailPhase = String(initialCachedDetail?.currentPhase || initialCachedDetail?.status || "")
-      .trim()
-      .toLowerCase();
     const initialTurnId = String(initialCachedDetail?.activeTurnId || "").trim()
-      || (isBusyPhase(initialDetailPhase) ? latestUserTurnId(initialCachedDetail) : "");
+      || (sessionOwnsExecution(initialCachedDetail) ? latestUserTurnId(initialCachedDetail) : "");
     const initialLayer = committedAssistantDeltaLayer;
     const initialTurnItems = initialLayer?.turnId === initialTurnId
       && initialLayer.ledgerSeq >= normalizedLedgerSeq(initialCachedDetail?.ledgerSeq)
@@ -630,7 +621,6 @@ export function useSessionDetailStream({
         stats: sessionStreamApplyStatsRef.current[streamSessionId],
         activeLayer,
         activeLayerSettled: isActiveTurnSettledByDetail(activeLayer, detail),
-        isBusyPhase,
       });
       sessionStreamApplyStatsRef.current[streamSessionId] = decision.stats;
       if (decision.shouldLogApplied) {
@@ -663,9 +653,8 @@ export function useSessionDetailStream({
       // Per-item overlay reconciliation (projection invariant c): overlay turn
       // items the canonical transcript already commits are dropped at item
       // granularity; whole-turn settlement above stays the coarse path.
-      const detailPhase = String(detail.currentPhase || detail.status || "").trim().toLowerCase();
       const authoritativeTurnId = normalizedTurnId(detail.activeTurnId)
-        || (isBusyPhase(detailPhase) ? latestUserTurnId(detail) : "");
+        || (sessionOwnsExecution(detail) ? latestUserTurnId(detail) : "");
       let rebasedLayer = activeLayer;
       if (activeLayer && authoritativeTurnId && activeLayer.turnId !== authoritativeTurnId) {
         const boundLayer = bindActiveTurnLayerToTurnId(activeLayer, authoritativeTurnId);
@@ -712,7 +701,6 @@ export function useSessionDetailStream({
         lastAppliedAtMs: lastAppliedAt,
         nowMs: Date.now(),
         minApplyIntervalMs: SESSION_STREAM_MIN_APPLY_INTERVAL_MS,
-        isBusyPhase,
       });
       sessionStreamApplyStatsRef.current[streamSessionId] = decision.stats;
       pendingDetail = decision.pendingDetail;

@@ -1,5 +1,6 @@
 import type { ConversationSummary, SessionSummary } from "../../api/types";
 import { conversationToSessionSummary } from "../DirectSessionIndexList";
+import { sessionBlocksMutation } from "../sessionActivityState";
 
 export type SessionBulkActionItem = {
   sessionId: string;
@@ -28,11 +29,8 @@ export function collectDirectSessionIdsFromConversations(
   return ids;
 }
 
-export function sessionBulkDeletable(
-  session: SessionSummary,
-  isBusyPhase: (value: string | null | undefined) => boolean,
-) {
-  return !isBusyPhase(session.currentPhase || session.status);
+export function sessionBulkDeletable(session: SessionSummary) {
+  return !sessionBlocksMutation(session);
 }
 
 export function sessionBulkActionSummary(

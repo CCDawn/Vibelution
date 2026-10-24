@@ -58,6 +58,8 @@ const styles = {
   status_approval: "text-[var(--state-warning)] [&>span:first-child]:bg-[var(--state-warning)]",
   status_error: "text-[var(--state-error)] [&>span:first-child]:bg-[var(--state-error)]",
   status_completed: "text-[var(--accent-cool)] [&>span:first-child]:bg-[var(--accent-cool)]",
+  status_paused: "text-[var(--fg-secondary)] [&>span:first-child]:bg-[var(--fg-secondary)]",
+  status_stopping: "text-[var(--fg-secondary)] [&>span:first-child]:bg-[var(--fg-secondary)]",
   status_none: "text-[var(--fg-tertiary)]",
   time: "shrink-0 text-[10px] tabular-nums text-[var(--fg-tertiary)]",
 } as const;

@@ -1,3 +1,4 @@
+import { sessionOwnsExecution } from "../sessionActivityState";
 /**
  * Submit acceptance evidence and the one-shot canonical projection readback.
  * useChatComposerTurnMutations calls this hook where the scheduler used to
@@ -19,7 +20,7 @@ import {
 } from "../chatActiveTurnLayer";
 import type { ActiveTurnLayersStore } from "./activeTurnLayersStore";
 import { mergeSessionDetailMessageWindow } from "../chatSessionState";
-import { chatStreamPerformanceNowMs, isRunningPhase } from "./chatCodingRouteViewModel";
+import { chatStreamPerformanceNowMs } from "./chatCodingRouteViewModel";
 import { postSubmitTelemetry } from "./chatSubmitTelemetry";
 
 export type SubmitAcceptanceEvidence = "canonical_message" | "queued_turn" | "active_task";
@@ -88,10 +89,9 @@ export function isCurrentRunningSessionTurn(
   if (!detail || String(detail.id || "").trim() !== sessionId || !normalizedTurnId) return false;
   const turnLayer = createOptimisticActiveTurnLayer({ sessionId, turnId: normalizedTurnId, accepted: true });
   if (turnLayer && !settleActiveTurnLayerFromDetail(turnLayer, detail)) return false;
-  const phase = String(detail.currentPhase || detail.status || "").trim().toLowerCase();
   // Stop click optimistically changes the phase to "stopping" before the
   // deferred request can be sent. Keep that exact, still-busy turn eligible.
-  if (!isRunningPhase(phase) && !(phase === "stopping" && detail.stopRequested)) return false;
+  if (!sessionOwnsExecution(detail)) return false;
   const activeTurnId = String(detail.activeTurnId || "").trim().replace(/^live:/, "");
   const activeTaskTurnId = String(
     detail.activeTask?.metadata?.turnId ?? detail.activeTask?.metadata?.turn_id ?? "",

@@ -638,8 +638,6 @@ export type AgentRunSnapshot = {
   status: string;
   currentPhase: string;
   /** Canonical lifecycle and actual activity, preferred over legacy wire mirrors. */
-  executionStatus?: string;
-  activityPhase?: string;
   terminalReason?: string;
   rawStatus?: string;
   summary: string;
@@ -660,8 +658,6 @@ export type SubAgentRunSnapshot = {
   contextMode: string;
   status: string;
   currentPhase: string;
-  executionStatus?: string;
-  activityPhase?: string;
   terminalReason?: string;
   rawStatus?: string;
   summary: string;

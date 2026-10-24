@@ -30,6 +30,8 @@ backend startup never blocks on recovery.
 
 from __future__ import annotations
 
+from core.runtime_manager.work_run_status import work_run_has_execution
+
 import logging
 import threading
 from typing import Any, Callable
@@ -55,7 +57,6 @@ RECOVERY_STATE_KEY = "session_recovery"
 
 # Work-run snapshot statuses that mean "a live process owned this turn" —
 # impossible right after a restart, so the snapshot marks the turn interrupted.
-_RECOVERY_BUSY_WORK_RUN_STATUSES = {"queued", "running", "stopping", "paused"}
 
 _TURN_LABEL_MAX_CHARS = 60
 
@@ -148,10 +149,7 @@ def _open_turn_work_run_is_interrupted(s: Any, turn_id: str) -> bool:
     snapshot = s._WORK_RUN_STORE.load_active_snapshot_for_run("chat_turn", turn_id)
     if not isinstance(snapshot, dict):
         return False
-    status = str(snapshot.get("status") or "").strip().lower()
-    if status not in _RECOVERY_BUSY_WORK_RUN_STATUSES:
-        return False
-    return not str(snapshot.get("finishedAt") or "").strip()
+    return work_run_has_execution(snapshot)
 
 
 def _interrupted_turn_prompt(events: list[Any], turn_id: str) -> str:

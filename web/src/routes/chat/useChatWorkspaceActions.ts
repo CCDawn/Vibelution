@@ -12,7 +12,7 @@ import type { ChatMentionTarget } from "../chatMentionTokens";
 import type { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import { isTempSessionId } from "../sessionOptimisticIds";
 import { prefetchSessionDetailWindow } from "./chatSessionDetailHelpers";
-import { isBusyPhase } from "./chatCodingRouteViewModel";
+import { sessionActivityPolicy, sessionBlocksMutation } from "../sessionActivityState";
 import { startUserAction } from "../../app/userActionTelemetry";
 import type { UseChatRouteSelectionResult } from "./useChatRouteSelection";
 import {
@@ -513,10 +513,11 @@ export function useChatWorkspaceActions({
       }));
       return;
     }
-    if (isBusyPhase(session.currentPhase || session.status)) {
+    if (sessionBlocksMutation(session)) {
       startUserAction("session_delete", { sessionId: session.id }, { destructive: true })
         .blocked("session_busy", {
-          phase: String(session.currentPhase || session.status || "").trim(),
+          status: String(session.status ?? "").trim(),
+          currentPhase: String(session.currentPhase ?? "").trim(),
         });
       setSessionComposerErrors((current) => ({
         ...current,
@@ -561,13 +562,14 @@ export function useChatWorkspaceActions({
       }));
       return;
     }
-    if (isBusyPhase(session.currentPhase || session.status)) {
+    if (sessionBlocksMutation(session)) {
       startUserAction("session_clear_history", {
         sessionId: session.id,
         agentId: session.agentId,
       }, { destructive: true })
         .blocked("session_busy", {
-          phase: String(session.currentPhase || session.status || "").trim(),
+          status: String(session.status ?? "").trim(),
+          currentPhase: String(session.currentPhase ?? "").trim(),
         });
       setSessionComposerErrors((current) => ({
         ...current,
@@ -581,7 +583,7 @@ export function useChatWorkspaceActions({
 
   const handleAddSessionToReview = useCallback((session: SessionSummary) => {
     setSessionContextMenu(null);
-    if (isBusyPhase(session.currentPhase || session.status)) {
+    if (sessionActivityPolicy(session).outputActive) {
       setSessionComposerErrors((current) => ({
         ...current,
         [session.id]: t("addSessionToReviewBusy"),

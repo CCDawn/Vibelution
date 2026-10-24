@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { AgentConfigWorkspaceAgent } from "../../api/types";
 import {
   buildLightweightAgentWorkspace,
+  buildActivityTimeline,
   filterAgents,
   findRuntimeFocusEvidence,
   referenceLabel,
@@ -10,6 +11,14 @@ import {
 } from "./agentRouteWorkspaceModel";
 
 describe("agentRouteWorkspaceModel", () => {
+  it("keeps run type and activity phase out of the lifecycle label", () => {
+    const rows = buildActivityTimeline({ agentId: "a", directSessionId: "s" } as AgentConfigWorkspaceAgent,
+      { runs: [{ runId: "r", runKind: "agent_run", status: "", currentPhase: "reading" }], subAgentRuns: [] } as never,
+      [], { parentRuns: "执行", subAgentRuns: "子执行", maxDepth: "深度", inboxTitle: "收件箱", wakeStatus: "唤醒", context: "上下文" }, "zh", undefined);
+    expect(rows[0].title).toBe("未知状态");
+    expect(rows[0].meta).toContain("读取中");
+    expect(rows[0].title).not.toContain("agent_run");
+  });
   it("builds a lightweight workspace and filters archived agents", () => {
     const agents = [
       { agentId: "a1", status: "active", primaryMode: "chat", references: [], health: [] },

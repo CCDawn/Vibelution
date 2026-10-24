@@ -10,6 +10,8 @@ Late-bound facade keeps monkeypatches stable.
 
 from __future__ import annotations
 
+from core.runtime_manager.work_run_status import work_run_has_execution
+
 import copy
 import hashlib
 import json
@@ -998,7 +1000,6 @@ def _repair_child_root_agent_direct_session_bindings(
 
 _STALE_RUNNING_REPAIR_GRACE_SECONDS_ENV = "VIBELUTION_SESSION_STALE_RUNNING_REPAIR_GRACE_SECONDS"
 _STALE_RUNNING_REPAIR_GRACE_SECONDS_DEFAULT = 120.0
-_STALE_RUNNING_OPEN_WORK_RUN_STATUSES = frozenset({"queued", "running", "stopping", "paused"})
 _STALE_RUNNING_SKIP_SIGNAL_TTL_SECONDS = 600.0
 _STALE_RUNNING_SKIP_SIGNAL_MAX_ENTRIES = 256
 # session_id -> (reason, monotonic) dedupe so skip signals stay visible without spamming.
@@ -1074,9 +1075,7 @@ def _stale_running_live_owner_reason(session_id: str) -> str:
     active_session_id = str(active.get("sessionId") or "").strip()
     if active_session_id and active_session_id != session_id:
         return ""
-    status = str(active.get("status") or active.get("currentPhase") or "").strip().lower()
-    finished_at = str(active.get("finishedAt") or active.get("endedAt") or "").strip()
-    if status not in _STALE_RUNNING_OPEN_WORK_RUN_STATUSES or finished_at:
+    if not work_run_has_execution(active):
         return ""
     grace = _stale_running_repair_grace_seconds()
     if grace <= 0.0:

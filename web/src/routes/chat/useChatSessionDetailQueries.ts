@@ -23,7 +23,7 @@ import {
   useStableSessionDetailPlaceholder,
 } from "./chatSessionQuerySeams";
 import type { SessionStreamDecisionSnapshot } from "./chatSessionStreamConnect";
-import { isBusyPhase } from "./chatCodingRouteViewModel";
+import { sessionOwnsExecution } from "../sessionActivityState";
 import { canLoadSessionParameters } from "./chatSessionSurfaceModel";
 
 /** Wait for the same visible directory used by bare-route canonicalization. */
@@ -239,20 +239,11 @@ export function useChatSessionDetailQueries({
     standardGroupRoomActive,
     teams,
   ]);
+  const backgroundExecutionOwned = Boolean(activeSessionId && directSessionPanelActive
+    && sessionOwnsExecution(sessionDetailQuery.data ?? directSessionActiveSummary));
   useEffect(() => {
-    setDirectSessionBackgroundSyncActive(Boolean(
-      activeSessionId
-      && directSessionPanelActive
-      && isBusyPhase(sessionDetailQuery.data?.currentPhase || directSessionActiveSummary?.currentPhase || directSessionActiveSummary?.status),
-    ));
-  }, [
-    activeSessionId,
-    directSessionActiveSummary?.currentPhase,
-    directSessionActiveSummary?.status,
-    directSessionPanelActive,
-    sessionDetailQuery.data?.currentPhase,
-    setDirectSessionBackgroundSyncActive,
-  ]);
+    setDirectSessionBackgroundSyncActive(backgroundExecutionOwned);
+  }, [backgroundExecutionOwned, setDirectSessionBackgroundSyncActive]);
   // A hidden window can miss frames or a stream restart; refocusing must not
   // trust the cached transcript, so force one authoritative resync for the
   // active session and the indexes that feed badges and notification titles.

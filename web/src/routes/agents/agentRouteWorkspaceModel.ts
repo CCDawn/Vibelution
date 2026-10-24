@@ -26,7 +26,7 @@ import {
   type RuntimeFocusEvidenceResult,
 } from "./agentRouteListModel";
 import { FALLBACK_AGENT_LLM_SLOTS } from "./agentRouteLlmModel";
-import { agentRunStatusLabel, agentRunSummary } from "./agentRunPresentation";
+import { agentRunPhaseLabel, agentRunReasonLabel, agentRunStatusLabel, agentRunSummary } from "./agentRunPresentation";
 
 export const LIGHTWEIGHT_AGENT_CONFIG_STORAGE = {
   agentRegistryPath: "workspace/agents/agents.json",
@@ -123,9 +123,9 @@ export function buildActivityTimeline(
     items.push({
       id: `run:${run.runId}`,
       kind: "run",
-      title: agentRunStatusLabel(run.status || run.currentPhase || run.runKind || copy.parentRuns, lang),
+      title: agentRunStatusLabel(run.status, lang),
       body: agentRunSummary(run.summary) || run.runId || "-",
-      meta: `${copy.parentRuns} · ${run.currentPhase || run.sessionId || "-"}`,
+      meta: [copy.parentRuns, agentRunPhaseLabel(run.currentPhase, lang), agentRunReasonLabel(run.terminalReason, lang), run.sessionId].filter(Boolean).join(" · "),
       timestamp,
       sessionId: run.sessionId || agent.directSessionId || "",
       messageId: "",
@@ -138,7 +138,7 @@ export function buildActivityTimeline(
     items.push({
       id: `sub:${run.runId}`,
       kind: "sub_run",
-      title: `${copy.subAgentRuns} · ${agentRunStatusLabel(run.status || run.currentPhase || run.runKind || "-", lang)}`,
+      title: `${copy.subAgentRuns} · ${agentRunStatusLabel(run.status, lang)}`,
       body: agentRunSummary(run.summary) || run.subRunId || run.runId || "-",
       meta: `${run.contextMode || "-"} · ${copy.maxDepth} ${run.depth}/${run.maxDepth}`,
       timestamp,

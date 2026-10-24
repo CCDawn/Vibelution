@@ -270,6 +270,15 @@ describe("AgentSessionTabStrip", () => {
     expect(markup).not.toContain(">会话进行</span>");
   });
 
+  it("labels paused activity without showing the running spinner", () => {
+    const markup = renderStrip({
+      sessions: [session({ id: "session-paused", status: "paused", currentPhase: "paused" })],
+    });
+
+    expect(markup).toContain("已暂停");
+    expect(markup).not.toContain("agentSessionTabStatusSpinner");
+  });
+
   it("hides completed indicator after the session activity is marked seen", () => {
     const done = session({
       id: "session-done",
@@ -429,6 +438,18 @@ describe("AgentSessionTabStrip", () => {
 
     expect(markup).toContain('aria-label="deleteSessionBusy 顾明澈"');
     expect(markup).toContain('disabled=""');
+  });
+
+  it("blocks delete for paused, contradictory running/resting, and unknown activity", () => {
+    const markup = renderStrip({
+      sessions: [
+        session({ id: "session-paused", status: "paused", currentPhase: "paused" }),
+        session({ id: "session-running", status: "running", currentPhase: "ready" }),
+        session({ id: "session-unknown", status: "future_phase", currentPhase: "" }),
+      ],
+    });
+
+    expect(markup.match(/aria-label="deleteSessionBusy 顾明澈"/g)?.length).toBe(3);
   });
 
   it("marks the active session tab with selection chrome independent of status color", () => {

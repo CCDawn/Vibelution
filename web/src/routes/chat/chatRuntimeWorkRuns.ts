@@ -1,4 +1,5 @@
 import type { RuntimeSummary } from "../../api/types";
+import { workRunHasExecution } from "../workRunActivityState";
 
 /**
  * Live chat turns from runtime summary. `workRuns.active.chat_turn` is a
@@ -10,6 +11,7 @@ export function chatTurnSessionIdsFromRuntime(
   const ids: string[] = [];
   const seen = new Set<string>();
   for (const run of runtime?.workRuns?.activeItems?.chat_turn ?? []) {
+    if (!workRunHasExecution(run)) continue;
     const sessionId = String(run?.sessionId ?? "").trim();
     if (!sessionId || seen.has(sessionId)) {
       continue;

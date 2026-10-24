@@ -1,3 +1,4 @@
+import { resolveSessionActivity, sessionBlocksMutation, sessionOwnsExecution } from "../sessionActivityState";
 import { isChatRoomMutationPending } from "./useChatScopedMutationPending";
 import { collapseProjectUtilityRail, selectSessionUtilityRail, setProjectUtilityHost } from "../../app/projectUtilityRail";
 import { useProjectAwareRightRail } from "./useProjectAwareRightRail";
@@ -1626,9 +1627,7 @@ export function ChatCodingRouteWorkbench() {
     polling: {
       directSessionPanelActive,
       runtimeActive: sessionToolApprovalRuntimeActive,
-      detailCurrentPhase: detail?.currentPhase,
-      summaryCurrentPhase: directSessionActiveSummary?.currentPhase,
-      summaryStatus: directSessionActiveSummary?.status,
+      executionOwned: sessionOwnsExecution(detail ?? directSessionActiveSummary),
     },
   });
   const handleLoadEarlierSessionMessages = useCallback(() => {
@@ -1973,7 +1972,6 @@ export function ChatCodingRouteWorkbench() {
     regenerateMutation,
     stopTurnMutation,
     sessionGuidanceMutation,
-    activeTurnSettledByDetail,
   });
   const companionComposerDisabled = composerDisabled || (companionMode && !companionTransportAgentId);
   const isModelParametersSavePendingNow = useCallback(() => {
@@ -2053,17 +2051,14 @@ export function ChatCodingRouteWorkbench() {
       .slice(-1);
   }, [detail?.runtimeNotices]);
   const activeControlSignals = useMemo<ChatNextStateSignalSummary[]>(() => {
-    const phase = detail?.currentPhase || directSessionActiveSummary?.currentPhase || directSessionActiveSummary?.status || "";
+    const phase = resolveSessionActivity(detail ?? directSessionActiveSummary ?? {}).execution;
     return (detail?.nextStateSignals ?? [])
       .filter((signal) => shouldShowNextStateSignalInConversation(signal, phase, detail?.messages ?? []))
       .slice(-3)
       .reverse();
   }, [
-    detail?.currentPhase,
-    detail?.messages,
-    detail?.nextStateSignals,
-    directSessionActiveSummary?.currentPhase,
-    directSessionActiveSummary?.status,
+    detail,
+    directSessionActiveSummary,
   ]);
   const latestControlSignal = activeControlSignals[0] ?? null;
   const regenerableAssistantMessageId = useMemo(() => {
@@ -2667,7 +2662,6 @@ export function ChatCodingRouteWorkbench() {
     filteredConversations,
     sessionsById,
     bulkDeleteSessionsMutation,
-    isBusyPhase,
     lang,
     t,
   });
@@ -2787,6 +2781,7 @@ export function ChatCodingRouteWorkbench() {
   });
 
   const handleArchiveSession = useCallback((session: SessionSummary) => {
+    if (sessionBlocksMutation(session)) return;
     setSessionContextMenu(null);
     sessionArchiveMutation.mutate({
       sessionId: session.id,
@@ -2800,6 +2795,7 @@ export function ChatCodingRouteWorkbench() {
     void queryClient.invalidateQueries({ queryKey: queryKeys.financialAssistants() });
   }, [queryClient]);
   const handleDeleteArchivedSession = useCallback((session: SessionSummary) => {
+    if (sessionBlocksMutation(session)) return;
     deleteSessionMutation.mutate(
       { sessionId: session.id },
       { onSettled: refreshArchivedSessions },
@@ -2812,7 +2808,7 @@ export function ChatCodingRouteWorkbench() {
       do {
         const page = await listArchivedChatSessions({ limit: 200, cursor });
         for (const item of page.items) {
-          if (!item.id || isBusyPhase(item.currentPhase || item.status)) {
+          if (!item.id || sessionBlocksMutation(item)) {
             continue;
           }
           sessionIds.push(item.id);
@@ -2829,7 +2825,7 @@ export function ChatCodingRouteWorkbench() {
         refreshArchivedSessions();
       }
     })();
-  }, [bulkDeleteSessionsMutation, refreshArchivedSessions, isBusyPhase]);
+  }, [bulkDeleteSessionsMutation, refreshArchivedSessions]);
 
   const handleTogglePinSession = useCallback((session: SessionSummary) => {
     setSessionContextMenu(null);

@@ -14,6 +14,7 @@ import { DirectSessionIndexList } from "./DirectSessionIndexList";
 
 const counters = vi.hoisted(() => ({
   viewModels: 0,
+  sessionBusyValues: [] as boolean[],
   itemProps: [] as Array<Record<string, unknown>>,
 }));
 
@@ -25,6 +26,7 @@ vi.mock("./DirectSessionIndexItem", async (importOriginal) => {
       input: Parameters<typeof actual.buildDirectSessionIndexViewModel>[0],
     ) => {
       counters.viewModels += 1;
+      counters.sessionBusyValues.push(input.sessionBusy);
       return actual.buildDirectSessionIndexViewModel(input);
     },
     DirectSessionIndexItem: (
@@ -48,6 +50,18 @@ function conversation(id: string): ConversationSummary {
     workspacePath: `/workspace/${id}`,
     agentId: "agent-1",
     agentDisplayName: "顾明澈",
+  };
+}
+
+function sessionSummary(id: string, status: string, currentPhase: string): SessionSummary {
+  return {
+    id,
+    title: id,
+    status,
+    currentPhase,
+    taskSummary: "",
+    lastActive: "",
+    updatedAt: "",
   };
 }
 
@@ -79,7 +93,6 @@ function listProps(overrides: Partial<ListProps> = {}): ListProps {
     buildSessionReferencePayload: (session) =>
       ({ sessionId: session.id } as unknown as SessionReferenceAttachment),
     contextMenuSessionId: "",
-    isBusyPhase: () => false,
     onCancelRename: () => undefined,
     onContextMenu: () => undefined,
     onDragReference: () => undefined,
@@ -97,6 +110,7 @@ describe("DirectSessionIndexList render stability", () => {
 
   beforeEach(() => {
     counters.viewModels = 0;
+    counters.sessionBusyValues.length = 0;
     counters.itemProps.length = 0;
   });
 
@@ -152,6 +166,23 @@ describe("DirectSessionIndexList render stability", () => {
 
     const latestItems = counters.itemProps.slice(-2);
     expect(latestItems[0].itemMessage).toBe("选择失败");
+  });
+
+  it("protects direct session deletes from paused, conflicting, and unknown activity", () => {
+    const ids = ["s-paused", "s-running-ready", "s-unknown", "s-ready"];
+    const sessionsById = new Map<string, SessionSummary>([
+      ["s-paused", sessionSummary("s-paused", "paused", "paused")],
+      ["s-running-ready", sessionSummary("s-running-ready", "running", "ready")],
+      ["s-unknown", sessionSummary("s-unknown", "future_phase", "")],
+      ["s-ready", sessionSummary("s-ready", "ready", "ready")],
+    ]);
+
+    renderList(listProps({
+      conversations: ids.map(conversation),
+      sessionsById,
+    }));
+
+    expect(counters.sessionBusyValues).toEqual([true, true, true, false]);
   });
 
   it("keeps the approval and runtime marker sets off the per-render path", () => {

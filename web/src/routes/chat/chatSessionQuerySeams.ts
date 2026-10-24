@@ -14,7 +14,6 @@ import type {
   SessionSummary,
   SessionToolApprovalRequest,
 } from "../../api/types";
-import { isBusyPhase } from "./chatCodingRouteViewModel";
 import { resolveSessionDetailPlaceholder } from "./chatSessionDetailHelpers";
 import { resolveStickySessionDetailPaint } from "./chatSessionPaintCache";
 
@@ -66,9 +65,7 @@ export function sessionDetailStructuralSharing(
 export type SessionToolApprovalPollingInput = {
   directSessionPanelActive: boolean;
   runtimeActive: boolean;
-  detailCurrentPhase: string | undefined;
-  summaryCurrentPhase: string | undefined;
-  summaryStatus: string | undefined;
+  executionOwned: boolean;
 };
 
 /**
@@ -89,9 +86,7 @@ export function useSessionToolApprovalsRefetchInterval(
   const {
     directSessionPanelActive,
     runtimeActive,
-    detailCurrentPhase,
-    summaryCurrentPhase,
-    summaryStatus,
+    executionOwned,
   } = options;
   return useCallback(
     (query) => {
@@ -102,7 +97,7 @@ export function useSessionToolApprovalsRefetchInterval(
       // Avoid 250ms thrash while busy (queues behind heavy session-detail under load).
       // Pending approvals still poll sub-second; busy-without-pending is lighter.
       const busy = runtimeActive
-        || isBusyPhase(detailCurrentPhase || summaryCurrentPhase || summaryStatus);
+        || executionOwned;
       if (hasPending) {
         return 750;
       }
@@ -114,9 +109,7 @@ export function useSessionToolApprovalsRefetchInterval(
     [
       directSessionPanelActive,
       runtimeActive,
-      detailCurrentPhase,
-      summaryCurrentPhase,
-      summaryStatus,
+      executionOwned,
     ],
   );
 }

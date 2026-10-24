@@ -1,5 +1,5 @@
 import type { ConversationMessage, SessionDetail, SessionStreamEvent, SessionTurnItem } from "../api/types";
-import { activityOutcome, isActivityResting } from "./sessionActivityState";
+import { activityOutcome, sessionIsAtRest } from "./sessionActivityState";
 import {
   activeTurnProtocolTextLength,
   consolidateSessionTurnItemsV2,
@@ -28,7 +28,7 @@ export type ActiveTurnLayerState = {
 /** The session authority can end execution before its message window hydrates. */
 export type ActiveTurnAuthority = Pick<SessionDetail,
   "id" | "currentPhase" | "activeTurnId" | "lastTurnTerminalTurnId" | "terminalReason" | "ledgerSeq"
->;
+> & { status?: string };
 
 export type OptimisticActiveTurnLayerInput = {
   sessionId: string;
@@ -405,10 +405,10 @@ export function projectActiveTurnLayerMessage(
 
 function isActiveTurnExecutionEnded(layer: ActiveTurnLayerState, authority?: ActiveTurnAuthority) {
   if (!authority || authority.id !== layer.sessionId || !layer.turnId) return false;
-  if (compactText(authority.activeTurnId) || compactText(authority.lastTurnTerminalTurnId) !== layer.turnId) return false;
+  if (compactText(authority.lastTurnTerminalTurnId) !== layer.turnId) return false;
   if (!activityOutcome(authority.terminalReason)) return false;
-  const phase = compactText(authority.currentPhase).toLowerCase();
-  if (!isActivityResting(phase) && !activityOutcome(phase)) return false;
+  if (!compactText(authority.currentPhase) && !compactText(authority.status)) return false;
+  if (!sessionIsAtRest(authority)) return false;
   const sequence = normalizedLedgerSeq(authority.ledgerSeq);
   return sequence > 0 && sequence >= normalizedLedgerSeq(layer.ledgerSeq);
 }

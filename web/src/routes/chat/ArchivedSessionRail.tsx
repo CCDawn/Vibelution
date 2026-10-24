@@ -13,6 +13,7 @@ import {
   sortArchivedSessions,
   visibleArchivedSessions,
 } from "./archivedSessionRailModel";
+import { sessionBlocksMutation } from "../sessionActivityState";
 import styles from "./ArchivedSessionRail.styles";
 import type { SessionListSortBy } from "./sessionListPreferences";
 
@@ -25,7 +26,6 @@ type ArchivedSessionRailProps = {
   archivePendingSessionIds?: ReadonlySet<string>;
   deletePendingSessionId: string;
   deleteAllPending: boolean;
-  isBusyPhase: (value: string | null | undefined) => boolean;
   lang: "zh" | "en";
   t: (key: TranslationKey) => string;
   onUnarchive: (session: SessionSummary) => void;
@@ -49,7 +49,6 @@ export function ArchivedSessionRail({
   onUnarchive,
   onDelete,
   onDeleteAll,
-  isBusyPhase,
   t,
   renderSessions,
 }: ArchivedSessionRailProps) {
@@ -82,7 +81,7 @@ export function ArchivedSessionRail({
       ) : sorted.length === 0 ? (
         <VStateSurface tone="empty" title={t("noArchivedSessions")} />
       ) : renderSessions(visible, (session) => {
-          const busy = isBusyPhase(session.currentPhase || session.status);
+          const busy = sessionBlocksMutation(session);
           const unarchivePending = archivePendingSessionIds?.has(session.id) ?? archivePendingSessionId === session.id;
           const deletePending = deletePendingSessionId === session.id;
           return (
@@ -91,7 +90,7 @@ export function ArchivedSessionRail({
                 type="button"
                 label={t("unarchiveSession")}
                 tooltip={t("unarchiveSession")}
-                isDisabled={unarchivePending}
+                isDisabled={busy || unarchivePending}
                 onPress={() => onUnarchive(session)}
                 icon={<ArchiveRestore size={15} aria-hidden="true" />}
               />

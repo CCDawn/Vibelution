@@ -14,11 +14,11 @@
  */
 
 import {
-  activityExecution, activityOutcome, isActivityResting, resolveSessionActivity,
+  activityExecution, activityOutcome, activityOutputActive, isActivityResting, resolveSessionActivity,
 } from "./sessionActivityState";
 
 // `completed` is the legacy unread-reply indicator, not a successful Turn verdict.
-export type SessionActivityTone = "running" | "approval" | "error" | "completed" | "none";
+export type SessionActivityTone = "running" | "stopping" | "paused" | "approval" | "error" | "completed" | "none";
 
 const SEEN_STORAGE_KEY = "vibelution.session-activity-seen.v1";
 
@@ -170,27 +170,7 @@ export function sessionIsErrorStatus(value: string | null | undefined) {
 }
 
 export function sessionIsRunningStatus(value: string | null | undefined) {
-  return Boolean(activityExecution(value));
-}
-
-export function sessionIsCompletedStatus(value: string | null | undefined) {
-  // Compatibility API used by unread/history filters; it means settled, not success.
-  const outcome = activityOutcome(value);
-  return value?.trim().toLowerCase() === "ready" || Boolean(outcome && outcome !== "failed");
-}
-
-export function sessionStatusCandidates(
-  session: {
-    childStatus?: string;
-    currentPhase?: string;
-    status?: string;
-    lastTurnStatus?: string;
-    sessionKind?: string;
-  },
-) {
-  // Compatibility export: callers receive one resolved current interpretation,
-  // rather than independently combining current and historical fields again.
-  return [sessionPrimaryStatus(session)].filter(Boolean);
+  return activityOutputActive(value);
 }
 
 export function sessionPrimaryStatus(
@@ -203,7 +183,7 @@ export function sessionPrimaryStatus(
   },
 ) {
   const state = resolveSessionActivity(session);
-  return state.phase || (activityExecution(state.execution) ? state.execution : state.reason || state.rawStatus);
+  return activityOutputActive(state.execution) ? state.phase || state.execution : state.outcome || state.execution;
 }
 
 export function resolveSessionActivityTone(
@@ -232,6 +212,12 @@ export function resolveSessionActivityTone(
     return "approval";
   }
   const state = resolveSessionActivity(session, { runtimeRunning: options?.isRuntimeRunning });
+  if (state.execution === "paused") {
+    return "paused";
+  }
+  if (state.execution === "stopping") {
+    return "stopping";
+  }
   if (activityExecution(state.execution)) {
     return "running";
   }
@@ -269,6 +255,12 @@ export function resolveAgentActivityTone(
   if (tones.some((tone) => tone === "running")) {
     return "running";
   }
+  if (tones.some((tone) => tone === "stopping")) {
+    return "stopping";
+  }
+  if (tones.some((tone) => tone === "paused")) {
+    return "paused";
+  }
   if (tones.some((tone) => tone === "completed")) {
     return "completed";
   }
@@ -276,6 +268,12 @@ export function resolveAgentActivityTone(
 }
 
 export function sessionActivityLabel(tone: SessionActivityTone, lang: "zh" | "en") {
+  if (tone === "stopping") {
+    return lang === "zh" ? "停止中" : "Stopping";
+  }
+  if (tone === "paused") {
+    return lang === "zh" ? "已暂停" : "Paused";
+  }
   if (tone === "running") {
     return lang === "zh" ? "会话进行" : "In session";
   }

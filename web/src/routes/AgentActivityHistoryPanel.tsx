@@ -208,10 +208,10 @@ export function AgentActivityHistoryPanel({
               <article key={run.runId} className={styles.runHistoryItem}>
                 <VTooltip
                   width="wide"
-                  content={`${[agentRunPhaseLabel(run.activityPhase ?? run.currentPhase, lang), agentRunReasonLabel(run.terminalReason, lang), run.sessionId].filter(Boolean).join(" · ") || "-"} · ${formatTimestamp(run.updatedAt || run.startedAt, lang)}`}
+                  content={`${[agentRunPhaseLabel(run.currentPhase, lang), agentRunReasonLabel(run.terminalReason, lang), run.sessionId].filter(Boolean).join(" · ") || "-"} · ${formatTimestamp(run.updatedAt || run.startedAt, lang)}`}
                 >
                   <strong className={styles.metadataTrigger} tabIndex={0}>
-                    {agentRunStatusLabel(run.executionStatus ?? run.status, lang)}
+                    {agentRunStatusLabel(run.status, lang)}
                   </strong>
                 </VTooltip>
                 <span>{agentRunSummary(run.summary) || run.runId}</span>
@@ -221,10 +221,10 @@ export function AgentActivityHistoryPanel({
               <article key={run.runId} className={styles.runHistoryItem}>
                 <VTooltip
                   width="wide"
-                  content={`${run.contextMode || "-"} · ${copy.maxDepth} ${run.depth}/${run.maxDepth} · ${[agentRunPhaseLabel(run.activityPhase ?? run.currentPhase, lang), agentRunReasonLabel(run.terminalReason, lang)].filter(Boolean).join(" · ")} · ${formatTimestamp(run.updatedAt || run.createdAt, lang)}`}
+                  content={`${run.contextMode || "-"} · ${copy.maxDepth} ${run.depth}/${run.maxDepth} · ${[agentRunPhaseLabel(run.currentPhase, lang), agentRunReasonLabel(run.terminalReason, lang)].filter(Boolean).join(" · ")} · ${formatTimestamp(run.updatedAt || run.createdAt, lang)}`}
                 >
                   <strong className={styles.metadataTrigger} tabIndex={0}>
-                    {copy.subAgentRuns} · {agentRunStatusLabel(run.executionStatus ?? run.status, lang)}
+                    {copy.subAgentRuns} · {agentRunStatusLabel(run.status, lang)}
                   </strong>
                 </VTooltip>
                 <span>{agentRunSummary(run.summary) || run.subRunId || run.runId}</span>

@@ -17,6 +17,7 @@ from core.chat.conversation_store import (
     parse_directory_cursor_entry,
 )
 from core.web.services.agent_config_authority import canonical_agent_config_payload
+from core.runtime_manager.work_run_status import resolve_work_run_activity, work_run_has_execution
 
 from . import directory_runtime
 from . import session_body_search
@@ -803,9 +804,8 @@ def _session_runtime_status_snapshot() -> dict[str, str] | None:
         if not isinstance(item, Mapping):
             continue
         session_id = str(item.get("sessionId") or "").strip()
-        status = str(item.get("status") or item.get("currentPhase") or "").strip().lower()
-        if session_id and status in {"queued", "running", "stopping", "paused"}:
-            statuses[session_id] = status
+        if session_id and work_run_has_execution(item):
+            statuses[session_id] = str(resolve_work_run_activity(item)["execution"])
     return statuses
 
 

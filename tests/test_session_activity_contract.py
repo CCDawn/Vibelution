@@ -42,3 +42,42 @@ def test_every_canonical_run_state_and_phase_has_a_display_mapping():
     assert RUN_ACTIVE_STATUSES | RUN_TERMINAL_STATUSES <= RUN_STATUS_LABELS.keys()
     assert set(RUN_STATUS_ALIASES.values()) <= RUN_STATUS_LABELS.keys()
     assert set(SESSION_ACTIVITY_CONTRACT["phases"]) == set(SESSION_ACTIVITY_CONTRACT["phaseLabels"])
+    assert set(SESSION_ACTIVITY_CONTRACT["executions"].values()) <= SESSION_ACTIVITY_CONTRACT["labels"].keys()
+    assert set(SESSION_ACTIVITY_CONTRACT["outcomes"].values()) <= SESSION_ACTIVITY_CONTRACT["labels"].keys()
+    from core.runtime_manager.work_run_status import WORK_RUN_ACTIVITY_CONTRACT
+
+    assert set(WORK_RUN_ACTIVITY_CONTRACT["executions"].values()) <= WORK_RUN_ACTIVITY_CONTRACT["labels"].keys()
+    assert set(WORK_RUN_ACTIVITY_CONTRACT["outcomes"].values()) <= WORK_RUN_ACTIVITY_CONTRACT["labels"].keys()
+
+
+POLICY_CASES = json.loads((Path(__file__).parent / "fixtures/activity_policy_cases.json").read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("case", POLICY_CASES, ids=lambda case: case["name"])
+def test_session_activity_policy(case):
+    from core.chat.session_activity import session_activity_policy
+
+    assert session_activity_policy(case["session"]) == case["expected"]
+    from core.chat.session_activity import session_activity_group
+
+    assert session_activity_group(case["session"]) == case["expectedGroup"]
+
+
+WORK_CASES = json.loads((Path(__file__).parent / "fixtures/work_run_activity_cases.json").read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("case", WORK_CASES, ids=lambda case: case["name"])
+def test_work_run_activity_behavior(case):
+    from core.runtime_manager.work_run_status import resolve_work_run_activity
+
+    assert resolve_work_run_activity(case["snapshot"]) == case["expected"]
+
+
+def test_all_activity_display_languages_cover_the_same_keys():
+    from scripts.generate_activity_contract import render_contract
+
+    contract = json.loads(render_contract().split(" = ", 1)[1].removesuffix(" as const;\n"))
+    for domain in contract.values():
+        assert domain["labels"].keys() == domain["labelsEn"].keys()
+        if "phaseLabels" in domain and "phaseLabelsEn" in domain:
+            assert domain["phaseLabels"].keys() == domain["phaseLabelsEn"].keys()

@@ -17,9 +17,8 @@ import {
   VSurface,
   VTextarea,
 } from "../../components/vui";
-import { auxTaskStatusLabel } from "../auxConversations/auxTaskPresentation";
 import { assistantTurnIsInFlight } from "../chatTurnProtocol";
-import { isBusyPhase } from "./chatCodingRouteViewModel";
+import { resolveSessionActivity, sessionActivityStatusLabel, sessionOwnsExecution } from "../sessionActivityState";
 import { ChatChangeRail } from "./ChatChangeRail";
 import type { CliAgentRunView, CliAgentTerminalSession } from "./cliAgentRunModel";
 import { encodeUtf8Base64 } from "./chatComposerSubmitModel";
@@ -94,6 +93,9 @@ export type ChatRightRailSideClient = {
     currentPhase?: string;
     status?: string;
     lastTurnStatus?: string;
+    terminalReason?: string;
+    activeTurnId?: string;
+    lastTurnTerminalTurnId?: string;
     queuedTurns?: Array<Pick<SessionQueuedTurn, "kind" | "status">>;
     activeTask?: Pick<SessionActiveTask, "status"> | null;
     messages: ConversationMessage[];
@@ -191,22 +193,16 @@ function failureText(error: unknown, fallback: string) {
 
 type ChatRightRailSessionDetail = Awaited<ReturnType<ChatRightRailSideClient["fetchDetail"]>>;
 
-const SIDE_CHAT_EXTRA_ACTIVE_PHASES = new Set(["pending", "waiting", "in_progress"]);
+// Queue and tool-backed activeTask are independent from Session execution.
+const SIDE_CHAT_ACTIVE_TASK_STATUSES = new Set(["pending", "queued", "running", "waiting", "in_progress"]);
 const SIDE_CHAT_QUEUED_PHASES = new Set(["queued", "starting", "draining", "paused"]);
-
-function sideChatPhaseIsInFlight(value: string | undefined): boolean {
-  const phase = String(value || "").trim().toLowerCase();
-  return isBusyPhase(phase) || SIDE_CHAT_EXTRA_ACTIVE_PHASES.has(phase);
-}
 
 function sideChatDetailIsInFlight(detail: ChatRightRailSessionDetail | undefined): boolean {
   if (!detail) {
     return false;
   }
-  return sideChatPhaseIsInFlight(detail.currentPhase)
-    || sideChatPhaseIsInFlight(detail.status)
-    || sideChatPhaseIsInFlight(detail.lastTurnStatus)
-    || sideChatPhaseIsInFlight(detail.activeTask?.status)
+  return sessionOwnsExecution(detail)
+    || SIDE_CHAT_ACTIVE_TASK_STATUSES.has(String(detail.activeTask?.status ?? "").toLowerCase())
     || Boolean(detail.queuedTurns?.some((turn) => {
       const status = String(turn.status || "").trim().toLowerCase();
       return SIDE_CHAT_QUEUED_PHASES.has(status);
@@ -482,8 +478,8 @@ function ChatRightRailFileBody({
 type DirectoryRow = {
   id: string;
   title: string;
-  status: string;
   summary: string;
+  source: SessionSummary;
 };
 
 function directoryRows(sessions: SessionSummary[]): DirectoryRow[] {
@@ -495,7 +491,7 @@ function directoryRows(sessions: SessionSummary[]): DirectoryRow[] {
     return [{
       id,
       title: String(session.taskTitle || session.title || id).trim() || id,
-      status: String(session.childStatus || session.status || session.currentPhase || "").trim(),
+      source: session,
       summary: String(session.resultCard?.summary || session.taskSummary || "").trim(),
     }];
   });
@@ -531,8 +527,9 @@ function ChatRightRailDirectoryBody({
     refetchIntervalInBackground: false,
   });
   const rows = directoryRows(directoryQuery.data ?? []);
-  const running = rows.filter((row) => sideChatPhaseIsInFlight(row.status));
-  const ended = rows.filter((row) => !sideChatPhaseIsInFlight(row.status));
+  const running = rows.filter((row) => sessionOwnsExecution(row.source));
+  const ended = rows.filter((row) => ["idle", "settled"].includes(resolveSessionActivity(row.source).execution));
+  const unknown = rows.filter((row) => resolveSessionActivity(row.source).execution === "unknown");
   const section = (title: string, items: DirectoryRow[], empty: string) => (
     <>
       <p className={styles.searchHeading}>{`${title} · ${items.length}`}</p>
@@ -547,7 +544,7 @@ function ChatRightRailDirectoryBody({
                 className={styles.launcherButton}
                 onClick={() => onOpenItem(item)}
               >
-                {`${item.title} · ${auxTaskStatusLabel(item.status, lang)}`}
+                {`${item.title} · ${sessionActivityStatusLabel(resolveSessionActivity(item.source), lang)}`}
               </VButton>
               {item.summary ? <p className={styles.note}>{item.summary}</p> : null}
             </li>
@@ -564,6 +561,7 @@ function ChatRightRailDirectoryBody({
       {directoryQuery.isError ? <p className={styles.error} role="alert">{copy.directoryError}</p> : null}
       {section(copy.directoryRunning, running, copy.directoryRunningEmpty)}
       {section(copy.directoryEnded, ended, copy.directoryEndedEmpty)}
+      {unknown.length ? section(lang === "zh" ? "状态未知" : "Unknown state", unknown, "") : null}
       <p className={styles.note}>{copy.directory}</p>
       <VRouteLinkButton to="/aux" variant="ghost" density="compact">
         {copy.directoryOpen}

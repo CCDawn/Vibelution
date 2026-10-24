@@ -84,7 +84,7 @@ export type PersonalAssistantOverview = {
   generatedAt: string;
   counts: { agents: number; sessions: number; running: number; waiting: number; failed: number };
   agents: Array<{ id: string; displayName: string; status: string }>;
-  sessions: Array<{ id: string; agentId: string; title: string; status: string; currentPhase: string; turnId?: string }>;
+  sessions: Array<{ id: string; agentId: string; title: string; status: string; currentPhase: string; turnId?: string; lastTurnStatus?: string; terminalReason?: string; activeTurnId?: string; lastTurnTerminalTurnId?: string }>;
   attention: PersonalAssistantAttentionRow[];
   /** Human-attention lane (knowledge_review/anomaly/human_gate), separate so session-derived attention keeps its counts invariant. */
   humanAttention?: PersonalAssistantAttentionRow[];

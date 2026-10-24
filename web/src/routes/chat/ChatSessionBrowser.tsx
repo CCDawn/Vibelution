@@ -106,16 +106,15 @@ function teamNameFor(session: SessionSummary) {
 
 function toneMatches(tone: SessionActivityTone, filter: SessionStatusFilter, isCompleted: boolean) {
   if (filter === "all") return true;
-  if (filter === "running") return tone === "running";
-  if (filter === "attention") return tone === "approval" || tone === "error";
+  if (filter === "running") return tone === "running" || tone === "stopping";
+  if (filter === "attention") return tone === "approval" || tone === "error" || tone === "paused";
   if (filter === "completed") return isCompleted;
   return tone === "none";
 }
 
 function hasCompletedLifecycle(session: SessionSummary) {
   const state = resolveSessionActivity(session);
-  return (state.execution === "settled" && state.outcome !== "failed")
-    || (state.execution === "idle" && state.rawStatus === "ready");
+  return state.execution === "settled";
 }
 
 function activityLabel(tone: SessionActivityTone, lang: "zh" | "en") {

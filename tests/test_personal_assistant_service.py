@@ -513,6 +513,7 @@ def test_platform_overview_uses_native_activity_and_only_projects_safe_summaries
     )
     monkeypatch.setattr(pet_activity_service, "list_sessions", lambda: sessions)
     monkeypatch.setattr(pet_activity_service, "get_pet_activity", observe_activity)
+    monkeypatch.setattr(session_service, "load_chat_turn_work_run_summary", lambda: pet_activity_service.load_chat_turn_work_run_summary())
     monkeypatch.setattr(
         pet_activity_service,
         "load_chat_turn_work_run_summary",
@@ -559,7 +560,7 @@ def test_platform_overview_uses_native_activity_and_only_projects_safe_summaries
         set(row) == {"id", "displayName", "status"} for row in overview["agents"]
     )
     assert all(
-        set(row) == {"id", "agentId", "title", "status", "currentPhase", "turnId"}
+        set(row) == {"id", "agentId", "title", "status", "currentPhase", "turnId", "lastTurnStatus", "terminalReason", "activeTurnId", "lastTurnTerminalTurnId"}
         for row in overview["sessions"]
     )
     assert all(
@@ -567,6 +568,26 @@ def test_platform_overview_uses_native_activity_and_only_projects_safe_summaries
         for row in overview["attention"]
     )
     assert sensitive not in str(overview)
+
+
+def test_overview_counts_match_execution_groups_without_inventing_unknown_owners(monkeypatch):
+    monkeypatch.setattr(directory, "list_agents", lambda **_: [])
+    rows = [{"id": name, "status": "ready", "currentPhase": "ready", "terminalReason": "success"}
+            for name in ("paused", "stopping", "blocked", "unknown")]
+    monkeypatch.setattr(session_service, "list_sessions", lambda: rows)
+    monkeypatch.setattr(session_service, "current_session_turn_id", lambda _: "")
+    monkeypatch.setattr(session_service, "load_chat_turn_work_run_summary", lambda: {"activeItems": [
+        {"sessionId": name, "runId": name, "status": status, "currentPhase": "thinking"}
+        for name, status in (("paused", "paused"), ("stopping", "stopping"), ("blocked", "blocked"), ("unknown", "future_state"))
+    ]})
+    monkeypatch.setattr(pet_activity_service, "get_pet_activity", lambda: {"sessions": [], "generatedAt": ""})
+    public = service._build_platform_overview_snapshot()["public"]
+    assert public["counts"] == {"agents": 0, "sessions": 4, "running": 1, "waiting": 1, "failed": 0}
+    states = {row["id"]: row for row in public["sessions"]}
+    assert states["paused"]["status"] == "paused"
+    for name in ("blocked", "unknown"):
+        assert states[name]["status"] == "unknown"
+        assert states[name]["activeTurnId"] == ""
 
 
 def test_platform_overview_keeps_total_counts_when_summaries_are_bounded(

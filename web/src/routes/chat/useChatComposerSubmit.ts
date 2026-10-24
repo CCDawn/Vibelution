@@ -65,8 +65,6 @@ import type { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import {
   chatStreamPerformanceNowMs,
   describeChatSubmitError,
-  isBusyPhase,
-  isRunningPhase,
 } from "./chatCodingRouteViewModel";
 import {
   MAX_COMPOSER_DOCUMENT_ATTACHMENTS,

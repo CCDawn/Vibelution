@@ -541,12 +541,13 @@ describe("Finance analyst team", () => {
       ? { ...detailFor(sessionId, currentRun!.synthesis, "工具额度已耗尽，本轮停止"), terminalReason: reason, lastTurnTerminalTurnId: "turn-synthesis" }
       : fetchDetail(sessionId));
     await render();
-    expect(container.textContent).toContain("汇总失败");
+    expect(container.textContent).toContain(reason === "superseded" ? "已停止" : "待继续");
+    expect(container.textContent).not.toContain("汇总失败");
     expect(container.textContent).not.toContain("主助手已汇总");
     expect(container.textContent).not.toContain("工具额度已耗尽，本轮停止");
   });
 
-  it("shows a terminal failure even when no assistant message was emitted", async () => {
+  it.each(["failed_runtime", "needs_continue", "paused_limit"])("shows exact terminal %s before an assistant message arrives", async (reason) => {
     currentRun = makeRun(); currentRun.coordinationStatus = "blocked";
     for (const role of roleKeys) currentRun.analysts[role]!.turnId = "turn-" + role;
     currentRun.synthesis.turnId = "turn-synthesis";
@@ -554,12 +555,31 @@ describe("Finance analyst team", () => {
     api.session.mockImplementation(async (sessionId: string) => {
       if (sessionId !== "session-assistant") return fetchDetail(sessionId);
       const detail = detailFor(sessionId, currentRun!.synthesis, "");
-      return { ...detail, messages: detail.messages?.filter(message => message.role === "user"), status: "failed", terminalReason: "failed_runtime", lastTurnTerminalTurnId: "turn-synthesis" };
+      return { ...detail, messages: detail.messages?.filter(message => message.role === "user"), status: "ready", terminalReason: reason, lastTurnTerminalTurnId: "turn-synthesis" };
     });
     await render();
-    expect(container.textContent).toContain("汇总失败");
+    expect(container.textContent).toContain(reason === "failed_runtime" ? "汇总失败" : "待继续");
     expect(container.textContent).not.toContain("等待主助手汇总");
     expect(container.textContent).not.toContain("等待响应");
+    expect(api.synthesis).not.toHaveBeenCalled();
+  });
+
+  it("keeps the exact paused synthesis stoppable before an assistant message arrives", async () => {
+    currentRun = makeRun(); currentRun.coordinationStatus = "blocked";
+    for (const role of roleKeys) currentRun.analysts[role]!.turnId = "turn-" + role;
+    currentRun.synthesis.turnId = "turn-synthesis";
+    const fetchDetail = api.session.getMockImplementation()!;
+    api.session.mockImplementation(async (sessionId: string) => {
+      if (sessionId !== "session-assistant") return fetchDetail(sessionId);
+      const detail = detailFor(sessionId, currentRun!.synthesis, "", "paused");
+      return { ...detail, messages: detail.messages?.filter(message => message.role === "user"), status: "paused", activeTurnId: "turn-synthesis" };
+    });
+    await render();
+    expect(container.textContent).toContain("汇总已暂停");
+    expect(button("停止汇总")).toBeDefined();
+    await act(async () => button("停止汇总").click());
+    await settle();
+    expect(api.stop).toHaveBeenCalledWith("session-assistant", "turn-synthesis");
     expect(api.synthesis).not.toHaveBeenCalled();
   });
 

@@ -48,7 +48,7 @@ export function isActivityResting(value: unknown) {
 
 /** Paused execution still owns the Turn, while producing no active output. */
 export function hasExecutionOwnership(value: unknown) {
-  return Boolean(activityExecution(value));
+  return (contract.policy.ownedExecutions as readonly string[]).includes(normalizeActivityValue(value));
 }
 
 export function resolveSessionActivity(
@@ -73,7 +73,7 @@ export function resolveSessionActivity(
   if (execution || (activeTurnId && !settledOwner) || (options?.runtimeRunning && options.authoritativeRuntime)) {
     return { ...result, execution: (execution || "running") as SessionActivityState["execution"], phase };
   }
-  if (rawStatus && !activityOutcome(rawStatus) && !isActivityResting(rawStatus)) return result;
+  if (current.some((value) => !activityOutcome(value) && !isActivityResting(value))) return result;
   if (reason && !activityOutcome(reason) && !["ready", "idle", "running"].includes(reason)) return result;
   const terminal = [reason, status, legacyPhase, normalizeActivityValue(session.lastTurnStatus), child].find(activityOutcome);
   if (terminal) return { ...result, execution: "settled", outcome: activityOutcome(terminal), reason: terminal };
@@ -87,4 +87,59 @@ export function sessionTerminalStatus(session: SessionActivitySource): string {
   const state = resolveSessionActivity(session);
   if (state.outcome) return state.reason;
   return state.execution === "idle" ? "ready" : "";
+}
+
+/** Separate execution ownership, active output and lifecycle permissions. */
+export function sessionActivityPolicy(session: SessionActivitySource) {
+  const { execution } = resolveSessionActivity(session);
+  return {
+    executionOwned: hasExecutionOwnership(execution),
+    outputActive: (contract.policy.outputExecutions as readonly string[]).includes(execution),
+    stopping: execution === "stopping",
+    atRest: (contract.policy.restingExecutions as readonly string[]).includes(execution),
+    blocksMutation: !(contract.policy.restingExecutions as readonly string[]).includes(execution),
+  };
+}
+
+export function sessionOwnsExecution(session: SessionActivitySource | null | undefined) {
+  return session ? sessionActivityPolicy(session).executionOwned : false;
+}
+
+export function sessionBlocksMutation(session: SessionActivitySource) {
+  return sessionActivityPolicy(session).blocksMutation;
+}
+
+export function sessionIsAtRest(session: SessionActivitySource) {
+  return sessionActivityPolicy(session).atRest;
+}
+
+export function activityCanContinue(value: unknown) {
+  return (contract.policy.continuableOutcomes as readonly string[]).includes(activityOutcome(value));
+}
+
+export function activityNeedsContinuation(value: unknown) {
+  return (contract.policy.waitingOutcomes as readonly string[]).includes(activityOutcome(value));
+}
+
+export function activityOutputActive(value: unknown) {
+  return (contract.policy.outputExecutions as readonly string[]).includes(activityExecution(value));
+}
+
+export function sessionActivityStatusLabel(
+  state: SessionActivityState,
+  lang: "zh" | "en",
+): string {
+  const value = activityOutputActive(state.execution)
+    ? state.phase || state.execution
+    : state.outcome || state.execution;
+  return lang === "zh"
+    ? lookup(contract.phaseLabels, value) || lookup(contract.labels, value) || contract.labels.unknown
+    : lookup(contract.phaseLabelsEn, value) || lookup(contract.labelsEn, value) || contract.labelsEn.unknown;
+}
+
+export function sessionActivityGroup(source: SessionActivitySource, needsApproval = false) {
+  const state = resolveSessionActivity(source);
+  if (needsApproval) return "waiting";
+  if (state.outcome === "failed") return "failed";
+  return contract.policy.executionGroups[state.execution];
 }

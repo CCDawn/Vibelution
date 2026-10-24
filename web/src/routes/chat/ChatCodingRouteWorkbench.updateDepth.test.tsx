@@ -70,9 +70,7 @@ type PlaceholderInput = {
 type RefetchIntervalInput = {
   directSessionPanelActive: boolean;
   runtimeActive: boolean;
-  detailCurrentPhase: string | undefined;
-  summaryCurrentPhase: string | undefined;
-  summaryStatus: string | undefined;
+  executionOwned: boolean;
 };
 
 type RefetchIntervalResolver = ReturnType<typeof useSessionToolApprovalsRefetchInterval>;
@@ -227,9 +225,7 @@ const pendingApproval: SessionToolApprovalRequest = {
 const idlePollingInput: SessionToolApprovalPollingInput = {
   directSessionPanelActive: true,
   runtimeActive: false,
-  detailCurrentPhase: "ready",
-  summaryCurrentPhase: "ready",
-  summaryStatus: "idle",
+  executionOwned: false,
 };
 
 function approvalsOptions(

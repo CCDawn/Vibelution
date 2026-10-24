@@ -17,6 +17,7 @@ from core.infrastructure.atomic_io import atomic_write_json
 from core.infrastructure.file_lock import cross_process_file_lock
 
 from .constants import PROJECT_ROOT, RUNTIME_MANAGER_DIR
+from .work_run_status import resolve_work_run_activity, work_run_status_blocks_lifecycle
 
 
 WORK_RUNS_DIR = RUNTIME_MANAGER_DIR / "work_runs"
@@ -24,6 +25,7 @@ RECENT_RUN_IDS_LIMIT = 100
 ACTIVE_RUN_IDS_LIMIT = 64
 READ_RETRY_ATTEMPTS = 5
 READ_RETRY_DELAY_SECONDS = 0.05
+STALE_SNAPSHOT_GRACE = timedelta(hours=6)
 # Index updates are read-modify-write cycles spanning load→mutate→atomic write.
 # Locking is two-level: ``_STORE_LOCK`` keeps threads of one process from
 # clobbering each other, and the per-kind ``index.json.lock`` sidecar
@@ -33,18 +35,6 @@ READ_RETRY_DELAY_SECONDS = 0.05
 # active-run-id add or remove.
 _STORE_LOCK = threading.RLock()
 _SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
-_ACTIVE_WORK_BLOCKING_STATUSES = {
-    "",
-    "active",
-    "queued",
-    "running",
-    "stopping",
-    "started",
-    "in_progress",
-    "pausing",
-    "resuming",
-    "force_stopping",
-}
 
 
 def default_work_runs_dir() -> Path:
@@ -53,26 +43,6 @@ def default_work_runs_dir() -> Path:
         if sandbox_root is not None:
             return sandbox_root / ".runtime" / "runtime-manager" / "work_runs"
     return WORK_RUNS_DIR
-_ACTIVE_WORK_NON_BLOCKING_STATUSES = {
-    "cancelled",
-    "closed",
-    "completed",
-    "done",
-    "failed",
-    "failed_provider",
-    "failed_runtime",
-    "idle",
-    "needs_continue",
-    "partial",
-    "paused_limit",
-    "ready",
-    "routed",
-    "stopped",
-    "stopped_by_user",
-    "stop_failed",
-    "superseded",
-}
-STALE_SNAPSHOT_GRACE = timedelta(hours=6)
 
 
 def _now_iso() -> str:
@@ -254,25 +224,11 @@ def _snapshot_lifecycle_signature(
 
 
 def active_work_status_blocks_lifecycle(status: str) -> bool:
-    normalized = str(status or "").strip().lower()
-    if normalized in _ACTIVE_WORK_NON_BLOCKING_STATUSES:
-        return False
-    if normalized in _ACTIVE_WORK_BLOCKING_STATUSES:
-        return True
-    return bool(normalized)
+    return work_run_status_blocks_lifecycle(status)
 
 
 def active_work_payload_blocks_lifecycle(payload: dict[str, Any]) -> bool:
-    if str(payload.get("finishedAt") or payload.get("endedAt") or "").strip():
-        return False
-    status = str(
-        payload.get("status")
-        or payload.get("currentPhase")
-        or payload.get("phase")
-        or payload.get("runtimeStatus")
-        or ""
-    ).strip().lower()
-    return active_work_status_blocks_lifecycle(status)
+    return resolve_work_run_activity(payload)["blocksLifecycle"]
 
 
 def snapshot_run_id(payload: dict[str, Any]) -> str:
@@ -615,27 +571,9 @@ class WorkRunStore:
             _atomic_write_json(self.runs_dir(run_kind) / f"{run_id}.json", payload)
             saved_index = self.save_run_index(run_kind, active_run_ids=next_active_run_ids, latest_run_id=run_id, emit_event=False)
         status = str(payload.get("status") or "").strip()
-        phase = str(payload.get("phase") or payload.get("currentPhase") or "").strip()
-        lifecycle_status = status in {
-            "queued",
-            "running",
-            "paused",
-            "stopping",
-            "done",
-            "completed",
-            "partial",
-            "needs_continue",
-            "paused_limit",
-            "stopped",
-            "stopped_by_user",
-            "force_stopping",
-            "stop_failed",
-            "failed",
-            "failed_provider",
-            "failed_runtime",
-            "cancelled",
-            "superseded",
-        }
+        activity = resolve_work_run_activity(payload)
+        phase = activity["phase"]
+        lifecycle_status = activity["execution"] not in {"idle", "unknown"}
         lifecycle_changed = previous_signature != current_signature
         _record_work_run_event(
             "state",
@@ -657,8 +595,8 @@ class WorkRunStore:
             },
             message=f"Work run snapshot persisted: {run_kind}/{run_id} {status or 'unknown'}",
             outcome="succeeded",
-            level="warning" if status == "partial" else "info",
-            lifecycle=lifecycle_status and (lifecycle_changed or status == "failed"),
+            level="warning" if activity["outcome"] == "partial" else "info",
+            lifecycle=lifecycle_status and (lifecycle_changed or activity["outcome"] == "failed"),
         )
         return payload
 

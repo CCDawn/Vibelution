@@ -95,7 +95,7 @@ function Harness({ queryClient }: { queryClient: QueryClient }) {
     activeSessionId: selectedSession, sessionDrafts: drafts, sessionFollowupQueues: {}, sessionComposerErrors: errors,
     sessionEditTargets: {}, sessionImageAttachments: {}, sessionReferenceAttachments: {}, sessionImageUploadPending: {},
     detail: currentDetail, agents: [], modelImageInputSupportById: new Map(), lang: "zh", t: translate,
-    ...mutations, activeTurnSettledByDetail: false,
+    ...mutations,
   });
   const actions = useChatComposerSubmitActions({
     ...mutations, queryClient, lang: "zh", describeError, setSessionDrafts: setDrafts,

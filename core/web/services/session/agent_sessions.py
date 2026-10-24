@@ -9,6 +9,8 @@ monkeypatches stable.
 
 from __future__ import annotations
 
+from core.chat.session_activity import session_activity_policy
+
 import json
 import shutil
 import threading
@@ -97,7 +99,7 @@ def stage_agent_session_purge(
                 lightweight=True,
             ) or {"id": session_id}
             phase = s._conversation_phase(session_id, normalized)
-            if phase in {"queued", "running", "stopping", "paused"}:
+            if session_activity_policy({"status": phase})["blocksMutation"]:
                 raise s.SessionBusyError(
                     s.text_for(
                         s.get_web_language(),
@@ -445,7 +447,7 @@ def reset_all_agent_test_conversations() -> dict[str, Any]:
                 ensure_workspace=False,
                 lightweight=True,
             ) or {"id": session_id}
-            if s._conversation_phase(session_id, normalized) in {"queued", "running", "stopping", "paused"}:
+            if session_activity_policy({"status": s._conversation_phase(session_id, normalized)})["blocksMutation"]:
                 raise s.SessionBusyError(
                     f"Session {session_id} is still active; finish or stop it before resetting test conversations."
                 )
@@ -1063,7 +1065,7 @@ def _archive_agent_sessions_sealed(
                 load_message_preview=False,
             ) or {"id": session_id}
             phase = s._conversation_phase(session_id, normalized)
-            if phase in {"queued", "running", "stopping", "paused"}:
+            if session_activity_policy({"status": phase})["blocksMutation"]:
                 raise s.SessionBusyError(
                     s.text_for(
                         s.get_web_language(),

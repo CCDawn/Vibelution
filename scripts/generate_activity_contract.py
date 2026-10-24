@@ -15,10 +15,14 @@ from core.chat.session_activity import SESSION_ACTIVITY_CONTRACT
 from core.runtime_manager.agent_run_status import (
     RUN_ACTIVE_STATUSES,
     RUN_REASON_LABELS,
+    RUN_REASON_LABELS_EN,
     RUN_STATUS_ALIASES,
     RUN_STATUS_LABELS,
+    RUN_STATUS_LABELS_EN,
     RUN_TERMINAL_STATUSES,
 )
+
+from core.runtime_manager.work_run_status import WORK_RUN_ACTIVITY_CONTRACT
 
 OUTPUT = ROOT / "web/src/api/generated/activityContract.ts"
 
@@ -26,9 +30,12 @@ OUTPUT = ROOT / "web/src/api/generated/activityContract.ts"
 def render_contract() -> str:
     payload = {
         "session": SESSION_ACTIVITY_CONTRACT,
+        "workRun": WORK_RUN_ACTIVITY_CONTRACT,
         "agentRun": {
             "labels": RUN_STATUS_LABELS, "aliases": RUN_STATUS_ALIASES,
+            "labelsEn": RUN_STATUS_LABELS_EN,
             "reasonLabels": RUN_REASON_LABELS,
+            "reasonLabelsEn": RUN_REASON_LABELS_EN,
             "activeStatuses": sorted(RUN_ACTIVE_STATUSES), "terminalStatuses": sorted(RUN_TERMINAL_STATUSES),
         },
     }

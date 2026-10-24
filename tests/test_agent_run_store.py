@@ -1,3 +1,5 @@
+import pytest
+
 from core.runtime_manager import agent_run_store, work_run_store
 
 
@@ -34,13 +36,13 @@ def test_unknown_agent_run_is_not_finished_or_successful(tmp_path, monkeypatch):
     assert snapshot["runId"] in work_run_store.WorkRunStore(root=work_run_store.WORK_RUNS_DIR).load_active_run_ids("sub_agent_run")
 
 
-def test_public_run_activity_adds_canonical_fields_without_changing_legacy_wire():
+def test_public_run_activity_normalizes_legacy_fields_without_rewriting_snapshot():
     snapshot = {"runId": "legacy", "status": "stopped_by_user", "currentPhase": "stopped_by_user"}
     projected = agent_run_store._public_snapshot(snapshot, agent_run_store._PUBLIC_AGENT_RUN_KEYS)
-    assert projected["status"] == projected["currentPhase"] == "stopped_by_user"
-    assert projected["executionStatus"] == "stopped"
-    assert projected["activityPhase"] == ""
+    assert projected["status"] == "stopped"
+    assert projected["currentPhase"] == ""
     assert projected["terminalReason"] == "stopped_by_user"
+    assert projected["rawStatus"] == "stopped_by_user"
     assert snapshot == {"runId": "legacy", "status": "stopped_by_user", "currentPhase": "stopped_by_user"}
 
 
@@ -52,8 +54,9 @@ def test_normalized_result_keeps_original_stop_cause_and_clears_stale_end(tmp_pa
     stopped = agent_run_store.persist_agent_run_snapshot(**fields, status=agent_run_store.result_status(result), result=result)
     assert stopped["terminalReason"] == "stopped_by_user"
     public = agent_run_store.list_agent_runs_for_agent("agent")["runs"][0]
-    assert public["status"] == "stopped_by_user"
-    assert public["executionStatus"] == "stopped"
+    assert public["status"] == "stopped"
+    assert public["currentPhase"] == ""
+    assert public["rawStatus"] == "stopped_by_user"
     running = agent_run_store.persist_agent_run_snapshot(**fields, status="running", result={"finishedAt": "old", "currentPhase": "reading"})
     assert not running["finishedAt"]
     assert not running["terminalReason"]
@@ -65,9 +68,69 @@ def test_legacy_force_stop_writer_cannot_reactivate_stale_alias_or_terminal_caus
         "runtimeStatus": "force_stopped", "terminalReason": "success",
     }
     public = agent_run_store._public_snapshot(snapshot, agent_run_store._PUBLIC_AGENT_RUN_KEYS)
-    assert public["status"] == public["executionStatus"] == "stopped"
-    assert public["activityPhase"] == ""
+    assert public["status"] == "stopped"
+    assert public["currentPhase"] == ""
     assert public["terminalReason"] == "force_stopped"
+
+
+@pytest.mark.parametrize("payload", [
+    {}, {"summary": "done"}, {"content": "success"}, {"raw_output": "completed"},
+    {"finishedAt": "2026-10-24T00:00:00Z"}, {"status": " ", "summary": "done"},
+])
+def test_missing_result_status_cannot_invent_success_from_result_or_end_time(payload):
+    assert agent_run_store.result_status(payload) == "unknown"
+
+
+@pytest.mark.parametrize("payload", [{"error": "failed"}, {"errorType": "ProviderError"}, {"error_type": "RuntimeError"}])
+def test_missing_result_status_still_recognizes_explicit_failure(payload):
+    assert agent_run_store.result_status(payload) == "failed"
+
+
+@pytest.mark.parametrize("allowed_keys", [agent_run_store._PUBLIC_AGENT_RUN_KEYS, agent_run_store._PUBLIC_SUB_AGENT_RUN_KEYS])
+@pytest.mark.parametrize(("snapshot", "status", "phase", "reason", "diagnostic"), [
+    ({"status": "running", "currentPhase": "reading"}, "running", "reading", "", "running"),
+    ({"status": "success", "currentPhase": "success"}, "completed", "", "success", "success"),
+    ({"status": "unknown", "rawStatus": "future_status", "currentPhase": "reading"}, "unknown", "", "", "future_status"),
+    ({"status": "stopped", "rawStatus": "stopped_by_user", "terminalReason": "stopped_by_user"}, "stopped", "", "stopped_by_user", "stopped_by_user"),
+])
+def test_agent_and_subagent_public_fields_have_one_canonical_meaning(allowed_keys, snapshot, status, phase, reason, diagnostic):
+    projected = agent_run_store._public_snapshot(snapshot, allowed_keys)
+    assert projected["status"] == status
+    assert projected["currentPhase"] == phase
+    assert projected["terminalReason"] == reason
+    assert projected["rawStatus"] == diagnostic
+    assert "executionStatus" not in projected
+    assert "activityPhase" not in projected
+
+
+@pytest.mark.parametrize("allowed_keys", [agent_run_store._PUBLIC_AGENT_RUN_KEYS, agent_run_store._PUBLIC_SUB_AGENT_RUN_KEYS])
+def test_retired_agent_run_fields_are_neither_read_nor_exposed_from_historical_snapshots(allowed_keys):
+    from core.runtime_manager.agent_run_status import public_run_activity
+
+    snapshot = {"status": "running", "currentPhase": "reading", "executionStatus": "completed", "activityPhase": "answering"}
+    fields = public_run_activity(snapshot)
+    projected = agent_run_store._public_snapshot(snapshot, allowed_keys)
+    for public in (fields, projected):
+        assert public["status"] == "running"
+        assert public["currentPhase"] == "reading"
+        assert "executionStatus" not in public
+        assert "activityPhase" not in public
+    legacy_only = agent_run_store._public_snapshot({"executionStatus": "completed", "activityPhase": "reading"}, allowed_keys)
+    assert legacy_only["status"] == "unknown"
+    assert legacy_only["currentPhase"] == ""
+    assert "executionStatus" not in legacy_only
+    assert "activityPhase" not in legacy_only
+
+
+def test_result_without_status_does_not_finish_or_complete_a_subagent_record(tmp_path, monkeypatch):
+    monkeypatch.setattr(work_run_store, "WORK_RUNS_DIR", tmp_path / "work_runs")
+    snapshot = agent_run_store.persist_sub_agent_run_snapshot(
+        parent_run_id="parent", sub_run_id="missing-result", status="", summary="looks complete", tool_call_count=0,
+        timestamp="2026-10-24T00:00:00Z", result={"summary": "looks complete"},
+    )
+    assert snapshot["status"] == "unknown"
+    assert not snapshot["endedAt"]
+    assert not snapshot["terminalReason"]
 
 def test_agent_run_store_persists_public_agent_and_subagent_snapshots(tmp_path, monkeypatch):
     monkeypatch.setattr(work_run_store, "WORK_RUNS_DIR", tmp_path / "work_runs")

@@ -41,7 +41,6 @@ import {
   buildSessionReferencePayload,
   startSessionReferenceDrag,
 } from "./chatComposerSubmitModel";
-import { isBusyPhase } from "./chatCodingRouteViewModel";
 import {
   avatarImageUrlFrom,
   avatarInitials,
@@ -358,7 +357,6 @@ export function ChatConversationIndexPanel({
         editingSessionTitle={editingSessionTitle}
         formatTime={formatConversationIndexTime}
         groupPanelActive={groupPanelActive}
-        isBusyPhase={isBusyPhase}
         lang={lang}
         renamePending={renameSessionMutation.isPending}
         renameSessionId={renameSessionMutation.variables?.sessionId ?? ""}
@@ -464,7 +462,6 @@ export function ChatConversationIndexPanel({
                   : ""
               }
               deleteAllPending={bulkDeleteSessionsMutation.isPending}
-              isBusyPhase={isBusyPhase}
               lang={lang}
               t={t}
               onUnarchive={(session) => sessionArchiveMutation.mutate({
@@ -563,7 +560,6 @@ export function ChatConversationIndexPanel({
             formatTime={formatConversationIndexTime}
             groupPanelActive={groupPanelActive}
             groupedConversations={groupedGroupConversations}
-            isBusyPhase={isBusyPhase}
             lang={lang}
             renamePending={renameSessionMutation.isPending}
             renameSessionId={renameSessionMutation.variables?.sessionId ?? ""}

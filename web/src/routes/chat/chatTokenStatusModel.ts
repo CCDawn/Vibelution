@@ -1,8 +1,9 @@
 import type { RuntimeSummary, SessionDetail } from "../../api/types";
 import type { TranslationKey } from "../../i18n/dictionary";
 import { clampPercent, contextUsagePercent } from "../chatShellFormat";
+import { activityOutputActive } from "../sessionActivityState";
 import type { TokenSpeedTrackerState } from "../chatTokenSpeed";
-import { formatTokenSpeedValue, isBusyPhase } from "./chatCodingRouteViewModel";
+import { formatTokenSpeedValue } from "./chatCodingRouteViewModel";
 import type { TokenCoreStatusMetric } from "./TokenCoreStatusPanel";
 
 export type ChatTokenStatusCompression = RuntimeSummary["contextCompression"] | null | undefined;
@@ -336,7 +337,7 @@ export function buildChatTokenStatusViewModel(options: {
 
   const conversationChainTokenSpeedActive = Boolean(activeSessionId)
     && !groupPanelActive
-    && isBusyPhase(sessionStateValue);
+    && activityOutputActive(sessionStateValue);
   const tokenSpeedRateValue = formatTokenSpeedValue(tokenSpeedTracker?.tokensPerSecond);
   const tokenSpeedValue = tokenSpeedRateValue
     || (conversationChainTokenSpeedActive ? t("tokenSpeedSampling") : "--");

@@ -38,6 +38,19 @@ def test_revisiting_old_success_does_not_create_a_new_completion(monkeypatch):
     assert pet_activity_service.get_pet_activity(now=NOW)["sessions"] == []
 
 
+def test_paused_work_run_does_not_animate_output_or_replay_historical_success(monkeypatch):
+    session = {**_session("paused", status="ready"), "terminalReason": "success"}
+    monkeypatch.setattr(pet_activity_service, "list_sessions", lambda: [session])
+    monkeypatch.setattr(pet_activity_service, "load_chat_turn_work_run_summary", lambda: {
+        "activeItems": [{"sessionId": "paused", "status": "paused", "currentPhase": "thinking"}],
+    })
+    monkeypatch.setattr(pet_activity_service, "list_tool_approval_requests", lambda *_a, **_k: [])
+    payload = pet_activity_service.get_pet_activity(now=NOW)
+    assert payload["aggregateTone"] == "idle"
+    assert payload["activeCount"] == 0
+    assert payload["sessions"] == []
+
+
 def _session(
     session_id: str,
     *,

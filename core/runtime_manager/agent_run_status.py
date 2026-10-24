@@ -5,14 +5,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from core.chat.session_activity import activity_phase, normalize_activity_value
+from core.chat.session_activity import ACTIVITY_STATUS_LABELS, ACTIVITY_STATUS_LABELS_EN, activity_phase, normalize_activity_value
 
-RUN_STATUS_LABELS = {
-    "queued": "排队中", "running": "进行中", "stopping": "停止中", "paused": "已暂停",
-    "completed": "已完成", "failed": "失败", "stopped": "已停止", "cancelled": "已取消",
-    "needs_continue": "待继续", "paused_limit": "达到限制，待继续", "superseded": "已替代",
-    "idle": "空闲", "unknown": "未知状态",
-}
+RUN_STATUS_LABELS = {key: label for key, label in ACTIVITY_STATUS_LABELS.items() if key != "settled"}
+RUN_STATUS_LABELS_EN = {key: label for key, label in ACTIVITY_STATUS_LABELS_EN.items() if key != "settled"}
 RUN_STATUS_ALIASES = {
     "done": "completed", "success": "completed", "succeeded": "completed",
     "failed_provider": "failed", "failed_runtime": "failed", "failure": "failed", "error": "failed",
@@ -28,6 +24,11 @@ RUN_REASON_LABELS = {
     "failed_provider": "模型服务失败", "failed_runtime": "运行失败", "error": "运行错误",
     "timeout": "执行超时", "timed_out": "执行超时", "blocked": "已阻塞", "stop_failed": "停止失败",
     "stopped_by_user": "用户停止", "force_stopped": "强制停止", "aborted": "执行中断",
+}
+RUN_REASON_LABELS_EN = {
+    "failed_provider": "Model service failed", "failed_runtime": "Execution failed", "error": "Runtime error",
+    "timeout": "Execution timed out", "timed_out": "Execution timed out", "blocked": "Blocked", "stop_failed": "Stop failed",
+    "stopped_by_user": "Stopped by user", "force_stopped": "Force stopped", "aborted": "Aborted",
 }
 
 
@@ -66,7 +67,7 @@ def run_activity_fields(status: str, result: Mapping[str, Any], previous: Mappin
 
 
 def public_run_activity(snapshot: Mapping[str, Any]) -> dict[str, str]:
-    """Decode existing snapshots without rewriting historical files."""
+    """Decode canonical public fields without rewriting historical snapshots."""
     status = normalize_activity_value(snapshot.get("status"))
     if not status:
         status = normalize_activity_value(snapshot.get("currentPhase"))
@@ -81,6 +82,6 @@ def public_run_activity(snapshot: Mapping[str, Any]) -> dict[str, str]:
     ):
         fields["terminalReason"] = "force_stopped"
     return {
-        "executionStatus": fields["status"], "activityPhase": fields["currentPhase"],
+        "status": fields["status"], "currentPhase": fields["currentPhase"],
         "terminalReason": fields["terminalReason"], "rawStatus": fields["rawStatus"],
     }

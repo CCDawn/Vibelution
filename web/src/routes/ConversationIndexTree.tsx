@@ -44,7 +44,6 @@ type ConversationIndexTreeProps = {
   formatTime: (value: string) => string;
   groupPanelActive: boolean;
   groupedConversations: ConversationIndexGroup[];
-  isBusyPhase: (value: string | null | undefined) => boolean;
   lang: "zh" | "en";
   renamePending: boolean;
   renameSessionId: string;
@@ -100,7 +99,6 @@ export function ConversationIndexTree({
   formatTime,
   groupPanelActive,
   groupedConversations,
-  isBusyPhase,
   lang,
   renamePending,
   renameSessionId,
@@ -178,7 +176,6 @@ export function ConversationIndexTree({
               editingSessionTitle={editingSessionTitle}
               formatTime={formatTime}
               groupPanelActive={groupPanelActive}
-              isBusyPhase={isBusyPhase}
               lang={lang}
               renamePending={renamePending}
               renameSessionId={renameSessionId}

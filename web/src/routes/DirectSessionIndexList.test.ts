@@ -148,7 +148,7 @@ describe("DirectSessionIndexList helpers", () => {
       agentStatusCode: "missing",
       agentStatusMessage: "Agent 已删除",
       taskSummary: "摘要",
-      currentPhase: "idle",
+      currentPhase: "",
     });
   });
 

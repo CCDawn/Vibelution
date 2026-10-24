@@ -9,6 +9,9 @@ their own packs. Late-bound facade keeps monkeypatches stable.
 
 from __future__ import annotations
 
+from core.chat.session_activity import activity_outcome, execution_owns_turn
+from core.runtime_manager.work_run_status import resolve_work_run_activity, work_run_has_execution
+
 import json
 import logging
 import threading
@@ -3258,13 +3261,6 @@ def _canonicalize_session_turn_items_for_protocol(
 # ZCode turnHeader 对齐（参考仓 rows.ts turnHeaderRowSchema）：轮级 state/工时
 # 以附加字段投影在 assistant 消息 envelope 上，不改既有 DTO 契约。只消费
 # journal 终态事件与 work-run 快照这些已有权威数据，不改其写入。
-_ASSISTANT_TURN_HEADER_FAILED_STATUSES = {"failed", "failed_provider", "failed_runtime"}
-_ASSISTANT_TURN_HEADER_INTERRUPTED_STATUSES = {
-    "stopped", "stopped_by_user", "cancelled", "superseded", "paused_limit", "interrupted",
-}
-_ASSISTANT_TURN_HEADER_ACTIVE_STATUSES = {"queued", "running", "stopping", "paused"}
-
-
 def _assistant_turn_header_terminal_event_types() -> set[str]:
     s = _service()
     return {s.EVENT_TURN_COMPLETED, s.EVENT_TURN_FAILED, s.EVENT_TURN_INTERRUPTED}
@@ -3324,27 +3320,15 @@ def _assistant_turn_header_fields(
         started_at = str(work_run.get("startedAt") or "").strip()
     if not ended_at:
         ended_at = str(work_run.get("finishedAt") or work_run.get("endedAt") or "").strip()
-    if terminal_status:
-        if terminal_status in _ASSISTANT_TURN_HEADER_FAILED_STATUSES:
-            state = "failed"
-        elif terminal_status in _ASSISTANT_TURN_HEADER_INTERRUPTED_STATUSES:
-            state = "interrupted"
+    outcome = activity_outcome(terminal_status)
+    state = "unknown"
+    if not terminal_status:
+        if streaming or work_run_has_execution(work_run) or execution_owns_turn(fallback_status):
+            state = "running"
         else:
-            state = "completed"
-    elif streaming or str(work_run.get("status") or "").strip().lower() in _ASSISTANT_TURN_HEADER_ACTIVE_STATUSES:
-        state = "running"
-    else:
-        state = {
-            "running": "running",
-            "failed": "failed",
-            "failed_provider": "failed",
-            "failed_runtime": "failed",
-            "stopped": "interrupted",
-            "stopped_by_user": "interrupted",
-            "cancelled": "interrupted",
-            "superseded": "interrupted",
-            "paused_limit": "interrupted",
-        }.get(str(fallback_status or "").strip().lower(), "completed" if ended_at else "running")
+            outcome = activity_outcome(fallback_status)
+    if outcome:
+        state = "completed" if outcome == "completed" else "failed" if outcome == "failed" else "interrupted"
     header: dict[str, Any] = {"turnState": state}
     if started_at:
         header["turnStartedAt"] = started_at
@@ -4838,8 +4822,8 @@ def _active_task_with_live_work_run(
         return active_task
     if not isinstance(live_work_run, dict):
         return active_task
-    status = str(live_work_run.get("status") or live_work_run.get("currentPhase") or "").strip().lower()
-    if status not in {"queued", "running", "stopping", "paused"}:
+    status = str(resolve_work_run_activity(live_work_run)["execution"])
+    if not work_run_has_execution(live_work_run):
         return active_task
     updated = dict(active_task or {})
     summary = str(live_work_run.get("summary") or "").strip()

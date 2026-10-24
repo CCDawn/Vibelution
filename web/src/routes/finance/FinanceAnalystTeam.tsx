@@ -1,3 +1,4 @@
+import { activityNeedsContinuation, activityOutcome, resolveSessionActivity } from "../sessionActivityState";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Activity, Building2, Circle, ExternalLink, Loader2, Newspaper, Play, RefreshCw, ShieldAlert, StopCircle, TrendingUp } from "lucide-react";
@@ -60,7 +61,7 @@ const DEPTH_OPTIONS = [
 const TEAM_POLL_MS = 1800;
 const MAX_LIVE_POLL_MS = 20 * 60 * 1000;
 
-type RoleState = "missing" | "loading" | "unavailable" | "waiting" | "running" | "completed" | "failed" | "stopped" | "incomplete";
+type RoleState = "missing" | "loading" | "unavailable" | "waiting" | "running" | "completed" | "failed" | "stopped" | "incomplete" | "needs_continue" | "paused";
 type NativeTurnProjection = {
   turn: AssistantConversationTurn | null;
   answer: string;
@@ -137,11 +138,14 @@ function projectNativeTurn(detail: SessionDetail | undefined, ref: { clientSubmi
         : "正在分析";
   const expectedTurnId = turn?.turnId || ref.turnId;
   const exactTerminal = expectedTurnId && detail?.lastTurnTerminalTurnId === expectedTurnId ? String(detail.terminalReason ?? "").toLowerCase() : "";
-  const stopped = /stop|cancel|abort/.test(exactTerminal);
-  const failed = turn?.status === "failed" || /failed|error|needs_continue|paused_limit|superseded/.test(exactTerminal);
+  const outcome = activityOutcome(exactTerminal);
+  const stopped = outcome === "stopped" || outcome === "cancelled" || outcome === "superseded";
+  const failed = turn?.status === "failed" || outcome === "failed";
+  const needsContinue = activityNeedsContinuation(outcome);
+  const paused = detail?.activeTurnId === expectedTurnId && resolveSessionActivity(detail).execution === "paused";
   const state: RoleState = !turn
-    ? stopped ? "stopped" : failed ? "failed" : !detail && ref.turnId ? "loading" : submissionSeen || ref.turnId ? "waiting" : "missing"
-    : turn.status === "pending" || turn.status === "running" ? "running"
+    ? paused ? "paused" : needsContinue ? "needs_continue" : stopped ? "stopped" : failed ? "failed" : !detail && ref.turnId ? "loading" : submissionSeen || ref.turnId ? "waiting" : "missing"
+    : paused ? "paused" : needsContinue ? "needs_continue" : turn.status === "pending" || turn.status === "running" ? "running"
       : stopped ? "stopped"
         : failed ? "failed"
           : answer ? "completed" : turn.status === "completed" ? "incomplete" : "waiting";
@@ -158,6 +162,8 @@ function statusText(state: RoleState, zh: boolean): string {
     completed: ["已完成", "Completed"],
     failed: ["失败", "Failed"],
     stopped: ["已停止", "Stopped"],
+    needs_continue: ["待继续", "Needs continuation"],
+    paused: ["已暂停", "Paused"],
     incomplete: ["缺少最终回答", "No final answer"],
   };
   return text[state][zh ? 0 : 1];
@@ -165,7 +171,7 @@ function statusText(state: RoleState, zh: boolean): string {
 
 function statusTone(state: RoleState): "neutral" | "success" | "warning" | "accent" {
   if (state === "completed") return "success";
-  if (state === "failed" || state === "stopped" || state === "incomplete") return "warning";
+  if (state === "failed" || state === "stopped" || state === "incomplete" || state === "needs_continue") return "warning";
   if (state === "running" || state === "waiting") return "accent";
   return "neutral";
 }
@@ -210,7 +216,7 @@ function executionPolicySummary(run: FinancialTeamRun, zh: boolean): { compact: 
 }
 
 function isTerminal(state: RoleState): boolean {
-  return state === "completed" || state === "failed" || state === "stopped" || state === "incomplete";
+  return state === "completed" || state === "failed" || state === "stopped" || state === "incomplete" || state === "needs_continue";
 }
 
 function compactError(error: unknown, fallback: string): string {
@@ -548,9 +554,9 @@ export function FinanceAnalystTeam({ assistant, stock, zh, onOpenSession, onSele
     ALL_ROLES.some((role) => {
       const turnId = selectedRun.analysts[role]?.turnId;
       const state = projections.get(role)?.state;
-      return Boolean(turnId && (state === "failed" || state === "stopped" || state === "incomplete"));
+      return Boolean(turnId && (state === "failed" || state === "stopped" || state === "incomplete" || state === "needs_continue"));
     })
-    || selectedRun.synthesis.turnId && (synthesisProjection?.state === "failed" || synthesisProjection?.state === "stopped" || synthesisProjection?.state === "incomplete")
+    || selectedRun.synthesis.turnId && (synthesisProjection?.state === "failed" || synthesisProjection?.state === "stopped" || synthesisProjection?.state === "incomplete" || synthesisProjection?.state === "needs_continue")
   ));
 
   function renderTurnCard(role: FinancialTeamRole) {
@@ -560,7 +566,7 @@ export function FinanceAnalystTeam({ assistant, stock, zh, onOpenSession, onSele
     const projection = projections.get(role) ?? { turn: null, answer: "", activity: "", state: "missing" as const, submissionSeen: false };
     const Icon = ROLE_ICONS[role];
     const isPending = pendingRoles.has(role);
-    const canStop = Boolean(ref.turnId && projection.state === "running");
+    const canStop = Boolean(ref.turnId && (projection.state === "running" || projection.state === "paused"));
     return <VSurface key={role} as="article" tone="card" padding="normal" className={styles.analystCard} data-role={role}>
       <div className={styles.cardHeading}>
         <div className={styles.roleTitle}><Icon size={16} /><h3>{ROLE_LABELS[role][zh ? 0 : 1]}</h3></div>
@@ -579,8 +585,8 @@ export function FinanceAnalystTeam({ assistant, stock, zh, onOpenSession, onSele
   const synthesisCard = selectedRun ? (
   <VSurface key="synthesis" as="section" tone="panel" padding="normal" className={styles.synthesis} data-financial-team-synthesis>
     <div className={styles.cardHeading}><div className={styles.roleTitle}><Activity size={16} /><h3>{zh ? "主助手综合结论" : "Assistant synthesis"}</h3></div><VChip tone={statusTone(synthesisProjection?.state ?? "missing")}>{statusText(synthesisProjection?.state ?? "missing", zh)}</VChip></div>
-    {synthesisProjection?.state === "completed" && synthesisProjection.answer && selectedRun.synthesis.turnId ? <div className={styles.answer}><FinanceGroundedReportBody target={{ assistantAgentId: assistant.agentId, sessionId: selectedRun.synthesis.sessionId, turnId: selectedRun.synthesis.turnId }} originalText={synthesisProjection.answer} zh={zh} onSupplementEvidence={() => onOpenSession(selectedRun.synthesis.sessionId)} /></div> : <p className={styles.placeholder}>{synthesisProjection && ["failed", "stopped", "incomplete"].includes(synthesisProjection.state) ? (zh ? `汇总${statusText(synthesisProjection.state, zh)}，可重新开始研究。` : `Synthesis: ${statusText(synthesisProjection.state, zh)}. Start a new research run.`) : allAnalystsComplete ? (zh ? "分析员已完成，等待主助手汇总" : "Analysts completed; waiting for synthesis") : (zh ? "分析员完成后自动汇总" : "Synthesis starts when all analysts finish")}</p>}
-    <div className={styles.cardActions}>{synthesisProjection?.state === "completed" && selectedRun.synthesis.turnId ? <FinanceReportExport assistantAgentId={assistant.agentId} sessionId={selectedRun.synthesis.sessionId} turnId={selectedRun.synthesis.turnId} zh={zh} /> : null}<VButton variant="ghost" icon={<ExternalLink size={14} />} onPress={() => onOpenSession(selectedRun.synthesis.sessionId)}>{zh ? "打开主助手会话" : "Assistant Session"}</VButton>{synthesisProjection?.state === "running" && selectedRun.synthesis.turnId ? <VButton variant="secondary" icon={<StopCircle size={14} />} isPending={stoppingRole === "synthesis"} isDisabled={Boolean(stoppingRole)} onPress={() => void stopExactTurn("synthesis", selectedRun.synthesis)}>{zh ? "停止汇总" : "Stop synthesis"}</VButton> : null}</div>
+    {synthesisProjection?.state === "completed" && synthesisProjection.answer && selectedRun.synthesis.turnId ? <div className={styles.answer}><FinanceGroundedReportBody target={{ assistantAgentId: assistant.agentId, sessionId: selectedRun.synthesis.sessionId, turnId: selectedRun.synthesis.turnId }} originalText={synthesisProjection.answer} zh={zh} onSupplementEvidence={() => onOpenSession(selectedRun.synthesis.sessionId)} /></div> : <p className={styles.placeholder}>{synthesisProjection && (isTerminal(synthesisProjection.state) || synthesisProjection.state === "paused") ? (zh ? `汇总${statusText(synthesisProjection.state, zh)}，${synthesisProjection.state === "needs_continue" ? "可打开对话继续任务" : synthesisProjection.state === "paused" ? "可打开对话查看当前执行" : "可重新开始研究"}。` : `Synthesis: ${statusText(synthesisProjection.state, zh)}. ${synthesisProjection.state === "needs_continue" ? "Open the conversation to continue." : synthesisProjection.state === "paused" ? "Open the conversation to inspect the execution." : "Start a new research run."}`) : allAnalystsComplete ? (zh ? "分析员已完成，等待主助手汇总" : "Analysts completed; waiting for synthesis") : (zh ? "分析员完成后自动汇总" : "Synthesis starts when all analysts finish")}</p>}
+    <div className={styles.cardActions}>{synthesisProjection?.state === "completed" && selectedRun.synthesis.turnId ? <FinanceReportExport assistantAgentId={assistant.agentId} sessionId={selectedRun.synthesis.sessionId} turnId={selectedRun.synthesis.turnId} zh={zh} /> : null}<VButton variant="ghost" icon={<ExternalLink size={14} />} onPress={() => onOpenSession(selectedRun.synthesis.sessionId)}>{zh ? "打开主助手会话" : "Assistant Session"}</VButton>{(synthesisProjection?.state === "running" || synthesisProjection?.state === "paused") && selectedRun.synthesis.turnId ? <VButton variant="secondary" icon={<StopCircle size={14} />} isPending={stoppingRole === "synthesis"} isDisabled={Boolean(stoppingRole)} onPress={() => void stopExactTurn("synthesis", selectedRun.synthesis)}>{zh ? "停止汇总" : "Stop synthesis"}</VButton> : null}</div>
   </VSurface>
   ) : null;
 

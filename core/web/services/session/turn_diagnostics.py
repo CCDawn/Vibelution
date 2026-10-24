@@ -9,6 +9,8 @@ Late-bound facade keeps monkeypatches stable.
 
 from __future__ import annotations
 
+from core.runtime_manager.work_run_status import resolve_work_run_activity, work_run_has_execution
+
 import hashlib
 import json
 import os
@@ -796,7 +798,7 @@ def _release_stale_chat_turn_work_run(*, session_id: str, finished_at: str, summ
     if not run_id:
         return
     status = str(active.get("status") or active.get("currentPhase") or "").strip().lower()
-    if status not in {"queued", "running", "stopping", "paused"}:
+    if not work_run_has_execution(active):
         return
     s._persist_chat_turn_work_run(
         session_id=session_id,
@@ -866,8 +868,7 @@ def _chat_turn_work_run_hang_reason(
     queued_owner: bool = False,
 ) -> str:
     """Return a non-empty reason code when a chat_turn work-run should be force-settled."""
-    status = str(payload.get("status") or payload.get("currentPhase") or "").strip().lower()
-    if status not in {"queued", "running", "stopping", "paused"}:
+    if not work_run_has_execution(payload):
         return ""
     if str(payload.get("finishedAt") or payload.get("endedAt") or "").strip():
         return ""
@@ -938,8 +939,7 @@ def _revive_registration_from_turn_control(payload: dict[str, Any], *, run_id: s
         return False
     if bool(getattr(control, "stop_requested", False)):
         return False
-    status = str(payload.get("status") or payload.get("currentPhase") or "").strip().lower()
-    if status != "running":
+    if resolve_work_run_activity(payload)["execution"] != "running":
         return False
     leases = payload.get("leases") if isinstance(payload.get("leases"), list) else []
     s._set_session_running(session_id, True, turn_id=run_id, leases=[str(item) for item in leases] or None)
@@ -1109,8 +1109,7 @@ def reconcile_stale_chat_turn_work_runs(*, now: datetime | None = None) -> list[
             for snapshot in s._WORK_RUN_STORE.list_snapshots("chat_turn", limit=40):
                 if not isinstance(snapshot, dict):
                     continue
-                status = str(snapshot.get("status") or snapshot.get("currentPhase") or "").strip().lower()
-                if status not in {"queued", "running", "stopping", "paused"}:
+                if not work_run_has_execution(snapshot):
                     continue
                 if str(snapshot.get("finishedAt") or snapshot.get("endedAt") or "").strip():
                     continue
@@ -1365,9 +1364,7 @@ def _active_chat_turn_work_run_for_session(
             continue
         if normalized_turn_id and run_id != normalized_turn_id:
             continue
-        status = str(snapshot.get("status") or snapshot.get("currentPhase") or "").strip().lower()
-        finished_at = str(snapshot.get("finishedAt") or snapshot.get("endedAt") or "").strip()
-        if status in {"queued", "running", "stopping", "paused"} and not finished_at:
+        if work_run_has_execution(snapshot):
             return dict(snapshot)
     return None
 
@@ -1537,7 +1534,8 @@ def _active_session_work_run_statuses(session_ids: list[str]) -> dict[str, str]:
             statuses[normalized_session_id] = "running"
             continue
         if isinstance(snapshot, dict):
-            status = str(snapshot.get("status") or snapshot.get("currentPhase") or "").strip().lower()
+            activity = resolve_work_run_activity(snapshot)
+            status = str(activity["outcome"] or activity["execution"])
         if status:
             statuses[normalized_session_id] = status
             continue
@@ -1620,6 +1618,8 @@ def _persist_chat_turn_work_run(
     finished_at: str = "",
     last_tool_error: dict[str, Any] | None = None,
 ) -> None:
+    from core.runtime_manager.work_run_status import resolve_work_run_activity
+
     s = _service()
     normalized_turn_id = str(turn_id or "").strip()
     if not normalized_turn_id:
@@ -1628,22 +1628,32 @@ def _persist_chat_turn_work_run(
     previous = s._WORK_RUN_STORE.load_snapshot("chat_turn", normalized_turn_id) or {}
     started = str(started_at or previous.get("startedAt") or now).strip()
     finished = str(finished_at or previous.get("finishedAt") or "").strip()
-    normalized_status = str(status or previous.get("status") or "running").strip().lower() or "running"
+    # End receipts never supply a missing result verdict to this writer.
+    previous_state = {**previous, "finishedAt": "", "endedAt": ""}
+    previous_activity = resolve_work_run_activity(previous_state)
+    requested_status = str(status or "").strip().lower()
+    if requested_status:
+        state = {"status": requested_status}
+        if work_run_has_execution(previous_state):
+            state["currentPhase"] = previous_activity["phase"]
+        if requested_status == previous_activity["outcome"]:
+            state["terminalReason"] = previous_activity["reason"]
+        activity = resolve_work_run_activity(state)
+        raw_status = activity["rawStatus"]
+    else:
+        activity = previous_activity
+        raw_status = str(previous.get("rawStatus") or activity["rawStatus"]).strip().lower()
     # 终态单调性：touch/心跳可能从事件线程晚到（与 worker 线程的终态写并发），
     # 一个已经终态的 work-run 不允许被复活为 queued/running/stopping，也不允许
     # 因此清空 finishedAt——那会让快照短暂复活并丢失 completed/failed 的区分。
-    _terminal_work_run_statuses = {
-        "completed", "failed", "failed_provider", "failed_runtime",
-        "stopped", "cancelled", "paused_limit", "needs_continue",
-        "stopped_by_user", "superseded",
-    }
-    previous_status = str(previous.get("status") or "").strip().lower()
-    if previous_status in _terminal_work_run_statuses and normalized_status not in _terminal_work_run_statuses:
-        normalized_status = previous_status
-    if normalized_status in {"running", "stopping"}:
-        active_run_id = normalized_turn_id
-    elif normalized_status == "queued":
+    if previous_activity["outcome"] and not activity["outcome"]:
+        activity = previous_activity
+        raw_status = str(previous.get("rawStatus") or activity["rawStatus"]).strip().lower()
+    normalized_status = activity["outcome"] or activity["execution"]
+    if activity["execution"] == "queued":
         active_run_id = s._replacement_active_chat_turn_id(exclude_turn_id=normalized_turn_id) or normalized_turn_id
+    elif work_run_has_execution({"status": normalized_status}) or activity["blocksLifecycle"]:
+        active_run_id = normalized_turn_id
     else:
         active_run_id = s._replacement_active_chat_turn_id(exclude_turn_id=normalized_turn_id)
     payload = {
@@ -1654,7 +1664,9 @@ def _persist_chat_turn_work_run(
         "sessionId": str(session_id or previous.get("sessionId") or "").strip(),
         "agentId": str(agent_id or previous.get("agentId") or "").strip(),
         "status": normalized_status,
-        "currentPhase": normalized_status,
+        "currentPhase": activity["phase"],
+        "terminalReason": activity["reason"],
+        "rawStatus": raw_status,
         "leases": list(leases or previous.get("leases") or ["readonly_chat"]),
         "userMessage": str(user_message or previous.get("userMessage") or "").strip(),
         "summary": str(summary or previous.get("summary") or "").strip(),
@@ -1662,21 +1674,7 @@ def _persist_chat_turn_work_run(
         "error": str(error or previous.get("error") or "").strip(),
         "startedAt": started,
         "updatedAt": str(updated_at or now).strip(),
-        "finishedAt": finished
-        if normalized_status
-        in {
-            "completed",
-            "failed",
-            "failed_provider",
-            "failed_runtime",
-            "stopped",
-            "cancelled",
-            "paused_limit",
-            "needs_continue",
-            "stopped_by_user",
-            "superseded",
-        }
-        else "",
+        "finishedAt": finished if activity["outcome"] else "",
     }
     if isinstance(last_tool_error, dict) and last_tool_error:
         timed_out = bool(last_tool_error.get("timedOut") or last_tool_error.get("timed_out"))
@@ -2760,9 +2758,9 @@ def _touch_chat_turn_work_run(
     previous = s._WORK_RUN_STORE.load_snapshot("chat_turn", normalized_turn_id)
     if not isinstance(previous, dict):
         return
-    status = str(previous.get("status") or previous.get("currentPhase") or "running").strip().lower() or "running"
-    if status not in {"queued", "running", "stopping", "paused"}:
+    if not work_run_has_execution(previous):
         return
+    status = str(resolve_work_run_activity(previous)["execution"])
     s._persist_chat_turn_work_run(
         session_id=session_id,
         turn_id=normalized_turn_id,

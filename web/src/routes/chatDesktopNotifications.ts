@@ -1,7 +1,7 @@
 import type { ConversationMessage, SessionDetail, SessionStreamEvent } from "../api/types";
 import type { BrowserTelemetryEventInput } from "../app/browserTelemetry";
 import {
-  activityOutcome, hasExecutionOwnership, resolveSessionActivity, sessionTerminalStatus,
+  activityNeedsContinuation, activityOutcome, hasExecutionOwnership, resolveSessionActivity, sessionTerminalStatus,
 } from "./sessionActivityState";
 
 export type DesktopConversationCompletionNotification = {
@@ -57,7 +57,6 @@ export type SessionCompletionSummary = {
 
 // The turn finished its reply but explicitly waits for a user "继续" to
 // advance; reporting it as plain "已结束" hides the pending follow-up step.
-const CONTINUATION_TERMINAL_STATUSES = new Set(["needs_continue"]);
 
 export type DesktopConversationNotifier = {
   handleAssistantDelta(
@@ -108,7 +107,7 @@ export function buildConversationNotificationCopy(options: {
       body: `「${label}」已完成一轮回复。`,
     };
   }
-  if (CONTINUATION_TERMINAL_STATUSES.has(options.terminalStatus)) {
+  if (activityNeedsContinuation(options.terminalStatus)) {
     return {
       title: "对话待继续",
       body: `「${label}」还有后续步骤，回复“继续”即可推进。`,

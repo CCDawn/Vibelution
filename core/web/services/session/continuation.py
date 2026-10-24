@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from core.chat.conversation_branches import analyze_conversation_branches
+from core.chat.session_activity import activity_can_continue, activity_outcome
 from core.chat.turn_journal import TERMINAL_EVENTS, fold_active_events, latest_open_turn_id
 
 from . import journal_bridge
@@ -68,11 +69,11 @@ def validate_continuation(s, session_id: str, expected: dict[str, Any]) -> None:
     statuses = {str(terminal.status or "").strip().lower(),
                 str(terminal.payload.get("finalStatus") or "").strip().lower()}
     if (terminal.event_type == "turn_interrupted"
-            or statuses & {"stopped", "stopped_by_user", "needs_continue", "paused_limit"}):
+            or any(activity_can_continue(status) for status in statuses)):
         return
     error = conversation.get("last_turn_error") or conversation.get("lastTurnError") or {}
     if (isinstance(error, Mapping)
-            and terminal.event_type == "turn_failed" and not statuses & {"completed", "success"}
+            and terminal.event_type == "turn_failed" and not any(activity_outcome(status) == "completed" for status in statuses)
             and str(error.get("turn_id") or error.get("turnId") or "").strip() == expected["turnId"]
             and str(error.get("reason_code") or error.get("reasonCode") or "").strip() == "iteration_limit_reached"):
         return

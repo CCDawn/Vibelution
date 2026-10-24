@@ -14,7 +14,7 @@ import psutil
 from core.chat.conversation_ledger import conversation_ledger_path
 from core.infrastructure.file_lock import cross_process_file_lock
 from core.infrastructure.process_liveness import is_pid_alive
-from core.runtime_manager.work_run_store import ACTIVE_RUN_IDS_LIMIT
+from core.runtime_manager.work_run_store import ACTIVE_RUN_IDS_LIMIT, active_work_payload_blocks_lifecycle
 
 from . import journal_bridge
 
@@ -23,7 +23,6 @@ from . import journal_bridge
 # ``_CHAT_TURN_WORKER_GONE_GRACE_SECONDS`` so both layers call the same
 # snapshot abandoned.
 _FOREIGN_OWNER_FRESH_SECONDS = 120.0
-_BLOCKING_WORK_RUN_STATUSES = {"queued", "running", "stopping", "paused"}
 
 
 class SessionAdmissionLock:
@@ -92,9 +91,7 @@ def _session_blocking_work_run_snapshots(
     for run_id in dict.fromkeys(key for key in [turn_id, *ids] if isinstance(key, str) and key):
         row = s._WORK_RUN_STORE.load_snapshot("chat_turn", run_id)
         if (row and row.get("sessionId") == session_id
-                and str(row.get("status") or row.get("currentPhase") or "").lower()
-                in _BLOCKING_WORK_RUN_STATUSES
-                and not (row.get("finishedAt") or row.get("endedAt"))):
+                and active_work_payload_blocks_lifecycle(row)):
             blocking.append(row)
     return blocking, False
 

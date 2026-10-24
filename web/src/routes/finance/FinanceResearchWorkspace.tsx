@@ -1,3 +1,4 @@
+import { activityNeedsContinuation, resolveSessionActivity } from "../sessionActivityState";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FileText, Search, Settings2 } from "lucide-react";
@@ -144,15 +145,15 @@ export function FinanceResearchWorkspace({ assistant, sessionId, zh, lifecycle }
   const report = useMemo(() => projectStockReport(messages, currentView), [messages, currentView?.terminalReason, currentView?.lastTurnStatus, currentView?.lastTurnTerminalTurnId]);
   const stockReport = reportMatchesStock(report, messages, stocks.selected) ? report : null;
   useEffect(() => {
-    if (nativeReady && currentView?.terminalReason === "success" && report?.turnId && report.turnId === currentView.lastTurnTerminalTurnId) void client.invalidateQueries({ queryKey: ["finance", "report-catalog", assistant.agentId] });
-  }, [client, assistant.agentId, nativeReady, currentView?.terminalReason, currentView?.lastTurnTerminalTurnId, report?.turnId]);
+    if (nativeReady && resolveSessionActivity({ ...currentView, currentPhase: currentView?.phase }).outcome === "completed" && report?.turnId && report.turnId === currentView?.lastTurnTerminalTurnId) void client.invalidateQueries({ queryKey: ["finance", "report-catalog", assistant.agentId] });
+  }, [client, assistant.agentId, nativeReady, currentView?.terminalReason, currentView?.lastTurnStatus, currentView?.status, currentView?.phase, currentView?.lastTurnTerminalTurnId, report?.turnId]);
   useEffect(() => {
     if (teamSelectedRun?.coordinationStatus === "completed" && teamSelectedRun.synthesis.turnId) void client.invalidateQueries({ queryKey: ["finance", "report-catalog", assistant.agentId] });
   }, [client, assistant.agentId, teamSelectedRun?.coordinationStatus, teamSelectedRun?.synthesis.turnId]);
   const busy = Boolean(currentView?.busy || currentView?.submitPending);
-  const latestOutcome = currentView?.terminalReason || currentView?.lastTurnStatus || "";
-  const canOfferStageReport = nativeReady && currentView?.status === "idle" && !busy && !currentView?.stopping
-    && !currentView?.transcriptPending && messages.length > 1 && ["needs_continue", "paused_limit"].includes(latestOutcome);
+  const sessionActivity = resolveSessionActivity({ ...currentView, currentPhase: currentView?.phase });
+  const canOfferStageReport = nativeReady && sessionActivity.execution === "settled" && !busy && !currentView?.stopping
+    && !currentView?.transcriptPending && messages.length > 1 && activityNeedsContinuation(sessionActivity.outcome);
   const stageReportPrompt = [
     "请基于当前会话已经获得的证据整理阶段报告。",
     "不要再次调用工具或请求新数据；只使用当前对话中已经出现的证据。",

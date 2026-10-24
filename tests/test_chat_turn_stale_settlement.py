@@ -216,7 +216,10 @@ def test_reconcile_settles_tool_timeout_hang(tmp_path, monkeypatch):
 
     latest = session_service._WORK_RUN_STORE.load_snapshot("chat_turn", turn_id)
     assert latest is not None
-    assert latest["status"] == "failed_runtime"
+    assert latest["status"] == "failed"
+    assert latest["currentPhase"] == ""
+    assert latest["terminalReason"] == "failed_runtime"
+    assert latest["rawStatus"] == "failed_runtime"
     assert str(latest.get("finishedAt") or "").strip()
     assert session_service._WORK_RUN_STORE.load_active_snapshot("chat_turn") is None
     assert session_service._is_session_running("session-a") is False

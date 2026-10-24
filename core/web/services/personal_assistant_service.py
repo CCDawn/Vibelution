@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from core.chat.session_activity import session_activity_group
+from core.runtime_manager.work_run_status import resolve_work_run_activity, work_run_has_execution
+
 import copy
 import hashlib
 import json
@@ -550,7 +553,23 @@ def _build_platform_overview_snapshot() -> dict:
     agents = directory.list_agents(detail="summary")
     sessions = session_service.list_sessions()
     activity = pet_activity_service.get_pet_activity()
-    live = {row["sessionId"]: row for row in activity["sessions"]}
+    runtime = session_service.load_chat_turn_work_run_summary()
+    runtime_by_session = {
+        str(item.get("sessionId") or ""): item
+        for item in (runtime.get("activeItems") or []) if isinstance(item, dict)
+    }
+    projected_sessions = []
+    for row in sessions:
+        work_run = runtime_by_session.get(row["id"])
+        if work_run:
+            runtime_activity = resolve_work_run_activity(work_run)
+            if runtime_activity["blocksLifecycle"]:
+                row = {**row, "status": runtime_activity["execution"], "currentPhase": runtime_activity["phase"],
+                       "activeTurnId": str((work_run.get("runId") if work_run_has_execution(work_run) else "") or row.get("activeTurnId") or "")}
+        projected_sessions.append(row)
+    sessions = projected_sessions
+    approval_ids = {row["sessionId"] for row in activity["sessions"] if row["tone"] == "approval"}
+    groups = [session_activity_group(row, needs_approval=row["id"] in approval_ids) for row in sessions]
     attention = [
         {
             "id": row["sessionId"],
@@ -565,9 +584,9 @@ def _build_platform_overview_snapshot() -> dict:
         "counts": {
             "agents": len(agents),
             "sessions": len(sessions),
-            "running": sum(row["tone"] == "running" for row in live.values()),
-            "waiting": sum(row["tone"] == "approval" for row in live.values()),
-            "failed": sum(row["tone"] == "error" for row in live.values()),
+            "running": groups.count("running"),
+            "waiting": groups.count("waiting"),
+            "failed": groups.count("failed"),
         },
         "agents": [
             {
@@ -588,11 +607,11 @@ def _build_platform_overview_snapshot() -> dict:
                 ),
                 "status": str(row.get("status") or ""),
                 "turnId": session_service.current_session_turn_id(row["id"]),
-                "currentPhase": str(
-                    live.get(row["id"], {}).get("phase")
-                    or row.get("currentPhase")
-                    or "idle"
-                ),
+                "currentPhase": str(row.get("currentPhase") or ""),
+                "lastTurnStatus": str(row.get("lastTurnStatus") or ""),
+                "terminalReason": str(row.get("terminalReason") or ""),
+                "activeTurnId": str(row.get("activeTurnId") or ""),
+                "lastTurnTerminalTurnId": str(row.get("lastTurnTerminalTurnId") or ""),
             }
             for row in sessions
         ],

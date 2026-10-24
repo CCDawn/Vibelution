@@ -38,8 +38,6 @@ _PUBLIC_AGENT_RUN_KEYS = {
     "sessionId",
     "status",
     "currentPhase",
-    "executionStatus",
-    "activityPhase",
     "terminalReason",
     "rawStatus",
     "summary",
@@ -59,8 +57,6 @@ _PUBLIC_SUB_AGENT_RUN_KEYS = {
     "contextMode",
     "status",
     "currentPhase",
-    "executionStatus",
-    "activityPhase",
     "terminalReason",
     "rawStatus",
     "summary",
@@ -75,12 +71,13 @@ _PUBLIC_SUB_AGENT_RUN_KEYS = {
 
 
 def result_status(result: dict[str, Any]) -> str:
+    """Decode execution evidence; content or an absent error cannot prove success."""
     status = str(result.get("status") or result.get("currentPhase") or "").strip().lower()
     if status:
         return normalize_run_status(status)
     if result.get("error") or result.get("errorType") or result.get("error_type"):
         return "failed"
-    return "completed"
+    return "unknown"
 
 
 def result_summary(result: dict[str, Any]) -> str:
@@ -249,11 +246,6 @@ def _load_work_run_snapshots(run_kind: str, *, limit: int | None = None) -> list
 
 def _public_snapshot(snapshot: dict[str, Any], allowed_keys: set[str]) -> dict[str, Any]:
     projected = {**snapshot, **public_run_activity(snapshot)}
-    # New consumers use executionStatus/activityPhase. Keep the legacy wire
-    # mirrors during migration; no old client needs to understand a new enum.
-    if "rawStatus" in snapshot:
-        projected["status"] = projected["rawStatus"]
-        projected["currentPhase"] = projected["rawStatus"]
     return {key: projected.get(key) for key in sorted(allowed_keys) if key in projected}
 
 

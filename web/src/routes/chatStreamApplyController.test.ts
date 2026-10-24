@@ -145,7 +145,6 @@ describe("chatStreamApplyController", () => {
       lastAppliedAtMs: 1_000,
       nowMs: 1_100,
       minApplyIntervalMs: 350,
-      isBusyPhase: (phase) => phase === "running" || phase === "responding",
     });
 
     expect(decision.action).toBe("schedule_timer");
@@ -164,7 +163,6 @@ describe("chatStreamApplyController", () => {
       lastAppliedAtMs: 1_000,
       nowMs: 1_010,
       minApplyIntervalMs: 350,
-      isBusyPhase: (phase) => phase === "running",
     });
 
     expect(queued.action).toBe("apply_now");
@@ -178,7 +176,6 @@ describe("chatStreamApplyController", () => {
       stats: queued.stats,
       activeLayer: activeLayer(),
       activeLayerSettled: false,
-      isBusyPhase: (phase) => phase === "running",
     });
 
     expect(applied.stats).toEqual({ received: 1, applied: 1, dropped: 0 });
@@ -205,7 +202,6 @@ describe("chatStreamApplyController", () => {
       stats: stats({ received: 1, applied: 1, dropped: 0 }),
       activeLayer: activeLayer(),
       activeLayerSettled: true,
-      isBusyPhase: (phase) => phase === "running",
     });
 
     expect(applied.clearActiveLayer).toBe(true);

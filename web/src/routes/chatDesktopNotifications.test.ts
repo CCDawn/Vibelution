@@ -596,7 +596,7 @@ describe("desktop conversation notifier", () => {
     const notifier = createDesktopConversationNotifier({ bridge: { notifyConversationCompleted: notify }, postTelemetry: vi.fn() });
     notifier.handleAssistantDelta(assistantDelta());
     notifier.handleSessionDetail(detail({ terminalReason }));
-    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ title: "对话已结束", terminalStatus: terminalReason }));
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ title: terminalReason === "paused_limit" ? "对话待继续" : "对话已结束", terminalStatus: terminalReason }));
   });
 
   it("waits for the matching settled turn rather than using an older detail", () => {

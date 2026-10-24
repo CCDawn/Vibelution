@@ -1,8 +1,6 @@
 import type { SessionContinuationExpectation } from "../../api/chat";
 import type { SessionDetail } from "../../api/types";
-import { isBusyPhase } from "./chatCodingRouteViewModel";
-
-const CONTINUABLE_TERMINALS = new Set(["stopped_by_user", "stopped", "cancelled", "aborted", "interrupted", "needs_continue", "paused_limit"]);
+import { activityCanContinue, resolveSessionActivity, sessionIsAtRest } from "../sessionActivityState";
 
 /** UI eligibility only; native admission revalidates this snapshot atomically. */
 export function resolveConversationContinuation(
@@ -17,12 +15,12 @@ export function resolveConversationContinuation(
   const ledgerSeq = detail.ledgerSeq;
   if (!turnId || !headId || !agentId || !Number.isSafeInteger(ledgerSeq) || Number(ledgerSeq) < 1) return null;
   if (detail.activeTurnId && detail.activeTurnId !== turnId) return null;
-  if (isBusyPhase(detail.currentPhase)) return null;
-  const terminal = String(detail.terminalReason || detail.lastTurnStatus || "").trim().toLowerCase();
+  if (!sessionIsAtRest(detail)) return null;
+  const terminal = resolveSessionActivity(detail).reason;
   const iterationStopped = terminal === "failed_runtime"
     && detail.lastTurnError?.reasonCode === "iteration_limit_reached"
     && detail.lastTurnError.turnId === turnId;
-  if (!CONTINUABLE_TERMINALS.has(terminal) && !iterationStopped) return null;
+  if (!activityCanContinue(terminal) && !iterationStopped) return null;
   return { turnId, headId, ledgerSeq: Number(ledgerSeq), agentId };
 }
 

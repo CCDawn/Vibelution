@@ -12,6 +12,12 @@ import {
 } from "./sessionActivityIndicator";
 
 describe("sessionActivityIndicator", () => {
+  it("presents paused and stopping separately from active output", () => {
+    expect(resolveSessionActivityTone({ status: "paused", currentPhase: "thinking", terminalReason: "success" })).toBe("paused");
+    expect(resolveSessionActivityTone({ status: "stopping", currentPhase: "thinking" })).toBe("stopping");
+    expect(sessionActivityLabel("paused", "zh")).toBe("已暂停");
+    expect(sessionActivityLabel("stopping", "zh")).toBe("停止中");
+  });
   beforeEach(() => {
     const store = new Map<string, string>();
     vi.stubGlobal("localStorage", {

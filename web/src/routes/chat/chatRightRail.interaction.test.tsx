@@ -662,14 +662,14 @@ describe("chat right rail interaction", () => {
       ]);
     });
     expect(host.textContent).toContain("进行中 · 1");
-    expect(host.textContent).toContain("正在查 · 运行中");
+    expect(host.textContent).toContain("正在查 · 进行中");
     expect(host.textContent).toContain("已结束 · 1");
     expect(host.textContent).toContain("已经好了 · 已完成");
     expect(host.textContent).toContain("写完了");
     expect(host.textContent).toContain("打开辅助对话中心");
 
     const openRunning = Array.from(host.querySelectorAll("button")).find((button) => (
-      button.textContent === "正在查 · 运行中"
+      button.textContent === "正在查 · 进行中"
     ));
     await act(async () => {
       openRunning?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -783,6 +783,6 @@ describe("chat right rail interaction", () => {
     expect(host.textContent).toContain("不会实盘下单");
     expect(host.textContent).toContain("暂无分钟行情");
     expect(host.textContent).toContain("进行中 · 1");
-    expect(host.textContent).toContain("正在查 · 运行中");
+    expect(host.textContent).toContain("正在查 · 进行中");
   });
 });

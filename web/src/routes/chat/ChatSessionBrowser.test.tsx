@@ -158,7 +158,8 @@ describe("ChatSessionBrowser", () => {
     markSessionActivitySeen(readCompleted.id, sessionActivityStamp(readCompleted));
 
     const preview = await mount(props({
-      sessions: [activeCompleted, readCompleted, stillRunning, failedResting],
+      sessions: [activeCompleted, readCompleted, stillRunning, failedResting,
+        session("ready-without-result"), session("paused", { currentPhase: "paused" })],
       activeSessionId: activeCompleted.id,
     }));
     try {
@@ -166,8 +167,9 @@ describe("ChatSessionBrowser", () => {
       expect(completedFilter.textContent).toBe("已结束");
       await act(async () => completedFilter.click());
       expect([...preview.host.querySelectorAll<HTMLElement>("[data-session-browser-id]")]
-        .map((row) => row.dataset.sessionBrowserId))
-        .toEqual([activeCompleted.id, readCompleted.id]);
+        .map((row) => row.dataset.sessionBrowserId)
+        .sort())
+        .toEqual([activeCompleted.id, readCompleted.id, failedResting.id].sort());
     } finally {
       await preview.unmount();
     }

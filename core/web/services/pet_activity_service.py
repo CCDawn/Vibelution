@@ -7,8 +7,9 @@ import threading
 from datetime import datetime, timezone
 from typing import Any
 
-from core.chat.session_activity import activity_outcome, resolve_session_activity
+from core.chat.session_activity import SESSION_ACTIVITY_CONTRACT, activity_outcome, resolve_session_activity
 from core.chat.turn_journal import EVENT_TURN_COMPLETED, TERMINAL_EVENTS, load_latest_turn_events_for_preview
+from core.runtime_manager.work_run_status import resolve_work_run_activity, work_run_has_execution
 
 from . import session_service
 from .session.timebase import parse_timestamp_utc
@@ -40,6 +41,7 @@ def get_pet_activity(*, now: datetime | None = None) -> dict[str, Any]:
         session_id: item
         for item in (active_items or [])
         if isinstance(item, dict)
+        and work_run_has_execution(item)
         and (session_id := str(item.get("sessionId") or "").strip())
     }
 
@@ -58,8 +60,12 @@ def get_pet_activity(*, now: datetime | None = None) -> dict[str, Any]:
             and resolve_session_activity(session)["outcome"] == "completed"
             else {}
         )
+        live_activity = resolve_work_run_activity(live_item) if live_item else None
+        activity_source = {
+            **session, "status": live_activity["execution"], "currentPhase": live_activity["phase"],
+        } if live_activity else session
         tone = _resolve_tone(
-            session,
+            activity_source,
             runtime_running=live_item is not None,
             needs_approval=needs_approval,
             now=observed_at,
@@ -130,7 +136,7 @@ def _resolve_tone(
     # so a remaining active item is the live authority when the persisted
     # Session projection still says ready from the previous turn.
     state = resolve_session_activity(session, runtime_running=runtime_running, authoritative_runtime=True)
-    if state["execution"] in {"queued", "running", "stopping"}:
+    if state["execution"] in SESSION_ACTIVITY_CONTRACT["policy"]["outputExecutions"]:
         return "running"
     if state["outcome"] == "failed":
         return "error"

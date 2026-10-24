@@ -1,6 +1,14 @@
 import type { ChatNextStateSignalSummary, RuntimeSummary, SessionDetail, SessionSummary } from "../../api/types";
 import type { TranslationKey } from "../../i18n/dictionary";
 import {
+  activityExecution,
+  activityOutputActive,
+  activityPhase,
+  isActivityResting,
+  resolveSessionActivity,
+  sessionActivityStatusLabel,
+} from "../sessionActivityState";
+import {
   buildVisiblePanelRows,
   type CompactPanelRow,
 } from "../chatCompactPanel";
@@ -298,13 +306,30 @@ export function buildChatSessionStateViewModel(options: {
     : !activeSessionId
       ? noActiveDirectSessionTitle
       : detail?.agentDisplayName ?? detail?.title ?? directSessionActiveSummary?.agentDisplayName ?? directSessionActiveSummary?.title ?? loadingDirectSessionTitle;
+  const runtimeActivity = runtimeMatchesSelectedSession ? runtimeSessionState : "";
+  const sessionActivity = resolveSessionActivity(detail ?? directSessionActiveSummary ?? {}, {
+    runtimeRunning: runtimeMatchesSelectedSession && activityExecution(runtimeActivity) === "running",
+  });
+  const sessionOutputActive = activityOutputActive(sessionActivity.execution);
+  const displaySessionActivity = sessionOutputActive
+    ? {
+      ...sessionActivity,
+      phase: sessionActivity.phase || activityPhase(runtimeActivity),
+    }
+    : sessionActivity;
+  const directSessionStateValue = sessionOutputActive
+    ? displaySessionActivity.phase || displaySessionActivity.execution
+    : displaySessionActivity.outcome || displaySessionActivity.execution;
+  const directSessionStateLabel = sessionActivityStatusLabel(displaySessionActivity, lang);
+  const runtimeLineMatchesSessionActivity = sessionActivity.execution === "running"
+    || (sessionActivity.execution === "idle" && isActivityResting(runtimeActivity));
   const activeSurfaceStatus = groupPanelActive
     ? (
       projectBusActive
         ? (lang === "zh" ? "全局广播" : "global broadcast")
         : statusLabel(activeGroupRoomStatus ?? "ready")
     )
-    : statusLabel(detail?.status || detail?.currentPhase || "idle");
+    : directSessionStateLabel;
   const activeSurfaceLine = groupPanelActive
     ? (
       projectBusActive
@@ -322,23 +347,15 @@ export function buildChatSessionStateViewModel(options: {
     if (groupPanelActive) {
       return activeSurfaceStatus;
     }
-    const runtimeState = runtimeMatchesSelectedSession ? (runtimeSessionState || "") : "";
-    switch (runtimeState) {
-      case "thinking":
-        return t("sessionStateThinking");
-      case "tooling":
-        return t("sessionStateTooling");
-      case "answering":
-        return t("sessionStateAnswering");
-      default:
-        return statusLabel(runtimeState || detail?.currentPhase || directSessionActiveSummary?.currentPhase || directSessionActiveSummary?.status || "idle");
-    }
+    return directSessionStateLabel;
   })();
   const sessionStateLine = groupPanelActive
     ? activeSurfaceLine
     : !activeSessionId
       ? noActiveDirectSessionLine
-      : runtimeMatchesSelectedSession && runtimeSessionStateLine
+      : runtimeMatchesSelectedSession
+        && runtimeLineMatchesSessionActivity
+        && runtimeSessionStateLine
         ? runtimeSessionStateLine
         : runtimeMismatchLine || (sessionDetailBlockingError
           ? sessionDetailErrorMessage
@@ -349,17 +366,9 @@ export function buildChatSessionStateViewModel(options: {
   const agentDirectSessionMismatch = Boolean(detail?.agentDirectSessionMismatch);
   const agentPrimaryDirectSessionId = String(detail?.agentPrimaryDirectSessionId ?? "").trim();
   const sessionBindingMismatchLine = agentDirectSessionMismatch ? t("sessionBindingMismatchLine") : "";
-  const sessionStateValue = String(
-    groupPanelActive
-      ? (projectBusActive ? "ready" : activeGroupRoomStatus ?? "ready")
-      : (runtimeMatchesSelectedSession ? runtimeSessionState : "")
-        || detail?.currentPhase
-        || directSessionActiveSummary?.currentPhase
-        || directSessionActiveSummary?.status
-        || "idle",
-  )
-    .trim()
-    .toLowerCase();
+  const sessionStateValue = groupPanelActive
+    ? String(projectBusActive ? "ready" : activeGroupRoomStatus ?? "ready").trim().toLowerCase()
+    : directSessionStateValue;
 
   const activeTask = detail?.activeTask ?? null;
   const activeTaskSummary = agentDirectSessionMismatch

@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import logging
 
+import pytest
+
 from core.runtime_manager.work_run_store import active_work_payload_blocks_lifecycle, WorkRunStore
 from core.web.services import session_service
 from core.web.services.session import read_health
@@ -128,6 +130,65 @@ def _isolated_work_run_store(monkeypatch, tmp_path) -> WorkRunStore:
     store = WorkRunStore(root=tmp_path / "work-runs")
     monkeypatch.setattr(session_service, "_WORK_RUN_STORE", store)
     return store
+
+
+@pytest.mark.parametrize(("status", "canonical", "phase", "reason", "terminal"), [
+    ("running", "running", "", "", False), ("reading", "running", "reading", "", False),
+    ("paused", "paused", "", "", False), ("queued", "queued", "", "", False),
+    ("failed_provider", "failed", "", "failed_provider", True),
+    ("failed_runtime", "failed", "", "failed_runtime", True),
+    ("stopped_by_user", "stopped", "", "stopped_by_user", True),
+    ("force_stopped", "stopped", "", "force_stopped", True),
+    ("canceled", "cancelled", "", "canceled", True),
+    ("needs_continue", "needs_continue", "", "needs_continue", True),
+    ("paused_limit", "paused_limit", "", "paused_limit", True),
+    ("future_state", "unknown", "", "", False), ("", "unknown", "", "", False),
+])
+def test_chat_turn_writer_separates_canonical_state_phase_and_reason(monkeypatch, tmp_path, status, canonical, phase, reason, terminal):
+    store = _isolated_work_run_store(monkeypatch, tmp_path)
+    monkeypatch.setattr(session_service, "_replacement_active_chat_turn_id", lambda **_: "")
+    session_service._persist_chat_turn_work_run(
+        session_id="session-writer", turn_id="turn-writer", status=status,
+        finished_at="2026-10-24T00:00:00Z", leases=["readonly_chat"],
+    )
+    snapshot = store.load_snapshot("chat_turn", "turn-writer")
+    assert snapshot["status"] == canonical
+    assert snapshot["currentPhase"] == phase
+    assert snapshot["terminalReason"] == reason
+    assert snapshot["rawStatus"] == status
+    assert bool(snapshot["finishedAt"]) == terminal
+    assert bool(store.load_active_run_ids("chat_turn")) != terminal
+    assert snapshot["ownerPid"] > 0
+    assert snapshot["ownerCreateTime"] > 0
+
+
+@pytest.mark.parametrize("terminal", ["failed_provider", "stopped_by_user", "needs_continue", "paused_limit"])
+@pytest.mark.parametrize("late_status", ["running", "reading", "paused", "future_state", ""])
+def test_late_work_run_touch_preserves_terminal_cause_and_end_receipt(monkeypatch, tmp_path, terminal, late_status):
+    store = _isolated_work_run_store(monkeypatch, tmp_path)
+    monkeypatch.setattr(session_service, "_replacement_active_chat_turn_id", lambda **_: "")
+    session_service._persist_chat_turn_work_run(
+        session_id="session-writer", turn_id="turn-writer", status=terminal,
+        finished_at="2026-10-24T00:00:00Z",
+    )
+    before = store.load_snapshot("chat_turn", "turn-writer")
+    session_service._persist_chat_turn_work_run(session_id="session-writer", turn_id="turn-writer", status=late_status)
+    after = store.load_snapshot("chat_turn", "turn-writer")
+    for field in ("status", "currentPhase", "terminalReason", "rawStatus", "finishedAt"):
+        assert after[field] == before[field]
+    assert store.load_active_run_ids("chat_turn") == []
+
+
+@pytest.mark.parametrize("status", ["reading", "future_state"])
+def test_missing_work_run_status_inherits_only_same_run_evidence(monkeypatch, tmp_path, status):
+    store = _isolated_work_run_store(monkeypatch, tmp_path)
+    monkeypatch.setattr(session_service, "_replacement_active_chat_turn_id", lambda **_: "")
+    session_service._persist_chat_turn_work_run(session_id="session-writer", turn_id="turn-writer", status=status)
+    before = store.load_snapshot("chat_turn", "turn-writer")
+    session_service._persist_chat_turn_work_run(session_id="session-writer", turn_id="turn-writer", status="")
+    after = store.load_snapshot("chat_turn", "turn-writer")
+    for field in ("status", "currentPhase", "terminalReason", "rawStatus"):
+        assert after[field] == before[field]
 
 
 def _forge_running_session(session_id: str, turn_id: str, *, leases: list[str] | None = None) -> None:

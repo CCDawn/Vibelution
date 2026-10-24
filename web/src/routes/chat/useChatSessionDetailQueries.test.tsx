@@ -116,6 +116,23 @@ async function mount(overrides: Partial<UseChatSessionDetailQueriesInput> = {}, 
 }
 
 describe("Chat startup detail priority", () => {
+  it("updates hidden synchronization when only owner and terminal identity change", async () => {
+    reads.detail.mockReturnValue(new Promise(() => {}));
+    const changed = vi.fn();
+    const detail = { ...fullDetail, status: "ready", currentPhase: "ready", ledgerSeq: 1 } as SessionDetail;
+    const page = await mount({ activeSessionId: "current", setDirectSessionBackgroundSyncActive: changed }, detail);
+    try {
+      expect(changed).toHaveBeenLastCalledWith(false);
+      await act(async () => { page.client.setQueryData(queryKeys.session("current"), { ...detail, activeTurnId: "t", ledgerSeq: 2 }); });
+      await flush();
+      expect(changed).toHaveBeenLastCalledWith(true);
+      await act(async () => { page.client.setQueryData(queryKeys.session("current"), {
+        ...detail, activeTurnId: "t", lastTurnTerminalTurnId: "t", terminalReason: "success", ledgerSeq: 3,
+      }); });
+      await flush();
+      expect(changed).toHaveBeenLastCalledWith(false);
+    } finally { await page.dispose(); }
+  });
   it("does not finish a bare route from an unready empty directory", async () => {
     let resolveDetail!: (detail: SessionDetail) => void;
     reads.detail.mockReturnValue(new Promise((resolve) => { resolveDetail = resolve; }));

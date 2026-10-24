@@ -10017,15 +10017,34 @@ def test_force_close_marks_parallel_persistent_work_runs(tmp_path, monkeypatch):
     routed = store.load_snapshot("chat_turn", "chat-routed")
     partial = store.load_snapshot("chat_turn", "chat-partial")
     done = store.load_snapshot("chat_turn", "chat-done")
-    assert alpha and alpha["status"] == "stopped_by_user"
-    assert beta and beta["status"] == "stopped_by_user"
-    assert alpha["runtimeStatus"] == "force_stopped"
+    assert alpha and alpha["status"] == "stopped"
+    assert beta and beta["status"] == "stopped"
+    assert alpha["currentPhase"] == beta["currentPhase"] == ""
+    assert alpha["terminalReason"] == beta["terminalReason"] == "force_stopped"
+    assert alpha["rawStatus"] == beta["rawStatus"] == "force_stopped"
+    assert "runtimeStatus" not in alpha
     assert beta["forceStopReason"] == "launcher_force_stop_button"
     assert stale and stale["status"] == "running"
     assert routed and routed["status"] == "routed"
     assert partial and partial["status"] == "partial"
     assert done and done["status"] == "completed"
     assert store.load_run_index("chat_turn")["activeRunId"] == ""
+
+
+@pytest.mark.parametrize("kind", ["chat_turn", "self_evolution_run", "formal_run"])
+def test_force_stop_snapshots_share_canonical_lifecycle_fields_for_every_kind(tmp_path, monkeypatch, kind):
+    work_runs_dir = tmp_path / "work_runs"
+    snapshot = {"runId": "force-run", "runKind": kind, "status": "running", "currentPhase": "reading", "runtimeStatus": "running"}
+    monkeypatch.setattr(work_run_store, "WORK_RUNS_DIR", work_runs_dir)
+    monkeypatch.setattr(daemon, "_persistent_active_work_run_snapshots", lambda: [snapshot])
+    result = daemon._mark_persistent_active_work_runs_force_stopped("test-force-stop")
+    stored = WorkRunStore(root=work_runs_dir).load_snapshot(kind, "force-run")
+    assert result == [{"kind": kind, "runId": "force-run", "status": "stopped"}]
+    assert stored["status"] == "stopped"
+    assert stored["currentPhase"] == ""
+    assert stored["terminalReason"] == stored["rawStatus"] == "force_stopped"
+    assert stored["finishedAt"]
+    assert "runtimeStatus" not in stored
 
 
 def test_handle_close_workbench_blocks_active_chat_turn_before_close(monkeypatch):

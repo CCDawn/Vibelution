@@ -1,6 +1,6 @@
 import { ConversationAttachment, ConversationMessage, SessionDetail, SessionMessageWindow, SessionReferenceAttachment, SessionStreamEvent, SessionSummary } from "../api/types";
 import { postBrowserTelemetry } from "../app/browserTelemetry";
-import { isRunningPhase } from "./chat/chatCodingRouteViewModel";
+import { sessionActivityPolicy } from "./sessionActivityState";
 import { hasTerminalCanonicalTurnOutcome } from "./chatTurnProtocol";
 import {  editMessageIndex,
   editMessageTurnId,
@@ -818,8 +818,7 @@ function preserveSessionDetailStopIntent(
       stopReason: "",
     };
   }
-  const phase = String(next.currentPhase || next.status || "").trim().toLowerCase();
-  if (!isRunningPhase(phase)) {
+  if (!sessionActivityPolicy(next).executionOwned) {
     return next;
   }
   return {

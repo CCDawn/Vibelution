@@ -476,13 +476,15 @@ def _mark_persistent_active_work_runs_force_stopped(reason: str) -> list[dict[st
         if not kind or not run_id:
             continue
         next_snapshot = dict(snapshot)
+        next_snapshot.pop("runtimeStatus", None)
         next_snapshot.update(
             {
                 "runId": run_id,
                 "runKind": kind,
-                "status": "stopped_by_user" if kind == "chat_turn" else "stopped",
-                "currentPhase": "stopped_by_user" if kind == "chat_turn" else "stopped",
-                "runtimeStatus": "force_stopped",
+                "status": "stopped",
+                "currentPhase": "",
+                "terminalReason": "force_stopped",
+                "rawStatus": "force_stopped",
                 "forceStoppedAt": stopped_at,
                 "forceStopReason": str(reason or "").strip(),
                 "finishedAt": str(next_snapshot.get("finishedAt") or stopped_at),

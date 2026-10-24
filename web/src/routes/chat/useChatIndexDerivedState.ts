@@ -3,7 +3,7 @@ import { useMemo } from "react";
 import type { SessionSummary } from "../../api/types";
 import { isAgentRootSession } from "../DirectSessionIndexItem";
 import { shouldShowConversationIndexLoading } from "../chatSessionStartupGate";
-import { isBusyPhase } from "./chatCodingRouteViewModel";
+import { sessionActivityPolicy, sessionBlocksMutation } from "../sessionActivityState";
 import type { SessionContextMenuState } from "./useChatSessionRenameMenu";
 import type { AgentContextMenuState } from "../AgentContextMenu";
 
@@ -74,7 +74,10 @@ export function useChatIndexDerivedState({
   const contextMenuSessionId = sessionContextMenu?.sessionId ?? "";
 
   const contextMenuSessionIsBusy = contextMenuSession
-    ? isBusyPhase(contextMenuSession.currentPhase || contextMenuSession.status)
+    ? sessionBlocksMutation(contextMenuSession)
+    : false;
+  const contextMenuSessionOutputActive = contextMenuSession
+    ? sessionActivityPolicy(contextMenuSession).outputActive
     : false;
   const contextMenuDeletePending = Boolean(
     contextMenuSession
@@ -111,7 +114,7 @@ export function useChatIndexDerivedState({
     && isAgentArchivePending(agentContextMenu.agent.agentId),
   );
   const contextMenuDeleteDisabled = contextMenuDeletePending || contextMenuSessionIsBusy;
-  const contextMenuAddToReviewDisabled = contextMenuAddToReviewPending || contextMenuSessionIsBusy;
+  const contextMenuAddToReviewDisabled = contextMenuAddToReviewPending || contextMenuSessionOutputActive;
   const contextMenuClearHistoryDisabled = contextMenuClearHistoryPending || contextMenuSessionIsBusy;
 
   return {

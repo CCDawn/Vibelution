@@ -1,3 +1,4 @@
+import { sessionIsAtRest } from "./sessionActivityState";
 import type { SessionDetail, SessionTurnItem } from "../api/types";
 import {
   activeTurnLayerTextLength,
@@ -31,7 +32,6 @@ export type PlanQueuedSessionDetailInput = {
   lastAppliedAtMs: number;
   nowMs: number;
   minApplyIntervalMs: number;
-  isBusyPhase: (phase: string) => boolean;
 };
 
 export type QueuedSessionDetailDecision = {
@@ -53,7 +53,6 @@ export type PlanAppliedSessionDetailInput = {
   stats: SessionStreamApplyStats | undefined;
   activeLayer: ActiveTurnLayerState | undefined;
   activeLayerSettled: boolean;
-  isBusyPhase: (phase: string) => boolean;
 };
 
 export type AppliedSessionDetailDecision = {
@@ -136,7 +135,7 @@ export function planQueuedSessionDetail(
     nextStats.dropped += 1;
   }
 
-  const finalPhase = isFinalSessionDetailPhase(input.detail, input.isBusyPhase);
+  const finalPhase = sessionIsAtRest(input.detail);
   const elapsedMs = Math.max(0, input.nowMs - input.lastAppliedAtMs);
   const delayMs = finalPhase ? 0 : Math.max(0, input.minApplyIntervalMs - elapsedMs);
   const shouldLogQueued = !finalPhase && (nextStats.received === 1 || nextStats.received % 20 === 0);
@@ -371,15 +370,7 @@ function sameActiveTurnRenderState(
 }
 
 function sessionDetailPhase(detail: SessionDetail) {
-  return String(detail.currentPhase || detail.status || "").trim().toLowerCase();
-}
-
-function isFinalSessionDetailPhase(
-  detail: SessionDetail,
-  isBusyPhase: (phase: string) => boolean,
-) {
-  const phase = sessionDetailPhase(detail);
-  return Boolean(phase && !isBusyPhase(phase));
+  return String(detail.currentPhase ?? "").trim().toLowerCase();
 }
 
 function assistantDeltaApplyTelemetry(input: {

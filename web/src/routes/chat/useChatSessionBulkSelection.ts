@@ -21,7 +21,6 @@ export type UseChatSessionBulkSelectionInput = {
     { sessionIds: string[] },
     unknown
   >;
-  isBusyPhase: (value: string | null | undefined) => boolean;
   lang: "zh" | "en";
   t: (key: TranslationKey) => string;
 };
@@ -52,7 +51,6 @@ export function useChatSessionBulkSelection({
   filteredConversations,
   sessionsById,
   bulkDeleteSessionsMutation,
-  isBusyPhase,
   lang,
   t,
 }: UseChatSessionBulkSelectionInput): UseChatSessionBulkSelectionResult {
@@ -129,11 +127,11 @@ export function useChatSessionBulkSelection({
     }
     const busySessions = selectedBulkSessions.filter((sessionId) => {
       const session = sessionsById.get(sessionId);
-      return session ? !sessionBulkDeletable(session, isBusyPhase) : false;
+      return session ? !sessionBulkDeletable(session) : true;
     });
     const removableSessions = selectedBulkSessions.filter((sessionId) => {
       const session = sessionsById.get(sessionId);
-      return session ? sessionBulkDeletable(session, isBusyPhase) : true;
+      return session ? sessionBulkDeletable(session) : false;
     });
     const notes: string[] = [];
     busySessions.forEach((sessionId) => {
@@ -177,7 +175,6 @@ export function useChatSessionBulkSelection({
     bulkDeleteSessionsMutation,
     bulkSessionPending,
     clearBulkSessions,
-    isBusyPhase,
     lang,
     selectedBulkSessions,
     sessionsById,

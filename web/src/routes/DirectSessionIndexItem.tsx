@@ -381,7 +381,7 @@ export const DirectSessionIndexItem = memo(function DirectSessionIndexItem({
           <LoaderCircle size={12} aria-hidden="true" className={styles.sessionActivitySpinner} />
         </span>
       ) : null}
-      {activityTone === "error" || activityTone === "completed" ? (
+      {activityTone === "error" || activityTone === "completed" || activityTone === "paused" || activityTone === "stopping" ? (
         <span
           aria-label={statusTitle}
           title={statusTitle}

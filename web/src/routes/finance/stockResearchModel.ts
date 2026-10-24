@@ -1,3 +1,4 @@
+import { activityNeedsContinuation, resolveSessionActivity, type SessionActivitySource } from "../sessionActivityState";
 import type { AssistantConversationTurn, ConversationMessage, SessionSummary } from "../../api/types";
 import type { StockCandle, StockIdentity, StockSnapshot } from "../../api/financialMarket";
 import { filingExcerptsFromTurnItems, groundResearchConclusion, normalizeFinancialReportLinks } from "./conclusionFigures";
@@ -72,14 +73,16 @@ export function researchTablePreview(text: string) {
   }
   return rows.join("\n");
 }
-export function researchRecordStatus(row: Pick<SessionSummary, "status" | "terminalReason" | "lastTurnStatus">, zh = true) {
-  if (["running", "queued"].includes(row.status)) return zh ? "研究中" : "Running";
-  if (row.status === "stopping") return zh ? "正在停止" : "Stopping";
-  const outcome = row.terminalReason || row.lastTurnStatus || row.status;
-  if (["needs_continue", "paused_limit", "paused"].includes(outcome) || ["needs_continue", "paused_limit"].includes(row.status)) return zh ? "待继续" : "Needs continuation";
-  if (["stopped_by_user", "stopped", "aborted", "cancelled", "superseded"].includes(outcome)) return zh ? "已停止" : "Stopped";
-  if (row.status === "failed" || row.lastTurnStatus === "failed" || row.terminalReason?.startsWith("failed")) return zh ? "失败" : "Failed";
-  if (row.terminalReason === "success" || row.lastTurnStatus === "completed" || row.status === "completed") return zh ? "已完成" : "Completed";
+export function researchRecordStatus(row: SessionActivitySource, zh = true) {
+  const state = resolveSessionActivity(row);
+  if (state.execution === "running" || state.execution === "queued") return zh ? "研究中" : "Running";
+  if (state.execution === "stopping") return zh ? "正在停止" : "Stopping";
+  if (state.execution === "paused") return zh ? "已暂停" : "Paused";
+  if (activityNeedsContinuation(state.outcome)) return zh ? "待继续" : "Needs continuation";
+  if (state.outcome === "stopped" || state.outcome === "cancelled" || state.outcome === "superseded") return zh ? "已停止" : "Stopped";
+  if (state.outcome === "failed") return zh ? "失败" : "Failed";
+  if (state.outcome === "completed") return zh ? "已完成" : "Completed";
+  if (state.execution === "unknown") return zh ? "状态未知" : "Unknown state";
   return zh ? "研究会话" : "Research session";
 }
 export function localResearchDate(now = new Date()) {
@@ -192,8 +195,8 @@ export function projectStockReport(messages: readonly ConversationMessage[], ter
     if (message.role === "user") { request = message.content; continue; }
     if (message.status !== "completed") continue;
     const terminalTurn = terminal?.lastTurnTerminalTurnId || latest?.turnId;
-    const outcome = terminal?.terminalReason || terminal?.lastTurnStatus || "";
-    if (message.turnId === terminalTurn && /^(?:stopped|aborted|cancelled|superseded|failed|needs_continue|paused)/.test(outcome)) continue;
+    const outcome = resolveSessionActivity({ terminalReason: terminal?.terminalReason, lastTurnStatus: terminal?.lastTurnStatus }).outcome;
+    if (message.turnId === terminalTurn && (terminal?.terminalReason || terminal?.lastTurnStatus) && outcome !== "completed") continue;
     const text = message.turnItems.filter((item) => item.type === "agent_message" && item.phase === "final_answer" && item.status === "completed").map((item) => item.type === "agent_message" ? item.text : "").join("\n\n");
     // Older native interrupted turns may be represented as completed messages.
     // Their native stop notice remains a notice even after a successful resume.

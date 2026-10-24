@@ -26,5 +26,6 @@
   {"name":"reconciled runtime beats stale resting snapshot","session":{"status":"ready","lastTurnStatus":"failed"},"runtimeRunning":true,"authoritativeRuntime":true,"expected":{"execution":"running","phase":"","outcome":"","reason":"","rawStatus":"ready"}},
   {"name":"frontend runtime hint cannot reopen a completed turn","session":{"status":"completed"},"runtimeRunning":true,"expected":{"execution":"settled","phase":"","outcome":"completed","reason":"completed","rawStatus":"completed"}},
   {"name":"success alias is accepted without becoming a phase","session":{"status":"ready","terminalReason":"succeeded"},"expected":{"execution":"settled","phase":"","outcome":"completed","reason":"succeeded","rawStatus":"ready"}},
-  {"name":"legacy phase is decoded at the boundary","session":{"currentPhase":"STREAMING"},"expected":{"execution":"running","phase":"answering","outcome":"","reason":"","rawStatus":"streaming"}}
+  {"name":"legacy phase is decoded at the boundary","session":{"currentPhase":"STREAMING"},"expected":{"execution":"running","phase":"answering","outcome":"","reason":"","rawStatus":"streaming"}},
+  {"name":"unknown current phase cannot inherit old success","session":{"status":"ready","currentPhase":"future_phase","terminalReason":"success"},"expected":{"execution":"unknown","phase":"","outcome":"","reason":"","rawStatus":"ready"}}
 ]

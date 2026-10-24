@@ -20,11 +20,9 @@ import {
   type ChatConversationComposerBridgeState,
 } from "./ChatConversationComposerBridge";
 import {
-  isBusyPhase,
-  isRunningPhase,
-  isStoppingPhase,
   shouldSuppressComposerErrorForTurnError,
 } from "./chatCodingRouteViewModel";
+import { sessionActivityPolicy } from "../sessionActivityState";
 import {
   imageInputModelIdForAgent,
   modelImageInputSupport,
@@ -75,7 +73,6 @@ export interface UseChatComposerBridgeStateParams {
     isPending: boolean;
     variables?: { sessionId?: string; mode?: SessionGuidanceMode };
   };
-  activeTurnSettledByDetail: boolean;
   continueEnabled?: boolean;
 }
 
@@ -123,7 +120,6 @@ export function useChatComposerBridgeState({
   regenerateMutation,
   stopTurnMutation,
   sessionGuidanceMutation,
-  activeTurnSettledByDetail,
 }: UseChatComposerBridgeStateParams): ChatComposerBridgeStateResult {
   const activeDraft = activeSessionId ? sessionDrafts[activeSessionId] ?? "" : "";
   const activeFollowupQueue = activeSessionId ? sessionFollowupQueues[activeSessionId] ?? EMPTY_FOLLOWUP_QUEUE : EMPTY_FOLLOWUP_QUEUE;
@@ -171,39 +167,10 @@ export function useChatComposerBridgeState({
     || (editResubmitMutation.isPending && editResubmitMutationMatchesActiveSession)
     || (regenerateMutation.isPending && regenerateMutation.variables?.sessionId === activeSessionId)
     || activeImageUploadPending;
-  const sessionRunning = isRunningPhase(detail?.currentPhase);
-  const sessionStopping = isStoppingPhase(detail?.currentPhase) || Boolean(detail?.stopRequested);
-  const lastTurnStatusNormalized = String(detail?.lastTurnStatus || "").trim().toLowerCase();
-  const terminalReasonNormalized = String(detail?.terminalReason || "").trim().toLowerCase();
-  const lastTurnTerminal = [
-    "ready",
-    "completed",
-    "failed",
-    "failed_runtime",
-    "failed_provider",
-    "needs_continue",
-    "paused_limit",
-    "stopped_by_user",
-    "superseded",
-    "cancelled",
-    "success",
-    "aborted",
-  ].includes(lastTurnStatusNormalized)
-    || [
-      "success",
-      "failed_runtime",
-      "failed_provider",
-      "needs_continue",
-      "paused_limit",
-      "stopped_by_user",
-      "aborted",
-      "superseded",
-      "ready",
-    ].includes(terminalReasonNormalized);
-  const liveActiveTurnOpen = Boolean(detail?.activeTurnId)
-    && !activeTurnSettledByDetail;
-  const sessionBusy = isBusyPhase(detail?.currentPhase)
-    && !(lastTurnTerminal && !liveActiveTurnOpen && !sessionStopping);
+  const activity = sessionActivityPolicy(detail ?? {});
+  const sessionRunning = activity.outputActive;
+  const sessionStopping = activity.stopping || Boolean(detail?.stopRequested);
+  const sessionBusy = activity.executionOwned;
   const activeImageInputGuidance = buildComposerImageInputGuidance({
     attachmentCount: activeImageAttachments.filter((attachment) => attachment.kind === "image").length,
     queuedUntilTurnEnds: sessionBusy && !resolvedEditTarget,

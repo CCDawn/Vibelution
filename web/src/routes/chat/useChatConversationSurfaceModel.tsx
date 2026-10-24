@@ -333,6 +333,7 @@ export function useChatConversationSurfaceModel({
       phase: detail.currentPhase,
       activeTurnAuthority: {
         id: detail.id,
+        status: detail.status,
         currentPhase: detail.currentPhase,
         activeTurnId: detail.activeTurnId,
         lastTurnTerminalTurnId: detail.lastTurnTerminalTurnId,

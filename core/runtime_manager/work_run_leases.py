@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable
 
 from .work_run_store import normalize_run_kind
+from .work_run_status import resolve_work_run_activity
 
 
 READONLY_CHAT_LEASE = "readonly_chat"
@@ -16,7 +17,6 @@ POLICY_WRITE_LEASE = "policy_write"
 EVALUATION_LEASE = "evaluation"
 EVOLUTION_TRANSACTION_LEASE = "evolution_transaction"
 
-LOCKING_STATUSES = {"queued", "running", "stopping", "paused"}
 WRITE_LEASES = {
     WORKTREE_WRITE_LEASE,
     MEMORY_WRITE_LEASE,
@@ -116,7 +116,7 @@ def normalize_status(value: Any) -> str:
 
 
 def active_run_is_locking(run: dict[str, Any]) -> bool:
-    return normalize_status(run.get("status")) in LOCKING_STATUSES
+    return bool(resolve_work_run_activity(run)["blocksLifecycle"])
 
 
 def leases_conflict(requested: Iterable[Any], active: Iterable[Any]) -> list[str]:

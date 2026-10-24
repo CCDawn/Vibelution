@@ -1,3 +1,4 @@
+import { sessionIsAtRest } from "./sessionActivityState";
 import "../design/route-css/companions.tailwind.css";
 
 import { useQuery } from "@tanstack/react-query";
@@ -24,8 +25,6 @@ import styles from "./companions/companions.styles";
 import {
   isSessionActivitySeen,
   markSessionActivitySeen,
-  sessionIsCompletedStatus,
-  sessionIsErrorStatus,
 } from "./sessionActivityIndicator";
 
 const COPY = {
@@ -156,15 +155,9 @@ export function CompanionsRoute() {
             const tomorrowCount = companion.snapshot.tomorrowSchedule?.activities.length ?? 0;
             const sessionActivity = companion.sessionActivity;
             const activityStamp = String(sessionActivity?.activityStamp || "").trim();
-            const activityStatus = String(
-              sessionActivity?.currentPhase
-              || sessionActivity?.status
-              || sessionActivity?.lastTurnStatus
-              || "",
-            );
             const hasUnread = Boolean(
               activityStamp
-              && (sessionIsCompletedStatus(activityStatus) || sessionIsErrorStatus(activityStatus))
+              && sessionIsAtRest(sessionActivity ?? {})
               && !isSessionActivitySeen(companion.directSessionId, activityStamp),
             );
             const openCompanion = () => {

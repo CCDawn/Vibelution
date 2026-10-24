@@ -14,7 +14,7 @@ import {
 } from "./sessionActivityIndicator";
 import styles from "./AgentSessionTabStrip.styles";
 import "./AgentSessionTabStrip.armed.css";
-import { isBusyPhase } from "./chat/chatCodingRouteViewModel";
+import { sessionBlocksMutation } from "./sessionActivityState";
 import {
   PANE_DOCK_MIME,
   readPaneDock,
@@ -380,7 +380,7 @@ export function AgentSessionTabStrip({
       {visibleSessions.map((session) => {
         const sessionAgent = session.agentId ? agentsById.get(session.agentId) : undefined;
         const sessionDisplay = sessionAgentDisplayInfo(session, sessionAgent, lang, resolveModelLabel);
-        const sessionStatus = session.childStatus || session.status || session.currentPhase;
+        const sessionStatus = session.status;
         const needsApproval = approvalSessionIds.has(session.id);
         const isRuntimeRunning = runtimeSessionIds.has(session.id);
         const tabActive = activeSessionId === session.id && workspaceActiveTab === "agent" && !activeCliAgentRunId;
@@ -411,7 +411,7 @@ export function AgentSessionTabStrip({
           deletePending
           || (deletePendingSessionId && deletePendingSessionId === session.id),
         );
-        const deleteDisabled = isBusyPhase(session.currentPhase || session.status) || sessionDeletePending;
+        const deleteDisabled = sessionBlocksMutation(session) || sessionDeletePending;
         const tabCloseArmed = !deleteDisabled && armedCloseSessionId === session.id;
         const tabCloseTitle = deleteDisabled
           ? t("deleteSessionBusy")

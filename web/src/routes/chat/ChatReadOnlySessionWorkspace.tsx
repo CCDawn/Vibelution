@@ -1,3 +1,4 @@
+import { resolveSessionActivity } from "../sessionActivityState";
 import type { SessionDetail } from "../../api/types";
 import { ChatSessionWorkspacePanel } from "./ChatSessionWorkspacePanel";
 
@@ -78,7 +79,7 @@ export function ChatReadOnlySessionWorkspace({
           messages: sessionDetail.messages,
           transcript: {
             title: sessionDetail.title || assistant.displayName,
-            phase: sessionDetail.currentPhase || sessionDetail.status || "idle",
+            phase: resolveSessionActivity(sessionDetail).execution,
             showHeader: false,
             showSessionOverview: false,
             showComposer: false,

@@ -55,12 +55,12 @@ export function agentRunStatusLabel(status: string | undefined, lang: "zh" | "en
   const value = String(status ?? "").trim().toLowerCase();
   const contract = ACTIVITY_CONTRACT.agentRun;
   const normalized = lookup(contract.labels, value) ? value : lookup(contract.aliases, value) || "unknown";
-  return lang === "zh" ? lookup(contract.labels, normalized) : normalized;
+  return lookup(lang === "zh" ? contract.labels : contract.labelsEn, normalized);
 }
 
 export function agentRunPhaseLabel(value: string | undefined, lang: "zh" | "en"): string {
   const phase = activityPhase(value);
-  return lang === "zh" ? lookup(ACTIVITY_CONTRACT.session.phaseLabels, phase) : phase;
+  return lookup(lang === "zh" ? ACTIVITY_CONTRACT.session.phaseLabels : ACTIVITY_CONTRACT.session.phaseLabelsEn, phase);
 }
 
 export function agentRunReasonLabel(value: string | undefined, lang: "zh" | "en"): string {
@@ -68,5 +68,5 @@ export function agentRunReasonLabel(value: string | undefined, lang: "zh" | "en"
   const reason = value.trim().toLowerCase();
   return lang === "zh"
     ? lookup(ACTIVITY_CONTRACT.agentRun.reasonLabels, reason) || agentRunStatusLabel(reason, lang)
-    : reason;
+    : lookup(ACTIVITY_CONTRACT.agentRun.reasonLabelsEn, reason) || agentRunStatusLabel(reason, lang);
 }

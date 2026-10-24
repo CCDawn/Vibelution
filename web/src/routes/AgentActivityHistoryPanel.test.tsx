@@ -38,7 +38,7 @@ describe("AgentActivityHistoryPanel", () => {
       activityTimeline={[]} isActivityLoading={false}
       runHistory={{ runs: [
         { runId: "missing", runKind: "agent_run", status: "", currentPhase: "" },
-        { runId: "stopped", runKind: "agent_run", status: "force_stopped", executionStatus: "stopped", activityPhase: "" },
+        { runId: "stopped", runKind: "agent_run", status: "stopped", currentPhase: "", terminalReason: "force_stopped" },
       ], subAgentRuns: [] } as unknown as AgentRunHistory}
       isRunHistoryLoading={false} inboxMessages={[]} isInboxLoading={false}
       inboxPendingCount={0} focusedMessageId="" pendingMessageId="" isConsumeAllPending={false}

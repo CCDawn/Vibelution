@@ -5,6 +5,37 @@ import {
   formatTokenStatusRingCompact,
 } from "./chatTokenStatusModel";
 
+function buildSpeedMetric(sessionStateValue: string) {
+  const model = buildChatTokenStatusViewModel({
+    detail: null,
+    lastCacheComposition: null,
+    lastContextComposition: null,
+    compression: null,
+    cache: {
+      cacheDetailAvailable: false,
+      cacheCompositionPercent: 0,
+      providerCachedInputTokens: 0,
+      providerCacheInputTokens: 0,
+      cacheCompositionSummary: "",
+      cacheDetailOpenLabel: "",
+      cacheCompositionTitle: "",
+    },
+    tokenSpeedTracker: null,
+    activeSessionId: "s1",
+    groupPanelActive: false,
+    sessionStateValue,
+    sessionStateLabel: sessionStateValue,
+    sessionStateLine: sessionStateValue,
+    lang: "en",
+    t: ((key: string) => key) as never,
+    numberFormatter: new Intl.NumberFormat("en-US"),
+    compactNumberFormatter: new Intl.NumberFormat("en-US", { notation: "compact" }),
+    locale: "en-US",
+    formatTime: (value) => value,
+  });
+  return model.tokenStatusMetrics.find((item) => item.key === "speed");
+}
+
 describe("formatTokenStatusRingCompact", () => {
   it("keeps short latin compact values", () => {
     const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
@@ -22,6 +53,18 @@ describe("formatTokenStatusRingCompact", () => {
 });
 
 describe("chatTokenStatusModel", () => {
+  it("samples token speed only while queued or producing output", () => {
+    for (const state of ["queued", "running", "thinking"]) {
+      expect(buildSpeedMetric(state)?.value, state).toBe("tokenSpeedSampling");
+    }
+  });
+
+  it("does not sample token speed while paused, stopping, settled, idle, or unknown", () => {
+    for (const state of ["paused", "stopping", "settled", "idle", "unknown"]) {
+      expect(buildSpeedMetric(state)?.value, state).toBe("--");
+    }
+  });
+
   it("shows missing cache telemetry instead of a false zero hit", () => {
     const model = buildChatTokenStatusViewModel({
       detail: {

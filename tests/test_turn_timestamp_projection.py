@@ -246,6 +246,15 @@ def test_assistant_turn_header_live_running(monkeypatch, tmp_path):
     assert "turnActiveMs" not in header
 
 
+def test_live_work_run_beats_message_completion_fallback(monkeypatch, tmp_path):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    store = WorkRunStore(root=tmp_path / "work-runs")
+    monkeypatch.setattr(session_service, "_WORK_RUN_STORE", store)
+    store.persist_snapshot("chat_turn", {"runId": "live", "status": "running", "startedAt": _TS_START}, active_run_id="live")
+    header = session_service._assistant_turn_header_fields("session-h", "live", fallback_status="completed")
+    assert header == {"turnState": "running", "turnStartedAt": _TS_START}
+
+
 def test_assistant_turn_header_falls_back_to_work_run(monkeypatch, tmp_path):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     store = WorkRunStore(root=tmp_path / "work-runs")

@@ -1,0 +1,179 @@
+[
+  {
+    "name": "ready permits a new turn without claiming success",
+    "session": {
+      "status": "ready"
+    },
+    "expected": {
+      "executionOwned": false,
+      "outputActive": false,
+      "stopping": false,
+      "atRest": true,
+      "blocksMutation": false
+    },
+    "expectedGroup": "idle"
+  },
+  {
+    "name": "paused keeps the turn and blocks lifecycle mutations",
+    "session": {
+      "status": "paused"
+    },
+    "expected": {
+      "executionOwned": true,
+      "outputActive": false,
+      "stopping": false,
+      "atRest": false,
+      "blocksMutation": true
+    },
+    "expectedGroup": "waiting"
+  },
+  {
+    "name": "waiting for continuation releases the turn",
+    "session": {
+      "status": "ready",
+      "terminalReason": "needs_continue"
+    },
+    "expected": {
+      "executionOwned": false,
+      "outputActive": false,
+      "stopping": false,
+      "atRest": true,
+      "blocksMutation": false
+    },
+    "expectedGroup": "idle"
+  },
+  {
+    "name": "limit outcome releases the turn",
+    "session": {
+      "status": "paused_limit"
+    },
+    "expected": {
+      "executionOwned": false,
+      "outputActive": false,
+      "stopping": false,
+      "atRest": true,
+      "blocksMutation": false
+    },
+    "expectedGroup": "idle"
+  },
+  {
+    "name": "status cannot mask live phase",
+    "session": {
+      "status": "ready",
+      "currentPhase": "tooling"
+    },
+    "expected": {
+      "executionOwned": true,
+      "outputActive": true,
+      "stopping": false,
+      "atRest": false,
+      "blocksMutation": true
+    },
+    "expectedGroup": "running"
+  },
+  {
+    "name": "phase cannot mask live status",
+    "session": {
+      "status": "running",
+      "currentPhase": "ready",
+      "lastTurnStatus": "completed"
+    },
+    "expected": {
+      "executionOwned": true,
+      "outputActive": true,
+      "stopping": false,
+      "atRest": false,
+      "blocksMutation": true
+    },
+    "expectedGroup": "running"
+  },
+  {
+    "name": "user stop is settled",
+    "session": {
+      "status": "ready",
+      "terminalReason": "stopped_by_user"
+    },
+    "expected": {
+      "executionOwned": false,
+      "outputActive": false,
+      "stopping": false,
+      "atRest": true,
+      "blocksMutation": false
+    },
+    "expectedGroup": "idle"
+  },
+  {
+    "name": "stopping retains ownership",
+    "session": {
+      "status": "stopping"
+    },
+    "expected": {
+      "executionOwned": true,
+      "outputActive": false,
+      "stopping": true,
+      "atRest": false,
+      "blocksMutation": true
+    },
+    "expectedGroup": "running"
+  },
+  {
+    "name": "an unknown status cannot authorize deletion",
+    "session": {
+      "status": "future_state"
+    },
+    "expected": {
+      "executionOwned": false,
+      "outputActive": false,
+      "stopping": false,
+      "atRest": false,
+      "blocksMutation": true
+    },
+    "expectedGroup": "unknown"
+  },
+  {
+    "name": "missing status stays unknown",
+    "session": {},
+    "expected": {
+      "executionOwned": false,
+      "outputActive": false,
+      "stopping": false,
+      "atRest": false,
+      "blocksMutation": true
+    },
+    "expectedGroup": "unknown"
+  },
+  {
+    "name": "a stale terminal owner does not lock input",
+    "session": {
+      "status": "ready",
+      "activeTurnId": "t",
+      "lastTurnTerminalTurnId": "t",
+      "terminalReason": "success"
+    },
+    "expected": {
+      "executionOwned": false,
+      "outputActive": false,
+      "stopping": false,
+      "atRest": true,
+      "blocksMutation": false
+    },
+    "expectedGroup": "idle"
+  },
+  {
+    "name": "a new owner cannot inherit prior outcome",
+    "session": {
+      "status": "ready",
+      "activeTurnId": "next",
+      "lastTurnTerminalTurnId": "prior",
+      "terminalReason": "success"
+    },
+    "expected": {
+      "executionOwned": true,
+      "outputActive": true,
+      "stopping": false,
+      "atRest": false,
+      "blocksMutation": true
+    },
+    "expectedGroup": "running"
+  }
+]

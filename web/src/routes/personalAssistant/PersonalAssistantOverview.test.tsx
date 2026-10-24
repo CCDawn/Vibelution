@@ -53,7 +53,7 @@ describe("personal assistant management shortcuts", () => {
     expect(container.querySelector("h2")?.textContent).toBe("平台概览");
     expect(container.querySelector('input[aria-label="搜索会话"]')?.getAttribute("placeholder")).toBe("搜索会话…");
     expect(container.textContent).toContain("第 1 / 2 页");
-    expect(container.querySelector("li")?.textContent).toContain("用户自定义 0操作工具中");
+    expect(container.querySelector("li")?.textContent).toContain("用户自定义 0使用工具");
     expect([...container.querySelectorAll("button")].some(button => button.textContent === "下一页")).toBe(true);
     await act(async () => (container.querySelector('[role="tab"][id$="agents"]') as HTMLElement).dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })));
     await act(async () => { client.setQueryData(queryKeys.configPublic(), { language: "en" }); await new Promise(resolve => setTimeout(resolve, 20)); });
@@ -72,7 +72,7 @@ describe("personal assistant management shortcuts", () => {
     await act(async () => container.querySelector<HTMLButtonElement>("li button")?.click());
     expect(openSession).toHaveBeenCalledWith("worker-session");
     await act(async () => (container.querySelector('[role="tab"][id$="sessions"]') as HTMLElement).dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })));
-    expect(container.querySelector("li")?.textContent).toContain("Session 1Ready");
+    expect(container.querySelector("li")?.textContent).toContain("Session 1Idle");
   });
 
   it("links all platform management entry points to registered owner pages", async () => {
@@ -96,7 +96,7 @@ describe("personal assistant management shortcuts", () => {
     const session = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("平台任务"))!;
     await act(async () => session.click());
     expect(openSession).toHaveBeenCalledWith("worker-session");
-    expect(container.textContent).toContain("操作工具中");
+    expect(container.textContent).toContain("使用工具");
   });
   it("routes human-attention rows without a session to their target page", async () => {
     vi.mocked(fetchPersonalAssistantOverview).mockResolvedValue({ generatedAt: "",
@@ -121,7 +121,7 @@ describe("personal assistant management shortcuts", () => {
     await act(async () => attention.click());
     expect(openSession).toHaveBeenCalledWith("worker-session");
     await act(async () => (container.querySelector('[role="tab"][id$="sessions"]') as HTMLElement).dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })));
-    const session = [...container.querySelectorAll("button")].find(button => button.textContent?.startsWith("会话 1就绪") || button.textContent?.startsWith("会话 1操作工具中"))!;
+    const session = [...container.querySelectorAll("button")].find(button => button.textContent?.startsWith("会话 1空闲") || button.textContent?.startsWith("会话 1使用工具"))!;
     await act(async () => session.click());
     expect(openSession).toHaveBeenCalledWith("worker-session");
   });

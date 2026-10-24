@@ -9,6 +9,9 @@ Late-bound facade keeps monkeypatches stable.
 
 from __future__ import annotations
 
+from core.chat.session_activity import session_activity_policy
+from core.runtime_manager.work_run_status import work_run_has_execution
+
 import copy
 import hashlib
 import json
@@ -36,8 +39,7 @@ def _active_chat_turn_id_for_session(session_id: str) -> str:
         return ""
     if str(active.get("sessionId") or "").strip() != str(session_id or "").strip():
         return ""
-    status = str(active.get("status") or active.get("currentPhase") or "").strip().lower()
-    if status not in {"queued", "running", "stopping", "paused"}:
+    if not work_run_has_execution(active):
         return ""
     return str(active.get("runId") or "").strip()
 
@@ -1334,7 +1336,7 @@ def _is_retriable_image_request_prompt(prompt: Any) -> bool:
 def _is_session_busy_for_delete(conversation_id: str, conversation: dict[str, Any]) -> bool:
     s = _service()
     phase = s._conversation_phase(conversation_id, conversation)
-    return phase in {"queued", "running", "stopping", "paused"}
+    return session_activity_policy({"status": phase})["blocksMutation"]
 
 
 def _is_session_running(session_id: str) -> bool:

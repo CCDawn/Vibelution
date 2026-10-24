@@ -32,7 +32,7 @@ describe("agent run display projection", () => {
     expect(agentRunStatusLabel("completed", "zh")).toBe("已完成");
     expect(agentRunStatusLabel("failed", "zh")).toBe("失败");
     expect(agentRunStatusLabel("custom_error", "zh")).toBe("未知状态");
-    expect(agentRunStatusLabel("completed", "en")).toBe("completed");
+    expect(agentRunStatusLabel("completed", "en")).toBe("Completed");
   });
   it("covers every AgentRun lifecycle and historical alias from the backend domain", () => {
     for (const value of [...Object.keys(ACTIVITY_CONTRACT.agentRun.labels), ...Object.keys(ACTIVITY_CONTRACT.agentRun.aliases)]) {

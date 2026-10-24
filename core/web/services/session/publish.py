@@ -719,9 +719,11 @@ def _publish_session_detail_snapshot(session_id: str, *, detail: dict[str, Any] 
             "upsert",
             patch=session_index_stream.index_patch_from_detail(detail),
         )
-    current_phase = str(detail.get("currentPhase") or detail.get("status") or "") if isinstance(detail, dict) else ""
-    normalized_phase = current_phase.strip().lower()
-    is_busy_snapshot = normalized_phase in s._SESSION_STREAM_BUSY_PHASES
+    from core.chat.session_activity import resolve_session_activity, session_activity_policy
+
+    activity_source = detail if isinstance(detail, dict) else {}
+    current_phase = resolve_session_activity(activity_source)["execution"]
+    is_busy_snapshot = session_activity_policy(activity_source)["executionOwned"]
     interval_seconds = s._SESSION_STREAM_MIN_BUSY_SNAPSHOT_INTERVAL_SECONDS
     now = s._perf_counter()
     should_throttle = False

@@ -131,7 +131,6 @@ function renderTree(overrides: Partial<{
       formatTime={() => "06/09"}
       groupPanelActive={false}
       groupedConversations={groupedConversations}
-      isBusyPhase={() => false}
       lang="zh"
       renamePending={false}
       renameSessionId=""

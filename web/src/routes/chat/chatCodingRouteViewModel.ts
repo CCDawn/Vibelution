@@ -1,6 +1,6 @@
 import { isFetchJsonHttpError } from "../../api/chat";
 import type { TranslationKey } from "../../i18n/dictionary";
-import { activityExecution } from "../sessionActivityState";
+import { activityExecution, activityOutputActive } from "../sessionActivityState";
 
 export type ResizableSide = "left" | "right";
 
@@ -216,7 +216,7 @@ export function shouldSuppressComposerErrorForTurnError(
 }
 
 export function isRunningPhase(value: string | null | undefined) {
-  return ["queued", "running"].includes(activityExecution(value));
+  return activityOutputActive(value);
 }
 
 export function isStoppingPhase(value: string | null | undefined) {

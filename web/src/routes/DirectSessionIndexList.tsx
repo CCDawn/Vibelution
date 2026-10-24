@@ -5,6 +5,7 @@ import type { AgentInstance, ConversationSummary, SessionReferenceAttachment, Se
 import type { TranslationKey } from "../i18n/dictionary";
 import type { ModelLabelResolver } from "./agentDisplay";
 import { DirectSessionIndexItem, buildDirectSessionIndexViewModel } from "./DirectSessionIndexItem";
+import { sessionBlocksMutation } from "./sessionActivityState";
 
 export type DirectSessionIndexListProps = {
   activeSessionId: string | null;
@@ -37,7 +38,6 @@ export type DirectSessionIndexListProps = {
     summary: string,
   ) => SessionReferenceAttachment;
   contextMenuSessionId: string;
-  isBusyPhase: (value: string | null | undefined) => boolean;
   onCancelRename: () => void;
   onContextMenu: (event: MouseEvent<HTMLDivElement>, session: SessionSummary) => void;
   onDragReference: (event: DragEvent<HTMLElement>, reference: SessionReferenceAttachment) => void;
@@ -124,7 +124,7 @@ export function conversationToSessionSummary(
     taskSummary: conversation.summary,
     lastActive: conversation.updatedAt,
     updatedAt: conversation.updatedAt,
-    currentPhase: conversation.status,
+    currentPhase: "",
     dialogueModelId: conversation.dialogueModelId,
     agentMissing: conversation.agentMissing,
     agentStatusCode: conversation.agentStatusCode,
@@ -165,7 +165,6 @@ export function DirectSessionIndexList({
   avatarInitials,
   buildSessionReferencePayload,
   contextMenuSessionId,
-  isBusyPhase,
   onCancelRename,
   onContextMenu,
   onDragReference,
@@ -197,7 +196,7 @@ export function DirectSessionIndexList({
     () =>
       conversations.map((conversation) => {
         const session = conversationToSessionSummary(conversation, sessionsById);
-        const sessionIsBusy = isBusyPhase(session.currentPhase || session.status);
+        const sessionIsBusy = sessionBlocksMutation(session);
         const itemError = sessionComposerErrors[session.id] ?? "";
         const sessionAgent = session.agentId ? agentsById.get(session.agentId) : undefined;
         const sessionAvatarImageUrl = avatarImageUrlFrom(sessionAgent, session);
@@ -234,7 +233,6 @@ export function DirectSessionIndexList({
       buildSessionReferencePayload,
       conversations,
       deleteBusyLabel,
-      isBusyPhase,
       lang,
       onDragReference,
       resolveModelLabel,

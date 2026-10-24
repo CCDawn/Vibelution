@@ -2,6 +2,8 @@
 
 This document defines the canonical domain language for Vibelution so architecture work can use stable names for the same concepts. It is intentionally small: add terms when they become load-bearing in design or tests.
 
+Session、AgentRun、WorkRun 的状态、阶段、结果与权限边界见 [活动契约](activity-contract.md)。
+
 ## Language
 
 ### Agent Runtime
