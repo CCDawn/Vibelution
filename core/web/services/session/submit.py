@@ -30,6 +30,7 @@ from . import document_attachments
 from . import journal_bridge
 from .admission_lock import (
     SessionAdmissionLock,
+    mark_native_admission_rejected,
     session_active_work_run_owner_alive,
 )
 from .retry import validate_safe_retry, with_retry_receipt
@@ -141,13 +142,13 @@ def _release_acquired_lock(lock: SessionAdmissionLock) -> Iterator[SessionAdmiss
 
 
 def _session_still_running_error(service: Any, lang: str) -> Any:
-    return service.SessionBusyError(
+    return mark_native_admission_rejected(service.SessionBusyError(
         service.text_for(
             lang,
             zh="当前会话仍在运行，请等这一轮结束后再继续发送。",
             en="This session is still running. Wait for the current turn to finish before sending again.",
         )
-    )
+    ))
 
 
 class _SessionTurnQueued(Exception):

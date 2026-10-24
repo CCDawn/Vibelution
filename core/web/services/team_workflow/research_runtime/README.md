@@ -79,6 +79,14 @@ graph outbox 保留待恢复动作；恢复后复用 checkpoint，避免再次�
 `authorized`，缺少上下文或角色不足仍显示 operator 权限门。提交时独立重新鉴权，
 快照签名、客户端身份头和 `requestedBy` 均不能赋予写权限。
 
+取消收口读取同一 Ledger 的冻结执行身份；普通 Session 携带预期 Turn，
+会议使用预期 room / round 与参与者身份，不能用普通 Turn 的终态补写代替会议停止。
+创建入口在外部副作用前以 Ledger CAS 记录 `executionAdmission=creating`，
+实际返回的 Session / meeting / fan-out 身份登记成功后才改为 `closed`。
+取消清理在创建尚未确认结束时保持 pending，并继续停止已经登记的执行。
+明确未准入的短暂繁忙仍按既有退避重试；硬崩溃或未知副作用不能伪装成清理完成，
+保留未确认的 admission 供进一步核查，不自动清除标记或重放未知操作。
+
 ```text
 Command transaction (WorkflowCommandService)
   -> graph_dispatch outbox (graph_dispatch_factory.py 唯一构造)

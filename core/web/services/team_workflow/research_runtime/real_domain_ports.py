@@ -17,10 +17,12 @@ import time
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import Any
+from uuid import uuid4
 
 from core.research.workflow.contracts import PendingAction, WorkflowSessionScopeV3
 from core.research.workflow.ledger import WorkflowLedgerStore
 from core.research.workflow.models import ActorKind
+from core.research.workflow.transitions import RunStatus, is_terminal_run
 
 from .agent_turn_completion import TurnNotReadyError
 from .domain_ports import (
@@ -747,6 +749,7 @@ class RealDomainPorts:
         handles: list[ScopedAgentTaskHandle],
         candidate_statuses: Mapping[str, str] | None = None,
         root_status: str = "running",
+        execution_admission: Mapping[str, str] | None = None,
     ) -> None:
         """Publish live candidate anchors without reading a legacy workflow store."""
         now_ms = int(time.time() * 1000)
@@ -886,6 +889,8 @@ class RealDomainPorts:
                     )
                 by_key[key] = item
             payload["scopedSessions"] = list(by_key.values())
+            if execution_admission is not None:
+                payload["executionAdmission"] = dict(execution_admission)
             return payload
 
         for _ in range(4):
@@ -901,6 +906,23 @@ class RealDomainPorts:
                 payload: dict[str, Any] = payload,
             ) -> bool:
                 current = uow.repository.get_anchor_by_node_run(action.node_run_id)
+                if execution_admission is not None:
+                    current_payload = json.loads(current[13] or "{}") if current else {}
+                    admission = current_payload.get("executionAdmission") or {}
+                    if (admission.get("status") == "creating"
+                            and admission.get("admissionId") != execution_admission["admissionId"]):
+                        raise RuntimeError("hypothesis candidate admission is already creating")
+                    if (execution_admission["status"] == "creating"
+                            and admission.get("admissionId") != execution_admission["admissionId"]):
+                        # Serialize admission with cancel_run on the Ledger writer.
+                        # Later child registration deliberately has no run-status
+                        # gate: a side effect racing cancellation still needs its
+                        # frozen identity registered for durable cleanup.
+                        run = uow.repository.get_run(action.run_id)
+                        self._require_run_execution_admission(run)
+                    elif (execution_admission["status"] == "closed"
+                            and admission.get("admissionId") != execution_admission["admissionId"]):
+                        raise RuntimeError("hypothesis candidate admission ownership changed")
                 if expected_revision is None:
                     if current is not None:
                         return False
@@ -935,7 +957,101 @@ class RealDomainPorts:
                 return
         raise RuntimeError("execution anchor changed while publishing candidate scope")
 
+    @staticmethod
+    def _require_run_execution_admission(run: Any) -> None:
+        try:
+            if run is not None and not is_terminal_run(RunStatus(run.status)):
+                return
+        except (AttributeError, TypeError, ValueError):
+            pass
+        raise RuntimeError("agent execution admission stopped: run is unavailable, invalid or terminal")
+
+    @staticmethod
+    def _known_session_admission_rejection(error: BaseException) -> bool:
+        """Use the native guard's explicit rejection proof for this one submit."""
+        from core.web.services.session_service import SessionBusyError
+
+        current: BaseException | None = error
+        seen: set[int] = set()
+        while current is not None and id(current) not in seen:
+            seen.add(id(current))
+            if isinstance(current, SessionBusyError) and getattr(current, "native_admission_rejected", False) is True:
+                return True
+            current = current.__cause__
+        return False
+
     def create_agent_task(self, *, action: PendingAction) -> AgentTaskHandle:
+        from .task_adapter_registry import resolve_agent_task_adapter
+
+        if resolve_agent_task_adapter(action.node_id) is None:
+            raise RuntimeError(f"agent node {action.node_id} has no task adapter")
+        if action.node_id in {"result_evaluation", "iteration_decision", "version_governance"}:
+            snapshot = self._run_input_snapshot(action.run_id)
+            if _bounded_agent_node_can_complete(
+                action.node_id, team_id=str(snapshot.get("teamId") or ""),
+                snapshot=snapshot, workflow_run_id=action.run_id,
+            ):
+                # These deterministic artifact adapters start no native work.
+                return _bounded_agent_task_handle(action)
+        admission = {
+            "status": "creating", "actionId": action.action_id,
+            "admissionId": uuid4().hex,
+        }
+        self._persist_agent_task_admission(action, admission)
+        # An exception may follow an external side effect whose identity did
+        # not return. Keep that admission pending instead of inventing proof
+        # that no native execution exists. Returned handles are registered
+        # strictly before closing, including when cancel won during creation.
+        try:
+            handle = self._create_agent_task(action=action, execution_admission=admission)
+        except Exception as exc:
+            # Built-in scalar adapters submit one Turn; fan-out registers all
+            # earlier siblings in its finally before propagating a rejection.
+            # A meeting or injected factory may have unknown earlier effects.
+            if (action.node_id != "optimization_discussion"
+                    and self._agent_task_factory is None
+                    and self._known_session_admission_rejection(exc)):
+                self._persist_agent_task_admission(action, {**admission, "status": "closed"})
+            raise
+        publish_agent_task_started_anchor(
+            self._store, action=action, binding=self.resolve_binding(action),
+            handle=handle, require_persisted=True,
+        )
+        self._persist_agent_task_admission(action, {**admission, "status": "closed"})
+        return handle
+
+    def _persist_agent_task_admission(
+        self, action: PendingAction, admission: Mapping[str, str],
+    ) -> None:
+        def mutate(uow: Any) -> None:
+            current = uow.repository.get_anchor_by_node_run(action.node_run_id)
+            payload = json.loads(current[13] or "{}") if current else {}
+            previous = payload.get("executionAdmission") or {}
+            if admission["status"] == "creating":
+                self._require_run_execution_admission(uow.repository.get_run(action.run_id))
+                if previous.get("status") == "creating":
+                    raise RuntimeError("agent task admission is already creating")
+            elif previous.get("admissionId") != admission["admissionId"]:
+                raise RuntimeError("agent task admission ownership changed")
+            payload["executionAdmission"] = dict(admission)
+            if current is None:
+                uow.repository.insert_anchor(
+                    anchor_id=new_id("anchor"), node_run_id=action.node_run_id,
+                    actor_kind=action.actor_kind.value,
+                    anchor_json=json.dumps(payload, ensure_ascii=False),
+                    created_at_ms=int(time.time() * 1000),
+                )
+            elif not uow.repository.update_anchor_by_node_run_cas(
+                node_run_id=action.node_run_id, expected_revision=int(current[15]),
+                anchor_json=json.dumps(payload, ensure_ascii=False), status=str(current[12]),
+            ):
+                raise RuntimeError("agent task admission anchor changed")
+
+        self._store.submit(mutate, force_flush=True).result(timeout=30)
+
+    def _create_agent_task(
+        self, *, action: PendingAction, execution_admission: Mapping[str, str],
+    ) -> AgentTaskHandle:
         from .task_adapter_registry import resolve_agent_task_adapter
 
         adapter_spec = resolve_agent_task_adapter(action.node_id)
@@ -1034,6 +1150,7 @@ class RealDomainPorts:
                     fan_out=fan_out,
                     challenge_task_contract=challenge_task_contract,
                     model_invocation_receipt_binding=model_invocation_receipt_binding,
+                    execution_admission=execution_admission,
                 )
                 publish_agent_task_started_anchor(
                     self._store, action=action, binding=binding, handle=fan_out_handle
@@ -1150,6 +1267,7 @@ class RealDomainPorts:
         fan_out: dict[str, Any],
         challenge_task_contract: Mapping[str, Any],
         model_invocation_receipt_binding: Mapping[str, Any],
+        execution_admission: Mapping[str, str] | None = None,
     ) -> AgentTaskHandle:
         """Create/replay one root and one canonical child task per candidate.
 
@@ -1220,6 +1338,12 @@ class RealDomainPorts:
         )
         root_attempt = int(root.get("sessionAttempt") or 1)
         selection_id = str(fan_out["selectionId"])
+        admission = dict(execution_admission) if execution_admission is not None else {
+            "status": "creating", "actionId": action.action_id, "admissionId": uuid4().hex,
+        }
+        handles: list[ScopedAgentTaskHandle] = []
+        failed_candidates: dict[str, str] = {}
+        unresolved_start = False
         self._persist_hypothesis_anchor_draft(
             action=action,
             binding=binding,
@@ -1228,49 +1352,74 @@ class RealDomainPorts:
             selection_id=selection_id,
             selected_candidate_ids=selected_ids,
             handles=[],
+            execution_admission=admission,
         )
 
-        previous_anchor = _previous_hypothesis_anchor(self._store, action)
-        previous_children = {
-            str(item.get("candidateId") or "").strip(): item
-            for item in list(previous_anchor.get("scopedSessions") or [])
-            if isinstance(item, dict)
-            and str(item.get("selectionId") or "").strip()
-            == str(fan_out["selectionId"])
-            and str(item.get("candidateId") or "").strip()
-        }
-        candidate_snapshots = {
-            str(item.get("candidateId") or "").strip(): dict(item)
-            for item in list(fan_out.get("candidateSnapshots") or [])
-            if isinstance(item, dict) and str(item.get("candidateId") or "").strip()
-        }
+        try:
+            previous_anchor = _previous_hypothesis_anchor(self._store, action)
+            previous_children = {
+                str(item.get("candidateId") or "").strip(): item
+                for item in list(previous_anchor.get("scopedSessions") or [])
+                if isinstance(item, dict)
+                and str(item.get("selectionId") or "").strip()
+                == str(fan_out["selectionId"])
+                and str(item.get("candidateId") or "").strip()
+            }
+            candidate_snapshots = {
+                str(item.get("candidateId") or "").strip(): dict(item)
+                for item in list(fan_out.get("candidateSnapshots") or [])
+                if isinstance(item, dict) and str(item.get("candidateId") or "").strip()
+            }
 
-        handles: list[ScopedAgentTaskHandle] = []
-        failed_candidates: dict[str, str] = {}
-        for candidate_id in selected_ids:
-            candidate_context = dict(candidate_snapshots.get(candidate_id) or {})
-            candidate_context.setdefault("candidateId", candidate_id)
-            subtask_id = (
-                f"{action.node_run_id}:{fan_out['selectionId']}:{candidate_id}"
-            )
-            prior = previous_children.get(candidate_id) or {}
-            try:
-                started = _resolve_or_start_formal_candidate_task(
-                    team_id=team_id,
-                    project_id=project_id,
-                    action=action,
-                    agent_id=binding.agent_id,
-                    source_collection_run_id=source_collection_run_id,
-                    selection_id=selection_id,
-                    candidate_id=candidate_id,
-                    selected_candidate_ids=selected_ids,
-                    candidate_context=candidate_context,
-                    subtask_id=subtask_id,
-                    previous=prior,
-                    challenge_task_contract=challenge_task_contract,
-                    model_invocation_receipt_binding=model_invocation_receipt_binding,
-                    hypothesis_input_binding=hypothesis_input_binding,
+            for candidate_id in selected_ids:
+                self._require_run_execution_admission(self._store.get_run(action.run_id))
+                candidate_context = dict(candidate_snapshots.get(candidate_id) or {})
+                candidate_context.setdefault("candidateId", candidate_id)
+                subtask_id = (
+                    f"{action.node_run_id}:{fan_out['selectionId']}:{candidate_id}"
                 )
+                prior = previous_children.get(candidate_id) or {}
+                unresolved_start = True
+                try:
+                    started = _resolve_or_start_formal_candidate_task(
+                        team_id=team_id,
+                        project_id=project_id,
+                        action=action,
+                        agent_id=binding.agent_id,
+                        source_collection_run_id=source_collection_run_id,
+                        selection_id=selection_id,
+                        candidate_id=candidate_id,
+                        selected_candidate_ids=selected_ids,
+                        candidate_context=candidate_context,
+                        subtask_id=subtask_id,
+                        previous=prior,
+                        challenge_task_contract=challenge_task_contract,
+                        model_invocation_receipt_binding=model_invocation_receipt_binding,
+                        hypothesis_input_binding=hypothesis_input_binding,
+                    )
+                except _HypothesisAuthorityUnavailable as exc:
+                    if self._known_session_admission_rejection(exc):
+                        unresolved_start = False
+                    raise
+                except (RuntimeError, ValueError) as exc:
+                    from core.web.services.session_service import SessionBusyError
+
+                    if isinstance(exc, SessionBusyError):
+                        unresolved_start = not self._known_session_admission_rejection(exc)
+                        raise
+                    unresolved_start = False
+                    failed_candidates[candidate_id] = "failed"
+                    self._persist_hypothesis_anchor_draft(
+                        action=action,
+                        binding=binding,
+                        root_session_id=root_session_id,
+                        root_session_attempt=root_attempt,
+                        selection_id=selection_id,
+                        selected_candidate_ids=selected_ids,
+                        handles=handles,
+                        candidate_statuses=failed_candidates,
+                    )
+                    continue
                 child = _scoped_handle_from_started(
                     started,
                     selection_id=selection_id,
@@ -1279,10 +1428,45 @@ class RealDomainPorts:
                     expected_root_session_id=root_session_id,
                     expected_agent_id=binding.agent_id,
                 )
-            except _HypothesisAuthorityUnavailable:
-                raise
-            except (RuntimeError, ValueError):
-                failed_candidates[candidate_id] = "failed"
+                # Register a returned child even when cancellation won during start.
+                handles.append(child)
+                unresolved_start = False
+                started_task = (
+                    dict(started.get("task"))
+                    if isinstance(started.get("task"), Mapping)
+                    else {}
+                )
+                formal_retry = bool(
+                    started.get("formalRetry") or started_task.get("formalRetry")
+                )
+                session_created = bool(
+                    started.get("sessionCreated")
+                    or started_task.get("sessionCreated")
+                )
+                if formal_retry:
+                    child_event_type = "workflow.scope_attempt.retried"
+                elif session_created:
+                    child_event_type = "workflow.child_session.created"
+                else:
+                    child_event_type = "workflow.child_session.resumed"
+                _record_hypothesis_scope_event(
+                    self._store,
+                    action=action,
+                    event_type=child_event_type,
+                    fields={
+                        "mode": "on",
+                        "selectionId": selection_id,
+                        "candidateId": candidate_id,
+                        "sessionId": child.session_id,
+                        "sessionAttempt": child.session_attempt,
+                        "taskId": child.task_id,
+                        "status": child.status,
+                        "created": session_created,
+                    },
+                    discriminator=(
+                        f"{candidate_id}:{child.session_attempt}:{child_event_type}"
+                    ),
+                )
                 self._persist_hypothesis_anchor_draft(
                     action=action,
                     binding=binding,
@@ -1293,78 +1477,47 @@ class RealDomainPorts:
                     handles=handles,
                     candidate_statuses=failed_candidates,
                 )
-                continue
-            started_task = (
-                dict(started.get("task"))
-                if isinstance(started.get("task"), Mapping)
-                else {}
+
+            self._require_run_execution_admission(self._store.get_run(action.run_id))
+            if not handles:
+                raise RuntimeError("hypothesis_design fan-out produced no candidate tasks")
+            from .knowledge_snapshot_consumption import (
+                record_knowledge_snapshot_consumed,
             )
-            formal_retry = bool(
-                started.get("formalRetry") or started_task.get("formalRetry")
-            )
-            session_created = bool(
-                started.get("sessionCreated")
-                or started_task.get("sessionCreated")
-            )
-            if formal_retry:
-                child_event_type = "workflow.scope_attempt.retried"
-            elif session_created:
-                child_event_type = "workflow.child_session.created"
-            else:
-                child_event_type = "workflow.child_session.resumed"
-            _record_hypothesis_scope_event(
+
+            record_knowledge_snapshot_consumed(
                 self._store,
-                action=action,
-                event_type=child_event_type,
-                fields={
-                    "mode": "on",
-                    "selectionId": selection_id,
-                    "candidateId": candidate_id,
-                    "sessionId": child.session_id,
-                    "sessionAttempt": child.session_attempt,
-                    "taskId": child.task_id,
-                    "status": child.status,
-                    "created": session_created,
-                },
-                discriminator=(
-                    f"{candidate_id}:{child.session_attempt}:{child_event_type}"
-                ),
+                run_id=action.run_id,
+                node_run_id=action.node_run_id,
+                selection_id=selection_id,
+                snapshot_hash=consumed_snapshot_hash,
+                now_ms=int(time.time() * 1000),
             )
-            handles.append(child)
-            self._persist_hypothesis_anchor_draft(
-                action=action,
-                binding=binding,
+            return AgentTaskHandle(
+                session_id=root_session_id,
+                session_attempt=root_attempt,
+                task_id="",
+                turn_id="",
                 root_session_id=root_session_id,
                 root_session_attempt=root_attempt,
-                selection_id=selection_id,
-                selected_candidate_ids=selected_ids,
-                handles=handles,
-                candidate_statuses=failed_candidates,
+                scoped_handles=tuple(handles),
             )
-
-        if not handles:
-            raise RuntimeError("hypothesis_design fan-out produced no candidate tasks")
-        from .knowledge_snapshot_consumption import (
-            record_knowledge_snapshot_consumed,
-        )
-
-        record_knowledge_snapshot_consumed(
-            self._store,
-            run_id=action.run_id,
-            node_run_id=action.node_run_id,
-            selection_id=selection_id,
-            snapshot_hash=consumed_snapshot_hash,
-            now_ms=int(time.time() * 1000),
-        )
-        return AgentTaskHandle(
-            session_id=root_session_id,
-            session_attempt=root_attempt,
-            task_id="",
-            turn_id="",
-            root_session_id=root_session_id,
-            root_session_attempt=root_attempt,
-            scoped_handles=tuple(handles),
-        )
+        finally:
+            # Closing and the complete set of returned identities commit together.
+            # A racing cancel cannot acknowledge an empty/partial draft while an
+            # external start is still capable of returning another live child.
+            if not unresolved_start:
+                self._persist_hypothesis_anchor_draft(
+                    action=action,
+                    binding=binding,
+                    root_session_id=root_session_id,
+                    root_session_attempt=root_attempt,
+                    selection_id=selection_id,
+                    selected_candidate_ids=selected_ids,
+                    handles=handles,
+                    candidate_statuses=failed_candidates,
+                    execution_admission={**admission, "status": "closed"},
+                )
 
     def _execute_hypothesis_fan_out(
         self,
@@ -2689,6 +2842,7 @@ def publish_agent_task_started_anchor(
     action: PendingAction,
     binding: BindingResolution,
     handle: AgentTaskHandle,
+    require_persisted: bool = False,
 ) -> None:
     """Publish the dispatch-time anchor and move the attempt to running.
 
@@ -2722,16 +2876,27 @@ def publish_agent_task_started_anchor(
     def mutate(uow: Any) -> bool:
         attempt = uow.repository.get_attempt(action.node_run_id)
         if attempt is None:
+            if require_persisted:
+                raise RuntimeError("agent task registration requires its owning attempt")
             return True
-        if str(attempt.status) not in {
+        run = uow.repository.get_run(action.run_id)
+        try:
+            run_terminal = run is None or is_terminal_run(RunStatus(run.status))
+        except (AttributeError, TypeError, ValueError):
+            run_terminal = True
+        live_attempt = not run_terminal and str(attempt.status) in {
             NodeAttemptStatus.DISPATCHING.value,
             NodeAttemptStatus.RUNNING.value,
-        }:
+        }
+        if not live_attempt and not require_persisted:
             # Only a live dispatch may move to running; the observability
             # path must never resurrect a blocked/terminal attempt.
             return True
         anchor_id = ""
         existing = uow.repository.get_anchor_by_node_run(action.node_run_id)
+        payload = {**(json.loads(existing[13] or "{}") if existing else {}), **anchor_payload}
+        if not live_attempt:
+            payload["status"] = str(attempt.status)
         if handle.scoped_handles:
             # v3 fan-out anchors are owned by the CAS draft publisher; only
             # link and transition the attempt here, never rewrite the json.
@@ -2743,7 +2908,7 @@ def publish_agent_task_started_anchor(
                 anchor_id=anchor_id,
                 node_run_id=action.node_run_id,
                 actor_kind=action.actor_kind.value,
-                anchor_json=json.dumps(anchor_payload, ensure_ascii=False),
+                anchor_json=json.dumps(payload, ensure_ascii=False),
                 created_at_ms=now_ms,
                 agent_id=binding.agent_id,
                 role_key=binding.role_key,
@@ -2751,14 +2916,14 @@ def publish_agent_task_started_anchor(
                 session_attempt=root_session_attempt,
                 task_id=scalar_task_id or None,
                 turn_id=scalar_turn_id or None,
-                status="running",
+                status="running" if live_attempt else str(attempt.status),
             )
         elif existing is not None:
             anchor_id = str(existing[0])
             uow.repository.update_anchor_by_node_run(
                 node_run_id=action.node_run_id,
-                anchor_json=json.dumps(anchor_payload, ensure_ascii=False),
-                status="running",
+                anchor_json=json.dumps(payload, ensure_ascii=False),
+                status="running" if live_attempt else str(attempt.status),
                 agent_id=binding.agent_id,
                 role_key=binding.role_key,
                 session_id=root_session_id or None,
@@ -2766,6 +2931,8 @@ def publish_agent_task_started_anchor(
                 task_id=scalar_task_id or None,
                 turn_id=scalar_turn_id or None,
             )
+        if not live_attempt:
+            return True
         uow.repository.update_attempt_status(
             action.node_run_id,
             NodeAttemptStatus.RUNNING.value,
@@ -2777,6 +2944,8 @@ def publish_agent_task_started_anchor(
     try:
         store.submit(mutate, force_flush=True).result(timeout=30)
     except Exception as exc:
+        if require_persisted:
+            raise
         # Pure observability: a failed provisional publish must not fail the
         # adapter execution; the commit path remains the anchor authority.
         try:

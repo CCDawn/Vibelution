@@ -7,7 +7,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import psutil
 
@@ -24,6 +24,14 @@ from . import journal_bridge
 # snapshot abandoned.
 _FOREIGN_OWNER_FRESH_SECONDS = 120.0
 
+_AdmissionError = TypeVar("_AdmissionError", bound=BaseException)
+
+
+def mark_native_admission_rejected(error: _AdmissionError) -> _AdmissionError:
+    """Attach a receipt only when a guard rejected admission before any new Turn."""
+    error.native_admission_rejected = True
+    return error
+
 
 class SessionAdmissionLock:
     """Keep the historical acquire/release API; share fencing across backends."""
@@ -39,7 +47,9 @@ class SessionAdmissionLock:
         except TimeoutError as exc:
             from core.web.services.session_service import SessionBusyError
 
-            raise SessionBusyError("Session接纳正忙，请稍后重试。") from exc
+            raise mark_native_admission_rejected(
+                SessionBusyError("Session接纳正忙，请稍后重试。")
+            ) from exc
         stack = getattr(self._local, "stack", None)
         if stack is None:
             stack = self._local.stack = []

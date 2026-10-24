@@ -28,6 +28,7 @@ import json
 import logging
 import time
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from typing import Any
 
 from core.research.workflow.contracts import (
@@ -71,6 +72,12 @@ logger = logging.getLogger(__name__)
 # in-flight) turn; anything else is already terminal and must not be touched
 # again by cancel_run turn closure.
 _CHAT_TURN_OPEN_STATUSES = frozenset({"", "queued", "running", "stopping", "paused"})
+
+
+@dataclass
+class _CancelRunExecutionScope:
+    meetings: list[dict[str, Any]] = field(default_factory=list)
+    admission_pending: bool = False
 
 
 def formal_node_order(run: Any) -> tuple[str, ...]:
@@ -1067,16 +1074,21 @@ class WorkflowCommandService:
         lookup before this hook, and turns already carrying a terminal
         snapshot are skipped, so repeats are natural no-ops.
         """
+        scope = _CancelRunExecutionScope()
         try:
-            pairs = _collect_cancel_run_turn_pairs(run_id)
+            pairs = _collect_cancel_run_turn_pairs(run_id, store=self._store, execution_scope=scope)
         except Exception:  # noqa: BLE001 - side effect must never break the command
             logger.exception(
                 "cancel_run turn closure could not read the run record: runId=%s",
                 run_id,
             )
             return
-        if not pairs:
-            return
+        for meeting in scope.meetings:
+            try:
+                _close_cancel_run_meeting(meeting)
+            except Exception:  # noqa: BLE001 - isolate native meeting stop failures
+                logger.exception("cancel_run meeting closure failed: runId=%s roomId=%s roundId=%s",
+                                 run_id, meeting["roomId"], meeting["roundId"])
         from core.web.services import session_service
 
         outcomes: list[dict[str, str]] = []
@@ -3074,16 +3086,107 @@ def _knowledge_recovery_actions(
     return actions
 
 
-def _collect_cancel_run_turn_pairs(run_id: str) -> list[tuple[str, str]]:
-    """Collect non-terminal (sessionId, turnId) pairs bound to a run record.
+def _collect_cancel_run_turn_pairs(
+    run_id: str, *, store: WorkflowLedgerStore | None = None,
+    execution_scope: _CancelRunExecutionScope | None = None,
+) -> list[tuple[str, str]]:
+    """Collect exact native execution identities from this run's authority.
 
-    Sources (both live in the JSON run record, not the ledger):
+    Ledger execution anchors take precedence once present. Only the current
+    attempt of each node can contribute; a stale JSON projection must not add
+    turns after the formal run has acquired its Ledger execution identity.
+    Legacy runs without Ledger anchors retain their JSON compatibility path:
     ``taskBundles[].subtasks[]`` — only entries still in an active status
     (mirrors ``task_bundle_lifecycle._ACTIVE_SUBTASK_STATUSES`` so already
     cancelled/failed/succeeded subtasks are never touched) and
     ``bindingSnapshots[]`` (sessionId+taskId+turnId bindings, filtered again
     by the chat_turn snapshot status at stop time).
     """
+    scope = execution_scope if execution_scope is not None else _CancelRunExecutionScope()
+    if store is not None:
+        anchors = store.read(lambda repo: repo.execute(
+            """SELECT e.anchor_id,e.node_run_id,e.session_id,e.turn_id,e.anchor_json,
+                      a.execution_anchor_id,
+                      NOT EXISTS (
+                          SELECT 1 FROM node_attempts newer
+                          WHERE newer.run_id=a.run_id AND newer.node_id=a.node_id
+                            AND newer.attempt>a.attempt
+                      ) AS current_attempt
+               FROM execution_anchors e
+               JOIN node_attempts a ON a.node_run_id=e.node_run_id
+               WHERE a.run_id=?
+               ORDER BY a.node_id,a.attempt,e.anchor_id""", (run_id,),
+        ).fetchall())
+        if anchors:
+            pairs: list[tuple[str, str]] = []
+            seen: set[tuple[str, str]] = set()
+
+            def add(session_id: Any, turn_id: Any) -> None:
+                pair = (str(session_id or "").strip(), str(turn_id or "").strip())
+                if all(pair) and pair not in seen:
+                    seen.add(pair)
+                    pairs.append(pair)
+
+            for anchor_id, node_run_id, session_id, turn_id, raw, linked_id, current in anchors:
+                if not current or (linked_id and linked_id != anchor_id):
+                    continue
+                try:
+                    payload = json.loads(raw or "{}")
+                except (TypeError, ValueError):
+                    add(session_id, turn_id)
+                    continue
+                if not isinstance(payload, Mapping):
+                    add(session_id, turn_id)
+                    continue
+                admission = payload.get("executionAdmission")
+                if isinstance(admission, Mapping) and admission.get("status") == "creating":
+                    # This flag and the published child identities come from
+                    # one snapshot. Never ack an empty/partial admission.
+                    scope.admission_pending = True
+                meeting = payload.get("meeting")
+                if isinstance(meeting, Mapping):
+                    from .completion_dependency import _receipt_handles
+                    from .domain_ports import AgentTaskHandle
+
+                    handle = AgentTaskHandle(
+                        str(session_id or ""), int(payload.get("sessionAttempt") or 1),
+                        str(payload.get("taskId") or ""), str(turn_id or ""),
+                        meeting_room_id=str(meeting.get("roomId") or ""),
+                        meeting_round_id=str(meeting.get("roundId") or ""),
+                        meeting_participants=tuple(meeting.get("participants") or ()),
+                    )
+                    participants = _receipt_handles(handle)
+                    if (not handle.meeting_room_id or not handle.meeting_round_id
+                            or not any(p["sessionId"] == session_id and p["turnId"] == turn_id for p in participants)):
+                        raise ValueError("cancel_run meeting anchor has inconsistent scalar identity")
+                    scope.meetings.append({"runId": run_id, "nodeRunId": node_run_id,
+                        "roomId": handle.meeting_room_id, "roundId": handle.meeting_round_id,
+                        "participants": participants})
+                    # Speaker identities are synthetic chat-room Turns. Their
+                    # stop and terminal proof belong to the native round.
+                    continue
+                add(session_id, turn_id)
+                root = payload.get("rootSession")
+                root = root if isinstance(root, Mapping) else {}
+                root_id = str(session_id or root.get("sessionId") or "").strip()
+                # Scalar columns own an existing root Turn. JSON cannot replace
+                # it with a later Turn on the same reusable Session.
+                if not turn_id and root_id and root.get("sessionId") == root_id:
+                    add(root_id, root.get("turnId"))
+                for child in payload.get("scopedSessions") or []:
+                    if not isinstance(child, Mapping) or not root_id:
+                        continue
+                    lineage = [str(child.get(key) or "").strip()
+                               for key in ("rootSessionId", "parentSessionId") if child.get(key)]
+                    if (child.get("workflowRunId", run_id) != run_id
+                            or child.get("nodeRunId", node_run_id) != node_run_id
+                            or not lineage or any(value != root_id for value in lineage)):
+                        continue
+                    if child.get("sessionId") == root_id:
+                        continue
+                    add(child.get("sessionId"), child.get("turnId"))
+            return pairs
+
     from .store import WorkflowRunStore
     from .task_bundle_lifecycle import _ACTIVE_SUBTASK_STATUSES
 
@@ -3114,6 +3217,50 @@ def _collect_cancel_run_turn_pairs(run_id: str) -> list[tuple[str, str]]:
             seen.add((session_id, turn_id))
             pairs.append((session_id, turn_id))
     return pairs
+
+
+def _close_cancel_run_meeting(target: Mapping[str, Any]) -> bool:
+    """Stop only the frozen native round, and prove its own terminal record."""
+    from core.web.services import chat_room_service
+
+    room_id, round_id = target["roomId"], target["roundId"]
+    room = chat_room_service.get_chat_room_detail(room_id, reconcile=False, participant_index=False)
+    if not isinstance(room, Mapping) or room.get("roomId") != room_id:
+        raise ValueError("cancel_run meeting room is unavailable")
+    config = room.get("config") or {}
+    authority = config.get("operatorDiscussionAuthority") or {}
+    rounds = [item for item in room.get("rounds") or []
+              if isinstance(item, Mapping) and item.get("roundId") == round_id]
+    if len(rounds) != 1:
+        raise ValueError("cancel_run frozen meeting round is unavailable")
+    native_round = rounds[0]
+    for binding in (config, authority, native_round.get("config") or {}):
+        if (binding.get("workflowRunId") != target["runId"]
+                or binding.get("nodeRunId") != target["nodeRunId"]):
+            raise ValueError("cancel_run meeting belongs to another run or attempt")
+    agent_ids = {item.get("agentId") for item in authority.get("participants") or []}
+    seats = {(item.get("sessionId"), item.get("participantId"))
+             for item in room.get("participants") or [] if item.get("agentId") in agent_ids}
+    frozen = {(item["sessionId"], item["participantId"]) for item in target["participants"]}
+    if not agent_ids or seats != frozen:
+        raise ValueError("cancel_run meeting participants differ from the frozen anchor")
+    status = str(native_round.get("status") or "").lower()
+    if status in chat_room_service.RUNNING_ROUND_STATUSES:
+        if room.get("activeRoundId") != round_id:
+            raise ValueError("cancel_run frozen meeting is not the active round")
+        if status != "stopping":
+            chat_room_service.stop_chat_room_round(room_id, expected_round_id=round_id,
+                                                  reason="Research workflow cancelled")
+        return False
+    if (status not in {"completed", "stopped", "failed"}
+            or not native_round.get("finishedAt") or room.get("activeRoundId") == round_id):
+        return False
+    store = chat_room_service._work_run_store()
+    snapshot = store.load_snapshot("chat_room_round", round_id) or {}
+    return bool(snapshot.get("roomId") == room_id and snapshot.get("roundId") == round_id
+                and snapshot.get("status") in {"completed", "stopped", "failed"}
+                and snapshot.get("finishedAt")
+                and store.load_run_index("chat_room_round").get("activeRunId") != round_id)
 
 
 def _close_cancel_run_turn(session_service: Any, session_id: str, turn_id: str) -> str:

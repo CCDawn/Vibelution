@@ -50,7 +50,7 @@ WorkRun 的 `status → currentPhase → phase → runtimeStatus` 是异构快�
 | Runtime 命令队列 | `command_queue.py` 的 inbox / processing / results 与 `commandId` | `accepted/completed/ok` 分别表示接收、结算和操作结果；取消、替代与执行失败分别展示。缺少结果证据保持未知，结果列表和结果事件采用同一解释。 |
 | CLI Task / Terminal | task kernel 记录任务结果，terminal runtime 记录进程与交互能力 | reader 已发布的运行/终态不能被提交确认覆盖；`alive` 不等于允许输入。停止收尾仍可读输出，不能再输入、恢复或启动。 |
 | Group | `chat_room_service.py` 写 room / round 和 append-only timeline | room `ready` 表示可接收新轮次，round `completed/partial/failed/stopped` 才是轮次结果。同轮终态吸收迟到的 `stopping`，不阻止新轮次启动。 |
-| 工具调用 | Executor 的 transport / semantic / exitCode 与原生 Journal | 预提交 `ready` 是待执行。v3 的四值 status 描述传输生命周期；已取消调用以已结束传输加 `semanticStatus=cancelled` 保真，界面显示中立取消。实际 failed 不能被语义警告或取消展示覆盖。工具无结果、显式业务失败不能报告成功；聚合命令检查所有 operation，搜索无匹配不掩盖另一条命令失败。 |
-| 正式研究工作流 | Ledger 的 `RunStatus`、`NodeAttemptStatus`、租约与已有 action offers | `paused` 是可恢复调度 hold，DTO、状态投影和展示必须接受。仅保留权威已授权的 retry / reconcile；`starting/dispatching` 在画布边界折叠为运行中，正式 Snapshot 保留原值。归档不自行证明成功，Campaign 阶段、决策和租约不冒充 Run 结果。 |
+| 工具调用 | Executor 的 transport / semantic / exitCode 与原生 Journal | 预提交 `ready` 是待执行。v3 的四值 status 描述传输生命周期；已取消调用以已结束传输加 `semanticStatus=cancelled` 保真，界面显示中立取消。搜索和 glob 即使保留部分结果，也把明确的 `[取消]` 回执放在首行；安全拦截原因码与取消原因中的普通文字不改变明确回执。实际 failed 不能被语义警告或取消展示覆盖。工具无结果、显式业务失败不能报告成功；聚合命令检查所有 operation，搜索无匹配不掩盖另一条命令失败。 |
+| 正式研究工作流 | Ledger 的 `RunStatus`、`NodeAttemptStatus`、租约与已有 action offers | `pause_run/resume_run` 经服务端授权与版本校验，暂停后续调度并恢复同一 Run，不冻结或取消在飞 Turn。取消清理读取同一 Ledger 的当前执行锚点，并携带预期 Turn 身份，清理动作结算不等于原生 Session 已结束。`starting/dispatching` 在画布边界折叠为运行中，正式 Snapshot 保留原值。归档不自行证明成功，Campaign 阶段、决策和租约不冒充 Run 结果。 |
 
-各领域的回归分别覆盖真实消费者、DTO 与顺序竞争；不通过批量改写历史记录来消除兼容拼写。领域测试通过和隔离实例 API / CDP 验收分别记录，均不代表运行过付费 CLI 任务或真实科研实验。
+各领域的回归分别覆盖真实消费者、DTO 与顺序竞争；不通过批量改写历史记录来消除兼容拼写。测试通过不替代真实 CLI 或研究执行验收；隔离实例 API / CDP 场景只证明证据中实际经过的链路，不外推为完整科研实验。

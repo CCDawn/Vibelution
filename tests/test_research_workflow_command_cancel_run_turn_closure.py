@@ -252,7 +252,7 @@ def test_cancel_run_side_effect_record_read_failure_keeps_command_accepted(
     """(b) Even failing to read the run record must not break the command."""
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
 
-    def failing_collect(run_id: str):
+    def failing_collect(run_id: str, **_kwargs):
         raise RuntimeError("simulated record read failure")
 
     monkeypatch.setattr(
@@ -424,7 +424,7 @@ def test_cleanup_worker_does_not_lease_unrelated_reconcile_action(
     monkeypatch.setattr(
         "core.web.services.team_workflow.research_runtime.command_service."
         "_collect_cancel_run_turn_pairs",
-        lambda _run_id: [],
+        lambda _run_id, **_kwargs: [],
     )
 
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
@@ -498,7 +498,7 @@ def test_cleanup_worker_terminalizes_budget_before_acknowledging_cancel(
     monkeypatch.setattr(
         "core.web.services.team_workflow.research_runtime.command_service."
         "_collect_cancel_run_turn_pairs",
-        lambda _run_id: [],
+        lambda _run_id, **_kwargs: [],
     )
 
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
@@ -558,7 +558,7 @@ def test_cleanup_worker_repairs_budget_after_legacy_cleanup_already_succeeded(
     monkeypatch.setattr(
         "core.web.services.team_workflow.research_runtime.command_service."
         "_collect_cancel_run_turn_pairs",
-        lambda _run_id: [],
+        lambda _run_id, **_kwargs: [],
     )
 
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
@@ -851,7 +851,7 @@ def test_cleanup_worker_settles_run_archived_from_cancelled(tmp_path, monkeypatc
     monkeypatch.setattr(
         "core.web.services.team_workflow.research_runtime.command_service."
         "_collect_cancel_run_turn_pairs",
-        lambda _run_id: [],
+        lambda _run_id, **_kwargs: [],
     )
 
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
@@ -927,7 +927,7 @@ def test_cleanup_worker_survives_poisoned_entry_and_continues_queue(
     monkeypatch.setattr(
         "core.web.services.team_workflow.research_runtime.command_service."
         "_collect_cancel_run_turn_pairs",
-        lambda _run_id: [],
+        lambda _run_id, **_kwargs: [],
     )
 
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
@@ -1026,7 +1026,7 @@ def test_cleanup_worker_parks_persistent_failure_after_attempt_cap(
     monkeypatch.setattr(
         "core.web.services.team_workflow.research_runtime.command_service."
         "_collect_cancel_run_turn_pairs",
-        lambda _run_id: [],
+        lambda _run_id, **_kwargs: [],
     )
 
     harness = CommandHarness(tmp_path / "ledger.sqlite3")

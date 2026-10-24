@@ -2399,8 +2399,10 @@ def _accepted_chat_room_round_payload(room: dict[str, Any], round_payload: dict[
     }
 
 
-def stop_chat_room_round(room_id: str, *, reason: str = "") -> dict[str, Any]:
-    """Request and persist a user stop for the active chat room round."""
+def stop_chat_room_round(
+    room_id: str, *, reason: str = "", expected_round_id: str | None = None,
+) -> dict[str, Any]:
+    """Stop the active round, optionally fenced to an owner's frozen identity."""
 
     lang = get_web_language()
     normalized_room_id = str(room_id or "").strip()
@@ -2418,6 +2420,12 @@ def stop_chat_room_round(room_id: str, *, reason: str = "") -> dict[str, Any]:
         if room is None:
             raise ChatRoomNotFoundError(text_for(lang, zh="未找到群聊。", en="Chat room not found."))
         active_round_id = str(room.get("activeRoundId") or "").strip()
+        if expected_round_id is not None and active_round_id != str(expected_round_id).strip():
+            raise ChatRoomBusyError(text_for(
+                lang,
+                zh="群聊当前轮次已变化，未停止其他轮次。",
+                en="The active chat room round changed; no other round was stopped.",
+            ))
         target_round = _find_round(room, active_round_id) if active_round_id else None
         if (
             target_round is None

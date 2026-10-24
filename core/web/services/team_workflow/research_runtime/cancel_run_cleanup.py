@@ -278,15 +278,18 @@ class CancelRunCleanupWorker:
 
         from .command_service import (
             _CHAT_TURN_OPEN_STATUSES,
+            _CancelRunExecutionScope,
+            _close_cancel_run_meeting,
             _close_cancel_run_turn,
             _collect_cancel_run_turn_pairs,
         )
 
-        pairs = _collect_cancel_run_turn_pairs(run_id)
-        if not pairs:
-            return True
-
-        complete = True
+        scope = _CancelRunExecutionScope()
+        pairs = _collect_cancel_run_turn_pairs(run_id, store=self._store, execution_scope=scope)
+        complete = not scope.admission_pending
+        for meeting in scope.meetings:
+            if not _close_cancel_run_meeting(meeting):
+                complete = False
         for session_id, turn_id in pairs:
             _close_cancel_run_turn(session_service, session_id, turn_id)
             if not _terminal_turn_is_closed(session_service, turn_id, _CHAT_TURN_OPEN_STATUSES):
