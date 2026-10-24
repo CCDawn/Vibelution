@@ -121,7 +121,7 @@ def _identity_status(record: dict[str, Any]) -> str:
 
     result = inspect_process_identity(record)
     status = str(result.get("status") or "unknown")
-    if status != "mismatch" or str(result.get("reason") or "") != "create_time_mismatch":
+    if status != "mismatch" or str(result.get("reason") or "") not in {"create_time_mismatch", "executable_mismatch"}:
         return status
     captured = capture_process_identity(int(record.get("pid") or 0))
     if not captured:
@@ -135,7 +135,17 @@ def _identity_status(record: dict[str, Any]) -> str:
         return status
     expected_exe = os.path.normcase(os.path.normpath(str(record.get("executable") or "")))
     actual_exe = os.path.normcase(os.path.normpath(str(captured.get("executable") or "")))
-    return "match" if expected_exe and expected_exe == actual_exe else status
+    if expected_exe and expected_exe == actual_exe:
+        return "match"
+    # Electron may report its launch path through a dependency junction while
+    # Windows reports the physical image path. Require native file identity,
+    # in addition to the creation-time check above; equal basenames are unsafe.
+    try:
+        if expected_exe and actual_exe and Path(expected_exe).samefile(actual_exe):
+            return "match"
+    except OSError:
+        pass
+    return status
 
 
 def _can_replace_owner(current: dict[str, Any] | None, *, owner: str, pid: int, identity: dict[str, Any]) -> bool:

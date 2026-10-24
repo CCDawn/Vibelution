@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import pytest
 from pathlib import Path
 
 from vibelution_storage import resolve_project_storage_paths
@@ -15,6 +16,23 @@ from core.launcher.desktop_shell_owner import (
     should_show_winforms_tray,
     write_desktop_shell_owner,
 )
+
+
+@pytest.mark.parametrize("same_file,age_delta,expected", [(True, 0.2, "match"), (False, 0.2, "mismatch"), (True, 20.0, "mismatch")])
+def test_owner_alias_requires_same_file_and_process_creation(tmp_path, monkeypatch, same_file, age_delta, expected):
+    from core.launcher.desktop_shell_owner import _identity_status
+    import core.runtime_manager.process_identity as identity
+    actual = tmp_path / "electron.exe"
+    actual.write_bytes(b"executable")
+    alias = tmp_path / "linked-electron.exe"
+    if same_file:
+        alias.hardlink_to(actual)
+    else:
+        alias.write_bytes(b"different executable")
+    record = {"pid": 123, "createTime": 100.0, "executable": str(alias)}
+    monkeypatch.setattr(identity, "inspect_process_identity", lambda _: {"status": "mismatch", "reason": "executable_mismatch"})
+    monkeypatch.setattr(identity, "capture_process_identity", lambda _: {"pid": 123, "createTime": 100.0 + age_delta, "executable": str(actual)})
+    assert _identity_status(record) == expected
 
 
 def _seed_project(tmp_path: Path, monkeypatch) -> Path:
