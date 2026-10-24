@@ -1828,7 +1828,9 @@ describe("chatSessionState", () => {
       requestedAt: "2026-01-01T00:00:05Z",
     }) as SessionDetail;
     const stopped = makeDetail({
+      status: "ready",
       currentPhase: "completed",
+      activeTurnId: "",
       stopRequested: false,
       stopRequestedAt: "",
       updatedAt: "2026-05-22T10:03:00Z",
@@ -1839,6 +1841,17 @@ describe("chatSessionState", () => {
     expect(merged.currentPhase).toBe("completed");
     expect(merged.stopRequested).toBe(false);
     expect(merged.stopRequestedAt).toBe("");
+  });
+
+  it("does not settle a stop from a terminal phase while explicit execution is still running", () => {
+    const stopping = markSessionDetailStopping(makeDetail({ activeTurnId: "turn-2" }), {
+      requestedAt: "2026-01-01T00:00:05Z",
+    }) as SessionDetail;
+    const merged = mergeSessionDetailMessageWindow(stopping, makeDetail({
+      status: "running", currentPhase: "completed", activeTurnId: "turn-2",
+    }));
+    expect(merged.currentPhase).toBe("stopping");
+    expect(merged.stopRequested).toBe(true);
   });
 
   it("retires an old stop intent when a newer active turn starts", () => {

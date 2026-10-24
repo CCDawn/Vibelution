@@ -810,6 +810,9 @@ function preserveSessionDetailStopIntent(
       && next.stopRequestedAt
       && next.stopRequestedAt !== previous.stopRequestedAt,
   );
+  if (nextOwnsNewStopIntent) {
+    return next;
+  }
   if (previousTurnId && nextTurnId && previousTurnId !== nextTurnId && !nextOwnsNewStopIntent) {
     return {
       ...next,
