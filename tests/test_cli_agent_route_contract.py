@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from core.web.routes.cli_agent_models import CliAgentTerminalSessionResponse
+import pytest
 
 CLI_AGENT_PUBLIC_STATE_FIELDS = {
     "terminalSessionId",
@@ -59,6 +60,21 @@ CLI_AGENT_PUBLIC_STATE_FIELDS = {
     "createdAt",
     "updatedAt",
 }
+
+
+@pytest.mark.parametrize("revision", [2, "2"])
+def test_live_cli_screen_revision_is_a_numeric_response_contract(revision) -> None:
+    payload = CliAgentTerminalSessionResponse.model_validate({
+        "terminalSessionId": "live-codex", "alive": True,
+        "screenParserVersion": revision,
+    }).model_dump(exclude_unset=True)
+    assert payload["screenParserVersion"] == 2
+
+
+@pytest.mark.parametrize("revision", [None, ""])
+def test_legacy_missing_cli_screen_revision_is_explicitly_unversioned(revision) -> None:
+    payload = CliAgentTerminalSessionResponse.model_validate({"screenParserVersion": revision}).model_dump()
+    assert payload["screenParserVersion"] == 0
 
 
 def test_cli_agent_terminal_session_publishes_known_schema_fields() -> None:

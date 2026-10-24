@@ -8,7 +8,7 @@ response_model_exclude_unset=True.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class CliAgentTerminalEnsurePayload(BaseModel):
@@ -74,7 +74,7 @@ class CliAgentTerminalSessionResponse(BaseModel):
     screenQuality: str = ""
     screenRows: int = 0
     screenCols: int = 0
-    screenParserVersion: str = ""
+    screenParserVersion: int = 0
     processStartedAt: str = ""
     processStartedAtMs: int = 0
     userClosed: bool = False
@@ -93,3 +93,10 @@ class CliAgentTerminalSessionResponse(BaseModel):
     tuiState: str = ""
     createdAt: str = ""
     updatedAt: str = ""
+
+    @field_validator("screenParserVersion", mode="before")
+    @classmethod
+    def normalize_legacy_screen_revision(cls, value):
+        # Old snapshots used an empty text placeholder; live screen buffers
+        # publish an integer revision. Keep the compatibility decode here.
+        return 0 if value is None or value == "" else value
