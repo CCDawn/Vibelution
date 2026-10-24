@@ -77,7 +77,7 @@
 | **测试策略** | §11 | `tests/README.md` · `tests/test_matrix.yaml` |
 | **Git / 合入 / remote** | §13 · §14 · §16 | 根 `AGENTS.md` §2 合入门 |
 | **版本 / 发布** | §15 | §12 refresh 决策 |
-| **完成报告 / Done** | §21 · §22 | `docs/guides/loop.md` §6 |
+| **完成报告 / Done / 用户目标验收** | §21 · §22 · [§22.1](development-standard.md#221-user-goal-acceptance-before-completion) | 实际页面/结果必须匹配用户目标；`docs/guides/loop.md` §4.1 / §6 |
 | **Fallback / degraded 语义** | §3.2 | 不得静默当 success |
 | **Project memory** | §19 · §19.1 | `migrate_project_storage.py inventory` |
 | **全栈新功能** | **§24 全节** | §24.5 DoD 清单 |

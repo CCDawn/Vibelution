@@ -745,7 +745,7 @@ Task handoff must include version bump recommendation, capability domain, user-v
 
 ## 16. Mainline Integration
 
-Task-owning Agents should self-review and self-merge by default when the merge gates in section 13 pass. Waiting for the user to request review or merge is not done. The mandatory local sequence is: branch from current local `main`; perform every write and commit in the task worktree; complete review, narrow feedback validation, staged-path light gates and acceptance evidence; call managed closeout once so it creates or explicitly reuses the claim-bound manifest outside the global integration claim; acquire `integration/main` only for final re-verification and `git merge --ff-only`; then immediately release and remove only the current task's resources. A mainline integration session is a fallback and serialization owner, not a direct-development workspace. It is still responsible for queued, cross-lane, large-conflict, release-sensitive, or user-designated integration work:
+Task-owning Agents should self-review and self-merge by default when the merge gates in section 13 pass. Waiting for the user to request review or merge is not done. The mandatory local sequence is: branch from current local `main`; perform every write and commit in the task worktree; complete review, narrow feedback validation, staged-path light gates and branch implementation acceptance evidence; call managed closeout once so it creates or explicitly reuses the claim-bound manifest outside the global integration claim; acquire `integration/main` only for final re-verification and `git merge --ff-only`; then immediately release and remove only the current task's resources. A mainline integration session is a fallback and serialization owner, not a direct-development workspace. It is still responsible for queued, cross-lane, large-conflict, release-sensitive, or user-designated integration work:
 
 - keeping local `main` clean before each merge;
 - reviewing claim status and write scopes;
@@ -887,6 +887,8 @@ Do not over-repeat root `config.toml` / `config.example.toml` cleanup state unle
 
 ## 22. Development Round Done Criteria
 
+Every tier must satisfy the user-goal acceptance contract in [section 22.1](#221-user-goal-acceptance-before-completion) before reporting the overall task as fixed or complete. A passed technical checklist does not substitute for that contract.
+
 A development round is not done until its tier-specific checklist is satisfied:
 
 `FAST_PATCH`:
@@ -925,6 +927,20 @@ A development round is not done until its tier-specific checklist is satisfied:
 - final report states remaining risk and next action.
 
 Docs-only/rule-only rounds may skip Launcher refresh and version bump when no runtime behavior or release package changes.
+
+### 22.1 User-Goal Acceptance Before Completion
+
+The task owner must close the user's original goal, not merely the implementation step that was easiest to verify. This contract governs completion claims; Git integration and cleanup receipts remain evidence of integration and cleanup only.
+
+1. **Map the goal to evidence before writing.** Identify each requested outcome, its actual acceptance surface and target identity (repository/branch, URL, instance/build, device or artifact as applicable), an observable success condition, and the evidence needed. Recheck this mapping before the final report so a narrower API or code-level objective cannot silently replace the user's goal.
+2. **Verify the actual page when the goal involves a page.** Load the correct current page and exercise the relevant user path; verify the expected result and the disappearance of the reported defect. Check all affected views and the applicable filter/time range. Retain bounded evidence such as a screenshot or rendered DOM result with target/version and observation time. An API response, source diff, passing test, health check or successful push cannot establish that the page is fixed. An unexpected blank view, loading placeholder, error screen or filter that merely hides the defect is not positive success evidence. A requested empty list or a contractually successful `204` response remains valid when its settled state or endpoint contract matches the user's success condition.
+3. **Keep evidence at its proven scope.** Distinguish implementation/tests, local integration, publication, service health, actual UI behavior, real-device operation and user-goal acceptance. For API-only or docs-only goals, use the matching real endpoint contract or artifact/link checks; do not require an unrelated browser, restart or device ceremony. Automated governance tests verify that these rules stay routed and present; they do not verify a user's actual page.
+4. **Pending is not complete.** `202 Accepted`, a queued background job, an empty response during calculation, a scheduled recheck, an API count of zero or a cache-refresh estimate cannot prove the final user-visible outcome. When the API and page disagree, keep the goal incomplete, diagnose the authoritative and derived states, perform a safe authorized repair and verify the actual result again. Do not replace that work with an unsupported promise that waiting will fix it.
+5. **Retain ownership of unfinished acceptance.** Continue authorized diagnosis, repair and rechecks without waiting for the user to chase the task or repeat an existing authorization. If progress needs an external event or a capability that is unavailable, report the precise blocker, what remains unverified, and a concrete resumption condition; arrange supported follow-up when available. Do not promise an unscheduled background check. Follow-up remains within the task's ownership and permission boundaries: preserve other tasks' code, branches, worktrees, claims, processes and settings, and preserve required backups and human attribution.
+6. **Separate integration from final acceptance.** Branch implementation checks and mergeability still close before local integration. If the user's goal can only be verified after an authorized publication or deployment, record that final acceptance as pending, clean only the merged task's resources immediately, then continue verification on the correct published surface. Do not hold `integration/main` or leave another task blocked while waiting. This rule does not authorize a push, deployment, restart or external communication that the user has not authorized.
+7. **Make the completion claim match the evidence.** Before saying fixed, complete or cleaned, confirm every requested outcome has passed its observable condition. Otherwise state the completed scope and remaining work explicitly; a technical substep or partial result must not be described as overall completion.
+
+Regression case: for GitHub contributor cleanup, a zero commit query and a clean contributors API are only history/API evidence. Acceptance requires a newly loaded repository homepage Contributors section and the all-time Contributors graph to show the expected human contributors and no targeted AI accounts. Statistics still showing the old names means the task remains incomplete. Preserve code, human attribution, history backups and other tasks throughout any refresh operation.
 
 ## 23. Functional Development Constraints
 

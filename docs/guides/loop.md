@@ -23,10 +23,10 @@
 4 ISOLATE   worktree if STANDARD+|ISOLATION_REQUIRED；pre-commit 按 staged paths 自动取得或复核窄 claim，真实重叠才阻止
 5 IMPLEMENT 只改 owner；SSOT 表 if 状态/API
 6 VERIFY    稳定修改批次按影响面跑最窄反馈测试；同一 HEAD/命令/输入未变不重复跑；完整 selector 计划留给最终 closeout 一次执行
-7 EVIDENCE  实现文件变更：已定位小修记 `LOCAL_ONLY`，需仓外对照记 `EXTERNAL`；logging/runtime 证据按影响面；验收在 merge 前闭合
+7 EVIDENCE  实现文件变更：已定位小修记 `LOCAL_ONLY`，需仓外对照记 `EXTERNAL`；logging/runtime 证据按影响面；分支实现验收在 merge 前闭合；逐项核对用户目标验收（§22.1）
 8 INTEGRATE 默认用 `scripts/task_closeout.py` 一次完成最终验证、短时 integration claim、ff-only merge 与清理；不得先手动 closeout 后无参重跑，不得等用户再下令审查/合入
 9 CLEAN     merge 成功即清理本任务临时内容/进程、claim、junction、worktree、本地分支；不等待 post-merge validation
-10 CLOSE     对用户汇报（根 `AGENTS.md` §5）；内部合入/清理仍做，不贴完成块
+10 CLOSE     核对用户目标与实际结果（§4.1），未达成则继续已授权的修复/复查；对用户汇报（根 `AGENTS.md` §5），不把接口或合入成功当整体完成
 ```
 
 ---
@@ -126,6 +126,17 @@ Launcher / runtime 落点速查：[`core/web/services/launcher_runtime.md`](../.
 | LLM | 相关 pytest；实机需 restart 后看 cache/usage |
 | process | launcher/runtime 测试 + 无控制台路径说明 |
 | 全栈 API | §24.5 全行 |
+
+### 4.1 用户目标验收（所有分级适用）
+
+完整规则以 [development-standard.md §22.1](../standards/development-standard.md#221-user-goal-acceptance-before-completion) 为准。开始时记录“用户目标 → 实际验收面/目标身份 → 可观察成功条件 → 证据”，结束前逐项回查；不能把用户目标缩成接口返回正常。
+
+- 涉及页面的目标，核对新加载的实际页面、相关操作和所有受影响视图，保留带环境/版本与时间的截图或渲染结果；API/测试/健康检查通过不能替代页面验收。
+- 排队、加载占位、计算中的空响应、不符合目标的意外空白、缓存等待和已安排复查均保留未完成状态；合法空列表或 `204` 响应按用户目标及实际契约验收。接口与页面不一致时继续定位和安全修复，不让用户反复催办。
+- 发布后才能观察的结果，分支验证及合入前检查仍须先通过；合入后立即清理本任务资源，再跟进已授权的实际结果验收。未授权的发布、重启或对外沟通仍保留原权限边界。
+- 只在每项用户目标都有对应成功证据时宣称“修好/完成”；否则明确已完成范围、未验结果、具体阻碍和恢复条件。纯接口或文档目标按其实际契约/产物验收，不强制无关 UI 操作。
+
+本次反例：GitHub 作者查询为 0、contributors API 只剩真人，但首页和全时段贡献者图仍显示 AI 时，页面清理未完成；必须让这两个实际页面都符合用户目标后才能结束。
 
 ---
 

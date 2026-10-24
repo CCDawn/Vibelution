@@ -106,6 +106,25 @@ def test_validation_and_managed_closeout_are_single_pass_by_default() -> None:
     assert "不得重测" in testing
 
 
+def test_completion_acceptance_routes_to_the_user_goal_contract() -> None:
+    """Protect the policy entry points; this test cannot validate an actual UI."""
+    anchor = "#221-user-goal-acceptance-before-completion"
+    for relative in ("AGENTS.md", "docs/standards/README.md", "docs/guides/loop.md", "docs/agents/worktree-collaboration.md"):
+        path = PROJECT_ROOT / relative
+        assert anchor in path.read_text(encoding="utf-8"), relative
+        _assert_local_links_resolve(path)
+
+    standard = (PROJECT_ROOT / "docs/standards/development-standard.md").read_text(encoding="utf-8")
+    section = standard.split("### 22.1 User-Goal Acceptance Before Completion\n", 1)[1].split("\n## 23.", 1)[0]
+    for boundary in (
+        "Map the goal to evidence", "Verify the actual page", "Keep evidence at its proven scope",
+        "202 Accepted", "Retain ownership of unfinished acceptance", "Separate integration from final acceptance",
+        "Make the completion claim match the evidence", "Regression case: for GitHub contributor cleanup",
+        "contractually successful `204` response",
+    ):
+        assert boundary in section, boundary
+
+
 def test_windows_no_console_red_line_is_normative():
     """Visible console popups are permanently forbidden for product runtime."""
 

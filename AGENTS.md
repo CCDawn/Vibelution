@@ -20,7 +20,7 @@
 - 当前 Git checkout 是项目根；运行时解析路径，不假设固定 Windows 用户名。
 - 根 `main` 是只读的本地集成工作区。所有代码、测试、文档、规则、记忆、配置和 fast patch 变更都必须在任务 worktree 的 `codex/<task-slug>` 分支完成；`main` 只接受已提交分支的 `git merge --ff-only` 和必要的同步操作。
 - 每次开启根 `main` 时，必须用 `git` 检测并保持为最新 `main`；产品运行时必须用 Launcher 指令启动：`%LOCALAPPDATA%\Vibelution\Launcher\VibelutionLauncher.exe --project "<project-root>" start`。
-- 所有验证与 mergeability 必须在合入前闭合；随后**主动自审当前任务 diff**并 `git merge --ff-only` 合入本地 `main`，不得把「等用户再说审查/合入」当作完成态。除用户要求隔离/交接或存在精确 blocker 外，未主动自审并合入本地 `main` 即未完成。合入后只清理本任务资源；清理失败不改变已合入事实，只恢复清理，不重测或重合。push/PR/发布、远端删除仍需明确授权。
+- 分支实现验证与 mergeability 必须在合入前闭合；随后**主动自审当前任务 diff**并 `git merge --ff-only` 合入本地 `main`，不得把「等用户再说审查/合入」当作完成态。除用户要求隔离/交接或存在精确 blocker 外，未主动自审并合入本地 `main` 即未完成。合入后只清理本任务资源；清理失败不改变已合入事实，只恢复清理，不重测或重合。发布后方可观察的用户目标按 §5 与开发标准 §22.1 继续验收，不能因合入而宣称目标完成。push/PR/发布、远端删除仍需明确授权。
 - 不覆盖、回滚、删除或重置无关的用户/Agent 改动；发现重叠先检查 claim 和 diff。
 - 远端 push、PR、发布需要用户明确授权和远端同步门；force、覆盖或远端删除需要破坏性确认。
 - **Windows 产品运行时禁止任何可见控制台弹窗**：这是无控制台弹窗红线。Launcher、Workbench、Runtime Manager、后台 Git/轮询和服务子进程不得弹出 `cmd.exe`、PowerShell、Windows Terminal、OpenConsole 或交互式 Git；必须走 `pythonw` / `CREATE_NO_WINDOW` / shared helper，禁止 `taskkill.exe`、裸 Git wrapper、`npm`/`cmd` 后台壳。用户明确打开的 CLI 面板除外；细则见 [development-standard.md](docs/standards/development-standard.md) §8.0。
@@ -56,7 +56,7 @@
 - 本地开发和验证按“现有 API → Playwright/CDP → 必要时桌面 UI”操作，能后台完成时不得抢焦点。本地桌面启动默认开放 loopback 调试端口且不弹 DevTools；使用 `scripts/desktop_debug.py --project "<project-root>"` 发现真实地址，按角色/instanceId/URL 选择窗口，完整重启后重新发现和连接。不得猜端口、用首个页面代替窗口识别或绕过 active-work guard。细则：[桌面调试](docs/guides/desktop-debugging.md)。
 
 - 工作分级为 `FAST_PATCH / STANDARD_TASK / HIGH_RISK`，使用足以保护正确性、并发与证据的最轻流程。
-- 写入前定位 owning surface、现有测试、用户改动和 active claim；禁止在根 `main` 直接写入任何变更。所有 development、mechanical 和文档/规则写入都必须转到任务 worktree，根 `main` 仅用于分支合入和必要同步；验证必须在合入前完成。任务 worktree 默认落在 `<project-root>/.worktrees/<task-slug>`；旧兄弟目录 `Vibelution-worktrees` 已不再存在于磁盘，仅保留兼容迁移逻辑（`core/infrastructure/branch_workspace.py`）以防目录重现，细则见 [协作规范](docs/agents/worktree-collaboration.md)。
+- 写入前定位 owning surface、现有测试、用户改动和 active claim；禁止在根 `main` 直接写入任何变更。所有 development、mechanical 和文档/规则写入都必须转到任务 worktree，根 `main` 仅用于分支合入和必要同步；分支实现验证必须在合入前完成。任务 worktree 默认落在 `<project-root>/.worktrees/<task-slug>`；旧兄弟目录 `Vibelution-worktrees` 已不再存在于磁盘，仅保留兼容迁移逻辑（`core/infrastructure/branch_workspace.py`）以防目录重现，细则见 [协作规范](docs/agents/worktree-collaboration.md)。
 - 前端使用 TypeScript、Tailwind-first、VUI `V*` 产品 API 和 shadcn/Radix renderer；HeroUI 已移除。触及 UI 的写入前必须对齐 §2 前端红线；完成前跑相关 frontend contract（至少 `vuiShadcnRouteContract` 与触及的 route/layout 测试），不得以「先实现再迁 VUI」交付用户可见路径。
 - `tsc -b` 是前端交付/重建闸，不是开发前默认闸。凡改 `web/`，宣称完成或建议 Launcher rebuild/restart 前必须主动运行 `npx tsc -b --pretty false`（或 `npm run build`）；类型红时先修，不把 Launcher 重建当验证。细节见 [loop.md](docs/guides/loop.md)。
 - 后端 route 保持薄层，公共 DTO 明确，业务与来源权威归 service/pack；projection 不得成为第二写入者。
@@ -66,6 +66,8 @@
 - 任何新增或修改产品后台子进程 spawn 的路径，默认按 §2 无控制台红线实现与验证；能弹出可见控制台的路径不得合入。
 
 ## 5. 对用户汇报
+
+宣称“修好、完成、清干净”前，必须逐项核对用户目标和实际验收结果。目标涉及页面时必须核对新加载的实际页面及相关操作；接口正常、测试通过、代码合入不能替代用户目标验收。未核验或目标未达成时明确保留未完成状态，继续已授权的修复与复查，不把常规跟进交给用户催办。完整规则见 [development-standard.md §22.1](docs/standards/development-standard.md#221-user-goal-acceptance-before-completion)。
 
 所有用户汇报都先用一句话说清“修了什么、现在怎样”，再按需写现象/结果、怎么试、真实限制、对方必须做什么；日常 3–8 句。内部 closeout、claim、worktree、SHA、闸门清单、测试数量、空段和完成块不贴给用户；合入或清理失败只用人话说明剩余 blocker。
 

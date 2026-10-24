@@ -4,7 +4,7 @@ This document defines the default collaboration protocol for multiple Agents wor
 
 ## Work Surfaces
 
-- `<project-root>` is the durable local `main` integration workspace. Keep this path checked out on branch `main`; use it only for local syncing, fast-forward merging, merge-result inspection, and publishing after the user explicitly authorizes a GitHub sync/release. All validation must finish before merge. Direct development writes and commits on `main` are forbidden.
+- `<project-root>` is the durable local `main` integration workspace. Keep this path checked out on branch `main`; use it only for local syncing, fast-forward merging, merge-result inspection, and publishing after the user explicitly authorizes a GitHub sync/release. All branch implementation validation must finish before merge. Direct development writes and commits on `main` are forbidden.
 - If `<project-root>` is found on a non-main branch, preserve or migrate that work into `<project-root>\.worktrees\<task-slug>` or a named stash, then restore the root path to `main` before continuing normal development or integration.
 - Development Agents use task-specific worktrees under `<project-root>\.worktrees\`. Resolve the pool with `core.infrastructure.branch_workspace`; do not hardcode a username, Desktop, or sibling folder.
 - The old sibling folder `<project-root-parent>\Vibelution-worktrees\` no longer exists on disk. The compatibility layer (`migrate_legacy_branch_workspaces` in `core.infrastructure.branch_workspace`) is kept only in case the folder reappears. Do not create new checkouts there; live legacy trees, if any ever resurface, can move with `migrate_legacy_branch_workspaces`.
@@ -203,7 +203,7 @@ python scripts/lmr.py register
 
 ## Cleanup
 
-All review, testing, quality gates, mergeability checks, and acceptance evidence belong before merge. The moment `git merge --ff-only <task-branch>` succeeds, the task is absorbed by local `main` and cleanup must start immediately; do not retain task resources while waiting for post-merge validation.
+All branch implementation review, testing, quality gates, mergeability checks, and code acceptance evidence belong before merge. The moment `git merge --ff-only <task-branch>` succeeds, the task is absorbed by local `main` and cleanup must start immediately; do not retain task resources while waiting for post-merge validation. User-goal acceptance that requires an authorized publication remains pending until its actual surface is verified under [development-standard.md §22.1](../standards/development-standard.md#221-user-goal-acceptance-before-completion); successful integration or cleanup does not establish overall completion. Keep that follow-up responsibility without retaining `integration/main` or another task's resources.
 
 If managed closeout reports `merged_cleanup_pending`, do not run validation or merge again. From root `main`, call `--cleanup-only --branch <task-branch>` so the idempotent safety checks can finish only the remaining task-owned cleanup.
 
