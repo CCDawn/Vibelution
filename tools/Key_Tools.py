@@ -3054,7 +3054,7 @@ def _build_key_tools() -> List[BaseTool]:
 
         path=describe, operation_id=目录中真实operationId，读取用途、参数、请求/响应schema和执行入口。
         文档目录覆盖全API，但发现不代表授权；可执行动作按access映射使用 personal_assistant_action_tool，
-        高风险操作使用 personal_assistant_manage_tool 的原生审批。禁止猜字段或让用户手抄ID/JSON。
+        高风险操作使用 personal_assistant_manage_tool 的原生审批；字段和对象 ID 从目录与查询结果取得。
 
         index 返回允许的标签分组与端点数量；tag 过滤后列出具体端点 path 与摘要。
         实际取数用 path="/api/..." 加可选 query（URL编码键值对，如 "limit=5"）。
@@ -3101,7 +3101,7 @@ def _build_key_tools() -> List[BaseTool]:
         还支持 team_create、knowledge_ingest、config_update（同样逐次审批）：
         team_run: name、goal、request_id（稳定唯一标识），可选template_id=dev-team；
         一次创建规划/两开发/评审四成员团队，保存原生流程并立即启动；返回teamId/flowId/runId。
-        running不等于完成，用action_tool的team_status查询；unknown/partial先核验，禁止换key重建。
+        running不等于完成，用action_tool的team_status查询；unknown/partial用原key核验已有记录。
         普通Agent改名/模型/档案、用户设置等优先用personal_assistant_action_tool对象参数自动执行。
         action_tool的index/describe登记的governed=true动作在此用相同action执行，arguments_json遵循其parameters schema。
         包含provider_add/update/remove/test、model_remove/default，以及session置顶/参数/归档、team_update/archive、room_update。
