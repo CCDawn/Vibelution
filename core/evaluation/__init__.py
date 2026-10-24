@@ -1,83 +1,146 @@
-"""监督进化与评测相关能力。
+# -*- coding: utf-8 -*-
+"""监督进化与评测相关能力。"""
 
-Public exports resolve their existing owner only when first requested.
-"""
+from .supervised_evolution import (
+    CaseDecisionSummary,
+    DEFAULT_BUNDLE_NAME,
+    DecisionGate,
+    RunAggregate,
+    SupervisedEvolutionCancelled,
+    SupervisedEvolutionDecision,
+    SupervisedEvolutionRun,
+    format_decision_record_summary,
+    load_supervised_bundle,
+    resolve_supervised_bundle_path,
+    run_supervised_evolution_session,
+)
+from .supervised_dashboard import (
+    SupervisedDashboardRecord,
+    SupervisedDashboardResult,
+    build_supervised_dashboard,
+    generate_supervised_dashboard,
+    load_dashboard_records,
+)
+from .selection_policy import PolicyExecutionRecord, execute_supervised_policy
+from .supervised_artifacts import (
+    SupervisedDecisionRecordArtifacts,
+    SupervisedJsonArtifact,
+    SupervisedPolicyProposalArtifact,
+    build_decision_record_artifacts,
+    build_case_diagnostic,
+    build_case_diagnostics,
+    load_project_json_artifact,
+    load_project_json_object,
+    load_required_project_json_object,
+    load_policy_proposal_artifacts,
+    load_policy_proposal_artifact,
+    policy_target_key,
+    resolve_project_artifact_path,
+)
+from .lineage import (
+    LineageCaseRecord,
+    LineageChainNode,
+    LineageIndex,
+    LineageSummary,
+    LineageSummaryItem,
+    load_lineage_index,
+    query_lineage_cases,
+    resolve_lineage_index_path,
+    summarize_lineage,
+)
+from .dataset_registry import (
+    DatasetMaterialization,
+    DatasetSpec,
+    ensure_dataset_registry,
+    get_dataset_spec,
+    list_dataset_status,
+    list_pending_self_evolution_dataset_candidates,
+    load_dataset_specs,
+    materialize_dataset_bundle,
+)
+from .chat_segmenter import (
+    ChatSegment,
+    ChatTurnRecord,
+    build_latest_task_segment,
+    has_analysis_signal,
+    has_conclusion_signal,
+    has_next_action_signal,
+    is_pure_chitchat_segment,
+    summarize_topic,
+)
+from .chat_review_queue import (
+    append_queue_event,
+    append_review_decision,
+    append_review_queue_candidate,
+    get_review_item,
+    iter_queue_events,
+    list_review_items,
+    load_review_items,
+)
+from .chat_dataset_capture import (
+    ChatDatasetCandidate,
+    ChatDatasetCaptureService,
+    ChatDatasetPaths,
+    approve_chat_candidate,
+    build_structured_chat_sample,
+    collect_exclusion_reasons,
+    collect_quality_signals,
+    format_candidate_preview,
+    format_structured_sample_preview,
+    load_candidate_payload,
+    reject_chat_candidate,
+    render_multiturn_prompt,
+    resolve_chat_dataset_paths,
+)
+from .supervised_workbench import (
+    DatasetRunPreparation,
+    DecisionHistoryRecord,
+    SupervisedGymProposalActionResult,
+    SupervisedGymProposalLifecycle,
+    SupervisedWorkbenchRunResult,
+    build_workbench_state,
+    dataset_status_line,
+    default_bundle_name,
+    execute_gym_promotion_action,
+    extract_gym_promotion_proposal_path,
+    format_bundle_preview,
+    format_decision_history,
+    format_file_excerpt,
+    format_gym_promotion_lifecycle,
+    format_lineage_summary,
+    format_materialization_summary,
+    format_run_banner,
+    list_available_workbench_bundles,
+    list_dataset_choices,
+    list_recent_decision_records,
+    load_gym_promotion_lifecycle,
+    load_workbench_state,
+    prepare_dataset_run,
+    resolve_workbench_bundle_path,
+    run_workbench_session,
+    save_workbench_state,
+    select_dataset_by_input,
+    select_decision_record,
+    supervised_evidence_storage_metadata,
+    workbench_state_path,
+)
+from .self_evolution_workbench import (
+    DEFAULT_SELF_EVOLUTION_GOAL,
+    SelfEvolutionTransactionRecord,
+    build_self_evolution_preview,
+    build_self_evolution_run_prompt,
+    build_self_evolution_snapshot,
+    build_self_evolution_worktree_snapshot,
+    format_self_evolution_audit_excerpt,
+    format_self_evolution_preview,
+    format_self_evolution_run_prompt,
+    format_self_evolution_transaction_history,
+    format_self_evolution_worktree_snapshot,
+    list_recent_self_evolution_transaction_payloads,
+    list_recent_self_evolution_transactions,
+    load_self_evolution_audit_records,
+)
 
-from __future__ import annotations
-
-from importlib import import_module as _import_module
-from typing import Any as _Any
-
-
-_EXPORT_GROUPS = {
-    '.supervised_evolution': (
-        'CaseDecisionSummary', 'DEFAULT_BUNDLE_NAME', 'DecisionGate',
-        'RunAggregate', 'SupervisedEvolutionCancelled', 'SupervisedEvolutionDecision',
-        'SupervisedEvolutionRun', 'format_decision_record_summary', 'load_supervised_bundle',
-        'resolve_supervised_bundle_path', 'run_supervised_evolution_session',
-    ),
-    '.supervised_dashboard': (
-        'SupervisedDashboardRecord', 'SupervisedDashboardResult', 'build_supervised_dashboard',
-        'generate_supervised_dashboard', 'load_dashboard_records',
-    ),
-    '.selection_policy': (
-        'PolicyExecutionRecord', 'execute_supervised_policy',
-    ),
-    '.supervised_artifacts': (
-        'SupervisedDecisionRecordArtifacts', 'SupervisedJsonArtifact', 'SupervisedPolicyProposalArtifact',
-        'build_decision_record_artifacts', 'build_case_diagnostic', 'build_case_diagnostics',
-        'load_project_json_artifact', 'load_project_json_object', 'load_required_project_json_object',
-        'load_policy_proposal_artifacts', 'load_policy_proposal_artifact', 'policy_target_key',
-        'resolve_project_artifact_path',
-    ),
-    '.lineage': (
-        'LineageCaseRecord', 'LineageChainNode', 'LineageIndex',
-        'LineageSummary', 'LineageSummaryItem', 'load_lineage_index',
-        'query_lineage_cases', 'resolve_lineage_index_path', 'summarize_lineage',
-    ),
-    '.dataset_registry': (
-        'DatasetMaterialization', 'DatasetSpec', 'ensure_dataset_registry',
-        'get_dataset_spec', 'list_dataset_status', 'list_pending_self_evolution_dataset_candidates',
-        'load_dataset_specs', 'materialize_dataset_bundle',
-    ),
-    '.chat_segmenter': (
-        'ChatSegment', 'ChatTurnRecord', 'build_latest_task_segment',
-        'has_analysis_signal', 'has_conclusion_signal', 'has_next_action_signal',
-        'is_pure_chitchat_segment', 'summarize_topic',
-    ),
-    '.chat_review_queue': (
-        'append_queue_event', 'append_review_decision', 'append_review_queue_candidate',
-        'get_review_item', 'iter_queue_events', 'list_review_items',
-        'load_review_items',
-    ),
-    '.chat_dataset_capture': (
-        'ChatDatasetCandidate', 'ChatDatasetCaptureService', 'ChatDatasetPaths',
-        'approve_chat_candidate', 'build_structured_chat_sample', 'collect_exclusion_reasons',
-        'collect_quality_signals', 'format_candidate_preview', 'format_structured_sample_preview',
-        'load_candidate_payload', 'reject_chat_candidate', 'render_multiturn_prompt',
-        'resolve_chat_dataset_paths',
-    ),
-    '.supervised_workbench': (
-        'DatasetRunPreparation', 'DecisionHistoryRecord', 'SupervisedGymProposalActionResult',
-        'SupervisedGymProposalLifecycle', 'SupervisedWorkbenchRunResult', 'build_workbench_state',
-        'dataset_status_line', 'default_bundle_name', 'execute_gym_promotion_action',
-        'extract_gym_promotion_proposal_path', 'format_bundle_preview', 'format_decision_history',
-        'format_file_excerpt', 'format_gym_promotion_lifecycle', 'format_lineage_summary',
-        'format_materialization_summary', 'format_run_banner', 'list_available_workbench_bundles',
-        'list_dataset_choices', 'list_recent_decision_records', 'load_gym_promotion_lifecycle',
-        'load_workbench_state', 'prepare_dataset_run', 'resolve_workbench_bundle_path',
-        'run_workbench_session', 'save_workbench_state', 'select_dataset_by_input',
-        'select_decision_record', 'supervised_evidence_storage_metadata', 'workbench_state_path',
-    ),
-    '.self_evolution_workbench': (
-        'DEFAULT_SELF_EVOLUTION_GOAL', 'SelfEvolutionTransactionRecord', 'build_self_evolution_preview',
-        'build_self_evolution_run_prompt', 'build_self_evolution_snapshot', 'build_self_evolution_worktree_snapshot',
-        'format_self_evolution_audit_excerpt', 'format_self_evolution_preview', 'format_self_evolution_run_prompt',
-        'format_self_evolution_transaction_history', 'format_self_evolution_worktree_snapshot', 'list_recent_self_evolution_transaction_payloads',
-        'list_recent_self_evolution_transactions', 'load_self_evolution_audit_records',
-    ),
-}
-_EXPORTS = {name: module for module, names in _EXPORT_GROUPS.items() for name in names}
 __all__ = [
     "CaseDecisionSummary",
     "DEFAULT_BUNDLE_NAME",
@@ -200,17 +263,3 @@ __all__ = [
     "list_recent_self_evolution_transactions",
     "load_self_evolution_audit_records",
 ]
-
-
-def __getattr__(name: str) -> _Any:
-    module_name = _EXPORTS.get(name)
-    if module_name is None:
-        # Preserve Python's normal fallback for real package submodules.
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    value = getattr(_import_module(module_name, __name__), name)
-    globals()[name] = value
-    return value
-
-
-def __dir__() -> list[str]:
-    return sorted(set(globals()).union(_EXPORTS))

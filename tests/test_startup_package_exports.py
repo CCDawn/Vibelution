@@ -35,10 +35,6 @@ def _cold(source: str, tmp_path: Path) -> None:
         "core.research.workflow.contracts.workflow_snapshot",
         "core.research.workflow.contracts.anomaly_inbox",
     )),
-    ("core.evaluation.chat_dataset_capture", (
-        "core.evaluation.supervised_evolution", "core.evaluation.supervised_workbench",
-        "core.evaluation.self_evolution_workbench", "core.gym",
-    )),
 ])
 def test_leaf_import_does_not_initialize_optional_exports(leaf, blocked, tmp_path):
     _cold(f"""
@@ -58,7 +54,6 @@ def test_leaf_import_does_not_initialize_optional_exports(leaf, blocked, tmp_pat
 # including names which the old package imported but omitted from __all__.
 @pytest.mark.parametrize(("package_name", "owner_digest"), [
     ("core.research.workflow.contracts", "b8297434f6854cf80f46a32f6eb3fa91995bcac3001e03bdde74962550f828b2"),
-    ("core.evaluation", "14eec5422a29fa0b63607c02fb32e59139c1a62bc9a62dd14f436a18fae55fcb"),
 ])
 def test_public_exports_keep_original_owners_and_identity(package_name, owner_digest, tmp_path):
     _cold(f"""
