@@ -392,6 +392,8 @@ ELECTRON_SUPERVISOR_EVENT_CODES = {
     "electron.conversation_notification.notified",
     "electron.conversation_notification.suppressed",
     "electron.conversation_notification.failed",
+    "electron.conversation_notification.native_shown",
+    "electron.conversation_notification.native_failed",
     # deep_link
     "electron.deep_link.accepted",
     "electron.deep_link.rejected",
