@@ -25,7 +25,7 @@ function completion(
 }
 
 function makeService(options: { focused?: boolean; notificationSupported?: boolean } = {}) {
-  const notifications: Array<{ title: string; body: string; clicked: () => void; shown: boolean }> = [];
+  const notifications: Array<{ title: string; body: string; clicked: () => void; shown: boolean; nativeShown: () => void; nativeFailed: () => void }> = [];
   const workbenchMessages: Array<{ channel: string; payload: unknown }> = [];
   const recordEvent = vi.fn(async () => undefined);
   const provider = {
@@ -49,8 +49,8 @@ function makeService(options: { focused?: boolean; notificationSupported?: boole
     windowProvider: provider,
     notificationSupported: () => options.notificationSupported ?? true,
     notificationOpenedChannel: OPENED_CHANNEL,
-    createNotification: ({ title, body, onClick }) => {
-      const record = { title, body, clicked: onClick, shown: false };
+    createNotification: ({ title, body, onClick, onShow, onFailed }) => {
+      const record = { title, body, clicked: onClick, shown: false, nativeShown: onShow, nativeFailed: onFailed };
       notifications.push(record);
       return {
         show: () => {
@@ -65,6 +65,17 @@ function makeService(options: { focused?: boolean; notificationSupported?: boole
 }
 
 describe("conversation notification service", () => {
+  it("records OS display and failure callbacks separately from submission", async () => {
+    const { service, notifications, recordEvent } = makeService();
+    await service.notify(completion());
+    expect(recordEvent.mock.calls.map(([event]) => event.eventCode)).toEqual(["electron.conversation_notification.notified"]);
+    notifications[0].nativeShown();
+    notifications[0].nativeFailed();
+    expect(recordEvent.mock.calls.map(([event]) => event.eventCode)).toEqual([
+      "electron.conversation_notification.notified", "electron.conversation_notification.native_shown",
+      "electron.conversation_notification.native_failed"
+    ]);
+  });
   it.each(["failed_runtime", "failed_provider", "paused_limit", "aborted", "superseded"])(
     "accepts the real renderer payload for %s without calling it success", async terminalReason => {
       const payloads: DesktopConversationCompletionNotification[] = [];

@@ -36,6 +36,8 @@ type NotificationFactoryInput = {
   title: string;
   body: string;
   onClick: () => void;
+  onShow: () => void;
+  onFailed: () => void;
 };
 
 type WindowProviderLike = {
@@ -287,6 +289,16 @@ export function createConversationNotificationService(
         const notification = options.createNotification({
           title: normalizedPayload.title,
           body: normalizedPayload.body,
+          onShow: () => record(
+            "electron.conversation_notification.native_shown",
+            "Native platform confirmed the conversation notification was shown.",
+            normalizedPayload, focused, "notified"
+          ),
+          onFailed: () => record(
+            "electron.conversation_notification.native_failed",
+            "Native platform reported a conversation notification failure.",
+            normalizedPayload, focused, "failed"
+          ),
           onClick: () => {
             void options.windowProvider.focusWorkbench();
             options.windowProvider.sendToWorkbench(options.notificationOpenedChannel, {
@@ -299,7 +311,7 @@ export function createConversationNotificationService(
         notification.show();
         record(
           "electron.conversation_notification.notified",
-          "Conversation completion notification was shown.",
+          "Conversation completion notification was submitted to the native platform.",
           normalizedPayload,
           focused,
           "notified"

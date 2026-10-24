@@ -822,9 +822,11 @@ function resolveConversationNotificationService(event: IpcMainInvokeEvent): Conv
   const service = createConversationNotificationService({
     windowProvider: target,
     notificationSupported: () => Notification.isSupported(),
-    createNotification: ({ title, body, onClick }) => {
+    createNotification: ({ title, body, onClick, onShow, onFailed }) => {
       const notification = new Notification({ title, body, silent: false });
       notification.on("click", onClick);
+      notification.on("show", onShow);
+      notification.on("failed", onFailed);
       return notification;
     },
     createBadgeIcon: createConversationBadgeIcon,
