@@ -1,9 +1,13 @@
 import { useEffect } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 
+import { queryKeys } from "../api/queryKeys";
+import type { ConfigBootstrap } from "../api/types";
 import { parseChatRouteSelection } from "../routes/chat/chatSelectionProjection";
 import { chatWorkbenchBootstrapQueryOptions } from "../routes/chat/chatWorkbenchBootstrapQuery";
 import { useChatStartupSessionPrefetch } from "../routes/chat/useChatStartupSessionPrefetch";
+import { readCurrentChatSelectionPreference } from "../routes/chat/useChatSelectionPersistence";
+import { isWorkbenchModeEnabled } from "./workbenchContract";
 
 /** Overlap native Chat reads with the lazy route chunk without selecting a session. */
 export function useChatStartupPrefetch({ queryClient, pathname, search }: {
@@ -12,7 +16,14 @@ export function useChatStartupPrefetch({ queryClient, pathname, search }: {
   search: string;
 }) {
   const selection = parseChatRouteSelection(search);
-  const enabled = pathname === "/chat" && (selection.kind === "bare" || selection.kind === "session");
+  // Native startup opens `/`. HomeRedirect validates config before restoring
+  // Chat, so warm its remembered reads during that wait without selecting it.
+  const restore = pathname === "/" ? readCurrentChatSelectionPreference() : null;
+  const config = queryClient.getQueryData<ConfigBootstrap>(queryKeys.configPublic());
+  const restoringChat = pathname === "/" && selection.kind === "bare"
+    && Boolean(restore?.agentId || restore?.sessionId) && isWorkbenchModeEnabled(config, "chat");
+  const enabled = restoringChat
+    || (pathname === "/chat" && (selection.kind === "bare" || selection.kind === "session"));
   useChatStartupSessionPrefetch({
     queryClient,
     enabled,

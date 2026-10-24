@@ -51,7 +51,10 @@ function pendingReads() {
 }
 
 describe("shell Chat startup prefetch", () => {
-  it.each([false, true])("starts both reads before the lazy route loads and shares its %s settled bootstrap", async settled => {
+  it.each([
+    { pathname: "/chat", settled: false }, { pathname: "/chat", settled: true },
+    { pathname: "/", settled: false }, { pathname: "/", settled: true },
+  ])("starts reads before the lazy route loads from $pathname (settled: $settled)", async ({ pathname, settled }) => {
     const bootstrap = pendingReads();
     const chunk = deferred<void>();
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -71,7 +74,7 @@ describe("shell Chat startup prefetch", () => {
       } };
     });
     const Route = lazy(loadRoute);
-    const page = await mount(undefined, <Route />, client);
+    const page = await mount({ pathname, search: "" }, <Route />, client);
     try {
       expect(loadRoute).toHaveBeenCalledOnce();
       expect(fetchChatWorkbenchBootstrap).toHaveBeenCalledOnce();
@@ -83,6 +86,68 @@ describe("shell Chat startup prefetch", () => {
       expect(fetchChatWorkbenchBootstrap).toHaveBeenCalledOnce();
       expect(fetchSessionDetailWindow).toHaveBeenCalledOnce();
       expect(querySessions).not.toHaveBeenCalled();
+    } finally { await page.close(); }
+  });
+
+  it("does not prefetch an undecided root without a remembered Chat selection", async () => {
+    pendingReads();
+    vi.mocked(readCurrentChatSelectionPreference).mockReturnValue(null);
+    const page = await mount({ pathname: "/", search: "" });
+    try {
+      expect(fetchChatWorkbenchBootstrap).not.toHaveBeenCalled();
+      expect(fetchSessionDetailWindow).not.toHaveBeenCalled();
+    } finally { await page.close(); }
+  });
+
+  it("warms only the catalog for a remembered Agent without a session", async () => {
+    pendingReads();
+    vi.mocked(readCurrentChatSelectionPreference).mockReturnValue({ agentId: "remembered-agent" });
+    const page = await mount({ pathname: "/", search: "" });
+    try {
+      expect(fetchChatWorkbenchBootstrap).toHaveBeenCalledOnce();
+      expect(fetchSessionDetailWindow).not.toHaveBeenCalled();
+    } finally { await page.close(); }
+  });
+
+  it.each([
+    { domainAvailability: { chat: false } }, { modeAvailability: { chat: false } },
+  ])("skips root restoration when cached config disables Chat: %j", async config => {
+    pendingReads();
+    const client = new QueryClient();
+    client.setQueryData(queryKeys.configPublic(), config);
+    const page = await mount({ pathname: "/", search: "" }, undefined, client);
+    try {
+      expect(fetchChatWorkbenchBootstrap).not.toHaveBeenCalled();
+      expect(fetchSessionDetailWindow).not.toHaveBeenCalled();
+    } finally { await page.close(); }
+  });
+
+  it("hands root reads to Chat without aborting or starting them twice", async () => {
+    pendingReads();
+    const page = await mount({ pathname: "/", search: "" });
+    const bootstrapSignal = vi.mocked(fetchChatWorkbenchBootstrap).mock.calls[0][0]?.signal;
+    const bodySignal = vi.mocked(fetchSessionDetailWindow).mock.calls[0][1]?.signal;
+    try {
+      await page.render({ pathname: "/chat", search: "" });
+      expect(bootstrapSignal?.aborted).toBe(false);
+      expect(bodySignal?.aborted).toBe(false);
+      expect(fetchChatWorkbenchBootstrap).toHaveBeenCalledOnce();
+      expect(fetchSessionDetailWindow).toHaveBeenCalledOnce();
+    } finally { await page.close(); }
+  });
+
+  it("retires root reads when authoritative config disables restoration", async () => {
+    const bootstrap = pendingReads();
+    const page = await mount({ pathname: "/", search: "" });
+    const bootstrapSignal = vi.mocked(fetchChatWorkbenchBootstrap).mock.calls[0][0]?.signal;
+    const bodySignal = vi.mocked(fetchSessionDetailWindow).mock.calls[0][1]?.signal;
+    try {
+      page.client.setQueryData(queryKeys.configPublic(), { domainAvailability: { chat: false } });
+      await page.render({ pathname: "/", search: "" });
+      expect(bootstrapSignal?.aborted).toBe(true);
+      expect(bodySignal?.aborted).toBe(true);
+      await act(async () => bootstrap.resolve(payload()));
+      expect(page.client.getQueryData(queryKeys.agents())).toBeUndefined();
     } finally { await page.close(); }
   });
 
