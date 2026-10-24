@@ -74,3 +74,31 @@ def test_discovery_keeps_legacy_identity_normalization(registry):
     assert row["createdBy"] == "operator"
     assert row["roleKey"] == "research_legacy_role"
     assert row["agentCode"] == directory._fallback_agent_code("old")
+
+
+def test_companion_background_discovery_uses_identities_but_keeps_ui_lister(registry, monkeypatch):
+    from types import SimpleNamespace
+    from core.web.services import virtual_human_life_service as life
+
+    service = SimpleNamespace(agent_lister=life._default_agent_lister)
+    rows = life._runtime_agent_identities(service)
+    assert [row["agentId"] for row in rows] == ["active-default", "draft", "old"]
+    assert rows[-1]["directSessionId"] == "session-old"
+    ui = [{"agentId": "ui", "avatarUrl": "/avatar.png"}]
+    monkeypatch.setattr(directory, "list_agents", lambda **kw: ui if kw == {
+        "include_archived": False, "detail": "summary",
+    } else pytest.fail("UI lister contract changed"))
+    assert life._default_agent_lister() is ui
+
+
+def test_companion_background_discovery_preserves_injected_lister(monkeypatch):
+    from types import SimpleNamespace
+    from core.web.services import virtual_human_life_service as life
+    from core.web.services.agent_directory import parameter_snapshot
+
+    custom = [{"agentId": "injected", "directSessionId": "custom-session"}]
+    calls = []
+    service = SimpleNamespace(agent_lister=lambda: calls.append(True) or custom)
+    monkeypatch.setattr(parameter_snapshot, "list_agent_identity_snapshots", lambda **kw: pytest.fail("injected lister bypassed"))
+    assert life._runtime_agent_identities(service) is custom
+    assert calls == [True]

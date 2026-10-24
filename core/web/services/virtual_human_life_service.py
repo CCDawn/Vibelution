@@ -60,6 +60,15 @@ def _default_agent_lister() -> list[dict[str, Any]]:
     return list_agents(include_archived=False, detail="summary")
 
 
+def _runtime_agent_identities(service: VirtualHumanLifeService) -> list[dict[str, Any]]:
+    """Background discovery needs bindings and IDs, without Agent UI hydration."""
+    if service.agent_lister is not _default_agent_lister:
+        return service.agent_lister()
+    from .agent_directory.parameter_snapshot import list_agent_identity_snapshots
+
+    return list_agent_identity_snapshots(include_archived=False)
+
+
 def _default_directory_visibility_manager(
     agent_id: str,
     *,
@@ -1632,7 +1641,7 @@ def heartbeat_all_virtual_humans(*, coalesced: bool = False, prepare_only: bool 
 
     recover_pending_purges()
     results: list[dict[str, Any]] = []
-    for agent in service.agent_lister():
+    for agent in _runtime_agent_identities(service):
         if not _RUNTIME_ACCEPTING.is_set():
             break
         agent_id = str(agent.get("agentId") or "").strip()
@@ -1819,7 +1828,7 @@ def stop_virtual_human_life_runtime() -> None:
     _RUNTIME_ACCEPTING.clear()
     try:
         service = get_virtual_human_life_service()
-        agents = service.agent_lister()
+        agents = _runtime_agent_identities(service)
     except Exception as exc:  # noqa: BLE001 - shutdown remains best-effort
         logger.warning(
             "Failed to enumerate virtual human Agents during host stop (%s).",
