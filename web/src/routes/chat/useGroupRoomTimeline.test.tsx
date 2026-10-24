@@ -201,6 +201,41 @@ function projectionAt(index = -1): GroupRoomTimelineProjection {
 }
 
 describe("foldGroupTimelineEvents", () => {
+  it.each(["completed", "failed", "partial", "stopped"])(
+    "preserves %s against a late stopping event while a new round starts normally",
+    (status) => {
+      const items = foldGroupTimelineEvents([
+        roundStart(1, "r1", "原议题"),
+        roundFinish(2, "r1", status, "本轮已结束"),
+        eventOf(3, "round_state", { status: "stopping" }, "r1"),
+        roundStart(4, "r2", "新议题"),
+      ]);
+      const rounds = items.flatMap((item) => item.kind === "round" ? [item.round] : []);
+      expect(rounds[0]).toMatchObject({
+        roundId: "r1",
+        status,
+        summary: "本轮已结束",
+        finishedAt: "2026-09-04T09:00:02.000Z",
+        updatedAt: "2026-09-04T09:00:02.000Z",
+      });
+      expect(rounds[1]).toMatchObject({ roundId: "r2", status: "running", topic: "新议题", finishedAt: "" });
+    },
+  );
+
+  it("seals stopped rounds with the backend terminal summary and timestamp", () => {
+    const items = foldGroupTimelineEvents([
+      roundStart(1, "r1", "讨论拆分"),
+      eventOf(2, "round_state", { status: "stopping" }, "r1"),
+      roundFinish(3, "r1", "stopped", "用户停止了本轮发言"),
+    ]);
+    const round = items[0]?.kind === "round" ? items[0].round : null;
+    expect(round).toMatchObject({
+      status: "stopped",
+      summary: "用户停止了本轮发言",
+      finishedAt: "2026-09-04T09:00:03.000Z",
+    });
+  });
+
   it("opens rounds on round_state(start), clusters messages by roundId, seals with the finish digest", () => {
     const items = foldGroupTimelineEvents([
       roundStart(1, "r1", "讨论拆分"),

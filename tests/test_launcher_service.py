@@ -46,6 +46,94 @@ def isolate_desktop_session_store(tmp_path, monkeypatch):
     )
 
 
+@pytest.mark.parametrize(
+    "error_type",
+    ["LifecycleCommandCancelled", "SupersededByOpenWorkbench", "SupersededByCloseWorkbench", "SupersededByForceCloseWorkbench"],
+)
+def test_recent_runtime_manager_result_events_preserve_terminal_facts(tmp_path, error_type):
+    events_path = tmp_path / "events.jsonl"
+    events_path.write_text(
+        json.dumps({
+            "type": "command_queue.command_result_written",
+            "payload": {"commandId": "cmd-old", "completed": True, "ok": False, "errorType": error_type},
+        }) + "\n",
+        encoding="utf-8",
+    )
+    event = launcher_service._recent_runtime_manager_events(events_path, limit=1)[0]
+    assert event["completed"] is True
+    assert event["ok"] is False
+    assert event["errorType"] == error_type
+
+
+def test_recent_runtime_manager_events_do_not_invent_completion(tmp_path):
+    events_path = tmp_path / "events.jsonl"
+    events_path.write_text(
+        json.dumps({"type": "command_queue.processing_recovered", "payload": {"commandId": "cmd-old"}}) + "\n",
+        encoding="utf-8",
+    )
+    event = launcher_service._recent_runtime_manager_events(events_path, limit=1)[0]
+    assert "completed" not in event
+    assert event["ok"] is None
+
+
+@pytest.mark.parametrize("ok", [None, "false", "true", 0, 1])
+def test_launcher_result_summary_preserves_unknown_success_fact(ok):
+    result = launcher_service._result_summary({"commandId": "cmd-unknown", "completed": True, "ok": ok})
+    assert result["ok"] is None
+    assert result["completed"] is True
+    assert launcher_service._result_summary({"completed": True})["ok"] is None
+
+
+@pytest.mark.parametrize("ok", [True, False])
+def test_launcher_result_summary_preserves_explicit_success_fact(ok):
+    assert launcher_service._result_summary({"completed": True, "ok": ok})["ok"] is ok
+
+
+def test_launcher_result_summary_preserves_interruption_facts():
+    facts = {"completed": True, "ok": False, "cancelled": True, "supersededByCommandId": "cmd-new", "supersededByCommandType": "open_workbench"}
+    summary = launcher_service._result_summary(facts)
+    for key, value in facts.items():
+        assert summary[key] == value
+
+
+def test_recent_result_files_keep_unknown_and_interruption_facts_on_the_wire(tmp_path):
+    facts = [
+        {"commandId": "unknown", "completed": True},
+        {"commandId": "cancelled", "completed": True, "ok": False, "cancelled": True},
+        {"commandId": "superseded", "completed": True, "ok": False, "supersededByCommandId": "cmd-new"},
+    ]
+    for result in facts:
+        (tmp_path / f"{result['commandId']}.json").write_text(json.dumps(result), encoding="utf-8")
+    projected = json.loads(json.dumps(launcher_service._recent_result_files(tmp_path, limit=3)))
+    by_id = {result["commandId"]: result for result in projected}
+    assert by_id["unknown"]["ok"] is None
+    assert by_id["unknown"]["completed"] is True
+    assert by_id["cancelled"]["cancelled"] is True
+    assert by_id["superseded"]["supersededByCommandId"] == "cmd-new"
+
+
+@pytest.mark.parametrize("ok", [None, "false", "true", 0, 1, True, False])
+def test_runtime_manager_recovery_summary_preserves_result_tristate(ok):
+    summary = launcher_service._runtime_manager_recovery_summary(
+        recent_events=[{"type": "command_queue.processing_recovered", "commandId": "cmd-old"}],
+        recent_results=[{"commandId": "cmd-old", "completed": True, "ok": ok}],
+    )
+    expected_ok = ok if isinstance(ok, bool) else None
+    assert summary["resultOk"] is expected_ok
+    if expected_ok is None:
+        assert "已恢复并完成" not in summary["statusLine"]
+        assert "结果需要检查" not in summary["statusLine"]
+
+
+def test_runtime_manager_recovery_summary_keeps_missing_result_unknown():
+    for results in ([], [{"commandId": "cmd-old", "completed": True}]):
+        summary = launcher_service._runtime_manager_recovery_summary(
+            recent_events=[{"type": "command_queue.processing_recovered", "commandId": "cmd-old"}],
+            recent_results=results,
+        )
+        assert summary["resultOk"] is None
+
+
 def test_launcher_payload_contract_is_shared_between_standalone_and_web_routes():
     from core.launcher import api_contract
 

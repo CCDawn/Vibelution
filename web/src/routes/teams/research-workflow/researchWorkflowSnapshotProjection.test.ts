@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ResearchWorkflowSnapshot } from "../../../api/types/research-workflow/core";
+import { projectionToCanvasGraph } from "./researchProcessGraphModel";
 import {
   snapshotToCanvasProjection,
   snapshotToRunRecord,
@@ -71,6 +72,26 @@ const snapshot: ResearchWorkflowSnapshot = {
 };
 
 describe("researchWorkflowSnapshotProjection", () => {
+  it.each(["starting", "dispatching"])("keeps a %s attempt active on the canvas", (status) => {
+    const formal: ResearchWorkflowSnapshot = {
+      ...snapshot,
+      definition: {
+        nodes: [{ nodeId: "source_finding", actorKind: "agent", label: "资料寻找", stageId: "knowledge_collection" }],
+        stages: [{ stageId: "knowledge_collection", nodeIds: ["source_finding"], index: 0, label: "资料搜集" }],
+        edges: [],
+      },
+      nodeAttempts: {
+        source_finding: [{ ...snapshot.nodeAttempts.source_finding[0], status }],
+      },
+    };
+    const projection = snapshotToCanvasProjection(formal);
+    const graph = projectionToCanvasGraph(projection);
+
+    expect(projection.formalSnapshot.nodeAttempts.source_finding[0].status).toBe(status);
+    expect(graph.nodes[0]).toMatchObject({ status: "running", isRuntimeCurrent: true });
+    expect(graph.stages[0].stageTone).toBe("active");
+  });
+
   it("copies frozen Agent bindings onto canvas nodeRuns and the run record", () => {
     const projection = snapshotToCanvasProjection(snapshot);
     expect(projection.run.nodeRuns.source_finding.primaryAgentId).toBe("agent-finder");

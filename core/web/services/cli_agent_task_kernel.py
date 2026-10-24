@@ -128,11 +128,14 @@ def submit_cli_agent_task(
 
     with _TASK_LOCK:
         task_state = _read_task_state(str(task_state.get("taskId") or "")) or task_state
-        task_state["status"] = "sent"
-        task_state["code"] = "CLI_AGENT_TASK_SENT"
-        task_state["sentAt"] = _now_iso()
-        task_state["updatedAt"] = task_state["sentAt"]
-        _write_task_state(task_state)
+        # The reader can publish progress or settle the task while input is
+        # being written. An acknowledgement must not reopen that newer state.
+        if task_state.get("status") == "queued":
+            task_state["status"] = "sent"
+            task_state["code"] = "CLI_AGENT_TASK_SENT"
+            task_state["sentAt"] = _now_iso()
+            task_state["updatedAt"] = task_state["sentAt"]
+            _write_task_state(task_state)
     return _public_task_result(task_state, terminal_session=terminal_session, output_limit=output_chars)
 
 

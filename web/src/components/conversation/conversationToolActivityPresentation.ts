@@ -1,4 +1,5 @@
 import type { CodexTranscriptCell } from "./codexTranscriptCells";
+import type { CodexTerminalOperation } from "./codexToolLifecycleModel";
 import { codexTranscriptToolRawName } from "./conversationToolActivityModel";
 import type { ConversationToolPresentationLanguage } from "./conversationToolPresentation";
 import {
@@ -40,13 +41,22 @@ export type ConversationToolActivityDigestPresentation = {
 };
 
 export function conversationToolActivityTerminalExitCode(cell: CodexTranscriptCell) {
+  let firstExitCode: number | null = null;
+  let noMatchExitCode: number | null = null;
   for (const operation of cell.toolLifecycleModel?.terminalOperations ?? []) {
     const exitCode = operation.result?.exitCode;
-    if (typeof exitCode === "number") {
-      return exitCode;
+    if (typeof exitCode !== "number") {
+      continue;
+    }
+    firstExitCode ??= exitCode;
+    if (exitCode !== 0) {
+      if (!isNoMatchTerminalOperation(operation)) {
+        return exitCode;
+      }
+      noMatchExitCode = exitCode;
     }
   }
-  return null;
+  return noMatchExitCode ?? firstExitCode;
 }
 
 export function conversationToolActivityHasNonzeroTerminalExit(cell: CodexTranscriptCell) {
@@ -54,21 +64,27 @@ export function conversationToolActivityHasNonzeroTerminalExit(cell: CodexTransc
   return exitCode !== null && exitCode !== 0;
 }
 
-export function conversationToolActivityIsNoMatchTerminalExit(cell: CodexTranscriptCell) {
-  if (conversationToolActivityTerminalExitCode(cell) !== 1) {
+function isNoMatchTerminalOperation(operation: CodexTerminalOperation) {
+  if (operation.result?.exitCode !== 1) {
     return false;
   }
-  const terminalText = (cell.toolLifecycleModel?.terminalOperations ?? [])
-    .flatMap((operation) => [
-      operation.request?.displayCommand,
-      operation.result?.formattedOutput,
-      operation.result?.stdout,
-      operation.result?.stderr,
-    ])
+  const terminalText = [
+    operation.request?.displayCommand,
+    operation.result?.formattedOutput,
+    operation.result?.stdout,
+    operation.result?.stderr,
+  ]
     .filter(Boolean)
     .join("\n");
   return /\b(?:findstr|grep|rg)\b/i.test(terminalText)
     && /(?:无输出|no output|no matches?|not found)/i.test(terminalText);
+}
+
+export function conversationToolActivityIsNoMatchTerminalExit(cell: CodexTranscriptCell) {
+  const nonzeroOperations = (cell.toolLifecycleModel?.terminalOperations ?? []).filter(
+    (operation) => typeof operation.result?.exitCode === "number" && operation.result.exitCode !== 0,
+  );
+  return nonzeroOperations.length > 0 && nonzeroOperations.every(isNoMatchTerminalOperation);
 }
 
 export function conversationToolActivityRendererForCell(
@@ -94,14 +110,11 @@ function toolInvocationCount(cell: CodexTranscriptCell) {
 }
 
 function needsAttention(cell: CodexTranscriptCell) {
-  if (conversationToolActivityIsNoMatchTerminalExit(cell)) {
-    return false;
-  }
   return cell.status === "failed"
     || cell.status === "degraded"
     || cell.tone === "warning"
     || cell.tone === "error"
-    || conversationToolActivityHasNonzeroTerminalExit(cell);
+    || (conversationToolActivityHasNonzeroTerminalExit(cell) && !conversationToolActivityIsNoMatchTerminalExit(cell));
 }
 
 function digestTitle(

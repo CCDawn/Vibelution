@@ -1,3 +1,5 @@
+import { CONVERSATION_NOTIFICATION_CONTRACT } from "./conversationNotificationContract.generated.js";
+
 export type DesktopConversationCompletionNotification = {
   schemaVersion: 1;
   notificationKey: string;
@@ -71,17 +73,9 @@ export type ConversationNotificationService = {
   clearAttention(): void;
 };
 
-const SUCCESS_TERMINAL_STATUSES = new Set(["completed"]);
-// The turn finished its reply but explicitly waits for a user "继续" to
-// advance; reporting it as plain "已结束" hides the pending follow-up step.
-const CONTINUATION_TERMINAL_STATUSES = new Set(["needs_continue", "paused_limit"]);
-// The renderer canonicalizes success, but preserves native failure/continuation
-// reasons. Keep those receipts; resting and user-stop values cannot notify.
-const NOTIFIABLE_TERMINAL_STATUSES = new Set([
-  "completed", "needs_continue", "paused_limit", "failed", "failure", "error",
-  "failed_runtime", "failed_provider", "timeout", "timed_out", "blocked", "danger",
-  "crashed", "unhealthy", "aborted", "interrupted", "cancelled", "canceled", "superseded"
-]);
+const SUCCESS_TERMINAL_STATUSES = new Set<string>(CONVERSATION_NOTIFICATION_CONTRACT.successTerminalStatuses);
+const CONTINUATION_TERMINAL_STATUSES = new Set<string>(CONVERSATION_NOTIFICATION_CONTRACT.continuationTerminalStatuses);
+const NOTIFIABLE_TERMINAL_STATUSES = new Set<string>(CONVERSATION_NOTIFICATION_CONTRACT.terminalStatuses);
 
 function normalizeText(value: unknown): string {
   return String(value ?? "").replace(/\s+/g, " ").trim();

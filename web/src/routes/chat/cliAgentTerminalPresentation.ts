@@ -15,6 +15,13 @@ export function terminalStatusText(
     return lang === "zh" ? "未连接" : "Disconnected";
   }
   const interactionState = String(session.interactionState || "").trim().toLowerCase();
+  const status = String(session.status || "").trim().toLowerCase();
+  if (status === "stopping") {
+    return lang === "zh" ? "停止中" : "Stopping";
+  }
+  if (interactionState === "closed" || session.userClosed || status === "closed") {
+    return lang === "zh" ? "已关闭" : "Closed";
+  }
   if (session.canInput === true || interactionState === "live" || session.alive) {
     return session.resumed ? (lang === "zh" ? "已恢复" : "Resumed") : (lang === "zh" ? "运行中" : "Running");
   }
@@ -24,21 +31,17 @@ export function terminalStatusText(
   if (interactionState === "history") {
     return lang === "zh" ? "只读历史" : "History";
   }
-  const status = String(session.status || "").trim().toLowerCase();
-  if (interactionState === "closed" || session.userClosed || status === "closed") {
-    return lang === "zh" ? "已关闭" : "Closed";
-  }
   if (status === "exited") {
     return lang === "zh" ? "已退出" : "Exited";
-  }
-  if (status === "stopping") {
-    return lang === "zh" ? "停止中" : "Stopping";
   }
   return lang === "zh" ? "未运行" : "Stopped";
 }
 
 export function canInputTerminal(session: CliAgentTerminalSession | null) {
   if (!session) {
+    return false;
+  }
+  if (String(session.status || "").trim().toLowerCase() === "stopping") {
     return false;
   }
   if (typeof session.canInput === "boolean") {
@@ -79,6 +82,9 @@ export function parseTerminalErrorSession(error: unknown): Partial<CliAgentTermi
 
 export function terminalErrorMessage(error: unknown, lang: "zh" | "en") {
   const patch = parseTerminalErrorSession(error);
+  if (patch?.status === "stopping") {
+    return lang === "zh" ? "终端正在停止，不能继续输入。" : "Terminal is stopping and cannot accept input.";
+  }
   if (patch?.interactionState === "resumable" || patch?.canResume) {
     return lang === "zh" ? "终端未运行，恢复会话后才能继续输入。" : "Terminal is not running. Resume the session before typing.";
   }

@@ -32,7 +32,7 @@ export const GROUP_TIMELINE_PAGE_LIMIT = 200;
  */
 const GROUP_TIMELINE_MAX_CHAIN_PAGES = 10;
 
-const ROUND_TERMINAL_STATUSES = new Set(["completed", "partial", "failed"]);
+const ROUND_TERMINAL_STATUSES = new Set(["completed", "partial", "failed", "stopped"]);
 
 export type GroupTimelineMemberChangeRow = {
   key: string;
@@ -158,8 +158,11 @@ export function foldGroupTimelineEvents(events: ChatRoomTimelineEvent[]): GroupT
         }
       } else if (status === "stopping") {
         const round = ensureRound(event, status);
-        round.status = "stopping";
-        round.updatedAt = createdAt || round.updatedAt;
+        // Stop requests can reach the log after this round's worker has settled.
+        if (!ROUND_TERMINAL_STATUSES.has(round.status)) {
+          round.status = "stopping";
+          round.updatedAt = createdAt || round.updatedAt;
+        }
       } else if (ROUND_TERMINAL_STATUSES.has(status)) {
         const round = ensureRound(event, status);
         round.status = status;

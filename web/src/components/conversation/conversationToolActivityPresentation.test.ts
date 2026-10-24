@@ -4,6 +4,8 @@ import type { CodexTranscriptCell } from "./codexTranscriptCells";
 import {
   buildConversationToolActivityDigestPresentation,
   buildConversationToolActivityPresentation,
+  conversationToolActivityIsNoMatchTerminalExit,
+  conversationToolActivityTerminalExitCode,
 } from "./conversationToolActivityPresentation";
 
 function toolCell(
@@ -170,6 +172,34 @@ describe("buildConversationToolActivityDigestPresentation", () => {
       state: "completed",
       attentionCount: 0,
       attentionLabel: "",
+    });
+    expect(buildConversationToolActivityDigestPresentation([
+      { ...search, status: "failed", tone: "error" },
+    ], "zh")).toMatchObject({ state: "attention", attentionCount: 1 });
+  });
+
+  it.each([0, 1])("keeps a later command failure visible after exit %i", (firstExit) => {
+    const grouped = toolCell("command-group", { title: "exec_command" });
+    grouped.toolLifecycleModel = {
+      toolCalls: [],
+      terminalOperations: [firstExit, 9].map((exitCode, index) => ({
+        operationId: `terminal:${index}`,
+        rawOperationId: `terminal:${index}`,
+        toolCallId: `tool:${index}`,
+        terminalId: `session:${index}`,
+        kind: "ExecCommand" as const,
+        status: "completed" as const,
+        request: { displayCommand: index === 0 ? "rg missing-pattern" : "build" },
+        result: { exitCode, formattedOutput: index === 0 ? "no matches" : "build failed" },
+      })),
+      terminalSessions: [],
+      modelObservations: [],
+    };
+    expect(conversationToolActivityTerminalExitCode(grouped)).toBe(9);
+    expect(conversationToolActivityIsNoMatchTerminalExit(grouped)).toBe(false);
+    expect(buildConversationToolActivityDigestPresentation([grouped], "zh")).toMatchObject({
+      state: "attention",
+      attentionCount: 1,
     });
   });
 

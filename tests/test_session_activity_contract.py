@@ -30,6 +30,20 @@ def test_frontend_vocabulary_is_generated_from_backend_domains():
     assert OUTPUT.read_text(encoding="utf-8") == render_contract()
 
 
+def test_native_notification_policy_is_generated_from_backend_receipts():
+    from core.chat.session_activity import SESSION_NOTIFICATION_CONTRACT
+    from scripts.generate_activity_contract import NATIVE_NOTIFICATION_OUTPUT, render_notification_contract
+
+    assert NATIVE_NOTIFICATION_OUTPUT.read_text(encoding="utf-8") == render_notification_contract()
+    admitted = set(SESSION_NOTIFICATION_CONTRACT["terminalStatuses"])
+    assert {"completed", "needs_continue", "paused_limit", "failed_provider", "failed_runtime", "aborted", "cancelled"} <= admitted
+    assert not admitted.intersection({"ready", "idle", "running", "paused", "stopped", "stopped_by_user", "force_stopped", "", "future_status"})
+    # The renderer transports successful aliases as the canonical completed.
+    assert not admitted.intersection({"done", "success", "succeeded"})
+    assert SESSION_NOTIFICATION_CONTRACT["successTerminalStatuses"] == ["completed"]
+    assert SESSION_NOTIFICATION_CONTRACT["continuationTerminalStatuses"] == ["needs_continue", "paused_limit"]
+
+
 def test_every_canonical_run_state_and_phase_has_a_display_mapping():
     from core.chat.session_activity import SESSION_ACTIVITY_CONTRACT
     from core.runtime_manager.agent_run_status import (

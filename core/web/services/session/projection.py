@@ -3147,6 +3147,10 @@ def _canonicalize_session_turn_items_for_protocol(
             raw.get("semanticStatus") or raw.get("semantic_status") or ""
         ).strip().lower()
         semantic_status = raw_semantic_status or ("degraded" if raw_status == "degraded" else "")
+        if item_type == "tool_call" and raw_status in {"cancelled", "canceled", "interrupted"}:
+            # The four-value status says the call settled; its business result
+            # remains cancelled, which is neither failure nor success.
+            semantic_status = "cancelled"
         status = {
             "in_progress": "running",
             "streaming": "running",
@@ -3157,6 +3161,8 @@ def _canonicalize_session_turn_items_for_protocol(
             "degraded": "completed",
             "error": "failed",
         }.get(raw_status, raw_status)
+        if item_type == "tool_call" and semantic_status == "cancelled" and raw_status in {"cancelled", "canceled", "interrupted"}:
+            status = "completed"
         if status not in {"pending", "running", "completed", "failed"}:
             status = "completed" if raw.get("terminal") is True else "running"
         item_id = str(raw.get("itemId") or raw.get("id") or "").strip()

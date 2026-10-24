@@ -1440,6 +1440,19 @@ def _require_runtime(terminal_session_id: str) -> _TerminalRuntime:
             "Terminal session is not running.",
             details=_terminal_not_running_details(session_id),
         )
+    if runtime.stop_requested.is_set():
+        with runtime.lock:
+            state = {**runtime.state, "status": "stopping", "alive": True}
+        raise CliAgentTerminalError(
+            "TERMINAL_SESSION_NOT_RUNNING",
+            "Terminal session is stopping.",
+            details={
+                "terminalSessionId": session_id,
+                "status": "stopping",
+                "alive": True,
+                **_terminal_interaction_fields(state),
+            },
+        )
     return runtime
 
 
@@ -2621,7 +2634,18 @@ def _terminal_interaction_fields(state: dict[str, Any]) -> dict[str, Any]:
         or status
         or "unknown"
     )
-    if alive and status not in {"closed", "stale", "stopped", "exited"}:
+    if status == "stopping":
+        return {
+            "interactionState": "closed" if user_closed else "history",
+            "canInput": False,
+            "canResume": False,
+            "canStart": False,
+            "resumeAction": "none",
+            "displayMode": "readonly_replay",
+            "stateReason": "stopping",
+            "tuiState": tui_state,
+        }
+    if alive and not user_closed and status not in {"closed", "stale", "stopped", "exited"}:
         return {
             "interactionState": "live",
             "canInput": True,

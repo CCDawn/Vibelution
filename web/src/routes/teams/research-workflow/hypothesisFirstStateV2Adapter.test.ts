@@ -221,6 +221,23 @@ describe("resolveHypothesisFirstNextActionFromV2", () => {
     expect(action.canonicalActions?.map((item) => item.command)).toEqual(["reconcile_formal_run"]);
   });
 
+  it("shows a paused formal run as a recoverable hold and retains its retry", () => {
+    const retry = {
+      ...command({ command: "retry_formal_node", payload: { runId: "formal-run-1", nodeId: "source_finding" } }, "重试节点"),
+      targetPhase: "formal_runtime",
+    } as CommandAction;
+    const state = stateV2({
+      isInitial: false,
+      currentPhase: "formal_runtime",
+      formalRuntime: { ...stateV2().formalRuntime, runId: "formal-run-1", runStatus: "paused", lifecycle: "running", actionability: "blocked" },
+      allowedActions: [retry],
+    });
+
+    const action = resolveHypothesisFirstNextActionFromV2(state);
+    expect(action.statusMessage).toBe("正式研究运行已暂停，等待恢复");
+    expect(action.canonicalActions).toEqual([retry]);
+  });
+
   it("keeps a valid selection offer reachable while formal runtime is ahead", () => {
     const selection = {
       ...command({

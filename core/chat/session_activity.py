@@ -55,6 +55,19 @@ SESSION_ACTIVITY_CONTRACT = {
     },
 }
 
+# Native transport receives canonical success but preserves failure and
+# continuation receipts. User stops stay silent; abnormal interruptions notify.
+# Derive aliases from their owning Session vocabulary instead of copying a list.
+SESSION_NOTIFICATION_CONTRACT = {
+    "successTerminalStatuses": ["completed"],
+    "continuationTerminalStatuses": SESSION_ACTIVITY_CONTRACT["policy"]["waitingOutcomes"],
+    "terminalStatuses": sorted(
+        reason for reason, outcome in SESSION_ACTIVITY_CONTRACT["outcomes"].items()
+        if outcome in {"failed", "cancelled", "superseded", "needs_continue", "paused_limit"}
+        or reason in {"completed", "aborted", "interrupted"}
+    ),
+}
+
 
 def normalize_activity_value(value: Any) -> str:
     return str(value or "").strip().lower()

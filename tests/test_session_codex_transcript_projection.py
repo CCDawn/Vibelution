@@ -3,6 +3,17 @@ import json
 from core.web.services import session_service
 
 
+def test_cancelled_tool_survives_the_four_value_transport_status_algebra():
+    for raw_status in ("cancelled", "canceled", "interrupted"):
+        item = session_service._canonicalize_session_turn_items_for_protocol(
+            [{"itemId": "tool", "type": "tool_call", "callId": "call-1", "status": raw_status}],
+            session_id="session-1", turn_id="turn-1",
+        )[0]
+        assert item["status"] == "completed"
+        assert item["semanticStatus"] == "cancelled"
+        assert item["terminal"] is True
+
+
 def test_user_transcript_preserves_all_native_reference_handles_without_resolved_content():
     references = [
         {"referenceId": "file:doc.txt", "kind": "file", "artifactId": "doc.txt", "title": "验收文件", "content": "resolved private body", "resolvedContent": "must not leak"},

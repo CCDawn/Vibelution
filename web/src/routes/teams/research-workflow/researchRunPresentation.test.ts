@@ -52,4 +52,14 @@ describe("research run presentation", () => {
   it("does not leak an unknown backend enum", () => {
     expect(researchRunStatusLabel("future_internal_state")).toBe("状态待确认");
   });
+
+  it.each([
+    ["created", "已创建", "Created"],
+    ["paused", "已暂停", "Paused"],
+    ["reconciliation_required", "状态待核对", "Reconciliation required"],
+    ["archived", "已归档", "Archived"],
+  ])("presents the known %s run status without implying success", (status, zh, en) => {
+    expect(researchRunStatusLabel(status)).toBe(zh);
+    expect(researchRunStatusLabel(status, "en")).toBe(en);
+  });
 });

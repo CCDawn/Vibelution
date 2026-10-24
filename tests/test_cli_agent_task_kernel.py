@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from core.web.services import cli_agent_task_kernel as task_kernel
 
 
@@ -50,6 +52,53 @@ def test_submit_cli_agent_task_locks_one_active_task_per_terminal(monkeypatch, t
     assert second["code"] == "CLI_AGENT_TASK_LOCKED"
     assert second["status"] == "task_locked"
     assert second["terminalSessionId"] == "cli-term-one"
+
+
+@pytest.mark.parametrize("reader_status", ["running", "completed", "failed"])
+def test_send_ack_preserves_task_state_written_by_terminal_reader(monkeypatch, tmp_path, reader_status):
+    project_root = tmp_path / "Vibelution"
+    project_root.mkdir()
+    monkeypatch.setattr(task_kernel, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(task_kernel, "TASK_STATE_DIR", project_root / ".runtime" / "cli_agents" / "tasks")
+    monkeypatch.setattr(task_kernel, "_ensure_watcher_started", lambda: None)
+    finalized = []
+    monkeypatch.setattr(task_kernel, "_finalize_task_result", lambda state, **_kwargs: finalized.append(dict(state)))
+
+    from core.web.services import cli_agent_terminal_service
+
+    terminal = {
+        "terminalSessionId": "cli-term-fast-reader",
+        "adapterId": "mimo_code",
+        "cwd": str(project_root),
+        "mode": "readonly",
+        "alive": True,
+        "status": "running",
+    }
+
+    def write_with_reader_progress(_session_id, _data):
+        if reader_status == "failed":
+            task_kernel.mark_terminal_closed(terminal, status="exited")
+        else:
+            state = task_kernel._active_task_for_terminal(terminal["terminalSessionId"])
+            output = "正在检查项目"
+            if reader_status == "completed":
+                output += "\n" + state["completionMarker"]
+            task_kernel.ingest_terminal_output(terminal, output)
+        return {}
+
+    monkeypatch.setattr(cli_agent_terminal_service, "write_cli_agent_terminal_input", write_with_reader_progress)
+    result = task_kernel.submit_cli_agent_task(
+        terminal_session=terminal, task="检查项目", timeout_seconds=60, output_limit=8000,
+    )
+
+    assert result["status"] == reader_status
+    assert result["internalStatus"] == reader_status
+    assert task_kernel._read_task_state(result["taskId"])["status"] == reader_status
+    if reader_status != "running":
+        assert result["completedAt"]
+        assert len(finalized) == 1
+        assert not task_kernel._active_task_for_terminal(terminal["terminalSessionId"])
+        assert result["code"] == ("CLI_AGENT_TASK_COMPLETED" if reader_status == "completed" else "CLI_AGENT_TERMINAL_CLOSED")
 
 
 def test_terminal_output_completion_returns_semantic_segments(monkeypatch, tmp_path):

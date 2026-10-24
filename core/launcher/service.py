@@ -2754,6 +2754,19 @@ def _recent_result_files(directory: Path, *, limit: int) -> list[dict[str, Any]]
     return results
 
 
+def _command_result_outcome_facts(payload: dict[str, Any]) -> dict[str, Any]:
+    facts: dict[str, Any] = {
+        "ok": payload.get("ok") if isinstance(payload.get("ok"), bool) else None,
+    }
+    for key in ("completed", "cancelled"):
+        if isinstance(payload.get(key), bool):
+            facts[key] = payload[key]
+    for key in ("errorType", "supersededByCommandId", "supersededByCommandType"):
+        if key in payload:
+            facts[key] = str(payload.get(key) or "")
+    return facts
+
+
 def _recent_runtime_manager_events(path: Path, *, limit: int) -> list[dict[str, Any]]:
     if limit <= 0:
         return []
@@ -2783,7 +2796,7 @@ def _recent_runtime_manager_events(path: Path, *, limit: int) -> list[dict[str, 
                 "commandType": str(event_payload.get("type") or ""),
                 "requestedBy": str(event_payload.get("requestedBy") or ""),
                 "resultPath": str(event_payload.get("resultPath") or ""),
-                "ok": bool(event_payload.get("ok")) if "ok" in event_payload else None,
+                **_command_result_outcome_facts(event_payload),
                 "message": _truncate(str(event_payload.get("message") or ""), 180),
             }
         )
@@ -2812,7 +2825,7 @@ def _runtime_manager_recovery_summary(
     command_id = str(recovered.get("commandId") or "")
     matching_result = next((result for result in recent_results if str(result.get("commandId") or "") == command_id), {})
     result_message = str(matching_result.get("message") or "")
-    result_ok = bool(matching_result.get("ok")) if matching_result else None
+    result_ok = _command_result_outcome_facts(matching_result)["ok"]
     return {
         "active": True,
         "commandId": command_id,
@@ -2896,8 +2909,7 @@ def _restart_queue_status_line(*, pending_count: int, active_restart: bool, acti
 def _result_summary(result: dict[str, Any]) -> dict[str, Any]:
     return {
         "commandId": str(result.get("commandId") or ""),
-        "ok": bool(result.get("ok")),
-        "completed": bool(result.get("completed")),
+        **_command_result_outcome_facts(result),
         "message": _truncate(str(result.get("message") or ""), 220),
         "errorType": str(result.get("errorType") or ""),
         "stateVersion": int(result.get("stateVersion") or 0),

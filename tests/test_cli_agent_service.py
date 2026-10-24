@@ -3,6 +3,7 @@ import json
 from types import SimpleNamespace
 import subprocess
 import sqlite3
+import threading
 
 import pytest
 
@@ -13,6 +14,29 @@ from core.web.services import cli_agent_service as service
 from core.web.services import cli_agent_terminal_service as terminal_service
 from core.web.services import session_service
 from core.web.services.terminal_screen_buffer import TerminalScreenBuffer
+
+
+class _FakeTerminalProcess:
+    def isalive(self):
+        return not getattr(self, "_terminated", False)
+
+    def terminate(self, force=False):
+        self._terminated = True
+
+
+@pytest.fixture(autouse=True)
+def _isolated_terminal_runtime_registry(monkeypatch):
+    # Unstarted fake runtimes belong to this test, including their shutdown.
+    # Never leave them for the next module's process-lifecycle fixture.
+    monkeypatch.setattr(terminal_service, "_RUNTIMES", {})
+    shutdown_was_requested = terminal_service._TERMINAL_SHUTDOWN_EVENT.is_set()
+    terminal_service.begin_cli_agent_terminal_lifecycle()
+    yield
+    result = terminal_service.shutdown_cli_agent_terminal_sessions()
+    assert result["closed"], result
+    assert not terminal_service._RUNTIMES
+    if not shutdown_was_requested:
+        terminal_service.begin_cli_agent_terminal_lifecycle()
 
 
 def _configure_roots(monkeypatch, tmp_path):
@@ -211,10 +235,7 @@ def test_codex_readonly_uses_exec_with_readonly_sandbox(monkeypatch, tmp_path):
 
     monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\codex.exe" if candidate == "codex.exe" else "")
 
-    class FakeProcess:
-        def isalive(self):
-            return True
-
+    class FakeProcess(_FakeTerminalProcess):
         def write(self, data):
             writes.append(data)
 
@@ -294,10 +315,7 @@ def test_mimo_worktree_mode_builds_dir_and_agent_args(monkeypatch, tmp_path):
 
     monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\mimo.cmd" if candidate == "mimo.cmd" else "")
 
-    class FakeProcess:
-        def isalive(self):
-            return True
-
+    class FakeProcess(_FakeTerminalProcess):
         def write(self, data):
             writes.append(data)
 
@@ -952,9 +970,8 @@ def test_cli_agent_terminal_ensure_resumes_discovered_claude_session_after_resta
     )
     spawned = []
 
-    class FakeProcess:
-        def isalive(self):
-            return True
+    class FakeProcess(_FakeTerminalProcess):
+        pass
 
     def fake_spawn(args, **kwargs):
         spawned.append(args)
@@ -1018,9 +1035,8 @@ def test_cli_agent_terminal_ensure_resumes_discovered_existing_session_after_res
     )
     spawned = []
 
-    class FakeProcess:
-        def isalive(self):
-            return True
+    class FakeProcess(_FakeTerminalProcess):
+        pass
 
     def fake_spawn(args, **kwargs):
         spawned.append(args)
@@ -1051,9 +1067,8 @@ def test_cli_agent_terminal_ensure_writes_runtime_state_without_project_config(m
     project_root = _configure_roots(monkeypatch, tmp_path)
     monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\mimo.cmd" if candidate == "mimo.cmd" else "")
 
-    class FakeProcess:
-        def isalive(self):
-            return True
+    class FakeProcess(_FakeTerminalProcess):
+        pass
 
     monkeypatch.setattr(terminal_service, "_spawn_terminal_process", lambda *args, **kwargs: (FakeProcess(), "conpty"))
     monkeypatch.setattr(terminal_service._TerminalRuntime, "start", lambda self: None)
@@ -1082,10 +1097,7 @@ def test_cli_agent_terminal_input_and_resize_return_lightweight_ack(monkeypatch,
     writes = []
     sizes = []
 
-    class FakeProcess:
-        def isalive(self):
-            return True
-
+    class FakeProcess(_FakeTerminalProcess):
         def write(self, data):
             writes.append(data)
 
@@ -1125,9 +1137,8 @@ def test_cli_agent_terminal_output_event_streams_chunk_without_session_snapshot(
 
     monkeypatch.setattr(cli_agent_task_kernel, "ingest_terminal_output", lambda *args, **kwargs: None)
 
-    class FakeProcess:
-        def isalive(self):
-            return True
+    class FakeProcess(_FakeTerminalProcess):
+        pass
 
     runtime = terminal_service._TerminalRuntime(
         state={
@@ -1158,9 +1169,8 @@ def test_cli_agent_terminal_reuses_active_lock_for_same_session_adapter_and_cwd(
     monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\mimo.cmd" if candidate == "mimo.cmd" else "")
     spawned = []
 
-    class FakeProcess:
-        def isalive(self):
-            return True
+    class FakeProcess(_FakeTerminalProcess):
+        pass
 
     def fake_spawn(*args, **kwargs):
         spawned.append((args, kwargs))
@@ -1202,9 +1212,8 @@ def test_cli_agent_terminal_reuses_active_lock_across_source_sessions(monkeypatc
     monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\mimo.cmd" if candidate == "mimo.cmd" else "")
     spawned = []
 
-    class FakeProcess:
-        def isalive(self):
-            return True
+    class FakeProcess(_FakeTerminalProcess):
+        pass
 
     def fake_spawn(*args, **kwargs):
         spawned.append((args, kwargs))
@@ -1254,9 +1263,8 @@ def test_cli_agent_terminal_view_rebinds_stale_history_to_live_runtime(monkeypat
     )
     live_id = "cli-term-live-rebind"
 
-    class FakeProcess:
-        def isalive(self):
-            return True
+    class FakeProcess(_FakeTerminalProcess):
+        pass
 
     live_runtime = terminal_service._TerminalRuntime(
         state={
@@ -1341,9 +1349,8 @@ def test_cli_agent_terminal_detail_and_events_rebind_old_id_to_live_runtime(monk
     old_id = "cli-term-old-history"
     live_id = "cli-term-live-events"
 
-    class FakeProcess:
-        def isalive(self):
-            return True
+    class FakeProcess(_FakeTerminalProcess):
+        pass
 
     terminal_service._write_state(
         {
@@ -1401,9 +1408,8 @@ def test_cli_agent_terminal_ensure_supersedes_legacy_duplicate_states(monkeypatc
     project_root = _configure_roots(monkeypatch, tmp_path)
     monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\mimo.cmd" if candidate == "mimo.cmd" else "")
 
-    class FakeProcess:
-        def isalive(self):
-            return True
+    class FakeProcess(_FakeTerminalProcess):
+        pass
 
     monkeypatch.setattr(terminal_service, "_spawn_terminal_process", lambda *args, **kwargs: (FakeProcess(), "conpty"))
     monkeypatch.setattr(terminal_service._TerminalRuntime, "start", lambda self: None)
@@ -1457,9 +1463,8 @@ def test_cli_agent_terminal_restart_ensure_supersedes_legacy_duplicate_states(mo
     project_root = _configure_roots(monkeypatch, tmp_path)
     monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\mimo.cmd" if candidate == "mimo.cmd" else "")
 
-    class FakeProcess:
-        def isalive(self):
-            return True
+    class FakeProcess(_FakeTerminalProcess):
+        pass
 
     monkeypatch.setattr(terminal_service, "_spawn_terminal_process", lambda *args, **kwargs: (FakeProcess(), "conpty"))
     monkeypatch.setattr(terminal_service._TerminalRuntime, "start", lambda self: None)
@@ -1515,9 +1520,8 @@ def test_cli_agent_terminal_idempotent_after_backend_restart(monkeypatch, tmp_pa
     monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\mimo.cmd" if candidate == "mimo.cmd" else "")
     spawned = []
 
-    class FakeProcess:
-        def isalive(self):
-            return True
+    class FakeProcess(_FakeTerminalProcess):
+        pass
 
     def fake_spawn(*args, **kwargs):
         spawned.append((args, kwargs))
@@ -1622,6 +1626,50 @@ def test_cli_agent_related_state_prefers_open_scope_over_closed_with_cli_session
     )
 
     assert state["terminalSessionId"] == "cli-term-open"
+
+
+@pytest.mark.parametrize("user_closed", [False, True])
+def test_cli_agent_stopping_terminal_disables_all_interaction(user_closed):
+    state = terminal_service._public_state({
+        "terminalSessionId": "cli-term-stopping",
+        "status": "stopping",
+        "alive": True,
+        "userClosed": user_closed,
+        "cliSessionId": "resumable-after-exit",
+    })
+
+    assert state["status"] == "stopping"
+    assert state["alive"] is True
+    assert state["canInput"] is False
+    assert state["canResume"] is False
+    assert state["canStart"] is False
+    assert state["resumeAction"] == "none"
+    assert state["displayMode"] == "readonly_replay"
+    assert state["interactionState"] != "live"
+
+
+def test_cli_agent_stopping_runtime_rejects_input_before_process_exit(monkeypatch):
+    writes = []
+    runtime = SimpleNamespace(
+        state={"terminalSessionId": "cli-term-stopping-input", "status": "running"},
+        lock=threading.RLock(),
+        stop_requested=SimpleNamespace(is_set=lambda: True),
+        is_alive=lambda: True,
+        send_input=lambda data: writes.append(data),
+        stop=lambda: True,
+        wait_stopped=lambda _deadline: True,
+        process_owner=None,
+    )
+    monkeypatch.setattr(terminal_service, "_RUNTIMES", {"cli-term-stopping-input": runtime})
+
+    with pytest.raises(terminal_service.CliAgentTerminalError) as exc_info:
+        terminal_service.write_cli_agent_terminal_input("cli-term-stopping-input", "new input\r")
+
+    assert writes == []
+    assert exc_info.value.code == "TERMINAL_SESSION_NOT_RUNNING"
+    assert exc_info.value.details["status"] == "stopping"
+    assert exc_info.value.details["alive"] is True
+    assert exc_info.value.details["canInput"] is False
 
 
 def test_cli_agent_public_state_exposes_tui_interrupted_separately():
@@ -1805,9 +1853,8 @@ def test_cli_agent_terminal_resume_intent_spawns_stale_session(monkeypatch, tmp_
     transcript_path.write_text("旧尺寸历史画面\r\n\x1b[57;6H", encoding="utf-8")
     spawned = []
 
-    class FakeProcess:
-        def isalive(self):
-            return True
+    class FakeProcess(_FakeTerminalProcess):
+        pass
 
     def fake_spawn(args, **kwargs):
         spawned.append({"args": list(args), "kwargs": dict(kwargs)})

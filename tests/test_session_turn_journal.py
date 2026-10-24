@@ -29,6 +29,18 @@ from core.chat.turn_journal import (
     session_turn_items_from_events,
     turn_journal_path,
 )
+
+
+@pytest.mark.parametrize("status", ["cancelled", "canceled", "interrupted"])
+def test_journal_cancelled_tool_is_settled_without_failure_or_success(tmp_path, status):
+    append_turn_event(tmp_path, "s", "t", EVENT_ASSISTANT_ITEM_COMMITTED, status="ready",
+                      tool_call_id="c", payload={"kind": "tool_call", "itemId": "tool", "callId": "c", "status": "ready"})
+    append_turn_event(tmp_path, "s", "t", EVENT_TOOL_RESULT, status="running",
+                      tool_call_id="c", payload={"toolCall": {"callId": "c", "status": status}})
+    item = session_turn_items_from_events(load_turn_events(tmp_path, "s"), turn_id="t")[0]
+    assert item["status"] == "completed"
+    assert item["semanticStatus"] == "cancelled"
+    assert "error" not in item
 import core.chat.turn_journal as turn_journal_module
 from core.llm.types import CanonicalItemIdentity, CanonicalToolCall, LLMProtocolEvent, TurnOutcome
 

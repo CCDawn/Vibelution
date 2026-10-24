@@ -426,6 +426,11 @@ function defaultStatus(
         : "等待假说收敛";
     case "formal_runtime": {
       if (!state.formalRuntime.runId) return "可以创建正式研究运行";
+      if (state.formalRuntime.runStatus === "paused") {
+        return lang === "en"
+          ? "Formal research run is paused; waiting to resume"
+          : "正式研究运行已暂停，等待恢复";
+      }
       if (state.formalRuntime.actionability === "blocked") return "正式研究运行已阻塞";
       switch (state.formalRuntime.runStatus) {
         case "failed": return "正式研究运行失败";

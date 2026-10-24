@@ -13,6 +13,12 @@ import {
 const base = { version: 3, sessionId: "session-1", turnId: "turn-1" } as const;
 
 describe("canonical SessionTurnItem v3 rendering", () => {
+  it("renders a settled cancelled tool neutrally while retaining real transport failure", () => {
+    const cancelled: SessionTurnItem = { ...base, itemId: "tool", type: "tool_call", callId: "c", toolName: "tool",
+      status: "completed", semanticStatus: "cancelled", revision: 1, sequence: 1 };
+    expect(codexTranscriptFromTurnItems([cancelled]).cells[0]).toMatchObject({ status: "cancelled", tone: "neutral" });
+    expect(codexTranscriptFromTurnItems([{ ...cancelled, status: "failed" }]).cells[0]).toMatchObject({ status: "failed", tone: "error" });
+  });
   it("keeps the highest revision and one final answer", () => {
     const items: SessionTurnItem[] = [
       { ...base, id: "answer-r1", itemId: "answer", type: "agent_message", phase: "final_answer", text: "旧", status: "running", revision: 1, sequence: 1 },

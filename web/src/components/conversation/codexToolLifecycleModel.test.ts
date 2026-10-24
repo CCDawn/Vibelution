@@ -253,7 +253,6 @@ describe("codexToolLifecycleModel", () => {
     // Known success words still resolve green.
     expect(normalizeCodexToolLifecycleStatus("done")).toBe("completed");
     expect(normalizeCodexToolLifecycleStatus("success")).toBe("completed");
-    expect(normalizeCodexToolLifecycleStatus("ready")).toBe("completed");
     // User/permission-interrupted runs are neutral, not failures.
     expect(normalizeCodexToolLifecycleStatus("cancelled")).toBe("cancelled");
     expect(normalizeCodexToolLifecycleStatus("canceled")).toBe("cancelled");
@@ -267,6 +266,16 @@ describe("codexToolLifecycleModel", () => {
     expect(normalizeCodexToolLifecycleStatus("mystery_status")).toBe("failed");
     expect(normalizeCodexToolLifecycleStatus(undefined)).toBe("failed");
   });
+
+  it.each(["ready", "waiting", "awaiting_approval", "approval_required", "blocked"])(
+    "keeps a pre-execution %s tool open throughout its lifecycle model",
+    (status) => {
+      const model = buildCodexToolLifecycleModel(toolOperation({ status, terminalSessionId: "terminal-preexecution" }));
+      expect(model.toolCalls[0]?.status).toBe("pending");
+      expect(model.terminalOperations[0]?.status).toBe("pending");
+      expect(model.modelObservations[0]?.outputItemIds).toEqual([]);
+    },
+  );
 
   it("keeps a cancelled terminal op out of the red failure slot in the built model", () => {
     const model = buildCodexToolLifecycleModel([

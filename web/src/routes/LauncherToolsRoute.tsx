@@ -70,6 +70,11 @@ import { LauncherRegistryDiagnosticsBanner } from "./LauncherRegistryDiagnostics
 import { buildAllInstanceMonitorRows } from "./LauncherProcessMonitor.binding";
 import { LauncherProcessMonitorPanel, type LauncherProcessRow } from "./LauncherProcessMonitorPanel";
 import { LauncherPortSettingsPanel } from "./LauncherPortSettingsPanel";
+import {
+  launcherCommandResultEventPresentation,
+  launcherCommandResultPresentation,
+  type LauncherCommandResultFacts,
+} from "./launcherCommandResultPresentation";
 
 const LauncherProjectMaintenancePanel = lazy(() =>
   import("./LauncherProjectMaintenancePanel").then((module) => ({ default: module.LauncherProjectMaintenancePanel })),
@@ -123,14 +128,16 @@ type LauncherControlPlaneCommand = {
 
 type LauncherControlPlaneResult = {
   commandId: string;
-  ok: boolean;
-  completed: boolean;
+  ok?: boolean | null;
+  completed?: boolean;
+  cancelled?: boolean;
+  supersededByCommandId?: string;
   message: string;
   errorType: string;
   stateVersion: number;
 };
 
-type LauncherControlPlaneEvent = {
+type LauncherControlPlaneEvent = LauncherCommandResultFacts & {
   type: string;
   at: string;
   commandId: string;
@@ -543,6 +550,7 @@ function isControlTokenError(error: unknown) {
 }
 
 function resultMessage(result: LauncherControlPlaneResult, operation: LauncherOperation, lang: "zh" | "en") {
+  const presentation = launcherCommandResultPresentation(result, lang);
   const commandType = operation === "force-stop"
     ? "force_close_workbench"
     : operation === "restart"
@@ -551,10 +559,13 @@ function resultMessage(result: LauncherControlPlaneResult, operation: LauncherOp
         ? "open_workbench"
         : "close_workbench";
   const fallback = lang === "zh"
-    ? `${humanCommandType(commandType, lang)}${result.ok ? "已完成" : "失败"}`
-    : `${humanCommandType(commandType, lang)} ${result.ok ? "completed" : "failed"}`;
+    ? `${humanCommandType(commandType, lang)}${presentation.label}`
+    : `${humanCommandType(commandType, lang)}: ${presentation.label}`;
+  if (presentation.state !== "completed" && presentation.state !== "failed") {
+    return fallback;
+  }
   const raw = String(result.message || result.errorType || fallback).trim();
-  if (result.ok) {
+  if (presentation.state === "completed") {
     return raw || fallback;
   }
   const lower = raw.toLowerCase();
@@ -2405,9 +2416,11 @@ export function LauncherToolsRoute() {
   const recoveryLine = recovery?.active
     ? {
         label: copy.recovery,
-        value: recovery.statusLine || humanCommandType(recovery.commandType, uiLang),
+        value: typeof recovery.resultOk === "boolean"
+          ? recovery.statusLine || humanCommandType(recovery.commandType, uiLang)
+          : uiLang === "zh" ? "恢复记录已读到，结果尚未确认。" : "Recovery recorded; result not confirmed.",
         meta: [recovery.commandId, compactDate(recovery.recoveredAt, locale)].filter(Boolean).join(" · ") || "-",
-        tone: recovery.resultOk === false ? "warning" as const : "success" as const,
+        tone: recovery.resultOk === false ? "warning" as const : recovery.resultOk === true ? "success" as const : "neutral" as const,
       }
     : null;
   const activeCommandLine = {
@@ -2416,18 +2429,25 @@ export function LauncherToolsRoute() {
     meta: [activeCommand?.requestedBy, activeCommand?.reason].filter(Boolean).join(" · ") || "-",
   };
   const diagnosticQueueItems = [
-    ...recentResults.map((item) => ({
-      id: item.commandId,
-      primary: item.message || humanCommandType(item.commandId, uiLang),
-      secondary: `${item.ok ? "ok" : "failed"} · ${item.message || item.errorType || "-"}`,
-      tone: item.ok ? "success" as const : "error" as const,
-    })),
-    ...recentEvents.map((item) => ({
-      id: `${item.at}-${item.type}-${item.commandId}`,
-      primary: humanCommandType(item.type, uiLang),
-      secondary: [item.commandId, compactDate(item.at, locale)].filter(Boolean).join(" · ") || "-",
-      tone: item.ok === false ? "error" as const : item.ok === true ? "success" as const : "neutral" as const,
-    })),
+    ...recentResults.map((item) => {
+      const presentation = launcherCommandResultPresentation(item, uiLang);
+      const hasOutcomeMessage = presentation.state === "completed" || presentation.state === "failed";
+      return {
+        id: item.commandId,
+        primary: hasOutcomeMessage ? item.message || humanCommandType(item.commandId, uiLang) : presentation.label,
+        secondary: `${presentation.label} · ${hasOutcomeMessage ? item.message || item.errorType || "-" : item.commandId}`,
+        tone: presentation.tone,
+      };
+    }),
+    ...recentEvents.map((item) => {
+      const presentation = launcherCommandResultEventPresentation(item, uiLang);
+      return {
+        id: `${item.at}-${item.type}-${item.commandId}`,
+        primary: presentation?.label ?? humanCommandType(item.type, uiLang),
+        secondary: [item.commandId, compactDate(item.at, locale)].filter(Boolean).join(" · ") || "-",
+        tone: presentation?.tone ?? (item.ok === false ? "error" as const : item.ok === true ? "success" as const : "neutral" as const),
+      };
+    }),
   ];
   const guardianResponsibilityRows = (guardian?.responsibilities ?? []).map((item) => ({
     id: item.id,
@@ -2494,8 +2514,12 @@ export function LauncherToolsRoute() {
     if (!trackedCommand || !trackedResult) {
       return;
     }
+    const presentation = launcherCommandResultPresentation(trackedResult, uiLang);
+    if (presentation.state === "pending") {
+      return;
+    }
     const message = resultMessage(trackedResult, trackedCommand.operation, uiLang);
-    const tone = trackedResult.ok ? "success" : "error";
+    const tone = presentation.tone;
     if (notice.text !== message || notice.tone !== tone) {
       setNotice({ tone, text: message, source: "lifecycle-control" });
     }

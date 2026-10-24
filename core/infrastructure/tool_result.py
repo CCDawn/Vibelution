@@ -173,6 +173,8 @@ def extract_tool_result_semantics(result: Any) -> dict[str, Any]:
         "timedOut": False,
         "failureClass": "",
     }
+    if result is None:
+        return {**semantics, "semanticStatus": "no_result", "failureClass": "no_result"}
 
     payload: dict[str, Any] = result if isinstance(result, dict) else {}
     if isinstance(result, (bytes, bytearray)):
@@ -223,9 +225,9 @@ def extract_tool_result_semantics(result: Any) -> dict[str, Any]:
             semantics["timedOut"] = True
             semantics["failureClass"] = semantics["failureClass"] or "timeout"
         if _looks_like_business_failure(payload):
-            if semantics["semanticStatus"] == "succeeded":
+            if not completed_terminal_lifecycle and semantics["semanticStatus"] in {"succeeded", "success", "ok", "completed", "done", "finished"}:
                 semantics["semanticStatus"] = "failed"
-            semantics["failureClass"] = semantics["failureClass"] or status or "business_failure"
+            semantics["failureClass"] = semantics["failureClass"] or (status if status in BUSINESS_FAILURE_STATUSES else "business_failure")
 
     nonzero_exit_match = re.search(
         r"\[(?:EXEC FAILURE|WARNING)\s*\|\s*Exit Code:\s*(-?\d+)\]",

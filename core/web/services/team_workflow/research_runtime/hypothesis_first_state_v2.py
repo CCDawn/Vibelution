@@ -2598,7 +2598,7 @@ def _project_formal_and_program(
         lifecycle, actionability = "queued", "waiting_system"
     elif run_status == "waiting_human":
         lifecycle, actionability = "waiting_human", "waiting_user"
-    elif run_status in {"blocked", "reconciliation_required"}:
+    elif run_status in {"blocked", "paused", "reconciliation_required"}:
         lifecycle, actionability = "running", "blocked"
     elif run_status == "succeeded":
         lifecycle, outcome, actionability = "completed", "succeeded", "terminal"
@@ -2606,8 +2606,6 @@ def _project_formal_and_program(
         lifecycle, actionability = "failed", "available"
     elif run_status == "cancelled":
         lifecycle, actionability = "cancelled", "available"
-    elif run_status == "archived":
-        lifecycle, outcome, actionability = "completed", "succeeded", "terminal"
     elif run_status != "running":
         actionability = "blocked"
         problems.append(
@@ -2705,7 +2703,7 @@ def _project_formal_and_program(
     reconcile_action = _formal_reconcile_action(
         run_id=current_id, snapshot=current_snapshot
     )
-    if run_status in {"running", "blocked", "waiting_human"}:
+    if run_status in {"running", "blocked", "paused", "waiting_human"}:
         # Node retries do not own the recovery surface: the ledger also keeps
         # a run-level reconcile offer authorized for blocked runs, and a
         # non-empty retry list used to short-circuit it entirely (SCI-003).
@@ -2714,11 +2712,12 @@ def _project_formal_and_program(
         actions.extend(retry_actions)
         if reconcile_action is not None:
             actions.append(reconcile_action)
-        if run_status == "blocked":
+        if run_status in {"blocked", "paused"}:
             # A blocked run whose frozen model routing (or any prerequisite)
             # is permanently unreachable must still have a sanctioned
             # retirement path: the ledger already allows BLOCKED -> CANCELLED,
-            # so surface the confirmed cancel offer beside the retries.
+            # so surface the confirmed cancel offer beside the retries. A
+            # scheduler-paused run has the same sanctioned retirement path.
             actions.append(
                 _command_action(
                     "cancel_run",
@@ -2748,7 +2747,7 @@ def _project_formal_and_program(
                 )
             )
         return formal, empty_program, problems, actions, "formal_runtime"
-    if run_status not in {"succeeded", "archived"}:
+    if run_status != "succeeded":
         return formal, empty_program, problems, actions, "formal_runtime"
 
     delivery_status = str(current_snapshot.get("deliveryStatus") or "").strip().lower()

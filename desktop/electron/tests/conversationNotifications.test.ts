@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createDesktopConversationNotifier } from "../../../web/src/routes/chatDesktopNotifications";
+import { CONVERSATION_NOTIFICATION_CONTRACT } from "../src/notifications/conversationNotificationContract.generated.js";
 import {
   createConversationNotificationService,
   type DesktopConversationCompletionNotification
@@ -65,6 +66,12 @@ function makeService(options: { focused?: boolean; notificationSupported?: boole
 }
 
 describe("conversation notification service", () => {
+  it.each(CONVERSATION_NOTIFICATION_CONTRACT.terminalStatuses)("honors the generated native contract for %s", async terminalStatus => {
+    const { service, notifications } = makeService();
+    expect((await service.notify(completion({ terminalStatus }))).status).toBe("notified");
+    const waiting = (CONVERSATION_NOTIFICATION_CONTRACT.continuationTerminalStatuses as readonly string[]).includes(terminalStatus);
+    expect(notifications[0].title).toBe(terminalStatus === "completed" ? "对话已完成" : waiting ? "对话待继续" : "对话已结束");
+  });
   it("records OS display and failure callbacks separately from submission", async () => {
     const { service, notifications, recordEvent } = makeService();
     await service.notify(completion());

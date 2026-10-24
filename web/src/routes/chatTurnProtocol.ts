@@ -224,10 +224,11 @@ export function codexTranscriptFromTurnItems(
     }
     if (item.type === "tool_call") {
       const degraded = toolTurnItemIsDegraded(item);
+      const cancelled = item.status === "completed" && toolSemanticStatus(item) === "cancelled";
       return [{
         ...base,
         kind: "tool_call",
-        status: degraded ? "degraded" : base.status,
+        status: cancelled ? "cancelled" : degraded ? "degraded" : base.status,
         tone: degraded ? "warning" : base.tone,
         title: item.toolName,
         text: item.output,

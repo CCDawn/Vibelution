@@ -1421,6 +1421,41 @@ def _project_formal_commands(
     ]
 
 
+def test_paused_formal_run_is_a_known_non_success_hold() -> None:
+    formal, _, problems, _, phase = hf_state_v2_module._project_formal_and_program(
+        question_id="SCI-001",
+        formal_runs=[{"runId": "run-paused", "questionId": "SCI-001", "status": "paused"}],
+        formal_snapshots={},
+        program_output=None,
+    )
+
+    assert formal["runStatus"] == "paused"
+    assert formal["lifecycle"] == "running"
+    assert formal["actionability"] == "blocked"
+    assert formal["outcome"] == "none"
+    assert problems == []
+    assert phase == "formal_runtime"
+
+
+@pytest.mark.parametrize("retry_available", [True, False])
+def test_paused_formal_run_preserves_only_authorized_retry(retry_available: bool) -> None:
+    actions = _project_formal_commands(
+        run_id="run-paused",
+        run_status="paused",
+        command_offers=[
+            {**_retry_offer(), "available": retry_available},
+            {**_RECONCILE_OFFER, "available": False},
+        ],
+    )
+
+    assert [action.command for action in actions] == (
+        ["retry_formal_node", "cancel_run"] if retry_available else ["cancel_run"]
+    )
+    if retry_available:
+        assert actions[0].idempotencyKey == "offer:retry:source_extraction:v7"
+    assert actions[-1].requiresConfirmation is True
+
+
 def test_blocked_formal_run_without_retry_projects_reconcile_offer() -> None:
     """生产 run-d02722658d8b 形态：blocked 且无可用节点 retry。
 
@@ -1596,7 +1631,10 @@ def test_created_formal_run_offers_cancel_before_archive() -> None:
     assert actions[0].requiresConfirmation is True
 
 
-def test_archived_formal_run_no_longer_suppresses_rebuild() -> None:
+@pytest.mark.parametrize("terminal_reason", ["failed_runtime", "operator_cancelled", None])
+def test_archived_formal_run_no_longer_suppresses_rebuild(
+    terminal_reason: str | None,
+) -> None:
     state = HypothesisFirstStateV2.model_validate(
         project_state_from_records(
             team_id="team-1",
@@ -1622,12 +1660,16 @@ def test_archived_formal_run_no_longer_suppresses_rebuild() -> None:
                 "teamId": "team-1",
                 "questionId": "SCI-001",
                 "status": "archived",
+                "terminalReason": terminal_reason,
                 "runVersion": 4,
             }],
         )
     )
 
     assert state.formalRuntime.runId is None
+    assert state.formalRuntime.outcome == "none"
+    assert state.programDelivery.outcome == "none"
+    assert state.currentPhase != "completed"
     create_actions = [
         action
         for action in state.allowedActions
@@ -1637,6 +1679,29 @@ def test_archived_formal_run_no_longer_suppresses_rebuild() -> None:
     # 归档后重建必须换 create 幂等键：同一 round 的旧键已绑定被退役 run 的
     # create fingerprint，环境变化后的重建会撞 run_id。
     assert create_actions[0].actionId == "create-formal-run-v2:round-accepted:1"
+
+
+@pytest.mark.parametrize("valid_output", [True, False])
+def test_archived_run_keeps_program_output_as_separate_success_authority(
+    valid_output: bool,
+) -> None:
+    output = _bridge_accepted_program_output("run-archived")
+    if not valid_output:
+        output["record"]["validation"]["semanticValidation"] = "failed"
+    formal, program, problems, _, phase = hf_state_v2_module._project_formal_and_program(
+        question_id="SCI-001",
+        formal_runs=[{"runId": "run-archived", "questionId": "SCI-001", "status": "archived"}],
+        formal_snapshots={},
+        program_output=output,
+    )
+
+    assert formal["runId"] is None
+    assert formal["outcome"] == "none"
+    assert program["outcome"] == ("succeeded" if valid_output else "none")
+    assert phase == ("completed" if valid_output else "program_delivery")
+    assert [problem["code"] for problem in problems] == (
+        [] if valid_output else ["program_candidate_validation_failed"]
+    )
 
 
 def test_converged_chain_does_not_offer_duplicate_formal_run() -> None:

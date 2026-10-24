@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 from core.infrastructure import tool_result as tool_result_module
+
+
 from core.infrastructure.tool_result import (
     extract_tool_result_semantics,
     truncate_result,
@@ -28,6 +30,14 @@ from core.infrastructure.tool_result import (
     infer_tool_execution_success,
     DEFAULT_MAX_CHARS,
 )
+
+
+@pytest.mark.parametrize("payload", [None, {"status": "completed", "ok": False}, '{"status":"completed","success":false}'])
+def test_tool_semantics_do_not_claim_success_without_business_success(payload):
+    semantics = tool_result_module.extract_tool_result_semantics(payload)
+    assert tool_result_module.infer_tool_execution_success(payload) is False
+    assert semantics["semanticStatus"] in {"failed", "no_result"}
+    assert semantics["failureClass"] == ("no_result" if payload is None else "business_failure")
 
 
 class TestTruncateResult:

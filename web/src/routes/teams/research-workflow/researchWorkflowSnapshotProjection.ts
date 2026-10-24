@@ -50,9 +50,14 @@ function nodeRunsFromAttempts(
   for (const [nodeId, attempts] of Object.entries(snapshot.nodeAttempts ?? {})) {
     const latest = attempts[attempts.length - 1];
     if (!latest) continue;
+    // The canvas groups dispatch phases as active work; the formal snapshot
+    // keeps the exact attempt status for command and recovery authority.
+    const status: NodeRunStatus = latest.status === "starting" || latest.status === "dispatching"
+      ? "running"
+      : latest.status as NodeRunStatus;
     nodeRuns[nodeId] = {
       nodeId,
-      status: latest.status as NodeRunStatus,
+      status,
       nodeRunId: latest.nodeRunId,
       attempt: latest.attempt,
       actorKind: latest.actorKind as ActorKind,

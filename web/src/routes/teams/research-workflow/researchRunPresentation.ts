@@ -2,23 +2,31 @@ import type { WorkflowRunRecord } from "../../../api/researchWorkflow";
 import { getNodeAdapter } from "./nodeAdapterModel";
 
 const RUN_STATUS_LABELS: Record<string, string> = {
+  created: "已创建",
   queued: "准备中",
   running: "运行中",
   waiting_human: "等待确认",
   blocked: "等待处理",
+  paused: "已暂停",
+  reconciliation_required: "状态待核对",
   succeeded: "已完成",
   failed: "运行失败",
   cancelled: "已取消",
+  archived: "已归档",
 };
 
 const RUN_STATUS_LABELS_EN: Record<string, string> = {
+  created: "Created",
   queued: "Preparing",
   running: "Running",
   waiting_human: "Waiting for review",
   blocked: "Needs attention",
+  paused: "Paused",
+  reconciliation_required: "Reconciliation required",
   succeeded: "Completed",
   failed: "Run failed",
   cancelled: "Cancelled",
+  archived: "Archived",
 };
 
 export type ResearchRunOption = {

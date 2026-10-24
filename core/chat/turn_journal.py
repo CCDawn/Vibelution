@@ -1845,7 +1845,8 @@ def _session_turn_items_from_active_events(
             continue
         payload = dict(event.payload or {})
         tool_call = dict(payload.get("toolCall") or payload.get("tool_call") or {})
-        outcome = _ui_tool_status_from_journal(_tool_status_from_event(event, tool_call))
+        journal_status = _tool_status_from_event(event, tool_call)
+        outcome = _ui_tool_status_from_journal(journal_status)
         tool_outcomes[call_id] = outcome
         # semanticStatus (degraded/fallback/partial) is orthogonal to the coarse
         # outcome; it must survive projection or the UI cannot show a degraded
@@ -1853,6 +1854,8 @@ def _session_turn_items_from_active_events(
         semantic_status = str(
             tool_call.get("semanticStatus") or tool_call.get("semantic_status") or ""
         ).strip().lower()
+        if journal_status in {"cancelled", "canceled", "interrupted"}:
+            semantic_status = "cancelled"
         if semantic_status:
             tool_semantic_statuses[call_id] = semantic_status
         summary = str(
@@ -1994,7 +1997,9 @@ def _ui_tool_status_from_journal(status: str) -> str:
         return "failed"
     if normalized in {"degraded", "fallback", "partial"}:
         return "degraded"
-    if normalized in {"blocked", "cancelled", "canceled", "no_result", "interrupted"}:
+    if normalized in {"cancelled", "canceled", "interrupted"}:
+        return "completed"
+    if normalized in {"blocked", "no_result"}:
         return "failed"
     if normalized in {"running", "pending", "queued", "ready"}:
         return "pending" if normalized in {"queued", "ready", "pending"} else "running"
@@ -3308,6 +3313,8 @@ def _tool_status_from_event(event: TurnJournalEvent, tool_call: dict[str, Any]) 
 
 def _normalize_terminal_tool_status(status: str) -> str:
     normalized = str(status or "").strip().lower()
+    if normalized == "canceled":
+        return "cancelled"
     if normalized in {"done", "success", "succeeded", "completed", "finished", "ready", "degraded", "observed"}:
         return "done"
     if normalized in {"failed", "failure", "error"}:

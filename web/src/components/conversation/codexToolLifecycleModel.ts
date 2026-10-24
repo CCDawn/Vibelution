@@ -123,13 +123,13 @@ export function normalizeCodexToolLifecycleStatus(status: string | undefined): C
   if (["degraded", "fallback", "partial", "recovered", "unavailable"].includes(normalized)) {
     return "degraded";
   }
-  if (["queued", "pending"].includes(normalized)) {
+  if (["queued", "pending", "ready", "waiting", "awaiting_approval", "approval_required", "blocked"].includes(normalized)) {
     return "pending";
   }
   if (["running", "thinking", "tooling", "answering", "streaming"].includes(normalized)) {
     return "running";
   }
-  if (["completed", "complete", "done", "success", "succeeded", "ok", "finished", "ready"].includes(normalized)) {
+  if (["completed", "complete", "done", "success", "succeeded", "ok", "finished"].includes(normalized)) {
     return "completed";
   }
   return "failed";

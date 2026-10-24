@@ -611,6 +611,7 @@ class FormalRuntimeState(PhaseState):
         "running",
         "waiting_human",
         "blocked",
+        "paused",
         "reconciliation_required",
         "succeeded",
         "failed",
