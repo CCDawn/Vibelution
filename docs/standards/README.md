@@ -22,6 +22,7 @@
 | Windows 产品运行时禁止 cmd/控制台弹窗（永久红线） | [development-standard.md §8.0](development-standard.md) + 根 `AGENTS.md` §2 |
 | 写入前本地复用评估 + 风险分级的仓外成熟方案调研 | [development-standard.md §2.2](development-standard.md) + 根 `AGENTS.md` §2 |
 | 多 Agent、worktree、claim、merge 协作 | [../agents/worktree-collaboration.md](../agents/worktree-collaboration.md) |
+| 合入后自动切回主目录、释放本任务占用、保留备份并核验清理 | [安全清理恢复](../agents/worktree-collaboration.md#safe-cleanup-recovery) |
 | 领域词汇 | [../agents/domain.md](../agents/domain.md) |
 | 工具授权入口 | [../agents/tool-authorization-entrypoints.md](../agents/tool-authorization-entrypoints.md) |
 | 前端 UI / VUI / shadcn（**强制**，根 `AGENTS.md` §2 红线） | [development-standard.md §9.1](development-standard.md) + [../../web/src/components/vui/README.md](../../web/src/components/vui/README.md) + [组件设计索引](../../web/src/components/vui/designs/INDEX.md) + 按钮选型 [../guides/button-selection.md](../guides/button-selection.md) + 门禁 `vuiShadcnRouteContract.test.ts` / `vuiComponentDesignContract` |

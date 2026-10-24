@@ -125,6 +125,37 @@ def test_completion_acceptance_routes_to_the_user_goal_contract() -> None:
         assert boundary in section, boundary
 
 
+def test_cleanup_recovery_keeps_ownership_backup_and_real_residue_checks() -> None:
+    """Protect cleanup instructions; this does not prove a real directory was removed."""
+    for relative in (
+        "AGENTS.md", "docs/standards/README.md", "docs/guides/loop.md",
+        "docs/standards/development-standard.md",
+    ):
+        path = PROJECT_ROOT / relative
+        assert "#safe-cleanup-recovery" in path.read_text(encoding="utf-8"), relative
+        _assert_local_links_resolve(path)
+
+    path = PROJECT_ROOT / "docs/agents/worktree-collaboration.md"
+    _assert_local_links_resolve(path)
+    text = path.read_text(encoding="utf-8")
+    section = text.split("### Safe Cleanup Recovery\n", 1)[1].split("\n## Shared Files", 1)[0]
+    for boundary in (
+        "Scope and preserve recovery", "Return this chat to the integration workspace",
+        "Use the existing owner route", "Release only task-owned holders",
+        "Use the owning worktree manager", "Remove only verified residue",
+        "Verify the real postconditions", "same cwd alone is not ownership proof",
+        "no active call, runtime duty or other-task consumer remains",
+        "historical backup identities/hashes remain intact",
+        "Do not spoof an official client", "not changing runtimes or encodings",
+    ):
+        assert boundary in section, boundary
+    assert "do not run project `--cleanup-only` against it" in text
+    assert "git worktree prune" not in text.split("## Cleanup\n", 1)[1].split("\n## Shared Files", 1)[0]
+    standard = (PROJECT_ROOT / "docs/standards/development-standard.md").read_text(encoding="utf-8")
+    assert "For externally managed worktrees, integrate with `--retain-worktree`" in standard
+    assert "do not run project `--cleanup-only` against them" in standard
+
+
 def test_windows_no_console_red_line_is_normative():
     """Visible console popups are permanently forbidden for product runtime."""
 

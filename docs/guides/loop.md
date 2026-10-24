@@ -25,9 +25,11 @@
 6 VERIFY    稳定修改批次按影响面跑最窄反馈测试；同一 HEAD/命令/输入未变不重复跑；完整 selector 计划留给最终 closeout 一次执行
 7 EVIDENCE  实现文件变更：已定位小修记 `LOCAL_ONLY`，需仓外对照记 `EXTERNAL`；logging/runtime 证据按影响面；分支实现验收在 merge 前闭合；逐项核对用户目标验收（§22.1）
 8 INTEGRATE 默认用 `scripts/task_closeout.py` 一次完成最终验证、短时 integration claim、ff-only merge 与清理；不得先手动 closeout 后无参重跑，不得等用户再下令审查/合入
-9 CLEAN     merge 成功即清理本任务临时内容/进程、claim、junction、worktree、本地分支；不等待 post-merge validation
+9 CLEAN     merge 成功即安全切回主目录、核实并释放本任务占用、保留历史备份，再清理本任务资源；按下方安全清理恢复验收，不等待 post-merge validation
 10 CLOSE     核对用户目标与实际结果（§4.1），未达成则继续已授权的修复/复查；对用户汇报（根 `AGENTS.md` §5），不把接口或合入成功当整体完成
 ```
+
+安全本地清理由 owner 自动跟进，不等用户催办；主检出保护、目录占用、托管归档和磁盘/Git 最终核验统一按[安全清理恢复](../agents/worktree-collaboration.md#safe-cleanup-recovery)执行。
 
 ---
 
@@ -56,7 +58,7 @@ Set-Location "<ROOT_MAIN>"
 .\.venv\Scripts\python.exe scripts\task_closeout.py --task-worktree "<TASK_WORKTREE>"
 # Codex App 等外部管理或仍承担运行职责的已登记 worktree：照常验证和 ff-only 合入，但保留目录、分支与依赖链接。
 # 此模式不停止服务、不绕过 claim/manifest；成功返回 merged=true、exit_code=0、merged_cleanup_pending。
-# 外部托管工作区待停止使用后由所属管理器归档，不得对它运行 --cleanup-only。
+# 外部托管工作区先安全切回主目录、释放本任务占用，再由所属管理器保存恢复快照并归档；不得对它运行 --cleanup-only。
 .\.venv\Scripts\python.exe "<TASK_WORKTREE>\scripts\task_closeout.py" --task-worktree "<TASK_WORKTREE>" --retain-worktree
 # selector 中的 .venv 是逻辑命令；同 requirements 指纹时由 gate 只读解析到根 main .venv，禁止在任务树创建 junction
 # requirements 变更需要独立依赖时，可复用已创建的物理任务 .venv；gate 会检查完整依赖与 pip health，仍不创建或安装环境。
@@ -68,7 +70,7 @@ Set-Location "<ROOT_MAIN>"
 .\.venv\Scripts\python.exe scripts\task_closeout.py --task-worktree "<TASK_WORKTREE>"
 # reuse_research_missing / reuse_research_invalid：先补录或修好复用证据（见下方 record 命令），再原样重跑 closeout；该检查在昂贵命令之前，无需 rebase/token
 .\.venv\Scripts\python.exe scripts\task_closeout.py --task-worktree "<TASK_WORKTREE>"
-# merged_cleanup_pending 表示已合入，只补清理，不验证/不 merge
+# 项目自管 worktree 的 merged_cleanup_pending 只补清理，不验证/不 merge；外部托管工作区走上方所属管理器归档。
 .\.venv\Scripts\python.exe scripts\task_closeout.py --task-worktree "<TASK_WORKTREE>" --branch "codex/<TASK>" --agent-id "<AGENT_ID>" --cleanup-only
 
 # FE focused Vitest（仓库根执行，selector 输出格式）

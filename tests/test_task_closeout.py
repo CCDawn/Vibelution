@@ -940,6 +940,44 @@ def test_cleanup_finishes_when_removal_only_left_the_directory(
     assert _run_git(context.main_root, "show-ref", "--verify", "--quiet", "refs/heads/codex/test-task").returncode != 0
 
 
+def test_cleanup_preserves_another_tasks_temporarily_missing_worktree(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Task cleanup must retain peer recovery metadata even when Git could prune it."""
+    for name in tuple(os.environ):
+        if name.startswith("GIT_"):
+            monkeypatch.delenv(name)
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    ctx = _leftover_context(tmp_path, monkeypatch)
+    peer_root = tmp_path / "other-task"
+    added = _run_git(
+        ctx.main_root, "worktree", "add", "-b", "codex/other-task", str(peer_root), "main",
+    )
+    assert added.returncode == 0, added.stderr
+    peer_tip = _run_git(peer_root, "rev-parse", "HEAD").stdout.strip()
+    peer_admin = Path(_run_git(peer_root, "rev-parse", "--absolute-git-dir").stdout.strip())
+    backup_ref = "refs/vibelution-backups/other-task/before"
+    assert _run_git(ctx.main_root, "update-ref", backup_ref, peer_tip).returncode == 0
+    offline_root = tmp_path / "offline-other-task"
+    peer_root.rename(offline_root)
+    for path in (peer_admin, *peer_admin.rglob("*")):
+        os.utime(path, (946684800, 946684800))
+    prunable = _run_git(ctx.main_root, "worktree", "prune", "--dry-run")
+    assert prunable.returncode == 0
+    assert peer_admin.name in prunable.stdout + prunable.stderr
+
+    closeout.cleanup_task_resources(ctx, agent_id="agent-test")
+
+    assert not ctx.task_root.exists()
+    assert _run_git(ctx.main_root, "show-ref", "--verify", "--quiet", "refs/heads/codex/test-task").returncode != 0
+    assert peer_admin.is_dir()
+    assert _run_git(ctx.main_root, "rev-parse", "codex/other-task").stdout.strip() == peer_tip
+    assert _run_git(ctx.main_root, "rev-parse", backup_ref).stdout.strip() == peer_tip
+    assert (offline_root / "seed.txt").read_text(encoding="utf-8") == "seed\n"
+
+
 def test_cleanup_keeps_residue_whose_content_it_cannot_judge(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
