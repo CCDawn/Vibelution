@@ -10,6 +10,7 @@ import { fetchSessionBudgetParameters, fetchSessionLlmOptions, listSessionChildS
 import { queryKeys } from "../../api/queryKeys";
 import type { ChatRoomDetail, SessionDetail, SessionSummary } from "../../api/types";
 import { postBrowserTelemetry } from "../../app/browserTelemetry";
+import { chatStartupCorrelationFields, recordChatStartupMilestone } from "../../app/chatStartupMetrics";
 import { isVisibleDirectSession, rootSessionIdFor } from "../conversationIndexModel";
 import { isTempSessionId } from "../sessionOptimisticIds";
 import {
@@ -214,6 +215,7 @@ export function useChatSessionDetailQueries({
       eventCode: sessionDetailQuery.isError ? "browser.chat_route.startup_data_failed" : "browser.chat_route.startup_data_ready",
       message: sessionDetailQuery.isError ? "Chat route startup reached a detail error surface." : "Chat route startup data is ready.",
       fields: {
+        ...chatStartupCorrelationFields(activeSessionId || ""),
         durationMs: Math.max(0, Date.now() - chatRouteMountStartedAtRef.current),
         activeSession: Boolean(activeSessionId),
         standardGroupRoomActive,
@@ -225,6 +227,11 @@ export function useChatSessionDetailQueries({
         groupRoomReady: Boolean(!standardGroupRoomActive || activeGroupRoom),
       },
     });
+    if (!sessionDetailQuery.isError && activeSessionId && !standardGroupRoomActive && !financeSurface
+      && sessionDetailQuery.data?.id === activeSessionId && !sessionDetailQuery.isPlaceholderData
+      && !isProvisionalSessionTranscript(sessionDetailQuery.data)) {
+      recordChatStartupMilestone(activeSessionId, "dataReady");
+    }
   }, [
     activeGroupRoom,
     activeSessionId,

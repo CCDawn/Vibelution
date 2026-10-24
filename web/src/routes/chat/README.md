@@ -41,6 +41,37 @@ Chat surface. Rules:
   gates: `chatRouteWriteBoundary.test.ts`, `useChatRouteSelection.test.tsx`,
   `useChatSessionSelection.test.tsx`, `AppShellNavigationTelemetry.test.ts`.
 
+## Native-session startup measurements
+
+`startup_data_ready` retains its existing meaning: the initial session catalog
+and authoritative transcript data are ready. It does not imply that the lazy
+conversation surface or composer has mounted.
+
+`useChatStartupPresentation` observes the existing native-session DOM identity
+without mounting, focusing or editing the conversation. After two animation-frame
+callbacks, it reports `startup_transcript_presented` for a visible transcript row
+(or a loaded empty session) and `startup_composer_ready` for a visible, enabled,
+editable textarea that passes a center-point hit test. Hidden windows, loading
+placeholders, unrelated sessions and read-only surfaces cannot complete it.
+This observes a DOM rendering opportunity, not GPU scan-out or an actual keystroke.
+
+`app/chatStartupMetrics.ts` joins those facts with data readiness and emits
+`browser.chat_route.startup_interactive` once for the first native session target
+in the document. All events carry `measurementVersion`, `pageInstanceId`,
+`navigationTimeOriginMs` and `sessionId`; observations from later sessions or other
+documents must not be combined. `interactiveMs` is the maximum of `dataReadyMs`,
+`transcriptPresentedMs` and `composerReadyMs`, measured from navigation time origin.
+`dataReadyToInteractiveMs` exposes the previously unmeasured presentation gap.
+Missing facts stay missing; errors or deadlines must never be converted to success.
+The same timestamps are available as native `performance` marks under
+`vibelution.chat.startup.{data_ready,transcript_presented,composer_ready,interactive}`
+so browser probes do not depend on telemetry upload or log-flush latency.
+
+For full startup, correlate that document's navigation time origin with the
+verified Launcher request/process timestamps. Report whether the Electron shell
+was fresh or reused. First-token latency and optional background readiness are
+separate measurements.
+
 ## Ownership map (claim scopes)
 
 | Task type | Prefer these files | Avoid |

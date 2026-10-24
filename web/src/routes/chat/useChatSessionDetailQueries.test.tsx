@@ -12,12 +12,16 @@ import { buildSessionDetailShellFromSummary } from "./chatSessionDetailHelpers";
 import { shouldWaitForChatStartupRestore, useChatSessionDetailQueries, type UseChatSessionDetailQueriesInput } from "./useChatSessionDetailQueries";
 import { useChatWorkbenchCatalogQueries, type ChatWorkbenchCatalogQueriesInput } from "./useChatWorkbenchCatalogQueries";
 
-const reads = vi.hoisted(() => ({ detail: vi.fn(), telemetry: vi.fn(), teams: vi.fn(async () => []) }));
+const reads = vi.hoisted(() => ({ detail: vi.fn(), telemetry: vi.fn(), milestone: vi.fn(), teams: vi.fn(async () => []) }));
 vi.mock("./chatSessionDetailHelpers", async (importOriginal) => ({
   ...await importOriginal<typeof import("./chatSessionDetailHelpers")>(),
   fetchSessionDetailWindow: reads.detail,
 }));
 vi.mock("../../app/browserTelemetry", () => ({ postBrowserTelemetry: reads.telemetry }));
+vi.mock("../../app/chatStartupMetrics", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../app/chatStartupMetrics")>(),
+  recordChatStartupMilestone: reads.milestone,
+}));
 vi.mock("../../api/teams", () => ({ listTeams: reads.teams }));
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 afterEach(() => vi.resetAllMocks());
@@ -153,6 +157,7 @@ describe("Chat startup detail priority", () => {
       expect(page.ready).toBe(true);
       expect(page.reportReady).toHaveBeenCalledOnce();
       expect(reads.telemetry).toHaveBeenCalledWith(expect.objectContaining({ eventCode: "browser.chat_route.startup_data_ready" }));
+      expect(reads.milestone).toHaveBeenCalledWith(summary.id, "dataReady");
     } finally { await page.dispose(); }
   });
 
@@ -200,6 +205,18 @@ describe("Chat startup detail priority", () => {
     } finally { await page.dispose(); }
   });
 
+  it("never assigns a previously latched ready flag to a new session still loading", async () => {
+    reads.detail.mockImplementation(() => new Promise(() => {}));
+    const next = { id: "next", agentId: "agent" } as SessionSummary;
+    const page = await mount({
+      activeSessionId: next.id, sessions: [next], chatStartupDataReady: true,
+    }, fullDetail);
+    try {
+      await flush();
+      expect(reads.milestone).not.toHaveBeenCalled();
+    } finally { await page.dispose(); }
+  });
+
   it.each([
     { name: "empty directory", input: {} },
     { name: "directory with no restore candidate", input: { sessions: [{ ...summary, hiddenFromIndex: true }] } },
@@ -237,6 +254,7 @@ describe("Chat startup detail priority", () => {
       expect(reads.teams).toHaveBeenCalledOnce();
       expect(reads.telemetry).toHaveBeenCalledWith(expect.objectContaining({ eventCode: "browser.chat_route.startup_data_failed" }));
       expect(reads.telemetry).not.toHaveBeenCalledWith(expect.objectContaining({ eventCode: "browser.chat_route.startup_data_ready" }));
+      expect(reads.milestone).not.toHaveBeenCalled();
     } finally { await page.dispose(); }
   });
 });

@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo, useRef, type ReactNode } from "react";
 
 import type { SessionReferenceAttachment } from "../../api/types";
 import { postBrowserTelemetry } from "../../app/browserTelemetry";
+import { useChatStartupPresentation } from "./useChatStartupPresentation";
 import { LazyConversationView } from "../../components/conversation/LazyConversationView";
 import type { ComposerQueueItem } from "../../components/conversation/composerFollowupQueueModel";
 import type {
@@ -243,6 +244,11 @@ export const ChatConversationComposerBridge = memo(function ChatConversationComp
     ),
     [activeTurnLayersStore, streamedActiveTurnLayer, messages, activeTurnMessage, activeTurnAuthority],
   );
+  useChatStartupPresentation({
+    sessionId,
+    enabled: !props.companionMode && !composer.readOnly,
+    transcriptPending: Boolean(props.transcriptPending),
+  });
   const terminalActivityLoggedRef = useRef("");
   const terminalActivityRetained = Boolean(
     streamedActiveTurnLayer
