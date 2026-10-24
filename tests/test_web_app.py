@@ -9344,8 +9344,9 @@ def test_stop_during_agent_call_does_not_record_late_completed_result(tmp_path, 
         detail_response = client.get("/api/sessions/session-live")
         assert detail_response.status_code == 200
         payload = detail_response.json()
-        assert latest_run["status"] == "stopped_by_user"
+        assert latest_run["status"] == "stopped"
         assert payload["currentPhase"] == "ready"
+        assert payload["terminalReason"] == "stopped_by_user"
         assert "本轮已按请求停止" in _assistant_visible_text(payload["messages"][-1])
         assert "迟到完成结果" not in _assistant_visible_text(payload["messages"][-1])
         assert not any(
