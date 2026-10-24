@@ -46,6 +46,7 @@ $arguments = @(
     "/platform:anycpu",
     "/reference:System.Windows.Forms.dll",
     "/reference:System.Drawing.dll",
+    "/reference:System.Web.Extensions.dll",
     ("/win32icon:{0}" -f $iconPath),
     ("/out:{0}" -f $OutputPath),
     $sourcePath

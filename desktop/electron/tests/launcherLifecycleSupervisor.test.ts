@@ -20,6 +20,19 @@ function bind(
 }
 
 describe("LauncherLifecycleSupervisor", () => {
+  it("retains a read-only generation fence after an intent slot is cleared", () => {
+    const supervisor = new LauncherLifecycleSupervisor();
+    expect(supervisor.intentGeneration("main")).toBe(0);
+    const start = supervisor.beginIntent({ instanceId: "main", operation: "start", desiredState: "open" });
+    expect(supervisor.intentGeneration("main")).toBe(start.generation);
+    supervisor.clearSlotIfCurrent(start);
+    expect(supervisor.snapshot("main")).toBeNull();
+    expect(supervisor.intentGeneration("main")).toBe(start.generation);
+    const stop = supervisor.beginIntent({ instanceId: "main", operation: "stop", desiredState: "closed" });
+    expect(supervisor.intentGeneration("main")).toBeGreaterThan(start.generation);
+    expect(supervisor.intentGeneration("main")).toBe(stop.generation);
+  });
+
   it("supersedes and aborts a start observer when stop arrives before READY", () => {
     const supervisor = new LauncherLifecycleSupervisor();
     const start = bind(

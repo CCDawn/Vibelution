@@ -118,9 +118,23 @@ def _recover_challenge_meeting_drivers_on_startup() -> object:
     return recover_challenge_meeting_drivers()
 
 
-def _start_meeting_driver_recovery_job(startup_jobs: StartupJobGroup):
+def _start_meeting_driver_recovery_job(
+    startup_jobs: StartupJobGroup,
+    *,
+    app: FastAPI | None = None,
+    directory_ready: asyncio.Task[Any] | None = None,
+):
     """Schedule the startup meeting-driver recovery scan."""
 
+    if directory_ready is not None:
+        return startup_jobs.start_async(
+            "startup-meeting-driver-recovery",
+            _run_session_recovery_after_first_frame(
+                app, directory_ready, startup_jobs,
+                _recover_challenge_meeting_drivers_on_startup,
+                worker_name="startup-meeting-driver-recovery-worker",
+            ),
+        )
     return startup_jobs.start_thread(
         "startup-meeting-driver-recovery", _recover_challenge_meeting_drivers_on_startup
     )
@@ -754,14 +768,26 @@ async def web_workbench_lifespan(app: FastAPI | None):
             worker_name="startup-agent-inbox-recovery-worker",
         ),
     )
+    # Historical orphan scans share the native directory and first-request
+    # budget. Live dispatch, receipts and safety owners below stay immediate.
     startup_meeting_driver_recovery_task = _start_meeting_driver_recovery_job(
-        startup_jobs
+        startup_jobs, app=app, directory_ready=startup_directory_task,
     )
-    startup_chat_room_round_recovery_task = startup_jobs.start_thread(
-        "startup-chat-room-round-recovery", _recover_orphaned_chat_room_rounds_on_startup
+    startup_chat_room_round_recovery_task = startup_jobs.start_async(
+        "startup-chat-room-round-recovery",
+        _run_session_recovery_after_first_frame(
+            app, startup_directory_task, startup_jobs,
+            _recover_orphaned_chat_room_rounds_on_startup,
+            worker_name="startup-chat-room-round-recovery-worker",
+        ),
     )
-    startup_command_attempt_recovery_task = startup_jobs.start_thread(
-        "startup-command-attempt-recovery", _recover_hypothesis_command_attempts_on_startup
+    startup_command_attempt_recovery_task = startup_jobs.start_async(
+        "startup-command-attempt-recovery",
+        _run_session_recovery_after_first_frame(
+            app, startup_directory_task, startup_jobs,
+            _recover_hypothesis_command_attempts_on_startup,
+            worker_name="startup-command-attempt-recovery-worker",
+        ),
     )
     # Session startup recovery sweep (interrupted turns + queue drain). Kept
     # adjacent to the other *_recovery_* hooks; later recovery hooks append
@@ -777,10 +803,14 @@ async def web_workbench_lifespan(app: FastAPI | None):
     )
     # Subagent address orphan sweep (crash-left running records). Same
     # best-effort recovery family; see core/orchestration/subagent_address.py.
-    startup_jobs.start_thread(
+    startup_jobs.start_async(
         "startup-subagent-address-recovery",
-        _recover_stale_subagent_addresses_on_startup,
-        stop_keyword="should_stop",
+        _run_session_recovery_after_first_frame(
+            app, startup_directory_task, startup_jobs,
+            _recover_stale_subagent_addresses_on_startup,
+            worker_name="startup-subagent-address-recovery-worker",
+            stop_keyword="should_stop",
+        ),
     )
     startup_research_task_recovery = _start_research_task_recovery_job(
         startup_jobs, startup_session_recovery_task,

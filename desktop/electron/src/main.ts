@@ -24,6 +24,7 @@ import {
 import { IPC_CHANNELS } from "./ipc.js";
 import { configureLocalDebugging, identifyDebugWindow, publishLocalDebugging } from "./debugging/localDebugging.js";
 import { captureElectronOwnerIdentity } from "./tray/desktopShellOwner.js";
+import { startNativeLauncherStartTransport } from "./process/nativeLauncherStart.js";
 import {
   DESKTOP_LAUNCH_PROFILE_FILE,
   applyDesktopLaunchSettingsToEnvironment,
@@ -135,7 +136,7 @@ import {
   type ServingProcessIdentity
 } from "./process/servingVersion.js";
 import { recordAdmissionOutcome } from "./lifecycle/instanceAdmissionStore.js";
-import { normalizeInstanceKey, resolveConfigHome, resolveDataHomeForProject, resolveRuntimeManagerDir } from "./lifecycle/projectStoragePaths.js";
+import { normalizeInstanceKey, resolveActiveCanonicalRuntimeHome, resolveConfigHome, resolveDataHomeForProject, resolveRuntimeManagerDir } from "./lifecycle/projectStoragePaths.js";
 import {
   claimStopIfGeneration,
   instancesRegistryPath,
@@ -3554,10 +3555,14 @@ async function orchestrateLauncherLifecycle(
   payload: LauncherIpcInvokePayload,
   provenance: LauncherLifecycleProvenance = "operator",
   signal?: AbortSignal,
-  fastCloseTiming?: { deadlineAt: number; forceAt: number }
+  fastCloseTiming?: { deadlineAt: number; forceAt: number },
+  nativeColdStart = false
 ): Promise<OrchestratedLifecycleResult> {
   if (launcherBootstrap === null) {
     throw new Error("Launcher backend is not available.");
+  }
+  if (nativeColdStart && shutdownApproved) {
+    throw new Error("Desktop shell is shutting down.");
   }
   const forceAuthorization = await authorizeLauncherForceLifecycle({
     operation,
@@ -3580,6 +3585,25 @@ async function orchestrateLauncherLifecycle(
   let frontendReleaseChanged = false;
   let frontendCheckedForReuse = false;
   let shellStale = false;
+
+  // A positive no-dispatch response must precede even beginIntent: that call
+  // can supersede an in-flight command. Current cold starts can reuse this
+  // read-only gate below; warm reuse/refresh keep the full legacy entry path.
+  let nativeReadiness: DesktopShellLaunchReadiness | null = null;
+  if (nativeColdStart) {
+    const admissionGeneration = launcherLifecycleSupervisor.intentGeneration("main");
+    if (supervisedOperation !== "start") throw new Error("Native transport only supports start.");
+    if (app.isPackaged && !await mainLineBackendIsReachable(paths.workspaceRoot)) {
+      nativeReadiness = await inspectCurrentDesktopShellLaunchReadiness(signal);
+    }
+    if (shutdownApproved) throw new Error("Desktop shell is shutting down.");
+    if (admissionGeneration !== launcherLifecycleSupervisor.intentGeneration("main")) {
+      return supersededLifecycleResult(operation);
+    }
+    if (nativeReadiness === null || nativeReadiness.launchBlocking) {
+      return { schemaVersion: 1, accepted: false, operation, code: "native_requires_legacy_launch" };
+    }
+  }
 
   // Claim cancellation before frontend preflight: a close must also supersede
   // a build that has not reached the serialized backend mutation yet.
@@ -3662,6 +3686,10 @@ async function orchestrateLauncherLifecycle(
         packagedShellBlocksReuse = Boolean(status.launchBlocking);
         packagedShellAdvisoryStale = Boolean(status.stale) && !packagedShellBlocksReuse;
       } catch (error: unknown) {
+        if (nativeColdStart) {
+          launcherLifecycleSupervisor.clearSlotIfCurrent(intentLease);
+          throw error;
+        }
         console.warn(error instanceof Error ? error.message : String(error));
         packagedShellBlocksReuse = await packagedDesktopShellIsStale();
       }
@@ -3731,12 +3759,17 @@ async function orchestrateLauncherLifecycle(
   });
   if (shouldInspectDesktopShellBeforeLifecycle(lifecycleOperation, app.isPackaged)) {
     try {
-      const status = await inspectCurrentDesktopShellLaunchReadiness(lifecycleSignal);
+      const status = nativeReadiness && !frontendCheckedForReuse && lifecycleOperation === "start"
+        ? nativeReadiness : await inspectCurrentDesktopShellLaunchReadiness(lifecycleSignal);
       if (!launcherLifecycleSupervisor.isCurrent(intentLease)) {
         return supersededLifecycleResult(operation);
       }
       refreshBeforeLifecycle = shouldRefreshBeforeLifecycle(lifecycleOperation, { isPackaged: true, launchBlocking: status.launchBlocking });
     } catch (error: unknown) {
+      if (nativeColdStart) {
+        launcherLifecycleSupervisor.clearSlotIfCurrent(intentLease);
+        throw error;
+      }
       console.warn(error instanceof Error ? error.message : String(error));
     }
   }
@@ -5350,6 +5383,36 @@ app.whenReady()
     windowProvider = createWindowProvider(paths, launcherBootstrap);
     resolveLauncherControlPlaneReady?.();
     resolveLauncherControlPlaneReady = null;
+    // Publish only for a real, ready Windows product shell. Node-based main
+    // tests and unmigrated layouts cannot touch an operator's runtime files.
+    if (app.isPackaged && process.platform === "win32" && process.versions.electron) {
+      try {
+        const runtimeHome = resolveActiveCanonicalRuntimeHome(paths.workspaceRoot);
+        if (runtimeHome) {
+          const transport = await startNativeLauncherStartTransport({
+            workspaceRoot: paths.workspaceRoot,
+            runtimeDir: join(runtimeHome, "launcher"),
+            identity: captureElectronOwnerIdentity(),
+            onStart: async () => {
+              try {
+                return await orchestrateLauncherLifecycle(
+                  "start", { schemaVersion: 1, path: "start" }, "operator", undefined, undefined, true
+                );
+              } catch (error: unknown) {
+                console.warn(error instanceof Error ? error.message : String(error));
+                return { schemaVersion: 1, accepted: false, operation: "start", code: "native_start_failed",
+                  message: "Launcher 未确认启动成功，请查看控制面日志。" };
+              }
+            }
+          });
+          const retireTransport = () => { void transport.close().catch(() => undefined); };
+          app.once("quit", retireTransport);
+          process.once("exit", retireTransport);
+        }
+      } catch {
+        console.warn("Native start transport unavailable; the compatibility entry remains active.");
+      }
+    }
     updateLauncherWindowTruth();
     startDeferredRestartFulfillment();
     desktopTray = createDesktopTray(paths, {
