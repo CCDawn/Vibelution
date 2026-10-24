@@ -2,9 +2,10 @@
 import React, { act, lazy, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider, QueryObserver, useQuery } from "@tanstack/react-query";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { queryKeys } from "../api/queryKeys";
+import { fetchWithControl, resetControlTokenForTests, seedControlTokenForTests } from "../api/client";
 import { prefetchConversationView } from "../components/conversation/prefetchConversationView";
 import { fetchChatWorkbenchBootstrap, querySessions } from "../api/chat";
 import { chatWorkbenchBootstrapQueryOptions } from "../routes/chat/chatWorkbenchBootstrapQuery";
@@ -24,7 +25,8 @@ vi.mock("../routes/chat/chatSessionDetailHelpers", () => ({ fetchSessionDetailWi
 vi.mock("../routes/chat/useChatSelectionPersistence", () => ({ readCurrentChatSelectionPreference: vi.fn() }));
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 vi.mock("../components/conversation/prefetchConversationView", () => ({ prefetchConversationView: vi.fn(async () => undefined) }));
-afterEach(() => { vi.clearAllMocks(); resetSessionDeleteTombstonesForTests(); });
+beforeEach(() => { seedControlTokenForTests(); });
+afterEach(() => { vi.clearAllMocks(); vi.unstubAllGlobals(); resetControlTokenForTests(); resetSessionDeleteTombstonesForTests(); });
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -41,6 +43,7 @@ async function mount(initial = { pathname: "/chat", search: "" }, route?: React.
   }
   const render = (location = initial) => act(async () => root.render(<QueryClientProvider client={client}><Shell {...location} /></QueryClientProvider>));
   await render();
+  await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 0)); });
   return { client, render, unmount: () => act(async () => root.unmount()), close: async () => { await act(async () => root.unmount()); client.clear(); } };
 }
 
@@ -53,6 +56,50 @@ function pendingReads() {
 }
 
 describe("shell Chat startup prefetch", () => {
+  it("issues authenticated network reads before the module preload fanout", async () => {
+    pendingReads();
+    resetControlTokenForTests();
+    const control = deferred<Response>();
+    const order: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.endsWith("/control-token")) { order.push("token"); return control.promise; }
+      order.push("request");
+      return new Response(JSON.stringify(payload()), { status: 200 });
+    }));
+    vi.mocked(fetchChatWorkbenchBootstrap).mockImplementationOnce(async () => {
+      const response = await fetchWithControl("/api/sessions/bootstrap");
+      return response.json();
+    });
+    vi.mocked(prefetchConversationView).mockImplementationOnce(async () => { order.push("module"); });
+    const page = await mount();
+    try {
+      expect(order).toEqual(["token"]);
+      await act(async () => control.resolve(new Response(JSON.stringify({ controlToken: "test" }), { status: 200 })));
+      await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 0)); });
+      expect(order).toEqual(["token", "request", "module"]);
+    } finally { await page.close(); }
+  });
+
+  it("does not start abandoned module warmup when authentication arrives late", async () => {
+    pendingReads();
+    resetControlTokenForTests();
+    const control = deferred<Response>();
+    vi.stubGlobal("fetch", vi.fn(() => control.promise));
+    const page = await mount();
+    try {
+      await page.render({ pathname: "/agents", search: "" });
+      await act(async () => control.resolve(new Response(JSON.stringify({ controlToken: "test" }), { status: 200 })));
+      await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 0)); });
+      expect(prefetchConversationView).not.toHaveBeenCalled();
+    } finally { await page.close(); }
+  });
+
+  it("keeps the data read available if speculative module loading fails", async () => {
+    pendingReads();
+    vi.mocked(prefetchConversationView).mockRejectedValueOnce(new Error("module unavailable"));
+    const page = await mount();
+    try { expect(fetchSessionDetailWindow).toHaveBeenCalledOnce(); } finally { await page.close(); }
+  });
   it.each([
     { pathname: "/chat", settled: false }, { pathname: "/chat", settled: true },
     { pathname: "/", settled: false }, { pathname: "/", settled: true },
@@ -80,6 +127,9 @@ describe("shell Chat startup prefetch", () => {
     try {
       expect(loadRoute).toHaveBeenCalledOnce();
       expect(prefetchConversationView).toHaveBeenCalledOnce();
+      expect(vi.mocked(fetchChatWorkbenchBootstrap).mock.invocationCallOrder[0]).toBeLessThan(
+        vi.mocked(prefetchConversationView).mock.invocationCallOrder[0],
+      );
       expect(fetchChatWorkbenchBootstrap).toHaveBeenCalledOnce();
       expect(fetchSessionDetailWindow).toHaveBeenCalledOnce();
       expect(querySessions).not.toHaveBeenCalled();
@@ -176,6 +226,7 @@ describe("shell Chat startup prefetch", () => {
     try {
       expect(fetchChatWorkbenchBootstrap).toHaveBeenCalledOnce();
       expect(fetchSessionDetailWindow).not.toHaveBeenCalled();
+      expect(prefetchConversationView).not.toHaveBeenCalled();
     } finally { await page.close(); }
   });
 

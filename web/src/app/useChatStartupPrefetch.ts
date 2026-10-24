@@ -2,6 +2,8 @@ import { useEffect } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 
 import { queryKeys } from "../api/queryKeys";
+import { getControlToken } from "../api/client";
+import { prefetchConversationView } from "../components/conversation/prefetchConversationView";
 import type { ConfigBootstrap } from "../api/types";
 import { parseChatRouteSelection } from "../routes/chat/chatSelectionProjection";
 import { chatWorkbenchBootstrapQueryOptions } from "../routes/chat/chatWorkbenchBootstrapQuery";
@@ -24,11 +26,29 @@ export function useChatStartupPrefetch({ queryClient, pathname, search }: {
     && Boolean(restore?.agentId || restore?.sessionId) && isWorkbenchModeEnabled(config, "chat");
   const enabled = restoringChat
     || (pathname === "/chat" && (selection.kind === "bare" || selection.kind === "session"));
-  useChatStartupSessionPrefetch({
+  const startupSessionId = useChatStartupSessionPrefetch({
     queryClient,
     enabled,
     requestedSessionId: selection.kind === "session" ? selection.sessionId : "",
   });
+
+  useEffect(() => {
+    if (!startupSessionId) return;
+    let cancelled = false;
+    let timer: number | undefined;
+    // API transport awaits this same token. Yield one task after it resolves
+    // so authenticated reads reach fetch before Vite's modulepreload fanout.
+    void getControlToken().then(() => {
+      if (cancelled) return;
+      timer = window.setTimeout(() => {
+        if (!cancelled) void prefetchConversationView().catch(() => {});
+      }, 0);
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [startupSessionId]);
 
   useEffect(() => {
     if (!enabled) return;

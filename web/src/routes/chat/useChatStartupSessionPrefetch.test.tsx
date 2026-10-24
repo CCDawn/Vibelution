@@ -2,10 +2,9 @@
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider, QueryObserver, useQuery } from "@tanstack/react-query";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { queryKeys } from "../../api/queryKeys";
-import { prefetchConversationView } from "../../components/conversation/prefetchConversationView";
 import { isSessionDeleteTombstoned, markSessionDeleteTombstone, resetSessionDeleteTombstonesForTests } from "../sessionDeleteTombstone";
 import { fetchSessionDetailWindow } from "./chatSessionDetailHelpers";
 import { readCurrentChatSelectionPreference } from "./useChatSelectionPersistence";
@@ -13,9 +12,7 @@ import { useChatStartupSessionPrefetch } from "./useChatStartupSessionPrefetch";
 
 vi.mock("./chatSessionDetailHelpers", () => ({ fetchSessionDetailWindow: vi.fn(), SESSION_DETAIL_PREFETCH_STALE_MS: 30_000 }));
 vi.mock("./useChatSelectionPersistence", () => ({ readCurrentChatSelectionPreference: vi.fn() }));
-vi.mock("../../components/conversation/prefetchConversationView", () => ({ prefetchConversationView: vi.fn() }));
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-beforeEach(() => { vi.mocked(prefetchConversationView).mockResolvedValue(undefined); });
 afterEach(() => { vi.resetAllMocks(); resetSessionDeleteTombstonesForTests(); });
 
 describe("remembered session startup overlap", () => {
@@ -41,12 +38,10 @@ describe("remembered session startup overlap", () => {
     vi.mocked(readCurrentChatSelectionPreference).mockReturnValue({ sessionId: "remembered" });
     let resolve!: (value: Awaited<ReturnType<typeof fetchSessionDetailWindow>>) => void;
     vi.mocked(fetchSessionDetailWindow).mockReturnValue(new Promise(done => { resolve = done; }));
-    vi.mocked(prefetchConversationView).mockReturnValue(new Promise(() => {}));
     const page = await mount();
     try {
       expect(fetchSessionDetailWindow).toHaveBeenCalledTimes(1);
       expect(page.client.getQueryData(queryKeys.sessions())).toBeUndefined();
-      expect(prefetchConversationView).toHaveBeenCalledOnce();
       await page.render(true);
       expect(fetchSessionDetailWindow).toHaveBeenCalledTimes(1);
       await act(async () => resolve({ id: "remembered", messages: [] } as Awaited<ReturnType<typeof fetchSessionDetailWindow>>));
@@ -71,18 +66,6 @@ describe("remembered session startup overlap", () => {
     const page = await mount({ enabled: mode !== "disabled", requestedSessionId: mode === "other-route" ? "different" : "" });
     try {
       expect(fetchSessionDetailWindow).not.toHaveBeenCalled();
-      expect(prefetchConversationView).not.toHaveBeenCalled();
-    } finally { await page.close(); }
-  });
-
-  it("keeps the data read available if speculative module loading fails", async () => {
-    vi.mocked(readCurrentChatSelectionPreference).mockReturnValue({ sessionId: "remembered" });
-    vi.mocked(prefetchConversationView).mockRejectedValue(new Error("module unavailable"));
-    vi.mocked(fetchSessionDetailWindow).mockResolvedValue({ id: "remembered", messages: [] } as Awaited<ReturnType<typeof fetchSessionDetailWindow>>);
-    const page = await mount();
-    try {
-      expect(page.client.getQueryData(queryKeys.session("remembered"))).toMatchObject({ id: "remembered" });
-      expect(prefetchConversationView).toHaveBeenCalledOnce();
     } finally { await page.close(); }
   });
 
