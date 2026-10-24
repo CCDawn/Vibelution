@@ -566,6 +566,63 @@ def test_hypothesis_recovery_starts_after_its_startup_delay():
         pump.stop()
 
 
+def test_startup_maintenance_budget_keeps_delivery_dispatch_and_receipts_live():
+    class MaintenanceRuntime(_ClaimRuntime):
+        def __init__(self):
+            super().__init__(["user-command"])
+            self.delivered = threading.Event()
+            self.scanned = threading.Event()
+
+        def run_maintenance_workers_once(self, limit=4):
+            self.delivered.set()
+            return 0
+
+        def run_maintenance_once(self, limit=4):
+            self.scanned.set()
+            return 0
+
+    runtime = MaintenanceRuntime()
+    pump = WorkflowOutboxPump(workers=1, idle_poll_s=0.05, maintenance_recovery_delay_s=30)
+    pump.attach(runtime)
+    threads = pump.threads
+    try:
+        assert runtime.delivered.wait(timeout=3)
+        assert runtime.first_start.wait(timeout=3)
+        assert _wait_until(lambda: runtime.receipt_persistence_calls > 0)
+        assert not runtime.scanned.is_set()
+        # Expire the gate without a slow/flaky wall-clock assertion. Normal
+        # serial ticks resume scans; dispatch wakes never bypassed the budget.
+        pump._maintenance_recovery_not_before = 0
+        assert runtime.scanned.wait(timeout=3)
+    finally:
+        pump.stop(timeout=1)
+    assert all(not thread.is_alive() for thread in threads)
+
+
+def test_stop_during_maintenance_budget_does_not_start_deferred_scans():
+    scanned = threading.Event()
+    delivered = threading.Event()
+
+    class MaintenanceRuntime(_ClaimRuntime):
+        def run_maintenance_workers_once(self, limit=4):
+            delivered.set()
+            return 0
+
+        def run_maintenance_once(self, limit=4):
+            scanned.set()
+            return 0
+
+    pump = WorkflowOutboxPump(workers=1, idle_poll_s=0.05, maintenance_recovery_delay_s=30)
+    pump.attach(MaintenanceRuntime([]))
+    threads = pump.threads
+    try:
+        assert delivered.wait(timeout=3)
+    finally:
+        pump.stop(timeout=1)
+    assert not scanned.is_set()
+    assert all(not thread.is_alive() for thread in threads)
+
+
 def test_closed_ledger_stops_lanes_instead_of_retrying() -> None:
     """A terminal ledger error must end every lane.
 

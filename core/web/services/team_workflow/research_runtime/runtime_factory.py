@@ -221,8 +221,8 @@ class WorkflowRuntime:
         """
         return self.receipt_persistence_worker.run_once(limit=limit)
 
-    def run_maintenance_once(self, limit: int = 4) -> int:
-        """Serial driver for the non-dispatch workers + retention sweeps.
+    def run_maintenance_workers_once(self, limit: int = 4) -> int:
+        """Drive delivery, cancellation and core repairs on the serial lane.
 
         One maintenance thread runs this loop: fork stays serial because it
         writes the LangGraph checkpoint
@@ -242,6 +242,11 @@ class WorkflowRuntime:
         # VIBELUTION_WORKFLOW_DEADLOCK_PAUSE=0.
         handled += self.graph_worker.run_governance_sweep()
         handled += self.adapter_worker.run_repairs_once(limit=limit)
+        return handled
+
+    def run_maintenance_once(self, limit: int = 4) -> int:
+        """Drive serial workers followed by bulk historical recovery scans."""
+        handled = self.run_maintenance_workers_once(limit=limit)
         self._recover_missing_knowledge_sideflows_best_effort(limit=limit)
         self._recover_dead_turn_knowledge_children_best_effort(limit=limit)
         self._recover_failed_knowledge_invocations_best_effort(limit=limit)
@@ -909,6 +914,10 @@ def start_production_workflow_runtime(*, hypothesis_recovery_delay_s: float = 0.
         pump = WorkflowOutboxPump(
             workers=workflow_worker_count(),
             hypothesis_recovery_delay_s=hypothesis_recovery_delay_s,
+            # These historical scans load large legacy service graphs and
+            # contend for the GIL just like hypothesis recovery. Share its
+            # first-frame budget while essential serial workers stay live.
+            maintenance_recovery_delay_s=hypothesis_recovery_delay_s,
         )
         try:
             _PRODUCTION = build_workflow_runtime(

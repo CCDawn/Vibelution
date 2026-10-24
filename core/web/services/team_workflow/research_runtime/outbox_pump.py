@@ -56,11 +56,14 @@ class WorkflowOutboxPump:
         batch_limit: int = 8,
         workers: int = DEFAULT_WORKERS,
         hypothesis_recovery_delay_s: float = 0.0,
+        maintenance_recovery_delay_s: float = 0.0,
     ) -> None:
         self._idle_poll_s = max(0.05, float(idle_poll_s))
         self._batch_limit = max(1, int(batch_limit))
         self._workers = max(1, int(workers))
         self._hypothesis_recovery_delay_s = max(0.0, float(hypothesis_recovery_delay_s))
+        self._maintenance_recovery_delay_s = max(0.0, float(maintenance_recovery_delay_s))
+        self._maintenance_recovery_not_before = 0.0
         self._runtime: Any | None = None
         # One token per wake: each token lets one idle worker run one extra
         # claim pass. Unlike the old single-thread Event this keeps the wake
@@ -100,6 +103,7 @@ class WorkflowOutboxPump:
                 return
             self._stop.clear()
             self._fatal.clear()
+            self._maintenance_recovery_not_before = time.monotonic() + self._maintenance_recovery_delay_s
             self._threads = [
                 threading.Thread(
                     target=self._worker_loop,
@@ -204,6 +208,11 @@ class WorkflowOutboxPump:
             while not self._stop.is_set() and not self._fatal.is_set():
                 runtime = self._runtime
                 maintenance = getattr(runtime, "run_maintenance_once", None)
+                if time.monotonic() < self._maintenance_recovery_not_before:
+                    # Delivery/cancel/graph repair still run on this same
+                    # serial lane. Only bulk historical scans yield startup;
+                    # their next ordinary tick resumes them after the budget.
+                    maintenance = getattr(runtime, "run_maintenance_workers_once", maintenance)
                 if maintenance is not None:
                     try:
                         maintenance(limit=self._batch_limit)

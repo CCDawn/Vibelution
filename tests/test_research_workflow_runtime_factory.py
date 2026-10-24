@@ -25,7 +25,7 @@ def test_startup_can_delay_hypothesis_repair_without_delaying_runtime_readiness(
     original_init = outbox_pump.WorkflowOutboxPump.__init__
 
     def capture_delay(self, **kwargs):
-        delays.append(kwargs["hypothesis_recovery_delay_s"])
+        delays.append((kwargs["hypothesis_recovery_delay_s"], kwargs["maintenance_recovery_delay_s"]))
         original_init(self, **kwargs)
 
     monkeypatch.setattr(outbox_pump.WorkflowOutboxPump, "__init__", capture_delay)
@@ -33,7 +33,7 @@ def test_startup_can_delay_hypothesis_repair_without_delaying_runtime_readiness(
         assert runtime_factory.start_production_workflow_runtime(hypothesis_recovery_delay_s=30) == "ready"
         assert runtime_factory.production_workflow_runtime() is not None
         assert runtime_factory.start_production_workflow_runtime(hypothesis_recovery_delay_s=30) == "ready"
-        assert delays == [30]
+        assert delays == [(30, 30)]
     finally:
         runtime_factory.stop_production_workflow_runtime()
 
@@ -45,6 +45,30 @@ from core.web.services.team_workflow.research_runtime.runtime_factory import (
     build_workflow_runtime,
 )
 from tests._support.workflow_ledger_helpers import build_run_record
+
+
+def test_essential_serial_workers_do_not_run_bulk_history_scans(tmp_path, monkeypatch):
+    from core.web.services.team_workflow.research_runtime.runtime_factory import WorkflowRuntime
+
+    runtime = build_workflow_runtime(tmp_path / "workflow.db")
+    scans = []
+    methods = (
+        "_recover_missing_knowledge_sideflows_best_effort", "_recover_dead_turn_knowledge_children_best_effort",
+        "_recover_failed_knowledge_invocations_best_effort", "_recover_blocked_quote_anchor_extractions_best_effort",
+        "_plan_stage_task_failure_remediation_best_effort", "_heal_formal_lineage_stale_leaves_best_effort",
+        "_reconcile_expired_task_bundles_best_effort", "_sweep_stuck_digest_works_best_effort",
+        "_sweep_meetings_missing_digest_best_effort", "_refresh_queued_meeting_activity_best_effort",
+        "_recover_challenge_meeting_drivers_best_effort", "_sweep_real_batches_best_effort",
+    )
+    for name in methods:
+        monkeypatch.setattr(WorkflowRuntime, name, lambda _self, _name=name, **_kwargs: scans.append(_name))
+    try:
+        runtime.run_maintenance_workers_once()
+        assert scans == []
+        runtime.run_maintenance_once()
+        assert scans == list(methods)
+    finally:
+        runtime.close()
 
 
 def _seed_with_snapshot(store, *, run_id: str = "run-test") -> None:
