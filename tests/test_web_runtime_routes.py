@@ -4777,6 +4777,9 @@ def test_runtime_scene_reconciliation_closes_running_package(tmp_path, monkeypat
     )
     monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+    # Exercise the immediate close path without racing the optional background
+    # refresh for this same freshly seeded package for its nonblocking lock.
+    monkeypatch.setattr(runtime_scene_service, "_schedule_scene_package_periodic_refresh", lambda *_args, **_kwargs: False)
 
     response = runtime_scene_service.record_runtime_scene_event(
         "runtime_manager",

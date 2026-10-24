@@ -1,6 +1,8 @@
 import { BrowserWindow, Notification, app, dialog, ipcMain, nativeImage, nativeTheme, protocol, screen, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
 import { randomUUID } from "node:crypto";
 import { requestRendererWindowClose } from "./windows/rendererWindowClose.js";
+import { configureWindowsNotificationIdentity } from "./notifications/windowsNotificationIdentity.js";
+import { NativeNotificationLifetime } from "./notifications/nativeNotificationLifetime.js";
 import { mkdirSync, statSync, watch, writeFileSync, type FSWatcher } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
@@ -386,6 +388,7 @@ const desktopSessionMirror = new DesktopSessionMirrorQueue((error: unknown) => {
 });
 let workbenchNotificationServices = new WeakMap<object, { origin: string; service: ConversationNotificationService }>();
 let humanAttentionNotificationService: HumanAttentionNotificationService | null = null;
+const nativeNotificationLifetime = new NativeNotificationLifetime();
 const desktopLaunchArgv = process.argv.slice(1);
 const desktopCliArgs = parseDesktopCliArgs(desktopLaunchArgv);
 const desktopLifecycleLaunchMetadata = parseDesktopLifecycleLaunchMetadata(desktopLaunchArgv, process.env);
@@ -457,6 +460,7 @@ if (!runPrimaryWhenReady) {
 }
 const localDebuggingEnabled = configureLocalDebugging(app, desktopLaunchArgv,
   lockDecision.action === "continue_as_primary" && !desktopCliArgs.smoke && !desktopCliArgs.workbenchCloseCanary);
+if (lockDecision.action === "continue_as_primary") configureWindowsNotificationIdentity(app);
 
 function createDesktopPathsForApp(): DesktopPaths {
   const launchSettings = desktopLaunchSettings();
@@ -827,6 +831,7 @@ function resolveConversationNotificationService(event: IpcMainInvokeEvent): Conv
       notification.on("click", onClick);
       notification.on("show", onShow);
       notification.on("failed", onFailed);
+      nativeNotificationLifetime.retain(notification);
       return notification;
     },
     createBadgeIcon: createConversationBadgeIcon,
@@ -862,6 +867,7 @@ function resolveHumanAttentionNotificationService(): HumanAttentionNotificationS
     createNotification: ({ title, body, onClick }) => {
       const notification = new Notification({ title, body, silent: false });
       notification.on("click", onClick);
+      nativeNotificationLifetime.retain(notification);
       return notification;
     },
     openedChannel: IPC_CHANNELS.humanAttentionOpened,
