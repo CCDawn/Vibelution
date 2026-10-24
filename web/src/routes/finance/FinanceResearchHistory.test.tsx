@@ -62,7 +62,7 @@ describe("financial research history rows", () => {
     ["ready", "Research session"],
     ["failed", "Failed"],
   ])("maps the native %s status to its own status icon", async (nativeStatus, label) => {
-    await render({ records: [{ ...record, status: nativeStatus, terminalReason: nativeStatus === "ready" ? undefined : record.terminalReason }] });
+    await render({ records: [{ ...record, status: nativeStatus, terminalReason: nativeStatus === "completed" ? "success" : nativeStatus === "failed" ? "failed_runtime" : undefined }] });
     const status = node.querySelector<HTMLElement>("[data-status]");
     expect(status?.dataset.status).toBe(label);
     expect(status?.querySelector("svg")).not.toBeNull();

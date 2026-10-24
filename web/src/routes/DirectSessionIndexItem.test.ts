@@ -87,7 +87,7 @@ function renderDirectItem(overrides: Partial<Parameters<typeof DirectSessionInde
 describe("DirectSessionIndexItem helpers", () => {
   it("uses current execution instead of a previous result when fields disagree", () => {
     expect(sessionStatusValue(makeSession({ status: "running", currentPhase: "reading", lastTurnStatus: "failed" }))).toBe("reading");
-    expect(sessionStatusValue(makeSession({ status: "ready", currentPhase: "ready", lastTurnStatus: "running" }))).toBe("ready");
+    expect(sessionStatusValue(makeSession({ status: "ready", currentPhase: "ready", lastTurnStatus: "running" }))).toBe("idle");
   });
 
   it("keeps current state semantic and rail-based without a redundant badge", () => {
