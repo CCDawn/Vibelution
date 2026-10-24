@@ -2,392 +2,245 @@
 
 Each independently changing contract stays in its owning module; callers import
 from this package boundary instead of growing ``models.py``.
+
+Public exports resolve their existing owner only when first requested.
 """
 
-from ._canonical import canonical_json, sha256_hex
-from ._validation import ContractValidationError
-from .anomaly_inbox import (
-    ANOMALY_INBOX_RULE_ID,
-    ANOMALY_INBOX_SCHEMA_VERSION,
-    ANOMALY_KIND_BLOCKED_RUN,
-    ANOMALY_KIND_BUDGET_EXHAUSTED,
-    ANOMALY_KIND_CLAIM_DISPUTED,
-    ANOMALY_KIND_DRIFT_SENTINEL_HIT,
-    ANOMALY_KIND_FORMAL_LINEAGE_CONFLICT,
-    ANOMALY_KIND_HEARTBEAT_STALE,
-    ANOMALY_KIND_NEEDS_HUMAN_GATE,
-    ANOMALY_KIND_RETRY_BUDGET_EXHAUSTED,
-    ANOMALY_KIND_REVIEW_DISAGREEMENT_ESCALATION,
-    ANOMALY_KIND_SEVERITY,
-    ANOMALY_KINDS,
-    ANOMALY_SEVERITIES,
-    AnomalyInbox,
-    AnomalyInboxItem,
-    AnomalyInboxScope,
-    AnomalyKind,
-)
-from .artifact_manifest import ArtifactManifest
-from .artifact_receipt import ArtifactReceipt, BudgetReceipt
-from .audit_sampling import (
-    DRIFT_SENTINEL_COUNT,
-    DRIFT_SENTINEL_GATE,
-    GATES,
-    REVIEW_STATUSES,
-    RUN_PHASE_VALUES,
-    SAMPLE_KIND_VALUES,
-    STRATA_AXES,
-    AuditSampleManifest,
-    DriftSentinelSelection,
-    QuestionSampleAssignment,
-    SampleKind,
-    SentinelExclusion,
-    audit_sample_manifest_hash,
-    drift_sentinel_selection_hash,
-    parse_sample_kind,
-)
-from .automation_policy import (
-    AUTO_ADVANCE_CAPABILITIES,
-    AUTO_ADVANCE_DRAIN_MODES,
-    AUTO_ADVANCE_EXECUTION_MODES,
-    AUTO_ADVANCE_POLICY_STATUSES,
-    AUTO_ADVANCE_UI_PRESET_IDS,
-    CANDIDATE_SELECTION_DEFAULT_MAX,
-    CANDIDATE_SELECTION_MIN_MAX,
-    CANDIDATE_SELECTION_RULES,
-    CANDIDATE_SELECTION_RULE_DIGEST_ORDER,
-    MAX_AUTO_REVISION_ROUNDS_ADJUSTABLE_TO,
-    MAX_AUTO_REVISION_ROUNDS_DEFAULT,
-    AutoAdvancePolicyV2,
-    AutomationPolicyValidationError,
-    HumanReviewPolicyV2,
-    POLICY_CONTENT_HASH_RULE,
-    compute_policy_content_hash,
-)
-from .budget import ResearchBudgetLedger
-from .candidate_diversity import (
-    CANDIDATE_COUNT_RANGE_MAX,
-    CANDIDATE_COUNT_RANGE_MIN,
-    CANDIDATE_SCREENING_CONTRACT_VERSION,
-    DEFAULT_APPROXIMATE_MATCH_AXES,
-    DEFAULT_DRAFT_POOL_SIZE,
-    DEFAULT_FINALIST_LIMIT,
-    DEFAULT_REQUIRED_THRESHOLD_IDS,
-    DIVERSITY_AXES,
-    MAX_FINALIST_LIMIT,
-    CandidateMergeRecord,
-    CandidateRejectionRecord,
-    CandidateScreeningArtifact,
-    CandidateScreeningDraft,
-    DiversityAxis,
-    DiversityMergeKind,
-    HardThresholdCheck,
-    HypothesisAxisProfile,
-    ScreeningRejectionReason,
-    ScreeningThresholds,
-    normalize_axis_text,
-    parse_diversity_axis,
-    parse_merge_kind,
-    parse_rejection_reason,
-)
-from .catalog_hypothesis_flow_readiness import (
-    CATALOG_HYPOTHESIS_FLOW_EVIDENCE_IDS,
-    CATALOG_HYPOTHESIS_FLOW_EVIDENCE_STATUSES,
-    CATALOG_HYPOTHESIS_FLOW_NOT_READY_STATUS,
-    CATALOG_HYPOTHESIS_FLOW_READY_STATUS,
-    CATALOG_HYPOTHESIS_FLOW_REPAIR_ACTION,
-    CATALOG_HYPOTHESIS_FLOW_REPORT_KIND,
-    CATALOG_HYPOTHESIS_FLOW_SCHEMA_VERSION,
-    RESEARCH_AUTHORIZATION_REQUIRED_ACTION,
-    CatalogHypothesisFlowReadinessAuthority,
-    CatalogHypothesisFlowReadinessReport,
-    catalog_hypothesis_flow_report_hash,
-)
-from .claim_belief import (
-    CLAIM_BELIEF_RULE_ID,
-    CLAIM_BELIEF_SCHEMA_VERSION,
-    CLAIM_BELIEF_STATES,
-    ClaimBeliefTable,
-    ClaimBeliefTableEntry,
-    belief_state_for_counts,
-)
-from .claim_ledger import (
-    ACCEPTED_REVIEW_STATUS,
-    CLAIM_SOURCES,
-    CLAIM_STATUSES,
-    SUPPORT_LEVELS,
-    ClaimEvidenceRef,
-    ClaimLedgerEntry,
-)
-from .competition_evaluation import CompetitionEvaluationSnapshot
-from .core_hypothesis_coherence import (
-    CORE_HYPOTHESIS_COHERENCE_CHECK_IDS,
-    CORE_HYPOTHESIS_COHERENCE_CONTRACT_VERSION,
-    CoreHypothesisCoherenceCheck,
-    CoreHypothesisCoherenceResult,
-)
-from .decision_record import (
-    DECISION_KINDS,
-    DECISION_STATUSES,
-    DecisionRecord,
-)
-from .discussion_scope import (
-    CANDIDATE_REVIEW_SCOPE_KIND,
-    DISCUSSION_SCOPE_KINDS,
-    DISCUSSION_SCOPE_VERSION,
-    PREFORMAL_CANDIDATE_REVIEW_SCOPE_KIND,
-    PREFORMAL_DISCUSSION_SCOPE_KINDS,
-    PREFORMAL_DISCUSSION_SCOPE_VERSION,
-    QUESTION_GENERATION_SCOPE_KIND,
-    DiscussionScopeEnvelope,
-    DiscussionScopeV1,
-    PreformalCandidateReviewScopeV1,
-    WorkflowDiscussionScopeV1,
-    canonical_discussion_scope,
-    canonical_discussion_scope_json,
-    discussion_scope_hash,
-    discussion_scope_hash_for,
-    discussion_scope_key,
-    discussion_scope_key_for,
-    parse_discussion_scope,
-    parse_discussion_scope_envelope,
-    session_scope_key,
-)
-from .execution import NodeExecutionEnvelope, TaskLease, TaskLeaseStatus
-from .execution_anchor import ExecutionAnchor
-from .evolution_lineage import (
-    EVOLUTION_LINEAGE_ACTORS,
-    EVOLUTION_LINEAGE_EVIDENCE_KINDS,
-    EVOLUTION_LINEAGE_EVENT_KINDS,
-    EVOLUTION_LINEAGE_SCHEMA_VERSION,
-    FINALIST_LIMIT,
-    MAX_REVISION_ROUNDS,
-    REVISION_EXHAUSTED_EXCEPTION,
-    EvolutionLineage,
-    EvolutionLineageEvent,
-    EvolutionLineageEventKind,
-    EvolutionLineageEvidenceRef,
-    evolution_lineage_summary,
-    mandatory_exception_review_required,
-)
-from .experiment_campaign import ExperimentCampaign, ExperimentCampaignStage
-from .hypothesis import HypothesisCandidate, HypothesisPortfolio
-from .hypothesis_fragment import (
-    HYPOTHESIS_CLAIM_BELIEF_STATES,
-    HYPOTHESIS_CLAIM_ROLES,
-    HYPOTHESIS_FRAGMENT_KIND,
-    HYPOTHESIS_FRAGMENT_SCHEMA_VERSION,
-    HypothesisClaimBinding,
-    HypothesisFragment,
-    canonical_fragment_payload,
-)
-from .hypothesis_quality import (
-    AUXILIARY_HYPOTHESIS_DIAGNOSTIC_DIMENSIONS,
-    HYPOTHESIS_SCORE_DIMENSIONS,
-    HYPOTHESIS_SCORE_RUBRIC_SHA256,
-    HYPOTHESIS_SCORE_RUBRIC_VERSION,
-    canonical_hypothesis_score_rubric,
-    hypothesis_score_rubric_sha256,
-)
-from .hypothesis_round import (
-    COMPARISON_OUTCOMES,
-    LINEAGE_KINDS,
-    MEETING_REF_KINDS,
-    MIN_CANDIDATES,
-    ROUND_STATUSES,
-    SCORE_DIMENSIONS,
-    HypothesisLineageRef,
-    HypothesisMeetingRef,
-    HypothesisMetaReview,
-    HypothesisPairwiseComparison,
-    HypothesisParetoAnalysis,
-    HypothesisRound,
-    HypothesisRoundCandidate,
-)
-from .hypothesis_selection import MAX_SELECTED_CANDIDATES, HypothesisSelectionRecord
-from .meeting_digest import MeetingDigest
-from .meeting_round import (
-    DEFAULT_MEETING_ROUNDS,
-    MEETING_STATUSES,
-    MEETING_TYPES,
-    MeetingRound,
-)
-from .node_readiness import (
-    ActorReadiness,
-    BudgetReadiness,
-    NodeReadiness,
-    ReadinessBlocker,
-)
-from .pending_action import ExecutionReceipt, PendingAction
-from .personal_memory_candidate import (
-    EVIDENCE_STATUSES,
-    MEMORY_CLASSES,
-    REUSE_POLICIES,
-    PersonalMemoryCandidate,
-)
-from .platform_readiness import (
-    BLOCKER_CAMPAIGN_THEME_MISMATCH,
-    BLOCKER_DEV_THEME_ONLY,
-    BLOCKER_THEME_NOT_ACTIVATED,
-    PlatformFlowReadinessReport,
-)
-from .policy_generation import (
-    DRAIN_ACTORS,
-    DRAIN_MODE_TRANSITIONS,
-    ORPHAN_DISPOSITIONS,
-    ORPHAN_DISPOSITION_TRANSITIONS,
-    POLICY_DRAIN_MODES,
-    POLICY_GENERATION_SCHEMA_VERSION,
-    DrainTransition,
-    OrphanOutcomeRecord,
-    PolicyGenerationRecord,
-    PolicyGenerationValidationError,
-    ensure_drain_mode_transition,
-    ensure_orphan_disposition_transition,
-)
-from .policy_shadow import (
-    POLICY_SHADOW_ACTION_FOR_POINT,
-    POLICY_SHADOW_AGREEMENTS,
-    POLICY_SHADOW_AUTO_ACTIONS,
-    POLICY_SHADOW_CAPABILITY_FOR_POINT,
-    POLICY_SHADOW_DECISION_POINTS,
-    POLICY_SHADOW_OUTCOME_CLASSES,
-    POLICY_SHADOW_SCHEMA_VERSION,
-    POLICY_SHADOW_WOULD_DECIDE_VALUES,
-    PolicyShadowAgreement,
-    PolicyShadowDecision,
-    PolicyShadowEvaluationRecord,
-    derive_shadow_agreement,
-)
-from .question_stage_binding import (
-    QUESTION_PACKAGE_STAGES,
-    QUESTION_STAGE_BINDING_POLICY_ID,
-    QUESTION_STAGE_BINDING_SCHEMA_VERSION,
-    QuestionStageBinding,
-)
-from .research_scope import (
-    REQUIRED_SCOPE_FIELDS,
-    ResearchScopeEnvelope,
-    ScopeMode,
-    parse_scope_mode,
-    scope_hash_for,
-    scope_identity_seed,
-)
-from .research_task_outputs import (
-    RESEARCH_TASK_OUTPUT_SCHEMA_SHA256,
-    RESEARCH_TASK_OUTPUT_SCHEMA_VERSION,
-    HypothesisDesignOutput,
-    ProtocolReviewOutput,
-    ResultEvaluationOutput,
-    canonical_research_task_output_schema_bundle,
-    parse_research_task_output,
-    research_task_output_schema_sha256,
-)
-from .research_team_role_contract import (
-    CANDIDATE_GENERATION_MEETING_TYPE,
-    CURRENT_RESEARCH_TEAM_ROLE_CONTRACT,
-    HYPOTHESIS_REVIEW_MEETING_TYPE,
-    LEGACY_READ_MODE,
-    RESEARCH_PARTICIPANT_POLICY_VERSION,
-    RESEARCH_TEAM_ROLE_CONTRACT_ID,
-    RESEARCH_TEAM_ROLE_CONTRACT_VERSION,
-    RESEARCH_TEAM_ROLE_SEMANTIC_VERSION,
-    ProductAgentRole,
-    ResearchParticipantPolicy,
-    ResearchTeamRoleContract,
-    SystemCapability,
-    current_research_team_role_contract_snapshot,
-)
-from .research_template import (
-    ADDENDUM_STATUSES,
-    BASELINE_STATUSES,
-    TemplateAddendum,
-    TemplateBaseline,
-)
-from .review_call_budget import (
-    CLOSING_REVIEW_CALLS,
-    MAX_BUDGET_FINALIST_COUNT,
-    REVIEW_CALL_BUDGET_CONTRACT_VERSION,
-    REVIEW_CALL_BUDGET_FORMULA,
-    ReviewCallBudget,
-    ReviewCallBudgetReconciliation,
-    reconcile_review_call_budget,
-    review_call_budget_for,
-    validate_finalist_count,
-)
-from .review_independence import (
-    ESCALATION_STATUS_FLAGGED_ONLY,
-    REVIEW_ASSIGNMENT_SOURCES,
-    REVIEW_DISAGREEMENT_DECISION_AXES,
-    REVIEW_DISAGREEMENT_SCHEMA_VERSION,
-    REVIEW_EXECUTION_MODES,
-    REVIEW_INDEPENDENCE_SCHEMA_VERSION,
-    REVIEW_STEP_NAMES,
-    ReviewDisagreementArtifact,
-    ReviewEscalation,
-    ReviewPairDisagreement,
-    ReviewScoreRef,
-    ReviewerIndependenceRecord,
-    inconsistent_axes_for_pair,
-    review_step_identity,
-    reviewer_independence_summary,
-    validate_step_independence,
-)
-from .retry_taxonomy import (
-    DEFAULT_RETRY_TAXONOMY,
-    HumanActionFamily,
-    RetryChargeRule,
-    RetryOutcomeClass,
-    RetryOutcomeOwner,
-    RetryTaxonomy,
-    RetryTaxonomyEntry,
-    UnknownRetryOutcomeCodeError,
-)
-from .run_input import WorkflowRunInputSnapshot
-from .session_scope import (
-    SESSION_SCOPE_KINDS,
-    SESSION_SCOPE_VERSION,
-    WORKFLOW_CANDIDATE_SCOPE_KIND,
-    WORKFLOW_NODE_ROOT_SCOPE_KIND,
-    WorkflowSessionScopeV3,
-)
-from .task_bundle import ResearchSubtask, ResearchTaskBundle
-from .theme_campaign import (
-    DEFAULT_PROGRAM_ID,
-    DEV_PROGRAM_ID,
-    DEV_THEME_PREFIX,
-    CampaignActivationStatus,
-    ResearchCampaignActivation,
-    ThemeContract,
-    ThemeContractStatus,
-    activation_scope_hash,
-    build_campaign_activation_payload,
-)
-from .workflow_command import (
-    ActorRef,
-    CommandOffer,
-    CommandReceipt,
-    CommandRequest,
-    ConfirmationContract,
-    WorkflowCommandKind,
-)
-from .workflow_event import WorkflowEventEnvelope, WorkflowEventType
-from .workflow_problem import (
-    Remediation,
-    RemediationKind,
-    WorkflowProblem,
-    WorkflowProblemCategory,
-)
-from .workflow_snapshot import (
-    AgentBindingSummary,
-    BudgetSummary,
-    HandoffSummary,
-    HumanTaskSummary,
-    NodeAttemptSummary,
-    ResearchWorkflowNodeDetail,
-    ResearchWorkflowSnapshot,
-    WorkflowRunSummary,
-)
+from __future__ import annotations
 
+from importlib import import_module as _import_module
+from typing import Any as _Any
+
+
+_EXPORT_GROUPS = {
+    '._canonical': (
+        'canonical_json', 'sha256_hex',
+    ),
+    '._validation': (
+        'ContractValidationError',
+    ),
+    '.anomaly_inbox': (
+        'ANOMALY_INBOX_RULE_ID', 'ANOMALY_INBOX_SCHEMA_VERSION', 'ANOMALY_KIND_BLOCKED_RUN',
+        'ANOMALY_KIND_BUDGET_EXHAUSTED', 'ANOMALY_KIND_CLAIM_DISPUTED', 'ANOMALY_KIND_DRIFT_SENTINEL_HIT',
+        'ANOMALY_KIND_FORMAL_LINEAGE_CONFLICT', 'ANOMALY_KIND_HEARTBEAT_STALE', 'ANOMALY_KIND_NEEDS_HUMAN_GATE',
+        'ANOMALY_KIND_RETRY_BUDGET_EXHAUSTED', 'ANOMALY_KIND_REVIEW_DISAGREEMENT_ESCALATION', 'ANOMALY_KIND_SEVERITY',
+        'ANOMALY_KINDS', 'ANOMALY_SEVERITIES', 'AnomalyInbox',
+        'AnomalyInboxItem', 'AnomalyInboxScope', 'AnomalyKind',
+    ),
+    '.artifact_manifest': (
+        'ArtifactManifest',
+    ),
+    '.artifact_receipt': (
+        'ArtifactReceipt', 'BudgetReceipt',
+    ),
+    '.audit_sampling': (
+        'DRIFT_SENTINEL_COUNT', 'DRIFT_SENTINEL_GATE', 'GATES',
+        'REVIEW_STATUSES', 'RUN_PHASE_VALUES', 'SAMPLE_KIND_VALUES',
+        'STRATA_AXES', 'AuditSampleManifest', 'DriftSentinelSelection',
+        'QuestionSampleAssignment', 'SampleKind', 'SentinelExclusion',
+        'audit_sample_manifest_hash', 'drift_sentinel_selection_hash', 'parse_sample_kind',
+    ),
+    '.automation_policy': (
+        'AUTO_ADVANCE_CAPABILITIES', 'AUTO_ADVANCE_DRAIN_MODES', 'AUTO_ADVANCE_EXECUTION_MODES',
+        'AUTO_ADVANCE_POLICY_STATUSES', 'AUTO_ADVANCE_UI_PRESET_IDS', 'CANDIDATE_SELECTION_DEFAULT_MAX',
+        'CANDIDATE_SELECTION_MIN_MAX', 'CANDIDATE_SELECTION_RULES', 'CANDIDATE_SELECTION_RULE_DIGEST_ORDER',
+        'MAX_AUTO_REVISION_ROUNDS_ADJUSTABLE_TO', 'MAX_AUTO_REVISION_ROUNDS_DEFAULT', 'AutoAdvancePolicyV2',
+        'AutomationPolicyValidationError', 'HumanReviewPolicyV2', 'POLICY_CONTENT_HASH_RULE',
+        'compute_policy_content_hash',
+    ),
+    '.budget': (
+        'ResearchBudgetLedger',
+    ),
+    '.candidate_diversity': (
+        'CANDIDATE_COUNT_RANGE_MAX', 'CANDIDATE_COUNT_RANGE_MIN', 'CANDIDATE_SCREENING_CONTRACT_VERSION',
+        'DEFAULT_APPROXIMATE_MATCH_AXES', 'DEFAULT_DRAFT_POOL_SIZE', 'DEFAULT_FINALIST_LIMIT',
+        'DEFAULT_REQUIRED_THRESHOLD_IDS', 'DIVERSITY_AXES', 'MAX_FINALIST_LIMIT',
+        'CandidateMergeRecord', 'CandidateRejectionRecord', 'CandidateScreeningArtifact',
+        'CandidateScreeningDraft', 'DiversityAxis', 'DiversityMergeKind',
+        'HardThresholdCheck', 'HypothesisAxisProfile', 'ScreeningRejectionReason',
+        'ScreeningThresholds', 'normalize_axis_text', 'parse_diversity_axis',
+        'parse_merge_kind', 'parse_rejection_reason',
+    ),
+    '.catalog_hypothesis_flow_readiness': (
+        'CATALOG_HYPOTHESIS_FLOW_EVIDENCE_IDS', 'CATALOG_HYPOTHESIS_FLOW_EVIDENCE_STATUSES', 'CATALOG_HYPOTHESIS_FLOW_NOT_READY_STATUS',
+        'CATALOG_HYPOTHESIS_FLOW_READY_STATUS', 'CATALOG_HYPOTHESIS_FLOW_REPAIR_ACTION', 'CATALOG_HYPOTHESIS_FLOW_REPORT_KIND',
+        'CATALOG_HYPOTHESIS_FLOW_SCHEMA_VERSION', 'RESEARCH_AUTHORIZATION_REQUIRED_ACTION', 'CatalogHypothesisFlowReadinessAuthority',
+        'CatalogHypothesisFlowReadinessReport', 'catalog_hypothesis_flow_report_hash',
+    ),
+    '.claim_belief': (
+        'CLAIM_BELIEF_RULE_ID', 'CLAIM_BELIEF_SCHEMA_VERSION', 'CLAIM_BELIEF_STATES',
+        'ClaimBeliefTable', 'ClaimBeliefTableEntry', 'belief_state_for_counts',
+    ),
+    '.claim_ledger': (
+        'ACCEPTED_REVIEW_STATUS', 'CLAIM_SOURCES', 'CLAIM_STATUSES',
+        'SUPPORT_LEVELS', 'ClaimEvidenceRef', 'ClaimLedgerEntry',
+    ),
+    '.competition_evaluation': (
+        'CompetitionEvaluationSnapshot',
+    ),
+    '.core_hypothesis_coherence': (
+        'CORE_HYPOTHESIS_COHERENCE_CHECK_IDS', 'CORE_HYPOTHESIS_COHERENCE_CONTRACT_VERSION', 'CoreHypothesisCoherenceCheck',
+        'CoreHypothesisCoherenceResult',
+    ),
+    '.decision_record': (
+        'DECISION_KINDS', 'DECISION_STATUSES', 'DecisionRecord',
+    ),
+    '.discussion_scope': (
+        'CANDIDATE_REVIEW_SCOPE_KIND', 'DISCUSSION_SCOPE_KINDS', 'DISCUSSION_SCOPE_VERSION',
+        'PREFORMAL_CANDIDATE_REVIEW_SCOPE_KIND', 'PREFORMAL_DISCUSSION_SCOPE_KINDS', 'PREFORMAL_DISCUSSION_SCOPE_VERSION',
+        'QUESTION_GENERATION_SCOPE_KIND', 'DiscussionScopeEnvelope', 'DiscussionScopeV1',
+        'PreformalCandidateReviewScopeV1', 'WorkflowDiscussionScopeV1', 'canonical_discussion_scope',
+        'canonical_discussion_scope_json', 'discussion_scope_hash', 'discussion_scope_hash_for',
+        'discussion_scope_key', 'discussion_scope_key_for', 'parse_discussion_scope',
+        'parse_discussion_scope_envelope', 'session_scope_key',
+    ),
+    '.execution': (
+        'NodeExecutionEnvelope', 'TaskLease', 'TaskLeaseStatus',
+    ),
+    '.execution_anchor': (
+        'ExecutionAnchor',
+    ),
+    '.evolution_lineage': (
+        'EVOLUTION_LINEAGE_ACTORS', 'EVOLUTION_LINEAGE_EVIDENCE_KINDS', 'EVOLUTION_LINEAGE_EVENT_KINDS',
+        'EVOLUTION_LINEAGE_SCHEMA_VERSION', 'FINALIST_LIMIT', 'MAX_REVISION_ROUNDS',
+        'REVISION_EXHAUSTED_EXCEPTION', 'EvolutionLineage', 'EvolutionLineageEvent',
+        'EvolutionLineageEventKind', 'EvolutionLineageEvidenceRef', 'evolution_lineage_summary',
+        'mandatory_exception_review_required',
+    ),
+    '.experiment_campaign': (
+        'ExperimentCampaign', 'ExperimentCampaignStage',
+    ),
+    '.hypothesis': (
+        'HypothesisCandidate', 'HypothesisPortfolio',
+    ),
+    '.hypothesis_fragment': (
+        'HYPOTHESIS_CLAIM_BELIEF_STATES', 'HYPOTHESIS_CLAIM_ROLES', 'HYPOTHESIS_FRAGMENT_KIND',
+        'HYPOTHESIS_FRAGMENT_SCHEMA_VERSION', 'HypothesisClaimBinding', 'HypothesisFragment',
+        'canonical_fragment_payload',
+    ),
+    '.hypothesis_quality': (
+        'AUXILIARY_HYPOTHESIS_DIAGNOSTIC_DIMENSIONS', 'HYPOTHESIS_SCORE_DIMENSIONS', 'HYPOTHESIS_SCORE_RUBRIC_SHA256',
+        'HYPOTHESIS_SCORE_RUBRIC_VERSION', 'canonical_hypothesis_score_rubric', 'hypothesis_score_rubric_sha256',
+    ),
+    '.hypothesis_round': (
+        'COMPARISON_OUTCOMES', 'LINEAGE_KINDS', 'MEETING_REF_KINDS',
+        'MIN_CANDIDATES', 'ROUND_STATUSES', 'SCORE_DIMENSIONS',
+        'HypothesisLineageRef', 'HypothesisMeetingRef', 'HypothesisMetaReview',
+        'HypothesisPairwiseComparison', 'HypothesisParetoAnalysis', 'HypothesisRound',
+        'HypothesisRoundCandidate',
+    ),
+    '.hypothesis_selection': (
+        'MAX_SELECTED_CANDIDATES', 'HypothesisSelectionRecord',
+    ),
+    '.meeting_digest': (
+        'MeetingDigest',
+    ),
+    '.meeting_round': (
+        'DEFAULT_MEETING_ROUNDS', 'MEETING_STATUSES', 'MEETING_TYPES',
+        'MeetingRound',
+    ),
+    '.node_readiness': (
+        'ActorReadiness', 'BudgetReadiness', 'NodeReadiness',
+        'ReadinessBlocker',
+    ),
+    '.pending_action': (
+        'ExecutionReceipt', 'PendingAction',
+    ),
+    '.personal_memory_candidate': (
+        'EVIDENCE_STATUSES', 'MEMORY_CLASSES', 'REUSE_POLICIES',
+        'PersonalMemoryCandidate',
+    ),
+    '.platform_readiness': (
+        'BLOCKER_CAMPAIGN_THEME_MISMATCH', 'BLOCKER_DEV_THEME_ONLY', 'BLOCKER_THEME_NOT_ACTIVATED',
+        'PlatformFlowReadinessReport',
+    ),
+    '.policy_generation': (
+        'DRAIN_ACTORS', 'DRAIN_MODE_TRANSITIONS', 'ORPHAN_DISPOSITIONS',
+        'ORPHAN_DISPOSITION_TRANSITIONS', 'POLICY_DRAIN_MODES', 'POLICY_GENERATION_SCHEMA_VERSION',
+        'DrainTransition', 'OrphanOutcomeRecord', 'PolicyGenerationRecord',
+        'PolicyGenerationValidationError', 'ensure_drain_mode_transition', 'ensure_orphan_disposition_transition',
+    ),
+    '.policy_shadow': (
+        'POLICY_SHADOW_ACTION_FOR_POINT', 'POLICY_SHADOW_AGREEMENTS', 'POLICY_SHADOW_AUTO_ACTIONS',
+        'POLICY_SHADOW_CAPABILITY_FOR_POINT', 'POLICY_SHADOW_DECISION_POINTS', 'POLICY_SHADOW_OUTCOME_CLASSES',
+        'POLICY_SHADOW_SCHEMA_VERSION', 'POLICY_SHADOW_WOULD_DECIDE_VALUES', 'PolicyShadowAgreement',
+        'PolicyShadowDecision', 'PolicyShadowEvaluationRecord', 'derive_shadow_agreement',
+    ),
+    '.question_stage_binding': (
+        'QUESTION_PACKAGE_STAGES', 'QUESTION_STAGE_BINDING_POLICY_ID', 'QUESTION_STAGE_BINDING_SCHEMA_VERSION',
+        'QuestionStageBinding',
+    ),
+    '.research_scope': (
+        'REQUIRED_SCOPE_FIELDS', 'ResearchScopeEnvelope', 'ScopeMode',
+        'parse_scope_mode', 'scope_hash_for', 'scope_identity_seed',
+    ),
+    '.research_task_outputs': (
+        'RESEARCH_TASK_OUTPUT_SCHEMA_SHA256', 'RESEARCH_TASK_OUTPUT_SCHEMA_VERSION', 'HypothesisDesignOutput',
+        'ProtocolReviewOutput', 'ResultEvaluationOutput', 'canonical_research_task_output_schema_bundle',
+        'parse_research_task_output', 'research_task_output_schema_sha256',
+    ),
+    '.research_team_role_contract': (
+        'CANDIDATE_GENERATION_MEETING_TYPE', 'CURRENT_RESEARCH_TEAM_ROLE_CONTRACT', 'HYPOTHESIS_REVIEW_MEETING_TYPE',
+        'LEGACY_READ_MODE', 'RESEARCH_PARTICIPANT_POLICY_VERSION', 'RESEARCH_TEAM_ROLE_CONTRACT_ID',
+        'RESEARCH_TEAM_ROLE_CONTRACT_VERSION', 'RESEARCH_TEAM_ROLE_SEMANTIC_VERSION', 'ProductAgentRole',
+        'ResearchParticipantPolicy', 'ResearchTeamRoleContract', 'SystemCapability',
+        'current_research_team_role_contract_snapshot',
+    ),
+    '.research_template': (
+        'ADDENDUM_STATUSES', 'BASELINE_STATUSES', 'TemplateAddendum',
+        'TemplateBaseline',
+    ),
+    '.review_call_budget': (
+        'CLOSING_REVIEW_CALLS', 'MAX_BUDGET_FINALIST_COUNT', 'REVIEW_CALL_BUDGET_CONTRACT_VERSION',
+        'REVIEW_CALL_BUDGET_FORMULA', 'ReviewCallBudget', 'ReviewCallBudgetReconciliation',
+        'reconcile_review_call_budget', 'review_call_budget_for', 'validate_finalist_count',
+    ),
+    '.review_independence': (
+        'ESCALATION_STATUS_FLAGGED_ONLY', 'REVIEW_ASSIGNMENT_SOURCES', 'REVIEW_DISAGREEMENT_DECISION_AXES',
+        'REVIEW_DISAGREEMENT_SCHEMA_VERSION', 'REVIEW_EXECUTION_MODES', 'REVIEW_INDEPENDENCE_SCHEMA_VERSION',
+        'REVIEW_STEP_NAMES', 'ReviewDisagreementArtifact', 'ReviewEscalation',
+        'ReviewPairDisagreement', 'ReviewScoreRef', 'ReviewerIndependenceRecord',
+        'inconsistent_axes_for_pair', 'review_step_identity', 'reviewer_independence_summary',
+        'validate_step_independence',
+    ),
+    '.retry_taxonomy': (
+        'DEFAULT_RETRY_TAXONOMY', 'HumanActionFamily', 'RetryChargeRule',
+        'RetryOutcomeClass', 'RetryOutcomeOwner', 'RetryTaxonomy',
+        'RetryTaxonomyEntry', 'UnknownRetryOutcomeCodeError',
+    ),
+    '.run_input': (
+        'WorkflowRunInputSnapshot',
+    ),
+    '.session_scope': (
+        'SESSION_SCOPE_KINDS', 'SESSION_SCOPE_VERSION', 'WORKFLOW_CANDIDATE_SCOPE_KIND',
+        'WORKFLOW_NODE_ROOT_SCOPE_KIND', 'WorkflowSessionScopeV3',
+    ),
+    '.task_bundle': (
+        'ResearchSubtask', 'ResearchTaskBundle',
+    ),
+    '.theme_campaign': (
+        'DEFAULT_PROGRAM_ID', 'DEV_PROGRAM_ID', 'DEV_THEME_PREFIX',
+        'CampaignActivationStatus', 'ResearchCampaignActivation', 'ThemeContract',
+        'ThemeContractStatus', 'activation_scope_hash', 'build_campaign_activation_payload',
+    ),
+    '.workflow_command': (
+        'ActorRef', 'CommandOffer', 'CommandReceipt',
+        'CommandRequest', 'ConfirmationContract', 'WorkflowCommandKind',
+    ),
+    '.workflow_event': (
+        'WorkflowEventEnvelope', 'WorkflowEventType',
+    ),
+    '.workflow_problem': (
+        'Remediation', 'RemediationKind', 'WorkflowProblem',
+        'WorkflowProblemCategory',
+    ),
+    '.workflow_snapshot': (
+        'AgentBindingSummary', 'BudgetSummary', 'HandoffSummary',
+        'HumanTaskSummary', 'NodeAttemptSummary', 'ResearchWorkflowNodeDetail',
+        'ResearchWorkflowSnapshot', 'WorkflowRunSummary',
+    ),
+}
+_EXPORTS = {name: module for module, names in _EXPORT_GROUPS.items() for name in names}
 __all__ = [
     "ADDENDUM_STATUSES",
     "ANOMALY_INBOX_RULE_ID",
@@ -707,3 +560,17 @@ __all__ = [
     "sha256_hex",
     "validate_step_independence",
 ]
+
+
+def __getattr__(name: str) -> _Any:
+    module_name = _EXPORTS.get(name)
+    if module_name is None:
+        # Preserve Python's normal fallback for real package submodules.
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(_import_module(module_name, __name__), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()).union(_EXPORTS))
