@@ -8,7 +8,6 @@ from typing import Any, Iterator, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request, status
-from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.web.routes.agent_catalog_models import (
@@ -78,7 +77,6 @@ from core.web.services.agent_directory_service import (
     list_project_memory_update_proposals,
     purge_archived_agent_instance,
     reset_agent_instance,
-    resolve_agent_avatar_file,
     resolve_project_memory_update_proposal,
     store_agent_avatar_image,
     update_agent_avatar,
@@ -559,17 +557,6 @@ def _config_agent_instances_present() -> bool:
 def agent_list(includeArchived: bool = False, detail: str = "full") -> list[dict]:
     _ensure_config_agent_instances()
     return list_agents(include_archived=includeArchived, detail=detail)
-
-
-@router.get("/agents/avatar-image/{filename}", response_class=FileResponse)
-def agent_avatar_image(filename: str) -> FileResponse:
-    try:
-        path = resolve_agent_avatar_file(filename)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="Agent avatar image not found") from exc
-    if not path.exists() or not path.is_file():
-        raise HTTPException(status_code=404, detail="Agent avatar image not found")
-    return FileResponse(path)
 
 
 @router.get(

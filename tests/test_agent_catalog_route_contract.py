@@ -34,8 +34,8 @@ JSON_ROUTE_FUNCTIONS = {
 }
 
 
-def _route_decorators() -> dict[str, ast.Call]:
-    tree = ast.parse(AGENTS_ROUTE.read_text(encoding="utf-8"))
+def _route_decorators(path: Path = AGENTS_ROUTE) -> dict[str, ast.Call]:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     found: dict[str, ast.Call] = {}
     for node in tree.body:
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -67,7 +67,7 @@ def test_agent_catalog_json_routes_declare_response_model() -> None:
 
 
 def test_agent_avatar_image_declares_file_response_class() -> None:
-    decorator = _route_decorators()["agent_avatar_image"]
+    decorator = _route_decorators(AGENTS_ROUTE.with_name("agent_assets.py"))["agent_avatar_image"]
     has_response_class = False
     for keyword in decorator.keywords:
         if keyword.arg != "response_class":

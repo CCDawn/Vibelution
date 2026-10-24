@@ -28,6 +28,7 @@ EARLY_READY_PATHS = frozenset(
 
 
 _BOOTSTRAP_ROUTE_MODULE_NAMES = frozenset({
+    "core.web.routes.agent_assets",
     "core.web.routes.config",
     "core.web.routes.launcher",
 })
@@ -36,6 +37,7 @@ _BOOTSTRAP_ROUTE_OPERATIONS = (
     (frozenset({"GET", "HEAD"}), "/api/launcher/current-instance"),
     (frozenset({"GET"}), "/api/config/avatar-image/{filename}"),
     (frozenset({"GET"}), "/api/config/theme-background-image/{filename}"),
+    (frozenset({"GET"}), "/api/agents/avatar-image/{filename}"),
     # Electron publishes window identity before the first
     # Session reads finish. These handlers already mount with Launcher and
     # need no Agent catalog; treating them as feature demand defeats the lazy

@@ -244,6 +244,7 @@ def test_shell_readiness_rejects_missing_referenced_assets(tmp_path):
 
 def test_shell_bootstrap_reads_do_not_wait_for_catalog_but_session_reads_do(tmp_path, monkeypatch):
     from core.web import route_bootstrap
+    from core.web.routes import agent_assets
     from core.web.control import CONTROL_TOKEN_HEADER, WebControlGuardMiddleware, get_control_token
     from core.web.services.agent_directory import bootstrap
 
@@ -265,6 +266,16 @@ def test_shell_bootstrap_reads_do_not_wait_for_catalog_but_session_reads_do(tmp_
     launcher = APIRouter()
     sessions = APIRouter()
     initialized = []
+    avatar = tmp_path / "avatar.svg"
+    avatar.write_text("<svg />", encoding="utf-8")
+
+    def resolve_avatar(filename):
+        assert initialized == []
+        if filename != "avatar.svg":
+            raise FileNotFoundError(filename)
+        return avatar
+
+    monkeypatch.setattr(agent_assets, "resolve_agent_avatar_file", resolve_avatar)
 
     @config.api_route("/config/bootstrap", methods=["GET", "HEAD"])
     @launcher.api_route("/launcher/current-instance", methods=["GET", "HEAD"])
@@ -302,6 +313,7 @@ def test_shell_bootstrap_reads_do_not_wait_for_catalog_but_session_reads_do(tmp_
         return {"full": True}
 
     startup_modules = [
+        agent_assets,
         SimpleNamespace(__name__="core.web.routes.config", router=config),
         SimpleNamespace(__name__="core.web.routes.launcher", router=launcher),
         SimpleNamespace(__name__="core.web.routes.sessions", router=sessions),
@@ -356,7 +368,13 @@ def test_shell_bootstrap_reads_do_not_wait_for_catalog_but_session_reads_do(tmp_
                     assert (await client.get(path)).status_code == 403
                     assert (await client.get(path, headers={**headers, "Origin": "https://untrusted.invalid"})).status_code == 403
                 assert initialized == []
+                response = await client.get("/api/agents/avatar-image/avatar.svg?v=existing")
+                assert response.status_code == 200
+                assert response.text == "<svg />"
+                assert response.headers["content-type"].startswith("image/svg+xml")
+                assert (await client.get("/api/agents/avatar-image/missing.svg")).status_code == 404
                 for path in (
+                    "/api/agents/avatar-image/avatar.svg",
                     "/api/config/avatar-image/avatar.png",
                     "/api/config/theme-background-image/background.png",
                 ):
@@ -395,7 +413,7 @@ def test_shell_bootstrap_reads_do_not_wait_for_catalog_but_session_reads_do(tmp_
                 release_remaining.set()
                 await warming
                 assert all(response.json() == {"full": True} for response in await asyncio.gather(*pending[2:]))
-                assert mounts.count(config) == mounts.count(launcher) == mounts.count(sessions) == 1
+                assert mounts.count(config) == mounts.count(launcher) == mounts.count(sessions) == mounts.count(agent_assets.router) == 1
         finally:
             release_catalog.set()
             release_remaining.set()
@@ -839,7 +857,7 @@ def test_startup_import_partition_loads_each_router_once(monkeypatch):
     assert set(first) == {
         "core.web.routes.config", "core.web.routes.launcher",
         "core.web.routes.runtime", "core.web.routes.sessions",
-        "core.web.routes.agent_plugins",
+        "core.web.routes.agent_plugins", "core.web.routes.agent_assets",
     }
     assert set(first).isdisjoint(later)
     assert len(names) == len(set(names)) == len(router_registry._ROUTE_MODULE_NAMES)

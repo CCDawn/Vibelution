@@ -19,6 +19,7 @@ logger = logging.getLogger("uvicorn.error")
 _ROUTE_MODULE_NAMES: tuple[str, ...] = (
     "core.web.routes.runtime",
     "core.web.routes.launcher",
+    "core.web.routes.agent_assets",
     "core.web.routes.workbench_ui",
     "core.web.routes.agents",
     "core.web.routes.agent_plugins",
@@ -75,6 +76,7 @@ _ROUTE_MODULE_NAMES: tuple[str, ...] = (
 # These owners can serve the first Workbench frame after the built-in Agent
 # catalog is initialized. Other feature routers remain behind full readiness.
 _STARTUP_ROUTE_MODULE_NAMES = frozenset({
+    "core.web.routes.agent_assets",
     "core.web.routes.runtime",
     "core.web.routes.launcher",
     "core.web.routes.sessions",
