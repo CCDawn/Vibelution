@@ -25,7 +25,7 @@
 
 `execution`、`phase`、`outcome`、`reason` 分别表示执行、活动、结果和原因。`thinking/tooling/...` 属于活动；`completed` 是成功结果；停止结果为 `stopped`，`terminalReason` 保留用户或强制停止的原因。`ready` 本身不能产生成功通知。
 
-Session 的 `status/currentPhase` 是原生当前控制面；`lastTurnStatus` 和 `terminalReason` 是历史结果事实，`childStatus` 是子会话投影。它们是独立事实字段。只有领域解析器可以解码它们；缺失阶段不得用 status 填造，历史 running 不得复活 idle，旧成功不得覆盖新执行。明确 live 状态或新 owner 优先；匹配 `lastTurnTerminalTurnId` 的终态 receipt 才能释放延迟清理的旧 owner。
+Session 的 `status/currentPhase` 是原生当前控制面；`lastTurnStatus` 和 `terminalReason` 是历史结果事实，`childStatus` 是子会话投影。它们是独立事实字段。只有领域解析器可以解码它们；缺失阶段不得用 status 填造，历史 running 不得复活 idle，旧成功不得覆盖新执行。明确 live 状态或新 owner 优先；匹配 `lastTurnTerminalTurnId` 的终态 receipt 才能释放延迟清理的旧 owner。原生 `terminalReason` 与旧终态展示值冲突时，保持原生结果回执的优先级，不凭词义猜测哪个属于更新的 Turn。
 
 WorkRun 的 `status → currentPhase → phase → runtimeStatus` 是异构快照的唯一解码边界；显式未知 status 不得被低优先字段洗白。缺失、未知和 `blocked` 等未证明结束的值保护关闭；`finishedAt/endedAt` 证明释放，不证明成功。恢复工作需要明确执行证据，不能把安全阻塞当成运行证据。
 
