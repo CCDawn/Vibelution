@@ -676,6 +676,13 @@ def _record(
             message="Session directory store lifecycle event.",
             fields=fields or {},
             lifecycle=True,
+            # Stage pairs remain durable component evidence. A successful
+            # sub-step must not start a package scan alongside initial reads;
+            # readiness and warning/failure events retain normal projection.
+            refresh_package_if_due=not (
+                event_code.startswith("session_directory.runtime.stage.")
+                and level == "info" and outcome in {"started", "completed", "skipped"}
+            ),
         )
     except Exception as exc:  # noqa: BLE001 - diagnostics must not change directory state
         logger.debug("Session directory runtime-scene event failed: %s", type(exc).__name__)

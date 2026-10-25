@@ -41,6 +41,37 @@ class _RecordingPipelineMetrics:
         yield
 
 
+def test_directory_startup_stage_keeps_raw_evidence_and_promotes_failures(tmp_path, monkeypatch):
+    scene_dir = _point_runtime_scene_at(tmp_path, monkeypatch, scene_id="directory-stage-evidence")
+    monkeypatch.setattr(runtime_scene_service, "_update_runtime_scene_package_manifest", lambda *_args, **_kwargs: None)
+    code = "session_directory.runtime.stage.store_open"
+    for suffix, level, outcome in [
+        ("started", "info", "started"),
+        ("finished", "info", "completed"),
+        ("finished", "warning", "failed"),
+    ]:
+        runtime_scene_service.record_runtime_scene_event(
+            "conversation", "session_directory", f"{code}.{suffix}",
+            level=level, outcome=outcome, lifecycle=True,
+            fields={"stage": "store_open", "generation": 1}, refresh_package_if_due=False,
+        )
+    runtime_scene_service.record_runtime_scene_event(
+        "conversation", "session_directory", "session_directory.runtime.ready",
+        outcome="started", lifecycle=True, refresh_package_if_due=False,
+    )
+
+    raw = runtime_scene_service._read_jsonl_file(scene_dir / "events/conversation.jsonl")
+    timeline = runtime_scene_service._read_jsonl_file(scene_dir / "timeline.jsonl")
+    lifecycle = runtime_scene_service._read_jsonl_file(scene_dir / "lifecycle.jsonl")
+    timeline = [item for item in timeline if item["event_code"].startswith("session_directory.")]
+    lifecycle = [item for item in lifecycle if item["event_code"].startswith("session_directory.")]
+    assert len(raw) == 4
+    assert [item["seq"] for item in raw] == [1, 2, 3, 4]
+    assert [item["event_code"] for item in timeline] == [f"{code}.finished", "session_directory.runtime.ready"]
+    assert [item["event_code"] for item in lifecycle] == [f"{code}.finished", "session_directory.runtime.ready"]
+    assert timeline[0]["level"] == "warning"
+
+
 @pytest.mark.parametrize(
     ("level", "reconciliation_closed", "expected"),
     [

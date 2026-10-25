@@ -111,6 +111,18 @@ def _capture_directory_runtime_events(monkeypatch):
     return events
 
 
+def test_normal_startup_stages_do_not_schedule_package_projection(monkeypatch):
+    calls = []
+    monkeypatch.setattr(directory_runtime, "record_runtime_scene_event", lambda *args, **kwargs: calls.append((args, kwargs)))
+    directory_runtime._record("session_directory.runtime.stage.store_open.started", outcome="started")
+    directory_runtime._record("session_directory.runtime.stage.store_open.finished", outcome="completed")
+    directory_runtime._record("session_directory.runtime.stage.store_open.finished", outcome="failed", level="warning")
+    directory_runtime._record("session_directory.runtime.ready", outcome="started")
+
+    assert [kwargs["refresh_package_if_due"] for _, kwargs in calls] == [False, False, True, True]
+    assert all(kwargs["lifecycle"] is True for _, kwargs in calls)
+
+
 def test_preopen_failure_marks_current_generation_failed_and_wakes_waiters(
     monkeypatch, tmp_path
 ):

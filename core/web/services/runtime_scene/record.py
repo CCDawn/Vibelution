@@ -1544,6 +1544,11 @@ def _runtime_scene_is_diagnostic_only_observation(payload: dict[str, Any]) -> bo
     event_code = str(payload.get("event_code") or "").strip()
     component = str(payload.get("component") or "").strip()
     phase = str(payload.get("phase") or "").strip()
+    if (component == "conversation" and phase == "session_directory"
+            and event_code.startswith("session_directory.runtime.stage.")):
+        # Keep paired timing evidence in the component log. The existing
+        # severity gate still promotes failures to timeline and lifecycle.
+        return True
     if event_code in s.TIMELINE_DIAGNOSTIC_ONLY_EVENT_CODES:
         return True
     if event_code in {"browser.memory.sampled", "browser.process_memory.sampled"}:
