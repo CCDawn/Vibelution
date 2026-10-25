@@ -61,11 +61,13 @@ describe("Electron main public deep-link consumption", () => {
     expect(helperIndex).toBeGreaterThan(0);
     expect(recoveryIndex).toBeGreaterThan(helperIndex);
     expect(startOrFocusIndex).toBeGreaterThan(recoveryIndex);
-    const bindingIndex = source.indexOf("void ensureProjectControlPlane(secondCli.workspaceRoot).then(");
+    const openBranchIndex = source.indexOf('if (intent.action === "open_workbench")');
+    const bindingIndex = source.indexOf("void ensureProjectControlPlane(secondCli.workspaceRoot).then(", openBranchIndex);
     const openRequestIndex = source.indexOf("? requestOpenWorkbenchFromSecondInstance() : undefined)", bindingIndex);
     const observersIndex = source.indexOf("startProjectControlPlaneObservers();", openRequestIndex);
     const catchIndex = source.indexOf("}).catch((error: unknown) => {", observersIndex);
-    expect(bindingIndex).toBeGreaterThan(0);
+    expect(openBranchIndex).toBeGreaterThan(0);
+    expect(bindingIndex).toBeGreaterThan(openBranchIndex);
     expect(openRequestIndex).toBeGreaterThan(bindingIndex);
     expect(observersIndex).toBeGreaterThan(openRequestIndex);
     expect(catchIndex).toBeGreaterThan(observersIndex);
