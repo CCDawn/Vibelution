@@ -827,9 +827,7 @@ def test_run_session_turn_aborts_prepare_when_stop_already_requested(monkeypatch
     assert "running_cleared" in calls
 
 
-def test_run_session_turn_aborts_when_prepare_context_interrupted(monkeypatch):
-    from pathlib import Path
-
+def test_run_session_turn_aborts_when_prepare_context_interrupted(monkeypatch, tmp_path):
     from core.orchestration.context_engine import AgentContextInterrupted
 
     calls: list[str] = []
@@ -841,7 +839,7 @@ def test_run_session_turn_aborts_when_prepare_context_interrupted(monkeypatch):
     monkeypatch.setattr(session_service, "_is_session_turn_current", lambda sid, tid: True)
     monkeypatch.setattr(session_service, "_normalize_optional_bool", lambda value: False)
     monkeypatch.setattr(session_service, "resolve_feature_decision", lambda *args, **kwargs: _Decision())
-    monkeypatch.setattr(session_service, "_ensure_session_workspace", lambda *args, **kwargs: Path("."))
+    monkeypatch.setattr(session_service, "_ensure_session_workspace", lambda *args, **kwargs: tmp_path)
     monkeypatch.setattr(session_service, "_sync_agent_directory_project_root", lambda *args, **kwargs: None)
     monkeypatch.setattr(session_service, "get_agent", lambda *args, **kwargs: {"agentId": "agent-1"})
     monkeypatch.setattr(session_service, "_supervised_role_for_runtime_context", lambda *args, **kwargs: "")
@@ -931,10 +929,8 @@ def test_run_session_turn_aborts_when_prepare_context_interrupted(monkeypatch):
     assert "running_cleared" in calls
 
 
-def test_run_session_turn_stop_during_agent_create_aborts_before_context_build(monkeypatch) -> None:
+def test_run_session_turn_stop_during_agent_create_aborts_before_context_build(monkeypatch, tmp_path) -> None:
     """A stop landing while the runtime agent is being built must not pay for context assembly."""
-
-    from pathlib import Path
 
     calls: list[str] = []
     lifecycle: list[tuple[str, dict]] = []
@@ -946,7 +942,7 @@ def test_run_session_turn_stop_during_agent_create_aborts_before_context_build(m
     monkeypatch.setattr(session_service, "_is_session_turn_current", lambda sid, tid: True)
     monkeypatch.setattr(session_service, "_normalize_optional_bool", lambda value: False)
     monkeypatch.setattr(session_service, "resolve_feature_decision", lambda *args, **kwargs: _Decision())
-    monkeypatch.setattr(session_service, "_ensure_session_workspace", lambda *args, **kwargs: Path("."))
+    monkeypatch.setattr(session_service, "_ensure_session_workspace", lambda *args, **kwargs: tmp_path)
     monkeypatch.setattr(session_service, "_sync_agent_directory_project_root", lambda *args, **kwargs: None)
     monkeypatch.setattr(session_service, "get_agent", lambda *args, **kwargs: {"agentId": "agent-1"})
     monkeypatch.setattr(session_service, "_supervised_role_for_runtime_context", lambda *args, **kwargs: "")
