@@ -261,9 +261,77 @@ def test_codex_readonly_uses_exec_with_readonly_sandbox(monkeypatch, tmp_path):
     args, kwargs = spawned[0]
     assert args == [r"C:\tools\codex.exe", "--cd", str(project_root)]
     assert kwargs["cwd"] == str(project_root)
-    assert writes == ["Inspect the repository without changing files.\r\n"]
+    assert len(writes) == 1
+    assert writes[0].startswith("Inspect the repository without changing files.")
+    marker = f"[VIBELUTION_CLI_DONE:{result['taskId']}]"
+    assert marker[1:-1] in writes[0]
+    assert marker not in writes[0], "input echo must not reproduce the complete completion marker"
+    assert writes[0].endswith("\r\n")
     assert result["terminalSessionId"].startswith("cli-term-")
     assert result["taskId"].startswith("cli-task-")
+
+
+@pytest.mark.parametrize("sources", [
+    (" session-current ", " message-current ", " turn-current "),
+    ("session-old", "message-current", "turn-current"),
+    ("", " ", ""),
+])
+def test_reused_terminal_tasks_keep_current_call_ownership_without_rebinding_terminal(monkeypatch, tmp_path, sources):
+    from copy import deepcopy
+    from core.web.services import cli_agent_task_kernel as kernel
+    from core.web.services.runtime_task_registry import RuntimeTaskStore
+
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    terminal = {
+        "terminalSessionId": "terminal-shared", "adapterId": "codex_code",
+        "cwd": str(project_root), "mode": "readonly", "alive": True, "status": "running",
+        "sourceSessionId": "session-old", "sourceMessageId": "message-old", "sourceRunId": "turn-old",
+        "cliRunId": "cli-run-shared", "cliSessionId": "cli-session-shared", "lockKey": "lock-shared",
+        "linkedSourceMessageIds": ["message-old", "message-current"],
+        "linkedSourceRunIds": ["turn-old", "turn-current"],
+    }
+    original = deepcopy(terminal)
+    task_root = tmp_path / "tasks"
+    generation_reads = []
+
+    def generation(session_id):
+        generation_reads.append(session_id)
+        return {"session-old": 3, "session-current": 7}.get(session_id, 0)
+
+    store = RuntimeTaskStore(task_root, branch_generation_reader=generation)
+    monkeypatch.setattr(kernel, "TASK_STATE_DIR", task_root)
+    monkeypatch.setattr(kernel, "_task_store", lambda: store)
+    monkeypatch.setattr(kernel, "_ensure_watcher_started", lambda: None)
+    monkeypatch.setattr(terminal_service, "ensure_cli_agent_terminal_session", lambda **kwargs: terminal)
+    monkeypatch.setattr(terminal_service, "write_cli_agent_terminal_input", lambda *args: {})
+    delivered = []
+    monkeypatch.setattr(session_service, "append_cli_agent_task_result_event", lambda session_id, **kwargs: delivered.append(session_id))
+
+    result = service.run_cli_agent(
+        agent_type="codex_code", task="Inspect the source", cwd=str(project_root),
+        source_session_id=sources[0], source_message_id=sources[1], source_run_id=sources[2],
+    )
+
+    persisted = store.load_state(result["taskId"])
+    expected = tuple(source.strip() for source in sources)
+    assert tuple(persisted[key] for key in ("sourceSessionId", "sourceMessageId", "sourceRunId")) == expected
+    assert persisted["branchGeneration"] == {"session-current": 7, "session-old": 3, "": 0}[expected[0]]
+    if expected[0] != "session-old":
+        assert "session-old" not in generation_reads
+    assert terminal == original
+    public = kernel._public_task_result(persisted, terminal_session=terminal)
+    assert tuple(public[key] for key in ("sourceSessionId", "sourceMessageId", "sourceRunId")) == expected
+    unknown = dict(persisted)
+    for key in ("sourceSessionId", "sourceMessageId", "sourceRunId"):
+        unknown.pop(key)
+    public_unknown = kernel._public_task_result(unknown, terminal_session=terminal)
+    assert tuple(public_unknown[key] for key in ("sourceSessionId", "sourceMessageId", "sourceRunId")) == ("", "", "")
+
+    kernel.ingest_terminal_output(terminal, persisted["completionMarker"])
+
+    assert store.load_state(result["taskId"])["status"] == "completed"
+    assert delivered == ([expected[0]] if expected[0] else [])
+    assert terminal == original
 
 
 def test_codex_worktree_exec_explicitly_disables_workspace_network(tmp_path):

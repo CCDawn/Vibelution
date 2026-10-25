@@ -258,7 +258,7 @@ def _cascade_stop_descendant_runtime_tasks(
     caller for the session lifecycle event.
     """
 
-    from .. import runtime_task_registry as runtime_tasks
+    from .. import cli_agent_task_kernel, runtime_task_registry as runtime_tasks
 
     s = _service()
     root_session_id = str(session_id or "").strip()
@@ -267,8 +267,10 @@ def _cascade_stop_descendant_runtime_tasks(
         return []
     store = runtime_tasks.default_store()
     targets = store.collect_cascade_targets(root_session_id)
-    if not targets:
-        return []
+    owner_session_depths = {root_session_id: 0}
+    for target in targets:
+        if target.get("kind") == runtime_tasks.KIND_CHILD_SESSION:
+            owner_session_depths[str(target.get("taskId") or "").strip()] = int(target.get("cascadeDepth") or 0) + 1
     report: list[dict[str, Any]] = []
     for target in targets:
         task_id = str(target.get("taskId") or "").strip()
@@ -298,6 +300,11 @@ def _cascade_stop_descendant_runtime_tasks(
         except Exception as exc:
             entry["error"] = type(exc).__name__
         report.append(entry)
+    report.extend(cli_agent_task_kernel.seal_cli_agent_task_notifications(
+        owner_session_depths, turn_id=normalized_turn_id, cascaded_from=root_session_id,
+    ))
+    if not report:
+        return []
     try:
         s._record_session_turn_lifecycle_event(
             root_session_id,

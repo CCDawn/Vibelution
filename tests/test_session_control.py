@@ -2,8 +2,18 @@
 
 from __future__ import annotations
 
+import pytest
+
 from core.web.services import session_service
+from core.web.services import cli_agent_task_kernel as cli_kernel
 from core.web.services.session import control
+
+
+@pytest.fixture(autouse=True)
+def _isolated_cli_store(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli_kernel, "TASK_STATE_DIR", tmp_path / "actual-cli-tasks")
+    monkeypatch.setattr(cli_kernel, "_ensure_watcher_started", lambda: None)
+    monkeypatch.setattr(cli_kernel, "_PENDING_FINALIZATIONS", {})
 
 
 def _install_running_stop_fixtures(
@@ -270,3 +280,65 @@ def test_cascade_stop_isolates_per_target_failures(monkeypatch, tmp_path) -> Non
     assert store.load_state("cli-healthy")["notificationSealed"] is True
     assert store.load_state("cli-healthy")["stopInitiator"] == "user"
     assert store.load_state("child-broken")["notificationSealed"] is False
+
+
+@pytest.mark.parametrize("child_owner", [False, True])
+def test_cascade_seals_the_actual_cli_store_and_drops_late_marker(monkeypatch, tmp_path, child_owner):
+    from core.web.services import cli_agent_service, cli_agent_terminal_service, runtime_task_registry as registry
+
+    native = _cascade_registry(tmp_path, monkeypatch)
+    if child_owner:
+        _register_cascade_task(native, "child-owner", parent="session-root", kind="child_session")
+    owner = "child-owner" if child_owner else "session-root"
+    monkeypatch.setattr(control, "request_stop_session_turn", lambda *args, **kwargs: {})
+    monkeypatch.setattr(cli_agent_terminal_service, "write_cli_agent_terminal_input", lambda *args: {})
+    monkeypatch.setattr(cli_agent_terminal_service, "stop_cli_agent_terminal_session", lambda *args: pytest.fail("notification sealing must not stop a terminal"))
+    delivered = []
+    events = []
+    monkeypatch.setattr(session_service, "append_cli_agent_task_result_event", lambda *args, **kwargs: delivered.append(args))
+    monkeypatch.setattr(cli_agent_service, "_record_event", lambda event, **kwargs: events.append((event, kwargs)))
+    terminal = {
+        "terminalSessionId": "cli-real-store", "adapterId": "codex_code", "alive": True,
+        "status": "running", "sourceSessionId": owner, "sourceRunId": "origin-turn",
+    }
+    submitted = cli_kernel.submit_cli_agent_task(
+        terminal_session=terminal, task="Inspect", timeout_seconds=60, output_limit=2000,
+    )
+    cli_store = cli_kernel._task_store()
+    task_id = submitted["taskId"]
+    before = cli_store.load_state(task_id)
+    assert before["parentSessionId"] == ""
+    untouched = {}
+    for name, source, status, kind in [
+        ("cli-neighbor", "session-root-neighbor", "running", registry.KIND_CLI_AGENT),
+        ("cli-unknown", "", "running", registry.KIND_CLI_AGENT),
+        ("cli-finished", owner, "completed", registry.KIND_CLI_AGENT),
+        ("other-kind", owner, "running", registry.KIND_RESEARCH_TASK),
+    ]:
+        untouched[name] = cli_store.register_task(registry.new_snapshot(
+            kind=kind, task_id=name, status=status, source_session_id=source,
+        ))
+
+    report = control._cascade_stop_descendant_runtime_tasks("session-root", turn_id="stopped-turn")
+
+    actual = cli_store.load_state(task_id)
+    assert actual["notificationSealed"] is True
+    assert actual["notificationSealedByTurnId"] == "stopped-turn"
+    assert actual["cascadeStop"]["cascadedFrom"] == "session-root"
+    assert actual["stopInitiator"] == "user"
+    assert actual["status"] == before["status"]
+    assert native.load_state(task_id) == {}
+    row = next(row for row in report if row["taskId"] == task_id)
+    assert row["cascadeDepth"] == (1 if child_owner else 0)
+    assert row["sealed"] is True
+    assert row["stopResult"] == "stop_intent_recorded"
+    for name, snapshot in untouched.items():
+        assert cli_store.load_state(name) == snapshot
+
+    cli_kernel.ingest_terminal_output(terminal, before["completionMarker"])
+
+    settled = cli_store.load_state(task_id)
+    assert settled["status"] == "completed"
+    assert settled["notificationDropReason"] == "sealed"
+    assert delivered == []
+    assert any(event == "cli_agent.task.result_fenced" and data["outcome"] == "sealed_dropped" for event, data in events)

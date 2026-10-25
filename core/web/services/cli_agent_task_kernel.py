@@ -28,6 +28,9 @@ ACTIVE_STATUSES = {"queued", "sent", "running"}
 TERMINAL_CLOSED_STATUSES = {"closed", "stopped", "exited", "stale"}
 
 _TASK_LOCK = threading.RLock()
+# Only callbacks currently awaiting their final decision are retained, never
+# historical terminal tasks. Access and removal share _TASK_LOCK with sealing.
+_PENDING_FINALIZATIONS: dict[str, str] = {}
 _WATCHER_STARTED = False
 _WATCH_MTIME_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _STORE_CACHE: dict[str, task_registry.RuntimeTaskStore] = {}
@@ -122,7 +125,7 @@ def submit_cli_agent_task(
             task_state["message"] = str(exc)
             task_state["completedAt"] = _now_iso()
             task_state["updatedAt"] = task_state["completedAt"]
-            _write_task_state(task_state)
+            _persist_task_for_finalization(task_state)
         _finalize_task_result(task_state, reason="send_failed")
         return _public_task_result(task_state, terminal_session=terminal_session, output_limit=output_chars)
 
@@ -171,7 +174,10 @@ def ingest_terminal_output(terminal_session: dict[str, Any], chunk: str) -> None
                 reason="protocol_pattern",
             )
             finalized = dict(task_state)
-        _write_task_state(task_state)
+        if finalized:
+            _persist_task_for_finalization(task_state)
+        else:
+            _write_task_state(task_state)
     if finalized:
         _finalize_task_result(finalized, reason="protocol_pattern")
 
@@ -193,7 +199,7 @@ def mark_terminal_closed(terminal_session: dict[str, Any], *, status: str = "exi
             code="CLI_AGENT_TERMINAL_CLOSED",
             reason=str(status or "exited"),
         )
-        _write_task_state(task_state)
+        _persist_task_for_finalization(task_state)
         finalized = dict(task_state)
     _finalize_task_result(finalized, reason=str(status or "terminal_closed"))
 
@@ -205,6 +211,47 @@ def active_cli_agent_task_for_terminal(terminal_session_id: str) -> dict[str, An
 
 def task_state_path(task_id: str) -> Path:
     return _task_store().task_state_path(task_id)
+
+
+def seal_cli_agent_task_notifications(
+    owner_session_depths: dict[str, int], *, turn_id: str, cascaded_from: str,
+) -> list[dict[str, Any]]:
+    """Seal active CLI tasks owned by the stopped native Session subtree."""
+    owners = {str(owner).strip(): depth for owner, depth in owner_session_depths.items() if str(owner).strip()}
+    if not owners:
+        return []
+    report: list[dict[str, Any]] = []
+    with _TASK_LOCK:
+        store = _task_store()
+        candidates = {str(task.get("taskId") or ""): task for task in store.active_task_states()}
+        for task_id, owner in _PENDING_FINALIZATIONS.items():
+            if owner in owners and task_id not in candidates:
+                task = store.load_state(task_id)
+                if task:
+                    candidates[task_id] = task
+        for task_id, task in candidates.items():
+            owner = str(task.get("sourceSessionId") or "").strip()
+            if (
+                owner not in owners or task.get("kind") != task_registry.KIND_CLI_AGENT
+                or (task.get("status") not in ACTIVE_STATUSES and task_id not in _PENDING_FINALIZATIONS)
+            ):
+                continue
+            task_id = str(task.get("taskId") or "").strip()
+            entry = {"taskId": task_id, "kind": task_registry.KIND_CLI_AGENT,
+                     "cascadeDepth": owners[owner], "stopResult": "", "sealed": False, "error": ""}
+            try:
+                sealed = store.seal_and_request_stop(
+                    task_id, reason=task_registry.SEAL_REASON_PARENT_TURN_CANCELLED,
+                    turn_id=turn_id, cascaded_from=cascaded_from, initiator="user",
+                )
+                if not sealed:
+                    raise LookupError("CLI task disappeared before notification sealing")
+                entry["sealed"] = bool(sealed.get("notificationSealed"))
+                entry["stopResult"] = "stop_intent_recorded"
+            except Exception as exc:
+                entry["error"] = type(exc).__name__
+            report.append(entry)
+    return report
 
 
 def _ensure_watcher_started() -> None:
@@ -259,7 +306,7 @@ def _watch_active_tasks() -> None:
                         code="CLI_AGENT_TASK_COMPLETED",
                         reason="idle_completion",
                     )
-                _write_task_state(task_state)
+                _persist_task_for_finalization(task_state)
                 finalized.append(dict(task_state))
         for task_state in finalized:
             _finalize_task_result(task_state, reason=str(task_state.get("completionReason") or "watchdog"))
@@ -353,24 +400,28 @@ def _complete_task_state(task_state: dict[str, Any], *, status: str, code: str, 
     task_state["resultSummary"] = protocols.summarize_segments(segments)
 
 
+def _persist_task_for_finalization(task_state: dict[str, Any]) -> None:
+    """Persist a terminal result and register its callback before releasing the lock."""
+    _write_task_state(task_state)
+    _PENDING_FINALIZATIONS[str(task_state["taskId"])] = str(task_state.get("sourceSessionId") or "").strip()
+
+
 def _finalize_task_result(task_state: dict[str, Any], *, reason: str) -> None:
     store = _task_store()
-    # Unified completion fencing: a session rewind between task start and
-    # completion drops the notification. The audit fields land on the task
-    # snapshot either way.
-    allowed = store.apply_completion_fencing(task_state)
-    # Notification sealing stacks on top of fencing: a task sealed by the
-    # cascade stop of its owning session turn loses its completion wake even
-    # when the generation still matches. Same dropped channel, distinct
-    # audit, snapshot updated either way.
-    outcome = ""
-    if allowed:
+    # A completion copy may predate a parent stop. Preserve durable stop/seal
+    # facts while serializing its decision and save with the owner stop helper.
+    with _TASK_LOCK:
         task_id = str(task_state.get("taskId") or "").strip()
-        try:
-            sealed = store.is_notification_sealed(task_id)
-        except Exception:
-            sealed = False
-        if sealed:
+        latest = store.load_state(task_id)
+        task_state.update({
+            key: value for key, value in latest.items()
+            if key.startswith("notificationSealed") or key in {"cascadeStop", "stopInitiator", "stopRequestedAt"}
+        })
+        # Rewind fencing and parent-stop sealing remain independent reasons
+        # to drop completion delivery; each leaves its existing audit fields.
+        allowed = store.apply_completion_fencing(task_state)
+        outcome = ""
+        if allowed and bool(task_state.get("notificationSealed")):
             allowed = False
             outcome = "sealed_dropped"
             task_state.update(
@@ -380,7 +431,9 @@ def _finalize_task_result(task_state: dict[str, Any], *, reason: str) -> None:
                     "notificationDropReason": "sealed",
                 }
             )
-    store.save_state(task_state)
+        store.save_state(task_state)
+        _PENDING_FINALIZATIONS.pop(task_id, None)
+    # Session events and notification delivery must stay outside _TASK_LOCK.
     if not allowed:
         cli_agent_service._record_event(
             "cli_agent.task.result_fenced",
@@ -577,10 +630,10 @@ def _public_task_result(
         "cliRunId": str(task_state.get("cliRunId") or terminal.get("cliRunId") or "").strip(),
         "lockKey": str(task_state.get("lockKey") or terminal.get("lockKey") or "").strip(),
         "cliSessionId": str(task_state.get("cliSessionId") or terminal.get("cliSessionId") or "").strip(),
-        "sourceSessionId": str(task_state.get("sourceSessionId") or terminal.get("sourceSessionId") or "").strip(),
+        "sourceSessionId": str(task_state.get("sourceSessionId") or "").strip(),
         "branchGeneration": task_state.get("branchGeneration"),
-        "sourceMessageId": str(task_state.get("sourceMessageId") or terminal.get("sourceMessageId") or "").strip(),
-        "sourceRunId": str(task_state.get("sourceRunId") or terminal.get("sourceRunId") or "").strip(),
+        "sourceMessageId": str(task_state.get("sourceMessageId") or "").strip(),
+        "sourceRunId": str(task_state.get("sourceRunId") or "").strip(),
         "createdAt": str(task_state.get("createdAt") or "").strip(),
         "sentAt": str(task_state.get("sentAt") or "").strip(),
         "completedAt": str(task_state.get("completedAt") or "").strip(),

@@ -22,17 +22,24 @@ rules:
     paths:
       - "core/web/services/cli_agent_protocols.py"
       - "core/web/services/cli_agent_task_kernel.py"
+      - "core/web/services/cli_agent_terminal_service.py"
+      - "core/web/services/cli_agent_service.py"
+      - "core/web/services/session/control.py"
       - "core/orchestration/runtime_goal.py"
       - "core/infrastructure/tool_executor.py"
       - "core/infrastructure/agent_session.py"
       - "core/web/services/agent_directory/ops_residual.py"
       - "tests/test_cli_agent_protocols.py"
       - "tests/test_cli_agent_task_kernel.py"
+      - "tests/test_cli_agent_terminal_teardown.py"
+      - "tests/test_cli_agent_service.py"
+      - "tests/test_session_control.py"
       - "tests/test_cli_agent_wake_bridge.py"
       - "tests/test_cli_agent_store.py"
       - "tests/test_runtime_goal_cli_tasks.py"
     commands:
-      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_cli_agent_protocols.py tests/test_cli_agent_task_kernel.py tests/test_cli_agent_wake_bridge.py tests/test_cli_agent_store.py tests/test_runtime_goal_cli_tasks.py tests/test_agent_protocol.py -q"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_cli_agent_protocols.py tests/test_cli_agent_task_kernel.py tests/test_cli_agent_wake_bridge.py tests/test_cli_agent_store.py tests/test_cli_agent_service.py tests/test_session_control.py tests/test_runtime_goal_cli_tasks.py tests/test_agent_protocol.py -q"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_cli_agent_terminal_teardown.py -m serial -q"
   - id: personal-assistant
     description: "Personal assistant identity, public overview, governed tools and native Session reuse."
     executionLayers:

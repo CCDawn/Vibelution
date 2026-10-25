@@ -235,8 +235,16 @@ def run_cli_agent(
                 allow_unsafe_permissions=allow_unsafe_permissions,
                 send_initial_task=False,
             )
+            # The shared terminal keeps its original owner. Each task belongs
+            # to this invocation, including an explicitly absent source.
+            task_terminal_session = {
+                **terminal_session,
+                "sourceSessionId": str(source_session_id or "").strip(),
+                "sourceMessageId": str(source_message_id or "").strip(),
+                "sourceRunId": str(source_run_id or "").strip(),
+            }
             task_result = cli_agent_task_kernel.submit_cli_agent_task(
-                terminal_session=terminal_session,
+                terminal_session=task_terminal_session,
                 task=task_text,
                 timeout_seconds=timeout_seconds,
                 output_limit=max_output_chars,

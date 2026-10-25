@@ -191,6 +191,66 @@ def test_conpty_job_is_created_before_pty_process(monkeypatch):
     assert not spawned
 
 
+@pytest.mark.parametrize("term_key", ["TERM", "term", "TeRm"])
+@pytest.mark.parametrize("term_value", [None, "", " \t ", "dumb", "DuMb", "vt100", "xterm-256color"])
+def test_conpty_spawn_passes_a_capable_term_without_changing_parent_environment(monkeypatch, term_key, term_value):
+    source_env = {"UPSTREAM_VALUE": "keep", "CI": "1", "NO_COLOR": "1"}
+    if term_value is not None:
+        source_env[term_key] = term_value
+    original = dict(source_env)
+    parent_env = dict(os.environ)
+    captured = []
+    process = SimpleNamespace()
+
+    def spawn(args, *, cwd, env, dimensions):
+        captured.append(dict(env))
+        return process
+
+    monkeypatch.setattr(cli_agent_service, "_run_environment", lambda: dict(source_env))
+    monkeypatch.setattr(terminal_service, "_is_windows_platform", lambda: True)
+    monkeypatch.setattr(terminal_service, "PtyProcess", SimpleNamespace(spawn=spawn))
+    monkeypatch.setattr(terminal_service, "WindowsProcessJob", lambda: object())
+    monkeypatch.setattr(terminal_service, "_ConptyProcessOwner", lambda *args: SimpleNamespace(initial_adoption_complete=True))
+
+    spawned, transport = terminal_service._spawn_terminal_process(["codex.exe"], cwd=".", rows=24, cols=80)
+
+    assert spawned is process
+    assert transport == "conpty"
+    term_entries = [(key, value) for key, value in captured[0].items() if key.upper() == "TERM"]
+    expected = term_value if term_value in {"vt100", "xterm-256color"} else "xterm-256color"
+    assert term_entries == [(term_key if term_value is not None else "TERM", expected)]
+    assert captured[0]["UPSTREAM_VALUE"] == "keep"
+    assert source_env == original
+    assert dict(os.environ) == parent_env
+
+
+@pytest.mark.parametrize("windows", [False, True])
+@pytest.mark.parametrize("term_value", [None, "", "dumb", "vt100"])
+def test_pipe_spawn_preserves_term_without_claiming_terminal_capabilities(monkeypatch, windows, term_value):
+    source_env = {"UPSTREAM_VALUE": "keep"}
+    if term_value is not None:
+        source_env["TERM"] = term_value
+    captured = []
+    process = SimpleNamespace()
+
+    def spawn(*args, **kwargs):
+        captured.append(kwargs)
+        return SimpleNamespace(process=process)
+
+    monkeypatch.setattr(cli_agent_service, "_run_environment", lambda: dict(source_env))
+    monkeypatch.setattr(terminal_service, "_is_windows_platform", lambda: windows)
+    monkeypatch.setattr(terminal_service, "PtyProcess", None)
+    monkeypatch.setattr(terminal_service, "OwnedProcess", SimpleNamespace(spawn=spawn))
+
+    spawned, transport = terminal_service._spawn_terminal_process(["codex.exe"], cwd=".", rows=24, cols=80)
+
+    assert spawned is process
+    assert transport == "pipe"
+    assert captured[0]["env"] == source_env
+    assert captured[0]["stdin"] == subprocess.PIPE
+    assert captured[0]["stdout"] == subprocess.PIPE
+
+
 def test_failed_conpty_adoption_keeps_known_tree_for_shutdown_retry(monkeypatch, terminal_runtime_environment):
     tmp_path = terminal_runtime_environment
     child_assignment_failures = 0

@@ -1595,6 +1595,11 @@ def _spawn_terminal_process(args: list[str], *, cwd: str, rows: int, cols: int) 
     rows = _clamp_int(rows, DEFAULT_ROWS, 4, 120)
     cols = _clamp_int(cols, DEFAULT_COLS, 20, 240)
     if _is_windows_platform() and PtyProcess is not None:
+        # A real ConPTY supports VT; Launcher may itself inherit TERM=dumb.
+        # Windows environment names are case-insensitive. Leave pipe mode alone.
+        term_key = next((key for key in env if key.upper() == "TERM"), "TERM")
+        if str(env.get(term_key) or "").strip().lower() in {"", "dumb"}:
+            env[term_key] = "xterm-256color"
         job = WindowsProcessJob()
         try:
             process = PtyProcess.spawn(args, cwd=cwd, env=env, dimensions=(rows, cols))

@@ -5,6 +5,11 @@ import pytest
 from core.web.services import cli_agent_task_kernel as task_kernel
 
 
+@pytest.fixture(autouse=True)
+def _isolated_pending_finalizations(monkeypatch):
+    monkeypatch.setattr(task_kernel, "_PENDING_FINALIZATIONS", {})
+
+
 def test_submit_cli_agent_task_locks_one_active_task_per_terminal(monkeypatch, tmp_path):
     project_root = tmp_path / "Vibelution"
     project_root.mkdir()
@@ -600,3 +605,160 @@ def test_finalize_result_drops_sealed_task_wake_with_audit(monkeypatch, tmp_path
     assert events[-1]["event"] == "cli_agent.task.result_fenced"
     assert events[-1]["outcome"] == "fenced_dropped"
     assert fenced_state["fencingReason"] == "stale_branch_generation"
+
+
+def test_cli_owner_notification_sealing_reports_failure_and_continues(monkeypatch, tmp_path):
+    from core.web.services import runtime_task_registry as registry
+
+    monkeypatch.setattr(task_kernel, "TASK_STATE_DIR", tmp_path / "actual-cli-tasks")
+    store = task_kernel._task_store()
+    for name in ("broken", "healthy"):
+        store.register_task(registry.new_snapshot(
+            kind=registry.KIND_CLI_AGENT, task_id=name, status="running", source_session_id="session-owner",
+        ))
+    seal = store.seal_and_request_stop
+
+    def sometimes_fail(task_id, **kwargs):
+        if task_id == "broken":
+            raise OSError("simulated isolated write failure")
+        return seal(task_id, **kwargs)
+
+    monkeypatch.setattr(store, "seal_and_request_stop", sometimes_fail)
+
+    report = task_kernel.seal_cli_agent_task_notifications(
+        {"session-owner": 2, "": 0}, turn_id="stop-turn", cascaded_from="session-root",
+    )
+
+    rows = {row["taskId"]: row for row in report}
+    assert rows["broken"]["sealed"] is False
+    assert rows["broken"]["error"] == "OSError"
+    assert rows["healthy"]["sealed"] is True
+    assert rows["healthy"]["cascadeDepth"] == 2
+    assert store.load_state("healthy")["notificationSealedByTurnId"] == "stop-turn"
+    assert store.load_state("broken")["notificationSealed"] is False
+
+
+def test_stale_marker_completion_preserves_a_later_parent_seal(codex_task):
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+
+    terminal, submitted, writes, delivered = codex_task("Inspect")
+    store = task_kernel._task_store()
+    completed_copy = dict(store.load_state(submitted["taskId"]))
+    completed_copy["output"] = completed_copy["completionMarker"]
+    detected = task_kernel.protocols.detect_task_status(
+        "codex_code", completed_copy["output"], completion_marker=completed_copy["completionMarker"],
+    )
+    assert detected == "completed"
+    task_kernel._complete_task_state(completed_copy, status=detected, code="CLI_AGENT_TASK_COMPLETED", reason="protocol_pattern")
+    copied = threading.Event()
+    release = threading.Event()
+
+    def finalize_after_seal():
+        copied.set()
+        assert release.wait(10)
+        task_kernel._finalize_task_result(completed_copy, reason="protocol_pattern")
+
+    with ThreadPoolExecutor(max_workers=1) as worker:
+        future = worker.submit(finalize_after_seal)
+        assert copied.wait(10)
+        try:
+            report = task_kernel.seal_cli_agent_task_notifications(
+                {"session-1": 0}, turn_id="stopped-turn", cascaded_from="session-1",
+            )
+            assert report[0]["sealed"] is True
+            sealed = store.load_state(submitted["taskId"])
+        finally:
+            release.set()
+        future.result(timeout=10)
+
+    settled = store.load_state(submitted["taskId"])
+    assert settled["status"] == "completed"
+    for key in ("notificationSealed", "notificationSealedAt", "notificationSealedReason", "notificationSealedByTurnId", "cascadeStop", "stopInitiator", "stopRequestedAt"):
+        assert settled[key] == sealed[key]
+    assert settled["notificationDropReason"] == "sealed"
+    assert delivered == []
+
+
+def test_actual_marker_removed_from_active_index_is_sealed_before_finalize(monkeypatch, codex_task):
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+
+    terminal, submitted, writes, delivered = codex_task("Inspect")
+    store = task_kernel._task_store()
+    task_id = submitted["taskId"]
+    marker = store.load_state(task_id)["completionMarker"]
+    entered = threading.Event()
+    release = threading.Event()
+    real_finalize = task_kernel._finalize_task_result
+
+    def paused_finalize(state, **kwargs):
+        entered.set()
+        assert release.wait(10)
+        return real_finalize(state, **kwargs)
+
+    monkeypatch.setattr(task_kernel, "_finalize_task_result", paused_finalize)
+    with ThreadPoolExecutor(max_workers=1) as worker:
+        future = worker.submit(task_kernel.ingest_terminal_output, terminal, marker)
+        assert entered.wait(10)
+        try:
+            assert store.load_state(task_id)["status"] == "completed"
+            assert task_id not in store.active_task_ids()
+            report = task_kernel.seal_cli_agent_task_notifications(
+                {"session-1": 0}, turn_id="stopped-turn", cascaded_from="session-1",
+            )
+            assert [row["taskId"] for row in report] == [task_id]
+            assert store.load_state(task_id)["notificationSealed"] is True
+        finally:
+            release.set()
+        future.result(timeout=10)
+
+    settled = store.load_state(task_id)
+    assert settled["notificationDropReason"] == "sealed"
+    assert delivered == []
+    assert task_id not in task_kernel._PENDING_FINALIZATIONS
+    assert task_kernel.seal_cli_agent_task_notifications(
+        {"session-1": 0}, turn_id="later-stop", cascaded_from="session-1",
+    ) == []
+    assert store.load_state(task_id) == settled
+
+
+@pytest.mark.parametrize("settlement", ["closed", "send_failed", "watchdog"])
+def test_each_terminal_settlement_tracks_only_its_pending_callback(monkeypatch, codex_task, settlement):
+    from core.web.services import cli_agent_terminal_service
+
+    terminal, submitted, writes, delivered = codex_task("Inspect")
+    store = task_kernel._task_store()
+    real_finalize = task_kernel._finalize_task_result
+    seen = []
+
+    def check_pending_before_finalize(state, **kwargs):
+        task_id = state["taskId"]
+        assert task_kernel._PENDING_FINALIZATIONS[task_id] == "session-1"
+        assert task_id not in store.active_task_ids()
+        seen.append(task_id)
+        return real_finalize(state, **kwargs)
+
+    monkeypatch.setattr(task_kernel, "_finalize_task_result", check_pending_before_finalize)
+    if settlement == "closed":
+        task_kernel.mark_terminal_closed(terminal)
+    elif settlement == "send_failed":
+        def fail_send(*args):
+            raise OSError("simulated send failure")
+        monkeypatch.setattr(cli_agent_terminal_service, "write_cli_agent_terminal_input", fail_send)
+        task_kernel.submit_cli_agent_task(
+            terminal_session={**terminal, "terminalSessionId": "another-terminal"},
+            task="Inspect", timeout_seconds=60, output_limit=2000,
+        )
+    else:
+        class EndWatch(Exception):
+            pass
+        def stop_watch(*args):
+            raise EndWatch()
+        monkeypatch.setattr(task_kernel, "_task_timeout_or_idle_status", lambda *args, **kwargs: "timeout")
+        monkeypatch.setattr(task_kernel.time, "sleep", stop_watch)
+        with pytest.raises(EndWatch):
+            task_kernel._watch_active_tasks()
+
+    assert len(seen) == 1
+    assert task_kernel._PENDING_FINALIZATIONS == {}
