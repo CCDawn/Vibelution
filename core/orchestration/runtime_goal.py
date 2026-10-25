@@ -242,9 +242,14 @@ class RuntimeGoalPacket:
     max_calls_per_turn: int = 0
     # None preserves the old boundary for callers constructing legacy packets.
     allow_agent_messages: bool | None = None
+    allow_cli_tasks: bool | None = None
 
     def agent_messages_allowed(self) -> bool:
         value = self.allow_subagents if self.allow_agent_messages is None else self.allow_agent_messages
+        return value is True
+
+    def cli_tasks_allowed(self) -> bool:
+        value = self.allow_subagents if self.allow_cli_tasks is None else self.allow_cli_tasks
         return value is True
 
     def allowed_components(self, registered_components: Iterable[str]) -> set[str]:
@@ -287,6 +292,7 @@ class RuntimeGoalPacket:
             f"  - Git 提交: {_yes_no(self.allow_git_commit)}",
             f"  - 进化事务: {_yes_no(self.allow_evolution_transaction)}",
             f"  - 子 agent: {_yes_no(self.allow_subagents)}",
+            f"  - CLI Agent 任务: {_yes_no(self.cli_tasks_allowed())}",
             f"  - 会话协作消息: {_yes_no(self.agent_messages_allowed())}",
             *budget_lines,
             f"- 完成标准: {self.completion_standard}",
@@ -323,6 +329,7 @@ def build_runtime_goal_packet(
             allow_git_commit=profile.allow_git_commit,
             allow_evolution_transaction=profile.allow_evolution_transaction,
             allow_subagents=profile.allow_subagents,
+            allow_cli_tasks=profile.allow_file_writes and _explicit_cli_task_capability(),
             allow_agent_messages=profile.allow_agent_messages,
             allow_code_context=_allow_code_context_for_turn(
                 profile.allow_file_writes,
@@ -343,6 +350,7 @@ def build_runtime_goal_packet(
             allow_git_commit=False,
             allow_evolution_transaction=True,
             allow_subagents=False,
+            allow_cli_tasks=False,
             allow_agent_messages=False,
             allow_code_context=True,
             max_calls_per_turn=max_calls,
@@ -368,6 +376,37 @@ def build_runtime_goal_packet(
         completion_standard="围绕 Vibelution 稳定性、进化效率或 UI/agent 一致性完成可验证改进。",
         forbidden_actions=("不要把当前入口解释成另一个 agent；仍然是同一个 Vibelution agent 面对自进化目标。",),
     )
+
+
+def _explicit_cli_task_capability() -> bool:
+    """Read persistent CLI eligibility from the current frozen Agent snapshot.
+
+    Runtime policy overlays may grant tools temporarily. They cannot turn on
+    this capability, and a missing snapshot never grants it. Execution still
+    passes through the existing ToolPolicy and approval authorities.
+    """
+    try:
+        from core.web.services.agent_directory_service import current_agent_runtime
+
+        runtime = current_agent_runtime(bound_only=True)
+        agent = runtime.get("agent") if isinstance(runtime, Mapping) else None
+        if not isinstance(agent, Mapping):
+            return False
+        policy = agent.get("toolPolicy")
+        metadata = agent.get("metadata")
+        if not isinstance(policy, Mapping) or not isinstance(metadata, Mapping):
+            return False
+        delegation = metadata.get("delegationPolicy")
+        if not isinstance(delegation, Mapping) or delegation.get("allowSubagents") is not True:
+            return False
+        tool = "cli_agent_run_tool"
+        return (
+            tool in _coerce_name_set(policy.get("allowedTools"))
+            and tool not in _coerce_name_set(policy.get("blockedTools"))
+            and _coerce_text(policy.get("mutationAccess")).strip().lower() != "none"
+        )
+    except Exception:
+        return False
 
 
 def _max_calls_per_turn(agent_tool_policy: dict | None) -> int:

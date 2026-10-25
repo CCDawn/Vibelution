@@ -8304,7 +8304,8 @@ class TestRuntimeStateMemoryFlow:
         assert scene_events[0][0:2] == ("prompt", "agent.runtime_goal.bound")
         assert scene_events[0][2]["fields"]["objectiveType"] == "self_improvement"
 
-    def test_direct_session_chat_keeps_user_text_out_of_system_prompt_goal(self, monkeypatch):
+    @pytest.mark.parametrize("explicit_cli", [False, True])
+    def test_direct_session_chat_keeps_user_text_out_of_system_prompt_goal(self, monkeypatch, explicit_cli):
         agent = AgentRuntime.__new__(AgentRuntime)
         captured = {}
 
@@ -8350,6 +8351,15 @@ class TestRuntimeStateMemoryFlow:
         agent._system_prompt_written = False
         raw_user_message = "分析项目里为什么每次发送都很慢"
 
+        from core.web.services import agent_directory_service
+
+        monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda **kwargs: {
+            "agent": {
+                "toolPolicy": {"allowedTools": ["cli_agent_run_tool"] if explicit_cli else []},
+                "metadata": {"delegationPolicy": {"allowSubagents": explicit_cli}},
+            },
+        })
+
         monkeypatch.setattr(agent_module, "get_ui", lambda: SimpleNamespace())
         monkeypatch.setattr(agent_module, "_record_agent_scene_event", lambda *args, **kwargs: None)
         monkeypatch.setattr(
@@ -8368,6 +8378,7 @@ class TestRuntimeStateMemoryFlow:
         assert captured["goal_seen_during_build"] == agent_module._SESSION_CHAT_PROMPT_GOAL
         assert captured["packet_seen_during_build"].goal == agent_module._SESSION_CHAT_PROMPT_GOAL
         assert captured["packet_seen_during_build"].allow_subagents is False
+        assert captured["packet_seen_during_build"].allow_cli_tasks is explicit_cli
         assert captured["packet_seen_during_build"].allow_agent_messages is True
         assert captured["excluded_sections"] == ["RUNTIME_LOG_INDEX"]
         assert raw_user_message not in captured["packet_seen_during_build"].render()

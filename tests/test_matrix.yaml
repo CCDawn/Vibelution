@@ -15,6 +15,23 @@ default:
     - "No focused rule matched; use the runner smoke as a small signal and decide broader validation from the changed surface."
 
 rules:
+  - id: cli-task-completion
+    description: "Explicit CLI capability, task completion authority, result delivery, and parent continuation."
+    executionLayers:
+      - "focused"
+    paths:
+      - "core/web/services/cli_agent_protocols.py"
+      - "core/web/services/cli_agent_task_kernel.py"
+      - "core/orchestration/runtime_goal.py"
+      - "core/infrastructure/tool_executor.py"
+      - "core/web/services/agent_directory/ops_residual.py"
+      - "tests/test_cli_agent_protocols.py"
+      - "tests/test_cli_agent_task_kernel.py"
+      - "tests/test_cli_agent_wake_bridge.py"
+      - "tests/test_cli_agent_store.py"
+      - "tests/test_runtime_goal_cli_tasks.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_cli_agent_protocols.py tests/test_cli_agent_task_kernel.py tests/test_cli_agent_wake_bridge.py tests/test_cli_agent_store.py tests/test_runtime_goal_cli_tasks.py tests/test_agent_protocol.py -q"
   - id: personal-assistant
     description: "Personal assistant identity, public overview, governed tools and native Session reuse."
     executionLayers:

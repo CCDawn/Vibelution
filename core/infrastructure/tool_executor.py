@@ -1573,7 +1573,16 @@ class ToolExecutor:
                 "[运行目标包] 当前能力边界禁止会话协作消息。"
                 f"能力 Profile: {profile or 'unknown'}；工具 `{normalized_tool}` 已被拦截。"
             )
-        if (
+        if normalized_tool == "cli_agent_run_tool":
+            cli_capability = getattr(packet, "allow_cli_tasks", None)
+            if cli_capability is None:
+                cli_capability = bool(getattr(packet, "allow_subagents", True))
+            if cli_capability is not True:
+                return (
+                    "[运行目标包] 当前能力边界禁止 CLI Agent 任务。"
+                    f"能力 Profile: {profile or 'unknown'}；工具 `{normalized_tool}` 已被拦截。"
+                )
+        elif (
             not bool(getattr(packet, "allow_subagents", True))
             and normalized_tool in cls._RUNTIME_GOAL_SUBAGENT_BLOCKED_TOOLS
         ):

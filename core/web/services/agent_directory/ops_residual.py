@@ -1222,11 +1222,14 @@ def count_agent_inbox_messages_for_agent(agent_id: str, *, status: str = "pendin
     return s._count_jsonl_matching_status(s._agent_workspace_event_path(agent, "agent_inbox_messages.jsonl"), status=status)
 
 
-def current_agent_runtime() -> dict[str, Any]:
+def current_agent_runtime(*, bound_only: bool = False) -> dict[str, Any]:
+    """Read the bound snapshot; optionally forbid legacy environment recovery."""
     s = _service()
     context = s._CURRENT_AGENT_RUNTIME.get({})
     if isinstance(context, dict) and context:
         return dict(context)
+    if bound_only:
+        return {}
     env_runtime = s._agent_runtime_from_env()
     if not env_runtime.get("agentId"):
         return {}
