@@ -346,6 +346,40 @@ internal static class NativeStartHarness {
   var json=new JavaScriptSerializer();
   using (var self=Process.GetCurrentProcess())
   using (var server=new NamedPipeServerStream(pipeName,PipeDirection.InOut,1,PipeTransmissionMode.Byte,PipeOptions.Asynchronous)) {
+   if (mode=="pipe-delayed-apm") {
+    // Keep native I/O pending until the wait helper has returned its timeout.
+    // Unlike a wall-clock server sleep, this orders completion deterministically.
+    using (var release=new ManualResetEvent(false)) {
+     int delayedReceived=0;
+     var delayed=new Thread(()=> {
+      server.WaitForConnection();
+      using (var reader=new StreamReader(server,new UTF8Encoding(false),false,1024,true)) {
+       if (reader.ReadLine()=="one-request") Interlocked.Increment(ref delayedReceived);
+      }
+      if (!release.WaitOne(5000)) return;
+      server.Write(new byte[]{42},0,1);server.Flush();
+     });
+     delayed.IsBackground=true;delayed.Start();
+     using (var client=new NamedPipeClientStream(".",pipeName,PipeDirection.InOut,PipeOptions.Asynchronous)) {
+      client.Connect(1000);
+      byte[] request=Encoding.UTF8.GetBytes("one-request\n"), buffer=new byte[1];
+      client.Write(request,0,request.Length);
+      var reading=client.BeginRead(buffer,0,buffer.Length,null,null);
+      var wait=typeof(VibelutionLauncher).GetMethod("WaitForNativePipeOperation",BindingFlags.NonPublic|BindingFlags.Static);
+      bool timedOut=false;
+      try {wait.Invoke(null,new object[]{reading,int.Parse(args[3]),"bounded test timeout"});}
+      catch(TargetInvocationException error) {if (!(error.InnerException is TimeoutException)) throw;timedOut=true;}
+      if (!timedOut || reading.IsCompleted || reading.AsyncWaitHandle.SafeWaitHandle.IsClosed) return 11;
+      release.Set();
+      // Observe the actual APM completion after timeout, before process exit.
+      if (!reading.AsyncWaitHandle.WaitOne(5000)) return 12;
+      int count=client.EndRead(reading);reading.AsyncWaitHandle.Close();
+      if (!delayed.Join(5000) || count!=1 || buffer[0]!=42) return 13;
+      Console.WriteLine("timed-out|received="+delayedReceived+"|late-completion=1");
+     }
+    }
+    return 0;
+   }
    File.WriteAllText(metadata,json.Serialize(new Dictionary<string,object> {
     {"schemaVersion",1},{"protocolVersion",1},{"workspaceRoot",root},{"pipeName",pipeName},{"token",new string('a',64)},
     {"pid",self.Id},{"createTime",(self.StartTime.ToUniversalTime()-new DateTime(1970,1,1,0,0,0,DateTimeKind.Utc)).TotalSeconds},
@@ -378,7 +412,7 @@ internal static class NativeStartHarness {
    string verdict;
    try {
     var method=typeof(VibelutionLauncher).GetMethod("TryNativeStart",BindingFlags.NonPublic|BindingFlags.Static);
-    verdict=(bool)method.Invoke(null,new object[]{root,mode=="pipe-timeout"?75:5000})?"completed":"fallback";
+    verdict=(bool)method.Invoke(null,new object[]{root,mode=="pipe-timeout"?(args.Length>3?int.Parse(args[3]):75):5000})?"completed":"fallback";
    } catch(TargetInvocationException error) {
     var field=error.InnerException.GetType().GetField("ExitCode");
     verdict="rejected:"+(field==null?"unknown":field.GetValue(error.InnerException).ToString());
@@ -393,9 +427,10 @@ internal static class NativeStartHarness {
     compiler = Path(os.environ["SystemRoot"]) / "Microsoft.NET/Framework64/v4.0.30319/csc.exe"
     executable = directory / "Harness.exe"
     result = subprocess.run(
-        [str(compiler), "/nologo", "/target:exe", "/main:NativeStartHarness", "/reference:System.Windows.Forms.dll",
+        [str(compiler), "/nologo", "/utf8output", "/target:exe", "/main:NativeStartHarness", "/reference:System.Windows.Forms.dll",
          "/reference:System.Drawing.dll", "/reference:System.Web.Extensions.dll", f"/out:{executable}",
-         str(NATIVE_ENTRY_SOURCE), str(harness)], capture_output=True, text=True, timeout=30,
+         str(NATIVE_ENTRY_SOURCE), str(NATIVE_ENTRY_SOURCE.with_name("ManagedDesktopAssistant.cs")),
+         str(harness)], capture_output=True, text=True, timeout=30,
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
     assert result.returncode == 0, result.stdout + result.stderr
@@ -468,6 +503,32 @@ def test_native_start_uses_real_local_pipe_and_never_retries_unknown_outcomes(na
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == f"{expected}|received=1"
+
+
+@pytest.mark.parametrize("timeout_ms", [0, 1, 15])
+def test_native_pipe_timeout_retains_apm_event_until_delayed_completion(native_start_harness, tmp_path, timeout_ms):
+    result = subprocess.run(
+        [str(native_start_harness), str(tmp_path), "pipe-delayed-apm", "unused", str(timeout_ms)],
+        capture_output=True, text=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "timed-out|received=1|late-completion=1"
+
+
+@pytest.mark.parametrize("timeout_ms", [1, 15, 75])
+def test_native_start_timeout_still_rejects_once_without_callback_crash(native_start_harness, tmp_path, timeout_ms):
+    root, projects = tmp_path / "project", tmp_path / "projects"
+    metadata, _, _ = _seed_native_start(root, projects)
+    executable = root / "dist/desktop/win-unpacked/Vibelution.exe"
+    executable.parent.mkdir(parents=True)
+    shutil.copy2(native_start_harness, executable)
+    result = subprocess.run(
+        [str(executable), str(root), "pipe-timeout", str(metadata), str(timeout_ms)],
+        env={**os.environ, "VIBELUTION_PROJECTS_HOME": str(projects)},
+        capture_output=True, text=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "rejected:3|received=1"
 
 
 def test_native_start_marks_possible_delivery_before_writing_and_keeps_legacy_bridge():

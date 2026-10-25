@@ -47,7 +47,8 @@ export async function publishLocalDebugging(
   userDataRoot: string,
   workspaceRoot: string,
   identity: DesktopShellOwnerIdentity,
-  recordPath = join(dirname(desktopShellOwnerPath(workspaceRoot)), "desktop_debug.json")
+  recordPath = workspaceRoot === "" ? join(userDataRoot, "assistant", "desktop_debug.json")
+    : join(dirname(desktopShellOwnerPath(workspaceRoot)), "desktop_debug.json")
 ): Promise<() => void> {
   const deadline = Date.now() + 5000;
   let lines: string[] = [];
@@ -66,6 +67,7 @@ export async function publishLocalDebugging(
   }
   const record = {
     schemaVersion: 1, ...identity, workspaceRoot,
+    ...(workspaceRoot === "" ? { kind: "launcher_assistant" } : {}),
     httpEndpoint: `http://127.0.0.1:${port}`,
     webSocketDebuggerUrl: `ws://127.0.0.1:${port}${lines[1]}`
   };

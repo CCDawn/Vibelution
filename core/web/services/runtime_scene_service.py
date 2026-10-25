@@ -318,7 +318,9 @@ from .runtime_scene.lifecycle import (
 )
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+from core.infrastructure.native_runtime import resolve_native_project_root
+
+PROJECT_ROOT = resolve_native_project_root(Path(__file__).resolve().parents[3])
 from vibelution_storage import resolve_project_runtime_home
 
 LAUNCHER_STATE_PATH = resolve_project_runtime_home(PROJECT_ROOT) / "launcher" / "state.json"

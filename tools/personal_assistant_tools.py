@@ -118,6 +118,11 @@ def personal_assistant_action_tool(action: str = "index", parameters: dict | Non
         runtime = _identity()
         if parameters is not None and not isinstance(parameters, dict):
             raise ValueError("parameters 必须是对象。")
+        from core.infrastructure.native_runtime import is_launcher_assistant_process
+        if is_launcher_assistant_process():
+            from core.assistant_runtime.actions import execute_action
+            return json.dumps({"source": "launcher-assistant", "untrustedContent": True,
+                               **execute_action(action, parameters or {}, runtime=runtime)}, ensure_ascii=False)
         from tools.pa_platform_actions import execute_action
         return json.dumps({"source": "platform-action-adapter", "untrustedContent": True,
                            **execute_action(action, parameters or {}, runtime)}, ensure_ascii=False)
@@ -207,6 +212,11 @@ def personal_assistant_manage_tool(action: str, arguments_json: str) -> str:
         args = json.loads(arguments_json)
         if not isinstance(args, dict):
             raise TypeError("管理参数必须是 JSON 对象。")
+        from core.infrastructure.native_runtime import is_launcher_assistant_process
+        if is_launcher_assistant_process():
+            from core.assistant_runtime.actions import execute_action
+            return json.dumps({"source": "launcher-assistant", "untrustedContent": True,
+                **execute_action(action, args, runtime=runtime, governed=True)}, ensure_ascii=False)
         if action in {"workflow_recovery_bind", "workflow_recovery_revoke", "workflow_start"}:
             return _workflow_action(action, args, runtime)
         from tools.pa_platform_actions import extension_contracts, execute_extension

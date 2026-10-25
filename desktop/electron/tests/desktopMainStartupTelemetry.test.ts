@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { runInNewContext } from "node:vm";
-import { ScriptTarget, transpileModule } from "typescript";
+import { createSourceFile, isFunctionDeclaration, ScriptTarget, transpileModule } from "typescript";
 import { describe, expect, it, vi } from "vitest";
 import {
   completeBootstrapWithoutWaitingForTelemetry,
@@ -14,16 +14,20 @@ const mainSourcePath = fileURLToPath(new URL("../src/main.ts", import.meta.url))
 describe("Electron main startup telemetry", () => {
   it("continues to the startup open when tray telemetry never settles", async () => {
     const source = readFileSync(mainSourcePath, "utf8");
+    const parsed = createSourceFile("main.ts", source, ScriptTarget.Latest, true);
+    const bootstrap = parsed.statements.find(node => isFunctionDeclaration(node) && node.name?.text === "bootstrapProjectControlPlane");
+    if (!bootstrap || !isFunctionDeclaration(bootstrap) || !bootstrap.body) throw new Error("Missing project bootstrap body");
+    const body = source.slice(bootstrap.body.getStart(parsed) + 1, bootstrap.body.getEnd() - 1);
     const marker = "void maybeRestoreTrayRestartAllPending();";
-    const begin = source.indexOf(marker) + marker.length;
-    const end = source.indexOf("const rawUrl = findVibelutionDeepLinkArg", begin);
+    const begin = body.indexOf(marker) + marker.length;
+    const end = body.length;
     expect(begin).toBeGreaterThan(marker.length);
     expect(end).toBeGreaterThan(begin);
     let release!: () => void;
     const pending = new Promise<void>((resolve) => { release = resolve; });
     const record = vi.fn(() => pending);
     let continued = false;
-    const startup = runInNewContext(transpileModule(`(async () => { ${source.slice(begin, end)} })()`, {
+    const startup = runInNewContext(transpileModule(`(async () => { ${body.slice(begin, end)} })()`, {
       compilerOptions: { target: ScriptTarget.ES2022 },
     }).outputText, {
       launcherBootstrap: {},

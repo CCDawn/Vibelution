@@ -178,6 +178,8 @@ class ExternalAgentTaskService:
         )
         self.approval_persist_enabled = bool(approval_persist_enabled)
         self._refresh_lock = threading.RLock()
+        self._task_lock_guard = threading.Lock()
+        self._task_locks: dict[str, threading.RLock] = {}
 
     def list_agents(self, *, limit: int = 50) -> dict[str, Any]:
         self._require_gateway_enabled()
@@ -298,79 +300,95 @@ class ExternalAgentTaskService:
         if not created:
             return self._public_task(record, include_private=include_private)
 
-        if not str(record.get("sessionId") or "").strip():
-            try:
-                session = self.dependencies.create_session(
-                    agent_id=resolved_agent_id,
-                    title=_clip(title, 160) or f"[external] {resolved_agent_id}",
-                    created_by="external_agent_task",
-                    conversation_index_kind="hidden",
-                    session_metadata={
-                        "source": "external_agent_task",
-                        "externalTaskId": record["taskId"],
-                        "effectivePermissionProfile": effective,
-                        "runtimeRevision": str(runtime_revision or "").strip(),
-                    },
-                    lightweight=True,
-                    activate=False,
-                )
-                session_id = str(
-                    session.get("sessionId")
-                    or session.get("conversationId")
-                    or session.get("id")
-                    or ""
-                ).strip()
-                if not session_id:
-                    raise RuntimeError(
-                        "hidden external task session returned no sessionId"
-                    )
-                submitted = self.dependencies.submit_message(
-                    session_id,
-                    normalized_task,
-                    message_source="external_agent_task",
-                    message_metadata={
-                        "source": "external_agent_task",
-                        "taskId": record["taskId"],
-                        "effectivePermissionProfile": effective,
-                        "allowInternalAutoContinue": True,
-                        "runtimeRevision": str(runtime_revision or "").strip(),
-                    },
-                    lightweight_response=True,
-                    include_started_turn_id=True,
-                )
-                turn_id = str(
-                    submitted.get("turnId")
-                    or submitted.get("startedTurnId")
-                    or submitted.get("activeTurnId")
-                    or ""
-                ).strip()
-                record = self._transition(
-                    record["taskId"],
-                    status="running",
-                    expected_revision=int(record["revision"]),
-                    reason_code="turn_started",
-                    fields={"sessionId": session_id, "turnId": turn_id},
-                )
-                self._record_event("external_agent.task.started", record)
-            except Exception:
-                latest = self.store.get_task(record["taskId"])
-                if str(latest.get("status") or "") not in TASK_TERMINAL_STATUSES:
-                    self._transition(
-                        record["taskId"],
-                        status="failed",
-                        expected_revision=int(latest["revision"]),
-                        reason_code="task_start_failed",
-                        fields={
-                            "error": {
-                                "code": "TASK_START_FAILED",
-                                "message": "Agent task could not be started.",
-                            }
-                        },
-                    )
-                raise
-        else:
+        return self._start_native_task(record, resolved_agent_id=resolved_agent_id,
+            normalized_task=normalized_task, title=title, effective=effective,
+            runtime_revision=runtime_revision, include_private=include_private)
+
+    def _task_lock(self, task_id: str):
+        # One native acceptance boundary per task; unrelated Agents retain
+        # their availability while a Session is being provisioned/submitted.
+        with self._task_lock_guard:
+            return self._task_locks.setdefault(task_id, threading.RLock())
+
+    def _start_native_task(self, record, *, resolved_agent_id, normalized_task,
+                           title, effective, runtime_revision, include_private):
+        with self._task_lock(record["taskId"]):
             record = self.store.get_task(record["taskId"])
-        return self._public_task(record, include_private=include_private)
+            if str(record.get("status") or "") in TASK_TERMINAL_STATUSES:
+                return self._public_task(record, include_private=include_private)
+            if not str(record.get("sessionId") or "").strip():
+                try:
+                    session = self.dependencies.create_session(
+                        agent_id=resolved_agent_id,
+                        title=_clip(title, 160) or f"[external] {resolved_agent_id}",
+                        created_by="external_agent_task",
+                        conversation_index_kind="hidden",
+                        session_metadata={
+                            "source": "external_agent_task",
+                            "externalTaskId": record["taskId"],
+                            "effectivePermissionProfile": effective,
+                            "runtimeRevision": str(runtime_revision or "").strip(),
+                        },
+                        lightweight=True,
+                        activate=False,
+                    )
+                    session_id = str(
+                        session.get("sessionId")
+                        or session.get("conversationId")
+                        or session.get("id")
+                        or ""
+                    ).strip()
+                    if not session_id:
+                        raise RuntimeError(
+                            "hidden external task session returned no sessionId"
+                        )
+                    submitted = self.dependencies.submit_message(
+                        session_id,
+                        normalized_task,
+                        message_source="external_agent_task",
+                        message_metadata={
+                            "source": "external_agent_task",
+                            "taskId": record["taskId"],
+                            "effectivePermissionProfile": effective,
+                            "allowInternalAutoContinue": True,
+                            "runtimeRevision": str(runtime_revision or "").strip(),
+                        },
+                        lightweight_response=True,
+                        include_started_turn_id=True,
+                    )
+                    turn_id = str(
+                        submitted.get("turnId")
+                        or submitted.get("startedTurnId")
+                        or submitted.get("activeTurnId")
+                        or ""
+                    ).strip()
+                    record = self._transition(
+                        record["taskId"],
+                        status="running",
+                        expected_revision=int(self.store.get_task(record["taskId"])["revision"]),
+                        reason_code="turn_started",
+                        fields={"sessionId": session_id, "turnId": turn_id},
+                    )
+                    self._record_event("external_agent.task.started", record)
+                except Exception:
+                    latest = self.store.get_task(record["taskId"])
+                    if str(latest.get("status") or "") not in TASK_TERMINAL_STATUSES:
+                        self._transition(
+                            record["taskId"],
+                            status="failed",
+                            expected_revision=int(latest["revision"]),
+                            reason_code="task_start_failed",
+                            fields={
+                                "error": {
+                                    "code": "TASK_START_FAILED",
+                                    "message": "Agent task could not be started.",
+                                }
+                            },
+                        )
+                    raise
+            else:
+                record = self.store.get_task(record["taskId"])
+            return self._public_task(record, include_private=include_private)
 
     def get_task(self, *, owner_id: str, task_id: str) -> dict[str, Any]:
         with self._refresh_lock:
@@ -378,7 +396,40 @@ class ExternalAgentTaskService:
             record, approvals = self._refresh(record)
         return self._public_task(record, pending_approvals=approvals)
 
+    def get_task_for_request(self, *, owner_id: str, client_request_id: str,
+                             include_private: bool = False) -> dict[str, Any]:
+        """Recover a lost acceptance using its already-persisted capability.
+
+        Unknown requests and requests owned by another capability have the
+        same denial. This lookup never creates or resubmits work.
+        """
+        with self._refresh_lock:
+            record = self.store.find_idempotent(owner_id=owner_id, client_request_id=client_request_id)
+            if record is None:
+                raise ExternalAgentAccessError("external Agent task was not found", code="TASK_NOT_FOUND")
+            record, approvals = self._refresh(record)
+        return self._public_task(record, pending_approvals=approvals, include_private=include_private)
+
     def resolve_approval(
+        self,
+        *,
+        owner_id: str,
+        capabilities: set[str],
+        task_id: str,
+        approval_id: str,
+        decision: str,
+        expected_revision: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        self._owned_task(owner_id, task_id)
+        # Native approval applies a side effect before the adapter records it.
+        # Serialize that interval with renewal, cancellation and projection.
+        with self._task_lock(task_id):
+            return self._resolve_approval_locked(owner_id=owner_id, capabilities=capabilities,
+                task_id=task_id, approval_id=approval_id, decision=decision,
+                expected_revision=expected_revision, reason=reason)
+
+    def _resolve_approval_locked(
         self,
         *,
         owner_id: str,
@@ -565,20 +616,21 @@ class ExternalAgentTaskService:
         lease_id: str,
         adapter_connection_id: str,
     ) -> dict[str, Any]:
-        try:
-            record = self.store.renew_lease(
-                task_id,
-                owner_id=owner_id,
-                lease_id=lease_id,
-                adapter_connection_id=adapter_connection_id,
-                lease_seconds=self.lease_seconds,
-            )
-        except ExternalAgentTaskNotFoundError as exc:
-            raise ExternalAgentAccessError(
-                "external Agent task was not found",
-                code="TASK_NOT_FOUND",
-            ) from exc
-        return self._public_task(record, include_private=True)
+        with self._task_lock(task_id):
+            try:
+                record = self.store.renew_lease(
+                    task_id,
+                    owner_id=owner_id,
+                    lease_id=lease_id,
+                    adapter_connection_id=adapter_connection_id,
+                    lease_seconds=self.lease_seconds,
+                )
+            except ExternalAgentTaskNotFoundError as exc:
+                raise ExternalAgentAccessError(
+                    "external Agent task was not found",
+                    code="TASK_NOT_FOUND",
+                ) from exc
+            return self._public_task(record, include_private=True)
 
     def cancel_connection_tasks(
         self, *, owner_id: str, adapter_connection_id: str
@@ -653,6 +705,11 @@ class ExternalAgentTaskService:
         terminal_status: str,
         reason_code: str,
     ) -> dict[str, Any]:
+        with self._task_lock(record["taskId"]):
+            return self._request_cancel_locked(self.store.get_task(record["taskId"]),
+                terminal_status=terminal_status, reason_code=reason_code)
+
+    def _request_cancel_locked(self, record, *, terminal_status, reason_code):
         status = str(record.get("status") or "")
         if status in TASK_TERMINAL_STATUSES:
             return record
@@ -703,6 +760,10 @@ class ExternalAgentTaskService:
     def _refresh(
         self, record: dict[str, Any]
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        with self._task_lock(record["taskId"]):
+            return self._refresh_locked(self.store.get_task(record["taskId"]))
+
+    def _refresh_locked(self, record):
         status = str(record.get("status") or "")
         if status in TASK_TERMINAL_STATUSES:
             return record, []

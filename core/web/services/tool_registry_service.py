@@ -22,6 +22,7 @@ from config.public_config import (
 )
 from config.settings import reload_config
 from core.infrastructure import developer_sandbox
+from core.infrastructure.native_runtime import resolve_native_project_root
 from core.infrastructure.image_model_discovery import resolve_image_model, should_discover_image_model
 from core.infrastructure.llm_utils import parse_tool_args
 from core.orchestration.tool_lifecycle import ToolLifecycleBridge
@@ -46,7 +47,8 @@ from core.infrastructure.tool_result import (
 )
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+SOURCE_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = resolve_native_project_root(SOURCE_ROOT)
 GENERATED_TOOLS_PATH = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "tool_registry", "generated_tools.json")
 _DEFAULT_GENERATED_TOOLS_PATH = GENERATED_TOOLS_PATH
 TOOL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{2,63}$")
@@ -156,8 +158,8 @@ _REGISTRY_CACHE: dict[str, Any] = {"signature": None, "payload": None}
 _REGISTRY_TIMING = threading.local()
 
 _REGISTRY_SIGNATURE_SOURCE_FILES: tuple[Path, ...] = (
-    PROJECT_ROOT / "core" / "web" / "services" / "tool_catalog.py",
-    PROJECT_ROOT / "core" / "infrastructure" / "tool_executor.py",
+    SOURCE_ROOT / "core" / "web" / "services" / "tool_catalog.py",
+    SOURCE_ROOT / "core" / "infrastructure" / "tool_executor.py",
 )
 
 
@@ -201,7 +203,7 @@ def _registry_file_stat(path: Path) -> tuple[str, int, int]:
 
 
 def _registry_package_stat() -> tuple[tuple[str, int, int], ...]:
-    package_dir = PROJECT_ROOT / "tools"
+    package_dir = SOURCE_ROOT / "tools"
     try:
         entries = sorted(path for path in package_dir.iterdir() if path.suffix == ".py")
     except OSError:

@@ -12,8 +12,9 @@ from core.agent_plugins.personal_affairs.service import (
     PersonalAffairsNotFoundError,
     PersonalAffairsService,
 )
+from core.infrastructure.native_runtime import resolve_native_project_root
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = resolve_native_project_root(Path(__file__).resolve().parents[3])
 
 _SERVICE: PersonalAffairsService | None = None
 _SERVICE_LOCK = threading.Lock()

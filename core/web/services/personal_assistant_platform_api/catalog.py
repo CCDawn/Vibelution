@@ -11,7 +11,7 @@ import copy
 import json
 import time
 from collections import deque
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any
 
 STANDARD_METHODS = ("get", "post", "put", "patch", "delete")
@@ -131,8 +131,15 @@ def get_spec() -> dict[str, Any]:
     return spec if isinstance(spec, dict) else {}
 
 
-def api_catalog(query: str = "", tag: str = "", offset: int = 0, limit: int = DEFAULT_PAGE_SIZE) -> dict[str, Any]:
-    """List registered ``/api`` operations with bounded pagination."""
+def api_catalog(query: str = "", tag: str = "", offset: int = 0, limit: int = DEFAULT_PAGE_SIZE, *,
+                spec: dict[str, Any] | None = None,
+                entry_projector: Callable[[str, str, dict[str, Any]], dict[str, Any]] | None = None) -> dict[str, Any]:
+    """List registered ``/api`` operations with bounded pagination.
+
+    ``spec`` and ``entry_projector`` are internal owner seams, never HTTP/tool
+    parameters. The neutral documentation owner can avoid lifecycle bootstrap
+    and legacy PA advertising while sharing all discovery/pagination rules.
+    """
 
     if type(offset) is not int or offset < 0:
         return _receipt({"message": "offset must be an integer greater than or equal to zero"}, ok=False)
@@ -141,13 +148,14 @@ def api_catalog(query: str = "", tag: str = "", offset: int = 0, limit: int = DE
 
     wanted_query = str(query or "").strip().casefold()
     wanted_tag = str(tag or "").strip().casefold()
-    spec = get_spec()
+    spec = get_spec() if spec is None else spec
     paths = spec.get("paths") if isinstance(spec.get("paths"), dict) else {}
-    read_paths = _allowlisted_read_paths(paths)
+    read_paths = _allowlisted_read_paths(paths) if entry_projector is None else set()
 
     matches: list[dict[str, Any]] = []
     for method, path, operation in _iter_operations(paths):
-        entry = _catalog_entry(method, path, operation, read_paths)
+        entry = (_catalog_entry(method, path, operation, read_paths) if entry_projector is None
+                 else entry_projector(method, path, operation))
         operation_tags = entry["tags"]
         if wanted_tag and not any(item.casefold() == wanted_tag for item in operation_tags):
             continue
@@ -170,8 +178,12 @@ def api_catalog(query: str = "", tag: str = "", offset: int = 0, limit: int = DE
     )
 
 
-def api_describe(operation_id: str) -> dict[str, Any]:
-    """Describe one unique operation and only its reachable schema components."""
+def api_describe(operation_id: str, *, spec: dict[str, Any] | None = None,
+                 entry_projector: Callable[[str, str, dict[str, Any]], dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Describe one unique operation and only its reachable schema components.
+
+    Internal spec/projection seams preserve the legacy default owner path.
+    """
 
     wanted_id = str(operation_id or "").strip()
     if not wanted_id:
@@ -179,7 +191,7 @@ def api_describe(operation_id: str) -> dict[str, Any]:
             {"message": "operationId is required", "operationId": wanted_id},
             ok=False,
         )
-    spec = get_spec()
+    spec = get_spec() if spec is None else spec
     paths = spec.get("paths") if isinstance(spec.get("paths"), dict) else {}
     operations = [
         (method, path, operation)
@@ -203,7 +215,7 @@ def api_describe(operation_id: str) -> dict[str, Any]:
         )
 
     method, path, operation = operations[0]
-    paths_for_read = _allowlisted_read_paths(paths)
+    paths_for_read = _allowlisted_read_paths(paths) if entry_projector is None else set()
     path_item = paths.get(path) if isinstance(paths.get(path), dict) else {}
     parameters = _effective_parameters(path_item.get("parameters"), operation.get("parameters"))
     request_body = copy.deepcopy(operation.get("requestBody"))
@@ -215,7 +227,8 @@ def api_describe(operation_id: str) -> dict[str, Any]:
     omitted: list[str] = list(missing)
     omitted_fields: list[str] = []
     schemas: dict[str, Any] = {}
-    entry = _catalog_entry(method, path, operation, paths_for_read)
+    entry = (_catalog_entry(method, path, operation, paths_for_read) if entry_projector is None
+             else entry_projector(method, path, operation))
     payload: dict[str, Any] = {
         "operation": entry,
         "description": str(operation.get("description") or "")[:8000],
@@ -291,19 +304,23 @@ def _is_api_path(path: str) -> bool:
     return path == "/api" or path.startswith("/api/")
 
 
-def _catalog_entry(
-    method: str, path: str, operation: dict[str, Any], read_paths: set[str]
-) -> dict[str, Any]:
+def _catalog_identity_entry(method: str, path: str, operation: dict[str, Any]) -> dict[str, Any]:
     tags = [str(item) for item in operation.get("tags") or [] if item is not None]
     summary = str(operation.get("summary") or "")
     operation_id = str(operation.get("operationId") or "")
-    entry: dict[str, Any] = {
+    return {
         "operationId": operation_id,
         "method": method.upper(),
         "path": path,
         "summary": summary,
         "tags": tags,
     }
+
+
+def _catalog_entry(
+    method: str, path: str, operation: dict[str, Any], read_paths: set[str]
+) -> dict[str, Any]:
+    entry = _catalog_identity_entry(method, path, operation)
 
     if method == "get" and path in read_paths:
         entry.update(

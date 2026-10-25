@@ -5,6 +5,7 @@ import type { DesktopCliArgs } from "../cli/desktopCli.js";
 export const DESKTOP_LAUNCH_PROFILE_FILE = "vibelution-launch-profile.json";
 
 export type DesktopLaunchSettings = {
+  assistant?: boolean;
   schemaVersion: 1;
   workspaceRoot: string;
   configPath: string;
@@ -45,6 +46,13 @@ export function resolveDesktopLaunchSettings(input: DesktopLaunchSettingsInput):
   const profileWorkspaceRoot = readProfileString(profile?.workspaceRoot);
   // Writers only emit operatorConfigPath. `configPath` is a one-shot recover for old profiles.
   const profileConfigPath = readProfileString(profile?.operatorConfigPath) || readProfileString(profile?.configPath);
+  const configPath = firstString(input.cliArgs.configPath, input.env.VIBELUTION_CONFIG_PATH, profileConfigPath);
+  if (input.cliArgs.assistant) {
+    return {
+      schemaVersion: 1, assistant: true, workspaceRoot: "", pythonPath: "", configPath,
+      profilePath: loadedProfile.path, profileError: loadedProfile.error, searchedProfilePaths,
+    };
+  }
   const profilePythonPath = readProfileString(profile?.pythonPath);
   const workspaceRoot = firstString(input.cliArgs.workspaceRoot, input.env.VIBELUTION_WORKSPACE_ROOT, profileWorkspaceRoot);
   const fileExists = input.fileExists ?? existsSync;
@@ -52,7 +60,7 @@ export function resolveDesktopLaunchSettings(input: DesktopLaunchSettingsInput):
   return {
     schemaVersion: 1,
     workspaceRoot,
-    configPath: firstString(input.cliArgs.configPath, input.env.VIBELUTION_CONFIG_PATH, profileConfigPath),
+    configPath,
     pythonPath: firstString(
       input.env.VIBELUTION_PYTHON_PATH,
       input.env.PYTHON,
@@ -81,18 +89,42 @@ export function resolveWorkspacePythonPath(
   return candidates.find((candidate) => fileExists(candidate)) ?? "";
 }
 
+/** Bind a later operator project request without inheriting the assistant's Python. */
+export function resolveDeferredProjectLaunchSettings(
+  input: DesktopLaunchSettingsInput, projectRoot: string, configPath: string,
+): DesktopLaunchSettings {
+  const env = { ...input.env };
+  for (const key of Object.keys(env)) {
+    if (["VIBELUTION_WORKSPACE_ROOT", "VIBELUTION_PYTHON_PATH", "PYTHON", "PYTHONPATH", "PYTHONHOME"].includes(key.toUpperCase())) delete env[key];
+  }
+  const result = resolveDesktopLaunchSettings({ ...input, env, cliArgs: {
+    ...input.cliArgs, assistant: false, workspaceRoot: projectRoot.trim(), configPath,
+  } });
+  const ownPython = resolveWorkspacePythonPath(result.workspaceRoot, input.fileExists ?? existsSync);
+  // The installed launch profile is the existing explicit fallback for shared
+  // project environments; embedded assistant resources are never candidates.
+  return { ...result, pythonPath: ownPython || result.pythonPath };
+}
+
 export function applyDesktopLaunchSettingsToEnvironment(
   env: NodeJS.ProcessEnv,
   settings: DesktopLaunchSettings
 ): NodeJS.ProcessEnv {
   const nextEnv: NodeJS.ProcessEnv = { ...env };
-  if (settings.workspaceRoot) {
+  if (settings.assistant) {
+    for (const key of Object.keys(nextEnv)) {
+      if (["VIBELUTION_WORKSPACE_ROOT", "VIBELUTION_PYTHON_PATH", "PYTHON", "PYTHONPATH", "PYTHONHOME"].includes(key.toUpperCase())) {
+        delete nextEnv[key];
+      }
+    }
+  }
+  if (!settings.assistant && settings.workspaceRoot) {
     nextEnv.VIBELUTION_WORKSPACE_ROOT = settings.workspaceRoot;
   }
   if (settings.configPath) {
     nextEnv.VIBELUTION_CONFIG_PATH = settings.configPath;
   }
-  if (settings.pythonPath) {
+  if (!settings.assistant && settings.pythonPath) {
     nextEnv.VIBELUTION_PYTHON_PATH = settings.pythonPath;
     if (!nextEnv.PYTHON) {
       nextEnv.PYTHON = settings.pythonPath;

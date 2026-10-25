@@ -15,9 +15,10 @@ from pathlib import Path
 from typing import Any, Literal
 
 from core.infrastructure import developer_sandbox
+from core.infrastructure.native_runtime import resolve_native_project_root
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = resolve_native_project_root(Path(__file__).resolve().parents[2])
 USAGE_SCHEMA_VERSION = 2
 DEFAULT_LEDGER_TIMEOUT_SECONDS = 5.0
 MAX_LOCK_WAIT_SECONDS = 2.0

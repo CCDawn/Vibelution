@@ -12,6 +12,9 @@
 | [0008](0008-project-mutable-state-lives-outside-source-tree.md) | 项目可变状态统一放到源码树外，并以双层身份隔离 | Accepted |
 | [0009](0009-launcher-control-plane-lives-in-electron-main.md) | Launcher 控制面落在 Electron 主进程（TS + IPC），工作台仍是 Python | Accepted |
 | [0010](0010-chat-route-is-window-local-authority.md) | Chat 当前页面/会话/群聊由窗口内 committed Router URL 单一权威；后端 pointer 降级为 last-viewed hint | Accepted |
+| [0011](0011-research-checkpoints-converge-on-ledger-graph-runtime.md) | Research checkpoints 收敛到 Ledger Graph runtime | Accepted |
+| [0012](0012-launcher-owns-personal-assistant-runtime.md) | Launcher 独占个人助理产品，独立 Python 原生会话宿主复用共享引擎 | Accepted |
+| [0013](0013-launcher-assistant-reuses-native-project-sdk.md) | Launcher 助理直接复用原生项目 SDK，生命周期仍归 Electron main | Accepted |
 
 ## 写法
 

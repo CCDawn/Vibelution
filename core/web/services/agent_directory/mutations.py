@@ -973,6 +973,27 @@ def _record_agent_avatar_updated_event(agent: dict[str, Any]) -> None:
         return
 
 
+def agent_avatar_options_snapshot(storage_dirs: tuple[tuple[str, Path], ...]) -> list[dict[str, str]]:
+    """Native metadata projection over trusted, already-resolved existing roots.
+
+    No routing, config loading, default-avatar resolution or URL projection.
+    """
+    s = _service()
+    if not isinstance(storage_dirs, tuple) or any(source not in {"custom", "bundled", "legacy"}
+        or not isinstance(path, Path) or not path.is_absolute() for source, path in storage_dirs):
+        raise ValueError("Invalid avatar storage snapshot")
+    if len({source for source, _ in storage_dirs}) != len(storage_dirs):
+        raise ValueError("Duplicate avatar storage source")
+    filenames = set()
+    for source, path in storage_dirs:
+        filenames.update(_cached_agent_avatar_dir_filenames(source, path))
+        if len(filenames) > 50000:
+            raise ValueError("Avatar snapshot limit exceeded")
+    ordered = [name for name in s.AGENT_AVATAR_FILENAMES if name in filenames]
+    ordered.extend(sorted(filenames.difference(ordered)))
+    return [{"filename": name, "path": str(s.AGENT_AVATAR_RELATIVE_DIR / name)} for name in ordered]
+
+
 def list_agent_avatar_options(model_id: str = "") -> dict[str, Any]:
     s = _service()
     options: list[dict[str, Any]] = []

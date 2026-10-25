@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import { normalizeLaunchRequestId } from "./lifecycle/launchRequestReceipt.js";
 
 export type SingleInstanceDecision =
@@ -8,6 +8,8 @@ export type SingleInstanceDecision =
 export type SingleInstanceLifecycleProvenance = "operator" | "forwarded";
 
 export type SingleInstanceLifecycleEnvelope = {
+  assistant?: boolean;
+  workspaceRoot?: string;
   schemaVersion: 1;
   kind: "vibelution-single-instance";
   projectRoot: string;
@@ -29,6 +31,8 @@ export type SingleInstanceLifecycleEnvelope = {
 };
 
 export type SingleInstanceLifecycleEnvelopeInput = {
+  assistant?: boolean;
+  workspaceRoot?: string;
   launchRequestId?: string;
   projectRoot?: string;
   openWorkbench?: boolean;
@@ -41,6 +45,7 @@ export type SingleInstanceLifecycleEnvelopeInput = {
 };
 
 export type SecondInstanceIntent =
+  | { action: "open_assistant"; hiddenPresentation: boolean }
   | { action: "handle_deep_link"; rawUrl: string }
   | { action: "apply_project"; projectRoot: string; lifecycleCommand: string; hiddenPresentation: boolean }
   | { action: "lifecycle"; command: string }
@@ -48,6 +53,8 @@ export type SecondInstanceIntent =
   | { action: "focus_existing_shell" };
 
 export type SingleInstanceCliIntent = {
+  assistant?: boolean;
+  workspaceRoot?: string;
   launchRequestId?: string;
   projectRoot: string;
   openWorkbench: boolean;
@@ -80,12 +87,18 @@ export function createSingleInstanceEnvelope(
   input: SingleInstanceLifecycleEnvelopeInput = {}
 ): SingleInstanceLifecycleEnvelope {
   const command = normalizeSingleInstanceText(input.lifecycleCommand);
+  if (input.assistant && (input.workspaceRoot || String(input.projectRoot || "").trim() || input.openWorkbench || command)) {
+    throw new Error("ASSISTANT_MODE_CONFLICT");
+  }
+  const workspaceRoot = input.workspaceRoot === undefined ? "" : validateSingleInstanceWorkspaceRoot(input.workspaceRoot);
   const source = normalizeSingleInstanceText(input.lifecycleSource);
   const reason = normalizeSingleInstanceText(input.lifecycleReason);
   const explicitlyForwarded = input.explicitlyForwarded === true || Boolean(source) || Boolean(reason);
   return {
     schemaVersion: 1,
     kind: "vibelution-single-instance",
+    ...(input.assistant === true ? { assistant: true } : {}),
+    ...(workspaceRoot ? { workspaceRoot } : {}),
     projectRoot: String(input.projectRoot || "").trim(),
     openWorkbench: input.openWorkbench === true,
     hiddenPresentation: input.hiddenPresentation === true,
@@ -111,7 +124,18 @@ export function resolveSingleInstanceCliIntent(value: unknown): SingleInstanceCl
   if (!isSingleInstanceEnvelope(value)) {
     return { projectRoot: "", openWorkbench: false, hiddenPresentation: false, lifecycleCommand: "" };
   }
+  if (value.assistant !== undefined && typeof value.assistant !== "boolean") {
+    throw new Error("ASSISTANT_MODE_CONFLICT");
+  }
+  if (value.assistant && (value.workspaceRoot || String(value.projectRoot || "").trim() || value.openWorkbench || value.lifecycle.command.trim())) {
+    throw new Error("ASSISTANT_MODE_CONFLICT");
+  }
+  const workspace = Object.hasOwn(value, "workspaceRoot")
+    ? { workspaceRoot: validateSingleInstanceWorkspaceRoot(value.workspaceRoot) }
+    : {};
   return {
+    ...(value.assistant === true ? { assistant: true } : {}),
+    ...workspace,
     projectRoot: typeof value.projectRoot === "string" ? value.projectRoot.trim() : "",
     openWorkbench: value.openWorkbench === true,
     hiddenPresentation: value.hiddenPresentation === true,
@@ -175,6 +199,7 @@ export function pinSharedDesktopShellUserData(
 }
 
 export function resolveSecondInstanceIntent(input: {
+  assistant?: boolean;
   deepLinkUrl?: string;
   projectRoot?: string;
   openWorkbench?: boolean;
@@ -182,6 +207,12 @@ export function resolveSecondInstanceIntent(input: {
   lifecycleCommand?: string;
 }): SecondInstanceIntent {
   const deepLinkUrl = String(input.deepLinkUrl || "").trim();
+  if (input.assistant) {
+    if (deepLinkUrl || String(input.projectRoot || "").trim() || input.openWorkbench || String(input.lifecycleCommand || "").trim()) {
+      throw new Error("ASSISTANT_MODE_CONFLICT");
+    }
+    return { action: "open_assistant", hiddenPresentation: input.hiddenPresentation === true };
+  }
   if (deepLinkUrl) {
     return { action: "handle_deep_link", rawUrl: deepLinkUrl };
   }
@@ -205,6 +236,16 @@ export function resolveSecondInstanceIntent(input: {
     return { action: "open_workbench" };
   }
   return { action: "focus_existing_shell" };
+}
+
+function validateSingleInstanceWorkspaceRoot(value: unknown): string {
+  // A Windows drive-relative/root-relative path is not an explicit workspace.
+  // Accept POSIX roots and Windows drive/UNC roots regardless of host platform.
+  if (typeof value !== "string" || value !== value.trim() || value.includes("\0") ||
+      (value !== "" && !posix.isAbsolute(value) && !/^(?:[A-Za-z]:[\\/]|\\\\[^\\]+\\[^\\]+(?:\\|$))/.test(value))) {
+    throw new Error("INVALID_WORKSPACE_ROOT");
+  }
+  return value;
 }
 
 function normalizeSingleInstanceText(value: unknown): string {

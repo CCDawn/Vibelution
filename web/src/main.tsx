@@ -16,7 +16,7 @@ import "./design/workbench-frame.css";
 if (!redirectToCanonicalWorkbenchHost()) {
   // Hold routine delivery before React effects can post their first route event.
   // Launcher and assistant windows have separate startup owners.
-  if (!/^\/(?:launcher|desktop-assistant|desktop-pet)(?:\/|$)/.test(window.location.pathname)) {
+  if (!/^\/(?:launcher|launcher-assistant|desktop-assistant|desktop-pet)(?:\/|$)/.test(window.location.pathname)) {
     setBrowserTelemetryStartupPending(true);
   }
   ReactDOM.createRoot(document.getElementById("root")!).render(

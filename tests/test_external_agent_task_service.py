@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
+from concurrent.futures import ThreadPoolExecutor
+import threading
 
 import pytest
 
@@ -150,6 +152,62 @@ def test_explicit_allowlist_exposes_and_runs_hidden_non_team_agent(tmp_path) -> 
     assert [item["agentId"] for item in discovered["agents"]] == ["hidden-coder"]
     assert started["status"] == "running"
     assert started["effectivePermissionProfile"] == "read_only"
+
+
+def test_lost_start_response_lookup_requires_original_request_capability(tmp_path):
+    runtime = FakeRuntime()
+    service = _service(tmp_path, runtime)
+    started = service.start_task(owner_id="durable-request-capability", adapter_connection_id="before-disconnect",
+        capabilities=set(), agent_id="coder", task="bounded task", permission_profile="read_only",
+        client_request_id="launcher-assistant:stable-request", title="", runtime_revision="rev-1")
+    recovered = service.get_task_for_request(owner_id="durable-request-capability",
+        client_request_id="launcher-assistant:stable-request", include_private=True)
+    assert recovered["taskId"] == started["taskId"]
+    assert recovered["_leaseId"]
+    assert len(runtime.create_calls) == len(runtime.submit_calls) == 1
+    for owner, request_id in (("wrong-capability", "launcher-assistant:stable-request"),
+                              ("durable-request-capability", "unknown")):
+        with pytest.raises(ExternalAgentAccessError) as denied:
+            service.get_task_for_request(owner_id=owner, client_request_id=request_id)
+        assert denied.value.code == "TASK_NOT_FOUND"
+
+
+@pytest.mark.parametrize("operation", ["heartbeat", "cancel"])
+def test_start_binding_serializes_only_its_task_against_renewal_and_cancel(tmp_path, operation):
+    runtime = FakeRuntime()
+    entered, release = threading.Event(), threading.Event()
+    create = runtime.create_session
+    def gated_create(**kwargs):
+        value = create(**kwargs)
+        entered.set()
+        assert release.wait(3)
+        return value
+    runtime.create_session = gated_create
+    service = _service(tmp_path, runtime)
+    arguments = dict(owner_id="owner", adapter_connection_id="connection", capabilities=set(),
+        agent_id="coder", task="one native task", permission_profile="read_only",
+        client_request_id="race-request", title="", runtime_revision="rev-1")
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        running = pool.submit(service.start_task, **arguments)
+        assert entered.wait(3)
+        record = service.store.find_idempotent(owner_id="owner", client_request_id="race-request")
+        if operation == "heartbeat":
+            concurrent = pool.submit(service.heartbeat, owner_id="owner", task_id=record["taskId"],
+                lease_id=record["leaseId"], adapter_connection_id="reconnected")
+        else:
+            concurrent = pool.submit(service.cancel_task, owner_id="owner", task_id=record["taskId"])
+        release.set()
+        running.result(timeout=3)
+        concurrent.result(timeout=3)
+    final = service.store.get_task(record["taskId"])
+    assert final["sessionId"] and final["turnId"]
+    assert len(runtime.create_calls) == len(runtime.submit_calls) == 1
+    if operation == "heartbeat":
+        assert final["status"] == "running"
+        assert not runtime.stop_calls
+    else:
+        assert final["status"] in {"cancelling", "stop_unconfirmed", "cancelled"}
+        assert runtime.stop_calls == [(final["sessionId"], final["turnId"])]
 
 
 def test_start_is_hidden_async_and_does_not_persist_prompt(tmp_path) -> None:
@@ -902,6 +960,38 @@ def test_cancel_approval_enters_real_turn_stop_path(tmp_path) -> None:
 
     assert result["taskStatus"] == "stop_unconfirmed"
     assert runtime.stop_calls == [(task["sessionId"], "turn-1")]
+
+
+def test_approval_resolution_and_renewal_preserve_the_same_task_revision(tmp_path) -> None:
+    runtime = FakeRuntime()
+    entered, release = threading.Event(), threading.Event()
+    native_resolve = runtime.resolve_approval
+    def gated_resolve(*args, **kwargs):
+        entered.set()
+        assert release.wait(3)
+        return native_resolve(*args, **kwargs)
+    runtime.resolve_approval = gated_resolve
+    service = _service(tmp_path, runtime)
+    started = service.start_task(owner_id="host-a", adapter_connection_id="connection-a", capabilities=set(),
+        agent_id="coder", task="work", permission_profile="read_only", client_request_id="approval-race",
+        title="", runtime_revision="rev-1")
+    record = service.store.get_task(started["taskId"])
+    runtime.approvals[record["sessionId"]] = [{"requestId": "approval-1", "turnId": "turn-1",
+        "status": "pending", "decisionFingerprint": "fp-1"}]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        approval = pool.submit(service.resolve_approval, owner_id="host-a", capabilities=set(),
+            task_id=record["taskId"], approval_id="approval-1", decision="accept", expected_revision="fp-1", reason="")
+        assert entered.wait(3)
+        renewal = pool.submit(service.heartbeat, owner_id="host-a", task_id=record["taskId"],
+            lease_id=record["leaseId"], adapter_connection_id="connection-b")
+        try:
+            assert not renewal.done()
+        finally:
+            release.set()
+        assert approval.result(timeout=3)["decision"] == "accept"
+        renewal.result(timeout=3)
+    assert len(runtime.resolve_calls) == 1
+    assert service.store.get_task(record["taskId"])["approvalDecisions"]["approval-1"]["decision"] == "accept"
 
 
 def test_other_owner_cannot_resolve_task_approval(tmp_path) -> None:

@@ -1396,6 +1396,34 @@ def get_public_config_snapshot() -> dict[str, Any]:
     return payload
 
 
+def read_existing_config_snapshot(path: Path) -> dict[str, Any]:
+    """Read bounded raw TOML without initialization, migration or cache writes.
+
+    Internal source snapshot only; callers must never expose raw configuration.
+    """
+    try:
+        if not isinstance(path, Path) or not path.is_absolute():
+            raise ValueError("explicit absolute path required")
+        def stamp(info):
+            return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+        before = path.stat()
+        if before.st_size > 16 * 1024 * 1024:
+            raise ValueError("config too large")
+        with path.open("rb") as stream:
+            opened = os.fstat(stream.fileno())
+            raw = stream.read(16 * 1024 * 1024 + 1)
+            finished = os.fstat(stream.fileno())
+        after = path.stat()
+        # Windows path stat and handle stat can report different creation-time
+        # precision for an unchanged file. Compare ctime within each API pair.
+        if (len(raw) > 16 * 1024 * 1024 or not (stamp(before) == stamp(opened) == stamp(finished) == stamp(after))
+            or before.st_ctime_ns != after.st_ctime_ns or opened.st_ctime_ns != finished.st_ctime_ns):
+            raise ValueError("config changed")
+        return tomllib.loads(raw.decode("utf-8"))
+    except (OSError, ValueError, UnicodeError):
+        raise ValueError("EXISTING_CONFIG_UNAVAILABLE") from None
+
+
 def load_public_config(config_path: Path | None = None, *, allow_legacy_v1: bool | None = None) -> dict:
     requested_allow_legacy_v1 = allow_legacy_v1
     if config_path is None:

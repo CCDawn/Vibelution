@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Header, HTTPException, Request, status
+from fastapi import APIRouter, Header, HTTPException, Query, Request, status
 
 from core.external_agent.contracts import API_PROTOCOL_VERSION, SERVER_VERSION
 from core.web.control import validate_control_request
@@ -202,6 +202,25 @@ def start_external_agent_task(
             runtime_revision=_runtime_revision(),
             include_private=True,
         )
+    except Exception as exc:
+        raise _handle_service_error(exc) from exc
+
+
+@router.get(
+    "/v1/external-agent/task-request",
+    response_model=ExternalAgentTaskResponse,
+    response_model_exclude_unset=True,
+)
+def get_external_agent_task_for_request(
+    request: Request,
+    client_request_id: Annotated[str, Query(min_length=1, max_length=256)],
+    task_capability: Annotated[str, Header(alias=TASK_CAPABILITY_HEADER)] = "",
+) -> dict[str, Any]:
+    _require_control(request)
+    owner_id = _require_header(task_capability, "external Agent task capability")
+    try:
+        return _service().get_task_for_request(owner_id=owner_id,
+            client_request_id=client_request_id, include_private=True)
     except Exception as exc:
         raise _handle_service_error(exc) from exc
 

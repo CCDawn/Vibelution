@@ -9,9 +9,8 @@ from typing import Any
 from core.chat.chat_task_types import trim_lines
 
 from . import agent_directory_service, chat_room_service, session_service, team_service
-from .team import role_definition_service
 from .runtime_scene_service import record_runtime_scene_event
-
+from .team import role_definition_service
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEV_TEAM_TEMPLATE_ID = "dev-team"
@@ -57,6 +56,7 @@ def instantiate_team_template(
     team_category: str = "",
     team_source: str = "",
     team_purpose: str = "",
+    instantiation_marker: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Materialize one template into a Team.
 
@@ -68,22 +68,19 @@ def instantiate_team_template(
 
     template = _resolve_template(template_id)
     _sync_project_roots()
+    # Resolve after the Team/Session facades are initialized; avoid a module-level
+    # template -> catalog -> Session import cycle.
+    from .agent_operation_service import create_configured_agent_with_session
+
     created_agents: list[dict[str, Any]] = []
     members: list[dict[str, Any]] = []
     for index, role in enumerate(template["roles"], start=1):
-        session = session_service.create_chat_session(
-            title=str(role["agentName"]),
-            llm_bindings=session_service.default_session_llm_bindings(),
-            created_by="team_template",
-        )
-        agent_id = str(session.get("agentId") or "").strip()
-        if not agent_id:
-            raise TeamTemplateError(f"Template role did not create an Agent: {role['role']}")
-        agent = agent_directory_service.update_agent_instance(
-            agent_id,
+        agent = create_configured_agent_with_session(
             display_name=str(role["agentName"]),
+            llm_bindings=session_service.default_session_llm_bindings(),
             primary_mode="chat",
             role_key=str(role["roleKey"]),
+            prompt_template_id="prompt-chat-default",
             tool_policy=_role_tool_policy(role),
             persona_profile=role["personaProfile"],
             task_profile=role["taskProfile"],
@@ -92,7 +89,10 @@ def instantiate_team_template(
                 "teamTemplateId": template["templateId"],
                 "teamTemplateRole": role["roleKey"],
                 **dict(template.get("agentMetadata") or {}),
+                **({"teamTemplateInstantiation": {**instantiation_marker, "roleKey": role["roleKey"]}}
+                   if instantiation_marker is not None else {}),
             },
+            source="team_template", session_title=str(role["agentName"]), session_title_source="manual",
         )
         created_agents.append(agent)
         members.append(
@@ -441,5 +441,5 @@ def _record_template_event(
             outcome="created",
             lifecycle=True,
         )
-    except Exception:
+    except Exception:  # noqa: BLE001,S110 -- optional evidence must not fail native materialization
         pass

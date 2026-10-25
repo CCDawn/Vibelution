@@ -27,6 +27,10 @@ class FakeService:
         self.calls.append(("get", kwargs))
         return {"taskId": kwargs["task_id"], "status": "running"}
 
+    def get_task_for_request(self, **kwargs):
+        self.calls.append(("lookup", kwargs))
+        return {"taskId": "eat-1", "status": "running", "_leaseId": "private-lease"}
+
     def resolve_approval(self, **kwargs):
         self.calls.append(("approval", kwargs))
         return {"status": "ok", "decision": kwargs["decision"]}
@@ -59,6 +63,18 @@ def _headers(
         external_agent.TASK_CAPABILITY_HEADER: capability,
         external_agent.ADAPTER_CONNECTION_HEADER: connection,
     }
+
+
+def test_request_lookup_requires_control_and_original_task_capability(monkeypatch):
+    client, service = _client(monkeypatch)
+    path = "/api/v1/external-agent/task-request?client_request_id=stable-request"
+    assert client.get(path).status_code == 403
+    headers = _headers()
+    assert client.get(path, headers={CONTROL_TOKEN_HEADER: headers[CONTROL_TOKEN_HEADER]}).status_code == 403
+    response = client.get(path, headers=headers)
+    assert response.status_code == 200
+    assert response.json()["_leaseId"] == "private-lease"
+    assert service.calls[-1] == ("lookup", {"owner_id": "task-cap-1", "client_request_id": "stable-request", "include_private": True})
 
 
 def test_external_routes_require_control_token_even_for_reads(monkeypatch) -> None:

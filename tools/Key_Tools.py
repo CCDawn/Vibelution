@@ -3072,6 +3072,10 @@ def _build_key_tools() -> List[BaseTool]:
         action=index 列动作；describe 的 parameters={"action":"agent_update"} 返回准确参数schema。
         parameters直接传JSON对象，不能传字符串。agent_update 示例：
         {"agent_id":"概览取得的真实ID","updates":{"displayName":"新名字"}}。
+        Launcher独立助理以index/describe返回的实时目录为准：projects查询已授权项目，agents发现可派遣目标，
+        dispatch使用project_id、agent_id、稳定dispatch_id，并优先用task_source的start_after/end_before唯一短锚点提取用户任务原文；
+        两锚点都为空时使用整条用户消息。不要改写任务、ID和引号文字；task只接受用户消息的精确原文子串。
+        receipt查询原任务；项目取自授权目录，同一请求复用原ID和选择参数，原生引用可恢复原任务，不要求用户重新抄写。
         agent_create: display_name、request_id（本次创建稳定唯一标识），可选model_id、mission；
         默认沿用助理模型，创建可接收派遣的普通Agent，权限固定为消息协作；需要文件/命令等权限另走审批。
         agent_avatar: agent_id 和 avatar_image_path，或reset_to_default=true；先avatar_options查现有图片。
@@ -3079,6 +3083,7 @@ def _build_key_tools() -> List[BaseTool]:
         [{"section":"user_profile","key":"display_name","value":"新名字"}]。
         model_options查已有模型；model_add在已配置provider添加模型，不接收密钥/网络地址。
         assistant_settings/update、assistant_model_set管理助理自身；dialogue_settings/update调整主动说话与提问。
+        助理自身偏好修改在当前轮结束后自动刷新生效，不要求用户手动刷新或重启。
         provider_catalog及provider_*/model_*管理连接和模型；workspace_list按名称查会话/团队/群聊，再用session_*/team_*/room_update操作。
         index中的governed=true动作使用manage同名action，arguments_json为对应parameters的JSON；不要在日常工具中反复重试。
         team_status: run_id，可选team_id（可省略，由自己的创建记录定位）、wait_seconds最多30秒；完成时返回团队最终产物。

@@ -1073,7 +1073,9 @@ from core.web.services.session.publish import (
 )
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+from core.infrastructure.native_runtime import is_launcher_assistant_process, resolve_native_project_root
+
+PROJECT_ROOT = resolve_native_project_root(Path(__file__).resolve().parents[3])
 
 
 def assemble_conversation_context(*args: Any, **kwargs: Any):
@@ -1296,7 +1298,11 @@ _AGENT_DIRECTORY_STUB_HIDDEN_TEAM_KINDS = {
 _SESSION_LIST_PREWARM_LOCK = threading.Lock()
 _SESSION_LIST_PREWARM_INFLIGHT = False
 _UNSET = object()
-_WORK_RUN_STORE = WorkRunStore()
+_WORK_RUN_STORE = (
+    WorkRunStore(root=PROJECT_ROOT / ".runtime" / "runtime-manager" / "work_runs")
+    if is_launcher_assistant_process()
+    else WorkRunStore()
+)
 _NO_VISIBLE_REPLY_ZH = "本轮没有产生可见回复。"
 _NO_VISIBLE_REPLY_EN = "This turn did not produce a visible reply."
 _PROVIDER_ERROR_PATTERN = re.compile(

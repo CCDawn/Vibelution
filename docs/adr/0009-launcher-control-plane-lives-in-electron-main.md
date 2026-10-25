@@ -6,6 +6,11 @@ Accepted (2026-08-14). Amended 2026-08-17: the packaged product path no longer s
 
 ## Context
 
+2026-10-24: Decision 5's two-role Python restriction is superseded by
+[ADR 0012](0012-launcher-owns-personal-assistant-runtime.md), which permits a
+Launcher-owned native assistant runtime. Electron control-plane ownership is
+unchanged; the historical decision below is retained.
+
 The product Launcher is a desktop control surface. Today it is split across three runtimes that do not share one source of window and lifecycle truth:
 
 ```text

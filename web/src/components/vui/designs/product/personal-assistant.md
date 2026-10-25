@@ -1,5 +1,28 @@
 # Personal assistant
 
+## LauncherAssistantRoute
+
+### 功能
+Launcher 自己拥有的个人助理浮窗，复用现有收起形象、原生消息列表与输入框，连接独立原生会话宿主。
+### 适用范围
+仅 `/launcher-assistant` 和 main 核验的专用窗口；首轮独立运行验收，不把原项目内助理当代理。
+
+Launcher 聊天复用 `ConversationView` 的发送、停止和继续控件。运行时停止只绑定当前原生 Turn；隐藏、收起和关闭视图均不停止任务。继续控件仅在原生终态、分支和 ledger 快照允许时出现；已有草稿或排队消息时不出现。响应未确认时保留原请求标识，原生重新校验身份与快照，不用普通聊天发送替代继续操作。
+### 使用方式
+复用 DesktopPetCharacter、desktop-pet 样式和 LazyConversationView，展开态用 VDenseOpsPage；隐藏窗口不取消会话或派遣。消息请求 ID 在未知结果时保持不变，显式重试核对原生接受结果。通过 role-scoped IPC 读取状态、详情与回执，不给 renderer 后端凭据、端口或任意 URL。ConversationView 的可选 runtimeApi 只替换配置与标注的数据访问及查询 key，普通工作台默认行为不变。
+### 非职责
+不实现第二套 transcript、任务调度或 LLM 调用；不持有远程任务凭据；不把原生 succeeded 等同于业务验收通过。
+### 视觉与状态
+会话的 `lastTurnError` 直接交给 ConversationView 已有错误面板，展示原生失败摘要和可展开诊断；清除或更新均跟随会话读回，不增加错误分类、自动重试或另一份错误状态。
+操作者名称和头像预设通过同一 status 的可选 `operatorProfile` 两字段投影传给 ConversationView 已有用户显示参数；同一终态刷新会自动读回，缺损时沿用普通显示默认值，不把用户名称混作助理名。原始只读配置不返回 bio、偏好、头像文件路径或凭据；不增加 writer、独立缓存或轮询。
+沿用已存在的浮窗形象与聊天布局，形象、名称、状态提示和标题显示读取 Launcher status 的 settings 偏好；明确的原生终态会按 session/turn 去重刷新，收起聊天也生效，不要求用户手动刷新。重新展开、窗口恢复可见与显式刷新仍可重读。自身会话在可见时启动读一次，以原生活动、已受理轮次、队列或待确认原请求维持观察；任务收口后停止轮询，隐藏后停止 UI 轮询。审批与派遣面板继续只在展开时读取。VUI 控件覆盖加载、连接错误、保留输入后的重试、收起和隐藏；没有实现的管理动作不显示可点击占位按钮。发送确认绑定原生 turnId，旧 ready 和旧终态不能结束新请求的等待；未知发送/继续只按原 requestId 回读原生接受证据，不重发、不换 ID、不把 queue ID 当 turnId。清理输入仅作用于仍等于原提交快照的草稿，新草稿保持。未确认输入与原 requestId 留在窗口内存缓存，组件卸载不清除；长期续租仍归宿主。
+原生审批只读取当前助理会话的 pending 请求，复用 ChatToolApprovalDialog、toolApprovalPreview 与 VButton；只提供同意本次、拒绝及失败后重读，不显示会话级授权、永久授权或操作窗口委托。审批失败保留原请求，窗口隐藏和卸载不取消原生任务。
+忙碌时认可原生显式 queued ACK，校验 clientSubmissionId 与原请求 ID 一致后清空输入，保留原生队列引用，queue ID 不作 turnId。首个旧 ready 不解除等待；读取到对应 queuedTurns 后由原生 queued/starting 状态控制轮询，paused/blocked 显示原状态并在会话空闲时停读。复用原生提交读回 helper，以 canonical message/activeTask 的 clientSubmissionId 与真实 turnId 确认入场；已观察到的队列项移除且没有入场证据时只显示已移除，不宣称成功，不自动重发，不增加队列调度或管理按钮。
+### 实现落点
+`routes/desktopPet/LauncherAssistantRoute.tsx`、`api/launcherAssistant.ts`。
+### 反冗余
+同一 ConversationView、DesktopPetCharacter 和 VUI 元素；迁移验收阶段保留旧入口，全部迁移和数据验收结束后退役旧产品实现。
+
 ## DesktopAssistantReturnNotice
 
 ### 功能

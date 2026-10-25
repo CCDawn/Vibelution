@@ -2515,12 +2515,18 @@ def repair_agent_directory() -> dict[str, Any]:
         s.ensure_agent_shared_workspace()
         available_agent_avatar_filenames = s._available_agent_avatar_filenames()
         normalized_tool_policies = s._tool_policies(state)
-        knowledge_steward_result = s._ensure_knowledge_steward_agent(
-            state,
-            ensure_shared_workspace=False,
-            available_avatar_filenames=available_agent_avatar_filenames,
-            normalized_tool_policies=normalized_tool_policies,
-        )
+        from core.infrastructure.native_runtime import is_launcher_assistant_process
+
+        # The dedicated Launcher directory owns only its explicit assistant.
+        # Workbench repair retains its ordinary built-in steward provisioning.
+        knowledge_steward_result: dict[str, Any] = {}
+        if not is_launcher_assistant_process():
+            knowledge_steward_result = s._ensure_knowledge_steward_agent(
+                state,
+                ensure_shared_workspace=False,
+                available_avatar_filenames=available_agent_avatar_filenames,
+                normalized_tool_policies=normalized_tool_policies,
+            )
         if knowledge_steward_result.get("changed"):
             changed = True
         display_name_repaired_agents: list[dict[str, Any]] = []

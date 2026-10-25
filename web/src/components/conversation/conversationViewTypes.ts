@@ -76,6 +76,13 @@ export type ConversationToolApprovalSurface = {
 };
 
 export type ConversationViewProps = {
+  /** Same transcript UI, with host-scoped reads/writes and separate query keys. */
+  runtimeApi?: {
+    cacheKey: string;
+    fetchConfigBootstrap: typeof import("../../api/config").fetchConfigBootstrap;
+    fetchMessageCuration: typeof import("../../api/chat").fetchSessionMessageCuration;
+    setMessageCuration: typeof import("../../api/chat").setSessionMessageCuration;
+  };
   sessionId: string;
   title: string;
   phase: string;

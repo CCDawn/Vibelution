@@ -2,9 +2,9 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 // @ts-expect-error Build entrypoints are plain JavaScript, outside the source TS project.
-import { createIsolatedBuilderConfig, resolveInstalledElectronDistribution } from "../scripts/buildDesktopPackage.js";
+import { createIsolatedBuilderConfig, resolveInstalledElectronDistribution, runDesktopPackageBuild } from "../scripts/buildDesktopPackage.js";
 
 const buildScriptPath = fileURLToPath(new URL("../../../scripts/build_desktop_package.ps1", import.meta.url));
 const verifyScriptPath = fileURLToPath(new URL("../../../scripts/verify_desktop_package.ps1", import.meta.url));
@@ -36,11 +36,13 @@ describe("installed Electron package runtime", () => {
       const config = createIsolatedBuilderConfig({
         baseConfig, electronRoot: root, appRoot: join(root, "app"),
         outputRoot: join(root, "out"), frontendRoot: join(root, "web"),
+        assistantRoot: join(root, "assistant"),
         electronDistribution: resolveInstalledElectronDistribution(root, "staging", "win32"),
       });
       expect(config.electronDist).toBe(dist);
       expect(config.electronVersion).toBe("42.5.0");
       expect(baseConfig).toEqual({ files: ["dist/**/*"] });
+      expect(config.extraResources).toContainEqual({ from: join(root, "assistant"), to: "launcher-assistant" });
       expect(existsSync(join(dist, "electron.exe"))).toBe(true);
     });
   });
@@ -57,6 +59,41 @@ describe("installed Electron package runtime", () => {
 
   it("does not reuse the host runtime for a Linux ARM64 cross-build", () => {
     expect(resolveInstalledElectronDistribution("missing-host-installation", "linux-arm64", "win32")).toEqual({});
+  });
+
+  it("rejects the unsupported migrated assistant cross-build before output", () => {
+    expect(() => runDesktopPackageBuild({ mode: "linux-arm64" })).toThrow(/assistant.*Windows/);
+  });
+
+  it("refuses a production package configuration without its owned assistant", () => {
+    expect(() => createIsolatedBuilderConfig({ baseConfig: {}, appRoot: "app", outputRoot: "out", frontendRoot: "web" }))
+      .toThrow(/owner-built assistant/);
+  });
+
+  it.skipIf(process.platform !== "win32")("consumes only the one prepared payload session and refuses reuse", () => {
+    fixture((root) => {
+      const workspace = join(root, "workspace");
+      const session = join(workspace, "dist", ".desktop-shell-build-fixture");
+      const assistantRoot = join(session, "launcher-assistant");
+      mkdirSync(assistantRoot, { recursive: true });
+      writeFileSync(join(assistantRoot, "manifest.json"), "{}");
+      writeFileSync(join(root, "package.json"), "{}");
+      writeFileSync(join(root, "desktop-entry-catalog.json"), "{}");
+      vi.stubEnv("VIBELUTION_DESKTOP_BUILD_MANAGED", "1");
+      vi.stubEnv("VIBELUTION_DESKTOP_BUILD_ROOT", session);
+      vi.stubEnv("VIBELUTION_ASSISTANT_PAYLOAD_ROOT", assistantRoot);
+      vi.stubEnv("VIBELUTION_ASSISTANT_MANIFEST_SHA256", "c".repeat(64));
+      let compilerReached = false;
+      try {
+        const options = { workspaceRoot: workspace, electronRoot: root, run: (_exe: string, args: string[]) => {
+          compilerReached = args[0].endsWith("tsc");
+          throw new Error("fixture compile gate");
+        } };
+        expect(() => runDesktopPackageBuild(options)).toThrow("fixture compile gate");
+        expect(compilerReached).toBe(true);
+        expect(() => runDesktopPackageBuild(options)).toThrow("only its owner-built assistant payload");
+      } finally { vi.unstubAllEnvs(); }
+    });
   });
 });
 
@@ -132,7 +169,8 @@ describe("desktop package script", () => {
     expect(frontendBundle).toContain("ensure-frontend-build");
     expect(frontendBundle).toContain("frontendContentSha256");
     expect(readFileSync(packageBuilderPath, "utf8")).toContain("frontendRoot");
-    expect(readFileSync(packageBuilderPath, "utf8")).toContain("extraResources = [{ from: resolve(input.frontendRoot), to: \"web-dist\" }]");
+    expect(readFileSync(packageBuilderPath, "utf8")).toContain('{ from: resolve(input.frontendRoot), to: "web-dist" }');
+    expect(readFileSync(packageBuilderPath, "utf8")).toContain('{ from: resolve(input.assistantRoot), to: "launcher-assistant" }');
     expect(packageJson.scripts?.["package:linux-arm64:dir"]).toContain("runDesktopPackage.js --mode linux-arm64");
   });
 

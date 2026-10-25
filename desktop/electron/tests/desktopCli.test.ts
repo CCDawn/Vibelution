@@ -8,6 +8,27 @@ import { desktopSmokeSummary, desktopSmokeSummaryPath } from "../src/smoke/deskt
 import { desktopWorkbenchCloseCanarySummary, desktopWorkbenchCloseCanarySummaryPath } from "../src/smoke/workbenchCloseCanary.js";
 
 describe("desktop CLI arguments", () => {
+  it("accepts explicit assistant mode with operator config and hidden presentation", () => {
+    expect(parseDesktopCliArgs(["--assistant", "--config", "C:/operator/config.toml", "--hidden-presentation"]))
+      .toMatchObject({ assistant: true, workspaceRoot: "", projectRoot: "", openWorkbench: false,
+        lifecycleCommand: "", configPath: "C:/operator/config.toml", hiddenPresentation: true });
+  });
+
+  it.each([
+    ["--workspace", "C:/workspace"], ["--workspace", ""], ["--project", "C:/project"],
+    ["--project=C:/project"], ["--open-workbench"], ["start"], ["restart"], ["open"],
+    ["vibelution://open?project=old"], ["VIBELUTION://focus"],
+  ])("rejects mixed assistant/project intents: %s", (...intent) => {
+    expect(() => parseDesktopCliArgs(["--assistant", ...intent])).toThrow("ASSISTANT_MODE_CONFLICT");
+    expect(() => parseDesktopCliArgs([...intent, "--assistant"])).toThrow("ASSISTANT_MODE_CONFLICT");
+  });
+
+  it("preserves ordinary deep-link parsing without requesting assistant mode", () => {
+    expect(parseDesktopCliArgs(["vibelution://open?project=old"]))
+      .toMatchObject({ projectRoot: "", workspaceRoot: "", lifecycleCommand: "", openWorkbench: false });
+    expect(parseDesktopCliArgs(["vibelution://open?project=old"]).assistant).not.toBe(true);
+  });
+
   it("does not infer a Workbench-open request from an ordinary duplicate launch", () => {
     expect(parseDesktopCliArgs(["--workspace", "C:/workspace"]).openWorkbench).toBe(false);
     expect(parseDesktopCliArgs(["--workspace", "C:/workspace"]).projectRoot).toBe("");

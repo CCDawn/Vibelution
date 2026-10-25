@@ -1,12 +1,12 @@
 # Launcher 常驻个人助理完整迁移方案
 
-- Status: PROPOSED，待实施；本文不表示迁移已经生效，也不替代现行 ADR。
+- Status: IN_PROGRESS（2026-10-25）；已开始实施，完整迁移和平台退役尚未完成。运行归属见 [ADR 0012](../adr/0012-launcher-owns-personal-assistant-runtime.md)，项目业务 API 直接复用原生 SDK 的定案见 [ADR 0013](../adr/0013-launcher-assistant-reuses-native-project-sdk.md)。
 - 日期: 2026-10-23，Asia/Shanghai。
 - 初始化配置设计补充: 2026-10-24；对应本地源码基线 729f390f5，以下新增预设与初始化流程仍待实施。
 - Launcher 产品形态与外部调研补充: 2026-10-24；本地基线 b1ecf1709；完整助理入口、打开即桌面形象和关闭常驻契约见第 8 节，外部固定源码与借鉴裁决见第 13.3 节。
 - 唯一归属修订: 2026-10-24；用户已明确个人助理全部迁入 Launcher，平台不保留这项产品功能。本次本地核对基线 74dd3e8e7；第 1.3、5.2、7.5、12 和 14 节据此修订，替代此前每项目 PA 与平台嵌入视图的建议；运行迁移尚未实施。
 - 代码基线: 245f325166f4ebde2a3b7b353f9b1e23fb8c1d24；这是本地核对基线，远端刷新因本机代理连接失败而未完成。
-- 交付范围: 架构、职责、接口、数据迁移、实施依赖、验收、切换与回滚方案。本轮仅文档。
+- 交付范围: 架构、职责、接口、数据迁移、实施依赖、验收、切换与回滚方案；实施证据与剩余项见第 15 节。
 - 完成条件: M0–M7 全部关闭，原生桌面、真实模型、断线恢复和回滚演练均有证据；届时更新状态并按 [ADR 0005](../adr/0005-docs-authority-and-archive-policy.md) 归档。
 - 约束: [AGENTS.md](../../AGENTS.md)、[开发标准](../standards/development-standard.md) 和原生业务服务继续持有权限、数据与生命周期权威。
 
@@ -76,19 +76,20 @@
 
 ~~~mermaid
 flowchart TB
-    U["Launcher 完整助理面板"] --> E["Electron main：身份校验、生命周期与连接代理"]
+    U["Launcher 完整助理面板"] --> E["Electron main：身份、项目注册与生命周期"]
     V["桌面形象：打开即显示"] --> E
     V -.->|"点击唤起同一助理"| U
     E <-->|"私有运行通道"| A["独立 Python 助理服务"]
     A --> S["助理专属存储：原生 Session、偏好、操作记录"]
-    A <-->|"受控项目请求"| B["Electron main 项目连接代理"]
+    E -->|"已登记项目与权限快照"| A
+    A <-->|"闭合业务调用"| B["宿主内复用原生项目 SDK"]
     B --> P1["项目 A 原生 API 与执行器"]
     B --> P2["项目 B 原生 API 与执行器"]
     P1 --> D1["项目 A Agent、Journal、团队与任务"]
     P2 --> D2["项目 B Agent、Journal、团队与任务"]
 ~~~
 
-图中的 E 与 B 是同一 Electron main 的不同职责。连接代理在确定性代码中校验请求并调用目标，不运行第二个规划模型，也不建立第二套项目任务状态。
+图中的 B 复用在可信 Python 宿主内，不增加进程或规划模型。Electron 管登记表、权限快照和项目生命周期；SDK 直接调用目标的受控业务 API，目标执行器和原生回执仍是项目任务权威。
 
 ### 3.1 进程与发布包
 
@@ -106,11 +107,12 @@ flowchart TB
 
 为保留现有 Session DTO 和事件形状，首版采用“私有 loopback 助理 API + Electron IPC 代理”。Python 仅监听 127.0.0.1 的动态端口，不使用固定 :8765，不提供 Launcher 实例注册、项目生命周期或桌面窗口控制接口。
 
-- Electron 通过继承的私有管道完成 bootstrap、传递一次性会话凭证，并接收协议版本、端口、profileId、releaseId 和健康信息。凭证不得放在 argv、URL、日志或 renderer。
+- Electron 通过仅传给所属子进程的环境传递 generation 专属 bearer；子进程在原生 import 前移除该环境变量。就绪文件只原子发布协议、role、instanceId、PID 与动态端口，不含凭据；main 再在自己的 Job 内核对 generation 并认证健康。profile、封存 release 和权限快照由 owner 绑定，不能只凭 PID 或端口接管。凭据不得放在 argv、URL、日志或 renderer。
 - 助理 API 的业务和事件请求全部认证；不沿用公开 control-token 获取入口，不设置宽泛 CORS。Electron 对每条 IPC 校验 sender、主 frame、窗口角色和参数。
 - 面板和桌宠只使用窄的 typed IPC 方法，由 main 转发对话与事件，不获取项目或助理 token。
-- 助理向 Electron 发起项目连接、生命周期及动作请求，走同一私有管道的反向 RPC；RPC 使用闭合 method，不接收 shell、任意 URL、任意文件路径或自由 HTTP method。
-- 帧必须有 requestId、长度上限、超时和取消语义；日志走独立输出，不混入协议。启动测试必须验证 pythonw 的继承句柄，不能假设 sys.stdin/stdout 始终可用。
+- 项目业务 API 由可信 Python 宿主直接复用现有闭合 SDK，私有项目凭据仅留在宿主 profile。Electron 下发已登记项目和权限快照；模型和 renderer 均不接收凭据、URL 或根路径。未知动作和未迁移 API 默认不可执行。
+- 项目生命周期请求单独经闭合 main bridge，复用 Electron 原生命令、队列、supervisor 和回执；不接收 shell、任意 URL、任意文件路径或自由 HTTP method。该桥的稳定 command 关联与重启恢复未验收前，不开放为模型动作；SDK 不承担项目启动/停止。
+- 闭合请求与响应须有长度上限、超时和取消语义；需要恢复的写入保留稳定 requestId。日志走独立有界文件，不混入协议；pythonw 不依赖 sys.stdin/stdout，后台子进程复用无控制台和 Job 原语。
 - 协议与 API 分别版本化。主版本不兼容时拒绝执行并提供恢复入口；未知可选字段可忽略，未知动作默认拒绝。
 - 原生 Session 事件只增加传输适配。事件携带 sessionId、turnId、seq 和 cursor；断线按原生 Journal 水位重放，缓冲超限返回 resync_required。不得由 IPC 或全局操作表生成另一份 transcript。
 
@@ -231,7 +233,7 @@ Launcher 只负责编排初始化和展示结果。配置写入仍通过各自 s
 
 ### 5.1 项目寻址
 
-连接代理只解析已登记项目和实例。模型提供 projectRef 或明确的目标对象，不能提供网络地址。内部请求固定携带 projectId、instanceId、instanceGeneration、configAuthorityId、capabilityRevision。
+Electron 只下发已登记项目的根、注册 epoch 与权限快照，可信宿主按快照解析 SDK 目标。模型提供 projectRef 或明确的目标对象，不能提供网络地址、根路径或可信身份。目标绑定、能力 revision、配置权威及实例 generation 按各原生 API 的实际契约校验；这些字段不是由模型填写，也不把规划中的完整身份 envelope 写成所有入口已经实现的保证。
 
 默认目标可继承本次对话明确固定的项目。执行前展示或在操作回执中说明目标；切换工作台窗口不会修改已排队操作。两个项目重名、目标实例改变、配置源改变或对象已移动时，重新核对，不能猜测。
 
@@ -318,26 +320,28 @@ M2 用“发送前、目标写入后回执前、全局记录回执前”三个�
 sequenceDiagram
     participant U as 用户
     participant A as 常驻助理
-    participant E as Electron 连接代理
+    participant E as Electron main
+    participant S as 宿主内原生 SDK
     participant P as 项目原生服务
     U->>A: 在项目 A 建团队并运行
-    A->>E: 解析目标与能力
-    E->>P: 校验实例身份和授权
-    P-->>E: 能力、revision 与调用授权
-    E-->>A: 返回已验证目标与能力
+    E-->>A: 已登记项目与权限快照
+    A->>S: 解析已授权目标
+    S->>P: 原生身份和能力握手
+    P-->>S: 绑定目标的能力、revision 与授权
+    S-->>A: 闭合可执行能力
     A->>A: 保存稳定操作键、必要参数和步骤引用
-    A->>E: prepare / execute
-    E->>P: 转发受控原生动作
-    P-->>E: 原生对象 ID、运行 ID 和后续回执
-    E-->>A: 转发有界状态与证据
-    A->>E: 请求原生读回核验
-    E->>P: 查询已记录的目标
-    P-->>E: 原生状态
-    E-->>A: 核验结果
+    A->>S: 受控业务动作与稳定请求键
+    S->>P: 原生授权与执行
+    P-->>S: 原生对象 ID、运行 ID 和后续回执
+    S-->>A: 有界状态与证据
+    A->>S: 按原 ID 读回核验
+    S->>P: 查询原生对象或回执
+    P-->>S: 原生状态
+    S-->>A: 核验结果
     A-->>U: 完成结果或明确待处理步骤
 ~~~
 
-所有项目消息均经 Electron 项目连接代理转发；助理不直接获取项目 token。
+项目业务消息经宿主内原生 SDK 直接通信；可信宿主持有私有项目能力，模型和 renderer 不持有。Electron 保留登记、权限快照与生命周期权威。离线项目需先走 Electron 生命周期桥，在原生身份与能力握手完成后才走上述业务路径；桥尚未完成时明确报告不可用，不转用 Python 启动项目。此路径取代原定“所有项目消息经 Electron 转发”的方案，依据是 2026-10-25 用户明确选择保留原生 SDK。
 
 ### 6.3 团队搭建与派遣
 
@@ -744,4 +748,129 @@ M0 冻结契约后，M1 与 M3 应先交付“无需项目即可启动的最小�
 - 临时迁移适配有未关闭操作清单和明确 owner；全部交接后真实关闭，不以“以后也许有用”为由进入正常运行链。
 - 一次请求在断线与重启后仍指向同一原生对象；不以新增全局任务引擎、第二份 transcript 或复制原生对象来解决恢复。
 
-本轮只修订迁移方案，不实施产品迁移或操作活数据。实施完成后的证据必须同时证明“Launcher 功能完整”和“平台个人助理功能已退出”。
+实施完成后的证据必须同时证明“Launcher 功能完整”和“平台个人助理功能已退出”。阶段性源码或模型验收不能替代这个完成条件。
+
+## 15. 实施记录（2026-10-24）
+
+当前仍在任务分支实现。以下完成项分别标明验证边界，不代表已交付独立安装包或已经退役平台个人助理。
+
+| 切片 | 已验证事实 | 仍需关闭 |
+| --- | --- | --- |
+| 固定 native profile | 复用原生 Agent、Session、Journal、LLM、配置与工具授权；独立进程加 profile OS 锁。普通角色保持既有默认根；开发者模式完整 worker 已验证写入助理 profile | 打包后继续核对路径、资源和普通会话回归 |
+| 真实模型对话与本地设置 | 使用既有 DeepSeek 模型连接。源码宿主与独立包内 CPython 均实际调用 canonical action；助理名称、小萝形象、showStatus 与应用用户名均从原生设置/隔离配置读回核验 | 头像、壁纸、全部模型动作及原生桌面显示逐项验收 |
+| 无项目 PA 派遣与恢复 | 源码宿主、独立 CPython payload 两条链路均通过真实模型验收。目标只有普通 Agent，PA 数量前后均为 0；running 时重启助理后同一个 native taskId 返回 succeeded，结果标记与目标 Journal 的 turn_completed 均核对通过 | 项目掉线、租约过期、撤销、审批和团队复合操作的完整桌面故障验收 |
+| 回包丢失与并发 | 受控故障测试证明：原 capability 查询找回已受理任务；凭据丢失/损坏拒绝新造 capability；一条坏记录不阻断健康任务续租；每任务只续租一次；启动与续租/取消按任务串行 | 新的跨项目管理动作沿用同等去重与权限证据 |
+| Electron 常驻 owner | 实际 managed Windows package 无项目独立启动，真实模型、专用 IPC、Live2D/ConversationView、完整退出后身份/历史/偏好恢复及正常 Job 退出均已核验；不登记 Workbench Job | 最新功能新包复验、公共 Launcher 入口、项目开停独立性和完整故障验收 |
+| 目标 Agent 管理 | 中立 operator subject、控制 token、私有 capability、scope 和项目/实例绑定均强制校验。真实模型完成普通 Agent 创建、改名、默认头像恢复，并由原生回执与当前配置读回核验；不新增逐次确认。创建首个记录即为低权限，实际 compiled snapshot 同步核验；更新使用原生 CAS，保留已受理 Session pin | 完整配置字段、归档/恢复与更多管理能力 |
+| 团队一键运行 | 原生共享安全 recipe/template/generic workflow；真实模型四角色运行、助理重启、原 run 回执恢复和产物引用通过，目标没有 PA，部分创建禁止重建 | 新包内联合验收、团队元数据/生命周期和完整恢复授权迁移 |
+| API 文档 | 真实注册表生成无 lifespan/业务 bootstrap 的 OpenAPI，复用既有目录和 schema 解析；真实模型取得真实 operationId 并成功 describe，目标 PA 为 0，未写业务对象 | 尚未迁移的 API 保持 operator_only；每项执行能力仍需语义适配和实际验收 |
+| 项目授权登记 | main 持久登记保留 registration UUID/tombstone，最多128 active项目；启动读取已登记快照，成功原生清单封装才触发严格更新。撤销、重加、排队/握手、未知 ACK 退役负例通过；观察本身不等待助理就绪 | 真实动态生命周期/撤销/重加与 Git 清单新鲜度验收；assistantOnly 仅验证已有登记根，不宣称重新扫描 Git |
+| 普通会话元数据 | 共享闭合 DTO、既有原生目录/分类/Team 名册/Companion 绑定，独立 sessions:read；只返回身份、标题、归属、置顶与状态，不 seed/repair/加载正文或改变当前选择。真实 SQLite 零写入与损坏名册拒绝回归通过 | 本轮真实模型验收；置顶写入、列表、归档、正文和参数等后续切片。无原生历史请求标记的写入不能按当前值猜测丢失回执 |
+| 既有功能复用 | 21 项 Launcher 本地设置/模型合同复用既有 schema 与执行器；删除模型/Provider 明确标记 unavailable，停用也阻断，待完整跨项目引用校验闭合后开放。桌面人物、ConversationView 和审批卡继续复用 | Session/Team/Knowledge/Inbox 管理、事务/记忆/调度、活数据迁移与平台退役尚待实现 |
+
+当前验收使用隔离 profile、私有 provider 配置副本及 task-owned target fixture，没有重启正式桌面或改动正式用户设置。过程证据保存在 Git common-dir 的 `vibelution-cache/launcher-assistant-runtime/`；关键记录为 `dispatch-model-evidence.json`、`local-and-dispatch-model-evidence.json`、`packaged-local-and-dispatch-model-evidence.json` 与 native Job 验收记录。模型回执不单凭 ready/idle 或模型自述判定成功。
+
+`agent-management-model-evidence.json` 额外记录真实模型 Agent 创建、改名、默认头像重置，然后本地设置、派遣与重启回执的完整串联；项目 PA 数量前后仍为 0，正式配置未改变。管理主体是持久中立 operator subject，不是项目 Agent/Session。
+
+构建闭包调查确认：共享开发环境约 8 GiB，包含约 7 GiB 的非运行时 torch；当前运行时 requirements 的已安装传递闭包为 137 个 distribution，RECORD 声明约 368 MiB。采用既有 CPython 标准运行库、受控依赖文件集及一份共享源码 payload；不复制整份开发 venv，也不引入第二套 Session/LLM 或新的打包框架。首份 payload 的 22472 个文件、ABI、资源、manifest 与全部依赖文件记录校验已通过；包内 Python 独立运行真实模型、设置、派遣及重启恢复通过，运行后 sealed payload 内容未改变。它仍是隔离运行包证据，最终 Electron package、新鲜度与公共 Launcher 入口需要另外验收。
+
+实际 native Job 长目录验收曾暴露 SDK 导入失败：264 字符模块路径在普通路径表示下不可读，导致 LiteLLM 留下不完整子模块。仅在 Launcher 的 Windows isolated bootstrap 中，将既有绝对 import 搜索目录改为同路径的 extended namespace 表示，保持搜索目录集合不变。禁网、禁写的同目录 SDK 差分验证和真实长路径 import 测试已通过；必须以新进程验证，不能在损坏进程中迟改路径。
+
+原生 Agent operation owner 已抽取 metadata-first 安全创建 recipe，外部 Agent 创建和原生 Team template 共用；先写角色/模型/权限，再创建不激活的直属 Session，并核验真实 compiled snapshot。Team 的顺序流程定义、冻结校验、受理与回执摘要也抽到原生 shared owner；旧 PA 仅保留薄 wrapper。普通 catalog 旧的 session-first 创建问题另有边界，不通过放松验证掩盖；未修改普通 Session admission、Journal 或 worker。
+
+2026-10-24 的新增运行证据：
+
+- 实际 managed Windows package 包含 22479 个封存文件、137 个运行依赖。无 workspace、无开发 Python/PYTHONPATH 时，真正的 Electron 主进程通过自有 native Job 启动宿主，原生专用 renderer IPC 完成真实模型对话。完整退出后两次重新打开，Agent/Session、历史、名称、小洛形象与状态偏好保持；后续对话以原生 Journal 的 `success` 核验。截图确认 Live2D 形象和复用的 ConversationView；未加载项目 HTTP API，未抢焦点、未发现自有控制台窗口，最终正常退出并退役 Job。该包构建早于后续 Team/Stop/Continue 源码，不宣称它已经包含最新功能。
+- `team-model-clean-evidence.json`：源码隔离宿主中，真实模型实际建队和受理运行，运行中重启助理后模型用 `team_status` 找回同一个 run。四角色各有真实原生 `turn_completed`，仅一个管理关联记录、四个产物引用，目标项目 PA 前后均为 0，正式配置内容不变，全部执行器、Agent runtime 和目录正常退出。首次同场验收发现配置 hash 漂移与较短清理预算，保留失败记录；修复测试隔离、冻结输入并增加有界完整清理记录后，重跑通过。
+- `control-model-evidence.json`：真实模型执行中停止，原生终态为 `stopped_by_user`；按原快照继续后新 Turn 以 `success` 结束，同请求 ID 重复调用只产生同一个 Turn，换 ID 使用旧快照被拒绝。前端与私有 IPC 同步接入复用的停止/继续控件。
+- `documentation-model-pure-evidence.json`：真实模型成功查询真实目录并 describe `agent_create_api_agents_post`，675 个真实 path 注册表中此次查询匹配70项，实际说明引用4个 schema；原生工具结果均成功，没有管理 intent，目标 PA 为0，正式配置和清理核验通过。此前失败轮次保留：旧 `get_spec` 会走业务 bootstrap，并且普通请求5秒不足以承载首次 schema 编译。新路径跳过 bootstrap/旧PA执行广告，首读实测约7.5秒、缓存后目录约13毫秒、describe约2毫秒；仅文档 GET 使用20秒有界读取预算，其余业务请求维持原时限。
+
+私有会话 detail 的高频读取已改用原生 `include_secondary=False`，保留 transcript/运行信息并省去项目侧列表计算；之前实际包出现的只读超时通过原 Turn 读回恢复，未重发消息。最新读取延迟仍待新包实测。部分同进程测试曾存在触达正式配置自动升级的风险，已给本次新增测试增加私有配置 fixture；后续整段回归从 collection 前隔离全部路径，并审计正式配置目录写入为 0、文件内容不变。无法仅凭初次 hash 变化认定具体写入者，未回滚共享文件。
+
+退役闸门保持不变：先完成独立资源与入口、所有管理能力、数据/在途任务交接和回归，随后删除平台 PA 产品入口、初始化、巡检和隐藏代理。当前不能把平台仍有旧实现的状态称为迁移完成。
+
+后续新包实测发现，原生设置已修改但桌面仍显示旧名称与状态；已增加按明确终态 Turn 去重的状态查询刷新，成功、待继续、错误及停止均有回归，不增加空闲轮询。独立审查又发现原生项目清单的成功封装与裸 payload 不同，以及 Team 投影会将异常成员标识转成字符串；两处均先复现后修复，并新增真实封装持久登记/撤销与异常字段测试。此处只记录源码与测试事实，修复后的新加载页面和完整派遣重启联合验收仍需另行核对。
+
+最新实际 Windows 包已完成上述界面的真实模型复验：DeepSeek 单轮原生 `success` 后，未点击刷新，当前标题自动变为用户指定名称、状态文字隐藏；收起后 Live2D 为 `ready`。运行中完整退出并重启隔离助理，Agent/Session、偏好和原派遣任务 ID 保持，原任务回执自动恢复 `succeeded`。中间一次 `BACKEND_UNAVAILABLE` 随后自行恢复，未重派；无法用事后成功的 SDK 探针反推此前具体失败阶段。两个助理进程、原生目标和所有执行器均正常退出，目标 PA 前后均为 0。
+
+这轮联合验收仍标记为 **partial_acceptance**：用户任务要求的 `E3_RECEIPT_3E159D2DFC294ED1` 被助理在实际工具参数中改成了末位为 `4` 的内容，目标忠实执行了被改写的任务。已核对原生用户事件、工具参数及目标 Journal，不能用原生成功代替任务内容正确。下一步增加只引用原生用户记录的任务片段和持久来源引用，避免模型重抄文本，并保留原请求的去重/重启恢复；修复与复测完成前，不宣称完整派遣验收通过。证据位于 task-owned `launcher-assistant-current-real-j_9o0jsk/combined-evidence.json`，不是正式项目数据。
+
+原文引用的源码保护已完成：模型的 raw task 必须为原生当前用户输入的精确子串，也可用唯一短锚点选择原文；关联记录仅增加身份、偏移和哈希，跨轮/重启重试回读原 Journal，不另存正文。改写、歧义、错误身份/触发来源、损坏引用及未知 legacy 重派均有拒绝测试。新增来源读取还补了关停竞争：来源专用非阻塞准入，Journal 解析在线程执行，避免事件循环与关停 drain 等锁。真实 Journal、ContextVar 跨线程、原有命令及重启重试回归已通过；修复后的实际模型与新包仍待验收。
+
+原文保护的实际包复验现已通过（`launcher-assistant-literal-real-bhcmi50t/backend-combined-evidence.json`）：一条自然用户指令完成目标发现与派遣，关联中的原生来源和文本哈希匹配；目标原生用户事件逐字包含原任务，最终结果含正确固定标记。运行中完整重启助理后仍为同一个 native task，状态 `succeeded`，目标 Journal 有对应 `turn_completed`，身份与偏好保持。此处只接受后端派遣与恢复切片。
+
+同轮另保留了真实前端失败证据：发送偏好请求后立即收起，原生终态成功且新偏好已落地，但旧界面仍显示鲸鱼、旧名称和状态文字。已补可见窗口下自身会话的活动/原请求观察，空闲与隐藏停止轮询，收起后的终态仍刷新偏好；晚 ACK、未知发送/继续只回读原 ID，不重发或覆盖新草稿。自然查询周期、VUI 和类型回归通过，新前端实际包验收仍待核对。平台旧 PA 尚未退役。
+
+收起状态的实际包复验已关闭（`launcher-assistant-collapsed-real-9wsnxza8/combined-evidence.json`）：DeepSeek 修改后，未刷新或重新展开，原窗口名称自动更新、小洛 Live2D 为 ready、状态文字隐藏。随后一条自然用户指令派遣原文，目标原生用户事件逐字包含任务；运行中完整退出再启动助理，原 Agent/Session 与偏好不变，同一个 native task 恢复 succeeded，固定标记及目标 Journal 的原 Turn 完成均核验。两个助理进程和目标执行器均正常退出，目标 PA 前后为 0。验收脚本曾把 renderer 属性误写为 xiaoluo；保留原始采样，按现有组件真实合同 live2d 纠正断言，未改原始 DOM、后端值、任务内容或重发模型请求。晚到 RPC 失败覆盖已确认发送的竞争也已单独回归与复审。
+
+新增 `scripts/assistant_migration_inventory.py` 只读来源清单入口，复用现行存储解析，仅记录选中身份范围的文件大小与哈希；不导出正文、不修复数据、不打开可写 SQLite，也不暂停或迁移旧助理。当前正式来源中定位到一个 active PA，已生成当前 Journal 与资产等声明范围的清单，写入审计未发现正式数据写入。清单始终为 inventory、sourceQuiesced=false、readyForCutover=false；完整历史发现、原生归属、水位、旧派遣和恢复授权仍需独立核验，不能把当前目录为空解释成全部历史或在途任务为空。
+
+助理自身事务和记忆接入原生工具：新身份在 action/manage 之外装配事务、记忆追加/替代、私有正式知识查询和压缩 descriptor，不创建新账本或执行器；已有空/自定义策略不自动扩大。普通与开发者模式的原生子进程回归覆盖事务六项操作、记忆替代、上下文投影与重启原 ID 保持。真实 DeepSeek 源码宿主两轮也通过：创建一条待办与偏好，正常退出后恢复原 Agent/Session/itemId/episodeId，再完成原待办并建立原 episode→successor 关系；仅两次用户请求、两个原生完成 Turn、无重复记录、两代自有进程均正常退出。首次测量误查普通 memory 目录，失败记录保留，改按既有 MemoryPolicy 的 events/episodic_events.jsonl 核验并从原身份继续，没有重发已受理写入。证据为 `launcher-personal-model-99c8cb833fcd4d0aad5d792e51fffb85/verified-evidence.json`；此片尚未随新包验收，旧账本和提醒装配也未交接。迁移清单相应纳入原生 episodic_events 文件，不能仅凭 memory 目录为空认定没有个人记忆。
+
+显式 `--assistant` 独立启动已补齐 CLI、profile、环境和 second-instance 窄分支：忽略旧项目/Python 绑定，不探测项目 `.venv` 或改写 launch profile；复用同一个 Host/window。参数与项目/lifecycle/产品深链冲突时，在主锁前退出。独立审查发现的两个问题已闭合：环境合并会重新引入已删除键，现于最终 native spawn 前按大小写无关规则清理；混合深链的拒绝移到 CLI 解析。普通启动/envelope 行为继续回归。`desktop_shell` 轻量根导入复用 config.paths 并保留冻结 native role 的根适配，普通根与 Launcher profile 两条分支均核验，不引用其他任务的性能数字作为本轮测量。
+
+新 managed Windows package 已由正规 owner 构建并完整核验，记录在 `launcher-managed-package-a3311f1b5d0944c593781ca7748dbc9c/managed-package-evidence.json`：包含当前个人事务/记忆工具、头像候选与独立启动修复；完整 payload、frontend 与来源指纹匹配，current/stale=false。其实际无模型启动验收为 `launcher-explicit-startup-5lth373d/evidence.json`：配置只有 loopback 测试 provider，未创建原生 Turn；污染的 profile/env 不影响独立角色，workspaceRoot 为空，没有普通平台 bridge，没有创建所指项目目录。混合深链以 1 拒绝；两个正常进程退出码均 0，自有进程树均退役，原 Agent/Session、七项原生工具和原 profile 内容保持。此项只接受实际独立启动与身份恢复；该新包的真实模型偏好/派遣/重启联合复测启动被自动审批拒绝，尚未执行，不能沿用旧包结果宣称最新包已通过全部模型场景。
+
+当前冻结后端回归首次为 521 通过、1 失败；失败是 Team 测试仍硬编码七项 scope，而 sessions:read 已成为第八项。将该断言改为精确八项合同，保留旧主体不得自动扩权的负例，整模块 26 项通过；不改产品权限或为测试放宽授权。两轮均从 collection 前隔离配置，正式配置写入审计为 0 且字节不变。
+
+正式来源的更新清单 `legacy-pa-current-identity-inventory-episodic.json` 仍仅覆盖当前声明身份：一个 active PA、652221 字节 Journal 与 40281 字节会话资产，当前 episodic 文件不存在；此次写入审计为 0。它仍不是历史/在途任务交接证明。公共 C# Launcher 入口也尚无独立安装的可信 active package：不能把项目 dist 或源码 `.venv` 当全局安装位置。下一片应复用现有包生产者与原子发布原语，集中提供固定托管目录、不可变包代次和有界 manifest，再接项目解析前的 GUI `--assistant` 分支；坏 schema/hash/link 或缺包均拒绝，不扫描项目或退回 Python bridge。尚未安装或发布正式包，旧平台 PA 未退役。
+
+头像候选与写入的真实模型 SOURCE 业务合同验收通过（`avm-7b97b6b8/verified-evidence.json`）：一个 DeepSeek Turn 查询已登记测试项目、普通 Agent、当前头像及原生候选，使用首个不同候选和刚读回的 updatedAt 修改一次，再 agent_get 核验。完整公开 DTO 仅头像和更新时间变化，名称、模型、身份和 configRevision 保持；一份原生 intent、一份 source association、CAS 与非重复完成回执匹配，目标 PA 连续采样均 0。双进程正常退出、执行器排空、正式/模板/源与目标配置内容不变。首轮仅建只读授权时因过长 Temp 路径的原子临时文件超 MAX_PATH 而失败，尚无模型或头像操作；保留证据后用短 Temp 根新建 fixture。第二轮原测量的全 raw 字段不变断言为 false，且修改前 raw 对象仅在内存中，无法恢复完整差异；原失败文件及其哈希保持不变，派生证据明确 fullRawDiff=unverified，只接受闭合 DTO 与原生动作合同，不补发或推断未知字段。此项不是包内前端或完整权限字段不变的运行证明。
+
+## 16. 联合验收与公共入口续进（2026-10-25）
+
+用户明确允许向既有 DeepSeek 发送新建临时项目的虚构 Agent、头像和任务元数据，仅在临时环境修改偏好、头像、待办、记忆和派遣，并要求正式数据不变。未重启、安装或迁移正式产品数据。
+
+`e7-788vzjef/joint-acceptance-receipt.json` 记录新包五次唯一 UI 请求的联合验收：收起聊天后名称、Live2D 和隐藏状态自动生效；原文哈希与目标唯一用户事件匹配；任务 running 时完整退出并重开助理后，同一个 nativeTaskId 恢复 succeeded，结果含原标记；原待办完成，原 episode 建立后继关系；头像仅一次写入，候选、CAS、原生完成回执与读回一致。新旧进程正常退出并退役，原生 drain 无未完成或失败项，目标 PA 前后均 0。正式配置独立 before/after 的 SHA、大小、mtime、ctime 完全相同。头像的完整叶子差异已保存，包含头像、更新时间与原生 creation/mutation 元数据，没有宣称全部 raw 字段不变。初版提取器把 Journal 的 done/returned 与 semanticStatus=succeeded 混为同一字段，原提取结果保留；仅修正证据解析，没有重发请求。
+
+前一次 E6 保留为 failed_cleanup：所有模型业务与正常退出完成，但正式配置哈希发生变化。只读同刻备份比较与 main instance 事件将范围缩到 /workbench/window_size 的 launcher.settings.startup.updated，现无写入 PID 证明，不归因本 fixture 或其他线程，也未回滚正式文件。E7 只证明自己的隔离与业务验收，不用于改写 E6 的失败记录。
+
+公共 native 入口已增加项目解析前的 `--assistant` 分支；显式参数拒绝项目、生命周期、深链混用。新 Python owner 复用封存校验、跨进程锁与严格原子文件原语，发布到固定 KnownFolder LocalAppData/Vibelution/Launcher/managed-desktop：packages 下以 catalog 实际字节 SHA 标识不可变包，最后切换五字段 active 指针。C# 以相同闭合 schema 验证完整文件和 namespace，保持文件和祖先目录句柄至 Process.Start，紧邻启动再次检查成员；不以此宣称发行者签名或启动后同用户任意修改的防护。路径上限按 UTF-16 单位统一，含长路径、emoji、设备别名、重解析、替换、坏 hash 与旧指针保护的 Py→C# 互操作测试。
+
+显式 Windows 安装器补齐 Electron 依赖验证/安装，并在原生 sync 明确确认 current/rebuilt 后，复用现有桌面包构建器和新 publisher；dry-run 只允许校验已有包，不导入配置或构建服务。public CLI 不提供根目录覆盖，测试 seam 只指向 Temp。三处原生缓存输入均纳入新 C# helper，快捷方式缓存键修正为所有输入的组合 SHA。共享 payload verifier 的实际读取也加了初始/声明长度加一的边界及路径/句柄身份校验，避免只在外层检查增长。
+
+真实托管包 Temp 验证中已发现旧完整目录收据的普通 Windows 枚举漏掉 70 个长路径文件；普通 subset 的原数量、字节与 framing SHA 均与旧收据一致，多出的文件全部受原封存 manifest 和 runtime hash 覆盖，旧 EXE、ASAR、provenance 与 manifest 哈希也保持。原收据和失败 attempt 未改，完整 namespace 清单另存。后续实际复制已完成：完整 23001 文件、976321314 字节的 source/copy/after framing 哈希一致，不使用 hardlink；原生 admission 也在 Temp 通过，25695 个验证句柄保持至交接边界。实际安装耗时约 451 秒，原生元数据校验约 9.4 秒，尚未做性能优化。复制阶段控制器错误地把编译进程退出后的短暂 Job 活跃当成失败，且同刻正式配置 stat 漂移，原始失败记录均保留；后续 admission 有独立的稳定 stat、零写入审计与正常退出证据，未改写前一阶段记录。此处仍不是正式安装、公共默认入口的桌面验收或全量功能迁移完成。
+
+普通会话配置新增只读 neutral `session_config_get`：沿用 `sessions:read` 与完整 Session/Team/Companion 可见性门，仅从 Session 创建时绑定的历史 compiled revision 返回闭合模型标识、context 覆盖和 reasoning effort；不返回预算、prompt、persona、policy，不回退当前 Agent 或修复缺失快照。源码关联回归和独立审查已通过，历史 A/当前 B 的真实 SQLite 用例验证读取 A 且无写入；SOURCE 真实模型与重建包验收分开记录。
+
+独立控制面的剩余差异已明确：当前 `assistantOnly` 会在项目 bootstrap 前返回，第二实例生命周期请求只 focus，不能据此宣称离线项目启动/停止/重启可用。下一片从已登记项目解析目标，复用 `runWorkbenchLifecycle`、原生命令 intent/settlement、supervisor 与 tracked Job，按项目显式隔离 queue/context；不临时改进程全局 workspace，也不使用助理 embedded Python 启动项目。原生来源或有效人工批准才可授权中断工作，模型不接受 force/interrupt 参数。稳定请求关联只能恢复原生 command，不引入第二个任务执行器。
+
+此前记录的 §6.2 全量转发目标已被 2026-10-25 用户决定和 ADR 0013 替代：可信 Python child 内的原生 SDK 持有私有项目能力并直接通信，renderer/model 不接收凭据，这是最终业务传输方向。离线生命周期仍必须由 main 执行；该桥的 command 关联与恢复尚未闭合，不扩大 child 为任意 HTTP、路径代理或 Python 控制面。
+
+随后 Temp 大包枚举复现了目录签名误拒：一个目录的 st_size 从 0 变为 49152，但 dev/ino/mtime/type/attributes、23001 个成员和逐文件字节全部保持。目录签名现将 allocation size 归一为 0，保留身份、时间、类型、属性及精确成员复查；regular file 的 size/hash 和读取边界不变。RED 只在 size 用例失败，身份/时间/reparse 拒绝用例仍成功，修复后 publisher 34 项通过。
+
+独立入口的同包对照定位到进程启动路径拼写：namespace EXE/cwd 未到应用数据初始化；仅在测试中转为同 file ID/dir ID 的普通 Win32 写法后，native admission、独立 GUI 和 HostReady 全部通过，并正常退出、封存及正式配置前后保持。生产 helper 现只在最终 ProcessStartInfo 转换路径，并直接重开验证 FinalPath 仍属于原 namespace 对象；两份额外句柄也持有到 Process.Start，其他 namespace 校验不变。联合回归还复现普通 native pipe 的 pending APM wait handle 超时提前释放竞争，已独立修复并用延迟 completion 真实管道测试覆盖；原失败保留，修复后的 managed/ordinary 联合 87 项通过。生产修复后的实际短 stub 链路另行验收，不能用测试转换的对照替代。
+
+真实模型还暴露动作发现的输出预算问题：原 37 动作全 schema 目录为 25612 字符，会被原生 4000 字符预算截断。Launcher index 已改严格搜索/分页轻量导航，最大 12 项页为 2539 字符，完整参数由 describe 返回；只移除 Schema 展示 title，业务 title、默认值和全部约束保留。最大 Agent update describe 从 4472 降为 3705 字符，全部动作页和 describe 经原生完整预算验证，关联 76 项通过。有 query/describe 提示的一次真实 SOURCE 请求已完成发现和历史读取，全部工具结果未截断；这项并不代表无技术提示或从不猜名。
+
+无技术提示的自然目标也完成了原生历史配置读取，且目标零写入、PA0、正式配置 SHA/stat 保持；但该完整场景仍失败：助理最终从时间戳推断与当前配置相同，缺乏依据，另有一次额外 api_catalog 被截断；SOURCE graceful shutdown 等待 45 秒仍未退出，最后只回收所属 Job，不能报双进程 exit0。原失败及派生边界保留，接下来补真实只读历史/当前比较与独立关停根因验证，不用提示词或事后成功涂绿。
+
+2026-10-25 的后续源码切片已补只读 `session_config_compare`，同时返回普通 Session 历史 compiled revision 与所属 Agent 当前 compiled revision，原生计算差异字段，目标和 SDK 分别核验身份、revision 与值。不返回 active-Turn 参数、provider 默认值或预算。一次无动作名/API/ID 提示的真实 DeepSeek 请求读取到历史 A 的 32768/low 与当前 B 的 65536/high，原生进程自然退出，目标 Agent/SQLite 字节和正式配置 SHA/stat 保持；最终答复关于配置差异的核心判断有依据，但附加操作建议超出 DTO，完整回答不记为通过。
+
+动作发现与 API 文档分页分别收口：`api_catalog` 保留完整 operationId、路径、权限与能力字段，只缩短 summary，并按实际工具包装和预算返回完整前缀、实际 limit 与 nextOffset；续页保持 query/tag，详情走 `api_describe`。源码预算回归通过不替代新包真实模型验收。
+
+偏好消费者继续复用既有数据链：明确终态除刷新助理外观外，也失效 shared config 与 runtime model-config，供语言和模型标签重读。操作者显示名/头像预设从既有原始只读配置快照投影为 status 的两个字段，接到 ConversationView 已有用户显示参数；缺损省略，不输出 bio、偏好、图片路径/URL 或凭据，不增加 writer/缓存/轮询。源码回归和类型检查已通过；壁纸、主题和上传头像文件尚未迁移，新包实际页面验收另记。
+
+本次新包首个隔离构建在 node-gyp 下载 Node 24.15.0 headers 时超时，尚无 GUI 或模型请求。独立 Temp 单变量诊断中，仅指定复制自已安装精确版本的私有 headers cache 后编译成功，共享缓存前后不变；不修改产品代码或共享依赖。原始构建失败保留：正式配置字节未变但 stat/文件身份漂移，父进程 audit 不能证明全部子进程或外部进程的 OS 写入来源，不能记为完整边界通过。新的正规 producer 与联合实测使用新的收据，不覆盖失败记录。
+
+随后正规新包完成构建与完整封存；独立 GUI/Host、私有身份与根预检、零模型正常关停均有 Temp 证据。首个实际模型 Turn 仍失败，0 工具调用和 0 业务效果；之后确认联测脚本同时误清理了授权凭据变量、把原运行档位改成 `safe_local`，后者按平台设计把远端推理钳位到 localhost。修复只作用于 Temp harness，保留授权原档位与唯一凭据引用，并在新请求前核对原生 effective 路由。GET `/models` 的 HTTP 200 是连通性证据，不是实际推理成功。旧失败回执不回填成功；构建/运行期间正式配置漂移的写者尚未定位，同包一次 postseal ValueError 未复现，均保持未核实状态。
+
+文档预算复查覆盖 749 个真实注册 operation：原直接 describe 有 141 个会被原生 4000 字符预算截断，部分 schema 业务字段名还会被普通工作流结果投影隐藏。Launcher 已增加无状态文档节点视图 v1：完整 JSON Pointer 作为数据传递，本地分页字段在 SDK 前剥离，默认 limit=512，实际页按预算缩小；使用 digest 绑定续读，保留上游省略和文本清洗标记，不修改 HTTP/SDK、通用安全投影或权限。749 个 operation 默认根节点已各用一页完成，无预算截断或字段投影丢失；上游原有 1 项省略仍明确标记。长文本复查还定位到空白恰落续页起点时的误拒，现先整段清洗，再对每页应用同一规则，用 textFiltered 标记变化，按原字符跨度推进游标，不恢复被隐藏的指令。旧 12 字符页的 42 次拒绝与默认页的旧失败均保留；不能宣称取回服务器已省略的 schema。最终长文本回归与新包真实模型验收分别记录。
+
+最终默认路径的长文本验收已完成：113 个去重文本用 117 页完整续读，118 次真实 tool wrapper/budget/facts/render 检查无预算截断、字段投影差异或游标错误，最大 1623 字符；原 offset=512 的失败点现已通过。分页跨度与返回文本长度不同的 1 页明确标记 textFiltered。749 根节点的既有证据按未改的 object/root 逻辑复用，新 string 分支单独验证，不重复刷全量。代表性源回归 81 项通过，正式配置写入审计为 0、字节保持；这些仍不是新包真实模型或完整迁移/平台退役的通过声明。
+
+最新 E14 使用正规 producer 构建的新包，通过实际独立 GUI、私有 Host 和原生 effective provider 路由预检；只提交一次真实 UI 请求，没有重发。DeepSeek 官方响应为 `insufficient_balance_error / Insufficient Balance`，在任何工具调用前失败，业务效果为 0。设置自动生效、任务派遣及助理重启后的回执恢复均未执行，不能用旧包的成功记录替代。Launcher/Host/目标进程均自然退出，原生 drain 无遗留，目标项目个人助理数量仍为 0；本轮正式配置 SHA 与 stat 均保持。父进程 Python audit 不是全部子进程 OS 写入审计。用户已选择补充额度后继续 DeepSeek，尚未确认到账；不自动切换模型或重复提交。
+
+E14 退出后的封存复查仍在目录枚举前后签名比较处失败；原错误没有包含具体目录和变化字段。随后单次只读原逻辑枚举未复现，成员及大小与原 catalog 相同，但没有重新计算内容 hash，因此封存结果仍未通过，不归因于篡改，也不放宽比较。为后续定位补充安全的相对目录与变化字段诊断，独立于额度问题处理。
+
+源码另修复 Launcher 漏传 `lastTurnError` 的显示链路：复用 ConversationView 已有失败摘要和诊断面板，错误随原生会话读回更新，不新建错误分类或自动重试。回归先确认旧实现缺失错误参数，修复后相关页面及两项 VUI 契约通过，TypeScript 构建检查通过；此改动尚未进入 E14 包，实际页面验收仍待下一新包。
+
+离线项目生命周期的复用点也已核实：`main_line_intent.json` 只保留最新意图，`results/{commandId}.json` 是原生结算来源；queue 的 active/pending 和 Launcher CLI 的 seen 集合都在内存中，CLI dispatched 不证明启动完成。现有 facade 还没有 production 构造点，也没有助理 requestId 到 commandId 的持久关联，因此仍不向模型开放。下一片必须由 main 在副作用前可靠落盘关联，重复请求只按原 commandId 回读现有结算；缺回执、超时或进程中断保持 pending/unknown，不自动重放。原生队列的 intent 和 settlement 含异步尽力写入，不能直接把它们或一般 backend 状态当作某个助理请求的去重证据；不另建执行器或第二套业务状态账本。
+
+新增只读 `session_list` 已接通 HTTP、SDK 与 Launcher 动作，沿用 `sessions:read`；最多六项，返回完整 ID 和清洗后的短标题，过滤仅针对标题与公开 ID，DAO 不搜索对话预览。权限核验复用原生运行状态读取器，该读取器可能解码含调试内容的 JSON；限制是不给模型导出正文、预览、调试状态或路径，不宣称底层完全不访问这些数据。明确私有且尚无 runtime 的会话可过滤，已有 runtime 仍先核验归属和字段；损坏或歧义整页拒绝，合法 supervised 仅在列表中归类过滤。审查复现的未知 kind/role、私有标记掩盖损坏 archive/marker 的问题均已修正并独立复验，旧 single 默认读取顺序与 DTO 保持。关联私有回归通过，源码尚未进入新的真实模型联合验收包。
+
+新会话接口的实际注册文档已单独遍历，参数、响应约束和 native_action 映射可读，没有重复跑既有 749 项；该次探针本体完成，但 runner 审计 stdout 丢失，保留 missing，不补记为审计通过。随后只针对补充的单行 query 说明再验证一次 describe：说明可见，原生预算和投影完整，canonical runner 正式配置审计为零拦截且字节保持。源码测试、文档遍历与真实新包验收继续分别记账，不能据此退役平台旧实现。
+
+2026-10-26 合入前审查复现了普通入口的逆序启动回归：先打开独立助理后，第二次项目请求未建立控制面，并在 receipt 的 try 边界外读取空项目路径。现把既有项目 bootstrap 和观察器抽为单飞初始化，普通首启及延迟项目请求共用；只在真实项目控制面建立后发布 ready，保留原 AssistantHost/Job，不停止或重建助理。延迟初始化不触发自动 shell 更新重启，资源协议按当前 main 持有的绑定解析；项目 Python 优先目标环境，保留原安装 profile 的显式共享环境备用，不继承 embedded 助理 Python。
+
+同一修复还保留原生入口的两种根：单实例 envelope 可选传递经过校验的 workspaceRoot（integrationRoot），projectRoot 仍只表示目标 slot；旧 envelope 缺失时使用现有 profile，不从 worktree slot 猜控制面根。分支工作区依旧走既有 branch instance supervisor。真实 main 函数抽取的反例分别先确认空根异常和误把 worktree 当主线，再验证修复后的入口、并发及失败保留助理；这些是源码运行验证，不代表新版安装包或真实模型验收。用户已明确先合入阶段代码，正式切换、剩余能力迁移与平台旧实现退役仍单独保留未完成状态。

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
-import { ScriptTarget, transpileModule } from "typescript";
+import { createSourceFile, isFunctionDeclaration, ScriptTarget, transpileModule } from "typescript";
 import { describe, expect, it, vi } from "vitest";
 import { executeLauncherUpdate, projectLauncherUpdateFreshness, retainKnownDesktopShell } from "../src/process/launcherUpdate.js";
 import { decidePackagedDesktopShellRefresh } from "../src/process/desktopShellFreshness.js";
@@ -13,6 +13,14 @@ function updateInputs(state: ActiveWorkStatus = { state: "idle", message: "" }) 
     stopWorkspaces: vi.fn().mockResolvedValue(undefined),
     scheduleReplacement: vi.fn().mockResolvedValue(undefined),
   };
+}
+
+function desktopExitHelper(mainSource: string): string {
+  const source = createSourceFile("main.ts", mainSource, ScriptTarget.ES2022, true);
+  const helper = source.statements.find(statement => isFunctionDeclaration(statement)
+    && statement.name?.text === "exitDesktopShellProcess");
+  if (!helper) throw new Error("main.ts is missing exitDesktopShellProcess");
+  return helper.getText(source);
 }
 
 describe("guarded local Launcher update", () => {
@@ -33,21 +41,48 @@ describe("guarded local Launcher update", () => {
       desktopPythonPath: () => "pythonw.exe",
       stopMainRuntimeForApprovedShutdown: vi.fn().mockResolvedValue(undefined),
       stopIsolatedInstancesForApprovedShutdown: vi.fn().mockResolvedValue(undefined),
+      stopLauncherAssistant: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
       scheduleCurrentDesktopShellRefresh: vi.fn().mockResolvedValue(undefined),
       // Exiting is simulated; no real windows or child processes are touched.
       setTimeout: (callback: () => void) => { callback(); },
       refresh: undefined as unknown as (operation: string) => Promise<boolean>,
+      restartLatest: undefined as unknown as () => Promise<unknown>,
+      exitDesktop: undefined as unknown as () => Promise<void>,
     };
     Object.assign(sandbox, {
       bestEffortStopIsolatedInstancesForShutdown: sandbox.stopIsolatedInstancesForApprovedShutdown,
       stopManagedRuntime: sandbox.stopMainRuntimeForApprovedShutdown,
     });
-    const code = transpileModule(refresh + restart + "\nglobalThis.refresh = refreshPackagedDesktopShellIfStale;\nglobalThis.restartLatest = restartLauncherToLatestBuild;", {
+    const code = transpileModule(desktopExitHelper(main) + refresh + restart
+      + "\nglobalThis.refresh = refreshPackagedDesktopShellIfStale;\nglobalThis.restartLatest = restartLauncherToLatestBuild;\nglobalThis.exitDesktop = exitDesktopShellProcess;", {
       compilerOptions: { target: ScriptTarget.ES2022 },
     }).outputText;
     runInNewContext(code, sandbox);
     return sandbox;
   }
+
+  it("waits for the assistant to drain before exiting the desktop process", async () => {
+    const input = automaticRefreshHarness();
+    let completeDrain!: () => void;
+    input.stopLauncherAssistant.mockImplementation(() => new Promise<void>(resolve => { completeDrain = resolve; }));
+
+    const exiting = input.exitDesktop();
+    expect(input.stopLauncherAssistant).toHaveBeenCalledOnce();
+    expect(input.app.exit).not.toHaveBeenCalled();
+    completeDrain();
+    await exiting;
+    expect(input.app.exit).toHaveBeenCalledExactlyOnceWith(0);
+    expect(input.stopLauncherAssistant.mock.invocationCallOrder[0])
+      .toBeLessThan(input.app.exit.mock.invocationCallOrder[0]);
+  });
+
+  it("keeps the desktop process alive when the assistant cannot drain", async () => {
+    const input = automaticRefreshHarness();
+    input.stopLauncherAssistant.mockRejectedValue(new Error("ASSISTANT_DRAIN_TIMEOUT"));
+
+    await expect(input.exitDesktop()).rejects.toThrow("ASSISTANT_DRAIN_TIMEOUT");
+    expect(input.app.exit).not.toHaveBeenCalled();
+  });
 
   it("opens a launch-ready shell without waiting for full frontend freshness", async () => {
     const input = automaticRefreshHarness();
@@ -137,6 +172,11 @@ describe("guarded local Launcher update", () => {
     // The automatic path must not force: force clears the refresh cooldown,
     // which would let a repeatedly failing rebuild keep re-stopping the shell.
     expect(input.scheduleCurrentDesktopShellRefresh).toHaveBeenCalledWith("open", { force: false, shellKind: "packaged" });
+    expect(input.stopLauncherAssistant).toHaveBeenCalledOnce();
+    expect(input.scheduleCurrentDesktopShellRefresh.mock.invocationCallOrder[0])
+      .toBeLessThan(input.stopLauncherAssistant.mock.invocationCallOrder[0]);
+    expect(input.stopLauncherAssistant.mock.invocationCallOrder[0])
+      .toBeLessThan(input.app.exit.mock.invocationCallOrder[0]);
     expect(input.app.exit).toHaveBeenCalledOnce();
     expect(input.shutdownApproved).toBe(true);
     const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
@@ -167,12 +207,13 @@ describe("guarded local Launcher update", () => {
 
   it("lets an explicit operator update keep bypassing the refresh cooldown", async () => {
     const input = automaticRefreshHarness();
-    await (input.restartLatest as () => Promise<unknown>)();
+    await input.restartLatest();
     // restart-latest-shell is the user-clicked update entry: it still forces
     // so the Python scheduler clears any cooldown marker before scheduling.
     expect(input.scheduleCurrentDesktopShellRefresh).toHaveBeenCalledWith("open", { force: true, shellKind: "packaged" });
     expect(input.stopMainRuntimeForApprovedShutdown).toHaveBeenCalledWith(true);
-    expect(input.app.exit).toHaveBeenCalledOnce();
+    expect(input.stopLauncherAssistant).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(input.app.exit).toHaveBeenCalledOnce());
   });
 
   it.each(["active", "unknown"] as const)("does not build, stop or schedule when tasks are %s", async (state) => {
@@ -277,13 +318,14 @@ describe("guarded local Launcher update", () => {
       notifyDesktopTray: vi.fn(),
       ensureLatestLauncher: async () => { events.push("prepare"); },
       scheduleCurrentDesktopShellRefresh: schedule,
+      stopLauncherAssistant: async () => { events.push("drain-assistant"); },
     };
-    const code = transpileModule(main.slice(begin, end) + "\nglobalThis.restart = exitAndRelaunchLauncherShell;", {
+    const code = transpileModule(desktopExitHelper(main) + main.slice(begin, end) + "\nglobalThis.restart = exitAndRelaunchLauncherShell;", {
       compilerOptions: { target: ScriptTarget.ES2022 },
     }).outputText;
     runInNewContext(code, sandbox);
     await (sandbox.restart as () => Promise<void>)();
-    expect(events).toEqual(["prepare", "schedule", "exit"]);
+    expect(events).toEqual(["prepare", "schedule", "drain-assistant", "exit"]);
     // The replacement shell carries the start lifecycle so it restores the
     // workbench/backend instead of coming up as a bare tray.
     expect(schedule).toHaveBeenCalledWith("start", { force: true, shellKind: "unpackaged" });

@@ -294,8 +294,13 @@ describe("Electron main Launcher IPC facade", () => {
   });
 
   it("waits for the Electron control plane before dispatching startup and second-instance lifecycle commands", () => {
-    const bootstrapIndex = mainSource.indexOf("launcherBootstrap = await bootstrapMainOwnedLauncher(paths, initialWorkbenchUrl);");
-    const readyResolveIndex = mainSource.indexOf("resolveLauncherControlPlaneReady?.();");
+    // The independent assistant has no project control plane to bootstrap.
+    // It must not publish project readiness until a real project attaches.
+    const assistantOnlyBranch = /if \(assistantOnly\) \{\s*await assistantStartup;\s*return;\s*\}/;
+    expect(assistantOnlyBranch.test(mainSource)).toBe(true);
+    const projectSource = mainSource.replace(assistantOnlyBranch, "");
+    const bootstrapIndex = projectSource.indexOf("launcherBootstrap = await bootstrapMainOwnedLauncher(paths, initialWorkbenchUrl);");
+    const readyResolveIndex = projectSource.indexOf("resolveLauncherControlPlaneReady?.();");
     expect(bootstrapIndex).toBeGreaterThan(0);
     expect(readyResolveIndex).toBeGreaterThan(bootstrapIndex);
 

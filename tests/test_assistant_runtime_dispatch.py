@@ -1,0 +1,528 @@
+"""Adapter recovery tests; in-process native services are not model acceptance."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+import httpx
+import anyio
+import pytest
+
+from core.assistant_runtime.dispatch import DispatchError, DispatchService
+from core.external_agent.backend_client import BackendClientError, ManagedAgentBackendClient
+from core.external_agent.contracts import API_PROTOCOL_VERSION, SERVER_VERSION
+from core.web.services.external_agent.service import ExternalAgentTaskError
+from tests.test_external_agent_backend_client import _runtime_state
+from tests.test_external_agent_task_service import FakeRuntime, _agent, _service
+
+
+class ClientProbe:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.instances: list[dict[str, Any]] = []
+        self.get_error = False
+        self.start_error = False
+
+    def factory(self, project_root: Path, **kwargs: Any):
+        probe = self
+        self.instances.append({"project_root": project_root, **kwargs})
+
+        class Client:
+            async def diagnostics(self):
+                probe.calls.append(("diagnostics", {}))
+                return {"status": "healthy"}
+
+            async def list_agents(self, **kwargs):
+                probe.calls.append(("list", kwargs))
+                return {"agents": [{"agentId": "coder"}], "count": 1}
+
+            async def start_task(self, **kwargs):
+                probe.calls.append(("start", kwargs))
+                if probe.start_error:
+                    raise BackendClientError("secret transport detail", code="BACKEND_UNAVAILABLE")
+                return {"taskId": "eat-1", "status": "running", "pollAfterMs": 500}
+
+            async def get_task(self, **kwargs):
+                probe.calls.append(("get", kwargs))
+                if probe.get_error:
+                    raise BackendClientError("secret transport detail", code="BACKEND_UNAVAILABLE")
+                return {"taskId": "eat-1", "status": "succeeded", "resultSummary": "native result"}
+
+            async def get_task_for_request(self, **kwargs):
+                probe.calls.append(("lookup", kwargs))
+                raise BackendClientError("request not accepted", code="TASK_NOT_FOUND")
+
+            async def heartbeat_once(self):
+                probe.calls.append(("heartbeat", {}))
+
+            async def heartbeat_task(self, *, task_id):
+                probe.calls.append(("heartbeat", {"task_id": task_id}))
+
+            async def resolve_approval(self, **kwargs):
+                probe.calls.append(("approval", kwargs))
+                return {"taskId": "eat-1", "status": "ok", "decision": kwargs["decision"]}
+
+            async def cancel_task(self, **kwargs):
+                probe.calls.append(("cancel", kwargs))
+                return {"taskId": "eat-1", "status": "stop_unconfirmed"}
+
+            async def shutdown(self):
+                raise AssertionError("ordinary adapter operations must never shut down native tasks")
+
+            def lifecycle(self):
+                raise AssertionError("MCP lifecycle implicitly cancels tasks")
+
+        return Client()
+
+
+def adapter(tmp_path: Path, probe: ClientProbe) -> DispatchService:
+    return DispatchService(tmp_path / "profile", {"project-a": tmp_path / "project"}, client_factory=probe.factory)
+
+
+async def start(service: DispatchService, **kwargs):
+    return await service.dispatch(
+        "project-a", agent_id="coder", task="private original task", dispatch_id="dispatch-1", **kwargs
+    )
+
+
+@pytest.mark.anyio
+async def test_registry_is_the_only_path_authority_and_credentials_are_separate(tmp_path):
+    probe = ClientProbe()
+    service = adapter(tmp_path, probe)
+    assert service.project_ids() == ("project-a",)
+    with pytest.raises(DispatchError) as rejected:
+        await service.discover(str(tmp_path / "unregistered"))
+    assert rejected.value.code == "PROJECT_NOT_AUTHORIZED"
+    assert probe.instances == []
+    await service.discover("project-a")
+    await start(service)
+    for instance in probe.instances:
+        assert instance["project_root"] == (tmp_path / "project").resolve()
+        assert instance["state_path"].is_relative_to((tmp_path / "profile").resolve())
+        assert "mcp" not in instance["state_path"].parts
+
+
+@pytest.mark.anyio
+async def test_dispatch_refs_survive_restart_without_prompt_or_duplicate_start(tmp_path):
+    probe = ClientProbe()
+    first = await start(adapter(tmp_path, probe))
+    assert first["nativeTaskId"] == "eat-1"
+    service = adapter(tmp_path, probe)
+    replay = await start(service)
+    receipt = await service.reconcile("dispatch-1")
+    assert replay["clientRequestId"] == first["clientRequestId"]
+    assert receipt["receipt"]["status"] == "succeeded"
+    assert receipt["completionEvidence"]["businessAcceptance"] == "not_evaluated"
+    assert [name for name, _ in probe.calls].count("start") == 1
+    assert len(probe.instances) == 2  # recreated and revalidated on reconnect
+    assert [name for name, _ in probe.calls].count("diagnostics") == 2
+    serialized = "".join(path.read_text(encoding="utf-8") for path in (tmp_path / "profile").rglob("*.json"))
+    assert "private original task" not in serialized
+    assert service.list_dispatches()[0]["receipt"]["resultSummary"] == "native result"
+
+
+@pytest.mark.anyio
+async def test_changed_payload_or_rebound_project_cannot_reuse_dispatch(tmp_path):
+    probe = ClientProbe()
+    service = adapter(tmp_path, probe)
+    await start(service)
+    with pytest.raises(DispatchError) as conflict:
+        await service.dispatch("project-a", agent_id="coder", task="different", dispatch_id="dispatch-1")
+    assert conflict.value.code == "DISPATCH_CONFLICT"
+    rebound = DispatchService(tmp_path / "profile", {"project-a": tmp_path / "other"}, client_factory=probe.factory)
+    with pytest.raises(DispatchError) as changed:
+        await rebound.reconcile("dispatch-1")
+    assert changed.value.code == "PROJECT_BINDING_CHANGED"
+
+
+@pytest.mark.anyio
+async def test_known_task_transport_failure_is_recorded_and_never_redispatched(tmp_path):
+    probe = ClientProbe()
+    service = adapter(tmp_path, probe)
+    await start(service)
+    probe.get_error = True
+    with pytest.raises(DispatchError) as failure:
+        await service.reconcile("dispatch-1")
+    assert failure.value.code == "BACKEND_UNAVAILABLE"
+    assert "secret" not in str(failure.value)
+    stored = service.list_dispatches()[0]
+    assert stored["nativeTaskId"] == "eat-1"
+    assert stored["lastError"]["code"] == "BACKEND_UNAVAILABLE"
+    probe.get_error = False
+    recovered = await adapter(tmp_path, probe).reconcile("dispatch-1")
+    assert recovered["lastError"] is None
+    assert [name for name, _ in probe.calls].count("start") == 1
+    assert not {"shutdown", "cancel"}.intersection(name for name, _ in probe.calls)
+
+
+@pytest.mark.anyio
+async def test_unconfirmed_start_needs_explicit_original_dispatch_retry(tmp_path):
+    probe = ClientProbe()
+    probe.start_error = True
+    service = adapter(tmp_path, probe)
+    with pytest.raises(DispatchError):
+        await start(service)
+    first_request = next(args["client_request_id"] for name, args in probe.calls if name == "start")
+    recovered = await adapter(tmp_path, probe).reconcile("dispatch-1")
+    assert recovered["nativeTaskId"] == ""
+    assert [name for name, _ in probe.calls].count("start") == 1
+    probe.start_error = False
+    await start(adapter(tmp_path, probe))
+    assert [args["client_request_id"] for name, args in probe.calls if name == "start"] == [first_request] * 2
+
+
+@pytest.mark.anyio
+async def test_approval_cancel_and_heartbeat_are_explicit_native_operations(tmp_path):
+    probe = ClientProbe()
+    service = adapter(tmp_path, probe)
+    await start(service)
+    await service.heartbeat()
+    approved = await service.resolve_approval("dispatch-1", approval_id="approval-1", decision="accept", expected_revision="revision-1")
+    assert approved["receipt"]["status"] == "succeeded"
+    assert next(args for name, args in probe.calls if name == "approval") == {
+        "task_id": "eat-1", "approval_id": "approval-1", "decision": "accept", "expected_revision": "revision-1", "reason": ""
+    }
+    cancelled = await service.cancel("dispatch-1")
+    assert cancelled["receipt"]["status"] == "stop_unconfirmed"
+    assert [name for name, _ in probe.calls].count("cancel") == 1
+    assert any(name == "heartbeat" for name, _ in probe.calls)
+
+
+@pytest.fixture
+def journal_source(monkeypatch):
+    from copy import deepcopy
+    from core.assistant_runtime import native
+    runtime = {"agentId": "assistant-a", "sessionId": "own-session", "turnId": "turn-a"}
+    original = {**runtime, "eventId": "user-a", "content": "只回复 E3_RECEIPT_3E159D2DFC294ED1"}
+    current = dict(original)
+    def read(caller, *, source_ref=None):
+        return deepcopy(original if source_ref is not None else current)
+    monkeypatch.setattr(native, "read_task_source", read)
+    return runtime, original, current
+
+
+@pytest.mark.anyio
+async def test_original_native_span_retries_after_restart_without_recopy_or_new_task(tmp_path, journal_source):
+    runtime, original, current = journal_source
+    probe = ClientProbe()
+    probe.start_error = True
+    service = adapter(tmp_path, probe)
+    with pytest.raises(DispatchError):
+        await service.dispatch_from_source("project-a", agent_id="coder", dispatch_id="anchored", runtime=runtime, task_source={})
+    stored = json.loads(service._path("anchored").read_text(encoding="utf-8"))
+    assert stored["sourceRef"]["eventId"] == "user-a"
+    assert original["content"] not in json.dumps(stored, ensure_ascii=False)
+    runtime["turnId"] = "turn-new"
+    current.update(turnId="turn-new", eventId="user-new", content="查询或恢复原任务")
+    probe.start_error = False
+    restarted = adapter(tmp_path, probe)
+    recovered = await restarted.dispatch_from_source("project-a", agent_id="coder", dispatch_id="anchored", runtime=runtime, task_source={})
+    await restarted.dispatch_from_source("project-a", agent_id="coder", dispatch_id="anchored", runtime=runtime, task_source={})
+    starts = [args for name, args in probe.calls if name == "start"]
+    assert [args["task"] for args in starts] == [original["content"], original["content"]]
+    assert [args["client_request_id"] for args in starts] == ["launcher-assistant:anchored"] * 2
+    assert starts[1]["require_existing_capability"] is True
+    assert recovered["nativeTaskId"] == "eat-1" and "sourceRef" not in recovered
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("change", ["selector", "raw", "agent", "title", "corrupt_ref"])
+async def test_changed_model_source_or_task_parameters_cannot_reuse_original_dispatch(tmp_path, journal_source, change):
+    runtime, original, _ = journal_source
+    probe = ClientProbe()
+    service = adapter(tmp_path, probe)
+    params = {"agent_id": "coder", "dispatch_id": "anchored", "runtime": runtime, "task_source": {}}
+    await service.dispatch_from_source("project-a", **params)
+    if change == "selector":
+        params["task_source"] = {"start_after": "只回复 "}
+    elif change == "raw":
+        params.pop("task_source")
+        params["task"] = original["content"]
+    elif change in {"agent", "title"}:
+        params["agent_id" if change == "agent" else "title"] = "changed"
+    else:
+        record = json.loads(service._path("anchored").read_text(encoding="utf-8"))
+        record["sourceRef"]["contentHash"] = "0" * 64
+        service._path("anchored").write_text(json.dumps(record), encoding="utf-8")
+    with pytest.raises(DispatchError) as conflict:
+        await adapter(tmp_path, probe).dispatch_from_source("project-a", **params)
+    assert conflict.value.code == "DISPATCH_CONFLICT"
+    assert [name for name, _ in probe.calls].count("start") == 1
+
+
+@pytest.mark.anyio
+async def test_raw_original_source_and_corrupt_ref_receipt_stay_separate(tmp_path, journal_source):
+    runtime, original, current = journal_source
+    probe = ClientProbe()
+    probe.start_error = True
+    service = adapter(tmp_path, probe)
+    params = {"agent_id": "coder", "dispatch_id": "raw-source", "runtime": runtime, "task": original["content"]}
+    with pytest.raises(DispatchError):
+        await service.dispatch_from_source("project-a", **params)
+    runtime["turnId"] = "next"
+    current.update(turnId="next", eventId="user-next", content="恢复")
+    probe.start_error = False
+    await adapter(tmp_path, probe).dispatch_from_source("project-a", **params)
+    record = json.loads(service._path("raw-source").read_text(encoding="utf-8"))
+    record["sourceRef"] = {"damaged": True}
+    service._path("raw-source").write_text(json.dumps(record), encoding="utf-8")
+    assert (await adapter(tmp_path, probe).reconcile("raw-source"))["receipt"]["status"] == "succeeded"
+    assert [name for name, _ in probe.calls].count("start") == 2
+
+
+@pytest.mark.anyio
+async def test_unknown_legacy_model_retry_denied_but_known_raw_repeat_is_read_only(tmp_path, journal_source):
+    runtime, _, _ = journal_source
+    probe = ClientProbe()
+    service = adapter(tmp_path, probe)
+    probe.start_error = True
+    with pytest.raises(DispatchError):
+        await start(service)
+    before = len(probe.calls)
+    with pytest.raises(DispatchError) as denied:
+        await service.dispatch_from_source("project-a", agent_id="coder", dispatch_id="dispatch-1", runtime=runtime,
+            task="private original task")
+    assert denied.value.code == "TASK_SOURCE_UNAVAILABLE" and len(probe.calls) == before
+    probe.start_error = False
+    await start(service)
+    before = len(probe.calls)
+    result = await service.dispatch_from_source("project-a", agent_id="coder", dispatch_id="dispatch-1", runtime=runtime,
+        task="private original task")
+    assert result["nativeTaskId"] == "eat-1" and len(probe.calls) == before
+
+
+@pytest.mark.anyio
+async def test_concurrent_retries_and_invalid_ids_do_not_duplicate_or_escape_records(tmp_path):
+    probe = ClientProbe()
+    service = adapter(tmp_path, probe)
+    async with anyio.create_task_group() as group:
+        for _ in range(4):
+            group.start_soon(start, service)
+    assert [name for name, _ in probe.calls].count("start") == 1
+    with pytest.raises(DispatchError) as invalid:
+        await service.dispatch("project-a", agent_id="coder", task="read", dispatch_id="../outside")
+    assert invalid.value.code == "INVALID_DISPATCH"
+    assert len(service.list_dispatches()) == 1
+
+
+@pytest.mark.anyio
+async def test_corrupted_reference_is_retained_and_never_recreated(tmp_path):
+    probe = ClientProbe()
+    service = adapter(tmp_path, probe)
+    await start(service)
+    path = next((tmp_path / "profile" / "assistant_dispatch" / "records").glob("*.json"))
+    path.write_text("{broken", encoding="utf-8")
+    with pytest.raises(DispatchError) as corrupt:
+        await start(service)
+    assert corrupt.value.code == "DISPATCH_STATE_INVALID"
+    assert path.read_text(encoding="utf-8") == "{broken"
+    assert [name for name, _ in probe.calls].count("start") == 1
+
+
+@pytest.mark.anyio
+async def test_slow_project_does_not_block_other_project_heartbeats(tmp_path):
+    probe = ClientProbe()
+    other_project_queried = anyio.Event()
+
+    def factory(project_root, **kwargs):
+        client = probe.factory(project_root, **kwargs)
+        get_task = client.get_task
+
+        async def read(**arguments):
+            if project_root.name == "slow":
+                await other_project_queried.wait()
+                raise BackendClientError("offline", code="BACKEND_UNAVAILABLE")
+            other_project_queried.set()
+            return await get_task(**arguments)
+
+        client.get_task = read
+        return client
+
+    service = DispatchService(tmp_path / "profile", {"slow": tmp_path / "slow", "fast": tmp_path / "fast"}, client_factory=factory)
+    for project in ("slow", "fast"):
+        await service.dispatch(project, agent_id="coder", task="read", dispatch_id=f"dispatch-{project}")
+    with anyio.fail_after(2):
+        results = await service.heartbeat()
+    by_project = {item["projectId"]: item for item in results}
+    assert by_project["slow"]["lastError"]["code"] == "BACKEND_UNAVAILABLE"
+    assert by_project["fast"]["receipt"]["status"] == "succeeded"
+
+
+def native_adapter(tmp_path: Path, runtime: FakeRuntime, *, drop_first_start=False):
+    """Real client + native task service/policy/store, with no live model or backend."""
+    root = tmp_path / "project"
+    _runtime_state(root)
+    service = _service(tmp_path / "native-task-store", runtime)
+    calls: list[httpx.Request] = []
+    dropped = False
+
+    def handler(request: httpx.Request):
+        nonlocal dropped
+        calls.append(request)
+        path = request.url.path
+        if path == "/api/control-token":
+            return httpx.Response(200, json={"header": "X-Vibelution-Control-Token", "controlToken": "test-control"})
+        if path.endswith("/info"):
+            return httpx.Response(200, json={"apiProtocolVersion": API_PROTOCOL_VERSION, "serverVersion": SERVER_VERSION, "projectRoot": str(root.resolve()), "runtimeSourceRevision": "rev-1"})
+        owner = request.headers.get("X-Vibelution-External-Agent-Task-Capability", "")
+        connection = request.headers.get("X-Vibelution-External-Agent-Connection", "")
+        payload = json.loads(request.content) if request.content else {}
+        try:
+            if path.endswith("/agents"):
+                result = service.list_agents()
+            elif path.endswith("/task-request"):
+                result = service.get_task_for_request(owner_id=owner,
+                    client_request_id=request.url.params["client_request_id"], include_private=True)
+            elif path.endswith("/tasks"):
+                result = service.start_task(owner_id=owner, adapter_connection_id=connection, capabilities=set(), runtime_revision="rev-1", include_private=True, **payload)
+                if drop_first_start and not dropped:
+                    dropped = True
+                    raise httpx.ReadError("response lost after commit", request=request)
+            elif path.endswith("/heartbeat"):
+                result = service.heartbeat(owner_id=owner, task_id=path.split("/")[-2], adapter_connection_id=connection, **payload)
+            elif path.endswith("/cancel"):
+                result = service.cancel_task(owner_id=owner, task_id=path.split("/")[-2])
+            else:
+                result = service.get_task(owner_id=owner, task_id=path.rsplit("/", 1)[-1])
+        except ExternalAgentTaskError as exc:
+            return httpx.Response(404, json={"detail": {"code": exc.code, "message": str(exc)}})
+        return httpx.Response(200, json=result)
+
+    transport = httpx.MockTransport(handler)
+    factory = lambda project_root, **kwargs: ManagedAgentBackendClient(project_root, transport=transport, **kwargs)
+    adapter_service = DispatchService(tmp_path / "profile", {"project-a": root}, client_factory=factory)
+    return adapter_service, service, calls, factory
+
+
+@pytest.mark.anyio
+async def test_native_response_loss_recovers_same_capability_task_and_hidden_session(tmp_path):
+    runtime = FakeRuntime()
+    service, native, calls, factory = native_adapter(tmp_path, runtime, drop_first_start=True)
+    with pytest.raises(DispatchError):
+        await start(service, permission_profile="full_access")
+    recovered = DispatchService(tmp_path / "profile", {"project-a": tmp_path / "project"}, client_factory=factory)
+    receipt = await start(recovered, permission_profile="full_access")
+    await recovered.reconcile("dispatch-1")
+    starts = [request for request in calls if request.method == "POST" and request.url.path.endswith("/tasks")]
+    assert len(starts) == 2
+    assert starts[0].headers["X-Vibelution-External-Agent-Task-Capability"] == starts[1].headers["X-Vibelution-External-Agent-Task-Capability"]
+    assert len(runtime.create_calls) == len(runtime.submit_calls) == 1
+    assert runtime.create_calls[0]["conversation_index_kind"] == "hidden"
+    assert runtime.create_calls[0]["activate"] is False
+    assert receipt["receipt"]["effectivePermissionProfile"] == "workspace_write"
+    assert native.store.get_task(receipt["nativeTaskId"])["taskDigest"]
+    assert not runtime.stop_calls
+
+
+@pytest.mark.anyio
+async def test_native_ack_loss_reconnect_finds_task_without_original_prompt(tmp_path):
+    runtime = FakeRuntime()
+    service, native, calls, factory = native_adapter(tmp_path, runtime, drop_first_start=True)
+    with pytest.raises(DispatchError):
+        await start(service)
+    resumed = DispatchService(tmp_path / "profile", {"project-a": tmp_path / "project"}, client_factory=factory)
+    receipt = await resumed.reconcile("dispatch-1")
+    assert receipt["nativeTaskId"]
+    assert len(runtime.create_calls) == len(runtime.submit_calls) == 1
+    assert sum(request.method == "POST" and request.url.path.endswith("/tasks") for request in calls) == 1
+    assert not runtime.stop_calls
+
+
+@pytest.mark.anyio
+async def test_native_team_hidden_and_disabled_restrictions_remain_authoritative(tmp_path):
+    runtime = FakeRuntime(agents=[_agent(), _agent("team", conversationIndexKind="team_agent"), _agent("hidden", conversationIndexKind="hidden")])
+    service, native, _, _ = native_adapter(tmp_path, runtime)
+    assert [row["agentId"] for row in (await service.discover("project-a"))["agents"]] == ["coder"]
+    for agent_id in ("team", "hidden"):
+        with pytest.raises(DispatchError) as blocked:
+            await service.dispatch("project-a", agent_id=agent_id, task="read", dispatch_id=f"dispatch-{agent_id}")
+        assert blocked.value.code == "AGENT_NOT_FOUND"
+    native.enabled = False
+    with pytest.raises(DispatchError) as disabled:
+        await start(service)
+    assert disabled.value.code == "GATEWAY_NOT_READY"
+    assert runtime.create_calls == []
+
+
+@pytest.mark.anyio
+async def test_native_expired_lease_reconcile_reports_stop_instead_of_redispatch(tmp_path):
+    runtime = FakeRuntime()
+    service, native, calls, _ = native_adapter(tmp_path, runtime)
+    receipt = await start(service)
+    record = native.store.get_task(receipt["nativeTaskId"])
+    native.store.transition(record["taskId"], status="running", fields={"leaseExpiresAt": "2000-01-01T00:00:00Z"})
+    native.reconcile()
+    stopped = await service.reconcile("dispatch-1")
+    assert stopped["receipt"]["status"] == "stop_unconfirmed"
+    runtime.details[record["sessionId"]]["phase"] = "stopped"
+    native.reconcile()
+    final = await service.reconcile("dispatch-1")
+    assert final["receipt"]["status"] == "timed_out"
+    assert runtime.stop_calls == [(record["sessionId"], record["turnId"])]
+    assert len([request for request in calls if request.method == "POST" and request.url.path.endswith("/tasks")]) == 1
+
+
+@pytest.mark.anyio
+async def test_native_missing_credentials_cannot_take_over_or_restart_known_task(tmp_path):
+    runtime = FakeRuntime()
+    service, _, calls, _ = native_adapter(tmp_path, runtime)
+    receipt = await start(service)
+    credentials = next((tmp_path / "profile" / "assistant_dispatch" / "credentials").glob("*.json"))
+    credentials.unlink()
+    with pytest.raises(DispatchError) as missing:
+        await service.reconcile("dispatch-1")
+    assert missing.value.code == "TASK_NOT_FOUND"
+    assert service.list_dispatches()[0]["nativeTaskId"] == receipt["nativeTaskId"]
+    assert len(runtime.create_calls) == 1
+    assert len([request for request in calls if request.method == "POST" and request.url.path.endswith("/tasks")]) == 1
+    assert not runtime.stop_calls
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("corrupt", [False, True])
+async def test_lost_ack_and_lost_credentials_cannot_create_another_task(tmp_path, corrupt):
+    runtime = FakeRuntime()
+    service, native, calls, _ = native_adapter(tmp_path, runtime, drop_first_start=True)
+    with pytest.raises(DispatchError):
+        await start(service)
+    record = native.store.list_nonterminal()[0]
+    runtime.details[record["sessionId"]]["phase"] = "ready"
+    native.get_task(owner_id=next(request.headers["X-Vibelution-External-Agent-Task-Capability"]
+        for request in calls if request.method == "POST" and request.url.path.endswith("/tasks")), task_id=record["taskId"])
+    credentials = next((tmp_path / "profile/assistant_dispatch/credentials").glob("*.json"))
+    if corrupt:
+        credentials.write_text("{broken", encoding="utf-8")
+    else:
+        credentials.unlink()
+    with pytest.raises(DispatchError) as denied:
+        await start(service)
+    assert denied.value.code == "UNKNOWN_REQUEST"
+    assert len(runtime.create_calls) == len(runtime.submit_calls) == 1
+    assert sum(request.method == "POST" and request.url.path.endswith("/tasks") for request in calls) == 1
+
+
+@pytest.mark.anyio
+async def test_corrupt_reference_does_not_stop_healthy_task_renewal(tmp_path):
+    probe = ClientProbe()
+    service = adapter(tmp_path, probe)
+    await start(service)
+    broken = tmp_path / "profile/assistant_dispatch/records/broken.json"
+    broken.write_text("{broken", encoding="utf-8")
+    results = await service.heartbeat()
+    assert any((row.get("receipt") or {}).get("status") == "succeeded" for row in results)
+    failure = next(row for row in service.list_dispatches() if row["dispatchId"] == "broken")
+    assert failure["lastError"]["code"] == "DISPATCH_STATE_INVALID"
+    assert broken.read_text(encoding="utf-8") == "{broken"
+
+
+@pytest.mark.anyio
+async def test_three_dispatches_renew_each_native_task_once(tmp_path):
+    runtime = FakeRuntime(agents=[_agent("a"), _agent("b"), _agent("c")])
+    service, _, calls, _ = native_adapter(tmp_path, runtime)
+    for agent in ("a", "b", "c"):
+        await service.dispatch("project-a", agent_id=agent, task="read", dispatch_id=f"dispatch-{agent}")
+    await service.heartbeat()
+    renewals = [request for request in calls if request.url.path.endswith("/heartbeat")]
+    assert len(renewals) == 3

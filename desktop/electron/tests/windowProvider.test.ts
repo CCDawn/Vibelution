@@ -1713,6 +1713,7 @@ describe("resolveWorkbenchUrl", () => {
 describe("IPC channels", () => {
   it("keeps the bridge narrow", () => {
     expect(Object.keys(IPC_CHANNELS).sort()).toEqual([
+      "assistantInvoke",
       "beginDesktopPetWindowDrag",
       "controlDesktopPet",
       "conversationNotificationOpened",

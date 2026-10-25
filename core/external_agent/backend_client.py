@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import secrets
 import uuid
 from collections.abc import AsyncIterator
@@ -12,7 +13,7 @@ from contextlib import asynccontextmanager
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlencode, urlparse
 
 import anyio
 import httpx
@@ -28,6 +29,9 @@ from vibelution_storage import resolve_project_runtime_home
 CONTROL_TOKEN_HEADER = "X-Vibelution-Control-Token"
 TASK_CAPABILITY_HEADER = "X-Vibelution-External-Agent-Task-Capability"
 ADAPTER_CONNECTION_HEADER = "X-Vibelution-External-Agent-Connection"
+_MANAGEMENT_PREFIX = "/api/v1/launcher-assistant-management"
+_MANAGEMENT_ACTIONS = frozenset({"agent_create", "agent_update", "agent_avatar", "team_run"})
+_MANAGEMENT_SCOPES = ["agents:avatar", "agents:create", "agents:read", "agents:update", "platform:describe", "sessions:read", "teams:read", "teams:run"]
 
 
 class BackendClientError(RuntimeError):
@@ -140,6 +144,250 @@ class ManagedAgentBackendClient:
             "GET", f"/api/v1/external-agent/agents?limit={max(1, min(int(limit), 200))}"
         )
 
+    async def _management_grant(self, *, require_existing: bool) -> dict[str, Any]:
+        """Private operator handshake, never a tool result or task capability."""
+        async with self._state_lock:
+            if self._management_state_invalid:
+                raise BackendClientError("Management credentials are unreadable.", code="UNKNOWN_MANAGEMENT_SUBJECT")
+            saved = self._state.get("management") or {}
+            if require_existing and not saved.get("clientId"):
+                raise BackendClientError("Original management subject is missing.", code="UNKNOWN_MANAGEMENT_SUBJECT")
+            info = await self._request_json("GET", _MANAGEMENT_PREFIX + "/binding")
+            binding = info.get("binding")
+            if info.get("protocolVersion") != 1 or not isinstance(binding, dict) or set(binding) != {"projectId", "instanceId"} or any(
+                not isinstance(value, str) or not value or len(value) > 160 for value in binding.values()
+            ):
+                raise BackendClientError("Invalid management binding.", code="BACKEND_PROTOCOL_ERROR")
+            if saved.get("binding") and saved["binding"] != binding:
+                raise BackendClientError("Management instance changed.", code="RUNTIME_IDENTITY_MISMATCH")
+            client_id = str(saved.get("clientId") or secrets.token_urlsafe(32))
+            if not re.fullmatch(r"[A-Za-z0-9_-]{20,128}", client_id):
+                raise BackendClientError("Invalid management credential state.", code="UNKNOWN_MANAGEMENT_SUBJECT")
+            self._state["management"] = {**saved, "clientId": client_id, "binding": binding}
+            self._save_state_locked()  # A lost bind response must reuse the same operator subject.
+            grant = await self._request_json("POST", _MANAGEMENT_PREFIX + "/subjects/bind", json_payload={
+                "client_id": client_id, "expected_binding": binding, "scopes": _MANAGEMENT_SCOPES})
+            subject = grant.get("subject_id")
+            capability = grant.get("subject_capability")
+            scopes = grant.get("scopes")
+            if grant.get("protocolVersion") != 1 or grant.get("binding") != binding or not isinstance(scopes, list) or not all(isinstance(scope, str) for scope in scopes) or sorted(scopes) != _MANAGEMENT_SCOPES or not (
+                isinstance(subject, str) and re.fullmatch(r"ops-[A-Za-z0-9_-]{10,128}", subject)
+                and isinstance(capability, str) and re.fullmatch(r"[A-Za-z0-9_-]{32,256}", capability)
+            ) or (saved.get("subjectId") and saved["subjectId"] != subject):
+                raise BackendClientError("Management grant mismatch.", code="RUNTIME_IDENTITY_MISMATCH")
+            result = {"clientId": client_id, "binding": binding, "subjectId": subject, "capability": capability}
+            self._state["management"] = result
+            self._save_state_locked()
+            return result
+
+    async def management_action(self, *, action: str, request_id: str, parameters: dict[str, Any],
+                                require_existing_subject: bool = False) -> dict[str, Any]:
+        if action not in _MANAGEMENT_ACTIONS or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,95}", request_id):
+            raise BackendClientError("Unsupported management request.", code="INVALID_MANAGEMENT_REQUEST")
+        grant = await self._management_grant(require_existing=require_existing_subject)
+        result = await self._request_json("POST", f"{_MANAGEMENT_PREFIX}/actions/{action}",
+            management_auth=(grant["subjectId"], grant["capability"]), json_payload={
+                "request_id": request_id, "expected_binding": grant["binding"], "parameters": parameters})
+        return self._management_public_receipt(result, action=action, request_id=request_id)
+
+    async def management_receipt(self, *, action: str, request_id: str) -> dict[str, Any]:
+        if action not in _MANAGEMENT_ACTIONS or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,95}", request_id):
+            raise BackendClientError("Unsupported management request.", code="INVALID_MANAGEMENT_REQUEST")
+        grant = await self._management_grant(require_existing=True)
+        result = await self._request_json("GET", f"{_MANAGEMENT_PREFIX}/actions/{action}/requests/{request_id}",
+            management_auth=(grant["subjectId"], grant["capability"]))
+        return self._management_public_receipt(result, action=action, request_id=request_id)
+
+    async def management_agent(self, *, agent_id: str) -> dict[str, Any]:
+        if not isinstance(agent_id, str) or not 1 <= len(agent_id) <= 128:
+            raise BackendClientError("Invalid Agent identifier.", code="INVALID_MANAGEMENT_REQUEST")
+        grant = await self._management_grant(require_existing=False)
+        result = await self._request_json("GET", f"{_MANAGEMENT_PREFIX}/agents/{quote(agent_id, safe='')}",
+            management_auth=(grant["subjectId"], grant["capability"]))
+        agent = result.get("agent")
+        if not isinstance(agent, dict) or agent.get("agentId") != agent_id:
+            raise BackendClientError("Invalid Agent projection.", code="BACKEND_PROTOCOL_ERROR")
+        return {"agent": self._management_agent_view(agent)}
+
+    async def management_avatar_options(self, *, offset: int = 0, limit: int = 20) -> dict[str, Any]:
+        from pydantic import ValidationError
+        from core.web.services.external_management.contracts import AvatarOptionsQuery, AvatarOptionsResponse
+        try:
+            query = AvatarOptionsQuery.model_validate({"offset": offset, "limit": limit})
+        except ValidationError:
+            raise BackendClientError("Invalid avatar query.", code="INVALID_MANAGEMENT_REQUEST") from None
+        grant = await self._management_grant(require_existing=False)
+        result = await self._request_json("GET", _MANAGEMENT_PREFIX + "/avatar-options?" + urlencode(query.model_dump()),
+            management_auth=(grant["subjectId"], grant["capability"]))
+        try:
+            public = AvatarOptionsResponse.model_validate(result).model_dump()
+            if public["offset"] != query.offset or len(public["options"]) > query.limit:
+                raise ValueError("Avatar query response changed")
+        except (ValidationError, ValueError):
+            raise BackendClientError("Invalid avatar projection.", code="BACKEND_PROTOCOL_ERROR") from None
+        return public
+
+    async def management_session_list(self, **parameters) -> dict[str, Any]:
+        from pydantic import ValidationError
+        from core.web.services.external_management.contracts import SessionListQuery, SessionListResponse
+
+        try:
+            query = SessionListQuery.model_validate(parameters)
+        except ValidationError:
+            raise BackendClientError("Invalid Session list query.", code="INVALID_MANAGEMENT_REQUEST") from None
+        grant = await self._management_grant(require_existing=False)
+        result = await self._request_json("GET", _MANAGEMENT_PREFIX + "/sessions?" + urlencode(query.model_dump()),
+            management_auth=(grant["subjectId"], grant["capability"]))
+        try:
+            public = SessionListResponse.model_validate(result).model_dump()
+        except ValidationError:
+            raise BackendClientError("Invalid Session list projection.", code="BACKEND_PROTOCOL_ERROR") from None
+        if (public["offset"] != query.offset or public["limit"] > query.limit
+            or query.agent_id and any(row["agentId"] != query.agent_id for row in public["sessions"])):
+            raise BackendClientError("Session list query binding changed.", code="BACKEND_PROTOCOL_ERROR")
+        return public
+
+    async def management_session(self, *, session_id: str) -> dict[str, Any]:
+        from pydantic import ValidationError
+
+        from core.web.services.external_management.contracts import SessionMetadataQuery, SessionReadResponse
+
+        try:
+            query = SessionMetadataQuery.model_validate({"session_id": session_id})
+        except ValidationError:
+            raise BackendClientError("Invalid Session identifier.", code="INVALID_MANAGEMENT_REQUEST") from None
+        grant = await self._management_grant(require_existing=False)
+        result = await self._request_json("GET", f"{_MANAGEMENT_PREFIX}/sessions/{quote(query.session_id, safe='')}",
+            management_auth=(grant["subjectId"], grant["capability"]))
+        try:
+            public = SessionReadResponse.model_validate(result).model_dump()
+        except ValidationError:
+            raise BackendClientError("Invalid Session projection.", code="BACKEND_PROTOCOL_ERROR") from None
+        if public["session"]["id"] != query.session_id:
+            raise BackendClientError("Session identity changed.", code="BACKEND_PROTOCOL_ERROR")
+        return public
+
+    async def management_session_config(self, *, session_id: str) -> dict[str, Any]:
+        from pydantic import ValidationError
+        from core.web.services.external_management.contracts import SessionMetadataQuery, SessionConfigResponse
+
+        try:
+            query = SessionMetadataQuery.model_validate({"session_id": session_id})
+        except ValidationError:
+            raise BackendClientError("Invalid Session identifier.", code="INVALID_MANAGEMENT_REQUEST") from None
+        # The caller names a Session, not an Agent. Independently bind the DTO
+        # to that Session's public owner before accepting the compiled snapshot.
+        session = await self.management_session(session_id=query.session_id)
+        grant = await self._management_grant(require_existing=False)
+        result = await self._request_json("GET", f"{_MANAGEMENT_PREFIX}/sessions/{quote(query.session_id, safe='')}/config",
+            management_auth=(grant["subjectId"], grant["capability"]))
+        try:
+            public = SessionConfigResponse.model_validate(result).model_dump()
+        except ValidationError:
+            raise BackendClientError("Invalid Session config projection.", code="BACKEND_PROTOCOL_ERROR") from None
+        if public["config"]["sessionId"] != query.session_id or public["config"]["agentId"] != session["session"]["agentId"]:
+            raise BackendClientError("Session config identity changed.", code="BACKEND_PROTOCOL_ERROR")
+        return public
+
+    async def management_session_config_compare(self, *, session_id: str) -> dict[str, Any]:
+        from pydantic import ValidationError
+        from core.web.services.external_management.contracts import SessionMetadataQuery, SessionConfigComparisonResponse
+
+        try:
+            query = SessionMetadataQuery.model_validate({"session_id": session_id})
+        except ValidationError:
+            raise BackendClientError("Invalid Session identifier.", code="INVALID_MANAGEMENT_REQUEST") from None
+        session = await self.management_session(session_id=query.session_id)
+        grant = await self._management_grant(require_existing=False)
+        result = await self._request_json("GET", f"{_MANAGEMENT_PREFIX}/sessions/{quote(query.session_id, safe='')}/config-comparison",
+            management_auth=(grant["subjectId"], grant["capability"]))
+        try:
+            public = SessionConfigComparisonResponse.model_validate(result).model_dump()
+        except ValidationError:
+            raise BackendClientError("Invalid Session config comparison.", code="BACKEND_PROTOCOL_ERROR") from None
+        pinned, current = public["pinned"], public["current"]
+        changed = [key for key in ("modelId", "contextWindow", "reasoningEffort") if pinned[key] != current[key]]
+        if (public["sessionId"] != query.session_id or public["agentId"] != session["session"]["agentId"]
+            or not all(re.fullmatch(re.escape(public["agentId"]) + r":[0-9a-f]{64}", item["agentConfigRevisionId"])
+                       for item in (pinned, current))
+            or public["sameRevision"] != (pinned["agentConfigRevisionId"] == current["agentConfigRevisionId"])
+            or public["changedFields"] != changed or (public["sameRevision"] and changed)):
+            raise BackendClientError("Session config comparison identity or values changed.", code="BACKEND_PROTOCOL_ERROR")
+        return public
+
+    async def management_documentation(self, *, operation_id: str | None = None, **query) -> dict[str, Any]:
+        from pydantic import ValidationError
+
+        from core.web.services.external_management.contracts import (
+            DocumentationCatalogQuery,
+            DocumentationDescribeQuery,
+            DocumentationResponse,
+        )
+        try:
+            if operation_id is None:
+                parameters = DocumentationCatalogQuery.model_validate(query).model_dump()
+                suffix = "/api-documentation/catalog?" + urlencode(parameters)
+            else:
+                if query:
+                    raise ValueError("Unexpected documentation query")
+                parameters = DocumentationDescribeQuery.model_validate({"operation_id": operation_id})
+                suffix = "/api-documentation/operations/" + quote(parameters.operation_id, safe="")
+        except (ValidationError, ValueError):
+            raise BackendClientError("Invalid documentation query.", code="INVALID_MANAGEMENT_REQUEST") from None
+        grant = await self._management_grant(require_existing=False)
+        result = await self._request_json("GET", _MANAGEMENT_PREFIX + suffix,
+            management_auth=(grant["subjectId"], grant["capability"]), timeout_seconds=20.0)
+        try:
+            public = DocumentationResponse.model_validate(result).model_dump(exclude_none=True)
+        except ValidationError:
+            raise BackendClientError("Invalid API documentation.", code="BACKEND_PROTOCOL_ERROR") from None
+        if operation_id is not None and public.get("ok") and (public.get("operation") or {}).get("operationId") != operation_id:
+            raise BackendClientError("API operation identity changed.", code="BACKEND_PROTOCOL_ERROR")
+        return public
+
+    @staticmethod
+    def _management_agent_view(agent: dict[str, Any]) -> dict[str, Any]:
+        return {key: deepcopy(agent[key]) for key in (
+            "agentId", "directSessionId", "displayName", "configRevision", "updatedAt", "modelId", "avatarImagePath") if key in agent}
+
+    @staticmethod
+    def _management_public_receipt(payload: dict[str, Any], *, action: str, request_id: str) -> dict[str, Any]:
+        if payload.get("action") != action or payload.get("requestId") != request_id or payload.get("status") not in {"completed", "unknown"}:
+            raise BackendClientError("Invalid management receipt.", code="BACKEND_PROTOCOL_ERROR")
+        result = {key: deepcopy(payload[key]) for key in ("status", "action", "requestId", "verified", "reused", "code") if key in payload}
+        if isinstance(payload.get("agent"), dict):
+            result["agent"] = ManagedAgentBackendClient._management_agent_view(payload["agent"])
+        if action == "team_run":
+            from pydantic import ValidationError
+
+            from core.web.services.external_management.contracts import TeamRunView
+
+            phase, resume = payload.get("phase"), payload.get("resumeAllowed")
+            if phase not in {None, "materialization_pending", "materialized", "flow_saved", "started"} or (resume is not None and not isinstance(resume, bool)):
+                raise BackendClientError("Invalid team receipt.", code="BACKEND_PROTOCOL_ERROR")
+            if phase is not None:
+                result["phase"] = phase
+            if resume is not None:
+                result["resumeAllowed"] = resume
+            team = payload.get("teamRun")
+            if team is not None:
+                if not isinstance(team, dict):
+                    raise BackendClientError("Invalid team projection.", code="BACKEND_PROTOCOL_ERROR")
+                fields = TeamRunView.model_fields
+                try:
+                    # Drop private additions while validating all public DTO
+                    # fields; nested rows have their own positive field lists.
+                    public = {key: deepcopy(value) for key, value in team.items() if key in fields}
+                    for key, allowed in (("attempts", {"nodeId", "number", "agentId", "sessionId", "turnId", "status"}),
+                                         ("artifactRefs", {"nodeId", "sessionId", "turnId"})):
+                        if isinstance(public.get(key), list):
+                            public[key] = [{field: value for field, value in row.items() if field in allowed}
+                                           if isinstance(row, dict) else row for row in public[key]]
+                    result["teamRun"] = TeamRunView.model_validate(public).model_dump(exclude_none=True)
+                except ValidationError as exc:
+                    raise BackendClientError("Invalid team projection.", code="BACKEND_PROTOCOL_ERROR") from exc
+        return result
+
     async def diagnostics(self) -> dict[str, Any]:
         await self._ensure_connected()
         return {
@@ -156,6 +404,7 @@ class ManagedAgentBackendClient:
         permission_profile: str,
         client_request_id: str,
         title: str,
+        require_existing_capability: bool = False,
     ) -> dict[str, Any]:
         request_id = str(client_request_id or "").strip()
         async with self._state_lock:
@@ -167,6 +416,8 @@ class ManagedAgentBackendClient:
             )
             capability = str((request_state or {}).get("taskCapability") or "").strip()
             if not capability:
+                if require_existing_capability:
+                    raise BackendClientError("no durable credential for this request", code="UNKNOWN_REQUEST")
                 capability = secrets.token_urlsafe(32)
                 if request_id:
                     requests[request_id] = {"taskCapability": capability}
@@ -183,6 +434,23 @@ class ManagedAgentBackendClient:
                 "title": title,
             },
         )
+        return await self._record_acceptance(request_id, capability, payload)
+
+    async def get_task_for_request(self, *, client_request_id: str) -> dict[str, Any]:
+        """Recover a native ref after a lost start response, without its prompt."""
+        request_id = str(client_request_id or "").strip()
+        async with self._state_lock:
+            request_state = self._state.get("requests", {}).get(request_id) or {}
+            capability = str(request_state.get("taskCapability") or "").strip()
+        if not capability:
+            raise BackendClientError("no durable credential for this request", code="UNKNOWN_REQUEST")
+        payload = await self._request_json("GET",
+            "/api/v1/external-agent/task-request?" + urlencode({"client_request_id": request_id}),
+            task_capability=capability)
+        return await self._record_acceptance(request_id, capability, payload)
+
+    async def _record_acceptance(self, request_id: str, capability: str,
+                                 payload: dict[str, Any]) -> dict[str, Any]:
         task_id = str(payload.get("taskId") or "").strip()
         lease_id = str(payload.get("_leaseId") or "").strip()
         if not task_id or not lease_id:
@@ -272,6 +540,19 @@ class ManagedAgentBackendClient:
                 continue
             await self._record_task_status(task_id, payload)
 
+    async def heartbeat_task(self, *, task_id: str) -> dict[str, Any]:
+        """Renew only one already-owned task; never construct a new capability."""
+        task_state = await self._task_state(task_id)
+        if str(task_state.get("status") or "") in TASK_TERMINAL_STATUSES:
+            return {"taskId": task_id, "status": task_state["status"]}
+        payload = await self._request_json(
+            "POST", f"/api/v1/external-agent/tasks/{task_id}/heartbeat",
+            task_capability=str(task_state["taskCapability"]),
+            json_payload={"lease_id": str(task_state["leaseId"])},
+        )
+        await self._record_task_status(task_id, payload)
+        return self._public_payload(payload)
+
     async def shutdown(self) -> None:
         async with self._state_lock:
             tasks = deepcopy(self._state.get("tasks") or {})
@@ -357,7 +638,9 @@ class ManagedAgentBackendClient:
         path: str,
         *,
         task_capability: str = "",
+        management_auth: tuple[str, str] | None = None,
         json_payload: dict[str, Any] | None = None,
+        timeout_seconds: float | None = None,
     ) -> dict[str, Any]:
         await self._ensure_connected()
         headers = {
@@ -366,10 +649,12 @@ class ManagedAgentBackendClient:
         }
         if task_capability:
             headers[TASK_CAPABILITY_HEADER] = task_capability
+        if management_auth is not None:
+            headers["X-Vibelution-Management-Subject"], headers["X-Vibelution-Management-Capability"] = management_auth
         async with httpx.AsyncClient(
             base_url=self._base_url,
             transport=self.transport,
-            timeout=self.timeout_seconds,
+            timeout=self.timeout_seconds if timeout_seconds is None else max(0.5, min(float(timeout_seconds), 30.0)),
             trust_env=False,
         ) as client:
             try:
@@ -540,6 +825,9 @@ class ManagedAgentBackendClient:
 
     def _load_state(self) -> dict[str, Any]:
         payload = _read_json(self.state_path)
+        self._management_state_invalid = self.state_path.exists() and (
+            payload.get("projectRoot") != str(self.project_root)
+            or ("management" in payload and not isinstance(payload["management"], dict)))
         if str(payload.get("projectRoot") or "") != str(self.project_root):
             payload = {}
         return {
@@ -551,6 +839,7 @@ class ManagedAgentBackendClient:
             "requests": payload.get("requests")
             if isinstance(payload.get("requests"), dict)
             else {},
+            "management": deepcopy(payload.get("management")) if isinstance(payload.get("management"), dict) else {},
         }
 
     def _save_state_locked(self) -> None:

@@ -72,6 +72,10 @@ describe("launcher app protocol URLs", () => {
 });
 
 describe("launcher app protocol file serving", () => {
+  it("serves a packaged assistant with no configured project", () => {
+    expect(resolveLauncherDistRoot({ resourcesRoot: "C:/app/resources", workspaceRoot: "", packaged: true, env: {} }))
+      .toBe(resolve("C:/app/resources/web-dist"));
+  });
   it("serves the SPA fallback index.html for the /launcher route", async () => {
     const response = handlerFor(`${LAUNCHER_APP_ORIGIN}/launcher`);
     expect(response.status).toBe(200);

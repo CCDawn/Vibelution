@@ -11,6 +11,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from core.infrastructure import developer_sandbox
+from core.infrastructure.native_runtime import is_launcher_assistant_process, resolve_native_project_root
 from core.infrastructure.atomic_io import atomic_write_json
 from core.prompt_manager.assembly_contract import (
     PROMPT_ASSEMBLY_SCHEMA_VERSION,
@@ -35,7 +36,8 @@ from core.research.agent_templates import research_default_prompt
 from .runtime_scene_service import record_runtime_scene_event
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+SOURCE_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = resolve_native_project_root(SOURCE_ROOT)
 PROMPT_TEMPLATE_INDEX_VERSION = 1
 CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION = 17
 # The extractor template carries the evidence-remediation fetch protocol on
@@ -54,7 +56,7 @@ SELF_EVOLUTION_EXECUTOR_PROMPT_VERSION = 1
 VIRTUAL_HUMAN_LIFE_STEWARD_PROMPT_VERSION = 1
 CODE_DELIVERY_AUDIT_PROMPT_VERSION = 1
 KNOWLEDGE_STEWARD_PROMPT_VERSION = 20
-KNOWLEDGE_STEWARD_PROMPT_PATH = PROJECT_ROOT / "core/core_prompt/roles/knowledge_steward.md"
+KNOWLEDGE_STEWARD_PROMPT_PATH = SOURCE_ROOT / "core/core_prompt/roles/knowledge_steward.md"
 AGENT_PROMPT_SNAPSHOT_SCHEMA_VERSION = 3
 
 CHAT_AGENT_BASE_PROMPT = """## Conversation Agent Common Prompt
@@ -1189,7 +1191,8 @@ def build_agent_prompt_snapshot(
         # Core prompts are product files shipped with the install; the role
         # template registry is workspace data. Keep the two roots separate so a
         # source-tree core root never hijacks workspace template lookups.
-        core_bundle = load_core_prompt_bundle(Path(core_prompt_root or project_root or PROJECT_ROOT))
+        default_core_root = SOURCE_ROOT if is_launcher_assistant_process() else PROJECT_ROOT
+        core_bundle = load_core_prompt_bundle(Path(core_prompt_root or project_root or default_core_root))
     except CorePromptSourceError as exc:
         return {
             "schemaVersion": 2,

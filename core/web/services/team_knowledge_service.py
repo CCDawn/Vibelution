@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from core.chat.chat_task_types import trim_lines
+from core.infrastructure.native_runtime import resolve_native_project_root
 
 from . import agent_directory_service, chat_room_service, team_service
 from .runtime_scene_service import record_runtime_scene_event
@@ -28,7 +29,7 @@ from .team_knowledge import retrieval as _tk_retrieval
 from .team_knowledge import lifecycle as _tk_lifecycle
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = resolve_native_project_root(Path(__file__).resolve().parents[3])
 SCHEMA_VERSION = _tk_constants.SCHEMA_VERSION
 SOURCE_TYPES = _tk_constants.SOURCE_TYPES
 INGESTION_ADAPTERS = _tk_constants.INGESTION_ADAPTERS

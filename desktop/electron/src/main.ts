@@ -22,6 +22,11 @@ import {
   parseDesktopLifecycleLaunchMetadata
 } from "./cli/desktopCli.js";
 import { IPC_CHANNELS } from "./ipc.js";
+import { AssistantHost } from "./assistant/assistantHost.js";
+import { AssistantProjectRegistryConnection } from "./assistant/projectRegistryConnection.js";
+import { AssistantWindow } from "./assistant/assistantWindow.js";
+import { resolveAssistantResources } from "./assistant/assistantResources.js";
+import { createAssistantTray } from "./assistant/assistantTray.js";
 import { configureLocalDebugging, identifyDebugWindow, publishLocalDebugging } from "./debugging/localDebugging.js";
 import { captureElectronOwnerIdentity } from "./tray/desktopShellOwner.js";
 import { startNativeLauncherStartTransport } from "./process/nativeLauncherStart.js";
@@ -29,6 +34,7 @@ import {
   DESKTOP_LAUNCH_PROFILE_FILE,
   applyDesktopLaunchSettingsToEnvironment,
   resolveDesktopLaunchSettings,
+  resolveDeferredProjectLaunchSettings,
   type DesktopLaunchSettings
 } from "./launch/desktopLaunchSettings.js";
 import { RuntimeSceneBridge, type RuntimeSceneElectronEvent } from "./lifecycle/runtimeSceneBridge.js";
@@ -74,7 +80,7 @@ import {
   createHumanAttentionNotificationService,
   type HumanAttentionNotificationService
 } from "./notifications/humanAttentionNotifications.js";
-import { createDesktopPaths, resolveDesktopEntryCatalogPath, type DesktopPaths } from "./paths.js";
+import { createDesktopPaths, resolveDesktopBundleRoot, resolveDesktopEntryCatalogPath, type DesktopPaths } from "./paths.js";
 import { fetchLauncherControlToken, runDesktopActionOnce } from "./protocol/desktopActionClient.js";
 import { BackendControlTokenOwner } from "./protocol/backendControlToken.js";
 import { PROJECT_SLOT_LIFECYCLE_COMMANDS, planProjectSlot, projectSlotWindowAction } from "./protocol/applyProjectSlot.js";
@@ -93,7 +99,7 @@ import {
 } from "./protocol/launcherIpcHost.js";
 import { createLocalLauncherStatusSnapshot } from "./protocol/launcherStatusSnapshot.js";
 import { createReconcileDeadlineScheduler } from "./state/reconcileDeadlineScheduler.js";
-import { LauncherStateStore, type LauncherWindowTruth } from "./state/launcherStateStore.js";
+import { LauncherStateStore, unwrapSource, type LauncherWindowTruth } from "./state/launcherStateStore.js";
 import {
   LAUNCHER_APP_PROTOCOL,
   launcherAppOriginFor,
@@ -362,6 +368,16 @@ const launcherStateStore = new LauncherStateStore(
     // live backends onto terminal/missing rows, settle rows whose registered
     // identity died, and sweep dead keys after their grace.
     scheduleRegistryReconciliation(state.branchInstances);
+    // Only a successful native inventory observation may change assistant
+    // permissions. Never derive them from instances.json or display parsing.
+    // Applying permissions may wait for assistant startup/ACK. Launcher status
+    // observation remains independent and does not advertise apply success.
+    const assistantInventory = unwrapSource(state.branchInstances);
+    // This observer consumes native _capture envelopes, before store projection.
+    // Failed or legacy/unknown sources carry no permission-changing authority.
+    if (assistantInventory.ok && !("legacy" in assistantInventory)) {
+      void launcherAssistantProjects?.reconcile(assistantInventory.value).catch(() => console.warn("ASSISTANT_REGISTRY_UPDATE_FAILED"));
+    }
     return {
       status: state.status,
       branchInstances: state.branchInstances,
@@ -396,10 +412,19 @@ let workbenchNotificationServices = new WeakMap<object, { origin: string; servic
 let humanAttentionNotificationService: HumanAttentionNotificationService | null = null;
 const nativeNotificationLifetime = new NativeNotificationLifetime();
 const desktopLaunchArgv = process.argv.slice(1);
-const desktopCliArgs = parseDesktopCliArgs(desktopLaunchArgv);
+const desktopCliArgs = (() => {
+  try { return parseDesktopCliArgs(desktopLaunchArgv); }
+  catch {
+    console.warn("ASSISTANT_MODE_CONFLICT");
+    app.exit(1);
+    throw new Error("ASSISTANT_MODE_CONFLICT");
+  }
+})();
 const desktopLifecycleLaunchMetadata = parseDesktopLifecycleLaunchMetadata(desktopLaunchArgv, process.env);
 const singleInstanceEnvelope = createSingleInstanceEnvelope({
+  assistant: desktopCliArgs.assistant,
   launchRequestId: desktopCliArgs.launchRequestId,
+  workspaceRoot: desktopCliArgs.workspaceRoot,
   projectRoot: desktopCliArgs.projectRoot,
   openWorkbench: desktopCliArgs.openWorkbench,
   hiddenPresentation: desktopCliArgs.hiddenPresentation,
@@ -413,6 +438,9 @@ const desktopLifecycleProvenance = resolveSingleInstanceProvenance(singleInstanc
 let pendingOpenWorkbenchRequest = desktopCliArgs.openWorkbench;
 let pendingProjectRoot = desktopCliArgs.projectRoot;
 let cachedDesktopLaunchSettings: DesktopLaunchSettings | null = null;
+let projectControlPlaneLaunchSettings: DesktopLaunchSettings | null = null;
+let projectControlPlaneStartup: Promise<boolean> | null = null;
+let projectControlPlaneObserversStarted = false;
 let pendingWorkbenchCloseAck: PendingWorkbenchCloseAck | null = null;
 let workbenchCloseBackendStopInFlight: Promise<void> | null = null;
 let mainRuntimeShutdownInFlight: Promise<void> | null = null;
@@ -468,6 +496,84 @@ const localDebuggingEnabled = configureLocalDebugging(app, desktopLaunchArgv,
   lockDecision.action === "continue_as_primary" && !desktopCliArgs.smoke && !desktopCliArgs.workbenchCloseCanary);
 if (lockDecision.action === "continue_as_primary") configureWindowsNotificationIdentity(app);
 
+let launcherAssistantHost: AssistantHost | null = null;
+let launcherAssistantWindow: AssistantWindow | null = null;
+let launcherAssistantExitReady = false;
+let launcherAssistantStarting: Promise<void> | null = null;
+let launcherAssistantProjects: AssistantProjectRegistryConnection | null = null;
+let assistantOnly = desktopCliArgs.assistant === true;
+let pendingAssistantOpen: { show: boolean } | null = null;
+
+async function requestOpenAssistantFromSecondInstance(hiddenPresentation: boolean): Promise<void> {
+  if (shutdownApproved) throw new Error("ASSISTANT_NOT_READY");
+  const show = !hiddenPresentation;
+  if (launcherAssistantWindow) {
+    await launcherAssistantWindow.open({ show });
+    return;
+  }
+  // Ready may precede resource verification/window creation. Only remember
+  // presentation; this request never creates or restarts a native host.
+  pendingAssistantOpen = { show: pendingAssistantOpen?.show === true || show };
+}
+
+function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
+  if (launcherAssistantStarting) return launcherAssistantStarting;
+  launcherAssistantStarting = (async () => {
+    const projectConnection = new AssistantProjectRegistryConnection(join(paths.userDataRoot, "assistant", "projects.json"));
+    launcherAssistantProjects = projectConnection;
+    const resources = await resolveAssistantResources({ packaged: app.isPackaged, resourcesRoot: paths.resourcesRoot,
+      developmentSourceRoot: paths.workspaceRoot, developmentPythonPath: app.isPackaged ? "" : desktopPythonPath(), env: desktopEnvironment() });
+    if (shutdownApproved) return;
+    await new Promise<void>((windowOpened, startupFailed) => {
+      void projectConnection.start(snapshot => {
+        const host = new AssistantHost({
+          profileRoot: join(paths.userDataRoot, "assistant", "profile"),
+          runtimeRoot: join(paths.userDataRoot, "assistant", "runtime"),
+          sourceRoot: resources.sourceRoot, pythonPath: resources.pythonPath, pythonArguments: resources.pythonArguments,
+          env: resources.env, projects: snapshot.projects, projectSnapshot: snapshot,
+        });
+        launcherAssistantHost = host;
+        launcherAssistantWindow = new AssistantWindow(paths, host, () => shutdownApproved);
+        desktopTray ??= createAssistantTray(resources.sourceRoot, {
+          open: () => { void launcherAssistantWindow?.open().catch(() => console.warn("ASSISTANT_WINDOW_FAILED")); },
+          quit: () => {
+            if (!assistantOnly) { void requestDesktopShellExit().catch(() => console.warn("ASSISTANT_STOP_FAILED")); return; }
+            shutdownApproved = true;
+            app.quit();
+          },
+        });
+        // The character can show starting/error state while native readiness
+        // remains queued ahead of every authorization update.
+        const show = !desktopCliArgs.hiddenPresentation || pendingAssistantOpen?.show === true;
+        pendingAssistantOpen = null;
+        void launcherAssistantWindow.open({ show }).then(windowOpened, startupFailed);
+        return host;
+      }).catch(error => {
+        console.warn("ASSISTANT_START_FAILED");
+        startupFailed(error);
+      });
+    });
+  })();
+  return launcherAssistantStarting;
+}
+
+async function stopLauncherAssistant(): Promise<void> {
+  const stoppingProjects = launcherAssistantProjects?.stop();
+  await launcherAssistantStarting?.catch(() => undefined);
+  await stoppingProjects;
+  launcherAssistantExitReady = true;
+}
+
+async function exitDesktopShellProcess(): Promise<void> {
+  await stopLauncherAssistant();
+  app.exit(0);
+}
+
+ipcMain.handle(IPC_CHANNELS.assistantInvoke, async (event, payload: unknown) => {
+  if (shutdownApproved || !launcherAssistantWindow) throw new Error("ASSISTANT_NOT_READY");
+  return await launcherAssistantWindow.invoke(event, payload);
+});
+
 function createDesktopPathsForApp(): DesktopPaths {
   const launchSettings = desktopLaunchSettings();
   const workspaceRoot = desktopEnvironment().VIBELUTION_WORKSPACE_ROOT;
@@ -509,6 +615,7 @@ function registerPackagedDeepLinks(paths: DesktopPaths): DeepLinkRegistrationRes
 }
 
 function desktopLaunchSettings(): DesktopLaunchSettings {
+  if (projectControlPlaneLaunchSettings !== null) return projectControlPlaneLaunchSettings;
   if (cachedDesktopLaunchSettings !== null) {
     return cachedDesktopLaunchSettings;
   }
@@ -526,6 +633,11 @@ function desktopEnvironment(): NodeJS.ProcessEnv {
     ...process.env,
     NODE_ENV: process.env.NODE_ENV || (app.isPackaged ? "production" : "development")
   };
+  if (projectControlPlaneLaunchSettings !== null) {
+    for (const key of Object.keys(baseEnv)) {
+      if (["VIBELUTION_WORKSPACE_ROOT", "VIBELUTION_PYTHON_PATH", "PYTHON", "PYTHONPATH", "PYTHONHOME"].includes(key.toUpperCase())) delete (baseEnv as NodeJS.ProcessEnv)[key];
+    }
+  }
   return applyDesktopLaunchSettingsToEnvironment(applyDesktopCliToEnvironment(baseEnv, desktopCliArgs), desktopLaunchSettings());
 }
 
@@ -1409,6 +1521,10 @@ function recordSupervisorEventFallbackLocally(
 }
 
 function focusExistingDesktopShell(): void {
+  if (windowProvider === null) {
+    void launcherAssistantWindow?.open().catch(() => console.warn("ASSISTANT_WINDOW_FAILED"));
+    return;
+  }
   void windowProvider?.openLauncher().catch((error: unknown) => {
     console.warn(error instanceof Error ? error.message : String(error));
   });
@@ -2815,7 +2931,7 @@ async function restartLauncherToLatestBuild(
       return result;
     }
     shutdownApproved = true;
-    setTimeout(() => app.exit(0), 250);
+    setTimeout(() => { void exitDesktopShellProcess().catch(() => console.warn("ASSISTANT_STOP_FAILED")); }, 250);
     return result;
   } catch (error: unknown) {
     shellRefreshInFlight = false;
@@ -2893,11 +3009,11 @@ async function exitAndRelaunchLauncherShell(options: { forceShellRefresh?: boole
       notifyDesktopTray("Vibelution", `无法安排桌面壳更新，继续使用当前壳重启：${detail.slice(0, 220)}`, "warning");
       app.relaunch();
       shutdownApproved = true;
-      app.exit(0);
+      await exitDesktopShellProcess();
       return;
     }
     shutdownApproved = true;
-    app.exit(0);
+    await exitDesktopShellProcess();
     return;
   }
   if (decision === "ensure-and-relaunch") {
@@ -2916,7 +3032,7 @@ async function exitAndRelaunchLauncherShell(options: { forceShellRefresh?: boole
       shellRefreshInFlight = true;
       await scheduleCurrentDesktopShellRefresh("start", { force: true, shellKind: "unpackaged" });
       shutdownApproved = true;
-      app.exit(0);
+      await exitDesktopShellProcess();
       return;
     } catch (error: unknown) {
       shellRefreshInFlight = false;
@@ -2926,7 +3042,7 @@ async function exitAndRelaunchLauncherShell(options: { forceShellRefresh?: boole
   }
   app.relaunch();
   shutdownApproved = true;
-  app.exit(0);
+  await exitDesktopShellProcess();
 }
 
 async function runTrayRestartLauncher(): Promise<void> {
@@ -3132,7 +3248,7 @@ async function runTrayRestartAll(): Promise<void> {
         return;
       }
       shutdownApproved = true;
-      app.exit(0);
+      await exitDesktopShellProcess();
       return;
     }
     await exitAndRelaunchLauncherShell({ forceShellRefresh: true });
@@ -5249,19 +5365,23 @@ async function applyPendingProjectSlot(
   projectRoot: string,
   lifecycleCommand = "",
   provenance: LauncherLifecycleProvenance = "operator",
-  options: { hiddenPresentation?: boolean; launchRequestId?: string } = {}
+  options: { hiddenPresentation?: boolean; launchRequestId?: string; workspaceRoot?: string } = {}
 ): Promise<void> {
   const hiddenPresentation = options.hiddenPresentation === true;
   const wanted = projectRoot.trim();
   if (!wanted) {
     return;
   }
-  const receipt = beginLaunchRequestReceipt({
-    shellRoot: createDesktopPathsForApp().workspaceRoot,
-    projectRoot: wanted, operation: lifecycleCommand, requestId: options.launchRequestId
-  });
-  if (receipt.duplicate) return;
+  let receipt: ReturnType<typeof beginLaunchRequestReceipt> | null = null;
   try {
+    // The native entry's integration workspace and selected slot are distinct.
+    // Legacy envelopes may use the installed profile; never guess from a slot.
+    if (!await ensureProjectControlPlane(options.workspaceRoot || "")) throw new Error("PROJECT_CONTROL_PLANE_UNAVAILABLE");
+    receipt = beginLaunchRequestReceipt({
+      shellRoot: createDesktopPathsForApp().workspaceRoot,
+      projectRoot: wanted, operation: lifecycleCommand, requestId: options.launchRequestId
+    });
+    if (receipt.duplicate) return;
     if (windowProvider === null || launcherBootstrap === null) {
       // A second-instance launch can arrive while the primary Electron shell is
       // still bootstrapping. Wait for the same control-plane boundary instead of
@@ -5375,19 +5495,219 @@ async function applyPendingProjectSlot(
     await provider.openOrFocusWorkbench(url);
   } catch (error: unknown) {
     const detail = error instanceof Error ? error.message : String(error);
-    receipt.failed("launch_preparation_failed", detail);
+    receipt?.failed("launch_preparation_failed", detail);
     notifyDesktopTray("Vibelution", `应用工作区失败：${detail.slice(0, 300)}`, "warning");
+  } finally {
+    startProjectControlPlaneObservers();
   }
+}
+
+/** A single project control plane can attach after the resident assistant. */
+async function ensureProjectControlPlane(workspaceRoot = ""): Promise<boolean> {
+  if (projectControlPlaneStartup !== null) return await projectControlPlaneStartup;
+  if (launcherBootstrap !== null && windowProvider !== null) return true;
+  projectControlPlaneStartup = (async () => {
+    await app.whenReady();
+    if (shutdownApproved) return false;
+    const current = desktopLaunchSettings();
+    const deferred = current.assistant === true || !current.workspaceRoot;
+    if (deferred) {
+      projectControlPlaneLaunchSettings = resolveDeferredProjectLaunchSettings({
+        env: process.env, cliArgs: desktopCliArgs, resourcesRoot: process.resourcesPath,
+        userDataRoot: app.getPath("userData"),
+      }, workspaceRoot, current.configPath);
+    }
+    const paths = createDesktopPathsForApp();
+    if (deferred) claimElectronDesktopShellOwner(paths.workspaceRoot);
+    // Opening a project must not relaunch the already-resident assistant.
+    await bootstrapProjectControlPlane(paths, !deferred);
+    if (launcherBootstrap === null || windowProvider === null || shutdownApproved) return false;
+    assistantOnly = false;
+    return true;
+  })();
+  return await projectControlPlaneStartup;
+}
+
+async function bootstrapProjectControlPlane(paths: DesktopPaths, allowShellRefresh = true): Promise<void> {
+  await reapManagedRuntimeOnDesktopStart({
+    stopManagedRuntime,
+    stopLeftoverPythonLauncher: stopOwnedPythonLauncherService,
+    recordEvent: async (event) => {
+      await recordElectronSupervisorEvent(launcherBootstrap, event);
+    }
+  });
+  await reclaimExpiredIsolatedStops();
+  if (desktopCliArgs.smoke) {
+    await runSmokeAndQuit(paths);
+    return;
+  }
+  // URL discovery is read-only and independent of shell readiness. Publish
+  // the control plane only after readiness; retire the child on refresh/error.
+  const initialWorkbenchUrlController = new AbortController();
+  const initialWorkbenchUrl = resolveInitialWorkbenchUrl(paths, initialWorkbenchUrlController.signal);
+  let deepLinkRegistration: ReturnType<typeof registerPackagedDeepLinks>;
+  try {
+    if (allowShellRefresh && await refreshPackagedDesktopShellIfStale(thenLifecycleFromDesktopCli(desktopCliArgs))) {
+      return;
+    }
+    deepLinkRegistration = registerPackagedDeepLinks(paths);
+    launcherBootstrap = await bootstrapMainOwnedLauncher(paths, initialWorkbenchUrl);
+  } finally {
+    initialWorkbenchUrlController.abort();
+    await initialWorkbenchUrl;
+  }
+  electronStartupStage = "tray_ready";
+  const trayStartedAtMs = performance.now();
+  windowProvider = createWindowProvider(paths, launcherBootstrap);
+  resolveLauncherControlPlaneReady?.();
+  resolveLauncherControlPlaneReady = null;
+  // Publish only for a real, ready Windows product shell. Node-based main
+  // tests and unmigrated layouts cannot touch an operator's runtime files.
+  if (app.isPackaged && process.platform === "win32" && process.versions.electron) {
+    try {
+      const runtimeHome = resolveActiveCanonicalRuntimeHome(paths.workspaceRoot);
+      if (runtimeHome) {
+        const transport = await startNativeLauncherStartTransport({
+          workspaceRoot: paths.workspaceRoot,
+          runtimeDir: join(runtimeHome, "launcher"),
+          identity: captureElectronOwnerIdentity(),
+          onStart: async () => {
+            try {
+              return await orchestrateLauncherLifecycle(
+                "start", { schemaVersion: 1, path: "start" }, "operator", undefined, undefined, true
+              );
+            } catch (error: unknown) {
+              console.warn(error instanceof Error ? error.message : String(error));
+              return { schemaVersion: 1, accepted: false, operation: "start", code: "native_start_failed",
+                message: "Launcher 未确认启动成功，请查看控制面日志。" };
+            }
+          }
+        });
+        const retireTransport = () => { void transport.close().catch(() => undefined); };
+        app.once("quit", retireTransport);
+        process.once("exit", retireTransport);
+      }
+    } catch {
+      console.warn("Native start transport unavailable; the compatibility entry remains active.");
+    }
+  }
+  updateLauncherWindowTruth();
+  startDeferredRestartFulfillment();
+  desktopTray?.destroy();
+  desktopTray = createDesktopTray(paths, {
+    openAssistant: () => {
+      void launcherAssistantWindow?.open().catch(() => console.warn("ASSISTANT_WINDOW_FAILED"));
+    },
+    openLauncher: () => {
+      void windowProvider?.openLauncher().catch((error: unknown) => {
+        console.warn(error instanceof Error ? error.message : String(error));
+      });
+    },
+    listInstances: async () => {
+      return classifyTrayBranchInstances(launcherStateStore.projectBranchInstances());
+    },
+    getFreshness: async () => {
+      const raw = launcherStateStore.projectFreshness();
+      const freshness = typeof raw === "object" && raw !== null ? raw as Record<string, unknown> : {};
+      return {
+        current: freshness.current === true ? true : freshness.current === false ? false : null,
+        label: typeof freshness.label === "string" && freshness.label.trim()
+          ? freshness.label.trim()
+          : "Launcher 代码版本：未知"
+      };
+    },
+    restartLauncher: () => {
+      void runTrayRestartLauncher();
+    },
+    startInstance: (instanceId, label) => {
+      void runTrayBranchInstance("start", instanceId, `启动 ${label}`);
+    },
+    stopInstance: (instanceId, label) => {
+      void runTrayBranchInstance("stop", instanceId, `停止 ${label}`);
+    },
+    stopAll: () => {
+      void runTrayStopAll();
+    }
+  });
+  startPeriodicShellFreshnessWatch();
+  startWorkbenchBackendWatchdogLoop();
+  void maybeRestoreTrayRestartAllPending();
+  const trayStartupEvents: RuntimeSceneElectronEvent[] = [{
+    eventCode: "electron.tray.created",
+    message: "Electron system tray created.",
+    fields: { provider: "electron" }
+  }, {
+    eventCode: "electron.launcher.supervisor.started",
+    message: "Electron launcher supervisor started.",
+    fields: {
+      provider: "electron",
+      deepLinkRegistrationAttempted: deepLinkRegistration.attempted,
+      deepLinkRegistrationRegistered: deepLinkRegistration.registered,
+      deepLinkRegistrationReason: deepLinkRegistration.reason
+    }
+  }, {
+    eventCode: "electron.launcher_service.started",
+    message: "Electron main is the Launcher control plane; leftover Python launcher is not attached.",
+    fields: {
+      mode: launcherBootstrap?.mode ?? "",
+      launcherBackendPid: launcherBootstrap?.launcherBackendPid ?? 0
+    }
+  }, {
+    eventCode: "electron.tray.ready",
+    message: "Lightweight tray started.",
+    fields: electronStartupFields({
+      provider: "electron",
+      stage: "tray_ready",
+      stageDurationMs: electronStageElapsedMs(trayStartedAtMs)
+    })
+  }];
+  // Capture the ready timestamp now; observational I/O must not delay first open.
+  scheduleTelemetryWithoutWaiting(async () => {
+    for (const event of trayStartupEvents) {
+      await recordElectronSupervisorEvent(launcherBootstrap, event);
+    }
+  });
+}
+
+function startProjectControlPlaneObservers(): void {
+  if (projectControlPlaneObserversStarted) return;
+  if (launcherBootstrap === null || windowProvider === null || shutdownApproved) {
+    return;
+  }
+  projectControlPlaneObserversStarted = true;
+  // Startup state writes must not launch full Git/status scans alongside
+  // backend admission. One fresh read also covers hints missed meanwhile.
+  const paths = createDesktopPathsForApp();
+  startLauncherStateFileHints(paths);
+  if (!app.isPackaged) {
+    // Install after hints: their reset also disposes this release watcher.
+    launcherActiveReleaseWatcher = startLauncherActiveReleaseWatcher({
+      buildsRoot: join(paths.workspaceRoot, "web", ".vibelution-builds"),
+      onChange: () => {
+        windowProvider?.refreshLauncherIfReleaseChanged();
+      }
+    });
+    windowProvider.refreshLauncherIfReleaseChanged();
+  }
+  scheduleLauncherStatusCliRefresh();
 }
 
 if (runPrimaryWhenReady) {
 app.whenReady()
   .then(async () => {
-    const paths = createDesktopPathsForApp();
-    claimElectronDesktopShellOwner(paths.workspaceRoot);
+    const workspaceRoot = String(desktopEnvironment().VIBELUTION_WORKSPACE_ROOT || "").trim();
+    assistantOnly = desktopCliArgs.assistant === true || !workspaceRoot;
+    // An empty project registry is valid for the packaged resident assistant.
+    // Project-only paths are constructed only after this independent startup.
+    const paths: DesktopPaths = workspaceRoot ? createDesktopPathsForApp() : {
+      schemaVersion: 1, desktopBundleRoot: resolveDesktopBundleRoot(import.meta.url), resourcesRoot: process.resourcesPath,
+      userDataRoot: app.getPath("userData"), workspaceRoot: "",
+    };
+    if (workspaceRoot) claimElectronDesktopShellOwner(paths.workspaceRoot);
     if (localDebuggingEnabled) {
       try {
-        const retireDebugging = await publishLocalDebugging(app.getPath("userData"), paths.workspaceRoot, captureElectronOwnerIdentity());
+        const retireDebugging = await publishLocalDebugging(app.getPath("userData"), paths.workspaceRoot, captureElectronOwnerIdentity(),
+          workspaceRoot ? undefined : join(paths.userDataRoot, "assistant", "desktop_debug.json"));
         app.once("quit", retireDebugging);
       } catch (error) {
         console.warn("Local desktop debugging unavailable", error);
@@ -5402,142 +5722,18 @@ app.whenReady()
     registerLauncherAppProtocolHandle({
       // Resolve per request: the shell stays resident in the tray while
       // frontend rebuilds switch the active release pointer.
-      resolveDistRoot: () => resolveLauncherDistRoot(launcherDistRootInput)
+      resolveDistRoot: () => resolveLauncherDistRoot({ ...launcherDistRootInput,
+        workspaceRoot: String(desktopEnvironment().VIBELUTION_WORKSPACE_ROOT || ""), env: desktopEnvironment() })
     });
-    await reapManagedRuntimeOnDesktopStart({
-      stopManagedRuntime,
-      stopLeftoverPythonLauncher: stopOwnedPythonLauncherService,
-      recordEvent: async (event) => {
-        await recordElectronSupervisorEvent(launcherBootstrap, event);
-      }
-    });
-    await reclaimExpiredIsolatedStops();
-    if (desktopCliArgs.smoke) {
-      await runSmokeAndQuit(paths);
-      return;
-    }
-    // URL discovery is read-only and independent of shell readiness. Publish
-    // the control plane only after readiness; retire the child on refresh/error.
-    const initialWorkbenchUrlController = new AbortController();
-    const initialWorkbenchUrl = resolveInitialWorkbenchUrl(paths, initialWorkbenchUrlController.signal);
-    let deepLinkRegistration: ReturnType<typeof registerPackagedDeepLinks>;
-    try {
-      if (await refreshPackagedDesktopShellIfStale(thenLifecycleFromDesktopCli(desktopCliArgs))) {
+    if (!desktopCliArgs.smoke) {
+      const assistantStartup = startLauncherAssistant(paths);
+      if (assistantOnly) {
+        await assistantStartup;
         return;
       }
-      deepLinkRegistration = registerPackagedDeepLinks(paths);
-      launcherBootstrap = await bootstrapMainOwnedLauncher(paths, initialWorkbenchUrl);
-    } finally {
-      initialWorkbenchUrlController.abort();
-      await initialWorkbenchUrl;
+      void assistantStartup.catch(() => console.warn("ASSISTANT_START_FAILED"));
     }
-    electronStartupStage = "tray_ready";
-    const trayStartedAtMs = performance.now();
-    windowProvider = createWindowProvider(paths, launcherBootstrap);
-    resolveLauncherControlPlaneReady?.();
-    resolveLauncherControlPlaneReady = null;
-    // Publish only for a real, ready Windows product shell. Node-based main
-    // tests and unmigrated layouts cannot touch an operator's runtime files.
-    if (app.isPackaged && process.platform === "win32" && process.versions.electron) {
-      try {
-        const runtimeHome = resolveActiveCanonicalRuntimeHome(paths.workspaceRoot);
-        if (runtimeHome) {
-          const transport = await startNativeLauncherStartTransport({
-            workspaceRoot: paths.workspaceRoot,
-            runtimeDir: join(runtimeHome, "launcher"),
-            identity: captureElectronOwnerIdentity(),
-            onStart: async () => {
-              try {
-                return await orchestrateLauncherLifecycle(
-                  "start", { schemaVersion: 1, path: "start" }, "operator", undefined, undefined, true
-                );
-              } catch (error: unknown) {
-                console.warn(error instanceof Error ? error.message : String(error));
-                return { schemaVersion: 1, accepted: false, operation: "start", code: "native_start_failed",
-                  message: "Launcher 未确认启动成功，请查看控制面日志。" };
-              }
-            }
-          });
-          const retireTransport = () => { void transport.close().catch(() => undefined); };
-          app.once("quit", retireTransport);
-          process.once("exit", retireTransport);
-        }
-      } catch {
-        console.warn("Native start transport unavailable; the compatibility entry remains active.");
-      }
-    }
-    updateLauncherWindowTruth();
-    startDeferredRestartFulfillment();
-    desktopTray = createDesktopTray(paths, {
-      openLauncher: () => {
-        void windowProvider?.openLauncher().catch((error: unknown) => {
-          console.warn(error instanceof Error ? error.message : String(error));
-        });
-      },
-      listInstances: async () => {
-        return classifyTrayBranchInstances(launcherStateStore.projectBranchInstances());
-      },
-      getFreshness: async () => {
-        const raw = launcherStateStore.projectFreshness();
-        const freshness = typeof raw === "object" && raw !== null ? raw as Record<string, unknown> : {};
-        return {
-          current: freshness.current === true ? true : freshness.current === false ? false : null,
-          label: typeof freshness.label === "string" && freshness.label.trim()
-            ? freshness.label.trim()
-            : "Launcher 代码版本：未知"
-        };
-      },
-      restartLauncher: () => {
-        void runTrayRestartLauncher();
-      },
-      startInstance: (instanceId, label) => {
-        void runTrayBranchInstance("start", instanceId, `启动 ${label}`);
-      },
-      stopInstance: (instanceId, label) => {
-        void runTrayBranchInstance("stop", instanceId, `停止 ${label}`);
-      },
-      stopAll: () => {
-        void runTrayStopAll();
-      }
-    });
-    startPeriodicShellFreshnessWatch();
-    startWorkbenchBackendWatchdogLoop();
-    void maybeRestoreTrayRestartAllPending();
-    const trayStartupEvents: RuntimeSceneElectronEvent[] = [{
-      eventCode: "electron.tray.created",
-      message: "Electron system tray created.",
-      fields: { provider: "electron" }
-    }, {
-      eventCode: "electron.launcher.supervisor.started",
-      message: "Electron launcher supervisor started.",
-      fields: {
-        provider: "electron",
-        deepLinkRegistrationAttempted: deepLinkRegistration.attempted,
-        deepLinkRegistrationRegistered: deepLinkRegistration.registered,
-        deepLinkRegistrationReason: deepLinkRegistration.reason
-      }
-    }, {
-      eventCode: "electron.launcher_service.started",
-      message: "Electron main is the Launcher control plane; leftover Python launcher is not attached.",
-      fields: {
-        mode: launcherBootstrap?.mode ?? "",
-        launcherBackendPid: launcherBootstrap?.launcherBackendPid ?? 0
-      }
-    }, {
-      eventCode: "electron.tray.ready",
-      message: "Lightweight tray started.",
-      fields: electronStartupFields({
-        provider: "electron",
-        stage: "tray_ready",
-        stageDurationMs: electronStageElapsedMs(trayStartedAtMs)
-      })
-    }];
-    // Capture the ready timestamp now; observational I/O must not delay first open.
-    scheduleTelemetryWithoutWaiting(async () => {
-      for (const event of trayStartupEvents) {
-        await recordElectronSupervisorEvent(launcherBootstrap, event);
-      }
-    });
+    if (!await ensureProjectControlPlane(workspaceRoot)) return;
     const rawUrl = findVibelutionDeepLinkArg(process.argv.slice(1));
     if (rawUrl) {
       await handlePublicDeepLinkUrl(rawUrl, "startup");
@@ -5590,24 +5786,7 @@ app.whenReady()
     }
   })
   .finally(() => {
-    if (launcherBootstrap === null || windowProvider === null || shutdownApproved) {
-      return;
-    }
-    // Startup state writes must not launch full Git/status scans alongside
-    // backend admission. One fresh read also covers hints missed meanwhile.
-    const paths = createDesktopPathsForApp();
-    startLauncherStateFileHints(paths);
-    if (!app.isPackaged) {
-      // Install after hints: their reset also disposes this release watcher.
-      launcherActiveReleaseWatcher = startLauncherActiveReleaseWatcher({
-        buildsRoot: join(paths.workspaceRoot, "web", ".vibelution-builds"),
-        onChange: () => {
-          windowProvider?.refreshLauncherIfReleaseChanged();
-        }
-      });
-      windowProvider.refreshLauncherIfReleaseChanged();
-    }
-    scheduleLauncherStatusCliRefresh();
+    startProjectControlPlaneObservers();
   })
   .catch(async (error: unknown) => {
     await drainTelemetryWithDeadline(() =>
@@ -5620,45 +5799,65 @@ app.whenReady()
       })
     );
     console.error(error instanceof Error ? error.message : String(error));
-    app.quit();
+    // Project bootstrap failure must not tear down the independent assistant.
+    await launcherAssistantStarting?.catch(() => undefined);
+    if (!launcherAssistantHost) app.quit();
   });
 }
 
 app.on("second-instance", (_event, argv, _workingDirectory, additionalData) => {
   const secondInstanceProvenance = resolveSingleInstanceProvenance(additionalData);
-  const secondCli = resolveSingleInstanceCliIntent(additionalData);
-  const intent = resolveSecondInstanceIntent({
-    deepLinkUrl: findVibelutionDeepLinkArg(argv) ?? "",
-    projectRoot: secondCli.projectRoot,
-    openWorkbench: secondCli.openWorkbench,
-    hiddenPresentation: secondCli.hiddenPresentation,
-    lifecycleCommand: secondCli.lifecycleCommand
-  });
-  if (intent.action === "handle_deep_link") {
-    void handlePublicDeepLinkUrl(intent.rawUrl, "second_instance");
-    return;
-  }
-  if (intent.action === "apply_project") {
-    void applyPendingProjectSlot(intent.projectRoot, intent.lifecycleCommand, secondInstanceProvenance, {
-      launchRequestId: secondCli.launchRequestId,
-      hiddenPresentation: intent.hiddenPresentation
+  try {
+    const secondCli = resolveSingleInstanceCliIntent(additionalData);
+    const intent = resolveSecondInstanceIntent({
+      assistant: secondCli.assistant,
+      deepLinkUrl: findVibelutionDeepLinkArg(argv) ?? "",
+      projectRoot: secondCli.projectRoot,
+      openWorkbench: secondCli.openWorkbench,
+      hiddenPresentation: secondCli.hiddenPresentation,
+      lifecycleCommand: secondCli.lifecycleCommand
     });
-    return;
-  }
-  if (intent.action === "lifecycle") {
-    void handleSecondInstanceLifecycleCommand(intent.command, secondInstanceProvenance).catch((error: unknown) => {
-      console.warn(error instanceof Error ? error.message : String(error));
-    });
-    return;
-  }
-  if (intent.action === "open_workbench") {
-    void requestOpenWorkbenchFromSecondInstance().catch((error: unknown) => {
-      console.warn(error instanceof Error ? error.message : String(error));
-    });
-    return;
-  }
-  if (intent.action === "focus_existing_shell") {
-    focusExistingDesktopShell();
+    if (intent.action === "open_assistant") {
+      void requestOpenAssistantFromSecondInstance(intent.hiddenPresentation).catch(() => console.warn("ASSISTANT_WINDOW_FAILED"));
+      return;
+    }
+    if (intent.action === "handle_deep_link") {
+      void handlePublicDeepLinkUrl(intent.rawUrl, "second_instance");
+      return;
+    }
+    if (intent.action === "apply_project") {
+      void applyPendingProjectSlot(intent.projectRoot, intent.lifecycleCommand, secondInstanceProvenance, {
+        launchRequestId: secondCli.launchRequestId,
+        workspaceRoot: secondCli.workspaceRoot,
+        hiddenPresentation: intent.hiddenPresentation
+      }).catch((error: unknown) => {
+        console.warn(error instanceof Error ? error.message : String(error));
+      });
+      return;
+    }
+    if (intent.action === "lifecycle") {
+      void ensureProjectControlPlane(secondCli.workspaceRoot).then(ready => ready
+        ? handleSecondInstanceLifecycleCommand(intent.command, secondInstanceProvenance) : undefined).finally(() => {
+          startProjectControlPlaneObservers();
+        }).catch((error: unknown) => {
+        console.warn(error instanceof Error ? error.message : String(error));
+      });
+      return;
+    }
+    if (intent.action === "open_workbench") {
+      void ensureProjectControlPlane(secondCli.workspaceRoot).then(ready => ready
+        ? requestOpenWorkbenchFromSecondInstance() : undefined).finally(() => {
+          startProjectControlPlaneObservers();
+        }).catch((error: unknown) => {
+        console.warn(error instanceof Error ? error.message : String(error));
+      });
+      return;
+    }
+    if (intent.action === "focus_existing_shell") {
+      focusExistingDesktopShell();
+    }
+  } catch {
+    console.warn("ASSISTANT_MODE_CONFLICT");
   }
 });
 
@@ -5666,6 +5865,7 @@ async function handleSecondInstanceLifecycleCommand(
   command: string,
   provenance: LauncherLifecycleProvenance = "operator"
 ): Promise<void> {
+  if (assistantOnly) { focusExistingDesktopShell(); return; }
   if (launcherBootstrap === null || windowProvider === null) {
     // Electron emits second-instance after ready, but the primary app may not
     // have finished its asynchronous Launcher bootstrap yet.
@@ -5723,8 +5923,14 @@ app.on("open-url", (event, rawUrl) => {
 });
 
 app.on("before-quit", (event) => {
+  if (assistantOnly) shutdownApproved = true;
+  if (shutdownApproved && launcherAssistantHost && !launcherAssistantExitReady) {
+    event.preventDefault();
+    void stopLauncherAssistant().then(() => app.quit()).catch(() => console.warn("ASSISTANT_STOP_FAILED"));
+    return;
+  }
   if (shutdownApproved) {
-    releaseElectronDesktopShellOwner(createDesktopPathsForApp().workspaceRoot);
+    if (!assistantOnly) releaseElectronDesktopShellOwner(createDesktopPathsForApp().workspaceRoot);
     stopLauncherStateFileHints();
     stopDeferredRestartFulfillment();
     desktopTray?.destroy();

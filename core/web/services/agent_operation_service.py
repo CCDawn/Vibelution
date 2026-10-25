@@ -4,13 +4,18 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.web.services import agent_config_change_service
-from core.web.services import agent_directory_service
-from core.web.services import session_service
-from core.web.services.agent_config_workspace_service import invalidate_agent_config_workspace_cache
+from core.web.services import (
+    agent_config_change_service,
+    agent_directory_service,
+    session_service,
+)
+from core.web.services.agent_config_authority import normalize_permission_preset
+from core.web.services.agent_config_workspace_service import (
+    invalidate_agent_config_workspace_cache,
+)
 from core.web.services.agent_directory_service import (
-    AgentDirectoryError,
     CONVERSATION_INDEX_KIND_PERSONAL_AGENT,
+    AgentDirectoryError,
     get_agent,
     update_agent_avatar,
     update_agent_instance,
@@ -140,6 +145,79 @@ def create_agent_from_catalog_request(
     avatar_path = str(avatar_image_path or "").strip()
     if avatar_path:
         agent = update_agent_avatar(agent_id, avatar_image_path=avatar_path)
+    invalidate_agent_config_workspace_cache()
+    return agent
+
+
+def create_configured_agent_with_session(
+    *,
+    display_name: str,
+    llm_bindings: dict[str, Any],
+    tool_policy: dict[str, Any],
+    primary_mode: str = "chat",
+    role_key: str = "",
+    prompt_template_id: str = "prompt-chat-default",
+    persona_profile: dict[str, Any] | None = None,
+    task_profile: dict[str, Any] | None = None,
+    permission_preset: str | None = "request_approval",
+    delegation_policy: dict[str, Any] | None = None,
+    context_compression_policy: dict[str, Any] | None = None,
+    metadata: dict[str, Any] | None = None,
+    avatar_image_path: str = "",
+    source: str = "configured_agent_creation",
+    session_idempotency_key: str = "",
+    session_metadata: dict[str, Any] | None = None,
+    session_title: str = "",
+    session_title_source: str = "placeholder",
+) -> dict[str, Any]:
+    """Publish configured identity before its first inactive native Session.
+
+    The first registry write already has the explicit private ToolPolicy. Final
+    profiles and permission are published through the usual catalog owner before
+    directory sync imports a compiled snapshot. Lifecycle -> state is the native
+    lock order; no state lock spans Session creation. There are no retry loops:
+    callers retain their durable intent on any uncertain failure. The Session
+    key protects Session admission, not a second call to Agent creation itself.
+    """
+    name = str(display_name or "").strip()
+    bindings = agent_directory_service.normalize_agent_llm_bindings(llm_bindings)
+    persona = dict(persona_profile or {})
+    task = dict(task_profile or {})
+    policy = dict(tool_policy)
+    normalized_permission = normalize_permission_preset(permission_preset, strict=True)
+    validate_agent_create_request(display_name=name, llm_bindings=bindings, primary_mode=primary_mode,
+        role_key=role_key, prompt_template_id=prompt_template_id, persona_profile=persona,
+        task_profile=task, tool_policy=policy)
+    if primary_mode in {"", "chat"} and not str(role_key or "").strip() and (persona or task):
+        raise AgentDirectoryError("Roleless chat Agents do not retain persona or task profiles.")
+    initial_metadata = dict(metadata or {})
+    if delegation_policy is not None:
+        initial_metadata["delegationPolicy"] = dict(delegation_policy)
+    with agent_directory_service.agent_session_lifecycle_transaction():
+        agent = agent_directory_service.create_agent_instance(display_name=name, llm_bindings=bindings,
+            primary_mode=primary_mode, role_key=role_key, prompt_template_id=prompt_template_id,
+            initial_tool_policy=policy, context_compression_policy=context_compression_policy,
+            metadata=initial_metadata, created_by=source)
+        updates: dict[str, Any] = {"displayName": name, "permissionPreset": normalized_permission}
+        if persona:
+            updates["personaProfile"] = persona
+        if task:
+            updates["taskProfile"] = task
+        if delegation_policy is not None:
+            updates["delegationPolicy"] = dict(delegation_policy)
+        agent = update_agent_from_catalog_request(agent["agentId"], updates=updates,
+            expected_config_revision=agent["configRevision"], source=source)
+        if avatar_image_path:
+            agent = update_agent_avatar(agent["agentId"], avatar_image_path=avatar_image_path)
+        session = session_service.create_chat_session(agent_id=agent["agentId"], title=session_title,
+            title_source=session_title_source, created_by=source,
+            conversation_index_kind=CONVERSATION_INDEX_KIND_PERSONAL_AGENT,
+            activate=False, lightweight=True, idempotency_key=session_idempotency_key,
+            session_metadata=dict(session_metadata or {}))
+        session_id = str(session.get("id") or session.get("sessionId") or "")
+        if session.get("agentId") != agent["agentId"] or not session_id:
+            raise AgentDirectoryError("Native creation identity could not be confirmed.")
+        agent = update_agent_instance(agent["agentId"], direct_session_id=session_id)
     invalidate_agent_config_workspace_cache()
     return agent
 

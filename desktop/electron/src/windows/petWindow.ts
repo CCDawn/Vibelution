@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 
 import type { DesktopPaths } from "../paths.js";
 import { resolvePreloadPath } from "../paths.js";
+import type { ElectronWindowCreateOptions } from "./electronWindowProvider.js";
 import {
   clampPetWindowBounds,
   desktopPetWindowExpandedBounds,
@@ -31,8 +32,10 @@ export function isDesktopPetWindowUrl(rawUrl: string): boolean {
   }
 }
 
-export function createPetWindow(_url: string, paths: DesktopPaths): BrowserWindow {
-  const boundsPath = join(paths.userDataRoot, PET_BOUNDS_FILE);
+export function createPetWindow(_url: string, paths: Pick<DesktopPaths, "desktopBundleRoot" | "userDataRoot">,
+  _options?: ElectronWindowCreateOptions,
+  role: "desktop-pet" | "launcher-assistant" = "desktop-pet"): BrowserWindow {
+  const boundsPath = join(paths.userDataRoot, role === "launcher-assistant" ? "launcher-assistant-window.json" : PET_BOUNDS_FILE);
   const saved = readSavedBounds(boundsPath);
   const display = saved
     ? screen.getDisplayNearestPoint({ x: saved.x, y: saved.y })
@@ -60,13 +63,14 @@ export function createPetWindow(_url: string, paths: DesktopPaths): BrowserWindo
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      additionalArguments: ["--vibelution-window-role=desktop-pet"],
+      additionalArguments: [`--vibelution-window-role=${role}`],
     },
   });
   window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   window.webContents.on("did-navigate", (_event, url) => {
     // A mode switch always starts collapsed; expanded sizes are never persisted.
-    if (!isDesktopPetWindowUrl(url) || window.isDestroyed()) return;
+    if ((!isDesktopPetWindowUrl(url) && !(role === "launcher-assistant" && url === "vibelution-launcher://launcher/launcher-assistant"))
+        || window.isDestroyed()) return;
     const current = window.getBounds();
     window.setBounds(desktopPetWindowExpandedBounds(current, screen.getDisplayMatching(current).workArea, false), false);
   });

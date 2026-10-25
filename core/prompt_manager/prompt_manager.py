@@ -25,6 +25,7 @@ from dataclasses import fields as dataclass_fields, is_dataclass, replace as dat
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
+from core.infrastructure.native_runtime import resolve_native_project_root
 from core.prompt_manager.types import (
     SystemPrompt,
     SystemPromptSection,
@@ -392,7 +393,7 @@ def _get_static_root() -> Path:
 
 
 def _get_dynamic_root() -> Path:
-    project_root = _resolve_project_root()
+    project_root = resolve_native_project_root(_resolve_project_root())
     from core.infrastructure import developer_sandbox
 
     return developer_sandbox.route_workspace_path(

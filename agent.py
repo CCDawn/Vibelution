@@ -488,6 +488,9 @@ class AgentRuntime:
 
         # 工作区域
         project_root = os.path.dirname(os.path.abspath(__file__))
+        from core.infrastructure.native_runtime import is_launcher_assistant_process, assistant_native_root
+        if is_launcher_assistant_process():
+            project_root = str(assistant_native_root())
         self.project_root = project_root
         if workspace_path:
             candidate_workspace = Path(workspace_path)

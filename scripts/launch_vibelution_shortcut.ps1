@@ -9,6 +9,7 @@ Set-StrictMode -Version Latest
 $ProjectDir = (Resolve-Path -LiteralPath $ProjectDir).Path
 $buildScript = Join-Path $ProjectDir "scripts\windows_launcher_entry\build_vibelution_launcher_entry.ps1"
 $sourcePath = Join-Path $ProjectDir "scripts\windows_launcher_entry\VibelutionLauncher.cs"
+$assistantSourcePath = Join-Path $ProjectDir "scripts\windows_launcher_entry\ManagedDesktopAssistant.cs"
 $iconPath = Join-Path $ProjectDir "assets\icons\vibelution.ico"
 
 if (-not (Test-Path -LiteralPath $buildScript)) {
@@ -21,19 +22,27 @@ if (-not (Test-Path -LiteralPath $sourcePath)) {
 function Get-NativeEntryCacheKey {
     param(
         [string]$SourcePath,
+        [string]$AssistantSourcePath,
         [string]$BuildScriptPath,
         [string]$IconPath
     )
 
     $parts = @(
         (Get-FileHash -LiteralPath $SourcePath -Algorithm SHA256).Hash
+        (Get-FileHash -LiteralPath $AssistantSourcePath -Algorithm SHA256).Hash
         (Get-FileHash -LiteralPath $BuildScriptPath -Algorithm SHA256).Hash
     )
     if (Test-Path -LiteralPath $IconPath) {
         $parts += (Get-FileHash -LiteralPath $IconPath -Algorithm SHA256).Hash
     }
     $combined = ($parts -join "|")
-    return ($combined.Substring(0, [Math]::Min(16, $combined.Length))).ToLowerInvariant()
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $hash = $sha256.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($combined))
+        return ([System.BitConverter]::ToString($hash).Replace("-", "").Substring(0, 16)).ToLowerInvariant()
+    } finally {
+        $sha256.Dispose()
+    }
 }
 
 $localAppData = [Environment]::GetFolderPath("LocalApplicationData")
@@ -43,7 +52,7 @@ if (-not $localAppData) {
 $cacheDir = Join-Path $localAppData "Vibelution\Launcher\entry-cache"
 New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null
 
-$cacheKey = Get-NativeEntryCacheKey -SourcePath $sourcePath -BuildScriptPath $buildScript -IconPath $iconPath
+$cacheKey = Get-NativeEntryCacheKey -SourcePath $sourcePath -AssistantSourcePath $assistantSourcePath -BuildScriptPath $buildScript -IconPath $iconPath
 $entryExe = Join-Path $cacheDir ("VibelutionLauncher.{0}.exe" -f $cacheKey)
 
 if (-not (Test-Path -LiteralPath $entryExe)) {

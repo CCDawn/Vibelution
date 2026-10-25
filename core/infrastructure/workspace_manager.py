@@ -28,6 +28,8 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 from contextlib import contextmanager
 
+from core.infrastructure.native_runtime import is_launcher_assistant_process, resolve_native_project_root
+
 # 日志
 
 
@@ -47,6 +49,8 @@ def _resolve_project_root() -> Path:
     如果 core/ 下没有 agent.py，说明算错了，回退到 sys.path 搜索。
     """
     p = Path(__file__).parent.parent.parent.resolve()
+    if is_launcher_assistant_process():
+        return resolve_native_project_root(p)
     if (p / "agent.py").exists():
         return p
     # 回退：在 sys.path 中找 agent.py

@@ -1,12 +1,37 @@
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { parseDesktopCliArgs } from "../src/cli/desktopCli.js";
 import {
   DESKTOP_LAUNCH_PROFILE_FILE,
   applyDesktopLaunchSettingsToEnvironment,
-  resolveDesktopLaunchSettings
+  resolveDesktopLaunchSettings,
+  resolveDeferredProjectLaunchSettings
 } from "../src/launch/desktopLaunchSettings.js";
 import { createDesktopLaunchProfile, serializeDesktopLaunchProfile } from "../src/launch/desktopLaunchProfileWriter.js";
+
+describe("deferred project launch binding", () => {
+  it("uses the target project's Python instead of inherited assistant bindings", () => {
+    const env = { VIBELUTION_WORKSPACE_ROOT: "old-project", VIBELUTION_PYTHON_PATH: "embedded-python", PYTHON: "other-python" };
+    const ownPython = join("target-project", ".venv", "Scripts", "python.exe");
+    const input = { env, cliArgs: parseDesktopCliArgs(["--assistant"]), userDataRoot: "private", resourcesRoot: "resources",
+      readTextFile: () => JSON.stringify({ schemaVersion: 1, workspaceRoot: "profile-project", pythonPath: "shared-project-python" }),
+      fileExists: (path: string) => path === ownPython };
+    const result = resolveDeferredProjectLaunchSettings(input, "target-project", "private-config");
+    expect(result.assistant).not.toBe(true);
+    expect(result.workspaceRoot).toBe("target-project"); expect(result.pythonPath).toBe(ownPython);
+    expect(result.configPath).toBe("private-config");
+    expect(env.PYTHON).toBe("other-python"); expect(env.VIBELUTION_WORKSPACE_ROOT).toBe("old-project");
+  });
+
+  it("keeps the installed profile's explicit shared Python fallback without a local venv", () => {
+    const result = resolveDeferredProjectLaunchSettings({
+      env: { PYTHON: "embedded-python" }, cliArgs: parseDesktopCliArgs(["--assistant"]), userDataRoot: "private", resourcesRoot: "resources",
+      readTextFile: () => JSON.stringify({ schemaVersion: 1, workspaceRoot: "profile-project", pythonPath: "shared-project-python" }),
+      fileExists: () => false,
+    }, "", "private-config");
+    expect(result.workspaceRoot).toBe("profile-project"); expect(result.pythonPath).toBe("shared-project-python");
+  });
+});
 
 function resolveWithFiles(input: {
   env?: NodeJS.ProcessEnv;
@@ -31,6 +56,41 @@ function resolveWithFiles(input: {
 }
 
 describe("desktop launch settings", () => {
+  it("removes inherited project bindings case-insensitively while preserving operator config", () => {
+    const inherited = { vibelution_workspace_root: "C:/old/checkout", Vibelution_Python_Path: "C:/old/python.exe",
+      Python: "C:/old/other-python.exe", pythonpath: "C:/old/modules", PyThOnHoMe: "C:/old/runtime",
+      VIBELUTION_CONFIG_PATH: "C:/operator/config.toml", KEEP: "unchanged" };
+    const settings = resolveWithFiles({ argv: ["--assistant"], env: inherited });
+    const environment = applyDesktopLaunchSettingsToEnvironment(inherited, settings);
+    expect(environment).toEqual({ VIBELUTION_CONFIG_PATH: "C:/operator/config.toml", KEEP: "unchanged" });
+    expect(inherited.Python).toBe("C:/old/other-python.exe");
+    const ordinary = resolveWithFiles({ env: inherited });
+    expect(applyDesktopLaunchSettingsToEnvironment(inherited, ordinary)).toEqual(inherited);
+  });
+
+  it.each(["user", "resources"])("ignores %s project bindings in assistant mode without probing checkout Python", location => {
+    const userDataRoot = "C:/private/user";
+    const resourcesRoot = "C:/package/resources";
+    const profilePath = join(location === "user" ? userDataRoot : resourcesRoot, DESKTOP_LAUNCH_PROFILE_FILE);
+    const profile = JSON.stringify({ schemaVersion: 1, workspaceRoot: "C:/old/project",
+      pythonPath: "C:/old/project/.venv/python.exe", operatorConfigPath: "C:/operator/config.toml" });
+    const readTextFile = vi.fn((path: string) => path === profilePath ? profile : null);
+    const fileExists = vi.fn(() => { throw new Error("checkout Python must not be probed"); });
+    const inherited = { VIBELUTION_WORKSPACE_ROOT: "C:/inherited/project", VIBELUTION_PYTHON_PATH: "C:/old/python.exe",
+      PYTHON: "C:/other/python.exe", PYTHONPATH: "C:/old/modules", PYTHONHOME: "C:/old/runtime", KEEP: "value" };
+    const settings = resolveDesktopLaunchSettings({ env: inherited, cliArgs: parseDesktopCliArgs(["--assistant"]),
+      userDataRoot, resourcesRoot, readTextFile, fileExists });
+    expect(settings).toMatchObject({ assistant: true, workspaceRoot: "", pythonPath: "", configPath: "C:/operator/config.toml" });
+    expect(fileExists).not.toHaveBeenCalled();
+    const environment = applyDesktopLaunchSettingsToEnvironment(inherited, settings);
+    for (const name of ["VIBELUTION_WORKSPACE_ROOT", "VIBELUTION_PYTHON_PATH", "PYTHON", "PYTHONPATH", "PYTHONHOME"]) {
+      expect(environment).not.toHaveProperty(name);
+    }
+    expect(environment).toMatchObject({ VIBELUTION_CONFIG_PATH: "C:/operator/config.toml", KEEP: "value" });
+    expect(JSON.parse(profile).workspaceRoot).toBe("C:/old/project");
+    expect(inherited.VIBELUTION_WORKSPACE_ROOT).toBe("C:/inherited/project");
+  });
+
   it("loads a package launch profile as the default Electron entry context", () => {
     const resourcesRoot = "C:/Users/17533/Desktop/Vibelution/dist/desktop/win-unpacked/resources";
     const profilePath = join(resourcesRoot, DESKTOP_LAUNCH_PROFILE_FILE);

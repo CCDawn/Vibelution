@@ -19,7 +19,128 @@ from core.infrastructure.branch_workspace import (
     BranchWorkspaceLayout,
 )
 from core.launcher import desktop_shell
+from scripts import build_assistant_runtime as assistant_builder
 from scripts.windowless_subprocess import no_window_subprocess_kwargs
+from tests.test_assistant_runtime_package import _distribution, _write
+
+
+def _write_assistant_package(root: Path, package: Path) -> dict:
+    for name in assistant_builder._REQUIRED_SOURCE:
+        path = root / name
+        if not path.exists():
+            _write(root, name, b"")
+    (root / "schemas").mkdir(exist_ok=True)
+    (root / "assets").mkdir(exist_ok=True)
+    if not (root / "requirements.txt").read_bytes():
+        _write(root, "requirements.txt", "fixture-runtime>=1\n# 开发/测试依赖\n".encode())
+    base = root / ".assistant-fixture" / "python"
+    site = root / ".assistant-fixture" / "site"
+    for name in ("python.exe", "pythonw.exe", "python3.dll", "python312.dll", "vcruntime140.dll",
+                 "LICENSE.txt", "DLLs/_ssl.pyd", "Lib/site.py", "Lib/encodings/__init__.py"):
+        _write(base, name)
+    _distribution(site, "fixture-runtime")
+    result = assistant_builder.build_launcher_assistant_payload(
+        root, package / "resources/launcher-assistant", python_root=base, site_packages=site, python_version="3.12.10",
+    )
+    manifest = result["manifest"]
+    return {"manifestSha256": result["manifestSha256"],
+            "contentSha256": desktop_shell._frontend_directory_content_sha256(Path(result["manifestPath"]).parent),
+            **{key: manifest[key] for key in ("sourceContentSha256", "runtimeContentSha256", "requirementsSha256", "pythonVersion")}}
+
+
+def test_assistant_payload_build_reuses_owned_deadline_and_unique_session(tmp_path, monkeypatch):
+    calls = []
+    payload = tmp_path / "dist/.desktop-shell-build-fixture/launcher-assistant"
+    deadline = time.monotonic() + 30
+
+    def owned(command, **kwargs):
+        calls.append((command, kwargs))
+        _write(payload, "manifest.json", b"{}")
+
+    monkeypatch.setattr(desktop_shell, "_run_owned_process", owned)
+    digest = desktop_shell._build_assistant_payload(tmp_path, payload, deadline=deadline, env={"fixture": "1"})
+    assert len(digest) == 64
+    assert len(calls) == 1
+    command, options = calls[0]
+    assert command[0] == sys.executable
+    assert "build_launcher_assistant_payload" in command[3]
+    assert command[-2:] == [str(tmp_path), str(payload)]
+    assert options["deadline"] == deadline and options["env"] == {"fixture": "1"}
+
+
+def test_lightweight_shell_import_does_not_require_assistant_build_dependencies():
+    result = subprocess.run(
+        [sys.executable, "-B", "-c", "import sys; sys.modules['scripts.build_assistant_runtime'] = None; import core.launcher.desktop_shell"],
+        cwd=Path(__file__).resolve().parents[1], stdin=subprocess.DEVNULL, capture_output=True,
+        encoding="utf-8", errors="replace", timeout=20, **no_window_subprocess_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr[-1000:]
+
+
+@pytest.mark.parametrize("source", ["core/__init__.py", "requirements.txt"])
+def test_packaged_assistant_source_changes_make_shell_stale(tmp_path, monkeypatch, source):
+    _write_packaged_shell(tmp_path, tree_hash="a" * 40)
+    _mock_frontend_inspection(monkeypatch, tmp_path)
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda *args: "a" * 40)
+    monkeypatch.setattr(desktop_shell, "_electron_sources_newer_than_asar", lambda root: False)
+    path = tmp_path / source
+    path.write_bytes(path.read_bytes() + b"\n# changed\n")
+    assert desktop_shell.inspect_desktop_shell(tmp_path)["reason"] == "assistant_source_mismatch"
+
+
+@pytest.mark.parametrize("fault", ["missing", "tampered", "source_changed", "wrong_hash_domain"])
+def test_bad_staged_assistant_never_replaces_live_shell(tmp_path, monkeypatch, fault):
+    live = _write_live_win_unpacked(tmp_path)
+    staged = _write_staged_shell(tmp_path, tree_hash="a" * 40)
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda *args: "a" * 40)
+    payload = staged / "resources/launcher-assistant"
+    if fault == "missing":
+        (payload / "manifest.json").unlink()
+    elif fault == "tampered":
+        (payload / "python/pythonw.exe").write_bytes(b"tampered")
+    elif fault == "wrong_hash_domain":
+        path = staged / "resources/app.asar.unpacked/package-provenance.json"
+        proof = json.loads(path.read_text())
+        proof["assistant"]["contentSha256"] = json.loads((payload / "manifest.json").read_text())["payloadContentSha256"]
+        path.write_text(json.dumps(proof), encoding="utf-8")
+    else:
+        (tmp_path / "core/__init__.py").write_bytes(b"new source")
+    assert desktop_shell._try_promote_staged_desktop_shell(tmp_path) is False
+    assert (live / "main.js").read_text() == "old"
+    assert staged.is_dir()
+
+
+def test_source_change_during_build_is_rejected_before_publication(tmp_path, monkeypatch):
+    live = _write_live_win_unpacked(tmp_path)
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda *args: "a" * 40)
+
+    def build(root, **kwargs):
+        session = _write_built_shell_session(root, tree_hash="a" * 40)
+        (root / "core/__init__.py").write_bytes(b"changed during Node build")
+        return session
+
+    monkeypatch.setattr(desktop_shell, "_run_desktop_shell_package_build", build)
+    with pytest.raises(RuntimeError, match="assistant_source_mismatch"):
+        desktop_shell.build_desktop_shell_package(tmp_path)
+    assert (live / "main.js").read_text() == "old"
+
+
+def test_owner_cleanup_handles_long_payload_paths_and_refuses_other_targets(tmp_path):
+    boundary = tmp_path / "dist"
+    target = boundary / ".desktop-shell-build-fixture"
+    leaf = target / ("a" * 100) / ("b" * 100) / "payload.dat"
+    assert len(str(leaf)) > 260
+    internal = assistant_builder._io_path(leaf)
+    internal.parent.mkdir(parents=True)
+    internal.write_bytes(b"owned")
+    desktop_shell._remove_owned_shell_tree(target, within=boundary)
+    assert not target.exists()
+    outside = _write(tmp_path, "outside/keep.txt", b"keep")
+    with pytest.raises(ValueError, match="owner boundary"):
+        desktop_shell._remove_owned_shell_tree(outside.parent, within=boundary)
+    with pytest.raises(ValueError, match="owner boundary"):
+        desktop_shell._remove_owned_shell_tree(boundary, within=boundary)
+    assert outside.read_bytes() == b"keep"
 
 
 def _write_frontend_release(root: Path, *, frontend_tree: str = "d" * 40) -> Path:
@@ -75,6 +196,7 @@ def _write_packaged_shell(root: Path, *, tree_hash: str, asar_mtime: float | Non
     packaged_frontend = desktop_shell.packaged_frontend_dist(root)
     _copy_frontend_release(frontend_release, packaged_frontend)
     provenance.write_text(json.dumps({
+        "assistant": _write_assistant_package(root, exe.parent),
         "electronTreeHash": tree_hash,
         "frontendTreeHash": "d" * 40,
         "frontendContentSha256": desktop_shell._frontend_directory_content_sha256(packaged_frontend),
@@ -1050,6 +1172,7 @@ def test_desktop_shell_package_build_uses_direct_owned_builder_entry(tmp_path, m
         return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(desktop_shell, "_node_command", lambda: r"C:\nodejs\node.exe")
+    monkeypatch.setattr(desktop_shell, "_build_assistant_payload", lambda *args, **kwargs: "c" * 64)
     monkeypatch.setattr(desktop_shell, "_run_owned_process", fake_owned)
     session = desktop_shell._run_desktop_shell_package_build(
         tmp_path,
@@ -1067,7 +1190,8 @@ def test_desktop_shell_package_build_uses_direct_owned_builder_entry(tmp_path, m
     shutil.rmtree(session, ignore_errors=True)
 
 
-def test_package_build_retirement_failure_keeps_lock_and_stage_until_retry(tmp_path, monkeypatch):
+@pytest.mark.parametrize("first_stage", ["assistant", "electron"])
+def test_package_build_retirement_failure_keeps_lock_and_stage_until_retry(tmp_path, monkeypatch, first_stage):
     class FakeProcess:
         returncode = 0
 
@@ -1087,6 +1211,8 @@ def test_package_build_retirement_failure_keeps_lock_and_stage_until_retry(tmp_p
 
     owner = FakeOwner()
     monkeypatch.setattr(desktop_shell, "_node_command", lambda: "node")
+    if first_stage == "electron":
+        monkeypatch.setattr(desktop_shell, "_build_assistant_payload", lambda *args, **kwargs: "c" * 64)
     monkeypatch.setattr(desktop_shell, "uuid4", lambda: types.SimpleNamespace(hex="retirement"))
 
     def spawn(_command, **kwargs):
@@ -1141,25 +1267,11 @@ def test_package_build_reports_published_windows_output(tmp_path, monkeypatch, m
     assert not Path(result["output"]).name.startswith(".desktop-shell-build-")
 
 
-def test_package_build_reports_published_linux_output(tmp_path, monkeypatch):
-    def fake_build(project_root, *, mode, deadline):
-        assert mode == "linux-arm64"
-        assert desktop_shell._desktop_shell_lock_owned_by_current_process(
-            Path(project_root), lock_relative=desktop_shell.PREBUILD_LOCK_RELATIVE
-        )
-        session = Path(project_root) / "dist" / ".linux-package-session"
-        output = session / "builder-output"
-        output.mkdir(parents=True)
-        (output / "marker").write_text("published", encoding="utf-8")
-        return session
-
-    monkeypatch.setattr(desktop_shell, "_run_desktop_shell_package_build", fake_build)
-    result = desktop_shell.build_desktop_shell_package(tmp_path, mode="linux-arm64")
-
-    destination = tmp_path / "dist" / "desktop-linux-arm64"
-    assert result["output"] == str(destination)
-    assert (destination / "marker").read_text(encoding="utf-8") == "published"
-    assert not (tmp_path / "dist" / ".linux-package-session").exists()
+def test_package_build_rejects_unsupported_assistant_cross_build_before_output(tmp_path, monkeypatch):
+    monkeypatch.setattr(desktop_shell, "_run_desktop_shell_package_build", lambda *args, **kwargs: pytest.fail("must not build"))
+    with pytest.raises(ValueError, match="assistant.*Windows"):
+        desktop_shell.build_desktop_shell_package(tmp_path, mode="linux-arm64")
+    assert not (tmp_path / "dist").exists()
 
 
 def test_pid_alive_uses_psutil_not_os_kill(monkeypatch):
@@ -1828,7 +1940,7 @@ def _write_staged_shell(root: Path, *, tree_hash: str) -> Path:
     (staging_unpacked / "Vibelution.exe").write_bytes(b"mz")
     (staging_unpacked / "main.js").write_text("new", encoding="utf-8")
     (provenance_dir / "package-provenance.json").write_text(
-        json.dumps({"electronTreeHash": tree_hash}), encoding="utf-8"
+        json.dumps({"electronTreeHash": tree_hash, "assistant": _write_assistant_package(root, staging_unpacked)}), encoding="utf-8"
     )
     return staging_unpacked
 
@@ -1842,7 +1954,7 @@ def _write_built_shell_session(root: Path, *, tree_hash: str, name: str = "packa
     (built / "main.js").write_text("new", encoding="utf-8")
     (built / "resources" / "app.asar").write_bytes(b"asar")
     (provenance_dir / "package-provenance.json").write_text(
-        json.dumps({"electronTreeHash": tree_hash}), encoding="utf-8"
+        json.dumps({"electronTreeHash": tree_hash, "assistant": _write_assistant_package(root, built)}), encoding="utf-8"
     )
     return session
 

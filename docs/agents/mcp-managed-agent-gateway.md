@@ -10,6 +10,15 @@
 
 本文是其他 Coding Agent、MCP Host 和本机操作者部署、发现、调用 Vibelution MCP 的唯一操作指南。索引文件只链接本文，不复制部署命令或工具语义。
 
+### 请求回包丢失后的原生引用恢复
+
+后端新增兼容的 `GET /api/v1/external-agent/task-request?client_request_id=...`。
+它要求原生 control token 和本次请求在发送前保存的 task capability，按已有幂等索引查询，
+不创建 Session、不重发任务，也不接受新 capability 接管旧任务。未知请求与错误 owner 返回相同拒绝。
+原 owner 的私有响应可恢复原 lease；适配器必须继续从公共工具回执裁掉私有字段。
+`ManagedAgentBackendClient.get_task_for_request` 使用独立持久凭据恢复 taskId，
+界面断开或 Launcher 宿主重连无需再次提供原任务正文。原有审批、资格撤销和有限租约不变。
+
 ## 1. Agent 首次接入必须先做什么
 
 ### 1.1 在 Vibelution 仓库内工作

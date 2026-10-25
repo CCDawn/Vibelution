@@ -26,17 +26,20 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from config.paths import PROJECT_ROOT
 from core.infrastructure.atomic_io import atomic_write_json
 from core.infrastructure.no_console_git import run_git
 from core.infrastructure.owned_process import OwnedProcess
+from core.infrastructure.native_runtime import resolve_native_project_root
 from core.infrastructure.windows_process_job import WindowsProcessJob
 from core.launcher.frontend_build import (
     frontend_releases_dir,
     inspect_frontend_build,
     resolve_active_frontend_dist,
 )
+from config.paths import PROJECT_ROOT as SOURCE_PROJECT_ROOT
 from scripts.windowless_subprocess import no_window_subprocess_kwargs
+
+PROJECT_ROOT = resolve_native_project_root(SOURCE_PROJECT_ROOT)
 
 PACKAGED_EXE_RELATIVE = Path("dist") / "desktop" / "win-unpacked" / "Vibelution.exe"
 PROVENANCE_RELATIVE = (
@@ -963,7 +966,7 @@ def _retry_pending_build_retirements(project_root: Path, *, deadline: float) -> 
             continue
         _close_owned_process(item.owner, deadline=deadline)
         for path in item.cleanup_paths:
-            shutil.rmtree(path, ignore_errors=True)
+            _remove_owned_shell_tree(path, within=item.project_root)
             if path.exists():
                 raise RuntimeError(f"desktop build stage cleanup could not be confirmed: {path}")
         if not _release_pending_build_lock(item):
@@ -1022,6 +1025,66 @@ def _electron_package_block_reason(
     return ""
 
 
+def _assistant_payload_builder() -> Any:
+    # Ordinary unpackaged/bootstrap reads must not import build dependencies.
+    from scripts import build_assistant_runtime
+
+    return build_assistant_runtime
+
+
+def _assistant_source_content_sha256(root: Path) -> str:
+    """Use the payload owner's exact source selection and content-hash domain."""
+    assistant_payload = _assistant_payload_builder()
+    root = assistant_payload._trusted_root(root)
+    entries = []
+    for path in assistant_payload._source_files(root):
+        with path.open("rb") as handle:
+            digest = hashlib.file_digest(handle, "sha256").hexdigest()
+        entries.append({"path": "source/" + path.relative_to(root).as_posix(),
+                        "size": path.stat().st_size, "sha256": digest})
+    return assistant_payload._content_hash(entries, "source/")
+
+
+def _assistant_package_block_reason(root: Path, package: Path, *, full: bool = False) -> str:
+    evidence = _read_json(package / "resources/app.asar.unpacked/package-provenance.json").get("assistant")
+    hashes = ("manifestSha256", "contentSha256", "sourceContentSha256", "runtimeContentSha256", "requirementsSha256")
+    if not isinstance(evidence, dict) or any(not re.fullmatch(r"[0-9a-f]{64}", str(evidence.get(key, ""))) for key in hashes):
+        return "missing_assistant_provenance"
+    try:
+        assistant_payload = _assistant_payload_builder()
+        payload = assistant_payload._trusted_root(package / "resources/launcher-assistant")
+        manifest_path = assistant_payload._checked(payload, "manifest.json")
+        if not manifest_path.is_file() or manifest_path.stat().st_size > 32 * 1024 * 1024:
+            return "missing_assistant_payload"
+        content = manifest_path.read_bytes()
+        if hashlib.sha256(content).hexdigest() != evidence["manifestSha256"]:
+            return "assistant_manifest_mismatch"
+        manifest = json.loads(content)
+        if not isinstance(manifest, dict) or any(
+            manifest.get(key) != evidence.get(key) for key in (*hashes[2:], "pythonVersion")
+        ) or not re.fullmatch(r"3\.[0-9]+\.[0-9]+", str(evidence.get("pythonVersion", ""))):
+            return "assistant_manifest_mismatch"
+        if full:
+            assistant_payload.verify_launcher_assistant_payload(payload, expected_manifest_sha256=evidence["manifestSha256"])
+            if _frontend_directory_content_sha256(payload) != evidence["contentSha256"]:
+                return "assistant_package_content_mismatch"
+        if _assistant_source_content_sha256(root) != evidence["sourceContentSha256"]:
+            return "assistant_source_mismatch"
+    except (OSError, ValueError, TypeError):
+        return "assistant_payload_invalid"
+    return ""
+
+
+def _assert_assistant_package(root: Path, package: Path, *, deadline: float) -> None:
+    if time.monotonic() >= deadline:
+        raise TimeoutError("assistant validation exceeded the desktop build deadline")
+    reason = _assistant_package_block_reason(root, package, full=True)
+    if reason:
+        raise RuntimeError(f"desktop package assistant refused: {reason}")
+    if time.monotonic() >= deadline:
+        raise TimeoutError("assistant validation exceeded the desktop build deadline")
+
+
 def inspect_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, Any]:
     """Return whether the packaged Electron shell and Launcher frontend are current."""
 
@@ -1074,6 +1137,8 @@ def inspect_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, 
     package_block_reason = _electron_package_block_reason(
         root, current_tree=current_tree, packaged_tree=packaged_tree, source_newer=source_newer,
     )
+    if not package_block_reason:
+        package_block_reason = _assistant_package_block_reason(root, exe_path.parent)
     if package_block_reason:
         reason = package_block_reason
         stale = True
@@ -1171,6 +1236,8 @@ def inspect_desktop_shell_launch_readiness(project_root: Path | str = PROJECT_RO
         packaged_tree=str(provenance.get("electronTreeHash") or "").strip(),
         source_newer=_electron_sources_newer_than_asar(root),
     )
+    if not reason:
+        reason = _assistant_package_block_reason(root, packaged_desktop_exe(root).parent)
     # Admission may outlive an active-pointer change. Do not skip the packaged
     # frontend proof if the workspace release disappeared during the shell read.
     if not reason and not _usable_active_frontend_release(root):
@@ -1579,7 +1646,21 @@ def _wait_for_desktop_shell_build_lock(root: Path, *, deadline: float) -> None:
         time.sleep(min(DESKTOP_SHELL_BUILD_LOCK_POLL_SECONDS, remaining))
 
 
+def _build_assistant_payload(root: Path, payload: Path, *, deadline: float, env: dict[str, str]) -> str:
+    command = [sys.executable, "-B", "-c",
+               ("import sys; from scripts.build_assistant_runtime import build_launcher_assistant_payload; "
+                "build_launcher_assistant_payload(sys.argv[1], sys.argv[2])"), str(root), str(payload)]
+    _run_owned_process(command, cwd=root, deadline=deadline, label="desktop assistant payload", env=env)
+    assistant_payload = _assistant_payload_builder()
+    path = assistant_payload._checked(assistant_payload._trusted_root(payload), "manifest.json")
+    if not path.is_file() or path.stat().st_size > 32 * 1024 * 1024:
+        raise RuntimeError("desktop assistant builder did not produce a complete manifest")
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def _run_desktop_shell_package_build(root: Path, *, mode: str, deadline: float) -> Path:
+    if mode == "linux-arm64" or sys.platform != "win32":
+        raise ValueError("Launcher assistant packages currently require a native Windows build")
     session = root / "dist" / f".desktop-shell-build-{uuid4().hex}"
     electron_dir = root / ELECTRON_PACKAGE_DIR
     node_command = _node_command()
@@ -1588,6 +1669,9 @@ def _run_desktop_shell_package_build(root: Path, *, mode: str, deadline: float) 
     env["VIBELUTION_DESKTOP_BUILD_ROOT"] = str(session)
     env["VIBELUTION_DESKTOP_BUILD_MANAGED"] = "1"
     try:
+        payload = session / "launcher-assistant"
+        env["VIBELUTION_ASSISTANT_PAYLOAD_ROOT"] = str(payload)
+        env["VIBELUTION_ASSISTANT_MANIFEST_SHA256"] = _build_assistant_payload(root, payload, deadline=deadline, env=env)
         _run_owned_process(
             command,
             cwd=electron_dir,
@@ -1605,7 +1689,7 @@ def _run_desktop_shell_package_build(root: Path, *, mode: str, deadline: float) 
         )
         raise
     except Exception:
-        shutil.rmtree(session, ignore_errors=True)
+        _remove_owned_shell_tree(session, within=root / "dist")
         raise
 
 
@@ -1618,6 +1702,8 @@ def build_desktop_shell_package(
 
     if mode not in {"dir", "staging", "linux-arm64"}:
         raise ValueError(f"unsupported desktop package mode: {mode}")
+    if mode == "linux-arm64" or sys.platform != "win32":
+        raise ValueError("Launcher assistant packages currently require a native Windows build")
     root = Path(project_root).resolve()
     deadline = time.monotonic() + DESKTOP_SHELL_BUILD_DEADLINE_SECONDS
     _wait_for_desktop_shell_build_lock(root, deadline=deadline)
@@ -1642,6 +1728,7 @@ def build_desktop_shell_package(
                     "desktop package provenance does not match HEAD:desktop/electron "
                     f"(packaged={packaged_tree!r} current={current_tree!r})"
                 )
+            _assert_assistant_package(root, built, deadline=deadline)
             published_output = (
                 root / STAGING_WIN_UNPACKED_RELATIVE
                 if mode == "staging"
@@ -1652,7 +1739,7 @@ def build_desktop_shell_package(
         return {"built": True, "mode": mode, "output": str(published_output)}
     finally:
         if session is not None and not _pending_build_retirement_for(root, cleanup_path=session):
-            shutil.rmtree(session, ignore_errors=True)
+            _remove_owned_shell_tree(session, within=root / "dist")
         if not _pending_build_retirement_for(root):
             _release_desktop_shell_refresh_lock(root, lock_relative=PREBUILD_LOCK_RELATIVE)
 
@@ -1672,6 +1759,7 @@ def _stage_desktop_shell(root: Path, *, deadline: float | None = None) -> dict[s
                 "staged desktop shell provenance does not match HEAD:desktop/electron "
                 f"(staged={staged_tree!r} current={current_tree!r})"
             )
+        _assert_assistant_package(root, built, deadline=deadline)
         _publish_built_shell_tree(
             built,
             root / STAGING_WIN_UNPACKED_RELATIVE,
@@ -1680,7 +1768,7 @@ def _stage_desktop_shell(root: Path, *, deadline: float | None = None) -> dict[s
         return {"electronTreeHash": staged_tree}
     finally:
         if not _pending_build_retirement_for(root, cleanup_path=session):
-            shutil.rmtree(session, ignore_errors=True)
+            _remove_owned_shell_tree(session, within=root / "dist")
 
 
 def _try_promote_staged_desktop_shell(root: Path) -> bool:
@@ -1691,7 +1779,7 @@ def _try_promote_staged_desktop_shell(root: Path) -> bool:
     half-written package can already expose exe and provenance), and renaming
     it in would ship a broken shell. Lock contention therefore yields to the
     helper and the caller falls back to the real rebuild. Only the Electron
-    tree hash gates the swap; the caller still runs the full
+    tree hash and verified assistant payload gate the swap; the caller still runs the full
     ``inspect_desktop_shell`` afterwards and falls back to the real npm rebuild
     when the promoted package does not pass. Any rename failure restores the
     previous layout and returns False so the slow path stays safe.
@@ -1705,7 +1793,7 @@ def _try_promote_staged_desktop_shell(root: Path) -> bool:
         _release_desktop_shell_refresh_lock(root, lock_relative=PREBUILD_LOCK_RELATIVE)
 
 
-def _try_promote_staged_desktop_shell_locked(root: Path) -> bool:
+def _try_promote_staged_desktop_shell_locked(root: Path, *, deadline: float | None = None) -> bool:
     staging_unpacked = root / STAGING_WIN_UNPACKED_RELATIVE
     if not (staging_unpacked / "Vibelution.exe").is_file():
         return False
@@ -1716,6 +1804,11 @@ def _try_promote_staged_desktop_shell_locked(root: Path) -> bool:
     if not current_tree or staged_tree != current_tree:
         # Leave the staging in place; the next successful prebuild replaces it.
         return False
+    try:
+        _assert_assistant_package(root, staging_unpacked,
+                                  deadline=deadline or time.monotonic() + DESKTOP_SHELL_BUILD_DEADLINE_SECONDS)
+    except (OSError, ValueError, RuntimeError):
+        return False
     live = root / "dist" / "desktop" / "win-unpacked"
     previous = root / PREVIOUS_WIN_UNPACKED_RELATIVE
     try:
@@ -1724,8 +1817,18 @@ def _try_promote_staged_desktop_shell_locked(root: Path) -> bool:
         # A sharing violation here means something still holds the live tree
         # open; leave staging and the old package untouched for a later retry.
         return False
-    shutil.rmtree(root / STAGING_OUTPUT_DIR_RELATIVE, ignore_errors=True)
+    _remove_owned_shell_tree(root / STAGING_OUTPUT_DIR_RELATIVE, within=root / "dist")
     return True
+
+
+def _remove_owned_shell_tree(path: Path, *, within: Path) -> None:
+    """Retire only the named owner tree, including Windows paths over 260 chars."""
+    assistant_payload = _assistant_payload_builder()
+    boundary = assistant_payload._trusted_root(within)
+    target = assistant_payload._trusted_root(path)
+    if target == boundary or not target.is_relative_to(boundary):
+        raise ValueError("desktop shell cleanup target is outside its owner boundary")
+    shutil.rmtree(target, ignore_errors=True)
 
 
 def _publish_built_shell_tree(source: Path, destination: Path, *, previous: Path) -> None:
@@ -1734,7 +1837,7 @@ def _publish_built_shell_tree(source: Path, destination: Path, *, previous: Path
     moved_previous = False
     try:
         if previous.exists():
-            shutil.rmtree(previous, ignore_errors=True)
+            _remove_owned_shell_tree(previous, within=destination.parent)
         if destination.exists():
             _rename_dir(destination, previous)
             moved_previous = True
@@ -1747,7 +1850,7 @@ def _publish_built_shell_tree(source: Path, destination: Path, *, previous: Path
                 pass
         raise
     if moved_previous:
-        shutil.rmtree(previous, ignore_errors=True)
+        _remove_owned_shell_tree(previous, within=destination.parent)
 
 
 def rebuild_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, Any]:
@@ -1757,7 +1860,7 @@ def rebuild_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, 
     deadline = time.monotonic() + DESKTOP_SHELL_BUILD_DEADLINE_SECONDS
     _wait_for_desktop_shell_build_lock(root, deadline=deadline)
     try:
-        if _try_promote_staged_desktop_shell_locked(root):
+        if _try_promote_staged_desktop_shell_locked(root, deadline=deadline):
             status = inspect_desktop_shell(root)
             if not status["stale"]:
                 _append_refresh_log(root, "rebuild.promoted_from_staging", reason=status["reason"])
@@ -1774,6 +1877,7 @@ def rebuild_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, 
         session = _run_desktop_shell_package_build(root, mode="dir", deadline=deadline)
         try:
             built = session / "builder-output" / "win-unpacked"
+            _assert_assistant_package(root, built, deadline=deadline)
             _publish_built_shell_tree(
                 built,
                 root / PACKAGED_EXE_RELATIVE.parent,
@@ -1781,7 +1885,7 @@ def rebuild_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, 
             )
         finally:
             if not _pending_build_retirement_for(root, cleanup_path=session):
-                shutil.rmtree(session, ignore_errors=True)
+                _remove_owned_shell_tree(session, within=root / "dist")
 
         status = inspect_desktop_shell(root)
         if status["stale"]:

@@ -1,4 +1,5 @@
 export type DesktopCliArgs = {
+  assistant?: boolean;
   workspaceRoot: string;
   projectRoot: string;
   configPath: string;
@@ -48,6 +49,7 @@ const LIFECYCLE_COMMANDS = new Set([
 
 export function parseDesktopCliArgs(argv: string[]): DesktopCliArgs {
   const result: DesktopCliArgs = {
+    ...(argv.includes("--assistant") ? { assistant: true } : {}),
     workspaceRoot: "",
     projectRoot: "",
     configPath: "",
@@ -59,6 +61,7 @@ export function parseDesktopCliArgs(argv: string[]): DesktopCliArgs {
   };
   for (let index = 0; index < argv.length; index += 1) {
     const item = argv[index];
+    if (item === "--assistant") continue;
     if (item === "--workspace") {
       result.workspaceRoot = String(argv[index + 1] || "").trim();
       index += 1;
@@ -117,6 +120,11 @@ export function parseDesktopCliArgs(argv: string[]): DesktopCliArgs {
     if (!item.startsWith("-") && LIFECYCLE_COMMANDS.has(lowered) && !result.lifecycleCommand) {
       result.lifecycleCommand = lowered;
     }
+  }
+  if (result.assistant && (result.lifecycleCommand || argv.some(item =>
+    ["--workspace", "--project", "--open-workbench", "--smoke", "--workbench-close-canary"].includes(item)
+    || item.startsWith("--workspace=") || item.startsWith("--project=") || /^vibelution:\/\//i.test(item.trim())))) {
+    throw new Error("ASSISTANT_MODE_CONFLICT");
   }
   return result;
 }

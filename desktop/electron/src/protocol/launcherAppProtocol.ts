@@ -77,7 +77,7 @@ export function resolveLauncherDistRoot(input: {
   // The packaged launcher window must observe the workspace active release so
   // web changes reach the shell without a full package rebuild; the packaged
   // snapshot stays as the fallback when no workspace release exists.
-  const activeRelease = resolveWorkspaceActiveRelease(input.workspaceRoot);
+  const activeRelease = input.workspaceRoot ? resolveWorkspaceActiveRelease(input.workspaceRoot) : null;
   if (activeRelease) {
     return activeRelease;
   }

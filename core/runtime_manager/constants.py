@@ -5,12 +5,21 @@ from __future__ import annotations
 from pathlib import Path
 
 from config.workbench import DEFAULT_WORKBENCH_HOST, configured_backend_port
+from core.infrastructure.native_runtime import is_launcher_assistant_process, resolve_native_project_root
 from vibelution_storage import resolve_active_project_storage_paths
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-PROJECT_STORAGE = resolve_active_project_storage_paths(PROJECT_ROOT)
-RUNTIME_ROOT = PROJECT_STORAGE.runtime
-LOG_ROOT = PROJECT_STORAGE.logs
+PROJECT_ROOT = resolve_native_project_root(Path(__file__).resolve().parents[2])
+if is_launcher_assistant_process():
+    # The Launcher profile is not a project checkout and has no project ID.
+    # Default local stores stay in that profile; explicit target-project
+    # descriptor resolution still goes through the normal storage resolver.
+    PROJECT_STORAGE = None
+    RUNTIME_ROOT = PROJECT_ROOT / ".runtime"
+    LOG_ROOT = PROJECT_ROOT / "logs"
+else:
+    PROJECT_STORAGE = resolve_active_project_storage_paths(PROJECT_ROOT)
+    RUNTIME_ROOT = PROJECT_STORAGE.runtime
+    LOG_ROOT = PROJECT_STORAGE.logs
 RUNTIME_MANAGER_DIR = RUNTIME_ROOT / "runtime-manager"
 INBOX_DIR = RUNTIME_MANAGER_DIR / "inbox"
 PROCESSING_DIR = RUNTIME_MANAGER_DIR / "processing"

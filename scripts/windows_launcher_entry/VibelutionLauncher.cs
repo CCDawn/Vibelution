@@ -17,6 +17,7 @@ internal static class VibelutionLauncher
     [STAThread]
     private static int Main(string[] args)
     {
+        if (ManagedDesktopAssistant.IsRequested(args)) return ManagedDesktopAssistant.Run(args);
         string projectDir = Environment.CurrentDirectory;
         try
         {
@@ -1327,11 +1328,9 @@ internal static class VibelutionLauncher
                 // this point no generic error is permission to dispatch twice.
                 mayHaveSent = true;
                 IAsyncResult writing = pipe.BeginWrite(bytes, 0, bytes.Length, null, null);
-                using (var completed = writing.AsyncWaitHandle)
-                {
-                    if (!completed.WaitOne(1500)) throw new TimeoutException("Native start write timed out.");
-                    pipe.EndWrite(writing);
-                }
+                var completed = WaitForNativePipeOperation(writing, 1500, "Native start write timed out.");
+                pipe.EndWrite(writing);
+                completed.Close();
                 string response = ReadNativeStartResponse(pipe, responseTimeoutMs);
                 var result = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(response);
                 int verdict = ValidateNativeStartResult(result, projectDir, requestId);
@@ -1393,13 +1392,10 @@ internal static class VibelutionLauncher
             {
                 IAsyncResult reading = pipe.BeginRead(buffer, 0, buffer.Length, null, null);
                 int count;
-                using (var completed = reading.AsyncWaitHandle)
-                {
-                    int remaining = (int)Math.Max(0, timeoutMs - elapsed.ElapsedMilliseconds);
-                    if (remaining <= 0) throw new TimeoutException("Native start result timed out.");
-                    if (!completed.WaitOne(remaining)) throw new TimeoutException("Native start result timed out.");
-                    count = pipe.EndRead(reading);
-                }
+                int remaining = (int)Math.Max(0, timeoutMs - elapsed.ElapsedMilliseconds);
+                var completed = WaitForNativePipeOperation(reading, remaining, "Native start result timed out.");
+                count = pipe.EndRead(reading);
+                completed.Close();
                 if (count == 0) throw new EndOfStreamException();
                 int newline = Array.IndexOf(buffer, (byte)10, 0, count);
                 output.Write(buffer, 0, newline >= 0 ? newline : count);
@@ -1408,6 +1404,17 @@ internal static class VibelutionLauncher
             }
             throw new InvalidDataException();
         }
+    }
+
+    private static WaitHandle WaitForNativePipeOperation(IAsyncResult operation, int timeoutMs, string timeoutMessage)
+    {
+        // Borrow the APM-owned event. A timeout can leave native I/O pending:
+        // disposing its event then races the completion callback's SetEvent.
+        // Only the caller's successful EndRead/EndWrite permits closing it.
+        // Otherwise let the operation retain it through completion and GC.
+        var completed = operation.AsyncWaitHandle;
+        if (timeoutMs <= 0 || !completed.WaitOne(timeoutMs)) throw new TimeoutException(timeoutMessage);
+        return completed;
     }
 
     private static Dictionary<string, object> ReadNativeJson(string path)

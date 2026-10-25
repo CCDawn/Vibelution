@@ -3,7 +3,9 @@ import {
   copyFileSync,
   existsSync,
   mkdirSync,
+  lstatSync,
   readFileSync,
+  readdirSync,
   writeFileSync
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
@@ -36,7 +38,11 @@ export function createIsolatedBuilderConfig(input) {
     app: resolve(input.appRoot),
     output: resolve(input.outputRoot)
   };
-  config.extraResources = [{ from: resolve(input.frontendRoot), to: "web-dist" }];
+  if (!input.assistantRoot) throw new Error("Desktop packages require the owner-built assistant payload.");
+  config.extraResources = [
+    { from: resolve(input.frontendRoot), to: "web-dist" },
+    { from: resolve(input.assistantRoot), to: "launcher-assistant" }
+  ];
   if (config.win?.icon) {
     config.win.icon = resolve(input.electronRoot, config.win.icon);
   }
@@ -65,6 +71,9 @@ export function runDesktopPackageBuild(input = {}) {
   if (!["dir", "staging", "linux-arm64"].includes(mode)) {
     throw new Error(`Unsupported desktop package mode: ${mode}`);
   }
+  if (mode === "linux-arm64" || process.platform !== "win32") {
+    throw new Error("Launcher assistant packages currently require a native Windows build.");
+  }
   const root = resolve(input.workspaceRoot ?? resolve(electronRoot, "..", ".."));
   const packageRoot = resolve(input.electronRoot ?? electronRoot);
   const buildRoot = requireOwnedPackageSession(input, root);
@@ -74,9 +83,9 @@ export function runDesktopPackageBuild(input = {}) {
   const nativeBuildRoot = join(buildRoot, "native-workbench-job");
   const outputRoot = join(buildRoot, "builder-output");
   const generatedConfigPath = join(buildRoot, "electron-builder.generated.json");
+  const assistantRoot = join(buildRoot, "launcher-assistant");
 
   mkdirSync(dirname(buildRoot), { recursive: true });
-  mkdirSync(buildRoot);
   mkdirSync(appRoot);
   mkdirSync(distRoot);
 
@@ -103,7 +112,9 @@ export function runDesktopPackageBuild(input = {}) {
       "--workspace-root", root,
       "--output", join(appRoot, "package-provenance.json"),
       "--dist-root", distRoot,
-      "--frontend-output", frontendRoot
+      "--frontend-output", frontendRoot,
+      "--assistant-payload-root", assistantRoot,
+      "--assistant-manifest-sha256", process.env.VIBELUTION_ASSISTANT_MANIFEST_SHA256
     ];
     runNode(
       input,
@@ -119,7 +130,8 @@ export function runDesktopPackageBuild(input = {}) {
       electronRoot: packageRoot,
       appRoot,
       outputRoot,
-      frontendRoot
+      frontendRoot,
+      assistantRoot
     });
     writeFileSync(generatedConfigPath, `${JSON.stringify(builderConfig, null, 2)}\n`, "utf8");
 
@@ -145,7 +157,7 @@ export function runDesktopPackageBuild(input = {}) {
       throw new Error("electron-builder did not produce its isolated output directory.");
     }
 
-    return { buildRoot, appRoot, frontendRoot, outputRoot, generatedConfigPath };
+    return { buildRoot, appRoot, frontendRoot, assistantRoot, outputRoot, generatedConfigPath };
   } catch (error) {
     throw error;
   }
@@ -167,8 +179,14 @@ function requireOwnedPackageSession(input, workspaceRoot) {
   if (dirname(buildRoot) !== expectedParent || !basename(buildRoot).startsWith(".desktop-shell-build-")) {
     throw new Error("Desktop package session must be an isolated child of workspace dist.");
   }
-  if (existsSync(buildRoot)) {
-    throw new Error(`Desktop package build path already exists: ${buildRoot}`);
+  const assistantRoot = join(buildRoot, "launcher-assistant");
+  if (resolve(String(process.env.VIBELUTION_ASSISTANT_PAYLOAD_ROOT ?? "")) !== assistantRoot
+    || !/^[0-9a-f]{64}$/.test(String(process.env.VIBELUTION_ASSISTANT_MANIFEST_SHA256 ?? ""))
+    || !existsSync(buildRoot) || lstatSync(buildRoot).isSymbolicLink() || !lstatSync(buildRoot).isDirectory()
+    || readdirSync(buildRoot).length !== 1 || readdirSync(buildRoot)[0] !== "launcher-assistant"
+    || lstatSync(assistantRoot).isSymbolicLink() || !lstatSync(assistantRoot).isDirectory()
+    || !existsSync(join(assistantRoot, "manifest.json"))) {
+    throw new Error("Desktop package session must contain only its owner-built assistant payload.");
   }
   return buildRoot;
 }
@@ -194,8 +212,11 @@ function validateWindowsBuild(outputRoot) {
   const executable = join(unpacked, "Vibelution.exe");
   const asar = join(unpacked, "resources", "app.asar");
   const provenance = join(unpacked, "resources", "app.asar.unpacked", "package-provenance.json");
-  if (!existsSync(executable) || !existsSync(asar) || !existsSync(provenance)) {
-    throw new Error("electron-builder output is missing the executable, app.asar, or package provenance.");
+  const assistant = join(unpacked, "resources", "launcher-assistant");
+  if (!existsSync(executable) || !existsSync(asar) || !existsSync(provenance)
+    || !existsSync(join(assistant, "manifest.json")) || !existsSync(join(assistant, "python", "pythonw.exe"))
+    || !existsSync(join(assistant, "source", "scripts", "assistant_host.py")) || !readJsonFile(provenance).assistant) {
+    throw new Error("electron-builder output is missing the executable, provenance, or assistant payload.");
   }
 }
 

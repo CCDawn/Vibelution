@@ -36,6 +36,72 @@ describe("singleInstanceDecision", () => {
 });
 
 describe("single-instance lifecycle envelope", () => {
+  it.each(["C:/integration", "C:\\integration", "/integration", "\\\\server\\share\\integration"])(
+    "preserves the explicit integration workspace independently of the worktree project: %s",
+    (workspaceRoot) => {
+      const envelope = createSingleInstanceEnvelope({
+        workspaceRoot,
+        projectRoot: "C:/integration/.worktrees/task",
+        lifecycleCommand: "start"
+      });
+      expect(envelope.workspaceRoot).toBe(workspaceRoot);
+      expect(resolveSingleInstanceCliIntent(envelope)).toEqual({
+        workspaceRoot,
+        projectRoot: "C:/integration/.worktrees/task",
+        openWorkbench: false,
+        hiddenPresentation: false,
+        lifecycleCommand: "start"
+      });
+    }
+  );
+
+  it("omits an unspecified or empty workspace and does not infer one from a project or slot", () => {
+    for (const input of [{}, { workspaceRoot: "" }]) {
+      const envelope = createSingleInstanceEnvelope({ ...input, projectRoot: "C:/worktree" });
+      expect(envelope).not.toHaveProperty("workspaceRoot");
+      expect(resolveSingleInstanceCliIntent({ ...envelope, slotRoot: "C:/slot" })).toEqual({
+        projectRoot: "C:/worktree", openWorkbench: false, hiddenPresentation: false, lifecycleCommand: ""
+      });
+      expect(resolveSingleInstanceCliIntent({ ...envelope, workspaceRoot: "" })).toHaveProperty("workspaceRoot", "");
+    }
+  });
+
+  it.each(["C:/integration", "/integration"])("rejects assistant workspace conflicts: %s", (workspaceRoot) => {
+    expect(() => createSingleInstanceEnvelope({ assistant: true, workspaceRoot })).toThrow("ASSISTANT_MODE_CONFLICT");
+    expect(() => resolveSingleInstanceCliIntent({ ...createSingleInstanceEnvelope({ assistant: true }), workspaceRoot }))
+      .toThrow("ASSISTANT_MODE_CONFLICT");
+  });
+
+  it.each([null, false, 42, {}, [], " C:/root", "C:/root ", "C:/root\u0000suffix", "relative/root", "C:foo", "\\relative", "https://example.com/root", "file:///C:/root"].map((value) => [value]))(
+    "rejects malformed explicit workspace roots on both envelope boundaries: %j",
+    (workspaceRoot) => {
+      expect(() => createSingleInstanceEnvelope({ workspaceRoot } as unknown as Parameters<typeof createSingleInstanceEnvelope>[0]))
+        .toThrow("INVALID_WORKSPACE_ROOT");
+      expect(() => resolveSingleInstanceCliIntent({ ...createSingleInstanceEnvelope(), workspaceRoot }))
+        .toThrow("INVALID_WORKSPACE_ROOT");
+    }
+  );
+
+  it("rejects an explicitly undefined workspace in received metadata", () => {
+    expect(() => resolveSingleInstanceCliIntent({ ...createSingleInstanceEnvelope(), workspaceRoot: undefined }))
+      .toThrow("INVALID_WORKSPACE_ROOT");
+  });
+
+  it("forwards an assistant-only open to the same primary without project intent", () => {
+    const envelope = createSingleInstanceEnvelope({ assistant: true, hiddenPresentation: true });
+    expect(envelope).toMatchObject({ assistant: true, projectRoot: "", openWorkbench: false });
+    const intent = resolveSingleInstanceCliIntent(envelope);
+    expect(intent).toMatchObject({ assistant: true, hiddenPresentation: true });
+    expect(resolveSecondInstanceIntent(intent)).toEqual({ action: "open_assistant", hiddenPresentation: true });
+  });
+
+  it("rejects conflicting assistant fields even in structured second-instance metadata", () => {
+    expect(() => createSingleInstanceEnvelope({ assistant: true, projectRoot: "C:/project" })).toThrow("ASSISTANT_MODE_CONFLICT");
+    expect(() => resolveSingleInstanceCliIntent({ ...createSingleInstanceEnvelope(), assistant: true, openWorkbench: true }))
+      .toThrow("ASSISTANT_MODE_CONFLICT");
+    expect(() => resolveSecondInstanceIntent({ assistant: true, lifecycleCommand: "start" })).toThrow("ASSISTANT_MODE_CONFLICT");
+  });
+
   it("defaults legacy or malformed second-instance metadata to operator", () => {
     expect(resolveSingleInstanceProvenance(undefined)).toBe("operator");
     expect(resolveSingleInstanceProvenance({})).toBe("operator");

@@ -8,19 +8,24 @@ import {
   type DesktopPackageProvenance
 } from "../packaging/packageProvenance.js";
 import { preparePackagedFrontend } from "../packaging/frontendBundle.js";
+import { readAssistantPayloadEvidence } from "../packaging/assistantPayload.js";
 
 export type WritePackageProvenanceArgs = {
   workspaceRoot: string;
   outputPath: string;
   distRoot: string;
   frontendOutput: string;
+  assistantPayloadRoot: string;
+  assistantManifestSha256: string;
 };
 
 const ARGUMENTS: Record<string, keyof WritePackageProvenanceArgs> = {
   "--workspace-root": "workspaceRoot",
   "--output": "outputPath",
   "--dist-root": "distRoot",
-  "--frontend-output": "frontendOutput"
+  "--frontend-output": "frontendOutput",
+  "--assistant-payload-root": "assistantPayloadRoot",
+  "--assistant-manifest-sha256": "assistantManifestSha256"
 };
 
 export function parseWritePackageProvenanceArgs(argv: string[]): WritePackageProvenanceArgs {
@@ -52,6 +57,7 @@ export function runWritePackageProvenanceCli(argv: string[] = process.argv.slice
   const outputPath = resolve(args.outputPath);
   const distRoot = resolve(args.distRoot);
   const frontendOutput = resolve(args.frontendOutput);
+  const assistant = readAssistantPayloadEvidence(args.assistantPayloadRoot, args.assistantManifestSha256);
   const frontend = preparePackagedFrontend({
     workspaceRoot,
     packageInputRoot: frontendOutput
@@ -65,6 +71,7 @@ export function runWritePackageProvenanceCli(argv: string[] = process.argv.slice
     frontendSourceCommit: frontend.frontendSourceCommit,
     mainBundleSha256: sha256File(resolve(distRoot, "main.js")),
     preloadBundleSha256: sha256File(resolve(distRoot, "preload.cjs")),
+    assistant,
     builtAt: new Date().toISOString()
   });
   writeDesktopPackageProvenance(outputPath, provenance);

@@ -302,3 +302,16 @@ def test_invalid_reference_is_reported_as_truncated(monkeypatch):
 
     assert result["truncated"] is True
     assert "Missing" in result["omittedSchemas"]
+
+
+def test_internal_spec_and_entry_projector_skip_bootstrap_and_legacy_contracts(monkeypatch):
+    spec = _spec({"/api/example": {"get": _operation("example")}})
+    monkeypatch.setattr(catalog, "get_spec", lambda: pytest.fail("explicit spec must not bootstrap"))
+    monkeypatch.setattr(catalog, "_allowlisted_read_paths", lambda _: pytest.fail("neutral projection needs no PA read gate"))
+    monkeypatch.setattr(catalog, "_extended_action", lambda *_: pytest.fail("neutral projection needs no PA contracts"))
+
+    def entry(method, path, operation):
+        return {**catalog._catalog_identity_entry(method, path, operation), "access": "operator_only", "executable": False}
+
+    assert catalog.api_catalog(spec=spec, entry_projector=entry)["operations"][0]["operationId"] == "example"
+    assert catalog.api_describe("example", spec=spec, entry_projector=entry)["operation"]["executable"] is False

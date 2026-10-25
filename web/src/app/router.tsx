@@ -67,6 +67,7 @@ const LogsRoute = lazyRoute(() => import("../routes/LogsRoute").then((module) =>
 const MemoryRoute = lazyRoute(loadMemoryRouteChunk);
 const PetRoute = lazyRoute(() => import("../routes/PetRoute").then((module) => ({ default: module.PetRoute })));
 const DesktopAssistantRoute = lazyRoute(() => import("../routes/desktopPet/DesktopAssistantRoute").then((module) => ({ default: module.DesktopAssistantRoute })));
+const LauncherAssistantRoute = lazyRoute(() => import("../routes/desktopPet/LauncherAssistantRoute").then((module) => ({ default: module.LauncherAssistantRoute })));
 const PersonalAssistantRoute = lazyRoute(() => import("../routes/PersonalAssistantRoute").then((module) => ({ default: module.PersonalAssistantRoute })));
 const PromptTemplatesRoute = lazyRoute(() => import("../routes/PromptTemplatesRoute").then((module) => ({ default: module.PromptTemplatesRoute })));
 const ResetRoute = lazyRoute(() => import("../routes/ResetRoute").then((module) => ({ default: module.ResetRoute })));
@@ -175,6 +176,10 @@ function guardedLazyElement(
 }
 
 export const router = createBrowserRouter([
+  {
+    path: "/launcher-assistant",
+    ...guardedLazyElement(<LauncherAssistantRoute />, "launcher"),
+  },
   {
     path: "/desktop-assistant",
     ...guardedLazyElement(<DesktopAssistantRoute />, "workbench"),

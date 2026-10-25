@@ -83,14 +83,33 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     atomic_write_json(path, payload, sort_keys=True, strict_replace=True)
 
 
-def _teams_root() -> Path:
+def _teams_root(*, seed: bool = True) -> Path:
     s = _service()
-    return developer_sandbox.seeded_sandbox_workspace_path(s._project_root(), "teams")
+    resolve = developer_sandbox.seeded_sandbox_workspace_path if seed else developer_sandbox.sandboxed_workspace_path
+    return resolve(s._project_root(), "teams")
 
 
-def _teams_index_path() -> Path:
+def _teams_index_path(*, seed: bool = True) -> Path:
     s = _service()
-    return s._teams_root() / "teams.json"
+    return (s._teams_root() if seed else s._teams_root(seed=False)) / "teams.json"
+
+
+def read_index_snapshot(*, project_root: Path) -> dict[str, Any]:
+    """Read existing roster authority without seeding, repair, or empty fallback.
+
+    Callers deciding visibility must distinguish an unavailable authority from
+    an authoritative empty roster. Ordinary CRUD's legacy defaults stay intact.
+    """
+    s = _service()
+    expected_root = Path(project_root).resolve()
+    if Path(s.PROJECT_ROOT).resolve() != expected_root or s._project_root().resolve() != expected_root:
+        raise ValueError("Team index project binding changed")
+    with s._TEAM_LOCK:
+        payload = s._read_json(s._teams_index_path(seed=False))
+    teams = payload.get("teams")
+    if not isinstance(teams, list) or len(teams) > 100_000 or any(not isinstance(team, dict) for team in teams):
+        raise ValueError("Team index authority unavailable")
+    return payload
 
 
 def _team_canvas_path(team_id: str) -> Path:

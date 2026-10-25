@@ -61,6 +61,34 @@ it("publishes only the native endpoint belonging to the current startup and clea
     ...identity, workspaceRoot: root, httpEndpoint: "http://127.0.0.1:4567",
     webSocketDebuggerUrl: "ws://127.0.0.1:4567/devtools/browser/current"
   });
+  expect(JSON.parse(readFileSync(recordPath, "utf8"))).not.toHaveProperty("kind");
   dispose();
   expect(() => readFileSync(recordPath)).toThrow();
+});
+
+it("publishes an independent assistant record without a project owner path", async () => {
+  const { root } = fixture();
+  writeFileSync(join(root, "DevToolsActivePort"), "4567\n/devtools/browser/assistant-current\n");
+  const identity = { pid: process.pid, createTime: 123, executable: process.execPath };
+  const dispose = await publishLocalDebugging(root, "", identity);
+  const recordPath = join(root, "assistant", "desktop_debug.json");
+  expect(JSON.parse(readFileSync(recordPath, "utf8"))).toEqual({
+    schemaVersion: 1, ...identity, workspaceRoot: "", kind: "launcher_assistant",
+    httpEndpoint: "http://127.0.0.1:4567", webSocketDebuggerUrl: "ws://127.0.0.1:4567/devtools/browser/assistant-current"
+  });
+  dispose();
+  expect(() => readFileSync(recordPath)).toThrow();
+});
+
+it("keeps a replacement assistant startup record when the old publisher retires", async () => {
+  const { root } = fixture();
+  writeFileSync(join(root, "DevToolsActivePort"), "4567\n/devtools/browser/first\n");
+  const identity = { pid: process.pid, createTime: 123, executable: process.execPath };
+  const recordPath = join(root, "assistant", "desktop_debug.json");
+  const dispose = await publishLocalDebugging(root, "", identity, recordPath);
+  const record = JSON.parse(readFileSync(recordPath, "utf8"));
+  record.webSocketDebuggerUrl = "ws://127.0.0.1:5678/devtools/browser/next";
+  writeFileSync(recordPath, JSON.stringify(record));
+  dispose();
+  expect(JSON.parse(readFileSync(recordPath, "utf8"))).toEqual(record);
 });

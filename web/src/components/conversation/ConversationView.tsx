@@ -214,6 +214,7 @@ async function copyTextToClipboard(text: string) {
 // frames still re-render this component because the active-turn message prop
 // changes per committed frame.
 export const ConversationView = React.memo(function ConversationView({
+  runtimeApi,
   sessionId,
   title,
   phase,
@@ -338,8 +339,8 @@ export const ConversationView = React.memo(function ConversationView({
   // cache key with the shell-wide summary consumers; absence of data degrades
   // to the raw model id.
   const configSummaryQuery = useQuery({
-    queryKey: queryKeys.configPublic(),
-    queryFn: ({ signal }) => fetchConfigBootstrap({ signal }),
+    queryKey: runtimeApi ? [runtimeApi.cacheKey, "config"] : queryKeys.configPublic(),
+    queryFn: ({ signal }) => (runtimeApi?.fetchConfigBootstrap ?? fetchConfigBootstrap)({ signal }),
     staleTime: 30_000,
   });
   const modelLabelByModelId = useMemo(
@@ -464,8 +465,8 @@ export const ConversationView = React.memo(function ConversationView({
   } | null>(null);
   const curationFeedbackTimerRef = useRef<number | null>(null);
   const messageCurationQuery = useQuery({
-    queryKey: queryKeys.sessionMessageCuration(sessionId),
-    queryFn: () => fetchSessionMessageCuration(sessionId),
+    queryKey: runtimeApi ? [runtimeApi.cacheKey, "curation", sessionId] : queryKeys.sessionMessageCuration(sessionId),
+    queryFn: () => (runtimeApi?.fetchMessageCuration ?? fetchSessionMessageCuration)(sessionId),
     // Curation decorates loaded messages; its queue scan must not compete with
     // the initial transcript request while there is nothing to annotate yet.
     enabled: Boolean(sessionId) && !companionMode && !transcriptPending,
@@ -1243,7 +1244,7 @@ export const ConversationView = React.memo(function ConversationView({
     // Optimistic flip; the query invalidation restores server authority on
     // success and the overlay entry is dropped again on failure (rollback).
     setCurationOverrides((current) => applyOptimisticCuration(current, messageId, action));
-    void setSessionMessageCuration(sessionId, messageId, action)
+    void (runtimeApi?.setMessageCuration ?? setSessionMessageCuration)(sessionId, messageId, action)
       .then(() => {
         setCurationOverrides((current) => {
           if (!current.has(messageId)) {
@@ -1253,7 +1254,7 @@ export const ConversationView = React.memo(function ConversationView({
           next.delete(messageId);
           return next;
         });
-        void queryClient.invalidateQueries({ queryKey: queryKeys.sessionMessageCuration(sessionId) });
+        void queryClient.invalidateQueries({ queryKey: runtimeApi ? [runtimeApi.cacheKey, "curation", sessionId] : queryKeys.sessionMessageCuration(sessionId) });
       })
       .catch((error) => {
         setCurationOverrides((current) => {

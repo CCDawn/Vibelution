@@ -288,7 +288,8 @@ export function postBrowserTelemetry(
   payload: BrowserTelemetryEventInput,
   options?: { preferBeacon?: boolean },
 ) {
-  if (typeof window === "undefined") {
+  if (typeof window === "undefined" || (window.location.protocol === "vibelution-launcher:"
+      && window.location.pathname === "/launcher-assistant")) {
     return;
   }
 

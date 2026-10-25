@@ -52,7 +52,9 @@ from .team import team_store as _team_store
 from .team import team_constants as _team_constants
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+from core.infrastructure.native_runtime import resolve_native_project_root
+
+PROJECT_ROOT = resolve_native_project_root(Path(__file__).resolve().parents[3])
 SCHEMA_VERSION = _team_constants.SCHEMA_VERSION
 CANVAS_KIND = _team_constants.CANVAS_KIND
 RESEARCH_TEAM_DISPLAY_NAME = _team_constants.RESEARCH_TEAM_DISPLAY_NAME

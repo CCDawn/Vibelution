@@ -24,7 +24,9 @@ from core.agent_plugins.virtual_human_life.service import (
     VirtualHumanLifeService,
 )
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+from core.infrastructure.native_runtime import resolve_native_project_root
+
+PROJECT_ROOT = resolve_native_project_root(Path(__file__).resolve().parents[3])
 logger = logging.getLogger(__name__)
 
 _SERVICE_LOCK = threading.Lock()

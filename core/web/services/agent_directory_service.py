@@ -387,7 +387,9 @@ from .agent_directory.episodic_memory import (
 )
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+from core.infrastructure.native_runtime import resolve_native_project_root
+
+PROJECT_ROOT = resolve_native_project_root(Path(__file__).resolve().parents[3])
 AGENT_REGISTRY_VERSION = 1
 SUSPICIOUS_REGISTRY_SHRINK_MIN_AGENTS = 8
 SUSPICIOUS_REGISTRY_SHRINK_MIN_DIRECT_AGENTS = 3

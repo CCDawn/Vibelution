@@ -2197,7 +2197,8 @@ function Ensure-NativeLauncherEntryExecutable {
     }
 
     $sourcePath = Join-Path $projectDir "scripts\windows_launcher_entry\VibelutionLauncher.cs"
-    $inputs = @($nativeLauncherEntryBuildScriptPath, $sourcePath, $launcherIconPath) | Where-Object { Test-Path -LiteralPath $_ }
+    $assistantSourcePath = Join-Path $projectDir "scripts\windows_launcher_entry\ManagedDesktopAssistant.cs"
+    $inputs = @($nativeLauncherEntryBuildScriptPath, $sourcePath, $assistantSourcePath, $launcherIconPath) | Where-Object { Test-Path -LiteralPath $_ }
     $needsBuild = -not (Test-Path -LiteralPath $outputPath)
     if (-not $needsBuild) {
         $outputItem = Get-Item -LiteralPath $outputPath

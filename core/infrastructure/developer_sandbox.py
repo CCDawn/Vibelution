@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from core.infrastructure.native_runtime import resolve_native_project_root
 from config.paths import (
     CONFIG_HOME_ENV,
     CONFIG_PATH_ENV,
@@ -39,7 +40,7 @@ resolve_workspace_home = resolve_operator_workspace_home
 from config.public_config import CONFIG_PATH, load_public_config, public_config_hash, save_public_config
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = resolve_native_project_root(Path(__file__).resolve().parents[2])
 SANDBOX_SCHEMA_VERSION = 1
 CONFIG_SECTION = "launcher"
 CONFIG_KEY = "developer_mode"
@@ -376,6 +377,48 @@ def formal_workspace_path(project_root: Path, *parts: str) -> Path:
 
 def sandboxed_workspace_path(project_root: Path, *parts: str) -> Path:
     return sandbox_workspace_path(project_root, *parts) or formal_workspace_path(project_root, *parts)
+
+
+def existing_sandboxed_workspace_path(project_root: Path, *parts: str, public_config: dict) -> Path:
+    """Resolve an existing read authority without loading config or ensuring state."""
+    try:
+        if not isinstance(public_config, dict):
+            raise ValueError("invalid snapshot")
+        launcher = public_config.get(CONFIG_SECTION, {})
+        if not isinstance(launcher, dict):
+            raise ValueError("invalid launcher snapshot")
+        setting = launcher.get(CONFIG_KEY, {})
+        if not isinstance(setting, dict) or type(setting.get("enabled", False)) is not bool:
+            raise ValueError("invalid mode")
+        root = _project_root(project_root)
+        if not setting.get("enabled", False):
+            return formal_workspace_path(root, *parts)
+        path = _active_state_path(root)
+        before = path.stat()
+        with path.open("rb") as stream:
+            raw = stream.read(64 * 1024 + 1)
+        if len(raw) > 64 * 1024:
+            raise ValueError("authority too large")
+        after = path.stat()
+        if (before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+            raise ValueError("authority changed")
+        state = json.loads(raw)
+        if not isinstance(state, dict) or type(state.get("schemaVersion")) is not int or state["schemaVersion"] != 1:
+            raise ValueError("invalid authority")
+        token = state.get("sandboxId")
+        if not isinstance(token, str) or not token or len(token) > 128 or _safe_token(token, default="") != token:
+            raise ValueError("invalid sandbox identity")
+        sandbox = _sandbox_root(root, token)
+        workspace = sandbox / "workspace"
+        if (sandbox.resolve() != sandbox.parent.resolve() / token or not workspace.is_dir()
+            or not workspace.resolve().is_relative_to(sandbox.resolve())):
+            raise ValueError("workspace unavailable")
+        result = workspace.joinpath(*parts)
+        if not result.resolve().is_relative_to(workspace.resolve()):
+            raise ValueError("path outside workspace")
+        return result
+    except (OSError, ValueError, TypeError):
+        raise ValueError("EXISTING_WORKSPACE_UNAVAILABLE") from None
 
 
 def seeded_sandbox_workspace_path(project_root: Path, *parts: str) -> Path:

@@ -15,6 +15,7 @@ if (-not $OutputPath) {
 }
 
 $sourcePath = Join-Path $PSScriptRoot "VibelutionLauncher.cs"
+$assistantSourcePath = Join-Path $PSScriptRoot "ManagedDesktopAssistant.cs"
 $iconPath = Join-Path $ProjectDir "assets\icons\vibelution.ico"
 if (-not (Test-Path -LiteralPath $sourcePath)) {
     throw "Native launcher entry source not found: $sourcePath"
@@ -50,6 +51,7 @@ $arguments = @(
     ("/win32icon:{0}" -f $iconPath),
     ("/out:{0}" -f $OutputPath),
     $sourcePath
+    $assistantSourcePath
 )
 
 & $compilerPath @arguments

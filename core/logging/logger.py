@@ -32,6 +32,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from core.infrastructure.native_runtime import resolve_native_project_root
 from core.logging.safe_payload import summarize_tool_arguments
 from core.logging.trace_context import current_trace_fields
 from vibelution_storage import (
@@ -43,7 +44,7 @@ from vibelution_storage import (
 # 落盘路径常量（统一到项目 logs/ 下，与 runtime_scenes 同根）
 # ============================================================================
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_PROJECT_ROOT = resolve_native_project_root(Path(__file__).resolve().parents[2])
 try:
     LOG_ROOT = str(resolve_active_project_storage_paths(_PROJECT_ROOT).logs)
 except ProjectIdentityError:

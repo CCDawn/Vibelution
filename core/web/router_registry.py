@@ -47,6 +47,7 @@ _ROUTE_MODULE_NAMES: tuple[str, ...] = (
     "core.web.routes.runtime_tasks",
     "core.web.routes.project_agent_bus",
     "core.web.routes.external_agent",
+    "core.web.routes.launcher_assistant_management",
     "core.web.routes.kernel",
     "core.web.routes.team_templates",
     "core.web.routes.teams",

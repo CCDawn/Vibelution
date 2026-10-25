@@ -31,7 +31,7 @@ export function createDesktopPaths(input: DesktopPathInput): DesktopPaths {
   };
 }
 
-export function resolvePreloadPath(paths: DesktopPaths): string {
+export function resolvePreloadPath(paths: Pick<DesktopPaths, "desktopBundleRoot">): string {
   return resolve(paths.desktopBundleRoot, "preload.cjs");
 }
 

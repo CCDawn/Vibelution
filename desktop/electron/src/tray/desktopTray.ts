@@ -14,6 +14,7 @@ export type TrayFreshness = {
 };
 
 export type DesktopTrayActions = {
+  openAssistant?: () => void;
   openLauncher: () => void;
   listInstances: () => Promise<TrayBranchInstance[]>;
   getFreshness: () => Promise<TrayFreshness>;
@@ -61,6 +62,7 @@ export function buildDesktopTrayTemplate(
       ? DESKTOP_TRAY_MENU_LABELS.listFailed
       : DESKTOP_TRAY_MENU_LABELS.noRunning;
   return [
+    ...(actions.openAssistant ? [{ label: "打开个人助理", click: actions.openAssistant }] : []),
     { label: DESKTOP_TRAY_MENU_LABELS.openLauncher, click: actions.openLauncher },
     { label: freshness.label || DESKTOP_TRAY_MENU_LABELS.freshnessUnknown, enabled: false },
     { type: "separator" },

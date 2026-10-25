@@ -1,13 +1,14 @@
 <#
 .SYNOPSIS
-  One-shot Windows setup for Vibelution workbench (Phase 1 end-user path).
+  One-shot Windows setup for Vibelution desktop assistant and workbench.
 
 .DESCRIPTION
   Checks Python / Node / Git, creates .venv, installs Python deps, ensures web
-  dependencies and dist, and optionally starts the Launcher.
+  and desktop/electron build dependencies, verifies the native Launcher, then
+  builds and publishes the managed desktop package. Optionally starts a project.
 
-  Phase 1 still requires system Python 3.11+ and Node 18+. Phase 2 will embed
-  runtimes in a portable package (see docs/product/2026-08-06-windows-end-user-install.md).
+  Build prerequisites are system Python 3.11+ and Node 18+. The managed desktop
+  package carries the sealed assistant runtime produced by the shared owner.
 #>
 [CmdletBinding()]
 param(
@@ -45,6 +46,7 @@ $VenvPython = Join-Path $VenvDir "Scripts\python.exe"
 $VenvPythonw = Join-Path $VenvDir "Scripts\pythonw.exe"
 $Requirements = Join-Path $ProjectDir "requirements.txt"
 $WebDir = Join-Path $ProjectDir "web"
+$DesktopElectronDir = Join-Path $ProjectDir "desktop\electron"
 $DistIndex = Join-Path $WebDir "dist\index.html"
 $SyncLauncher = Join-Path $ProjectDir "scripts\windows_launcher_entry\sync_vibelution_launcher_entry.ps1"
 $LocalAppData = [Environment]::GetFolderPath("LocalApplicationData")
@@ -126,7 +128,51 @@ function Invoke-Native {
     }
 }
 
-Write-Host "Vibelution Windows install (Phase 1)"
+function Ensure-DesktopElectronDependencies {
+    param([string]$DesktopDir)
+
+    $current = $false
+    if (Test-Path -LiteralPath (Join-Path $DesktopDir "node_modules") -PathType Container) {
+        try {
+            Invoke-Native -FilePath "npm" -ArgumentList @("ls", "--depth=0", "--include=dev", "--prefix", $DesktopDir) -Label "Verify desktop/electron dependencies" | Out-Host
+            $current = $true
+        } catch {
+            Write-Host "  desktop/electron dependencies need installation"
+        }
+    }
+    if (-not $current) {
+        Invoke-Native -FilePath "npm" -ArgumentList @("ci", "--include=dev", "--prefix", $DesktopDir) -Label "npm ci (desktop/electron)"
+    } else {
+        Write-Host "  desktop/electron dependencies verified — reuse"
+    }
+}
+
+function Sync-NativeLauncherForManagedInstall {
+    param([string]$SyncScript, [string]$ProjectRoot, [string]$OutputPath)
+
+    if (-not $OutputPath -or -not (Test-Path -LiteralPath $SyncScript -PathType Leaf)) {
+        throw "Native Launcher sync is required before managed publication."
+    }
+    $powershellExe = Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe"
+    $raw = @(Invoke-Native -FilePath $powershellExe -ArgumentList @(
+        "-NoLogo", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
+        "-ExecutionPolicy", "Bypass", "-File", $SyncScript,
+        "-ProjectDir", $ProjectRoot, "-OutputPath", $OutputPath
+    ) -Label "Sync required native Launcher entry")
+    try {
+        $result = ($raw -join "`n") | ConvertFrom-Json -ErrorAction Stop
+        $matchesOutput = [string]::Equals([IO.Path]::GetFullPath([string]$result.outputPath),
+            [IO.Path]::GetFullPath($OutputPath), [StringComparison]::OrdinalIgnoreCase)
+        if ([string]$result.status -cnotin @("current", "rebuilt") -or -not $matchesOutput -or
+            -not (Test-Path -LiteralPath $OutputPath -PathType Leaf)) {
+            throw "Native Launcher sync did not confirm the required executable."
+        }
+    } catch {
+        throw "Native Launcher sync did not confirm a current executable; managed package was not published."
+    }
+}
+
+Write-Host "Vibelution Windows desktop install"
 Write-Host "Project: $ProjectDir"
 
 Write-Step "Check prerequisites"
@@ -167,7 +213,10 @@ if (-not (Test-Path -LiteralPath $Requirements)) {
 Invoke-Native -FilePath $VenvPython -ArgumentList @("-m", "pip", "install", "--upgrade", "pip") -Label "pip upgrade"
 Invoke-Native -FilePath $VenvPython -ArgumentList @("-m", "pip", "install", "-r", $Requirements) -Label "pip install -r requirements.txt"
 
-Write-Step "Install frontend dependencies"
+Write-Step "Prepare desktop/electron build dependencies"
+Ensure-DesktopElectronDependencies -DesktopDir $DesktopElectronDir
+
+Write-Step "Install web frontend dependencies"
 if (-not $SkipFrontendInstall) {
     $nodeModules = Join-Path $WebDir "node_modules"
     if (-not (Test-Path -LiteralPath $nodeModules)) {
@@ -199,21 +248,15 @@ if (-not $SkipFrontendBuild) {
     Write-Host "  using existing web/dist"
 }
 
-Write-Step "Sync native Launcher entry (best-effort)"
-if (Test-Path -LiteralPath $SyncLauncher) {
-    try {
-        & powershell -NoProfile -ExecutionPolicy Bypass -File $SyncLauncher
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "  warning: launcher sync returned $LASTEXITCODE (you can still start via scripts/vibelution_launcher.ps1)" -ForegroundColor Yellow
-        } else {
-            Write-Host "  launcher sync finished"
-        }
-    } catch {
-        Write-Host "  warning: launcher sync failed: $($_.Exception.Message)" -ForegroundColor Yellow
-    }
-} else {
-    Write-Host "  sync script not found — skip"
-}
+Write-Step "Sync and verify required native Launcher entry"
+Sync-NativeLauncherForManagedInstall -SyncScript $SyncLauncher -ProjectRoot $ProjectDir -OutputPath $NativeLauncher
+
+Write-Step "Build and publish managed desktop assistant package"
+$ManagedDesktopInstaller = Join-Path $ProjectDir "scripts\install_managed_desktop.py"
+Invoke-Native `
+    -FilePath $VenvPython `
+    -ArgumentList @($ManagedDesktopInstaller, "--project", $ProjectDir, "--apply") `
+    -Label "Build and publish managed desktop package"
 
 $configHome = Join-Path ([Environment]::GetFolderPath("MyDocuments")) "Vibelution\config"
 Write-Host ""
@@ -224,6 +267,7 @@ Write-Host "     (created on first Launcher start if missing)"
 Write-Host "  2. Start:"
 Write-Host "       Desktop shortcut: Vibelution Launcher"
 Write-Host "       or: $NativeLauncher --project `"$ProjectDir`" start"
+Write-Host "       Independent assistant: $NativeLauncher --assistant"
 Write-Host "  3. Guide: docs\guides\install-windows.md"
 Write-Host ""
 if (Test-Path -LiteralPath $VenvPythonw) {

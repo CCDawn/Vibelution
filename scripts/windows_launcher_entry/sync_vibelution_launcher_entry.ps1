@@ -18,6 +18,7 @@ if (-not $OutputPath) {
 
 $buildScriptPath = Join-Path $projectRoot "scripts\\windows_launcher_entry\\build_vibelution_launcher_entry.ps1"
 $sourcePath = Join-Path $projectRoot "scripts\\windows_launcher_entry\\VibelutionLauncher.cs"
+$assistantSourcePath = Join-Path $projectRoot "scripts\\windows_launcher_entry\\ManagedDesktopAssistant.cs"
 $iconPath = Join-Path $projectRoot "assets\\icons\\vibelution.ico"
 $syncLogPath = Join-Path $projectRoot ".runtime\\launcher\\native-entry-sync.log"
 
@@ -47,7 +48,7 @@ function Write-NativeLauncherSyncLog {
 }
 
 function Get-NativeLauncherSyncInputs {
-    $inputs = @($buildScriptPath, $sourcePath, $iconPath)
+    $inputs = @($buildScriptPath, $sourcePath, $assistantSourcePath, $iconPath)
     $missing = @($inputs | Where-Object { -not (Test-Path -LiteralPath $_) })
     if ($missing.Count -gt 0) {
         throw "Native Launcher sync inputs are missing: $($missing -join '; ')"

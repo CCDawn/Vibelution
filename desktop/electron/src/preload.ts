@@ -4,7 +4,15 @@ import { installRendererWindowClose } from "./windows/rendererWindowClose.js";
 
 const isLauncherControlWindow = process.argv.includes("--vibelution-window-role=launcher-control");
 const isDesktopPetWindow = process.argv.includes("--vibelution-window-role=desktop-pet");
+const isLauncherAssistantWindow = process.argv.includes("--vibelution-window-role=launcher-assistant");
 
+if (isLauncherAssistantWindow) {
+  contextBridge.exposeInMainWorld("vibelutionLauncherAssistant", {
+    invoke: (payload: unknown) => ipcRenderer.invoke(IPC_CHANNELS.assistantInvoke, payload),
+  });
+}
+
+if (!isLauncherAssistantWindow) {
 contextBridge.exposeInMainWorld("vibelutionLauncher", {
   getVersion: () => ipcRenderer.invoke(IPC_CHANNELS.getVersion),
   getDesktopShellSummary: () => ipcRenderer.invoke(IPC_CHANNELS.getDesktopShellSummary),
@@ -83,7 +91,8 @@ contextBridge.exposeInMainWorld("vibelutionLauncher", {
       }
     : {})
 });
+}
 
-if (!isLauncherControlWindow && !isDesktopPetWindow) {
+if (!isLauncherControlWindow && !isDesktopPetWindow && !isLauncherAssistantWindow) {
   contextBridge.executeInMainWorld({ func: installRendererWindowClose });
 }

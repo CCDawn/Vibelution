@@ -5,7 +5,7 @@ import viewSource from "./ConversationView.tsx?raw";
 describe("ConversationView model labels source contract", () => {
   it("derives model labels from the lightweight config bootstrap", () => {
     expect(viewSource).toContain("queryKeys.configPublic()");
-    expect(viewSource).toContain("fetchConfigBootstrap(");
+    expect(viewSource).toContain("(runtimeApi?.fetchConfigBootstrap ?? fetchConfigBootstrap)({ signal })");
     expect(viewSource).toContain("modelLabels");
   });
 

@@ -44,4 +44,9 @@ describe("desktop companion window", () => {
     fake.navigate?.({}, "http://127.0.0.1:8001/desktop-pet");
     expect(fake.setBounds).toHaveBeenLastCalledWith({ x: 1100, y: 440, width: 300, height: 330 }, false);
   });
+  it("reuses native geometry with a separate Launcher assistant preload role", () => {
+    createPetWindow("vibelution-launcher://launcher/launcher-assistant", { userDataRoot: "test" } as DesktopPaths,
+      undefined, "launcher-assistant");
+    expect(fake.options).toMatchObject({ webPreferences: { additionalArguments: ["--vibelution-window-role=launcher-assistant"] } });
+  });
 });

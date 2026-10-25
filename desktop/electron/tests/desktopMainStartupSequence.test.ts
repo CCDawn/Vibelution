@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { runInNewContext } from "node:vm";
-import { ScriptTarget, transpileModule } from "typescript";
+import { createSourceFile, isFunctionDeclaration, isIfStatement, ScriptTarget, transpileModule } from "typescript";
 import { describe, expect, it, vi } from "vitest";
 import { parseDesktopCliArgs } from "../src/cli/desktopCli.js";
 import { shouldDeferWorkbenchOpenUntilLifecycleStart } from "../src/process/desktopShellFreshness.js";
@@ -9,6 +9,20 @@ import { normalizeInstanceKey } from "../src/lifecycle/projectStoragePaths.js";
 import { PROJECT_SLOT_LIFECYCLE_COMMANDS } from "../src/protocol/applyProjectSlot.js";
 
 const mainSourcePath = fileURLToPath(new URL("../src/main.ts", import.meta.url));
+
+function mainFunction(source: string, name: string): string {
+  const parsed = createSourceFile("main.ts", source, ScriptTarget.Latest, true);
+  const declaration = parsed.statements.find(node => isFunctionDeclaration(node) && node.name?.text === name);
+  if (!declaration) throw new Error(`Missing main function: ${name}`);
+  return declaration.getText(parsed);
+}
+
+function primaryStartup(source: string): string {
+  const parsed = createSourceFile("main.ts", source, ScriptTarget.Latest, true);
+  const registration = parsed.statements.find(node => isIfStatement(node) && node.expression.getText(parsed) === "runPrimaryWhenReady");
+  if (!registration) throw new Error("Missing primary whenReady registration");
+  return registration.getText(parsed);
+}
 
 describe("Electron main startup sequence", () => {
   it.each([
@@ -40,10 +54,11 @@ describe("Electron main startup sequence", () => {
 
   it("uses launch readiness before opening windows and leaves full freshness on the resident watcher", () => {
     const source = readFileSync(mainSourcePath, "utf8");
-    const startup = source.slice(source.indexOf("app.whenReady()"));
-    const refreshIndex = startup.indexOf("await refreshPackagedDesktopShellIfStale(");
-    const bootstrapIndex = startup.indexOf("launcherBootstrap = await bootstrapMainOwnedLauncher(paths, initialWorkbenchUrl)");
-    const watcherIndex = startup.indexOf("startPeriodicShellFreshnessWatch()");
+    const startup = primaryStartup(source);
+    const bootstrap = mainFunction(source, "bootstrapProjectControlPlane");
+    const refreshIndex = bootstrap.indexOf("await refreshPackagedDesktopShellIfStale(");
+    const bootstrapIndex = bootstrap.indexOf("launcherBootstrap = await bootstrapMainOwnedLauncher(paths, initialWorkbenchUrl)");
+    const watcherIndex = bootstrap.indexOf("startPeriodicShellFreshnessWatch()");
     const refresh = source.slice(
       source.indexOf("async function refreshPackagedDesktopShellIfStale("),
       source.indexOf("async function runSmokeAndQuit(")
@@ -54,6 +69,7 @@ describe("Electron main startup sequence", () => {
     );
 
     expect(refreshIndex).toBeGreaterThan(-1);
+    expect(startup).toContain("await ensureProjectControlPlane(workspaceRoot)");
     expect(bootstrapIndex).toBeGreaterThan(refreshIndex);
     expect(watcherIndex).toBeGreaterThan(bootstrapIndex);
     expect(refresh).toContain("await inspectCurrentDesktopShellLaunchReadiness()");
@@ -66,13 +82,15 @@ describe("Electron main startup sequence", () => {
     const quitIndex = source.indexOf("if (!runPrimaryWhenReady)");
     const approveIndex = source.indexOf("shutdownApproved = true", quitIndex);
     const whenReadyGuardIndex = source.indexOf("if (runPrimaryWhenReady)");
-    const reapIndex = source.indexOf("await reapManagedRuntimeOnDesktopStart");
 
     expect(gateIndex).toBeGreaterThan(0);
     expect(quitIndex).toBeGreaterThan(gateIndex);
     expect(approveIndex).toBeGreaterThan(quitIndex);
     expect(whenReadyGuardIndex).toBeGreaterThan(approveIndex);
-    expect(reapIndex).toBeGreaterThan(whenReadyGuardIndex);
+    expect(primaryStartup(source)).toContain("app.whenReady()");
+    expect(primaryStartup(source)).toContain("await ensureProjectControlPlane(workspaceRoot)");
+    expect(mainFunction(source, "ensureProjectControlPlane")).toContain("await bootstrapProjectControlPlane(paths, !deferred)");
+    expect(mainFunction(source, "bootstrapProjectControlPlane")).toContain("await reapManagedRuntimeOnDesktopStart");
     expect(source).toContain("shouldRunDesktopWhenReadyHandlers({");
   });
 
@@ -134,8 +152,9 @@ describe("initial workbench discovery and shell readiness", () => {
     const source = readFileSync(mainSourcePath, "utf8");
     const resolver = source.slice(source.indexOf("async function resolveInitialWorkbenchUrl("),
       source.indexOf("async function bootstrapMainOwnedLauncher("));
-    const startup = source.slice(source.indexOf("const initialWorkbenchUrlController ="),
-      source.indexOf('electronStartupStage = "tray_ready";'));
+    const bootstrap = mainFunction(source, "bootstrapProjectControlPlane");
+    const startup = bootstrap.slice(bootstrap.indexOf("const initialWorkbenchUrlController ="),
+      bootstrap.indexOf('electronStartupStage = "tray_ready";'));
     const readiness = deferred<boolean>();
     const url = deferred<string>();
     let signal!: AbortSignal;
@@ -145,6 +164,7 @@ describe("initial workbench discovery and shell readiness", () => {
       console: { warn: vi.fn() },
       paths: { workspaceRoot: "C:/repo" },
       desktopCliArgs: {},
+      allowShellRefresh: true,
       desktopEnvironment: () => ({ VIBELUTION_PYTHON_PATH: "C:/repo/python.exe" }),
       resolveWorkbenchUrlFromBridge: vi.fn((input: { signal: AbortSignal }) => {
         signal = input.signal;
@@ -212,14 +232,14 @@ describe("initial workbench discovery and shell readiness", () => {
 describe("main project lifecycle admission", () => {
   function harness() {
     const source = readFileSync(mainSourcePath, "utf8");
-    const begin = source.indexOf("async function applyPendingProjectSlot(");
-    const end = source.indexOf("if (runPrimaryWhenReady)", begin);
     const receipt = { duplicate: false, failed: vi.fn(), dispatched: vi.fn() };
     const sandbox = {
       Error,
       windowProvider: { openOrFocusWorkbench: vi.fn(), openOrFocusInstanceWorkbench: vi.fn() },
       launcherBootstrap: {},
       pendingProjectRoot: "",
+      ensureProjectControlPlane: vi.fn(async () => true),
+      startProjectControlPlaneObservers: vi.fn(),
       createDesktopPathsForApp: () => ({ workspaceRoot: "C:/repo" }),
       normalizeInstanceKey,
       PROJECT_SLOT_LIFECYCLE_COMMANDS,
@@ -228,7 +248,7 @@ describe("main project lifecycle admission", () => {
       launcherStateStore: { refresh: vi.fn(async () => { throw new Error("inventory fallback"); }) },
       notifyDesktopTray: vi.fn(),
     };
-    const apply = runInNewContext(transpileModule(`${source.slice(begin, end)}\napplyPendingProjectSlot;`, {
+    const apply = runInNewContext(transpileModule(`${mainFunction(source, "applyPendingProjectSlot")}\napplyPendingProjectSlot;`, {
       compilerOptions: { target: ScriptTarget.ES2022 },
     }).outputText, sandbox) as (root: string, command: string, provenance?: string,
       options?: { hiddenPresentation?: boolean }) => Promise<void>;
@@ -251,12 +271,15 @@ describe("main project lifecycle admission", () => {
     let settle!: (value: { accepted: boolean; code: string; message: string }) => void;
     h.orchestrateLauncherLifecycle.mockImplementationOnce(() => new Promise(resolve => { settle = resolve; }));
     const pending = h.apply("C:/repo", "restart");
+    await new Promise<void>(resolve => setImmediate(resolve));
     expect(h.receipt.dispatched).not.toHaveBeenCalled();
     expect(h.launcherStateStore.refresh).not.toHaveBeenCalled();
+    expect(h.startProjectControlPlaneObservers).not.toHaveBeenCalled();
     settle({ accepted: false, code: "lifecycle_rejected", message: "admission denied" });
     await pending;
     expect(h.receipt.failed).toHaveBeenCalledWith("lifecycle_rejected", "admission denied");
     expect(h.receipt.dispatched).not.toHaveBeenCalled();
+    expect(h.startProjectControlPlaneObservers).toHaveBeenCalledOnce();
   });
 
   it("acknowledges a queued restart without bypassing lifecycle readiness", async () => {
@@ -295,14 +318,21 @@ describe("main project lifecycle admission", () => {
 describe("passive startup inventory", () => {
   it.each(["open", "start", ""])("waits for the initial %s dispatch before installing hints and scanning", async command => {
     const source = readFileSync(mainSourcePath, "utf8");
-    const startup = source.indexOf("app.whenReady()");
-    const begin = source.indexOf("const firstLifecycle = String(desktopCliArgs.lifecycleCommand", startup);
-    const end = source.indexOf("// T6:", begin);
-    const finallyStart = source.indexOf(".finally(() => {", end);
-    const finallyEnd = source.indexOf(".catch(async", finallyStart);
-    const beforeDispatch = source.slice(startup, begin);
-    expect(beforeDispatch).not.toContain("startLauncherStateFileHints(paths)");
-    expect(beforeDispatch).not.toContain("scheduleLauncherStatusCliRefresh();");
+    const startup = primaryStartup(source);
+    const begin = startup.indexOf("const firstLifecycle = String(desktopCliArgs.lifecycleCommand");
+    const end = startup.indexOf("// T6:", begin);
+    const finallyStart = startup.indexOf(".finally(() => {", end);
+    const finallyEnd = startup.indexOf(".catch(async", finallyStart);
+    expect(begin).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(begin);
+    expect(finallyStart).toBeGreaterThan(end);
+    expect(finallyEnd).toBeGreaterThan(finallyStart);
+    for (const beforeDispatch of [startup.slice(0, begin),
+      mainFunction(source, "ensureProjectControlPlane"), mainFunction(source, "bootstrapProjectControlPlane")]) {
+      expect(beforeDispatch).not.toContain("startProjectControlPlaneObservers();");
+      expect(beforeDispatch).not.toContain("startLauncherStateFileHints(paths)");
+      expect(beforeDispatch).not.toContain("scheduleLauncherStatusCliRefresh();");
+    }
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
     const sandbox = {
@@ -310,6 +340,7 @@ describe("passive startup inventory", () => {
       pendingOpenWorkbenchRequest: false,
       pendingProjectRoot: "",
       windowProvider: {}, launcherBootstrap: {}, shutdownApproved: false,
+      projectControlPlaneObserversStarted: false,
       app: { isPackaged: true },
       shouldDeferWorkbenchOpenUntilLifecycleStart,
       markWorkbenchOpenRequested: vi.fn(),
@@ -320,9 +351,10 @@ describe("passive startup inventory", () => {
       startLauncherStateFileHints: vi.fn(), scheduleLauncherStatusCliRefresh: vi.fn(),
     };
     const pending = runInNewContext(transpileModule(
-      `(async () => { ${source.slice(begin, end)} })()${source.slice(finallyStart, finallyEnd)}`, {
+      `${mainFunction(source, "startProjectControlPlaneObservers")}\n(async () => { ${startup.slice(begin, end)} })()${startup.slice(finallyStart, finallyEnd)}`, {
         compilerOptions: { target: ScriptTarget.ES2022 },
       }).outputText, sandbox);
+    expect(sandbox.startLauncherStateFileHints).not.toHaveBeenCalled();
     expect(sandbox.scheduleLauncherStatusCliRefresh).not.toHaveBeenCalled();
     release();
     await pending;
@@ -332,14 +364,12 @@ describe("passive startup inventory", () => {
 
   it("keeps the unpackaged release watcher alive after the file hints reset", async () => {
     const source = readFileSync(mainSourcePath, "utf8");
-    const startup = source.indexOf("app.whenReady()");
-    const begin = source.indexOf(".finally(() => {", startup);
-    const end = source.indexOf(".catch(async", begin);
     const order: string[] = [];
     const watcher = {};
     const sandbox = {
       windowProvider: { refreshLauncherIfReleaseChanged: () => { order.push("catchup"); } },
       launcherBootstrap: {}, shutdownApproved: false,
+      projectControlPlaneObserversStarted: false,
       app: { isPackaged: false }, launcherActiveReleaseWatcher: null,
       createDesktopPathsForApp: () => ({ workspaceRoot: "C:/repo" }),
       join: (...parts: string[]) => parts.join("/"),
@@ -347,7 +377,8 @@ describe("passive startup inventory", () => {
       startLauncherActiveReleaseWatcher: () => { order.push("release"); return watcher; },
       scheduleLauncherStatusCliRefresh: () => { order.push("refresh"); },
     };
-    await runInNewContext(transpileModule(`Promise.resolve()${source.slice(begin, end)}`, {
+    await runInNewContext(transpileModule(`${mainFunction(source, "startProjectControlPlaneObservers")}
+      startProjectControlPlaneObservers(); startProjectControlPlaneObservers();`, {
       compilerOptions: { target: ScriptTarget.ES2022 },
     }).outputText, sandbox);
     expect(order).toEqual(["hints", "release", "catchup", "refresh"]);
