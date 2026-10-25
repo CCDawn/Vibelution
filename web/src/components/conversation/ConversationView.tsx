@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { measureConversationVirtualRow } from "./conversationVirtualRowMeasurement";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { conversationStreamingFrameIdentity } from "./conversationStreamingMetrics";
 
@@ -680,6 +681,7 @@ export const ConversationView = React.memo(function ConversationView({
     scrollMargin: narrowTimelineViewport ? TIMELINE_NARROW_SCROLL_MARGIN_PX : TIMELINE_VIRTUAL_SCROLL_MARGIN_PX,
     initialRect: { width: TIMELINE_VIRTUAL_INITIAL_RECT.width, height: TIMELINE_VIRTUAL_INITIAL_RECT.height },
     useAnimationFrameWithResizeObserver: true,
+    measureElement: measureConversationVirtualRow,
   });
   const measureTimelineVirtualRow = useCallback(
     (node: HTMLDivElement | null) => {

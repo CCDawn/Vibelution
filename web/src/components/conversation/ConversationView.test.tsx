@@ -1194,6 +1194,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     );
     expect(conversationViewSource).toContain("measureTimelineVirtualRow");
     expect(conversationViewSource).toContain("useAnimationFrameWithResizeObserver: true");
+    expect(conversationViewSource).toContain("measureElement: measureConversationVirtualRow");
     // Virtual history and its live tail share the approved responsive rhythm.
     expect(conversationViewSource).toContain('TIMELINE_NARROW_VIEWPORT_QUERY = "(max-width: 719px)"');
     expect(conversationViewSource).toContain("TIMELINE_VIRTUAL_ROW_GAP_PX = 28");
