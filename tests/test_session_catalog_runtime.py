@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 import time
+from pathlib import Path
 from threading import Event
 
 import pytest
 
 from config.models import AppConfig
 from core.chat.session_catalog import resolve_session_catalog_path
+from core.infrastructure import developer_sandbox
 from core.ui.chat_state import save_chat_state
 from core.web.services import session_service
 from core.web.services.session import catalog_bridge, catalog_runtime
@@ -19,11 +23,11 @@ def _isolated_catalog_runtime(tmp_path, monkeypatch):
     monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path / "operator-data"))
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local-app-data"))
     monkeypatch.setattr(
-        catalog_runtime.developer_sandbox,
+        developer_sandbox,
         "is_developer_mode_enabled",
         lambda: False,
     )
-    monkeypatch.setattr(catalog_runtime, "record_runtime_scene_event", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(catalog_runtime._CatalogRuntimeSupervisor, "_record", staticmethod(lambda *_args, **_kwargs: {}))
     catalog_bridge.set_session_query_shadow_provider(None)
     yield
     catalog_runtime.shutdown_session_catalog_runtime()
@@ -143,6 +147,40 @@ def test_off_runtime_keeps_shadow_provider_disabled(tmp_path):
 
     assert status.status == "disabled"
     assert comparison.status == "disabled"
+
+
+def test_disabled_catalog_does_not_import_chat_or_diagnostic_dependencies():
+    code = """
+import importlib.abc
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+blocked = (
+    "core.ui.chat_state", "core.chat.conversation_ledger",
+    "core.infrastructure.developer_sandbox",
+    "core.web.services.runtime_scene_service", "core.llm", "core.orchestration",
+)
+class NoUnusedImports(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path, target=None):
+        if any(fullname == name or fullname.startswith(name + ".") for name in blocked):
+            raise AssertionError("Disabled catalog imported " + fullname)
+
+sys.meta_path.insert(0, NoUnusedImports())
+from core.web.services.session.catalog_runtime import initialize_session_catalog_runtime
+status = initialize_session_catalog_runtime(project_root=Path.cwd(), catalog_config=SimpleNamespace(mode="off"))
+assert status.status == "disabled"
+assert not any(name in sys.modules for name in blocked)
+"""
+    result = subprocess.run(
+        [sys.executable, "-B", "-c", code],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_runtime_shutdown_removes_candidate_provider(tmp_path):

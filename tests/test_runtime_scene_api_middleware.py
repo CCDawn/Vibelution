@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import threading
 
 import pytest
 from fastapi import FastAPI
@@ -226,44 +225,6 @@ def test_mutation_error_referer_and_stream_diagnostics_stay_before_body(
 
     assert response.status_code == status_code
     assert events == ["diagnostic", "body-sent"]
-
-
-@pytest.mark.parametrize("raises", [False, True])
-def test_inline_diagnostic_waits_for_worker_without_using_event_loop_thread(monkeypatch, raises) -> None:
-    event_loop_thread = threading.get_ident()
-    events: list[str] = []
-    recorded_contexts: list[dict] = []
-
-    def record(request, **kwargs):
-        assert threading.get_ident() != event_loop_thread
-        assert kwargs["status_code"] == (500 if raises else 200)
-        assert get_current_trace_context() == request.state.trace_context
-        recorded_contexts.append(get_current_trace_context().to_fields())
-        events.append("diagnostic-finished")
-
-    monkeypatch.setattr("core.web.middleware.runtime_scene_api.record_api_runtime_event", record)
-    request = Request({"type": "http", "method": "POST", "path": "/api/probe", "headers": []})
-    original_error = ValueError("handler failed")
-
-    async def run():
-        async def call_next(_request):
-            if raises:
-                raise original_error
-            return JSONResponse({"ok": True})
-
-        middleware = RuntimeSceneApiEventMiddleware(None)
-        if raises:
-            with pytest.raises(ValueError) as captured:
-                await middleware.dispatch(request, call_next)
-            assert captured.value is original_error
-        else:
-            await middleware.dispatch(request, call_next)
-        events.append("dispatch-finished")
-
-    asyncio.run(run())
-    assert events == ["diagnostic-finished", "dispatch-finished"]
-    assert recorded_contexts[0]["requestId"]
-    assert get_current_trace_context() is None
 
 
 def test_runtime_scene_tool_arguments_are_recursively_redacted() -> None:

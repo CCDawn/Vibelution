@@ -10,18 +10,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from core.chat.conversation_ledger import conversation_ledger_path, latest_ledger_sequence
 from core.chat.session_catalog import (
     SessionCatalogStore,
     set_session_catalog_dirty_observer,
     compute_workspace_key,
     resolve_session_catalog_path,
 )
-from core.infrastructure import developer_sandbox
-from core.ui.chat_state import chat_state_path
 
 from . import catalog_bridge
-from ..runtime_scene_service import record_runtime_scene_event
 
 
 _MAX_INCREMENTAL_RECONCILE_ATTEMPTS = 3
@@ -218,6 +214,8 @@ class _CatalogRuntimeSupervisor:
         fields: dict[str, Any] | None = None,
     ) -> None:
         try:
+            from ..runtime_scene_service import record_runtime_scene_event
+
             record_runtime_scene_event(
                 "session_catalog",
                 "reconcile",
@@ -290,6 +288,8 @@ def initialize_session_catalog_runtime(
         return SessionCatalogRuntimeStatus(status="disabled")
 
     try:
+        from core.infrastructure import developer_sandbox
+
         root = Path(project_root).resolve()
         workspace_root = _active_workspace_root(root)
         environment = "developer" if developer_sandbox.is_developer_mode_enabled() else "formal"
@@ -410,6 +410,8 @@ def build_runtime_catalog_snapshot(
 
 
 def _active_workspace_root(project_root: Path) -> Path:
+    from core.ui.chat_state import chat_state_path
+
     return chat_state_path(project_root).parent.parent
 
 
@@ -424,6 +426,8 @@ def _journal_inventory(
     workspace_root: Path,
     summaries: Sequence[Mapping[str, Any]],
 ) -> dict[str, dict[str, Any]]:
+    from core.chat.conversation_ledger import conversation_ledger_path, latest_ledger_sequence
+
     inventory: dict[str, dict[str, Any]] = {}
     workspace_resolved = workspace_root.resolve()
     for summary in summaries:
