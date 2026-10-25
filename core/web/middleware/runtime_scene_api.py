@@ -8,6 +8,7 @@ from urllib.parse import parse_qsl, urlparse
 
 from fastapi import Request
 from starlette.background import BackgroundTasks
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
@@ -63,7 +64,8 @@ class RuntimeSceneApiEventMiddleware(BaseHTTPMiddleware):
                 response = await call_next(request)
             except Exception as exc:
                 if should_record:
-                    record_api_runtime_event(
+                    await run_in_threadpool(
+                        record_api_runtime_event,
                         request,
                         status_code=500,
                         duration_ms=(_api_runtime_perf_counter() - start) * 1000,
@@ -87,7 +89,10 @@ class RuntimeSceneApiEventMiddleware(BaseHTTPMiddleware):
                         background.add_task(response.background)
                     response.background = background
                 else:
-                    record_api_runtime_event(
+                    # Preserve record-before-response for mutations and errors
+                    # without blocking unrelated requests on the HTTP event loop.
+                    await run_in_threadpool(
+                        record_api_runtime_event,
                         request,
                         status_code=response.status_code,
                         duration_ms=duration_ms,
