@@ -15,7 +15,7 @@ type AgentUserContentSectionViewProps = {
  * long-message handling: when the rendered body grows past the collapse
  * threshold the content clamps behind a bottom fade with a small ghost
  * expand/collapse toggle. Collapsed state is measurement-driven
- * (scrollHeight + ResizeObserver, so async media growth re-measures) and
+ * (ResizeObserver natural height, including async media growth) and
  * never persisted — every mount starts collapsed again. The inline editor
  * replaces this component entirely while editing, so edit mode is unaffected.
  */
@@ -27,26 +27,31 @@ export function AgentUserContentSectionView({
   const measuredContentRef = useRef<HTMLDivElement | null>(null);
   // Flips only when the natural content height crosses the threshold, so
   // per-frame ResizeObserver reports never re-render the bubble.
-  const [overflows, setOverflows] = useState(false);
+  // Keep the default height bounded until the browser's initial observer
+  // delivery, without forcing a document layout during the React commit.
+  const [overflows, setOverflows] = useState<boolean | null>(null);
   const [expanded, setExpanded] = useState(false);
-  const collapsed = overflows && !expanded;
+  const collapsed = overflows !== false && !expanded;
 
   useLayoutEffect(() => {
     const element = measuredContentRef.current;
     if (!element) {
       return;
     }
-    const measure = () => {
-      const next = shouldCollapseUserMessage(element.scrollHeight);
+    const updateHeight = (height: number) => {
+      const next = shouldCollapseUserMessage(height);
       setOverflows((current) => (current === next ? current : next));
     };
-    measure();
     // Content is markdown that can grow after first paint (images, streaming);
     // observe the natural-height node (the wrapper clips, the node does not).
     if (typeof ResizeObserver === "undefined") {
+      updateHeight(element.scrollHeight);
       return;
     }
-    const observer = new ResizeObserver(measure);
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries.find((item) => item.target === element);
+      if (entry) updateHeight(entry.contentRect.height);
+    });
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
@@ -61,7 +66,7 @@ export function AgentUserContentSectionView({
         <div ref={measuredContentRef} data-testid="user-message-measured-content">
           {children}
         </div>
-        {collapsed ? <div className={styles.userMessageCollapseFade} aria-hidden="true" /> : null}
+        {collapsed && overflows ? <div className={styles.userMessageCollapseFade} aria-hidden="true" /> : null}
       </div>
       {overflows ? (
         <VNativeButton

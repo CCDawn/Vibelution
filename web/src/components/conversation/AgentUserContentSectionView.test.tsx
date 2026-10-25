@@ -93,7 +93,8 @@ describe("AgentUserContentSectionView", () => {
 
     expect(html).toContain("user-message-measured-content");
     expect(html).not.toContain("user-message-collapse-toggle");
-    expect(html).not.toContain("userMessageBodyClamped");
+    expect(html).toContain("userMessageBodyClamped");
+    expect(html).not.toContain("userMessageCollapseFade");
   });
 
   it("localizes the collapse toggle copy in both dictionaries", () => {

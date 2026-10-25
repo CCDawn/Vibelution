@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { queryKeys } from "../../api/queryKeys";
 import { dictionaryChat } from "../../i18n/domains/dictionaryChat";
 import {
   dictionaryDomainsQueryKey,
@@ -18,21 +19,32 @@ import { USER_MESSAGE_COLLAPSE_THRESHOLD_PX } from "./conversationUserMessageCol
 type ResizeObserverCallbackStub = (entries: unknown[]) => void;
 
 /**
- * Measurement-driven collapse: stub scrollHeight (happy-dom has no layout)
- * and capture the ResizeObserver callback so tests can fire async content
- * growth (the image-loads-late case) through the real re-measure path.
+ * Happy-dom has no layout. Deliver natural-height observer entries and count
+ * legacy layout reads separately, including async media growth.
  */
 describe("AgentUserContentSectionView long message collapse", () => {
   let root: Root | null = null;
   let container: HTMLDivElement | null = null;
   let measuredHeight = 0;
+  let layoutReads = 0;
+  let deliverInitialMeasurement = true;
+  let observedElement: Element | null = null;
   let resizeCallback: ResizeObserverCallbackStub | null = null;
 
   class ResizeObserverStub {
+    callback: ResizeObserverCallbackStub;
     constructor(callback: ResizeObserverCallbackStub) {
+      this.callback = callback;
       resizeCallback = callback;
     }
-    observe() {}
+    observe(element: Element) {
+      observedElement = element;
+      if (deliverInitialMeasurement) {
+        queueMicrotask(() => {
+          if (resizeCallback === this.callback) notifyResize();
+        });
+      }
+    }
     unobserve() {}
     disconnect() {
       resizeCallback = null;
@@ -41,15 +53,23 @@ describe("AgentUserContentSectionView long message collapse", () => {
 
   beforeEach(() => {
     measuredHeight = 0;
+    layoutReads = 0;
+    deliverInitialMeasurement = true;
+    observedElement = null;
     resizeCallback = null;
     Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
       configurable: true,
       get() {
+        layoutReads += 1;
         return measuredHeight;
       },
     });
     (globalThis as { ResizeObserver?: unknown }).ResizeObserver = ResizeObserverStub;
   });
+
+  function notifyResize() {
+    resizeCallback?.([{ target: observedElement, contentRect: { height: measuredHeight } }]);
+  }
 
   afterEach(async () => {
     if (root) {
@@ -66,8 +86,9 @@ describe("AgentUserContentSectionView long message collapse", () => {
 
   async function renderView(node: React.ReactElement) {
     const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
     });
+    queryClient.setQueryData(queryKeys.configPublic(), { language: "zh" });
     queryClient.setQueryData(
       [
         "i18n",
@@ -160,10 +181,52 @@ describe("AgentUserContentSectionView long message collapse", () => {
     // threshold through the ResizeObserver path and the affordance disappears.
     measuredHeight = USER_MESSAGE_COLLAPSE_THRESHOLD_PX - 40;
     await act(async () => {
-      resizeCallback?.([]);
+      notifyResize();
     });
     expect(toggleButton()).toBeNull();
     expect(container?.querySelector(".userMessageCollapseFade")).toBeNull();
+  });
+
+  it("uses observer heights without forcing synchronous layout reads", async () => {
+    measuredHeight = USER_MESSAGE_COLLAPSE_THRESHOLD_PX + 60;
+    await renderView(<AgentUserContentSectionView><p>长消息</p></AgentUserContentSectionView>);
+    expect(toggleButton()?.getAttribute("aria-expanded")).toBe("false");
+    expect(layoutReads).toBe(0);
+
+    measuredHeight = USER_MESSAGE_COLLAPSE_THRESHOLD_PX - 40;
+    await act(async () => notifyResize());
+    expect(toggleButton()).toBeNull();
+    expect(layoutReads).toBe(0);
+
+    measuredHeight = USER_MESSAGE_COLLAPSE_THRESHOLD_PX + 80;
+    await act(async () => notifyResize());
+    expect(toggleButton()?.getAttribute("aria-expanded")).toBe("false");
+    await clickToggle();
+    measuredHeight += 200;
+    await act(async () => notifyResize());
+    expect(toggleButton()?.getAttribute("aria-expanded")).toBe("true");
+    expect(contentWrapper()?.classList.contains("userMessageBodyClamped")).toBe(false);
+    expect(layoutReads).toBe(0);
+  });
+
+  it("keeps the initial body clamped until measurement without a speculative toggle or fade", async () => {
+    deliverInitialMeasurement = false;
+    measuredHeight = USER_MESSAGE_COLLAPSE_THRESHOLD_PX - 40;
+    await renderView(<AgentUserContentSectionView><p>短消息</p></AgentUserContentSectionView>);
+    expect(contentWrapper()?.classList.contains("userMessageBodyClamped")).toBe(true);
+    expect(toggleButton()).toBeNull();
+    expect(container?.querySelector(".userMessageCollapseFade")).toBeNull();
+
+    await act(async () => notifyResize());
+    expect(contentWrapper()?.classList.contains("userMessageBodyClamped")).toBe(false);
+  });
+
+  it("retains synchronous measurement when ResizeObserver is unavailable", async () => {
+    (globalThis as { ResizeObserver?: unknown }).ResizeObserver = undefined;
+    measuredHeight = USER_MESSAGE_COLLAPSE_THRESHOLD_PX + 60;
+    await renderView(<AgentUserContentSectionView><p>长消息</p></AgentUserContentSectionView>);
+    expect(toggleButton()?.getAttribute("aria-expanded")).toBe("false");
+    expect(layoutReads).toBe(1);
   });
 
   it("starts collapsed again on every mount instead of persisting expansion", async () => {
