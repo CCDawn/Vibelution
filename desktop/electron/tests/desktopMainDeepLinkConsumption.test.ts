@@ -61,7 +61,14 @@ describe("Electron main public deep-link consumption", () => {
     expect(helperIndex).toBeGreaterThan(0);
     expect(recoveryIndex).toBeGreaterThan(helperIndex);
     expect(startOrFocusIndex).toBeGreaterThan(recoveryIndex);
-    expect(source).toContain("void requestOpenWorkbenchFromSecondInstance().catch((error: unknown) => {");
+    const bindingIndex = source.indexOf("void ensureProjectControlPlane(secondCli.workspaceRoot).then(");
+    const openRequestIndex = source.indexOf("? requestOpenWorkbenchFromSecondInstance() : undefined)", bindingIndex);
+    const observersIndex = source.indexOf("startProjectControlPlaneObservers();", openRequestIndex);
+    const catchIndex = source.indexOf("}).catch((error: unknown) => {", observersIndex);
+    expect(bindingIndex).toBeGreaterThan(0);
+    expect(openRequestIndex).toBeGreaterThan(bindingIndex);
+    expect(observersIndex).toBeGreaterThan(openRequestIndex);
+    expect(catchIndex).toBeGreaterThan(observersIndex);
   });
 
   it("treats a product-entry open as start-or-focus instead of a window-only open", () => {

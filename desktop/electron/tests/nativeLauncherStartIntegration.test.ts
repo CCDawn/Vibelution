@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { runInNewContext } from "node:vm";
-import { ScriptTarget, transpileModule } from "typescript";
+import { createSourceFile, isFunctionDeclaration, ScriptTarget, transpileModule } from "typescript";
 import { describe, expect, it, vi } from "vitest";
 
 const source = readFileSync(fileURLToPath(new URL("../src/main.ts", import.meta.url)), "utf8");
@@ -95,8 +95,14 @@ describe("Native start uses the original main lifecycle", () => {
   });
 
   it("publishes only after real Windows control-plane readiness and retires on direct exit", () => {
-    const startup = source.slice(source.indexOf("if (runPrimaryWhenReady)"));
-    expect(startup.indexOf("await startNativeLauncherStartTransport(")).toBeGreaterThan(startup.indexOf("resolveLauncherControlPlaneReady?.()"));
+    const parsed = createSourceFile("main.ts", source, ScriptTarget.Latest, true);
+    const bootstrap = parsed.statements.find(node => isFunctionDeclaration(node) && node.name?.text === "bootstrapProjectControlPlane");
+    if (!bootstrap) throw new Error("Missing shared project control-plane bootstrap");
+    const startup = bootstrap.getText(parsed);
+    const readyIndex = startup.indexOf("resolveLauncherControlPlaneReady?.()");
+    const transportIndex = startup.indexOf("await startNativeLauncherStartTransport(");
+    expect(readyIndex).toBeGreaterThan(0);
+    expect(transportIndex).toBeGreaterThan(readyIndex);
     expect(startup).toContain('app.isPackaged && process.platform === "win32" && process.versions.electron');
     expect(startup).toContain("resolveActiveCanonicalRuntimeHome(paths.workspaceRoot)");
     expect(startup).toContain('app.once("quit", retireTransport)');
