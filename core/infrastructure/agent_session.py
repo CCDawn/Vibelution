@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import threading
 import re
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Optional, Any, Dict
@@ -30,6 +31,23 @@ from core.infrastructure.tool_intents import (
     humanize_tool_name,
     humanize_tool_chain,
 )
+
+
+class _RuntimeGoalPacketSlot:
+    """Dataclass-compatible property whose value belongs to the caller context."""
+
+    def __get__(self, instance, owner=None):
+        if instance is None:
+            return None
+        slot = instance.__dict__.get("_runtime_goal_packet_context")
+        return slot.get() if slot is not None else None
+
+    def __set__(self, instance, value):
+        slot = instance.__dict__.get("_runtime_goal_packet_context")
+        if slot is None:
+            slot = ContextVar("agent_session_runtime_goal_packet", default=None)
+            instance.__dict__["_runtime_goal_packet_context"] = slot
+        slot.set(value)
 
 
 @dataclass
@@ -47,7 +65,7 @@ class AgentSessionState:
     last_validation_summary: Optional[str] = None
     last_validation_passed: Optional[bool] = None
     active_evolution_txn_id: Optional[str] = None
-    runtime_goal_packet: Any = None
+    runtime_goal_packet: Any = _RuntimeGoalPacketSlot()
     blocked_tool_patterns: Dict[str, Dict[str, str]] = field(default_factory=dict)
     recent_blockers: List[Dict[str, str]] = field(default_factory=list)
     recent_validation_results: List[Dict[str, Any]] = field(default_factory=list)

@@ -1,6 +1,9 @@
 """An explicitly configured CLI task is separate from automatic native delegation."""
 from copy import deepcopy
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from dataclasses import replace
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -156,3 +159,80 @@ def test_bound_only_reader_uses_snapshot_and_default_reader_retains_environment_
             agent_directory_service._CURRENT_AGENT_RUNTIME.reset(bound_token)
     finally:
         agent_directory_service._CURRENT_AGENT_RUNTIME.reset(token)
+
+
+def test_concurrent_bound_agents_keep_their_own_runtime_goal_packet(monkeypatch):
+    from core.infrastructure import agent_session
+
+    cli_agent = _runtime()["agent"]
+    other_agent = deepcopy(cli_agent)
+    other_agent["agentId"] = "agent-no-cli"
+    other_agent["toolPolicy"]["allowedTools"] = []
+    agents = {cli_agent["agentId"]: cli_agent, other_agent["agentId"]: other_agent}
+    # Only the directory read is a fixture: binding, snapshot getter, packet
+    # storage, propagation, and the Executor capability guard are real.
+    monkeypatch.setattr(agent_directory_service, "get_agent", lambda agent_id: deepcopy(agents[agent_id]))
+    monkeypatch.setattr(agent_session, "_agent_session", agent_session.AgentSessionState())
+    a_bound = threading.Barrier(2)
+    b_bound = threading.Barrier(2)
+
+    def bind(agent_id):
+        return agent_directory_service.active_agent_runtime(agent_id, session_id=agent_id, turn_id="turn-" + agent_id)
+
+    def make_packet():
+        return replace(build_runtime_goal_packet(resolve_mode_policy(AgentMode.CHAT, SimpleNamespace()), "Handle task"), allow_subagents=False)
+
+    def cli_worker():
+        with bind(cli_agent["agentId"]):
+            state = agent_session.get_session_state()
+            own = make_packet()
+            assert own.allow_cli_tasks is True
+            state.set_runtime_goal_packet(own)
+            a_bound.wait(timeout=10)
+            b_bound.wait(timeout=10)
+            observed = state.get_runtime_goal_packet()
+            with ThreadPoolExecutor(max_workers=1) as tools:
+                copied = tools.submit(copy_context().run, state.get_runtime_goal_packet).result(timeout=10)
+                unbound = tools.submit(state.get_runtime_goal_packet).result(timeout=10)
+            return own, observed, copied, unbound, ToolExecutor._check_runtime_goal_capability_block(state, CLI, {})
+
+    def other_worker():
+        with bind(other_agent["agentId"]):
+            state = agent_session.get_session_state()
+            own = make_packet()
+            assert own.allow_cli_tasks is False
+            a_bound.wait(timeout=10)
+            state.set_runtime_goal_packet(own)
+            b_bound.wait(timeout=10)
+            return state.get_runtime_goal_packet() is own, ToolExecutor._check_runtime_goal_capability_block(state, CLI, {})
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        cli_future = workers.submit(cli_worker)
+        other_future = workers.submit(other_worker)
+        own, observed, copied, unbound, blocked = cli_future.result(timeout=20)
+        other_is_own, other_blocked = other_future.result(timeout=20)
+    assert observed is own
+    assert copied is own
+    assert unbound is None
+    assert blocked is None
+    assert other_is_own is True
+    assert other_blocked is not None
+
+
+def test_runtime_goal_raw_property_and_new_state_do_not_leak_context(monkeypatch):
+    from core.infrastructure import agent_session
+
+    packet = object()
+    state = agent_session.AgentSessionState(runtime_goal_packet=packet)
+    assert state.runtime_goal_packet is packet
+    assert state.get_runtime_goal_packet() is packet
+    replacement = object()
+    state.runtime_goal_packet = replacement
+    assert state.get_runtime_goal_packet() is replacement
+    assert agent_session.AgentSessionState().get_runtime_goal_packet() is None
+    with ThreadPoolExecutor(max_workers=1) as thread:
+        assert thread.submit(lambda: state.runtime_goal_packet).result(timeout=10) is None
+    monkeypatch.setattr(agent_session, "_agent_session", state)
+    assert agent_session.reset_session_state().get_runtime_goal_packet() is None
+    assert state.get_runtime_goal_packet() is replacement
+    assert "runtime_goal_packet" not in state.get_attention_snapshot()

@@ -24,6 +24,7 @@ rules:
       - "core/web/services/cli_agent_task_kernel.py"
       - "core/orchestration/runtime_goal.py"
       - "core/infrastructure/tool_executor.py"
+      - "core/infrastructure/agent_session.py"
       - "core/web/services/agent_directory/ops_residual.py"
       - "tests/test_cli_agent_protocols.py"
       - "tests/test_cli_agent_task_kernel.py"
