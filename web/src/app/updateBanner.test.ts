@@ -4,6 +4,7 @@ import {
   UPDATE_BANNER_DISMISSED_STORAGE_KEY,
   isUpdateBannerVerdict,
   isLauncherUpdateAvailable,
+  updateRestartTarget,
   launcherUpdateBannerCopy,
   frontendUpdateBannerCopy,
   readStoredUpdateBannerDismissedHead,
@@ -17,6 +18,15 @@ import {
 } from "./updateBanner";
 
 describe("updateBanner verdict gate", () => {
+  it("updates the desktop shell and project in one operation whenever the shell is behind", () => {
+    for (const verdict of ["current", "backend_behind", "frontend_behind", "backend_and_frontend_behind"] as const) {
+      const launcherFreshness = { current: false, label: "stale", shellStale: true };
+      expect(shouldShowUpdateBanner({ verdict, diskHead: "new-head", dismissedHead: "", launcherFreshness })).toBe(true);
+      expect(updateRestartTarget(launcherFreshness)).toBe("shell");
+    }
+    expect(updateRestartTarget({ current: true, label: "current" })).toBe("workbench");
+    expect(updateRestartTarget({ current: null, label: "unknown" })).toBe("workbench");
+  });
   it("prompts for stale backend or frontend code", () => {
     expect(isUpdateBannerVerdict("backend_behind")).toBe(true);
     expect(isUpdateBannerVerdict("backend_and_frontend_behind")).toBe(true);

@@ -716,6 +716,8 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("storeUpdateBannerDismissedHead");
     // Workbench and Launcher version decisions share the same notification.
     expect(shellSource).toContain("updateBannerVerdict === \"backend_and_frontend_behind\"");
+    // Shell replacement includes the project update even when both are behind.
+    expect(shellSource).toContain('const launcherShellUpdate = updateRestartTarget(launcherFreshnessQuery.data) === "shell"');
 
     // Notification is a collapsed top-bar popover, never a workspace row.
     const bannerRegion = shellSource.slice(

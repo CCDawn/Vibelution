@@ -19,6 +19,11 @@ export function isLauncherUpdateAvailable(freshness: LauncherFreshness | undefin
   return Boolean(freshness && (freshness.current === false || freshness.shellStale || freshness.updateAvailable));
 }
 
+/** Shell replacement also reloads the project; prefer it when both owners are behind. */
+export function updateRestartTarget(freshness: LauncherFreshness | undefined | null): "shell" | "workbench" {
+  return isLauncherUpdateAvailable(freshness) ? "shell" : "workbench";
+}
+
 export function shouldShowUpdateBanner({
   verdict,
   diskHead,

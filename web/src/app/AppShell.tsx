@@ -64,8 +64,7 @@ import {
 } from "./workbenchLifecycleActions";
 import { useWorkbenchLifecycleActions } from "./useWorkbenchLifecycleActions";
 import {
-  isLauncherUpdateAvailable,
-  isUpdateBannerVerdict,
+  updateRestartTarget,
   launcherUpdateBannerCopy,
   frontendUpdateBannerCopy,
   readStoredUpdateBannerDismissedHead,
@@ -77,6 +76,7 @@ import {
   updateBannerRestartLabel,
   updateBannerRestartReloadsDocument,
 } from "./updateBanner";
+import { refreshUpdateFreshness, UPDATE_FRESHNESS_INTERVAL_MS, UPDATE_FRESHNESS_QUERY_OPTIONS, useUpdateFreshnessFocus } from "./updateFreshness";
 import { useShellI18n } from "../i18n/useShellI18n";
 import {
   collectBrowserMemorySnapshot,
@@ -1202,24 +1202,23 @@ export function AppShell() {
   // with disk HEAD. Refetched on window focus + periodic poll; git reads are
   // lock-free (GIT_OPTIONAL_LOCKS=0) and cheap.
   const codeFreshnessQuery = useQuery<CodeFreshness>({
+    ...UPDATE_FRESHNESS_QUERY_OPTIONS,
     queryKey: queryKeys.codeFreshness(),
     queryFn: ({ signal }) => fetchJson<CodeFreshness>("/api/runtime/code-freshness", { signal }),
     enabled: shellDeferredPollReady,
-    refetchInterval: resolvePollingInterval(shellPollingVisible, 120_000),
-    refetchIntervalInBackground: false,
-    staleTime: 30_000,
+    refetchInterval: resolvePollingInterval(shellPollingVisible, UPDATE_FRESHNESS_INTERVAL_MS),
     notifyOnChangeProps: ["data", "error", "isError", "isPending", "isSuccess", "isRefetchError"],
   });
 
   const launcherFreshnessQuery = useQuery({
+    ...UPDATE_FRESHNESS_QUERY_OPTIONS,
     queryKey: queryKeys.launcherFreshness(),
     queryFn: getLauncherFreshness,
     enabled: shellDeferredPollReady && hasLauncherFreshnessBridge(),
-    refetchInterval: resolvePollingInterval(shellPollingVisible, 120_000),
-    refetchIntervalInBackground: false,
-    staleTime: 30_000,
+    refetchInterval: resolvePollingInterval(shellPollingVisible, UPDATE_FRESHNESS_INTERVAL_MS),
     retry: false,
   });
+  useUpdateFreshnessFocus(queryClient, shellDeferredPollReady && !restartRequested && !shutdownRequested);
 
   // Top-bar read-only badges: Git merge pressure and unseen agent broadcasts.
   // Both share existing endpoints with their owning pages and poll gently —
@@ -1491,12 +1490,11 @@ export function AppShell() {
   // Human-readable only (no raw session ids). Used for shutdown copy and aria, not native title.
   const activeWorkDetailsTitle = activeWorkIndicator?.items.map((item) => item.detail).join(" · ") ?? "";
   const activeWorkLabels = [...new Set(activeWorkIndicator?.items.map((item) => item.label) ?? [])].join(" · ");
-  // Workbench and Launcher versions share the delayed 120s polling cadence.
+  // Both owners share a delayed poll and immediately recheck when this window regains focus.
   // Code staleness restarts this window. A stale desktop shell replaces the
   // shell; a window reload cannot clear that banner.
   const updateBannerVerdict = codeFreshnessQuery.data?.verdict ?? null;
-  const launcherUpdateAvailable = isLauncherUpdateAvailable(launcherFreshnessQuery.data);
-  const launcherShellUpdate = !isUpdateBannerVerdict(updateBannerVerdict) && launcherUpdateAvailable;
+  const launcherShellUpdate = updateRestartTarget(launcherFreshnessQuery.data) === "shell";
   const updateBannerDiskHead = codeFreshnessQuery.data?.backend.disk?.head || launcherFreshnessQuery.data?.headShort || "";
   const updateBannerVisible = shouldShowUpdateBanner({
     verdict: updateBannerVerdict,
@@ -1504,7 +1502,7 @@ export function AppShell() {
     dismissedHead: updateBannerDismissedHead,
     launcherFreshness: launcherFreshnessQuery.data,
   });
-  const updateBannerText = !isUpdateBannerVerdict(updateBannerVerdict) && launcherUpdateAvailable
+  const updateBannerText = launcherShellUpdate
     ? launcherUpdateBannerCopy(lang)
     : updateBannerVerdict === "frontend_behind"
       ? frontendUpdateBannerCopy(lang)
@@ -3022,6 +3020,7 @@ export function AppShell() {
         <div className={styles.windowDragRegion} data-shell-group="window-drag-region" aria-hidden="true" />
         {updateBannerVisible ? (
           <VPopover
+            onOpenChange={(open) => { if (open) void refreshUpdateFreshness(queryClient); }}
             align="end"
             side="bottom"
             sideOffset={8}

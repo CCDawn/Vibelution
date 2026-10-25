@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import shellSource from "./LauncherShell.tsx?raw";
 import homeSource from "../routes/LauncherRoute.tsx?raw";
 import { LauncherUpdateTopbar } from "./LauncherUpdateTopbar";
+import { queryKeys } from "../api/queryKeys";
 
 const api = vi.hoisted(() => ({ getLauncherFreshness: vi.fn(), restartLatestLauncher: vi.fn() }));
 vi.mock("../api/launcher", () => api);
@@ -16,11 +17,12 @@ let root: Root;
 let host: HTMLDivElement;
 let client: QueryClient;
 
-async function mount(desktop = false) {
+async function mount(desktop = false, cached = false) {
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  if (cached) client.setQueryData(queryKeys.launcherFreshness(), available);
   await act(async () => root.render(<QueryClientProvider client={client}><LauncherUpdateTopbar lang="zh" branchName="main" desktop={desktop} /></QueryClientProvider>));
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
 }
@@ -47,6 +49,24 @@ afterEach(async () => {
 });
 
 describe("shared Launcher update topbar", () => {
+  it("rechecks a recently cached update when the Launcher opens", async () => {
+    api.getLauncherFreshness.mockResolvedValue({ ...available, current: true, shellStale: false, updateAvailable: false });
+    await mount(false, true);
+    expect(api.getLauncherFreshness).toHaveBeenCalledOnce();
+    expect(host.textContent).toContain("已是最新版本");
+  });
+
+  it("clears an old update immediately on focus without waiting for the poll", async () => {
+    await mount();
+    api.getLauncherFreshness.mockResolvedValue({ ...available, current: true, shellStale: false, updateAvailable: false });
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    expect(host.textContent).toContain("已是最新版本");
+    expect(host.textContent).not.toContain("有新版本");
+    expect(api.restartLatestLauncher).not.toHaveBeenCalled();
+  });
   it("reserves native caption space and confines window dragging to the desktop spacer", async () => {
     await mount(true);
     const toolbar = document.querySelector('[data-testid="launcher-topbar"]');

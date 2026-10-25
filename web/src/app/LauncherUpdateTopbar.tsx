@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowUpCircle, Check, ChevronDown, GitBranch, LoaderCircle, Monitor, RefreshCw } from "lucide-react";
 import { useRef, useState } from "react";
 
@@ -7,6 +7,8 @@ import { queryKeys } from "../api/queryKeys";
 import type { LauncherFreshness } from "../api/types";
 import { VButton, VPopover, VToolbar } from "../components/vui";
 import styles from "./LauncherUpdateTopbar.styles";
+import { isLauncherUpdateAvailable } from "./updateBanner";
+import { refreshUpdateFreshness, UPDATE_FRESHNESS_INTERVAL_MS, UPDATE_FRESHNESS_QUERY_OPTIONS, useUpdateFreshnessFocus } from "./updateFreshness";
 
 export type LauncherUpdateTopbarViewProps = {
   lang: "zh" | "en";
@@ -32,7 +34,7 @@ export function LauncherUpdateTopbarView({
   const zh = lang === "zh";
   const [open, setOpen] = useState(false);
   const [confirm, setConfirm] = useState(false);
-  const hasUpdate = Boolean(freshness && (freshness.updateAvailable || freshness.current === false || freshness.shellStale));
+  const hasUpdate = isLauncherUpdateAvailable(freshness);
   const busy = updating || freshness?.updateInProgress === true;
   const failure = error || freshness?.refreshError || "";
   const unknown = !hasUpdate && (!freshness || freshness.current === null);
@@ -113,10 +115,14 @@ export function LauncherUpdateTopbar({ lang, branchName, desktop }: Pick<Launche
   const [accepted, setAccepted] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const updateLock = useRef(false);
+  const queryClient = useQueryClient();
+  useUpdateFreshnessFocus(queryClient, !confirming && !accepted);
   const freshnessQuery = useQuery({
+    ...UPDATE_FRESHNESS_QUERY_OPTIONS,
     queryKey: queryKeys.launcherFreshness(),
     queryFn: getLauncherFreshness,
-    refetchInterval: confirming || accepted || updateLock.current ? false : 60_000,
+    refetchInterval: confirming || accepted || updateLock.current ? false : UPDATE_FRESHNESS_INTERVAL_MS,
+    refetchOnWindowFocus: confirming || accepted ? false : "always",
     retry: false,
   });
   const updateMutation = useMutation({
@@ -126,18 +132,18 @@ export function LauncherUpdateTopbar({ lang, branchName, desktop }: Pick<Launche
       return result;
     },
     onSuccess: () => setAccepted(true),
-    onSettled: () => { updateLock.current = false; void freshnessQuery.refetch(); },
+    onSettled: () => { updateLock.current = false; void refreshUpdateFreshness(queryClient); },
   });
   return <LauncherUpdateTopbarView lang={lang} branchName={branchName} desktop={desktop} freshness={freshnessQuery.data}
     checking={freshnessQuery.isPending} rechecking={freshnessQuery.isFetching && !freshnessQuery.isPending} checkFailed={freshnessQuery.isError}
     updating={updateMutation.isPending || accepted}
     error={updateMutation.error instanceof Error ? updateMutation.error.message : undefined}
-    onCheck={() => { updateMutation.reset(); void freshnessQuery.refetch(); }}
+    onCheck={() => { updateMutation.reset(); void refreshUpdateFreshness(queryClient); }}
     onUpdate={() => {
       if (updateLock.current || accepted) return;
       updateLock.current = true;
       updateMutation.mutate();
     }}
     onConfirmationChange={setConfirming}
-    onDetailsChange={(open) => { if (open) void freshnessQuery.refetch(); }} />;
+    onDetailsChange={(open) => { if (open) void refreshUpdateFreshness(queryClient); }} />;
 }
