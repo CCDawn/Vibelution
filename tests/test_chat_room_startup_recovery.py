@@ -542,7 +542,7 @@ def test_startup_recovery_retry_limit_skips_chain_past_limit(tmp_path, monkeypat
 
 
 def test_startup_recovery_retry_counter_persists_across_simulated_restarts(
-    tmp_path, monkeypatch, room_executor
+    tmp_path, monkeypatch, room_executor, request
 ):
     _isolate_chat_room_kernel(tmp_path, monkeypatch)
     agents = [
@@ -578,6 +578,13 @@ def test_startup_recovery_retry_counter_persists_across_simulated_restarts(
     assert first_round["config"]["startupRecoveryRetries"] == 1
     assert first_round["config"]["startupRecoveryOfRoundId"] == "round-orphan-root"
 
+    # A terminal room is published before the worker's final WorkRun write.
+    # Retire the old executor before simulating a fresh process, so that write
+    # cannot overwrite the synthetic orphan after the simulated restart.
+    room_executor.shutdown(wait=True)
+    restarted_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="pytest-chat-room-restarted")
+    request.addfinalizer(lambda: restarted_executor.shutdown(wait=True, cancel_futures=True))
+    monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_EXECUTOR", restarted_executor)
     _reorphan_round(room["roomId"], first_redrive_id)
 
     second = chat_room_service.recover_orphaned_chat_room_rounds_on_startup(
