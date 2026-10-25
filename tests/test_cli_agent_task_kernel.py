@@ -193,6 +193,96 @@ def test_mimo_prompt_echo_completion_text_does_not_complete_task(monkeypatch, tm
     assert state.get("completionReason") is None
 
 
+@pytest.fixture
+def codex_task(monkeypatch, tmp_path):
+    monkeypatch.setattr(task_kernel, "TASK_STATE_DIR", tmp_path / "tasks")
+    monkeypatch.setattr(task_kernel, "_ensure_watcher_started", lambda: None)
+    delivered = []
+    writes = []
+    from core.web.services import cli_agent_terminal_service, session_service
+
+    monkeypatch.setattr(cli_agent_terminal_service, "write_cli_agent_terminal_input", lambda _session_id, data: writes.append(data) or {})
+    monkeypatch.setattr(session_service, "append_cli_agent_task_result_event", lambda session_id, **kwargs: delivered.append((session_id, kwargs)))
+    terminal = {
+        "terminalSessionId": "cli-term-codex-marker",
+        "adapterId": "codex_code",
+        "screenText": "OpenAI Codex",
+        "sourceSessionId": "session-1",
+        "alive": True,
+        "status": "running",
+    }
+    def submit(task):
+        result = task_kernel.submit_cli_agent_task(
+            terminal_session=terminal, task=task, timeout_seconds=60, output_limit=8000,
+        )
+        return terminal, result, writes, delivered
+
+    return submit
+
+
+def test_codex_split_prompt_echo_and_working_output_wait_for_own_marker(codex_task):
+    terminal, result, writes, delivered = codex_task("Explain why previous run failed and produce a recommendation")
+    for chunk in ("› Explain why previous run failed", " and produce a recommendation\r\n", "OpenAI Codex\r\nWorking\r\ncompleted\r\n"):
+        task_kernel.ingest_terminal_output(terminal, chunk)
+        assert task_kernel._read_task_state(result["taskId"])["status"] == "running"
+        assert delivered == []
+    state = task_kernel._read_task_state(result["taskId"])
+    assert state["completionMarker"]
+    assert state["completionMarker"] not in writes[0]
+
+
+@pytest.mark.parametrize("task,answer", [
+    ("Reply exactly completed", "completed"),
+    ("completed", "completed"),
+    ("Inspect the source", "Answer: You asked me to Inspect the source. The analysis is completed."),
+])
+def test_codex_own_marker_completes_once_across_chunks_and_preserves_answer(codex_task, task, answer):
+    terminal, result, writes, delivered = codex_task(task)
+    state = task_kernel._read_task_state(result["taskId"])
+    marker = state["completionMarker"]
+    assert marker
+    task_kernel.ingest_terminal_output(terminal, answer + "\r\n")
+    assert task_kernel._read_task_state(result["taskId"])["status"] == "running"
+    task_kernel.ingest_terminal_output(terminal, marker[:len(marker) // 2])
+    assert delivered == []
+    task_kernel.ingest_terminal_output(terminal, marker[len(marker) // 2:] + "\r\n")
+    task_kernel.ingest_terminal_output(terminal, marker + "\r\n")
+    assert task_kernel._read_task_state(result["taskId"])["status"] == "completed"
+    assert len(delivered) == 1
+    completed = delivered[0][1]["task_result"]
+    assert answer in completed["stdoutPreview"]
+    assert marker not in completed["stdoutPreview"]
+
+
+@pytest.mark.parametrize("marker", ["", "[VIBELUTION_CLI_DONE:task-own]"])
+@pytest.mark.parametrize("output", ["OpenAI Codex\n› Inspect the source", "Working", "completed", "failed"])
+def test_codex_current_and_legacy_tasks_never_idle_complete(marker, output):
+    task_state = {
+        "adapterId": "codex_code", "status": "running", "completionMarker": marker,
+        "task": "Inspect the source", "sentInput": "Inspect the source\r\n", "output": output,
+        "createdAt": "1970-01-01T00:00:01+00:00", "lastOutputAt": "1970-01-01T00:00:01+00:00",
+        "timeoutSeconds": 60,
+    }
+    assert task_kernel._task_timeout_or_idle_status(task_state, now=31.0) == ""
+    assert task_kernel._task_timeout_or_idle_status(task_state, now=61.0) == "timeout"
+
+
+def test_codex_legacy_task_without_marker_still_fails_on_terminal_exit(codex_task):
+    terminal, result, writes, delivered = codex_task("Inspect the source")
+    state = task_kernel._read_task_state(result["taskId"])
+    state["completionMarker"] = ""
+    task_kernel._write_task_state(state)
+    task_kernel.ingest_terminal_output(terminal, "completed\r\n")
+    assert delivered == []
+
+    task_kernel.mark_terminal_closed(terminal, status="exited")
+
+    state = task_kernel._read_task_state(result["taskId"])
+    assert state["status"] == "failed"
+    assert state["code"] == "CLI_AGENT_TERMINAL_CLOSED"
+    assert len(delivered) == 1
+
+
 def test_mimo_marker_protocol_idle_completes_non_echo_output_without_marker(monkeypatch, tmp_path):
     project_root = tmp_path / "Vibelution"
     project_root.mkdir()
@@ -252,7 +342,7 @@ def test_task_timeout_or_idle_status_reports_completed_after_idle_for_non_marker
     base = datetime(2026, 6, 14, 10, 0, 0, tzinfo=timezone.utc)
     created_at = base.isoformat()
     task_state = {
-        "adapterId": "codex_code",
+        "adapterId": "claude_code",
         "status": "running",
         "output": "Answer: 正在持续分析中",
         "createdAt": created_at,
@@ -260,12 +350,12 @@ def test_task_timeout_or_idle_status_reports_completed_after_idle_for_non_marker
         "timeoutSeconds": 3600,
     }
 
-    assert task_kernel._task_timeout_or_idle_status(task_state, now=(base + timedelta(seconds=40)).timestamp()) == "completed"
+    assert task_kernel._task_timeout_or_idle_status(task_state, now=(base + timedelta(seconds=50)).timestamp()) == "completed"
 
 
 def test_task_timeout_or_idle_status_with_epoch_zero_timestamp_still_completes_after_idle(monkeypatch, tmp_path):
     task_state = {
-        "adapterId": "codex_code",
+        "adapterId": "claude_code",
         "status": "running",
         "output": "Answer: 任务继续输出中",
         "createdAt": "1970-01-01T00:00:00+00:00",
@@ -273,7 +363,7 @@ def test_task_timeout_or_idle_status_with_epoch_zero_timestamp_still_completes_a
         "timeoutSeconds": 3600,
     }
 
-    assert task_kernel._task_timeout_or_idle_status(task_state, now=40.0) == "completed"
+    assert task_kernel._task_timeout_or_idle_status(task_state, now=50.0) == "completed"
 
 
 def test_submit_cli_agent_task_send_failure_fails_task_and_returns_error_like_result(monkeypatch, tmp_path):

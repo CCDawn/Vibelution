@@ -65,14 +65,11 @@ PROTOCOLS: dict[str, CliTaskProtocol] = {
         idle_completion_seconds=25.0,
         min_completion_seconds=4.0,
         max_tail_segments=8,
-        failure_patterns=(
-            r"(?i)\b(error|failed|exception|traceback|permission denied)\b",
-            r"(执行失败|运行失败|报错|异常|失败)",
-        ),
-        completion_patterns=(
-            r"(?i)\b(done|completed|finished|success)\b",
-            r"(已完成|完成|成功)",
-        ),
+        # TUI redraws echo prompts and status text. Only this task's marker
+        # closes it; process exit and timeout remain owned by the task kernel.
+        failure_patterns=(),
+        completion_patterns=(),
+        marker_completion_required=True,
     ),
     "claude_code": CliTaskProtocol(
         adapter_id="claude_code",
