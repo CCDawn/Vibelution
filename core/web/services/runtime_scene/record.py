@@ -125,15 +125,19 @@ def _append_scene_event(scene_dir: Path, component: str, payload: dict[str, Any]
     s = _service()
     with s.pipeline_metrics.measure("append", priority="normal"):
         with s.RUNTIME_SCENE_EVENT_WRITE_LOCK:
+            event_path = scene_dir / "events" / f"{component}.jsonl"
+            cache_key = str(event_path.resolve())
             sequenced_payload = dict(payload)
-            sequenced_payload["seq"] = s._next_scene_event_seq(scene_dir, component)
-            events_dir = scene_dir / "events"
-            events_dir.mkdir(parents=True, exist_ok=True)
-            event_path = events_dir / f"{component}.jsonl"
+            sequenced_payload["seq"] = s._next_scene_event_seq(
+                scene_dir, component, event_path=event_path, cache_key=cache_key
+            )
+            event_path.parent.mkdir(parents=True, exist_ok=True)
             with event_path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(sequenced_payload, ensure_ascii=False, separators=(",", ":")))
                 handle.write("\n")
-            s._remember_scene_event_seq(event_path, int(sequenced_payload.get("seq") or 0))
+            s._remember_scene_event_seq(
+                event_path, int(sequenced_payload.get("seq") or 0), cache_key=cache_key
+            )
             if not s._should_promote_scene_event_to_timeline(sequenced_payload):
                 return
         s._append_scene_jsonl(scene_dir, s.TIMELINE_PATH, sequenced_payload)
@@ -718,11 +722,19 @@ def _next_research_event_seq(scene_dir: Path) -> int:
     return last_seq + 1
 
 
-def _next_scene_event_seq(scene_dir: Path, component: str) -> int:
+def _next_scene_event_seq(
+    scene_dir: Path,
+    component: str,
+    *,
+    event_path: Path | None = None,
+    cache_key: str | None = None,
+) -> int:
     s = _service()
-    event_path = scene_dir / "events" / f"{component}.jsonl"
+    if event_path is None:
+        event_path = scene_dir / "events" / f"{component}.jsonl"
     signature = s._scene_event_file_signature(event_path)
-    cache_key = str(event_path.resolve())
+    if cache_key is None:
+        cache_key = str(event_path.resolve())
     with s._SCENE_EVENT_SEQ_CACHE_LOCK:
         cached = s._SCENE_EVENT_SEQ_CACHE.get(cache_key)
     if cached is not None and cached[:2] == signature:
@@ -1182,10 +1194,11 @@ def _remember_jsonl_file_cache(
         s._JSONL_FILE_CACHE[signature[0]] = (signature, rows, consumed_bytes, digest)
 
 
-def _remember_scene_event_seq(event_path: Path, seq: int) -> None:
+def _remember_scene_event_seq(event_path: Path, seq: int, *, cache_key: str | None = None) -> None:
     s = _service()
     signature = s._scene_event_file_signature(event_path)
-    cache_key = str(event_path.resolve())
+    if cache_key is None:
+        cache_key = str(event_path.resolve())
     with s._SCENE_EVENT_SEQ_CACHE_LOCK:
         if len(s._SCENE_EVENT_SEQ_CACHE) > s.JSONL_FILE_CACHE_LIMIT:
             s._SCENE_EVENT_SEQ_CACHE.clear()
@@ -1196,7 +1209,8 @@ def _resolve_current_runtime_scene_dir() -> Path | None:
     # The Launcher writes the active-scene reference directly.  state.json is a
     # runtime projection and can legitimately omit the runtime scene fields.
     s = _service()
-    for runtime_reference in (s._load_active_runtime_scene_reference(), s._load_launcher_state()):
+    for load_reference in (s._load_active_runtime_scene_reference, s._load_launcher_state):
+        runtime_reference = load_reference()
         raw_dir = str(runtime_reference.get("runtimeSceneDir") or "").strip()
         if not raw_dir:
             continue
@@ -1247,7 +1261,8 @@ def _resolve_pointer_runtime_scene_dir() -> Path | None:
     instead of disappearing.
     """
     s = _service()
-    for runtime_reference in (s._load_active_runtime_scene_reference(), s._load_launcher_state()):
+    for load_reference in (s._load_active_runtime_scene_reference, s._load_launcher_state):
+        runtime_reference = load_reference()
         raw_dir = str(runtime_reference.get("runtimeSceneDir") or "").strip()
         if not raw_dir:
             continue

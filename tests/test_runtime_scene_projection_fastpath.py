@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 import json
+from pathlib import Path
 
 import pytest
 
@@ -119,6 +120,80 @@ def test_ordinary_runtime_event_is_append_only_and_keeps_incremental_sequence(tm
         if line.strip()
     ]
     assert [row["seq"] for row in rows[-2:]] == [42, 43]
+
+
+def test_scene_append_resolves_sequence_key_once_and_checks_both_signatures(tmp_path, monkeypatch) -> None:
+    scene_dir = tmp_path / "scene"
+    event_path = scene_dir / "events" / "agent.jsonl"
+    resolved_paths = []
+    signatures = []
+    original_resolve = Path.resolve
+    original_signature = runtime_scene_service._scene_event_file_signature
+
+    def record_resolve(path, *args, **kwargs):
+        resolved_paths.append(path)
+        return original_resolve(path, *args, **kwargs)
+
+    def record_signature(path):
+        signature = original_signature(path)
+        signatures.append(signature)
+        return signature
+
+    monkeypatch.setattr(Path, "resolve", record_resolve)
+    monkeypatch.setattr(runtime_scene_service, "_scene_event_file_signature", record_signature)
+    monkeypatch.setattr(runtime_scene_service, "_should_promote_scene_event_to_timeline", lambda _: False)
+
+    runtime_scene_service._append_scene_event(scene_dir, "agent", {"event_code": "agent.started"})
+
+    assert resolved_paths == [event_path]
+    assert signatures == [(0, 0), original_signature(event_path)]
+    assert signatures[1][0] > 0
+
+
+@pytest.mark.parametrize("external_change", ["append", "truncate", "replace"])
+def test_scene_append_recovers_sequence_after_external_file_change(tmp_path, monkeypatch, external_change) -> None:
+    scene_dir = tmp_path / "scene"
+    event_path = scene_dir / "events" / "agent.jsonl"
+    monkeypatch.setattr(runtime_scene_service, "_should_promote_scene_event_to_timeline", lambda _: False)
+    original_read = runtime_scene_service._read_last_scene_event_seq
+    reads = []
+
+    def record_read(path):
+        reads.append(path)
+        return original_read(path)
+
+    monkeypatch.setattr(runtime_scene_service, "_read_last_scene_event_seq", record_read)
+    runtime_scene_service._append_scene_event(scene_dir, "agent", {"event_code": "agent.started"})
+    runtime_scene_service._append_scene_event(scene_dir, "agent", {"event_code": "agent.finished"})
+    assert reads == [event_path]
+
+    if external_change == "append":
+        with event_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps({"seq": 70, "source": "external append"}) + "\n")
+        expected_seq = 71
+    elif external_change == "truncate":
+        event_path.write_text("", encoding="utf-8")
+        expected_seq = 1
+    else:
+        replacement = event_path.with_suffix(".replacement")
+        replacement.write_text(json.dumps({"seq": 90}) + "\n", encoding="utf-8")
+        replacement.replace(event_path)
+        expected_seq = 91
+
+    runtime_scene_service._append_scene_event(scene_dir, "agent", {"event_code": "agent.restarted"})
+
+    rows = [json.loads(line) for line in event_path.read_text(encoding="utf-8").splitlines()]
+    assert rows[-1]["seq"] == expected_seq
+    assert reads == [event_path, event_path]
+
+
+def test_scene_sequence_helpers_keep_direct_call_compatibility(tmp_path) -> None:
+    event_path = tmp_path / "events" / "agent.jsonl"
+    assert runtime_scene_service._next_scene_event_seq(tmp_path, "agent") == 1
+    event_path.parent.mkdir()
+    event_path.write_text(json.dumps({"seq": 8}) + "\n", encoding="utf-8")
+    runtime_scene_service._remember_scene_event_seq(event_path, 8)
+    assert runtime_scene_service._next_scene_event_seq(tmp_path, "agent") == 9
 
 
 def test_ordinary_runtime_event_does_not_wait_for_package_projection_lock(tmp_path, monkeypatch) -> None:

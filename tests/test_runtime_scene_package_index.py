@@ -1,8 +1,11 @@
 import json
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from core.web.services import runtime_scene_service
 from core.web.services.runtime_scene import record as runtime_scene_record
+from tests.helpers.web_runtime_scene import _seed_runtime_scene_bundle
 
 def _local_index_key_prefix(iso_value: str) -> str:
     parsed = datetime.fromisoformat(iso_value.replace("Z", "+00:00")).astimezone()
@@ -536,6 +539,88 @@ def test_runtime_scene_pointer_fallback_rejects_scene_outside_root(tmp_path, mon
 
     assert blocked["accepted"] is False
     assert blocked["reason"] == "no_runtime_scene"
+
+
+@pytest.mark.parametrize("resolver_name", ["_resolve_current_runtime_scene_dir", "_resolve_pointer_runtime_scene_dir"])
+def test_runtime_scene_resolver_reads_active_pointer_lazily_and_follows_switch(tmp_path, monkeypatch, resolver_name):
+    status = "running" if resolver_name == "_resolve_current_runtime_scene_dir" else "stopped"
+    first = _seed_runtime_scene_bundle(tmp_path, scene_id="active-first", status=status)
+    second = _seed_runtime_scene_bundle(tmp_path, scene_id="active-second", status=status)
+    launcher_state_path = tmp_path / "state.json"
+    active_path = tmp_path / "active-runtime-scene.json"
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+    active_loads = []
+    original_load_active = runtime_scene_service._load_active_runtime_scene_reference
+
+    def record_active_load():
+        active_loads.append(True)
+        return original_load_active()
+
+    def fail_state_load():
+        raise AssertionError("a valid active pointer must not read the launcher state fallback")
+
+    monkeypatch.setattr(runtime_scene_service, "_load_active_runtime_scene_reference", record_active_load)
+    monkeypatch.setattr(runtime_scene_service, "_load_launcher_state", fail_state_load)
+    resolver = getattr(runtime_scene_service, resolver_name)
+
+    for scene in (first, second):
+        active_path.write_text(json.dumps({"runtimeSceneDir": str(scene)}), encoding="utf-8")
+        assert resolver() == scene.resolve()
+
+    assert len(active_loads) == 2
+
+
+@pytest.mark.parametrize(
+    ("resolver_name", "invalid_reason"),
+    [
+        ("_resolve_current_runtime_scene_dir", "outside"),
+        ("_resolve_current_runtime_scene_dir", "project"),
+        ("_resolve_current_runtime_scene_dir", "scene_id"),
+        ("_resolve_current_runtime_scene_dir", "sealed"),
+        ("_resolve_pointer_runtime_scene_dir", "outside"),
+        ("_resolve_pointer_runtime_scene_dir", "project"),
+    ],
+)
+def test_runtime_scene_resolver_falls_back_after_active_reference_becomes_invalid(
+    tmp_path, monkeypatch, resolver_name, invalid_reason
+):
+    active = _seed_runtime_scene_bundle(tmp_path, scene_id="active", status="running")
+    fallback = _seed_runtime_scene_bundle(tmp_path, scene_id="fallback", status="running")
+    reference = {"runtimeSceneDir": str(active), "runtimeSceneId": "active"}
+    loads = []
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+
+    def load_active():
+        loads.append("active")
+        return reference
+
+    def load_state():
+        loads.append("state")
+        return {"runtimeSceneDir": str(fallback), "runtimeSceneId": "fallback"}
+
+    monkeypatch.setattr(runtime_scene_service, "_load_active_runtime_scene_reference", load_active)
+    monkeypatch.setattr(runtime_scene_service, "_load_launcher_state", load_state)
+    resolver = getattr(runtime_scene_service, resolver_name)
+    assert resolver() == active.resolve()
+    assert loads == ["active"]
+
+    if invalid_reason == "outside":
+        reference["runtimeSceneDir"] = str(tmp_path)
+    elif invalid_reason == "scene_id":
+        reference["runtimeSceneId"] = "different-scene"
+    else:
+        manifest_path = active / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if invalid_reason == "project":
+            manifest["project_root"] = str(tmp_path / "other-project")
+        else:
+            manifest["status"] = "stopped"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    loads.clear()
+    assert resolver() == fallback.resolve()
+    assert loads == ["active", "state"]
 
 
 def test_runtime_scene_list_sorts_by_package_timestamp_when_started_at_missing(tmp_path, monkeypatch):

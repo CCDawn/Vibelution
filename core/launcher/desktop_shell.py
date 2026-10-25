@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from config.paths import PROJECT_ROOT
 from core.infrastructure.atomic_io import atomic_write_json
 from core.infrastructure.no_console_git import run_git
 from core.infrastructure.owned_process import OwnedProcess
@@ -35,7 +36,6 @@ from core.launcher.frontend_build import (
     inspect_frontend_build,
     resolve_active_frontend_dist,
 )
-from core.runtime_manager.constants import PROJECT_ROOT
 from scripts.windowless_subprocess import no_window_subprocess_kwargs
 
 PACKAGED_EXE_RELATIVE = Path("dist") / "desktop" / "win-unpacked" / "Vibelution.exe"
