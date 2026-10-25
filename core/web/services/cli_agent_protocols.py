@@ -114,6 +114,11 @@ def task_input_for_adapter(
             f"{marker_body}"
             " + 右方括号。"
         )
+    if protocol.adapter_id == "codex_code":
+        # Paste the whole multiline task before the single submit key. CR in
+        # the body would otherwise be interpreted as an early Enter by the TUI.
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        return f"\x1b[200~{text}\x1b[201~\r"
     return f"{text}\r\n"
 
 

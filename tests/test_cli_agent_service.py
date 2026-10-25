@@ -259,16 +259,55 @@ def test_codex_readonly_uses_exec_with_readonly_sandbox(monkeypatch, tmp_path):
     assert result["internalStatus"] == "sent"
     assert result["code"] == "CLI_AGENT_TASK_SENT"
     args, kwargs = spawned[0]
-    assert args == [r"C:\tools\codex.exe", "--cd", str(project_root)]
+    assert args == [r"C:\tools\codex.exe", "-c", "tui.disable_paste_burst=true", "--cd", str(project_root)]
     assert kwargs["cwd"] == str(project_root)
     assert len(writes) == 1
-    assert writes[0].startswith("Inspect the repository without changing files.")
+    assert writes[0].startswith("\x1b[200~Inspect the repository without changing files.")
     marker = f"[VIBELUTION_CLI_DONE:{result['taskId']}]"
     assert marker[1:-1] in writes[0]
     assert marker not in writes[0], "input echo must not reproduce the complete completion marker"
-    assert writes[0].endswith("\r\n")
+    assert writes[0].endswith("\x1b[201~\r")
     assert result["terminalSessionId"].startswith("cli-term-")
     assert result["taskId"].startswith("cli-task-")
+
+
+@pytest.mark.parametrize("session_id", ["", "codex-session-123"])
+def test_builtin_codex_interactive_commands_disable_paste_burst_per_process(monkeypatch, tmp_path, session_id):
+    from core.web.services import cli_agent_protocols
+
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    monkeypatch.setattr(service.shutil, "which", lambda name: r"C:\tools\codex.exe" if name == "codex.exe" else "")
+    command = terminal_service._build_terminal_command(
+        agent_type="codex_code", task="First\r\nSecond\rThird", cwd=str(project_root), mode="readonly",
+        model="", agent="", cli_session_id=session_id,
+    )
+    expected = [r"C:\tools\codex.exe", "-c", "tui.disable_paste_burst=true"]
+    if session_id:
+        expected += ["resume", session_id]
+    expected += ["--cd", str(project_root)]
+    assert command["args"] == expected
+    assert command["resumed"] == bool(session_id)
+    assert command["initialInput"] == (
+        "" if session_id else cli_agent_protocols.task_input_for_adapter("codex_code", "First\r\nSecond\rThird")
+    )
+
+
+@pytest.mark.parametrize("session_id", ["", "codex-session-123"])
+@pytest.mark.parametrize("template", ["CUSTOM {task}\r\n", ""])
+def test_codex_custom_initial_input_remains_owned_by_its_template(monkeypatch, tmp_path, session_id, template):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    service.CLI_AGENT_REGISTRY_PATH.parent.mkdir(parents=True)
+    service.CLI_AGENT_REGISTRY_PATH.write_text(json.dumps({
+        "adapters": {"codex_code": {"terminal": {"initialInput": template}}},
+    }), encoding="utf-8")
+    monkeypatch.setattr(service.shutil, "which", lambda name: r"C:\tools\codex.exe" if name == "codex.exe" else "")
+
+    command = terminal_service._build_terminal_command(
+        agent_type="codex_code", task="First\r\nSecond", cwd=str(project_root), mode="readonly",
+        model="", agent="", cli_session_id=session_id,
+    )
+
+    assert command["initialInput"] == ("" if session_id else template.replace("{task}", "First\r\nSecond"))
 
 
 @pytest.mark.parametrize("sources", [

@@ -21,6 +21,7 @@ from core.infrastructure.owned_process import OwnedProcess
 from core.infrastructure.windows_process_job import WindowsProcessJob
 from . import cli_agent_service
 from . import cli_agent_task_kernel
+from . import cli_agent_protocols
 from .terminal_screen_buffer import TerminalScreenBuffer, TerminalScreenSnapshot
 from core.logging import debug as _debug_logger
 from vibelution_storage import resolve_project_runtime_home
@@ -1507,7 +1508,13 @@ def _build_terminal_command(
     }
     executable_args = _terminal_executable_args(executable)
     args = _render_terminal_argv_template(argv_template, context, executable_args)
-    initial_input = "" if use_resume else _render_template_arg(str(terminal.get("initialInput") or ""), context)
+    initial_template = str(terminal.get("initialInput") or "")
+    initial_input = "" if use_resume else _render_template_arg(initial_template, context)
+    if (
+        not use_resume and agent_type == "codex_code"
+        and initial_template == cli_agent_service.DEFAULT_CLI_AGENT_ADAPTERS["codex_code"]["terminal"]["initialInput"]
+    ):
+        initial_input = cli_agent_protocols.task_input_for_adapter("codex_code", task)
     session_id_spec = terminal.get("sessionId") if isinstance(terminal.get("sessionId"), dict) else {}
     session_discovery_spec = terminal.get("sessionDiscovery") if isinstance(terminal.get("sessionDiscovery"), dict) else {}
     if (

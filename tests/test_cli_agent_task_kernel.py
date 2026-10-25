@@ -226,7 +226,11 @@ def codex_task(monkeypatch, tmp_path):
 
 
 def test_codex_split_prompt_echo_and_working_output_wait_for_own_marker(codex_task):
-    terminal, result, writes, delivered = codex_task("Explain why previous run failed and produce a recommendation")
+    terminal, result, writes, delivered = codex_task("Explain why previous run failed\r\nand produce a recommendation")
+    assert len(writes) == 1
+    assert writes[0].startswith("\x1b[200~Explain why previous run failed\nand produce a recommendation\n\n")
+    assert writes[0].endswith("\x1b[201~\r")
+    assert writes[0].count("\r") == 1
     for chunk in ("› Explain why previous run failed", " and produce a recommendation\r\n", "OpenAI Codex\r\nWorking\r\ncompleted\r\n"):
         task_kernel.ingest_terminal_output(terminal, chunk)
         assert task_kernel._read_task_state(result["taskId"])["status"] == "running"

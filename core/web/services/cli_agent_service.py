@@ -70,8 +70,8 @@ DEFAULT_CLI_AGENT_ADAPTERS: dict[str, dict[str, Any]] = {
         "supportedModes": list(SUPPORTED_MODES),
         "terminal": {
             "enabled": True,
-            "launch": {"argv": ["{exe}", "--cd", "{cwd}"]},
-            "resume": {"argv": ["{exe}", "resume", "{cliSessionId}", "--cd", "{cwd}"]},
+            "launch": {"argv": ["{exe}", "-c", "tui.disable_paste_burst=true", "--cd", "{cwd}"]},
+            "resume": {"argv": ["{exe}", "-c", "tui.disable_paste_burst=true", "resume", "{cliSessionId}", "--cd", "{cwd}"]},
             "initialInput": "{task}\r\n",
             "sessionId": {
                 "source": "stdout_regex",
