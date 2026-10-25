@@ -36,6 +36,87 @@ def _request() -> Request:
     )
 
 
+@pytest.mark.parametrize(("method", "route", "url"), [
+    ("PUT", "/api/launcher/desktop-sessions/{desktop_session_id}/windows/{role}", "/api/launcher/desktop-sessions/desktop-a/windows/workbench"),
+    ("POST", "/api/launcher/desktop-sessions/{desktop_session_id}/heartbeat", "/api/launcher/desktop-sessions/desktop-a/heartbeat"),
+])
+@pytest.mark.parametrize(("status", "duration_ms", "recorded"), [
+    (200, 12.0, False), (200, 900.0, True),
+    (403, 12.0, True), (409, 12.0, True), (422, 12.0, True), (500, 12.0, True),
+])
+def test_native_desktop_sync_keeps_handler_trace_and_failure_diagnostics(
+    monkeypatch, method, route, url, status, duration_ms, recorded,
+):
+    from core.web.middleware import runtime_scene_api
+
+    events = []
+    calls = []
+    clock = iter([10.0, 10.0 + duration_ms / 1000])
+    monkeypatch.setattr(runtime_scene_api, "_api_runtime_perf_counter", lambda: next(clock))
+    monkeypatch.setattr(runtime_scene_api, "record_api_runtime_event", lambda request, **kwargs: events.append(kwargs))
+    app = FastAPI()
+    app.add_middleware(RuntimeSceneApiEventMiddleware)
+
+    async def sync_handler(request: Request):
+        calls.append(request.path_params)
+        return JSONResponse({"revision": 7}, status_code=status)
+
+    app.add_api_route(route, sync_handler, methods=[method])
+    response = TestClient(app).request(method, url)
+    assert response.status_code == status
+    assert calls and calls[0]["desktop_session_id"] == "desktop-a"
+    assert response.json() == {"revision": 7}
+    assert response.headers["traceparent"]
+    assert response.headers["X-Request-ID"]
+    assert bool(events) is recorded
+    if recorded:
+        assert events[0]["status_code"] == status
+
+
+@pytest.mark.parametrize(("method", "route"), [
+    ("POST", "/api/launcher/desktop-sessions"),
+    ("DELETE", "/api/launcher/desktop-sessions/{desktop_session_id}"),
+    ("POST", "/api/launcher/desktop-sessions/{desktop_session_id}/windows/{role}"),
+    ("PUT", "/api/launcher/desktop-sessions/{desktop_session_id}/heartbeat"),
+    ("POST", "/api/launcher/desktop-sessions/{desktop_session_id}/heartbeat-extra"),
+])
+def test_other_desktop_session_mutations_keep_success_diagnostics(method, route):
+    from types import SimpleNamespace
+    from core.web.middleware.runtime_scene_api import is_signal_api_response
+
+    request = Request({"type": "http", "method": method, "path": route, "headers": [], "route": SimpleNamespace(path=route)})
+    assert is_signal_api_response(request, 200, duration_ms=12.0)
+
+
+def test_native_desktop_sync_exceptions_keep_diagnostics(monkeypatch):
+    from core.web.middleware import runtime_scene_api
+
+    events = []
+    monkeypatch.setattr(runtime_scene_api, "record_api_runtime_event", lambda request, **kwargs: events.append(kwargs))
+    app = FastAPI()
+    app.add_middleware(RuntimeSceneApiEventMiddleware)
+
+    @app.post("/api/launcher/desktop-sessions/{desktop_session_id}/heartbeat")
+    def fail():
+        raise RuntimeError("sync failed")
+
+    assert TestClient(app, raise_server_exceptions=False).post("/api/launcher/desktop-sessions/desktop-a/heartbeat").status_code == 500
+    assert events[0]["status_code"] == 500
+    assert isinstance(events[0]["exception"], RuntimeError)
+
+
+def test_desktop_sync_diagnostic_cutoff_requires_a_matched_route():
+    from types import SimpleNamespace
+    from core.web.middleware.runtime_scene_api import is_signal_api_response
+
+    template = "/api/launcher/desktop-sessions/{desktop_session_id}/heartbeat"
+    request = Request({"type": "http", "method": "POST", "path": template, "headers": []})
+    assert is_signal_api_response(request, 200, duration_ms=12.0)
+    request.scope["route"] = SimpleNamespace(path=template)
+    assert not is_signal_api_response(request, 200, duration_ms=799.0)
+    assert is_signal_api_response(request, 200, duration_ms=800.0)
+
+
 def test_record_api_runtime_event_warns_when_scene_writer_fails(monkeypatch) -> None:
     reset_api_runtime_record_failure_count_for_tests()
     warnings: list[tuple[str, str]] = []

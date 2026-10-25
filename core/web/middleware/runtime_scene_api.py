@@ -41,6 +41,10 @@ API_RUNTIME_EXCLUDED_PATHS = frozenset(
     }
 )
 API_RUNTIME_ALWAYS_RECORD_REFERER_PATHS = frozenset({"/teams", "/agents/teams"})
+API_RUNTIME_DESKTOP_SYNC_ROUTES = frozenset({
+    ("PUT", "/api/launcher/desktop-sessions/{desktop_session_id}/windows/{role}"),
+    ("POST", "/api/launcher/desktop-sessions/{desktop_session_id}/heartbeat"),
+})
 CLIENT_OPERATION_ID_HEADER = "X-Vibelution-Client-Operation-Id"
 REQUEST_ID_HEADER = "X-Request-ID"
 TRACEPARENT_HEADER = "traceparent"
@@ -118,6 +122,13 @@ def should_record_api_runtime_event(request: Request) -> bool:
 
 def is_signal_api_response(request: Request, status_code: int, *, duration_ms: float = 0.0) -> bool:
     method = request.method.upper()
+    if 200 <= status_code < 300 and 0 <= duration_ms < API_RUNTIME_SLOW_GET_THRESHOLD_MS:
+        route = request.scope.get("route")
+        template = _api_runtime_path_template(str(request.url.path or ""), str(getattr(route, "path", "") or ""))
+        if route is not None and (method, template) in API_RUNTIME_DESKTOP_SYNC_ROUTES:
+            # These periodic mirrors already persist state and have native
+            # lifecycle evidence. Keep slow/error signals, not every success.
+            return False
     if method in {"POST", "PUT", "PATCH", "DELETE"}:
         return True
     if method == "GET" and _is_always_recorded_referer_probe(request):
