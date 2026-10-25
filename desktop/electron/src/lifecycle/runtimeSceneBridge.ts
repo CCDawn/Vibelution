@@ -12,6 +12,8 @@ export type RuntimeSceneBridgeOptions = {
   controlToken: string;
   maxBufferedEvents: number;
   fetchImpl?: typeof fetch;
+  /** Resolve the current backend's paired origin/token before each queued POST. */
+  resolveControlContext?: () => Promise<{ launcherOrigin: string; controlToken: string }>;
   /**
    * Overrides how a fresh control token is obtained after a 401/403. The
    * default re-fetches the launcher `/api/control-token` route from this shell
@@ -300,10 +302,17 @@ export class RuntimeSceneBridge {
     }
   }
 
-  private postEvent(event: RuntimeSceneElectronEvent): Promise<Response> {
+  private async postEvent(event: RuntimeSceneElectronEvent): Promise<Response> {
+    let launcherOrigin = this.options.launcherOrigin;
+    if (this.options.resolveControlContext) {
+      const context = await this.options.resolveControlContext();
+      if (!context.controlToken.trim()) throw new Error("runtime scene control context is missing a token");
+      launcherOrigin = context.launcherOrigin;
+      this.controlToken = context.controlToken;
+    }
     return boundedDesktopControlFetch({
       fetchImpl: this.options.fetchImpl,
-      resource: `${new URL(this.options.launcherOrigin).origin}/api/launcher/runtime-scene/events`,
+      resource: `${new URL(launcherOrigin).origin}/api/launcher/runtime-scene/events`,
       operation: "runtime scene event",
       init: {
         method: "POST",

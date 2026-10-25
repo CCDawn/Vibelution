@@ -76,6 +76,7 @@ import {
 } from "./notifications/humanAttentionNotifications.js";
 import { createDesktopPaths, resolveDesktopEntryCatalogPath, type DesktopPaths } from "./paths.js";
 import { fetchLauncherControlToken, runDesktopActionOnce } from "./protocol/desktopActionClient.js";
+import { BackendControlTokenOwner } from "./protocol/backendControlToken.js";
 import { PROJECT_SLOT_LIFECYCLE_COMMANDS, planProjectSlot, projectSlotWindowAction } from "./protocol/applyProjectSlot.js";
 import {
   classifyTrayBranchInstances,
@@ -306,8 +307,12 @@ let desktopActionTimer: ReturnType<typeof setInterval> | null = null;
 let desktopActionPollRunning = false;
 let desktopSessionHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let desktopSessionHeartbeatRunning = false;
+// Last confirmed context for local close/stop snapshots; new writes use the
+// backend-bound owner instead of trusting this value as an auth cache.
 let desktopActionContext: DesktopActionLoopContext | null = null;
+let backendControlTokenOwner: BackendControlTokenOwner | null = null;
 let runtimeSceneBridge: RuntimeSceneBridge | null = null;
+let runtimeSceneBridgeOpening: Promise<RuntimeSceneBridge> | null = null;
 let desktopTray: ReturnType<typeof createDesktopTray> | null = null;
 let currentWorkbenchUrl = "";
 let desktopSessionRegistered = false;
@@ -1122,18 +1127,18 @@ async function persistManagedWindowState(
   }
   const managedRole: "launcher" | "workbench" = state.role;
   await desktopSessionMutations.enqueue("window", async () => {
-    const context = await resolveDesktopActionLoopContext(bootstrap);
+    const desktopSessionId = currentDesktopSessionId(bootstrap);
     if (!desktopSessionRegistered) {
       electronStartupStage = "desktop_session_registration";
       const stageStartedAtMs = performance.now();
       const registration = inProcessDesktopSessionStore.register({
-        desktopSessionId: context.desktopSessionId,
+        desktopSessionId,
         capabilities: desktopSessionCapabilities(bootstrap)
       });
       desktopSessionRevision = registration.revision;
       desktopSessionRegistered = true;
-      void desktopSessionMirror.register(() => registerDesktopSession({
-        ...context,
+      void desktopSessionMirror.register(async () => registerDesktopSession({
+        ...(await resolveDesktopActionLoopContext(bootstrap)),
         workspaceRoot: paths.workspaceRoot,
         capabilities: desktopSessionCapabilities(bootstrap)
       })).catch(() => undefined);
@@ -1144,20 +1149,20 @@ async function persistManagedWindowState(
         fields: electronStartupFields({
           stage: "desktop_session_registration",
           stageDurationMs: electronStageElapsedMs(stageStartedAtMs),
-          desktopSessionId: context.desktopSessionId
+          desktopSessionId
         })
       };
       scheduleTelemetryWithoutWaiting(() => recordElectronSupervisorEvent(bootstrap, registrationEvent));
     }
     const result = inProcessDesktopSessionStore.reportWindow({
-      desktopSessionId: context.desktopSessionId,
+      desktopSessionId,
       role: managedRole,
       revision: desktopSessionRevision,
       state
     });
     desktopSessionRevision = result.revision;
-    void desktopSessionMirror.mutate("window", (mirrorRevision) => reportDesktopWindowState({
-      ...context,
+    void desktopSessionMirror.mutate("window", async (mirrorRevision) => reportDesktopWindowState({
+      ...(await resolveDesktopActionLoopContext(bootstrap)),
       role: managedRole,
       revision: mirrorRevision,
       state
@@ -1171,7 +1176,7 @@ async function persistManagedWindowState(
         fields: electronStartupFields({
           stage: "workbench_window_ready",
           stageDurationMs: electronStageElapsedMs(stageStartedAtMs),
-          desktopSessionId: context.desktopSessionId,
+          desktopSessionId,
           windowId: state.windowId,
           rendererProcessId: state.rendererProcessId
         })
@@ -1218,14 +1223,13 @@ function startDesktopSessionHeartbeatIfNeeded(paths: DesktopPaths, bootstrap: La
     desktopSessionHeartbeatRunning = true;
     try {
       await desktopSessionMutations.enqueue("heartbeat", async () => {
-        const context = await resolveDesktopActionLoopContext(currentBootstrap);
         const result = inProcessDesktopSessionStore.heartbeat({
-          desktopSessionId: context.desktopSessionId,
+          desktopSessionId: currentDesktopSessionId(currentBootstrap),
           revision: desktopSessionRevision
         });
         desktopSessionRevision = result.revision;
-        await desktopSessionMirror.mutate("heartbeat", (mirrorRevision) => heartbeatDesktopSession({
-          ...context,
+        await desktopSessionMirror.mutate("heartbeat", async (mirrorRevision) => heartbeatDesktopSession({
+          ...(await resolveDesktopActionLoopContext(currentBootstrap)),
           revision: mirrorRevision
         }));
       });
@@ -1277,20 +1281,39 @@ function stopDesktopSessionHeartbeat(): void {
   desktopSessionHeartbeatRunning = false;
 }
 
+function currentDesktopControlOrigin(bootstrap: LauncherBootstrapResult, desktopEnv = desktopEnvironment()): string {
+  // A verified lifecycle URL supersedes the process's initial bootstrap/env
+  // hint after port relocation. Retained bridge callbacks may hold that old hint.
+  return resolveWorkbenchUrl(
+    currentWorkbenchUrl ? { ...desktopEnv, VIBELUTION_WORKBENCH_URL: currentWorkbenchUrl } : desktopEnv,
+    launcherBootstrap?.workbenchUrl || bootstrap.workbenchUrl
+  );
+}
+
 async function resolveDesktopActionLoopContext(
   bootstrap: LauncherBootstrapResult,
   options: { forceControlTokenRefresh?: boolean; signal?: AbortSignal } = {}
 ): Promise<DesktopActionLoopContext> {
-  if (!options.forceControlTokenRefresh && desktopActionContext !== null) {
-    return desktopActionContext;
-  }
   const desktopEnv = desktopEnvironment();
-  const launcherOrigin = resolveWorkbenchUrl(desktopEnv, bootstrap.workbenchUrl);
-  const envToken = String(desktopEnv.VIBELUTION_WEB_CONTROL_TOKEN || "").trim();
-  const controlToken = options.forceControlTokenRefresh
-    ? await fetchLauncherControlToken({ launcherOrigin, signal: options.signal })
-    : envToken || (await fetchLauncherControlToken({ launcherOrigin, signal: options.signal }));
+  const launcherOrigin = currentDesktopControlOrigin(bootstrap, desktopEnv);
+  const workspaceRoot = createDesktopPathsForApp().workspaceRoot;
+  if (backendControlTokenOwner === null || !backendControlTokenOwner.isForScope(workspaceRoot, launcherOrigin)) {
+    backendControlTokenOwner = new BackendControlTokenOwner({
+      workspaceRoot,
+      launcherOrigin,
+      readBackendIdentity: () => {
+        const state = readLauncherStateFile(launcherStatePath(workspaceRoot));
+        return { pid: Number(state.backendPid || 0), createTime: Number(state.backendCreateTime || 0) };
+      },
+      fetchControlToken: () => fetchLauncherControlToken({ launcherOrigin })
+    });
+  }
+  const owner = backendControlTokenOwner;
+  const controlToken = await owner.resolve({ forceRefresh: options.forceControlTokenRefresh, signal: options.signal });
   options.signal?.throwIfAborted();
+  if (backendControlTokenOwner !== owner || !owner.isForScope(createDesktopPathsForApp().workspaceRoot, currentDesktopControlOrigin(bootstrap))) {
+    throw new Error("Desktop control context scope changed during refresh.");
+  }
   desktopActionContext = {
     launcherOrigin,
     controlToken,
@@ -1299,17 +1322,42 @@ async function resolveDesktopActionLoopContext(
   return desktopActionContext;
 }
 
+function desktopControlContextForLocalClose(bootstrap: LauncherBootstrapResult): DesktopActionLoopContext {
+  // Closing the old backend and writing local receipts must not wait for a
+  // token endpoint that is already offline. Never use this snapshot for new work.
+  if (desktopActionContext !== null) return desktopActionContext;
+  const desktopEnv = desktopEnvironment();
+  return {
+    launcherOrigin: currentDesktopControlOrigin(bootstrap, desktopEnv),
+    controlToken: String(desktopEnv.VIBELUTION_WEB_CONTROL_TOKEN || "").trim(),
+    desktopSessionId: currentDesktopSessionId(bootstrap, desktopEnv)
+  };
+}
+
 async function resolveRuntimeSceneBridge(bootstrap: LauncherBootstrapResult): Promise<RuntimeSceneBridge> {
   if (runtimeSceneBridge !== null) {
     return runtimeSceneBridge;
   }
-  const context = await resolveDesktopActionLoopContext(bootstrap);
-  runtimeSceneBridge = new RuntimeSceneBridge({
-    launcherOrigin: context.launcherOrigin,
-    controlToken: context.controlToken,
-    maxBufferedEvents: RUNTIME_SCENE_MAX_BUFFERED_EVENTS
+  if (runtimeSceneBridgeOpening !== null) return runtimeSceneBridgeOpening;
+  // Publish the construction owner before awaiting credentials. A cold offline
+  // failure still reaches the caller's durable local fallback; concurrent first
+  // records cannot construct different queues after that shared lookup settles.
+  let opening!: Promise<RuntimeSceneBridge>;
+  opening = Promise.resolve().then(async () => {
+    const context = await resolveDesktopActionLoopContext(bootstrap);
+    runtimeSceneBridge = new RuntimeSceneBridge({
+      launcherOrigin: context.launcherOrigin,
+      controlToken: context.controlToken,
+      maxBufferedEvents: RUNTIME_SCENE_MAX_BUFFERED_EVENTS,
+      resolveControlContext: () => resolveDesktopActionLoopContext(bootstrap),
+      refreshControlToken: async () => (await resolveDesktopActionLoopContext(bootstrap, { forceControlTokenRefresh: true })).controlToken
+    });
+    return runtimeSceneBridge;
+  }).finally(() => {
+    if (runtimeSceneBridgeOpening === opening) runtimeSceneBridgeOpening = null;
   });
-  return runtimeSceneBridge;
+  runtimeSceneBridgeOpening = opening;
+  return await opening;
 }
 
 async function recordElectronSupervisorEvent(
@@ -1603,8 +1651,6 @@ async function recoverDesktopControlContext(
   desktopControlRecoveryPromise = (async () => {
     const previousContext = desktopActionContext;
     stopDesktopSessionHeartbeat();
-    desktopActionContext = null;
-    runtimeSceneBridge = null;
     desktopSessionRegistered = false;
     const refreshedContext = await resolveDesktopActionLoopContext(bootstrap, { forceControlTokenRefresh: true });
     if (previousContext !== null && refreshedContext.desktopSessionId !== previousContext.desktopSessionId) {
@@ -1667,7 +1713,7 @@ async function acknowledgeTransactionalWorkbenchClose(
     return;
   }
   const settled = mainWorkbenchCloseStore.windowClosed(transaction.closeId);
-  const context = await resolveDesktopActionLoopContext(bootstrap);
+  const context = desktopControlContextForLocalClose(bootstrap);
   if (settled.phase === "failed") {
     recordSupervisorEventFallbackLocally({
       eventCode: "electron.workbench_close.window_closed_after_failure",
@@ -1851,12 +1897,15 @@ async function authorizeLauncherForceLifecycle(input: {
           message: "isolated instance active-work projection is unavailable before force authorization"
         };
       }
-      if (launcherBootstrap === null) {
+      const bootstrap = launcherBootstrap;
+      if (bootstrap === null) {
         return { state: "unknown", message: "Launcher bootstrap is not available." };
       }
-      const context = await resolveDesktopActionLoopContext(launcherBootstrap);
       return await withDesktopShellExitTimeout(
-        (signal) => fetchLauncherActiveWorkStatus({ ...context, signal }),
+        async (signal) => {
+          const context = await resolveDesktopActionLoopContext(bootstrap, { signal });
+          return await fetchLauncherActiveWorkStatus({ ...context, signal });
+        },
         ACTIVE_WORK_STATUS_TIMEOUT_MS,
         "resolve launcher active work for force authorization"
       );
@@ -1917,7 +1966,7 @@ async function closeDesktopSessionIfRegistered(): Promise<void> {
   stopDesktopSessionHeartbeat();
   try {
     await desktopSessionMutations.enqueue("close", async () => {
-      const context = await resolveDesktopActionLoopContext(bootstrap);
+      const context = desktopControlContextForLocalClose(bootstrap);
       const result = inProcessDesktopSessionStore.close({
         desktopSessionId: context.desktopSessionId,
         revision: desktopSessionRevision
@@ -2677,13 +2726,16 @@ async function resolveTrayControlContextOrLoopback(): Promise<{
 }
 
 async function resolveInterruptedActiveWork(): Promise<{ count: number; items: Record<string, unknown>[] }> {
-  if (launcherBootstrap === null) {
+  const bootstrap = launcherBootstrap;
+  if (bootstrap === null) {
     return { count: 0, items: [] };
   }
   try {
-    const context = await resolveDesktopActionLoopContext(launcherBootstrap);
     const status = await withDesktopShellExitTimeout(
-      (signal) => fetchLauncherActiveWorkStatus({ ...context, signal }),
+      async (signal) => {
+        const context = await resolveDesktopActionLoopContext(bootstrap, { signal });
+        return await fetchLauncherActiveWorkStatus({ ...context, signal });
+      },
       ACTIVE_WORK_STATUS_TIMEOUT_MS,
       "resolve launcher active work for tray force action"
     );
@@ -4240,6 +4292,7 @@ async function openWorkbenchAfterLifecycleReady(
   // This port was just proved by the health + identity + version handshake.
   // A second Python bridge only rereads the same persisted URL.
   const url = rememberLiveWorkbenchUrl(workbenchLoopbackUrl(verifiedPort));
+  await resolveDesktopActionLoopContext(bootstrap, { signal: lease.signal });
   if (!launcherLifecycleSupervisor.isCurrent(lease) || !launcherLifecycleSupervisor.claimReady(lease)) {
     return;
   }

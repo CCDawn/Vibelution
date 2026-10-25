@@ -300,9 +300,10 @@ describe("Electron main transactional Workbench close", () => {
     const source = readFileSync(mainSourcePath, "utf8");
 
     expect(source).toContain("async function recoverWorkbenchCloseControlContext(");
-    expect(source.includes("await fetchLauncherControlToken({ launcherOrigin, signal: options.signal })")).toBe(true);
-    expect(source).toContain("context = await resolveDesktopActionLoopContext(bootstrap);");
-    expect(source).toContain("runtimeSceneBridge = null;");
+    expect(source).toContain("owner.resolve({ forceRefresh: options.forceControlTokenRefresh, signal: options.signal })");
+    expect(source).toContain("const context = desktopControlContextForLocalClose(bootstrap);");
+    const recovery = source.slice(source.indexOf("async function recoverDesktopControlContext("), source.indexOf("async function recoverWorkbenchCloseControlContext("));
+    expect(recovery).not.toContain("runtimeSceneBridge = null");
   });
 
   it("records supervisor evidence for untracked closes and fail-open paths", () => {

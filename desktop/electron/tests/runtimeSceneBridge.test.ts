@@ -8,6 +8,77 @@ import {
 } from "../src/lifecycle/runtimeSceneBridge.js";
 
 describe("RuntimeSceneBridge", () => {
+  it("keeps buffered events while shared control context is unavailable, then uses fresh credentials", async () => {
+    let available = false;
+    const posts: { url: string; token: string | null; event: string }[] = [];
+    const fetchImpl: typeof fetch = async (url, init) => {
+      posts.push({
+        url: String(url), token: new Headers(init?.headers).get("X-Vibelution-Control-Token"),
+        event: JSON.parse(String(init?.body)).eventCode
+      });
+      return new Response("{}", { status: 202 });
+    };
+    const bridge = new RuntimeSceneBridge({
+      launcherOrigin: "http://127.0.0.1:8765", controlToken: "old", maxBufferedEvents: 5, fetchImpl,
+      resolveControlContext: async () => {
+        if (!available) throw new Error("backend unavailable");
+        return { launcherOrigin: "http://127.0.0.1:8766", controlToken: "fresh" };
+      }
+    });
+    await bridge.record({ eventCode: "first", message: "", fields: {} });
+    await bridge.record({ eventCode: "second", message: "", fields: {} });
+    expect(posts).toEqual([]);
+    expect(bridge.bufferedCount()).toBe(2);
+    available = true;
+    await bridge.flush();
+    expect(posts.map((post) => post.event)).toEqual(["first", "second"]);
+    expect(posts.every((post) => post.token === "fresh" && post.url.startsWith("http://127.0.0.1:8766/"))).toBe(true);
+    expect(bridge.bufferedCount()).toBe(0);
+  });
+
+  it("keeps the in-flight acknowledgement and resolves new backend context for the next event", async () => {
+    let context = { launcherOrigin: "http://127.0.0.1:8765", controlToken: "first-backend" };
+    const posts: { token: string | null; event: string }[] = [];
+    let acknowledge!: (response: Response) => void;
+    const firstResponse = new Promise<Response>((resolve) => { acknowledge = resolve; });
+    const fetchImpl: typeof fetch = async (_url, init) => {
+      posts.push({ token: new Headers(init?.headers).get("X-Vibelution-Control-Token"), event: JSON.parse(String(init?.body)).eventCode });
+      return posts.length === 1 ? firstResponse : new Response("{}", { status: 202 });
+    };
+    const bridge = new RuntimeSceneBridge({
+      launcherOrigin: context.launcherOrigin, controlToken: context.controlToken,
+      maxBufferedEvents: 5, fetchImpl, resolveControlContext: async () => context
+    });
+    const first = bridge.record({ eventCode: "first", message: "", fields: {} });
+    await vi.waitFor(() => expect(posts).toHaveLength(1));
+    const second = bridge.record({ eventCode: "second", message: "", fields: {} });
+    context = { launcherOrigin: "http://127.0.0.1:8766", controlToken: "second-backend" };
+    acknowledge(new Response("{}", { status: 202 }));
+    await Promise.all([first, second]);
+    expect(posts).toEqual([{ token: "first-backend", event: "first" }, { token: "second-backend", event: "second" }]);
+    expect(bridge.bufferedCount()).toBe(0);
+  });
+
+  it("uses shared context after an auth refresh without replacing the bridge queue", async () => {
+    let token = "first";
+    const seen: string[] = [];
+    const refreshControlToken = vi.fn(async () => { token = "refreshed"; return token; });
+    const fetchImpl: typeof fetch = async (_url, init) => {
+      const sent = new Headers(init?.headers).get("X-Vibelution-Control-Token")!;
+      seen.push(sent);
+      return new Response("{}", { status: sent === "first" ? 403 : 202 });
+    };
+    const bridge = new RuntimeSceneBridge({
+      launcherOrigin: "http://127.0.0.1:8765", controlToken: token, maxBufferedEvents: 5, fetchImpl, refreshControlToken,
+      resolveControlContext: async () => ({ launcherOrigin: "http://127.0.0.1:8765", controlToken: token })
+    });
+    await bridge.record({ eventCode: "first", message: "", fields: {} });
+    await bridge.record({ eventCode: "second", message: "", fields: {} });
+    expect(seen).toEqual(["first", "refreshed", "refreshed"]);
+    expect(refreshControlToken).toHaveBeenCalledTimes(1);
+    expect(bridge.bufferedCount()).toBe(0);
+  });
+
   it("releases a real response socket after accepting headers with an unfinished body", async () => {
     let socketClosed = false;
     const server = createServer((request, response) => {
