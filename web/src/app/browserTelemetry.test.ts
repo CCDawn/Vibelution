@@ -34,6 +34,31 @@ describe("browser telemetry", () => {
     resetBrowserTelemetryDeliveryBufferForTests();
   });
 
+  it("does not queue or send project telemetry from the independent Launcher assistant", async () => {
+    vi.stubGlobal("window", { location: new URL("vibelution-launcher://launcher/launcher-assistant") });
+    seedControlTokenForTests();
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 202 });
+    vi.stubGlobal("fetch", fetchMock);
+    postTestEvent("assistant.event");
+    postExitTestEvent("assistant.exit");
+    for (let index = 0; index < 20; index += 1) { await Promise.resolve(); }
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(peekBrowserTelemetryDeliveryBufferForTests()).toHaveLength(0);
+  });
+
+  it.each([
+    "http://127.0.0.1:8000/launcher-assistant",
+    "vibelution-launcher://launcher/launcher",
+  ])("preserves ordinary telemetry outside the independent assistant: %s", async (url) => {
+    vi.stubGlobal("window", { location: new URL(url) });
+    seedControlTokenForTests();
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 202 });
+    vi.stubGlobal("fetch", fetchMock);
+    postTestEvent("ordinary.event");
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body)).eventCode).toBe("ordinary.event");
+  });
+
   it("holds ordinary startup telemetry and releases it in priority and FIFO order", async () => {
     vi.stubGlobal("window", {});
     seedControlTokenForTests();
