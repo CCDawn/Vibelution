@@ -192,14 +192,15 @@ def _run_install_function(tmp_path, name, body):
     assert function is not None
     script = tmp_path / "function-only.ps1"
     script.write_text('Set-StrictMode -Version Latest\n$ErrorActionPreference = "Stop"\n'
-                      + function.group() + "\n" + body, encoding="utf-8")
+                      '$OutputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)\n'
+                      + function.group() + "\n" + body, encoding="utf-8-sig")
     powershell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
     env = {k: v for k, v in os.environ.items() if not k.upper().startswith("VIBELUTION_")}
     env.update(USERPROFILE=str(tmp_path / "private"), HOME=str(tmp_path / "private"),
                LOCALAPPDATA=str(tmp_path / "private"), PSModulePath=str(powershell.parent / "Modules"))
     result = subprocess.run([str(powershell), "-NoLogo", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
                              "-ExecutionPolicy", "Bypass", "-File", str(script)],
-                            env=env, capture_output=True, text=True, timeout=15,
+                            env=env, capture_output=True, text=True, encoding="utf-8", timeout=15,
                             creationflags=subprocess.CREATE_NO_WINDOW)
     assert result.returncode == 0, result.stdout + result.stderr
     return json.loads(result.stdout.splitlines()[-1])

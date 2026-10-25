@@ -56,14 +56,29 @@ def _run(tmp_path: Path, code: str, *, role: str = "launcher_assistant", root: s
     native_root.mkdir(exist_ok=True)
     config = tmp_path / "config.toml"
     config.write_text(config_text, encoding="utf-8")
-    env = {key: value for key, value in os.environ.items() if not key.startswith("VIBELUTION_")}
+    env = {key: value for key, value in os.environ.items()
+           if not key.upper().startswith("VIBELUTION_") and "API_KEY" not in key.upper()
+           and key.upper() != "OPENAI_ADMIN_KEY"}
+    private_user = tmp_path / "user"
+    private_local = private_user / "AppData" / "Local"
+    private_roaming = private_user / "AppData" / "Roaming"
+    private_temp = tmp_path / "tmp"
+    for directory in (private_local, private_roaming, private_temp):
+        directory.mkdir(parents=True, exist_ok=True)
     env.update({
         "VIBELUTION_PROCESS_ROLE": role,
         "VIBELUTION_ASSISTANT_NATIVE_ROOT": str(native_root) if root is None else root,
         "VIBELUTION_DATA_HOME": str(native_root / "data"),
         "VIBELUTION_CONFIG_PATH": str(config),
         "VIBELUTION_PROJECTS_HOME": str(tmp_path / "projects"),
-        "USERPROFILE": str(tmp_path / "user"),
+        "USERPROFILE": str(private_user),
+        "HOME": str(private_user),
+        "LOCALAPPDATA": str(private_local),
+        "APPDATA": str(private_roaming),
+        "TEMP": str(private_temp), "TMP": str(private_temp), "TMPDIR": str(private_temp),
+        # The OpenAI SDK requires a nonempty key even for this loopback mock.
+        # Never inherit an operator credential into the synthetic provider.
+        "OPENAI_API_KEY": "isolated-loopback-test-key",
         "PYTHONDONTWRITEBYTECODE": "1",
         "PYTHONIOENCODING": "utf-8",
         "ASSISTANT_TEST_WRITE_ROOT": str(tmp_path),
