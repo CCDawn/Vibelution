@@ -2400,6 +2400,73 @@ def test_messages_with_live_output_does_not_reopen_a_terminal_turn(monkeypatch):
     ) == normalized_messages
 
 
+@pytest.mark.parametrize(
+    ("raw_agent_id", "target_status", "session_kind", "shared_owner", "expected"),
+    [
+        ("agent-target", "active", "main", False, True),
+        ("", "active", "main", False, True),
+        ("agent-missing", "active", "main", False, True),
+        ("agent-other", "active", "main", False, False),
+        ("agent-target", "active", "child", False, False),
+        ("agent-target", "archived", "main", False, False),
+        ("agent-target", "missing", "main", False, False),
+        ("agent-missing", "active", "main", True, False),
+        ("agent-target", "active", "main", True, True),
+    ],
+)
+def test_direct_session_summary_scopes_agent_reads_without_changing_ownership(
+    tmp_path, monkeypatch, raw_agent_id, target_status, session_kind, shared_owner, expected,
+):
+    from core.web.services.session import conversation_index
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    records = [
+        {
+            "agentId": "agent-other", "status": "active",
+            "directSessionId": "session-direct" if shared_owner else "session-other",
+        },
+        {"agentId": "agent-unrelated", "status": "active", "directSessionId": "session-unrelated"},
+    ]
+    if target_status != "missing":
+        records.append({"agentId": "agent-target", "status": target_status, "directSessionId": "session-direct"})
+    raw = {
+        "conversation_id": "session-direct", "agent_id": raw_agent_id,
+        "session_kind": session_kind, "title": "Direct session", "messages": [],
+    }
+    monkeypatch.setattr(session_service, "load_session_chat_state", lambda *_args: raw)
+    monkeypatch.setattr(agent_directory_service, "load_state", lambda: {"agents": records})
+    monkeypatch.setattr(session_service, "_sync_agent_directory_project_root", lambda: None)
+    full_lookup = session_service._agent_lookup_for_conversations
+    with monkeypatch.context() as reference_patch:
+        reference_patch.setattr(session_service, "_agent_lookup_for_conversations", lambda **_kwargs: full_lookup())
+        reference = conversation_index._agent_direct_session_query_summary(agent_id="agent-target")
+    assert (reference is not None) is expected
+
+    hydrated = []
+    project_agent = session_service._conversation_agent_from_state
+
+    def tracked_projection(agent, **kwargs):
+        hydrated.append(agent["agentId"])
+        return project_agent(agent, **kwargs)
+
+    def scoped_records(*, agent_ids=(), direct_session_ids=()):
+        selected = set(agent_ids)
+        selected.update(item["agentId"] for item in records if item["directSessionId"] in direct_session_ids)
+        return [dict(item) for item in records if item["agentId"] in selected]
+
+    def reject_full_registry():
+        raise AssertionError("single-Agent direct query must not copy the full registry")
+
+    monkeypatch.setattr(agent_directory_service, "load_state", reject_full_registry)
+    monkeypatch.setattr(agent_directory_service, "load_agent_records", scoped_records)
+    monkeypatch.setattr(session_service, "_conversation_agent_from_state", tracked_projection)
+
+    assert conversation_index._agent_direct_session_query_summary(agent_id=" agent-target ") == reference
+    assert "agent-unrelated" not in hydrated
+    if raw_agent_id == "agent-target" and target_status != "missing":
+        assert hydrated == ["agent-target"]
+
+
 def _stub_session_query_source(monkeypatch, summaries):
     monkeypatch.setattr(
         session_service,

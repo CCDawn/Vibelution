@@ -1193,7 +1193,7 @@ def _agent_direct_session_query_summary(*, agent_id: str) -> dict[str, Any] | No
     normalized_agent_id = str(agent_id or "").strip()
     if not normalized_agent_id:
         return None
-    agent_by_id = s._agent_lookup_for_conversations()
+    agent_by_id = s._agent_lookup_for_conversations(agent_ids=(normalized_agent_id,))
     agent = s._agent_from_lookup(agent_by_id, normalized_agent_id)
     if not isinstance(agent, dict) or str(agent.get("status") or "active").strip().lower() == "archived":
         return None
@@ -1204,6 +1204,15 @@ def _agent_direct_session_query_summary(*, agent_id: str) -> dict[str, Any] | No
     raw = s.load_session_chat_state(s.PROJECT_ROOT, direct_session_id)
     if not isinstance(raw, dict):
         return None
+    raw_agent_id = str(raw.get("agent_id") or raw.get("agentId") or "").strip()
+    if raw_agent_id != normalized_agent_id:
+        # Legacy bindings can refer to another live Agent, or recover through
+        # a competing direct-session owner. Preserve the full lookup's ordering
+        # and ownership checks while projecting only that identity closure.
+        agent_by_id = s._agent_lookup_for_conversations(
+            session_id=direct_session_id,
+            agent_ids=(normalized_agent_id, raw_agent_id),
+        )
     conversation = s._normalize_conversation(
         raw,
         agent_by_id=agent_by_id,
