@@ -17,6 +17,22 @@ def _source() -> str:
     return NATIVE_ENTRY_SOURCE.read_text(encoding="utf-8")
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows native entry synchronization")
+def test_code_only_integration_skips_native_install_before_resolving_project(tmp_path):
+    script = PROJECT_ROOT / "scripts/windows_launcher_entry/sync_vibelution_launcher_entry.ps1"
+    powershell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+    absent_project = tmp_path / "not-a-project"
+    output = tmp_path / "must-not-be-installed.exe"
+    result = subprocess.run([
+        str(powershell), "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+        "-File", str(script), "-ProjectDir", str(absent_project), "-OutputPath", str(output),
+    ], env={**os.environ, "VIBELUTION_SKIP_NATIVE_ENTRY_SYNC": "1"}, capture_output=True,
+        text=True, encoding="utf-8", errors="replace", creationflags=subprocess.CREATE_NO_WINDOW, timeout=20)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"status": "skipped", "rebuilt": False}
+    assert not absent_project.exists() and not output.exists()
+
+
 def test_native_launch_budget_covers_start_settlement_retry_and_spawn():
     from scripts.vibelution_desktop_entry import (
         DEFAULT_START_LIFECYCLE_SETTLE_TIMEOUT_SECONDS,

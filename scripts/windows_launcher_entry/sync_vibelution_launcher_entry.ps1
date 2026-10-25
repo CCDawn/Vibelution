@@ -7,6 +7,14 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
+# Code-only integration and isolated validation must not update an installation.
+if ($env:VIBELUTION_SKIP_NATIVE_ENTRY_SYNC -eq "1") {
+    if (-not $Quiet) {
+        @{ status = "skipped"; rebuilt = $false } | ConvertTo-Json -Compress
+    }
+    exit 0
+}
+
 $projectRoot = (Resolve-Path -LiteralPath $ProjectDir).Path
 if (-not $OutputPath) {
     $localAppData = [Environment]::GetFolderPath("LocalApplicationData")
