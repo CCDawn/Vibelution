@@ -25,6 +25,8 @@ const styles = {
   chatStatusDot: "size-1.5 shrink-0 rounded-full bg-[var(--fg-secondary)] [[data-tone=running]_&]:bg-[var(--vui-pet-accent)] [[data-tone=approval]_&]:bg-[var(--vui-pet-tone-approval)] [[data-tone=error]_&]:bg-[var(--vui-pet-tone-error)] [[data-tone=completed]_&]:bg-[var(--vui-pet-tone-completed)]",
   chatActions: "flex shrink-0 items-center gap-0.5",
   chatBody: "desktop-assistant-chat-body flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
+  receiptPanel: "max-h-28 shrink-0 overflow-auto border-t border-[var(--vui-border-subtle)] px-3 py-2 text-vui-micro-11",
+  receiptBoundary: "text-[var(--fg-secondary)]",
 } as const;
 
 export default styles;

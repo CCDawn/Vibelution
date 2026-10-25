@@ -19,7 +19,7 @@ Launcher 聊天复用 `ConversationView` 的发送、停止和继续控件。运
 原生审批只读取当前助理会话的 pending 请求，复用 ChatToolApprovalDialog、toolApprovalPreview 与 VButton；只提供同意本次、拒绝及失败后重读，不显示会话级授权、永久授权或操作窗口委托。审批失败保留原请求，窗口隐藏和卸载不取消原生任务。
 忙碌时认可原生显式 queued ACK，校验 clientSubmissionId 与原请求 ID 一致后清空输入，保留原生队列引用，queue ID 不作 turnId。首个旧 ready 不解除等待；读取到对应 queuedTurns 后由原生 queued/starting 状态控制轮询，paused/blocked 显示原状态并在会话空闲时停读。复用原生提交读回 helper，以 canonical message/activeTask 的 clientSubmissionId 与真实 turnId 确认入场；已观察到的队列项移除且没有入场证据时只显示已移除，不宣称成功，不自动重发，不增加队列调度或管理按钮。
 ### 实现落点
-`routes/desktopPet/LauncherAssistantRoute.tsx`、`api/launcherAssistant.ts`。
+`routes/desktopPet/LauncherAssistantRoute.tsx`、`api/launcherAssistant.ts`。排队与派遣回执面板的几何、边框和提示色由同一 `DesktopAssistantRoute.styles.ts` 样式 owner 提供，Launcher 入口作为明确消费者登记，不在页面内新增视觉工具类。
 ### 反冗余
 同一 ConversationView、DesktopPetCharacter 和 VUI 元素；迁移验收阶段保留旧入口，全部迁移和数据验收结束后退役旧产品实现。
 

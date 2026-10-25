@@ -440,7 +440,7 @@ export function LauncherAssistantRoute() {
     {approvalError || approvals.isError ? <VStateSurface tone="error" title={approvalError || (lang === "zh" ? "待授权查询暂不可用" : "Pending approvals unavailable")}
       actions={<VButton onClick={() => { setApprovalError(""); void approvals.refetch(); }}>{copy.retry}</VButton>}>{approvals.error?.message}</VStateSurface> : null}
     {detail.data?.queuedTurns?.length || queuedAcceptance ? <section data-launcher-assistant-queue
-      className="max-h-28 shrink-0 overflow-auto border-t border-[var(--vui-border-subtle)] px-3 py-2 text-vui-micro-11"
+      className={petStyles.receiptPanel}
       aria-label={lang === "zh" ? "原生消息队列" : "Native message queue"}>
       {queuedAcceptance && !queuedAcceptance.observed ? <p role="status">{waitingQueueText}</p> : null}
       {detail.data?.queuedTurns?.map(row => <p key={row.id} role="status">{launcherAssistantQueueLabel(row.status, lang)}{row.lastError ? ` · ${row.lastError}` : ""}</p>)}
@@ -452,8 +452,8 @@ export function LauncherAssistantRoute() {
       actions={<VButton onClick={() => void detail.refetch()}>{copy.retry}</VButton>}>{detail.error.message}</VStateSurface> : null}
     {dispatches.isError ? <VStateSurface tone="error" title={copy.receipts}
       actions={<VButton onClick={() => void dispatches.refetch()}>{copy.retry}</VButton>}>{dispatches.error.message}</VStateSurface> : null}
-    {dispatches.data?.length ? <section className="max-h-28 shrink-0 overflow-auto border-t border-[var(--vui-border-subtle)] px-3 py-2 text-vui-micro-11" aria-label={copy.receipts}>
-      <p className="text-[var(--fg-secondary)]">{copy.receiptBoundary}</p>
+    {dispatches.data?.length ? <section className={petStyles.receiptPanel} aria-label={copy.receipts}>
+      <p className={petStyles.receiptBoundary}>{copy.receiptBoundary}</p>
       {dispatches.data.map(row => <p key={row.dispatchId}>{row.projectId || row.dispatchId} · {launcherDispatchLabel(row, lang)}</p>)}
     </section> : null}
   </VDenseOpsPage>;

@@ -43,6 +43,7 @@ const productSharedParentStyleConsumers = [
   // Both assistant surfaces and the overview share their scoped, typed product style owner.
   "routes/PersonalAssistantRoute.tsx",
   "routes/desktopPet/DesktopAssistantRoute.tsx",
+  "routes/desktopPet/LauncherAssistantRoute.tsx", // shares DesktopAssistantRoute.styles with the existing pet window
   "routes/personalAssistant/PersonalAssistantOverview.tsx",
   "app/SpecialistAgentMenu.tsx", // shell-owned nav geometry is passed via props
   // Settings-align wave 3: the extracted ConfigSectionEditor shares the owning
