@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from starlette.background import BackgroundTasks
 from starlette.requests import Request
+from starlette.responses import JSONResponse, StreamingResponse
 
 from core.logging import debug as debug_logger
 from core.logging.trace_context import (
@@ -109,6 +113,118 @@ def test_api_middleware_propagates_trace_context_and_response_headers(monkeypatc
     assert response.headers["X-Request-ID"] == "request-123"
     assert captured_events[-1]["fields"] == body
     assert get_current_trace_context() is None
+
+
+def _observe_response_body(app, events: list[str]):
+    async def observed_app(scope, receive, send):
+        async def observed_send(message):
+            await send(message)
+            if message["type"] == "http.response.body" and not message.get("more_body", False):
+                events.append("body-sent")
+
+        await app(scope, receive, observed_send)
+
+    return observed_app
+
+
+def test_slow_json_get_records_after_body_with_trace_and_existing_background_tasks(monkeypatch) -> None:
+    events: list[str] = []
+    payloads: list[dict] = []
+
+    def record(payload):
+        events.append("diagnostic")
+        payloads.append(payload)
+
+    monkeypatch.setattr("core.web.services.runtime_scene_service.record_backend_api_event", record)
+    clock = iter([0.0, 1.0])
+    monkeypatch.setattr("core.web.middleware.runtime_scene_api._api_runtime_perf_counter", lambda: next(clock))
+    app = FastAPI()
+    app.add_middleware(RuntimeSceneApiEventMiddleware)
+
+    @app.get("/api/slow-json")
+    async def slow_json():
+        background = BackgroundTasks()
+        background.add_task(events.append, "existing-first")
+        background.add_task(events.append, "existing-second")
+        return JSONResponse(get_current_trace_context().to_fields(), background=background)
+
+    response = TestClient(_observe_response_body(app, events)).get(
+        "/api/slow-json?token=do-not-record&page=1",
+        headers={"X-Request-ID": "deferred-request", "traceparent": f"00-{'1' * 32}-{'2' * 16}-01"},
+    )
+
+    assert response.status_code == 200
+    assert events.index("body-sent") < events.index("diagnostic")
+    assert events.count("diagnostic") == 1
+    assert events.count("existing-first") == events.count("existing-second") == 1
+    assert events.index("existing-first") < events.index("existing-second")
+    assert payloads[0]["fields"] == response.json()
+    assert payloads[0]["duration_ms"] == 1000.0
+    assert payloads[0]["path_template"] == "/api/slow-json"
+    assert "do-not-record" not in json.dumps(payloads)
+    assert response.headers["X-Request-ID"] == "deferred-request"
+    assert get_current_trace_context() is None
+
+
+def test_deferred_diagnostic_keeps_background_attached_to_dispatch_response(monkeypatch) -> None:
+    events: list[str] = []
+    monkeypatch.setattr(
+        "core.web.middleware.runtime_scene_api.record_api_runtime_event",
+        lambda *_args, **_kwargs: events.append("diagnostic"),
+    )
+    clock = iter([0.0, 1.0])
+    monkeypatch.setattr("core.web.middleware.runtime_scene_api._api_runtime_perf_counter", lambda: next(clock))
+    response = JSONResponse({"ok": True}, background=BackgroundTasks())
+    response.background.add_task(events.append, "existing")
+    request = Request({"type": "http", "method": "GET", "path": "/api/slow-json", "headers": []})
+
+    async def run():
+        async def call_next(_request):
+            return response
+
+        result = await RuntimeSceneApiEventMiddleware(None).dispatch(request, call_next)
+        assert events == []
+        await result.background()
+
+    asyncio.run(run())
+    assert events == ["diagnostic", "existing"]
+
+
+@pytest.mark.parametrize(
+    ("method", "status_code", "referer", "streaming", "media_type"),
+    [
+        ("POST", 200, "", False, "application/json"),
+        ("GET", 500, "", False, "application/json"),
+        ("GET", 200, "/teams", False, "application/json"),
+        ("GET", 200, "", True, "text/event-stream"),
+        ("GET", 200, "", True, "application/json"),
+    ],
+)
+def test_mutation_error_referer_and_stream_diagnostics_stay_before_body(
+    monkeypatch, method, status_code, referer, streaming, media_type
+) -> None:
+    events: list[str] = []
+    monkeypatch.setattr(
+        "core.web.middleware.runtime_scene_api.record_api_runtime_event",
+        lambda *_args, **_kwargs: events.append("diagnostic"),
+    )
+    clock = iter([0.0, 1.0])
+    monkeypatch.setattr("core.web.middleware.runtime_scene_api._api_runtime_perf_counter", lambda: next(clock))
+    app = FastAPI()
+    app.add_middleware(RuntimeSceneApiEventMiddleware)
+
+    @app.api_route("/api/probe", methods=[method])
+    async def probe():
+        if streaming:
+            return StreamingResponse(iter([b"data: {}\n\n"]), media_type=media_type)
+        return JSONResponse({"ok": True}, status_code=status_code)
+
+    response = TestClient(_observe_response_body(app, events)).request(
+        method, "/api/probe", headers={"referer": referer}
+    )
+
+    assert response.status_code == status_code
+    assert events == ["diagnostic", "body-sent"]
 
 
 def test_runtime_scene_tool_arguments_are_recursively_redacted() -> None:

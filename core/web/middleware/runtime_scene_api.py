@@ -7,6 +7,7 @@ from typing import Any
 from urllib.parse import parse_qsl, urlparse
 
 from fastapi import Request
+from starlette.background import BackgroundTasks
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
@@ -72,14 +73,40 @@ class RuntimeSceneApiEventMiddleware(BaseHTTPMiddleware):
 
             duration_ms = (_api_runtime_perf_counter() - start) * 1000
             if should_record and is_signal_api_response(request, response.status_code, duration_ms=duration_ms):
-                record_api_runtime_event(
-                    request,
-                    status_code=response.status_code,
-                    duration_ms=duration_ms,
-                )
+                if _can_defer_api_runtime_event(request, response):
+                    # Native response tasks run after the body, off the event loop
+                    # for this synchronous writer. Keep any attached tasks intact.
+                    background = BackgroundTasks()
+                    background.add_task(
+                        record_api_runtime_event,
+                        request,
+                        status_code=response.status_code,
+                        duration_ms=duration_ms,
+                    )
+                    if response.background is not None:
+                        background.add_task(response.background)
+                    response.background = background
+                else:
+                    record_api_runtime_event(
+                        request,
+                        status_code=response.status_code,
+                        duration_ms=duration_ms,
+                    )
             response.headers[TRACEPARENT_HEADER] = trace_context.to_traceparent()
             response.headers[REQUEST_ID_HEADER] = trace_context.request_id
             return response
+
+
+def _can_defer_api_runtime_event(request: Request, response: Response) -> bool:
+    if request.method.upper() != "GET" or not 200 <= response.status_code < 300:
+        return False
+    if _is_always_recorded_referer_probe(request):
+        return False
+    # Streams may never finish. Only defer bounded JSON response diagnostics.
+    if "content-length" not in response.headers:
+        return False
+    media_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    return media_type == "application/json" or (media_type.startswith("application/") and media_type.endswith("+json"))
 
 
 def should_record_api_runtime_event(request: Request) -> bool:
