@@ -59,6 +59,10 @@ const previewExemptDesignSections = new Set([
   // overview, identity/return interaction tests and native desktop acceptance.
   "PersonalAssistantRoute",
   "DesktopAssistantRoute",
+  // Launcher-owned composition requires role-scoped IPC and native Session
+  // state; real query-refresh and recovery-model tests cover it. It is not a
+  // standalone VUI export. Packaged GUI acceptance remains a separate check.
+  "LauncherAssistantRoute",
   "PersonalAssistantOverview",
   // Route-owned operator control: window choices and one-shot confirmations
   // require live consent state, not a static standalone VUI export. Covered
