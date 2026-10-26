@@ -166,6 +166,9 @@ class ManagementAdapter:
         fingerprint = hashlib.sha256(json.dumps(parameters, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
         path = self._root / (key + ".json")
         async with self._locks.setdefault(key, anyio.Lock()):
+            # A request may have waited while main suspended project admission.
+            # Reuse the provider gate before reading/replaying or writing intent.
+            self._key(project_id, action, request_id)
             retrying = path.exists()
             if retrying:
                 record = self._read(path)

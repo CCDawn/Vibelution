@@ -52,6 +52,23 @@ function readIntent(intentsDir: string, intentId: string): DeferredRestartIntent
 }
 
 describe("fulfillDeferredRestartIntentOnce", () => {
+  it("excludes pre-attachment requests from fulfillment admission and accepts a fresh restart", async () => {
+    const { root, runtimeManagerDir, intentsDir } = makeWorkspace();
+    try {
+      const old = writeIntent(intentsDir, intentPayload({ intentId: "old" }));
+      const invalid = writeIntent(intentsDir, intentPayload({ intentId: "unknown-date", createdAt: "unknown" }));
+      const before = [readFileSync(old, "utf8"), readFileSync(invalid, "utf8")];
+      const submitRestart = vi.fn(async () => ({ accepted: true }));
+      const input = { workspaceRoot: root, runtimeManagerDir, listActiveWork: () => [], submitRestart,
+        now: () => NOW_MS + 1000, notBefore: NOW_MS };
+      await expect(fulfillDeferredRestartIntentOnce(input)).resolves.toEqual({ status: "none" });
+      expect(submitRestart).not.toHaveBeenCalled();
+      writeIntent(intentsDir, intentPayload({ intentId: "fresh", createdAt: new Date(NOW_MS + 1).toISOString() }));
+      await expect(fulfillDeferredRestartIntentOnce(input)).resolves.toEqual({ status: "fulfilled", intentId: "fresh" });
+      expect(submitRestart).toHaveBeenCalledOnce();
+      expect([readFileSync(old, "utf8"), readFileSync(invalid, "utf8")]).toEqual(before);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
   it("does nothing when no intents are queued", async () => {
     const { root, runtimeManagerDir } = makeWorkspace();
     try {

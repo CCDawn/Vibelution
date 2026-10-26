@@ -29,6 +29,7 @@ import { createAssistantProjectMainControl } from "./assistant/projectMainContro
 import { AssistantWindow } from "./assistant/assistantWindow.js";
 import { resolveAssistantResources } from "./assistant/assistantResources.js";
 import { createAssistantTray } from "./assistant/assistantTray.js";
+import { createAssistantLauncherEntry } from "./assistant/launcherEntry.js";
 import { configureLocalDebugging, identifyDebugWindow, publishLocalDebugging } from "./debugging/localDebugging.js";
 import { captureElectronOwnerIdentity } from "./tray/desktopShellOwner.js";
 import { startNativeLauncherStartTransport } from "./process/nativeLauncherStart.js";
@@ -444,6 +445,9 @@ let pendingProjectRoot = desktopCliArgs.projectRoot;
 let cachedDesktopLaunchSettings: DesktopLaunchSettings | null = null;
 let projectControlPlaneLaunchSettings: DesktopLaunchSettings | null = null;
 let projectControlPlaneStartup: Promise<boolean> | null = null;
+// Deferred management attaches observation and explicit controls, never cold-start recovery.
+let projectControlPlaneAutomaticLifecycle = true;
+let projectControlPlaneRecoveryNotBefore: number | undefined;
 let projectControlPlaneObserversStarted = false;
 let pendingWorkbenchCloseAck: PendingWorkbenchCloseAck | null = null;
 let workbenchCloseBackendStopInFlight: Promise<void> | null = null;
@@ -521,6 +525,38 @@ async function requestOpenAssistantFromSecondInstance(hiddenPresentation: boolea
   pendingAssistantOpen = { show: pendingAssistantOpen?.show === true || show };
 }
 
+let assistantLauncherEntry: ReturnType<typeof createAssistantLauncherEntry> | null = null;
+
+function requestOpenLauncherFromAssistant(): Promise<{ opened: boolean }> {
+  assistantLauncherEntry ??= createAssistantLauncherEntry({
+    isQuitting: () => shutdownApproved,
+    openExisting: async () => {
+      if (!windowProvider || !launcherBootstrap) return false;
+      await windowProvider.openLauncher();
+      return true;
+    },
+    chooseProject: async () => {
+      const selection = await dialog.showOpenDialog({ title: "选择要管理的 Vibelution 项目", properties: ["openDirectory"] });
+      if (selection.canceled || selection.filePaths.length !== 1) return null;
+      const root = selection.filePaths[0];
+      // A fresh human selection supplies context, never a renderer/model path
+      // or an automatic migration of the old registry's grants.
+      try {
+        if (!statSync(root).isDirectory() || !statSync(join(root, "core", "launcher")).isDirectory()
+          || !statSync(join(root, "web", "package.json")).isFile()) throw new Error();
+      } catch { throw new Error("ASSISTANT_LAUNCHER_UNAVAILABLE"); }
+      return root;
+    },
+    connect: root => ensureProjectControlPlane(root, true),
+    openConnected: async () => {
+      if (!windowProvider) throw new Error("ASSISTANT_LAUNCHER_UNAVAILABLE");
+      await windowProvider.openLauncher();
+      startProjectControlPlaneObservers();
+    },
+  });
+  return assistantLauncherEntry();
+}
+
 function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
   if (launcherAssistantStarting) return launcherAssistantStarting;
   launcherAssistantStarting = (async () => {
@@ -551,18 +587,22 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
       developmentSourceRoot: paths.workspaceRoot, developmentPythonPath: app.isPackaged ? "" : desktopPythonPath(), env: desktopEnvironment() });
     if (shutdownApproved) return;
     await new Promise<void>((windowOpened, startupFailed) => {
-      void projectConnection.start(snapshot => {
+      void projectConnection.start((snapshot, projectsSuspended) => {
         const host = new AssistantHost({
           profileRoot: join(paths.userDataRoot, "assistant", "profile"),
           runtimeRoot: join(paths.userDataRoot, "assistant", "runtime"),
           sourceRoot: resources.sourceRoot, pythonPath: resources.pythonPath, pythonArguments: resources.pythonArguments,
-          env: resources.env, projects: snapshot.projects, projectSnapshot: snapshot,
+          env: resources.env, projects: snapshot.projects, projectSnapshot: snapshot, projectsSuspended,
           mainControl, appearanceControl: true,
         });
         launcherAssistantHost = host;
-        launcherAssistantWindow = new AssistantWindow(paths, host, () => shutdownApproved);
+        launcherAssistantWindow = new AssistantWindow(paths, host, () => shutdownApproved, requestOpenLauncherFromAssistant);
         desktopTray ??= createAssistantTray(resources.sourceRoot, {
           open: () => { void launcherAssistantWindow?.open().catch(() => console.warn("ASSISTANT_WINDOW_FAILED")); },
+          openLauncher: () => { void requestOpenLauncherFromAssistant().catch(() => {
+            void dialog.showMessageBox({ type: "error", title: "Launcher 暂不可用",
+              message: "未能打开项目管理，请确认选择的是可用的 Vibelution 项目目录后重试。" });
+          }); },
           quit: () => {
             if (!assistantOnly) { void requestDesktopShellExit().catch(() => console.warn("ASSISTANT_STOP_FAILED")); return; }
             shutdownApproved = true;
@@ -834,7 +874,7 @@ const reconcileDeadlineScheduler = createReconcileDeadlineScheduler({
 });
 
 launcherStateStore.subscribe((snapshot) => {
-  reconcileDeadlineScheduler.schedule(snapshot.nextReconcileAt);
+  reconcileDeadlineScheduler.schedule(projectControlPlaneAutomaticLifecycle ? snapshot.nextReconcileAt : undefined);
   windowProvider?.sendToLauncher(IPC_CHANNELS.launcherStateChanged, snapshot);
 });
 
@@ -5191,6 +5231,7 @@ async function orchestrateLauncherApi(
 }
 
 async function reclaimExpiredIsolatedStops(): Promise<void> {
+  if (!projectControlPlaneAutomaticLifecycle) return;
   const result = await reconcileOrphanedInstanceRegistry({
     registryPath: instancesRegistryPath(),
     pythonPath: desktopPythonPath()
@@ -5235,6 +5276,7 @@ async function runDeferredRestartFulfillmentOnce(): Promise<void> {
     await fulfillDeferredRestartIntentOnce({
       workspaceRoot: paths.workspaceRoot,
       runtimeManagerDir: resolveRuntimeManagerDir(paths.workspaceRoot),
+      notBefore: projectControlPlaneRecoveryNotBefore,
       listActiveWork: () => listActiveWorkRuns(paths.workspaceRoot),
       submitRestart: async () =>
         await orchestrateLauncherLifecycle("restart", { schemaVersion: 1, path: "restart" }, "forwarded")
@@ -5645,14 +5687,17 @@ async function applyPendingProjectSlot(
 }
 
 /** A single project control plane can attach after the resident assistant. */
-async function ensureProjectControlPlane(workspaceRoot = ""): Promise<boolean> {
+async function ensureProjectControlPlane(workspaceRoot = "", managementOnly = false): Promise<boolean> {
   if (projectControlPlaneStartup !== null) return await projectControlPlaneStartup;
   if (launcherBootstrap !== null && windowProvider !== null) return true;
+  let deferredWorkspace = "";
   projectControlPlaneStartup = (async () => {
     await app.whenReady();
     if (shutdownApproved) return false;
     const current = desktopLaunchSettings();
     const deferred = current.assistant === true || !current.workspaceRoot;
+    projectControlPlaneAutomaticLifecycle = !managementOnly;
+    projectControlPlaneRecoveryNotBefore = managementOnly ? Date.now() : undefined;
     if (deferred) {
       projectControlPlaneLaunchSettings = resolveDeferredProjectLaunchSettings({
         env: process.env, cliArgs: desktopCliArgs, resourcesRoot: process.resourcesPath,
@@ -5660,25 +5705,41 @@ async function ensureProjectControlPlane(workspaceRoot = ""): Promise<boolean> {
       }, workspaceRoot, current.configPath);
     }
     const paths = createDesktopPathsForApp();
-    if (deferred) claimElectronDesktopShellOwner(paths.workspaceRoot);
+    if (deferred) {
+      deferredWorkspace = paths.workspaceRoot;
+      claimElectronDesktopShellOwner(deferredWorkspace);
+    }
     // Opening a project must not relaunch the already-resident assistant.
-    await bootstrapProjectControlPlane(paths, !deferred);
+    await bootstrapProjectControlPlane(paths, !deferred, !managementOnly);
     if (launcherBootstrap === null || windowProvider === null || shutdownApproved) return false;
     assistantOnly = false;
     return true;
   })();
-  return await projectControlPlaneStartup;
+  try { return await projectControlPlaneStartup; }
+  catch (error) {
+    // A failed first human selection must not poison future attempts or leave
+    // that project claiming a live control plane. Never undo a published owner.
+    if (launcherBootstrap === null && windowProvider === null) {
+      try { if (deferredWorkspace) releaseElectronDesktopShellOwner(deferredWorkspace); }
+      catch { console.warn("ASSISTANT_PROJECT_OWNER_RELEASE_FAILED"); }
+      projectControlPlaneLaunchSettings = null;
+      projectControlPlaneStartup = null;
+    }
+    throw error;
+  }
 }
 
-async function bootstrapProjectControlPlane(paths: DesktopPaths, allowShellRefresh = true): Promise<void> {
-  await reapManagedRuntimeOnDesktopStart({
-    stopManagedRuntime,
-    stopLeftoverPythonLauncher: stopOwnedPythonLauncherService,
-    recordEvent: async (event) => {
-      await recordElectronSupervisorEvent(launcherBootstrap, event);
-    }
-  });
-  await reclaimExpiredIsolatedStops();
+async function bootstrapProjectControlPlane(paths: DesktopPaths, allowShellRefresh = true, restoreLifecycle = true): Promise<void> {
+  if (restoreLifecycle) {
+    await reapManagedRuntimeOnDesktopStart({
+      stopManagedRuntime,
+      stopLeftoverPythonLauncher: stopOwnedPythonLauncherService,
+      recordEvent: async (event) => {
+        await recordElectronSupervisorEvent(launcherBootstrap, event);
+      }
+    });
+    await reclaimExpiredIsolatedStops();
+  }
   if (desktopCliArgs.smoke) {
     await runSmokeAndQuit(paths);
     return;
@@ -5734,6 +5795,8 @@ async function bootstrapProjectControlPlane(paths: DesktopPaths, allowShellRefre
     }
   }
   updateLauncherWindowTruth();
+  // Management attachment cannot replay an earlier request. A later explicit
+  // restart retains the normal lifecycle rules for superseding old requests.
   startDeferredRestartFulfillment();
   desktopTray?.destroy();
   desktopTray = createDesktopTray(paths, {
@@ -5771,9 +5834,11 @@ async function bootstrapProjectControlPlane(paths: DesktopPaths, allowShellRefre
       void runTrayStopAll();
     }
   });
-  startPeriodicShellFreshnessWatch();
-  startWorkbenchBackendWatchdogLoop();
-  void maybeRestoreTrayRestartAllPending();
+  if (restoreLifecycle) startPeriodicShellFreshnessWatch();
+  if (restoreLifecycle) {
+    startWorkbenchBackendWatchdogLoop();
+    void maybeRestoreTrayRestartAllPending();
+  }
   const trayStartupEvents: RuntimeSceneElectronEvent[] = [{
     eventCode: "electron.tray.created",
     message: "Electron system tray created.",

@@ -526,3 +526,185 @@ async def test_three_dispatches_renew_each_native_task_once(tmp_path):
     await service.heartbeat()
     renewals = [request for request in calls if request.url.path.endswith("/heartbeat")]
     assert len(renewals) == 3
+
+
+@pytest.mark.anyio
+async def test_project_suspension_blocks_sdk_and_intents_but_retains_history(tmp_path):
+    probe = ClientProbe()
+    service = adapter(tmp_path, probe)
+    await start(service)
+    before = service._path("dispatch-1").read_bytes()
+    calls = len(probe.instances)
+    assert service.suspend_projects()["projectsSuspended"] is True
+    for operation in (
+        service.discover("project-a"),
+        service.dispatch("project-a", agent_id="coder", task="read", dispatch_id="new"),
+        service.reconcile("dispatch-1"),
+        service.cancel("dispatch-1"),
+        service.management.invoke("project-a", action="agent_create", request_id="new", parameters={}),
+        service.management.receipt("project-a", action="agent_create", request_id="new"),
+        service.management.authorization_status("project-a"),
+    ):
+        with pytest.raises(DispatchError) as denied:
+            await operation
+        assert denied.value.code == "PROJECT_REGISTRY_RECONCILE_REQUIRED"
+    assert len(probe.instances) == calls
+    assert not service._path("new").exists()
+    assert not (tmp_path / "profile/assistant_management").exists()
+    assert service._path("dispatch-1").read_bytes() == before
+    assert service.list_dispatches("project-a")[0]["nativeTaskId"] == "eat-1"
+    assert service.project_ids() == ("project-a",)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("queue", ["dispatch", "management", "sdk"])
+async def test_project_suspension_rechecks_queued_admission_before_effects(tmp_path, queue):
+    probe = ClientProbe()
+    service = adapter(tmp_path, probe)
+    if queue == "dispatch":
+        lock = service._dispatch_lock("queued")
+        operation = lambda: service.dispatch("project-a", agent_id="coder", task="read", dispatch_id="queued")
+    elif queue == "management":
+        key = service.management._key("project-a", "agent_create", "queued")
+        lock = service.management._locks.setdefault(key, anyio.Lock())
+        operation = lambda: service.management.invoke("project-a", action="agent_create", request_id="queued", parameters={})
+    else:
+        lock = service._project_locks.setdefault("project-a", anyio.Lock())
+        operation = lambda: service.discover("project-a")
+    entered = anyio.Event()
+    async def queued():
+        entered.set()
+        with pytest.raises(DispatchError) as denied:
+            await operation()
+        assert denied.value.code == "PROJECT_REGISTRY_RECONCILE_REQUIRED"
+    await lock.acquire()
+    async with anyio.create_task_group() as group:
+        group.start_soon(queued)
+        await entered.wait()
+        await anyio.sleep(0)
+        service.suspend_projects()
+        lock.release()
+    assert probe.instances == []
+    assert not service._path("queued").exists()
+    assert not (tmp_path / "profile/assistant_management").exists()
+
+
+@pytest.mark.anyio
+async def test_project_snapshot_resume_requires_complete_valid_physical_roots(tmp_path):
+    probe = ClientProbe()
+    project = tmp_path / "project"
+    missing = tmp_path / "missing"
+    project.mkdir()
+    non_directory = tmp_path / "file"
+    non_directory.write_text("retained", encoding="utf-8")
+    snapshot = {"schemaVersion": 1, "revision": 7, "projects": {"a": str(project), "b": str(missing)}}
+    service = DispatchService(tmp_path / "profile", {}, client_factory=probe.factory, projects_suspended=True)
+    service.replace_projects(snapshot, retain_suspension=True)
+    assert service.project_ids() == ("a", "b")
+    for invalid in (
+        snapshot,
+        {**snapshot, "revision": 6},
+        {**snapshot, "projects": {"a": str(project)}},
+        {**snapshot, "revision": 8, "projects": {"a": str(tmp_path / "other"), "b": str(missing)}},
+        {**snapshot, "revision": 8, "projects": {"a": str(project), "new": str(non_directory)}},
+        {**snapshot, "unexpected": True},
+    ):
+        with pytest.raises(DispatchError):
+            service.replace_projects(invalid)
+        with pytest.raises(DispatchError) as denied:
+            await service.discover("a")
+        assert denied.value.code == "PROJECT_REGISTRY_RECONCILE_REQUIRED"
+        assert service.project_ids() == ("a", "b")
+        assert service._revoked_projects == set()
+        assert service._seen_projects == {"a": project.resolve(), "b": missing.resolve()}
+    missing.mkdir()
+    service.replace_projects(snapshot)
+    await service.discover("a")
+    assert len(probe.instances) == 1
+
+
+def test_project_snapshot_root_alias_cannot_clear_suspension(tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    service = DispatchService(tmp_path / "profile", {}, projects_suspended=True)
+    snapshot = {"schemaVersion": 1, "revision": 7, "projects": {"a": str(root), "b": str(root)}}
+    service.replace_projects(snapshot, retain_suspension=True)
+    with pytest.raises(DispatchError) as denied:
+        service.replace_projects(snapshot)
+    assert denied.value.code == "PROJECT_REGISTRY_RECONCILE_REQUIRED"
+    assert service.suspend_projects() == {"schemaVersion": 1, "revision": 7, "projectsSuspended": True}
+
+
+def test_project_snapshot_symlink_alias_cannot_clear_suspension(tmp_path):
+    root = tmp_path / "project"
+    alias = tmp_path / "alias"
+    root.mkdir()
+    try:
+        alias.symlink_to(root, target_is_directory=True)
+    except OSError:
+        pytest.skip("Directory symlinks are unavailable on this test platform")
+    service = DispatchService(tmp_path / "profile", {}, projects_suspended=True)
+    snapshot = {"schemaVersion": 1, "revision": 7, "projects": {"a": str(alias)}}
+    service.replace_projects(snapshot, retain_suspension=True)
+    assert service._projects["a"] == alias
+    with pytest.raises(DispatchError) as denied:
+        service.replace_projects(snapshot)
+    assert denied.value.code == "PROJECT_REGISTRY_RECONCILE_REQUIRED"
+    with pytest.raises(DispatchError) as conflict:
+        service.replace_projects({**snapshot, "projects": {"a": str(root)}})
+    assert conflict.value.code == "PROJECT_REGISTRY_CONFLICT"
+    alias.unlink()
+    alias.mkdir()
+    assert service.replace_projects(snapshot) == {"schemaVersion": 1, "revision": 7, "projectCount": 1}
+    assert not service._projects_suspended.is_set()
+
+
+@pytest.mark.anyio
+async def test_suspended_bootstrap_retains_original_root_binding_and_dispatch_history(tmp_path):
+    probe = ClientProbe()
+    root = tmp_path / "project"
+    root.mkdir()
+    first = adapter(tmp_path, probe)
+    await start(first)
+    before = first._path("dispatch-1").read_bytes()
+    target = tmp_path / "rebound-target"
+    target.mkdir()
+    root.rmdir()
+    try:
+        root.symlink_to(target, target_is_directory=True)
+    except OSError:
+        pytest.skip("Directory symlinks are unavailable on this test platform")
+    service = DispatchService(tmp_path / "profile", {}, projects_suspended=True, client_factory=probe.factory)
+    snapshot = {"schemaVersion": 1, "revision": 7, "projects": {"project-a": str(root)}}
+    service.replace_projects(snapshot, retain_suspension=True)
+    assert service._projects["project-a"] == root
+    assert service.list_dispatches()[0]["nativeTaskId"] == "eat-1"
+    with pytest.raises(DispatchError) as denied:
+        service.replace_projects(snapshot)
+    assert denied.value.code == "PROJECT_REGISTRY_RECONCILE_REQUIRED"
+    root.unlink()
+    root.mkdir()
+    service.replace_projects(snapshot)
+    await service.discover("project-a")
+    assert probe.instances[-1]["project_root"] == root
+    assert service._path("dispatch-1").read_bytes() == before
+    assert [name for name, _ in probe.calls].count("start") == 1
+
+
+@pytest.mark.anyio
+async def test_project_suspension_allows_already_admitted_transaction_to_settle(tmp_path):
+    admitted, settle = anyio.Event(), anyio.Event()
+    class Client:
+        async def diagnostics(self):
+            admitted.set()
+            await settle.wait()
+        async def list_agents(self):
+            return {"agents": []}
+    service = DispatchService(tmp_path / "profile", {"a": tmp_path / "project"}, client_factory=lambda *args, **kwargs: Client())
+    async def operate():
+        assert await service._call("a", lambda client: client.list_agents()) == {"agents": []}
+    async with anyio.create_task_group() as group:
+        group.start_soon(operate)
+        await admitted.wait()
+        service.suspend_projects()
+        settle.set()

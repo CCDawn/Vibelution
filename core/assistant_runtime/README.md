@@ -501,6 +501,37 @@ an Agent or substitutes metadata when native resolution fails. The result does
 not describe an active Turn or a historical compiled configuration. Ordinary
 Session admission, Journal, worker, persistence and SSE remain unchanged.
 
+## Unavailable projects during independent startup
+
+Electron retains the complete persisted schema-1 project snapshot and its
+revision when a registered directory is missing or physically rebound. Only
+that reconciliation condition may start the native host with
+`--projects-suspended`; corrupt or externally changed registries still fail.
+Local chat remains available, while project SDK and management admissions are
+blocked before intent creation and again after waiting for a project lock.
+Previously admitted calls may settle under the existing binding/revocation
+checks. Historical dispatch references remain readable without replay.
+
+Main can close the same gate through the private authenticated
+`POST /api/assistant/project-registry/suspend` with the closed body `{}`. Its
+closed acknowledgement is `{schemaVersion:1, revision, projectsSuspended:true}`.
+An unknown acknowledgement retires the owned host. Only a complete validated
+snapshot PUT can reopen project admission; no subset, revision rewrite, path
+discovery, authorization upgrade or historical-data migration is implied.
+
+The assistant header and tray expose a human-only `openLauncher` window action.
+It accepts no project path from the renderer or model, focuses the connected
+Launcher, or asks the human to choose an existing project through the native
+directory picker. It reuses the existing main-owned control plane and does not
+send a model message or start a project runtime by itself.
+Management-only attachment skips startup reaping, expired-instance retirement,
+old tray restart restoration and automatic shell replacement. Its normal
+deferred-restart owner only admits requests created after this attachment;
+opening the window does not rewrite or fulfil earlier requests. Ordinary
+project/lifecycle startup retains its existing recovery behavior. Once a fresh
+explicit lifecycle request executes, its normal supersession of older requests
+still applies.
+
 ## Explicit upgrade of existing authorization
 
 `authorization_upgrade` is a governed management action. An approved request

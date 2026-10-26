@@ -9,6 +9,7 @@ type ProjectHost = {
   start(): Promise<unknown>;
   stop(): Promise<unknown>;
   updateProjects(snapshot: AssistantProjectRegistrySnapshot): Promise<void>;
+  suspendProjects?(): Promise<void>;
 };
 type Inventory = { integrationRoot: string; items: Array<{ id: string; path: string; checkedOut: boolean }> };
 function record(value: unknown): value is Record<string, unknown> {
@@ -45,27 +46,27 @@ export class AssistantProjectRegistryConnection {
   private serial: Promise<unknown> = Promise.resolve();
   private host: ProjectHost | null = null;
   private acknowledgedRevision = -1;
+  private projectsSuspended = false;
   private closed = false;
 
   constructor(filePath: string) {
     this.registry = new AssistantProjectRegistry({ filePath });
-    // Corrupt/missing persisted roots fail before any child can be created.
-    this.registry.snapshot();
   }
 
   /** Trusted main callers only; both reads retain disk/physical-root validation. */
   snapshot(): AssistantProjectRegistrySnapshot { this.assertOpen(); return this.registry.snapshot(); }
   registration(projectId: string): AssistantProjectRegistration | null { this.assertOpen(); return this.registry.registration(projectId); }
 
-  start<T extends ProjectHost>(createHost: (snapshot: AssistantProjectRegistrySnapshot) => T): Promise<T> {
+  start<T extends ProjectHost>(createHost: (snapshot: AssistantProjectRegistrySnapshot, projectsSuspended: boolean) => T): Promise<T> {
     return this.enqueue(async () => {
       this.assertOpen();
       if (this.host) throw new Error("ASSISTANT_ALREADY_STARTED");
-      const snapshot = this.registry.snapshot();
-      const host = createHost(snapshot);
+      const { snapshot, projectsSuspended } = this.registry.startupState();
+      const host = createHost(snapshot, projectsSuspended);
       this.host = host;
       await host.start();
       this.acknowledgedRevision = snapshot.revision;
+      this.projectsSuspended = projectsSuspended;
       return host;
     });
   }
@@ -88,13 +89,14 @@ export class AssistantProjectRegistryConnection {
         }));
         snapshot = await this.registry.reconcile(integrationRoot, candidates);
       } catch (error) {
-        await this.retire();
+        await this.suspendOrRetire();
         throw error;
       }
-      if (this.host && snapshot.revision > this.acknowledgedRevision) {
+      if (this.host && (snapshot.revision > this.acknowledgedRevision || this.projectsSuspended)) {
         try {
           await this.host.updateProjects(snapshot);
           this.acknowledgedRevision = snapshot.revision;
+          this.projectsSuspended = false;
         }
         catch (error) {
           // A failed/unknown acknowledgement is terminal for this connection;
@@ -112,6 +114,17 @@ export class AssistantProjectRegistryConnection {
   }
 
   private assertOpen(): void { if (this.closed) throw new Error("ASSISTANT_REGISTRY_CLOSED"); }
+  private async suspendOrRetire(): Promise<void> {
+    // A failed inventory is never an authoritative revoke. Close this channel
+    // permanently, preserving local chat only after confirmed project suspension.
+    this.closed = true;
+    const host = this.host;
+    if (host?.suspendProjects) {
+      try { await host.suspendProjects(); return; }
+      catch { /* Unknown suspension cannot retain the old project authority. */ }
+    }
+    await this.retire();
+  }
   private async retire(): Promise<void> {
     this.closed = true;
     const host = this.host;

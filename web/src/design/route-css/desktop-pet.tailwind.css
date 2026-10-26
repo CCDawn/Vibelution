@@ -59,6 +59,12 @@
   .launcher-assistant-chat-window[data-operator-avatar="custom"] .vui-components-conversationview.userTurn .turnContent { max-width: min(88%, 36rem) !important; }
 }
 
+/* Expanded Launcher owns an opaque fill above the VUI recipe's transparent
+   utility layer. Collapsed avatar roots never receive this class. */
+.launcher-assistant-chat-window {
+  background-color: var(--vui-surface-panel);
+}
+
 /* Same composition and readability tokens as workbench-shell.css. The image
    belongs to the expanded Launcher recipe, never the transparent pet root. */
 .launcher-assistant-chat-window[data-theme-background="custom"] {
@@ -72,7 +78,7 @@
     var(--theme-background-overlay-mid)
   );
   --theme-background-blur: 1px;
-  background: var(--vui-gradient-background-readable), var(--workbench-theme-background-image), var(--vui-gradient-route-soft);
+  background-image: var(--vui-gradient-background-readable), var(--workbench-theme-background-image), var(--vui-gradient-route-soft);
   background-position: center, center, center;
   background-size: auto, cover, auto;
   background-repeat: no-repeat, no-repeat, no-repeat;

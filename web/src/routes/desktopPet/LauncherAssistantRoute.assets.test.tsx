@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { compile } from "tailwindcss";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConversationViewProps } from "../../components/conversation/conversationViewTypes";
 import { LauncherAssistantRoute } from "./LauncherAssistantRoute";
@@ -31,6 +32,7 @@ let detail: Record<string, unknown>;
 let assets: { avatar: Record<string, unknown>; background: Record<string, unknown> };
 let invoke: ReturnType<typeof vi.fn>;
 let failingAvatar = false;
+let presentation: HTMLStyleElement | undefined;
 let fetch: ReturnType<typeof vi.fn>;
 const image = (dataBase64: string) => ({ contentType: "image/png", dataBase64, sha256: "a".repeat(64) });
 const asset = (kind: "avatar" | "background", dataBase64: string | null, readability = "standard") => ({
@@ -39,6 +41,8 @@ const asset = (kind: "avatar" | "background", dataBase64: string | null, readabi
 afterEach(async () => {
   await act(async () => root?.unmount()); root = undefined;
   client?.clear(); container?.remove(); conversation = undefined;
+  presentation?.remove(); presentation = undefined;
+  delete document.documentElement.dataset.theme;
   vi.unstubAllGlobals(); vi.clearAllMocks(); vi.restoreAllMocks();
 });
 async function settle() {
@@ -91,6 +95,32 @@ async function finishTurn(turnId: string) {
 }
 
 describe("Launcher operator image consumption", () => {
+  it("paints the expanded recipe in both themes, including below a transparent wallpaper, and keeps the avatar transparent", async () => {
+    await renderAssistant({ capability: false });
+    const collapsed = container.querySelector<HTMLElement>('[data-expanded="false"]')!;
+    expect(["", "transparent", "rgba(0, 0, 0, 0)"]).toContain(getComputedStyle(collapsed).backgroundColor);
+    await click("展开个人助理聊天");
+    const expanded = container.querySelector<HTMLElement>('[data-expanded="true"]')!;
+    // Compile the real component classes, including the VUI recipe defaults.
+    // DOM style resolution catches both competing utilities and the wallpaper
+    // shorthand clearing an otherwise opaque background-color.
+    const compiler = await compile("@tailwind utilities;");
+    presentation = document.createElement("style");
+    presentation.textContent = tokenCss + compiler.build(expanded.className.split(/\s+/))
+      + launcherCss.replace(/^@(import|source)\s[^\n]+/gm, "");
+    document.head.append(presentation);
+    for (const [theme, color] of [["light", "#ffffff"], ["dark", "#252629"]]) {
+      document.documentElement.dataset.theme = theme;
+      expanded.dataset.themeBackground = "default";
+      expect(getComputedStyle(expanded).backgroundColor, `${theme} default`).toBe(color);
+      expanded.dataset.themeBackground = "custom";
+      expanded.style.setProperty("--workbench-theme-background-image", "linear-gradient(transparent, transparent)");
+      expect(getComputedStyle(expanded).backgroundColor, `${theme} wallpaper underlay`).toBe(color);
+    }
+    await click("收起聊天");
+    expect(["", "transparent", "rgba(0, 0, 0, 0)"]).toContain(getComputedStyle(container.querySelector<HTMLElement>('[data-expanded="false"]')!).backgroundColor);
+  });
+
   it("binds the canonical readable composite where the recipe-local overlay is defined", () => {
     const imageOwner = launcherCss.match(/\.launcher-assistant-chat-window\[data-theme-background="custom"\]\s*\{([^}]+)\}/)?.[1] || "";
     const readable = (source: string) => source.match(/--vui-gradient-background-readable:\s*([^;]+);/)?.[1].replace(/\s+/g, " ").trim();
@@ -99,7 +129,7 @@ describe("Launcher operator image consumption", () => {
     expect(readable(imageOwner)).toBeTruthy();
     expect(readable(imageOwner)).toBe(readable(tokenCss));
     expect(imageOwner).toContain("--theme-background-overlay-mid:");
-    expect(imageOwner).toContain("background: var(--vui-gradient-background-readable), var(--workbench-theme-background-image), var(--vui-gradient-route-soft)");
+    expect(imageOwner).toContain("background-image: var(--vui-gradient-background-readable), var(--workbench-theme-background-image), var(--vui-gradient-route-soft)");
   });
 
   it("shows current images on initial expansion and switches or clears once per native terminal", async () => {

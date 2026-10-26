@@ -34,6 +34,7 @@ export type AssistantHostOptions = {
   pythonPath: string;
   projects: Record<string, string>;
   projectSnapshot?: AssistantProjectRegistrySnapshot;
+  projectsSuspended?: boolean;
   env?: NodeJS.ProcessEnv;
   pythonArguments?: string[];
   native?: WorkbenchJobNative;
@@ -53,6 +54,7 @@ type Generation = {
   origin?: string;
   sessionId?: string;
   closed: boolean;
+  projectRevision: number;
 };
 
 class HostError extends Error {
@@ -115,6 +117,7 @@ export class AssistantHost {
   private startingRevision = -1;
   private stopping?: Promise<AssistantHostSnapshot>;
   private projectSnapshot: AssistantProjectRegistrySnapshot;
+  private projectsSuspended: boolean;
 
   constructor(options: AssistantHostOptions) {
     for (const path of [options.profileRoot, options.runtimeRoot, options.sourceRoot, options.pythonPath, ...Object.values(options.projects)]) {
@@ -123,6 +126,7 @@ export class AssistantHost {
     this.options = { ...options, projects: { ...options.projects }, env: { ...options.env },
       pythonArguments: [...(options.pythonArguments ?? ["-B", "-X", "utf8"])] };
     this.projectSnapshot = projectSnapshot(options.projectSnapshot ?? { schemaVersion: 1, revision: 0, projects: options.projects });
+    this.projectsSuspended = options.projectsSuspended === true;
     if (projectMapKey(this.projectSnapshot.projects) !== projectMapKey(options.projects)) throw new HostError("ASSISTANT_REQUEST_INVALID");
   }
 
@@ -145,19 +149,50 @@ export class AssistantHost {
       try {
         if (this.view.state !== "ready" || !generation || generation.closed) throw new HostError("ASSISTANT_NOT_READY");
         const result = await this.rpc(generation, "/api/assistant/project-registry", "PUT", desired);
-        if (!object(result) || result.schemaVersion !== 1 || result.revision !== desired.revision
+        if (this.current !== generation || generation.closed || generation.abort.signal.aborted
+          || !object(result) || result.schemaVersion !== 1 || result.revision !== desired.revision
           || result.projectCount !== Object.keys(desired.projects).length) throw new HostError("ASSISTANT_REGISTRY_INVALID");
+        generation.projectRevision = desired.revision;
+        this.projectsSuspended = false;
       } catch {
         // Unknown revocation is not permission to retain a privileged old view.
         // Retire only this owned host; remote native tasks are never cancelled.
-        if (generation && !generation.closed) await this.retire(generation, true);
-        if (this.current === generation) this.current = null;
-        this.view = { state: "failed", errorCode: "ASSISTANT_REGISTRY_UNCONFIRMED" };
-        throw new HostError("ASSISTANT_REGISTRY_UNCONFIRMED");
+        await this.rejectProjectConfirmation(generation);
       }
     });
     this.serial = operation.catch(() => undefined);
     return operation;
+  }
+
+  /** Main-only fail-closed gate; never changes the persisted project table. */
+  suspendProjects(): Promise<void> {
+    // Preserve the gate even if this acknowledgement is lost and start retries.
+    this.projectsSuspended = true;
+    const operation = this.serial.then(async () => {
+      this.projectsSuspended = true;
+      const generation = this.current;
+      try {
+        if (this.view.state !== "ready" || !generation || generation.closed) throw new HostError("ASSISTANT_NOT_READY");
+        const result = await this.rpc(generation, "/api/assistant/project-registry/suspend", "POST", {});
+        if (this.current !== generation || generation.closed || generation.abort.signal.aborted
+          || !object(result) || Object.keys(result).length !== 3
+          || !ownKeys(result, ["schemaVersion", "revision", "projectsSuspended"])
+          || result.schemaVersion !== 1 || result.revision !== generation.projectRevision
+          || result.projectsSuspended !== true) throw new HostError("ASSISTANT_REGISTRY_INVALID");
+      } catch { await this.rejectProjectConfirmation(generation); }
+    });
+    this.serial = operation.catch(() => undefined);
+    return operation;
+  }
+
+  private async rejectProjectConfirmation(generation: Generation | null): Promise<never> {
+    try { if (generation && !generation.closed) await this.retire(generation, true); }
+    catch { /* Retain an unclosed owned Job so stop() can retry its retirement. */ }
+    finally {
+      if (generation?.closed && this.current === generation) this.current = null;
+      this.view = { state: "failed", errorCode: "ASSISTANT_REGISTRY_UNCONFIRMED" };
+    }
+    throw new HostError("ASSISTANT_REGISTRY_UNCONFIRMED");
   }
 
   start(): Promise<AssistantHostSnapshot> {
@@ -318,13 +353,15 @@ export class AssistantHost {
       const spawned = native.spawn({
         executable: python,
         arguments: [...this.options.pythonArguments!, join(this.options.sourceRoot, "scripts", "assistant_host.py"), "--profile-root", this.options.profileRoot,
-          "--runtime-dir", directory, "--instance-id", id, "--projects-file", manifest],
+          "--runtime-dir", directory, "--instance-id", id, "--projects-file", manifest,
+          ...(this.projectsSuspended ? ["--projects-suspended"] : [])],
         cwd: this.options.profileRoot,
         env: environment,
         stdoutPath: join(directory, "stdout.log"), stderrPath: join(directory, "stderr.log"),
         containDescendants: true, maxLogBytes: MAX_LOG_BYTES,
       });
-      generation = { id, token, directory, native, job: spawned.job, abort: new AbortController(), closed: false };
+      generation = { id, token, directory, native, job: spawned.job, abort: new AbortController(), closed: false,
+        projectRevision: this.projectSnapshot.revision };
       this.current = generation;
       if (!positiveInteger(spawned.pid)) throw new HostError("ASSISTANT_SPAWN_INVALID");
       const deadline = Date.now() + STARTUP_MS;

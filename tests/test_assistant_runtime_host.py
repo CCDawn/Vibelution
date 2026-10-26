@@ -85,6 +85,30 @@ def test_health_does_not_disclose_token_or_project_paths():
         assert "private-test-token" not in str(result)
 
 
+def test_project_suspension_is_private_closed_and_preserves_local_session(tmp_path):
+    from core.assistant_runtime.dispatch import DispatchService
+    root = tmp_path / "project"
+    root.mkdir()
+    service = DispatchService(tmp_path / "profile", {})
+    snapshot = {"schemaVersion": 1, "revision": 4, "projects": {"p": str(root)}}
+    service.replace_projects(snapshot)
+    with TestClient(create_app(native=Native(), token="private-test-token", dispatch=service),
+                    base_url="http://127.0.0.1") as client:
+        path = "/api/assistant/project-registry/suspend"
+        assert client.post(path, json={}).status_code == 401
+        client.headers["Authorization"] = "Bearer private-test-token"
+        assert client.post(path, json={}, headers={"Origin": "http://127.0.0.1"}).status_code == 403
+        for invalid in ({"projectsSuspended": False}, {"revision": 4}, [], None):
+            assert client.post(path, json=invalid).status_code == 422
+        assert client.post(path + "?resume=true", json={}).status_code == 422
+        assert client.post(path, json={}).json() == {"schemaVersion": 1, "revision": 4, "projectsSuspended": True}
+        assert client.get("/api/assistant/session").json()["sessionId"] == "native-session"
+        assert client.post("/api/assistant/messages", json={"message": "local chat", "requestId": "local"}).status_code == 200
+        assert client.get("/api/assistant/dispatches").json() == {"dispatches": []}
+        assert client.put("/api/assistant/project-registry", json=snapshot).status_code == 200
+    assert service.project_ids() == ("p",)
+
+
 def test_ready_publication_failure_drains_native_owner():
     class Owner(Native):
         stopped = False

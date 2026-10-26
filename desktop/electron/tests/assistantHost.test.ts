@@ -17,7 +17,7 @@ afterEach(() => {
   }
 });
 
-function fixture(options: { stale?: boolean; noReadyFirst?: boolean; graceful?: boolean; pythonArguments?: string[]; env?: NodeJS.ProcessEnv } = {}) {
+function fixture(options: { stale?: boolean; noReadyFirst?: boolean; graceful?: boolean; pythonArguments?: string[]; env?: NodeJS.ProcessEnv; projectsSuspended?: boolean } = {}) {
   const root = mkdtempSync(join(tmpdir(), "assistant-host-test-"));
   tempRoots.push(root);
   const python = join(root, "pythonw.exe");
@@ -55,12 +55,103 @@ function fixture(options: { stale?: boolean; noReadyFirst?: boolean; graceful?: 
     return Response.json({ accepted: true });
   });
   const host = new AssistantHost({ profileRoot: join(root, "profile"), runtimeRoot: join(root, "runtime"),
-    sourceRoot: root, pythonPath: python, pythonArguments: options.pythonArguments, projects: { project: root }, native, fetch: fetchImpl,
+    sourceRoot: root, pythonPath: python, pythonArguments: options.pythonArguments, projects: { project: root }, projectsSuspended: options.projectsSuspended, native, fetch: fetchImpl,
     env: { VIBELUTION_CONFIG_PATH: join(root, "config.toml"), ...options.env, VIBELUTION_ASSISTANT_TOKEN: "must-not-override-token" } });
   return { host, native, fetchImpl, inputs, root, active };
 }
 
 describe("AssistantHost", () => {
+  it("keeps startup and retries gated until a complete project snapshot is acknowledged", async () => {
+    const { host, inputs, fetchImpl, root } = fixture({ graceful: true, projectsSuspended: true });
+    await host.start();
+    expect(inputs[0].arguments).toContain("--projects-suspended");
+    const runtime = inputs[0].arguments[inputs[0].arguments.indexOf("--runtime-dir") + 1];
+    expect(JSON.parse(readFileSync(join(runtime, "projects.json"), "utf8")).projects).toEqual({ project: root });
+    fetchImpl.mockRejectedValueOnce(new Error("unknown update"));
+    await expect(host.updateProjects({ schemaVersion: 1, revision: 1, projects: {} })).rejects.toThrow("ASSISTANT_REGISTRY_UNCONFIRMED");
+    await host.start();
+    expect(inputs.at(-1)!.arguments).toContain("--projects-suspended");
+    fetchImpl.mockResolvedValueOnce(Response.json({ schemaVersion: 1, revision: 1, projectCount: 0 }));
+    await host.updateProjects({ schemaVersion: 1, revision: 1, projects: {} });
+    await host.stop(); await host.start();
+    expect(inputs.at(-1)!.arguments).not.toContain("--projects-suspended");
+    await host.stop();
+  });
+
+  it("serializes suspension behind snapshot application and retains the local host after its exact ACK", async () => {
+    const { host, fetchImpl, native, inputs } = fixture({ graceful: true });
+    await host.start();
+    let release!: (value: Response) => void;
+    fetchImpl.mockImplementationOnce(async () => await new Promise<Response>(done => { release = done; }))
+      .mockResolvedValueOnce(Response.json({ schemaVersion: 1, revision: 3, projectsSuspended: true }));
+    const update = host.updateProjects({ schemaVersion: 1, revision: 3, projects: {} });
+    const suspension = host.suspendProjects();
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    expect(fetchImpl.mock.calls.filter(([url]) => String(url).endsWith("/suspend"))).toHaveLength(0);
+    release(Response.json({ schemaVersion: 1, revision: 3, projectCount: 0 }));
+    await update; await suspension;
+    expect(fetchImpl.mock.calls.at(-1)?.[1]?.method).toBe("POST");
+    expect(fetchImpl.mock.calls.at(-1)?.[1]?.body).toBe("{}");
+    expect(String(fetchImpl.mock.calls.at(-1)?.[0])).toMatch(/\/project-registry\/suspend$/);
+    expect(native.close).not.toHaveBeenCalled();
+    await expect(host.request({ operation: "detail" })).resolves.toMatchObject({ id: "s" });
+    await host.stop(); await host.start();
+    expect(inputs.at(-1)!.arguments).toContain("--projects-suspended");
+    await host.stop();
+  });
+
+  it.each([
+    { schemaVersion: 1, revision: 0, projectsSuspended: false },
+    { schemaVersion: 1, revision: 1, projectsSuspended: true },
+    { schemaVersion: 1, revision: 0, projectsSuspended: true, extra: true },
+    { schemaVersion: 1, revision: 0 },
+  ])("retires unconfirmed suspension and retains its gate on retry: %j", async ack => {
+    const { host, native, fetchImpl, inputs } = fixture({ graceful: true });
+    await host.start();
+    fetchImpl.mockResolvedValueOnce(Response.json(ack));
+    await expect(host.suspendProjects()).rejects.toThrow("ASSISTANT_REGISTRY_UNCONFIRMED");
+    expect(host.snapshot()).toEqual({ state: "failed", errorCode: "ASSISTANT_REGISTRY_UNCONFIRMED" });
+    expect(native.close).toHaveBeenCalledTimes(1);
+    await host.start();
+    expect(inputs.at(-1)!.arguments).toContain("--projects-suspended");
+    await host.stop();
+  });
+
+  it("rejects a suspension ACK after stop has invalidated its generation", async () => {
+    const { host, fetchImpl, inputs } = fixture({ graceful: true });
+    await host.start();
+    let release!: (value: Response) => void;
+    fetchImpl.mockImplementationOnce(async () => await new Promise<Response>(done => { release = done; }));
+    const suspension = expect(host.suspendProjects()).rejects.toThrow("ASSISTANT_REGISTRY_UNCONFIRMED");
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    const stopped = host.stop();
+    release(Response.json({ schemaVersion: 1, revision: 0, projectsSuspended: true }));
+    await suspension; await stopped; await host.start();
+    expect(inputs.at(-1)!.arguments).toContain("--projects-suspended");
+    await host.stop();
+  });
+
+  it("keeps failed suspension locally failed and retains an unclosed Job for cleanup", async () => {
+    const { host, fetchImpl, native } = fixture({ graceful: true });
+    await host.start();
+    fetchImpl.mockRejectedValueOnce(new Error("ack lost"));
+    native.close.mockImplementationOnce(() => { throw new Error("close failed"); });
+    await expect(host.suspendProjects()).rejects.toThrow("ASSISTANT_REGISTRY_UNCONFIRMED");
+    expect(host.snapshot()).toEqual({ state: "failed", errorCode: "ASSISTANT_REGISTRY_UNCONFIRMED" });
+    await expect(host.request({ operation: "detail" })).rejects.toThrow("ASSISTANT_NOT_READY");
+    await host.stop();
+    expect(native.close).toHaveBeenCalledTimes(2);
+  });
+
+  it("never exposes suspension as a renderer request operation", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    const before = fetchImpl.mock.calls.length;
+    await expect(host.request({ operation: "suspendProjects" } as unknown as AssistantHostRequest)).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    expect(fetchImpl).toHaveBeenCalledTimes(before);
+    await host.stop();
+  });
+
   it("keeps selected assets on a fixed UI operation with a dedicated response budget", async () => {
     const { host, fetchImpl } = fixture({ graceful: true });
     await host.start();

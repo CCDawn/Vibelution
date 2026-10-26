@@ -29,6 +29,93 @@ function fixture() {
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 describe("main-owned assistant registry connection", () => {
+  it("starts standalone with a suspended full snapshot while strict reads still fail", async () => {
+    const f = fixture(), project = f.directory("task");
+    await f.connection.reconcile(f.payload([f.row(project)]));
+    const before = f.connection.snapshot(), bytes = readFileSync(f.filePath, "utf8");
+    rmSync(project, { recursive: true });
+    const connection = new AssistantProjectRegistryConnection(f.filePath);
+    const factory = vi.fn((_snapshot: AssistantProjectRegistrySnapshot, _suspended: boolean) => f.host);
+    await connection.start(factory);
+    expect(factory).toHaveBeenCalledWith(before, true);
+    expect(() => connection.snapshot()).toThrow("PROJECT_REGISTRY_RECONCILE_REQUIRED");
+    expect(readFileSync(f.filePath, "utf8")).toBe(bytes);
+    await connection.stop();
+  });
+
+  it("clears startup suspension through a full unchanged snapshot after roots recover", async () => {
+    const f = fixture(), project = f.directory("task");
+    await f.connection.reconcile(f.payload([f.row(project)]));
+    const before = f.connection.snapshot(), bytes = readFileSync(f.filePath, "utf8");
+    rmSync(project, { recursive: true });
+    const connection = new AssistantProjectRegistryConnection(f.filePath);
+    await connection.start((_snapshot, suspended) => { expect(suspended).toBe(true); return f.host; });
+    f.directory("task");
+    await connection.reconcile(f.payload([f.row(project)]));
+    expect(f.host.updateProjects).toHaveBeenCalledExactlyOnceWith(before);
+    expect(readFileSync(f.filePath, "utf8")).toBe(bytes);
+    await connection.reconcile(f.payload([f.row(project)]));
+    expect(f.host.updateProjects).toHaveBeenCalledTimes(1);
+    await connection.stop();
+  });
+
+  it("suspends project authority after inventory failure, retains chat, and still stops the retained host", async () => {
+    const f = fixture(), project = f.directory("task");
+    const suspendProjects = vi.fn(async () => undefined);
+    const host = { ...f.host, suspendProjects };
+    await f.connection.start(() => host);
+    await f.connection.reconcile(f.payload([f.row(project)]));
+    const bytes = readFileSync(f.filePath, "utf8");
+    rmSync(f.integrationRoot, { recursive: true });
+    await expect(f.connection.reconcile(f.payload([]))).rejects.toThrow();
+    expect(suspendProjects).toHaveBeenCalledTimes(1);
+    expect(host.stop).not.toHaveBeenCalled();
+    expect(readFileSync(f.filePath, "utf8")).toBe(bytes);
+    await expect(f.connection.reconcile(f.payload([]))).rejects.toThrow("ASSISTANT_REGISTRY_CLOSED");
+    await expect(f.connection.start(() => host)).rejects.toThrow("ASSISTANT_REGISTRY_CLOSED");
+    await f.connection.stop();
+    expect(host.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("retires a host when project suspension is unconfirmed", async () => {
+    const f = fixture();
+    const suspendProjects = vi.fn(async () => { throw new Error("ASSISTANT_REGISTRY_UNCONFIRMED"); });
+    await f.connection.start(() => ({ ...f.host, suspendProjects }));
+    rmSync(f.integrationRoot, { recursive: true });
+    await expect(f.connection.reconcile(f.payload([]))).rejects.toThrow();
+    expect(suspendProjects).toHaveBeenCalledTimes(1);
+    expect(f.host.stop).toHaveBeenCalledTimes(1);
+    await expect(f.connection.reconcile(f.payload([]))).rejects.toThrow("ASSISTANT_REGISTRY_CLOSED");
+  });
+
+  it("suspends without publishing a subset when another integration loses its root", async () => {
+    const f = fixture(), a = f.directory("a"), b = f.directory("b");
+    const suspendProjects = vi.fn(async () => undefined);
+    await f.connection.start(() => ({ ...f.host, suspendProjects }));
+    await f.connection.reconcile(f.payload([f.row(a)]));
+    await f.connection.reconcile(f.payload([f.row(b)], b));
+    const before = f.host.updateProjects.mock.calls[1][0], bytes = readFileSync(f.filePath, "utf8");
+    rmSync(b, { recursive: true });
+    await expect(f.connection.reconcile(f.payload([f.row(a)]))).rejects.toThrow("PROJECT_REGISTRY_RECONCILE_REQUIRED");
+    expect(f.host.updateProjects).toHaveBeenCalledTimes(2);
+    expect(suspendProjects).toHaveBeenCalledTimes(1);
+    expect(readFileSync(f.filePath, "utf8")).toBe(bytes);
+    const captured = vi.fn((_snapshot: AssistantProjectRegistrySnapshot, _suspended: boolean) => f.host);
+    const next = new AssistantProjectRegistryConnection(f.filePath);
+    await next.start(captured);
+    expect(captured).toHaveBeenCalledWith(before, true);
+    await next.stop();
+    await f.connection.stop();
+  });
+
+  it("retires legacy hosts without suspension support on inventory failure", async () => {
+    const f = fixture();
+    await f.connection.start(() => f.host);
+    rmSync(f.integrationRoot, { recursive: true });
+    await expect(f.connection.reconcile(f.payload([]))).rejects.toThrow();
+    expect(f.host.stop).toHaveBeenCalledTimes(1);
+  });
+
   it("grants checked-out inventory, revokes an authoritative empty group, and re-adds with a new UUID", async () => {
     const f = fixture(), project = f.directory("task");
     await f.connection.start(() => f.host);
@@ -152,7 +239,7 @@ describe("main-owned assistant registry connection", () => {
     const f = fixture(), project = f.directory("task");
     await f.connection.reconcile(f.payload([f.row(project)]));
     rmSync(project, { recursive: true });
-    expect(() => new AssistantProjectRegistryConnection(f.filePath)).toThrow("PROJECT_REGISTRY_RECONCILE_REQUIRED");
+    expect(() => new AssistantProjectRegistryConnection(f.filePath).snapshot()).toThrow("PROJECT_REGISTRY_RECONCILE_REQUIRED");
     await f.connection.reconcile(f.payload([f.row(project)]));
     let snapshot!: AssistantProjectRegistrySnapshot;
     await f.connection.start(value => { snapshot = value; return f.host; });

@@ -10,6 +10,10 @@ export type AssistantProjectRegistrySnapshot = {
   revision: number;
   projects: Record<string, string>;
 };
+export type AssistantProjectRegistryStartupState = {
+  snapshot: AssistantProjectRegistrySnapshot;
+  projectsSuspended: boolean;
+};
 export type AssistantProjectRegistration = {
   integrationRoot: string;
   baseProjectId: string;
@@ -92,6 +96,15 @@ export class AssistantProjectRegistry {
   snapshot(): AssistantProjectRegistrySnapshot {
     this.assertDiskUnchanged();
     return this.project(this.stored);
+  }
+
+  /** Startup retains the full authority table; unavailable roots only gate project access. */
+  startupState(): AssistantProjectRegistryStartupState {
+    try { return { snapshot: this.snapshot(), projectsSuspended: false }; }
+    catch (error) {
+      if (!(error instanceof AssistantProjectRegistryError) || error.code !== "PROJECT_REGISTRY_RECONCILE_REQUIRED") throw error;
+      return { snapshot: this.project(this.stored, false), projectsSuspended: true };
+    }
   }
 
   /** Main-only lifecycle metadata. Roots and epochs remain one registry authority. */
@@ -219,12 +232,15 @@ export class AssistantProjectRegistry {
     catch { return fail("PROJECT_REGISTRY_FILESYSTEM_FAILED"); }
   }
 
-  private project(stored: StoredRegistry): AssistantProjectRegistrySnapshot {
+  private project(stored: StoredRegistry, validateRoots = true): AssistantProjectRegistrySnapshot {
     const entries: Array<[string, string]> = [];
+    let reconcileRequired = false;
     for (const row of stored.registrations.filter(row => row.active)) {
-      if (!this.directory(row.root) || this.physicalPath(row.root) !== row.root) fail("PROJECT_REGISTRY_RECONCILE_REQUIRED");
+      if (validateRoots && (!this.directory(row.root) || this.physicalPath(row.root) !== row.root)) reconcileRequired = true;
       entries.push([`${row.baseProjectId}:${row.registrationUuid}`, row.root]);
     }
+    // Inspect all rows so a missing root cannot conceal a filesystem failure.
+    if (reconcileRequired) fail("PROJECT_REGISTRY_RECONCILE_REQUIRED");
     return { schemaVersion: 1, revision: stored.revision,
       projects: Object.fromEntries(entries.sort(([a], [b]) => a.localeCompare(b))) };
   }

@@ -59,6 +59,7 @@ function fixture() {
     AssistantHost: vi.fn(function () { return host; }), AssistantWindow: vi.fn(function () { return window; }),
     AssistantProjectRegistryConnection: vi.fn(function () { return projects; }),
     createAssistantTray: vi.fn(() => ({ destroy: vi.fn() })), requestDesktopShellExit: vi.fn(),
+    requestOpenLauncherFromAssistant: vi.fn(async () => ({ opened: true })),
     resolveSingleInstanceProvenance, resolveSingleInstanceCliIntent, resolveSecondInstanceIntent,
     findVibelutionDeepLinkArg: vi.fn(() => null), handlePublicDeepLinkUrl: vi.fn(),
     applyPendingProjectSlot: vi.fn(), handleSecondInstanceLifecycleCommand: vi.fn(),
@@ -77,6 +78,7 @@ function projectEntryFixture() {
   const initialSettings = { assistant: true, workspaceRoot: "", configPath: "private-config", pythonPath: "" };
   Object.assign(context, {
     projectControlPlaneStartup: null, projectControlPlaneLaunchSettings: null,
+    projectControlPlaneAutomaticLifecycle: true,
     windowProvider: null, launcherBootstrap: null, pendingProjectRoot: "",
     launcherControlPlaneReady: Promise.resolve(),
     desktopLaunchSettings: () => context.projectControlPlaneLaunchSettings || initialSettings,
@@ -88,6 +90,7 @@ function projectEntryFixture() {
       return { ...paths, workspaceRoot: context.projectControlPlaneLaunchSettings.workspaceRoot };
     }),
     claimElectronDesktopShellOwner: vi.fn(),
+    releaseElectronDesktopShellOwner: vi.fn(),
     bootstrapProjectControlPlane: vi.fn(async () => { context.launcherBootstrap = {}; context.windowProvider = {}; }),
     startProjectControlPlaneObservers: vi.fn(),
     beginLaunchRequestReceipt: vi.fn(() => receipt),
@@ -106,6 +109,50 @@ function projectEntryFixture() {
 }
 
 describe("resident assistant followed by an ordinary project entry", () => {
+  it("attaches management without stopping live projects or restoring old restart requests", async () => {
+    const { context, paths } = projectEntryFixture();
+    const forbidden = ["reapManagedRuntimeOnDesktopStart", "reclaimExpiredIsolatedStops",
+      "startPeriodicShellFreshnessWatch", "startWorkbenchBackendWatchdogLoop", "maybeRestoreTrayRestartAllPending"];
+    Object.assign(context, {
+      AbortController, performance, electronStartupStage: "", resolveLauncherControlPlaneReady: null,
+      resolveInitialWorkbenchUrl: vi.fn(async () => ""),
+      registerPackagedDeepLinks: vi.fn(() => ({ attempted: false, registered: false, reason: "private" })),
+      bootstrapMainOwnedLauncher: vi.fn(async () => ({ mode: "main_orchestrated", launcherBackendPid: 0 })),
+      createWindowProvider: vi.fn(() => ({})), updateLauncherWindowTruth: vi.fn(),
+      electronStartupFields: vi.fn((fields: unknown) => fields), electronStageElapsedMs: vi.fn(() => 0),
+      createDesktopTray: vi.fn(() => ({})), scheduleTelemetryWithoutWaiting: vi.fn(),
+      startDeferredRestartFulfillment: vi.fn(),
+      ...Object.fromEntries(forbidden.map(name => [name, vi.fn()])),
+    });
+    const bootstrap = ast.statements.find(node => isFunctionDeclaration(node) && node.name?.text === "bootstrapProjectControlPlane")!.getFullText(ast);
+    runInNewContext(transpileModule(bootstrap, { compilerOptions: { target: ScriptTarget.ES2022 } }).outputText, context);
+    await expect(context.ensureProject("human-project", true)).resolves.toBe(true);
+    for (const name of forbidden) expect(context[name], name).not.toHaveBeenCalled();
+    expect(context.createWindowProvider).toHaveBeenCalledOnce();
+    expect(context.projectControlPlaneAutomaticLifecycle).toBe(false);
+    expect(Number.isFinite(context.projectControlPlaneRecoveryNotBefore)).toBe(true);
+    expect(context.startDeferredRestartFulfillment).toHaveBeenCalledOnce();
+    // Subsequent observer/status refreshes must not mutate an expired registry.
+    context.reconcileOrphanedInstanceRegistry = vi.fn();
+    const reclaim = ast.statements.find(node => isFunctionDeclaration(node) && node.name?.text === "reclaimExpiredIsolatedStops")!.getFullText(ast);
+    runInNewContext(transpileModule(reclaim, { compilerOptions: { target: ScriptTarget.ES2022 } }).outputText, context);
+    await context.reclaimExpiredIsolatedStops();
+    expect(context.reconcileOrphanedInstanceRegistry).not.toHaveBeenCalled();
+    expect(paths.workspaceRoot).toBe("");
+  });
+  it("releases only the failed deferred context and permits a different human project selection", async () => {
+    const { context, host, paths } = projectEntryFixture();
+    await context.start(paths);
+    context.bootstrapProjectControlPlane.mockRejectedValueOnce(new Error("unavailable project"));
+    await expect(context.ensureProject("unavailable-project")).rejects.toThrow("unavailable project");
+    expect(context.releaseElectronDesktopShellOwner).toHaveBeenCalledExactlyOnceWith("unavailable-project");
+    expect(context.projectControlPlaneLaunchSettings).toBeNull();
+    expect(context.projectControlPlaneStartup).toBeNull();
+    await expect(context.ensureProject("available-project")).resolves.toBe(true);
+    expect(context.projectControlPlaneLaunchSettings.workspaceRoot).toBe("available-project");
+    expect(context.claimElectronDesktopShellOwner.mock.calls).toEqual([["unavailable-project"], ["available-project"]]);
+    expect(host.start).toHaveBeenCalledOnce(); expect(host.stop).not.toHaveBeenCalled();
+  });
   it("initializes the existing project control plane and dispatches without restarting the assistant", async () => {
     const { context, host, paths, receipt } = projectEntryFixture();
     await context.start(paths);

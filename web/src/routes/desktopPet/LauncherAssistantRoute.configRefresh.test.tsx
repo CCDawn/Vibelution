@@ -70,6 +70,7 @@ async function renderAssistant() {
       case "approvals": return [];
       case "dispatches": return { dispatches: [] };
       case "setExpanded": return { expanded: request.expanded };
+      case "openLauncher": return { opened: true };
       case "send": return { accepted: true, turnId: "settings-turn" };
       default: throw new Error("unexpected_operation");
     }
@@ -92,6 +93,23 @@ function finishSettingsTurn() {
 }
 
 describe("Launcher config refresh through real query cycles", () => {
+  it("keeps the assistant default and opens Launcher by one explicit header action", async () => {
+    await renderAssistant();
+    expect(calls("openLauncher")).toBe(0);
+    await click("展开个人助理聊天");
+    const launcherButton = [...container.querySelectorAll("button")].find(button => button.textContent === "打开 Launcher");
+    expect(launcherButton).toBeTruthy();
+    await act(async () => { launcherButton!.click(); launcherButton!.click(); });
+    await settle();
+    expect(calls("openLauncher")).toBe(1);
+    expect(calls("send")).toBe(0);
+    expect(container.querySelector('[data-expanded="true"]')).toBeTruthy();
+    expect(fetchJson).not.toHaveBeenCalled();
+    invoke.mockImplementationOnce(async () => { throw new Error("入口暂不可用"); });
+    await act(async () => launcherButton!.click()); await settle();
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("入口暂不可用");
+    expect(launcherButton!.disabled).toBe(false);
+  });
   it("bootstraps the real shell locale through native config without HTTP", async () => {
     await renderAssistant();
     expect(client.getQueryData(queryKeys.configPublic())).toEqual(nativeConfig);

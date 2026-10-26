@@ -8,7 +8,7 @@ import {
   launcherConversationApi,
   getLauncherAssistantApprovals, resolveLauncherAssistantApproval,
   stopLauncherAssistantTurn, continueLauncherAssistantTurn,
-  getLauncherOperatorAsset,
+  getLauncherOperatorAsset, openLauncherFromAssistant,
 } from "../../api/launcherAssistant";
 import type { SessionContinuationExpectation } from "../../api/chat";
 import { queryKeys } from "../../api/queryKeys";
@@ -72,6 +72,8 @@ export function LauncherAssistantRoute() {
   const [resizePending, setResizePending] = useState(false);
   const [sendUnconfirmed, setSendUnconfirmed] = useState(false);
   const [feedback, setFeedback] = useState("");
+  const launcherGate = useRef(false);
+  const [launcherPending, setLauncherPending] = useState(false);
   const [acceptedTurnId, setAcceptedTurnId] = useState("");
   const [queuedAcceptance, setQueuedAcceptance] = useState<LauncherAssistantQueuedAcceptance | null>(null);
   const approvalGate = useRef(false);
@@ -280,6 +282,16 @@ export function LauncherAssistantRoute() {
     catch (error) { if (mounted.current) setFeedback(errorMessage(error)); }
   }
 
+  async function openLauncher() {
+    if (launcherGate.current) return;
+    launcherGate.current = true;
+    setLauncherPending(true);
+    setFeedback("");
+    try { await openLauncherFromAssistant(); }
+    catch (error) { if (mounted.current) setFeedback(errorMessage(error)); }
+    finally { launcherGate.current = false; if (mounted.current) setLauncherPending(false); }
+  }
+
   async function submit() {
     if (sending.current || controlGate.current || !sessionId) return;
     const submission = launcherAssistantSubmission(outstanding.current, draftRef.current);
@@ -439,6 +451,8 @@ export function LauncherAssistantRoute() {
         <h1 className={petStyles.chatTitle} hidden={!preferences.showTitles}>{displayName}</h1>
         <span className={petStyles.chatStatus} hidden={!preferences.showStatus && !feedback} role={feedback ? "alert" : "status"}>{statusText}</span>
       </div>
+      <VButton density="compact" variant="ghost" isPending={launcherPending} isDisabled={launcherPending}
+        onClick={() => void openLauncher()}>{lang === "zh" ? "打开 Launcher" : "Open Launcher"}</VButton>
       <VNativeButton className={petStyles.close} aria-label={copy.refresh} onClick={() => { void status.refetch(); void detail.refetch(); void dispatches.refetch(); void approvals.refetch(); void client.invalidateQueries({ queryKey: assetQueryPrefix }); }}><RefreshCw size={14} /></VNativeButton>
       <VNativeButton className={petStyles.close} aria-label={copy.collapse} disabled={resizePending} onClick={() => void toggle()}><X size={14} /></VNativeButton>
     </header>}>

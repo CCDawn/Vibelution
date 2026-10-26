@@ -62,6 +62,7 @@ def main():
     parser.add_argument("--runtime-dir", required=True, type=Path)
     parser.add_argument("--instance-id", required=True)
     parser.add_argument("--projects-file", type=Path)
+    parser.add_argument("--projects-suspended", action="store_true")
     args = parser.parse_args()
     if not args.profile_root.is_absolute() or not args.runtime_dir.is_absolute():
         parser.error("Assistant paths must be absolute")
@@ -99,9 +100,11 @@ def main():
     from core.infrastructure.atomic_io import atomic_write_json
     from core.infrastructure.file_lock import cross_process_file_lock
 
-    dispatch = DispatchService(root, {})
+    dispatch = DispatchService(root, {}, projects_suspended=args.projects_suspended)
     try:
-        dispatch.replace_projects(project_snapshot)
+        # Install main's complete authorization view even when some physical
+        # roots need reconciliation. Startup must never reopen that gate.
+        dispatch.replace_projects(project_snapshot, retain_suspension=True)
     except DispatchError:
         parser.error("Invalid private project registry snapshot")
     main_control = None

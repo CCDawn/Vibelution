@@ -59,6 +59,11 @@ class ProjectSnapshot(BaseModel):
     projects: dict[str, str] = Field(max_length=128)
 
 
+class SuspendProjects(BaseModel):
+    """Main may only close the gate; restoring requires a full snapshot PUT."""
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
 def _operator_profile() -> dict[str, str] | None:
     """Read only the two display fields from the bound operator document."""
     from config.editor_schema_data import USER_AVATAR_PRESET_OPTIONS
@@ -289,6 +294,12 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, on_ready
             return {"stopping": True}
 
     if dispatch is not None:
+        @app.post("/api/assistant/project-registry/suspend")
+        async def suspend_project_registry(payload: SuspendProjects, request: Request):
+            if request.query_params:
+                raise HTTPException(422, detail="Invalid private project suspension")
+            return dispatch.suspend_projects()
+
         @app.put("/api/assistant/project-registry")
         async def project_registry(payload: ProjectSnapshot):
             from .dispatch import DispatchError

@@ -25,6 +25,34 @@ afterEach(() => {
 });
 
 describe("main-owned project registration", () => {
+  it("starts suspended with the complete unchanged mapping when an active root disappears", async () => {
+    const { registry, root, directory, filePath } = fixture();
+    const a = directory("a"), b = directory("b");
+    await registry.reconcile(root, [candidate("a", a), candidate("b", b)]);
+    const before = registry.snapshot(), bytes = readFileSync(filePath, "utf8");
+    expect(registry.startupState()).toEqual({ snapshot: before, projectsSuspended: false });
+    rmSync(a, { recursive: true });
+    const loaded = new AssistantProjectRegistry({ filePath });
+    expect(() => loaded.snapshot()).toThrow("PROJECT_REGISTRY_RECONCILE_REQUIRED");
+    expect(loaded.startupState()).toEqual({ snapshot: before, projectsSuspended: true });
+    expect(readFileSync(filePath, "utf8")).toBe(bytes);
+    loaded.startupState().snapshot.projects = {};
+    expect(loaded.startupState().snapshot).toEqual(before);
+  });
+
+  it("never translates disk changes or filesystem errors into suspended startup", async () => {
+    let broken = false;
+    const { registry, filePath } = fixture({ platform: "win32", isDirectory: () => {
+      if (broken) throw new Error("access denied");
+      return true;
+    }, realPath: path => path });
+    await registry.reconcile("C:\\integration", [candidate("base", "C:\\project")]);
+    broken = true;
+    expect(() => registry.startupState()).toThrow("PROJECT_REGISTRY_FILESYSTEM_FAILED");
+    writeFileSync(filePath, "changed");
+    expect(() => registry.startupState()).toThrow("PROJECT_REGISTRY_CHANGED");
+  });
+
   it("persists UUID grants, keeps no-op revisions, and never resurrects removed IDs", async () => {
     const { registry, root, directory, filePath } = fixture();
     const project = directory("project");

@@ -27,7 +27,7 @@ export type LauncherAssistantDispatch = {
 };
 
 export type LauncherAssistantRequest =
-  | { operation: "status" | "detail" | "dispatches" | "hide" | "approvals" }
+  | { operation: "status" | "detail" | "dispatches" | "hide" | "approvals" | "openLauncher" }
   | { operation: "resolveApproval"; requestId: string; decision: "accept" | "decline" }
   | { operation: "send"; message: string; requestId: string }
   | { operation: "stop"; turnId: string }
@@ -201,6 +201,14 @@ export async function setLauncherAssistantExpanded(expanded: boolean): Promise<v
 
 export async function hideLauncherAssistant(): Promise<void> {
   await launcherAssistantBridge().invoke({ operation: "hide" });
+}
+
+export async function openLauncherFromAssistant(): Promise<boolean> {
+  const result = await launcherAssistantBridge().invoke({ operation: "openLauncher" });
+  if (!exactFields(result, ["opened"]) || typeof result.opened !== "boolean") {
+    throw new Error("Launcher 暂时未能打开，请重试。");
+  }
+  return result.opened;
 }
 
 /** The native conversation keeps its normal DTOs, with Launcher as its sole data source. */

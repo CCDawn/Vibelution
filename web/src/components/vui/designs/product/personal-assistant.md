@@ -13,6 +13,8 @@ Launcher 聊天复用 `ConversationView` 的发送、停止和继续控件。运
 ### 非职责
 不实现第二套 transcript、任务调度或 LLM 调用；不持有远程任务凭据；不把原生 succeeded 等同于业务验收通过。
 ### 视觉与状态
+展开聊天始终以 `--vui-surface-panel` 提供不透明的浅色/深色窗口底色，由 Launcher route 样式明确持有，不依赖 VUI 默认透明背景与工具类的加载顺序；自定义壁纸只叠加 background-image，透明图片、未加载或清除图片均保留该底色。原有圆角不变，收起形象仍使用透明根节点。
+聊天标题栏使用文本 VButton「打开 Launcher」，托盘提供同名入口；默认只显示助理，首次打开由 main 原生目录选择器选择现有项目，并复用项目管理窗口。renderer 不传入路径，打开入口不启动模型。
 会话的 `lastTurnError` 直接交给 ConversationView 已有错误面板，展示原生失败摘要和可展开诊断；清除或更新均跟随会话读回，不增加错误分类、自动重试或另一份错误状态。
 操作者名称和头像预设通过同一 status 的可选 `operatorProfile` 两字段投影传给 ConversationView 已有用户显示参数；同一终态刷新会自动读回，缺损时沿用普通显示默认值，不把用户名称混作助理名。原始只读配置不返回 bio、偏好、头像文件路径或凭据；不增加 writer、独立缓存或轮询。
 status 明确声明 `operatorAssetsVersion: 1` 时，展开且可见的聊天通过固定 kind 的 `operatorAsset` IPC 独立读取头像和背景；旧宿主不读资源。图片只接收受限 MIME、大小和严格 base64 的封闭响应，renderer 不接收路径、任意 URL，不回退 HTTP。头像复用 ConversationView 的 `userAvatarImageUrl`；仅 Launcher 自定义头像用户行恢复普通会话头像的双列几何，无自定义图仍沿用 compact 布局，助理头像不变。背景仅在展开根设置既有 `--workbench-theme-background-image`，复用工作台背景合成与 soft 18% / standard 44% / strong 60% 可读性遮罩 token；收起形象保持透明。原生终态与既有配置刷新共用去重边界，收起时只标记资源失效，重开读取当前选择；删除图片或取消选择恢复默认。资源失败在聊天旁复用 VStateSurface/VButton 提示与重试，保留聊天、身份和发送能力，无独立设置 writer、raw 图片缓存或空闲轮询。

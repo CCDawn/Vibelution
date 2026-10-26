@@ -12,11 +12,13 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import re
 from collections.abc import Awaitable, Callable, Mapping
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Event
 from types import MappingProxyType
 from typing import Any
 
@@ -53,6 +55,13 @@ def _digest(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def _lexical_root(value: str | Path) -> Path:
+    """Normalize main's binding without following a changed physical root."""
+    if "\x00" in os.fspath(value):
+        raise ValueError("Invalid project root")
+    return Path(os.path.abspath(value))
+
+
 class DispatchService:
     """Single host owner for a profile's dispatch references.
 
@@ -69,10 +78,11 @@ class DispatchService:
         projects: Mapping[str, Path],
         *,
         client_factory: Callable[..., Any] = ManagedAgentBackendClient,
+        projects_suspended: bool = False,
     ) -> None:
         self._root = Path(profile_root).expanduser().resolve() / "assistant_dispatch"
         self._projects = MappingProxyType({
-            str(project_id): Path(path).expanduser().resolve()
+            str(project_id): _lexical_root(Path(path).expanduser())
             for project_id, path in projects.items()
         })
         # The first main-supplied envelope establishes the version, including
@@ -82,12 +92,27 @@ class DispatchService:
         self._seen_projects = dict(self._projects)
         self._revoked_projects: set[str] = set()
         self._client_factory = client_factory
+        # Main may narrow admission while native recovery/tool threads exist.
+        # Keep this synchronous and independent of an asyncio loop or SDK.
+        self._projects_suspended = Event()
+        if projects_suspended:
+            self._projects_suspended.set()
         self._dispatch_locks: dict[str, anyio.Lock] = {}
         self._project_locks: dict[str, anyio.Lock] = {}
         from .management import ManagementAdapter
-        self.management = ManagementAdapter(profile_root, lambda: self._projects, self._call)
+        self.management = ManagementAdapter(profile_root, self._admitted_projects, self._call)
 
-    def replace_projects(self, snapshot: dict) -> dict:
+    def suspend_projects(self) -> dict:
+        """Narrow project admissions without changing grants or native history."""
+        self._projects_suspended.set()
+        return {"schemaVersion": 1, "revision": self._registry_revision, "projectsSuspended": True}
+
+    def _admitted_projects(self) -> Mapping[str, Path]:
+        if self._projects_suspended.is_set():
+            raise DispatchError("Project registry requires reconciliation.", code="PROJECT_REGISTRY_RECONCILE_REQUIRED")
+        return self._projects
+
+    def replace_projects(self, snapshot: dict, *, retain_suspension: bool = False) -> dict:
         """Apply only main's private, monotonically versioned authorization view.
 
         Main persists registration epochs and tombstones. This in-process
@@ -104,7 +129,10 @@ class DispatchService:
             if (not isinstance(key, str) or not key.strip() or len(key) > 160
                     or not isinstance(value, str) or not Path(value).is_absolute()):
                 raise DispatchError("Invalid private project registration.", code="PROJECT_REGISTRY_INVALID")
-            projects[key] = Path(value).resolve()
+            try:
+                projects[key] = _lexical_root(value)
+            except (OSError, ValueError, RuntimeError):
+                raise DispatchError("Invalid private project registration.", code="PROJECT_REGISTRY_INVALID") from None
         revision = snapshot["revision"]
         if revision < self._registry_revision:
             raise DispatchError("Older project snapshot refused.", code="PROJECT_REGISTRY_STALE")
@@ -114,10 +142,24 @@ class DispatchService:
             raise DispatchError("Revoked registration cannot be reused.", code="PROJECT_REGISTRY_REVOKED")
         if any(key in self._seen_projects and self._seen_projects[key] != path for key, path in projects.items()):
             raise DispatchError("Project registration binding changed.", code="PROJECT_BINDING_CHANGED")
+        if self._projects_suspended.is_set() and not retain_suspension:
+            # Validate the entire envelope before mutating revocations, seen
+            # bindings or the gate. Path equality follows platform case rules.
+            physical_roots: set[Path] = set()
+            try:
+                for supplied in projects.values():
+                    physical = supplied.resolve(strict=True)
+                    if supplied != physical or not physical.is_dir() or physical in physical_roots:
+                        raise ValueError("Unavailable or aliased project root")
+                    physical_roots.add(physical)
+            except (OSError, ValueError, RuntimeError):
+                raise DispatchError("Project registry requires reconciliation.", code="PROJECT_REGISTRY_RECONCILE_REQUIRED") from None
         self._revoked_projects.update(set(self._projects) - set(projects))
         self._seen_projects.update(projects)
         self._projects = MappingProxyType(projects)
         self._registry_revision = revision
+        if not retain_suspension:
+            self._projects_suspended.clear()
         return {"schemaVersion": 1, "revision": revision, "projectCount": len(projects)}
 
     def project_ids(self) -> tuple[str, ...]:
@@ -167,6 +209,7 @@ class DispatchService:
             "title": title, "permissionProfile": permission_profile,
         }, sort_keys=True, ensure_ascii=False))
         async with self._dispatch_lock(dispatch_id):
+            self._project(project_id)
             path = self._path(dispatch_id)
             retrying = path.exists()
             if path.exists():
@@ -208,6 +251,7 @@ class DispatchService:
 
         self._project(project_id)
         async with self._dispatch_lock(dispatch_id):
+            self._project(project_id)
             record = self._read(dispatch_id) if self._path(dispatch_id).exists() else None
             if record is not None and "sourceRef" not in record:
                 # Legacy acknowledged raw repeats can only return the known
@@ -306,7 +350,7 @@ class DispatchService:
     def list_dispatches(self, project_id: str | None = None) -> list[dict[str, Any]]:
         """Return reference snapshots, never credentials or stored task prompts."""
         if project_id is not None:
-            self._project(project_id)
+            self._project(project_id, require_available=False)
         records = []
         for path in sorted((self._root / "records").glob("*.json")):
             try:
@@ -340,7 +384,7 @@ class DispatchService:
             )
             try:
                 await client.diagnostics()
-                if self._project(project_id) != project_root:
+                if self._project(project_id, require_available=False) != project_root:
                     raise DispatchError("Project binding changed before admission.", code="PROJECT_BINDING_CHANGED")
                 return await action(client)
             except BackendClientError as exc:
@@ -365,8 +409,9 @@ class DispatchService:
         self._save(record)
         return self._public(record)
 
-    def _project(self, project_id: str) -> Path:
-        path = self._projects.get(project_id)
+    def _project(self, project_id: str, *, require_available: bool = True) -> Path:
+        projects = self._admitted_projects() if require_available else self._projects
+        path = projects.get(project_id)
         if path is None:
             raise DispatchError("Project is not in the host-authorized registry.", code="PROJECT_NOT_AUTHORIZED")
         return path

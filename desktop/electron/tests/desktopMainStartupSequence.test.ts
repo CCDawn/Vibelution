@@ -89,7 +89,7 @@ describe("Electron main startup sequence", () => {
     expect(whenReadyGuardIndex).toBeGreaterThan(approveIndex);
     expect(primaryStartup(source)).toContain("app.whenReady()");
     expect(primaryStartup(source)).toContain("await ensureProjectControlPlane(workspaceRoot)");
-    expect(mainFunction(source, "ensureProjectControlPlane")).toContain("await bootstrapProjectControlPlane(paths, !deferred)");
+    expect(mainFunction(source, "ensureProjectControlPlane")).toContain("await bootstrapProjectControlPlane(paths, !deferred, !managementOnly)");
     expect(mainFunction(source, "bootstrapProjectControlPlane")).toContain("await reapManagedRuntimeOnDesktopStart");
     expect(source).toContain("shouldRunDesktopWhenReadyHandlers({");
   });

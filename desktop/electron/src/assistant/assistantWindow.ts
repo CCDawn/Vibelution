@@ -12,7 +12,8 @@ export class AssistantWindow {
   private opening: Promise<void> | null = null;
   private themeControl = new AssistantThemeControl();
   constructor(private paths: Pick<DesktopPaths, "desktopBundleRoot" | "userDataRoot">, private host: AssistantHost,
-    private isQuitting: () => boolean = () => false) {}
+    private isQuitting: () => boolean = () => false,
+    private openLauncher?: () => Promise<{ opened: boolean }>) {}
 
   async open({ show = true }: { show?: boolean } = {}): Promise<void> {
     if (this.opening) {
@@ -82,6 +83,7 @@ export class AssistantWindow {
     if (!window || window.isDestroyed()) return Promise.reject(new Error("ASSISTANT_WINDOW_UNAVAILABLE"));
     return invokeAssistant(event, payload, {
       contents: window.webContents, host: this.host,
+      openLauncher: this.openLauncher,
       hide: () => window.hide(),
       setExpanded: expanded => {
         const current = window.getBounds();

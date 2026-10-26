@@ -36,6 +36,8 @@ export type FulfillDeferredRestartIntentInput = {
   listActiveWork: () => readonly unknown[];
   submitRestart: () => Promise<{ accepted: boolean; code?: string; message?: string }>;
   now?: () => number;
+  /** Management-only attachment may fulfil new requests without replaying old ones. */
+  notBefore?: number;
 };
 
 type IntentStatus = "pending" | "claimed" | "completed" | "failed" | "expired" | "superseded";
@@ -177,6 +179,7 @@ export async function fulfillDeferredRestartIntentOnce(
   const now = input.now ?? Date.now;
   const pending = listDeferredRestartIntents(input.runtimeManagerDir).filter(
     (intent) => intent.status === "pending" && intentTargetMatches(intent)
+      && (input.notBefore === undefined || Date.parse(String(intent.createdAt || "")) >= input.notBefore)
   );
   const expiredIds: string[] = [];
   const fresh: DeferredRestartIntent[] = [];

@@ -5,11 +5,25 @@ import {
   sendLauncherAssistantMessage, setLauncherAssistantExpanded,
   getLauncherAssistantApprovals, resolveLauncherAssistantApproval,
   stopLauncherAssistantTurn, continueLauncherAssistantTurn,
-  getLauncherOperatorAsset,
+  getLauncherOperatorAsset, openLauncherFromAssistant,
 } from "./launcherAssistant";
 import type { SessionToolApprovalRequest } from "./types";
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe("Launcher window entry", () => {
+  it("uses only the closed IPC verb and accepts native cancellation", async () => {
+    const invoke = vi.fn().mockResolvedValueOnce({ opened: true }).mockResolvedValueOnce({ opened: false });
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    await expect(openLauncherFromAssistant()).resolves.toBe(true);
+    await expect(openLauncherFromAssistant()).resolves.toBe(false);
+    expect(invoke.mock.calls).toEqual([[{ operation: "openLauncher" }], [{ operation: "openLauncher" }]]);
+  });
+  it.each([{}, { opened: "true" }, { opened: true, path: "private" }])("rejects an unknown window result", async result => {
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke: vi.fn().mockResolvedValue(result) });
+    await expect(openLauncherFromAssistant()).rejects.toThrow("Launcher");
+  });
+});
 
 describe("Launcher operator assets", () => {
   const image = { contentType: "image/png", dataBase64: "AQI=", sha256: "a".repeat(64) };

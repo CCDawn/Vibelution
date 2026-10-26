@@ -5,11 +5,21 @@ function setup() {
   const mainFrame = { url: LAUNCHER_ASSISTANT_URL };
   const contents = { mainFrame, isDestroyed: () => false };
   const owner = { contents, host: { start: vi.fn(async () => ({})), request: vi.fn(async (_payload: unknown) => ({ accepted: true })) },
-    hide: vi.fn(), setExpanded: vi.fn((expanded: boolean) => ({ expanded })) };
+    hide: vi.fn(), setExpanded: vi.fn((expanded: boolean) => ({ expanded })), openLauncher: vi.fn(async () => ({ opened: true })) };
   return { owner, event: { sender: contents, senderFrame: mainFrame } };
 }
 
 describe("Launcher assistant private bridge", () => {
+  it("opens the existing Launcher through a closed human action without starting a model host", async () => {
+    const { owner, event } = setup();
+    await expect(invokeAssistant(event, { operation: "openLauncher" }, owner)).resolves.toEqual({ opened: true });
+    expect(owner.openLauncher).toHaveBeenCalledExactlyOnceWith();
+    expect(owner.host.start).not.toHaveBeenCalled();
+    expect(owner.host.request).not.toHaveBeenCalled();
+    await expect(invokeAssistant(event, { operation: "openLauncher", root: "untrusted" }, owner)).rejects.toThrow("REQUEST_INVALID");
+    owner.openLauncher.mockRejectedValueOnce(new Error("private path"));
+    await expect(invokeAssistant(event, { operation: "openLauncher" }, owner)).rejects.toThrow("ASSISTANT_LAUNCHER_UNAVAILABLE");
+  });
   it.each(["http://127.0.0.1:8000/launcher-assistant", "vibelution-launcher://launcher/launcher",
     LAUNCHER_ASSISTANT_URL + "?token=untrusted", LAUNCHER_ASSISTANT_URL + "/nested"])("denies another URL %s", async url => {
     const { owner, event } = setup();
