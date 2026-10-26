@@ -8,8 +8,10 @@ import {
   CLOSE_BACKOFF_MAX_MS,
   closeBackoffWindowMs,
   createMainLineCommandQueue,
+  waitForMainLineIntentPersistence,
   type CloseBackoffCoalescedInfo,
   type MainLineLifecycleResult,
+  type MainLineQueuedCommand,
 } from "../src/lifecycle/mainLine/commandQueue.js";
 import { writeMainLineQueueOwnerMarker } from "../src/lifecycle/mainLine/ownerMarker.js";
 
@@ -141,6 +143,131 @@ describe("mainLineCommandQueue", () => {
       execute: (command) => Promise.resolve(ok("restart", command.commandId)),
     });
     expect(intents.some((intent) => intent.desiredState === "open" && intent.operation === "restart")).toBe(true);
+  });
+});
+
+describe("mainLineCommandQueue durable request admission", () => {
+  it("does not let a failed pending association erase a valid active intent", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const intents: string[] = [];
+    const queue = createMainLineCommandQueue({ persistIntent: intent => { intents.push(intent.operation); } });
+    const active = queue.submit({ operation: "start", onCommand: () => gate, execute: async command => {
+      await waitForMainLineIntentPersistence(command);
+      return ok(command.operation, command.commandId);
+    } });
+    const pending = queue.submit({ operation: "stop", onCommand: async () => { throw new Error("bind failed"); }, execute: async command => ok(command.operation, command.commandId) });
+    const rejected = expect(pending).rejects.toThrow("bind failed");
+    release();
+    await active; await rejected;
+    expect(intents).toContain("start");
+    expect(intents).not.toContain("stop");
+  });
+
+  it.each(["join", "passthrough"])("cancels a stalled %s association without waiting for its callback", async kind => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const signal = new AbortController();
+    const queue = createMainLineCommandQueue();
+    const execute = vi.fn(async command => ok(command.operation, command.commandId));
+    let entered!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const active = kind === "join" ? queue.submit({ operation: "restart", execute: async command => { await gate; return ok(command.operation, command.commandId); } }) : Promise.resolve();
+    const request = queue.submit({ operation: kind === "join" ? "restart" : "shutdown", signal: signal.signal, onCommand: () => { entered(); return gate; }, execute });
+    const outcome = request.then(() => "resolved", () => "cancelled");
+    await started;
+    signal.abort(new Error("cancel stalled bind"));
+    expect(await Promise.race([outcome, new Promise(resolve => setTimeout(() => resolve("stalled"), 30))])).toBe("cancelled");
+    release(); await active;
+  });
+  it("waits for durable association before native intent and execution", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const events: string[] = [];
+    const queue = createMainLineCommandQueue({ persistIntent: () => { events.push("intent"); } });
+    const result = queue.submit({
+      operation: "restart",
+      onCommand: async (command) => {
+        expect(Object.keys(command).sort()).toEqual(["commandId", "noBrowser", "operation", "type"]);
+        command.operation = "stop"; // Only the detached projection can be changed.
+        await gate;
+        events.push("bound");
+      },
+      execute: async (command) => {
+        events.push("execute");
+        expect(command.operation).toBe("restart");
+        return ok(command.operation, command.commandId);
+      },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(events).toEqual([]);
+    release();
+    await result;
+    expect(events[0]).toBe("bound");
+    expect(events).toContain("intent");
+    expect(events).toContain("execute");
+  });
+
+  it("does not persist or execute when the association fails", async () => {
+    const persistIntent = vi.fn();
+    const execute = vi.fn(async (command: MainLineQueuedCommand) => ok(command.operation, command.commandId));
+    const queue = createMainLineCommandQueue({ persistIntent });
+    await expect(queue.submit({
+      operation: "start", execute,
+      onCommand: async () => { throw new Error("association failed"); },
+    })).rejects.toThrow("association failed");
+    expect(persistIntent).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("associates joined and backoff requests with the actual native command", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const commands: MainLineQueuedCommand[] = [];
+    const onCommand = async (command: MainLineQueuedCommand) => { commands.push(command); };
+    const execute = vi.fn(async (command: MainLineQueuedCommand) => {
+      if (command.operation === "restart") await gate;
+      return ok(command.operation, command.commandId);
+    });
+    const queue = createMainLineCommandQueue();
+    const restart = queue.submit({ operation: "restart", onCommand, execute });
+    const joined = queue.submit({ operation: "start", onCommand, execute });
+    release();
+    const [first, second] = await Promise.all([restart, joined]);
+    expect(first.commandId).toBe(second.commandId);
+    expect(commands.slice(0, 2)).toEqual([
+      expect.objectContaining({ commandId: first.commandId, operation: "restart" }),
+      expect.objectContaining({ commandId: first.commandId, operation: "restart" }),
+    ]);
+    const stop = await queue.submit({ operation: "stop", onCommand, execute });
+    const backoff = await queue.submit({ operation: "stop", onCommand, execute });
+    expect(backoff.code).toBe("close_backoff_coalesced");
+    expect(commands.slice(2).map((command) => command.commandId)).toEqual([stop.commandId, stop.commandId]);
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
+
+  it("cancels an admission without blocking its replacement or writing a late intent", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const signal = new AbortController();
+    const intents: string[] = [];
+    const queue = createMainLineCommandQueue({ persistIntent: (intent) => { intents.push(intent.operation); } });
+    const execute = vi.fn(async (command: MainLineQueuedCommand) => {
+      await waitForMainLineIntentPersistence(command);
+      return ok(command.operation, command.commandId);
+    });
+    const first = queue.submit({ operation: "start", signal: signal.signal, onCommand: () => gate, execute });
+    const rejected = expect(first).rejects.toThrow("cancel admission");
+    signal.abort(new Error("cancel admission"));
+    const replacement = queue.submit({ operation: "stop", execute });
+    await replacement;
+    release();
+    await rejected;
+    await Promise.resolve();
+    expect(intents.length).toBeGreaterThan(0);
+    expect(intents.every((operation) => operation === "stop")).toBe(true);
+    expect(execute.mock.calls.map(([command]) => command.operation)).toEqual(["stop"]);
   });
 });
 

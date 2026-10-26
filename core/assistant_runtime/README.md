@@ -182,6 +182,32 @@ before that bridge becomes model-executable. The process-wide default queue or
 a Python lifecycle implementation cannot substitute for it. Installing an
 independent assistant does not itself start or stop registered projects.
 
+Electron's source-only `projectLifecycleRequests` controller now reserves a
+durable request reference before dispatch, then binds it to the actual native
+command before intent persistence or execution. The existing queue still owns
+join, supersede and close backoff. Joined requests bind to that original command,
+not a second executor. Admission failure/cancellation cannot block replacement
+work or erase another admitted command's intent; ordinary callers omit the new
+optional admission hook and keep their queue behavior.
+
+After recreation, the controller checks current registration and storage-owner
+binding and reads only native `results/{commandId}.json`. Missing, partial,
+handoff-only, error or timed-out evidence remains unknown and never replays the
+operation. `restart_queued` remains queued; it does not prove the project
+restarted. Unknown/unregistered projects are refused before allocating request
+capacity or reading a reference. The reference store is bounded, has no automatic
+garbage collection, and fails closed on corruption, links, ownership changes or
+capacity exhaustion. It stores association facts only, not another business
+outcome ledger. Files are fsynced before effect admission; Windows Node lacks
+directory fsync, so this is not a power-loss durability guarantee.
+
+This controller has Temp-only native-guard/recreation tests, but no production
+host-to-main constructor/transport yet. It is not advertised as a model action.
+The remaining bridge must use the same controller and trusted per-project
+configuration. No real provider was called for this slice; DeepSeek acceptance
+is paused until the operator confirms funding. Platform PA retirement still
+requires the new package's functional and data-handoff acceptance.
+
 The renderer refreshes its own display name and character/status preferences
 once per authoritative native terminal Turn, including stopped/error and
 needs-continue outcomes. It does not treat every idle detail update as another

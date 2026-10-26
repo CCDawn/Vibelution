@@ -33,6 +33,22 @@ function setup() {
 }
 
 describe("registered project lifecycle facade", () => {
+  it("binds trusted native metadata before execution and rechecks registration after the bind", async () => {
+    const f = setup(), gate = deferred(), entered = deferred();
+    const bind = vi.fn(async (_binding: unknown, _command: unknown) => { entered.resolve(); await gate.promise; });
+    const pending = f.facade.dispatch({ projectId: A, operation: "start" }, { onCommand: bind });
+    await Promise.race([entered.promise, new Promise(resolve => setTimeout(resolve, 30))]);
+    expect(bind).toHaveBeenCalledTimes(1);
+    expect(await readMainLineIntent(f.runtime(f.a).runtimeManagerDir)).toBeNull();
+    const [binding, command] = bind.mock.calls[0] as unknown as [{ registryFingerprint: string; workspaceRoot: string }, { commandId: string }];
+    expect(binding.workspaceRoot).toBe(f.a);
+    expect(binding.registryFingerprint).toMatch(/^[a-f0-9]{64}$/);
+    expect(command.commandId).toMatch(/^cmd_/);
+    f.change({ ...f.snapshot(), revision: 2 });
+    gate.resolve();
+    expect((await pending).code).toBe("registration_changed");
+    expect(await readMainLineIntent(f.runtime(f.a).runtimeManagerDir)).toBeNull();
+  });
   it("constructs and reads a closed status without resolving Python or starting a project", async () => {
     const f = setup();
     expect(f.run).not.toHaveBeenCalled();

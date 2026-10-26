@@ -41,6 +41,8 @@ export type MainLineSubmitInput = {
   /** Cancelled lease work must not occupy or later settle the current lane. */
   signal?: AbortSignal;
   noBrowser?: boolean;
+  /** Trusted caller admission: persist request association before native effects. */
+  onCommand?: (command: MainLineQueuedCommand) => Promise<void>;
   execute: (command: MainLineQueuedCommand) => Promise<MainLineLifecycleResult>;
 };
 
@@ -187,10 +189,66 @@ export function createMainLineCommandQueue(options: {
   // the join branch can tell a live in-flight close from the just-settled one.
   let settledCloseSlot: Slot | null = null;
   let latestPersistCommandId = "";
+  let persistOrdinal = 0;
+  let latestPersistOrdinal = 0;
   let intentPersistence: Promise<unknown> = Promise.resolve();
+  const admissions = new WeakMap<object, {
+    ready: Promise<void>; admitted: boolean; cancel: (reason: unknown) => void;
+  }>();
+
+  const admit = (input: MainLineSubmitInput, command: MainLineQueuedCommand): Promise<void> => {
+    // Only metadata crosses this seam; never hand a callback the mutable Slot.
+    const projection = {
+      commandId: command.commandId, type: command.type,
+      operation: command.operation, noBrowser: command.noBrowser,
+    };
+    const called = Promise.resolve().then(() => {
+      input.signal?.throwIfAborted();
+      return input.onCommand?.(projection);
+    });
+    if (!input.signal) return called;
+    const signal = input.signal;
+    let abort!: () => void;
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      abort = () => reject(signal.reason ?? new Error("main-line lifecycle command aborted"));
+      if (signal.aborted) abort();
+      else signal.addEventListener("abort", abort, { once: true });
+    });
+    return Promise.race([called, cancelled]).then(() => { signal.throwIfAborted(); })
+      .finally(() => signal.removeEventListener("abort", abort));
+  };
+
+  const prepareAdmission = (input: MainLineSubmitInput, command: MainLineQueuedCommand): void => {
+    if (!input.onCommand) return;
+    let cancel!: (reason: unknown) => void;
+    const cancelled = new Promise<never>((_resolve, reject) => { cancel = reject; });
+    const entry = { ready: Promise.resolve(), admitted: false, cancel };
+    entry.ready = Promise.race([admit(input, command), cancelled]).then(() => { entry.admitted = true; });
+    // Pending commands may wait behind another command before drain observes failure.
+    void entry.ready.catch(() => undefined);
+    admissions.set(command, entry);
+  };
+
+  const execute = (input: MainLineSubmitInput, command: MainLineQueuedCommand): Promise<MainLineLifecycleResult> => {
+    const admission = admissions.get(command);
+    if (!admission) return input.execute(command);
+    return admission.ready.then(() => {
+      input.signal?.throwIfAborted();
+      return input.execute(command);
+    });
+  };
 
   const persist = (command: MainLineQueuedCommand): void => {
-    latestPersistCommandId = command.commandId;
+    const ordinal = ++persistOrdinal;
+    const markIntent = (): void => {
+      if (ordinal > latestPersistOrdinal) {
+        latestPersistOrdinal = ordinal;
+        latestPersistCommandId = command.commandId;
+      }
+    };
+    const admission = admissions.get(command);
+    if (admission) void admission.ready.then(markIntent).catch(() => undefined);
+    else markIntent();
     const snapshot: MainLineIntentSnapshot = {
       schemaVersion: 1,
       desiredState: desiredStateFor(command.type),
@@ -202,8 +260,12 @@ export function createMainLineCommandQueue(options: {
     // recovery writes ordered without making close wait for disk I/O; skip
     // older snapshots that have not started writing yet.
     intentPersistence = intentPersistence.catch(() => undefined).then(() => {
-      if (latestPersistCommandId !== command.commandId) return;
-      return options.persistIntent?.(snapshot);
+      const write = (): void | Promise<void> => {
+        if (latestPersistCommandId !== command.commandId) return;
+        return options.persistIntent?.(snapshot);
+      };
+      const admission = admissions.get(command);
+      return admission ? admission.ready.then(write) : write();
     }).catch(() => undefined);
     if (options.persistIntent) {
       intentPersistenceByCommand.set(command, async () => {
@@ -214,11 +276,12 @@ export function createMainLineCommandQueue(options: {
         } while (observed !== intentPersistence);
       });
     }
-    try {
-      void Promise.resolve(options.writeOwnerMarker?.()).catch(() => undefined);
-    } catch {
-      // Owner marker is best-effort for the daemon idle skip.
-    }
+    const writeMarker = (): void => {
+      try { void Promise.resolve(options.writeOwnerMarker?.()).catch(() => undefined); }
+      catch { /* Owner marker is best-effort for the daemon idle skip. */ }
+    };
+    if (admission) void admission.ready.then(writeMarker).catch(() => undefined);
+    else writeMarker();
   };
 
   const findJoinable = (type: MainLineQueueType, noBrowser: boolean): Slot | null => {
@@ -264,7 +327,7 @@ export function createMainLineCommandQueue(options: {
         next.resolve(result);
       },
       (error: unknown) => {
-        if (active === next && !next.signal?.aborted) noteCloseSettlement(next, {
+        if (active === next && !next.signal?.aborted && (!admissions.has(next) || admissions.get(next)?.admitted)) noteCloseSettlement(next, {
           schemaVersion: 1,
           accepted: false,
           operation: next.operation,
@@ -303,8 +366,9 @@ export function createMainLineCommandQueue(options: {
           operation: input.operation,
           noBrowser,
         };
+        prepareAdmission(input, passthrough);
         persist(passthrough);
-        return input.execute(passthrough);
+        return execute(input, passthrough);
       }
 
       const joined = findJoinable(mapped, noBrowser);
@@ -316,11 +380,14 @@ export function createMainLineCommandQueue(options: {
         && joined !== null
         && joined === settledCloseSlot;
       if (joined && !joinedSettledClose) {
-        return joined.result.then((result) => ({
+        const result = joined.result.then((result) => ({
           ...result,
           joined: true,
           message: result.message || "joined existing main-line lifecycle command",
         }));
+        if (!input.onCommand) return result;
+        // Observe both promises immediately even if the existing command fails first.
+        return Promise.all([admit(input, joined), result]).then(([, value]) => value);
       }
 
       for (let index = pending.length - 1; index >= 0; index -= 1) {
@@ -328,6 +395,7 @@ export function createMainLineCommandQueue(options: {
         if (item && supersedesPending(mapped, item.type)) {
           pending.splice(index, 1);
           item.detachAbort?.();
+          admissions.get(item)?.cancel(new Error("main-line lifecycle command superseded"));
           item.resolve(supersededResult(item.operation));
         }
       }
@@ -356,12 +424,15 @@ export function createMainLineCommandQueue(options: {
           } catch {
             // Observability must not change queue semantics.
           }
-          return Promise.resolve({
+          const result: MainLineSubmitResult = {
             ...lastClose.result,
             joined: true,
             code: CLOSE_BACKOFF_COALESCED_CODE,
             message: `Close re-request coalesced into the previous close result; close retry backoff window is ${Math.round(backoffMs / 1000)}s.`
-          });
+          };
+          if (!input.onCommand) return Promise.resolve(result);
+          if (!settledCloseSlot) return Promise.reject(new Error("main-line close association unavailable"));
+          return admit(input, settledCloseSlot).then(() => result);
         }
       }
 
@@ -376,14 +447,16 @@ export function createMainLineCommandQueue(options: {
         type: mapped,
         operation: input.operation,
         noBrowser,
-        execute: input.execute,
+        execute: (queued) => execute(input, queued),
         signal: input.signal,
         result,
         resolve,
         reject,
       };
+      prepareAdmission(input, command);
       const abort = (): void => {
         command.detachAbort?.();
+        admissions.get(command)?.cancel(input.signal?.reason ?? new Error("main-line lifecycle command aborted"));
         const index = pending.indexOf(command);
         if (index >= 0) pending.splice(index, 1);
         command.reject(input.signal?.reason ?? new Error("main-line lifecycle command aborted"));

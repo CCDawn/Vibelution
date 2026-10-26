@@ -1,7 +1,9 @@
 import { realpathSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { isAbsolute, resolve } from "node:path";
 
-import { createMainLineCommandQueue, type MainLineCommandQueue } from "../lifecycle/mainLine/commandQueue.js";
+import { createMainLineCommandQueue, type MainLineCommandQueue, type MainLineQueuedCommand } from "../lifecycle/mainLine/commandQueue.js";
+import type { LifecycleRequestBinding } from "./projectLifecycleRequestStore.js";
 import { writeMainLineIntent } from "../lifecycle/mainLine/commandIntent.js";
 import { writeMainLineQueueOwnerMarker } from "../lifecycle/mainLine/ownerMarker.js";
 import { resolveRuntimeManagerDir } from "../lifecycle/projectStoragePaths.js";
@@ -44,6 +46,15 @@ export type AssistantProjectLifecycleResult = {
 type Request = { projectId: string; operation: AssistantProjectLifecycleOperation };
 type Permission = AssistantProjectLifecycleTarget & { fingerprint: string; physicalRoot: string; runtimeManagerDir: string };
 type Context = AssistantProjectRuntimeContext & { queue: MainLineCommandQueue };
+export type AssistantProjectLifecycleExecution = {
+  signal?: AbortSignal;
+  /** Main-owned request association, never supplied by an agent or renderer. */
+  onCommand?: (binding: LifecycleRequestBinding, command: MainLineQueuedCommand) => Promise<void>;
+};
+const nativeCodes = new Set<ResultCode>(["active_work_blocked", "restart_queued", "lifecycle_intent_superseded", "backend_retire_incomplete", "close_backoff_coalesced"]);
+export function projectLifecycleResultCode(accepted: boolean, code: unknown): ResultCode {
+  return nativeCodes.has(code as ResultCode) ? code as ResultCode : accepted ? "accepted" : "rejected";
+}
 /** Bound retained registrations without cancelling or replacing an in-flight queue. */
 export const MAX_ASSISTANT_PROJECT_LIFECYCLE_CONTEXTS = 128;
 class FacadeFailure extends Error { constructor(readonly code: FailureCode) { super(code); } }
@@ -69,13 +80,15 @@ function request(value: unknown): Request {
  * An Electron-main capability boundary over the existing native lifecycle owner.
  * cancelled/lifecycle_failed mean this call did not confirm the outcome: a native
  * command may already have had effects. They MUST NOT trigger automatic retries.
- * Stable request/receipt association and cross-process recovery are intentionally
- * absent here and must be completed before exposing lifecycle actions to an agent.
+ * Durable request association is supplied by the main-owned request controller;
+ * the transport must use that controller before exposing writes to an agent.
  * Retained contexts are capped for this facade's lifetime; hitting the cap fails
  * closed until its owner can safely retire/recreate it, never cancelling work.
  */
 export function createAssistantProjectLifecycle(options: AssistantProjectLifecycleOptions): {
-  dispatch(input: unknown, execution?: { signal?: AbortSignal }): Promise<AssistantProjectLifecycleResult>;
+  dispatch(input: unknown, execution?: AssistantProjectLifecycleExecution): Promise<AssistantProjectLifecycleResult>;
+  /** Trusted main-only binding inspection; not a model/renderer response. */
+  bindingFor(projectId: string): LifecycleRequestBinding;
 } {
   const { getPermissionSnapshot, resolveRuntimeContext, readStatus } = options;
   const runner = options.runLifecycle ?? runWorkbenchLifecycle;
@@ -126,6 +139,10 @@ export function createAssistantProjectLifecycle(options: AssistantProjectLifecyc
     if (current.runtimeManagerDir !== expected.runtimeManagerDir) fail("storage_owner_changed");
   }
   function checkSignal(signal?: AbortSignal): void { if (signal?.aborted) fail("cancelled"); }
+  function bindingFor(expected: Permission): LifecycleRequestBinding {
+    return { workspaceRoot: expected.workspaceRoot, runtimeManagerDir: expected.runtimeManagerDir,
+      registryFingerprint: createHash("sha256").update(expected.fingerprint).digest("hex") };
+  }
   async function contextFor(expected: Permission): Promise<Context> {
     recheck(expected);
     const key = contextKey(expected);
@@ -157,20 +174,26 @@ export function createAssistantProjectLifecycle(options: AssistantProjectLifecyc
     checkStorageOwner(context);
     return context;
   }
-  function guardedQueue(context: Context, expected: Permission, signal?: AbortSignal): MainLineCommandQueue {
+  function guardedQueue(context: Context, expected: Permission, execution: AssistantProjectLifecycleExecution): MainLineCommandQueue {
+    const { signal, onCommand } = execution;
     return {
       snapshot: () => context.queue.snapshot(),
       submit(input) {
         checkSignal(signal); recheck(expected); checkStorageOwner(context);
-        return context.queue.submit({ ...input, signal, execute: async command => {
+        return context.queue.submit({ ...input, signal,
+          ...(onCommand ? { onCommand: async (command: MainLineQueuedCommand) => {
+            checkSignal(signal); recheck(expected); checkStorageOwner(context);
+            await onCommand(bindingFor(expected), command);
+            checkSignal(signal); recheck(expected); checkStorageOwner(context);
+          } } : {}), execute: async command => {
           checkSignal(signal); recheck(expected); checkStorageOwner(context);
           return input.execute(command);
         } });
       },
     };
   }
-  const nativeCodes = new Set<ResultCode>(["active_work_blocked", "restart_queued", "lifecycle_intent_superseded", "backend_retire_incomplete", "close_backoff_coalesced"]);
   return {
+    bindingFor: projectId => bindingFor(permission(request({ projectId, operation: "status" }).projectId)),
     async dispatch(input, execution = {}) {
       let captured: Request;
       try { captured = request(input); } catch { return { schemaVersion: 1, accepted: false, code: "invalid_request" }; }
@@ -192,12 +215,12 @@ export function createAssistantProjectLifecycle(options: AssistantProjectLifecyc
         const context = await contextFor(expected);
         checkSignal(signal); recheck(expected);
         const result = await runner({ workspaceRoot: context.workspaceRoot, pythonPath: context.pythonPath, operatorConfigPath: context.operatorConfigPath,
-          operation: captured.operation, interruptActiveWork: false, signal, queue: guardedQueue(context, expected, signal) });
+          operation: captured.operation, interruptActiveWork: false, signal, queue: guardedQueue(context, expected, execution) });
         checkSignal(signal);
         if (!result || result.schemaVersion !== 1 || typeof result.accepted !== "boolean") fail("lifecycle_failed");
         // Never forward native message, commandId, work rows, arbitrary codes,
         // path-bearing state, or thrown exception text across the boundary.
-        const code = nativeCodes.has(result.code as ResultCode) ? result.code as ResultCode : result.accepted ? "accepted" : "rejected";
+        const code = projectLifecycleResultCode(result.accepted, result.code);
         return { ...base, accepted: result.accepted, code };
       } catch (error) {
         return { ...base, accepted: false, code: signal?.aborted ? "cancelled" : error instanceof FacadeFailure ? error.code : "lifecycle_failed" };

@@ -874,3 +874,9 @@ E14 退出后的封存复查仍在目录枚举前后签名比较处失败；原�
 2026-10-26 合入前审查复现了普通入口的逆序启动回归：先打开独立助理后，第二次项目请求未建立控制面，并在 receipt 的 try 边界外读取空项目路径。现把既有项目 bootstrap 和观察器抽为单飞初始化，普通首启及延迟项目请求共用；只在真实项目控制面建立后发布 ready，保留原 AssistantHost/Job，不停止或重建助理。延迟初始化不触发自动 shell 更新重启，资源协议按当前 main 持有的绑定解析；项目 Python 优先目标环境，保留原安装 profile 的显式共享环境备用，不继承 embedded 助理 Python。
 
 同一修复还保留原生入口的两种根：单实例 envelope 可选传递经过校验的 workspaceRoot（integrationRoot），projectRoot 仍只表示目标 slot；旧 envelope 缺失时使用现有 profile，不从 worktree slot 猜控制面根。分支工作区依旧走既有 branch instance supervisor。真实 main 函数抽取的反例分别先确认空根异常和误把 worktree 当主线，再验证修复后的入口、并发及失败保留助理；这些是源码运行验证，不代表新版安装包或真实模型验收。用户已明确先合入阶段代码，正式切换、剩余能力迁移与平台旧实现退役仍单独保留未完成状态。
+
+2026-10-26 继续迁移：main-only `projectLifecycleRequests` 已补请求关联与恢复 owner。先以当前项目权限校验，再可靠保留 requestId，原生队列选出真实 commandId 后，在 intent/执行前落盘关联；start 加入 restart、close backoff 均关联实际原命令。复用原队列，不增加执行器或第二套业务状态。请求关联失败和取消不会晚到执行、阻塞替代命令或吞掉其他有效 intent；缺失/损坏/截断/转交确认/错误/超时结算保持 unknown，不自动重放。重建控制器和 store 后只查原生 results，`restart_queued` 明确保持 queued。
+
+这一片已覆盖临时目录中的真实原生 active-work 拒绝/重启排队及回执恢复、重复请求与冲突、权限撤销、损坏/链接资源、容量和写入失败。store 只保存关联事实，默认最多 1024 项，无自动回收；容量满时拒绝新请求。Windows 强制记录文件 fsync，但 Node 不支持目录 fsync，不能据此保证断电后目录项持久。仍缺生产 host→main 受限桥及目标配置构造，不向模型开放 lifecycle 动作。
+
+当前剩余面保持独立：Launcher 的主题/壁纸/上传头像资源消费者、共享设置 owner 去除旧 PA 依赖、其余语义 API、旧数据交接，以及新包联合验收。DeepSeek 等额度补充确认后再调用；本轮未调用真实模型、未安装或重启正式 Launcher、未修改正式数据。仅在全部功能及数据验收通过后退役平台旧个人助理。
