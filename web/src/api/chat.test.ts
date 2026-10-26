@@ -17,6 +17,7 @@ import composerSource from "../routes/chat/useChatComposerTurnMutations.ts?raw";
 import composerModelSource from "../routes/chat/chatComposerSubmitModel.ts?raw";
 import helperSource from "../routes/chat/chatSessionDetailHelpers.ts?raw";
 import conversationViewSource from "../components/conversation/ConversationView.tsx?raw";
+import conversationMessageCurationHookSource from "../components/conversation/useConversationMessageCuration.ts?raw";
 
 describe("Chat session tool approval API", () => {
   it("owns pending approval query and decision transports", () => {
@@ -148,9 +149,14 @@ describe("Chat session tool approval API", () => {
     expect(apiSource).toContain("JSON.stringify({ action })");
     // The aggregate model tally rides the chat-review domain module instead.
     expect(evolutionApiSource).toContain("/api/chat-review/model-curation-stats");
-    // View layers consume the api functions and never the endpoint strings.
-    expect(conversationViewSource).toContain("fetchSessionMessageCuration");
-    expect(conversationViewSource).toContain("setSessionMessageCuration");
+    // The conversation surface consumes the api functions through the curation
+    // hook and never the endpoint strings.
+    expect(conversationMessageCurationHookSource).toContain("fetchSessionMessageCuration");
+    expect(conversationMessageCurationHookSource).toContain("setSessionMessageCuration");
+    expect(conversationMessageCurationHookSource).not.toContain("/curation");
+    expect(conversationViewSource).toContain("useConversationMessageCuration");
+    expect(conversationViewSource).not.toContain("fetchSessionMessageCuration");
+    expect(conversationViewSource).not.toContain("setSessionMessageCuration");
     expect(conversationViewSource).not.toContain("/curation");
     expect(routeSource).not.toContain("/curation");
     expect(mutationSource).not.toContain("/curation");
