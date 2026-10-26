@@ -904,3 +904,13 @@ E14 退出后的封存复查仍在目录枚举前后签名比较处失败；原�
 Agent归档现已接通动态说明、SDK、独立agents:archive权限和原生逐次审批；严格configRevision CAS位于canonical archive lock内，通过后直接委托现有归档/Session封存owner，不预写metadata。受保护、团队/Companion、损坏身份、忙碌关联会话与过期版本拒绝，unknown或重启后只读原回执、不重放归档。完成回执保存首次确认的历史状态。旧无scopes授权冻结原八项、已有九项原样保持、新主体显式请求十项，绑定回包必须精确相符；不静默给旧主体加权。真实Temp普通配置Agent及其Session封存、忙碌/保护/CAS反例、SDK授权和回执回归均通过，独立复审无阻断。其余语义API、有效参数只读owner、显式旧授权升级、历史/在途数据交接和最终新包DeepSeek验收仍未完成，平台旧助理继续保留。
 
 最终自审另发现Agent旧getter隐式repair及sandbox路径ensure/seed，冻结候选因此未合入。新归档已改为专用existing-only authority adapter，新适配器的身份/CAS检查与unknown回读不走get_agent/load_state/load_agent_record；进入原生事务前先existing-only预读，缺authority立即拒绝，锁内再重载；registry/roster按限长strict JSON读，Companion store也使用同一不初始化resolver，缺authority拒绝。头像回执只报告persisted选择，不hydrate当前默认logo。新增哨兵先复现旧getter进入admission，再验证stale拒绝、unknown重启回读及开发沙箱缺authority都不写/复制/初始化。桌面全量出现游移超时，调查确认默认容量为15个fork；资源争用是优先假设，现独立将Vitest文件并发限制为4，未改变超时、断言、隔离或selector，完整检查仍须重新通过。
+
+### 2026-10-26：剩余查询与旧授权交接增量
+
+继续按 ADR 0013 保留原生项目 SDK。新增 `team_list/team_get`、`room_list/room_get` 和 `session_parameters_get`，复用原生 Team 分类、既有目录/配置快照和模型参数解析器；具体路径、授权及输出边界见 `core/assistant_runtime/README.md`。目录读取拒绝不明确来源，参数读取在整个校验期间固定 workspace 和实际 native store，未改普通会话核心。
+
+旧 8/9/10 项授权继续保持原值；新主体显式请求 13 项授权。需要新增权限时，通过原生审批后的 `authorization_upgrade` 提交精确旧 scopes 和新增项，不换身份或凭据，不丢弃既有任务关联。复用 requests/subjects 持久化与跨进程锁，响应丢失后只读取原请求证明；SDK 重启、后续升级和旧回执查询都不会重放授权写入。新增 HTTP、SDK、模型 action 串联及并发回归仅在临时环境验证，不等同于真实模型或正式安装验收。
+
+旧数据交接仍分阶段进行：只读 inventory 增加所选 PA 自己的派遣事件文件与默认私有知识目录指纹；其他目标 Agent 上的旧请求、全部历史 Session、自定义路径、SQLite 队列和运行权归属仍待核验。不得将旧 A2A message ID 改名为 native task ID，不复制旧 runnable queue 或 open Turn，不为获得新回执而重新派遣旧任务。`readyForCutover=false` 和平台旧助理保留条件继续有效。
+
+主仓库迁到 SSD 后，唯一主目录为 `D:\桌面开发\Vibelution`。任务分支重连新 Git common-dir，保存的旧分支提交与本轮变更通过正常验证和 fast-forward 集成；不以覆盖文件来追平复制时落后的 main。本轮不迁移正式运行数据，不改正式 Launcher 注册/安装，不调用 DeepSeek；新增功能的新包、真实模型联合验收仍等待用户明确确认额度补充。

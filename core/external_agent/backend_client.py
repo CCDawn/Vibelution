@@ -30,8 +30,8 @@ CONTROL_TOKEN_HEADER = "X-Vibelution-Control-Token"
 TASK_CAPABILITY_HEADER = "X-Vibelution-External-Agent-Task-Capability"
 ADAPTER_CONNECTION_HEADER = "X-Vibelution-External-Agent-Connection"
 _MANAGEMENT_PREFIX = "/api/v1/launcher-assistant-management"
-_MANAGEMENT_ACTIONS = frozenset({"agent_create", "agent_update", "agent_avatar", "agent_archive", "team_run", "session_pin"})
-_MANAGEMENT_SCOPES = ["agents:archive", "agents:avatar", "agents:create", "agents:read", "agents:update", "platform:describe", "sessions:pin", "sessions:read", "teams:read", "teams:run"]
+_MANAGEMENT_ACTIONS = frozenset({"agent_create", "agent_update", "agent_avatar", "agent_archive", "team_run", "session_pin", "authorization_upgrade"})
+_MANAGEMENT_SCOPES = ["agents:archive", "agents:avatar", "agents:create", "agents:read", "agents:update", "platform:describe", "rooms:read", "sessions:parameters:read", "sessions:pin", "sessions:read", "teams:directory:read", "teams:read", "teams:run"]
 # Historical grants without persisted scopes predate pin and archive. Freeze
 # their actual eight scopes; deriving this list from fresh scopes expands power.
 _LEGACY_MANAGEMENT_SCOPES = ["agents:avatar", "agents:create", "agents:read", "agents:update", "platform:describe", "sessions:read", "teams:read", "teams:run"]
@@ -194,18 +194,24 @@ class ManagedAgentBackendClient:
                                 require_existing_subject: bool = False) -> dict[str, Any]:
         if action not in _MANAGEMENT_ACTIONS or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,95}", request_id):
             raise BackendClientError("Unsupported management request.", code="INVALID_MANAGEMENT_REQUEST")
-        if action in {"session_pin", "agent_archive"}:
+        if action in {"session_pin", "agent_archive", "authorization_upgrade"}:
             from pydantic import ValidationError
             from core.web.services.external_management.contracts import ACTION_MODELS
             try:
                 parameters = ACTION_MODELS[action].model_validate(parameters).model_dump()
             except ValidationError:
                 raise BackendClientError("Invalid management parameters.", code="INVALID_MANAGEMENT_REQUEST") from None
-        grant = await self._management_grant(require_existing=require_existing_subject)
+        grant = (await self._original_management_grant(require_original=True) if action == "authorization_upgrade"
+            else await self._management_grant(require_existing=require_existing_subject))
         result = await self._request_json("POST", f"{_MANAGEMENT_PREFIX}/actions/{action}",
             management_auth=(grant["subjectId"], grant["capability"]), json_payload={
                 "request_id": request_id, "expected_binding": grant["binding"], "parameters": parameters})
         public = self._management_public_receipt(result, action=action, request_id=request_id)
+        if action == "authorization_upgrade":
+            if public["status"] == "completed" and (public["authorization"]["previousScopes"] != parameters["expected_scopes"]
+                or public["authorization"]["addedScopes"] != parameters["add_scopes"]):
+                raise BackendClientError("Authorization request binding changed.", code="BACKEND_PROTOCOL_ERROR")
+            await self._sync_authorization_receipt(grant, public)
         if action == "agent_archive" and public["status"] == "completed" and public["agent"]["agentId"] != parameters["agent_id"]:
             raise BackendClientError("Mismatched Agent archive receipt.", code="BACKEND_PROTOCOL_ERROR")
         if action == "session_pin" and public["status"] == "completed" and (
@@ -217,10 +223,78 @@ class ManagedAgentBackendClient:
     async def management_receipt(self, *, action: str, request_id: str) -> dict[str, Any]:
         if action not in _MANAGEMENT_ACTIONS or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,95}", request_id):
             raise BackendClientError("Unsupported management request.", code="INVALID_MANAGEMENT_REQUEST")
-        grant = await self._management_grant(require_existing=True)
+        grant = (await self._original_management_grant(require_original=True) if action == "authorization_upgrade"
+            else await self._management_grant(require_existing=True))
         result = await self._request_json("GET", f"{_MANAGEMENT_PREFIX}/actions/{action}/requests/{request_id}",
             management_auth=(grant["subjectId"], grant["capability"]))
-        return self._management_public_receipt(result, action=action, request_id=request_id)
+        public = self._management_public_receipt(result, action=action, request_id=request_id)
+        if action == "authorization_upgrade":
+            await self._sync_authorization_receipt(grant, public)
+        return public
+
+    async def _original_management_grant(self, *, require_original):
+        """Keep original credentials when an explicit upgrade changed server scopes.
+
+        Rebinding an old scope list would conflict before its receipt could be
+        read. This path verifies identity, never silently asks for more scopes.
+        """
+        from pydantic import ValidationError
+        from core.web.services.external_management.contracts import Binding
+        if self._management_state_invalid:
+            raise BackendClientError("Original credentials are unreadable.", code="UNKNOWN_MANAGEMENT_SUBJECT")
+        saved = deepcopy(self._state.get("management") or {})
+        if require_original and not saved.get("clientId"):
+            raise BackendClientError("Original subject is missing.", code="UNKNOWN_MANAGEMENT_SUBJECT")
+        if not saved.get("subjectId") or not saved.get("capability"):
+            return await self._management_grant(require_existing=bool(saved.get("clientId")))
+        try:
+            binding = Binding.model_validate(saved["binding"]).model_dump()
+            if (not isinstance(saved["subjectId"], str) or not re.fullmatch(r"ops-[A-Za-z0-9_-]{10,128}", saved["subjectId"])
+                or not isinstance(saved["capability"], str) or not re.fullmatch(r"[A-Za-z0-9_-]{32,256}", saved["capability"])):
+                raise ValueError("Invalid credentials")
+            info = await self._request_json("GET", _MANAGEMENT_PREFIX + "/binding")
+            if info.get("protocolVersion") != 1 or Binding.model_validate(info.get("binding")).model_dump() != binding:
+                raise ValueError("Binding changed")
+        except (ValidationError, ValueError, KeyError):
+            raise BackendClientError("Original subject binding changed.", code="RUNTIME_IDENTITY_MISMATCH") from None
+        return saved
+
+    async def _authorization_state(self, grant):
+        from pydantic import ValidationError
+        from core.web.services.external_management.contracts import AuthorizationStateResponse
+        result = await self._request_json("GET", _MANAGEMENT_PREFIX + "/authorization",
+            management_auth=(grant["subjectId"], grant["capability"]))
+        try:
+            public = AuthorizationStateResponse.model_validate(result).model_dump()
+            if public["subjectId"] != grant["subjectId"] or public["binding"] != grant["binding"]:
+                raise ValueError("Wrong subject")
+        except (ValidationError, ValueError):
+            raise BackendClientError("Invalid authorization state.", code="BACKEND_PROTOCOL_ERROR") from None
+        return public
+
+    async def management_authorization_status(self):
+        grant = await self._original_management_grant(require_original=False)
+        return await self._authorization_state(grant)
+
+    async def _sync_authorization_receipt(self, grant, receipt):
+        if receipt["status"] != "completed":
+            return
+        proof = receipt["authorization"]
+        if proof["subjectId"] != grant["subjectId"]:
+            raise BackendClientError("Wrong upgrade subject.", code="BACKEND_PROTOCOL_ERROR")
+        async with self._state_lock:
+            current = await self._authorization_state(grant)
+            saved = self._state.get("management") or {}
+            if (saved.get("subjectId") != grant["subjectId"] or saved.get("clientId") != grant["clientId"]
+                or saved.get("binding") != grant["binding"] or saved.get("capability") != grant["capability"]
+                or current["grantRevision"] < proof["grantRevision"]
+                or not set(proof["scopes"]).issubset(current["scopes"])
+                or not set(saved.get("scopes", _LEGACY_MANAGEMENT_SCOPES)).issubset(current["scopes"])):
+                raise BackendClientError("Upgrade reconciliation changed identity.", code="RUNTIME_IDENTITY_MISMATCH")
+            # Only explicit upgrade completion/recovery syncs a changed grant;
+            # ordinary status and reads leave their saved scope list untouched.
+            self._state["management"] = {**saved, "scopes": current["scopes"]}
+            self._save_state_locked()
 
     async def management_agent(self, *, agent_id: str) -> dict[str, Any]:
         if not isinstance(agent_id, str) or not 1 <= len(agent_id) <= 128:
@@ -269,6 +343,76 @@ class ManagedAgentBackendClient:
         if (public["offset"] != query.offset or public["limit"] > query.limit
             or query.agent_id and any(row["agentId"] != query.agent_id for row in public["sessions"])):
             raise BackendClientError("Session list query binding changed.", code="BACKEND_PROTOCOL_ERROR")
+        return public
+
+    async def _management_directory_read(self, suffix, response_model):
+        from pydantic import ValidationError
+        grant = await self._management_grant(require_existing=False)
+        result = await self._request_json("GET", _MANAGEMENT_PREFIX + suffix,
+            management_auth=(grant["subjectId"], grant["capability"]))
+        try:
+            return response_model.model_validate(result).model_dump()
+        except ValidationError:
+            raise BackendClientError("Invalid directory projection.", code="BACKEND_PROTOCOL_ERROR") from None
+
+    async def _management_directory_list(self, kind, parameters):
+        from pydantic import ValidationError
+        from core.web.services.external_management.contracts import DirectoryQuery, TeamListResponse, RoomListResponse
+        try:
+            query = DirectoryQuery.model_validate(parameters)
+        except ValidationError:
+            raise BackendClientError("Invalid directory query.", code="INVALID_MANAGEMENT_REQUEST") from None
+        public = await self._management_directory_read("/directory/" + kind + "?" + urlencode(query.model_dump()),
+            TeamListResponse if kind == "teams" else RoomListResponse)
+        if (public["offset"] != query.offset or len(public[kind]) > query.limit
+            or not query.archived and any(row["status"] == "archived" for row in public[kind])):
+            raise BackendClientError("Directory query binding changed.", code="BACKEND_PROTOCOL_ERROR")
+        return public
+
+    async def management_team_list(self, **parameters):
+        return await self._management_directory_list("teams", parameters)
+
+    async def management_room_list(self, **parameters):
+        return await self._management_directory_list("rooms", parameters)
+
+    async def management_team(self, *, team_id, member_offset=0, limit=6):
+        from pydantic import ValidationError
+        from core.web.services.external_management.contracts import TeamReadQuery, TeamReadResponse
+        try:
+            query = TeamReadQuery.model_validate({"team_id": team_id, "member_offset": member_offset, "limit": limit})
+        except ValidationError:
+            raise BackendClientError("Invalid Team query.", code="INVALID_MANAGEMENT_REQUEST") from None
+        public = await self._management_directory_read("/directory/teams/" + quote(query.team_id, safe="") + "?" +
+            urlencode(query.model_dump(exclude={"team_id"})), TeamReadResponse)
+        if (public["team"]["id"] != query.team_id or public["team"]["memberOffset"] != query.member_offset
+            or len(public["team"]["members"]) > query.limit):
+            raise BackendClientError("Team query binding changed.", code="BACKEND_PROTOCOL_ERROR")
+        return public
+
+    async def management_room(self, *, room_id):
+        from pydantic import ValidationError
+        from core.web.services.external_management.contracts import RoomReadQuery, RoomReadResponse
+        try:
+            query = RoomReadQuery.model_validate({"room_id": room_id})
+        except ValidationError:
+            raise BackendClientError("Invalid room query.", code="INVALID_MANAGEMENT_REQUEST") from None
+        public = await self._management_directory_read("/directory/rooms/" + quote(query.room_id, safe=""), RoomReadResponse)
+        if public["room"]["id"] != query.room_id:
+            raise BackendClientError("Room query binding changed.", code="BACKEND_PROTOCOL_ERROR")
+        return public
+
+    async def management_session_parameters(self, *, session_id):
+        from pydantic import ValidationError
+        from core.web.services.external_management.contracts import SessionMetadataQuery, SessionParametersResponse
+        try:
+            query = SessionMetadataQuery.model_validate({"session_id": session_id})
+        except ValidationError:
+            raise BackendClientError("Invalid Session identifier.", code="INVALID_MANAGEMENT_REQUEST") from None
+        session = await self.management_session(session_id=query.session_id)
+        public = await self._management_directory_read("/sessions/" + quote(query.session_id, safe="") + "/parameters", SessionParametersResponse)
+        if (public["parameters"]["sessionId"] != query.session_id
+            or public["parameters"]["agentId"] != session["session"]["agentId"]):
+            raise BackendClientError("Session parameter identity changed.", code="BACKEND_PROTOCOL_ERROR")
         return public
 
     async def management_session(self, *, session_id: str) -> dict[str, Any]:
@@ -379,6 +523,18 @@ class ManagedAgentBackendClient:
         if payload.get("action") != action or payload.get("requestId") != request_id or payload.get("status") not in {"completed", "unknown"}:
             raise BackendClientError("Invalid management receipt.", code="BACKEND_PROTOCOL_ERROR")
         result = {key: deepcopy(payload[key]) for key in ("status", "action", "requestId", "verified", "reused", "code") if key in payload}
+        if action == "authorization_upgrade":
+            from pydantic import ValidationError
+            from core.web.services.external_management.contracts import ReceiptResponse
+            try:
+                receipt = ReceiptResponse.model_validate(payload)
+                if (receipt.status == "completed" and (receipt.authorization is None or receipt.verified is not True or receipt.code is not None)
+                    or receipt.status == "unknown" and (receipt.authorization is not None or receipt.verified is not False)
+                    or any(getattr(receipt, field) is not None for field in ("agent", "session", "teamRun", "phase", "resumeAllowed"))):
+                    raise ValueError("Invalid authorization receipt")
+                return receipt.model_dump(exclude_none=True)
+            except (ValidationError, ValueError):
+                raise BackendClientError("Invalid authorization receipt.", code="BACKEND_PROTOCOL_ERROR") from None
         if action == "agent_archive":
             from pydantic import ValidationError
             from core.web.services.external_management.contracts import ReceiptResponse
@@ -386,7 +542,7 @@ class ManagedAgentBackendClient:
                 receipt = ReceiptResponse.model_validate(payload)
                 if (receipt.status == "completed" and (receipt.agent is None or receipt.verified is not True or receipt.code is not None)
                     or receipt.status == "unknown" and (receipt.agent is not None or receipt.verified is not False)
-                    or any(getattr(receipt, key) is not None for key in ("session", "teamRun", "phase", "resumeAllowed"))):
+                    or any(getattr(receipt, key) is not None for key in ("session", "authorization", "teamRun", "phase", "resumeAllowed"))):
                     raise ValueError("Invalid archive receipt state")
                 return receipt.model_dump(exclude_none=True)
             except (ValidationError, ValueError) as exc:
@@ -398,7 +554,7 @@ class ManagedAgentBackendClient:
                 receipt = ReceiptResponse.model_validate(payload)
                 if (receipt.status == "completed" and (receipt.session is None or receipt.verified is not True)
                     or receipt.status == "unknown" and (receipt.session is not None or receipt.verified is not False)
-                    or any(getattr(receipt, key) is not None for key in ("agent", "teamRun", "phase", "resumeAllowed"))):
+                    or any(getattr(receipt, key) is not None for key in ("agent", "authorization", "teamRun", "phase", "resumeAllowed"))):
                     raise ValueError("Invalid Session receipt state")
                 return receipt.model_dump(exclude_none=True)
             except (ValidationError, ValueError) as exc:

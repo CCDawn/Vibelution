@@ -455,13 +455,13 @@ intent and receipt owners handle unknown results by readback only; no archive
 replay, purge, reset, restore or force is exposed. A completed receipt freezes
 the first verified archived observation.
 
-Fresh SDK subjects explicitly request ten scopes. Persisted nine-scope subjects
-retain those exact grants, and historical grants without a scope list retain
-their original eight. No automatic upgrade or subject rotation is performed.
+Fresh SDK subjects explicitly request thirteen scopes. Persisted eight-, nine-
+and ten-scope subjects retain those exact grants, and historical grants without
+a scope list retain their original eight. No automatic upgrade or subject
+rotation is performed.
 Temp native-Agent/Session lifecycle and SDK/receipt regressions have passed;
-this does not establish real-model or formal-project acceptance. The remaining
-effective-parameter API needs a side-effect-free configuration/catalog owner
-before it can replace the legacy ensure/repair getter faithfully.
+this does not establish real-model or formal-project acceptance. The effective
+parameter API now uses the existing-only snapshot path described below.
 
 Archive admission and uncertain-result readback explicitly avoid the repairing
 Agent projection. Their dedicated adapter reuses an existing-only config and
@@ -471,3 +471,59 @@ Missing authority is refused without seed/copy/repair. Receipt avatars describe
 persisted selections, without hydrating a current UI/default logo. Regression
 sentinels prohibit the old getter, save/repair and sandbox initialization, and
 verify unchanged registry bytes through stale rejection and restarted readback.
+
+## Directory and effective parameter queries
+
+The native project SDK remains the project transport, as settled in ADR 0013.
+The model receives closed actions, rather than arbitrary HTTP or file access.
+The management prefix is `/api/v1/launcher-assistant-management`:
+
+| Model action | GET suffix | Required grants | Result boundary |
+| --- | --- | --- | --- |
+| `team_list` / `team_get` | `/directory/teams[/{team_id}]` | `teams:directory:read` | Ordinary Team summaries and bounded member pages |
+| `room_list` / `room_get` | `/directory/rooms[/{room_id}]` | `rooms:read` | Ordinary room metadata, without message projection |
+| `session_parameters_get` | `/sessions/{session_id}/parameters` | `sessions:read` and `sessions:parameters:read` | Current effective Agent defaults for future Turns |
+| `authorization_status` | `/authorization` | Original subject credentials and operator control | Exact current grants and revision; no automatic local grant update |
+
+Directory pages contain at most six items, stable IDs and explicit offsets;
+`archived=true` includes archived items. Private/system sources are filtered
+only after classification is validated. Missing, corrupt or ambiguous sources
+are refused. Rooms use their canonical formal-workspace owner even in developer
+mode. Their co-located JSON is decoded, but rounds/messages are neither searched
+nor projected, exported or hydrated. Returned names and descriptions remain
+untrusted content.
+
+Effective parameters reuse the saved candidate, already-loaded operator config,
+frozen existing model catalog and native reasoning/context/budget resolvers.
+The GET pins Agent, roster, Companion binding, workspace routing and the actual
+native store revision throughout validation. It never seeds a catalog, repairs
+an Agent or substitutes metadata when native resolution fails. The result does
+not describe an active Turn or a historical compiled configuration. Ordinary
+Session admission, Journal, worker, persistence and SSE remain unchanged.
+
+## Explicit upgrade of existing authorization
+
+`authorization_upgrade` is a governed management action. An approved request
+must provide the exact sorted `expected_scopes` and disjoint sorted `add_scopes`.
+Its existing POST action endpoint requires both operator control and the original
+subject capability. It preserves the subject/client/capability, opaque task
+associations and existing grants; new read grants do not imply archive or pin.
+The protocol remains version 1 with additive endpoints and a new closed action.
+Existing actions retain their authentication and response contracts.
+
+The existing Store owns intent and receipt persistence. A subject mutation adds
+an immutable proof and increments its grant revision atomically. After lost ACK
+or SDK restart, `management_receipt` reads the original request; it never reruns
+the grant mutation. A missing proof stays unknown. Historical receipts preserve
+their original scope union even after later upgrades. The SDK updates only its
+saved scope list after a completed receipt and current-subject verification.
+Transport, stored-grant, restart, competing-process and native model-output
+budget tests run in isolated environments; real DeepSeek/package acceptance
+for these new actions is still pending funding confirmation.
+
+Source inventory also fingerprints the selected old PA's own dispatch events
+and default private knowledge namespace without exporting their contents.
+This does not discover target-side dispatches, all historical Sessions, custom
+memory/knowledge paths or queue ownership. Old message IDs are not new native
+task capabilities. No old queue, Turn or transcript is copied into the running
+Launcher profile; `readyForCutover` remains false until handoff is verified.

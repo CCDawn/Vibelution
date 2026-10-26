@@ -65,6 +65,22 @@ class NativeAgentGateway:
         from .workspace import read_sessions
         return read_sessions(self.project_root, self._owners(), query)
 
+    def read_teams(self, query):
+        from .workspace_queries import read_teams
+        return read_teams(self.project_root, self._owners(), query)
+
+    def read_team(self, team_id, query):
+        from .workspace_queries import read_team
+        return read_team(self.project_root, self._owners(), team_id, query)
+
+    def read_rooms(self, query):
+        from .workspace_queries import read_rooms
+        return read_rooms(self.project_root, self._owners(), query)
+
+    def read_room(self, room_id):
+        from .workspace_queries import read_room
+        return read_room(self.project_root, self._owners(), room_id)
+
     def read_session_config(self, session_id: str):
         from .workspace import read_session_config
         return read_session_config(self.project_root, self._owners(), session_id)
@@ -72,6 +88,10 @@ class NativeAgentGateway:
     def read_session_config_comparison(self, session_id: str):
         from .workspace import read_session_config_comparison
         return read_session_config_comparison(self.project_root, self._owners(), session_id)
+
+    def read_session_parameters(self, session_id: str):
+        from .session_parameters import read_session_parameters
+        return read_session_parameters(self.project_root, self._owners(), session_id)
 
     def find_created(self, request_key: str):
         directory = self._owners()

@@ -174,7 +174,10 @@ def _binding_snapshot(project_root, agent_id, cache=None):
     return cache[agent_id]
 
 
-def _validated_session_snapshot(project_root: Path, directory, session_id: str, *, _context=None, strict_shape=False):
+def _validated_session_snapshot(
+    project_root: Path, directory, session_id: str, *, _context=None, strict_shape=False, return_agent=False,
+    _source_reader=None, _return_store=False,
+):
     from core.agent_plugins.virtual_human_life.storage import VirtualHumanLifeStore
     from core.infrastructure import developer_sandbox
     from core.web.services.team import team_projection, team_store
@@ -204,14 +207,16 @@ def _validated_session_snapshot(project_root: Path, directory, session_id: str, 
             if agent is None or _context["direct_owners"].get(session_id, agent_id) != agent_id:
                 _deny()
         else:
-            agents = _registry_agents(project_root, directory)
+            agents = (_source_reader("agents") if _source_reader is not None
+                else _registry_agents(project_root, directory))
             matches = [item for item in agents if item.get("agentId") == agent_id]
             if len(matches) != 1:
                 _deny()
             agent = matches[0]
             if any(item is not agent and item.get("directSessionId") == session_id for item in agents):
                 _deny()
-        team_ids = _context["team_ids"] if _context is not None else _team_member_ids(project_root)
+        team_ids = (_context["team_ids"] if _context is not None else _source_reader("team_member_ids")
+            if _source_reader is not None else _team_member_ids(project_root))
         if agent_id in team_ids:
             _deny(known_private=True)
         metadata, agent_classification = _agent_visibility(directory, agent)
@@ -229,15 +234,19 @@ def _validated_session_snapshot(project_root: Path, directory, session_id: str, 
             classification = conversation_index._conversation_index_classification(record, agent, hidden_team_member_agent_ids=set())
             if classification["kind"] not in {"user_chat", "personal_agent"} or classification["errors"]:
                 _deny()
-        binding = _binding_snapshot(project_root, agent_id, _context["bindings"] if _context is not None else None)
+        binding = (_source_reader("binding", agent_id) if _source_reader is not None
+            else _binding_snapshot(project_root, agent_id, _context["bindings"] if _context is not None else None))
         if binding is not None and (binding.get("enabled") is not False or binding.get("agentId") not in (None, agent_id)):
             _deny(known_private=binding.get("enabled") is True and binding.get("agentId") in (None, agent_id))
     except ManagementError:
         raise
     except (OSError, ValueError, TypeError, KeyError, RuntimeError):
         _deny()
-    return store.repository, deepcopy(row), {
+    result = store.repository, deepcopy(row), {
         "last_turn_status": runtime.get("last_turn_status"), "lastTurnStatus": runtime.get("lastTurnStatus")}
+    if return_agent:
+        result = (*result, deepcopy(agent))
+    return (*result, store) if _return_store else result
 
 
 def read_session(project_root: Path, directory, session_id: str) -> dict:

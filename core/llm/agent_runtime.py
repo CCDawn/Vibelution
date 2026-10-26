@@ -141,6 +141,7 @@ def resolve_agent_llm(
     runtime_profile_id: str = DEFAULT_RUNTIME_PROFILE_ID,
     fallback_to_dialogue: bool | None = None,
     reasoning_effort_override: str | None = None,
+    catalog_snapshot: dict[str, Any] | None = None,
 ) -> ResolvedAgentLlm:
     requested_slot = normalize_agent_llm_slot(slot)
     should_fallback = requested_slot != DEFAULT_AGENT_LLM_SLOT if fallback_to_dialogue is None else bool(fallback_to_dialogue)
@@ -178,7 +179,10 @@ def resolve_agent_llm(
     if reasoning_effort_override is not None:
         profile.reasoning_effort = normalize_reasoning_effort(reasoning_effort_override)
     reasoning_resolution = resolve_reasoning_effort_request(profile)
-    spec = discover_model(runtime_config, runtime_profile_id)
+    if catalog_snapshot is None:
+        spec = discover_model(runtime_config, runtime_profile_id)
+    else:
+        spec = discover_model(runtime_config, runtime_profile_id, catalog_snapshot=catalog_snapshot)
     context_window = resolve_agent_model_context_window(
         agent,
         model_ref,
@@ -194,7 +198,10 @@ def resolve_agent_llm(
             # downstream consumer of the resolved config observe the same
             # bounded context window as the session context assembler.
             model_entry["context_window"] = context_window["limit"]
-            spec = discover_model(runtime_config, runtime_profile_id)
+            if catalog_snapshot is None:
+                spec = discover_model(runtime_config, runtime_profile_id)
+            else:
+                spec = discover_model(runtime_config, runtime_profile_id, catalog_snapshot=catalog_snapshot)
         spec.provider_details = {
             **dict(spec.provider_details or {}),
             "agent_context_window_limit": context_window["limit"],

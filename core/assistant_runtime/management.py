@@ -219,6 +219,42 @@ class ManagementAdapter:
         result = await self._call(project_id, lambda client: client.management_session_list(**parameters))
         return {**result, "projectId": project_id}
 
+    async def team_list(self, project_id: str, **parameters):
+        if project_id not in self._projects:
+            raise DispatchError("Project is not authorized.", code="PROJECT_NOT_AUTHORIZED")
+        result = await self._call(project_id, lambda client: client.management_team_list(**parameters))
+        return {**result, "projectId": project_id}
+
+    async def authorization_status(self, project_id: str):
+        if project_id not in self._projects:
+            raise DispatchError("Project is not authorized.", code="PROJECT_NOT_AUTHORIZED")
+        result = await self._call(project_id, lambda client: client.management_authorization_status())
+        return {**result, "projectId": project_id}
+
+    async def team(self, project_id: str, **parameters):
+        if project_id not in self._projects:
+            raise DispatchError("Project is not authorized.", code="PROJECT_NOT_AUTHORIZED")
+        result = await self._call(project_id, lambda client: client.management_team(**parameters))
+        return {**result, "projectId": project_id}
+
+    async def room_list(self, project_id: str, **parameters):
+        if project_id not in self._projects:
+            raise DispatchError("Project is not authorized.", code="PROJECT_NOT_AUTHORIZED")
+        result = await self._call(project_id, lambda client: client.management_room_list(**parameters))
+        return {**result, "projectId": project_id}
+
+    async def room(self, project_id: str, **parameters):
+        if project_id not in self._projects:
+            raise DispatchError("Project is not authorized.", code="PROJECT_NOT_AUTHORIZED")
+        result = await self._call(project_id, lambda client: client.management_room(**parameters))
+        return {**result, "projectId": project_id}
+
+    async def session_parameters(self, project_id: str, **parameters):
+        if project_id not in self._projects:
+            raise DispatchError("Project is not authorized.", code="PROJECT_NOT_AUTHORIZED")
+        result = await self._call(project_id, lambda client: client.management_session_parameters(**parameters))
+        return {**result, "projectId": project_id}
+
     async def session(self, project_id: str, *, session_id: str):
         if project_id not in self._projects:
             raise DispatchError("Project is not authorized.", code="PROJECT_NOT_AUTHORIZED")

@@ -337,16 +337,21 @@ def _curated_capabilities(profile: Any) -> dict[str, bool]:
     return {}
 
 
-def _catalog_model_details(provider_id: str, model_ref: str) -> tuple[dict[str, Any], dict[str, Any]]:
+def _catalog_model_details(
+    provider_id: str, model_ref: str, *, catalog_snapshot: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     if "/" not in model_ref:
         return {}, {"catalog_availability": "not_applicable"}
     ref_provider_id, model_key = model_ref.split("/", 1)
     if ref_provider_id != provider_id or not model_key:
         return {}, {"catalog_availability": "not_found"}
-    try:
-        state = load_model_catalog_state()
-    except ValueError:
-        return {}, {"catalog_availability": "invalid"}
+    if catalog_snapshot is None:
+        try:
+            state = load_model_catalog_state()
+        except ValueError:
+            return {}, {"catalog_availability": "invalid"}
+    else:
+        state = catalog_snapshot
     providers = state.get("providers", {}) if isinstance(state, dict) else {}
     provider_record = providers.get(provider_id, {}) if isinstance(providers, dict) else {}
     models = provider_record.get("models", {}) if isinstance(provider_record, dict) else {}
@@ -416,7 +421,9 @@ def _base_capabilities_for_model(profile, provider) -> LLMCapabilities:
     )
 
 
-def discover_model(config: AppConfig, profile_id: str) -> ResolvedModelSpec:
+def discover_model(
+    config: AppConfig, profile_id: str, *, catalog_snapshot: dict[str, Any] | None = None,
+) -> ResolvedModelSpec:
     profile = config.llm.get_profile(profile_id)
     provider = config.llm.get_provider(profile.provider_id)
     base_capabilities = _base_capabilities_for_model(profile, provider)
@@ -428,7 +435,10 @@ def discover_model(config: AppConfig, profile_id: str) -> ResolvedModelSpec:
         (model_entry or {}).get("upstream_id") or (model_entry or {}).get("model") or profile.model or ""
     ).strip()
     declared_overrides, declared_fields = _declared_capability_overrides(model_entry)
-    catalog_model, catalog_details = _catalog_model_details(provider_id, model_ref)
+    if catalog_snapshot is None:
+        catalog_model, catalog_details = _catalog_model_details(provider_id, model_ref)
+    else:
+        catalog_model, catalog_details = _catalog_model_details(provider_id, model_ref, catalog_snapshot=catalog_snapshot)
     provider_metadata, runtime_probe = _catalog_capability_layers(catalog_model)
     discovery_metadata = (
         model_entry.get("discovery_metadata", {})

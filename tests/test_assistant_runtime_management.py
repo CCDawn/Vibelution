@@ -748,3 +748,13 @@ async def test_documentation_node_locals_are_stripped_before_sdk_and_invalid_loc
         assert len(seen) == 2 and not (tmp_path / "profile/assistant_management").exists()
     finally:
         unbind_actions(service)
+@pytest.mark.parametrize("character", ["名", '"', "\\"])
+def test_directory_pages_fit_native_model_budget_without_losing_pagination(character):
+    import json
+    from tests.test_assistant_runtime_actions import _through_native_model_budget
+    rows = [{"id": "team-" + str(index) + "a" * 153, "name": character * 32,
+        "purpose": character * 64, "status": "archived", "memberCount": 120} for index in range(6)]
+    payload = {"projectId": "p" * 160, "teams": rows, "total": 7, "offset": 0, "nextOffset": 6, "untrustedContent": True}
+    raw, outcome, facts, rendered = _through_native_model_budget(payload)
+    assert outcome is None and not facts.truncated
+    assert json.loads(rendered.split("\nResult:\n", 1)[1]) == json.loads(raw)

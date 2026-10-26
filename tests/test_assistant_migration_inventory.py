@@ -174,3 +174,109 @@ def test_journal_directory_is_not_an_available_native_history(tmp_path):
     result = inspect(tmp_path, workspace)["candidates"][0]
     assert result["inventoryComplete"] is False
     assert result["files"]["journal"]["issues"][0]["code"] == "source_type_mismatch"
+
+
+def test_dispatch_and_private_knowledge_fingerprints_remain_selected_identity_only(tmp_path, monkeypatch):
+    from core.assistant_runtime import migration_inventory as owner
+    workspace, _, _, _ = source(tmp_path)
+    dispatch = workspace / "agents" / AGENT / "events/agent_inbox_messages.jsonl"
+    knowledge = workspace / "agents" / AGENT / "knowledge/knowledge_bases.json"
+    knowledge.parent.mkdir()
+    # Inventory fingerprints bytes; invalid JSON is not interpreted as tasks.
+    dispatch.write_bytes(b"PRIVATE_DISPATCH_BODY not-json\xff")
+    knowledge.write_bytes(b"PRIVATE_KNOWLEDGE_BODY not-json\xfe")
+    for relative in ("events/agent_inbox_messages.jsonl", "knowledge/knowledge_bases.json"):
+        other = workspace / "agents/agent-other" / relative
+        other.parent.mkdir(parents=True, exist_ok=True)
+        other.write_bytes(b"OTHER_AGENT_PRIVATE_BODY")
+    before, hashed, original = snapshot(tmp_path), [], owner._hash_file
+    def hashing(path, size):
+        assert "agent-other" not in path.parts
+        hashed.append(path)
+        return original(path, size)
+    monkeypatch.setattr(owner, "_hash_file", hashing)
+    report = inspect(tmp_path, workspace)
+    files = report["candidates"][0]["files"]
+    assert files["dispatch_events"] == {"available": True, "issues": [], "entries": [{
+        "path": dispatch.name, "size": dispatch.stat().st_size, "sha256": hashlib.sha256(dispatch.read_bytes()).hexdigest()}]}
+    assert files["private_knowledge"] == {"available": True, "issues": [], "entries": [{
+        "path": knowledge.name, "size": knowledge.stat().st_size, "sha256": hashlib.sha256(knowledge.read_bytes()).hexdigest()}]}
+    assert dispatch in hashed and knowledge in hashed and snapshot(tmp_path) == before
+    serialized = json.dumps(report)
+    assert all(value not in serialized for value in ("PRIVATE_DISPATCH_BODY", "PRIVATE_KNOWLEDGE_BODY", "OTHER_AGENT_PRIVATE_BODY", "agent-other"))
+    assert report["readyForCutover"] is False and report["sourceQuiesced"] is False
+    assert {"legacy_dispatch_handoff", "private_knowledge_custom_paths"}.issubset(report["pendingChecks"])
+
+
+def test_missing_dispatch_and_knowledge_sources_are_observable_without_creation(tmp_path):
+    workspace, _, _, _ = source(tmp_path)
+    before = snapshot(tmp_path)
+    report = inspect(tmp_path, workspace)
+    for category in ("dispatch_events", "private_knowledge"):
+        assert report["candidates"][0]["files"][category] == {"available": False, "entries": [], "issues": []}
+    assert snapshot(tmp_path) == before and report["readyForCutover"] is False
+
+
+@pytest.mark.parametrize("category,relative", [
+    ("dispatch_events", "events/agent_inbox_messages.jsonl"),
+    ("private_knowledge", "knowledge/source.jsonl"),
+])
+def test_new_sources_reuse_file_size_bounds_without_exposing_bodies(tmp_path, category, relative):
+    workspace, _, _, _ = source(tmp_path)
+    target = workspace / "agents" / AGENT / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b"PRIVATE_BODY")
+    before = snapshot(tmp_path)
+    report = inspect(tmp_path, workspace, max_file_bytes=4)
+    result = report["candidates"][0]
+    assert result["files"][category]["entries"] == []
+    assert any(issue["code"] == "file_too_large" for issue in result["files"][category]["issues"])
+    assert result["inventoryComplete"] is False and "PRIVATE_BODY" not in json.dumps(report)
+    assert snapshot(tmp_path) == before
+
+
+@pytest.mark.parametrize("category,relative,is_directory", [
+    ("dispatch_events", "events/agent_inbox_messages.jsonl", False),
+    ("private_knowledge", "knowledge", True),
+])
+def test_new_source_links_are_rejected_without_following_targets(tmp_path, monkeypatch, category, relative, is_directory):
+    from core.assistant_runtime import migration_inventory as owner
+    workspace, _, _, _ = source(tmp_path)
+    outside = tmp_path / "unselected-source"
+    if is_directory:
+        outside.mkdir()
+        (outside / "unselected-link-secret.jsonl").write_text("PRIVATE_LINK_BODY", encoding="utf-8")
+    else:
+        outside.write_text("PRIVATE_LINK_BODY", encoding="utf-8")
+    link = workspace / "agents" / AGENT / relative
+    try:
+        link.symlink_to(outside, target_is_directory=is_directory)
+    except OSError:
+        pytest.skip("native symlink privilege unavailable")
+    original = owner._hash_file
+    def hashing(path, size):
+        assert not path.resolve().is_relative_to(outside.resolve())
+        return original(path, size)
+    monkeypatch.setattr(owner, "_hash_file", hashing)
+    report = inspect(tmp_path, workspace)
+    result = report["candidates"][0]
+    assert result["files"][category]["entries"] == [] and result["files"][category]["issues"]
+    assert result["inventoryComplete"] is False
+    assert "PRIVATE_LINK_BODY" not in json.dumps(report) and "unselected-link-secret.jsonl" not in json.dumps(report)
+
+
+@pytest.mark.parametrize("category,relative,is_directory", [
+    ("dispatch_events", "events/agent_inbox_messages.jsonl", True),
+    ("private_knowledge", "knowledge", False),
+])
+def test_dispatch_requires_file_and_private_knowledge_requires_directory(tmp_path, category, relative, is_directory):
+    workspace, _, _, _ = source(tmp_path)
+    target = workspace / "agents" / AGENT / relative
+    if is_directory:
+        target.mkdir()
+    else:
+        target.write_text("not a directory", encoding="utf-8")
+    report = inspect(tmp_path, workspace)
+    result = report["candidates"][0]
+    assert result["files"][category]["issues"][0]["code"] == "source_type_mismatch"
+    assert result["inventoryComplete"] is False and report["readyForCutover"] is False

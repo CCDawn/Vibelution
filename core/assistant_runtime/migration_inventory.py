@@ -18,7 +18,7 @@ _TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$")
 _PROFILE = "personal_assistant_v1"
 _PENDING = ("source_selection", "source_quiescence", "native_session_ownership", "legacy_session_discovery",
             "native_journal_watermark", "target_history_import",
-            "private_memory_migration", "personal_affairs_migration", "legacy_dispatch_handoff",
+            "private_memory_migration", "private_knowledge_custom_paths", "personal_affairs_migration", "legacy_dispatch_handoff",
             "workflow_recovery_authority", "pending_approval_disposition", "target_verification", "platform_retirement")
 
 
@@ -186,6 +186,8 @@ def inventory_sources(*, project_root: Path, workspace: Path, project_id: str, i
             "agent_assets": (workspace, ("agents", aid, "artifacts")),
             "memory": (workspace, ("agents", aid, "memory")),
             "episodic_memory": (workspace, ("agents", aid, "events", "episodic_events.jsonl")),
+            "dispatch_events": (workspace, ("agents", aid, "events", "agent_inbox_messages.jsonl")),
+            "private_knowledge": (workspace, ("agents", aid, "knowledge")),
             "mental_model": (workspace, ("agents", aid, "mental_model")),
             "inbox": (workspace, ("agents", aid, "inbox")),
             "outbox": (workspace, ("agents", aid, "outbox")),
@@ -199,7 +201,7 @@ def inventory_sources(*, project_root: Path, workspace: Path, project_id: str, i
             try:
                 path = _checked(base, *parts)
                 files[category] = _tree(path, max_file_bytes=max_file_bytes, max_files=max_files,
-                    expected_file=category in {"journal", "episodic_memory"})
+                    expected_file=category in {"journal", "episodic_memory", "dispatch_events"})
             except (InventoryError, OSError):
                 files[category] = {"available": False, "entries": [], "issues": [{"path": "", "code": "source_unavailable"}]}
         encoded = json.dumps(row, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")

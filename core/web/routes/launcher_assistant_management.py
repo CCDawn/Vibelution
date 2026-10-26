@@ -23,6 +23,7 @@ from core.web.services.external_management.contracts import (
     SessionListResponse,
     SessionConfigResponse,
     SessionConfigComparisonResponse,
+    DirectoryQuery, TeamListResponse, TeamReadResponse, RoomListResponse, RoomReadResponse, SessionParametersResponse, AuthorizationStateResponse,
 )
 from core.web.services.external_management.service import (
     ManagementError,
@@ -51,7 +52,7 @@ def _credentials(request: Request):
     return request.headers.get(SUBJECT_HEADER, ""), request.headers.get(CAPABILITY_HEADER, "")
 
 
-async def _body(request: Request):
+async def _body(request: Request, *, unique_keys=False):
     try:
         chunks = []
         size = 0
@@ -61,7 +62,14 @@ async def _body(request: Request):
                 raise ValueError("request too large")
             chunks.append(chunk)
         content = b"".join(chunks)
-        value = json.loads(content)
+        def unique(pairs):
+            value = {}
+            for key, item in pairs:
+                if key in value:
+                    raise ValueError("Duplicate field")
+                value[key] = item
+            return value
+        value = json.loads(content, object_pairs_hook=unique) if unique_keys else json.loads(content)
         if not isinstance(value, dict):
             raise TypeError("object required")
         return value
@@ -93,6 +101,14 @@ async def bind_subject(request: Request):
     return await _call(lambda: _service().bind(payload))
 
 
+@router.get("/authorization", response_model=AuthorizationStateResponse)
+async def authorization_status(request: Request):
+    _require_control(request)
+    if request.query_params:
+        raise HTTPException(status_code=422, detail={"code": "INVALID_INPUT"})
+    return await _call(lambda: _service().authorization_status(*_credentials(request)))
+
+
 @router.get("/avatar-options", response_model=AvatarOptionsResponse)
 async def avatar_options(request: Request, offset: int = 0, limit: int = 20):
     _require_control(request)
@@ -109,10 +125,48 @@ async def read_agent(agent_id: str, request: Request):
     return await _call(lambda: _service().read_agent(*_credentials(request), agent_id))
 
 
+def _directory_query(request, *, detail=False):
+    values = request.query_params
+    allowed = {"member_offset", "limit"} if detail else DirectoryQuery.model_fields.keys()
+    if (set(values) - allowed or len(values.multi_items()) != len(values)
+        or any(not re.fullmatch(r"[0-9]{1,6}", values[key]) for key in ("offset", "member_offset", "limit") if key in values)
+        or "archived" in values and values["archived"].casefold() not in {"true", "false"}):
+        raise HTTPException(status_code=422, detail={"code": "INVALID_INPUT"})
+
+
+@router.get("/directory/teams", response_model=TeamListResponse)
+async def list_teams(request: Request, query: str = "", offset: int = 0, limit: int = 6, archived: bool = False):
+    _require_control(request)
+    _directory_query(request)
+    return await _call(lambda: _service().read_teams(*_credentials(request), query=query, offset=offset, limit=limit, archived=archived))
+
+
+@router.get("/directory/teams/{team_id}", response_model=TeamReadResponse)
+async def read_team(team_id: str, request: Request, member_offset: int = 0, limit: int = 6):
+    _require_control(request)
+    _directory_query(request, detail=True)
+    return await _call(lambda: _service().read_team(*_credentials(request), team_id, member_offset=member_offset, limit=limit))
+
+
+@router.get("/directory/rooms", response_model=RoomListResponse)
+async def list_rooms(request: Request, query: str = "", offset: int = 0, limit: int = 6, archived: bool = False):
+    _require_control(request)
+    _directory_query(request)
+    return await _call(lambda: _service().read_rooms(*_credentials(request), query=query, offset=offset, limit=limit, archived=archived))
+
+
+@router.get("/directory/rooms/{room_id}", response_model=RoomReadResponse)
+async def read_room(room_id: str, request: Request):
+    _require_control(request)
+    if request.query_params:
+        raise HTTPException(status_code=422, detail={"code": "INVALID_INPUT"})
+    return await _call(lambda: _service().read_room(*_credentials(request), room_id))
+
+
 @router.post("/actions/{action}", response_model=ReceiptResponse, response_model_exclude_none=True)
 async def invoke(action: str, request: Request):
     _require_control(request)
-    payload = await _body(request)
+    payload = await _body(request, unique_keys=action == "authorization_upgrade")
     return await _call(lambda: _service().invoke(*_credentials(request), action, payload))
 
 
@@ -151,9 +205,19 @@ async def read_session_config_comparison(session_id: str, request: Request):
     return await _call(lambda: _service().read_session_config_comparison(*_credentials(request), session_id))
 
 
+@router.get("/sessions/{session_id}/parameters", response_model=SessionParametersResponse)
+async def read_session_parameters(session_id: str, request: Request):
+    _require_control(request)
+    if request.query_params:
+        raise HTTPException(status_code=422, detail={"code": "INVALID_INPUT"})
+    return await _call(lambda: _service().read_session_parameters(*_credentials(request), session_id))
+
+
 @router.get("/actions/{action}/requests/{request_id}", response_model=ReceiptResponse, response_model_exclude_none=True)
 async def receipt(action: str, request_id: str, request: Request):
     _require_control(request)
+    if action == "authorization_upgrade" and request.query_params:
+        raise HTTPException(status_code=422, detail={"code": "INVALID_INPUT"})
     return await _call(lambda: _service().receipt(*_credentials(request), action, request_id))
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import unicodedata
 from datetime import datetime, timezone
 from os import PathLike
@@ -80,6 +81,66 @@ def load_model_catalog_state(
     if not isinstance(payload.get("providers"), dict) or not isinstance(payload.get("metadata"), dict):
         raise ValueError("invalid model catalog state")
     return payload
+
+
+def read_existing_model_catalog_snapshot(
+    path: Path,
+    *,
+    allow_missing: bool = False,
+) -> tuple[dict[str, Any], str]:
+    """Freeze bounded catalog bytes, returning ``(state, existing|absent)``.
+
+    Only an initially absent file can represent canonical empty observations.
+    Corruption, duplicate keys, or replacement while reading always fail closed;
+    this reader never initializes a directory, cache, or catalog.
+    """
+    try:
+        if not isinstance(path, Path) or not path.is_absolute():
+            raise ValueError("explicit absolute path required")
+        try:
+            before = path.stat()
+        except FileNotFoundError:
+            if allow_missing:
+                return empty_model_catalog_state(), "absent"
+            raise
+        maximum = 16 * 1024 * 1024
+        if before.st_size > maximum:
+            raise ValueError("catalog too large")
+        with path.open("rb") as stream:
+            opened = os.fstat(stream.fileno())
+            raw = stream.read(maximum + 1)
+            finished = os.fstat(stream.fileno())
+        after = path.stat()
+        def stamp(info):
+            return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+        # Path and handle ctime have different precision on Windows; compare
+        # ctime only within each API pair, as the existing TOML snapshot does.
+        if (len(raw) > maximum or not (stamp(before) == stamp(opened) == stamp(finished) == stamp(after))
+            or before.st_ctime_ns != after.st_ctime_ns or opened.st_ctime_ns != finished.st_ctime_ns):
+            raise ValueError("catalog changed")
+        def unique(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError("duplicate catalog key")
+                result[key] = value
+            return result
+        def reject_constant(_value):
+            raise ValueError("invalid JSON constant")
+        payload = json.loads(raw.decode("utf-8"), object_pairs_hook=unique, parse_constant=reject_constant)
+        if (not isinstance(payload, dict) or type(payload.get("schemaVersion")) is not int
+            or payload["schemaVersion"] != MODEL_CATALOG_SCHEMA_VERSION
+            or not isinstance(payload.get("providers"), dict) or not isinstance(payload.get("metadata"), dict)):
+            raise ValueError("invalid model catalog state")
+        for provider in payload["providers"].values():
+            if not isinstance(provider, dict) or not isinstance(provider.get("models", {}), dict):
+                raise ValueError("invalid provider catalog")
+            for model in provider.get("models", {}).values():
+                if (not isinstance(model, dict) or not isinstance(model.get("reasoningContract", {}), dict)):
+                    raise ValueError("invalid model catalog")
+        return payload, "existing"
+    except (OSError, ValueError, UnicodeError):
+        raise ValueError("EXISTING_MODEL_CATALOG_UNAVAILABLE") from None
 
 
 def save_model_catalog_state(
@@ -631,6 +692,7 @@ __all__ = [
     "classify_capability_error",
     "import_legacy_capability_cache",
     "load_model_catalog_state",
+    "read_existing_model_catalog_snapshot",
     "merge_capability_observations",
     "prune_absent_provider_entries",
     "provider_catalog_refresh_due",

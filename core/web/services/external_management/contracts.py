@@ -1,20 +1,31 @@
 """Pure schemas shared by the native client and target backend; no runtime identity."""
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 import re
 import unicodedata
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-Scope = Literal["agents:read", "agents:create", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "platform:describe", "sessions:read", "sessions:pin"]
-SCOPES = ("agents:read", "agents:create", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "platform:describe", "sessions:read", "sessions:pin")
+Scope = Literal["agents:read", "agents:create", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read"]
+SCOPES = ("agents:read", "agents:create", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read")
 _AVATAR_EXTENSION = r"(?:[pP][nN][gG]|[jJ][pP][gG]|[jJ][pP][eE][gG]|[wW][eE][bB][pP]|svg)"
 _AVATAR_PATH_PATTERN = r"^workspace/avatars/[A-Za-z0-9_.-]+\." + _AVATAR_EXTENSION + "$"
 
 
 class Closed(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class UntrustedResponse(Closed):
+    untrustedContent: Literal[True]
+
+    @field_validator("untrustedContent", mode="before")
+    @classmethod
+    def explicitly_untrusted(cls, value):
+        if value is not True:
+            raise ValueError("Explicit untrusted marker required")
+        return value
 
 
 class Binding(Closed):
@@ -107,6 +118,18 @@ class AgentArchive(Closed):
     expected_config_revision: int = Field(ge=0)
 
 
+class AuthorizationUpgrade(Closed):
+    expected_scopes: list[Scope] = Field(min_length=1, max_length=len(SCOPES))
+    add_scopes: list[Scope] = Field(min_length=1, max_length=len(SCOPES))
+
+    @model_validator(mode="after")
+    def explicit_missing_additions(self):
+        if (self.expected_scopes != sorted(set(self.expected_scopes)) or self.add_scopes != sorted(set(self.add_scopes))
+            or set(self.expected_scopes) & set(self.add_scopes)):
+            raise ValueError("Choose exact sorted missing additions")
+        return self
+
+
 class AgentAvatar(Closed):
     agent_id: str = Field(min_length=1, max_length=128)
     expected_updated_at: str = Field(min_length=1, max_length=160)
@@ -138,8 +161,8 @@ class SessionPin(Closed):
     pinned: bool
 
 
-ACTION_MODELS = {"agent_create": AgentCreate, "agent_update": AgentUpdate, "agent_avatar": AgentAvatar, "agent_archive": AgentArchive, "team_run": TeamRun, "session_pin": SessionPin}
-ACTION_SCOPES = {"agent_create": "agents:create", "agent_update": "agents:update", "agent_avatar": "agents:avatar", "agent_archive": "agents:archive", "team_run": "teams:run", "session_pin": "sessions:pin"}
+ACTION_MODELS = {"agent_create": AgentCreate, "agent_update": AgentUpdate, "agent_avatar": AgentAvatar, "agent_archive": AgentArchive, "team_run": TeamRun, "session_pin": SessionPin, "authorization_upgrade": AuthorizationUpgrade}
+ACTION_SCOPES = {"agent_create": "agents:create", "agent_update": "agents:update", "agent_avatar": "agents:avatar", "agent_archive": "agents:archive", "team_run": "teams:run", "session_pin": "sessions:pin", "authorization_upgrade": None}
 
 
 def contracts() -> dict:
@@ -150,9 +173,10 @@ def contracts() -> dict:
         "agent_archive": "每次经原生审批，按 configRevision 归档普通 Agent 并封存关联 Session；protected 或关联 Session 忙时拒绝。稳定 request_id，未知结果只查询原回执，不提供 purge、reset、restore 或 force。verified 表示首次原生回读已归档，完成回执保留历史状态。",
         "team_run": "创建内置 dev-team 并受理原生工作流运行；稳定 request_id，未知结果查询原回执，只有 resumeAllowed 才可用原参数续接。",
         "session_pin": "经原生审批置顶或取消置顶普通可见 Session；不改变当前选择。verified 表示首次确认时原生元数据符合目标状态，不证明某次调用的因果；完成回执保留历史状态，当前状态用 session_get 查询。未知结果查询原 action/request_id，不能换 ID 重放。",
+        "authorization_upgrade": "经原生审批显式增加当前Launcher原主体的指定缺失权限；先authorization_status读取当前scopes，expected_scopes和add_scopes必须分别排序、唯一、不重叠。不能默认升级到全部权限，查询只选所需读取权；写权另行明确选择。保留client/subject/capability和任务关联，不支持撤销或换主体。unknown或异常保持同一request_id查询management_receipt(action=authorization_upgrade)，不更换ID重试。需要operator control，旧读取scope本身不授予升级权。完成回执为历史证明，当前状态另查。",
     }
     return {name: {"action": name, "description": descriptions[name], "parameters": model.model_json_schema(),
-                   "governed": name in {"team_run", "session_pin", "agent_archive"}, "scope": ACTION_SCOPES[name]} for name, model in ACTION_MODELS.items()}
+                   "governed": name in {"team_run", "session_pin", "agent_archive", "authorization_upgrade"}, "scope": ACTION_SCOPES[name] or "operator:control"} for name, model in ACTION_MODELS.items()}
 
 
 class BindingResponse(Closed):
@@ -182,6 +206,104 @@ class AgentView(Closed):
 
 class AgentReadResponse(Closed):
     agent: AgentView
+
+
+class DirectoryQuery(Closed):
+    query: str = Field(default="", max_length=64)
+    offset: int = Field(default=0, ge=0, le=100_000)
+    limit: int = Field(default=6, ge=1, le=6)
+    archived: bool = False
+
+    @field_validator("query")
+    @classmethod
+    def single_line(cls, value):
+        if any(unicodedata.category(char) in {"Cc", "Cf"} for char in value):
+            raise ValueError("Single-line query required")
+        return value
+
+
+class TeamReadQuery(Closed):
+    team_id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+    member_offset: int = Field(default=0, ge=0, le=120)
+    limit: int = Field(default=6, ge=1, le=6)
+
+
+class RoomReadQuery(Closed):
+    room_id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+
+
+class DirectoryItem(Closed):
+    id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+    status: str = Field(min_length=1, max_length=32)
+
+
+class TeamSummary(DirectoryItem):
+    status: Literal["active", "archived"]
+    name: str = Field(max_length=32)
+    purpose: str = Field(max_length=64)
+    memberCount: int = Field(ge=0, le=120)
+
+
+class RoomSummary(DirectoryItem):
+    status: Literal["ready", "running", "stopping", "failed", "archived"]
+    title: str = Field(max_length=120)
+
+
+class DirectoryPage(UntrustedResponse):
+    _items_field: ClassVar[str]
+    offset: int = Field(ge=0, le=100_000)
+    total: int = Field(ge=0, le=100_000)
+    nextOffset: int | None = Field(ge=0, le=100_000)
+    @model_validator(mode="after")
+    def coherent_page(self):
+        items = getattr(self, self._items_field)
+        ids = [item.id for item in items]
+        end = self.offset + len(ids)
+        if (ids != sorted(set(ids)) or ids and end > self.total or self.offset < self.total and not ids
+            or self.nextOffset != (end if end < self.total else None)):
+            raise ValueError("Inconsistent directory page")
+        return self
+
+
+class TeamListResponse(DirectoryPage):
+    _items_field = "teams"
+    teams: list[TeamSummary] = Field(max_length=6)
+
+
+class RoomListResponse(DirectoryPage):
+    _items_field = "rooms"
+    rooms: list[RoomSummary] = Field(max_length=6)
+
+
+class TeamMember(Closed):
+    agentId: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+
+
+class TeamView(DirectoryItem):
+    status: Literal["active", "archived"]
+    name: str = Field(max_length=120)
+    purpose: str = Field(max_length=240)
+    members: list[TeamMember] = Field(max_length=6)
+    memberOffset: int = Field(ge=0, le=120)
+    memberTotal: int = Field(ge=0, le=120)
+    nextMemberOffset: int | None = Field(ge=0, le=120)
+
+    @model_validator(mode="after")
+    def coherent_members(self):
+        end = self.memberOffset + len(self.members)
+        if (len({member.agentId for member in self.members}) != len(self.members)
+            or self.members and end > self.memberTotal or self.memberOffset < self.memberTotal and not self.members
+            or self.nextMemberOffset != (end if end < self.memberTotal else None)):
+            raise ValueError("Inconsistent Team member page")
+        return self
+
+
+class TeamReadResponse(UntrustedResponse):
+    team: TeamView
+
+
+class RoomReadResponse(UntrustedResponse):
+    room: RoomSummary
 
 
 class AvatarOptionsQuery(Closed):
@@ -300,6 +422,37 @@ class SessionReadResponse(Closed):
     untrustedContent: Literal[True] = True
 
 
+class SessionBudgetView(Closed):
+    revision: int = Field(ge=0)
+    maxCallsPerTurn: int | None = Field(ge=0, le=2**53 - 1)
+
+
+class SessionParametersView(Closed):
+    sessionId: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+    agentId: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+    configRevision: int = Field(ge=0)
+    currentModelId: str = Field(min_length=1, max_length=300)
+    currentReasoningEffort: Literal["", "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]
+    reasoningEffortValues: list[Literal["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]] = Field(max_length=8)
+    contextWindow: int = Field(ge=0, le=2**53 - 1)
+    maxContextWindow: int = Field(ge=0, le=2**53 - 1)
+    budget: SessionBudgetView
+
+    @model_validator(mode="after")
+    def consistent_values(self):
+        if (self.configRevision != self.budget.revision or self.contextWindow > self.maxContextWindow
+            or len(set(self.reasoningEffortValues)) != len(self.reasoningEffortValues)
+            or self.currentReasoningEffort and self.currentReasoningEffort not in self.reasoningEffortValues):
+            raise ValueError("Inconsistent parameter snapshot")
+        return self
+
+
+class SessionParametersResponse(UntrustedResponse):
+    source: Literal["native-current-agent-runtime-parameters"]
+    catalogState: Literal["existing", "absent"]
+    parameters: SessionParametersView
+
+
 class SessionConfigView(Closed):
     sessionId: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
     agentId: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
@@ -364,14 +517,45 @@ class SessionConfigComparisonResponse(Closed):
         return self
 
 
+class AuthorizationView(Closed):
+    subjectId: str = Field(pattern=r"^ops-[0-9a-f]{32}$")
+    previousScopes: list[Scope] = Field(min_length=1, max_length=len(SCOPES))
+    addedScopes: list[Scope] = Field(min_length=1, max_length=len(SCOPES))
+    scopes: list[Scope] = Field(min_length=1, max_length=len(SCOPES))
+    grantRevision: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def exact_additions(self):
+        if (any(values != sorted(set(values)) for values in (self.previousScopes, self.addedScopes, self.scopes))
+            or set(self.previousScopes) & set(self.addedScopes)
+            or self.scopes != sorted(set(self.previousScopes) | set(self.addedScopes))):
+            raise ValueError("Invalid authorization proof")
+        return self
+
+
+class AuthorizationStateResponse(Closed):
+    subjectId: str = Field(pattern=r"^ops-[0-9a-f]{32}$")
+    binding: Binding
+    scopes: list[Scope] = Field(min_length=1, max_length=len(SCOPES))
+    grantRevision: int = Field(ge=0)
+
+    @field_validator("scopes")
+    @classmethod
+    def exact_scopes(cls, value):
+        if value != sorted(set(value)):
+            raise ValueError("Invalid authorization state")
+        return value
+
+
 class ReceiptResponse(Closed):
     status: Literal["completed", "unknown"]
-    action: Literal["agent_create", "agent_update", "agent_avatar", "agent_archive", "team_run", "session_pin"]
+    action: Literal["agent_create", "agent_update", "agent_avatar", "agent_archive", "team_run", "session_pin", "authorization_upgrade"]
     requestId: str
     verified: bool
     reused: bool
     agent: AgentView | None = None
     session: SessionView | None = None
+    authorization: AuthorizationView | None = None
     code: Literal["OPERATION_UNCONFIRMED"] | None = None
     phase: Literal["materialization_pending", "materialized", "flow_saved", "started"] | None = None
     resumeAllowed: bool | None = None
@@ -427,7 +611,7 @@ class DocumentationDescribeQuery(Closed):
         return value.strip()
 
 
-DocumentationAction = Literal["session_list", "agent_create", "agent_update", "agent_avatar", "agent_archive", "session_config_get", "session_config_compare", "session_pin"]
+DocumentationAction = Literal["session_list", "agent_create", "agent_update", "agent_avatar", "agent_archive", "session_config_get", "session_config_compare", "session_parameters_get", "session_pin", "team_list", "team_get", "room_list", "room_get", "authorization_status"]
 # This maps documentation to already-migrated semantic actions. It grants no
 # HTTP execution and deliberately advertises no other registered API operation.
 DOCUMENTATION_ACTIONS = {
@@ -440,6 +624,16 @@ DOCUMENTATION_ACTIONS = {
     ("GET", "/api/v1/launcher-assistant-management/sessions/{session_id}/config-comparison"): "session_config_compare",
     ("POST", "/api/sessions/{session_id}/pin"): "session_pin",
     ("POST", "/api/sessions/{session_id}/unpin"): "session_pin",
+    ("GET", "/api/teams"): "team_list",
+    ("GET", "/api/teams/{team_id}"): "team_get",
+    ("GET", "/api/chat-rooms"): "room_list",
+    ("GET", "/api/chat-rooms/{room_id}"): "room_get",
+    ("GET", "/api/v1/launcher-assistant-management/directory/teams"): "team_list",
+    ("GET", "/api/v1/launcher-assistant-management/directory/teams/{team_id}"): "team_get",
+    ("GET", "/api/v1/launcher-assistant-management/directory/rooms"): "room_list",
+    ("GET", "/api/v1/launcher-assistant-management/directory/rooms/{room_id}"): "room_get",
+    ("GET", "/api/v1/launcher-assistant-management/sessions/{session_id}/parameters"): "session_parameters_get",
+    ("GET", "/api/v1/launcher-assistant-management/authorization"): "authorization_status",
 }
 
 

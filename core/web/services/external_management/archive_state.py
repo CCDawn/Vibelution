@@ -1,43 +1,12 @@
 """Existing archive authorities only; never seed, reconcile or repair a read."""
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
-from config.public_config import read_existing_config_snapshot
-from core.infrastructure.developer_sandbox import existing_sandboxed_workspace_path
+from .state_snapshot import ExistingStateSnapshot
 
 
-class ArchiveState:
-    def __init__(self, project_root, directory):
-        self.project_root = project_root
-        self.directory = directory
-        self.config = read_existing_config_snapshot(Path(directory.CONFIG_PATH))
-
-    def path(self, *parts):
-        return existing_sandboxed_workspace_path(self.project_root, *parts, public_config=self.config)
-
-    @staticmethod
-    def read_json(path):
-        def unique(pairs):
-            result = {}
-            for key, value in pairs:
-                if key in result:
-                    raise ValueError("Ambiguous archive authority")
-                result[key] = value
-            return result
-        before = path.stat()
-        with path.open("rb") as stream:
-            raw = stream.read(32 * 1024 * 1024 + 1)
-        after = path.stat()
-        stamp = lambda info: (info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
-        if len(raw) > 32 * 1024 * 1024 or stamp(before) != stamp(after):
-            raise ValueError("Archive authority unavailable")
-        payload = json.loads(raw.decode("utf-8-sig"), object_pairs_hook=unique)
-        if not isinstance(payload, dict):
-            raise ValueError("Invalid archive authority")
-        return payload
-
+class ArchiveState(ExistingStateSnapshot):
     def agent(self, agent_id):
         rows = self.read_json(self.path("agents", "agents.json")).get("agents")
         if not isinstance(rows, list) or len(rows) > 100_000 or any(not isinstance(row, dict) for row in rows):

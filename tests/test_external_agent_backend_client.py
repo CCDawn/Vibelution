@@ -13,6 +13,86 @@ from core.external_agent.backend_client import (
 )
 
 
+@pytest.fixture
+def directory_client(tmp_path, monkeypatch):
+    _runtime_state(tmp_path)
+    client = ManagedAgentBackendClient(tmp_path, state_path=tmp_path / "directory-credentials.json")
+    state = {"calls": [], "payload": {}}
+    async def grant(**kwargs):
+        return {"subjectId": "subject", "capability": "test-capability"}
+    async def request(method, path, **kwargs):
+        state["calls"].append((method, path))
+        if path.endswith("/sessions/session-a"):
+            return {"session": {"id": "session-a", "title": "Visible", "agentId": "agent-a",
+                "pinned": False, "pinnedAtMs": None, "status": "ready", "archived": False}, "untrustedContent": True}
+        return deepcopy(state["payload"])
+    monkeypatch.setattr(client, "_management_grant", grant)
+    monkeypatch.setattr(client, "_request_json", request)
+    return client, state
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("kind", ["team", "room"])
+async def test_directory_sdk_pages_and_closed_queries(directory_client, kind):
+    client, state = directory_client
+    item = ({"id": "team-a", "name": "Name", "purpose": "Goal", "status": "active", "memberCount": 1}
+        if kind == "team" else {"id": "room-a", "title": "Title", "status": "ready"})
+    key = kind + "s"
+    state["payload"] = {key: [item], "total": 1, "offset": 0, "nextOffset": None, "untrustedContent": True}
+    call = getattr(client, "management_" + kind + "_list")
+    assert await call(limit=1) == state["payload"]
+    assert "/directory/" + key + "?" in state["calls"][-1][1]
+    count = len(state["calls"])
+    for parameters in ({"limit": 7}, {"limit": True}, {"offset": "0"}, {"archived": 1}, {"query": "line\nbody"}, {"path": "private"}):
+        with pytest.raises(BackendClientError) as denied:
+            await call(**parameters)
+        assert denied.value.code == "INVALID_MANAGEMENT_REQUEST"
+    assert len(state["calls"]) == count
+    for patch in ({"offset": 1}, {"untrustedContent": 1}, {"messages": ["PRIVATE"]}, {"total": 0}):
+        original = deepcopy(state["payload"])
+        state["payload"].update(patch)
+        with pytest.raises(BackendClientError) as denied:
+            await call(limit=1)
+        assert denied.value.code == "BACKEND_PROTOCOL_ERROR"
+        state["payload"] = original
+
+
+@pytest.mark.anyio
+async def test_directory_sdk_details_bind_identity_and_member_offset(directory_client):
+    client, state = directory_client
+    state["payload"] = {"team": {"id": "team-a", "name": "Name", "purpose": "Goal", "status": "active",
+        "members": [{"agentId": "agent-a"}], "memberOffset": 1, "memberTotal": 2, "nextMemberOffset": None}, "untrustedContent": True}
+    assert (await client.management_team(team_id="team-a", member_offset=1, limit=1))["team"]["memberOffset"] == 1
+    for patch in ({"id": "team-b"}, {"memberOffset": 0, "nextMemberOffset": 1}, {"prompt": "PRIVATE"}):
+        original = deepcopy(state["payload"])
+        state["payload"]["team"].update(patch)
+        with pytest.raises(BackendClientError):
+            await client.management_team(team_id="team-a", member_offset=1, limit=1)
+        state["payload"] = original
+    state["payload"] = {"room": {"id": "room-a", "title": "Title", "status": "ready"}, "untrustedContent": True}
+    assert (await client.management_room(room_id="room-a"))["room"]["id"] == "room-a"
+    state["payload"]["room"]["id"] = "room-b"
+    with pytest.raises(BackendClientError):
+        await client.management_room(room_id="room-a")
+
+
+@pytest.mark.anyio
+async def test_parameter_sdk_binds_session_agent_and_closed_effective_snapshot(directory_client):
+    client, state = directory_client
+    state["payload"] = {"source": "native-current-agent-runtime-parameters", "catalogState": "absent", "untrustedContent": True,
+        "parameters": {"sessionId": "session-a", "agentId": "agent-a", "configRevision": 3,
+            "currentModelId": "provider/model", "currentReasoningEffort": "high", "reasoningEffortValues": ["low", "high"],
+            "contextWindow": 32000, "maxContextWindow": 64000, "budget": {"revision": 3, "maxCallsPerTurn": 0}}}
+    assert (await client.management_session_parameters(session_id="session-a"))["parameters"]["budget"]["maxCallsPerTurn"] == 0
+    for patch in ({"agentId": "agent-b"}, {"sessionId": "session-b"}, {"configRevision": True},
+        {"budget": {"revision": 4, "maxCallsPerTurn": 0}}, {"contextWindow": 128000}, {"provider": {"api_key": "PRIVATE"}}):
+        original = deepcopy(state["payload"])
+        state["payload"]["parameters"].update(patch)
+        with pytest.raises(BackendClientError):
+            await client.management_session_parameters(session_id="session-a")
+        state["payload"] = original
+
+
 @pytest.mark.anyio
 async def test_session_pin_sdk_allowlist_and_closed_session_receipt(tmp_path, monkeypatch):
     _runtime_state(tmp_path)
@@ -117,7 +197,9 @@ async def test_archive_sdk_strict_local_parameters_and_target_receipt(tmp_path, 
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("saved_scopes", [None, ["agents:avatar", "agents:create", "agents:read", "agents:update",
-    "platform:describe", "sessions:pin", "sessions:read", "teams:read", "teams:run"]])
+    "platform:describe", "sessions:pin", "sessions:read", "teams:read", "teams:run"],
+    ["agents:archive", "agents:avatar", "agents:create", "agents:read", "agents:update",
+     "platform:describe", "sessions:pin", "sessions:read", "teams:read", "teams:run"]])
 async def test_archive_scope_never_expands_saved_grants(tmp_path, monkeypatch, saved_scopes):
     _runtime_state(tmp_path)
     client = ManagedAgentBackendClient(tmp_path, state_path=tmp_path / "credentials.json")
@@ -136,11 +218,13 @@ async def test_archive_scope_never_expands_saved_grants(tmp_path, monkeypatch, s
             "subject_id": saved["subjectId"], "subject_capability": saved["capability"]}
     monkeypatch.setattr(client, "_request_json", request)
     grant = await client._management_grant(require_existing=True)
-    assert "agents:archive" not in grant["scopes"] and grant["subjectId"] == saved["subjectId"]
+    assert grant["scopes"] == (saved_scopes or ["agents:avatar", "agents:create", "agents:read", "agents:update",
+        "platform:describe", "sessions:read", "teams:read", "teams:run"])
+    assert grant["subjectId"] == saved["subjectId"]
 
 
 @pytest.mark.anyio
-async def test_fresh_archive_grant_lost_bind_ack_reuses_persisted_client_and_exact_ten_scopes(tmp_path, monkeypatch):
+async def test_fresh_grant_lost_bind_ack_reuses_persisted_client_and_exact_thirteen_scopes(tmp_path, monkeypatch):
     _runtime_state(tmp_path)
     path = tmp_path / "credentials.json"
     binding = {"projectId": "p", "instanceId": "i"}
@@ -152,7 +236,7 @@ async def test_fresh_archive_grant_lost_bind_ack_reuses_persisted_client_and_exa
         body = kwargs["json_payload"]
         persisted = json.loads(path.read_text())["management"]
         assert persisted["clientId"] == body["client_id"] and persisted["scopes"] == body["scopes"]
-        assert len(body["scopes"]) == 10 and "agents:archive" in body["scopes"]
+        assert len(body["scopes"]) == 13 and {"agents:archive", "teams:directory:read", "rooms:read", "sessions:parameters:read"} <= set(body["scopes"])
         calls.append(deepcopy(body))
         if len(calls) == 1:
             raise BackendClientError("lost bind ack", code="BACKEND_UNAVAILABLE")
@@ -517,7 +601,7 @@ async def test_team_client_uses_operator_envelope_and_same_read_only_receipt(tmp
             return httpx.Response(200, json={"protocolVersion": 1, "binding": binding})
         if request.url.path == prefix + "/subjects/bind":
             body = json.loads(request.content)
-            assert body["scopes"] == ["agents:archive", "agents:avatar", "agents:create", "agents:read", "agents:update", "platform:describe", "sessions:pin", "sessions:read", "teams:read", "teams:run"]
+            assert body["scopes"] == ["agents:archive", "agents:avatar", "agents:create", "agents:read", "agents:update", "platform:describe", "rooms:read", "sessions:parameters:read", "sessions:pin", "sessions:read", "teams:directory:read", "teams:read", "teams:run"]
             return httpx.Response(200, json={"protocolVersion": 1, "binding": binding, "scopes": body["scopes"],
                 "subject_id": "ops-1234567890abcdef", "subject_capability": "a" * 48})
         if request.url.path.startswith(prefix + "/actions/team_run"):

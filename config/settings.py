@@ -1456,6 +1456,22 @@ def get_config(**kwargs) -> AppConfig:
     return get_settings().config
 
 
+def peek_loaded_config_snapshot() -> AppConfig | None:
+    """Copy an already loaded runtime config without constructing or loading it.
+
+    A concurrent singleton replacement/reload invalidates the copy. Callers
+    requiring an existing runtime authority must handle ``None`` themselves.
+    """
+    settings = _settings
+    loaded = getattr(settings, "_config", None) if settings is not None else None
+    if loaded is None:
+        return None
+    snapshot = copy.deepcopy(loaded)
+    if _settings is not settings or settings._config is not loaded:
+        return None
+    return snapshot
+
+
 def reload_config(config_path: Optional[str] = None, **kwargs) -> AppConfig:
     """
     重新加载全局配置单例。
@@ -1628,6 +1644,7 @@ __all__ = [
     # 函数
     "get_settings",
     "get_config",
+    "peek_loaded_config_snapshot",
     "reload_config",
     # 便捷配置访问函数
     "get_llm_config",

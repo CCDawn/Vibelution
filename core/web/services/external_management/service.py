@@ -103,7 +103,7 @@ class ManagementService:
                 self.store.write(client_path, {"subject_id": grant["subject_id"]})
         return {key: grant[key] for key in ("subject_id", "subject_capability", "binding", "scopes")} | {"protocolVersion": 1}
 
-    def _authorize(self, subject: str, capability: str, scope: str, expected: dict | None = None) -> dict:
+    def _authorize(self, subject: str, capability: str, scope: str | None, expected: dict | None = None) -> dict:
         if not re.fullmatch(r"ops-[0-9a-f]{32}", subject) or not re.fullmatch(r"[A-Za-z0-9_-]{32,128}", capability):
             raise ManagementError("SUBJECT_DENIED")
         grant = self.store.read(self.store.path("subjects", subject))
@@ -114,9 +114,20 @@ class ManagementService:
             raise ManagementError("TARGET_BINDING_CHANGED", 409)
         if expected is not None and expected != current.binding:
             raise ManagementError("TARGET_BINDING_CHANGED", 409)
-        if scope not in grant.get("scopes", []):
+        if scope is not None and scope not in grant.get("scopes", []):
             raise ManagementError("SCOPE_DENIED")
         return grant
+
+    def _authorization_upgrades(self):
+        from .authorization_upgrade import UpgradeOwner
+        # This self-subject operation is exposed only by operator-control
+        # transport. Old read scopes do not grant an upgrade privilege.
+        return UpgradeOwner(self.store,
+            lambda subject, capability, expected=None: self._authorize(subject, capability, None, expected), self.identity)
+
+    def authorization_status(self, subject, capability):
+        from .contracts import AuthorizationStateResponse
+        return AuthorizationStateResponse.model_validate(self._authorization_upgrades().current_subject(subject, capability)).model_dump()
 
     def read_agent(self, subject: str, capability: str, agent_id: str) -> dict:
         self._authorize(subject, capability, "agents:read")
@@ -160,6 +171,45 @@ class ManagementService:
         except ValidationError:
             raise ManagementError("SESSION_LIST_UNAVAILABLE", 503) from None
 
+    def _directory_read(self, subject, capability, action, parameters):
+        from .contracts import (DirectoryQuery, TeamReadQuery, RoomReadQuery, TeamListResponse,
+            TeamReadResponse, RoomListResponse, RoomReadResponse)
+        scope, query_model, response_model = {
+            "team_list": ("teams:directory:read", DirectoryQuery, TeamListResponse),
+            "team_get": ("teams:directory:read", TeamReadQuery, TeamReadResponse),
+            "room_list": ("rooms:read", DirectoryQuery, RoomListResponse),
+            "room_get": ("rooms:read", RoomReadQuery, RoomReadResponse),
+        }[action]
+        self._authorize(subject, capability, scope)
+        try:
+            query = query_model.model_validate(parameters)
+        except ValidationError:
+            raise ManagementError("INVALID_INPUT", 422) from None
+        if action == "team_list":
+            raw = self.native.read_teams(query)
+        elif action == "team_get":
+            raw = self.native.read_team(query.team_id, query)
+        elif action == "room_list":
+            raw = self.native.read_rooms(query)
+        else:
+            raw = self.native.read_room(query.room_id)
+        try:
+            return response_model.model_validate(raw).model_dump()
+        except ValidationError:
+            raise ManagementError("DIRECTORY_UNAVAILABLE", 503) from None
+
+    def read_teams(self, subject, capability, **parameters):
+        return self._directory_read(subject, capability, "team_list", parameters)
+
+    def read_team(self, subject, capability, team_id, **parameters):
+        return self._directory_read(subject, capability, "team_get", {**parameters, "team_id": team_id})
+
+    def read_rooms(self, subject, capability, **parameters):
+        return self._directory_read(subject, capability, "room_list", parameters)
+
+    def read_room(self, subject, capability, room_id):
+        return self._directory_read(subject, capability, "room_get", {"room_id": room_id})
+
     def read_session(self, subject: str, capability: str, session_id: str) -> dict:
         self._authorize(subject, capability, "sessions:read")
         try:
@@ -185,6 +235,19 @@ class ManagementService:
         except ValidationError:
             raise ManagementError("INVALID_INPUT", 422) from None
         return self.native.read_session_config_comparison(query.session_id)
+
+    def read_session_parameters(self, subject: str, capability: str, session_id: str) -> dict:
+        from .contracts import SessionParametersResponse
+        self._authorize(subject, capability, "sessions:read")
+        self._authorize(subject, capability, "sessions:parameters:read")
+        try:
+            query = SessionMetadataQuery.model_validate({"session_id": session_id})
+        except ValidationError:
+            raise ManagementError("INVALID_INPUT", 422) from None
+        try:
+            return SessionParametersResponse.model_validate(self.native.read_session_parameters(query.session_id)).model_dump()
+        except ValidationError:
+            raise ManagementError("SESSION_PARAMETERS_UNAVAILABLE", 503) from None
 
     def documentation_catalog(self, subject: str, capability: str, *, query="", tag="", offset=0, limit=20) -> dict:
         from .documentation import api_catalog
@@ -313,6 +376,9 @@ class ManagementService:
         except (ValidationError, ValueError):
             raise ManagementError("INVALID_INPUT", 422) from None
         key = self._request_key(subject, action, envelope.request_id)
+        if action == "authorization_upgrade":
+            return self._authorization_upgrades().invoke(subject, capability, envelope.request_id,
+                expected_binding=envelope.expected_binding.model_dump(), **parameters)
         if action == "team_run":
             return self._team_intents(grant).run(envelope.request_id, parameters)
         fingerprint = digest(parameters)
@@ -354,6 +420,8 @@ class ManagementService:
     def receipt(self, subject: str, capability: str, action: str, request_id: str) -> dict:
         if action not in ACTION_MODELS:
             raise ManagementError("UNKNOWN_ACTION", 404)
+        if action == "authorization_upgrade":
+            return self._authorization_upgrades().receipt(subject, capability, request_id)
         if action == "team_run":
             return self.team_receipt(subject, capability, request_id)
         self._authorize(subject, capability, ACTION_SCOPES[action])
