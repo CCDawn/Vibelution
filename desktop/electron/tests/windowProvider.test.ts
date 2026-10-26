@@ -1712,8 +1712,10 @@ describe("resolveWorkbenchUrl", () => {
 
 describe("IPC channels", () => {
   it("keeps the bridge narrow", () => {
+    expect(IPC_CHANNELS.assistantThemeResult).toBe("vibelution:assistant-theme-result");
     expect(Object.keys(IPC_CHANNELS).sort()).toEqual([
       "assistantInvoke",
+      "assistantThemeResult",
       "beginDesktopPetWindowDrag",
       "controlDesktopPet",
       "conversationNotificationOpened",
