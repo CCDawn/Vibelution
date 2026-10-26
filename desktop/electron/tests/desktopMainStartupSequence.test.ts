@@ -426,8 +426,16 @@ describe("hidden presentation forwarding", () => {
   it("gates every provider present:false call site behind the hidden intent", () => {
     const source = readMainSource();
     const occurrences = source.split("present: false").length - 1;
-    const gated = source.split("...(hiddenPresentation ? { present: false } : {})").length - 1;
+    const gates = [
+      "...(hiddenPresentation ? { present: false } : {})",
+      "...(payload.present === false ? { present: false } : {})",
+      "...(presentation.present === false ? { present: false } : {})",
+      "? await provider.openOrFocusWorkbench(workbenchUrl, { present: false })",
+    ];
+    const gated = gates.reduce((total, gate) => total + source.split(gate).length - 1, 0);
     expect(occurrences).toBeGreaterThan(0);
     expect(gated).toBe(occurrences);
+    const canary = mainFunction(source, "openWorkbenchForCloseCanary");
+    expect(canary).toContain("{ present: !desktopCliArgs.hiddenPresentation }");
   });
 });
