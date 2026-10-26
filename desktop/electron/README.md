@@ -87,3 +87,9 @@ npm test -- --run launcher
 Launcher 首页和工具页共用顶栏更新入口，收起详情不会隐藏提醒；当前只比较本地代码，不检测远端发布。确认更新后，先检查任务、准备前端与桌面壳，再检查一次任务；准备失败或普通停止被拒绝时不安排换版。最后由无控制台 helper 在旧壳退出后完成 `win-unpacked` 换版。不要让用户手跑 `package:dir`。只 `stop` Python `:8765` 不会加载新 `app.asar`。
 
 Unpackaged 更新也遵循同一顺序：`ensure-latest-launcher` 仅构建到 `dist/desktop-unpackaged-staging`，不替换正在运行的 `desktop/electron/dist`；后台 refresh helper 等旧 Electron 退出后，核对源码与完整产物，再发布暂存目录。源码已变化时重新构建。每次发布使用独立旧目录并重试清理历史备份；Windows 仍映射的 `.node` 保留到后续清理，不阻断新版发布。托盘「启动最新 Launcher」同样走 helper，不能直接 `app.relaunch()` 跳过暂存产物发布。
+
+## 窗口关闭与后台清退
+
+工作台窗口关闭与后台资源确认是两个独立事实，定案见 [ADR 0014](../../docs/adr/0014-workbench-window-close-keeps-background-retirement.md)。窗口及时响应后，既有 Electron 托盘宿主继续管理首次捕获的 Job、输出 drain、端口与前端构建进程；未全部确认时 Launcher 保留“停止中”，不能因窗口消失或一次空观察而显示已关闭。进程真正退出、输出排空及端口关闭后才提交完成，旧操作须通过身份和 epoch 检查；正常退出整个桌面壳仍须等待后台收口。
+
+后台单次状态读取和命令有界，窗口预算不会销毁已接纳的回收 owner。临时读取故障保持 pending，明确的新身份才使旧完成写入失效。宿主崩溃后的持久 stopping 仅表示仍需复核，不能凭它宣称已完成；这与正常托盘常驻回收的验收不同。

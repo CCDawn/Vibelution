@@ -914,3 +914,9 @@ Agent归档现已接通动态说明、SDK、独立agents:archive权限和原生�
 旧数据交接仍分阶段进行：只读 inventory 增加所选 PA 自己的派遣事件文件与默认私有知识目录指纹；其他目标 Agent 上的旧请求、全部历史 Session、自定义路径、SQLite 队列和运行权归属仍待核验。不得将旧 A2A message ID 改名为 native task ID，不复制旧 runnable queue 或 open Turn，不为获得新回执而重新派遣旧任务。`readyForCutover=false` 和平台旧助理保留条件继续有效。
 
 主仓库迁到 SSD 后，唯一主目录为 `D:\桌面开发\Vibelution`。任务分支重连新 Git common-dir，保存的旧分支提交与本轮变更通过正常验证和 fast-forward 集成；不以覆盖文件来追平复制时落后的 main。本轮不迁移正式运行数据，不改正式 Launcher 注册/安装，不调用 DeepSeek；新增功能的新包、真实模型联合验收仍等待用户明确确认额度补充。
+
+### 2026-10-26：窗口响应与后台清退分开确认
+
+迁盘后的完整合入检查在既有原生 fast-close 用例出现资源清退超时；未改动 main 的临时对照同样复现。诊断确认 Job accounting 归零不等于 root process wait、输出 drain 或 TCP listener 已完成，不能把这些资源强行记为关闭。用户随后明确选择窗口及时关闭、Launcher 后台持续回收并显示未完成，决策见 ADR 0014。
+
+实现复用托盘驻留、精确 Job 退休闭包、原有保存/HTTP 机会、生命周期命令及 stopping 投影，分别记录窗口 ACK 和后台确认。源代码、状态读取故障、发布 CAS、late completion 和新启动隔离已有回归；两处普通/开发者 Session 核心均无改动。窗口、后台资源与 Launcher 状态的新包联合验收及最终合入检查仍须闭合，不能用单元测试替代。DeepSeek 仍等用户明确确认额度，正式数据和旧 PA 退役边界保持。

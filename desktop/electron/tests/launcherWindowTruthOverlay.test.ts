@@ -26,6 +26,13 @@ const truth = (overrides: Partial<LauncherWindowTruth> = {}): LauncherWindowTrut
 });
 
 describe("launcher status window truth overlay", () => {
+  it("does not turn unconfirmed stopping into closed when the window and PID signals disappear", () => {
+    const result = overlayLauncherWindowTruth("status", { projectBundle: {
+      desiredState: "closed", observedState: "open", phase: "stopping",
+      backend: { alive: false, healthy: false, pid: 0, portListening: false }, browser: { alive: false }
+    } }, truth()) as { projectBundle: Record<string, unknown> };
+    expect(result.projectBundle).toMatchObject({ desiredState: "closed", phase: "stopping", observedState: "partial" });
+  });
   it("keeps a Python-reported closed bundle from hiding a live BrowserWindow", () => {
     const payload = {
       projectBundle: {

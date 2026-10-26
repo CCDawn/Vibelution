@@ -22,6 +22,91 @@ describe("workbench job registry", () => {
     vi.useRealTimers();
   });
 
+  it("retains the captured Job until the root exit is signaled after empty accounting and completed drains", async () => {
+    vi.useFakeTimers();
+    let exitCode: number | null = null;
+    const close = vi.fn();
+    __setWorkbenchJobNativeForTests({
+      spawn: () => ({ pid: process.pid, job: {} }), terminate: () => true,
+      activeCount: () => 0, drainStatus: completeDrainStatus, exitCode: () => exitCode, close
+    });
+    spawnTrackedWorkbenchProcess("C:/root-exit-retirement", {
+      executable: "pythonw.exe", arguments: [], cwd: "C:/", env: {}, stdoutPath: "out", stderrPath: "err"
+    });
+    const retire = captureTrackedWorkbenchJobRetirement("C:/root-exit-retirement", process.pid)!;
+    const attempt = retire();
+    await vi.advanceTimersByTimeAsync(8_000);
+    await expect(attempt).resolves.toBe(false);
+    expect(close).not.toHaveBeenCalled();
+    expect(hasTrackedWorkbenchJob("C:/root-exit-retirement")).toBe(true);
+    expect(retire.isCurrent()).toBe(true);
+    exitCode = 1;
+    await expect(retire()).resolves.toBe(true);
+    expect(close).toHaveBeenCalledOnce();
+    expect(hasTrackedWorkbenchJob("C:/root-exit-retirement")).toBe(false);
+  });
+
+  it("does not let the reaper release an unsignaled root with empty accounting and completed drains", async () => {
+    vi.useFakeTimers();
+    let exitCode: number | null = null;
+    const close = vi.fn();
+    __setWorkbenchJobNativeForTests({
+      spawn: () => ({ pid: process.pid, job: {} }), terminate: () => true,
+      activeCount: () => 0, drainStatus: completeDrainStatus, exitCode: () => exitCode, close
+    });
+    spawnTrackedWorkbenchProcess("C:/root-exit-reaper", {
+      executable: "pythonw.exe", arguments: [], cwd: "C:/", env: {}, stdoutPath: "out", stderrPath: "err"
+    });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(close).not.toHaveBeenCalled();
+    expect(hasTrackedWorkbenchJob("C:/root-exit-reaper")).toBe(true);
+    exitCode = 1;
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(close).toHaveBeenCalledOnce();
+    expect(hasTrackedWorkbenchJob("C:/root-exit-reaper")).toBe(false);
+  });
+
+  it("waits for root exit when gracefully closing a Job whose drains already completed", async () => {
+    vi.useFakeTimers();
+    let exitCode: number | null = null;
+    const close = vi.fn();
+    __setWorkbenchJobNativeForTests({
+      spawn: () => ({ pid: process.pid, job: {} }), terminate: () => true,
+      activeCount: () => 0, drainStatus: completeDrainStatus, exitCode: () => exitCode, close
+    });
+    spawnTrackedWorkbenchProcess("C:/root-exit-graceful", {
+      executable: "pythonw.exe", arguments: [], cwd: "C:/", env: {}, stdoutPath: "out", stderrPath: "err"
+    });
+    const closing = closeTrackedWorkbenchJob("C:/root-exit-graceful");
+    await vi.advanceTimersByTimeAsync(100);
+    expect(close).not.toHaveBeenCalled();
+    expect(hasTrackedWorkbenchJob("C:/root-exit-graceful")).toBe(true);
+    exitCode = 1;
+    await vi.advanceTimersByTimeAsync(20);
+    await expect(closing).resolves.toBe(true);
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("blocks replacement until the previous root is signaled even when accounting and drains are empty", () => {
+    vi.useFakeTimers();
+    let exitCode: number | null = null;
+    const spawn = vi.fn(() => ({ pid: process.pid, job: {} }));
+    const close = vi.fn();
+    __setWorkbenchJobNativeForTests({
+      spawn, terminate: () => true, activeCount: () => 0,
+      drainStatus: completeDrainStatus, exitCode: () => exitCode, close
+    });
+    const input = { executable: "pythonw.exe", arguments: [], cwd: "C:/", env: {}, stdoutPath: "out", stderrPath: "err" };
+    spawnTrackedWorkbenchProcess("C:/root-exit-replacement", input);
+    expect(() => spawnTrackedWorkbenchProcess("C:/root-exit-replacement", input)).toThrow("still terminating or draining");
+    expect(spawn).toHaveBeenCalledOnce();
+    expect(close).not.toHaveBeenCalled();
+    exitCode = 1;
+    spawnTrackedWorkbenchProcess("C:/root-exit-replacement", input);
+    expect(spawn).toHaveBeenCalledTimes(2);
+    expect(close).toHaveBeenCalledOnce();
+  });
+
   it("confirms completed retirement on the next 20 ms poll while preserving incomplete drains", async () => {
     vi.useFakeTimers();
     let drained = false;
@@ -581,6 +666,34 @@ nativeAddon("windows workbench job", () => {
       rmSync(directory, { recursive: true, force: true });
     }
   }, 15_000);
+});
+
+describe("workbench job native capability", () => {
+  it("rejects production addons missing root exit status instead of caching an unsafe binding", async () => {
+    vi.resetModules();
+    const load = vi.fn(() => ({ drainStatus: completeDrainStatus }));
+    vi.doMock("node:module", async (importOriginal) => ({
+      ...await importOriginal<typeof import("node:module")>(), createRequire: () => load
+    }));
+    vi.doMock("node:fs", async (importOriginal) => ({
+      ...await importOriginal<typeof import("node:fs")>(), existsSync: () => true
+    }));
+    try {
+      const isolated = await import("../src/process/workbenchJob.js");
+      expect(() => isolated.loadWorkbenchJobNative()).toThrow("root process exit status; rebuild the desktop addon");
+      expect(() => isolated.loadWorkbenchJobNative()).toThrow("root process exit status; rebuild the desktop addon");
+      expect(load).toHaveBeenCalledTimes(2);
+      isolated.__setWorkbenchJobNativeForTests({
+        spawn: () => ({ pid: process.pid, job: {} }), terminate: () => true,
+        activeCount: () => 0, drainStatus: completeDrainStatus, close: () => undefined
+      });
+      expect(isolated.loadWorkbenchJobNative().exitCode).toBeUndefined();
+    } finally {
+      vi.doUnmock("node:module");
+      vi.doUnmock("node:fs");
+      vi.resetModules();
+    }
+  });
 });
 
 function pidAlive(pid: number): boolean {

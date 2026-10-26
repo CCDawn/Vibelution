@@ -11,8 +11,8 @@ const beforeMutation = source.indexOf("  // Claim cancellation before frontend p
 const preflight = source.slice(firstStatement, beforeMutation);
 
 function sandbox(nativeColdStart = true) {
-  const inFlight = { commandId: "cmd_existing_inflight" };
-  const mutate = vi.fn(() => { inFlight.commandId = "changed"; });
+  const inFlight = { commandId: "cmd_existing_inflight", epoch: 7 };
+  const mutate = vi.fn(() => { inFlight.commandId = "changed"; inFlight.epoch += 1; });
   return {
     nativeColdStart, shutdownApproved: false, inFlight, mutate, operation: "start", payload: { path: "start" }, signal: undefined,
     launcherBootstrap: {}, app: { isPackaged: true },
@@ -21,6 +21,8 @@ function sandbox(nativeColdStart = true) {
     normalizeSupervisedLifecycleOperation: (operation: string) => operation,
     desiredStateForLifecycleOperation: () => "open",
     createDesktopPathsForApp: () => ({ workspaceRoot: "C:/project" }),
+    mainWorkbenchCloseStore: { currentTransaction: vi.fn((): { phase: string; windowAcknowledged?: boolean } | null => null) },
+    hasBackgroundWorkbenchRetirement: vi.fn((_workspaceRoot: string) => false),
     mainLineBackendIsReachable: vi.fn(async () => false),
     inspectCurrentDesktopShellLaunchReadiness: vi.fn(async () => ({ schemaVersion: 1, launchBlocking: false, reason: "current" })),
     launcherLifecycleSupervisor: { beginIntentWithOptions: mutate, intentGeneration: vi.fn(() => 1) },
@@ -36,6 +38,38 @@ async function runPreflight(context: ReturnType<typeof sandbox>) {
 }
 
 describe("Native start uses the original main lifecycle", () => {
+  describe.each(["start", "restart"])("pending close admission for %s", (operation) => {
+    it.each([
+      { phase: "backend_closing", windowAcknowledged: false, pendingOwner: false },
+      { phase: "background_closing", windowAcknowledged: true, pendingOwner: false },
+      { phase: "window_close_authorized", windowAcknowledged: false, pendingOwner: false },
+      { phase: "succeeded", windowAcknowledged: true, pendingOwner: true },
+    ])("returns pending before any read-only gate or mutation for $phase / owner pending=$pendingOwner", async ({ phase, windowAcknowledged, pendingOwner }) => {
+      const context = sandbox();
+      context.operation = operation;
+      context.payload.path = operation;
+      context.mainWorkbenchCloseStore.currentTransaction.mockReturnValue({ phase, windowAcknowledged });
+      context.hasBackgroundWorkbenchRetirement.mockReturnValue(pendingOwner);
+      // A reachable retiring backend must never be mistaken for a reusable one.
+      context.mainLineBackendIsReachable.mockResolvedValue(true);
+      expect(await runPreflight(context)).toMatchObject({ accepted: false, operation, code: "backend_retiring" });
+      expect(context.mutate).not.toHaveBeenCalled();
+      expect(context.inFlight).toEqual({ commandId: "cmd_existing_inflight", epoch: 7 });
+      expect(context.launcherLifecycleSupervisor.intentGeneration).not.toHaveBeenCalled();
+      expect(context.mainLineBackendIsReachable).not.toHaveBeenCalled();
+      expect(context.inspectCurrentDesktopShellLaunchReadiness).not.toHaveBeenCalled();
+    });
+  });
+
+  it("runs the native cold-start read-only gate after retirement reaches succeeded", async () => {
+    const context = sandbox();
+    context.mainWorkbenchCloseStore.currentTransaction.mockReturnValue({ phase: "succeeded", windowAcknowledged: true });
+    expect(await runPreflight(context)).toBe("admitted");
+    expect(context.inspectCurrentDesktopShellLaunchReadiness).toHaveBeenCalledOnce();
+    expect(context.mutate).toHaveBeenCalledOnce();
+    expect(context.inFlight.epoch).toBe(8);
+  });
+
   it("rejects shutdown before the first await without reviving through the legacy bridge", async () => {
     const context = sandbox();
     context.shutdownApproved = true;

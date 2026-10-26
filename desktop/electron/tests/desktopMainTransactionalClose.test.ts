@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MainWorkbenchCloseTransactionStore, type MainWorkbenchCloseTransaction } from "../src/lifecycle/workbenchCloseTransactionStore.js";
 import { createDesktopShellExitDeadline, withDesktopShellExitTimeout } from "../src/shutdown/desktopShellExit.js";
 import { isActiveWorkProbeAuthFailure, resolveQuitActiveWorkStatus } from "../src/shutdown/shutdownCoordinator.js";
+import type { WorkbenchCloseTiming } from "../src/process/fastWorkbenchClose.js";
 
 const mainSourcePath = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 const closeStoreSource = readFileSync(
@@ -13,7 +14,19 @@ const closeStoreSource = readFileSync(
   "utf8",
 );
 
-function closeHarness() {
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
+async function flushCloseCallbacks() {
+  for (let step = 0; step < 20; step += 1) await Promise.resolve();
+}
+
+const releaseCloseHarnesses: Array<() => Promise<void>> = [];
+
+function closeHarness(options: { platform?: string; owner?: boolean } = {}) {
   const source = readFileSync(mainSourcePath, "utf8");
   const begin = source.indexOf("async function requestTransactionalWorkbenchClose(");
   const end = source.indexOf("\nasync function stopWorkbenchBackend(", begin);
@@ -22,22 +35,34 @@ function closeHarness() {
   }));
   const probe = vi.fn(async (_input: { controlToken: string; signal?: AbortSignal }) => ({ state: "idle", message: "" }));
   const confirm = vi.fn(async () => false);
-  const stop = vi.fn(async (_paths: object, _bootstrap: object, _transaction: MainWorkbenchCloseTransaction, _signal: AbortSignal, _timing: { deadlineAt: number; forceAt: number }) => undefined);
+  const stop = vi.fn(async (_paths: object, _bootstrap: object, _transaction: MainWorkbenchCloseTransaction, _signal: AbortSignal, _timing?: WorkbenchCloseTiming) => undefined);
   const closed = vi.fn(async (_options?: { deadlineAt?: number }) => undefined);
   const record = vi.fn();
   const store = new MainWorkbenchCloseTransactionStore();
   const coordinator = vi.fn(async (_reason: string, run: () => Promise<void>) => run());
   const readStatus = vi.fn(async (_workspaceRoot: string) => ({ observedState: "closed" }));
-  const readback = vi.fn(async (input: { readStatus: () => Promise<unknown>; timeoutMs: number; signal: AbortSignal }) => {
-    await input.readStatus();
-    return true;
+  const readback = vi.fn(async (input: { readStatus: () => Promise<unknown>; timeoutMs: number; signal?: AbortSignal }) => {
+    const status = await input.readStatus() as { observedState: string };
+    return status.observedState === "closed";
   });
   const retireBuilds = vi.fn(async () => true);
-  const commitClosed = vi.fn(() => true);
+  const captureBuilds = vi.fn(() => retireBuilds);
+  const backend = deferred<"closed" | "superseded">();
+  const getOwner = vi.fn((_root: string) => options.owner === false ? undefined : { completion: backend.promise });
+  let retirementPending = false;
+  const markPending = vi.fn((_epoch: number) => { retirementPending = true; return true; });
+  const isCurrent = vi.fn((_epoch: number) => true);
+  const releasePending = vi.fn((_epoch: number) => { retirementPending = false; });
+  const commitClosed = vi.fn((epoch: number) => {
+    if (!isCurrent(epoch)) return false;
+    retirementPending = false;
+    return true;
+  });
   const beginLifecycle = vi.fn(() => 1);
+  const canarySummary = vi.fn();
   const sandbox: Record<string, unknown> = {
-    AbortSignal, Date, Error, performance, randomUUID: () => "explicit-close-request",
-    process: { platform: "win32" }, WORKBENCH_CLOSE_BACKEND_WAIT_MS: 1800, WORKBENCH_CLOSE_FORCE_AFTER_MS: 1200,
+    AbortSignal, Date, Error, performance, setTimeout, clearTimeout, randomUUID: () => "explicit-close-request",
+    process: { platform: options.platform ?? "win32" }, WORKBENCH_CLOSE_BACKEND_WAIT_MS: 1800, WORKBENCH_CLOSE_FORCE_AFTER_MS: 1200,
     WORKBENCH_CLOSE_TOTAL_WAIT_MS: 2000,
     windowProvider: { approveWorkbenchCloseOnce: closed },
     desktopLifecycleCoordinator: { request: coordinator },
@@ -46,24 +71,51 @@ function closeHarness() {
     fetchLauncherActiveWorkStatus: probe,
     resolveQuitActiveWorkStatus, isActiveWorkProbeAuthFailure,
     createDesktopShellExitDeadline, withDesktopShellExitTimeout,
-    captureFrontendBuildRetirement: () => retireBuilds,
+    captureFrontendBuildRetirement: captureBuilds,
+    getBackgroundWorkbenchRetirement: getOwner,
     mainWorkbenchCloseStore: store,
-    launcherStateStore: { beginMainLifecycle: beginLifecycle, commitVerifiedMainClosed: commitClosed },
+    launcherStateStore: { beginMainLifecycle: beginLifecycle, markMainRetirementPending: markPending,
+      isMainLifecycleCurrent: isCurrent, releaseMainRetirementPending: releasePending, commitVerifiedMainClosed: commitClosed },
     confirmWorkbenchForceClose: confirm,
     recordSupervisorEventFallbackLocally: record,
     stopWorkbenchBackend: stop,
     waitForWorkbenchBackendSettledForWindowClose: readback,
     readRuntimeManagerLauncherStatusSummary: readStatus,
+    desktopControlContextForLocalClose: () => ({ desktopSessionId: "stable-session", controlToken: "cached" }),
+    writeWorkbenchCloseCanarySummary: canarySummary,
+    desktopSessionRevision: 1,
+    shutdownApproved: false,
     pendingWorkbenchCloseAck: null, workbenchCloseBackendStopInFlight: null
   };
-  runInNewContext(transpileModule(source.slice(begin, end) + "\nglobalThis.runClose = requestTransactionalWorkbenchClose;", {
+  const ackBegin = source.indexOf("async function acknowledgeTransactionalWorkbenchClose(");
+  const ackEnd = source.indexOf("\nfunction writeWorkbenchCloseCanarySummary(", ackBegin);
+  runInNewContext(transpileModule(source.slice(begin, end) + source.slice(ackBegin, ackEnd)
+    + "\nglobalThis.runClose = requestTransactionalWorkbenchClose; globalThis.ackClose = acknowledgeTransactionalWorkbenchClose;", {
     compilerOptions: { target: ScriptTarget.ES2022 }
   }).outputText, sandbox);
-  return { context, probe, confirm, stop, closed, record, store, coordinator, readback, readStatus, retireBuilds, commitClosed, beginLifecycle,
+  releaseCloseHarnesses.push(async () => {
+    isCurrent.mockReturnValue(false);
+    backend.resolve("superseded");
+    if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(1250);
+    await flushCloseCallbacks();
+    expect(sandbox.workbenchCloseBackendStopInFlight).toBeNull();
+  });
+  return { context, probe, confirm, stop, closed, record, store, coordinator, readback, readStatus, retireBuilds, captureBuilds,
+    commitClosed, beginLifecycle, markPending, isCurrent, releasePending, getOwner, backend, canarySummary,
+    pending: () => retirementPending,
+    pendingAck: () => sandbox.pendingWorkbenchCloseAck,
+    acknowledge: () => (sandbox.ackClose as (paths: object, bootstrap: object) => Promise<void>)({ workspaceRoot: "test-workspace" }, {}),
     run: () => (sandbox.runClose as (paths: object, bootstrap: object) => Promise<void>)({ workspaceRoot: "test-workspace" }, {}) };
 }
 
-afterEach(() => vi.useRealTimers());
+afterEach(async () => {
+  try {
+    for (const release of releaseCloseHarnesses.splice(0)) await release();
+    if (vi.isFakeTimers()) expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
 
 describe("Explicit Workbench close", () => {
   it("interrupts work without waiting for a status probe, control token, or confirmation", async () => {
@@ -79,9 +131,11 @@ describe("Explicit Workbench close", () => {
       mode: "force", reason: "workbench_window_close", activeWorkState: "unknown", requestId: "explicit-close-request"
     });
     expect(h.closed).toHaveBeenCalledOnce();
-    expect(h.commitClosed).toHaveBeenCalledWith(1);
-    expect(h.commitClosed.mock.invocationCallOrder[0]).toBeLessThan(h.closed.mock.invocationCallOrder[0]!);
-    expect(h.store.currentTransaction()?.phase).toBe("window_close_authorized");
+    expect(h.markPending).toHaveBeenCalledWith(1);
+    expect(h.stop.mock.invocationCallOrder[0]).toBeLessThan(h.markPending.mock.invocationCallOrder[0]!);
+    expect(h.markPending.mock.invocationCallOrder[0]).toBeLessThan(h.closed.mock.invocationCallOrder[0]!);
+    expect(h.commitClosed).not.toHaveBeenCalled();
+    expect(h.store.currentTransaction()?.phase).toBe("background_closing");
   });
 
   it("passes one absolute request deadline and force time through the fifth stop argument", async () => {
@@ -98,29 +152,68 @@ describe("Explicit Workbench close", () => {
     const closing = h.run();
     await vi.advanceTimersByTimeAsync(900);
     await closing;
-    expect(h.stop.mock.calls[0][4]).toEqual({ deadlineAt: requestedAt + 1800, forceAt: requestedAt + 1200 });
-    expect(h.readback.mock.calls[0][0].timeoutMs).toBe(900);
-    expect(h.readback.mock.calls[0][0].signal).toBe(h.stop.mock.calls[0][3]);
+    expect(h.stop.mock.calls[0][4]).toEqual({
+      deadlineAt: requestedAt + 1800, forceAt: requestedAt + 1200,
+      background: { retireFrontendBuilds: h.retireBuilds }
+    });
+    expect(h.readback).not.toHaveBeenCalled();
     expect(h.closed).toHaveBeenCalledWith({ deadlineAt: requestedAt + 2000 });
   });
 
-  it("authorizes window close only after the file-only final readback settles", async () => {
+  it("keeps window-first acknowledgement pending until the owned backend confirms closed", async () => {
     const h = closeHarness();
-    let finishReadback!: (settled: boolean) => void;
-    h.readback.mockImplementationOnce(async (input) => {
-      await input.readStatus();
-      return await new Promise((resolve) => { finishReadback = resolve; });
-    });
-    const closing = h.run();
-    await vi.waitFor(() => expect(h.readStatus).toHaveBeenCalledWith("test-workspace"));
-    expect(h.store.currentTransaction()?.phase).toBe("backend_closing");
-    expect(h.closed).not.toHaveBeenCalled();
-    finishReadback(true);
-    await closing;
+    await h.run();
+    await h.acknowledge();
+    expect(h.store.currentTransaction()).toMatchObject({ phase: "background_closing", windowAcknowledged: true });
+    expect(h.pending()).toBe(true);
+    expect(h.pendingAck()).toMatchObject({ projectionEpoch: 1 });
+    expect(h.commitClosed).not.toHaveBeenCalled();
+    expect(h.canarySummary).not.toHaveBeenCalled();
+
+    h.backend.resolve("closed");
+    await flushCloseCallbacks();
+    expect(h.commitClosed).toHaveBeenCalledExactlyOnceWith(1);
+    expect(h.store.currentTransaction()?.phase).toBe("succeeded");
+    expect(h.pending()).toBe(false);
+    expect(h.pendingAck()).toBeNull();
+    expect(h.canarySummary).toHaveBeenCalledOnce();
+    expect(h.record).toHaveBeenCalledWith(expect.objectContaining({ eventCode: "electron.workbench_close.completed" }));
+  });
+
+  it("keeps backend-first completion awaiting the actual window acknowledgement", async () => {
+    const h = closeHarness();
+    await h.run();
+    h.backend.resolve("closed");
+    await flushCloseCallbacks();
+    expect(h.commitClosed).not.toHaveBeenCalled();
+    expect(h.pending()).toBe(true);
+    expect(h.pendingAck()).toMatchObject({ projectionEpoch: 1 });
+    expect(h.store.currentTransaction()?.phase).toBe("window_close_authorized");
+    expect(h.canarySummary).not.toHaveBeenCalled();
+    await h.acknowledge();
+    expect(h.commitClosed).toHaveBeenCalledExactlyOnceWith(1);
+    expect(h.pending()).toBe(false);
+    expect(h.store.currentTransaction()?.phase).toBe("succeeded");
+    expect(h.pendingAck()).toBeNull();
+    expect(h.canarySummary).toHaveBeenCalledOnce();
+  });
+
+  it("closes promptly while a stalled background owner stays pending beyond the admission deadline", async () => {
+    vi.useFakeTimers();
+    const h = closeHarness();
+    const requestedAt = Date.now();
+    await h.run();
     expect(h.closed).toHaveBeenCalledOnce();
-    expect(h.record).toHaveBeenCalledWith(expect.objectContaining({
-      eventCode: "electron.workbench_close.window_authorized"
-    }));
+    expect(Date.now()).toBe(requestedAt);
+    await h.acknowledge();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(h.pending()).toBe(true);
+    expect(h.store.currentTransaction()?.phase).toBe("background_closing");
+    expect(h.commitClosed).not.toHaveBeenCalled();
+    expect(h.canarySummary).not.toHaveBeenCalled();
+    h.backend.resolve("closed");
+    await flushCloseCallbacks();
+    expect(h.store.currentTransaction()?.phase).toBe("succeeded");
   });
 
   it("does not authorize window close when backend stopping fails", async () => {
@@ -130,48 +223,301 @@ describe("Explicit Workbench close", () => {
     expect(h.readback).not.toHaveBeenCalled();
     expect(h.closed).not.toHaveBeenCalled();
     expect(h.commitClosed).not.toHaveBeenCalled();
-    expect(h.store.currentTransaction()).toMatchObject({ phase: "failed", failureCode: "backend_stop_timeout" });
+    expect(h.markPending).not.toHaveBeenCalled();
+    expect(h.store.currentTransaction()).toMatchObject({ phase: "failed", failureCode: "backend_stop_admission_failed" });
   });
 
-  it("keeps a newer start's window when the old close lost its projection epoch", async () => {
+  it("keeps a newer start's window when admission loses its projection epoch", async () => {
     const h = closeHarness();
-    h.commitClosed.mockReturnValueOnce(false);
+    h.markPending.mockReturnValueOnce(false);
     await h.run();
     expect(h.closed).not.toHaveBeenCalled();
+    expect(h.getOwner).not.toHaveBeenCalled();
+    expect(h.commitClosed).not.toHaveBeenCalled();
     expect(h.store.currentTransaction()).toMatchObject({ phase: "failed", failureCode: "lifecycle_intent_superseded" });
   });
 
-  it("waits for exact owned frontend build retirement before authorizing the window", async () => {
+  it.each(["owner", "projection"])("does not claim closed when the background %s epoch is superseded", async (stage) => {
     const h = closeHarness();
-    h.retireBuilds.mockResolvedValueOnce(false);
-    await expect(h.run()).rejects.toThrow("Owned frontend build processes did not retire");
-    expect(h.stop).toHaveBeenCalledOnce();
-    expect(h.closed).not.toHaveBeenCalled();
+    await h.run();
+    await h.acknowledge();
+    if (stage === "projection") h.isCurrent.mockReturnValue(false);
+    h.backend.resolve(stage === "owner" ? "superseded" : "closed");
+    await flushCloseCallbacks();
+    expect(h.store.currentTransaction()).toMatchObject({ phase: "failed", failureCode: "lifecycle_intent_superseded" });
+    expect(h.pendingAck()).toBeNull();
+    expect(h.canarySummary).not.toHaveBeenCalled();
+    expect(h.pending()).toBe(stage !== "owner");
+    expect(h.record.mock.calls.some(([event]) => event.eventCode === "electron.workbench_close.completed")).toBe(false);
+    if (stage === "owner") {
+      expect(h.commitClosed).not.toHaveBeenCalled();
+      expect(h.releasePending).toHaveBeenCalledExactlyOnceWith(1);
+    }
+  });
+
+  it.each(["pending", "stopped"])("rejects an expired window ACK while the backend is %s without overwriting a newer lifecycle", async (stage) => {
+    const h = closeHarness();
+    await h.run();
+    if (stage === "stopped") {
+      h.backend.resolve("closed");
+      await flushCloseCallbacks();
+      expect(h.store.currentTransaction()?.phase).toBe("window_close_authorized");
+    }
     expect(h.commitClosed).not.toHaveBeenCalled();
+    h.isCurrent.mockReturnValue(false);
+    await h.acknowledge();
+    expect(h.store.currentTransaction()).toMatchObject({ phase: "failed", failureCode: "lifecycle_intent_superseded" });
+    expect(h.pendingAck()).toBeNull();
+    expect(h.commitClosed).not.toHaveBeenCalled();
+    expect(h.canarySummary).not.toHaveBeenCalled();
+    expect(h.record.mock.calls.some(([event]) => event.eventCode === "electron.workbench_close.completed")).toBe(false);
+  });
+
+  it("passes the captured frontend retirement closure to the existing backend owner without retiring it twice", async () => {
+    const h = closeHarness();
+    // Exercise the real stop adapter as well, so the trusted closure must reach
+    // the lifecycle owner through the same argument rather than a second stop.
+    const source = readFileSync(mainSourcePath, "utf8");
+    const begin = source.indexOf("async function stopWorkbenchBackend(");
+    const end = source.indexOf("\nfunction isRecoverableDesktopControlError(", begin);
+    const lifecycle = vi.fn(async (..._args: unknown[]) => ({ accepted: true }));
+    const adapter: Record<string, unknown> = { orchestrateLauncherLifecycle: lifecycle, Error };
+    runInNewContext(transpileModule(source.slice(begin, end) + "\nglobalThis.stop = stopWorkbenchBackend;", {
+      compilerOptions: { target: ScriptTarget.ES2022 }
+    }).outputText, adapter);
+    h.stop.mockImplementation(adapter.stop as typeof h.stop);
+    await h.run();
+    expect(h.captureBuilds).toHaveBeenCalledExactlyOnceWith("test-workspace");
+    const captured = h.stop.mock.calls[0][4]?.background?.retireFrontendBuilds;
+    expect(captured).toBe(h.retireBuilds);
+    expect(h.retireBuilds).not.toHaveBeenCalled();
+    expect(h.getOwner).toHaveBeenCalledExactlyOnceWith("test-workspace");
+    expect(h.stop).toHaveBeenCalledOnce();
+    expect(lifecycle).toHaveBeenCalledOnce();
+    expect(lifecycle.mock.calls[0][0]).toBe("force-stop");
+    expect(lifecycle.mock.calls[0][1]).toMatchObject({ init: { body: { deferWindowClose: true, confirmed: true } } });
+    expect(lifecycle.mock.calls[0][2]).toBe("operator");
+    expect(lifecycle.mock.calls[0][3]).toBe(h.stop.mock.calls[0][3]);
+    expect(lifecycle.mock.calls[0][4]).toBe(h.stop.mock.calls[0][4]);
+    await captured!();
+    h.backend.resolve("closed");
+    await flushCloseCallbacks();
+    expect(h.retireBuilds).toHaveBeenCalledOnce();
     expect(h.readback).not.toHaveBeenCalled();
   });
 
-  it("does not report close success when final readback is unsettled", async () => {
-    const h = closeHarness();
-    h.readback.mockResolvedValueOnce(false);
-    await expect(h.run()).rejects.toThrow("did not settle closed");
-    expect(h.closed).not.toHaveBeenCalled();
-    expect(h.store.currentTransaction()?.phase).toBe("failed");
-    expect(h.record.mock.calls.some(([event]) => event.eventCode === "electron.workbench_close.window_authorized")).toBe(false);
+  it("retries at least two unconfirmed no-owner readbacks before completing on verified closure", async () => {
+    vi.useFakeTimers();
+    const h = closeHarness({ owner: false });
+    h.readStatus.mockResolvedValueOnce({ observedState: "stopping" })
+      .mockResolvedValueOnce({ observedState: "unknown" });
+    await h.run();
+    await h.acknowledge();
+    expect(h.closed).toHaveBeenCalledOnce();
+    expect(h.readStatus).toHaveBeenCalledWith("test-workspace");
+    expect(h.readback).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(249);
+    expect(h.readback).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(h.readback).toHaveBeenCalledTimes(2);
+    expect(h.commitClosed).not.toHaveBeenCalled();
+    expect(h.store.currentTransaction()?.phase).toBe("background_closing");
+    expect(h.pending()).toBe(true);
+    expect(h.canarySummary).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(250);
+    expect(h.readback).toHaveBeenCalledTimes(3);
+    expect(h.readback.mock.calls.every(([input]) => input.timeoutMs === 1000)).toBe(true);
+    expect(h.store.currentTransaction()?.phase).toBe("succeeded");
+    expect(h.commitClosed).toHaveBeenCalledExactlyOnceWith(1);
+    expect(h.pendingAck()).toBeNull();
+    expect(h.retireBuilds).toHaveBeenCalledOnce();
   });
 
-  it.each(["backend stop", "final readback"])("fails a stalled %s within the same 1800ms budget", async (stage) => {
+  it("keeps long unknown no-owner readbacks pending without delaying the window and stops when its epoch expires", async () => {
+    vi.useFakeTimers();
+    const h = closeHarness({ owner: false });
+    h.readStatus.mockResolvedValue({ observedState: "unknown" });
+    const requestedAt = Date.now();
+    await h.run();
+    expect(h.closed).toHaveBeenCalledExactlyOnceWith({ deadlineAt: requestedAt + 2000 });
+    expect(Date.now()).toBe(requestedAt);
+    await h.acknowledge();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(h.readback.mock.calls.length).toBeGreaterThan(2);
+    expect(h.readback.mock.calls.every(([input]) => input.timeoutMs === 1000)).toBe(true);
+    expect(h.store.currentTransaction()?.phase).toBe("background_closing");
+    expect(h.commitClosed).not.toHaveBeenCalled();
+    expect(h.pending()).toBe(true);
+    expect(h.canarySummary).not.toHaveBeenCalled();
+    const readbacksBeforeSupersede = h.readback.mock.calls.length;
+    h.isCurrent.mockReturnValue(false);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(h.store.currentTransaction()).toMatchObject({ phase: "failed", failureCode: "lifecycle_intent_superseded" });
+    expect(h.pendingAck()).toBeNull();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(h.readback).toHaveBeenCalledTimes(readbacksBeforeSupersede);
+    expect(h.pending()).toBe(true);
+    expect(h.canarySummary).not.toHaveBeenCalled();
+    expect(h.record.mock.calls.some(([event]) => event.eventCode === "electron.workbench_close.completed")).toBe(false);
+  });
+
+  it("accepts eventual verified no-owner closure after the original window deadline", async () => {
+    vi.useFakeTimers();
+    const h = closeHarness({ owner: false });
+    h.readStatus.mockResolvedValue({ observedState: "stopping" });
+    await h.run();
+    await h.acknowledge();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(h.store.currentTransaction()?.phase).toBe("background_closing");
+    expect(h.commitClosed).not.toHaveBeenCalled();
+    h.readStatus.mockResolvedValue({ observedState: "closed" });
+    await vi.advanceTimersByTimeAsync(250);
+    expect(h.store.currentTransaction()?.phase).toBe("succeeded");
+    expect(h.canarySummary).toHaveBeenCalledOnce();
+  });
+
+  it.each(["status", "readback"])("hard-bounds a never-returning %s read at 1000ms and retries without delaying the window", async (stage) => {
+    vi.useFakeTimers();
+    const h = closeHarness({ owner: false });
+    if (stage === "status") h.readStatus.mockImplementationOnce(() => new Promise(() => undefined));
+    else h.readback.mockImplementationOnce(() => new Promise(() => undefined));
+    const requestedAt = Date.now();
+    await h.run();
+    await h.acknowledge();
+    expect(h.closed).toHaveBeenCalledExactlyOnceWith({ deadlineAt: requestedAt + 2000 });
+    expect(Date.now()).toBe(requestedAt);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(h.readback).toHaveBeenCalledTimes(1);
+    expect(h.commitClosed).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(h.readback.mock.calls[0][0].signal?.aborted).toBe(true);
+    expect(h.store.currentTransaction()?.phase).toBe("background_closing");
+    await vi.advanceTimersByTimeAsync(249);
+    expect(h.readback).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(h.readback).toHaveBeenCalledTimes(2);
+    expect(h.store.currentTransaction()?.phase).toBe("succeeded");
+    expect(h.retireBuilds).toHaveBeenCalledOnce();
+  });
+
+  it.each(["status", "readback", "frontend"])("exits a permanently stalled %s observation after its hard deadline when the epoch expires", async (stage) => {
+    vi.useFakeTimers();
+    const h = closeHarness({ owner: false });
+    if (stage === "status") h.readStatus.mockImplementation(() => new Promise(() => undefined));
+    else if (stage === "readback") h.readback.mockImplementation(() => new Promise(() => undefined));
+    else h.retireBuilds.mockImplementation(() => new Promise(() => undefined));
+    await h.run();
+    await h.acknowledge();
+    await vi.advanceTimersByTimeAsync(999);
+    expect(h.store.currentTransaction()?.phase).toBe("background_closing");
+    h.isCurrent.mockReturnValue(false);
+    await vi.advanceTimersByTimeAsync(251);
+    expect(h.store.currentTransaction()).toMatchObject({ phase: "failed", failureCode: "lifecycle_intent_superseded" });
+    expect(h.pendingAck()).toBeNull();
+    expect(h.readback).toHaveBeenCalledTimes(1);
+    expect(h.canarySummary).not.toHaveBeenCalled();
+  });
+
+  it.each(["false", "delayed"])("keeps a closed backend pending while captured frontend retirement is %s", async (stage) => {
+    vi.useFakeTimers();
+    const h = closeHarness({ owner: false });
+    const frontend = deferred<boolean>();
+    if (stage === "false") h.retireBuilds.mockResolvedValueOnce(false).mockResolvedValueOnce(false);
+    else h.retireBuilds.mockImplementationOnce(() => frontend.promise);
+    const requestedAt = Date.now();
+    await h.run();
+    await h.acknowledge();
+    expect(h.closed).toHaveBeenCalledOnce();
+    expect(Date.now()).toBe(requestedAt);
+    await vi.advanceTimersByTimeAsync(499);
+    expect(h.store.currentTransaction()?.phase).toBe("background_closing");
+    expect(h.pending()).toBe(true);
+    expect(h.commitClosed).not.toHaveBeenCalled();
+    if (stage === "delayed") frontend.resolve(true);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(h.store.currentTransaction()?.phase).toBe("succeeded");
+    const callsAtCompletion = h.retireBuilds.mock.calls.length;
+    expect(callsAtCompletion).toBe(stage === "false" ? 3 : 1);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(h.retireBuilds).toHaveBeenCalledTimes(callsAtCompletion);
+    expect(h.canarySummary).toHaveBeenCalledOnce();
+  });
+
+  it("rejects stalled admission at 1800ms without authorizing the window", async () => {
     vi.useFakeTimers();
     const h = closeHarness();
-    if (stage === "backend stop") h.stop.mockImplementationOnce(() => new Promise(() => undefined));
-    else h.readback.mockImplementationOnce(() => new Promise(() => undefined));
+    const admission = deferred<void>();
+    h.stop.mockImplementationOnce(() => admission.promise);
     const failure = h.run().catch((error: unknown) => error);
-    await vi.advanceTimersByTimeAsync(1800);
-    expect((await failure as Error).message).toContain("workbench close timed out after 1800ms");
+    await vi.advanceTimersByTimeAsync(1799);
+    expect(h.store.currentTransaction()?.phase).toBe("backend_closing");
+    await vi.advanceTimersByTimeAsync(1);
+    expect((await failure as Error).message).toContain("workbench close admission timed out after 1800ms");
     expect(h.stop.mock.calls[0][3].aborted).toBe(true);
     expect(h.closed).not.toHaveBeenCalled();
+    expect(h.markPending).not.toHaveBeenCalled();
+    expect(h.commitClosed).not.toHaveBeenCalled();
+    expect(h.store.currentTransaction()).toMatchObject({ phase: "failed", failureCode: "backend_stop_admission_failed" });
+    admission.resolve();
+    await flushCloseCallbacks();
+    expect(h.markPending).not.toHaveBeenCalled();
+    expect(h.closed).not.toHaveBeenCalled();
+  });
+
+  it("charges coordinator queue time against the original admission and window deadlines", async () => {
+    vi.useFakeTimers();
+    const h = closeHarness();
+    const requestedAt = Date.now();
+    h.coordinator.mockImplementation(async (_reason, run) => {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      await run();
+    });
+    h.stop.mockImplementationOnce(() => new Promise(() => undefined));
+    const failure = h.run().catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(1800);
+    expect((await failure as Error).message).toContain("workbench close admission timed out after 1300ms");
+    expect(Date.now()).toBe(requestedAt + 1800);
+    expect(h.stop.mock.calls[0][4]?.deadlineAt).toBe(requestedAt + 1800);
+    expect(h.stop.mock.calls[0][3].aborted).toBe(true);
+    expect(h.closed).not.toHaveBeenCalled();
+    expect(h.markPending).not.toHaveBeenCalled();
+  });
+
+  it("preserves the non-Windows path that verifies backend and frontend retirement before closing", async () => {
+    const h = closeHarness({ platform: "linux" });
+    const readback = deferred<boolean>();
+    h.readback.mockImplementationOnce(async (input) => {
+      await input.readStatus();
+      return await readback.promise;
+    });
+    const closing = h.run();
+    await flushCloseCallbacks();
+    expect(h.retireBuilds).toHaveBeenCalledOnce();
+    expect(h.readStatus).toHaveBeenCalledWith("test-workspace");
+    expect(h.store.currentTransaction()?.phase).toBe("backend_closing");
+    expect(h.closed).not.toHaveBeenCalled();
+    readback.resolve(true);
+    await closing;
+    expect(h.stop.mock.calls[0][4]).toBeUndefined();
+    expect(h.markPending).not.toHaveBeenCalled();
+    expect(h.getOwner).not.toHaveBeenCalled();
+    expect(h.commitClosed).toHaveBeenCalledWith(1);
+    expect(h.commitClosed.mock.invocationCallOrder[0]).toBeLessThan(h.closed.mock.invocationCallOrder[0]!);
+    expect(h.store.currentTransaction()?.phase).toBe("window_close_authorized");
+    expect(h.pendingAck()).not.toHaveProperty("projectionEpoch");
+    await h.acknowledge();
+    expect(h.commitClosed).toHaveBeenCalledExactlyOnceWith(1);
+    expect(h.store.currentTransaction()?.phase).toBe("succeeded");
+  });
+
+  it.each(["frontend", "readback"])("preserves non-Windows rejection when %s does not retire", async (stage) => {
+    const h = closeHarness({ platform: "linux" });
+    if (stage === "frontend") h.retireBuilds.mockResolvedValueOnce(false);
+    else h.readStatus.mockResolvedValueOnce({ observedState: "stopping" });
+    await expect(h.run()).rejects.toThrow(stage === "frontend" ? "Owned frontend build processes did not retire" : "did not settle closed");
+    expect(h.closed).not.toHaveBeenCalled();
+    expect(h.commitClosed).not.toHaveBeenCalled();
     expect(h.store.currentTransaction()).toMatchObject({ phase: "failed", failureCode: "backend_stop_timeout" });
-    expect(h.record.mock.calls.some(([event]) => event.eventCode === "electron.workbench_close.window_authorized")).toBe(false);
   });
 });
 

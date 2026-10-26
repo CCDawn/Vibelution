@@ -303,15 +303,16 @@ export class ElectronWindowProvider {
     }
   }
 
-  async openOrFocusWorkbench(workbenchUrl = this.workbenchUrl): Promise<ManagedWindowState> {
+  /** Navigate/report normally; present=false only suppresses this call's restore/show/focus. */
+  async openOrFocusWorkbench(workbenchUrl = this.workbenchUrl, options: { present?: boolean } = {}): Promise<ManagedWindowState> {
     const safeUrl = localWorkbenchUrl(workbenchUrl);
     this.workbenchUrl = safeUrl;
     if (this.workbenchNavigation !== null) {
       await this.workbenchNavigation;
-      return this.openOrFocusWorkbench(safeUrl);
+      return this.openOrFocusWorkbench(safeUrl, options);
     }
 
-    const navigation = Promise.resolve().then(() => this.navigateWorkbench(safeUrl));
+    const navigation = Promise.resolve().then(() => this.navigateWorkbench(safeUrl, options.present !== false));
     this.workbenchNavigation = navigation;
     try {
       return await navigation;
@@ -953,7 +954,7 @@ export class ElectronWindowProvider {
     window.on("session-end", () => this.onOsSessionEnd("session-end", role));
   }
 
-  private async navigateWorkbench(safeUrl: string): Promise<ManagedWindowState> {
+  private async navigateWorkbench(safeUrl: string, present = true): Promise<ManagedWindowState> {
     let workbenchWindow = this.reconcileCurrentWorkbenchWindow();
     if (!workbenchWindow || workbenchWindow.isDestroyed()) {
       workbenchWindow = this.createWorkbenchWindow(safeUrl, this.paths);
@@ -979,25 +980,29 @@ export class ElectronWindowProvider {
         // stays retryable and the log keeps the root cause.
         await this.presentWorkbenchErrorStatus({
           origin: originOfUrl(safeUrl),
-          detail: navigationFailureDetail(error)
+          detail: navigationFailureDetail(error),
+          present
         });
         throw navigationFailure(safeUrl, error);
       }
     }
 
-    presentElectronWindow(workbenchWindow);
+    if (present) {
+      presentElectronWindow(workbenchWindow);
+    }
     return this.reportAndReturn(this.stateFor("workbench"));
   }
 
   /**
    * Present the visible bilingual "backend unavailable" status in the
-   * Workbench window instead of destroying it. Reused by the navigation
+   * Workbench window instead of destroying it; present=false suppresses this
+   * call's restore/show/focus. Reused by the navigation
    * failure path and by main.ts when the backend start attempt itself failed
    * before any navigation could happen. Best-effort: if even the local error
    * document cannot load, the window stays hidden rather than masking the
    * original failure.
    */
-  async presentWorkbenchErrorStatus(input: { origin: string; detail: string }): Promise<ManagedWindowState> {
+  async presentWorkbenchErrorStatus(input: { origin: string; detail: string; present?: boolean }): Promise<ManagedWindowState> {
     let workbenchWindow = this.reconcileCurrentWorkbenchWindow();
     if (!workbenchWindow || workbenchWindow.isDestroyed()) {
       workbenchWindow = this.createWorkbenchWindow(this.workbenchUrl, this.paths);
@@ -1011,7 +1016,9 @@ export class ElectronWindowProvider {
     } catch {
       // The error document is best-effort; never mask the original failure.
     }
-    presentElectronWindow(workbenchWindow);
+    if (input.present !== false) {
+      presentElectronWindow(workbenchWindow);
+    }
     return this.reportAndReturn(this.stateFor("workbench"));
   }
 

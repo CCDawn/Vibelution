@@ -4,6 +4,7 @@ import type { ActiveWorkProbeState } from "../shutdown/shutdownCoordinator.js";
 export type MainWorkbenchClosePhase =
   | "confirmation_required"
   | "backend_closing"
+  | "background_closing"
   | "window_close_authorized"
   | "succeeded"
   | "failed";
@@ -15,6 +16,7 @@ export type MainWorkbenchCloseTransaction = {
   reason: string;
   activeWorkState: ActiveWorkProbeState;
   requestId?: string;
+  windowAcknowledged?: boolean;
   failureCode?: string;
   message?: string;
 };
@@ -66,12 +68,21 @@ export class MainWorkbenchCloseTransactionStore {
     return transaction;
   }
 
-  backendStopped(closeId: string): MainWorkbenchCloseTransaction {
+  authorizeWindowBeforeBackendStopped(closeId: string): MainWorkbenchCloseTransaction {
     const transaction = this.requireOpen(closeId);
     if (transaction.phase !== "backend_closing") {
       throw new Error(`workbench close transaction ${closeId} is not closing the backend`);
     }
-    transaction.phase = "window_close_authorized";
+    transaction.phase = "background_closing";
+    return transaction;
+  }
+
+  backendStopped(closeId: string): MainWorkbenchCloseTransaction {
+    const transaction = this.requireOpen(closeId);
+    if (transaction.phase !== "backend_closing" && transaction.phase !== "background_closing") {
+      throw new Error(`workbench close transaction ${closeId} is not closing the backend`);
+    }
+    transaction.phase = transaction.windowAcknowledged ? "succeeded" : "window_close_authorized";
     return transaction;
   }
 
@@ -85,9 +96,15 @@ export class MainWorkbenchCloseTransactionStore {
     if (transaction.phase === "failed" || transaction.phase === "succeeded") {
       return transaction;
     }
+    if (transaction.phase === "background_closing") {
+      // The window acknowledgement does not verify that backend cleanup finished.
+      transaction.windowAcknowledged = true;
+      return transaction;
+    }
     if (transaction.phase !== "window_close_authorized") {
       throw new Error(`workbench close transaction ${closeId} is not authorized to close the window`);
     }
+    transaction.windowAcknowledged = true;
     transaction.phase = "succeeded";
     return transaction;
   }

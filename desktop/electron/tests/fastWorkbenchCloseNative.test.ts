@@ -4,8 +4,10 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import { closeOwnedWorkbenchFast } from "../src/process/fastWorkbenchClose.js";
+import { startBackgroundWorkbenchRetirement } from "../src/process/backgroundWorkbenchRetirement.js";
 import {
   __setWorkbenchJobNativeForTests,
+  captureTrackedWorkbenchJobRetirement,
   hasTrackedWorkbenchJob,
   spawnTrackedWorkbenchProcess,
   terminateTrackedWorkbenchJob
@@ -46,10 +48,11 @@ async function readReady(path: string): Promise<{ pid: number; childPid?: number
 
 // Controlled local processes only: no product runtime, model, or external service.
 describe.skipIf(process.platform !== "win32")("native fast close with a busy child and wedged HTTP", () => {
-  it.each([1, 2, 3])("retires the real captured Windows Job within two seconds, repeat %s", async (repeat) => {
+  it.each([1, 2, 3])("admits window closure promptly and confirms the captured Job in the background, repeat %s", async (repeat) => {
     const temporaryRoot = realpathSync(tmpdir());
     const directory = mkdtempSync(join(temporaryRoot, "vibelution-fast-close-native-"));
     let rootPid: number | undefined;
+    let current = true;
     try {
       writeFileSync(join(directory, "child.cjs"), `
         require("node:fs").writeFileSync(process.argv[2], JSON.stringify({ pid: process.pid }));
@@ -95,24 +98,38 @@ describe.skipIf(process.platform !== "win32")("native fast close with a busy chi
 
       const requestedAt = Date.now();
       const started = performance.now();
-      const closed = await closeOwnedWorkbenchFast({
-        workspaceRoot: directory, spawnPid: rootPid, port,
-        deadlineAt: requestedAt + 1800, forceAt: requestedAt + 1200
+      const captured = captureTrackedWorkbenchJobRetirement(directory, rootPid);
+      if (!captured) throw new Error("Expected the original owned Job.");
+      let attemptedFastClose = false;
+      const owner = startBackgroundWorkbenchRetirement({
+        workspaceRoot: directory, requestId: `native-${repeat}`, isCurrent: () => current,
+        retireCaptured: async () => {
+          if (attemptedFastClose) return await captured();
+          attemptedFastClose = true;
+          return await closeOwnedWorkbenchFast({ workspaceRoot: directory, spawnPid: rootPid!, port,
+            deadlineAt: requestedAt + 1800, forceAt: requestedAt + 1200, captureRetirement: () => captured });
+        },
+        portClosed: async () => !(await portListening(port)),
+        commitClosed: async () => true
       });
+      // Window permission does not depend on the eventual OS cleanup deadline.
+      expect(performance.now() - started).toBeLessThan(2000);
+      expect(owner.status).toBe("pending");
+      const closed = await owner.completion;
       const rootStillAlive = pidAlive(rootPid);
       const childStillAlive = pidAlive(child.pid);
       const portStillListening = await portListening(port);
       const elapsedMs = performance.now() - started;
       console.info(`native fast close repeat ${repeat}: ${elapsedMs.toFixed(1)}ms; rootAlive=${rootStillAlive}; childAlive=${childStillAlive}; portListening=${portStillListening}`);
-      expect(closed).toBe(true);
+      expect(closed).toBe("closed");
       expect(rootStillAlive).toBe(false);
       expect(childStillAlive).toBe(false);
       expect(portStillListening).toBe(false);
       expect(hasTrackedWorkbenchJob(directory)).toBe(false);
       expect(readFileSync(join(directory, "http-requests.log"), "utf8")).toContain("GET /api/health");
       expect(elapsedMs).toBeGreaterThanOrEqual(1150);
-      expect(elapsedMs).toBeLessThan(2000);
     } finally {
+      current = false;
       try {
         if (rootPid !== undefined) await terminateTrackedWorkbenchJob(directory, rootPid);
       } finally {

@@ -20,6 +20,10 @@ function harness(options: { live?: boolean; releaseChanged?: boolean; packaged?:
   expect(begin).toBeGreaterThan(-1);
   expect(end).toBeGreaterThan(begin);
   const supervisor = new LauncherLifecycleSupervisor();
+  const beginIntent = vi.spyOn(supervisor, "beginIntentWithOptions");
+  const beginMainLifecycle = vi.fn();
+  const currentCloseTransaction = vi.fn((): { phase: string; windowAcknowledged?: boolean } | null => null);
+  const backgroundRetirement = vi.fn((_workspaceRoot: string) => false);
   const ensure = vi.fn(async (_input: { signal?: AbortSignal }) => ({ skipped: !options.releaseChanged }));
   const reachable = vi.fn(async () => options.live ?? false);
   const reusable = vi.fn(async () => true);
@@ -54,6 +58,8 @@ function harness(options: { live?: boolean; releaseChanged?: boolean; packaged?:
     normalizeSupervisedLifecycleOperation: (operation: string) => operation,
     desiredStateForLifecycleOperation: (operation: string) => ["start", "restart", "rebuild-and-start"].includes(operation) ? "open" : "closed",
     createDesktopPathsForApp: () => ({ workspaceRoot: "C:/frontend-preflight-test" }),
+    mainWorkbenchCloseStore: { currentTransaction: currentCloseTransaction },
+    hasBackgroundWorkbenchRetirement: backgroundRetirement,
     app: { isPackaged: options.packaged ?? false },
     windowProvider: { approveWorkbenchCloseOnce: closed },
     shouldDeferOrchestratedWindowClose: () => false,
@@ -74,7 +80,7 @@ function harness(options: { live?: boolean; releaseChanged?: boolean; packaged?:
     restartLauncherToLatestBuild: promote,
     joinDecisionForLauncherLifecycleStop: () => ({ waitForInFlightRestart: false, joinInFlightRestart: false }),
     launcherLifecycleSupervisor: supervisor,
-    launcherStateStore: { beginMainLifecycle: vi.fn() },
+    launcherStateStore: { beginMainLifecycle },
     readLauncherStateFile: () => ({}),
     launcherStatePath: () => "unused",
     runWorkbenchLifecycle: lifecycle,
@@ -95,6 +101,7 @@ function harness(options: { live?: boolean; releaseChanged?: boolean; packaged?:
   ).outputText, sandbox);
   return {
     ensure, reachable, reusable, servingInspect, opened, closed, inspect, fullInspect, launchInspect, unpackagedInspect, notify, trayNotify, promote, lifecycle, supervisor,
+    beginIntent, beginMainLifecycle, currentCloseTransaction, backgroundRetirement,
     run: sandbox.orchestrateUnderTest as (
       operation: string, payload: object, provenance?: string, signal?: AbortSignal
     ) => Promise<{ accepted: boolean; code?: string }>
@@ -104,6 +111,51 @@ function harness(options: { live?: boolean; releaseChanged?: boolean; packaged?:
 afterEach(resetFrontendBuildStateForTests);
 
 describe("main-line frontend startup preflight", () => {
+  describe.each(["start", "restart", "rebuild-and-start"])("retirement admission for %s", (operation) => {
+    it.each([
+      { phase: "backend_closing", windowAcknowledged: false, pendingOwner: false },
+      { phase: "background_closing", windowAcknowledged: true, pendingOwner: false },
+      { phase: "window_close_authorized", windowAcknowledged: false, pendingOwner: false },
+      { phase: "succeeded", windowAcknowledged: true, pendingOwner: true },
+    ])("keeps the existing intent untouched while $phase / owner pending=$pendingOwner", async ({ phase, windowAcknowledged, pendingOwner }) => {
+      const h = harness({ live: true, packaged: true });
+      const lease = h.supervisor.beginIntent({ instanceId: "main", operation: "stop", desiredState: "closed" });
+      const before = h.supervisor.snapshot("main");
+      const generation = h.supervisor.intentGeneration("main");
+      h.beginIntent.mockClear();
+      h.currentCloseTransaction.mockReturnValue({ phase, windowAcknowledged });
+      h.backgroundRetirement.mockReturnValue(pendingOwner);
+      await expect(h.run(operation, {})).resolves.toMatchObject({ accepted: false, operation, code: "backend_retiring" });
+      expect(h.supervisor.snapshot("main")).toEqual(before);
+      expect(h.supervisor.intentGeneration("main")).toBe(generation);
+      expect(lease.signal.aborted).toBe(false);
+      expect(h.beginIntent).not.toHaveBeenCalled();
+      expect(h.beginMainLifecycle).not.toHaveBeenCalled();
+      expect(h.lifecycle).not.toHaveBeenCalled();
+      expect(h.ensure).not.toHaveBeenCalled();
+      expect(h.inspect).not.toHaveBeenCalled();
+      expect(h.unpackagedInspect).not.toHaveBeenCalled();
+      expect(h.reachable).not.toHaveBeenCalled();
+      expect(h.reusable).not.toHaveBeenCalled();
+      expect(h.servingInspect).not.toHaveBeenCalled();
+      expect(h.opened).not.toHaveBeenCalled();
+      expect(h.promote).not.toHaveBeenCalled();
+      expect(peekFrontendBuild("main")).toBe(false);
+    });
+  });
+
+  it.each(["start", "restart"])("retains the original %s preflight after retirement succeeds", async (operation) => {
+    const h = harness({ packaged: true });
+    h.currentCloseTransaction.mockReturnValue({ phase: "succeeded", windowAcknowledged: true });
+    h.inspect.mockResolvedValue({ stale: false, launchBlocking: false });
+    await expect(h.run(operation, {})).resolves.toMatchObject({ accepted: true });
+    expect(h.beginIntent).toHaveBeenCalledOnce();
+    expect(h.beginMainLifecycle).toHaveBeenCalledWith(operation);
+    expect(h.inspect).toHaveBeenCalledOnce();
+    expect(h.ensure).toHaveBeenCalledOnce();
+    expect(h.lifecycle).toHaveBeenCalledWith(expect.objectContaining({ operation }));
+  });
+
   it.each([false, true])("cancels live serving verification when stop supersedes open (late result: %s)", async (lateResult) => {
     const h = harness({ live: true });
     let probeSignal: AbortSignal | undefined;

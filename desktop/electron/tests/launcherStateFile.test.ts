@@ -90,4 +90,15 @@ describe("Launcher state replacement under transient file contention", () => {
     expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ phase: "previous" });
     expect(readdirSync(roots[0])).toEqual(["state.json"]);
   });
+
+  it("rechecks the background request fence after transient rename contention", async () => {
+    const path = statePath();
+    let current = true;
+    failure.remaining = 1;
+    failure.onRename = () => { current = false; };
+    await expect(writeLauncherStateFile(path, { phase: "steady" }, undefined, () => current)).rejects.toThrow("superseded");
+    expect(failure.calls).toBe(1);
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ phase: "previous" });
+    expect(readdirSync(roots[0])).toEqual(["state.json"]);
+  });
 });

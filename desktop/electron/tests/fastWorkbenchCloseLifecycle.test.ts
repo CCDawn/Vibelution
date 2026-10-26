@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { executeMainLineWorkbench } from "../src/process/workbenchBackend.js";
 import { closeOwnedWorkbenchFast } from "../src/process/fastWorkbenchClose.js";
+import { getBackgroundWorkbenchRetirement } from "../src/process/backgroundWorkbenchRetirement.js";
 
 vi.mock("../src/process/fastWorkbenchClose.js", () => ({ closeOwnedWorkbenchFast: vi.fn() }));
 const directories: string[] = [];
@@ -45,5 +46,155 @@ describe("explicit fast close lifecycle", () => {
     expect(result.accepted).toBe(false);
     expect(closeOwnedWorkbenchFast).not.toHaveBeenCalled();
     expect(f.writeState).not.toHaveBeenCalled();
+  });
+
+  function backgroundFixture() {
+    const f = fixture();
+    let state: Record<string, unknown> = { ...f.previous };
+    let jobRetired = false;
+    let portListening = true;
+    const retire = Object.assign(vi.fn(async () => jobRetired), { isCurrent: () => true });
+    const captureRetirement = vi.fn(() => retire);
+    const builds = vi.fn(async () => true);
+    vi.mocked(closeOwnedWorkbenchFast).mockResolvedValue(false);
+    return { ...f, captureRetirement, retire, builds,
+      input: { ...f.input, readState: () => state,
+        writeState: async (next: Record<string, unknown>) => { state = next; f.writeState(next); },
+        connect: async () => portListening, captureRetirement,
+        fastCloseTiming: { ...f.input.fastCloseTiming, background: { retireFrontendBuilds: builds } } },
+      state: () => state, retireJob: () => { jobRetired = true; }, releasePort: () => { portListening = false; },
+      supersede: () => { state = { ...state, spawnPid: 999, phase: "starting", desiredState: "open" }; }
+    };
+  }
+
+  it("admits background closing, retains identities and blocks start until all resource proofs arrive", async () => {
+    vi.useFakeTimers();
+    const f = backgroundFixture();
+    try {
+      expect(await executeMainLineWorkbench(f.input)).toMatchObject({ accepted: true, code: "backend_retiring" });
+      const owner = getBackgroundWorkbenchRetirement(f.input.workspaceRoot)!;
+      expect(owner.status).toBe("pending");
+      expect(f.state()).toMatchObject({ desiredState: "closed", phase: "stopping", spawnPid: 123, backendPid: 456 });
+      expect(f.captureRetirement).toHaveBeenCalledTimes(1);
+      expect((await executeMainLineWorkbench({ ...f.input, operation: "start" })).accepted).toBe(false);
+      f.retireJob();
+      await vi.advanceTimersByTimeAsync(251);
+      expect(owner.status).toBe("pending");
+      expect(f.state().spawnPid).toBe(123);
+      f.releasePort();
+      await vi.advanceTimersByTimeAsync(251);
+      expect(await owner.completion).toBe("closed");
+      expect(f.state()).toMatchObject({ observedState: "closed", phase: "steady", spawnPid: 0, backendPid: 0 });
+      expect(f.builds).toHaveBeenCalledTimes(1);
+      expect(f.captureRetirement).toHaveBeenCalledTimes(1);
+    } finally {
+      f.supersede();
+      await vi.advanceTimersByTimeAsync(251);
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not clear a new identity when the old background retirement completes late", async () => {
+    vi.useFakeTimers();
+    const f = backgroundFixture();
+    try {
+      await executeMainLineWorkbench(f.input);
+      const owner = getBackgroundWorkbenchRetirement(f.input.workspaceRoot)!;
+      f.supersede();
+      f.retireJob();
+      f.releasePort();
+      await vi.advanceTimersByTimeAsync(251);
+      expect(await owner.completion).toBe("superseded");
+      expect(f.state()).toMatchObject({ spawnPid: 999, desiredState: "open", phase: "starting" });
+      expect(f.writeState).toHaveBeenCalledTimes(1);
+    } finally {
+      f.supersede();
+      await vi.advanceTimersByTimeAsync(251);
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the original background owner through an unavailable state observation", async () => {
+    vi.useFakeTimers();
+    const f = backgroundFixture();
+    const readState = vi.fn(() => f.state());
+    try {
+      await executeMainLineWorkbench({ ...f.input, readState });
+      const owner = getBackgroundWorkbenchRetirement(f.input.workspaceRoot)!;
+      readState.mockReturnValue({});
+      f.retireJob();
+      f.releasePort();
+      await vi.advanceTimersByTimeAsync(501);
+      expect(owner.status).toBe("pending");
+      expect(f.retire).not.toHaveBeenCalled();
+      readState.mockImplementation(() => f.state());
+      await vi.advanceTimersByTimeAsync(251);
+      expect(await owner.completion).toBe("closed");
+      expect(f.captureRetirement).toHaveBeenCalledTimes(1);
+    } finally {
+      readState.mockImplementation(() => f.state());
+      f.supersede();
+      await vi.advanceTimersByTimeAsync(251);
+      vi.useRealTimers();
+    }
+  });
+
+  it("persists stopping and waits for captured builds even when no backend was registered", async () => {
+    vi.useFakeTimers();
+    const f = backgroundFixture();
+    let state: Record<string, unknown> = { desiredState: "closed", phase: "steady", spawnPid: 0, backendPid: 0 };
+    f.builds.mockResolvedValue(false);
+    try {
+      await executeMainLineWorkbench({ ...f.input, readState: () => state,
+        writeState: async (next) => { state = next; }, captureRetirement: () => null, connect: async () => false });
+      const owner = getBackgroundWorkbenchRetirement(f.input.workspaceRoot)!;
+      expect(state).toMatchObject({ desiredState: "closed", phase: "stopping" });
+      await vi.advanceTimersByTimeAsync(251);
+      expect(owner.status).toBe("pending");
+      expect(closeOwnedWorkbenchFast).not.toHaveBeenCalled();
+      f.builds.mockResolvedValue(true);
+      await vi.advanceTimersByTimeAsync(251);
+      expect(await owner.completion).toBe("closed");
+      expect(state).toMatchObject({ observedState: "closed", phase: "steady" });
+    } finally {
+      state = { ...state, desiredState: "open", phase: "starting" };
+      await vi.advanceTimersByTimeAsync(251);
+      vi.useRealTimers();
+    }
+  });
+
+  it("preserves state metadata through a single unavailable observation at each retirement read", async () => {
+    vi.useFakeTimers();
+    const metadata = { schemaVersion: 1, backendPort: 8177, host: "127.0.0.1", url: "http://127.0.0.1:8177" };
+    const scenario = async (faultAt?: number): Promise<number> => {
+      const f = backgroundFixture();
+      Object.assign(f.state(), metadata);
+      let reads = 0;
+      const readState = () => ++reads === faultAt ? {} : f.state();
+      try {
+        if (faultAt === 1) {
+          await expect(executeMainLineWorkbench({ ...f.input, readState })).rejects.toThrow("admission state is unavailable");
+          expect(f.writeState).not.toHaveBeenCalled();
+        } else {
+          await executeMainLineWorkbench({ ...f.input, readState });
+          const owner = getBackgroundWorkbenchRetirement(f.input.workspaceRoot)!;
+          f.retireJob();
+          f.releasePort();
+          for (let attempt = 0; attempt < 8 && owner.status === "pending"; attempt++) await vi.advanceTimersByTimeAsync(251);
+          expect(owner.status).toBe("closed");
+          expect(f.state()).toMatchObject({ ...metadata, observedState: "closed", phase: "steady" });
+        }
+        return reads;
+      } finally {
+        f.supersede();
+        await vi.advanceTimersByTimeAsync(251);
+      }
+    };
+    try {
+      const reads = await scenario();
+      for (let faultAt = 1; faultAt <= reads; faultAt++) await scenario(faultAt);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

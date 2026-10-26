@@ -73,7 +73,9 @@ function retire(current: OwnedBuild): Promise<boolean> {
       const deadline = Date.now() + RETIRE_WAIT_MS;
       while (true) {
         if (current.released) return true;
-        if (current.native.activeCount(current.job) === 0 && current.native.drainStatus(current.job).complete) {
+        // Empty Job accounting can precede the root handle becoming signaled.
+        if (current.native.activeCount(current.job) === 0 && current.native.drainStatus(current.job).complete
+          && current.native.exitCode(current.job) !== null) {
           release(current);
           return true;
         }

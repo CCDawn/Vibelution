@@ -87,6 +87,52 @@ describe("owned frontend build bridge", () => {
     expect(native.spawn).not.toHaveBeenCalled();
   });
 
+  it("keeps normal build output pending while the root is unsignaled despite empty accounting and completed drains", async () => {
+    vi.useFakeTimers();
+    const { native, states } = mockNative();
+    const output = launch();
+    Object.assign(states[0], { active: 0, drained: true });
+    let settled = false;
+    void output.then(() => { settled = true; });
+    await vi.advanceTimersByTimeAsync(40);
+    expect(settled).toBe(false);
+    expect(native.close).not.toHaveBeenCalled();
+    expect(existsSync(states[0].input.stdoutPath)).toBe(true);
+    states[0].code = 0;
+    await vi.advanceTimersByTimeAsync(20);
+    await expect(output).resolves.toBe('{"ok":true}');
+    expect(native.close).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("retains an unsignaled captured build after empty accounting and complete drains until exact retirement can retry", async () => {
+    vi.useFakeTimers();
+    const { native, states } = mockNative();
+    vi.mocked(native.terminate).mockImplementation((job) => {
+      states.find((current) => current.job === job)!.active = 0;
+      return true;
+    });
+    const outcome = launch().catch((error: unknown) => error);
+    states[0].drained = true;
+    const retire = captureFrontendBuildRetirement("C:/owned-frontend-test");
+    const first = retire();
+    let settled = false;
+    void first.then(() => { settled = true; });
+    await vi.advanceTimersByTimeAsync(599);
+    expect(settled).toBe(false);
+    expect(native.close).not.toHaveBeenCalled();
+    expect(existsSync(states[0].input.stdoutPath)).toBe(true);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(first).resolves.toBe(false);
+    expect(await outcome).toMatchObject({ message: expect.stringContaining("retirement was not confirmed") });
+    expect(native.close).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+    states[0].code = 1;
+    await expect(retire()).resolves.toBe(true);
+    expect(native.close).toHaveBeenCalledOnce();
+    expect(existsSync(states[0].input.stdoutPath)).toBe(false);
+  });
+
   it("terminates synchronously on abort and waits for real drain completion", async () => {
     vi.useFakeTimers();
     const { native, states } = mockNative();

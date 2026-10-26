@@ -8,6 +8,32 @@ const initial = {
 };
 
 describe("LauncherStateStore", () => {
+  it("retains pending main retirement across window closure and empty observations until verified", async () => {
+    const live = { status: { projectBundle: { id: "main", observedState: "open", backend: { pid: 42, port: 8000 } } }, branchInstances: { items: [] } };
+    const store = new LauncherStateStore(async () => initial, live);
+    const epoch = store.beginMainLifecycle("force-stop");
+    expect(store.markMainRetirementPending(epoch)).toBe(true);
+    store.updateWindowTruth({ workbench: null, instances: [] });
+    await store.refresh("empty_after_window_closed");
+    expect(store.snapshot().main).toMatchObject({ phase: "stopping", desiredState: "closed", pid: 42 });
+    expect(store.commitVerifiedMainClosed(epoch)).toBe(true);
+    expect(store.snapshot().main).toMatchObject({ observedState: "closed", phase: "steady", pid: 0 });
+    store.beginMainLifecycle("start");
+    expect(store.markMainRetirementPending(epoch)).toBe(false);
+    expect(store.commitVerifiedMainClosed(epoch)).toBe(false);
+  });
+
+  it("releases only the superseded retirement projection and reads the newer main identity", async () => {
+    const newer = { status: { projectBundle: { id: "main", desiredState: "open", observedState: "open", phase: "steady", backend: { pid: 99, port: 8000 } } }, branchInstances: { items: [] } };
+    const store = new LauncherStateStore(async () => newer, initial);
+    const epoch = store.beginMainLifecycle("force-stop");
+    store.markMainRetirementPending(epoch);
+    expect(store.releaseMainRetirementPending(epoch)).toBe(true);
+    await store.refresh("new_identity");
+    expect(store.snapshot().main).toMatchObject({ observedState: "open", phase: "steady", pid: 99 });
+    store.beginMainLifecycle("restart");
+    expect(store.releaseMainRetirementPending(epoch)).toBe(false);
+  });
   it("deduplicates refresh and publishes monotonic refreshing/fresh revisions", async () => {
     let resolveLoad!: (value: typeof initial) => void;
     const loader = vi.fn(() => new Promise<typeof initial>((resolve) => { resolveLoad = resolve; }));

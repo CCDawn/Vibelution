@@ -3,6 +3,13 @@ import { sameProjectRoot } from "./workbenchBackend.js";
 import type { GracefulWorkbenchShutdownResponse } from "./workbenchBackendRetire.js";
 import { captureTrackedWorkbenchJobRetirement } from "./workbenchJob.js";
 
+/** Trusted main-only close context; never decoded from renderer JSON. */
+export type WorkbenchCloseTiming = {
+  deadlineAt: number;
+  forceAt: number;
+  background?: { retireFrontendBuilds: () => Promise<boolean> };
+};
+
 export type FastWorkbenchCloseInput = {
   workspaceRoot: string;
   port: number;

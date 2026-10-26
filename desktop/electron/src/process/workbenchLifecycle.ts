@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import type { WorkbenchCloseTiming } from "./fastWorkbenchClose.js";
 import { join } from "node:path";
 
 import {
@@ -60,7 +61,7 @@ export type RunWorkbenchLifecycleInput = {
   operation: WorkbenchLifecycleOperation;
   /** Only explicit operator restarts set this; forwarded and automatic restarts remain protected. */
   interruptActiveWork?: boolean;
-  fastCloseTiming?: { deadlineAt: number; forceAt: number };
+  fastCloseTiming?: WorkbenchCloseTiming;
   controlToken?: string;
   spawnImpl?: WorkbenchBackendSpawn;
   signal?: AbortSignal;

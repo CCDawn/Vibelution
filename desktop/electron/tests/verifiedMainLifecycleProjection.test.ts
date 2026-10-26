@@ -3,10 +3,25 @@ import { describe, expect, it } from "vitest";
 import {
   projectVerifiedMainClosedBranches,
   projectVerifiedMainClosedStatus,
+  projectPendingMainRetirementBranches,
+  projectPendingMainRetirementStatus,
   retainCurrentMainBranch,
 } from "../src/state/verifiedMainLifecycleProjection.js";
 
 describe("verified main close projection", () => {
+  it("projects pending retirement without clearing any original resource evidence or peers", () => {
+    const source = { projectBundle: { backend: { pid: 42, alive: true }, browser: { windowPid: 43 } },
+      lifecycleProof: { components: [{ id: "backend", pid: 42 }] } };
+    const before = structuredClone(source);
+    expect(projectPendingMainRetirementStatus(source)).toMatchObject({ phase: "stopping", desiredState: "closed",
+      projectBundle: { phase: "stopping", backend: { pid: 42, alive: true }, browser: { windowPid: 43 } },
+      lifecycleProof: { phase: "stopping", components: [{ id: "backend", pid: 42 }] } });
+    expect(source).toEqual(before);
+    const peer = { id: "peer", current: false, runtime: { lifecycleState: "running" } };
+    const branches = projectPendingMainRetirementBranches({ items: [{ id: "main", current: true, pids: { backend: 42 } }, peer] }) as { items: unknown[] };
+    expect(branches.items[0]).toMatchObject({ phase: "stopping", startable: false, pids: { backend: 42 } });
+    expect(branches.items[1]).toBe(peer);
+  });
   it("clones main's status and clears live components while retaining static frontend readiness", () => {
     const source = {
       projectBundle: {

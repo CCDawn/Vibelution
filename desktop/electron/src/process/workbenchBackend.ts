@@ -39,7 +39,8 @@ import {
 } from "./resolveWorkbenchPortOwner.js";
 import { knownPidIsAlive, observeMainLineWorkbench, probeTcpConnect } from "../lifecycle/mainLine/observation.js";
 import { captureTrackedWorkbenchJobRetirement, closeTrackedWorkbenchJob, getTrackedWorkbenchJobPid, hasTrackedWorkbenchJob, spawnTrackedWorkbenchProcess, terminateTrackedWorkbenchJob } from "./workbenchJob.js";
-import { closeOwnedWorkbenchFast } from "./fastWorkbenchClose.js";
+import { closeOwnedWorkbenchFast, type WorkbenchCloseTiming } from "./fastWorkbenchClose.js";
+import { getBackgroundWorkbenchRetirement, startBackgroundWorkbenchRetirement } from "./backgroundWorkbenchRetirement.js";
 import {
   BACKEND_HEALTH_HTTP_TIMEOUT_MS,
   defaultFetchWorkbenchHealth,
@@ -120,7 +121,8 @@ export type ExecuteMainLineWorkbenchInput = {
   expectedIdentities?: Readonly<Record<string, PythonProcessIdentity>>;
   controlToken?: string;
   /** Internal explicit window-close budget; never accepted from renderer JSON. */
-  fastCloseTiming?: { deadlineAt: number; forceAt: number };
+  fastCloseTiming?: WorkbenchCloseTiming;
+  captureRetirement?: typeof captureTrackedWorkbenchJobRetirement;
   /** Explicit operator restart consent to pause active work through graceful shutdown. */
   interruptActiveWork?: boolean;
   gracefulShutdown?: typeof requestGracefulWorkbenchShutdown;
@@ -426,11 +428,15 @@ function liveUnverifiedBrowserWindowHandles(
   return [...handles].sort((left, right) => right - left);
 }
 
-export function readLauncherStateFile(path: string): WorkbenchBackendState {
+export function readLauncherStateFile(path: string, options: { required?: boolean } = {}): WorkbenchBackendState {
   try {
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    const content = readFileSync(path, "utf8");
+    if (options.required && content.length > 1024 * 1024) throw new Error("State is oversized.");
+    const parsed = JSON.parse(content) as unknown;
+    if (!isRecord(parsed) && options.required) throw new Error("State must be an object.");
     return isRecord(parsed) ? parsed : {};
   } catch {
+    if (options.required) throw new Error("Launcher retirement state is unavailable.");
     return {};
   }
 }
@@ -566,7 +572,8 @@ export async function mainLineBackendIsReusable(
 }
 
 export async function writeLauncherStateFile(
-  path: string, state: WorkbenchBackendState, signal?: AbortSignal
+  path: string, state: WorkbenchBackendState, signal?: AbortSignal,
+  isCurrent?: () => boolean
 ): Promise<void> {
   signal?.throwIfAborted();
   mkdirSync(dirname(path), { recursive: true });
@@ -584,6 +591,7 @@ export async function writeLauncherStateFile(
       try {
         // Check + replace stay in one event-loop turn so a superseding intent
         // cannot interleave while an OS rename is still queued.
+        if (isCurrent && !isCurrent()) throw new Error("Workbench lifecycle state write was superseded.");
         renameSync(tmp, path);
         break;
       } catch (error: unknown) {
@@ -658,7 +666,9 @@ export type WorkbenchRuntimeStateCleanupResult = {
  * to be gone. Keeping a stale state/ports file makes the branch projection
  * report a dead backend as alive and leases its old port on the next start.
  */
-export function clearWorkbenchLauncherRuntimeState(workspaceRoot: string): WorkbenchRuntimeStateCleanupResult {
+export function clearWorkbenchLauncherRuntimeState(
+  workspaceRoot: string, options: { preservePath?: string } = {}
+): WorkbenchRuntimeStateCleanupResult {
   const canonicalRuntimeHome = resolveCanonicalRuntimeHome(workspaceRoot);
   const runtimeDirs = new Set<string>([
     join(resolveCheckoutRuntimeHome(workspaceRoot), "launcher"),
@@ -672,6 +682,7 @@ export function clearWorkbenchLauncherRuntimeState(workspaceRoot: string): Workb
   let removedCount = 0;
   let failedCount = 0;
   for (const path of paths) {
+    if (options.preservePath && resolvePath(path).toLowerCase() === resolvePath(options.preservePath).toLowerCase()) continue;
     try {
       unlinkSync(path);
       removedCount += 1;
@@ -1508,6 +1519,13 @@ export async function executeMainLineWorkbench(
     : shutdownOwner;
   const operation = input.operation;
   const commandId = input.command.commandId;
+  const pendingRetirement = getBackgroundWorkbenchRetirement(input.workspaceRoot);
+  if (pendingRetirement?.status === "pending") {
+    return {
+      schemaVersion: 1, accepted: ["stop", "force-stop", "shutdown"].includes(operation), operation, commandId,
+      code: "backend_retiring", message: "Owned backend resources are still being reclaimed."
+    };
+  }
   const captureIdentity = input.captureProcessIdentity
     ?? ((captureInput: { pythonPath: string; workspaceRoot: string; pid: number; env?: NodeJS.ProcessEnv }) =>
       capturePythonProcessIdentity(captureInput));
@@ -1551,7 +1569,11 @@ export async function executeMainLineWorkbench(
         };
       }
     }
-    const previous = readState();
+    const previous = input.fastCloseTiming?.background
+      ? (input.readState ? input.readState() : readLauncherStateFile(statePath, { required: true })) : readState();
+    if (input.fastCloseTiming?.background && (!isRecord(previous) || Object.keys(previous).length === 0)) {
+      throw new Error("Launcher close admission state is unavailable.");
+    }
     const port = preferredWorkbenchPort({
       workspaceRoot: input.workspaceRoot,
       state: previous,
@@ -1560,11 +1582,88 @@ export async function executeMainLineWorkbench(
     const hasLiveBackendHandle = [previous.spawnPid, previous.backendLaunchPid, previous.backendPid]
       .some((pid) => (input.pidAlive ?? knownPidIsAlive)(Number(pid || 0)));
     if (input.fastCloseTiming && operation === "force-stop"
-      && (hasTrackedWorkbenchJob(input.workspaceRoot) || hasLiveBackendHandle)) {
+      && (input.fastCloseTiming.background || hasTrackedWorkbenchJob(input.workspaceRoot) || hasLiveBackendHandle)) {
       const daemonPid = (input.readDaemonPid ?? readDaemonPid)(input.workspaceRoot);
       if (daemonPid > 0 && (input.pidAlive ?? knownPidIsAlive)(daemonPid)) {
         return { schemaVersion: 1, accepted: false, operation, commandId,
           code: "backend_retire_incomplete", message: "A separate Runtime Manager daemon requires verified retirement." };
+      }
+      if (input.fastCloseTiming.background) {
+        // Capture ownership before the first await. Window and command deadlines
+        // must not discard this exact retirement identity or re-discover a PID.
+        const ownedPid = getTrackedWorkbenchJobPid(input.workspaceRoot)
+          || Number(previous.spawnPid || previous.backendLaunchPid || 0);
+        const captured = (input.captureRetirement ?? captureTrackedWorkbenchJobRetirement)(input.workspaceRoot, ownedPid);
+        const noRegisteredBackend = !hasTrackedWorkbenchJob(input.workspaceRoot)
+          && [previous.spawnPid, previous.backendLaunchPid, previous.backendPid].every((pid) => !Number(pid || 0));
+        const owned = captured ?? (noRegisteredBackend ? Object.assign(async () => true, { isCurrent: () => true }) : null);
+        if (!owned) return { schemaVersion: 1, accepted: false, operation, commandId,
+          code: "backend_retire_incomplete", message: "No captured native retirement identity is available." };
+        const retirementId = commandId;
+        const identityFields = ["spawnPid", "backendLaunchPid", "backendPid", "spawnCreateTime", "backendLaunchCreateTime",
+          "backendCreateTime", "spawnExecutable", "backendLaunchExecutable", "backendExecutable"] as const;
+        const readRetirementState = (): WorkbenchBackendState => {
+          const current = input.readState ? input.readState() : readLauncherStateFile(statePath, { required: true });
+          if (!isRecord(current) || !["closed", "open"].includes(String(current.desiredState || ""))
+            || typeof current.phase !== "string" || !current.phase) {
+            throw new Error("Launcher retirement observation is unavailable.");
+          }
+          if (!current.backgroundRetirementId && current.desiredState === "closed" && current.phase === "stopping") {
+            throw new Error("Launcher retirement request observation is unavailable.");
+          }
+          return current;
+        };
+        const isCurrent = (): boolean => {
+          const current = readRetirementState();
+          return current.backgroundRetirementId === retirementId && current.phase === "stopping"
+            && current.desiredState === "closed"
+            && preferredWorkbenchPort({ workspaceRoot: input.workspaceRoot, state: current,
+              envPort: input.targetEnvironment?.VIBELUTION_PORT ?? "" }) === port
+            && identityFields.every((field) => current[field] === previous[field]);
+        };
+        await writeState({ ...previous, desiredState: "closed", phase: "stopping",
+          backgroundRetirementId: retirementId, lastReason: "electron_background_retirement_pending",
+          lastSource: "electron_main", updatedAt: isoNow(input.now) });
+        let jobRetired = false;
+        let buildsRetired = false;
+        let fastAttempted = false;
+        const retireBuilds = input.fastCloseTiming.background.retireFrontendBuilds;
+        const timing = input.fastCloseTiming;
+        const retireCaptured = async (): Promise<boolean> => {
+          if (noRegisteredBackend && !captured) return true;
+          if (fastAttempted) return await owned();
+          fastAttempted = true;
+          // Keep the existing save/graceful-shutdown opportunity. After its
+          // bounded attempt, only this captured retirement may continue.
+          return await closeOwnedWorkbenchFast({ workspaceRoot: input.workspaceRoot, port,
+            spawnPid: ownedPid,
+            deadlineAt: timing.deadlineAt, forceAt: timing.forceAt,
+            controlToken: input.controlToken, captureRetirement: () => owned });
+        };
+        startBackgroundWorkbenchRetirement({
+          workspaceRoot: input.workspaceRoot, requestId: retirementId, isCurrent,
+          retireCaptured: async () => {
+            [jobRetired, buildsRetired] = await Promise.all([
+              jobRetired ? true : retireCaptured(), buildsRetired ? true : retireBuilds()
+            ]);
+            return jobRetired && buildsRetired;
+          },
+          portClosed: async () => !(await (input.connect ? input.connect(port, host) : probeTcpConnect(port, host, 100))),
+          commitClosed: async () => {
+            if (!isCurrent()) return false;
+            const closed = { ...readRetirementState(), desiredState: "closed", observedState: "closed", phase: "steady",
+              failureMessage: "", lifecycleWarning: "", backgroundRetirementId: "",
+              backendPid: 0, backendLaunchPid: 0, spawnPid: 0, backendCreateTime: 0, backendExecutable: "",
+              backendLaunchCreateTime: 0, backendLaunchExecutable: "", spawnCreateTime: 0, spawnExecutable: "",
+              lastReason: "electron_background_retirement_verified", lastSource: "electron_main", updatedAt: isoNow(input.now) };
+            clearWorkbenchLauncherRuntimeState(input.workspaceRoot, { preservePath: statePath });
+            if (input.writeState) await input.writeState(closed);
+            else await writeLauncherStateFile(statePath, closed, undefined, isCurrent);
+            return true;
+          }
+        });
+        return { ...accepted(operation, commandId), code: "backend_retiring",
+          message: "The window may close; owned backend resources are being reclaimed." };
       }
       const retired = await closeOwnedWorkbenchFast({
         workspaceRoot: input.workspaceRoot,

@@ -1,6 +1,8 @@
 import {
   projectVerifiedMainClosedBranches,
   projectVerifiedMainClosedStatus,
+  projectPendingMainRetirementBranches,
+  projectPendingMainRetirementStatus,
   retainCurrentMainBranch,
 } from "./verifiedMainLifecycleProjection.js";
 
@@ -330,6 +332,7 @@ export class LauncherStateStore {
   private queuedRefreshPromise: Promise<LauncherStateSnapshotV1> | null = null;
   private mainLifecycleEpoch = 0;
   private observedMainEpoch = -1;
+  private pendingMainRetirementEpoch: number | null = null;
 
   constructor(
     private readonly loader: LauncherStateLoader,
@@ -380,15 +383,43 @@ export class LauncherStateStore {
 
   beginMainLifecycle(_operation: string): number {
     this.mainLifecycleEpoch += 1;
+    this.pendingMainRetirementEpoch = null;
     this.freshness = "stale";
     this.staleReason = "main_lifecycle_changed";
     this.publish();
     return this.mainLifecycleEpoch;
   }
 
+  markMainRetirementPending(expectedEpoch: number): boolean {
+    if (expectedEpoch !== this.mainLifecycleEpoch) return false;
+    this.pendingMainRetirementEpoch = expectedEpoch;
+    this.sources = { ...this.sources,
+      status: projectPendingMainRetirementStatus(this.sources.status),
+      branchInstances: projectPendingMainRetirementBranches(this.sources.branchInstances) };
+    this.freshness = "stale";
+    this.staleReason = "backend_retirement_pending";
+    this.publish();
+    return true;
+  }
+
+  isMainLifecycleCurrent(expectedEpoch: number): boolean {
+    return expectedEpoch === this.mainLifecycleEpoch;
+  }
+
+  releaseMainRetirementPending(expectedEpoch: number): boolean {
+    if (expectedEpoch !== this.mainLifecycleEpoch || this.pendingMainRetirementEpoch !== expectedEpoch) return false;
+    this.pendingMainRetirementEpoch = null;
+    this.freshness = "stale";
+    this.staleReason = "background_retirement_superseded";
+    this.publish();
+    void this.refresh("background_retirement_superseded").catch(() => undefined);
+    return true;
+  }
+
   /** Call only after the owning close transaction verifies backend/port retirement. */
   commitVerifiedMainClosed(expectedEpoch: number): boolean {
     if (expectedEpoch !== this.mainLifecycleEpoch) return false;
+    this.pendingMainRetirementEpoch = null;
     this.mainLifecycleEpoch += 1;
     this.observedMainEpoch = this.mainLifecycleEpoch;
     this.freshness = "fresh";
@@ -447,7 +478,7 @@ export class LauncherStateStore {
         const branchInstances = unwrapSource(sources.branchInstances);
         const freshness = sources.freshness === undefined ? null : unwrapSource(sources.freshness);
         const cleanup = sources.cleanup === undefined ? null : unwrapSource(sources.cleanup);
-        const mainChanged = mainLifecycleEpoch !== this.mainLifecycleEpoch;
+        const mainChanged = mainLifecycleEpoch !== this.mainLifecycleEpoch || this.pendingMainRetirementEpoch !== null;
         this.sources = {
           ...this.sources,
           ...(status.ok && !mainChanged ? { status: status.value } : {}),

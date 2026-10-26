@@ -42,6 +42,8 @@ export type WorkbenchJobNative = {
   terminate: (job: WorkbenchJobHandle) => boolean;
   activeCount: (job: WorkbenchJobHandle) => number;
   drainStatus: (job: WorkbenchJobHandle) => WorkbenchJobDrainStatus;
+  /** Null until the root process handle is signaled. Optional only for trusted legacy test overrides. */
+  exitCode?: (job: WorkbenchJobHandle) => number | null;
   close: (job: WorkbenchJobHandle) => void;
 };
 
@@ -59,6 +61,13 @@ const tracked = new Map<string, TrackedJob>();
 let nativeOverride: WorkbenchJobNative | null | undefined;
 let nativeModule: WorkbenchJobNative | null = null;
 let reapTimer: ReturnType<typeof setInterval> | null = null;
+
+function isJobIdle(job: WorkbenchJobHandle, native: WorkbenchJobNative, drain?: WorkbenchJobDrainStatus): boolean {
+  // Job accounting may reach zero before the root handle is actually signaled.
+  return native.activeCount(job) === 0
+    && (drain ?? native.drainStatus(job)).complete
+    && (native.exitCode === undefined || native.exitCode(job) !== null);
+}
 
 function forgetJob(current: TrackedJob): void {
   current.released = true;
@@ -78,7 +87,7 @@ function ensureReaper(): void {
       if (current.retiring) continue;
       try {
         const status = current.native.drainStatus(current.job);
-        if (current.native.activeCount(current.job) === 0 && status.complete) {
+        if (isJobIdle(current.job, current.native, status)) {
           reportDrainIssues(current.workspaceRoot, status);
           current.native.close(current.job);
           forgetJob(current);
@@ -131,7 +140,11 @@ export function loadWorkbenchJobNative(): WorkbenchJobNative {
       `Windows workbench job addon is not built. Run npm run build:job in desktop/electron. Looked in ${addonCandidates().join(", ")}`
     );
   }
-  nativeModule = requireNative(found) as WorkbenchJobNative;
+  const loaded = requireNative(found) as WorkbenchJobNative;
+  if (typeof loaded.exitCode !== "function") {
+    throw new Error("workbench job native binding does not expose root process exit status; rebuild the desktop addon");
+  }
+  nativeModule = loaded;
   return nativeModule;
 }
 
@@ -165,8 +178,7 @@ export function spawnTrackedWorkbenchProcess(
   if (previous) {
     let idle = false;
     try {
-      idle = previous.native.activeCount(previous.job) === 0
-        && previous.native.drainStatus(previous.job).complete;
+      idle = isJobIdle(previous.job, previous.native);
     } catch {
       throw new Error("previous workbench job retirement could not be inspected");
     }
@@ -217,13 +229,13 @@ async function waitUntilIdle(job: WorkbenchJobHandle, native: WorkbenchJobNative
   const deadline = Date.now() + JOB_TERMINATE_WAIT_MS;
   while (Date.now() < deadline) {
     if (isReleased?.()) return true;
-    if (native.activeCount(job) === 0 && native.drainStatus(job).complete) {
+    if (isJobIdle(job, native)) {
       return true;
     }
     await delay(JOB_TERMINATE_POLL_MS);
   }
   if (isReleased?.()) return true;
-  return native.activeCount(job) === 0 && native.drainStatus(job).complete;
+  return isJobIdle(job, native);
 }
 
 export async function terminateTrackedWorkbenchJob(workspaceRoot: string, expectedPid?: number): Promise<boolean> {

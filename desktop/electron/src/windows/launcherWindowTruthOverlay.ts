@@ -116,7 +116,9 @@ function overlayStatusWindowTruth(
       bundle.observedState = "partial";
       bundle.lifecycleConsistency = "browser_missing";
     } else {
-      bundle.observedState = "closed";
+      const retirementPending = String(bundle.phase || "").toLowerCase() === "stopping"
+        && String(bundle.desiredState || "").toLowerCase() === "closed";
+      bundle.observedState = retirementPending ? "partial" : "closed";
       if (["browser_missing", "backend_missing"].includes(String(bundle.lifecycleConsistency || "").toLowerCase())) {
         bundle.lifecycleConsistency = "";
       }

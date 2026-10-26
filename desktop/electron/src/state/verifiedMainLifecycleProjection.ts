@@ -3,6 +3,31 @@ function record(value: unknown): Record<string, unknown> {
     ? value as Record<string, unknown> : {};
 }
 
+/** A close intent is not a stopped-resource proof; retain every observed handle. */
+export function projectPendingMainRetirementStatus(value: unknown): unknown {
+  const status = record(value);
+  const bundle = record(status.projectBundle);
+  const pending = { desiredState: "closed", phase: "stopping", overallState: "stopping",
+    lifecycleConsistency: "stopping", statusLine: "正在回收后台进程，尚未确认停止。" };
+  return { ...status, ...pending,
+    projectBundle: { ...bundle, ...pending },
+    lifecycleProof: { ...record(status.lifecycleProof), ...pending, summary: pending.statusLine }
+  };
+}
+
+export function projectPendingMainRetirementBranches(value: unknown): unknown {
+  const payload = record(value);
+  if (!Array.isArray(payload.items)) return value;
+  return { ...payload, items: payload.items.map((raw) => {
+    const item = record(raw);
+    if (item.current !== true) return raw;
+    return { ...item, desiredState: "closed", phase: "stopping", startable: false,
+      startBlockReason: "正在回收后台进程，尚未确认停止。",
+      runtime: { ...record(item.runtime), lifecycleState: "stopping", desiredState: "closed", phase: "stopping", registryStatus: "stopping" }
+    };
+  }) };
+}
+
 function closedComponents(value: unknown, proof = false): unknown {
   if (!Array.isArray(value)) return value;
   return value.map((component) => {

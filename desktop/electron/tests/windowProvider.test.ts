@@ -192,6 +192,112 @@ const desktopPaths: DesktopPaths = {
   userDataRoot: "C:/Users/17533/AppData/Roaming/Vibelution"
 };
 
+describe("main Workbench hidden presentation", () => {
+  function harness(window = new FakeWindow(42, "", 4242)) {
+    const create = vi.fn(() => window);
+    const report = vi.fn();
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createWorkbenchWindow: create,
+      reportState: report
+    });
+    return { provider, window, create, report };
+  }
+
+  it("loads and reports a ready hidden window without restore/show/focus, then presents a normal open", async () => {
+    const h = harness();
+    h.window.minimized = true;
+    const state = await h.provider.openOrFocusWorkbench("http://127.0.0.1:8002/", { present: false });
+    expect(h.window.loadedUrls).toEqual(["http://127.0.0.1:8002/"]);
+    expect(h.window.showCount).toBe(0);
+    expect(h.window.focusCount).toBe(0);
+    expect(h.window.restoreCount).toBe(0);
+    expect(state).toMatchObject({ open: true, focused: false, url: "http://127.0.0.1:8002/", windowId: 42 });
+    expect(h.report).toHaveBeenCalledWith(state);
+    expect(h.provider.sendToWorkbench("ready-probe", {})).toBe(true);
+
+    await h.provider.openOrFocusWorkbench();
+    expect(h.create).toHaveBeenCalledOnce();
+    expect(h.window.loadedUrls).toHaveLength(1);
+    expect(h.window.restoreCount).toBe(1);
+    expect(h.window.showCount).toBe(1);
+    expect(h.window.focusCount).toBe(1);
+  });
+
+  it("keeps hidden presentation through queued navigation and does not make it sticky", async () => {
+    const h = harness();
+    let release!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    const load = h.window.loadURL.bind(h.window);
+    const navigation = vi.spyOn(h.window, "loadURL").mockImplementationOnce(async url => {
+      await pending;
+      await load(url);
+    });
+    const first = h.provider.openOrFocusWorkbench("http://127.0.0.1:8000/", { present: false });
+    await vi.waitFor(() => expect(navigation).toHaveBeenCalledOnce());
+    const second = h.provider.openOrFocusWorkbench("http://127.0.0.1:8002/", { present: false });
+    release();
+    await Promise.all([first, second]);
+    expect(h.window.loadedUrls).toEqual(["http://127.0.0.1:8000/", "http://127.0.0.1:8002/"]);
+    expect(h.window.showCount).toBe(0);
+    expect(h.window.focusCount).toBe(0);
+    expect(h.report.mock.calls.map(([state]) => state.url)).toEqual(["http://127.0.0.1:8000/", "http://127.0.0.1:8002/"]);
+    await h.provider.openOrFocusWorkbench();
+    expect(h.window.showCount).toBe(1);
+    expect(h.window.focusCount).toBe(1);
+  });
+
+  it("does not hide or close an already presented window for a same-origin hidden open", async () => {
+    const h = harness();
+    await h.provider.openOrFocusWorkbench();
+    const hideCount = h.window.hideCount;
+    const state = await h.provider.openOrFocusWorkbench(undefined, { present: false });
+    expect(h.window.showCount).toBe(1);
+    expect(h.window.focusCount).toBe(1);
+    expect(h.window.hideCount).toBe(hideCount);
+    expect(h.window.closeCount).toBe(0);
+    expect(h.window.destroyCount).toBe(0);
+    expect(state.focused).toBe(true);
+  });
+
+  it("keeps a failed hidden navigation and its error page unpresented, with normal retry still presenting", async () => {
+    const h = harness(new FakeWindow(42, "", 4242, true, new Error("ERR_CONNECTION_REFUSED")));
+    await expect(h.provider.openOrFocusWorkbench("http://127.0.0.1:8002/", { present: false })).rejects.toThrow("ERR_CONNECTION_REFUSED");
+    expect(h.window.loadedUrls).toHaveLength(2);
+    expect(isWorkbenchErrorPageUrl(h.window.loadedUrls[1])).toBe(true);
+    expect(h.window.showCount).toBe(0);
+    expect(h.window.focusCount).toBe(0);
+    expect(h.window.destroyCount).toBe(0);
+    expect(h.report).toHaveBeenCalledWith(expect.objectContaining({ open: true, focused: false }));
+    expect(h.provider.sendToWorkbench("not-ready", {})).toBe(false);
+    h.window.navigationError = null;
+    await h.provider.openOrFocusWorkbench();
+    expect(h.window.showCount).toBe(1);
+    expect(h.window.focusCount).toBe(1);
+    expect(h.window.loadedUrls[2]).toBe("http://127.0.0.1:8002/");
+  });
+
+  it("allows an explicitly hidden error status without changing the default error presentation", async () => {
+    const h = harness();
+    const input = { origin: "http://127.0.0.1:8000", detail: "backend is not ready" };
+    const state = await h.provider.presentWorkbenchErrorStatus({ ...input, present: false });
+    expect(isWorkbenchErrorPageUrl(h.window.loadedUrls[0])).toBe(true);
+    expect(state).toMatchObject({ open: true, focused: false });
+    expect(h.report).toHaveBeenCalledWith(state);
+    expect(h.window.showCount).toBe(0);
+    expect(h.window.focusCount).toBe(0);
+    await h.provider.presentWorkbenchErrorStatus(input);
+    expect(h.window.showCount).toBe(1);
+    expect(h.window.focusCount).toBe(1);
+  });
+
+  it.each(["https://example.com/", "file:///C:/private.html", "javascript:alert(1)"])("still rejects an unsafe hidden target %s before creating a window", async url => {
+    const h = harness();
+    await expect(h.provider.openOrFocusWorkbench(url, { present: false })).rejects.toThrow();
+    expect(h.create).not.toHaveBeenCalled();
+    expect(h.report).not.toHaveBeenCalled();
+  });
+});
+
 describe("Electron window provider state", () => {
   it("binds branch IPC and notification focus, click and attention to its registered WebContents", async () => {
     const main = new FakeWindow(42, "", 4242);
