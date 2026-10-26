@@ -292,7 +292,8 @@ def test_native_status_rereads_operator_profile_and_keeps_identity_on_read_failu
     result = facade.identity()
     assert result["assistant"] == assistant
     assert result["operatorProfile"] == {"displayName": "Second", "avatarPreset": "codex"}
+    assert result["operatorAssetsVersion"] == 1
     def unavailable(*args):
         raise ValueError("PRIVATE_PATH_OR_CONFIG_SENTINEL")
     monkeypatch.setattr(public_config, "read_existing_config_snapshot", unavailable)
-    assert facade.identity() == {"assistant": assistant, "settings": {"ok": True}}
+    assert facade.identity() == {"assistant": assistant, "settings": {"ok": True}, "operatorAssetsVersion": 1}
