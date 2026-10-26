@@ -38,6 +38,25 @@ class ProjectLifecycle(MainControlProject):
     request_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
 
 
+class LauncherTheme(Parameters):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    theme: Literal["dark", "light"]
+
+
+class OperatorImageImport(Parameters):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    kind: Literal["avatar", "background"]
+
+
+_APPEARANCE_SCHEMAS = {"launcher_theme_get": Parameters, "launcher_theme_set": LauncherTheme,
+                       "operator_image_upload": OperatorImageImport}
+_APPEARANCE_HELP = {
+    "launcher_theme_get": "读取Launcher当前持久化的明暗主题；仅Launcher同来源窗口，不代表各项目HTTP页面的独立主题。",
+    "launcher_theme_set": "设置Launcher为light或dark并等待页面核验持久化与自动生效，同来源窗口同步；沿用现有主题存储，不修改各项目HTTP页面的独立偏好。",
+    "operator_image_upload": "经原生审批打开单张图片选择框，用户选择PNG/JPEG/WebP后自动上传并应用为头像avatar或壁纸background，无须进入设置页；取消不修改。模型不得传文件路径、URL或图片内容。等待最多120秒，unknown/unavailable时先读operator_image_options/当前外观，不自动重复打开选择框。重复人工导入可能新增资源。",
+}
+
+
 _MAIN_SCHEMAS = {"project_status": MainControlProject, "project_lifecycle": ProjectLifecycle,
                  "project_lifecycle_receipt": ProjectLifecycle}
 _MAIN_HELP = {
@@ -76,7 +95,7 @@ class AgentRead(Project):
 
 
 class ManagementReceipt(Project):
-    action: str = Field(pattern=r"^(?:agent_(create|update|avatar)|team_run|session_pin)$")
+    action: str = Field(pattern=r"^(?:agent_(create|update|avatar|archive)|team_run|session_pin)$")
     request_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$")
 
 
@@ -219,6 +238,10 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
     main_contracts = {key: {"action": key, "description": _MAIN_HELP[key],
         "parameters": model.model_json_schema(), "governed": key == "project_lifecycle"}
         for key, model in _MAIN_SCHEMAS.items()} if main_control is not None else {}
+    if main_control is not None and getattr(main_control, "appearance_enabled", False):
+        main_contracts.update({key: {"action": key, "description": _APPEARANCE_HELP[key],
+            "parameters": model.model_json_schema(), "governed": key == "operator_image_upload"}
+            for key, model in _APPEARANCE_SCHEMAS.items()})
     if action == "index":
         return _index_page(parameters, schemas, {**local, **main_contracts}, managed)
     if action == "describe":
@@ -242,7 +265,7 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
     if action not in {*schemas, *managed, *main_contracts}:
         raise ValueError("Unknown Launcher action; use index for supported operations")
     try:
-        schema = _MAIN_SCHEMAS[action] if action in main_contracts else managed[action][0] if action in managed else schemas[action]
+        schema = {**_MAIN_SCHEMAS, **_APPEARANCE_SCHEMAS}[action] if action in main_contracts else managed[action][0] if action in managed else schemas[action]
         args = schema.model_validate(parameters).model_dump(exclude_unset=action == "agent_update")
     except ValidationError as exc:
         raise ValueError("Action parameters do not match describe schema") from exc
@@ -250,12 +273,23 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
     if "project_id" in args and args["project_id"] not in projects:
         raise ValueError("Project is not authorized by Launcher")
     if action in main_contracts:
-        if action == "project_lifecycle" and governed is not True:
+        if action in {"project_lifecycle", "operator_image_upload"} and governed is not True:
             return {"ok": False, "status": "approval_required", "action": action, "tool": "personal_assistant_manage_tool"}
-        request = {"projectId": args["project_id"], "operation": args.get("operation", "status")}
-        if "request_id" in args:
-            request["requestId"] = args["request_id"]
-        coroutine = main_control.invoke(action, request)
+        if action in _APPEARANCE_SCHEMAS:
+            if not runtime:
+                raise ValueError("Launcher native tool identity is required")
+            request = {"operation": "read"} if action == "launcher_theme_get" else {"operation": "set", "theme": args["theme"]} if action == "launcher_theme_set" else {"operation": "import", "kind": args["kind"]}
+        else:
+            request = {"projectId": args["project_id"], "operation": args.get("operation", "status")}
+            if "request_id" in args:
+                request["requestId"] = args["request_id"]
+        if action == "operator_image_upload":
+            turn_id = runtime.get("turnId")
+            if not isinstance(turn_id, str) or not turn_id.strip():
+                raise ValueError("Launcher native Turn identity is required")
+            coroutine = main_control.invoke(action, request, turn_id=turn_id)
+        else:
+            coroutine = main_control.invoke(action, request)
     elif action in managed:
         if managed[action][1]["governed"] and governed is not True:
             return {"ok": False, "status": "approval_required", "action": action, "tool": "personal_assistant_manage_tool"}
@@ -291,8 +325,10 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
     elif action == "receipt":
         coroutine = service.reconcile(args["dispatch_id"])
     try:
-        return asyncio.run_coroutine_threadsafe(coroutine, loop).result(timeout=25)
+        return asyncio.run_coroutine_threadsafe(coroutine, loop).result(timeout=125 if action == "operator_image_upload" else 25)
     except TimeoutError as exc:
+        if action in _APPEARANCE_SCHEMAS:
+            raise ValueError("Launcher外观操作尚未确认，请读取当前外观；不要自动重复上传或重新打开选择框。") from exc
         raise ValueError("原生请求尚未确认，请用原 dispatch_id 或 action/request_id 查询回执；不要更换 ID 重建对象。") from exc
     except DispatchError as exc:
         return {"ok": False, "code": exc.code, "message": str(exc)}

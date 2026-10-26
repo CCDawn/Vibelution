@@ -37,10 +37,17 @@ describe("themePreference", () => {
   it("persists and reads the selected theme", () => {
     const storage = memoryStorage();
 
-    writeStoredWorkbenchTheme("light", storage);
+    expect(writeStoredWorkbenchTheme("light", storage)).toBe(true);
 
     expect(storage.getItem(WORKBENCH_THEME_STORAGE_KEY)).toBe("light");
     expect(readStoredWorkbenchTheme(storage)).toBe("light");
+  });
+
+  it("reports inaccessible or unverified storage without throwing", () => {
+    expect(writeStoredWorkbenchTheme("dark", null)).toBe(false);
+    expect(writeStoredWorkbenchTheme("dark", { setItem() {}, getItem: () => "light" })).toBe(false);
+    expect(writeStoredWorkbenchTheme("dark", { setItem() { throw new Error("blocked"); }, getItem: () => null })).toBe(false);
+    expect(writeStoredWorkbenchTheme("dark", { setItem() {}, getItem() { throw new Error("blocked"); } })).toBe(false);
   });
 
   it("toggles between light and dark", () => {

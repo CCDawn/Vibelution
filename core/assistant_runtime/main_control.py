@@ -14,6 +14,8 @@ import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from . import appearance_protocol as appearance
+
 
 _OPERATIONS = {"start", "stop", "restart"}
 _ACTIONS = {"project_status", "project_lifecycle", "project_lifecycle_receipt"}
@@ -40,6 +42,8 @@ def _opaque(value, maximum):
 
 
 def _request(action, request):
+    if type(action) is str and action in appearance.APPEARANCE_ACTIONS:
+        return appearance.validate_request(action, request)
     if type(action) is not str or action not in _ACTIONS or type(request) is not dict:
         raise ValueError("Invalid main control request")
     status = action == "project_status"
@@ -54,6 +58,8 @@ def _request(action, request):
 
 def _result(action, request, result):
     """Reject unknown fields rather than copying errors, paths or credentials."""
+    if action in appearance.APPEARANCE_ACTIONS:
+        return appearance.validate_result(action, request, result)
     status = action == "project_status"
     required = {"schemaVersion", *request, "accepted", "code"} if status else {
         "schemaVersion", *request, "state", "code"}
@@ -92,15 +98,21 @@ class _Delivery:
     deadline: float
     future: asyncio.Future
     claimed: bool = False
+    image_admitted: bool = False
+    turn_id: str | None = None
 
 
 class MainControlBroker:
-    def __init__(self, project_ids: Callable, *, timeout_seconds=20, claim_seconds=10, max_pending=32):
+    def __init__(self, project_ids: Callable, *, timeout_seconds=20, claim_seconds=10, max_pending=32, appearance_enabled=False, image_timeout_seconds=appearance.IMAGE_SELECTION_SECONDS):
         if (not callable(project_ids) or type(max_pending) is not int or not 1 <= max_pending <= 128
                 or any(type(value) not in {int, float} or not math.isfinite(value) or value <= 0
                        for value in (timeout_seconds, claim_seconds))
                 or timeout_seconds > 20 or claim_seconds > 10):
             raise ValueError("Invalid main control transport limits")
+        if type(appearance_enabled) is not bool or type(image_timeout_seconds) not in {int, float} or not math.isfinite(image_timeout_seconds) or not 0 < image_timeout_seconds <= appearance.IMAGE_SELECTION_SECONDS:
+            raise ValueError("Invalid appearance transport limits")
+        self.appearance_enabled = appearance_enabled
+        self._image_timeout = image_timeout_seconds
         self._project_ids = project_ids
         self._timeout = timeout_seconds
         self._claim_seconds = claim_seconds
@@ -115,8 +127,13 @@ class MainControlBroker:
         except Exception:  # noqa: BLE001 - fail closed without exposing registry errors.
             return False
 
+    def _authorized_request(self, entry):
+        return self.appearance_enabled if entry.action in appearance.APPEARANCE_ACTIONS else self._authorized(entry.request["projectId"])
+
     @staticmethod
     def _unavailable(entry, code="control_unavailable"):
+        if entry.action in appearance.APPEARANCE_ACTIONS:
+            return appearance.unavailable(entry.action, entry.request)
         if entry.action == "project_status":
             return {"schemaVersion": 1, **entry.request, "accepted": False,
                     "code": "project_unavailable" if code == "project_unavailable" else "status_unavailable"}
@@ -125,7 +142,7 @@ class MainControlBroker:
     def _expire(self):
         now = asyncio.get_running_loop().time()
         for delivery_id, entry in list(self._pending.items()):
-            authorized = self._authorized(entry.request["projectId"])
+            authorized = self._authorized_request(entry)
             if entry.deadline <= now or not authorized:
                 self._pending.pop(delivery_id)
                 if not entry.future.done():
@@ -143,12 +160,18 @@ class MainControlBroker:
         for delivery_id in keep:
             self._queue.put_nowait(delivery_id)
 
-    async def invoke(self, action: str, request: dict) -> dict:
+    async def invoke(self, action: str, request: dict, *, turn_id: str | None = None) -> dict:
         captured = _request(action, request)
-        if not self._authorized(captured["projectId"]):
+        if turn_id is not None and not _opaque(turn_id, 160):
+            raise ValueError("Invalid appearance turn identity")
+        if action in appearance.APPEARANCE_ACTIONS:
+            if not self.appearance_enabled:
+                raise ValueError("Appearance control is not enabled by Launcher")
+        elif not self._authorized(captured["projectId"]):
             raise ValueError("Project is not authorized by Launcher")
         loop = asyncio.get_running_loop()
-        entry = _Delivery(action, captured, loop.time() + self._timeout, loop.create_future())
+        timeout = self._image_timeout if action == "operator_image_upload" else self._timeout
+        entry = _Delivery(action, captured, loop.time() + timeout, loop.create_future(), turn_id=turn_id)
         self._expire()
         if self._closed.is_set():
             return self._unavailable(entry)
@@ -158,7 +181,7 @@ class MainControlBroker:
         self._pending[delivery_id] = entry
         self._queue.put_nowait(delivery_id)
         try:
-            return await asyncio.wait_for(asyncio.shield(entry.future), timeout=self._timeout)
+            return await asyncio.wait_for(asyncio.shield(entry.future), timeout=timeout)
         except asyncio.TimeoutError:
             return self._unavailable(entry)
         finally:
@@ -192,8 +215,30 @@ class MainControlBroker:
             entry = self._pending.get(delivery_id)
             if entry is not None:
                 entry.claimed = True
-                return {"schemaVersion": 1, "request": {"deliveryId": delivery_id, "action": entry.action, **entry.request}}
+                remaining = {"timeoutMs": max(1, math.floor((entry.deadline - loop.time()) * 1000))} if entry.action == "operator_image_upload" else {}
+                return {"schemaVersion": 1, "request": {"deliveryId": delivery_id, "action": entry.action, **entry.request, **remaining}}
         return empty
+
+    def cancel_image_imports(self, turn_id: str) -> None:
+        """A successful native stop retires only that Turn's unadmitted chooser."""
+        for key, entry in list(self._pending.items()):
+            if entry.action == "operator_image_upload" and entry.turn_id == turn_id and not entry.image_admitted:
+                self._pending.pop(key)
+                if not entry.future.done():
+                    entry.future.set_result({"schemaVersion":1, **entry.request, "code":"cancelled", "verified":False})
+        self._compact_queue()
+
+    def admit_image_import(self, delivery_id: str, kind: str) -> bool:
+        """One live chooser result may enter the canonical writer; no upload replay."""
+        if type(delivery_id) is not str or re.fullmatch(r"[0-9a-f]{32}", delivery_id) is None or kind not in {"avatar", "background"}:
+            return False
+        self._expire()
+        entry = self._pending.get(delivery_id)
+        if (entry is None or not self.appearance_enabled or self._closed.is_set() or not entry.claimed
+                or entry.action != "operator_image_upload" or entry.request["kind"] != kind or entry.image_admitted):
+            return False
+        entry.image_admitted = True
+        return True
 
     def settle(self, delivery_id: str, result: dict) -> bool:
         if type(delivery_id) is not str or re.fullmatch(r"[0-9a-f]{32}", delivery_id) is None:

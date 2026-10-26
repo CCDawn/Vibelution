@@ -2,7 +2,8 @@
 
 The caller owns the source allowlist. This module enforces physical containment,
 rejects links, and holds every directory from the drive root through the target
-without write/delete sharing until enumeration or reading has finished.
+without delete sharing until the operation has finished. Source reads also deny
+write sharing; an explicit directory writer lease permits child replacement.
 """
 from __future__ import annotations
 
@@ -18,6 +19,7 @@ _DIRECTORY = 0x10
 _REPARSE = 0x400
 _GENERIC_READ = 0x80000000
 _SHARE_READ = 1
+_SHARE_WRITE = 2
 _OPEN_EXISTING = 3
 _BACKUP_SEMANTICS = 0x02000000
 _OPEN_REPARSE_POINT = 0x00200000
@@ -111,7 +113,9 @@ def _verify(api, handle, path: Path, *, directory: bool) -> _FileInformation:
 
 
 @contextmanager
-def _locked_source(root: Path, path: Path, *, directory: bool) -> Iterator[tuple]:
+def _locked_source(
+    root: Path, path: Path, *, directory: bool, allow_child_replacement: bool = False,
+) -> Iterator[tuple]:
     root, path = _validated_paths(root, path)
     api = _api()
     handles = []
@@ -121,11 +125,12 @@ def _locked_source(root: Path, path: Path, *, directory: bool) -> Iterator[tuple
     try:
         for current in chain:
             is_directory = current != path or directory
+            share_mode = _SHARE_READ | (_SHARE_WRITE if is_directory and allow_child_replacement else 0)
             handle = api.CreateFileW(
                 # READ_ATTRIBUTES alone does not participate in Windows sharing
                 # checks strongly enough to prevent a directory rename.
                 str(current), _GENERIC_READ,
-                _SHARE_READ, None, _OPEN_EXISTING,
+                share_mode, None, _OPEN_EXISTING,
                 _OPEN_REPARSE_POINT | _BACKUP_SEMANTICS, None,
             )
             if handle == _INVALID_HANDLE or handle is None:
@@ -139,9 +144,18 @@ def _locked_source(root: Path, path: Path, *, directory: bool) -> Iterator[tuple
 
 
 @contextmanager
-def lock_source_directory(root: Path, path: Path) -> Iterator[None]:
-    """Keep a verified directory chain locked while the caller uses scandir."""
-    with _locked_source(root, path, directory=True):
+def lock_source_directory(
+    root: Path, path: Path, *, allow_child_replacement: bool = False,
+) -> Iterator[None]:
+    """Pin a verified directory chain against renames; reject initial reparse paths.
+
+    The default read lease denies write sharing. Explicit writer leases permit
+    atomic child-file replacement while still denying directory delete sharing.
+    This is namespace pinning, not a sandbox against every same-user mutation.
+    """
+    if type(allow_child_replacement) is not bool:
+        raise ValueError("Invalid directory lease mode.")
+    with _locked_source(root, path, directory=True, allow_child_replacement=allow_child_replacement):
         yield None
 
 

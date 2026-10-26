@@ -1,11 +1,13 @@
+import { isAppearanceAction, parseAppearanceClaim, appearanceControlResult, type AppearanceMainControlRequest } from "./appearanceControlProtocol.js";
 /** Closed, generation-scoped transport over the existing private host connection.
  * It has no credentials, paths, scheduler, transcript or business-state writer.
  */
-export type MainControlRequest = {
+export type ProjectMainControlRequest = {
   deliveryId: string;
   projectId: string;
 } & ({ action: "project_status"; operation: "status"; requestId?: never }
   | { action: "project_lifecycle" | "project_lifecycle_receipt"; operation: "start" | "stop" | "restart"; requestId: string });
+export type MainControlRequest = ProjectMainControlRequest | AppearanceMainControlRequest;
 type PublicResult = Record<string, unknown>;
 const ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/;
 const forbiddenScheme = /^(?:https?|file|data|javascript|mailto|ftp|wss?):/i;
@@ -24,6 +26,7 @@ export function parseMainControlClaim(value: unknown): MainControlRequest | null
   if (!closed(value, ["schemaVersion", "request"]) || value.schemaVersion !== 1) return invalid();
   if (value.request === null) return null;
   const row = value.request;
+  if (row && typeof row === "object" && isAppearanceAction(Object.getOwnPropertyDescriptor(row,"action")?.value)) return parseAppearanceClaim(row);
   if (!closed(row, ["deliveryId", "action", "projectId", "operation"], ["requestId"])
     || typeof row.deliveryId !== "string" || !/^[a-f0-9]{32}$/.test(row.deliveryId) || !opaque(row.projectId, 160)) return invalid();
   const base = { deliveryId: row.deliveryId, projectId: row.projectId };
@@ -42,6 +45,7 @@ const CODES = new Set([
 const STATES = new Set(["completed", "queued", "rejected", "unknown", "not_found"]);
 /** Fail closed rather than relay arbitrary errors, native rows, paths or messages. */
 export function projectMainControlResult(request: MainControlRequest, value: unknown): PublicResult {
+  if (request.action === "launcher_theme_get" || request.action === "launcher_theme_set" || request.action === "operator_image_upload") return appearanceControlResult(request,value);
   const status = request.action === "project_status";
   const base = { schemaVersion: 1, projectId: request.projectId, operation: request.operation,
     ...(!status ? { requestId: request.requestId } : {}) };
@@ -76,7 +80,7 @@ export async function runMainControlPump(options: {
   signal: AbortSignal;
   isCurrent: () => boolean;
   invoke: (path: string, method: "GET" | "POST", body?: object) => Promise<unknown>;
-  onRequest: (request: MainControlRequest) => Promise<unknown>;
+  onRequest: (request: MainControlRequest, signal?: AbortSignal) => Promise<unknown>;
   onFailure: () => void;
 }): Promise<void> {
   let failed = false;
@@ -93,7 +97,11 @@ export async function runMainControlPump(options: {
         active.add(request.deliveryId);
         try {
           let value: unknown;
-          try { value = await options.onRequest(request); }
+          try {
+            if (request.action === "operator_image_upload") value = await options.onRequest(request, AbortSignal.any([options.signal,AbortSignal.timeout(request.timeoutMs)]));
+            else if (request.action === "launcher_theme_get" || request.action === "launcher_theme_set") value = await options.onRequest(request,options.signal);
+            else value = await options.onRequest(request);
+          }
           catch { /* Unknown result is queried by the same request ID, never re-executed here. */ }
           if (!current()) return;
           const result = projectMainControlResult(request, value);

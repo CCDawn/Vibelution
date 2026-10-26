@@ -7,8 +7,8 @@ import unicodedata
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-Scope = Literal["agents:read", "agents:create", "agents:update", "agents:avatar", "teams:run", "teams:read", "platform:describe", "sessions:read", "sessions:pin"]
-SCOPES = ("agents:read", "agents:create", "agents:update", "agents:avatar", "teams:run", "teams:read", "platform:describe", "sessions:read", "sessions:pin")
+Scope = Literal["agents:read", "agents:create", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "platform:describe", "sessions:read", "sessions:pin"]
+SCOPES = ("agents:read", "agents:create", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "platform:describe", "sessions:read", "sessions:pin")
 _AVATAR_EXTENSION = r"(?:[pP][nN][gG]|[jJ][pP][gG]|[jJ][pP][eE][gG]|[wW][eE][bB][pP]|svg)"
 _AVATAR_PATH_PATTERN = r"^workspace/avatars/[A-Za-z0-9_.-]+\." + _AVATAR_EXTENSION + "$"
 
@@ -102,6 +102,11 @@ class AgentUpdate(Closed):
     updates: AgentUpdates
 
 
+class AgentArchive(Closed):
+    agent_id: str = Field(min_length=1, max_length=128)
+    expected_config_revision: int = Field(ge=0)
+
+
 class AgentAvatar(Closed):
     agent_id: str = Field(min_length=1, max_length=128)
     expected_updated_at: str = Field(min_length=1, max_length=160)
@@ -133,8 +138,8 @@ class SessionPin(Closed):
     pinned: bool
 
 
-ACTION_MODELS = {"agent_create": AgentCreate, "agent_update": AgentUpdate, "agent_avatar": AgentAvatar, "team_run": TeamRun, "session_pin": SessionPin}
-ACTION_SCOPES = {"agent_create": "agents:create", "agent_update": "agents:update", "agent_avatar": "agents:avatar", "team_run": "teams:run", "session_pin": "sessions:pin"}
+ACTION_MODELS = {"agent_create": AgentCreate, "agent_update": AgentUpdate, "agent_avatar": AgentAvatar, "agent_archive": AgentArchive, "team_run": TeamRun, "session_pin": SessionPin}
+ACTION_SCOPES = {"agent_create": "agents:create", "agent_update": "agents:update", "agent_avatar": "agents:avatar", "agent_archive": "agents:archive", "team_run": "teams:run", "session_pin": "sessions:pin"}
 
 
 def contracts() -> dict:
@@ -142,11 +147,12 @@ def contracts() -> dict:
         "agent_create": "在目标项目创建普通低权限 Agent；必须选择显式模型，使用稳定 request_id，未知结果查询原回执。",
         "agent_update": "按原生 configRevision 更新普通 Agent 名称、对话模型、提示词或人物/任务档案；拒绝权限、身份与生命周期字段。",
         "agent_avatar": "按原生 updatedAt 使用已有头像候选或恢复默认；不接收 URL、文件上传或任意路径。",
+        "agent_archive": "每次经原生审批，按 configRevision 归档普通 Agent 并封存关联 Session；protected 或关联 Session 忙时拒绝。稳定 request_id，未知结果只查询原回执，不提供 purge、reset、restore 或 force。verified 表示首次原生回读已归档，完成回执保留历史状态。",
         "team_run": "创建内置 dev-team 并受理原生工作流运行；稳定 request_id，未知结果查询原回执，只有 resumeAllowed 才可用原参数续接。",
         "session_pin": "经原生审批置顶或取消置顶普通可见 Session；不改变当前选择。verified 表示首次确认时原生元数据符合目标状态，不证明某次调用的因果；完成回执保留历史状态，当前状态用 session_get 查询。未知结果查询原 action/request_id，不能换 ID 重放。",
     }
     return {name: {"action": name, "description": descriptions[name], "parameters": model.model_json_schema(),
-                   "governed": name in {"team_run", "session_pin"}, "scope": ACTION_SCOPES[name]} for name, model in ACTION_MODELS.items()}
+                   "governed": name in {"team_run", "session_pin", "agent_archive"}, "scope": ACTION_SCOPES[name]} for name, model in ACTION_MODELS.items()}
 
 
 class BindingResponse(Closed):
@@ -360,7 +366,7 @@ class SessionConfigComparisonResponse(Closed):
 
 class ReceiptResponse(Closed):
     status: Literal["completed", "unknown"]
-    action: Literal["agent_create", "agent_update", "agent_avatar", "team_run", "session_pin"]
+    action: Literal["agent_create", "agent_update", "agent_avatar", "agent_archive", "team_run", "session_pin"]
     requestId: str
     verified: bool
     reused: bool
@@ -421,7 +427,7 @@ class DocumentationDescribeQuery(Closed):
         return value.strip()
 
 
-DocumentationAction = Literal["session_list", "agent_create", "agent_update", "agent_avatar", "session_config_get", "session_config_compare", "session_pin"]
+DocumentationAction = Literal["session_list", "agent_create", "agent_update", "agent_avatar", "agent_archive", "session_config_get", "session_config_compare", "session_pin"]
 # This maps documentation to already-migrated semantic actions. It grants no
 # HTTP execution and deliberately advertises no other registered API operation.
 DOCUMENTATION_ACTIONS = {
@@ -429,6 +435,7 @@ DOCUMENTATION_ACTIONS = {
     ("POST", "/api/agents"): "agent_create",
     ("PATCH", "/api/agents/{agent_id}"): "agent_update",
     ("PATCH", "/api/agents/{agent_id}/avatar"): "agent_avatar",
+    ("DELETE", "/api/agents/{agent_id}"): "agent_archive",
     ("GET", "/api/v1/launcher-assistant-management/sessions/{session_id}/config"): "session_config_get",
     ("GET", "/api/v1/launcher-assistant-management/sessions/{session_id}/config-comparison"): "session_config_compare",
     ("POST", "/api/sessions/{session_id}/pin"): "session_pin",

@@ -1,14 +1,16 @@
-import { type BrowserWindow, screen } from "electron";
+import { type BrowserWindow, dialog, screen } from "electron";
 import type { DesktopPaths } from "../paths.js";
 import { createPetWindow } from "../windows/petWindow.js";
 import { desktopPetWindowExpandedBounds } from "../windows/petWindowBounds.js";
 import type { AssistantHost } from "./assistantHost.js";
 import { invokeAssistant, LAUNCHER_ASSISTANT_URL } from "./assistantBridge.js";
+import { AssistantThemeControl, type AssistantThemeInput, type AssistantThemeResult } from "./assistantThemeControl.js";
 
 /** Window visibility never owns the resident native runtime or remote tasks. */
 export class AssistantWindow {
   private window: BrowserWindow | null = null;
   private opening: Promise<void> | null = null;
+  private themeControl = new AssistantThemeControl();
   constructor(private paths: Pick<DesktopPaths, "desktopBundleRoot" | "userDataRoot">, private host: AssistantHost,
     private isQuitting: () => boolean = () => false) {}
 
@@ -31,6 +33,10 @@ export class AssistantWindow {
   private async create(show: boolean): Promise<void> {
     const window = createPetWindow(LAUNCHER_ASSISTANT_URL, this.paths, undefined, "launcher-assistant");
     this.window = window;
+    window.webContents.on("did-start-navigation", (_event, _url, _isInPlace, isMainFrame) => {
+      if (isMainFrame) this.themeControl.invalidate(window.webContents);
+    });
+    window.webContents.on("destroyed", () => this.themeControl.invalidate(window.webContents));
     window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
     window.webContents.on("will-navigate", (event, url) => {
       if (url !== LAUNCHER_ASSISTANT_URL) event.preventDefault();
@@ -45,6 +51,30 @@ export class AssistantWindow {
       if (!window.isDestroyed()) window.destroy();
       throw new Error("ASSISTANT_WINDOW_FAILED");
     }
+  }
+
+  requestTheme(input: AssistantThemeInput, signal?: AbortSignal): Promise<AssistantThemeResult> {
+    const window = this.window;
+    if (!window || window.isDestroyed()) return Promise.resolve({ schemaVersion: 1, operation: input.operation, code: "unavailable" });
+    return this.themeControl.request(window.webContents, input, signal);
+  }
+
+  acceptThemeResult(event: Parameters<typeof invokeAssistant>[0], payload: unknown): boolean {
+    return this.themeControl.acceptResult(event, payload);
+  }
+
+  /** Native user selection stays in main; paths never become renderer/model data. */
+  async chooseOperatorImage(kind: "avatar" | "background", signal?: AbortSignal): Promise<string | null> {
+    const window = this.window;
+    if (!window || window.isDestroyed() || signal?.aborted || !["avatar", "background"].includes(kind)) return null;
+    try {
+      const result = await dialog.showOpenDialog(window, {
+        title: kind === "avatar" ? "选择头像" : "选择背景图片",
+        properties: ["openFile"], filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp"] }],
+      });
+      if (signal?.aborted || window.isDestroyed() || this.window !== window || result.canceled || result.filePaths.length !== 1) return null;
+      return result.filePaths[0] || null;
+    } catch { return null; }
   }
 
   invoke(event: Parameters<typeof invokeAssistant>[0], payload: unknown): Promise<unknown> {

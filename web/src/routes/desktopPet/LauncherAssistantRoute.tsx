@@ -25,6 +25,7 @@ import { DEFAULT_PET_PREFERENCES } from "./desktopPetPreferences";
 import { ChatToolApprovalDialog } from "../chat/ChatToolApprovalDialog";
 import { toolApprovalRiskLabel } from "../chat/toolApprovalLabels";
 import { toolApprovalActionPreview, toolApprovalDisplayName } from "../chat/toolApprovalPreview";
+import { useLauncherThemeControl } from "./useLauncherThemeControl";
 import petStyles from "./DesktopAssistantRoute.styles";
 import {
   launcherAssistantActivity, launcherAssistantPollInterval, launcherAssistantSubmission,
@@ -53,6 +54,7 @@ type ContinueAttempt = { requestId: string; expected: SessionContinuationExpecta
 type ComposerSnapshot = { draft: string; outstanding: LauncherAssistantSubmission | null; acceptedTurnId: string; queuedAcceptance: LauncherAssistantQueuedAcceptance | null; continuation?: ContinueAttempt };
 
 export function LauncherAssistantRoute() {
+  useLauncherThemeControl();
   const client = useQueryClient();
   const { lang } = useShellI18n();
   const copy = COPY[lang];

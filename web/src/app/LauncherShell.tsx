@@ -17,13 +17,13 @@ import { LauncherUpdateTopbar } from "./LauncherUpdateTopbar";
 import { LauncherNavigation } from "./LauncherNavigation";
 import { VSplitWorkspace, VSurface, VWorkbenchFrame } from "../components/vui";
 import styles from "./LauncherShell.styles";
-import { applyWorkbenchDocumentTheme, readStoredWorkbenchTheme } from "./themePreference";
+import { applyWorkbenchDocumentTheme, readStoredWorkbenchTheme, subscribeStoredWorkbenchTheme } from "./themePreference";
 import { applyUiFontBasePx, readStoredUiFontBasePx } from "./uiFontPreference";
 
 export function LauncherShell() {
   const routeContent = useMemo(() => <Outlet />, []);
   const lang = useLauncherLanguage();
-  const [theme] = useState(() => readStoredWorkbenchTheme());
+  const [theme, setTheme] = useState(() => readStoredWorkbenchTheme());
   const queryClient = useQueryClient();
   const stateBridgeAvailable = hasLauncherStateBridge();
   const branchInstancesQuery = useQuery({
@@ -32,6 +32,12 @@ export function LauncherShell() {
     staleTime: 15_000,
   });
   const launcherWindowTitle = currentInstanceWindowTitle("launcher", branchInstancesQuery.data);
+
+  useEffect(() => {
+    const unsubscribe = subscribeStoredWorkbenchTheme(setTheme);
+    setTheme(readStoredWorkbenchTheme());
+    return unsubscribe;
+  }, []);
 
   useEffect(() => {
     if (!stateBridgeAvailable) {

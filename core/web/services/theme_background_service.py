@@ -252,7 +252,8 @@ def store_theme_background_image(*, filename: str, content_type: str, data_base6
     safe_stem = _sanitize_stem(filename)
     output_name = f"background-{int(time.time())}-{secrets.token_hex(4)}-{safe_stem}{extension}"
     output_path = resolve_theme_background_file(output_name)
-    output_path.write_bytes(payload)
+    with output_path.open("xb") as stream:
+        stream.write(payload)
     relative_path = str(THEME_BACKGROUND_RELATIVE_DIR / output_name)
     _record_theme_background_event(
         "config.theme_background.uploaded",

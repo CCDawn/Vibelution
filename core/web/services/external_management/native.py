@@ -186,3 +186,68 @@ class NativeAgentGateway:
             return directory.update_agent_instance(agent["agentId"],
                 metadata={**agent.get("metadata", {}), "externalManagementMutation": marker},
                 expected_updated_at=agent["updatedAt"])
+
+    def archive(self, parameters: dict, marker: dict):
+        from core.web.routes.agents import _archive_agent_with_session_lifecycle
+        from core.web.services import session_service as sessions
+        from .service import ManagementError
+        from .workspace import _binding_snapshot, _team_member_ids
+
+        directory = self._owners()
+        agent_id = parameters["agent_id"]
+        try:
+            # Admission-first canonical lock excludes session submits and all
+            # Agent config writers through CAS and the full owner transaction.
+            with sessions.agent_archive_transaction(agent_id):
+                with directory._STATE_LOCK:
+                    current = directory.get_agent(agent_id, include_archived=True)
+                    self._editable(current)
+                    raw = directory._find_agent(directory.load_state(), agent_id)
+                    try:
+                        # Agent ownership is independent of Session index
+                        # classification: configured Agents need not have a
+                        # conversationIndexKind. Reuse the ordinary identity
+                        # boundaries without inventing Session visibility.
+                        metadata = raw.get("metadata", {})
+                        role = raw.get("roleKey")
+                        creation = (metadata.get("creationSpec") or {}) if isinstance(metadata, dict) else None
+                        if (raw.get("kind") != directory.DEFAULT_AGENT_KIND or not isinstance(role, str) or not role
+                            or role == "personal_assistant" or role.startswith(("challenge_cup_", "knowledge_expansion_"))
+                            or not isinstance(metadata, dict) or not isinstance(creation, dict)
+                            or any(metadata.get(key) for key in ("personalAssistantProfile", "protected", "systemRole", "researchOrgRole",
+                                "teamId", "challengeCupTeamId", "knowledgeExpansionTeamId", "virtualHumanCompanion",
+                                "virtualHumanSelfWake", "lifeStewardForAgentId"))
+                            or (raw.get("createdBy") or creation.get("source")) in
+                                directory.TEAM_PRIVATE_DIRECT_SESSION_CREATED_BY | directory.INTERNAL_RECOVERY_DIRECT_SESSION_CREATED_BY
+                            or directory._agent_archive_protected(raw)):
+                            raise ValueError("Private Agent")
+                        for record in (raw, metadata):
+                            for field, allowed in (("conversationIndexKind", {"", "personal_agent"}),
+                                                   ("conversation_index_kind", {"", "personal_agent"}),
+                                                   ("conversationIndexVisibility", {"", "user_visible"}),
+                                                   ("conversation_index_visibility", {"", "user_visible"})):
+                                if field in record and (not isinstance(record[field], str) or record[field] not in allowed):
+                                    raise ValueError("Private or damaged Agent classification")
+                            for field in ("hiddenFromIndex", "hidden_from_index"):
+                                if field in record and record[field] is not False:
+                                    raise ValueError("Hidden or damaged Agent marker")
+                        if agent_id in _team_member_ids(self.project_root):
+                            raise ValueError("Private team Agent")
+                        binding = _binding_snapshot(self.project_root, agent_id)
+                        if binding is not None and (binding.get("enabled") is not False or binding.get("agentId") not in (None, agent_id)):
+                            raise ValueError("Companion binding")
+                    except (ManagementError, OSError, ValueError, TypeError, KeyError):
+                        raise ManagementError("AGENT_PROTECTED", 403) from None
+                    revision = raw.get("configRevision")
+                    if type(revision) is not int or revision < 0 or revision != parameters["expected_config_revision"]:
+                        raise ManagementError("STATE_CONFLICT", 409)
+                # No metadata write before CAS or archive: the durable intent
+                # already owns idempotency; only the canonical owner mutates.
+                agent, _summary = _archive_agent_with_session_lifecycle(agent_id,
+                    source="external_operator_management", timings={},
+                    archive_write=lambda: directory.archive_agent_instance(agent_id, repair_mode_bindings=False))
+                return agent
+        except sessions.SessionBusyError:
+            raise ManagementError("AGENT_BUSY", 409) from None
+        except directory.AgentNotFoundError:
+            raise ManagementError("AGENT_UNAVAILABLE", 404) from None

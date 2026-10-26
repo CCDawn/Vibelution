@@ -39,7 +39,8 @@ export type AssistantHostOptions = {
   native?: WorkbenchJobNative;
   fetch?: typeof globalThis.fetch;
   /** Main-only native lifecycle capability; deliberately absent from renderer IPC. */
-  mainControl?: (request: MainControlRequest) => Promise<unknown>;
+  mainControl?: (request: MainControlRequest, signal?: AbortSignal) => Promise<unknown>;
+  appearanceControl?: boolean;
 };
 
 type Generation = {
@@ -311,7 +312,9 @@ export class AssistantHost {
       for (const key of Object.keys(environment)) {
         if (excluded.has(key.toUpperCase()) || key.toUpperCase() === "VIBELUTION_ASSISTANT_MAIN_CONTROL") delete environment[key];
       }
+      for (const key of Object.keys(environment)) if (key.toUpperCase() === "VIBELUTION_ASSISTANT_APPEARANCE_CONTROL") delete environment[key];
       if (this.options.mainControl) environment.VIBELUTION_ASSISTANT_MAIN_CONTROL = "1";
+      if (this.options.mainControl && this.options.appearanceControl) environment.VIBELUTION_ASSISTANT_APPEARANCE_CONTROL = "1";
       const spawned = native.spawn({
         executable: python,
         arguments: [...this.options.pythonArguments!, join(this.options.sourceRoot, "scripts", "assistant_host.py"), "--profile-root", this.options.profileRoot,
@@ -336,6 +339,7 @@ export class AssistantHost {
             const health = await this.rpc(generation, "/health", "GET", undefined, timeout);
             if (!object(health) || health.status !== "ok" || health.role !== "launcher_assistant" || health.protocolVersion !== 1) throw new HostError("ASSISTANT_HEALTH_INVALID");
             if (this.options.mainControl && health.mainControlVersion !== 1) throw new HostError("ASSISTANT_MAIN_CONTROL_UNAVAILABLE");
+            if (this.options.appearanceControl && health.appearanceControlVersion !== 1) throw new HostError("ASSISTANT_APPEARANCE_CONTROL_UNAVAILABLE");
             const status = await this.rpc(generation, "/api/assistant", "GET", undefined, Math.max(1, deadline - Date.now()));
             generation.sessionId = identity(status);
             if (revision !== this.revision || generation.abort.signal.aborted) throw new HostError("ASSISTANT_STOPPED");
@@ -359,6 +363,17 @@ export class AssistantHost {
       this.view = { state: "failed", errorCode: failure };
       throw new HostError(failure);
     }
+  }
+
+  /** Main-only bytes from an operator-selected image, never renderer/model JSON. */
+  async importOperatorImage(input: { kind: "avatar" | "background"; filename: string; contentType: string; dataBase64: string }, deliveryId: string): Promise<unknown> {
+    if (!/^[0-9a-f]{32}$/.test(deliveryId) || !["avatar","background"].includes(input.kind)
+      || typeof input.filename !== "string" || input.filename.length > 240 || typeof input.contentType !== "string"
+      || typeof input.dataBase64 !== "string" || input.dataBase64.length > Math.ceil((input.kind === "avatar" ? 5 : 10)*1024*1024/3)*4) throw new HostError("ASSISTANT_REQUEST_INVALID");
+    const generation = this.current;
+    if (!this.options.appearanceControl || !generation || generation.closed || generation.abort.signal.aborted || this.view.state !== "ready") throw new HostError("ASSISTANT_NOT_READY");
+    return await this.rpc(generation, `/api/assistant/operator-assets/${input.kind}`, "POST",
+      { deliveryId, filename: input.filename, contentType: input.contentType, dataBase64: input.dataBase64 }, REQUEST_MS, false, 8192);
   }
 
   private startMainControl(generation: Generation): void {

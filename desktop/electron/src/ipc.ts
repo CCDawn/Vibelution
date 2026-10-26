@@ -1,5 +1,6 @@
 export const IPC_CHANNELS = {
   assistantInvoke: "assistant:invoke",
+  assistantThemeResult: "vibelution:assistant-theme-result",
   getVersion: "launcher:get-version",
   getDesktopShellSummary: "launcher:get-desktop-shell-summary",
   focusWorkbenchWindow: "launcher:focus-workbench-window",

@@ -239,7 +239,8 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, on_ready
     @app.get("/health")
     def health():
         return {"status": "ok", "role": "launcher_assistant", "protocolVersion": 1,
-                **({"mainControlVersion": 1} if main_control is not None else {})}
+                **({"mainControlVersion": 1} if main_control is not None else {}),
+                **({"appearanceControlVersion": 1} if main_control is not None and getattr(main_control, "appearance_enabled", False) else {})}
 
     if main_control is not None:
         async def main_control_body(request):
@@ -340,6 +341,33 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, on_ready
         except ValueError:
             raise HTTPException(503, detail={"code": "operator_asset_unavailable"}) from None
 
+    if main_control is not None and getattr(main_control, "appearance_enabled", False):
+        @app.post("/api/assistant/operator-assets/{kind}")
+        async def import_operator_asset(kind: Literal["avatar", "background"], request: Request):
+            if request.query_params:
+                raise HTTPException(422, detail="Invalid operator asset request")
+            body = bytearray()
+            async for chunk in request.stream():
+                if len(body) + len(chunk) > 14 * 1024 * 1024:
+                    raise HTTPException(413, detail="Operator image payload is too large")
+                body.extend(chunk)
+            def unique(pairs):
+                value = {}
+                for key, item in pairs:
+                    if key in value: raise ValueError("Duplicate field")
+                    value[key] = item
+                return value
+            try:
+                payload = json.loads(body, object_pairs_hook=unique)
+                if type(payload) is not dict or set(payload) != {"deliveryId", "filename", "contentType", "dataBase64"} or any(type(v) is not str for v in payload.values()):
+                    raise ValueError("Invalid payload")
+            except (ValueError, UnicodeDecodeError, RecursionError):
+                raise HTTPException(422, detail="Invalid operator image payload") from None
+            if not main_control.admit_image_import(payload["deliveryId"], kind):
+                raise HTTPException(409, detail="Operator image request is no longer active")
+            from .operator_image_actions import import_operator_image
+            return await asyncio.to_thread(import_operator_image, kind, payload["filename"], payload["contentType"], payload["dataBase64"])
+
     @app.get("/api/assistant/curation")
     def curation():
         return native.curation()
@@ -356,8 +384,11 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, on_ready
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.post("/api/assistant/stop", status_code=202)
-    def stop(payload: StopTurn):
-        return native.stop(payload.turnId)
+    async def stop(payload: StopTurn):
+        result = await asyncio.to_thread(native.stop, payload.turnId)
+        if main_control is not None and getattr(main_control, "appearance_enabled", False):
+            main_control.cancel_image_imports(payload.turnId.strip())
+        return result
 
     @app.post("/api/assistant/continue", status_code=202)
     def continue_turn(payload: ContinueTurn):

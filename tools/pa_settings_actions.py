@@ -150,6 +150,40 @@ def _transaction_failure(exc: Exception) -> dict:
     return _failure("config_operation_failed")
 
 
+def _select_operator_image(kind: str, selection: str, *, config_path: Path, before: dict) -> dict:
+    """Internal canonical image patch after the private image boundary validates it.
+
+    This is deliberately absent from the legacy settings_update whitelist.
+    The caller owns resource validation and supplies its authoritative snapshot.
+    """
+    if kind not in {"avatar", "background"} or not isinstance(selection, str):
+        return _failure("invalid_input")
+    table, key = (("user_profile",), "avatar_image_path") if kind == "avatar" else (
+        ("ui", "workbench_theme"), "background_image_path")
+    try:
+        expected = copy.deepcopy(before)
+        node = expected
+        for part in table:
+            node = node.setdefault(part, {})
+        node[key] = selection
+
+        def mutate(text: str) -> str:
+            candidate = managed._upsert_toml_key(text, table, key, managed._format_value(selection))
+            if tomllib.loads(candidate) != expected:
+                raise ValueError("image patch changed unexpected data")
+            return candidate
+
+        # Explicitly absent and explicitly empty have different native theme defaults.
+        if _at(before, (*table, key)) != selection:
+            _transaction(config_path, before, mutate, "pa_operator_image_select")
+        if _at(_read_config(config_path), (*table, key)) != selection:
+            return _failure("verification_failed")
+        return {"ok": True, "status": "applied", "verified": True,
+                "kind": kind, "selection": selection}
+    except Exception as exc:
+        return _transaction_failure(exc)
+
+
 def settings_update(updates: list) -> dict:
     """Atomically update only public profile/UI preferences; verify disk values."""
     try:

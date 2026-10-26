@@ -52,6 +52,7 @@ function fixture() {
     desktopLaunchSettings: () => ({ configPath: "private-config" }),
     process: { env: {}, resourcesPath: "resources" },
     createAssistantProjectMainControl: vi.fn(() => async () => ({ state: "unknown" })),
+    createAssistantAppearanceMainControl: vi.fn(() => async () => ({ code: "unavailable" })),
     resolveAssistantResources: vi.fn(async () => ({ sourceRoot: "sealed-source", pythonPath: "sealed-pythonw",
       pythonArguments: ["-I"], env: { VIBELUTION_CONFIG_PATH: "private-config" } })),
     readProjectId: vi.fn(() => "p"), instanceIdForProject: vi.fn(() => "i"),

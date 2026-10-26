@@ -388,3 +388,77 @@ creation. Hashes establish integrity, not publisher signatures or protection
 against a same-user writer after handoff. These changes are being verified in
 Temp; there has been no formal installation, complete API/data handoff or
 platform PA retirement.
+
+## Native appearance control
+
+Main may explicitly negotiate `appearanceControlVersion:1` alongside the unchanged
+private protocol and project-control capability. Without that provisioned flag,
+old hosts do not advertise the three new main actions. Theme get/set and governed
+`operator_image_upload` use the existing broker/pump and fixed private IPC; they
+have no project SDK proxy, arbitrary command, URL or model-supplied source path.
+
+`launcher_theme_get` / `launcher_theme_set` project only delivery, operation and
+optional light/dark into the exact owned assistant frame. The renderer uses the
+existing `vibelution.workbench.theme` writer, verifies persistence and document
+application, and replies through a closed authenticated-frame ACK. LauncherShell
+and the assistant subscribe to the existing same-origin theme events. Project
+HTTP origins retain their independent preference. Four pending requests, a
+three-second reply deadline and bounded recent tombstones prevent unbounded
+resident state; no second theme setting or idle poll is added.
+
+`operator_image_options` / `operator_image_select` read bounded logical resource
+names and apply an existing image (or clear it) through the canonical operator
+config transaction. Uploaded avatars retain `workspace/user_avatars/...` logical
+paths even though their physical operator folder is `avatars/`. Navigation reads
+at most 1000 candidates and only small headers; a chosen resource is fully
+revalidated before and after application. Legacy `settings_update` permissions
+are not expanded by the dedicated image helper.
+
+For upload, a governed tool opens the owned native single-file chooser. Main
+reads only that operator-selected regular file, with 5/10 MiB limits and file/
+ancestor identity checks, and sends bytes to a fixed private host operation.
+The model sees no local source path, base64 or credential. The optional private
+POST requires a still-live, claimed, kind-matching delivery and admits it once;
+an old generation, expired or replayed chooser cannot enter the writer. A native
+stop cancels that Turn's unadmitted chooser; already admitted transactions drain
+through their existing owner. Selection has a 120-second budget, project calls
+keep their original budget, and no layer automatically repeats an import.
+
+The canonical avatar/background stores remain the only resource writers and
+now exclusively create their random names, refusing collision or hardlink
+overwrite. The Launcher import adapter reuses Windows verified directory leases
+through image storage, config transaction and readback. Its explicit directory
+write mode permits child replacement while denying ancestor/root rename;
+default source-reader sharing remains unchanged. This is a namespace pinning
+boundary, not a sandbox against every action by another same-user writer.
+Canonical stores retain random naming, so a repeated intentional import can
+create another resource; an image already stored survives config conflicts.
+
+Temp joint verification exercises an actual Python private host, main control
+and canonical image/config services, plus host restart and original selected
+resource reads, with a synthetic native identity and chooser/renderer seams.
+A fresh headless source page separately verifies dark/light persistence,
+reload, same-origin event synchronization and image replacement/clearing using
+synthetic private IPC. Neither proof is a packaged GUI/real-model acceptance or
+a human-interacted native chooser test. DeepSeek remains on hold until explicit
+funding confirmation, and platform PA retirement remains gated by complete
+function/data acceptance.
+
+## Governed Agent archive
+
+`agent_archive` reuses the native management approval and a separate
+`agents:archive` grant. Strict `expected_config_revision` is checked within the
+existing Agent archive transaction; the adapter delegates the actual archive
+and associated Session sealing to the canonical lifecycle owner. Protected,
+private, damaged or busy objects are refused before mutation. Existing durable
+intent and receipt owners handle unknown results by readback only; no archive
+replay, purge, reset, restore or force is exposed. A completed receipt freezes
+the first verified archived observation.
+
+Fresh SDK subjects explicitly request ten scopes. Persisted nine-scope subjects
+retain those exact grants, and historical grants without a scope list retain
+their original eight. No automatic upgrade or subject rotation is performed.
+Temp native-Agent/Session lifecycle and SDK/receipt regressions have passed;
+this does not establish real-model or formal-project acceptance. The remaining
+effective-parameter API needs a side-effect-free configuration/catalog owner
+before it can replace the legacy ensure/repair getter faithfully.

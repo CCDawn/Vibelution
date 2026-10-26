@@ -252,6 +252,20 @@ class ManagementService:
         return agent.get("avatarImagePath") == parameters["avatar_image_path"]
 
     def _confirm(self, record: dict) -> bool:
+        if record["action"] == "agent_archive":
+            try:
+                from .contracts import AgentView
+                agent = self.native.read(record["parameters"]["agent_id"])
+                if (not isinstance(agent, dict) or agent.get("agentId") != record["parameters"]["agent_id"]
+                    or agent.get("status") != "archived" or type(agent.get("configRevision")) is not int
+                    or agent["configRevision"] < record["parameters"]["expected_config_revision"]):
+                    return False
+                view = AgentView.model_validate(_agent_view(agent)).model_dump()
+                record["receipt"] = {"status": "completed", "action": record["action"], "requestId": record["requestId"],
+                    "verified": True, "agent": view}
+                return True
+            except Exception:  # noqa: BLE001 -- unknown intent permits readback only
+                return False
         if record["action"] == "session_pin":
             # A completed receipt freezes this first canonical observation;
             # current state remains available through session_get.
@@ -323,7 +337,7 @@ class ManagementService:
                 if action == "session_pin":
                     self.native.pin_session(parameters)
                 else:
-                    agent = getattr(self.native, {"agent_create": "create", "agent_update": "update", "agent_avatar": "avatar"}[action])(parameters, marker)
+                    agent = getattr(self.native, {"agent_create": "create", "agent_update": "update", "agent_avatar": "avatar", "agent_archive": "archive"}[action])(parameters, marker)
             except ManagementError as exc:
                 record["failure"] = {"code": exc.code, "status_code": exc.status_code}
                 self.store.write(path, record)

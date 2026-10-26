@@ -30,9 +30,11 @@ CONTROL_TOKEN_HEADER = "X-Vibelution-Control-Token"
 TASK_CAPABILITY_HEADER = "X-Vibelution-External-Agent-Task-Capability"
 ADAPTER_CONNECTION_HEADER = "X-Vibelution-External-Agent-Connection"
 _MANAGEMENT_PREFIX = "/api/v1/launcher-assistant-management"
-_MANAGEMENT_ACTIONS = frozenset({"agent_create", "agent_update", "agent_avatar", "team_run", "session_pin"})
-_MANAGEMENT_SCOPES = ["agents:avatar", "agents:create", "agents:read", "agents:update", "platform:describe", "sessions:pin", "sessions:read", "teams:read", "teams:run"]
-_LEGACY_MANAGEMENT_SCOPES = [scope for scope in _MANAGEMENT_SCOPES if scope != "sessions:pin"]
+_MANAGEMENT_ACTIONS = frozenset({"agent_create", "agent_update", "agent_avatar", "agent_archive", "team_run", "session_pin"})
+_MANAGEMENT_SCOPES = ["agents:archive", "agents:avatar", "agents:create", "agents:read", "agents:update", "platform:describe", "sessions:pin", "sessions:read", "teams:read", "teams:run"]
+# Historical grants without persisted scopes predate pin and archive. Freeze
+# their actual eight scopes; deriving this list from fresh scopes expands power.
+_LEGACY_MANAGEMENT_SCOPES = ["agents:avatar", "agents:create", "agents:read", "agents:update", "platform:describe", "sessions:read", "teams:read", "teams:run"]
 
 
 class BackendClientError(RuntimeError):
@@ -178,7 +180,7 @@ class ManagedAgentBackendClient:
             subject = grant.get("subject_id")
             capability = grant.get("subject_capability")
             scopes = grant.get("scopes")
-            if grant.get("protocolVersion") != 1 or grant.get("binding") != binding or not isinstance(scopes, list) or not all(isinstance(scope, str) for scope in scopes) or sorted(scopes) != requested_scopes or not (
+            if grant.get("protocolVersion") != 1 or grant.get("binding") != binding or not isinstance(scopes, list) or not all(isinstance(scope, str) for scope in scopes) or scopes != requested_scopes or not (
                 isinstance(subject, str) and re.fullmatch(r"ops-[A-Za-z0-9_-]{10,128}", subject)
                 and isinstance(capability, str) and re.fullmatch(r"[A-Za-z0-9_-]{32,256}", capability)
             ) or (saved.get("subjectId") and saved["subjectId"] != subject):
@@ -192,18 +194,20 @@ class ManagedAgentBackendClient:
                                 require_existing_subject: bool = False) -> dict[str, Any]:
         if action not in _MANAGEMENT_ACTIONS or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,95}", request_id):
             raise BackendClientError("Unsupported management request.", code="INVALID_MANAGEMENT_REQUEST")
-        if action == "session_pin":
+        if action in {"session_pin", "agent_archive"}:
             from pydantic import ValidationError
-            from core.web.services.external_management.contracts import SessionPin
+            from core.web.services.external_management.contracts import ACTION_MODELS
             try:
-                parameters = SessionPin.model_validate(parameters).model_dump()
+                parameters = ACTION_MODELS[action].model_validate(parameters).model_dump()
             except ValidationError:
-                raise BackendClientError("Invalid Session pin parameters.", code="INVALID_MANAGEMENT_REQUEST") from None
+                raise BackendClientError("Invalid management parameters.", code="INVALID_MANAGEMENT_REQUEST") from None
         grant = await self._management_grant(require_existing=require_existing_subject)
         result = await self._request_json("POST", f"{_MANAGEMENT_PREFIX}/actions/{action}",
             management_auth=(grant["subjectId"], grant["capability"]), json_payload={
                 "request_id": request_id, "expected_binding": grant["binding"], "parameters": parameters})
         public = self._management_public_receipt(result, action=action, request_id=request_id)
+        if action == "agent_archive" and public["status"] == "completed" and public["agent"]["agentId"] != parameters["agent_id"]:
+            raise BackendClientError("Mismatched Agent archive receipt.", code="BACKEND_PROTOCOL_ERROR")
         if action == "session_pin" and public["status"] == "completed" and (
             public["session"]["id"] != parameters["session_id"] or public["session"]["pinned"] is not parameters["pinned"]
         ):
@@ -375,6 +379,18 @@ class ManagedAgentBackendClient:
         if payload.get("action") != action or payload.get("requestId") != request_id or payload.get("status") not in {"completed", "unknown"}:
             raise BackendClientError("Invalid management receipt.", code="BACKEND_PROTOCOL_ERROR")
         result = {key: deepcopy(payload[key]) for key in ("status", "action", "requestId", "verified", "reused", "code") if key in payload}
+        if action == "agent_archive":
+            from pydantic import ValidationError
+            from core.web.services.external_management.contracts import ReceiptResponse
+            try:
+                receipt = ReceiptResponse.model_validate(payload)
+                if (receipt.status == "completed" and (receipt.agent is None or receipt.verified is not True or receipt.code is not None)
+                    or receipt.status == "unknown" and (receipt.agent is not None or receipt.verified is not False)
+                    or any(getattr(receipt, key) is not None for key in ("session", "teamRun", "phase", "resumeAllowed"))):
+                    raise ValueError("Invalid archive receipt state")
+                return receipt.model_dump(exclude_none=True)
+            except (ValidationError, ValueError) as exc:
+                raise BackendClientError("Invalid Agent archive receipt.", code="BACKEND_PROTOCOL_ERROR") from exc
         if action == "session_pin":
             from pydantic import ValidationError
             from core.web.services.external_management.contracts import ReceiptResponse

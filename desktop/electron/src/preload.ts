@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
+import { createAssistantThemePreload } from "./assistant/assistantThemePreload.js";
 import { IPC_CHANNELS } from "./ipc.js";
 import { installRendererWindowClose } from "./windows/rendererWindowClose.js";
 
@@ -7,6 +8,7 @@ const isDesktopPetWindow = process.argv.includes("--vibelution-window-role=deskt
 const isLauncherAssistantWindow = process.argv.includes("--vibelution-window-role=launcher-assistant");
 
 if (isLauncherAssistantWindow) {
+  contextBridge.exposeInMainWorld("vibelutionLauncherTheme",createAssistantThemePreload(ipcRenderer));
   contextBridge.exposeInMainWorld("vibelutionLauncherAssistant", {
     invoke: (payload: unknown) => ipcRenderer.invoke(IPC_CHANNELS.assistantInvoke, payload),
   });

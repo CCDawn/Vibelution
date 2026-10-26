@@ -24,6 +24,7 @@ import {
 import { IPC_CHANNELS } from "./ipc.js";
 import { AssistantHost } from "./assistant/assistantHost.js";
 import { AssistantProjectRegistryConnection } from "./assistant/projectRegistryConnection.js";
+import { createAssistantAppearanceMainControl } from "./assistant/appearanceMainControl.js";
 import { createAssistantProjectMainControl } from "./assistant/projectMainControl.js";
 import { AssistantWindow } from "./assistant/assistantWindow.js";
 import { resolveAssistantResources } from "./assistant/assistantResources.js";
@@ -522,11 +523,27 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
   launcherAssistantStarting = (async () => {
     const projectConnection = new AssistantProjectRegistryConnection(join(paths.userDataRoot, "assistant", "projects.json"));
     launcherAssistantProjects = projectConnection;
-    const mainControl = createAssistantProjectMainControl({
+    const projectMainControl = createAssistantProjectMainControl({
       directory: join(paths.userDataRoot, "assistant", "lifecycle-requests"), registry: projectConnection,
       operatorConfigPath: desktopLaunchSettings().configPath,
       launch: { env: process.env, cliArgs: desktopCliArgs, resourcesRoot: process.resourcesPath, userDataRoot: app.getPath("userData") },
     });
+    const appearanceMainControl = createAssistantAppearanceMainControl({
+      chooseImage: async (kind,signal) => {
+        if (!launcherAssistantWindow || shutdownApproved) throw new Error("ASSISTANT_NOT_READY");
+        return launcherAssistantWindow.chooseOperatorImage(kind,signal);
+      },
+      importImage: async (input,deliveryId) => {
+        if (!launcherAssistantHost || shutdownApproved) throw new Error("ASSISTANT_NOT_READY");
+        return launcherAssistantHost.importOperatorImage(input,deliveryId);
+      },
+      theme: async (request,signal) => launcherAssistantWindow
+        ? launcherAssistantWindow.requestTheme(request,signal)
+        : {schemaVersion:1,operation:request.operation,code:"unavailable"},
+    });
+    const mainControl: NonNullable<ConstructorParameters<typeof AssistantHost>[0]["mainControl"]> = (request,signal) =>
+      request.action === "launcher_theme_get" || request.action === "launcher_theme_set" || request.action === "operator_image_upload"
+        ? appearanceMainControl(request,signal) : projectMainControl(request);
     const resources = await resolveAssistantResources({ packaged: app.isPackaged, resourcesRoot: paths.resourcesRoot,
       developmentSourceRoot: paths.workspaceRoot, developmentPythonPath: app.isPackaged ? "" : desktopPythonPath(), env: desktopEnvironment() });
     if (shutdownApproved) return;
@@ -537,7 +554,7 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
           runtimeRoot: join(paths.userDataRoot, "assistant", "runtime"),
           sourceRoot: resources.sourceRoot, pythonPath: resources.pythonPath, pythonArguments: resources.pythonArguments,
           env: resources.env, projects: snapshot.projects, projectSnapshot: snapshot,
-          mainControl,
+          mainControl, appearanceControl: true,
         });
         launcherAssistantHost = host;
         launcherAssistantWindow = new AssistantWindow(paths, host, () => shutdownApproved);
@@ -575,6 +592,11 @@ async function exitDesktopShellProcess(): Promise<void> {
   await stopLauncherAssistant();
   app.exit(0);
 }
+
+ipcMain.handle(IPC_CHANNELS.assistantThemeResult, (event,payload:unknown) => {
+  if (shutdownApproved || !launcherAssistantWindow) return false;
+  return launcherAssistantWindow.acceptThemeResult(event,payload);
+});
 
 ipcMain.handle(IPC_CHANNELS.assistantInvoke, async (event, payload: unknown) => {
   if (shutdownApproved || !launcherAssistantWindow) throw new Error("ASSISTANT_NOT_READY");

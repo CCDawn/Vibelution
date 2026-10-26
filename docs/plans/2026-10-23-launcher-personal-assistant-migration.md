@@ -894,3 +894,11 @@ E14 退出后的封存复查仍在目录枚举前后签名比较处失败；原�
 剩余范围仍包括主题明暗模式的统一设置权威、操作者图片选择/上传的模型语义入口、尚未接入的语义 API、旧授权与历史/在途数据交接，以及新包 DeepSeek 联合验收。本轮阶段变更未改变版本号或正式安装；需要后续构建包含本片的 Launcher 才能进入新包验收，不自动重启正式实例。旧个人助理继续保留至验收通过。
 
 合入前继续追踪原生关闭链时发现真实的令牌回退风险：显式目标环境仍可能在 shutdown helper 缺参时使用当前项目 token，使目标 409 活跃工作拒绝变成 401 并进入身份核验后的回收分支。已阻止该版本合入，现统一包装 stop/start/restart 的原生 graceful owner，显式传目标 token 或空串（由原 owner 仅向已核验 loopback 目标获取），不改通用 helper 的普通调用默认。真实 helper + 虚构 HTTP 先复现三类操作都误用 A token，再验证目标 B 认证及实时 409 不走 tree retirement；独立复审通过。跨项目仍共享 main 的全局 operator/profile 存储根，不宣称支持每个目标切换独立 operator profile。
+
+2026-10-26 外观入口继续迁移：明暗主题沿用 `vibelution.workbench.theme` 单一writer，通过明确启用的私有appearance能力到owned renderer核验持久化和document结果；Launcher同来源窗口订阅原有事件，项目HTTP origin的独立主题保持原语义。新增已有operator图片导航/选择/清除，以及经原生审批打开图片选择框、自动导入并应用头像或壁纸；模型只给kind，不得到源路径、图片字节或通用文件能力。上传前由当前broker核验live/claimed/kind/一次性准入，旧generation、过期、重放及native stop后的未准入选择不能写入；已准入事务继续按canonical owner完成。项目20秒预算保持，人工图片选择单独最多120秒，不自动重试。
+
+资源和配置仍由原owner写入：新通道只复用既有头像/背景store、Windows namespace lease、operator config transaction；随机名排他创建防覆盖，目录lease的显式child-write模式继续禁止目录重命名且不改变普通source reader默认。组合测试发现并修复了theme多余字段投影与头像逻辑前缀错误，新增真实Python宿主/main/图片服务导入、取消和重启读回；使用虚构身份与chooser/renderer seam，没有真实模型。新加载源码页面已确认明暗切换、刷新保留、同来源另一页面同步、图片自动替换/清空，截图待完整ConversationView稳定后取证。原生文件选择框尚未真人交互验收。DeepSeek继续等待额度确认，正式安装/运行与旧个人助理不变。
+
+后续API不能用旧会话getter名称直接接通：session_parameters_get会经过ensure/repair，并且有效推理选项还依赖verified catalog与runtime/env配置；已做隔离反例，暂未用历史compiled值或仅TOML值冒充旧语义。下一片优先接通明确原生owner的Agent归档，复用审批、版本CAS和原请求回执；其余语义API、旧授权/历史/在途交接和最终新包真实模型验收继续保留。
+
+Agent归档现已接通动态说明、SDK、独立agents:archive权限和原生逐次审批；严格configRevision CAS位于canonical archive lock内，通过后直接委托现有归档/Session封存owner，不预写metadata。受保护、团队/Companion、损坏身份、忙碌关联会话与过期版本拒绝，unknown或重启后只读原回执、不重放归档。完成回执保存首次确认的历史状态。旧无scopes授权冻结原八项、已有九项原样保持、新主体显式请求十项，绑定回包必须精确相符；不静默给旧主体加权。真实Temp普通配置Agent及其Session封存、忙碌/保护/CAS反例、SDK授权和回执回归均通过，独立复审无阻断。其余语义API、有效参数只读owner、显式旧授权升级、历史/在途数据交接和最终新包DeepSeek验收仍未完成，平台旧助理继续保留。

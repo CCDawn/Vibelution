@@ -67,6 +67,7 @@ def main():
         parser.error("Assistant paths must be absolute")
     token = os.environ.pop("VIBELUTION_ASSISTANT_TOKEN", "")
     main_control_enabled = os.environ.pop("VIBELUTION_ASSISTANT_MAIN_CONTROL", "") == "1"
+    appearance_enabled = os.environ.pop("VIBELUTION_ASSISTANT_APPEARANCE_CONTROL", "") == "1"
     if len(token) < 32:
         parser.error("Launcher private bootstrap credential is missing")
     root = args.profile_root.resolve()
@@ -106,7 +107,7 @@ def main():
     main_control = None
     if main_control_enabled:
         from core.assistant_runtime.main_control import MainControlBroker
-        main_control = MainControlBroker(dispatch.project_ids)
+        main_control = MainControlBroker(dispatch.project_ids, appearance_enabled=appearance_enabled)
 
     ready = args.runtime_dir / "ready.json"
     # A second Launcher cannot open another writer over the same profile.

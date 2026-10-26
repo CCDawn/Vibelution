@@ -10,6 +10,44 @@ from core.external_agent.backend_client import BackendClientError
 
 
 @pytest.mark.anyio
+async def test_archive_governed_action_and_restart_receipt_only(tmp_path):
+    writes, reads = [], []
+    def factory(root, **kwargs):
+        class Client:
+            async def diagnostics(self): return {"status": "healthy"}
+            async def management_action(self, **values):
+                writes.append(values)
+                return {"status": "unknown", "action": "agent_archive", "requestId": "archive-1", "verified": False, "reused": False}
+            async def management_receipt(self, **values):
+                reads.append(values)
+                return {"status": "unknown", "action": "agent_archive", "requestId": "archive-1", "verified": False, "reused": True}
+        return Client()
+    profile, project = tmp_path / "profile", tmp_path / "project"
+    service = DispatchService(profile, {"p": project}, client_factory=factory)
+    bind_actions(service, asyncio.get_running_loop())
+    parameters = {"project_id": "p", "request_id": "archive-1", "agent_id": "agent-a", "expected_config_revision": 3}
+    try:
+        description = execute_action("describe", {"action": "agent_archive"})
+        assert description["governed"] is True and description["scope"] == "agents:archive"
+        for _ in range(2):
+            denied = await asyncio.to_thread(execute_action, "agent_archive", parameters)
+            assert denied["status"] == "approval_required" and writes == []
+        result = await asyncio.to_thread(execute_action, "agent_archive", parameters, governed=True)
+        assert result["status"] == "unknown" and len(writes) == 1
+        await asyncio.to_thread(execute_action, "management_receipt", {
+            "project_id": "p", "request_id": "archive-1", "action": "agent_archive"})
+        for injected in ({"force": True}, {"purge": True}, {"governed": True}, {"expected_config_revision": True}):
+            with pytest.raises(ValueError):
+                await asyncio.to_thread(execute_action, "agent_archive", {**parameters, **injected}, governed=True)
+    finally:
+        unbind_actions(service)
+    restarted = DispatchService(profile, {"p": project}, client_factory=factory)
+    result = await restarted.management.invoke("p", action="agent_archive", request_id="archive-1",
+        parameters={"agent_id": "agent-a", "expected_config_revision": 3})
+    assert result["status"] == "unknown" and len(writes) == 1 and len(reads) == 2
+
+
+@pytest.mark.anyio
 async def test_session_pin_governed_closed_action_and_original_receipt_after_restart(tmp_path):
     probe = Probe()
     def factory(root, **kwargs):

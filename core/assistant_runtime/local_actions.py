@@ -35,6 +35,8 @@ def contracts() -> dict:
             result[name] = source[name]
     for name in _PLATFORM_ACTIONS:
         result[name] = {**pa_platform_actions.action_catalog(name), "governed": False}
+    from . import operator_image_actions
+    result.update(operator_image_actions.contracts())
     result["assistant_settings_update"] = {**result["assistant_settings_update"],
         "description": result["assistant_settings_update"]["description"] + " 当前轮结束后自动刷新生效，不要求用户手动刷新或重启。"}
     # This native read action predates describe support. Its empty arguments
@@ -64,6 +66,9 @@ def execute(action: str, parameters: dict, runtime: dict, *, governed: bool = Fa
                 "error": "cross_project_reference_validation_unavailable", "message": _REFERENCE_GUARD_MESSAGE}
     from tools import pa_platform_actions
 
+    if action in {"operator_image_options", "operator_image_select"}:
+        from .operator_image_actions import execute as execute_image
+        return execute_image(action, parameters)
     if contract["governed"] and governed is True:
         return pa_platform_actions.execute_extension(action, parameters, runtime, governed=True)
     # Native dispatch normalizes immutable JSON arguments, validates the native

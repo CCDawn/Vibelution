@@ -70,13 +70,101 @@ async def test_management_legacy_subject_retains_original_scope_set(tmp_path, mo
             return {"protocolVersion": 1, "binding": binding}
         body = kwargs["json_payload"]
         calls.append(body)
-        assert "sessions:pin" not in body["scopes"]
+        assert "sessions:pin" not in body["scopes"] and "agents:archive" not in body["scopes"] and len(body["scopes"]) == 8
         return {"protocolVersion": 1, "binding": binding, "scopes": body["scopes"],
             "subject_id": "ops-1234567890abcdef", "subject_capability": "a" * 48}
     monkeypatch.setattr(client, "_request_json", request)
     await client._management_grant(require_existing=True)
     assert len(calls) == 1 and calls[0]["client_id"] == "legacy_client_1234567890"
     assert "sessions:pin" not in client._state["management"]["scopes"]
+
+
+@pytest.mark.anyio
+async def test_archive_sdk_strict_local_parameters_and_target_receipt(tmp_path, monkeypatch):
+    _runtime_state(tmp_path)
+    client = ManagedAgentBackendClient(tmp_path, state_path=tmp_path / "credentials.json")
+    calls = []
+    payload = {"status": "completed", "action": "agent_archive", "requestId": "archive-1", "verified": True,
+        "reused": False, "agent": {"agentId": "agent-a", "directSessionId": "session-a", "displayName": "A",
+            "configRevision": 3, "updatedAt": "v3", "modelId": "provider/model", "avatarImagePath": ""}}
+    async def grant(**kwargs):
+        return {"subjectId": "subject", "capability": "capability", "binding": {"projectId": "p", "instanceId": "i"}}
+    async def request(method, path, **kwargs):
+        calls.append((method, path, kwargs))
+        return deepcopy(payload)
+    monkeypatch.setattr(client, "_management_grant", grant)
+    monkeypatch.setattr(client, "_request_json", request)
+    parameters = {"agent_id": "agent-a", "expected_config_revision": 3}
+    assert await client.management_action(action="agent_archive", request_id="archive-1", parameters=parameters) == payload
+    for extra in ({"expected_config_revision": True}, {"expected_config_revision": "3"}, {"force": True}, {"purge": True}):
+        with pytest.raises(BackendClientError) as invalid:
+            await client.management_action(action="agent_archive", request_id="archive-1", parameters={**parameters, **extra})
+        assert invalid.value.code == "INVALID_MANAGEMENT_REQUEST" and len(calls) == 1
+    payload["agent"]["agentId"] = "foreign"
+    with pytest.raises(BackendClientError) as mismatch:
+        await client.management_action(action="agent_archive", request_id="archive-1", parameters=parameters)
+    assert mismatch.value.code == "BACKEND_PROTOCOL_ERROR"
+    payload["agent"]["agentId"] = "agent-a"
+    for extra in ({"verified": False}, {"session": {}}, {"private": "secret"}, {"agent": None}):
+        original = deepcopy(payload)
+        payload.update(extra)
+        with pytest.raises(BackendClientError) as invalid:
+            await client.management_receipt(action="agent_archive", request_id="archive-1")
+        assert invalid.value.code == "BACKEND_PROTOCOL_ERROR"
+        payload.clear()
+        payload.update(original)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("saved_scopes", [None, ["agents:avatar", "agents:create", "agents:read", "agents:update",
+    "platform:describe", "sessions:pin", "sessions:read", "teams:read", "teams:run"]])
+async def test_archive_scope_never_expands_saved_grants(tmp_path, monkeypatch, saved_scopes):
+    _runtime_state(tmp_path)
+    client = ManagedAgentBackendClient(tmp_path, state_path=tmp_path / "credentials.json")
+    binding = {"projectId": "p", "instanceId": "i"}
+    saved = {"clientId": "saved_client_1234567890", "binding": binding, "subjectId": "ops-1234567890abcdef", "capability": "a" * 48}
+    if saved_scopes is not None:
+        saved["scopes"] = saved_scopes
+    client._state["management"] = saved
+    async def request(method, path, **kwargs):
+        if path.endswith("/binding"):
+            return {"protocolVersion": 1, "binding": binding}
+        body = kwargs["json_payload"]
+        expected = saved_scopes or ["agents:avatar", "agents:create", "agents:read", "agents:update", "platform:describe", "sessions:read", "teams:read", "teams:run"]
+        assert body["scopes"] == expected and body["client_id"] == saved["clientId"]
+        return {"protocolVersion": 1, "binding": binding, "scopes": body["scopes"],
+            "subject_id": saved["subjectId"], "subject_capability": saved["capability"]}
+    monkeypatch.setattr(client, "_request_json", request)
+    grant = await client._management_grant(require_existing=True)
+    assert "agents:archive" not in grant["scopes"] and grant["subjectId"] == saved["subjectId"]
+
+
+@pytest.mark.anyio
+async def test_fresh_archive_grant_lost_bind_ack_reuses_persisted_client_and_exact_ten_scopes(tmp_path, monkeypatch):
+    _runtime_state(tmp_path)
+    path = tmp_path / "credentials.json"
+    binding = {"projectId": "p", "instanceId": "i"}
+    calls = []
+    client = ManagedAgentBackendClient(tmp_path, state_path=path)
+    async def request(method, route, **kwargs):
+        if route.endswith("/binding"):
+            return {"protocolVersion": 1, "binding": binding}
+        body = kwargs["json_payload"]
+        persisted = json.loads(path.read_text())["management"]
+        assert persisted["clientId"] == body["client_id"] and persisted["scopes"] == body["scopes"]
+        assert len(body["scopes"]) == 10 and "agents:archive" in body["scopes"]
+        calls.append(deepcopy(body))
+        if len(calls) == 1:
+            raise BackendClientError("lost bind ack", code="BACKEND_UNAVAILABLE")
+        return {"protocolVersion": 1, "binding": binding, "scopes": body["scopes"],
+            "subject_id": "ops-1234567890abcdef", "subject_capability": "a" * 48}
+    monkeypatch.setattr(client, "_request_json", request)
+    with pytest.raises(BackendClientError):
+        await client._management_grant(require_existing=False)
+    restarted = ManagedAgentBackendClient(tmp_path, state_path=path)
+    monkeypatch.setattr(restarted, "_request_json", request)
+    assert (await restarted._management_grant(require_existing=True))["subjectId"] == "ops-1234567890abcdef"
+    assert calls[0] == calls[1]
 
 
 @pytest.mark.anyio
@@ -429,7 +517,7 @@ async def test_team_client_uses_operator_envelope_and_same_read_only_receipt(tmp
             return httpx.Response(200, json={"protocolVersion": 1, "binding": binding})
         if request.url.path == prefix + "/subjects/bind":
             body = json.loads(request.content)
-            assert body["scopes"] == ["agents:avatar", "agents:create", "agents:read", "agents:update", "platform:describe", "sessions:pin", "sessions:read", "teams:read", "teams:run"]
+            assert body["scopes"] == ["agents:archive", "agents:avatar", "agents:create", "agents:read", "agents:update", "platform:describe", "sessions:pin", "sessions:read", "teams:read", "teams:run"]
             return httpx.Response(200, json={"protocolVersion": 1, "binding": binding, "scopes": body["scopes"],
                 "subject_id": "ops-1234567890abcdef", "subject_capability": "a" * 48})
         if request.url.path.startswith(prefix + "/actions/team_run"):

@@ -69,7 +69,7 @@ Python lifecycle executor is introduced. The optional `mainControlVersion=1`
 health field is negotiated before deliveries start. Old hosts without the
 main-provisioned capability retain their original action catalog.
 
-Each delivery has a random transport ID and one closed action: project status,
+Each project delivery has a random transport ID and one closed action: project status,
 governed start/stop/restart, or original lifecycle receipt. Business request IDs
 stay distinct from delivery IDs and native command IDs. The short-lived broker
 is bounded and never requeues a claimed or expired delivery. Only main's durable
@@ -88,6 +88,16 @@ their instance registry is never edited by the assistant SDK.
 The separate selected-avatar/background read is a UI resource channel, not a
 model capability. It resolves only current operator selections through existing
 resource owners and never accepts a path, URL or generic asset request.
+
+Main may separately provision optional appearance control on that same private
+transport. Theme requests use the existing Launcher-origin storage helper and
+an owned-frame observation ACK; image upload uses an operator-selected native
+file, the existing resource owner and config transaction. Source paths and image
+bytes stay between main and its private host, while the model receives only
+closed public facts. A short-lived, one-use delivery authorizes upload entry;
+no upload scheduler, generic file capability or additional preference store is
+introduced. Global appearance operations do not change the settled project SDK
+transport or each project HTTP origin's theme preference.
 
 ## Alternatives
 

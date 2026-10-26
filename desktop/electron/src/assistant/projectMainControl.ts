@@ -73,6 +73,7 @@ export function createAssistantProjectMainControl(options: {
     store: new AssistantProjectLifecycleRequestStore({ directory: options.directory }) });
   return async input => {
     const request = parseMainControlClaim({ schemaVersion: 1, request: input })!;
+    if (request.action !== "project_status" && request.action !== "project_lifecycle" && request.action !== "project_lifecycle_receipt") throw new Error("ASSISTANT_MAIN_CONTROL_INVALID");
     let code: "project_unavailable" | "prerequisite_required" | undefined;
     try {
       const registered = registry.registration(request.projectId);

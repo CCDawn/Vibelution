@@ -11,7 +11,7 @@ function browserStorage(): ThemeStorage | null {
   if (typeof window === "undefined") {
     return null;
   }
-  return window.localStorage;
+  try { return window.localStorage; } catch { return null; }
 }
 
 export function normalizeWorkbenchTheme(value: unknown): WorkbenchTheme | null {
@@ -30,14 +30,17 @@ export function readStoredWorkbenchTheme(storage: ThemeStorage | null = browserS
   }
 }
 
-export function writeStoredWorkbenchTheme(theme: WorkbenchTheme, storage: ThemeStorage | null = browserStorage()): void {
+export function writeStoredWorkbenchTheme(theme: WorkbenchTheme, storage: ThemeStorage | null = browserStorage()): boolean {
   if (!storage) {
-    return;
+    return false;
   }
   try {
     storage.setItem(WORKBENCH_THEME_STORAGE_KEY, theme);
+    if (storage.getItem(WORKBENCH_THEME_STORAGE_KEY) !== theme) return false;
     if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(THEME_CHANGE_EVENT, { detail: theme }));
+    return true;
   } catch {
+    return false;
   }
 }
 

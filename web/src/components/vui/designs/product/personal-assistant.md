@@ -242,3 +242,11 @@ severity 用 `--state-error`/`--state-warning` 与 `--vui-border-subtle`/`--vui-
 `routes/personalAssistant/PersonalAssistantDispatches.tsx` + 同名 `.styles.ts`；API 客户端 `api/personalAssistantDispatches.ts`。
 ### 反冗余
 复用 VUI 原语（VButton/VStateSurface）、fetchJson 客户端与事务面板的列表/徽标模式，不新建第二套轮询、badge 组件或消息存储；投递状态与回执配对全部信任后端投影，前端不重复计算。
+
+Launcher appearance control reuses the existing document theme/storage helper and
+same-origin events; no theme panel or competing persistence is added. A governed
+image upload opens the owned native chooser and applies the selected resource,
+while current avatar/background consumers and native ConversationView remain
+the only image presentation. Cancel/timeout is not success; image content and
+source paths are not model results. Source-page acceptance covers settled light/
+dark views, persistence, same-origin synchronization and existing image states.

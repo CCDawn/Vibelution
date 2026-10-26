@@ -142,7 +142,8 @@ def store_user_avatar_image(*, filename: str, content_type: str, data_base64: st
     safe_stem = _sanitize_stem(filename)
     output_name = f"avatar-{int(time.time())}-{secrets.token_hex(4)}-{safe_stem}{extension}"
     output_path = _user_avatar_write_file(output_name)
-    output_path.write_bytes(payload)
+    with output_path.open("xb") as stream:
+        stream.write(payload)
     relative_path = str(USER_AVATAR_RELATIVE_DIR / output_name)
     _record_avatar_event(
         "config.avatar_image.uploaded",
