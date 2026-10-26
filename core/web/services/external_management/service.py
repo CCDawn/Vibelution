@@ -255,7 +255,7 @@ class ManagementService:
         if record["action"] == "agent_archive":
             try:
                 from .contracts import AgentView
-                agent = self.native.read(record["parameters"]["agent_id"])
+                agent = self.native.read_archive_state(record["parameters"]["agent_id"])
                 if (not isinstance(agent, dict) or agent.get("agentId") != record["parameters"]["agent_id"]
                     or agent.get("status") != "archived" or type(agent.get("configRevision")) is not int
                     or agent["configRevision"] < record["parameters"]["expected_config_revision"]):

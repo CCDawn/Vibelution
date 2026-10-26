@@ -23,6 +23,9 @@ def archive_env(tmp_path):
         def read(self, agent_id):
             return deepcopy(self.agent)
 
+        def read_archive_state(self, agent_id):
+            return deepcopy(self.agent)
+
         def archive(self, parameters, marker):
             self.calls += 1
             assert list((tmp_path / "management" / "requests").glob("*.json"))
@@ -96,6 +99,9 @@ def test_archive_contract_and_documentation():
 def _ordinary_with_child(env):
     from core.web.services.agent_operation_service import create_configured_agent_with_session
     from core.web.services.team import team_store
+    config = env["directory"].CONFIG_PATH
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text("[launcher.developer_mode]\nenabled = false\n", encoding="utf-8")
     roster = team_store._teams_index_path(seed=False)
     roster.parent.mkdir(parents=True, exist_ok=True)
     roster.write_text('{"teams":[]}', encoding="utf-8")
@@ -150,13 +156,91 @@ def test_native_archive_rejects_private_or_damaged_agent_before_owner(configured
     current, _child = _ordinary_with_child(configured_env)
     directory = configured_env["directory"]
     # Damage the raw authority to prove projections cannot normalize it away.
-    load = directory.load_state
-    def snapshot():
-        state = load()
-        directory._find_agent(state, current["agentId"]).update(patch)
-        return state
-    monkeypatch.setattr(directory, "load_state", snapshot)
+    import json
+    state = directory.load_state()
+    directory._find_agent(state, current["agentId"]).update(patch)
+    directory.registry_path().write_text(json.dumps(state), encoding="utf-8")
     monkeypatch.setattr(owner, "_archive_agent_with_session_lifecycle", lambda *a, **k: pytest.fail("owner must not run"))
     with pytest.raises(ManagementError) as denied:
         NativeAgentGateway(configured_env["root"]).archive({"agent_id": current["agentId"], "expected_config_revision": current["configRevision"]}, {})
     assert denied.value.code in {"AGENT_PROTECTED", "STATE_CONFLICT"}
+
+
+def test_archive_admission_never_uses_repairing_getter(configured_env, monkeypatch):
+    from core.web.services.external_management.native import NativeAgentGateway
+    current, _child = _ordinary_with_child(configured_env)
+    directory = configured_env["directory"]
+    registry = directory.registry_path()
+    before = registry.read_bytes()
+    with monkeypatch.context() as guard:
+        guard.setattr(directory, "get_agent", lambda *a, **k: pytest.fail("repairing getter before admission"))
+        guard.setattr(directory, "save_state", lambda *a, **k: pytest.fail("write before admission"))
+        with pytest.raises(ManagementError) as denied:
+            NativeAgentGateway(configured_env["root"]).archive({"agent_id": current["agentId"],
+                "expected_config_revision": current["configRevision"] + 1}, {})
+        assert denied.value.code == "STATE_CONFLICT"
+    assert registry.read_bytes() == before
+
+
+def test_archive_unknown_readback_never_repairs_or_seeds(configured_env, monkeypatch, tmp_path):
+    from core.web.services.external_management.native import NativeAgentGateway
+    from core.infrastructure import developer_sandbox
+    current, _child = _ordinary_with_child(configured_env)
+    directory = configured_env["directory"]
+    gateway = NativeAgentGateway(configured_env["root"])
+    calls = []
+    def lose_ack(*args):
+        calls.append(True)
+        raise TimeoutError("lost ack")
+    monkeypatch.setattr(gateway, "archive", lose_ack)
+    service = ManagementService(tmp_path / "archive-read", identity=lambda: TargetIdentity(BINDING, "root"), native=gateway)
+    grant = service.bind({"client_id": "raw-read", "expected_binding": BINDING, "scopes": ["agents:archive"]})
+    envelope = {"request_id": "read-1", "expected_binding": BINDING, "parameters": {
+        "agent_id": current["agentId"], "expected_config_revision": current["configRevision"]}}
+    assert service.invoke(grant["subject_id"], grant["subject_capability"], "agent_archive", envelope)["status"] == "unknown"
+    state = directory.load_state()
+    raw = directory._find_agent(state, current["agentId"])
+    raw["status"] = "archived"
+    raw["metadata"]["avatarImagePath"] = "workspace/avatars/archive-test.png"
+    raw.pop("personaProfile", None)  # A legacy repair candidate must remain raw.
+    directory.save_state(state)
+    registry = directory.registry_path()
+    before = registry.read_bytes()
+    def forbidden(*args, **kwargs):
+        pytest.fail("archive recovery may not repair, seed or initialize")
+    with monkeypatch.context() as guard:
+        guard.setattr(directory, "get_agent", forbidden)
+        guard.setattr(directory, "save_state", forbidden)
+        guard.setattr(directory, "load_agent_record", forbidden)
+        guard.setattr(developer_sandbox, "_ensure_active_state", forbidden)
+        guard.setattr(developer_sandbox, "seeded_sandbox_workspace_path", forbidden)
+        restarted = ManagementService(service.root, identity=service.identity, native=gateway)
+        result = restarted.receipt(grant["subject_id"], grant["subject_capability"], "agent_archive", "read-1")
+        assert result["status"] == "completed" and result["verified"] is True
+        assert result["agent"]["avatarImagePath"] == "workspace/avatars/archive-test.png"
+    assert registry.read_bytes() == before and len(calls) == 1
+
+
+def test_archive_missing_developer_authority_never_initializes(configured_env, monkeypatch):
+    from core.web.services.external_management.native import NativeAgentGateway
+    from core.infrastructure import developer_sandbox
+    current, _child = _ordinary_with_child(configured_env)
+    directory = configured_env["directory"]
+    registry = directory.registry_path()
+    before = registry.read_bytes()
+    active = developer_sandbox._active_state_path(configured_env["root"])
+    assert not active.exists()
+    directory.CONFIG_PATH.write_text("[launcher.developer_mode]\nenabled = true\n", encoding="utf-8")
+    def forbidden(*args, **kwargs):
+        pytest.fail("missing authority may not initialize or seed")
+    with monkeypatch.context() as guard:
+        guard.setattr(developer_sandbox, "CONFIG_PATH", directory.CONFIG_PATH)
+        guard.setattr(developer_sandbox, "_ensure_active_state", forbidden)
+        guard.setattr(developer_sandbox, "seeded_sandbox_workspace_path", forbidden)
+        gateway = NativeAgentGateway(configured_env["root"])
+        with pytest.raises(ManagementError) as denied:
+            gateway.archive({"agent_id": current["agentId"], "expected_config_revision": current["configRevision"]}, {})
+        assert denied.value.code == "AGENT_UNAVAILABLE"
+        with pytest.raises(ValueError):
+            gateway.read_archive_state(current["agentId"])
+    assert not active.exists() and registry.read_bytes() == before

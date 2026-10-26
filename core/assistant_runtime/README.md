@@ -462,3 +462,12 @@ Temp native-Agent/Session lifecycle and SDK/receipt regressions have passed;
 this does not establish real-model or formal-project acceptance. The remaining
 effective-parameter API needs a side-effect-free configuration/catalog owner
 before it can replace the legacy ensure/repair getter faithfully.
+
+Archive admission and uncertain-result readback explicitly avoid the repairing
+Agent projection. Their dedicated adapter reuses an existing-only config and
+sandbox authority resolver, reads bounded strict raw registry/roster snapshots,
+and gives the existing Companion store the same non-initializing resolver.
+Missing authority is refused without seed/copy/repair. Receipt avatars describe
+persisted selections, without hydrating a current UI/default logo. Regression
+sentinels prohibit the old getter, save/repair and sandbox initialization, and
+verify unchanged registry bytes through stale rejection and restarted readback.

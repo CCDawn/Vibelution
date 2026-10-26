@@ -22,6 +22,19 @@ class NativeAgentGateway:
     def read(self, agent_id: str):
         return self._owners().get_agent(agent_id, include_archived=True)
 
+    def read_archive_state(self, agent_id: str):
+        from .archive_state import ArchiveState
+        directory = self._owners()
+        with directory._STATE_LOCK:
+            raw = ArchiveState(self.project_root, directory).agent(agent_id)
+            if raw is None:
+                return None
+            metadata = raw.get("metadata", {})
+            if not isinstance(metadata, dict):
+                raise ValueError("Invalid Agent metadata")
+            # Receipt fields are persisted facts, not a hydrated UI/default logo.
+            return {**raw, "avatarImagePath": directory._agent_avatar_path_from_metadata(metadata)}
+
     def avatar_options(self):
         directory = self._owners()
         from config.public_config import read_existing_config_snapshot
@@ -191,18 +204,24 @@ class NativeAgentGateway:
         from core.web.routes.agents import _archive_agent_with_session_lifecycle
         from core.web.services import session_service as sessions
         from .service import ManagementError
-        from .workspace import _binding_snapshot, _team_member_ids
+        from .archive_state import ArchiveState
 
         directory = self._owners()
         agent_id = parameters["agent_id"]
         try:
+            # The canonical transaction snapshots Sessions through legacy path
+            # readers. Reject missing authority before entering that owner;
+            # reload under its lock for identity and CAS before any effect.
+            if ArchiveState(self.project_root, directory).agent(agent_id) is None:
+                raise ManagementError("AGENT_UNAVAILABLE", 404)
             # Admission-first canonical lock excludes session submits and all
             # Agent config writers through CAS and the full owner transaction.
             with sessions.agent_archive_transaction(agent_id):
                 with directory._STATE_LOCK:
-                    current = directory.get_agent(agent_id, include_archived=True)
-                    self._editable(current)
-                    raw = directory._find_agent(directory.load_state(), agent_id)
+                    state = ArchiveState(self.project_root, directory)
+                    raw = state.agent(agent_id)
+                    if not isinstance(raw, dict) or raw.get("status") != "active":
+                        raise ManagementError("AGENT_UNAVAILABLE", 404)
                     try:
                         # Agent ownership is independent of Session index
                         # classification: configured Agents need not have a
@@ -231,9 +250,9 @@ class NativeAgentGateway:
                             for field in ("hiddenFromIndex", "hidden_from_index"):
                                 if field in record and record[field] is not False:
                                     raise ValueError("Hidden or damaged Agent marker")
-                        if agent_id in _team_member_ids(self.project_root):
+                        if agent_id in state.team_member_ids():
                             raise ValueError("Private team Agent")
-                        binding = _binding_snapshot(self.project_root, agent_id)
+                        binding = state.binding(agent_id)
                         if binding is not None and (binding.get("enabled") is not False or binding.get("agentId") not in (None, agent_id)):
                             raise ValueError("Companion binding")
                     except (ManagementError, OSError, ValueError, TypeError, KeyError):
@@ -251,3 +270,5 @@ class NativeAgentGateway:
             raise ManagementError("AGENT_BUSY", 409) from None
         except directory.AgentNotFoundError:
             raise ManagementError("AGENT_UNAVAILABLE", 404) from None
+        except (OSError, ValueError, TypeError, KeyError):
+            raise ManagementError("AGENT_UNAVAILABLE", 503) from None
