@@ -33,6 +33,7 @@ import {
   type PythonJsonBridgeSpawn
 } from "../src/process/pythonJsonBridge.js";
 import { resolveWorkbenchPortOwner } from "../src/process/resolveWorkbenchPortOwner.js";
+import { requestGracefulWorkbenchShutdown } from "../src/process/workbenchBackendRetire.js";
 
 const roots: string[] = [];
 function workspace(): string {
@@ -280,6 +281,69 @@ describe("native lifecycle target environment", () => {
     expectEnvironmentFields(spawnOptions?.env, env);
     expect(spawnOptions?.cwd).toBe(root);
     expect(process.env.VIBELUTION_PORT).toBe("18101");
+  });
+
+  it.each(["stop", "start", "restart"] as const)("isolates real graceful shutdown authentication during target %s", async (operation) => {
+    vi.stubEnv("VIBELUTION_WEB_CONTROL_TOKEN", "synthetic-ambient-a");
+    const root = workspace();
+    let alive = true, spawned = false;
+    const headers: string[] = [], reads: string[] = [];
+    const terminateProcessTree = vi.fn(async () => false);
+    const result = await executeMainLineWorkbench({
+      ...lifecycleSeams(root), operation, targetEnvironment: projectBEnvironment(root),
+      readState: () => ({ backendPort: 18202, backendPid: 51, backendCreateTime: 1, backendExecutable: join(root, "python.exe") }),
+      connect: async () => alive || spawned,
+      fetchHealth: async () => ({ status: 200, json: async () => ({ status: "ok", routesReady: true, shellReady: true, pid: alive ? 51 : 4242, workspaceRoot: root }) }),
+      pidAlive: pid => pid === 51 && alive,
+      captureProcessIdentity: async ({ pid }) => ({ pid, createTime: 1, executable: join(root, "python.exe") }),
+      spawnImpl: () => { spawned = true; return { pid: 4242, kill: () => true }; },
+      terminateProcessTree,
+      gracefulShutdown: input => requestGracefulWorkbenchShutdown({ ...input,
+        connect: async () => alive, pidAlive: () => alive,
+        request: async (url, options) => {
+          reads.push(url);
+          if (options.method === "GET") return { status: 200, json: async () => ({ controlToken: "synthetic-target-b" }) };
+          headers.push(options.headers?.["X-Vibelution-Control-Token"] || "");
+          alive = false;
+          return { status: 202 };
+        },
+      }),
+      command: { commandId: `isolated-auth-${operation}`, type: operation === "stop" ? "close" : operation === "start" ? "open" : "restart", operation, noBrowser: true },
+    });
+    expect(result).toMatchObject({ accepted: true });
+    expect(headers).toEqual(["synthetic-target-b"]);
+    expect(reads.some(url => url.endsWith("/api/control-token"))).toBe(true);
+    expect(terminateProcessTree).not.toHaveBeenCalled();
+    expect(process.env.VIBELUTION_WEB_CONTROL_TOKEN).toBe("synthetic-ambient-a");
+  });
+
+  it.each(["stop", "start", "restart"] as const)("retains the target realtime active-work refusal during %s", async (operation) => {
+    vi.stubEnv("VIBELUTION_WEB_CONTROL_TOKEN", "synthetic-ambient-a");
+    const root = workspace();
+    const headers: string[] = [];
+    const terminateProcessTree = vi.fn(async () => false);
+    const task = executeMainLineWorkbench({
+      ...lifecycleSeams(root), operation, targetEnvironment: projectBEnvironment(root),
+      readState: () => ({ backendPort: 18202, backendPid: 51, backendCreateTime: 1, backendExecutable: join(root, "python.exe") }),
+      connect: async () => true,
+      fetchHealth: async () => ({ status: 200, json: async () => ({ status: "ok", routesReady: true, shellReady: true, pid: 51, workspaceRoot: root }) }),
+      pidAlive: pid => pid === 51,
+      captureProcessIdentity: async ({ pid }) => ({ pid, createTime: 1, executable: join(root, "python.exe") }),
+      terminateProcessTree,
+      gracefulShutdown: input => requestGracefulWorkbenchShutdown({ ...input,
+        request: async (_url, options) => {
+          if (options.method === "GET") return { status: 200, json: async () => ({ controlToken: "synthetic-target-b" }) };
+          headers.push(options.headers?.["X-Vibelution-Control-Token"] || "");
+          return { status: options.headers?.["X-Vibelution-Control-Token"] === "synthetic-target-b" ? 409 : 401 };
+        },
+      }),
+      command: { commandId: `isolated-refusal-${operation}`, type: operation === "stop" ? "close" : operation === "start" ? "open" : "restart", operation, noBrowser: true },
+    });
+    if (operation === "stop") await expect(task).resolves.toMatchObject({ accepted: false, code: "active_work_blocked" });
+    else await expect(task).rejects.toThrow(/active work|still held/);
+    expect(headers).toEqual(["synthetic-target-b"]);
+    expect(terminateProcessTree).not.toHaveBeenCalled();
+    expect(process.env.VIBELUTION_WEB_CONTROL_TOKEN).toBe("synthetic-ambient-a");
   });
 
   it.each([true, false])("keeps identity helper admission scoped (explicit target: %s)", async (explicit) => {

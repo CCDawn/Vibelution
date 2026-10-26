@@ -219,6 +219,13 @@ per physical project root. A changed runtime-manager owner is refused rather
 than creating a parallel queue. Explicit target environments reach backend,
 frontend build, Windows Job, identity, port-owner and retirement helpers without
 switching `process.env` or inheriting the assistant's embedded Python.
+Graceful shutdown also receives an explicit target token or empty value. Empty
+means the existing owner discovers a token only from the identity-verified
+loopback target; it cannot fall back to the Launcher's ambient project token.
+The target's realtime 409 active-work refusal remains authoritative, without a
+process-tree fallback. Global profile/storage roots remain main-owned and
+shared across registered projects; this is not per-target operator-profile
+switching.
 
 The optional main-control v1 channel reuses the host's private authenticated
 connection. Main long-polls short-lived deliveries and settles their public

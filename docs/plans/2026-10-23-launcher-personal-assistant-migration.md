@@ -892,3 +892,5 @@ E14 退出后的封存复查仍在目录枚举前后签名比较处失败；原�
 新增 session_pin 已贯通既有 HTTP 通用 route、SDK、动态动作说明及 Launcher 原生审批，独立要求 sessions:pin。复用普通 Session 可见性权威与 canonical pin setter、现有 durable intent/fingerprint/receipt；已达目标状态不刷新置顶时间，unknown 仅回读、完成回执保留首次历史状态，当前状态由 session_get 查询。旧 SDK 主体保持原八项 scope，fresh 主体先持久化显式九项请求再 bind，不自动扩权；旧授权的显式迁移仍待后续收口。真实 SQLite 回归确认当前选择和 Session runtime 不变，独立审查未发现阻断问题。
 
 剩余范围仍包括主题明暗模式的统一设置权威、操作者图片选择/上传的模型语义入口、尚未接入的语义 API、旧授权与历史/在途数据交接，以及新包 DeepSeek 联合验收。本轮阶段变更未改变版本号或正式安装；需要后续构建包含本片的 Launcher 才能进入新包验收，不自动重启正式实例。旧个人助理继续保留至验收通过。
+
+合入前继续追踪原生关闭链时发现真实的令牌回退风险：显式目标环境仍可能在 shutdown helper 缺参时使用当前项目 token，使目标 409 活跃工作拒绝变成 401 并进入身份核验后的回收分支。已阻止该版本合入，现统一包装 stop/start/restart 的原生 graceful owner，显式传目标 token 或空串（由原 owner 仅向已核验 loopback 目标获取），不改通用 helper 的普通调用默认。真实 helper + 虚构 HTTP 先复现三类操作都误用 A token，再验证目标 B 认证及实时 409 不走 tree retirement；独立复审通过。跨项目仍共享 main 的全局 operator/profile 存储根，不宣称支持每个目标切换独立 operator profile。

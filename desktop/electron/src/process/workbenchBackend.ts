@@ -1498,6 +1498,14 @@ export async function executeMainLineWorkbench(
   };
   const host = DEFAULT_WORKBENCH_HOST;
   const helperEnvironment = input.targetEnvironment === undefined ? {} : { env: input.targetEnvironment };
+  const shutdownOwner = input.gracefulShutdown
+    ?? (input.killPid ? undefined : requestGracefulWorkbenchShutdown);
+  const targetControlToken = input.controlToken ?? input.targetEnvironment?.VIBELUTION_WEB_CONTROL_TOKEN ?? "";
+  // An explicit empty token makes the canonical owner discover the verified
+  // target's token, rather than borrowing the Launcher's current project token.
+  const targetGracefulShutdown: typeof requestGracefulWorkbenchShutdown | undefined = shutdownOwner && input.targetEnvironment !== undefined
+    ? shutdownInput => shutdownOwner({ ...shutdownInput, controlToken: shutdownInput.controlToken ?? targetControlToken })
+    : shutdownOwner;
   const operation = input.operation;
   const commandId = input.command.commandId;
   const captureIdentity = input.captureProcessIdentity
@@ -1630,8 +1638,7 @@ export async function executeMainLineWorkbench(
             ...helperEnvironment,
             allowedKinds: ["managed_workbench_backend", "runtime_manager_daemon"]
           }));
-    const gracefulShutdown = input.gracefulShutdown
-      ?? (input.killPid ? undefined : requestGracefulWorkbenchShutdown);
+    const gracefulShutdown = targetGracefulShutdown;
     let staleReclaim: {
       reclaimed: boolean;
       reason: string;
@@ -1967,8 +1974,7 @@ export async function executeMainLineWorkbench(
           ...helperEnvironment,
           allowedKinds: ["managed_workbench_backend", "runtime_manager_daemon"]
         }));
-  const gracefulShutdownImpl = input.gracefulShutdown
-    ?? (input.killPid ? undefined : requestGracefulWorkbenchShutdown);
+  const gracefulShutdownImpl = targetGracefulShutdown;
   let restartPauseConfirmed = false;
   const gracefulShutdown: typeof requestGracefulWorkbenchShutdown | undefined = gracefulShutdownImpl
     ? async (shutdownInput) => {
