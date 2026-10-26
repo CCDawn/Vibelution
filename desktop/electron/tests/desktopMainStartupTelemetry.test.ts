@@ -18,10 +18,10 @@ describe("Electron main startup telemetry", () => {
     const bootstrap = parsed.statements.find(node => isFunctionDeclaration(node) && node.name?.text === "bootstrapProjectControlPlane");
     if (!bootstrap || !isFunctionDeclaration(bootstrap) || !bootstrap.body) throw new Error("Missing project bootstrap body");
     const body = source.slice(bootstrap.body.getStart(parsed) + 1, bootstrap.body.getEnd() - 1);
-    const marker = "void maybeRestoreTrayRestartAllPending();";
-    const begin = body.indexOf(marker) + marker.length;
+    const marker = "const trayStartupEvents:";
+    const begin = body.indexOf(marker);
     const end = body.length;
-    expect(begin).toBeGreaterThan(marker.length);
+    expect(begin).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(begin);
     let release!: () => void;
     const pending = new Promise<void>((resolve) => { release = resolve; });

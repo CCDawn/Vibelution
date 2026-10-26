@@ -100,11 +100,13 @@ describe("Electron main tray integration", () => {
   });
 
   it("claims the desktop shell owner before creating the tray", () => {
-    const claimIdx = mainSource.indexOf("claimElectronDesktopShellOwner(paths.workspaceRoot)");
+    const claimIdx = mainSource.indexOf("claimElectronDesktopShellOwner(deferredWorkspace)");
+    const bootstrapIdx = mainSource.indexOf("await bootstrapProjectControlPlane(paths, !deferred, !managementOnly)");
     const trayIdx = mainSource.indexOf("desktopTray = createDesktopTray(paths,");
     expect(claimIdx).toBeGreaterThan(-1);
     expect(trayIdx).toBeGreaterThan(-1);
-    expect(claimIdx).toBeLessThan(trayIdx);
+    expect(bootstrapIdx).toBeGreaterThan(claimIdx);
+    expect(bootstrapIdx).toBeLessThan(trayIdx);
   });
 
   it("records tray force-interrupt evidence when restart-all runs under FORCE_INTERRUPT", () => {
