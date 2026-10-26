@@ -229,7 +229,10 @@ export class ElectronWindowProvider {
   private async presentLauncher(): Promise<ManagedWindowState> {
     const launcherOrigin = launcherAppOriginFor(this.launcherUrl);
     const safeUrl = launcherWindowUrl(this.launcherUrl);
-    const existing = this.listLauncherWindows(launcherOrigin).filter((window) => !window.isDestroyed());
+    // Origin discovery also returns the resident assistant. Only the actual
+    // control route may be adopted or discarded as a duplicate Launcher.
+    const existing = this.listLauncherWindows(launcherOrigin).filter((window) =>
+      !window.isDestroyed() && isLauncherControlWindowUrl(window.webContents.getURL(), safeUrl));
     const contentVersion = this.currentLauncherContentVersion();
     if (this.launcherWindow && !this.launcherWindow.isDestroyed()) {
       this.reloadLauncherIfStale(this.launcherWindow, contentVersion);
@@ -1332,6 +1335,17 @@ function launcherWindowUrl(value: string): string {
   }
   const origin = new URL(value).origin;
   return assertLocalHttpUrl(value, origin);
+}
+
+function isLauncherControlWindowUrl(candidate: string, expected: string): boolean {
+  try {
+    const url = new URL(candidate);
+    const target = new URL(expected);
+    const route = (path: string) => path.replace(/\/+$/, "") || "/";
+    return !url.username && !url.password
+      && launcherAppOriginFor(candidate) === launcherAppOriginFor(expected)
+      && route(url.pathname) === route(target.pathname);
+  } catch { return false; }
 }
 
 function navigationFailure(url: string, error: unknown): Error {

@@ -1259,6 +1259,35 @@ describe("Electron window provider state", () => {
     expect(extra.isDestroyed()).toBe(true);
   });
 
+  it.each(["vibelution-launcher://launcher", "http://127.0.0.1:8765"])("does not adopt or retire the resident assistant at %s", async origin => {
+    const assistant = new FakeWindow(7, `${origin}/launcher-assistant`, 7070);
+    const launcher = new FakeWindow(8, `${origin}/launcher?panel=projects#top`, 8080);
+    const create = vi.fn((url: string) => new FakeWindow(9, url, 9090));
+    const provider = new ElectronWindowProvider(desktopPaths, `${origin}/launcher`, "http://127.0.0.1:8000", {
+      createLauncherWindow: create, createWorkbenchWindow: url => new FakeWindow(42, url, 4242),
+      // Native discovery is by origin. Role validation belongs to the provider.
+      listLauncherWindows: () => [assistant, launcher],
+    });
+    expect((await provider.openLauncher()).windowId).toBe(8);
+    expect((await provider.openLauncher()).windowId).toBe(8);
+    expect(create).not.toHaveBeenCalled();
+    expect(assistant.showCount).toBe(0); expect(assistant.focusCount).toBe(0);
+    expect(assistant.destroyCount).toBe(0); expect(assistant.closeCount).toBe(0);
+  });
+
+  it("creates a separate project manager when the assistant is the only same-origin window", async () => {
+    const assistant = new FakeWindow(7, "vibelution-launcher://launcher/launcher-assistant", 7070);
+    const create = vi.fn((url: string) => new FakeWindow(9, url, 9090));
+    const provider = new ElectronWindowProvider(desktopPaths, "vibelution-launcher://launcher/launcher", "http://127.0.0.1:8000", {
+      createLauncherWindow: create, createWorkbenchWindow: url => new FakeWindow(42, url, 4242),
+      listLauncherWindows: () => [assistant],
+    });
+    expect((await provider.openLauncher()).windowId).toBe(9);
+    expect((await provider.openLauncher()).windowId).toBe(9);
+    expect(create).toHaveBeenCalledExactlyOnceWith("vibelution-launcher://launcher/launcher", desktopPaths);
+    expect(assistant.showCount).toBe(0); expect(assistant.focusCount).toBe(0); expect(assistant.destroyCount).toBe(0);
+  });
+
   it("adopts one existing workbench window and destroys extras", async () => {
     const first = new FakeWindow(42, "http://127.0.0.1:8002/teams", 4242);
     const extra = new FakeWindow(43, "http://127.0.0.1:8002/chat", 4343);
