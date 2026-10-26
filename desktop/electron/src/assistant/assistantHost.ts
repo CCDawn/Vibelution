@@ -5,6 +5,7 @@ import { isAbsolute, join, resolve } from "node:path";
 import { loadWorkbenchJobNative, type WorkbenchJobHandle, type WorkbenchJobNative } from "../process/workbenchJob.js";
 import { resolveNoConsolePython } from "../process/workbenchBackend.js";
 import { MAX_ASSISTANT_PROJECTS, type AssistantProjectRegistrySnapshot } from "./projectRegistry.js";
+import { runMainControlPump, type MainControlRequest } from "./mainControlTransport.js";
 
 const STARTUP_MS = 60_000;
 const REQUEST_MS = 15_000;
@@ -23,7 +24,8 @@ export type AssistantHostRequest =
   | { operation: "stop"; turnId: string }
   | { operation: "continue"; requestId: string; continuation: { turnId: string; headId: string; ledgerSeq: number; agentId: string } }
   | { operation: "curation"; sessionId: string }
-  | { operation: "curate"; sessionId: string; messageId: string; action: "include" | "exclude" };
+  | { operation: "curate"; sessionId: string; messageId: string; action: "include" | "exclude" }
+  | { operation: "operatorAsset"; kind: "avatar" | "background" };
 
 export type AssistantHostOptions = {
   profileRoot: string;
@@ -36,6 +38,8 @@ export type AssistantHostOptions = {
   pythonArguments?: string[];
   native?: WorkbenchJobNative;
   fetch?: typeof globalThis.fetch;
+  /** Main-only native lifecycle capability; deliberately absent from renderer IPC. */
+  mainControl?: (request: MainControlRequest) => Promise<unknown>;
 };
 
 type Generation = {
@@ -215,6 +219,11 @@ export class AssistantHost {
           || !["accept", "decline"].includes(payload.decision)) throw new HostError("ASSISTANT_REQUEST_INVALID");
         return await this.rpc(generation, "/api/assistant/approvals/decision", "POST",
           { requestId: payload.requestId, decision: payload.decision });
+      case "operatorAsset":
+        if (!ownKeys(payload, ["operation", "kind"]) || !["avatar", "background"].includes(payload.kind)) throw new HostError("ASSISTANT_REQUEST_INVALID");
+        // Native backgrounds allow 10 MiB; base64 fits this operation's 16 MiB
+        // envelope without widening ordinary JSON or main-control budgets.
+        return await this.rpc(generation, `/api/assistant/operator-assets/${payload.kind}`, "GET", undefined, REQUEST_MS, false, 16 * 1024 * 1024);
       case "send":
         if (!ownKeys(payload, ["operation", "message", "requestId"])
           || typeof payload.message !== "string" || !payload.message.trim() || payload.message.length > 64_000
@@ -300,8 +309,9 @@ export class AssistantHost {
         excluded.add("PYTHONHOME");
       }
       for (const key of Object.keys(environment)) {
-        if (excluded.has(key.toUpperCase())) delete environment[key];
+        if (excluded.has(key.toUpperCase()) || key.toUpperCase() === "VIBELUTION_ASSISTANT_MAIN_CONTROL") delete environment[key];
       }
+      if (this.options.mainControl) environment.VIBELUTION_ASSISTANT_MAIN_CONTROL = "1";
       const spawned = native.spawn({
         executable: python,
         arguments: [...this.options.pythonArguments!, join(this.options.sourceRoot, "scripts", "assistant_host.py"), "--profile-root", this.options.profileRoot,
@@ -325,10 +335,12 @@ export class AssistantHost {
             const timeout = Math.max(1, Math.min(2_000, deadline - Date.now()));
             const health = await this.rpc(generation, "/health", "GET", undefined, timeout);
             if (!object(health) || health.status !== "ok" || health.role !== "launcher_assistant" || health.protocolVersion !== 1) throw new HostError("ASSISTANT_HEALTH_INVALID");
+            if (this.options.mainControl && health.mainControlVersion !== 1) throw new HostError("ASSISTANT_MAIN_CONTROL_UNAVAILABLE");
             const status = await this.rpc(generation, "/api/assistant", "GET", undefined, Math.max(1, deadline - Date.now()));
             generation.sessionId = identity(status);
             if (revision !== this.revision || generation.abort.signal.aborted) throw new HostError("ASSISTANT_STOPPED");
             this.view = { state: "ready", errorCode: null };
+            if (this.options.mainControl) this.startMainControl(generation);
             return this.snapshot();
           } catch (error) {
             if (!(error instanceof HostError) || !["ASSISTANT_TRANSPORT_FAILED", "ASSISTANT_REQUEST_TIMEOUT"].includes(error.code)) throw error;
@@ -349,6 +361,29 @@ export class AssistantHost {
     }
   }
 
+  private startMainControl(generation: Generation): void {
+    const onRequest = this.options.mainControl!;
+    void runMainControlPump({
+      signal: generation.abort.signal,
+      isCurrent: () => this.current === generation && !generation.closed && this.view.state === "ready",
+      invoke: (path, method, body) => this.rpc(generation, path, method, body, REQUEST_MS, false, 8_192),
+      onRequest,
+      onFailure: () => {
+        if (this.current !== generation || generation.abort.signal.aborted) return;
+        generation.abort.abort();
+        this.view = { state: "failed", errorCode: "ASSISTANT_MAIN_CONTROL_FAILED" };
+        // Reuse the same serialized Job owner; never race another retirement or
+        // cancel a native project command when only the assistant channel failed.
+        const operation = this.serial.then(async () => {
+          if (this.current !== generation) return;
+          try { await this.retire(generation, false); }
+          finally { if (generation.closed && this.current === generation) this.current = null; }
+        });
+        this.serial = operation.catch(() => undefined);
+      },
+    }).catch(() => undefined);
+  }
+
   private readReady(generation: Generation): { port: number } | null {
     const path = join(generation.directory, "ready.json");
     if (!existsSync(path)) return null;
@@ -365,7 +400,7 @@ export class AssistantHost {
   }
 
   private async rpc(generation: Generation, path: string, method: "GET" | "POST" | "PUT", body?: object,
-    timeoutMs = REQUEST_MS, retiring = false): Promise<unknown> {
+    timeoutMs = REQUEST_MS, retiring = false, maxResponseBytes = MAX_RESPONSE_BYTES): Promise<unknown> {
     if (!generation.origin || generation.closed || (!retiring && generation.abort.signal.aborted)) throw new HostError("ASSISTANT_NOT_READY");
     const timeout = new AbortController();
     const timer = setTimeout(() => timeout.abort(), timeoutMs);
@@ -381,7 +416,7 @@ export class AssistantHost {
         throw new HostError("ASSISTANT_HTTP_FAILED");
       }
       const length = Number(response.headers.get("content-length"));
-      if (Number.isFinite(length) && length > MAX_RESPONSE_BYTES) {
+      if (Number.isFinite(length) && length > maxResponseBytes) {
         await response.body?.cancel().catch(() => undefined);
         throw new HostError("ASSISTANT_RESPONSE_TOO_LARGE");
       }
@@ -395,7 +430,7 @@ export class AssistantHost {
           if (signal.aborted) throw new HostError(timeout.signal.aborted ? "ASSISTANT_REQUEST_TIMEOUT" : "ASSISTANT_STOPPED");
           if (part.done) break;
           size += part.value.byteLength;
-          if (size > MAX_RESPONSE_BYTES) throw new HostError("ASSISTANT_RESPONSE_TOO_LARGE");
+          if (size > maxResponseBytes) throw new HostError("ASSISTANT_RESPONSE_TOO_LARGE");
           chunks.push(part.value);
         }
       } finally {

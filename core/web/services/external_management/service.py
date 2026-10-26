@@ -252,6 +252,19 @@ class ManagementService:
         return agent.get("avatarImagePath") == parameters["avatar_image_path"]
 
     def _confirm(self, record: dict) -> bool:
+        if record["action"] == "session_pin":
+            # A completed receipt freezes this first canonical observation;
+            # current state remains available through session_get.
+            try:
+                from .contracts import SessionReadResponse
+                session = SessionReadResponse.model_validate(self.native.read_session(record["sessionId"])).session
+                if session.id != record["sessionId"] or session.pinned is not record["parameters"]["pinned"]:
+                    return False
+                record["receipt"] = {"status": "completed", "action": record["action"], "requestId": record["requestId"],
+                    "verified": True, "session": session.model_dump()}
+                return True
+            except Exception:  # noqa: BLE001 -- unavailable metadata never authorizes a repeat write
+                return False
         try:
             if record["action"] == "agent_create":
                 candidates = self.native.find_created(record["marker"]["requestKey"])
@@ -303,16 +316,22 @@ class ManagementService:
             marker = {"subjectType": "operator", "subjectId": subject, "requestKey": key, "requestFingerprint": fingerprint}
             record = {"action": action, "requestId": envelope.request_id, "fingerprint": fingerprint,
                       "binding": grant["binding"], "parameters": parameters, "marker": marker}
+            if action == "session_pin":
+                record["sessionId"] = parameters["session_id"]
             self.store.write(path, record)  # Admission is durable before any native side effect.
             try:
-                agent = getattr(self.native, {"agent_create": "create", "agent_update": "update", "agent_avatar": "avatar"}[action])(parameters, marker)
+                if action == "session_pin":
+                    self.native.pin_session(parameters)
+                else:
+                    agent = getattr(self.native, {"agent_create": "create", "agent_update": "update", "agent_avatar": "avatar"}[action])(parameters, marker)
             except ManagementError as exc:
                 record["failure"] = {"code": exc.code, "status_code": exc.status_code}
                 self.store.write(path, record)
                 raise
             except Exception:  # noqa: BLE001 -- lost native acknowledgement remains an unknown durable intent
                 return self._receipt(record, reused=False)
-            record["agentId"] = agent.get("agentId", "")
+            if action != "session_pin":
+                record["agentId"] = agent.get("agentId", "")
             self.store.write(path, record)
             self._confirm(record)
             self.store.write(path, record)

@@ -293,7 +293,7 @@ async def test_session_config_compare_action_preserves_read_scope_and_explicit_c
         page = await asyncio.to_thread(execute_action, "index", {"query": "session_config_compare"})
         assert {r["action"] for r in page["actions"]} >= {"session_config_compare", "session_config_get"}
         assert next(r for r in page["actions"] if r["action"] == "session_config_compare")["governed"] is False
-        assert "session_config_compare" not in ACTION_MODELS and len(SCOPES) == 8
+        assert "session_config_compare" not in ACTION_MODELS and len(SCOPES) == 9
         description = await asyncio.to_thread(execute_action, "describe", {"action": "session_config_compare"})
         assert description["parameters"]["additionalProperties"] is False
         assert set(description["parameters"]["properties"]) == {"session_id", "project_id"}

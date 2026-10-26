@@ -1,0 +1,65 @@
+import { describe, expect, it, vi } from "vitest";
+import { parseMainControlClaim, projectMainControlResult, runMainControlPump, type MainControlRequest } from "../src/assistant/mainControlTransport.js";
+
+const wire = (overrides: object = {}) => ({ schemaVersion: 1, request: {
+  deliveryId: "a".repeat(32), action: "project_lifecycle", projectId: "synthetic:uuid", operation: "start", requestId: "request-1", ...overrides,
+} });
+const request = wire().request as MainControlRequest;
+const result = { schemaVersion: 1 as const, projectId: request.projectId, operation: "start", requestId: "request-1", state: "completed", code: "accepted", accepted: true };
+
+describe("generation-scoped main control transport", () => {
+  it("admits only closed opaque lifecycle/status envelopes", () => {
+    expect(parseMainControlClaim(wire())).toEqual(request);
+    expect(parseMainControlClaim({ schemaVersion: 1, request: null })).toBeNull();
+    for (const override of [{ force: true }, { operation: "force-stop" }, { projectId: "file:///private" }, { requestId: "../request" }, { deliveryId: "old" }]) {
+      expect(() => parseMainControlClaim(wire(override))).toThrow();
+    }
+    expect(() => parseMainControlClaim({ ...wire(), url: "http://private" })).toThrow();
+    expect(() => parseMainControlClaim(wire({ action: "project_status", operation: "status" }))).toThrow();
+  });
+
+  it("projects only matching public facts and sanitizes arbitrary callback errors/details", () => {
+    expect(projectMainControlResult(request, result)).toEqual(result);
+    for (const invalid of [{ ...result, requestId: "other" }, { ...result, message: "SECRET C:/private" }, { ...result, code: "SECRET" }, { ...result, state: "completed", accepted: false },
+      { ...result, state: "completed", code: "project_unavailable" }, { ...result, state: "queued", code: "accepted" }]) {
+      const projected = projectMainControlResult(request, invalid);
+      expect(projected).toMatchObject({ state: "unknown", code: "control_unavailable" });
+      expect(JSON.stringify(projected)).not.toContain("SECRET");
+    }
+  });
+
+  it("does not replay a request when its result acknowledgement is lost", async () => {
+    const signal = new AbortController();
+    let claimed = false;
+    const invoke = vi.fn(async (path: string) => {
+      if (path.endsWith("/next")) {
+        if (!claimed) { claimed = true; return wire(); }
+        return await new Promise((_resolve, reject) => signal.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true }));
+      }
+      throw new Error("lost acknowledgement SECRET");
+    });
+    const onRequest = vi.fn(async () => result);
+    const failure = vi.fn(() => signal.abort());
+    await runMainControlPump({ signal: signal.signal, invoke, onRequest, isCurrent: () => !signal.signal.aborted, onFailure: failure });
+    expect(onRequest).toHaveBeenCalledTimes(1);
+    expect(failure).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets an admitted main command settle after host retirement without replying to a replacement", async () => {
+    const signal = new AbortController();
+    let release!: () => void, entered!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    let claimed = false;
+    const invoke = vi.fn(async (path: string) => {
+      if (!claimed) { claimed = true; return wire(); }
+      if (signal.signal.aborted) throw new Error("aborted");
+      return await new Promise((_resolve, reject) => signal.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true }));
+    });
+    const onRequest = vi.fn(async () => { entered(); await gate; return result; });
+    const pending = runMainControlPump({ signal: signal.signal, invoke, onRequest, isCurrent: () => !signal.signal.aborted, onFailure: vi.fn() });
+    await started; signal.abort(); release(); await pending;
+    expect(onRequest).toHaveBeenCalledTimes(1);
+    expect(invoke.mock.calls.every(([path]) => path.endsWith("/next"))).toBe(true);
+  });
+});

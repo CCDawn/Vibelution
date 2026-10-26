@@ -111,6 +111,7 @@ export async function runOwnedFrontendBuildBridge(input: {
   pythonPath: string;
   args: string[];
   signal?: AbortSignal;
+  env?: NodeJS.ProcessEnv;
 }): Promise<string> {
   if (input.signal?.aborted) throw failure("aborted", "frontend build preflight was aborted before spawn");
   const native = loadWorkbenchJobNative() as BuildNative;
@@ -124,7 +125,7 @@ export async function runOwnedFrontendBuildBridge(input: {
   try {
     const spawnInput = {
       executable: input.pythonPath, arguments: input.args, cwd: input.workspaceRoot,
-      env: pythonBridgeEnv(), stdoutPath, stderrPath, maxLogBytes: LOG_BYTES,
+      env: pythonBridgeEnv(input.env), stdoutPath, stderrPath, maxLogBytes: LOG_BYTES,
       containDescendants: true
     };
     job = native.spawn(spawnInput).job;

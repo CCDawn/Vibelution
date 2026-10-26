@@ -10,6 +10,56 @@ from core.external_agent.backend_client import BackendClientError
 
 
 @pytest.mark.anyio
+async def test_session_pin_governed_closed_action_and_original_receipt_after_restart(tmp_path):
+    probe = Probe()
+    def factory(root, **kwargs):
+        class Client:
+            async def diagnostics(self):
+                return {"status": "healthy"}
+            async def management_action(self, **values):
+                probe.writes.append(values)
+                return receipt(values, reused=False)
+            async def management_receipt(self, **values):
+                probe.lookups.append(values)
+                return receipt(values, reused=True)
+        return Client()
+    def receipt(values, *, reused):
+        return {"status": "completed", "action": values["action"], "requestId": values["request_id"],
+            "verified": True, "reused": reused, "session": {"id": "session-a", "agentId": "agent-a",
+                "title": "Visible", "pinned": True, "pinnedAtMs": 123, "status": "ready", "archived": False}}
+    profile, project = tmp_path / "profile", tmp_path / "project"
+    service = DispatchService(profile, {"p": project}, client_factory=factory)
+    bind_actions(service, asyncio.get_running_loop())
+    parameters = {"project_id": "p", "request_id": "pin-1", "session_id": "session-a", "pinned": True}
+    try:
+        described = execute_action("describe", {"action": "session_pin"})
+        assert described["governed"] is True and described["scope"] == "sessions:pin"
+        index = execute_action("index", {"query": "session_pin"})
+        assert "session_pin" in json.dumps(index)
+        denied = await asyncio.to_thread(execute_action, "session_pin", parameters)
+        assert denied["status"] == "approval_required" and probe.writes == []
+        result = await asyncio.to_thread(execute_action, "session_pin", parameters, governed=True)
+        assert result["session"]["pinned"] is True and result["projectId"] == "p"
+        assert probe.writes[0]["parameters"] == {"session_id": "session-a", "pinned": True}
+        for injected in ({"agentId": "fake"}, {"actor": "operator"}, {"pinned": "true"}, {"governed": True}):
+            with pytest.raises(ValueError):
+                await asyncio.to_thread(execute_action, "session_pin", {**parameters, **injected}, governed=True)
+        await asyncio.to_thread(execute_action, "management_receipt", {
+            "project_id": "p", "action": "session_pin", "request_id": "pin-1"})
+    finally:
+        unbind_actions(service)
+    restarted = DispatchService(profile, {"p": project}, client_factory=factory)
+    await restarted.management.invoke("p", action="session_pin", request_id="pin-1",
+        parameters={"session_id": "session-a", "pinned": True})
+    assert len(probe.writes) == 1
+    assert all(row == {"action": "session_pin", "request_id": "pin-1"} for row in probe.lookups)
+    with pytest.raises(DispatchError) as conflict:
+        await restarted.management.invoke("p", action="session_pin", request_id="pin-1",
+            parameters={"session_id": "session-a", "pinned": False})
+    assert conflict.value.code == "MANAGEMENT_CONFLICT"
+
+
+@pytest.mark.anyio
 async def test_session_list_action_uses_read_scope_without_intent_and_fits_native_budget(tmp_path, monkeypatch):
     from core.infrastructure.tool_result_budget import apply_tool_result_budget
     from core.infrastructure.tool_result import package_tool_result_facts, render_tool_result_for_model

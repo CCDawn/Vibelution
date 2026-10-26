@@ -41,6 +41,56 @@
 [data-assistant-chat="compact"] .vui-components-conversationview.emptyState { font-size: 13px; }
 [data-assistant-chat="compact"] .vui-components-conversationview.userMessageBody { border: 0; background: var(--vui-selection-bg); border-radius: 12px 12px 3px 12px; padding: 10px 13px; }
 
+/* Restore the native user avatar rail only for the Launcher custom image. */
+.launcher-assistant-chat-window[data-operator-avatar="custom"] .vui-components-conversationview.userTurn {
+  grid-template-columns: minmax(0, 1fr) 2rem;
+  gap: 0 12px;
+}
+.launcher-assistant-chat-window[data-operator-avatar="custom"] .vui-components-conversationview.userTurn .turnAvatar {
+  display: grid;
+  grid-column: 2;
+  grid-row: 1;
+}
+.launcher-assistant-chat-window[data-operator-avatar="custom"] .vui-components-conversationview.userTurn .turnContent {
+  max-width: min(76%, 640px) !important;
+}
+@media (max-width: 719px) {
+  .launcher-assistant-chat-window[data-operator-avatar="custom"] .vui-components-conversationview.userTurn { column-gap: 8px; }
+  .launcher-assistant-chat-window[data-operator-avatar="custom"] .vui-components-conversationview.userTurn .turnContent { max-width: min(88%, 36rem) !important; }
+}
+
+/* Same composition and readability tokens as workbench-shell.css. The image
+   belongs to the expanded Launcher recipe, never the transparent pet root. */
+.launcher-assistant-chat-window[data-theme-background="custom"] {
+  --vui-surface-chat: transparent;
+  --theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 44%, transparent);
+  /* tokens.css defines this composite at :root, before the recipe-local mid
+     exists. Rebind the same composite here so var() resolves in its owner. */
+  --vui-gradient-background-readable: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-canvas) 48%, transparent),
+    var(--theme-background-overlay-mid)
+  );
+  --theme-background-blur: 1px;
+  background: var(--vui-gradient-background-readable), var(--workbench-theme-background-image), var(--vui-gradient-route-soft);
+  background-position: center, center, center;
+  background-size: auto, cover, auto;
+  background-repeat: no-repeat, no-repeat, no-repeat;
+  background-attachment: scroll, scroll, scroll;
+}
+.launcher-assistant-chat-window[data-theme-background="custom"][data-theme-background-readability="soft"] {
+  --theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 18%, transparent);
+  --theme-background-blur: 0px;
+}
+.launcher-assistant-chat-window[data-theme-background="custom"][data-theme-background-readability="standard"] {
+  --theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 44%, transparent);
+  --theme-background-blur: 1px;
+}
+.launcher-assistant-chat-window[data-theme-background="custom"][data-theme-background-readability="strong"] {
+  --theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 60%, transparent);
+  --theme-background-blur: 2px;
+}
+
 /* Important Tailwind utilities must be overridden in the same cascade layer. */
 @layer utilities {
   [data-assistant-chat="compact"] .vui-components-conversationview.composerFieldCodex { gap: 2px !important; }

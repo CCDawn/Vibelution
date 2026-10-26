@@ -66,6 +66,7 @@ def main():
     if not args.profile_root.is_absolute() or not args.runtime_dir.is_absolute():
         parser.error("Assistant paths must be absolute")
     token = os.environ.pop("VIBELUTION_ASSISTANT_TOKEN", "")
+    main_control_enabled = os.environ.pop("VIBELUTION_ASSISTANT_MAIN_CONTROL", "") == "1"
     if len(token) < 32:
         parser.error("Launcher private bootstrap credential is missing")
     root = args.profile_root.resolve()
@@ -102,6 +103,10 @@ def main():
         dispatch.replace_projects(project_snapshot)
     except DispatchError:
         parser.error("Invalid private project registry snapshot")
+    main_control = None
+    if main_control_enabled:
+        from core.assistant_runtime.main_control import MainControlBroker
+        main_control = MainControlBroker(dispatch.project_ids)
 
     ready = args.runtime_dir / "ready.json"
     # A second Launcher cannot open another writer over the same profile.
@@ -122,7 +127,7 @@ def main():
                 server.should_exit = True
 
         app = create_app(native=NativeFacade(root), token=token,
-                         dispatch=dispatch, on_ready=publish_ready,
+                         dispatch=dispatch, main_control=main_control, on_ready=publish_ready,
                          on_shutdown=request_shutdown)
         # Native SSE is intentionally long lived. Bound HTTP connection drain
         # so an open renderer stream cannot prevent lifespan/native shutdown.

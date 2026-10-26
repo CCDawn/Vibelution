@@ -101,6 +101,7 @@ export type WorkbenchBackendState = Record<string, unknown>;
 export type ExecuteMainLineWorkbenchInput = {
   workspaceRoot: string;
   pythonPath: string;
+  targetEnvironment?: NodeJS.ProcessEnv;
   operation: WorkbenchLifecycleOperation;
   command: MainLineQueuedCommand;
   signal?: AbortSignal;
@@ -109,7 +110,7 @@ export type ExecuteMainLineWorkbenchInput = {
   readState?: () => WorkbenchBackendState;
   writeState?: (state: WorkbenchBackendState) => void | Promise<void>;
   listActiveWork?: () => ActiveWorkRun[];
-  ensureFrontend?: (input: { force: boolean; signal?: AbortSignal }) => Promise<void>;
+  ensureFrontend?: (input: { force: boolean; signal?: AbortSignal; env?: NodeJS.ProcessEnv }) => Promise<void>;
   now?: () => string;
   connect?: (port: number, host: string) => Promise<boolean>;
   fetchHealth?: (url: string) => Promise<WorkbenchHealthResponse>;
@@ -129,6 +130,7 @@ export type ExecuteMainLineWorkbenchInput = {
   captureProcessIdentity?: (input: {
     pythonPath: string;
     workspaceRoot: string;
+    env?: NodeJS.ProcessEnv;
     pid: number;
     signal?: AbortSignal;
   }) => Promise<PythonProcessIdentity | null>;
@@ -136,6 +138,7 @@ export type ExecuteMainLineWorkbenchInput = {
   resolvePortOwner?: (input: {
     pythonPath: string;
     workspaceRoot: string;
+    env?: NodeJS.ProcessEnv;
     port: number;
     signal?: AbortSignal;
   }) => Promise<WorkbenchPortOwnerResolution | null>;
@@ -197,6 +200,7 @@ export function workbenchBackendArgs(input: { host: string; port: number }): str
 export function workbenchBackendEnv(input: {
   workspaceRoot: string;
   port: number;
+  baseEnv?: NodeJS.ProcessEnv;
   host?: string;
   dataHome?: string;
   configHome?: string;
@@ -206,7 +210,7 @@ export function workbenchBackendEnv(input: {
   extra?: NodeJS.ProcessEnv;
 }): NodeJS.ProcessEnv {
   const env = pythonBridgeEnv({
-    ...process.env,
+    ...(input.baseEnv ?? process.env),
     ...(input.extra ?? {})
   });
   env.VIBELUTION_WORKSPACE_ROOT = input.workspaceRoot;
@@ -1219,6 +1223,7 @@ export type FrontendReleaseEnsureResult = {
 export async function ensureFrontendRelease(input: {
   workspaceRoot: string;
   pythonPath: string;
+  env?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
   runBridge?: typeof runPythonJsonBridge;
   terminateProcessTree?: PythonOwnedProcessTreeTerminator;
@@ -1227,6 +1232,7 @@ export async function ensureFrontendRelease(input: {
   const terminateProcessTree = input.terminateProcessTree ?? createPythonOwnedProcessTreeTerminator({
     pythonPath: input.pythonPath,
     workspaceRoot: input.workspaceRoot,
+    ...(input.env === undefined ? {} : { env: input.env }),
     allowedKinds: ["frontend_build_bridge"]
   });
   const terminateOwnedTree: PythonJsonBridgeOwnedTreeTerminator = async (child) => {
@@ -1253,12 +1259,13 @@ export async function ensureFrontendRelease(input: {
   ];
   const raw = process.platform === "win32" && !input.runBridge && !input.terminateProcessTree
     ? await runOwnedFrontendBuildBridge({
-      workspaceRoot: input.workspaceRoot, pythonPath: input.pythonPath, args, signal: input.signal
+      workspaceRoot: input.workspaceRoot, pythonPath: input.pythonPath, args, signal: input.signal, env: input.env
     })
     : await runBridge({
       pythonPath: input.pythonPath,
       args,
       cwd: input.workspaceRoot,
+      env: input.env,
       failureLabel: "frontend build preflight",
       timeoutMs: PYTHON_JSON_BRIDGE_MAINTENANCE_TIMEOUT_MS,
       signal: input.signal,
@@ -1268,6 +1275,7 @@ export async function ensureFrontendRelease(input: {
       captureChildIdentity: (pid) => capturePythonProcessIdentity({
         pythonPath: input.pythonPath,
         workspaceRoot: input.workspaceRoot,
+        ...(input.env === undefined ? {} : { env: input.env }),
         pid
       })
     });
@@ -1292,7 +1300,7 @@ export async function ensureFrontendRelease(input: {
 
 export function defaultEnsureFrontend(
   workspaceRoot: string,
-  options: { force: boolean; signal?: AbortSignal },
+  options: { force: boolean; signal?: AbortSignal; env?: NodeJS.ProcessEnv },
   pythonPath?: string
 ): Promise<void> {
   // Every start path must verify the content-addressed frontend fingerprint
@@ -1307,7 +1315,7 @@ export function defaultEnsureFrontend(
     ));
   }
   void options;
-  return ensureFrontendRelease({ workspaceRoot, pythonPath: resolved, signal: options.signal }).then(() => undefined);
+  return ensureFrontendRelease({ workspaceRoot, pythonPath: resolved, signal: options.signal, env: options.env }).then(() => undefined);
 }
 
 export type SpawnedWorkbenchBackend = {
@@ -1350,6 +1358,7 @@ export function spawnWorkbenchBackend(input: {
   workspaceRoot: string;
   pythonPath: string;
   port: number;
+  baseEnv?: NodeJS.ProcessEnv;
   host?: string;
   scriptRoot?: string;
   dataHome?: string;
@@ -1377,6 +1386,7 @@ export function spawnWorkbenchBackend(input: {
   }
   const env = workbenchBackendEnv({
     workspaceRoot: input.workspaceRoot,
+    baseEnv: input.baseEnv,
     port: input.port,
     host,
     dataHome: input.dataHome,
@@ -1487,27 +1497,30 @@ export async function executeMainLineWorkbench(
     input.signal?.throwIfAborted();
   };
   const host = DEFAULT_WORKBENCH_HOST;
+  const helperEnvironment = input.targetEnvironment === undefined ? {} : { env: input.targetEnvironment };
   const operation = input.operation;
   const commandId = input.command.commandId;
   const captureIdentity = input.captureProcessIdentity
-    ?? ((captureInput: { pythonPath: string; workspaceRoot: string; pid: number }) =>
+    ?? ((captureInput: { pythonPath: string; workspaceRoot: string; pid: number; env?: NodeJS.ProcessEnv }) =>
       capturePythonProcessIdentity(captureInput));
   const captureCurrentBackendIdentity = async (pid: number): Promise<PythonProcessIdentity | null> => {
     return await captureIdentity({
       pythonPath: input.pythonPath,
       workspaceRoot: input.workspaceRoot,
       pid,
+      ...helperEnvironment,
       signal: input.signal
     });
   };
   const resolveIdentityForPort = input.resolvePortOwner
-    ?? ((ownerInput: { pythonPath: string; workspaceRoot: string; port: number }) =>
+    ?? ((ownerInput: { pythonPath: string; workspaceRoot: string; port: number; env?: NodeJS.ProcessEnv }) =>
       resolveWorkbenchPortOwner(ownerInput));
   const resolveCurrentPortOwner = async (port: number): Promise<WorkbenchPortOwnerResolution | null> => {
     return await resolveIdentityForPort({
       pythonPath: input.pythonPath,
       workspaceRoot: input.workspaceRoot,
       port,
+      ...helperEnvironment,
       signal: input.signal
     });
   };
@@ -1531,7 +1544,11 @@ export async function executeMainLineWorkbench(
       }
     }
     const previous = readState();
-    const port = preferredWorkbenchPort({ workspaceRoot: input.workspaceRoot, state: previous });
+    const port = preferredWorkbenchPort({
+      workspaceRoot: input.workspaceRoot,
+      state: previous,
+      envPort: input.targetEnvironment === undefined ? undefined : input.targetEnvironment.VIBELUTION_PORT ?? ""
+    });
     const hasLiveBackendHandle = [previous.spawnPid, previous.backendLaunchPid, previous.backendPid]
       .some((pid) => (input.pidAlive ?? knownPidIsAlive)(Number(pid || 0)));
     if (input.fastCloseTiming && operation === "force-stop"
@@ -1610,6 +1627,7 @@ export async function executeMainLineWorkbench(
         : createPythonOwnedProcessTreeTerminator({
             pythonPath: input.pythonPath,
             workspaceRoot: input.workspaceRoot,
+            ...helperEnvironment,
             allowedKinds: ["managed_workbench_backend", "runtime_manager_daemon"]
           }));
     const gracefulShutdown = input.gracefulShutdown
@@ -1879,7 +1897,8 @@ export async function executeMainLineWorkbench(
       input.pythonPath
     )))({
       force: operation === "rebuild-and-start",
-      signal: input.signal
+      signal: input.signal,
+      ...(input.targetEnvironment === undefined ? {} : { env: input.targetEnvironment })
     });
   } catch (error: unknown) {
     await persistStartPreflightFailure(error);
@@ -1887,7 +1906,11 @@ export async function executeMainLineWorkbench(
   }
   input.signal?.throwIfAborted();
 
-  const preferred = preferredWorkbenchPort({ workspaceRoot: input.workspaceRoot, state: previous });
+  const preferred = preferredWorkbenchPort({
+    workspaceRoot: input.workspaceRoot,
+    state: previous,
+    envPort: input.targetEnvironment === undefined ? undefined : input.targetEnvironment.VIBELUTION_PORT ?? ""
+  });
   const daemonPid = (input.readDaemonPid ?? readDaemonPid)(input.workspaceRoot);
   const daemonIdentity = (input.readDaemonIdentity ?? readDaemonIdentity)(input.workspaceRoot);
   const verifiedDaemonPid = daemonIdentity?.pid === daemonPid ? daemonPid : 0;
@@ -1941,6 +1964,7 @@ export async function executeMainLineWorkbench(
       : createPythonOwnedProcessTreeTerminator({
           pythonPath: input.pythonPath,
           workspaceRoot: input.workspaceRoot,
+          ...helperEnvironment,
           allowedKinds: ["managed_workbench_backend", "runtime_manager_daemon"]
         }));
   const gracefulShutdownImpl = input.gracefulShutdown
@@ -2048,6 +2072,7 @@ export async function executeMainLineWorkbench(
   input.signal?.throwIfAborted();
   const spawned = spawnWorkbenchBackend({
     workspaceRoot: input.workspaceRoot,
+    baseEnv: input.targetEnvironment,
     pythonPath: input.pythonPath,
     port: resolved.port,
     host,
@@ -2128,6 +2153,7 @@ export async function executeMainLineWorkbench(
       backendIdentity = await captureIdentity({
         pythonPath: spawned.pythonPath,
         workspaceRoot: input.workspaceRoot,
+        ...helperEnvironment,
         pid: spawnPid,
         signal: input.signal
       });

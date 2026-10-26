@@ -44,6 +44,10 @@ class NativeAgentGateway:
         from .workspace import read_session
         return read_session(self.project_root, self._owners(), session_id)
 
+    def pin_session(self, parameters: dict):
+        from .workspace import pin_session
+        return pin_session(self.project_root, self._owners(), parameters)
+
     def read_sessions(self, query):
         from .workspace import read_sessions
         return read_sessions(self.project_root, self._owners(), query)

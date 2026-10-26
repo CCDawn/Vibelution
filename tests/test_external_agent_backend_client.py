@@ -14,6 +14,72 @@ from core.external_agent.backend_client import (
 
 
 @pytest.mark.anyio
+async def test_session_pin_sdk_allowlist_and_closed_session_receipt(tmp_path, monkeypatch):
+    _runtime_state(tmp_path)
+    client = ManagedAgentBackendClient(tmp_path, state_path=tmp_path / "credentials.json")
+    calls = []
+    payload = {"status": "completed", "action": "session_pin", "requestId": "pin-1", "verified": True,
+        "reused": False, "session": {"id": "session-a", "title": "Visible", "agentId": "agent-a",
+            "pinnedAtMs": 123, "pinned": True, "status": "ready", "archived": False}}
+    async def grant(**kwargs):
+        return {"subjectId": "subject", "capability": "capability", "binding": {"projectId": "p", "instanceId": "i"}}
+    async def request(method, path, **kwargs):
+        calls.append((method, path, kwargs))
+        return deepcopy(payload)
+    monkeypatch.setattr(client, "_management_grant", grant)
+    monkeypatch.setattr(client, "_request_json", request)
+    result = await client.management_action(action="session_pin", request_id="pin-1",
+        parameters={"session_id": "session-a", "pinned": True})
+    assert result == payload and calls[0][0] == "POST"
+    assert calls[0][2]["json_payload"]["parameters"] == {"session_id": "session-a", "pinned": True}
+    for patch in ({"pinned": "true"}, {"pinned": 1}, {"agentId": "foreign"}, {"actor": "operator"}):
+        with pytest.raises(BackendClientError) as invalid:
+            await client.management_action(action="session_pin", request_id="pin-1",
+                parameters={"session_id": "session-a", "pinned": True, **patch})
+        assert invalid.value.code == "INVALID_MANAGEMENT_REQUEST" and len(calls) == 1
+    payload["session"]["id"] = "other"
+    with pytest.raises(BackendClientError) as mismatch:
+        await client.management_action(action="session_pin", request_id="pin-1",
+            parameters={"session_id": "session-a", "pinned": True})
+    assert mismatch.value.code == "BACKEND_PROTOCOL_ERROR"
+    payload["session"]["id"] = "session-a"
+    await client.management_receipt(action="session_pin", request_id="pin-1")
+    assert calls[-1][0] == "GET"
+    for patch in ({"pinned": 1}, {"prompt": "PRIVATE"}, {"pinnedAtMs": "123"}):
+        original = deepcopy(payload["session"])
+        payload["session"].update(patch)
+        with pytest.raises(BackendClientError) as invalid:
+            await client.management_receipt(action="session_pin", request_id="pin-1")
+        assert invalid.value.code == "BACKEND_PROTOCOL_ERROR"
+        payload["session"] = original
+    payload.pop("session")
+    with pytest.raises(BackendClientError):
+        await client.management_receipt(action="session_pin", request_id="pin-1")
+
+
+@pytest.mark.anyio
+async def test_management_legacy_subject_retains_original_scope_set(tmp_path, monkeypatch):
+    _runtime_state(tmp_path)
+    client = ManagedAgentBackendClient(tmp_path, state_path=tmp_path / "credentials.json")
+    binding = {"projectId": "p", "instanceId": "i"}
+    client._state["management"] = {"clientId": "legacy_client_1234567890", "binding": binding,
+        "subjectId": "ops-1234567890abcdef", "capability": "a" * 48}
+    calls = []
+    async def request(method, path, **kwargs):
+        if path.endswith("/binding"):
+            return {"protocolVersion": 1, "binding": binding}
+        body = kwargs["json_payload"]
+        calls.append(body)
+        assert "sessions:pin" not in body["scopes"]
+        return {"protocolVersion": 1, "binding": binding, "scopes": body["scopes"],
+            "subject_id": "ops-1234567890abcdef", "subject_capability": "a" * 48}
+    monkeypatch.setattr(client, "_request_json", request)
+    await client._management_grant(require_existing=True)
+    assert len(calls) == 1 and calls[0]["client_id"] == "legacy_client_1234567890"
+    assert "sessions:pin" not in client._state["management"]["scopes"]
+
+
+@pytest.mark.anyio
 async def test_session_list_sdk_closed_page_query_binding_and_no_query_injection(tmp_path, monkeypatch):
     from urllib.parse import parse_qs, urlsplit
     _runtime_state(tmp_path)
@@ -363,7 +429,7 @@ async def test_team_client_uses_operator_envelope_and_same_read_only_receipt(tmp
             return httpx.Response(200, json={"protocolVersion": 1, "binding": binding})
         if request.url.path == prefix + "/subjects/bind":
             body = json.loads(request.content)
-            assert body["scopes"] == ["agents:avatar", "agents:create", "agents:read", "agents:update", "platform:describe", "sessions:read", "teams:read", "teams:run"]
+            assert body["scopes"] == ["agents:avatar", "agents:create", "agents:read", "agents:update", "platform:describe", "sessions:pin", "sessions:read", "teams:read", "teams:run"]
             return httpx.Response(200, json={"protocolVersion": 1, "binding": binding, "scopes": body["scopes"],
                 "subject_id": "ops-1234567890abcdef", "subject_capability": "a" * 48})
         if request.url.path.startswith(prefix + "/actions/team_run"):

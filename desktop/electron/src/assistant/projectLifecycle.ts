@@ -2,7 +2,7 @@ import { realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { isAbsolute, resolve } from "node:path";
 
-import { createMainLineCommandQueue, type MainLineCommandQueue, type MainLineQueuedCommand } from "../lifecycle/mainLine/commandQueue.js";
+import { getMainLineCommandQueueForProject, type MainLineCommandQueue, type MainLineQueuedCommand } from "../lifecycle/mainLine/commandQueue.js";
 import type { LifecycleRequestBinding } from "./projectLifecycleRequestStore.js";
 import { writeMainLineIntent } from "../lifecycle/mainLine/commandIntent.js";
 import { writeMainLineQueueOwnerMarker } from "../lifecycle/mainLine/ownerMarker.js";
@@ -19,6 +19,8 @@ export type AssistantProjectRuntimeContext = {
   operatorConfigPath: string;
   /** Compatibility assertion only; the facade derives and uses the native owner. */
   runtimeManagerDir: string;
+  /** Explicit target process environment, captured by the trusted main resolver. */
+  environment?: NodeJS.ProcessEnv;
 };
 export type AssistantProjectLifecycleOptions = {
   /** Must read the current complete permission table, including registry disk validation. */
@@ -154,11 +156,12 @@ export function createAssistantProjectLifecycle(options: AssistantProjectLifecyc
         recheck(expected);
         if (!raw || !absolute(raw.workspaceRoot) || raw.workspaceRoot !== expected.workspaceRoot || !absolute(raw.pythonPath) || !absolute(raw.operatorConfigPath) || !absolute(raw.runtimeManagerDir)) return fail("prerequisite_required");
         if (canonical(raw.runtimeManagerDir) !== expected.runtimeManagerDir) fail("storage_owner_changed");
-        const runtime = { workspaceRoot: raw.workspaceRoot, pythonPath: raw.pythonPath, operatorConfigPath: raw.operatorConfigPath, runtimeManagerDir: expected.runtimeManagerDir };
+        const runtime = { workspaceRoot: raw.workspaceRoot, pythonPath: raw.pythonPath, operatorConfigPath: raw.operatorConfigPath, runtimeManagerDir: expected.runtimeManagerDir,
+          ...(raw.environment ? { environment: { ...raw.environment } } : {}) };
         checkStorageOwner(runtime);
-        // Each registration owns its own native queue and durable callbacks.
-        // No shared-main queue, process.env switching, or alternate executor.
-        const queue = createMainLineCommandQueue({
+        // The assistant and ordinary Launcher controls share the target's
+        // canonical native queue, never a parallel assistant executor.
+        const queue = getMainLineCommandQueueForProject(runtime.workspaceRoot, runtime.runtimeManagerDir, {
           persistIntent: intent => { checkStorageOwner(runtime); return writeMainLineIntent(runtime.runtimeManagerDir, intent); },
           writeOwnerMarker: async () => { checkStorageOwner(runtime); await writeMainLineQueueOwnerMarker(runtime.runtimeManagerDir); },
         });
@@ -215,7 +218,7 @@ export function createAssistantProjectLifecycle(options: AssistantProjectLifecyc
         const context = await contextFor(expected);
         checkSignal(signal); recheck(expected);
         const result = await runner({ workspaceRoot: context.workspaceRoot, pythonPath: context.pythonPath, operatorConfigPath: context.operatorConfigPath,
-          operation: captured.operation, interruptActiveWork: false, signal, queue: guardedQueue(context, expected, execution) });
+          operation: captured.operation, interruptActiveWork: false, targetEnvironment: context.environment, signal, queue: guardedQueue(context, expected, execution) });
         checkSignal(signal);
         if (!result || result.schemaVersion !== 1 || typeof result.accepted !== "boolean") fail("lifecycle_failed");
         // Never forward native message, commandId, work rows, arbitrary codes,

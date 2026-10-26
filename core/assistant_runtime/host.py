@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import secrets
 from collections.abc import Callable
 from contextlib import asynccontextmanager, suppress
@@ -102,6 +103,7 @@ class NativeFacade:
 
         from . import native
         result = native.identity()
+        result["operatorAssetsVersion"] = 1
         result["settings"] = pa_assistant_actions.execute("assistant_settings", {}, {}, governed=False)
         profile = _operator_profile()
         if profile is not None:
@@ -157,7 +159,7 @@ class NativeFacade:
             yield event
 
 
-def create_app(*, native, token: str, dispatch=None, on_ready: Callable | None = None,
+def create_app(*, native, token: str, dispatch=None, main_control=None, on_ready: Callable | None = None,
                on_shutdown: Callable | None = None) -> FastAPI:
     if len(token) < 16:
         raise ValueError("Assistant host requires a private bearer credential")
@@ -179,7 +181,7 @@ def create_app(*, native, token: str, dispatch=None, on_ready: Callable | None =
         try:
             if dispatch is not None:
                 from .actions import bind_actions, unbind_actions
-                bind_actions(dispatch, asyncio.get_running_loop())
+                bind_actions(dispatch, asyncio.get_running_loop(), main_control=main_control)
                 bound = True
             # Native startup recovery can immediately resume a tool-using
             # worker. Its authorized action owner must already be available.
@@ -190,6 +192,10 @@ def create_app(*, native, token: str, dispatch=None, on_ready: Callable | None =
                 on_ready()
             yield
         finally:
+            # Release synchronous tool waiters before draining their native
+            # worker; shutdown must never wait on its own main-control request.
+            if main_control is not None:
+                main_control.close()
             if task is not None:
                 task.cancel()
                 with suppress(asyncio.CancelledError):
@@ -232,7 +238,48 @@ def create_app(*, native, token: str, dispatch=None, on_ready: Callable | None =
 
     @app.get("/health")
     def health():
-        return {"status": "ok", "role": "launcher_assistant", "protocolVersion": 1}
+        return {"status": "ok", "role": "launcher_assistant", "protocolVersion": 1,
+                **({"mainControlVersion": 1} if main_control is not None else {})}
+
+    if main_control is not None:
+        async def main_control_body(request):
+            if request.query_params:
+                raise HTTPException(422, detail="Invalid main control protocol")
+            body = bytearray()
+            async for chunk in request.stream():
+                if len(body) + len(chunk) > 4096:
+                    raise HTTPException(413, detail="Main control payload is too large")
+                body.extend(chunk)
+            return body
+
+        @app.get("/api/assistant/main-control/next")
+        async def main_control_next(request: Request):
+            if await main_control_body(request):
+                raise HTTPException(422, detail="Invalid main control protocol")
+            return await main_control.claim()
+
+        @app.post("/api/assistant/main-control/settle")
+        async def main_control_settle(request: Request):
+            body = await main_control_body(request)
+
+            def unique_object(pairs):
+                value = {}
+                for key, item in pairs:
+                    if key in value:
+                        raise ValueError("Duplicate protocol field")
+                    value[key] = item
+                return value
+
+            try:
+                payload = json.loads(body, object_pairs_hook=unique_object)
+                if (type(payload) is not dict or set(payload) != {"schemaVersion", "deliveryId", "result"}
+                        or type(payload["schemaVersion"]) is not int or payload["schemaVersion"] != 1
+                        or type(payload["result"]) is not dict):
+                    raise ValueError("Invalid main control envelope")
+                accepted = main_control.settle(payload["deliveryId"], payload["result"])
+            except (ValueError, UnicodeDecodeError, RecursionError):
+                raise HTTPException(422, detail="Invalid main control protocol") from None
+            return {"schemaVersion": 1, "accepted": accepted}
 
     if on_shutdown is not None:
         @app.post("/api/assistant/shutdown")
@@ -282,6 +329,16 @@ def create_app(*, native, token: str, dispatch=None, on_ready: Callable | None =
     @app.get("/api/assistant/config")
     def config():
         return native.config()
+
+    @app.get("/api/assistant/operator-assets/{kind}")
+    async def operator_asset(kind: Literal["avatar", "background"], request: Request):
+        if request.query_params:
+            raise HTTPException(422, detail="Invalid operator asset request")
+        from .operator_assets import read_operator_asset
+        try:
+            return await asyncio.to_thread(read_operator_asset, kind)
+        except ValueError:
+            raise HTTPException(503, detail={"code": "operator_asset_unavailable"}) from None
 
     @app.get("/api/assistant/curation")
     def curation():

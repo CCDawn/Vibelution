@@ -1,4 +1,4 @@
-"""Metadata-only Session read through existing native readers, with no repair."""
+"""Ordinary Session metadata and canonical pin writes, with no repair or selection."""
 from __future__ import annotations
 
 import json
@@ -174,7 +174,7 @@ def _binding_snapshot(project_root, agent_id, cache=None):
     return cache[agent_id]
 
 
-def _validated_session_snapshot(project_root: Path, directory, session_id: str, *, _context=None):
+def _validated_session_snapshot(project_root: Path, directory, session_id: str, *, _context=None, strict_shape=False):
     from core.agent_plugins.virtual_human_life.storage import VirtualHumanLifeStore
     from core.infrastructure import developer_sandbox
     from core.web.services.team import team_projection, team_store
@@ -191,7 +191,7 @@ def _validated_session_snapshot(project_root: Path, directory, session_id: str, 
     runtime = _context["runtimes"][session_id] if _context is not None else store.repository.get_session_runtime_state(session_id)
     if not isinstance(row, dict) or not isinstance(runtime, dict):
         _deny()
-    if _context is not None:
+    if _context is not None or strict_shape:
         _list_record_shape(row)
         _list_record_shape(runtime)
     _ordinary(row)
@@ -250,6 +250,27 @@ def read_session(project_root: Path, directory, session_id: str) -> dict:
     pinned_at = row.get("pinnedAtMs")
     public["pinnedAtMs"] = pinned_at if type(pinned_at) is int and pinned_at > 0 else None
     return {"session": public, "untrustedContent": True}
+
+
+def pin_session(project_root: Path, directory, parameters: dict) -> None:
+    """Validate native visibility before the sole canonical pin writer; no selection."""
+    from core.web.services import session_service
+    from core.web.services.session.session_pin_ops import set_chat_session_pinned
+
+    session_id, pinned = parameters["session_id"], parameters["pinned"]
+    _repository, row, _runtime = _validated_session_snapshot(project_root, directory, session_id, strict_shape=True)
+    pinned_at = row.get("pinnedAtMs")
+    if ("pinnedAtMs" not in row or pinned_at is not None and (type(pinned_at) is not int or pinned_at <= 0)
+        or "pinned" in row and (type(row["pinned"]) is not bool or row["pinned"] is not (pinned_at is not None))):
+        _deny()
+    if (pinned_at is not None) == pinned:
+        return  # Reapplying an already-achieved state must not refresh pinnedAtMs.
+    try:
+        set_chat_session_pinned(session_id, pinned=pinned)
+    except session_service.SessionNotFoundError:
+        _deny()
+    except session_service.SessionValidationError:
+        raise ManagementError("SESSION_DIRECTORY_UNAVAILABLE", 503) from None
 
 
 def _compiled_model_fields(snapshot, *, session_id: str, agent_id: str, expected_revision_id: str | None = None) -> dict:

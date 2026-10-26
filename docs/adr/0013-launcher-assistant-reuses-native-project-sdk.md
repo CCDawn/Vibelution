@@ -60,6 +60,35 @@ maintenance. Neither variant gives credentials to the model or renderer.
    retirement still requires the functional and data handoff acceptance in the
    migration plan; the permanent product owner is Launcher alone.
 
+## Main-control transport v1
+
+The lifecycle exception uses the existing child-owned private loopback API and
+the current generation's bearer. Main polls `main-control/next` and posts to
+`main-control/settle`; no reverse listener, second credential, generic proxy or
+Python lifecycle executor is introduced. The optional `mainControlVersion=1`
+health field is negotiated before deliveries start. Old hosts without the
+main-provisioned capability retain their original action catalog.
+
+Each delivery has a random transport ID and one closed action: project status,
+governed start/stop/restart, or original lifecycle receipt. Business request IDs
+stay distinct from delivery IDs and native command IDs. The short-lived broker
+is bounded and never requeues a claimed or expired delivery. Only main's durable
+request association and native results can establish the operation's outcome.
+Host retirement does not cancel an admitted project operation or send its late
+result into a newer generation. Missing/timed-out evidence remains unknown;
+queued restart remains queued.
+
+Target configuration reuses deferred project launch settings and canonical
+storage paths. Native queue selection is shared by assistant and ordinary
+Launcher controls for the same physical root, while different projects retain
+independent queues/environments. Branch-instance registrations are explicitly
+unavailable on this main-line bridge until their existing supervisor is adapted;
+their instance registry is never edited by the assistant SDK.
+
+The separate selected-avatar/background read is a UI resource channel, not a
+model capability. It resolves only current operator selections through existing
+resource owners and never accepts a path, URL or generic asset request.
+
 ## Alternatives
 
 - Forward every project request through Electron: rejected for this migration

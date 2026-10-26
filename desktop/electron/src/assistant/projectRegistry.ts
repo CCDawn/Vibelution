@@ -94,6 +94,14 @@ export class AssistantProjectRegistry {
     return this.project(this.stored);
   }
 
+  /** Main-only lifecycle metadata. Roots and epochs remain one registry authority. */
+  registration(projectId: string): AssistantProjectRegistration | null {
+    const snapshot = this.snapshot();
+    if (!Object.hasOwn(snapshot.projects, projectId)) return null;
+    const row = this.stored.registrations.find(item => item.active && `${item.baseProjectId}:${item.registrationUuid}` === projectId);
+    return row ? { ...row } : null;
+  }
+
   async reconcile(integrationRoot: string, candidates: readonly AssistantProjectCandidate[]): Promise<AssistantProjectRegistrySnapshot> {
     if (!Array.isArray(candidates)) return fail("PROJECT_REGISTRY_INVALID");
     // Capture caller-owned arrays before waiting behind another persistence.

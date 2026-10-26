@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from copy import deepcopy
 from concurrent.futures import TimeoutError
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model, model_validator
 
@@ -25,6 +26,25 @@ class ActionIndex(Parameters):
 
 class Project(Parameters):
     project_id: str = Field(min_length=1, max_length=160)
+
+
+class MainControlProject(Parameters):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    project_id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+
+
+class ProjectLifecycle(MainControlProject):
+    operation: Literal["start", "stop", "restart"]
+    request_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+
+
+_MAIN_SCHEMAS = {"project_status": MainControlProject, "project_lifecycle": ProjectLifecycle,
+                 "project_lifecycle_receipt": ProjectLifecycle}
+_MAIN_HELP = {
+    "project_status": "只读查询 Launcher 当前已登记主项目的状态与活跃任务数；分支 instance 暂返回 prerequisite_required，不控制分支。",
+    "project_lifecycle": "经原生审批控制当前已登记主项目的 start/stop/restart；分支 instance 暂返回 prerequisite_required。不支持 force/interrupt。unknown 时保留同一 request_id 查询 project_lifecycle_receipt，不能换 ID 重放；queued 表示等待执行，不等于完成。",
+    "project_lifecycle_receipt": "只读查询同一 project_id、operation、request_id 的主项目原生回执；unknown 时继续查询原 ID，不换 ID 重放，queued 不等于完成；不支持分支 instance 或 force/interrupt。",
+}
 
 
 class Dispatch(Project):
@@ -56,7 +76,7 @@ class AgentRead(Project):
 
 
 class ManagementReceipt(Project):
-    action: str = Field(pattern=r"^(?:agent_(create|update|avatar)|team_run)$")
+    action: str = Field(pattern=r"^(?:agent_(create|update|avatar)|team_run|session_pin)$")
     request_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$")
 
 
@@ -169,11 +189,11 @@ def _index_page(parameters: dict, schemas: dict, local: dict, managed: dict) -> 
             "indexParameters": _schema_without_titles(ActionIndex.model_json_schema())}
 
 
-def bind_actions(service, loop):
+def bind_actions(service, loop, main_control=None):
     global _binding
     if _binding is not None:
         raise RuntimeError("Launcher assistant actions already have an owner")
-    _binding = (service, loop)
+    _binding = (service, loop, main_control)
 
 
 def unbind_actions(service):
@@ -191,20 +211,25 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
     """
     if _binding is None:
         raise ValueError("Launcher assistant host is not running")
-    service, loop = _binding
+    service, loop, main_control = _binding
     from . import local_actions
     local = local_actions.contracts()
     managed = _management_contracts()
     schemas = {**_SCHEMAS, **_documentation_contracts(), **_project_read_contracts()}
+    main_contracts = {key: {"action": key, "description": _MAIN_HELP[key],
+        "parameters": model.model_json_schema(), "governed": key == "project_lifecycle"}
+        for key, model in _MAIN_SCHEMAS.items()} if main_control is not None else {}
     if action == "index":
-        return _index_page(parameters, schemas, local, managed)
+        return _index_page(parameters, schemas, {**local, **main_contracts}, managed)
     if action == "describe":
         if parameters == {"action": "index"}:
             return {"action": "index", "description": "分页搜索 Launcher 动作导航；执行动作前 describe 读取完整 schema。",
                     "parameters": _schema_without_titles(ActionIndex.model_json_schema())}
-        if set(parameters) != {"action"} or parameters["action"] not in {*schemas, *local, *managed}:
+        if set(parameters) != {"action"} or parameters["action"] not in {*schemas, *local, *managed, *main_contracts}:
             raise ValueError("Unknown Launcher action")
         key = parameters["action"]
+        if key in main_contracts:
+            return _describe_contract(main_contracts[key])
         if key in local:
             return _describe_contract(local[key])
         if key in managed:
@@ -214,17 +239,24 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
         if not runtime:
             raise ValueError("Launcher native tool identity is required")
         return local_actions.execute(action, parameters, runtime, governed=governed)
-    if action not in {*schemas, *managed}:
+    if action not in {*schemas, *managed, *main_contracts}:
         raise ValueError("Unknown Launcher action; use index for supported operations")
     try:
-        schema = managed[action][0] if action in managed else schemas[action]
+        schema = _MAIN_SCHEMAS[action] if action in main_contracts else managed[action][0] if action in managed else schemas[action]
         args = schema.model_validate(parameters).model_dump(exclude_unset=action == "agent_update")
     except ValidationError as exc:
         raise ValueError("Action parameters do not match describe schema") from exc
     projects = service.project_ids()
     if "project_id" in args and args["project_id"] not in projects:
         raise ValueError("Project is not authorized by Launcher")
-    if action in managed:
+    if action in main_contracts:
+        if action == "project_lifecycle" and governed is not True:
+            return {"ok": False, "status": "approval_required", "action": action, "tool": "personal_assistant_manage_tool"}
+        request = {"projectId": args["project_id"], "operation": args.get("operation", "status")}
+        if "request_id" in args:
+            request["requestId"] = args["request_id"]
+        coroutine = main_control.invoke(action, request)
+    elif action in managed:
         if managed[action][1]["governed"] and governed is not True:
             return {"ok": False, "status": "approval_required", "action": action, "tool": "personal_assistant_manage_tool"}
         project_id, request_id = args.pop("project_id"), args.pop("request_id")

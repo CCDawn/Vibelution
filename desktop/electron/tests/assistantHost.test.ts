@@ -61,6 +61,19 @@ function fixture(options: { stale?: boolean; noReadyFirst?: boolean; graceful?: 
 }
 
 describe("AssistantHost", () => {
+  it("keeps selected assets on a fixed UI operation with a dedicated response budget", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    fetchImpl.mockResolvedValueOnce(new Response(JSON.stringify({ image: null }), { headers: { "content-length": String(9 * 1024 * 1024) } }));
+    expect(await host.request({ operation: "operatorAsset", kind: "background" })).toEqual({ image: null });
+    expect(String(fetchImpl.mock.calls.at(-1)?.[0])).toBe("http://127.0.0.1:12345/api/assistant/operator-assets/background");
+    for (const payload of [{ operation: "operatorAsset", kind: "file" }, { operation: "operatorAsset", kind: "avatar", path: "private" }]) {
+      await expect(host.request(payload as AssistantHostRequest)).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    }
+    fetchImpl.mockResolvedValueOnce(new Response("{}", { headers: { "content-length": String(9 * 1024 * 1024) } }));
+    await expect(host.request({ operation: "config" })).rejects.toThrow("ASSISTANT_RESPONSE_TOO_LARGE");
+    await host.stop();
+  });
   it("does not acknowledge a queued revocation before its native apply completes", async () => {
     const { host, fetchImpl, root } = fixture({ graceful: true });
     await host.start();

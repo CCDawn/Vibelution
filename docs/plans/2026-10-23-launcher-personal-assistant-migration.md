@@ -880,3 +880,15 @@ E14 退出后的封存复查仍在目录枚举前后签名比较处失败；原�
 这一片已覆盖临时目录中的真实原生 active-work 拒绝/重启排队及回执恢复、重复请求与冲突、权限撤销、损坏/链接资源、容量和写入失败。store 只保存关联事实，默认最多 1024 项，无自动回收；容量满时拒绝新请求。Windows 强制记录文件 fsync，但 Node 不支持目录 fsync，不能据此保证断电后目录项持久。仍缺生产 host→main 受限桥及目标配置构造，不向模型开放 lifecycle 动作。
 
 当前剩余面保持独立：Launcher 的主题/壁纸/上传头像资源消费者、共享设置 owner 去除旧 PA 依赖、其余语义 API、旧数据交接，以及新包联合验收。DeepSeek 等额度补充确认后再调用；本轮未调用真实模型、未安装或重启正式 Launcher、未修改正式数据。仅在全部功能及数据验收通过后退役平台旧个人助理。
+
+下一片已接通模型动作到 main 的生产构造链：既有 action/manage tool → 私有宿主短命 broker → 当前 generation 的 authenticated claim/settle → main-only controller → 原生 queue/settlement。仅新增三个闭合动作，写操作继续经过原生审批和 active-work 保护；不接 URL、路径、force 或 interrupt。短命 delivery 不成为命令账本，超时不重排；宿主完整重启后按原 requestId 查询。实际 Python 宿主 + Node main 模块 + 原生 guard 的 Temp 联合验证已通过：停止被 active work 拒绝、重启保持 queued、重建宿主与 controller 后读原结算且未再执行。此用例使用虚构身份和明确的临时请求授权，没有真实模型或新包 UI 验收含义。
+
+接线审查还修正了两个前提：助理和 Launcher 原先可能为同一项目创建两条队列，现改用物理 root 的 canonical native queue；目标进程、前端构建、Windows Job、身份查询、端口归属及回收 helper 现显式传目标环境，不串用当前项目端口/配置/data/Python，不切换 process.env。分支 instance 仍归既有 supervisor，三类请求在关联落盘前返回 prerequisite_required，不用 main-line 队列替代它。
+
+图片消费复用当前 operator 配置与原头像/背景资源 owner，通过 UI-only operatorAsset 私有操作返回限长图片数据；普通 JSON 与 main-control 的预算保持，专用图片预算适配原 5/10MiB 上限。该通道不向模型公开图片或文件路径，不增加设置写入者；页面显示与自动生效验收另记。DeepSeek 继续等待额度确认，正式运行环境和旧助理保持。
+
+实际当前源码页面已在隔离 headless Edge 中加载真实 ConversationView，私有 IPC 使用虚构数据且封锁外部与项目 HTTP。初次、明确终态后的自动头像/壁纸替换、清除和收起透明均已通过，未点击刷新；computed style 和截图像素共同核验壁纸确实可见。首轮属性检查曾漏掉局部渐变依赖无效导致白底，已保留失败并在 Launcher recipe 重新绑定原公式后通过。此证据只证明当前源码 UI，不是新包或真实模型验收。
+
+新增 session_pin 已贯通既有 HTTP 通用 route、SDK、动态动作说明及 Launcher 原生审批，独立要求 sessions:pin。复用普通 Session 可见性权威与 canonical pin setter、现有 durable intent/fingerprint/receipt；已达目标状态不刷新置顶时间，unknown 仅回读、完成回执保留首次历史状态，当前状态由 session_get 查询。旧 SDK 主体保持原八项 scope，fresh 主体先持久化显式九项请求再 bind，不自动扩权；旧授权的显式迁移仍待后续收口。真实 SQLite 回归确认当前选择和 Session runtime 不变，独立审查未发现阻断问题。
+
+剩余范围仍包括主题明暗模式的统一设置权威、操作者图片选择/上传的模型语义入口、尚未接入的语义 API、旧授权与历史/在途数据交接，以及新包 DeepSeek 联合验收。本轮阶段变更未改变版本号或正式安装；需要后续构建包含本片的 Launcher 才能进入新包验收，不自动重启正式实例。旧个人助理继续保留至验收通过。

@@ -8,6 +8,7 @@ export type LauncherOperatorProfile = {
 };
 
 export type LauncherAssistantStatus = {
+  operatorAssetsVersion?: 1;
   operatorProfile?: LauncherOperatorProfile;
   assistant: { agentId: string; directSessionId: string; displayName: string };
   settings?: { ok: boolean; preferences: DesktopPetPreferences; displayName: string; modelId: string };
@@ -32,6 +33,7 @@ export type LauncherAssistantRequest =
   | { operation: "stop"; turnId: string }
   | { operation: "continue"; requestId: string; continuation: SessionContinuationExpectation }
   | { operation: "config" }
+  | { operation: "operatorAsset"; kind: LauncherOperatorAssetKind }
   | { operation: "curation"; sessionId: string }
   | { operation: "curate"; sessionId: string; messageId: string; action: SessionMessageCurationAction }
   | { operation: "setExpanded"; expanded: boolean };
@@ -48,11 +50,61 @@ function record(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object";
 }
 
+export type LauncherOperatorAssetKind = "avatar" | "background";
+export type LauncherOperatorAsset = {
+  schemaVersion: 1;
+  kind: LauncherOperatorAssetKind;
+  image: { url: string; sha256: string } | null;
+  readability: "soft" | "standard" | "strong";
+};
+
+function exactFields(value: unknown, fields: string[]): value is Record<string, unknown> {
+  return record(value) && !Array.isArray(value) && Object.keys(value).length === fields.length
+    && fields.every(field => Object.prototype.hasOwnProperty.call(value, field));
+}
+
+/** Images cross only the fixed-kind Launcher IPC; no URL/path or HTTP fallback. */
+export async function getLauncherOperatorAsset(kind: LauncherOperatorAssetKind, options?: { signal?: AbortSignal }): Promise<LauncherOperatorAsset> {
+  options?.signal?.throwIfAborted();
+  if (kind !== "avatar" && kind !== "background") throw new Error("Launcher 图片类型不可用。");
+  const result = await launcherAssistantBridge().invoke({ operation: "operatorAsset", kind });
+  options?.signal?.throwIfAborted();
+  const invalid = () => new Error("Launcher 图片资源不可用，请重试。");
+  if (!exactFields(result, ["schemaVersion", "kind", "image", "readability"])
+    || result.schemaVersion !== 1 || result.kind !== kind
+    || typeof result.readability !== "string" || !["soft", "standard", "strong"].includes(result.readability)) throw invalid();
+  const readability = result.readability as LauncherOperatorAsset["readability"];
+  if (result.image === null) return { schemaVersion: 1, kind, image: null, readability };
+  const image = result.image;
+  if (!exactFields(image, ["contentType", "dataBase64", "sha256"])
+    || typeof image.contentType !== "string" || !["image/png", "image/jpeg", "image/webp"].includes(image.contentType)
+    || typeof image.sha256 !== "string" || !/^[a-fA-F0-9]{64}$/.test(image.sha256)
+    || typeof image.dataBase64 !== "string") throw invalid();
+  const data = image.dataBase64;
+  const limit = (kind === "avatar" ? 5 : 10) * 1024 * 1024;
+  if (!data.length || data.length > Math.ceil(limit / 3) * 4 || data.length % 4 !== 0
+    || !/^[A-Za-z0-9+/]*={0,2}$/.test(data)) throw invalid();
+  const padding = data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0;
+  const decodedLength = data.length / 4 * 3 - padding;
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  // Reject non-canonical padding bits instead of silently normalizing input.
+  if (!decodedLength || decodedLength > limit
+    || (padding === 2 && alphabet.indexOf(data[data.length - 3]) % 16 !== 0)
+    || (padding === 1 && alphabet.indexOf(data[data.length - 2]) % 4 !== 0)) throw invalid();
+  try { if (atob(data).length !== decodedLength) throw invalid(); } catch { throw invalid(); }
+  options?.signal?.throwIfAborted();
+  return { schemaVersion: 1, kind, readability,
+    image: { url: `data:${image.contentType};base64,${data}`, sha256: image.sha256 } };
+}
+
 export async function getLauncherAssistantStatus(): Promise<LauncherAssistantStatus> {
   const result = await launcherAssistantBridge().invoke({ operation: "status" });
   if (!record(result) || !record(result.assistant)
     || ![result.assistant.agentId, result.assistant.directSessionId, result.assistant.displayName].every(value => typeof value === "string" && value.trim())) {
     throw new Error("Launcher 个人助理身份不可用。");
+  }
+  if (Object.prototype.hasOwnProperty.call(result, "operatorAssetsVersion") && result.operatorAssetsVersion !== 1) {
+    throw new Error("Launcher 图片资源版本不可用。");
   }
   if (result.settings !== undefined) {
     const settings = result.settings;

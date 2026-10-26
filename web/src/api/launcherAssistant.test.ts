@@ -5,10 +5,91 @@ import {
   sendLauncherAssistantMessage, setLauncherAssistantExpanded,
   getLauncherAssistantApprovals, resolveLauncherAssistantApproval,
   stopLauncherAssistantTurn, continueLauncherAssistantTurn,
+  getLauncherOperatorAsset,
 } from "./launcherAssistant";
 import type { SessionToolApprovalRequest } from "./types";
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe("Launcher operator assets", () => {
+  const image = { contentType: "image/png", dataBase64: "AQI=", sha256: "a".repeat(64) };
+  const response = { schemaVersion: 1, kind: "avatar", image, readability: "standard" };
+
+  it("reads only the fixed kind through IPC and returns a data image without raw image fields", async () => {
+    const invoke = vi.fn().mockResolvedValue(response);
+    const fetch = vi.fn();
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke }); vi.stubGlobal("fetch", fetch);
+    await expect(getLauncherOperatorAsset("avatar")).resolves.toEqual({ schemaVersion: 1, kind: "avatar", readability: "standard",
+      image: { url: "data:image/png;base64,AQI=", sha256: image.sha256 } });
+    expect(invoke).toHaveBeenCalledExactlyOnceWith({ operation: "operatorAsset", kind: "avatar" });
+    expect(fetch).not.toHaveBeenCalled();
+    await expect(getLauncherOperatorAsset("https://example.test/image.png" as "avatar")).rejects.toThrow("类型");
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["image/png", "image/jpeg", "image/webp"])("accepts the fixed image MIME %s", async contentType => {
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke: vi.fn().mockResolvedValue({ ...response, image: { ...image, contentType } }) });
+    expect((await getLauncherOperatorAsset("avatar")).image?.url.startsWith(`data:${contentType};base64,`)).toBe(true);
+  });
+
+  it("accepts cleared images and closed readability values", async () => {
+    for (const readability of ["soft", "standard", "strong"]) {
+      vi.stubGlobal("vibelutionLauncherAssistant", { invoke: vi.fn().mockResolvedValue({ ...response, image: null, readability }) });
+      expect((await getLauncherOperatorAsset("avatar")).image).toBeNull();
+    }
+  });
+
+  const invalidResponses = [
+    ["version", { ...response, schemaVersion: 2 }], ["wrong kind", { ...response, kind: "background" }],
+    ["root extras", { ...response, url: "https://example.test" }], ["readability", { ...response, readability: "other" }],
+    ["readability type", { ...response, readability: ["standard"] }],
+    ["MIME type", { ...response, image: { ...image, contentType: ["image/png"] } }],
+    ["SVG", { ...response, image: { ...image, contentType: "image/svg+xml" } }],
+    ["URL image", { ...response, image: { url: "https://example.test" } }],
+    ["image extras", { ...response, image: { ...image, path: "C:/secret.png" } }],
+    ["hash", { ...response, image: { ...image, sha256: "broken" } }],
+    ...["", "AQI", "AQI===", "AQ I=", "AQI=\n", "AQI_", "ＡQI=", "AR==", "AQJ=", "data:image/png;base64,AQI=", "===="].map(dataBase64 =>
+      [`base64 ${dataBase64.length}`, { ...response, image: { ...image, dataBase64 } }]),
+  ] as const;
+  it.each(invalidResponses)("rejects malformed resource: %s", async (_label, value) => {
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke: vi.fn().mockResolvedValue(value) });
+    await expect(getLauncherOperatorAsset("avatar")).rejects.toThrow("图片资源不可用");
+  });
+
+  it.each(["avatar", "background"] as const)("checks the decoded size boundary for %s without exposing bytes", async kind => {
+    const limit = (kind === "avatar" ? 5 : 10) * 1024 * 1024;
+    const encode = (length: number) => "AAAA".repeat(Math.floor(length / 3)) + (length % 3 === 1 ? "AA==" : length % 3 === 2 ? "AAA=" : "");
+    const invoke = vi.fn().mockResolvedValue({ ...response, kind, image: { ...image, dataBase64: encode(limit) } });
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    const result = await getLauncherOperatorAsset(kind);
+    expect(Boolean(result.image)).toBe(true);
+    invoke.mockResolvedValue({ ...response, kind, image: { ...image, dataBase64: encode(limit + 1) } });
+    await expect(getLauncherOperatorAsset(kind)).rejects.toThrow("图片资源不可用");
+  });
+
+  it("honors abort before and after native IPC", async () => {
+    const controller = new AbortController();
+    const invoke = vi.fn(async () => { controller.abort(); return response; });
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    await expect(getLauncherOperatorAsset("avatar", { signal: controller.signal })).rejects.toThrow();
+    expect(invoke).toHaveBeenCalledTimes(1);
+    await expect(getLauncherOperatorAsset("avatar", { signal: controller.signal })).rejects.toThrow();
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps old status compatible and rejects unsupported or malformed capability versions", async () => {
+    const assistant = { agentId: "a", directSessionId: "s", displayName: "Assistant" };
+    const invoke = vi.fn().mockResolvedValue({ assistant });
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    expect((await getLauncherAssistantStatus()).operatorAssetsVersion).toBeUndefined();
+    invoke.mockResolvedValue({ assistant, operatorAssetsVersion: 1 });
+    expect((await getLauncherAssistantStatus()).operatorAssetsVersion).toBe(1);
+    for (const operatorAssetsVersion of [undefined, null, "1", 0, 2]) {
+      invoke.mockResolvedValue({ assistant, operatorAssetsVersion });
+      await expect(getLauncherAssistantStatus()).rejects.toThrow("版本");
+    }
+  });
+});
 
 describe("Launcher assistant bridge", () => {
   it("stops only the named turn and continues the native snapshot without arbitrary message", async () => {

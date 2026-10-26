@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 import {
-  getSharedMainLineCommandQueue,
+  getMainLineCommandQueueForProject,
   type CloseBackoffCoalescedInfo,
   type MainLineCommandQueue
 } from "../lifecycle/mainLine/commandQueue.js";
@@ -55,6 +55,8 @@ export type RunWorkbenchLifecycleInput = {
   workspaceRoot: string;
   pythonPath: string;
   operatorConfigPath: string;
+  /** Trusted target context; snapshot before queueing without changing process.env. */
+  targetEnvironment?: NodeJS.ProcessEnv;
   operation: WorkbenchLifecycleOperation;
   /** Only explicit operator restarts set this; forwarded and automatic restarts remain protected. */
   interruptActiveWork?: boolean;
@@ -109,8 +111,9 @@ export async function runWorkbenchLifecycle(input: RunWorkbenchLifecycleInput): 
   if (input.signal?.aborted) {
     throw new PythonJsonBridgeError("aborted", "workbench lifecycle was aborted before spawn");
   }
+  const targetEnvironment = input.targetEnvironment === undefined ? undefined : { ...input.targetEnvironment };
   const runtimeManagerDir = resolveRuntimeManagerDir(input.workspaceRoot);
-  const queue = input.queue ?? getSharedMainLineCommandQueue({
+  const queue = input.queue ?? getMainLineCommandQueueForProject(input.workspaceRoot, runtimeManagerDir, {
     persistIntent: (intent) => {
       return writeMainLineIntent(runtimeManagerDir, intent).catch(() => undefined);
     },
@@ -157,6 +160,7 @@ export async function runWorkbenchLifecycle(input: RunWorkbenchLifecycleInput): 
         const result = await executeMainLineWorkbench({
           workspaceRoot: input.workspaceRoot,
           pythonPath: input.pythonPath,
+          targetEnvironment,
           operation: input.operation,
           interruptActiveWork: input.interruptActiveWork,
           fastCloseTiming: input.fastCloseTiming,

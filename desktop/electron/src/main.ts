@@ -24,6 +24,7 @@ import {
 import { IPC_CHANNELS } from "./ipc.js";
 import { AssistantHost } from "./assistant/assistantHost.js";
 import { AssistantProjectRegistryConnection } from "./assistant/projectRegistryConnection.js";
+import { createAssistantProjectMainControl } from "./assistant/projectMainControl.js";
 import { AssistantWindow } from "./assistant/assistantWindow.js";
 import { resolveAssistantResources } from "./assistant/assistantResources.js";
 import { createAssistantTray } from "./assistant/assistantTray.js";
@@ -521,6 +522,11 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
   launcherAssistantStarting = (async () => {
     const projectConnection = new AssistantProjectRegistryConnection(join(paths.userDataRoot, "assistant", "projects.json"));
     launcherAssistantProjects = projectConnection;
+    const mainControl = createAssistantProjectMainControl({
+      directory: join(paths.userDataRoot, "assistant", "lifecycle-requests"), registry: projectConnection,
+      operatorConfigPath: desktopLaunchSettings().configPath,
+      launch: { env: process.env, cliArgs: desktopCliArgs, resourcesRoot: process.resourcesPath, userDataRoot: app.getPath("userData") },
+    });
     const resources = await resolveAssistantResources({ packaged: app.isPackaged, resourcesRoot: paths.resourcesRoot,
       developmentSourceRoot: paths.workspaceRoot, developmentPythonPath: app.isPackaged ? "" : desktopPythonPath(), env: desktopEnvironment() });
     if (shutdownApproved) return;
@@ -531,6 +537,7 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
           runtimeRoot: join(paths.userDataRoot, "assistant", "runtime"),
           sourceRoot: resources.sourceRoot, pythonPath: resources.pythonPath, pythonArguments: resources.pythonArguments,
           env: resources.env, projects: snapshot.projects, projectSnapshot: snapshot,
+          mainControl,
         });
         launcherAssistantHost = host;
         launcherAssistantWindow = new AssistantWindow(paths, host, () => shutdownApproved);

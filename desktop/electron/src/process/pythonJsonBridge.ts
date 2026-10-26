@@ -354,6 +354,7 @@ except (psutil.AccessDenied, OSError) as error:
 export function createPythonOwnedProcessTreeTerminator(input: {
   pythonPath: string;
   workspaceRoot: string;
+  env?: NodeJS.ProcessEnv;
   allowedKinds: readonly PythonOwnedProcessTreeKind[];
   spawnImpl?: PythonJsonBridgeSpawn;
   expectedIdentities?: Readonly<Record<string, PythonProcessIdentity>>;
@@ -395,6 +396,7 @@ export function createPythonOwnedProcessTreeTerminator(input: {
         ],
         cwd: input.workspaceRoot,
         spawnImpl: input.spawnImpl,
+        ...(input.env === undefined ? {} : { env: input.env }),
         failureLabel: `owned process-tree terminator for pid ${normalizedPid}`,
         maxBytes: 16_000,
         timeoutMs: input.timeoutMs ?? PYTHON_JSON_BRIDGE_PROCESS_TREE_TIMEOUT_MS,
@@ -435,6 +437,7 @@ export function createPythonOwnedProcessTreeTerminator(input: {
 export async function capturePythonProcessIdentity(input: {
   pythonPath: string;
   workspaceRoot: string;
+  env?: NodeJS.ProcessEnv;
   pid: number;
   timeoutMs?: number;
   spawnImpl?: PythonJsonBridgeSpawn;
@@ -451,6 +454,7 @@ export async function capturePythonProcessIdentity(input: {
       args: ["-c", PYTHON_PROCESS_IDENTITY_SCRIPT, String(pid)],
       cwd: input.workspaceRoot,
       spawnImpl: input.spawnImpl,
+      ...(input.env === undefined ? {} : { env: input.env }),
       failureLabel: `process identity capture for pid ${pid}`,
       signal: input.signal,
       timeoutMs: input.timeoutMs ?? PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS,
@@ -526,6 +530,7 @@ export async function runPythonJsonBridge(input: {
   pythonPath: string;
   args: string[];
   cwd: string;
+  env?: NodeJS.ProcessEnv;
   spawnImpl?: PythonJsonBridgeSpawn;
   failureLabel: string;
   maxBytes?: number;
@@ -557,7 +562,7 @@ export async function runPythonJsonBridge(input: {
     cwd: input.cwd,
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
-    env: pythonBridgeEnv()
+    env: pythonBridgeEnv(input.env)
   });
   if (input.killPolicy === "owned-tree" && input.captureChildIdentity && Number(child.pid) > 0) {
     const identityPromise = Promise.resolve(input.captureChildIdentity(Math.trunc(Number(child.pid)))).catch(() => null);

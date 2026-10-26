@@ -26,6 +26,7 @@ export type WorkbenchPortOwnerResolution = {
 export async function resolveWorkbenchPortOwner(input: {
   workspaceRoot: string;
   pythonPath: string;
+  env?: NodeJS.ProcessEnv;
   port: number;
   spawnImpl?: PythonJsonBridgeSpawn;
   signal?: AbortSignal;
@@ -53,6 +54,7 @@ export async function resolveWorkbenchPortOwner(input: {
       ],
       cwd: input.workspaceRoot,
       spawnImpl: input.spawnImpl,
+      ...(input.env === undefined ? {} : { env: input.env }),
       failureLabel: `resolve workbench port owner for port ${port}`,
       timeoutMs: input.timeoutMs ?? PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS,
       signal: input.signal,

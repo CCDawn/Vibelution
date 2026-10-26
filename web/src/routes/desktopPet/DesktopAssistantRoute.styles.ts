@@ -16,6 +16,7 @@ const styles = {
   unreadBadge: "pointer-events-none absolute right-5 top-4 z-[2] grid h-5 min-w-5 place-items-center rounded-full border border-[var(--vui-pet-cue-border)] bg-[var(--vui-pet-tone-approval)] px-1 text-vui-micro-10 font-semibold leading-none text-[var(--vui-pet-panel)] shadow-sm",
   chatCue: "desktop-assistant-chat-cue",
   chatWindow: "flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-xl border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] text-[var(--fg-primary)] shadow-xl",
+  launcherChatWindow: "launcher-assistant-chat-window flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-xl border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] text-[var(--fg-primary)] shadow-xl",
   chatHeader: "flex h-14 min-w-0 shrink-0 items-center gap-2 border-b border-[var(--vui-border-subtle)] bg-[var(--vui-surface-toolbar)] px-3 [-webkit-app-region:drag] [&_button]:[-webkit-app-region:no-drag]",
   chatAvatar: "grid size-[30px] shrink-0 place-items-center rounded-lg bg-[var(--vui-selection-bg)] text-[var(--fg-secondary)]",
   chatIdentity: "flex min-w-0 flex-1 flex-col gap-0.5",

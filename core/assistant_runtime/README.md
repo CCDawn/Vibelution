@@ -95,7 +95,18 @@ require the already-open, root-bound directory and canonical registry, Team
 roster and Companion bindings without seed, repair, hydration or selection.
 Missing authority and hidden/system/Team/Companion/PA classification fail
 closed. Titles remain untrusted. This slice does not add transcript access,
-pin writes or permission upgrades for existing grants.
+transcript writes or permission upgrades for existing grants.
+
+`session_pin` is a separately governed action requiring `sessions:pin` and the
+existing native approval gate. It validates the same ordinary visible Session
+and delegates only to the canonical pin setter, preserving current selection
+and an already-achieved pin timestamp. Existing durable management admission
+binds action/request/fingerprint before effects; unknown requests only read back
+and never repeat a write. A completed receipt preserves its first confirmation
+as historical evidence; `session_get` reports current state after later edits.
+Fresh SDK subjects persist the explicit nine-scope request before binding.
+Existing states without a scope list keep the legacy eight-scope grant; this
+slice does not silently expand permissions or change the subject to gain access.
 
 `session_config_get` uses the same `sessions:read` and ordinary-Session gate,
 then reads only that Session's pinned compiled revision through the native
@@ -201,12 +212,37 @@ capacity exhaustion. It stores association facts only, not another business
 outcome ledger. Files are fsynced before effect admission; Windows Node lacks
 directory fsync, so this is not a power-loss durability guarantee.
 
-This controller has Temp-only native-guard/recreation tests, but no production
-host-to-main constructor/transport yet. It is not advertised as a model action.
-The remaining bridge must use the same controller and trusted per-project
-configuration. No real provider was called for this slice; DeepSeek acceptance
-is paused until the operator confirms funding. Platform PA retirement still
-requires the new package's functional and data-handoff acceptance.
+Electron now constructs the controller at resident-assistant startup, using the
+current disk-validated registry and existing deferred target launch settings.
+The assistant and ordinary Launcher controls share one canonical native queue
+per physical project root. A changed runtime-manager owner is refused rather
+than creating a parallel queue. Explicit target environments reach backend,
+frontend build, Windows Job, identity, port-owner and retirement helpers without
+switching `process.env` or inheriting the assistant's embedded Python.
+
+The optional main-control v1 channel reuses the host's private authenticated
+connection. Main long-polls short-lived deliveries and settles their public
+facts; the broker holds no command executor or durable business state. It bounds
+pending deliveries to 32, waits to 20 seconds, and forgets expired deliveries
+without replay. Main has four transport workers and an 8 KiB control-response
+budget. Host retirement stops deliveries/replies, not admitted native project
+commands. A fresh host queries the original main request association.
+
+Only a main-provisioned capability exposes `project_status`, governed
+`project_lifecycle` and `project_lifecycle_receipt` through the existing native
+action/manage tools. Writes retain native approval and active-work protection;
+there is no force, interrupt, path, URL or generic command parameter. Currently
+only registrations whose root is their integration root use this main-line
+engine; branch instances return `prerequisite_required` before reserving a
+request. Their existing instance supervisor remains the lifecycle owner.
+
+Temp verification covers an actual Python HTTP host, Node main-control modules,
+native active-work guard and queued-restart settlement, full host stop/start,
+and original receipt recovery without another native execution. The fixture
+uses a synthetic native identity and explicit temporary-request authorization;
+it is not a real-model or packaged-Electron UI acceptance claim. DeepSeek remains
+paused until funding confirmation. Platform PA retirement still requires the
+new package's functional and data-handoff acceptance.
 
 The renderer refreshes its own display name and character/status preferences
 once per authoritative native terminal Turn, including stopped/error and
@@ -219,9 +255,19 @@ reuse a bounded, read-only raw configuration snapshot and a closed two-field
 `operatorProfile` in status. Existing ConversationView user props consume them
 through the same terminal status refresh. Missing/damaged data omits the optional
 profile; bio, preferences, file paths, avatar image URLs and credentials never
-cross that projection. Uploaded operator avatar files, wallpaper and theme remain
-separate migration work. This source slice still needs the current package's
-real-page acceptance.
+cross that projection. Current uploaded avatars and background images have a
+separate UI-only `operatorAsset` read over the same private IPC. It accepts only
+`avatar` or `background`, resolves the current operator selection through the
+canonical image owners, and returns bounded PNG/JPEG/WebP data without paths.
+The dedicated 16 MiB JSON envelope covers the native 10 MiB wallpaper limit;
+ordinary JSON stays at 8 MiB and main control at 8 KiB. Images never enter model
+actions or results. A fresh headless Edge page using the actual route/ConversationView and
+synthetic private IPC has verified initial display, terminal-driven replacement
+without manual refresh, clearing, transparent collapse and narrow-window
+geometry. A computed-style and screenshot pixel probe caught and verified the
+fix for a root-inherited invalid gradient; the Launcher recipe rebinds the same
+canonical formula locally, keeping its 18/44/60 readability values. These page
+checks do not establish packaged-Electron or real-provider acceptance.
 
 Acceptance harnesses must preserve the authorized operator `runtime.profile`
 and canonical credential references. `safe_local` deliberately redirects remote

@@ -1,4 +1,6 @@
 import { randomBytes } from "node:crypto";
+import { realpathSync } from "node:fs";
+import { resolve } from "node:path";
 
 // Settlement may need a durable queue fingerprint before the Python daemon has
 // ever provisioned state.json. Keep this local to the actual queued object;
@@ -496,6 +498,45 @@ export function createMainLineCommandQueue(options: {
 
 let sharedQueue: MainLineCommandQueue | null = null;
 
+const PROJECT_QUEUE_LIMIT = 128;
+const projectQueues = new Map<string, {
+  runtimeManagerDir: string;
+  queue: MainLineCommandQueue;
+}>();
+
+function canonicalQueuePath(path: string): string {
+  const resolvedPath = resolve(path);
+  let canonicalPath = resolvedPath;
+  try {
+    canonicalPath = realpathSync.native(resolvedPath);
+  } catch {
+    // New or temporarily unavailable paths still have a stable resolved key.
+  }
+  return process.platform === "win32" ? canonicalPath.toLowerCase() : canonicalPath;
+}
+
+export function getMainLineCommandQueueForProject(
+  workspaceRoot: string,
+  runtimeManagerDir: string,
+  options?: Parameters<typeof createMainLineCommandQueue>[0],
+): MainLineCommandQueue {
+  const rootKey = canonicalQueuePath(workspaceRoot);
+  const ownerDir = canonicalQueuePath(resolve(runtimeManagerDir));
+  const existing = projectQueues.get(rootKey);
+  if (existing) {
+    if (existing.runtimeManagerDir !== ownerDir) {
+      throw new Error("MAIN_LINE_QUEUE_OWNER_CHANGED");
+    }
+    return existing.queue;
+  }
+  if (projectQueues.size >= PROJECT_QUEUE_LIMIT) {
+    throw new Error("MAIN_LINE_QUEUE_LIMIT");
+  }
+  const queue = createMainLineCommandQueue(options);
+  projectQueues.set(rootKey, { runtimeManagerDir: ownerDir, queue });
+  return queue;
+}
+
 export function getSharedMainLineCommandQueue(
   options?: Parameters<typeof createMainLineCommandQueue>[0],
 ): MainLineCommandQueue {
@@ -505,4 +546,5 @@ export function getSharedMainLineCommandQueue(
 
 export function resetSharedMainLineCommandQueueForTests(): void {
   sharedQueue = null;
+  projectQueues.clear();
 }

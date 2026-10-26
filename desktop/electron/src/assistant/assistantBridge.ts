@@ -32,7 +32,7 @@ export async function invokeAssistant(event: Sender, payload: unknown, owner: As
     if (Object.keys(request).length !== 2 || typeof request.expanded !== "boolean") throw new Error("ASSISTANT_REQUEST_INVALID");
     return owner.setExpanded(request.expanded);
   }
-  if (!["status", "detail", "dispatches", "config", "send", "stop", "continue", "curation", "curate", "approvals", "resolveApproval"].includes(String(request.operation))) {
+  if (!["status", "detail", "dispatches", "config", "send", "stop", "continue", "curation", "curate", "approvals", "resolveApproval", "operatorAsset"].includes(String(request.operation))) {
     throw new Error("ASSISTANT_REQUEST_INVALID");
   }
   try {

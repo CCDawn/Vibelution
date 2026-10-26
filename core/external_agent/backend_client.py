@@ -30,8 +30,9 @@ CONTROL_TOKEN_HEADER = "X-Vibelution-Control-Token"
 TASK_CAPABILITY_HEADER = "X-Vibelution-External-Agent-Task-Capability"
 ADAPTER_CONNECTION_HEADER = "X-Vibelution-External-Agent-Connection"
 _MANAGEMENT_PREFIX = "/api/v1/launcher-assistant-management"
-_MANAGEMENT_ACTIONS = frozenset({"agent_create", "agent_update", "agent_avatar", "team_run"})
-_MANAGEMENT_SCOPES = ["agents:avatar", "agents:create", "agents:read", "agents:update", "platform:describe", "sessions:read", "teams:read", "teams:run"]
+_MANAGEMENT_ACTIONS = frozenset({"agent_create", "agent_update", "agent_avatar", "team_run", "session_pin"})
+_MANAGEMENT_SCOPES = ["agents:avatar", "agents:create", "agents:read", "agents:update", "platform:describe", "sessions:pin", "sessions:read", "teams:read", "teams:run"]
+_LEGACY_MANAGEMENT_SCOPES = [scope for scope in _MANAGEMENT_SCOPES if scope != "sessions:pin"]
 
 
 class BackendClientError(RuntimeError):
@@ -163,19 +164,26 @@ class ManagedAgentBackendClient:
             client_id = str(saved.get("clientId") or secrets.token_urlsafe(32))
             if not re.fullmatch(r"[A-Za-z0-9_-]{20,128}", client_id):
                 raise BackendClientError("Invalid management credential state.", code="UNKNOWN_MANAGEMENT_SUBJECT")
-            self._state["management"] = {**saved, "clientId": client_id, "binding": binding}
+            # Old credentials did not persist scopes. Keep their original
+            # grant; only a fresh client may explicitly request the new scope.
+            requested_scopes = saved.get("scopes", _LEGACY_MANAGEMENT_SCOPES if saved.get("clientId") else _MANAGEMENT_SCOPES)
+            if (not isinstance(requested_scopes, list) or not requested_scopes
+                or any(not isinstance(scope, str) or scope not in _MANAGEMENT_SCOPES for scope in requested_scopes)
+                or requested_scopes != sorted(set(requested_scopes))):
+                raise BackendClientError("Invalid management scopes.", code="UNKNOWN_MANAGEMENT_SUBJECT")
+            self._state["management"] = {**saved, "clientId": client_id, "binding": binding, "scopes": requested_scopes}
             self._save_state_locked()  # A lost bind response must reuse the same operator subject.
             grant = await self._request_json("POST", _MANAGEMENT_PREFIX + "/subjects/bind", json_payload={
-                "client_id": client_id, "expected_binding": binding, "scopes": _MANAGEMENT_SCOPES})
+                "client_id": client_id, "expected_binding": binding, "scopes": requested_scopes})
             subject = grant.get("subject_id")
             capability = grant.get("subject_capability")
             scopes = grant.get("scopes")
-            if grant.get("protocolVersion") != 1 or grant.get("binding") != binding or not isinstance(scopes, list) or not all(isinstance(scope, str) for scope in scopes) or sorted(scopes) != _MANAGEMENT_SCOPES or not (
+            if grant.get("protocolVersion") != 1 or grant.get("binding") != binding or not isinstance(scopes, list) or not all(isinstance(scope, str) for scope in scopes) or sorted(scopes) != requested_scopes or not (
                 isinstance(subject, str) and re.fullmatch(r"ops-[A-Za-z0-9_-]{10,128}", subject)
                 and isinstance(capability, str) and re.fullmatch(r"[A-Za-z0-9_-]{32,256}", capability)
             ) or (saved.get("subjectId") and saved["subjectId"] != subject):
                 raise BackendClientError("Management grant mismatch.", code="RUNTIME_IDENTITY_MISMATCH")
-            result = {"clientId": client_id, "binding": binding, "subjectId": subject, "capability": capability}
+            result = {"clientId": client_id, "binding": binding, "subjectId": subject, "capability": capability, "scopes": requested_scopes}
             self._state["management"] = result
             self._save_state_locked()
             return result
@@ -184,11 +192,23 @@ class ManagedAgentBackendClient:
                                 require_existing_subject: bool = False) -> dict[str, Any]:
         if action not in _MANAGEMENT_ACTIONS or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,95}", request_id):
             raise BackendClientError("Unsupported management request.", code="INVALID_MANAGEMENT_REQUEST")
+        if action == "session_pin":
+            from pydantic import ValidationError
+            from core.web.services.external_management.contracts import SessionPin
+            try:
+                parameters = SessionPin.model_validate(parameters).model_dump()
+            except ValidationError:
+                raise BackendClientError("Invalid Session pin parameters.", code="INVALID_MANAGEMENT_REQUEST") from None
         grant = await self._management_grant(require_existing=require_existing_subject)
         result = await self._request_json("POST", f"{_MANAGEMENT_PREFIX}/actions/{action}",
             management_auth=(grant["subjectId"], grant["capability"]), json_payload={
                 "request_id": request_id, "expected_binding": grant["binding"], "parameters": parameters})
-        return self._management_public_receipt(result, action=action, request_id=request_id)
+        public = self._management_public_receipt(result, action=action, request_id=request_id)
+        if action == "session_pin" and public["status"] == "completed" and (
+            public["session"]["id"] != parameters["session_id"] or public["session"]["pinned"] is not parameters["pinned"]
+        ):
+            raise BackendClientError("Mismatched Session pin receipt.", code="BACKEND_PROTOCOL_ERROR")
+        return public
 
     async def management_receipt(self, *, action: str, request_id: str) -> dict[str, Any]:
         if action not in _MANAGEMENT_ACTIONS or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,95}", request_id):
@@ -355,6 +375,18 @@ class ManagedAgentBackendClient:
         if payload.get("action") != action or payload.get("requestId") != request_id or payload.get("status") not in {"completed", "unknown"}:
             raise BackendClientError("Invalid management receipt.", code="BACKEND_PROTOCOL_ERROR")
         result = {key: deepcopy(payload[key]) for key in ("status", "action", "requestId", "verified", "reused", "code") if key in payload}
+        if action == "session_pin":
+            from pydantic import ValidationError
+            from core.web.services.external_management.contracts import ReceiptResponse
+            try:
+                receipt = ReceiptResponse.model_validate(payload)
+                if (receipt.status == "completed" and (receipt.session is None or receipt.verified is not True)
+                    or receipt.status == "unknown" and (receipt.session is not None or receipt.verified is not False)
+                    or any(getattr(receipt, key) is not None for key in ("agent", "teamRun", "phase", "resumeAllowed"))):
+                    raise ValueError("Invalid Session receipt state")
+                return receipt.model_dump(exclude_none=True)
+            except (ValidationError, ValueError) as exc:
+                raise BackendClientError("Invalid Session receipt.", code="BACKEND_PROTOCOL_ERROR") from exc
         if isinstance(payload.get("agent"), dict):
             result["agent"] = ManagedAgentBackendClient._management_agent_view(payload["agent"])
         if action == "team_run":

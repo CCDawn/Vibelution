@@ -1,13 +1,14 @@
 import "../../design/route-css/desktop-pet.tailwind.css";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { MessageCircle, RefreshCw, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import {
   getLauncherAssistantDetail, getLauncherAssistantDispatches, getLauncherAssistantStatus,
   hideLauncherAssistant, sendLauncherAssistantMessage, setLauncherAssistantExpanded,
   launcherConversationApi,
   getLauncherAssistantApprovals, resolveLauncherAssistantApproval,
   stopLauncherAssistantTurn, continueLauncherAssistantTurn,
+  getLauncherOperatorAsset,
 } from "../../api/launcherAssistant";
 import type { SessionContinuationExpectation } from "../../api/chat";
 import { queryKeys } from "../../api/queryKeys";
@@ -84,6 +85,18 @@ export function LauncherAssistantRoute() {
   const sessionId = status.data?.assistant.directSessionId || "";
   const reading = expanded && visible && Boolean(sessionId);
   const observingOwnSession = visible && Boolean(sessionId);
+  const readingAssets = reading && status.data?.operatorAssetsVersion === 1;
+  const assetQueryPrefix = ["launcher-assistant", "operator-asset"];
+  const avatar = useQuery({
+    queryKey: [...assetQueryPrefix, "avatar", sessionId],
+    queryFn: ({ signal }) => getLauncherOperatorAsset("avatar", { signal }),
+    enabled: readingAssets, retry: false, staleTime: Infinity,
+  });
+  const background = useQuery({
+    queryKey: [...assetQueryPrefix, "background", sessionId],
+    queryFn: ({ signal }) => getLauncherOperatorAsset("background", { signal }),
+    enabled: readingAssets, retry: false, staleTime: Infinity,
+  });
   const composerKey = ["launcher-assistant", "composer", sessionId];
   function saveComposer(patch: Partial<ComposerSnapshot>) {
     client.setQueryDefaults(composerKey, { gcTime: Infinity });
@@ -150,6 +163,7 @@ export function LauncherAssistantRoute() {
     void client.invalidateQueries({ queryKey: ["launcher-assistant", "status"], exact: true });
     void client.invalidateQueries({ queryKey: queryKeys.configPublic(), exact: true });
     void client.invalidateQueries({ queryKey: [launcherConversationApi.cacheKey, "config"], exact: true });
+    void client.invalidateQueries({ queryKey: ["launcher-assistant", "operator-asset"] });
   }, [client, observingOwnSession, sessionId, terminalOutcome, terminalTurnId]);
   const approvals = useQuery({
     queryKey: ["launcher-assistant", "approvals", sessionId, epoch],
@@ -243,6 +257,12 @@ export function LauncherAssistantRoute() {
       epochRef.current += 1;
       setEpoch(epochRef.current);
       setExpanded(!expanded);
+      if (expanded) {
+        // Collapse cancels in-flight image reads and marks them stale without
+        // starting an IPC request. Reopening reads the current native choice.
+        void client.cancelQueries({ queryKey: assetQueryPrefix });
+        void client.invalidateQueries({ queryKey: assetQueryPrefix, refetchType: "none" });
+      }
       if (!expanded) void status.refetch();
       if (sending.current) setSendUnconfirmed(true);
     } catch (error) {
@@ -362,6 +382,11 @@ export function LauncherAssistantRoute() {
   }
 
   const identity = status.data?.assistant;
+  const avatarImage = readingAssets && !avatar.isError ? avatar.data?.image : null;
+  const backgroundImage = readingAssets && !background.isError ? background.data?.image : null;
+  const backgroundStyle = backgroundImage
+    ? { "--workbench-theme-background-image": `url(${JSON.stringify(backgroundImage.url)})` } as CSSProperties
+    : undefined;
   const preferences = status.data?.settings?.preferences || DEFAULT_PET_PREFERENCES;
   const displayName = status.data?.settings?.displayName || identity?.displayName || copy.title;
   const { tone, animationState } = launcherAssistantActivity(detail.data);
@@ -402,14 +427,17 @@ export function LauncherAssistantRoute() {
   </main>;
 
   return <VDenseOpsPage hideHeader ariaLabel={displayName}
-    className={petStyles.chatWindow} bodyClassName={petStyles.chatBody}
+    className={petStyles.launcherChatWindow} bodyClassName={petStyles.chatBody} style={backgroundStyle}
     data-vui-domain-recipe="launcher-assistant" data-assistant-chat="compact" data-expanded="true" data-tone={tone}
+    data-operator-avatar={avatarImage ? "custom" : "default"}
+    data-theme-background={backgroundImage ? "custom" : "default"}
+    data-theme-background-readability={backgroundImage ? background.data?.readability : undefined}
     toolbarSlot={<header className={petStyles.chatHeader}>
       <div className={petStyles.chatIdentity}>
         <h1 className={petStyles.chatTitle} hidden={!preferences.showTitles}>{displayName}</h1>
         <span className={petStyles.chatStatus} hidden={!preferences.showStatus && !feedback} role={feedback ? "alert" : "status"}>{statusText}</span>
       </div>
-      <VNativeButton className={petStyles.close} aria-label={copy.refresh} onClick={() => { void status.refetch(); void detail.refetch(); void dispatches.refetch(); void approvals.refetch(); }}><RefreshCw size={14} /></VNativeButton>
+      <VNativeButton className={petStyles.close} aria-label={copy.refresh} onClick={() => { void status.refetch(); void detail.refetch(); void dispatches.refetch(); void approvals.refetch(); void client.invalidateQueries({ queryKey: assetQueryPrefix }); }}><RefreshCw size={14} /></VNativeButton>
       <VNativeButton className={petStyles.close} aria-label={copy.collapse} disabled={resizePending} onClick={() => void toggle()}><X size={14} /></VNativeButton>
     </header>}>
     {detail.data ? <LazyConversationView
@@ -419,6 +447,7 @@ export function LauncherAssistantRoute() {
       turnError={detail.data.lastTurnError}
       defaultFileContext={detail.data.defaultFileContext} assistantDisplayName={displayName}
       userDisplayName={status.data?.operatorProfile?.displayName} userAvatarPreset={status.data?.operatorProfile?.avatarPreset}
+      userAvatarImageUrl={avatarImage?.url}
       showHeader={false} showSessionOverview={false} showMentalSnapshots={false} density="compact" composerVariant="codex"
       composerValue={draft} composerPlaceholder={copy.placeholder} composerDisabled={sendPending || sendUnconfirmed || controlPending}
       composerPending={sendPending || controlPending || stopping} composerActionMode={actionMode} composerAttachmentInputDisabled
@@ -430,6 +459,9 @@ export function LauncherAssistantRoute() {
       fallback={<VStateSurface fill tone="loading" title={copy.loading} />}
     /> : <VStateSurface fill tone={detail.isError ? "error" : "loading"} title={detail.isError ? copy.unavailable : copy.loading}
       actions={detail.isError ? <VButton onClick={() => void detail.refetch()}>{copy.retry}</VButton> : undefined}>{detail.error?.message}</VStateSurface>}
+    {readingAssets && (avatar.isError || background.isError) ? <VStateSurface tone="error"
+      title={lang === "zh" ? "部分外观图片暂不可用，聊天仍可使用" : "Some appearance images are unavailable; chat is ready"}
+      actions={<VButton onClick={() => { if (avatar.isError) void avatar.refetch(); if (background.isError) void background.refetch(); }}>{copy.retry}</VButton>} /> : null}
     {approval ? <ChatToolApprovalDialog lang={lang} variant="inline"
       pending={approvalPending || !approval.availableDecisions.includes("accept") || !approval.availableDecisions.includes("decline")}
       rawTitle={approval.toolName} riskLabel={toolApprovalRiskLabel(approval.risk, lang)}

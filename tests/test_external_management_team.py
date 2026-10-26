@@ -134,7 +134,7 @@ def test_team_schema_governance_and_no_prototype_scope_upgrade(env):
     from core.web.services.external_management.contracts import contracts
     assert contracts()["team_run"]["governed"] is True
     assert SCOPES == ("agents:read", "agents:create", "agents:update", "agents:avatar",
-                      "teams:run", "teams:read", "platform:describe", "sessions:read")
+                      "teams:run", "teams:read", "platform:describe", "sessions:read", "sessions:pin")
     for injected in ({"owner": "fake"}, {"governed": True}, {"nativeApproval": True}, {"runtime": {}}, {"url": "http://local"}):
         payload = copy.deepcopy(env.payload)
         payload["parameters"].update(injected)

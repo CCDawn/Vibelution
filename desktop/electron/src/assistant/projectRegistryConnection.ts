@@ -3,7 +3,7 @@ import { realpathSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 
 import { readProjectId } from "../lifecycle/projectStoragePaths.js";
-import { AssistantProjectRegistry, type AssistantProjectRegistrySnapshot } from "./projectRegistry.js";
+import { AssistantProjectRegistry, type AssistantProjectRegistrySnapshot, type AssistantProjectRegistration } from "./projectRegistry.js";
 
 type ProjectHost = {
   start(): Promise<unknown>;
@@ -52,6 +52,10 @@ export class AssistantProjectRegistryConnection {
     // Corrupt/missing persisted roots fail before any child can be created.
     this.registry.snapshot();
   }
+
+  /** Trusted main callers only; both reads retain disk/physical-root validation. */
+  snapshot(): AssistantProjectRegistrySnapshot { this.assertOpen(); return this.registry.snapshot(); }
+  registration(projectId: string): AssistantProjectRegistration | null { this.assertOpen(); return this.registry.registration(projectId); }
 
   start<T extends ProjectHost>(createHost: (snapshot: AssistantProjectRegistrySnapshot) => T): Promise<T> {
     return this.enqueue(async () => {
