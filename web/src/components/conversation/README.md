@@ -9,8 +9,9 @@ window, and turn composition. Stick-bottom scroll lives in
 `useConversationTimelineFollow.ts`. Process/response expansion state, the
 segment parse cache, and prewarm live in `useConversationProcessExpansion.ts`.
 The turn-navigator directory and live current-turn index live in
-`useConversationTurnNav.ts`. Pure presentation, timeline projection, and tool
-rendering should live outside the shell.
+`useConversationTurnNav.ts`. In-chat SFT message curation (like/dislike) lives
+in `useConversationMessageCuration.ts`. Pure presentation, timeline projection,
+and tool rendering should live outside the shell.
 
 ## 30-second routing (Agent reading map)
 
@@ -48,6 +49,7 @@ rendering should live outside the shell.
 | Prefetch (idle warm, no mount) | `prefetchConversationView.ts`, `LazyConversationView.tsx` |
 | Text-selection quote menu | `useConversationSelectionQuote.tsx` |
 | Branch fork dialog state | `useConversationForkSession.ts`; dialog JSX stays in `ConversationView.tsx` |
+| In-chat SFT message curation (like/dislike) | `useConversationMessageCuration.ts`, `conversationMessageCuration.ts` |
 | Shell composition only | `ConversationView.tsx` |
 
 ## ConversationView block map (M6)
@@ -70,6 +72,7 @@ Approximate ownership inside the shell. Line ranges drift; use the map by
 | Image preview mount | conditional React.lazy dialog | keep shell gate |
 | Text-selection quote | quote / copy / reference / side-chat menu | `useConversationSelectionQuote.tsx` |
 | Branch fork dialog | target message, scope, pending, open/close/submit | `useConversationForkSession.ts`; `ConversationForkSessionDialog` JSX stays in the shell |
+| Message curation | optimistic overlay, failure rollback, ~3s 409/error title, session reset, companion and transcript-pending query gates | `useConversationMessageCuration.ts`; like/dislike buttons stay in timeline rows |
 
 ## Ownership map
 
@@ -82,6 +85,7 @@ Approximate ownership inside the shell. Line ranges drift; use the map by
 | Prefetch without mount | `prefetchConversationView.ts` | mounting ConversationView early |
 | Timeline text-selection quote | `useConversationSelectionQuote.tsx` | stick-bottom / history-load scroll |
 | Branch fork dialog state | `useConversationForkSession.ts` | route API call, or moving `ConversationForkSessionDialog` out of the shell |
+| In-chat SFT message curation | `useConversationMessageCuration.ts` | copy-answer feedback, image preview, or inlining the query back into the shell |
 | Process / response expansion state | `useConversationProcessExpansion.ts` | inlining section defaults back into the shell |
 | Turn navigator directory | `useConversationTurnNav.ts` | inlining preview maps back into the shell |
 
