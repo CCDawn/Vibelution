@@ -47,6 +47,7 @@ rendering should live outside the shell.
 | Agent thread bridge / projection hooks | `useAgentThread.ts`, `useAgentMessageTimelineProjection.ts` |
 | Prefetch (idle warm, no mount) | `prefetchConversationView.ts`, `LazyConversationView.tsx` |
 | Text-selection quote menu | `useConversationSelectionQuote.tsx` |
+| Copy-answer check-icon feedback | `useConversationCopyAnswerFeedback.ts` |
 | Branch fork dialog state | `useConversationForkSession.ts`; dialog JSX stays in `ConversationView.tsx` |
 | Shell composition only | `ConversationView.tsx` |
 
@@ -69,6 +70,7 @@ Approximate ownership inside the shell. Line ranges drift; use the map by
 | Composer | draft, attachments, slash, submit keys | composer pure modules + Chat route hooks |
 | Image preview mount | conditional React.lazy dialog | keep shell gate |
 | Text-selection quote | quote / copy / reference / side-chat menu | `useConversationSelectionQuote.tsx` |
+| Copy-answer feedback | copied-message id, 1600ms check icon, clipboard failure swallow | `useConversationCopyAnswerFeedback.ts` |
 | Branch fork dialog | target message, scope, pending, open/close/submit | `useConversationForkSession.ts`; `ConversationForkSessionDialog` JSX stays in the shell |
 
 ## Ownership map
@@ -81,6 +83,7 @@ Approximate ownership inside the shell. Line ranges drift; use the map by
 | Markdown / tool renderers | dedicated renderer modules | re-inlining into shell |
 | Prefetch without mount | `prefetchConversationView.ts` | mounting ConversationView early |
 | Timeline text-selection quote | `useConversationSelectionQuote.tsx` | stick-bottom / history-load scroll |
+| Copy-answer feedback | `useConversationCopyAnswerFeedback.ts` | selection-quote clipboard, or in-chat SFT curation |
 | Branch fork dialog state | `useConversationForkSession.ts` | route API call, or moving `ConversationForkSessionDialog` out of the shell |
 | Process / response expansion state | `useConversationProcessExpansion.ts` | inlining section defaults back into the shell |
 | Turn navigator directory | `useConversationTurnNav.ts` | inlining preview maps back into the shell |
