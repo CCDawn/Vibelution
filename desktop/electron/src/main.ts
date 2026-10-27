@@ -603,34 +603,48 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
         });
         launcherAssistantHost = host;
         launcherAssistantWindow = new AssistantWindow(paths, host, () => shutdownApproved, requestOpenLauncherFromAssistant);
+        let reminderDialogTail: Promise<unknown> = Promise.resolve();
+        const showReminderFallback = (notice: { title: string; body: string }) => {
+          const shown = reminderDialogTail.then(() => {
+            if (shutdownApproved) throw new Error("ASSISTANT_STOPPED");
+            return dialog.showMessageBox({ type: "info", title: notice.title, message: notice.body || "已到期",
+              buttons: ["打开助理", "稍后"], defaultId: 0, cancelId: 1, noLink: true });
+          });
+          reminderDialogTail = shown.then(() => undefined, () => undefined);
+          return shown;
+        };
         stopLauncherAssistantReminders = startAssistantReminderPump({
           host,
           available: () => !shutdownApproved,
-          notify: (notice, onClick, onFailure, onFallback) => new Promise((resolve, reject) => {
+          notify: (notice, recoveredFallback, onClick, onFailure, onFallback, onLateFallback) => new Promise((resolve, reject) => {
             let settled = false;
+            let resultChannel: "system_notification" | "attention_fallback" | "unknown" = "unknown";
+            let lateFallbackStarted = false;
             const timeout = setTimeout(() => {
               if (!settled) { settled = true; reject(new Error("ASSISTANT_REMINDER_NOTIFICATION_UNKNOWN")); }
             }, 10_000);
             const fallback = () => {
-              if (settled) { onFailure(); return; }
+              if (settled) {
+                if (resultChannel === "attention_fallback" || lateFallbackStarted) return;
+                lateFallbackStarted = true;
+                console.warn("ASSISTANT_REMINDER_NOTIFICATION_FAILED");
+                onLateFallback(() => showReminderFallback(notice).then(result => result.response === 0));
+                return;
+              }
               settled = true;
+              resultChannel = "attention_fallback";
               clearTimeout(timeout);
-              console.warn("ASSISTANT_REMINDER_NOTIFICATION_FAILED");
-              onFallback();
-              try {
-                void dialog.showMessageBox({ type: "info", title: notice.title, message: notice.body || "已到期",
-                  buttons: ["打开助理", "稍后"], defaultId: 0, cancelId: 1, noLink: true })
-                  .then(result => { if (result.response === 0) onClick(); resolve("attention_fallback"); })
-                  .catch(() => reject(new Error("ASSISTANT_REMINDER_NOTIFICATION_FAILED")));
-              } catch { reject(new Error("ASSISTANT_REMINDER_NOTIFICATION_FAILED")); }
+              if (!recoveredFallback) console.warn("ASSISTANT_REMINDER_NOTIFICATION_FAILED");
+              onFallback(showReminderFallback(notice).then(result => result.response === 0));
+              resolve("attention_fallback");
             };
-            if (!Notification.isSupported()) { fallback(); return; }
+            if (recoveredFallback || !Notification.isSupported()) { fallback(); return; }
             try {
               const notification = new Notification({ title: notice.title, body: notice.body, silent: false });
               notification.on("click", onClick);
               notification.on("failed", fallback);
               notification.on("show", () => {
-                if (!settled) { settled = true; clearTimeout(timeout); resolve("system_notification"); }
+                if (!settled) { settled = true; resultChannel = "system_notification"; clearTimeout(timeout); resolve("system_notification"); }
               });
               nativeNotificationLifetime.retain(notification);
               notification.show();

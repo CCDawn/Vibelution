@@ -58,8 +58,12 @@ with TestClient(app, base_url='http://127.0.0.1') as client:
     event = response.json()['event']
     assert event['kind'] == 'affair_reminder' and event['title'] == '事务提醒：fixture due'
     assert event['targetUrl'] == ''
+    assert event['recoveredFallback'] is False
     assert client.post(path, headers=headers).json()['event'] is None
     body = {'eventId': event['id'], 'attemptToken': event['attemptToken'], 'channel': 'system_notification'}
+    fallback = {key: body[key] for key in ('eventId', 'attemptToken')}
+    pending = client.post('/api/assistant/reminders/fallback', headers=headers, json=fallback)
+    assert pending.status_code == 503 and pending.json()['detail']['code'] == 'receipt_fallback_not_allowed'
     receipt = client.post('/api/assistant/reminders/submitted', headers=headers, json=body).json()['receipt']
     assert receipt['state'] == 'submitted' and not receipt['interactionObserved']
     (root / 'fixture-event.json').write_text(json.dumps(body))
@@ -75,8 +79,20 @@ body = json.loads((root / 'fixture-event.json').read_text())
 with TestClient(create_app(native=NativeFacade(root), token='isolated-main-token'),
                 base_url='http://127.0.0.1') as client:
     assert client.post('/api/assistant/reminders/next', headers=headers).json()['event'] is None
+    fallback = {key: body[key] for key in ('eventId', 'attemptToken')}
+    assert client.post('/api/assistant/reminders/fallback', json=fallback).status_code == 401
+    bad = client.post('/api/assistant/reminders/fallback', headers=headers,
+                      json={**fallback, 'attemptToken': '0' * 64})
+    assert bad.status_code == 503 and bad.json()['detail']['code'] == 'receipt_attempt_owner_required'
+    result = client.post('/api/assistant/reminders/fallback', headers=headers, json=fallback)
+    assert result.status_code == 200
+    assert result.json()['receipt']['state'] == 'submitted'
+    assert result.json()['receipt']['channel'] == 'attention_fallback'
+    assert not result.json()['receipt']['interactionObserved']
+    body['channel'] = 'attention_fallback'
     opened = client.post('/api/assistant/reminders/opened', headers=headers, json=body)
     assert opened.status_code == 200 and opened.json()['receipt']['interactionObserved']
+    assert client.post('/api/assistant/reminders/fallback', headers=headers, json=fallback).status_code == 503
     (root / 'affairs_migrations').mkdir()
     result = client.post('/api/assistant/reminders/next', headers=headers)
     assert result.status_code == 409 and result.json()['detail']['code'] == 'reminder_imported_profile_blocked'
@@ -113,6 +129,83 @@ with TestClient(app, base_url='http://127.0.0.1') as client:
     assert '20261001' not in app.state.reminders.stores
     assert client.post('/api/assistant/reminders/opened', headers=headers, json=body).json()['receipt']['interactionObserved']
     assert '20261001' not in app.state.reminders.stores
+''', config_text=TEST_MODEL_CONFIG)
+
+
+def test_queued_fallback_recovers_after_restart_until_user_interacts(tmp_path):
+    _run(tmp_path, r'''
+import json, os
+from pathlib import Path
+from fastapi.testclient import TestClient
+from core.assistant_runtime.host import NativeFacade, create_app
+from core.web.services import personal_affairs_service
+root = Path(os.environ['VIBELUTION_ASSISTANT_NATIVE_ROOT'])
+headers = {'Authorization': 'Bearer isolated-main-token'}
+app = create_app(native=NativeFacade(root), token='isolated-main-token')
+with TestClient(app, base_url='http://127.0.0.1') as client:
+    agent = app.state.assistant['assistant']['agentId']
+    personal_affairs_service.get_personal_affairs_service().add_item(
+        agent, kind='todo', title='queued fallback', due_at='2020-01-01T00:00:00Z')
+    event = client.post('/api/assistant/reminders/next', headers=headers).json()['event']
+    assert event['recoveredFallback'] is False
+    body = {'eventId': event['id'], 'attemptToken': event['attemptToken'], 'channel': 'attention_fallback'}
+    assert client.post('/api/assistant/reminders/submitted', headers=headers, json=body).status_code == 200
+    assert client.post('/api/assistant/reminders/next', headers=headers).json()['event'] is None
+    (root / 'queued-event.json').write_text(json.dumps(body))
+''', config_text=TEST_MODEL_CONFIG)
+    _run(tmp_path, r'''
+import json, os
+from pathlib import Path
+from fastapi.testclient import TestClient
+from core.assistant_runtime.host import NativeFacade, create_app
+root = Path(os.environ['VIBELUTION_ASSISTANT_NATIVE_ROOT'])
+headers = {'Authorization': 'Bearer isolated-main-token'}
+old = json.loads((root / 'queued-event.json').read_text())
+with TestClient(create_app(native=NativeFacade(root), token='isolated-main-token'),
+                base_url='http://127.0.0.1') as client:
+    event = client.post('/api/assistant/reminders/next', headers=headers).json()['event']
+    assert event['id'] == old['eventId'] and event['recoveredFallback'] is True
+    assert event['attemptToken'] != old['attemptToken']
+    assert client.post('/api/assistant/reminders/next', headers=headers).json()['event'] is None
+    assert client.post('/api/assistant/reminders/opened', headers=headers, json=old).status_code != 200
+    (root / 'recovered-event.json').write_text(json.dumps(event))
+''', config_text=TEST_MODEL_CONFIG)
+    _run(tmp_path, r'''
+import json, os
+from pathlib import Path
+from fastapi.testclient import TestClient
+from core.assistant_runtime.host import NativeFacade, create_app
+root = Path(os.environ['VIBELUTION_ASSISTANT_NATIVE_ROOT'])
+headers = {'Authorization': 'Bearer isolated-main-token'}
+prior = json.loads((root / 'recovered-event.json').read_text())
+with TestClient(create_app(native=NativeFacade(root), token='isolated-main-token'),
+                base_url='http://127.0.0.1') as client:
+    event = client.post('/api/assistant/reminders/next', headers=headers).json()['event']
+    assert event['id'] == prior['id'] and event['recoveredFallback'] is True
+    assert event['attemptToken'] != prior['attemptToken']
+    body = {'eventId': event['id'], 'attemptToken': event['attemptToken'], 'channel': 'attention_fallback'}
+    assert client.post('/api/assistant/reminders/submitted', headers=headers, json=body).status_code == 200
+    opened = client.post('/api/assistant/reminders/opened', headers=headers, json=body)
+    assert opened.status_code == 200 and opened.json()['receipt']['interactionObserved']
+import apsw
+day = event['id'].split(':')[1]
+db = apsw.Connection(str(root / 'reminder_receipts' / day / 'reminders.sqlite3'))
+try:
+    assert list(db.execute('SELECT count(*) FROM receipt_inflight')) == [(0,)]
+    assert list(db.execute('SELECT count(*) FROM receipt_senders')) == [(0,)]
+finally:
+    db.close()
+''', config_text=TEST_MODEL_CONFIG)
+    _run(tmp_path, r'''
+import os
+from pathlib import Path
+from fastapi.testclient import TestClient
+from core.assistant_runtime.host import NativeFacade, create_app
+root = Path(os.environ['VIBELUTION_ASSISTANT_NATIVE_ROOT'])
+with TestClient(create_app(native=NativeFacade(root), token='isolated-main-token'),
+                base_url='http://127.0.0.1') as client:
+    result = client.post('/api/assistant/reminders/next', headers={'Authorization': 'Bearer isolated-main-token'})
+    assert result.json()['event'] is None
 ''', config_text=TEST_MODEL_CONFIG)
 
 

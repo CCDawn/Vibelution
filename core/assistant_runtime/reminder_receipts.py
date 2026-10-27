@@ -317,6 +317,53 @@ class ReminderReceiptStore:
         """Trusted owner supplies an actual interaction callback, not a timer."""
         return self._record(event_id, attempt_token, channel, "opened")
 
+    def record_notification_fallback(self, event_id: str, attempt_token: str) -> dict:
+        """Record main's queued fallback after a native toast failure.
+
+        The bearer token binds the attempt even after host restart; it grants
+        no submission ownership and cannot change an already opened receipt.
+        """
+        event_id, digest = self._attempt_digest(event_id, attempt_token, "system_notification")
+        with self._transaction() as conn:
+            rows = list(conn.execute("SELECT token_hash,state,channel FROM reminder_receipts WHERE event_id=?", (event_id,)))
+            if not rows or not secrets.compare_digest(rows[0][0], digest):
+                raise ReminderReceiptError("receipt_attempt_owner_required")
+            if rows[0][1:] != ("submitted", "system_notification"):
+                raise ReminderReceiptError("receipt_fallback_not_allowed")
+            conn.execute("UPDATE reminder_receipts SET channel='attention_fallback' WHERE event_id=?", (event_id,))
+        return self._public((event_id, "submitted", "attention_fallback"))
+
+    def recover_fallback(self, event_id: str) -> dict:
+        """Reclaim an unhandled queued fallback under the exclusive host lock.
+
+        The caller must hold the native profile's host-owner OS lock for its
+        entire lifetime, and main must have drained any previous native dialog.
+        Old sender registrations can be replaced only under that ownership;
+        a system notification or unknown pending attempt is never recoverable.
+        """
+        event_id = _token(event_id)
+        if event_id in self._owned:
+            raise ReminderReceiptError("receipt_fallback_already_owned")
+        raw = secrets.token_hex(32)
+        digest = hashlib.sha256(raw.encode("ascii")).hexdigest()
+        with self._transaction() as conn:
+            if list(conn.execute("SELECT phase FROM receipt_fence WHERE singleton=1")) != [("OPEN",)]:
+                raise ReminderReceiptError("receipt_admission_closed")
+            rows = list(conn.execute("SELECT state,channel FROM reminder_receipts WHERE event_id=?", (event_id,)))
+            if rows != [("submitted", "attention_fallback")]:
+                raise ReminderReceiptError("receipt_fallback_not_allowed")
+            old = list(conn.execute("SELECT sender_id FROM receipt_inflight WHERE event_id=?", (event_id,)))
+            conn.execute("INSERT OR IGNORE INTO receipt_senders VALUES (?,1)", (self._sender_id,))
+            conn.execute("UPDATE reminder_receipts SET token_hash=? WHERE event_id=?", (digest, event_id))
+            conn.execute("DELETE FROM receipt_inflight WHERE event_id=?", (event_id,))
+            conn.execute("INSERT INTO receipt_inflight VALUES (?,?,1)", (event_id, self._sender_id))
+            if old and old[0][0] != self._sender_id:
+                conn.execute("DELETE FROM receipt_senders WHERE sender_id=? AND NOT EXISTS "
+                             "(SELECT 1 FROM receipt_inflight WHERE sender_id=?)", (old[0][0], old[0][0]))
+        self._owned[event_id] = digest
+        return {"created": True, **self._public((event_id, "submitted", "attention_fallback")),
+                "attemptToken": raw}
+
     @staticmethod
     def _attempt_digest(event_id, token, channel):
         event_id = _token(event_id)

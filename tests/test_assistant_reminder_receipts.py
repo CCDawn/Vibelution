@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 import textwrap
+import threading
 import time
 
 import pytest
@@ -126,6 +127,47 @@ def test_submission_is_not_seen_and_only_winning_owner_can_record_callbacks(tmp_
         assert not restarted.reserve("event")["created"]
     with pytest.raises(ReminderReceiptError, match="receipt_owner_context_required"):
         store.get("event")
+
+
+def test_failed_toast_fallback_and_click_are_atomically_ordered(tmp_path):
+    root = tmp_path / "receipts"
+    with opened(root, create=True) as store:
+        token = store.reserve("event")["attemptToken"]
+        store.record_submitted("event", token, channel="system_notification")
+    barrier = threading.Barrier(2)
+
+    def compete(fallback):
+        with opened(root) as store:
+            barrier.wait(timeout=10)
+            try:
+                if fallback:
+                    return store.record_notification_fallback("event", token)
+                return store.record_recovered_opened("event", token, channel="system_notification")
+            except ReminderReceiptError as error:
+                return str(error)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        fallback, click = list(pool.map(compete, (True, False)))
+    with opened(root) as store:
+        record = store.get("event")
+        if isinstance(fallback, dict):
+            assert fallback["state"] == "submitted" and fallback["channel"] == "attention_fallback"
+            assert click == "receipt_channel_conflict"
+            assert record["state"] == "submitted" and not record["interactionObserved"]
+            assert store.record_recovered_opened("event", token, channel="attention_fallback")["interactionObserved"]
+        else:
+            assert fallback == "receipt_fallback_not_allowed"
+            assert click["state"] == "opened" and record["channel"] == "system_notification"
+
+
+def test_failed_toast_fallback_rejects_other_original_channels(tmp_path):
+    root = tmp_path / "receipts"
+    with opened(root, create=True) as store:
+        token = store.reserve("event")["attemptToken"]
+        store.record_submitted("event", token, channel="assistant_window")
+        with pytest.raises(ReminderReceiptError, match="receipt_fallback_not_allowed"):
+            store.record_notification_fallback("event", token)
+        assert store.get("event")["channel"] == "assistant_window"
 
 
 def test_real_host_restart_accepts_retained_native_click_token_without_submission_ownership(tmp_path):

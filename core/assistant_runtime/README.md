@@ -686,16 +686,22 @@ For a Launcher assistant profile with no affairs migration records, the native
 host and Electron main can send reminders for that profile's own due affairs.
 The private bearer-authenticated endpoints are `POST /api/assistant/reminders/next`
 (reserve and return one event), `POST /api/assistant/reminders/submitted` (record
-the native submission), and `POST /api/assistant/reminders/opened` (record a real
-notification click). The reservation token stays in Electron main. An existing
+the native submission), `POST /api/assistant/reminders/fallback` (record a
+queued fallback after a submitted system notification later fails), and
+`POST /api/assistant/reminders/opened` (record a real notification click). The
+reservation token stays in Electron main. An existing
 `affairs_migrations` directory blocks this sender for the whole profile; it does
 not establish legacy takeover. A failed or uncertain attempt is not replayed;
 it can therefore remain undelivered. Daily ledgers retain receipts and fail
 closed at their capacity; automatic retention cleanup is not implemented.
-If the system notification fails, Electron presents one reminder dialog at a
-time. The fallback is recorded as submitted after the dialog is answered; only
-the "open assistant" choice records an interaction. Shutdown waits at most two
-seconds for an unanswered dialog and leaves its outcome unconfirmed.
+If the system notification fails, Electron queues one reminder dialog at a
+time. A late failure after a submitted system notification changes that receipt
+to the queued fallback; submission alone does not prove the dialog was seen.
+Either dialog choice records an interaction. During the same UTC day, an
+unanswered fallback for a still due item is recovered on restart without
+sending another system notification. On a later UTC day, an open overdue item
+is treated as a new daily reminder. Shutdown waits at most two seconds for an
+unanswered dialog.
 
 `reminder_receipts.ReminderReceiptStore` uses pinned Windows handles and SQLite transactions to
 reserve a stable event ID before a single submission. A prior pending or

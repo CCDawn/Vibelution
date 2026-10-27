@@ -1,13 +1,14 @@
 import type { AssistantHost, AssistantReminder, AssistantReminderChannel } from "./assistantHost.js";
 
-type ReminderHost = Pick<AssistantHost, "snapshot" | "nextReminder" | "settleReminder">;
+type ReminderHost = Pick<AssistantHost, "snapshot" | "nextReminder" | "settleReminder" | "fallbackReminder">;
 type ReminderNotice = Pick<AssistantReminder, "title" | "body">;
 
 /** One main-process sender. Unknown outcomes pause it rather than replaying. */
 export function startAssistantReminderPump(options: {
   host: ReminderHost;
   available(): boolean;
-  notify(notice: ReminderNotice, onClick: () => void, onFailure: () => void, onFallback: () => void): Promise<AssistantReminderChannel>;
+  notify(notice: ReminderNotice, recoveredFallback: boolean, onClick: () => void, onFailure: () => void, onFallback: (decision: Promise<boolean>) => void,
+    onLateFallback: (show: () => Promise<boolean>) => void): Promise<AssistantReminderChannel>;
   openAssistant(): void;
   onError(reason: "notification" | "transport"): void;
   intervalMs?: number;
@@ -16,12 +17,9 @@ export function startAssistantReminderPump(options: {
   let retired = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let active: Promise<void> | undefined;
-  let fallbackStarted: Promise<void> | undefined;
-  let signalFallback: (() => void) | undefined;
-  let notificationFinished: Promise<void> | undefined;
-  let signalNotificationFinished: (() => void) | undefined;
-  let notificationCompleted = false;
+  let claiming: Promise<AssistantReminder | null> | undefined;
   const pendingClicks = new Set<Promise<void>>();
+  const pendingDialogs = new Set<Promise<boolean>>();
   let failureReported = false;
   const delay = options.intervalMs ?? 30_000;
   const schedule = (ms: number) => {
@@ -32,9 +30,6 @@ export function startAssistantReminderPump(options: {
   };
   async function tick(): Promise<void> {
     if (stopped) return;
-    fallbackStarted = new Promise(resolve => { signalFallback = resolve; });
-    notificationFinished = new Promise(resolve => { signalNotificationFinished = resolve; });
-    notificationCompleted = false;
     if (options.host.snapshot().state !== "ready") {
       schedule(delay);
       return;
@@ -43,8 +38,12 @@ export function startAssistantReminderPump(options: {
       schedule(delay);
       return;
     }
+    if (pendingDialogs.size || pendingClicks.size) { schedule(delay); return; }
     try {
-      const event = await options.host.nextReminder();
+      claiming = options.host.nextReminder();
+      let event: AssistantReminder | null;
+      try { event = await claiming; }
+      finally { claiming = undefined; }
       if (retired) return;
       failureReported = false;
       if (!event) { schedule(delay); return; }
@@ -52,23 +51,55 @@ export function startAssistantReminderPump(options: {
       let acknowledgement: Promise<void> | undefined;
       let channel: AssistantReminderChannel | undefined;
       let clickHandled = false;
+      let lateFallbackHandled = false;
+      const track = (recording: Promise<void>) => {
+        pendingClicks.add(recording);
+        void recording.finally(() => pendingClicks.delete(recording));
+      };
       const recordClick = () => {
         if (!clicked || clickHandled || !acknowledgement || !channel) return;
         clickHandled = true;
         const confirmedChannel = channel;
         const recording = acknowledgement.then(() => options.host.settleReminder(event, confirmedChannel, true))
           .catch(() => options.onError("transport"));
-        pendingClicks.add(recording);
-        void recording.finally(() => pendingClicks.delete(recording));
+        track(recording);
       };
-      channel = await options.notify({ title: event.title, body: event.body }, () => {
-        if (retired) return;
+      channel = await options.notify({ title: event.title, body: event.body }, event.recoveredFallback, () => {
+        if (retired || lateFallbackHandled) return;
         clicked = true;
         options.openAssistant();
         recordClick();
-      }, () => options.onError("notification"), () => signalFallback?.());
-      notificationCompleted = true;
-      signalNotificationFinished?.();
+      }, () => options.onError("notification"), decision => {
+        pendingDialogs.add(decision);
+        void decision.then(opened => {
+          pendingDialogs.delete(decision);
+          if (retired) return;
+          clicked = true;
+          if (opened) options.openAssistant();
+          recordClick();
+        }).catch(() => { pendingDialogs.delete(decision); options.onError("notification"); });
+      }, show => {
+        if (retired || lateFallbackHandled) return;
+        lateFallbackHandled = true;
+        // A previous toast can fail while a restarted host is answering the
+        // next claim. Let that claim finish before publishing the fallback.
+        const claimDone = claiming?.then(() => undefined, () => undefined) ?? Promise.resolve();
+        const decision = claimDone.then(show);
+        pendingDialogs.add(decision);
+        let converted = false;
+        const recording = claimDone.then(() => acknowledgement ?? Promise.resolve()).catch(() => undefined)
+          .then(() => options.host.fallbackReminder(event))
+          .then(() => { converted = true; })
+          .catch(() => options.onError("transport"));
+        track(recording);
+        void decision.then(opened => {
+          pendingDialogs.delete(decision);
+          if (retired) return;
+          if (opened) options.openAssistant();
+          track(recording.then(() => converted ? options.host.settleReminder(event, "attention_fallback", true) : undefined)
+            .catch(() => options.onError("transport")));
+        }).catch(() => { pendingDialogs.delete(decision); options.onError("notification"); });
+      });
       if (retired) return;
       acknowledgement = options.host.settleReminder(event, channel, false);
       recordClick();
@@ -91,14 +122,11 @@ export function startAssistantReminderPump(options: {
   return async () => {
     stopped = true;
     if (timer) clearTimeout(timer);
-    if (active) {
-      const awaitingFallback = await Promise.race([active.then(() => false), fallbackStarted!.then(() => true)]);
-      if (awaitingFallback) {
-        let timeout: ReturnType<typeof setTimeout> | undefined;
-        await Promise.race([active, notificationFinished!, new Promise<void>(resolve => { timeout = setTimeout(resolve, 2_000); })]);
-        if (timeout) clearTimeout(timeout);
-        if (notificationCompleted) await active;
-      }
+    if (active) await active;
+    if (pendingDialogs.size) {
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([Promise.allSettled(pendingDialogs), new Promise<void>(resolve => { timeout = setTimeout(resolve, 2_000); })]);
+      if (timeout) clearTimeout(timeout);
     }
     retired = true;
     await Promise.all(pendingClicks);

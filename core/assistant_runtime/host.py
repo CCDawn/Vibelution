@@ -60,6 +60,12 @@ class ReminderSettlement(BaseModel):
     channel: Literal["assistant_window", "system_notification", "attention_fallback"]
 
 
+class ReminderFallback(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    eventId: str = Field(pattern=r"^reminder:[0-9]{8}:[a-f0-9]{64}$")
+    attemptToken: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
 class ProjectSnapshot(BaseModel):
     """Main-only authorization projection; deliberately absent from renderer IPC."""
     model_config = ConfigDict(extra="forbid", strict=True)
@@ -308,6 +314,13 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, on_ready
         if request.query_params:
             raise HTTPException(422, detail="Invalid reminder request")
         result = await reminder_call("settle", payload.eventId, payload.attemptToken, payload.channel, opened=True)
+        return {"schemaVersion": 1, "receipt": result}
+
+    @app.post("/api/assistant/reminders/fallback")
+    async def reminder_fallback(payload: ReminderFallback, request: Request):
+        if request.query_params:
+            raise HTTPException(422, detail="Invalid reminder request")
+        result = await reminder_call("fallback", payload.eventId, payload.attemptToken)
         return {"schemaVersion": 1, "receipt": result}
 
     if main_control is not None:

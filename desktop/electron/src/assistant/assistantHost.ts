@@ -30,7 +30,7 @@ export type AssistantHostRequest =
 /** Private to Electron main; attemptToken must never cross the renderer bridge. */
 export type AssistantReminder = {
   id: string; kind: "affair_reminder"; severity: "high" | "medium";
-  title: string; body: string; targetUrl: string; attemptToken: string;
+  title: string; body: string; targetUrl: string; attemptToken: string; recoveredFallback: boolean;
 };
 export type AssistantReminderChannel = "system_notification" | "attention_fallback";
 
@@ -146,12 +146,13 @@ export class AssistantHost {
     if (!object(result) || !ownKeys(result, ["schemaVersion", "event"]) || result.schemaVersion !== 1) throw new HostError("ASSISTANT_RESPONSE_INVALID");
     if (result.event === null) return null;
     const event = result.event;
-    if (!object(event) || !ownKeys(event, ["id", "kind", "severity", "title", "body", "targetUrl", "attemptToken"])
+    if (!object(event) || !ownKeys(event, ["id", "kind", "severity", "title", "body", "targetUrl", "attemptToken", "recoveredFallback"])
       || typeof event.id !== "string" || !/^reminder:[0-9]{8}:[a-f0-9]{64}$/.test(event.id)
       || event.kind !== "affair_reminder" || !["high", "medium"].includes(String(event.severity))
       || typeof event.title !== "string" || !event.title.trim() || event.title.length > 120
       || typeof event.body !== "string" || event.body.length > 400
       || event.targetUrl !== ""
+      || typeof event.recoveredFallback !== "boolean"
       || typeof event.attemptToken !== "string" || !/^[a-f0-9]{64}$/.test(event.attemptToken)) throw new HostError("ASSISTANT_RESPONSE_INVALID");
     return event as AssistantReminder;
   }
@@ -165,6 +166,17 @@ export class AssistantHost {
       || !object(result.receipt) || result.receipt.eventId !== event.id
       || result.receipt.state !== (opened ? "opened" : "submitted")
       || result.receipt.channel !== channel) throw new HostError("ASSISTANT_RESPONSE_INVALID");
+  }
+
+  /** Main-only: the original system notification reported failure after submission. */
+  async fallbackReminder(event: AssistantReminder): Promise<void> {
+    const generation = this.current;
+    if (this.view.state !== "ready" || !generation || generation.closed || generation.abort.signal.aborted) throw new HostError("ASSISTANT_NOT_READY");
+    const result = await this.rpc(generation, "/api/assistant/reminders/fallback", "POST",
+      { eventId: event.id, attemptToken: event.attemptToken }, REQUEST_MS, false, 8192);
+    if (!object(result) || !ownKeys(result, ["schemaVersion", "receipt"]) || result.schemaVersion !== 1
+      || !object(result.receipt) || result.receipt.eventId !== event.id
+      || result.receipt.state !== "submitted" || result.receipt.channel !== "attention_fallback") throw new HostError("ASSISTANT_RESPONSE_INVALID");
   }
 
   /** Main-only; this operation is never admitted through renderer request(). */

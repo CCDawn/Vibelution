@@ -26,6 +26,7 @@ class LauncherReminders:
         self.owner = "assistant-" + hashlib.sha256(agent_id.encode()).hexdigest()
         self.stores = {}
         self.outstanding = {}
+        self.claimed = set()
 
     def _no_import(self):
         # Import creates this directory before publishing any ledger change.
@@ -87,10 +88,20 @@ class LauncherReminders:
                 except UnicodeEncodeError:
                     raise ReminderReceiptError("reminder_item_invalid") from None
                 event_id = "reminder:" + day + ":" + hashlib.sha256(item_id.encode()).hexdigest()
+                if event_id in self.claimed:
+                    continue
                 store = self._store(day, create=True)
                 reservation = store.reserve(event_id)
+                recovered = False
                 if not reservation["created"]:
-                    continue
+                    if (reservation["state"] != "submitted"
+                            or reservation["channel"] != "attention_fallback"):
+                        continue
+                    # The production host owns host-owner.lock. Electron must
+                    # also drain any prior dialog before polling a new host.
+                    reservation = store.recover_fallback(event_id)
+                    recovered = True
+                self.claimed.add(event_id)
                 self.outstanding.setdefault(day, set()).add(event_id)
                 return {"schemaVersion": 1, "event": {
                     "id": event_id, "kind": "affair_reminder",
@@ -101,6 +112,7 @@ class LauncherReminders:
                     # the Workbench affairs route identifies a different profile.
                     "targetUrl": "",
                     "attemptToken": reservation["attemptToken"],
+                    "recoveredFallback": recovered,
                 }}
         return {"schemaVersion": 1, "event": None}
 
@@ -121,6 +133,16 @@ class LauncherReminders:
             if str(error) != "receipt_attempt_owner_required":
                 raise
             result = store.record_recovered_opened(event_id, token, channel=channel)
+        self._retire_old(datetime.now(timezone.utc).strftime("%Y%m%d"))
+        return result
+
+    def fallback(self, event_id: str, token: str):
+        self._no_import()
+        match = _EVENT.fullmatch(event_id) if isinstance(event_id, str) else None
+        if not match:
+            raise ReminderReceiptError("reminder_event_invalid")
+        store = self._store(match.group(1), create=False)
+        result = store.record_notification_fallback(event_id, token)
         self._retire_old(datetime.now(timezone.utc).strftime("%Y%m%d"))
         return result
 
