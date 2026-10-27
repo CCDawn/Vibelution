@@ -6,7 +6,9 @@ import asyncio
 import json
 import secrets
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, suppress
+from functools import partial
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request
@@ -49,6 +51,13 @@ class ApprovalDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
     requestId: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9_.:-]+$")
     decision: Literal["accept", "decline"]
+
+
+class ReminderSettlement(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    eventId: str = Field(pattern=r"^reminder:[0-9]{8}:[a-f0-9]{64}$")
+    attemptToken: str = Field(pattern=r"^[a-f0-9]{64}$")
+    channel: Literal["assistant_window", "system_notification", "attention_fallback"]
 
 
 class ProjectSnapshot(BaseModel):
@@ -183,6 +192,7 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, on_ready
     async def lifespan(app):
         task = None
         bound = False
+        reminder_executor = None
         try:
             if dispatch is not None:
                 from .actions import bind_actions, unbind_actions
@@ -191,6 +201,12 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, on_ready
             # Native startup recovery can immediately resume a tool-using
             # worker. Its authorized action owner must already be available.
             app.state.assistant = await asyncio.to_thread(native.bootstrap)
+            if isinstance(native, NativeFacade):
+                from .reminders import LauncherReminders
+                reminder_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="assistant-reminders")
+                app.state.reminder_executor = reminder_executor
+                app.state.reminders = await asyncio.get_running_loop().run_in_executor(
+                    reminder_executor, LauncherReminders, native.root, native.assistant["agentId"])
             if dispatch is not None:
                 task = asyncio.create_task(maintain_dispatches())
             if on_ready is not None:
@@ -208,7 +224,14 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, on_ready
             # Native own chat is drained; remote tasks are never cancelled by
             # an HTTP connection, renderer close, or this host's shutdown.
             try:
-                await asyncio.to_thread(native.shutdown)
+                try:
+                    if reminder_executor is not None:
+                        if hasattr(app.state, "reminders"):
+                            await asyncio.get_running_loop().run_in_executor(reminder_executor, app.state.reminders.close)
+                finally:
+                    if reminder_executor is not None:
+                        await asyncio.to_thread(reminder_executor.shutdown, wait=True)
+                    await asyncio.to_thread(native.shutdown)
             finally:
                 if bound:
                     unbind_actions(dispatch)
@@ -246,6 +269,46 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, on_ready
         return {"status": "ok", "role": "launcher_assistant", "protocolVersion": 1,
                 **({"mainControlVersion": 1} if main_control is not None else {}),
                 **({"appearanceControlVersion": 1} if main_control is not None and getattr(main_control, "appearance_enabled", False) else {})}
+
+    async def reminder_call(method, *args, **kwargs):
+        from .reminder_receipts import ReminderReceiptError
+        if not hasattr(app.state, "reminders"):
+            raise HTTPException(503, detail={"code": "reminder_unavailable"})
+        try:
+            return await asyncio.get_running_loop().run_in_executor(
+                app.state.reminder_executor, partial(getattr(app.state.reminders, method), *args, **kwargs))
+        except ReminderReceiptError as error:
+            code = str(error)
+            permanent = {
+                "reminder_imported_profile_blocked", "receipt_capacity_exceeded",
+                "receipt_admission_closed", "receipt_schema_invalid",
+                "receipt_integrity_failed", "receipt_owner_or_capacity_mismatch",
+                "receipt_header_invalid", "receipt_namespace_invalid",
+                "receipt_file_budget_exceeded",
+            }
+            raise HTTPException(409 if code in permanent else 503, detail={"code": code}) from None
+        except Exception:
+            raise HTTPException(503, detail={"code": "reminder_unavailable"}) from None
+
+    @app.post("/api/assistant/reminders/next")
+    async def reminder_next(request: Request):
+        if request.query_params:
+            raise HTTPException(422, detail="Invalid reminder request")
+        return JSONResponse(await reminder_call("next"), headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/assistant/reminders/submitted")
+    async def reminder_submitted(payload: ReminderSettlement, request: Request):
+        if request.query_params:
+            raise HTTPException(422, detail="Invalid reminder request")
+        result = await reminder_call("settle", payload.eventId, payload.attemptToken, payload.channel, opened=False)
+        return {"schemaVersion": 1, "receipt": result}
+
+    @app.post("/api/assistant/reminders/opened")
+    async def reminder_opened(payload: ReminderSettlement, request: Request):
+        if request.query_params:
+            raise HTTPException(422, detail="Invalid reminder request")
+        result = await reminder_call("settle", payload.eventId, payload.attemptToken, payload.channel, opened=True)
+        return {"schemaVersion": 1, "receipt": result}
 
     if main_control is not None:
         async def main_control_body(request):

@@ -678,18 +678,27 @@ legacy relationships or missing evidence cannot establish quiescence or make
 The internal reminder preview compares the authorized source affairs snapshot
 with the target's native affairs ledger and reports missing/conflicting items
 and the number due. It neither sends a reminder nor transfers execution: the
-legacy Workbench remains the notification owner. A source quiescence fence,
-durable delivery acknowledgement and Launcher reminder consumer still have to
-be established before any reminder cutover can be declared.
+legacy Workbench remains the notification owner. A source quiescence fence and
+the legacy delivery watermark still have to be established before any reminder
+cutover can be declared.
 
-`reminder_receipts.ReminderReceiptStore` is a private, currently unwired
-building block. It uses pinned Windows handles and SQLite transactions to
+For a Launcher assistant profile with no affairs migration records, the native
+host and Electron main can send reminders for that profile's own due affairs.
+The private bearer-authenticated endpoints are `POST /api/assistant/reminders/next`
+(reserve and return one event), `POST /api/assistant/reminders/submitted` (record
+the native submission), and `POST /api/assistant/reminders/opened` (record a real
+notification click). The reservation token stays in Electron main. An existing
+`affairs_migrations` directory blocks this sender for the whole profile; it does
+not establish legacy takeover. A failed or uncertain attempt is not replayed;
+it can therefore remain undelivered. Daily ledgers retain receipts and fail
+closed at their capacity; automatic retention cleanup is not implemented.
+
+`reminder_receipts.ReminderReceiptStore` uses pinned Windows handles and SQLite transactions to
 reserve a stable event ID before a single submission. A prior pending or
 submitted attempt is not replayed; submission is not proof of viewing. A
 recovered native click requires the original token and the already committed
-channel. Capacity exhaustion is fail-closed; safe retention and a production
-notification owner are not yet implemented. Existing executors do not consult
-this store, so it cannot establish single ownership or enable cutover.
+channel. Older Workbench executors do not consult this store, so it cannot
+establish single ownership or enable legacy cutover.
 Its v2 ledger can permanently close admission for cooperating senders and
 retain in-flight reservations after a crash. A drained v2 ledger proves only
 those registered senders have drained; it does not fence older binaries. The

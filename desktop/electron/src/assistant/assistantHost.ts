@@ -27,6 +27,12 @@ export type AssistantHostRequest =
   | { operation: "curate"; sessionId: string; messageId: string; action: "include" | "exclude" }
   | { operation: "operatorAsset"; kind: "avatar" | "background" };
 
+/** Private to Electron main; attemptToken must never cross the renderer bridge. */
+export type AssistantReminder = {
+  id: string; kind: "affair_reminder"; severity: "high" | "medium";
+  title: string; body: string; targetUrl: string; attemptToken: string;
+};
+
 export type AssistantHostOptions = {
   profileRoot: string;
   runtimeRoot: string;
@@ -131,6 +137,34 @@ export class AssistantHost {
   }
 
   snapshot(): AssistantHostSnapshot { return { ...this.view }; }
+
+  async nextReminder(): Promise<AssistantReminder | null> {
+    const generation = this.current;
+    if (this.view.state !== "ready" || !generation || generation.closed || generation.abort.signal.aborted) throw new HostError("ASSISTANT_NOT_READY");
+    const result = await this.rpc(generation, "/api/assistant/reminders/next", "POST", {}, REQUEST_MS, false, 8192);
+    if (!object(result) || !ownKeys(result, ["schemaVersion", "event"]) || result.schemaVersion !== 1) throw new HostError("ASSISTANT_RESPONSE_INVALID");
+    if (result.event === null) return null;
+    const event = result.event;
+    if (!object(event) || !ownKeys(event, ["id", "kind", "severity", "title", "body", "targetUrl", "attemptToken"])
+      || typeof event.id !== "string" || !/^reminder:[0-9]{8}:[a-f0-9]{64}$/.test(event.id)
+      || event.kind !== "affair_reminder" || !["high", "medium"].includes(String(event.severity))
+      || typeof event.title !== "string" || !event.title.trim() || event.title.length > 120
+      || typeof event.body !== "string" || event.body.length > 400
+      || event.targetUrl !== ""
+      || typeof event.attemptToken !== "string" || !/^[a-f0-9]{64}$/.test(event.attemptToken)) throw new HostError("ASSISTANT_RESPONSE_INVALID");
+    return event as AssistantReminder;
+  }
+
+  async settleReminder(event: AssistantReminder, opened: boolean): Promise<void> {
+    const generation = this.current;
+    if (this.view.state !== "ready" || !generation || generation.closed || generation.abort.signal.aborted) throw new HostError("ASSISTANT_NOT_READY");
+    const result = await this.rpc(generation, `/api/assistant/reminders/${opened ? "opened" : "submitted"}`, "POST",
+      { eventId: event.id, attemptToken: event.attemptToken, channel: "system_notification" }, REQUEST_MS, false, 8192);
+    if (!object(result) || !ownKeys(result, ["schemaVersion", "receipt"]) || result.schemaVersion !== 1
+      || !object(result.receipt) || result.receipt.eventId !== event.id
+      || result.receipt.state !== (opened ? "opened" : "submitted")
+      || result.receipt.channel !== "system_notification") throw new HostError("ASSISTANT_RESPONSE_INVALID");
+  }
 
   /** Main-only; this operation is never admitted through renderer request(). */
   updateProjects(snapshot: AssistantProjectRegistrySnapshot): Promise<void> {
@@ -465,7 +499,8 @@ export class AssistantHost {
       });
       if (!response.ok) {
         await response.body?.cancel().catch(() => undefined);
-        throw new HostError("ASSISTANT_HTTP_FAILED");
+        throw new HostError(path === "/api/assistant/reminders/next" && response.status === 409
+          ? "ASSISTANT_REMINDER_BLOCKED" : "ASSISTANT_HTTP_FAILED");
       }
       const length = Number(response.headers.get("content-length"));
       if (Number.isFinite(length) && length > maxResponseBytes) {

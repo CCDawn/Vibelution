@@ -23,6 +23,7 @@ import {
 } from "./cli/desktopCli.js";
 import { IPC_CHANNELS } from "./ipc.js";
 import { AssistantHost } from "./assistant/assistantHost.js";
+import { startAssistantReminderPump } from "./assistant/reminderPump.js";
 import { AssistantProjectRegistryConnection } from "./assistant/projectRegistryConnection.js";
 import { createAssistantAppearanceMainControl } from "./assistant/appearanceMainControl.js";
 import { createAssistantProjectMainControl } from "./assistant/projectMainControl.js";
@@ -514,6 +515,7 @@ let launcherAssistantWindow: AssistantWindow | null = null;
 let launcherAssistantExitReady = false;
 let launcherAssistantStarting: Promise<void> | null = null;
 let launcherAssistantProjects: AssistantProjectRegistryConnection | null = null;
+let stopLauncherAssistantReminders: (() => Promise<void>) | null = null;
 let assistantOnly = desktopCliArgs.assistant === true;
 let pendingAssistantOpen: { show: boolean } | null = null;
 
@@ -601,6 +603,26 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
         });
         launcherAssistantHost = host;
         launcherAssistantWindow = new AssistantWindow(paths, host, () => shutdownApproved, requestOpenLauncherFromAssistant);
+        stopLauncherAssistantReminders = startAssistantReminderPump({
+          host,
+          available: () => !shutdownApproved && Notification.isSupported(),
+          notify: (notice, onClick, onFailure) => {
+            const notification = new Notification({ title: notice.title, body: notice.body, silent: false });
+            notification.on("click", onClick);
+            notification.on("failed", onFailure);
+            nativeNotificationLifetime.retain(notification);
+            notification.show();
+          },
+          openAssistant: () => { void launcherAssistantWindow?.open({ show: true }).catch(() => console.warn("ASSISTANT_WINDOW_FAILED")); },
+          onError: () => {
+            console.warn("ASSISTANT_REMINDER_UNAVAILABLE");
+            if (!shutdownApproved) void dialog.showMessageBox({
+              type: "warning", title: "个人助理提醒暂不可用",
+              message: "助理暂时无法正常发送提醒，已有事务和发送记录仍会保留。",
+              buttons: ["确定"], noLink: true,
+            }).catch(() => console.warn("ASSISTANT_REMINDER_WARNING_FAILED"));
+          },
+        });
         desktopTray ??= createAssistantTray(resources.sourceRoot, {
           open: () => { void launcherAssistantWindow?.open().catch(() => console.warn("ASSISTANT_WINDOW_FAILED")); },
           openLauncher: () => { void requestOpenLauncherFromAssistant().catch(() => {
@@ -629,9 +651,18 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
 }
 
 async function stopLauncherAssistant(): Promise<void> {
-  const stoppingProjects = launcherAssistantProjects?.stop();
+  const stoppingReminders = stopLauncherAssistantReminders?.();
+  const connection = launcherAssistantProjects;
+  const stoppingProjects = connection
+    ? (stoppingReminders ? stoppingReminders.then(() => connection.stop()) : connection.stop())
+    : undefined;
   await launcherAssistantStarting?.catch(() => undefined);
-  await stoppingProjects;
+  if (stoppingProjects) await stoppingProjects;
+  else {
+    await stopLauncherAssistantReminders?.();
+    await launcherAssistantProjects?.stop();
+  }
+  stopLauncherAssistantReminders = null;
   launcherAssistantExitReady = true;
 }
 
