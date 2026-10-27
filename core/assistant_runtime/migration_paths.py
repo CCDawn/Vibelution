@@ -72,7 +72,15 @@ def _path(raw, *, project_root: Path, workspace: Path, absolute=False) -> Path:
 
 
 def _identity_chain(path: Path) -> tuple:
-    """Check the whole lexical chain before resolving; missing is not an empty source."""
+    """Bind ancestors to filesystem objects and the source to its full stamp.
+
+    Ancestor child lists are outside the selected source: sibling activity may
+    change their size, mtime, ctime or link count. Retain device/inode, mode and
+    birth time where available to detect replacement without treating sibling
+    writes as source edits. Never substitute mutable ctime for birth time here.
+    Without a valid inode, keep the conservative full stamp even with birth time.
+    The endpoint and scanned descendants keep their full snapshot evidence.
+    """
     result = []
     for node in (*reversed(path.parents), path):
         try:
@@ -86,7 +94,10 @@ def _identity_chain(path: Path) -> tuple:
         if node != path and not stat.S_ISDIR(value.st_mode):
             raise MigrationIOError("source_type_mismatch")
         try:
-            result.append((node, path_identity(node)))
+            birthtime = getattr(value, "st_birthtime_ns", None)
+            identity = (path_identity(node) if node == path or value.st_ino <= 0 else
+                        (value.st_dev, value.st_ino, value.st_mode, birthtime))
+            result.append((node, identity))
         except OSError:
             raise MigrationIOError("source_unavailable_or_changed") from None
     check_path(path)

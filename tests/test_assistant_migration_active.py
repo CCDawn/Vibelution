@@ -40,6 +40,7 @@ def test_authorized_personal_data_reaches_native_tools_and_survives_restart(tmp_
         from core.assistant_runtime.migration_paths import resolve_source_paths, source_snapshot
         from core.assistant_runtime.migration_io import read_stable_file, strict_json, verify_snapshot
         from core.assistant_runtime.migration_inventory import declared_assistant_identities
+        from core.assistant_runtime import migration_episodic
         from core.web.services import personal_affairs_service
         from core.web.services.agent_directory import episodic_memory
         root = Path(os.environ['VIBELUTION_ASSISTANT_NATIVE_ROOT'])
@@ -48,13 +49,24 @@ def test_authorized_personal_data_reaches_native_tools_and_survives_restart(tmp_
         registry = read_stable_file(workspace / 'agents/agents.json', 16 * 1024 * 1024)
         raw = strict_json(registry.raw)
         assert [r['agentId'] for r in declared_assistant_identities(raw['agents'])] == [case['agent']]
+        original_import = migration_episodic.import_episodic
+        def import_with_unrelated_sibling_activity(*args, **kwargs):
+            result = original_import(*args, **kwargs)
+            # Other parallel tests/targets may create siblings of the source.
+            # Force a visible ancestor mtime change after the first commit.
+            (root.parent / 'unrelated-runtime-output').mkdir(exist_ok=True)
+            stamp = root.parent.stat()
+            os.utime(root.parent, ns=(stamp.st_atime_ns, stamp.st_mtime_ns + 2_000_000_000))
+            return result
+        migration_episodic.import_episodic = import_with_unrelated_sibling_activity
         with offline_migration_profile() as lease:
             resolved = source_snapshot(resolve_source_paths(project_root=project, workspace=workspace,
                 project_id='project-1', instance_id='instance-1', agent_row=raw['agents'][0]))
             result = activate_personal_snapshot(lease, resolved, migration_id='active-1',
                 source_roots=(project, workspace), authority_snapshots=(registry,),
                 authority_verify=lambda: verify_snapshot(registry))
-            assert result['status'] == 'complete' and not result['readyForCutover']
+            diagnostic = {key: result.get(key) for key in ('status', 'failedCategory', 'reason')}
+            assert result['status'] == 'complete' and not result['readyForCutover'], diagnostic
             assert not result['sourceQuiesced'] and result['archive']['published']
             if (root.parent / 'first-pass.json').exists():
                 assert result['episodic']['idempotent'] and result['affairs']['idempotent']

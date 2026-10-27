@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -217,6 +218,96 @@ def test_parent_replacement_after_resolution_invalidates_snapshot(tmp_path):
     assert rows(result, "memory")[0]["status"] == "unsupported"
     assert "source_changed" in json.dumps(result.report)
     assert "REPLACEMENT" not in json.dumps(result.report)
+
+
+@pytest.mark.parametrize("during_scan", [False, True])
+def test_unrelated_ancestor_children_do_not_invalidate_source(tmp_path, monkeypatch, during_scan):
+    args = setup_source(tmp_path)
+    memory = write(args["workspace"] / "agents/pa/memory/a.jsonl")
+    resolved = owner.resolve_source_paths(**args)
+    ancestor = args["workspace"].parent
+
+    def sibling_activity():
+        (ancestor / "unrelated-target").mkdir()
+        stamp = ancestor.stat()
+        os.utime(ancestor, ns=(stamp.st_atime_ns, stamp.st_mtime_ns + 2_000_000_000))
+
+    if during_scan:
+        original = owner.fingerprint_tree
+        def changing(path, **kwargs):
+            result = original(path, **kwargs)
+            if path == memory.parent:
+                sibling_activity()
+            return result
+        monkeypatch.setattr(owner, "fingerprint_tree", changing)
+    else:
+        sibling_activity()
+
+    result = owner.source_snapshot(resolved)
+    selected = rows(result, "memory")[0]
+    assert selected["status"] == "available", selected["issues"]
+    assert result.snapshots[selected["sourceRef"]][0].raw == memory.read_bytes()
+
+
+def test_ancestor_replacement_preserving_timestamps_invalidates_snapshot(tmp_path):
+    args = setup_source(tmp_path)
+    memory = write(args["workspace"] / "agents/pa/memory/a.jsonl")
+    resolved = owner.resolve_source_paths(**args)
+    ancestor = args["workspace"] / "agents"
+    stamp = ancestor.stat()
+    moved = ancestor.with_name("old-agents")
+    ancestor.rename(moved)
+    # Move the original leaf back: only the ancestor's object identity changes.
+    ancestor.mkdir()
+    (moved / "pa").rename(ancestor / "pa")
+    os.utime(ancestor, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+
+    result = owner.source_snapshot(resolved)
+    selected = rows(result, "memory")[0]
+    assert selected["status"] == "unsupported"
+    assert selected["issues"][-1]["code"] == "source_changed"
+    assert selected["sourceRef"] not in result.snapshots
+
+
+@pytest.mark.parametrize("birthtime", [None, 0, 1_700_000_000_000_000_000])
+def test_ancestor_without_object_identity_keeps_conservative_stamp(tmp_path, monkeypatch, birthtime):
+    args = setup_source(tmp_path)
+    write(args["workspace"] / "agents/pa/memory/a.jsonl")
+    ancestor = args["workspace"].parent
+    original = Path.lstat
+
+    def weak_identity(path, *args, **kwargs):
+        value = original(path, *args, **kwargs)
+        if path == ancestor:
+            return SimpleNamespace(st_dev=value.st_dev, st_ino=0, st_mode=value.st_mode,
+                                   st_file_attributes=getattr(value, "st_file_attributes", 0),
+                                   st_birthtime_ns=birthtime)
+        return value
+
+    monkeypatch.setattr(Path, "lstat", weak_identity)
+    resolved = owner.resolve_source_paths(**args)
+    (ancestor / "unrelated-target").mkdir()
+    stamp = ancestor.stat()
+    os.utime(ancestor, ns=(stamp.st_atime_ns, stamp.st_mtime_ns + 2_000_000_000))
+
+    result = owner.source_snapshot(resolved)
+    selected = rows(result, "memory")[0]
+    assert selected["status"] == "unsupported"
+    assert selected["issues"][-1]["code"] == "source_changed"
+
+
+def test_source_directory_children_changed_after_resolution_are_rejected(tmp_path):
+    args = setup_source(tmp_path)
+    memory = write(args["workspace"] / "agents/pa/memory/a.jsonl").parent
+    resolved = owner.resolve_source_paths(**args)
+    write(memory / "added.jsonl")
+    stamp = memory.stat()
+    os.utime(memory, ns=(stamp.st_atime_ns, stamp.st_mtime_ns + 2_000_000_000))
+
+    result = owner.source_snapshot(resolved)
+    selected = rows(result, "memory")[0]
+    assert selected["status"] == "unsupported"
+    assert selected["issues"][-1]["code"] == "source_changed"
 
 
 @pytest.mark.parametrize("budget", [{"max_file_bytes": 2}, {"max_files": 1}, {"max_total_bytes": 2}])
