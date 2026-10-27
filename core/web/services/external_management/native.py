@@ -93,6 +93,18 @@ class NativeAgentGateway:
         from .session_parameters import read_session_parameters
         return read_session_parameters(self.project_root, self._owners(), session_id)
 
+    def legacy_observation_snapshot(self, binding, source_agent_id, legacy_message_ids, expected_registry_sha256=None):
+        from .legacy_native import LegacyNativeGateway
+        # This source is private PA migration evidence, not an ordinary Session
+        # read. Do not call hydrated Agent/Session getters or provisioning code.
+        from core.web.services import agent_directory_service as directory
+        from .service import ManagementError
+        if (Path(directory.PROJECT_ROOT).resolve() != self.project_root
+                or Path(directory._active_project_root()).resolve() != self.project_root):
+            raise ManagementError("TARGET_BINDING_CHANGED", 409)
+        return LegacyNativeGateway(self.project_root, directory).snapshot(
+            binding, source_agent_id, legacy_message_ids, expected_registry_sha256)
+
     def find_created(self, request_key: str):
         directory = self._owners()
         # This is a recovery read of canonical native metadata, never a new creation.

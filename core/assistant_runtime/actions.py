@@ -103,6 +103,16 @@ class TeamStatus(Project):
     request_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$")
 
 
+class LegacyObservers(Project):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    offset: int = Field(default=0, ge=0, le=32)
+    limit: int = Field(default=3, ge=1, le=4)
+
+
+class LegacyReceipts(LegacyObservers):
+    observer_id: str = Field(pattern=r"^lob-[a-f0-9]{64}$")
+
+
 def _management_contracts():
     from core.web.services.external_management.contracts import ACTION_MODELS, contracts
     result = {}
@@ -138,8 +148,10 @@ def _project_read_contracts():
 
 _SCHEMAS = {"projects": Parameters, "agents": Project, "dispatch": Dispatch, "receipt": Receipt,
             "agent_get": AgentRead, "management_receipt": ManagementReceipt, "team_status": TeamStatus,
-            "authorization_status": Project}
+            "authorization_status": Project, "legacy_observers": LegacyObservers, "legacy_receipts": LegacyReceipts}
 _HELP = {
+    "legacy_observers": "分页只读本主体已明确交接的旧任务观察授权；不创建授权，不继承旧临时控制权限。新legacy:receipts:read须明确授予，旧授权不会自动扩大。",
+    "legacy_receipts": "按observer_id分页查询白名单旧任务及迟到回执。businessTaskStatus是显式业务报告，nativeTurnStatus只是执行轮状态；unknown/unresolved不是完成。不得重派或将旧消息ID当external task ID；取消、继续、审批必须重新走原生授权。",
     "projects": "列出 Launcher 已授权项目的 projectId。",
     "agents": "查询项目当前允许派遣的普通 Agent；不会创建项目内个人助理。",
     "dispatch": "以稳定 dispatch_id 派遣只读任务。优先用 task_source 的 start_after/end_before 唯一短锚点提取当前用户原文（都为空表示整条消息）；不得改写任务、ID或引号文字。task 仅允许用户消息的精确原文子串。未知时保留原参数与 ID，查询回执或由原生引用恢复，不能换 ID 重派。",
@@ -333,6 +345,10 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
         coroutine = service.management.receipt(args.pop("project_id"), action="team_run", **args)
     elif action == "authorization_status":
         coroutine = service.management.authorization_status(args.pop("project_id"))
+    elif action == "legacy_observers":
+        coroutine = service.management.legacy_observers(args.pop("project_id"), **args)
+    elif action == "legacy_receipts":
+        coroutine = service.management.legacy_receipts(args.pop("project_id"), **args)
     elif action in {"api_catalog", "api_describe"}:
         coroutine = service.management.documentation(args.pop("project_id"), **args)
     elif action == "projects":

@@ -14,6 +14,7 @@ def test_catalog_reuses_native_schema_and_governance_without_project_actions():
     expected = set(assistant.contracts()) | set(config.contracts()) | {
         "settings_catalog", "settings_update", "model_add", "model_options",
         "operator_image_options", "operator_image_select",
+        "history_list", "history_read",
     }
     assert set(contracts) == expected
     for owner in (assistant, config):

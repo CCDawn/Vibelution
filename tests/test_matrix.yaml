@@ -55,6 +55,22 @@ rules:
       - "tests/test_personal_assistant_*.py"
     commands:
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_personal_assistant_service.py tests/test_personal_assistant_api.py tests/test_personal_assistant_tools.py tests/test_personal_assistant_desktop.py tests/test_personal_assistant_desktop_registration.py tests/test_cua_driver_client.py tests/test_owned_process.py tests/test_windowless_subprocess.py tests/test_session_agent_runtime.py tests/test_tool_authorization_execution.py -q"
+  - id: assistant-migration-handoff
+    description: "Immutable retained history, explicit source paths and receipt-only legacy handoff."
+    executionLayers:
+      - "focused"
+    paths:
+      - "core/assistant_runtime/**"
+      - "core/web/services/external_management/**"
+      - "core/web/routes/launcher_assistant_management.py"
+      - "core/external_agent/backend_client.py"
+      - "scripts/assistant_migration_inventory.py"
+      - "tests/test_assistant_migration*.py"
+      - "tests/test_assistant_history_actions.py"
+      - "tests/test_assistant_legacy*.py"
+      - "tests/test_external_management_legacy_observation.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_assistant_migration_inventory.py tests/test_assistant_migration_io.py tests/test_assistant_migration_history.py tests/test_assistant_migration_paths.py tests/test_assistant_migration_source_archive.py tests/test_assistant_migration_cli.py tests/test_assistant_migration_native_joint.py tests/test_assistant_history_actions.py tests/test_assistant_legacy_handoff.py tests/test_assistant_legacy_correlation.py tests/test_assistant_legacy_navigation.py tests/test_external_management_legacy_observation.py tests/test_external_agent_backend_client.py tests/test_external_management_documentation.py tests/test_assistant_runtime_local_actions.py tests/test_assistant_runtime_actions.py tests/test_assistant_runtime_management.py tests/test_assistant_runtime_native.py tests/test_session_agent_runtime.py -q"
   - id: owned-runtime-shutdown
     description: "Physical worker retirement and bounded backend shutdown/reopen."
     executionLayers:

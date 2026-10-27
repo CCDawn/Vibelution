@@ -14,6 +14,25 @@ from core.infrastructure.atomic_io import atomic_write_json
 from .dispatch import DispatchError
 
 
+def _legacy_page(rows, project_id, *, offset, limit, field, observer_id=None):
+    result = {"projectId": project_id, field: [], "total": len(rows), "offset": offset,
+              "nextOffset": None, "untrustedContent": True, "readOnly": True,
+              "readyForCutover": False}
+    if observer_id is not None:
+        result["observerId"] = observer_id
+    for row in rows[offset:offset + limit]:
+        candidate = {**result, field: result[field] + [row]}
+        if len(json.dumps(candidate, ensure_ascii=False)) > 3200:
+            if not result[field]:
+                return {"ok": False, "status": "unavailable", "error": "legacy_navigation_budget",
+                        "projectId": project_id, "untrustedContent": True}
+            break
+        result[field].append(row)
+    end = offset + len(result[field])
+    result["nextOffset"] = end if end < len(rows) else None
+    return result
+
+
 # Keep catalog navigation comfortably inside the native tool-result cap after
 # the action tool adds its source/untrusted wrapper and the model-result header.
 _DOCUMENTATION_NAVIGATION_TARGET_CHARS = 3400
@@ -233,6 +252,23 @@ class ManagementAdapter:
             raise DispatchError("Project is not authorized.", code="PROJECT_NOT_AUTHORIZED")
         result = await self._call(project_id, lambda client: client.management_authorization_status())
         return {**result, "projectId": project_id}
+
+    async def legacy_observers(self, project_id: str, *, offset=0, limit=3):
+        if project_id not in self._projects:
+            raise DispatchError("Project is not authorized.", code="PROJECT_NOT_AUTHORIZED")
+        result = await self._call(project_id, lambda client: client.management_legacy_observers())
+        rows = [{key: row[key] for key in ("observerId", "status", "sourceAgentId", "sourceSessionId")}
+                | {"whitelistedMessageCount": len(row["legacyMessageIds"]), "actions": ["read_receipt"]}
+                for row in result["observers"]]
+        return _legacy_page(rows, project_id, offset=offset, limit=limit, field="observers")
+
+    async def legacy_receipts(self, project_id: str, *, observer_id: str, offset=0, limit=3):
+        if project_id not in self._projects:
+            raise DispatchError("Project is not authorized.", code="PROJECT_NOT_AUTHORIZED")
+        result = await self._call(project_id, lambda client: client.management_legacy_receipts(observer_id))
+        rows = [{key: value for key, value in row.items() if key != "receipts"} for row in result["dispatches"]]
+        return _legacy_page(rows, project_id, offset=offset, limit=limit,
+                            field="dispatches", observer_id=observer_id)
 
     async def team(self, project_id: str, **parameters):
         if project_id not in self._projects:

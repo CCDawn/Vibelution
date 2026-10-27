@@ -224,7 +224,7 @@ async def test_archive_scope_never_expands_saved_grants(tmp_path, monkeypatch, s
 
 
 @pytest.mark.anyio
-async def test_fresh_grant_lost_bind_ack_reuses_persisted_client_and_exact_thirteen_scopes(tmp_path, monkeypatch):
+async def test_fresh_grant_lost_bind_ack_reuses_persisted_client_and_exact_fourteen_scopes(tmp_path, monkeypatch):
     _runtime_state(tmp_path)
     path = tmp_path / "credentials.json"
     binding = {"projectId": "p", "instanceId": "i"}
@@ -236,7 +236,7 @@ async def test_fresh_grant_lost_bind_ack_reuses_persisted_client_and_exact_thirt
         body = kwargs["json_payload"]
         persisted = json.loads(path.read_text())["management"]
         assert persisted["clientId"] == body["client_id"] and persisted["scopes"] == body["scopes"]
-        assert len(body["scopes"]) == 13 and {"agents:archive", "teams:directory:read", "rooms:read", "sessions:parameters:read"} <= set(body["scopes"])
+        assert len(body["scopes"]) == 14 and {"agents:archive", "teams:directory:read", "rooms:read", "sessions:parameters:read", "legacy:receipts:read"} <= set(body["scopes"])
         calls.append(deepcopy(body))
         if len(calls) == 1:
             raise BackendClientError("lost bind ack", code="BACKEND_UNAVAILABLE")
@@ -601,7 +601,7 @@ async def test_team_client_uses_operator_envelope_and_same_read_only_receipt(tmp
             return httpx.Response(200, json={"protocolVersion": 1, "binding": binding})
         if request.url.path == prefix + "/subjects/bind":
             body = json.loads(request.content)
-            assert body["scopes"] == ["agents:archive", "agents:avatar", "agents:create", "agents:read", "agents:update", "platform:describe", "rooms:read", "sessions:parameters:read", "sessions:pin", "sessions:read", "teams:directory:read", "teams:read", "teams:run"]
+            assert body["scopes"] == ["agents:archive", "agents:avatar", "agents:create", "agents:read", "agents:update", "legacy:receipts:read", "platform:describe", "rooms:read", "sessions:parameters:read", "sessions:pin", "sessions:read", "teams:directory:read", "teams:read", "teams:run"]
             return httpx.Response(200, json={"protocolVersion": 1, "binding": binding, "scopes": body["scopes"],
                 "subject_id": "ops-1234567890abcdef", "subject_capability": "a" * 48})
         if request.url.path.startswith(prefix + "/actions/team_run"):

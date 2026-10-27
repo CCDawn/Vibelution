@@ -7,8 +7,8 @@ import unicodedata
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-Scope = Literal["agents:read", "agents:create", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read"]
-SCOPES = ("agents:read", "agents:create", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read")
+Scope = Literal["agents:read", "agents:create", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read"]
+SCOPES = ("agents:read", "agents:create", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read")
 _AVATAR_EXTENSION = r"(?:[pP][nN][gG]|[jJ][pP][gG]|[jJ][pP][eE][gG]|[wW][eE][bB][pP]|svg)"
 _AVATAR_PATH_PATTERN = r"^workspace/avatars/[A-Za-z0-9_.-]+\." + _AVATAR_EXTENSION + "$"
 
@@ -192,6 +192,113 @@ class BoundSubjectResponse(Closed):
     subject_capability: str = Field(repr=False)
     binding: Binding
     scopes: list[Scope]
+
+
+class LegacyObserverCreate(Closed):
+    request_id: str = Field(min_length=1, max_length=96, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+    expected_binding: Binding
+    source_agent_id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+    legacy_message_ids: list[str] = Field(min_length=1, max_length=32)
+    expected_registry_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    expected_source_authority: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("legacy_message_ids")
+    @classmethod
+    def exact_sorted_refs(cls, value):
+        if (any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,159}", item) for item in value)
+                or value != sorted(set(value))):
+            raise ValueError("Sorted unique legacy message references required")
+        return value
+
+
+class LegacyObserverView(UntrustedResponse):
+    requestId: str = Field(min_length=1, max_length=96, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+    observerId: str = Field(pattern=r"^lob-[a-f0-9]{64}$")
+    status: Literal["created", "unknown"]
+    reused: bool
+    sourceAgentId: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+    sourceSessionId: str | None = Field(default=None, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+    legacyMessageIds: list[str] = Field(min_length=1, max_length=32)
+    actions: list[Literal["read_receipt"]] = Field(min_length=1, max_length=1)
+    ownerEpoch: Literal[1]
+    sourceQuiesced: Literal[False]
+    readyForCutover: Literal[False]
+
+    @field_validator("ownerEpoch", mode="before")
+    @classmethod
+    def exact_epoch(cls, value):
+        if type(value) is not int or value != 1:
+            raise ValueError("Exact observation epoch required")
+        return value
+
+    @field_validator("sourceQuiesced", "readyForCutover", mode="before")
+    @classmethod
+    def no_cutover_claim(cls, value):
+        if value is not False:
+            raise ValueError("Observation does not establish cutover")
+        return value
+
+    @model_validator(mode="after")
+    def coherent_observer(self):
+        LegacyObserverCreate.exact_sorted_refs(self.legacyMessageIds)
+        if self.status == "created" and self.sourceSessionId is None:
+            raise ValueError("Created observation requires its original source Session")
+        return self
+
+
+class LegacyObserversResponse(UntrustedResponse):
+    observers: list[LegacyObserverView] = Field(max_length=32)
+
+    @model_validator(mode="after")
+    def unique_sorted_observers(self):
+        ids = [observer.observerId for observer in self.observers]
+        if ids != sorted(set(ids)):
+            raise ValueError("Unique sorted observation directory required")
+        return self
+
+
+class LegacyReceiptView(Closed):
+    legacyMessageId: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+    taskStatus: Literal["running", "blocked", "completed", "failed"]
+    evidenceCount: int = Field(ge=0, le=5)
+
+
+class LegacyDispatchView(Closed):
+    legacyMessageId: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+    targetAgentId: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+    targetSessionId: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+    businessTaskStatus: Literal["running", "blocked", "completed", "failed", "cancelled", "awaiting_result", "awaiting_confirmation", "unresolved"]
+    nativeCorrelation: Literal["correlated", "unresolved"]
+    nativeTurnId: str | None = Field(default=None, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+    nativeRunId: str | None = Field(default=None, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+    nativeTaskId: None = None
+    nativeTurnStatus: Literal["running", "completed", "failed", "interrupted"] | None = None
+    nativeRunReason: str = Field(min_length=1, max_length=96, pattern=r"^[a-z0-9_]+$")
+    reason: str = Field(min_length=1, max_length=96, pattern=r"^[a-z0-9_]+$")
+    receipts: list[LegacyReceiptView] = Field(max_length=32)
+    receiptCount: int = Field(ge=0, le=10000)
+    receiptsTruncated: bool
+
+    @model_validator(mode="after")
+    def coherent_receipts(self):
+        ids = [receipt.legacyMessageId for receipt in self.receipts]
+        if (len(set(ids)) != len(ids) or self.receiptCount < len(ids)
+                or self.receiptsTruncated != (self.receiptCount > len(ids))
+                or self.nativeRunId is not None and self.nativeRunId != self.nativeTurnId
+                or self.nativeCorrelation == "correlated" and self.nativeTurnId is None):
+            raise ValueError("Inconsistent observation receipt proof")
+        return self
+
+
+class LegacyReceiptsResponse(UntrustedResponse):
+    observer: LegacyObserverView
+    dispatches: list[LegacyDispatchView] = Field(min_length=1, max_length=32)
+
+    @model_validator(mode="after")
+    def only_granted_refs(self):
+        if self.observer.status != "created" or [row.legacyMessageId for row in self.dispatches] != self.observer.legacyMessageIds:
+            raise ValueError("Receipt response must exactly match the observation grant")
+        return self
 
 
 class AgentView(Closed):
@@ -611,7 +718,7 @@ class DocumentationDescribeQuery(Closed):
         return value.strip()
 
 
-DocumentationAction = Literal["session_list", "agent_create", "agent_update", "agent_avatar", "agent_archive", "session_config_get", "session_config_compare", "session_parameters_get", "session_pin", "team_list", "team_get", "room_list", "room_get", "authorization_status"]
+DocumentationAction = Literal["session_list", "agent_create", "agent_update", "agent_avatar", "agent_archive", "session_config_get", "session_config_compare", "session_parameters_get", "session_pin", "team_list", "team_get", "room_list", "room_get", "authorization_status", "legacy_observers", "legacy_receipts"]
 # This maps documentation to already-migrated semantic actions. It grants no
 # HTTP execution and deliberately advertises no other registered API operation.
 DOCUMENTATION_ACTIONS = {
@@ -634,6 +741,8 @@ DOCUMENTATION_ACTIONS = {
     ("GET", "/api/v1/launcher-assistant-management/directory/rooms/{room_id}"): "room_get",
     ("GET", "/api/v1/launcher-assistant-management/sessions/{session_id}/parameters"): "session_parameters_get",
     ("GET", "/api/v1/launcher-assistant-management/authorization"): "authorization_status",
+    ("GET", "/api/v1/launcher-assistant-management/legacy-observers"): "legacy_observers",
+    ("GET", "/api/v1/launcher-assistant-management/legacy-observers/{observer_id}/receipts"): "legacy_receipts",
 }
 
 

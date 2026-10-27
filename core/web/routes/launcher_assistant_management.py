@@ -24,6 +24,7 @@ from core.web.services.external_management.contracts import (
     SessionConfigResponse,
     SessionConfigComparisonResponse,
     DirectoryQuery, TeamListResponse, TeamReadResponse, RoomListResponse, RoomReadResponse, SessionParametersResponse, AuthorizationStateResponse,
+    LegacyObserverView, LegacyObserversResponse, LegacyReceiptsResponse,
 )
 from core.web.services.external_management.service import (
     ManagementError,
@@ -107,6 +108,31 @@ async def authorization_status(request: Request):
     if request.query_params:
         raise HTTPException(status_code=422, detail={"code": "INVALID_INPUT"})
     return await _call(lambda: _service().authorization_status(*_credentials(request)))
+
+
+@router.post("/legacy-observers", response_model=LegacyObserverView)
+async def create_legacy_observer(request: Request):
+    _require_control(request)
+    if request.query_params:
+        raise HTTPException(status_code=422, detail={"code": "INVALID_INPUT"})
+    payload = await _body(request, unique_keys=True)
+    return await _call(lambda: _service().create_legacy_observer(*_credentials(request), payload))
+
+
+@router.get("/legacy-observers", response_model=LegacyObserversResponse)
+async def list_legacy_observers(request: Request):
+    _require_control(request)
+    if request.query_params:
+        raise HTTPException(status_code=422, detail={"code": "INVALID_INPUT"})
+    return await _call(lambda: _service().list_legacy_observers(*_credentials(request)))
+
+
+@router.get("/legacy-observers/{observer_id}/receipts", response_model=LegacyReceiptsResponse)
+async def read_legacy_receipts(observer_id: str, request: Request):
+    _require_control(request)
+    if request.query_params:
+        raise HTTPException(status_code=422, detail={"code": "INVALID_INPUT"})
+    return await _call(lambda: _service().read_legacy_receipts(*_credentials(request), observer_id))
 
 
 @router.get("/avatar-options", response_model=AvatarOptionsResponse)

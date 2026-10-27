@@ -31,7 +31,7 @@ TASK_CAPABILITY_HEADER = "X-Vibelution-External-Agent-Task-Capability"
 ADAPTER_CONNECTION_HEADER = "X-Vibelution-External-Agent-Connection"
 _MANAGEMENT_PREFIX = "/api/v1/launcher-assistant-management"
 _MANAGEMENT_ACTIONS = frozenset({"agent_create", "agent_update", "agent_avatar", "agent_archive", "team_run", "session_pin", "authorization_upgrade"})
-_MANAGEMENT_SCOPES = ["agents:archive", "agents:avatar", "agents:create", "agents:read", "agents:update", "platform:describe", "rooms:read", "sessions:parameters:read", "sessions:pin", "sessions:read", "teams:directory:read", "teams:read", "teams:run"]
+_MANAGEMENT_SCOPES = ["agents:archive", "agents:avatar", "agents:create", "agents:read", "agents:update", "legacy:receipts:read", "platform:describe", "rooms:read", "sessions:parameters:read", "sessions:pin", "sessions:read", "teams:directory:read", "teams:read", "teams:run"]
 # Historical grants without persisted scopes predate pin and archive. Freeze
 # their actual eight scopes; deriving this list from fresh scopes expands power.
 _LEGACY_MANAGEMENT_SCOPES = ["agents:avatar", "agents:create", "agents:read", "agents:update", "platform:describe", "sessions:read", "teams:read", "teams:run"]
@@ -343,6 +343,71 @@ class ManagedAgentBackendClient:
         if (public["offset"] != query.offset or public["limit"] > query.limit
             or query.agent_id and any(row["agentId"] != query.agent_id for row in public["sessions"])):
             raise BackendClientError("Session list query binding changed.", code="BACKEND_PROTOCOL_ERROR")
+        return public
+
+    @staticmethod
+    def _legacy_observer_identity(grant, view):
+        key = [grant["subjectId"], "legacy_observer", view["requestId"]]
+        expected = "lob-" + hashlib.sha256(json.dumps(key, ensure_ascii=False, sort_keys=True,
+            separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+        if view["observerId"] != expected:
+            raise BackendClientError("Observation subject binding changed.", code="BACKEND_PROTOCOL_ERROR")
+
+    async def management_legacy_observer_create(self, *, request_id: str, source_agent_id: str,
+                                               legacy_message_ids: list[str], expected_registry_sha256: str,
+                                               expected_source_authority: str) -> dict[str, Any]:
+        """Trusted migration caller only; deliberately absent from model actions."""
+        from pydantic import ValidationError
+        from core.web.services.external_management.contracts import LegacyObserverCreate, LegacyObserverView
+        grant = await self._original_management_grant(require_original=False)
+        try:
+            request = LegacyObserverCreate.model_validate({"request_id": request_id, "expected_binding": grant["binding"],
+                "source_agent_id": source_agent_id, "legacy_message_ids": legacy_message_ids,
+                "expected_registry_sha256": expected_registry_sha256,
+                "expected_source_authority": expected_source_authority}).model_dump()
+        except ValidationError:
+            raise BackendClientError("Invalid legacy observation request.", code="INVALID_MANAGEMENT_REQUEST") from None
+        result = await self._request_json("POST", _MANAGEMENT_PREFIX + "/legacy-observers",
+            management_auth=(grant["subjectId"], grant["capability"]), json_payload=request)
+        try:
+            public = LegacyObserverView.model_validate(result).model_dump()
+        except ValidationError:
+            raise BackendClientError("Invalid observation proof.", code="BACKEND_PROTOCOL_ERROR") from None
+        self._legacy_observer_identity(grant, public)
+        if (public["requestId"] != request_id or public["sourceAgentId"] != source_agent_id
+                or public["legacyMessageIds"] != legacy_message_ids):
+            raise BackendClientError("Observation references changed.", code="BACKEND_PROTOCOL_ERROR")
+        return public
+
+    async def management_legacy_observers(self) -> dict[str, Any]:
+        from pydantic import ValidationError
+        from core.web.services.external_management.contracts import LegacyObserversResponse
+        grant = await self._original_management_grant(require_original=False)
+        result = await self._request_json("GET", _MANAGEMENT_PREFIX + "/legacy-observers",
+            management_auth=(grant["subjectId"], grant["capability"]))
+        try:
+            public = LegacyObserversResponse.model_validate(result).model_dump()
+        except ValidationError:
+            raise BackendClientError("Invalid observation directory.", code="BACKEND_PROTOCOL_ERROR") from None
+        for view in public["observers"]:
+            self._legacy_observer_identity(grant, view)
+        return public
+
+    async def management_legacy_receipts(self, observer_id: str) -> dict[str, Any]:
+        from pydantic import ValidationError
+        from core.web.services.external_management.contracts import LegacyReceiptsResponse
+        if not isinstance(observer_id, str) or not re.fullmatch(r"lob-[a-f0-9]{64}", observer_id):
+            raise BackendClientError("Invalid observation identifier.", code="INVALID_MANAGEMENT_REQUEST")
+        grant = await self._original_management_grant(require_original=False)
+        result = await self._request_json("GET", f"{_MANAGEMENT_PREFIX}/legacy-observers/{observer_id}/receipts",
+            management_auth=(grant["subjectId"], grant["capability"]))
+        try:
+            public = LegacyReceiptsResponse.model_validate(result).model_dump()
+        except ValidationError:
+            raise BackendClientError("Invalid legacy receipt projection.", code="BACKEND_PROTOCOL_ERROR") from None
+        self._legacy_observer_identity(grant, public["observer"])
+        if public["observer"]["observerId"] != observer_id:
+            raise BackendClientError("Observation identifier changed.", code="BACKEND_PROTOCOL_ERROR")
         return public
 
     async def _management_directory_read(self, suffix, response_model):

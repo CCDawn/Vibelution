@@ -37,6 +37,8 @@ def contracts() -> dict:
         result[name] = {**pa_platform_actions.action_catalog(name), "governed": False}
     from . import operator_image_actions
     result.update(operator_image_actions.contracts())
+    from . import history_actions
+    result.update(history_actions.contracts())
     result["assistant_settings_update"] = {**result["assistant_settings_update"],
         "description": result["assistant_settings_update"]["description"] + " 当前轮结束后自动刷新生效，不要求用户手动刷新或重启。"}
     # This native read action predates describe support. Its empty arguments
@@ -55,6 +57,9 @@ def execute(action: str, parameters: dict, runtime: dict, *, governed: bool = Fa
     contract = contracts().get(action)
     if contract is None:
         raise ValueError("未知的 Launcher 本地操作，请先 index/describe 查询。")
+    if action in {"history_list", "history_read"}:
+        from .history_actions import execute as execute_history
+        return execute_history(action, parameters)
     # The reused config owner currently checks one project. A packaged source
     # tree is not the project registry, and unreadable stores cannot prove that
     # references are absent. Native approval does not fill that evidence gap.

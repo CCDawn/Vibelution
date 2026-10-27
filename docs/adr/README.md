@@ -16,6 +16,7 @@
 | [0012](0012-launcher-owns-personal-assistant-runtime.md) | Launcher 独占个人助理产品，独立 Python 原生会话宿主复用共享引擎 | Accepted |
 | [0013](0013-launcher-assistant-reuses-native-project-sdk.md) | Launcher 助理直接复用原生项目 SDK，生命周期仍归 Electron main | Accepted |
 | [0014](0014-workbench-window-close-keeps-background-retirement.md) | Workbench 窗口及时关闭，Launcher 持续确认后台清退 | Accepted |
+| [0015](0015-legacy-dispatch-handoff-is-observation-only.md) | 旧派遣仅交接观察及回执，控制操作重新原生授权 | Accepted |
 
 ## 写法
 

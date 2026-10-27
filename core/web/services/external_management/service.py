@@ -129,6 +129,21 @@ class ManagementService:
         from .contracts import AuthorizationStateResponse
         return AuthorizationStateResponse.model_validate(self._authorization_upgrades().current_subject(subject, capability)).model_dump()
 
+    def _legacy_observations(self):
+        from .legacy_observation import LegacyObservationOwner
+        return LegacyObservationOwner(self.store,
+            lambda subject, capability, expected=None: self._authorize(subject, capability, "legacy:receipts:read", expected),
+            self.native)
+
+    def create_legacy_observer(self, subject, capability, payload):
+        return self._legacy_observations().create(subject, capability, payload)
+
+    def list_legacy_observers(self, subject, capability):
+        return self._legacy_observations().list(subject, capability)
+
+    def read_legacy_receipts(self, subject, capability, observer_id):
+        return self._legacy_observations().read(subject, capability, observer_id)
+
     def read_agent(self, subject: str, capability: str, agent_id: str) -> dict:
         self._authorize(subject, capability, "agents:read")
         if not isinstance(agent_id, str) or not 1 <= len(agent_id) <= 128:

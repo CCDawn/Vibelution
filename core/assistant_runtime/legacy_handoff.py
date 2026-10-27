@@ -10,6 +10,7 @@ import json
 import os
 import stat
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 
 from core.assistant_runtime.migration_inventory import InventoryError, _TOKEN, declared_assistant_identities
@@ -58,11 +59,69 @@ def _safe_path(path):
     return path
 
 
+def _stable_parent(value):
+    # A sibling write must not invalidate an existing file's ancestor identity.
+    # Birthtime, where available, additionally protects against inode reuse.
+    return value.st_dev, value.st_ino, value.st_mode, getattr(value, "st_birthtime_ns", None)
+
+
+@dataclass(frozen=True)
+class AbsentInboxProof:
+    agent_id: str
+    path: Path
+    parents: tuple
+    nearest_identity: tuple
+
+    @classmethod
+    def capture(cls, workspace: Path, agent_id: str):
+        if not workspace.is_absolute() or not _token(agent_id):
+            raise InventoryError("invalid_absent_inbox_scope")
+        path = workspace / "agents" / agent_id / "events/agent_inbox_messages.jsonl"
+        parents = []
+        for node in (*reversed(path.parents), path):
+            try:
+                value = node.lstat()
+            except FileNotFoundError:
+                if not parents:
+                    raise InventoryError("source_root_unavailable") from None
+                return cls(agent_id, path, tuple(parents), _identity(parents[-1][0]))
+            if stat.S_ISLNK(value.st_mode) or getattr(value, "st_file_attributes", 0) & 0x400:
+                raise InventoryError("linked_source")
+            if not stat.S_ISDIR(value.st_mode):
+                if node == path:
+                    raise InventoryError("absent_inbox_appeared")
+                raise InventoryError("source_type_mismatch")
+            parents.append((node, _stable_parent(value)))
+        raise InventoryError("absent_inbox_appeared")
+
+    def verify(self, workspace: Path):
+        current = self.capture(workspace, self.agent_id)
+        if (current.path != self.path or current.parents != self.parents
+                or current.nearest_identity != self.nearest_identity):
+            raise InventoryError("absent_inbox_changed")
+
+
+@dataclass(frozen=True)
+class ObservationPreview:
+    """Private native evidence: an absent Inbox is not an empty task ledger."""
+    report: dict
+    absences: tuple[AbsentInboxProof, ...]
+
+
+def preview_legacy_observation(*, legacy_message_ids: list[str], **kwargs) -> ObservationPreview:
+    if (not isinstance(legacy_message_ids, list) or not 1 <= len(legacy_message_ids) <= 32
+            or any(not _token(value) for value in legacy_message_ids)
+            or legacy_message_ids != sorted(set(legacy_message_ids))):
+        raise InventoryError("invalid_observation_references")
+    return preview_legacy_handoff(**kwargs, _observation_refs=tuple(legacy_message_ids))
+
+
 def preview_legacy_handoff(*, project_root: Path, workspace: Path, project_id: str,
                            instance_id: str, assistant_agent_id: str,
                            max_files: int = 256, max_file_bytes: int = 8 * 1024 * 1024,
                            max_total_bytes: int = 64 * 1024 * 1024,
-                           max_rows: int = 10000, max_line_bytes: int = 256 * 1024) -> dict:
+                           max_rows: int = 10000, max_line_bytes: int = 256 * 1024,
+                           _observation_refs: tuple[str, ...] | None = None) -> dict | ObservationPreview:
     """Read existing registry/inboxes only; missing/corrupt sources stay incomplete.
 
     Limits cover all JSONL files together (bytes/rows) and each file/line.
@@ -82,8 +141,21 @@ def preview_legacy_handoff(*, project_root: Path, workspace: Path, project_id: s
         "registrySha256": None, "dispatches": [], "sources": [], "issues": [],
         "counts": {"files": 0, "bytes": 0, "rows": 0, "excludedFollowups": 0, "unresolvedReceipts": 0}}
     issues, counts = report["issues"], report["counts"]
+    absences = []
     snapshots = []
     seen_issues = set()
+
+    def finish():
+        if _observation_refs is None:
+            report["previewComplete"] = not issues
+            return report
+        report.update(stage="observation_preview", observationMessageIds=list(_observation_refs),
+                      observationComplete=not issues, absentSourceCount=len(absences))
+        report["dispatches"] = sorted((row for row in report["dispatches"] if row["legacyMessageId"] in _observation_refs),
+                                      key=lambda row: row["legacyMessageId"])
+        # This dedicated observation proof does not upgrade the old full-scan
+        # preview or claim that any missing Inbox contains an empty ledger.
+        return ObservationPreview(report, tuple(absences))
 
     def issue(code, aid=None):
         key = (code, aid)
@@ -152,10 +224,10 @@ def preview_legacy_handoff(*, project_root: Path, workspace: Path, project_id: s
                           "projectRoot": str(project_root.resolve()), "workspace": str(workspace.resolve())})
     except InventoryError as exc:
         issue(str(exc))
-        return report
+        return finish()
     except (OSError, ValueError, KeyError, TypeError, RecursionError):
         issue("registry_unavailable_or_invalid")
-        return report
+        return finish()
 
     inboxes = {}
     for row in rows:
@@ -237,7 +309,13 @@ def preview_legacy_handoff(*, project_root: Path, workspace: Path, project_id: s
         except InventoryError as exc:
             issue(str(exc), aid)
         except FileNotFoundError:
-            issue("source_missing", aid)
+            if _observation_refs is not None and aid != assistant_agent_id:
+                try:
+                    absences.append(AbsentInboxProof.capture(workspace, aid))
+                except (InventoryError, OSError):
+                    issue("absent_inbox_unproven", aid)
+            else:
+                issue("source_missing", aid)
         except OSError:
             issue("source_unreadable", aid)
 
@@ -304,6 +382,18 @@ def preview_legacy_handoff(*, project_root: Path, workspace: Path, project_id: s
             "sourceSessionId": _metadata(row).get("sourceSessionId") or None, "deliveryStatus": row.get("status", "pending"),
             "taskStatus": status, "receipts": receipts if not issues else [],
             "nativeTaskId": None, "nativeCorrelation": "unresolved"})
+    if _observation_refs is not None:
+        chosen = {row["legacyMessageId"]: row for row in report["dispatches"] if row["legacyMessageId"] in _observation_refs}
+        if len(chosen) != len(_observation_refs):
+            issue("observation_reference_unavailable")
+        selected_targets = {row["targetAgentId"] for row in chosen.values()}
+        for absent in absences:
+            if absent.agent_id in selected_targets or absent.agent_id == assistant_agent_id:
+                issue("selected_inbox_missing", absent.agent_id)
+            try:
+                absent.verify(workspace)
+            except (InventoryError, OSError):
+                issue("absent_inbox_changed", absent.agent_id)
     # Recheck the registry and every opened source after aggregation. No proof
     # of quiescence is implied, even if the bounded observation stayed stable.
     for path, before, digest in snapshots:
@@ -316,5 +406,4 @@ def preview_legacy_handoff(*, project_root: Path, workspace: Path, project_id: s
     if issues:
         for item in report["dispatches"]:
             item.update(taskStatus="unresolved", receipts=[])
-    report["previewComplete"] = not issues
-    return report
+    return finish()

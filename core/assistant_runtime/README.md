@@ -455,8 +455,9 @@ intent and receipt owners handle unknown results by readback only; no archive
 replay, purge, reset, restore or force is exposed. A completed receipt freezes
 the first verified archived observation.
 
-Fresh SDK subjects explicitly request thirteen scopes. Persisted eight-, nine-
-and ten-scope subjects retain those exact grants, and historical grants without
+Fresh SDK subjects explicitly request fourteen scopes, including the separate
+`legacy:receipts:read` scope. Persisted eight-, nine-, ten- and thirteen-scope
+subjects retain those exact grants, and historical grants without
 a scope list retain their original eight. No automatic upgrade or subject
 rotation is performed.
 Temp native-Agent/Session lifecycle and SDK/receipt regressions have passed;
@@ -554,8 +555,9 @@ for these new actions is still pending funding confirmation.
 
 Source inventory also fingerprints the selected old PA's own dispatch events
 and default private knowledge namespace without exporting their contents.
-This does not discover target-side dispatches, all historical Sessions, custom
-memory/knowledge paths or queue ownership. Old message IDs are not new native
+That initial inventory alone does not discover target-side dispatches, all
+historical Sessions, custom paths or queue ownership. The explicit adapters
+below handle retained history, approved paths and observation. Old message IDs are not new native
 task capabilities. No old queue, Turn or transcript is copied into the running
 Launcher profile; `readyForCutover` remains false until handoff is verified.
 
@@ -583,3 +585,88 @@ Legacy IDs remain `legacyMessageId`; `nativeTaskId=null` and
 Late receipts are observed by rerunning the preview. This read does not start,
 replay, copy, enqueue, repair, pause or retire anything. A complete scan still
 has `sourceQuiesced=false` and `readyForCutover=false`.
+
+## Retained history and approved custom sources
+
+`scripts/assistant_migration_inventory.py` keeps its default inventory and
+`--handoff-preview` read-only behavior. Explicit `--history-preview <PA>` scans
+all retained, provably owned Sessions, including archived and hidden children.
+The canonical SQLite root overrides stale legacy JSON. Reads use a temporary
+SQLite copy with the native APSW runtime; nonempty WAL/journals, active Turns,
+unknown ownership, corrupt sources or limits refuse complete import. Deleted
+Session tombstones are respected; purged history is not reconstructed.
+
+`--history-import <PA> --target-profile <absolute-profile> --migration-id <id>`
+publishes an immutable archive below `history_archive/migrations`. Original
+Journal bytes, event/message/tool IDs, assets, hashes and source scope remain
+separate from the new active native Session. Native parsers and projectors are
+reused; model `history_list` / `history_read` paginate bounded, untrusted,
+read-only projections. Existing projection whitespace normalization still
+applies; original archive bytes remain exact. No imported Turn is continued,
+enqueued or replayed and no ordinary Session core is modified.
+
+`--source-paths <PA>` inspects raw workspace/memory-policy declarations without
+getters that initialize, normalize or repair state. External locations are not
+read before an exact source/category/root grant. `--path-grants <file>` accepts:
+
+```json
+{"schemaVersion":1,"sourceScope":{"projectId":"p","instanceId":"i","agentId":"pa"},"grants":[{"category":"memory","root":"C:/explicit/existing/root","revision":1}]}
+```
+
+`--source-import <PA> --target-profile <absolute-profile> --migration-id <id>`
+copies approved memory, private knowledge, personal-affairs and asset data to
+`history_sources/migrations`. It preserves sources only: plugin-ledger/KB
+activation and schema promotion remain pending. Generic plugins, inbox/outbox
+and runnable queues are never activated or copied as execution state. Missing,
+unapproved and conflicting paths remain explicit; partial preservation does
+not become `sourceComplete=true`.
+
+`--source-config <existing-config>` selects the source's existing formal or
+developer-sandbox route without creating a sandbox or initializing config.
+Without this option ordinary inventory/import uses the explicit project's
+active formal storage route. Config, pointer and physical source identities
+are rechecked before publication. Imports reject aliases, links, physical
+source/target overlap, extra target files, hash conflicts and changed sources;
+stable migration IDs are idempotent. Publication rechecks the final archive
+before reporting success. No source is deleted or frozen.
+
+## Observation of in-flight legacy dispatches
+
+[ADR 0015](../../docs/adr/0015-legacy-dispatch-handoff-is-observation-only.md)
+records the user-approved boundary: the original project Session/Turn keeps
+execution. Launcher receives receipt observation only. Cancel, continue and
+approval operations require fresh native authorization; old temporary grants,
+pending approvals, leases and worker ownership are not transferred.
+
+The native SDK adds operator-only `POST /legacy-observers` and closed
+`GET /legacy-observers`, `GET /legacy-observers/{observer_id}/receipts` under
+the management prefix. Creation requires source Agent, exact sorted message
+whitelist, registry hash, expected physical source authority and stable request
+ID, plus the original subject/capability/control token and explicit
+`legacy:receipts:read`. Formal/sandbox copies with identical IDs cannot satisfy
+the wrong source authority. Model actions expose only `legacy_observers` and
+`legacy_receipts`; they cannot create grants or supply paths/capabilities.
+
+Offline operator entry is `--observe-handoff <PA> --source-config <config>
+--target-profile <profile> --registered-project-id <opaque-registration-id>
+--request-id <stable-id> --message-id <old-message-id>` (repeat message-id).
+Stop the target host first: this entry reuses its native profile owner lock and
+SDK credential store; a resident owner returns `TARGET_PROFILE_BUSY`. It never
+upgrades an existing subject automatically. An old subject must first use the
+governed `authorization_upgrade` action for the separate read scope.
+
+The existing target Store persists intent and private source proofs; it does
+not schedule work. Restart/lost ACK reads the same proof, or retains unknown
+when no proof survived. Late receipts are read from the original inbox without
+marking them consumed. Business-task completion stays distinct from Turn/run
+completion. `nativeTaskId` remains null for A2A dispatches; a native run is
+reported only when an actual matching runtime snapshot proves it. Missing
+unrelated canonical inboxes have typed negative proofs, never a fabricated
+complete empty ledger. Selected PA/target inbox absence and custom unapproved
+sources still refuse observation.
+
+Temporary native-process restart, HTTP/SDK receipt and revocation regressions
+provide local acceptance. Real DeepSeek and fresh packaged acceptance remain
+separate gates; `sourceQuiesced=false` and `readyForCutover=false` remain
+mandatory. The old platform assistant and its receipt address stay available
+until functional/data handoff and real-model acceptance permit retirement.
