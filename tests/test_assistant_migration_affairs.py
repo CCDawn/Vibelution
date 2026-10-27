@@ -137,7 +137,7 @@ def test_real_native_import_receipt_crash_recovery_and_conflicts(tmp_path):
             finally:
                 affairs._write_receipt = original
             service.cancel_item(lease.agent_id, item_id=third['itemId'])
-            fails('affairs_target_item_conflict', lambda: run(lease, [third], 'interrupted-edit'))
+            fails('affairs_outcome_unknown', lambda: run(lease, [third], 'interrupted-edit'))
             source = root.parent / 'old' / 'personal-affairs' / 'affairs' / 'items.jsonl'
             source.parent.mkdir(parents=True)
             fourth = {**row, 'itemId': 'affair-four', 'kind': 'schedule', 'status': 'done',
@@ -391,3 +391,74 @@ def test_ordinary_runtime_cannot_supply_an_affairs_target(tmp_path, role):
         else:
             raise AssertionError('caller-provided target was trusted')
     ''', role=role)
+
+
+@pytest.mark.parametrize("mutation", ["remove", "partial-remove", "replace", "edit", "before-write", "unchanged"])
+def test_pending_receipt_never_replays_changed_or_missing_rows_after_restart(tmp_path, mutation):
+    setup = r'''
+        import hashlib, json, os, sys
+        from pathlib import Path
+        from core.assistant_runtime import migration_affairs as migration
+        from core.assistant_runtime.migration_profile import offline_migration_profile
+        from core.assistant_runtime.migration_io import MigrationIOError
+        from core.infrastructure.file_lock import cross_process_file_lock
+        from core.web.services import personal_affairs_service
+        def no_network(event, _args):
+            if event == 'socket.connect': raise AssertionError('migration contacted a provider')
+        sys.addaudithook(no_network)
+        root = Path(os.environ['VIBELUTION_ASSISTANT_NATIVE_ROOT'])
+        mutation = json.loads((root.parent / 'mutation.json').read_text())
+        row = {'schemaVersion': 1, 'itemId': 'pending-old', 'kind': 'todo', 'title': 'Synthetic task',
+            'status': 'open', 'createdAt': '2025-02-01T00:00:00Z'}
+        retained = {**row, 'itemId': 'pending-retained'}
+        rows = [row, retained] if mutation == 'partial-remove' else [row]
+        body = b''.join(json.dumps(item).encode() + b'\n' for item in rows)
+        def run(lease):
+            return migration.import_affairs(lease, body,
+                source_scope={'projectId': 'p', 'instanceId': 'i', 'agentId': 'old-pa'},
+                source_sha256=hashlib.sha256(body).hexdigest(), migration_id='pending-restart')
+    '''
+    (tmp_path / "mutation.json").write_text(json.dumps(mutation), encoding="utf-8")
+    _run(tmp_path, setup + r'''
+        original = migration._write_receipt
+        def abrupt_exit(path, receipt):
+            if not receipt['published']: original(path, receipt)
+            if receipt['published'] or mutation == 'before-write': os._exit(0)
+        migration._write_receipt = abrupt_exit
+        with offline_migration_profile() as lease:
+            run(lease)
+            raise AssertionError('did not exit between intent and receipt publication')
+    ''', config_text=TEST_MODEL_CONFIG)
+    _run(tmp_path, setup + r'''
+        with offline_migration_profile() as lease:
+            service = personal_affairs_service.get_personal_affairs_service()
+            ledger = service.store._path(lease.agent_id, 'affairs/items.jsonl')
+            receipt = root / 'affairs_migrations' / (hashlib.sha256(b'pending-restart').hexdigest() + '.json')
+            assert json.loads(receipt.read_text())['published'] is False
+            with cross_process_file_lock(ledger):
+                if mutation == 'remove': ledger.unlink()
+                elif mutation == 'replace':
+                    service.store.write_jsonl(lease.agent_id, 'affairs/items.jsonl', [{**row, 'itemId': 'user-replacement'}])
+                elif mutation == 'edit':
+                    service.complete_item(lease.agent_id, item_id=row['itemId'])
+                elif mutation == 'partial-remove':
+                    service.store.write_jsonl(lease.agent_id, 'affairs/items.jsonl', [retained])
+                elif mutation == 'before-write': assert not ledger.exists()
+            before = ledger.read_bytes() if ledger.exists() else None
+            receipt_before = receipt.read_bytes()
+            if mutation == 'unchanged':
+                result = run(lease)
+                assert result['importedCount'] == 0 and not result['idempotent']
+                assert ledger.read_bytes() == before
+                assert json.loads(receipt.read_text())['published'] is True
+                service.complete_item(lease.agent_id, item_id=row['itemId'])
+                before = ledger.read_bytes()
+            for _ in range(2):
+                if mutation == 'unchanged': assert run(lease)['idempotent']
+                else:
+                    try: run(lease)
+                    except MigrationIOError as error: assert str(error) == 'affairs_outcome_unknown'
+                    else: raise AssertionError('pending request replayed or completed after user change')
+                assert (ledger.read_bytes() if ledger.exists() else None) == before
+                if mutation != 'unchanged': assert receipt.read_bytes() == receipt_before
+    ''', config_text=TEST_MODEL_CONFIG)

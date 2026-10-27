@@ -203,8 +203,9 @@ def import_episodic(lease, source: FileSnapshot | bytes, *, source_scope: dict,
 
     Internal operator adapter: use only a live offline migration profile lease.
     A metadata-only pending receipt binds a request before ledger publication;
-    matching rows recover a ledger/receipt interruption, conflicting rows fail.
-    Completed requests never replay over later native edits.
+    fully matching rows recover a ledger/receipt interruption without writing
+    the ledger. Pending missing/edited rows have an unknown outcome and never
+    replay. Completed requests never replay over later native edits.
     """
     _check_lease(lease)
     if not _token(migration_id):
@@ -257,6 +258,11 @@ def import_episodic(lease, source: FileSnapshot | bytes, *, source_scope: dict,
                 if isinstance(source, FileSnapshot):
                     verify_snapshot(source)
                 by_id = {row["episodeId"]: row for row in existing}
+                # Missing rows may have been published and subsequently
+                # removed. Pending recovery can only acknowledge the complete
+                # unchanged publication; never recreate or overwrite a row.
+                if receipt is not None and any(by_id.get(row["episodeId"]) != row for row in rows):
+                    raise MigrationIOError("episodic_outcome_unknown")
                 ids = {row[key] for row in existing for key in ("episodeId", "eventId")}
                 additions = []
                 for row in rows:

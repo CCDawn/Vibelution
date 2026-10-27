@@ -144,7 +144,7 @@ def test_native_import_preserves_history_restart_and_user_edits(tmp_path, develo
                 migration._write_receipt = original
             episodes.supersede_episodic_event(lease.agent_id, 'pending-one', successor_episode_id=new['episodeId'])
             pending_changed = ledger.read_bytes()
-            fails('episodic_target_id_conflict', lambda: run(lease, [pending], 'pending-edit'))
+            fails('episodic_outcome_unknown', lambda: run(lease, [pending], 'pending-edit'))
             assert ledger.read_bytes() == pending_changed
             fourth = {**successor, 'episodeId': 'old-four', 'eventId': 'event-four'}
             source = root.parent / 'legacy' / 'episodic_events.jsonl'
@@ -311,4 +311,80 @@ def test_ledger_published_before_receipt_recovers_after_abrupt_process_exit(tmp_
             assert result['importedCount'] == 0 and not result['idempotent']
             assert run(lease)['idempotent']
             assert episodes.list_episodic_events(lease.agent_id, include_superseded=True) == history
+    ''', config_text=TEST_MODEL_CONFIG)
+
+
+@pytest.mark.parametrize("mutation", ["remove", "partial-remove", "replace", "edit", "before-write", "unchanged"])
+def test_pending_receipt_never_replays_changed_or_missing_rows_after_restart(tmp_path, mutation):
+    setup = r'''
+        import hashlib, json, os, sys
+        from pathlib import Path
+        from core.assistant_runtime import migration_episodic as migration
+        from core.assistant_runtime.migration_profile import offline_migration_profile
+        from core.assistant_runtime.migration_io import MigrationIOError
+        from core.infrastructure.file_lock import cross_process_file_lock
+        from core.web.services.agent_directory import episodic_memory as episodes
+        def no_network(event, _args):
+            if event == 'socket.connect': raise AssertionError('migration contacted a provider')
+        sys.addaudithook(no_network)
+        root = Path(os.environ['VIBELUTION_ASSISTANT_NATIVE_ROOT'])
+        mutation = json.loads((root.parent / 'mutation.json').read_text())
+        row = {'schemaVersion': 1, 'episodeId': 'pending-old', 'eventId': 'pending-event', 'agentId': 'old-pa',
+            'occurredAt': '2025-02-01T00:00:00Z', 'kind': 'note', 'text': 'Synthetic', 'refs': [],
+            'validFrom': '2025-02-01T00:00:00Z', 'validUntil': '', 'supersededByEpisodeId': ''}
+        retained = {**row, 'episodeId': 'pending-retained', 'eventId': 'retained-event'}
+        rows = [row, retained] if mutation == 'partial-remove' else [row]
+        body = b''.join(json.dumps(item).encode() + b'\n' for item in rows)
+        def run(lease):
+            return migration.import_episodic(lease, body,
+                source_scope={'projectId': 'p', 'instanceId': 'i', 'agentId': 'old-pa'},
+                source_sha256=hashlib.sha256(body).hexdigest(), migration_id='pending-restart')
+    '''
+    (tmp_path / "mutation.json").write_text(json.dumps(mutation), encoding="utf-8")
+    _run(tmp_path, setup + r'''
+        original = migration._write_receipt
+        def abrupt_exit(path, receipt):
+            if not receipt['published']: original(path, receipt)
+            if receipt['published'] or mutation == 'before-write': os._exit(0)
+        migration._write_receipt = abrupt_exit
+        with offline_migration_profile() as lease:
+            run(lease)
+            raise AssertionError('did not exit between intent and receipt publication')
+    ''', config_text=TEST_MODEL_CONFIG)
+    _run(tmp_path, setup + r'''
+        with offline_migration_profile() as lease:
+            from core.web.services import agent_directory_service as directory
+            ledger = episodes._episodic_events_path(directory.get_agent(lease.agent_id))
+            receipt = root / 'episodic_migrations' / (hashlib.sha256(b'pending-restart').hexdigest() + '.json')
+            assert json.loads(receipt.read_text())['published'] is False
+            if mutation == 'remove':
+                with cross_process_file_lock(ledger): ledger.unlink()
+            elif mutation == 'replace':
+                with episodes.episodic_transaction(lease.agent_id) as transaction:
+                    transaction.events.clear()
+                    transaction.append(text='Synthetic user replacement')
+            elif mutation == 'edit':
+                episodes.supersede_episodic_event(lease.agent_id, row['episodeId'])
+            elif mutation == 'partial-remove':
+                with episodes.episodic_transaction(lease.agent_id) as transaction:
+                    transaction.events[:] = [item for item in transaction.events if item['episodeId'] != row['episodeId']]
+                    transaction._dirty = True
+            elif mutation == 'before-write': assert not ledger.exists()
+            before = ledger.read_bytes() if ledger.exists() else None
+            receipt_before = receipt.read_bytes()
+            if mutation == 'unchanged':
+                result = run(lease)
+                assert result['importedCount'] == 0 and not result['idempotent']
+                assert ledger.read_bytes() == before
+                assert json.loads(receipt.read_text())['published'] is True
+                episodes.supersede_episodic_event(lease.agent_id, row['episodeId'])
+                before = ledger.read_bytes()
+            for _ in range(2):
+                if mutation == 'unchanged': assert run(lease)['idempotent']
+                else:
+                    try: run(lease)
+                    except MigrationIOError as error: assert str(error) == 'episodic_outcome_unknown'
+                    else: raise AssertionError('pending request replayed or completed after user change')
+                assert (ledger.read_bytes() if ledger.exists() else None) == before
+                if mutation != 'unchanged': assert receipt.read_bytes() == receipt_before
     ''', config_text=TEST_MODEL_CONFIG)

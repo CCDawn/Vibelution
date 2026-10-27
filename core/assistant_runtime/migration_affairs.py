@@ -122,9 +122,10 @@ def import_affairs(lease, source: FileSnapshot | bytes, *, source_scope: dict,
     bootstrap, never from an agent ID supplied by a tool. The persisted receipt
     binds migration ID, source scope, content hash and independently verified
     target identity before the ledger changes. A published receipt prevents
-    replay over user changes. An unfinished receipt permits only that same
-    request to recover; identical existing IDs are read back and conflicting
-    IDs reject the complete request. No eviction at the native 2048-row limit.
+    replay over user changes. An unfinished receipt can only complete when all
+    source rows already exist unchanged: a missing row might have been removed
+    after publication, so it must never be added again. No eviction at the
+    native 2048-row limit.
     """
     _check_lease(lease)
     if not _token(migration_id):
@@ -172,6 +173,12 @@ def import_affairs(lease, source: FileSnapshot | bytes, *, source_scope: dict,
             existing = (_parse_rows(read_stable_file(ledger, _BYTE_CAP).raw)
                         if ledger.exists() or ledger.is_symlink() else [])
             by_id = {row["itemId"]: row for row in existing}
+            # A pending intent cannot distinguish an interrupted first write
+            # from a user removing/replacing its rows after that write (ABA).
+            # Reconcile only a fully matching publication, under the native
+            # ledger lock; leave both ledger and intent untouched otherwise.
+            if pending and any(by_id.get(row["itemId"]) != row for row in rows):
+                raise MigrationIOError("affairs_outcome_unknown")
             additions = []
             for row in rows:
                 previous = by_id.get(row["itemId"])
