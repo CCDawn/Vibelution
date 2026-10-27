@@ -682,6 +682,15 @@ legacy Workbench remains the notification owner. A source quiescence fence,
 durable delivery acknowledgement and Launcher reminder consumer still have to
 be established before any reminder cutover can be declared.
 
+`reminder_receipts.ReminderReceiptStore` is a private, currently unwired
+building block. It uses pinned Windows handles and SQLite transactions to
+reserve a stable event ID before a single submission. A prior pending or
+submitted attempt is not replayed; submission is not proof of viewing. A
+recovered native click requires the original token and the already committed
+channel. Capacity exhaustion is fail-closed; safe retention and a production
+notification owner are not yet implemented. Existing executors do not consult
+this store, so it cannot establish single ownership or enable cutover.
+
 The resident Launcher assistant cannot use the offline operator entry while it
 owns the profile lock. Its normal shutdown requests cancellation of the current
 turn, and a status snapshot is not an idle barrier: native queue drain, timers,
@@ -692,6 +701,16 @@ generation, keep a separate lifecycle drain reference, and use short native
 ledger transactions without holding the assistant command lock across source
 scans or knowledge review. It must preserve user edits and receipt recovery,
 and must not allow the model to supply filesystem paths or grant itself access.
+
+`online_history.OnlineHistoryOwner` is an unwired coordinator for a future
+trusted owner: it accepts only opaque registrations and separately supplied
+canonical source identity, and requires generation and source-authority guards
+across writes and publication. Its tests use simulated guards; no main-owned
+production authority currently supplies them. In particular, existing file
+pins do not prevent a different source writer creating a tombstone or asset in
+an observed directory. A source change can therefore be detected after an
+offline archive becomes visible; until a real source freeze or consistent
+snapshot is proven, this is not evidence of a complete or safe cutover.
 
 ## Observation of in-flight legacy dispatches
 

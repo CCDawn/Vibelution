@@ -10,6 +10,7 @@ import json
 import os
 import re
 import tempfile
+from contextlib import ExitStack, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -475,7 +476,7 @@ def _write_new(path, raw):
             raise MigrationIOError("history_copy_mismatch")
 
 
-def import_history(discovery: HistoryDiscovery, target_root: Path, migration_id: str, *, authority_verify=None) -> dict:
+def import_history(discovery: HistoryDiscovery, target_root: Path, migration_id: str, *, authority_verify=None, write_guard=None) -> dict:
     if not _token(migration_id) or not discovery.report.get("historyComplete"):
         raise MigrationIOError("history_discovery_incomplete")
     target = _canonical_target(target_root)
@@ -487,13 +488,16 @@ def import_history(discovery: HistoryDiscovery, target_root: Path, migration_id:
         authority_verify()
     _verify_source(discovery)
     manifest, copies = _manifest(discovery, migration_id)
-    with pinned_target_directory(target, create=True) as target:
-        with pinned_target_directory(target / "history_archive/migrations", create=True) as root:
-            with migration_target_lock(root / ".publish"):
-                return _publish_history(discovery, root, migration_id, manifest, copies, authority_verify)
+    guard = write_guard or nullcontext
+    with ExitStack() as stack:
+        with guard():
+            target = stack.enter_context(pinned_target_directory(target, create=True))
+            root = stack.enter_context(pinned_target_directory(target / "history_archive/migrations", create=True))
+        with migration_target_lock(root / ".publish"):
+            return _publish_history(discovery, root, migration_id, manifest, copies, authority_verify, guard)
 
 
-def _publish_history(discovery, root, migration_id, manifest, copies, authority_verify=None):
+def _publish_history(discovery, root, migration_id, manifest, copies, authority_verify=None, write_guard=nullcontext):
     """Caller holds the verified migrations parent chain and writer mutex."""
     final, pending = root / migration_id, root / ("." + migration_id + ".pending")
     if final.exists() or final.is_symlink():
@@ -505,10 +509,14 @@ def _publish_history(discovery, root, migration_id, manifest, copies, authority_
             authority_verify()
         return {"migrationId": migration_id, "published": True, "idempotent": True,
                 "historyCount": len(discovery.sessions), "readyForCutover": False}
-    with pinned_target_directory(pending, create=True) as pending:
+    with ExitStack() as stack:
+        with write_guard():
+            pending = stack.enter_context(pinned_target_directory(pending, create=True))
         for relative, snapshot in copies:
-            _write_new(pending / relative, snapshot.raw)
-        _write_new(pending / "manifest.json", _encoded(manifest))
+            with write_guard():
+                _write_new(pending / relative, snapshot.raw)
+        with write_guard():
+            _write_new(pending / "manifest.json", _encoded(manifest))
         stored, _ = _load_archive(pending, migration_id=migration_id)
         if stored != manifest:
             raise MigrationIOError("history_copy_mismatch")
@@ -519,7 +527,8 @@ def _publish_history(discovery, root, migration_id, manifest, copies, authority_
     # The generic no-delete lease closes for publication. The helper acquires
     # a verified DELETE handle, checks that this is still the same directory,
     # and renames that object while the destination parent chain stays pinned.
-    publish_directory(pending, final, pending_identity)
+    with write_guard():
+        publish_directory(pending, final, pending_identity)
     stored, _ = _load_archive(final)
     if stored != manifest:
         raise MigrationIOError("history_copy_mismatch")

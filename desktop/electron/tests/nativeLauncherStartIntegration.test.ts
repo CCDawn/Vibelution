@@ -3,11 +3,12 @@ import { fileURLToPath } from "node:url";
 import { runInNewContext } from "node:vm";
 import { createSourceFile, isFunctionDeclaration, ScriptTarget, transpileModule } from "typescript";
 import { describe, expect, it, vi } from "vitest";
+import { isWorkbenchStartBlockedByClose } from "../src/lifecycle/workbenchCloseTransactionStore.js";
 
 const source = readFileSync(fileURLToPath(new URL("../src/main.ts", import.meta.url)), "utf8");
 const start = source.indexOf("async function orchestrateLauncherLifecycle(");
 const firstStatement = source.indexOf("  if (launcherBootstrap === null)", start);
-const beforeMutation = source.indexOf("  // Claim cancellation before frontend preflight", start);
+const beforeMutation = source.indexOf("  const begunIntent = launcherLifecycleSupervisor.beginIntentWithOptions", start);
 const preflight = source.slice(firstStatement, beforeMutation);
 
 function sandbox(nativeColdStart = true) {
@@ -15,6 +16,9 @@ function sandbox(nativeColdStart = true) {
   const mutate = vi.fn(() => { inFlight.commandId = "changed"; inFlight.epoch += 1; });
   return {
     nativeColdStart, shutdownApproved: false, inFlight, mutate, operation: "start", payload: { path: "start" }, signal: undefined,
+    lifecycleCurrent: undefined as (() => boolean) | undefined, provenance: "operator", workbenchFailedCloseHandling: false, pendingWorkbenchCloseAck: null,
+    isWorkbenchStartBlockedByClose,
+    joinDecisionForLauncherLifecycleStop: () => ({ waitForInFlightRestart: false }),
     launcherBootstrap: {}, app: { isPackaged: true },
     authorizeLauncherForceLifecycle: vi.fn(async () => undefined),
     desktopEnvironment: () => ({ PYTHON: "pythonw.exe" }),
@@ -114,6 +118,25 @@ describe("Native start uses the original main lifecycle", () => {
   it("does not revive a start when a newer stop arrived during its read-only gate", async () => {
     const context = sandbox();
     context.launcherLifecycleSupervisor.intentGeneration.mockReturnValueOnce(1).mockReturnValue(2);
+    expect(await runPreflight(context)).toMatchObject({ accepted: false, code: "lifecycle_intent_superseded" });
+    expect(context.mutate).not.toHaveBeenCalled();
+  });
+
+  it("does not supersede a close admitted while the native readiness check is pending", async () => {
+    const context = sandbox();
+    context.inspectCurrentDesktopShellLaunchReadiness.mockImplementation(async () => {
+      context.mainWorkbenchCloseStore.currentTransaction.mockReturnValue({ phase: "backend_closing", windowAcknowledged: false });
+      return { schemaVersion: 1, launchBlocking: false, reason: "current" };
+    });
+    expect(await runPreflight(context)).toMatchObject({ accepted: false, code: "backend_retiring" });
+    expect(context.mutate).not.toHaveBeenCalled();
+  });
+
+  it("does not begin an old open's intent when its close generation changes during authorization", async () => {
+    const context = sandbox(false);
+    let current = true;
+    context.lifecycleCurrent = () => current;
+    context.authorizeLauncherForceLifecycle.mockImplementation(async () => { current = false; return undefined; });
     expect(await runPreflight(context)).toMatchObject({ accepted: false, code: "lifecycle_intent_superseded" });
     expect(context.mutate).not.toHaveBeenCalled();
   });

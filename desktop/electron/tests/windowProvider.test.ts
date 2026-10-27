@@ -298,6 +298,136 @@ describe("main Workbench hidden presentation", () => {
   });
 });
 
+describe("main Workbench open gate", () => {
+  it("blocks main-window origin and notification focus while leaving instance focus available", async () => {
+    let blocked = false;
+    const main = new FakeWindow(47, "", 4747);
+    const instance = new FakeWindow(48, "", 4848);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createWorkbenchWindow: url => new URL(url).port === "8001" ? instance : main,
+      shouldBlockWorkbenchOpen: () => blocked
+    });
+    await provider.openOrFocusWorkbench();
+    await provider.openOrFocusInstanceWorkbench({ instanceId: "worktree:assistant", url: "http://127.0.0.1:8001/" });
+    const mainTarget = provider.notificationTargetForSender(main.webContents, "http://127.0.0.1:8000/")!;
+    const instanceTarget = provider.notificationTargetForSender(instance.webContents, "http://127.0.0.1:8001/")!;
+    const mainFocus = main.focusCount;
+    const instanceFocus = instance.focusCount;
+    blocked = true;
+    expect(provider.focusAndSendToWorkbenchOrigin("http://127.0.0.1:8000", "conversation:opened", {})).toBe(false);
+    await expect(mainTarget.focusWorkbench()).rejects.toThrow("Workbench open or focus blocked while closing");
+    expect(main.focusCount).toBe(mainFocus);
+    expect(main.sentIpc).toEqual([]);
+    expect(provider.focusAndSendToWorkbenchOrigin("http://127.0.0.1:8001", "conversation:opened", {})).toBe(true);
+    await instanceTarget.focusWorkbench();
+    expect(instance.focusCount).toBe(instanceFocus + 2);
+    expect(instance.sentIpc).toHaveLength(1);
+    blocked = false;
+    expect(provider.focusAndSendToWorkbenchOrigin("http://127.0.0.1:8000", "conversation:opened", {})).toBe(true);
+  });
+
+  it("rejects open and focus while closing, then permits reopening", async () => {
+    let blocked = false;
+    const window = new FakeWindow(43, "", 4343);
+    const create = vi.fn(() => window);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createWorkbenchWindow: create,
+      shouldBlockWorkbenchOpen: () => blocked
+    });
+    await provider.openOrFocusWorkbench();
+    blocked = true;
+    await expect(provider.focusWorkbench()).rejects.toThrow("Workbench open or focus blocked while closing");
+    await expect(provider.openOrFocusWorkbench()).rejects.toThrow("Workbench open or focus blocked while closing");
+    expect(window.showCount).toBe(1);
+    expect(window.focusCount).toBe(1);
+    expect(create).toHaveBeenCalledOnce();
+
+    blocked = false;
+    await provider.openOrFocusWorkbench();
+    expect(window.showCount).toBe(2);
+    expect(window.focusCount).toBe(2);
+  });
+
+  it("blocks a pending and queued navigation before presentation and permits retry", async () => {
+    let blocked = false;
+    let release!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    const window = new FakeWindow(44, "", 4444);
+    const load = window.loadURL.bind(window);
+    const navigation = vi.spyOn(window, "loadURL").mockImplementationOnce(async url => {
+      await pending;
+      await load(url);
+    });
+    const create = vi.fn(() => window);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createWorkbenchWindow: create,
+      shouldBlockWorkbenchOpen: () => blocked
+    });
+    const first = provider.openOrFocusWorkbench();
+    await vi.waitFor(() => expect(navigation).toHaveBeenCalledOnce());
+    const second = provider.openOrFocusWorkbench("http://127.0.0.1:8002/");
+    const firstRejected = expect(first).rejects.toThrow("Workbench open or focus blocked while closing");
+    const secondRejected = expect(second).rejects.toThrow("Workbench open or focus blocked while closing");
+    blocked = true;
+    release();
+    await Promise.all([firstRejected, secondRejected]);
+    expect(window.loadedUrls).toEqual(["http://127.0.0.1:8000/"]);
+    expect(window.showCount).toBe(0);
+    expect(window.focusCount).toBe(0);
+    expect(create).toHaveBeenCalledOnce();
+
+    blocked = false;
+    await provider.openOrFocusWorkbench("http://127.0.0.1:8002/");
+    expect(window.showCount).toBe(1);
+    expect(window.focusCount).toBe(1);
+  });
+
+  it("does not create or present an error status if pending navigation fails while closing", async () => {
+    let blocked = false;
+    let rejectLoad!: (error: Error) => void;
+    const window = new FakeWindow(45, "", 4545);
+    const navigation = vi.spyOn(window, "loadURL").mockImplementationOnce(() => new Promise<void>((_, reject) => { rejectLoad = reject; }));
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createWorkbenchWindow: () => window,
+      shouldBlockWorkbenchOpen: () => blocked
+    });
+    const first = provider.openOrFocusWorkbench();
+    await vi.waitFor(() => expect(navigation).toHaveBeenCalledOnce());
+    const rejected = expect(first).rejects.toThrow("Workbench open or focus blocked while closing");
+    blocked = true;
+    rejectLoad(new Error("ERR_CONNECTION_REFUSED"));
+    await rejected;
+    expect(navigation).toHaveBeenCalledOnce();
+    expect(window.showCount).toBe(0);
+    expect(window.focusCount).toBe(0);
+  });
+
+  it("rechecks the gate when a queued open resumes after successful navigation", async () => {
+    let blocked = false;
+    let releaseReport!: () => void;
+    const reportPending = new Promise<void>(resolve => { releaseReport = resolve; });
+    const report = vi.fn(() => reportPending);
+    const window = new FakeWindow(46, "", 4646);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createWorkbenchWindow: () => window,
+      reportState: report,
+      shouldBlockWorkbenchOpen: () => blocked
+    });
+    const first = provider.openOrFocusWorkbench();
+    await vi.waitFor(() => expect(report).toHaveBeenCalledOnce());
+    const second = provider.openOrFocusWorkbench("http://127.0.0.1:8002/");
+    const firstRejected = expect(first).rejects.toThrow("Workbench open or focus blocked while closing");
+    const secondRejected = expect(second).rejects.toThrow("Workbench open or focus blocked while closing");
+    blocked = true;
+    releaseReport();
+    await firstRejected;
+    await secondRejected;
+    expect(window.loadedUrls).toEqual(["http://127.0.0.1:8000/"]);
+    expect(window.showCount).toBe(1);
+    expect(window.focusCount).toBe(1);
+  });
+});
+
 describe("Electron window provider state", () => {
   it("binds branch IPC and notification focus, click and attention to its registered WebContents", async () => {
     const main = new FakeWindow(42, "", 4242);
@@ -637,6 +767,70 @@ describe("Electron window provider state", () => {
     expect(isolated.closeCount).toBe(1);
     expect(closeRequests).toEqual([]);
     expect(provider.instanceWindowStates()).toEqual([]);
+  });
+
+  it("acknowledges an absent workbench without waiting for its state mirror", async () => {
+    const reportState = vi.fn(() => new Promise<void>(() => undefined));
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8002", { reportState });
+    let observed: { open: boolean } | undefined;
+    void provider.approveWorkbenchCloseOnce().then((state) => { observed = state; });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(observed?.open).toBe(false);
+    expect(reportState).toHaveBeenCalledOnce();
+  });
+
+  it("does not reopen from a queued navigation after close completes and reporting resumes", async () => {
+    let releaseReport!: () => void;
+    const reported = new Promise<void>((resolve) => { releaseReport = resolve; });
+    const window = new FakeWindow(47, "", 4747);
+    const create = vi.fn(() => window);
+    const reportState = vi.fn((state: { open: boolean }) => state.open ? reported : Promise.resolve());
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createWorkbenchWindow: create, reportState
+    });
+    const first = provider.openOrFocusWorkbench().catch((error: unknown) => error);
+    for (let i = 0; i < 8; i += 1) await Promise.resolve();
+    const second = provider.openOrFocusWorkbench().catch((error: unknown) => error);
+    await provider.approveWorkbenchCloseOnce();
+    releaseReport();
+    expect(await first).toBeInstanceOf(Error);
+    expect(await second).toBeInstanceOf(Error);
+    expect(create).toHaveBeenCalledOnce();
+    expect(window.isDestroyed()).toBe(true);
+  });
+
+  it("does not recreate an error window when an old navigation fails after close", async () => {
+    let rejectLoad!: (error: Error) => void;
+    const window = new FakeWindow(45, "", 4545);
+    const load = vi.spyOn(window, "loadURL").mockImplementationOnce(() => new Promise<void>((_, reject) => { rejectLoad = reject; }));
+    const create = vi.fn(() => window);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createWorkbenchWindow: create
+    });
+    const navigation = provider.openOrFocusWorkbench();
+    await Promise.resolve();
+    window.destroy();
+    rejectLoad(new Error("navigation interrupted"));
+    await expect(navigation).rejects.toThrow();
+    expect(create).toHaveBeenCalledOnce();
+    expect(load).toHaveBeenCalledOnce();
+    expect(window.showCount).toBe(0);
+  });
+
+  it("leaves a synchronously failing workbench close retryable", async () => {
+    const window = new FakeWindow(46, "", 4646);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createWorkbenchWindow: () => window
+    });
+    await provider.openOrFocusWorkbench();
+    const close = vi.spyOn(window, "close").mockImplementationOnce(() => { throw new Error("close failed"); });
+    window.destroyError = new Error("destroy failed");
+    expect((await provider.approveWorkbenchCloseOnce()).open).toBe(true);
+    expect(provider.isWorkbenchCloseInFlight()).toBe(false);
+    close.mockRestore();
+    window.destroyError = null;
+    expect((await provider.approveWorkbenchCloseOnce()).open).toBe(false);
   });
 
   it("retains and reports an isolated window when forced destruction fails, then allows retry", async () => {

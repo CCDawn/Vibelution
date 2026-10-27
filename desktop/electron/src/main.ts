@@ -283,6 +283,7 @@ import {
 import { installBrokenPipeGuards } from "./runtime/brokenPipeGuard.js";
 import {
   MainWorkbenchCloseTransactionStore,
+  isWorkbenchStartBlockedByClose,
   type MainWorkbenchCloseTransaction
 } from "./lifecycle/workbenchCloseTransactionStore.js";
 
@@ -450,6 +451,9 @@ let projectControlPlaneAutomaticLifecycle = true;
 let projectControlPlaneRecoveryNotBefore: number | undefined;
 let projectControlPlaneObserversStarted = false;
 let pendingWorkbenchCloseAck: PendingWorkbenchCloseAck | null = null;
+let workbenchFailedCloseHandling = false;
+let workbenchCloseGeneration = 0;
+const workbenchOpenControllers = new Set<AbortController>();
 let workbenchCloseBackendStopInFlight: Promise<void> | null = null;
 let mainRuntimeShutdownInFlight: Promise<void> | null = null;
 let electronStartupStage = "electron_process_ready";
@@ -792,6 +796,9 @@ function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapR
       },
       shouldInterceptLauncherClose: () => !shutdownApproved,
       shouldInterceptWorkbenchClose: () => !shutdownApproved,
+      shouldBlockWorkbenchOpen: () => workbenchFailedCloseHandling || isWorkbenchStartBlockedByClose(
+        hasBackgroundWorkbenchRetirement(paths.workspaceRoot), mainWorkbenchCloseStore.currentTransaction(),
+        pendingWorkbenchCloseAck !== null),
       shouldInterceptInstanceClose: () => !shutdownApproved,
       onWorkbenchCloseRequest: () =>
         requestTransactionalWorkbenchClose(paths, bootstrap).catch((error: unknown) =>
@@ -1222,10 +1229,21 @@ async function openWorkbenchAtCurrentLauncherUrl(
   payload: Record<string, unknown> = {}
 ): Promise<ManagedWindowState> {
   let workbenchUrl = "";
+  const openCloseGeneration = workbenchCloseGeneration;
+  const openController = new AbortController();
+  workbenchOpenControllers.add(openController);
+  const assertCurrentOpen = (): void => {
+    if (openCloseGeneration !== workbenchCloseGeneration || workbenchFailedCloseHandling
+        || isWorkbenchStartBlockedByClose(hasBackgroundWorkbenchRetirement(paths.workspaceRoot),
+          mainWorkbenchCloseStore.currentTransaction(), pendingWorkbenchCloseAck !== null)) {
+      throw new Error("Workbench open superseded by close");
+    }
+  };
   const previousWorkbenchUrl = currentWorkbenchUrl;
   electronStartupStage = "workbench_navigation";
   const stageStartedAtMs = markWorkbenchOpenRequested();
   try {
+    assertCurrentOpen();
     // A desktop action belongs to the already registered Electron session. Running
     // bootstrap again here can rotate the local control token that this session
     // uses to acknowledge actions, report window state, and close atomically.
@@ -1241,9 +1259,17 @@ async function openWorkbenchAtCurrentLauncherUrl(
       await ensureWorkbenchBackendReady({
         workspaceRoot: paths.workspaceRoot,
         workbenchUrl,
-        startLifecycle: () => orchestrateLauncherLifecycle("start", { schemaVersion: 1, path: "open-workbench" })
+        startLifecycle: async () => {
+          assertCurrentOpen();
+          const result = await orchestrateLauncherLifecycle("start", { schemaVersion: 1, path: "open-workbench" },
+            "operator", openController.signal, undefined, false, () => openCloseGeneration === workbenchCloseGeneration);
+          assertCurrentOpen();
+          if (!result.accepted) throw new Error(result.message || result.code || "Workbench start was not accepted.");
+          return result;
+        }
       });
     } catch (gateError: unknown) {
+      assertCurrentOpen();
       const gateDetail = gateError instanceof Error ? gateError.message : String(gateError);
       await provider.presentWorkbenchErrorStatus({
         origin: safeOrigin(workbenchUrl),
@@ -1252,6 +1278,7 @@ async function openWorkbenchAtCurrentLauncherUrl(
       });
       throw gateError instanceof Error ? gateError : new Error(gateDetail);
     }
+    assertCurrentOpen();
     const state = payload.present === false
       ? await provider.openOrFocusWorkbench(workbenchUrl, { present: false })
       : await provider.openOrFocusWorkbench(workbenchUrl);
@@ -1289,6 +1316,8 @@ async function openWorkbenchAtCurrentLauncherUrl(
       }
     });
     throw error;
+  } finally {
+    workbenchOpenControllers.delete(openController);
   }
 }
 
@@ -1672,6 +1701,8 @@ async function requestTransactionalWorkbenchClose(
   if (provider === null || bootstrap === null) {
     throw new Error("Electron Workbench close transaction requires an active Launcher bootstrap.");
   }
+  workbenchCloseGeneration += 1;
+  for (const controller of workbenchOpenControllers) controller.abort();
   const requestedAtMs = performance.now();
   const requestedAt = Date.now();
   const retireFrontendBuilds = captureFrontendBuildRetirement(paths.workspaceRoot);
@@ -1704,23 +1735,86 @@ async function requestTransactionalWorkbenchClose(
       // Admission persists stopping and captures exact resources. The window
       // ACK is independent of their eventual, strictly verified retirement.
       const admissionDeadline = createDesktopShellExitDeadline(Math.max(1, fastCloseTiming.deadlineAt - Date.now()));
+      let admissionNeedsRetry = false;
       try {
         await withDesktopShellExitTimeout((signal) => stopWorkbenchBackend(paths, bootstrap, transaction, signal, fastCloseTiming),
           admissionDeadline, "workbench close admission");
       } catch (error: unknown) {
-        mainWorkbenchCloseStore.fail(transaction.closeId, "backend_stop_admission_failed",
-          error instanceof Error ? error.message : String(error));
-        throw error;
+        if (!isWorkbenchCloseControlFetchFailure(error)) {
+          mainWorkbenchCloseStore.fail(transaction.closeId, "backend_stop_admission_failed",
+            error instanceof Error ? error.message : String(error));
+          // No window close was authorized yet. A native window close request
+          // will enter the failure handler; an action with no window must not
+          // leave a phantom acknowledgement that blocks every future start.
+          workbenchFailedCloseHandling = provider.isWorkbenchCloseInFlight();
+          if (!workbenchFailedCloseHandling && pendingWorkbenchCloseAck?.closeId === transaction.closeId) {
+            pendingWorkbenchCloseAck = null;
+          }
+          throw error;
+        }
+        // A timeout does not prove that the stop was admitted. Keep the same
+        // transaction pending and retry after closing the window; never claim
+        // closure from the missing acknowledgement.
+        admissionNeedsRetry = true;
       } finally {
         admissionDeadline.dispose();
       }
       if (!launcherStateStore.markMainRetirementPending(projectionEpoch)) {
         mainWorkbenchCloseStore.fail(transaction.closeId, "lifecycle_intent_superseded", "A newer lifecycle superseded this close.");
+        if (pendingWorkbenchCloseAck?.closeId === transaction.closeId) pendingWorkbenchCloseAck = null;
         return;
       }
       transaction = mainWorkbenchCloseStore.authorizeWindowBeforeBackendStopped(transaction.closeId);
-      const owner = getBackgroundWorkbenchRetirement(paths.workspaceRoot);
       const ownedStop = (async (): Promise<void> => {
+        let admissionPendingReported = false;
+        while (admissionNeedsRetry && launcherStateStore.isMainLifecycleCurrent(projectionEpoch)) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 250));
+          if (!launcherStateStore.isMainLifecycleCurrent(projectionEpoch)) break;
+          // The original timed-out request may have admitted the exact owned
+          // retirement after its caller stopped waiting. Join it rather than
+          // starting a second stop that could supersede its generation.
+          if (getBackgroundWorkbenchRetirement(paths.workspaceRoot)?.status === "pending") {
+            admissionNeedsRetry = false;
+            break;
+          }
+          const retryStarted = Date.now();
+          const retryDeadline = createDesktopShellExitDeadline(WORKBENCH_CLOSE_BACKEND_WAIT_MS);
+          try {
+            await withDesktopShellExitTimeout((signal) => stopWorkbenchBackend(paths, bootstrap, transaction, signal, {
+              deadlineAt: retryStarted + WORKBENCH_CLOSE_BACKEND_WAIT_MS,
+              forceAt: retryStarted + WORKBENCH_CLOSE_FORCE_AFTER_MS,
+              background: { retireFrontendBuilds }
+            }, () => launcherStateStore.isMainLifecycleCurrent(projectionEpoch)), retryDeadline, "background close admission");
+            admissionNeedsRetry = false;
+          } catch (error: unknown) {
+            if (getBackgroundWorkbenchRetirement(paths.workspaceRoot)?.status === "pending") {
+              admissionNeedsRetry = false;
+            } else if (!isWorkbenchCloseControlFetchFailure(error)) {
+              launcherStateStore.releaseMainRetirementPending(projectionEpoch);
+              const failed = mainWorkbenchCloseStore.fail(transaction.closeId, "backend_stop_admission_failed",
+                error instanceof Error ? error.message : String(error));
+              if (failed.windowAcknowledged && pendingWorkbenchCloseAck?.closeId === transaction.closeId) {
+                await acknowledgeTransactionalWorkbenchClose(paths, bootstrap);
+              }
+              notifyDesktopTray("Vibelution", "后台回收未完成；请查看 Launcher 状态后重试。", "warning");
+              return;
+            } else if (!admissionPendingReported) {
+              admissionPendingReported = true;
+              recordSupervisorEventFallbackLocally({ eventCode: "electron.workbench_close.background_admission_pending",
+                message: "Workbench closed; backend retirement admission remains unconfirmed.",
+                fields: { closeId: transaction.closeId, detail: String(error instanceof Error ? error.message : error).slice(0, 300) } });
+            }
+          } finally {
+            retryDeadline.dispose();
+          }
+        }
+        if (!launcherStateStore.isMainLifecycleCurrent(projectionEpoch)) {
+          launcherStateStore.releaseMainRetirementPending(projectionEpoch);
+          mainWorkbenchCloseStore.fail(transaction.closeId, "lifecycle_intent_superseded", "A newer lifecycle superseded this close.");
+          if (pendingWorkbenchCloseAck?.closeId === transaction.closeId) pendingWorkbenchCloseAck = null;
+          return;
+        }
+        const owner = getBackgroundWorkbenchRetirement(paths.workspaceRoot);
         if (owner && await owner.completion !== "closed") {
           launcherStateStore.releaseMainRetirementPending(projectionEpoch);
           mainWorkbenchCloseStore.fail(transaction.closeId, "lifecycle_intent_superseded", "Background retirement was superseded.");
@@ -1775,7 +1869,32 @@ async function requestTransactionalWorkbenchClose(
       }).finally(() => {
         if (workbenchCloseBackendStopInFlight === ownedStop) workbenchCloseBackendStopInFlight = null;
       });
-      await provider.approveWorkbenchCloseOnce({ deadlineAt: requestedAt + WORKBENCH_CLOSE_TOTAL_WAIT_MS });
+      const windowState = await provider.approveWorkbenchCloseOnce({ deadlineAt: requestedAt + WORKBENCH_CLOSE_TOTAL_WAIT_MS });
+      if (windowState?.open === true) {
+        notifyDesktopTray("Vibelution", "工作台窗口未能关闭，后台仍在处理；完成后可重试。", "warning");
+        // Do not release the start gate while the captured backend is still
+        // being retired. Once it settles, surface the failed window close and
+        // allow a fresh explicit retry without claiming window acknowledgement.
+        void ownedStop.then(() => {
+          const current = mainWorkbenchCloseStore.get(transaction.closeId);
+          if (current?.phase === "failed" && pendingWorkbenchCloseAck?.closeId === transaction.closeId) {
+            pendingWorkbenchCloseAck = null;
+          }
+          if (current && current.phase !== "succeeded" && current.phase !== "failed"
+              && launcherStateStore.isMainLifecycleCurrent(projectionEpoch)) {
+            mainWorkbenchCloseStore.fail(transaction.closeId, "window_close_failed", "Workbench window remains open.");
+            launcherStateStore.releaseMainRetirementPending(projectionEpoch);
+            if (pendingWorkbenchCloseAck?.closeId === transaction.closeId) pendingWorkbenchCloseAck = null;
+          }
+        }).catch(() => undefined);
+        return;
+      }
+      // No BrowserWindow means no 'closed' event will arrive. Reuse the same
+      // acknowledgement only after the provider confirms the window is absent.
+      if (windowState?.open === false && pendingWorkbenchCloseAck?.closeId === transaction.closeId
+          && !transaction.windowAcknowledged) {
+        await acknowledgeTransactionalWorkbenchClose(paths, bootstrap);
+      }
       return;
     }
     const closeDeadline = createDesktopShellExitDeadline(fastCloseTiming
@@ -1862,8 +1981,17 @@ async function requestTransactionalWorkbenchClose(
         elapsedMs: Math.max(0, Math.round(performance.now() - requestedAtMs))
       }
     });
-    await provider.approveWorkbenchCloseOnce(fastCloseTiming
+    const windowState = await provider.approveWorkbenchCloseOnce(fastCloseTiming
       ? { deadlineAt: requestedAt + WORKBENCH_CLOSE_TOTAL_WAIT_MS } : {});
+    if (windowState?.open === true) {
+      mainWorkbenchCloseStore.fail(transaction.closeId, "window_close_failed", "Workbench window remains open.");
+      if (pendingWorkbenchCloseAck?.closeId === transaction.closeId) pendingWorkbenchCloseAck = null;
+      throw new Error("Workbench window remains open.");
+    }
+    if (windowState?.open === false && pendingWorkbenchCloseAck?.closeId === transaction.closeId
+        && !transaction.windowAcknowledged) {
+      await acknowledgeTransactionalWorkbenchClose(paths, bootstrap);
+    }
   });
 }
 
@@ -1872,7 +2000,8 @@ async function stopWorkbenchBackend(
   bootstrap: LauncherBootstrapResult,
   transaction: MainWorkbenchCloseTransaction,
   signal?: AbortSignal,
-  fastCloseTiming?: WorkbenchCloseTiming
+  fastCloseTiming?: WorkbenchCloseTiming,
+  lifecycleCurrent?: () => boolean
 ): Promise<void> {
   void paths;
   void bootstrap;
@@ -1894,7 +2023,7 @@ async function stopWorkbenchBackend(
     // A force close is an explicitly confirmed destructive operator intent and
     // keeps the original supersede semantics; a normal window close must not
     // abort an in-flight restart.
-  }, transaction.mode === "force" ? "operator" : "window-close", signal, fastCloseTiming);
+  }, transaction.mode === "force" ? "operator" : "window-close", signal, fastCloseTiming, false, lifecycleCurrent);
   if (!result.accepted) {
     throw new Error(result.message || result.code || `Workbench ${operation} was not accepted.`);
   }
@@ -2069,41 +2198,60 @@ async function handleTransactionalWorkbenchCloseFailure(
   bootstrap: LauncherBootstrapResult | null,
   error: unknown
 ): Promise<void> {
-  const message = error instanceof Error ? error.message : String(error);
-  recordSupervisorEventFallbackLocally({
-    eventCode: "electron.workbench_close.failed",
-    message: "Workbench close transaction failed before Electron window authorization.",
-    fields: { error: message.slice(0, 300), workspaceRoot: paths.workspaceRoot }
-  });
-  const provider = windowProvider;
-  if (provider === null) {
-    console.warn(message);
-    return;
-  }
-  if (isWorkbenchCloseControlFetchFailure(error)) {
+  workbenchFailedCloseHandling = true;
+  let retryScheduled = false;
+  try {
+    const message = error instanceof Error ? error.message : String(error);
     recordSupervisorEventFallbackLocally({
-      eventCode: "electron.workbench_close.fail_open_destroy",
-      message: "Workbench close control fetch failed; Electron is destroying the window.",
+      eventCode: "electron.workbench_close.failed",
+      message: "Workbench close transaction failed before Electron window authorization.",
       fields: { error: message.slice(0, 300), workspaceRoot: paths.workspaceRoot }
     });
-    await provider.approveWorkbenchCloseOnce();
-    return;
+    const provider = windowProvider;
+    if (provider === null) {
+      console.warn(message);
+      return;
+    }
+    const closeFailedWindow = async (): Promise<void> => {
+      const state = await provider.approveWorkbenchCloseOnce();
+      const failed = mainWorkbenchCloseStore.currentTransaction();
+      if (state.open === false && failed?.phase === "failed" && pendingWorkbenchCloseAck?.closeId === failed.closeId) {
+        await acknowledgeTransactionalWorkbenchClose(paths, bootstrap);
+      } else if (state.open && failed?.phase === "failed" && pendingWorkbenchCloseAck?.closeId === failed.closeId) {
+        pendingWorkbenchCloseAck = null;
+        notifyDesktopTray("Vibelution", "工作台窗口未能关闭，后台回收也未完成；可检查状态后重试。", "warning");
+      }
+    };
+    if (isWorkbenchCloseControlFetchFailure(error)) {
+      recordSupervisorEventFallbackLocally({
+        eventCode: "electron.workbench_close.fail_open_destroy",
+        message: "Workbench close control fetch failed; Electron is destroying the window.",
+        fields: { error: message.slice(0, 300), workspaceRoot: paths.workspaceRoot }
+      });
+      await closeFailedWindow();
+      return;
+    }
+    const retry = await confirmWorkbenchCloseRetry(provider, message);
+    if (!retry) {
+      recordSupervisorEventFallbackLocally({
+        eventCode: "electron.workbench_close.fail_open_user_declined",
+        message: "Workbench close transaction failed and retry was declined; closing the window while the backend may keep running.",
+        fields: { error: message.slice(0, 300), workspaceRoot: paths.workspaceRoot }
+      });
+      await closeFailedWindow();
+      return;
+    }
+    setTimeout(() => {
+      const retry = requestTransactionalWorkbenchClose(paths, bootstrap);
+      workbenchFailedCloseHandling = false;
+      void retry.catch((retryError: unknown) =>
+        handleTransactionalWorkbenchCloseFailure(paths, bootstrap, retryError)
+      );
+    }, 0);
+    retryScheduled = true;
+  } finally {
+    if (!retryScheduled) workbenchFailedCloseHandling = false;
   }
-  const retry = await confirmWorkbenchCloseRetry(provider, message);
-  if (!retry) {
-    recordSupervisorEventFallbackLocally({
-      eventCode: "electron.workbench_close.fail_open_user_declined",
-      message: "Workbench close transaction failed and retry was declined; closing the window while the backend may keep running.",
-      fields: { error: message.slice(0, 300), workspaceRoot: paths.workspaceRoot }
-    });
-    await provider.approveWorkbenchCloseOnce();
-    return;
-  }
-  setTimeout(() => {
-    void requestTransactionalWorkbenchClose(paths, bootstrap).catch((retryError: unknown) =>
-      handleTransactionalWorkbenchCloseFailure(paths, bootstrap, retryError)
-    );
-  }, 0);
 }
 
 function launcherLifecyclePayloadBody(payload: LauncherIpcInvokePayload): Record<string, unknown> {
@@ -3895,7 +4043,8 @@ async function orchestrateLauncherLifecycle(
   provenance: LauncherLifecycleProvenance = "operator",
   signal?: AbortSignal,
   fastCloseTiming?: WorkbenchCloseTiming,
-  nativeColdStart = false
+  nativeColdStart = false,
+  lifecycleCurrent?: () => boolean
 ): Promise<OrchestratedLifecycleResult> {
   if (launcherBootstrap === null) {
     throw new Error("Launcher backend is not available.");
@@ -3903,6 +4052,7 @@ async function orchestrateLauncherLifecycle(
   if (nativeColdStart && shutdownApproved) {
     throw new Error("Desktop shell is shutting down.");
   }
+  if (lifecycleCurrent && !lifecycleCurrent()) return supersededLifecycleResult(operation);
   const forceAuthorization = await authorizeLauncherForceLifecycle({
     operation,
     instanceId: "main",
@@ -3921,9 +4071,10 @@ async function orchestrateLauncherLifecycle(
   const startsWorkbench = supervisedOperation === "start"
     || supervisedOperation === "restart"
     || supervisedOperation === "rebuild-and-start";
-  const pendingClose = mainWorkbenchCloseStore.currentTransaction();
-  if (startsWorkbench && (hasBackgroundWorkbenchRetirement(paths.workspaceRoot)
-    || pendingClose && ["backend_closing", "background_closing", "window_close_authorized"].includes(pendingClose.phase))) {
+  const closeBlocksStart = (): boolean => workbenchFailedCloseHandling
+    || isWorkbenchStartBlockedByClose(hasBackgroundWorkbenchRetirement(paths.workspaceRoot),
+      mainWorkbenchCloseStore.currentTransaction(), pendingWorkbenchCloseAck !== null);
+  if (startsWorkbench && closeBlocksStart()) {
     return { schemaVersion: 1, accepted: false, operation, code: "backend_retiring",
       message: "后台进程仍在回收，请等待 Launcher 确认停止。" };
   }
@@ -3958,6 +4109,13 @@ async function orchestrateLauncherLifecycle(
     await waitForInFlightRestartSettlement("main", WORKBENCH_CLOSE_RESTART_JOIN_WAIT_MS, signal);
   }
   signal?.throwIfAborted();
+  if (lifecycleCurrent && !lifecycleCurrent()) return supersededLifecycleResult(operation);
+  // A close can be admitted while the native readiness check is awaiting I/O.
+  // Recheck immediately before acquiring the intent that could supersede it.
+  if (startsWorkbench && closeBlocksStart()) {
+    return { schemaVersion: 1, accepted: false, operation, code: "backend_retiring",
+      message: "后台进程仍在回收，请等待 Launcher 确认停止。" };
+  }
   const begunIntent = launcherLifecycleSupervisor.beginIntentWithOptions(
     { instanceId: "main", operation: lifecycleOperation, desiredState },
     { joinInFlightRestart: stopJoinDecision.joinInFlightRestart }

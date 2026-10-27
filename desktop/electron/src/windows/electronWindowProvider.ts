@@ -70,6 +70,7 @@ export type ElectronWindowProviderOptions = {
   reportState?: (state: ManagedWindowState) => void | Promise<void>;
   shouldInterceptLauncherClose?: () => boolean;
   shouldInterceptWorkbenchClose?: () => boolean;
+  shouldBlockWorkbenchOpen?: () => boolean;
   shouldInterceptInstanceClose?: (instanceId: string) => boolean;
   onWorkbenchCloseRequest?: () => void | Promise<void>;
   onWorkbenchClosed?: () => void | Promise<void>;
@@ -124,6 +125,7 @@ type InstanceWorkbenchEntry = {
 };
 
 export class ElectronWindowProvider {
+  private workbenchCloseGeneration = 0;
   private launcherWindow: ElectronWindowLike | null = null;
   private workbenchWindow: ElectronWindowLike | null = null;
   private petWindow: ElectronWindowLike | null = null;
@@ -134,6 +136,7 @@ export class ElectronWindowProvider {
   private readonly reportState: (state: ManagedWindowState) => void | Promise<void>;
   private readonly shouldInterceptLauncherClose: () => boolean;
   private readonly shouldInterceptWorkbenchClose: () => boolean;
+  private readonly shouldBlockWorkbenchOpen: () => boolean;
   private readonly shouldInterceptInstanceClose: (instanceId: string) => boolean;
   private readonly onWorkbenchCloseRequest: () => void | Promise<void>;
   private readonly onWorkbenchClosed: () => void | Promise<void>;
@@ -174,6 +177,7 @@ export class ElectronWindowProvider {
     this.reportState = options.reportState ?? (() => undefined);
     this.shouldInterceptLauncherClose = options.shouldInterceptLauncherClose ?? (() => false);
     this.shouldInterceptWorkbenchClose = options.shouldInterceptWorkbenchClose ?? (() => false);
+    this.shouldBlockWorkbenchOpen = options.shouldBlockWorkbenchOpen ?? (() => false);
     this.shouldInterceptInstanceClose = options.shouldInterceptInstanceClose
       ?? (options.onInstanceCloseRequest ? (() => true) : (() => false));
     this.onWorkbenchCloseRequest = options.onWorkbenchCloseRequest ?? (() => undefined);
@@ -308,14 +312,17 @@ export class ElectronWindowProvider {
 
   /** Navigate/report normally; present=false only suppresses this call's restore/show/focus. */
   async openOrFocusWorkbench(workbenchUrl = this.workbenchUrl, options: { present?: boolean } = {}): Promise<ManagedWindowState> {
+    const generation = this.workbenchCloseGeneration;
+    this.assertWorkbenchOpenAllowed(generation);
     const safeUrl = localWorkbenchUrl(workbenchUrl);
     this.workbenchUrl = safeUrl;
     if (this.workbenchNavigation !== null) {
       await this.workbenchNavigation;
+      this.assertWorkbenchOpenAllowed(generation);
       return this.openOrFocusWorkbench(safeUrl, options);
     }
 
-    const navigation = Promise.resolve().then(() => this.navigateWorkbench(safeUrl, options.present !== false));
+    const navigation = Promise.resolve().then(() => this.navigateWorkbench(safeUrl, options.present !== false, generation));
     this.workbenchNavigation = navigation;
     try {
       return await navigation;
@@ -496,6 +503,7 @@ export class ElectronWindowProvider {
   }
 
   async focusWorkbench(): Promise<ManagedWindowState> {
+    this.assertWorkbenchOpenAllowed();
     this.reconcileCurrentWorkbenchWindow();
     if (!this.workbenchWindow || this.workbenchWindow.isDestroyed()) {
       return this.reportAndReturn(closedWindowState("workbench"));
@@ -534,7 +542,12 @@ export class ElectronWindowProvider {
     const live = () => this.trustedWorkbenchOrigin(sender, senderUrl) === origin;
     return {
       isWorkbenchFocused: () => live() && window.isFocused(),
-      focusWorkbench: async () => { if (live()) presentElectronWindow(window); },
+      focusWorkbench: async () => {
+        if (live()) {
+          if (window === this.workbenchWindow) this.assertWorkbenchOpenAllowed();
+          presentElectronWindow(window);
+        }
+      },
       sendToWorkbench: (channel: string, payload: unknown) => {
         if (!live() || !sender.send) return false;
         sender.send(channel, payload);
@@ -578,6 +591,7 @@ export class ElectronWindowProvider {
     }
     if (matches.size !== 1) return false;
     const [[window, readyUrl]] = matches;
+    if (window === this.workbenchWindow && this.shouldBlockWorkbenchOpen()) return false;
     try {
       presentElectronWindow(window);
       if (!matchesOrigin(window, readyUrl)) return false;
@@ -674,19 +688,34 @@ export class ElectronWindowProvider {
       this.requestWorkbenchCloseTransaction();
       return this.stateFor("workbench");
     }
+    this.workbenchCloseGeneration += 1;
     workbenchWindow.close();
     return this.stateFor("workbench");
   }
 
   async approveWorkbenchCloseOnce(options: { deadlineAt?: number } = {}): Promise<ManagedWindowState> {
+    this.workbenchCloseGeneration += 1;
     this.reconcileCurrentWorkbenchWindow();
     const workbenchWindow = this.workbenchWindow;
     if (!workbenchWindow || workbenchWindow.isDestroyed()) {
       this.discardExtraWorkbenchWindows(this.listLiveWorkbenchWindows(), null);
-      return this.reportAndReturn(closedWindowState("workbench"));
+      const state = closedWindowState("workbench");
+      // A delayed session mirror cannot delay acknowledgement of a window
+      // that is already absent. Reporting remains best-effort and async.
+      try { void Promise.resolve(this.reportState(state)).catch(() => undefined); } catch { /* best-effort */ }
+      return state;
     }
     this.workbenchCloseAuthorized = true;
-    workbenchWindow.close();
+    try {
+      workbenchWindow.close();
+    } catch {
+      try { workbenchWindow.destroy(); } catch { /* keep the live window retryable */ }
+      if (!workbenchWindow.isDestroyed()) {
+        this.workbenchCloseAuthorized = false;
+        this.workbenchCloseInFlight = false;
+        return this.stateFor("workbench");
+      }
+    }
     if (!workbenchWindow.isDestroyed()) {
       const remainingMs = typeof options.deadlineAt === "number" && Number.isFinite(options.deadlineAt)
         ? Math.max(0, options.deadlineAt - Date.now())
@@ -957,7 +986,8 @@ export class ElectronWindowProvider {
     window.on("session-end", () => this.onOsSessionEnd("session-end", role));
   }
 
-  private async navigateWorkbench(safeUrl: string, present = true): Promise<ManagedWindowState> {
+  private async navigateWorkbench(safeUrl: string, present = true, generation = this.workbenchCloseGeneration): Promise<ManagedWindowState> {
+    this.assertWorkbenchOpenAllowed(generation);
     let workbenchWindow = this.reconcileCurrentWorkbenchWindow();
     if (!workbenchWindow || workbenchWindow.isDestroyed()) {
       workbenchWindow = this.createWorkbenchWindow(safeUrl, this.paths);
@@ -977,6 +1007,10 @@ export class ElectronWindowProvider {
         }
         this.workbenchReadyUrl = safeUrl;
       } catch (error: unknown) {
+        this.assertWorkbenchOpenAllowed(generation);
+        if (workbenchWindow.isDestroyed() || this.workbenchWindow !== workbenchWindow) {
+          throw navigationFailure(safeUrl, error);
+        }
         // Never destroy the window out from under the user (a one-frame flash
         // with no explanation). Keep it alive, present the bilingual error
         // document, and rethrow the original failure so the desktop action
@@ -985,15 +1019,18 @@ export class ElectronWindowProvider {
           origin: originOfUrl(safeUrl),
           detail: navigationFailureDetail(error),
           present
-        });
+        }, generation);
         throw navigationFailure(safeUrl, error);
       }
     }
 
+    this.assertWorkbenchOpenAllowed(generation);
     if (present) {
       presentElectronWindow(workbenchWindow);
     }
-    return this.reportAndReturn(this.stateFor("workbench"));
+    const state = await this.reportAndReturn(this.stateFor("workbench"));
+    this.assertWorkbenchOpenAllowed(generation);
+    return state;
   }
 
   /**
@@ -1005,7 +1042,8 @@ export class ElectronWindowProvider {
    * document cannot load, the window stays hidden rather than masking the
    * original failure.
    */
-  async presentWorkbenchErrorStatus(input: { origin: string; detail: string; present?: boolean }): Promise<ManagedWindowState> {
+  async presentWorkbenchErrorStatus(input: { origin: string; detail: string; present?: boolean }, generation = this.workbenchCloseGeneration): Promise<ManagedWindowState> {
+    this.assertWorkbenchOpenAllowed(generation);
     let workbenchWindow = this.reconcileCurrentWorkbenchWindow();
     if (!workbenchWindow || workbenchWindow.isDestroyed()) {
       workbenchWindow = this.createWorkbenchWindow(this.workbenchUrl, this.paths);
@@ -1019,10 +1057,20 @@ export class ElectronWindowProvider {
     } catch {
       // The error document is best-effort; never mask the original failure.
     }
+    this.assertWorkbenchOpenAllowed(generation);
+    if (workbenchWindow.isDestroyed() || this.workbenchWindow !== workbenchWindow) {
+      throw new Error("Workbench window closed before error status completed");
+    }
     if (input.present !== false) {
       presentElectronWindow(workbenchWindow);
     }
     return this.reportAndReturn(this.stateFor("workbench"));
+  }
+
+  private assertWorkbenchOpenAllowed(generation = this.workbenchCloseGeneration): void {
+    if (generation !== this.workbenchCloseGeneration || this.shouldBlockWorkbenchOpen()) {
+      throw new Error("Workbench open or focus blocked while closing");
+    }
   }
 
   /**
@@ -1050,6 +1098,7 @@ export class ElectronWindowProvider {
     if (this.workbenchCloseInFlight) {
       return;
     }
+    this.workbenchCloseGeneration += 1;
     this.workbenchCloseInFlight = true;
     void Promise.resolve(this.onWorkbenchCloseRequest()).finally(() => {
       if (!this.workbenchCloseAuthorized) {

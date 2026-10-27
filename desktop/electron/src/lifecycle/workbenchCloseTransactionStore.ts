@@ -21,6 +21,16 @@ export type MainWorkbenchCloseTransaction = {
   message?: string;
 };
 
+/** A failed backend retirement does not release a still-closing window. */
+export function isWorkbenchStartBlockedByClose(
+  retirementPending: boolean,
+  transaction: MainWorkbenchCloseTransaction | null,
+  windowAcknowledgementPending: boolean
+): boolean {
+  return retirementPending || windowAcknowledgementPending || Boolean(transaction
+    && ["backend_closing", "background_closing", "window_close_authorized"].includes(transaction.phase));
+}
+
 export class MainWorkbenchCloseTransactionStore {
   private current: MainWorkbenchCloseTransaction | null = null;
 
