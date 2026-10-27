@@ -607,8 +607,8 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
         const showReminderFallback = (notice: { title: string; body: string }) => {
           const shown = reminderDialogTail.then(() => {
             if (shutdownApproved) throw new Error("ASSISTANT_STOPPED");
-            return dialog.showMessageBox({ type: "info", title: notice.title, message: notice.body || "已到期",
-              buttons: ["打开助理", "稍后"], defaultId: 0, cancelId: 1, noLink: true });
+            if (!launcherAssistantWindow) throw new Error("ASSISTANT_WINDOW_UNAVAILABLE");
+            return launcherAssistantWindow.showReminder(notice);
           });
           reminderDialogTail = shown.then(() => undefined, () => undefined);
           return shown;

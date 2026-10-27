@@ -60,6 +60,17 @@ export class AssistantWindow {
     return this.themeControl.request(window.webContents, input, signal);
   }
 
+  /** Show a native fallback on the resident assistant, including when hidden. */
+  async showReminder(notice: { title: string; body: string }): Promise<{ response: number }> {
+    await this.open({ show: true });
+    const window = this.window;
+    if (this.isQuitting() || !window || window.isDestroyed()) throw new Error("ASSISTANT_WINDOW_UNAVAILABLE");
+    return await dialog.showMessageBox(window, {
+      type: "info", title: notice.title, message: notice.body || "已到期",
+      buttons: ["打开助理", "稍后"], defaultId: 0, cancelId: 1, noLink: true,
+    });
+  }
+
   acceptThemeResult(event: Parameters<typeof invokeAssistant>[0], payload: unknown): boolean {
     return this.themeControl.acceptResult(event, payload);
   }
