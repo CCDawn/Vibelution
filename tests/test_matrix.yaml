@@ -67,13 +67,10 @@ rules:
       - "scripts/assistant_migration_inventory.py"
       - "scripts/assistant_migration_activate.py"
       - "tests/test_assistant_migration*.py"
-      - "tests/test_assistant_online_history.py"
-      - "tests/test_assistant_reminder_receipts.py"
       - "tests/test_assistant_history_actions.py"
       - "tests/test_assistant_legacy*.py"
       - "tests/test_external_management*.py"
     commands:
-      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_assistant_online_history.py tests/test_assistant_reminder_receipts.py -q"
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_assistant_migration_inventory.py tests/test_assistant_migration_io.py tests/test_assistant_migration_history.py tests/test_assistant_migration_paths.py tests/test_assistant_migration_source_archive.py tests/test_assistant_migration_cli.py tests/test_assistant_migration_native_joint.py tests/test_assistant_migration_profile.py tests/test_assistant_migration_active.py tests/test_assistant_migration_affairs.py tests/test_assistant_migration_episodic.py tests/test_assistant_migration_knowledge.py tests/test_assistant_migration_recovery_bindings.py tests/test_assistant_migration_reminders.py tests/test_assistant_history_actions.py tests/test_assistant_legacy_handoff.py tests/test_assistant_legacy_correlation.py tests/test_assistant_legacy_navigation.py tests/test_external_management_legacy_observation.py tests/test_external_agent_backend_client.py tests/test_external_management_documentation.py tests/test_assistant_runtime_local_actions.py tests/test_assistant_runtime_actions.py tests/test_assistant_runtime_management.py tests/test_assistant_runtime_native.py tests/test_assistant_runtime_personal.py tests/test_session_agent_runtime.py -q"
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_external_management_session_pin.py tests/test_external_management_team.py tests/test_external_management_session_parameters.py tests/test_external_management_avatar.py tests/test_external_management_directory_api.py tests/test_external_management_authorization_upgrade.py tests/test_external_management_agent_archive.py tests/test_external_management_workspace.py tests/test_external_management_workspace_queries.py -q"
   - id: owned-runtime-shutdown
