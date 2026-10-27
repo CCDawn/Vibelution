@@ -44,7 +44,7 @@ function fixture() {
   };
   const context: Record<string, any> = {
     launcherAssistantStarting: null, launcherAssistantHost: null, launcherAssistantWindow: null,
-    launcherAssistantProjects: null, pendingAssistantOpen: null,
+    launcherAssistantProjects: null, stopLauncherAssistantReminders: null, pendingAssistantOpen: null,
     launcherAssistantExitReady: false, desktopTray: null, assistantOnly: true, shutdownApproved: false,
     app: { isPackaged: true, quit: vi.fn(), on: vi.fn(), getPath: vi.fn(() => "private") }, join, console,
     desktopCliArgs: { hiddenPresentation: true }, desktopPythonPath: vi.fn(() => ""),
@@ -57,6 +57,7 @@ function fixture() {
       pythonArguments: ["-I"], env: { VIBELUTION_CONFIG_PATH: "private-config" } })),
     readProjectId: vi.fn(() => "p"), instanceIdForProject: vi.fn(() => "i"),
     AssistantHost: vi.fn(function () { return host; }), AssistantWindow: vi.fn(function () { return window; }),
+    startAssistantReminderPump: vi.fn(() => vi.fn(async () => undefined)),
     AssistantProjectRegistryConnection: vi.fn(function () { return projects; }),
     createAssistantTray: vi.fn(() => ({ destroy: vi.fn() })), requestDesktopShellExit: vi.fn(),
     requestOpenLauncherFromAssistant: vi.fn(async () => ({ opened: true })),
