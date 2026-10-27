@@ -9,7 +9,7 @@ export function startAssistantReminderPump(options: {
   available(): boolean;
   notify(notice: ReminderNotice, onClick: () => void, onFailure: () => void): void;
   openAssistant(): void;
-  onError(): void;
+  onError(reason: "notification" | "transport"): void;
   intervalMs?: number;
 }): () => Promise<void> {
   let stopped = false;
@@ -43,13 +43,13 @@ export function startAssistantReminderPump(options: {
       const recordClick = () => {
         if (!clicked || clickHandled || !acknowledgement) return;
         clickHandled = true;
-        void acknowledgement.then(() => options.host.settleReminder(event, true)).catch(() => options.onError());
+        void acknowledgement.then(() => options.host.settleReminder(event, true)).catch(() => options.onError("transport"));
       };
       options.notify({ title: event.title, body: event.body }, () => {
         clicked = true;
         options.openAssistant();
         recordClick();
-      }, () => options.onError());
+      }, () => options.onError("notification"));
       acknowledgement = options.host.settleReminder(event, false);
       recordClick();
       await acknowledgement;
@@ -58,7 +58,7 @@ export function startAssistantReminderPump(options: {
       if (stopped) return;
       // The owner never returns an already reserved event. Continue scanning
       // later for other reminders, without replaying an uncertain submission.
-      if (!failureReported) { options.onError(); failureReported = true; }
+      if (!failureReported) { options.onError("transport"); failureReported = true; }
       if (error instanceof Error && error.message === "ASSISTANT_REMINDER_BLOCKED") stopped = true;
       else schedule(delay);
     }

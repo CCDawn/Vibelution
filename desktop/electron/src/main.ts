@@ -614,11 +614,13 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
             notification.show();
           },
           openAssistant: () => { void launcherAssistantWindow?.open({ show: true }).catch(() => console.warn("ASSISTANT_WINDOW_FAILED")); },
-          onError: () => {
-            console.warn("ASSISTANT_REMINDER_UNAVAILABLE");
+          onError: reason => {
+            console.warn(reason === "notification" ? "ASSISTANT_REMINDER_NOTIFICATION_FAILED" : "ASSISTANT_REMINDER_TRANSPORT_FAILED");
             if (!shutdownApproved) void dialog.showMessageBox({
               type: "warning", title: "个人助理提醒暂不可用",
-              message: "助理暂时无法正常发送提醒，已有事务和发送记录仍会保留。",
+              message: reason === "notification"
+                ? "系统通知未能显示，已有事务和发送记录仍会保留。"
+                : "助理暂时无法连接提醒服务，已有事务和发送记录仍会保留。",
               buttons: ["确定"], noLink: true,
             }).catch(() => console.warn("ASSISTANT_REMINDER_WARNING_FAILED"));
           },
