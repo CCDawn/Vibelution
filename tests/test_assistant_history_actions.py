@@ -60,6 +60,13 @@ def test_ordinary_process_cannot_read_imported_history(monkeypatch):
         actions.execute("history_list", {})
 
 
+def test_invalid_history_list_limit_reports_usable_bound_without_echoing_input(monkeypatch):
+    monkeypatch.setattr(history, "list_history", lambda *_: pytest.fail("unexpected archive read"))
+    with pytest.raises(ValueError, match="limit为1至12") as error:
+        actions.execute("history_list", {"limit": 50, "path": "C:/private"})
+    assert "C:/private" not in str(error.value)
+
+
 def test_navigation_and_escaped_text_remain_inside_native_model_budget(tmp_path, monkeypatch):
     hid = imported(tmp_path, monkeypatch)
     detail = history.history_detail(tmp_path / "target", hid)
