@@ -601,7 +601,14 @@ publishes an immutable archive below `history_archive/migrations`. Original
 Journal bytes, event/message/tool IDs, assets, hashes and source scope remain
 separate from the new active native Session. Native parsers and projectors are
 reused; model `history_list` / `history_read` paginate bounded, untrusted,
-read-only projections. Existing projection whitespace normalization still
+read-only projections. New archives become visible only after the final source
+and authority checks; the direct offline importer can revalidate an interrupted,
+unconfirmed import. Its caller is trusted to supply any required source
+authorization; the importer does not acquire that authorization itself. The
+online owner's reservation still forbids retrying its ID. Existing v1 archives
+remain visible, but have no record proving their final checks
+completed. These checks do not freeze the source or establish full handoff.
+Existing projection whitespace normalization still
 applies; original archive bytes remain exact. No imported Turn is continued,
 enqueued or replayed and no ordinary Session core is modified.
 

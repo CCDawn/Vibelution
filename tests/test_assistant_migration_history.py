@@ -257,6 +257,86 @@ def test_source_changes_during_copy_do_not_publish(tmp_path, monkeypatch):
     assert history.list_history(target) == []
 
 
+@pytest.mark.parametrize("failure", ["source", "authority", "interrupted"])
+def test_published_directory_stays_invisible_until_final_confirmation(tmp_path, monkeypatch, failure):
+    workspace = source(tmp_path)
+    found, target = discover(workspace), tmp_path / "target"
+    publish = history.publish_directory
+    final = target / "history_archive/migrations/one"
+    observed = []
+    def after_publish(pending, destination, identity):
+        if destination.name == ".confirmed" and failure == "interrupted":
+            raise InterruptedError("injected crash before confirmation")
+        publish(pending, destination, identity)
+        if destination == final:
+            observed.append(history.list_history(target))
+            if failure == "source":
+                journal(workspace, "direct", open_turn=True)
+    monkeypatch.setattr(history, "publish_directory", after_publish)
+    def verify_authority():
+        if failure == "authority" and final.exists():
+            raise history.MigrationIOError("authority_changed")
+    with pytest.raises((history.MigrationIOError, InterruptedError)):
+        history.import_history(found, target, "one", authority_verify=verify_authority)
+    assert observed == [[]]
+    assert final.exists() and history.list_history(target) == []
+    history_id = history._manifest(found, "one")[0]["histories"][0]["historyId"]
+    with pytest.raises(history.MigrationIOError, match="history_not_found"):
+        history.history_detail(target, history_id)
+    if failure != "source":
+        monkeypatch.setattr(history, "publish_directory", publish)
+        if failure == "authority":
+            with pytest.raises(history.MigrationIOError, match="authority_changed"):
+                history.import_history(found, target, "one", authority_verify=verify_authority)
+            assert history.list_history(target) == []
+        checks = []
+        def restored_authority():
+            checks.append(True)
+        assert history.import_history(found, target, "one", authority_verify=restored_authority)["idempotent"]
+        assert checks
+        assert len(history.list_history(target)) == 1
+
+
+def test_v1_archives_remain_readable_and_idempotent(tmp_path):
+    workspace = source(tmp_path)
+    found, target = discover(workspace), tmp_path / "target"
+    history.import_history(found, target, "one")
+    archive = target / "history_archive/migrations/one"
+    (archive / ".confirmed").rmdir()
+    manifest_path = archive / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["schemaVersion"] = 1
+    manifest_path.write_bytes(history._encoded(manifest))
+    assert len(history.list_history(target)) == 1
+    assert history.import_history(found, target, "one")["idempotent"]
+
+
+def test_process_crash_before_confirmation_stays_hidden_and_direct_retry_recovers(tmp_path):
+    import subprocess
+    import sys
+    workspace = source(tmp_path)
+    target = tmp_path / "target"
+    code = """
+import os, sys
+from pathlib import Path
+from core.assistant_runtime import migration_history as history
+from tests.test_assistant_migration_history import discover
+original = history.publish_directory
+def crash(pending, final, identity):
+    if final.name == '.confirmed':
+        os._exit(42)
+    return original(pending, final, identity)
+history.publish_directory = crash
+history.import_history(discover(Path(sys.argv[1])), Path(sys.argv[2]), 'one')
+"""
+    result = subprocess.run([sys.executable, "-c", code, str(workspace), str(target)],
+                            check=False, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    assert result.returncode == 42
+    assert history.list_history(target) == []
+    assert history.import_history(discover(workspace), target, "one")["idempotent"]
+    assert len(history.list_history(target)) == 1
+
+
 def test_new_asset_or_tombstone_after_discovery_is_detected(tmp_path):
     workspace = source(tmp_path)
     assets = workspace / "sessions/direct/artifacts/nested"

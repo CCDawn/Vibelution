@@ -453,7 +453,7 @@ def _manifest(discovery, migration_id):
         rows.append({"historyId": hid, "sessionId": sid, "sourceScope": scope,
             "watermark": session.watermark, "journal": {"path": journal_path,
                 "sha256": session.journal.sha256, "size": len(session.journal.raw)}, "assets": assets})
-    manifest = {"schemaVersion": 1, "migrationId": migration_id, "readOnly": True,
+    manifest = {"schemaVersion": 2, "migrationId": migration_id, "readOnly": True,
         "untrustedContent": True, "canContinue": False, "histories": rows,
         "sourceFingerprint": _digest([{ "path": str(s.path), "sha256": s.sha256} for s in discovery.snapshots])}
     return manifest, copies
@@ -501,12 +501,7 @@ def _publish_history(discovery, root, migration_id, manifest, copies, authority_
     """Caller holds the verified migrations parent chain and writer mutex."""
     final, pending = root / migration_id, root / ("." + migration_id + ".pending")
     if final.exists() or final.is_symlink():
-        stored, _ = _load_archive(final)
-        if stored != manifest:
-            raise MigrationIOError("history_migration_id_conflict")
-        _verify_source(discovery)
-        if authority_verify is not None:
-            authority_verify()
+        _verify_and_confirm_final(final, discovery, manifest, authority_verify, write_guard, existing=True)
         return {"migrationId": migration_id, "published": True, "idempotent": True,
                 "historyCount": len(discovery.sessions), "readyForCutover": False}
     with ExitStack() as stack:
@@ -529,28 +524,67 @@ def _publish_history(discovery, root, migration_id, manifest, copies, authority_
     # and renames that object while the destination parent chain stays pinned.
     with write_guard():
         publish_directory(pending, final, pending_identity)
-    stored, _ = _load_archive(final)
-    if stored != manifest:
-        raise MigrationIOError("history_copy_mismatch")
-    _verify_source(discovery)
-    if authority_verify is not None:
-        authority_verify()
+    _verify_and_confirm_final(final, discovery, manifest, authority_verify, write_guard, existing=False)
     return {"migrationId": migration_id, "published": True, "idempotent": False,
             "historyCount": len(discovery.sessions), "readyForCutover": False}
 
 
-def _load_archive(directory, *, migration_id=None, budget=None):
+def _verify_and_confirm_final(final, discovery, manifest, authority_verify, write_guard, *, existing):
+    # Keep the directory identity fixed until its confirmation is published.
+    with pinned_target_directory(final):
+        stored, _ = _load_archive(final)
+        # v1 has no confirmation marker and cannot prove an old import finished.
+        if stored != manifest and not (existing and stored == {**manifest, "schemaVersion": 1}):
+            raise MigrationIOError("history_migration_id_conflict" if existing else "history_copy_mismatch")
+        _verify_source(discovery)
+        if authority_verify is not None:
+            authority_verify()
+        if stored["schemaVersion"] == 2:
+            _confirm_archive(final, write_guard)
+
+
+def _confirmation_exists(directory):
+    marker = directory / ".confirmed"
+    if not marker.exists() and not marker.is_symlink():
+        return False
+    check_path(marker)
+    if not marker.is_dir() or any(marker.iterdir()):
+        raise MigrationIOError("history_archive_invalid")
+    return True
+
+
+def _confirm_archive(directory, write_guard):
+    # Publish an empty directory by verified handle as the visibility commit.
+    # A crash before the rename leaves only the hidden pending marker.
+    if _confirmation_exists(directory):
+        return
+    pending = directory / ".confirmation.pending"
+    with ExitStack() as stack:
+        with write_guard():
+            stack.enter_context(pinned_target_directory(directory))
+            pending = stack.enter_context(pinned_target_directory(pending, create=True))
+        if any(pending.iterdir()):
+            raise MigrationIOError("history_archive_invalid")
+        identity = path_identity(pending)
+        stack.pop_all().close()
+    with write_guard():
+        publish_directory(pending, directory / ".confirmed", identity)
+
+
+def _load_archive(directory, *, migration_id=None, budget=None, visible_only=False):
     budget = budget if budget is not None else _ArchiveBudget()
     check_path(directory)
     manifest_snapshot = budget.read(directory / "manifest.json")
     manifest = strict_json(manifest_snapshot.raw)
     mid = migration_id or directory.name
-    if (not isinstance(manifest, dict) or manifest.get("schemaVersion") != 1
+    if (not isinstance(manifest, dict) or manifest.get("schemaVersion") not in (1, 2)
             or manifest.get("migrationId") != mid or not _token(mid)
             or not isinstance(manifest.get("histories"), list) or len(manifest["histories"]) > 10000
             or manifest.get("readOnly") is not True or manifest.get("canContinue") is not False
             or manifest.get("untrustedContent") is not True):
         raise MigrationIOError("history_archive_invalid")
+    if visible_only and manifest["schemaVersion"] == 2 and not _confirmation_exists(directory):
+        return None
     budget.reserve("histories_left", len(manifest["histories"]))
     expected, ids, snapshots = {"manifest.json"}, set(), {}
     for row in manifest["histories"]:
@@ -614,7 +648,9 @@ def _archives(target_root, *, budget):
             budget.reserve("archives_left")
             # A generator keeps at most the current archive's bytes alive;
             # callers must not materialize this iterator before pagination.
-            yield _load_archive(Path(child.path), budget=budget)
+            archive = _load_archive(Path(child.path), budget=budget, visible_only=True)
+            if archive is not None:
+                yield archive
 
 
 def _summary(row, migration_id):
