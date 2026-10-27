@@ -241,7 +241,7 @@ def test_no_repair_or_execution_apis_and_cli_is_additive(tmp_path, monkeypatch, 
     monkeypatch.setattr(agent_directory_service, "load_state", forbidden)
     monkeypatch.setattr(personal_assistant_service, "profile_agent", forbidden)
     monkeypatch.setattr(cli, "resolve_active_project_storage_paths", lambda root: SimpleNamespace(
-        project_root=tmp_path, data=workspace.parent, project_id="project", instance_id="instance"))
+        project_root=tmp_path, data=workspace.parent, runtime=tmp_path / "runtime", project_id="project", instance_id="instance"))
     monkeypatch.setattr("sys.argv", ["inventory", "--project", str(tmp_path), "--handoff-preview", "pa"])
     before = snapshot(tmp_path)
     assert cli.main() == 0
