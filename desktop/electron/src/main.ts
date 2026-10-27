@@ -4,6 +4,8 @@ import { requestRendererWindowClose } from "./windows/rendererWindowClose.js";
 import { configureWindowsNotificationIdentity } from "./notifications/windowsNotificationIdentity.js";
 import { NativeNotificationLifetime } from "./notifications/nativeNotificationLifetime.js";
 import { handleHumanAttentionIpc } from "./notifications/humanAttentionIpc.js";
+import { LegacyReminderSourceFence } from "./notifications/legacyReminderSourceFence.js";
+import { createLegacyReminderSourceResolver } from "./notifications/resolveLegacyReminderSource.js";
 import { mkdirSync, statSync, watch, writeFileSync, type FSWatcher } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
@@ -520,6 +522,10 @@ let launcherAssistantWindow: AssistantWindow | null = null;
 let launcherAssistantExitReady = false;
 let launcherAssistantStarting: Promise<void> | null = null;
 let launcherAssistantProjects: AssistantProjectRegistryConnection | null = null;
+let legacyReminderAdmission: {
+  fence: LegacyReminderSourceFence;
+  resolveSource: ReturnType<typeof createLegacyReminderSourceResolver>;
+} | null = null;
 let stopLauncherAssistantReminders: (() => Promise<void>) | null = null;
 let assistantOnly = desktopCliArgs.assistant === true;
 let pendingAssistantOpen: { show: boolean } | null = null;
@@ -573,6 +579,17 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
   launcherAssistantStarting = (async () => {
     const projectConnection = new AssistantProjectRegistryConnection(join(paths.userDataRoot, "assistant", "projects.json"));
     launcherAssistantProjects = projectConnection;
+    try {
+      const directory = join(paths.userDataRoot, "assistant", "legacy-reminder-admission");
+      mkdirSync(directory, { recursive: true });
+      legacyReminderAdmission = { fence: new LegacyReminderSourceFence(directory),
+        resolveSource: createLegacyReminderSourceResolver({ windowProvider: () => windowProvider,
+          projectConnection: () => launcherAssistantProjects, readInstances: () => readRegistry(instancesRegistryPath()) }) };
+    } catch {
+      // The replacement consumer stays disabled when admission state cannot be opened.
+      legacyReminderAdmission = null;
+      console.warn("LEGACY_REMINDER_ADMISSION_UNAVAILABLE");
+    }
     const projectMainControl = createAssistantProjectMainControl({
       directory: join(paths.userDataRoot, "assistant", "lifecycle-requests"), registry: projectConnection,
       operatorConfigPath: desktopLaunchSettings().configPath,
@@ -4080,7 +4097,8 @@ ipcMain.handle(IPC_CHANNELS.notifyConversationCompleted, async (event, payload: 
 
 ipcMain.handle(IPC_CHANNELS.notifyHumanAttention, async (event, payload: unknown) => {
   return await handleHumanAttentionIpc(event, payload, windowProvider, trustedIpcOrigins(event),
-    (acceptedPayload, source) => resolveHumanAttentionNotificationService().notify(acceptedPayload, source));
+    (acceptedPayload, source) => resolveHumanAttentionNotificationService().notify(acceptedPayload, source),
+    legacyReminderAdmission ?? undefined);
 });
 
 ipcMain.handle(IPC_CHANNELS.openExternalUrl, async (event, rawUrl: unknown) => {
