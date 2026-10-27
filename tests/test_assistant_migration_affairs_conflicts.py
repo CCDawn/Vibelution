@@ -218,7 +218,7 @@ def test_successive_syncs_use_confirmed_previous_snapshots_as_baselines(tmp_path
                 except MigrationIOError as error: assert str(error) == 'affairs_conflict_baseline_stale'
                 else: raise AssertionError('stale baseline accepted after successful sync')
                 listing = list_affairs_conflicts(root, sync_id=sync, source_scope=scope, target_agent_id=lease.agent_id)
-                assert listing['unresolvedCount'] == 0 and listing['conflicts'][0]['syncStatus'] == 'applied'
+                assert listing['unresolvedCount'] == 0 and listing['conflicts'][0]['syncStatus'] == 'planned_apply'
             assert service.store.read_jsonl(lease.agent_id, 'affairs/items.jsonl') == [row('v3')]
             # Corrupt a previously published link; no later baseline may use it.
             path = root / 'affairs_sync_receipts' / (hashlib.sha256(b'sync-2').hexdigest() + '.json')
@@ -288,7 +288,7 @@ def test_published_sync_classifies_changes_and_pending_never_claims_resolution(t
             assert result['appliedCount'] == 1 and result['conflictCount'] == 2
             listing = list_affairs_conflicts(root, **kwargs)
             assert listing['syncStatus'] == 'published' and listing['unresolvedCount'] == 2
-            assert sorted(item['syncStatus'] for item in listing['conflicts']) == ['already', 'applied', 'unresolved', 'unresolved']
+            assert sorted(item['syncStatus'] for item in listing['conflicts']) == ['already', 'planned_apply', 'unresolved', 'unresolved']
             detail = read_affairs_conflict(root, **kwargs, conflict_id=listing['conflicts'][0]['conflictId'])
             assert detail['syncStatus'] == listing['conflicts'][0]['syncStatus']
             found = discover_affairs_conflicts(root, target_agent_id=lease.agent_id)['sets'][0]

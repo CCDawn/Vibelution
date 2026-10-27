@@ -509,17 +509,19 @@ export class AssistantHost {
   }
 
   /** Main-only; caller holds the project registry lease through cancellation and drain. */
-  async syncAffairs(input: { projectId: string; previewId: string; turnId: string; revision: number; signal?: AbortSignal }): Promise<unknown> {
+  async syncAffairs(input: { projectId: string; previewId: string; turnId: string; revision: number; signal?: AbortSignal; recoverSyncId?: string }): Promise<unknown> {
     if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(input.projectId)
       || !/^[a-f0-9]{64}$/.test(input.previewId) || typeof input.turnId !== "string"
-      || !/^\S{1,160}$/.test(input.turnId) || !Number.isSafeInteger(input.revision) || input.revision < 0) {
+      || !/^\S{1,160}$/.test(input.turnId) || !Number.isSafeInteger(input.revision) || input.revision < 0
+      || (input.recoverSyncId !== undefined && !/^affairs-[a-f0-9]{40}$/.test(input.recoverSyncId))) {
       throw new HostError("ASSISTANT_REQUEST_INVALID");
     }
     const generation = this.current;
     if (!generation || generation.closed || generation.abort.signal.aborted || this.view.state !== "ready"
       || this.projectsSuspended || generation.projectRevision !== input.revision) throw new HostError("ASSISTANT_NOT_READY");
     const operationId = randomBytes(16).toString("hex");
-    const body = { projectId: input.projectId, previewId: input.previewId, turnId: input.turnId, revision: input.revision, operationId };
+    const body = { projectId: input.projectId, previewId: input.previewId, turnId: input.turnId, revision: input.revision, operationId,
+      ...(input.recoverSyncId !== undefined ? { recoverSyncId: input.recoverSyncId } : {}) };
     const unknown = unknownAffairsSyncResult(input);
     const fence = async () => {
       const result = await this.rpc(generation, "/api/assistant/affairs-sync/cancel", "POST",
@@ -528,7 +530,7 @@ export class AssistantHost {
         || result.operationId !== operationId || result.cancelled !== true) throw new HostError("ASSISTANT_RESPONSE_INVALID");
     };
     if (input.signal?.aborted) {
-      try { await fence(); return { ...unknown, state: "rejected", code: "cancelled" }; }
+      try { await fence(); return input.recoverSyncId !== undefined ? unknown : { ...unknown, state: "rejected", code: "cancelled" }; }
       catch { await this.stop(); return unknown; }
     }
     try {

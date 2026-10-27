@@ -213,3 +213,7 @@ def test_launcher_history_import_approval_shows_verified_source_only(monkeypatch
         "project_id": "project", "preview_id": "a" * 64})})
     assert affair["assistantAction"] == "affairs_sync" and affair["assistantTargets"]["assistantAgentId"] == "old-pa"
     assert "个人事务" in affair["assistantOperationDescription"]
+    recovery = _assistant_management_summary({"action": "affairs_sync", "arguments_json": json.dumps({
+        "project_id": "project", "preview_id": "a" * 64, "recover_sync_id": "affairs-" + "b" * 40})})
+    assert recovery["assistantTargets"]["syncId"] == "affairs-" + "b" * 40
+    assert "不会重新写入事务" in recovery["assistantOperationDescription"]

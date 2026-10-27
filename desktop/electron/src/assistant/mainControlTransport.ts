@@ -9,7 +9,7 @@ export type ProjectMainControlRequest = {
 } & ({ action: "project_status"; operation: "status"; requestId?: never }
   | { action: "project_lifecycle" | "project_lifecycle_receipt"; operation: "start" | "stop" | "restart"; requestId: string });
 export type HistoryMainControlRequest = { deliveryId: string; action: "history_import"; projectId: string; previewId: string; turnId: string; timeoutMs: number };
-export type AffairsSyncMainControlRequest = Omit<HistoryMainControlRequest, "action"> & { action: "affairs_sync" };
+export type AffairsSyncMainControlRequest = Omit<HistoryMainControlRequest, "action"> & { action: "affairs_sync"; recoverSyncId?: string };
 export type MainControlRequest = ProjectMainControlRequest | AppearanceMainControlRequest | HistoryMainControlRequest | AffairsSyncMainControlRequest;
 type PublicResult = Record<string, unknown>;
 const ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/;
@@ -31,12 +31,15 @@ export function parseMainControlClaim(value: unknown): MainControlRequest | null
   const row = value.request;
   if (row && typeof row === "object" && isAppearanceAction(Object.getOwnPropertyDescriptor(row,"action")?.value)) return parseAppearanceClaim(row);
   if (row && typeof row === "object" && ["history_import", "affairs_sync"].includes(Object.getOwnPropertyDescriptor(row, "action")?.value)) {
-    if (!closed(row, ["deliveryId", "action", "projectId", "previewId", "turnId", "timeoutMs"])
+    if (!closed(row, ["deliveryId", "action", "projectId", "previewId", "turnId", "timeoutMs"],
+      Object.getOwnPropertyDescriptor(row, "action")?.value === "affairs_sync" ? ["recoverSyncId"] : [])
       || typeof row.deliveryId !== "string" || !/^[a-f0-9]{32}$/.test(row.deliveryId) || !opaque(row.projectId, 160)
       || typeof row.previewId !== "string" || !/^[a-f0-9]{64}$/.test(row.previewId) || !opaque(row.turnId, 160)
-      || typeof row.timeoutMs !== "number" || !Number.isSafeInteger(row.timeoutMs) || row.timeoutMs < 1 || row.timeoutMs > 120000) return invalid();
+      || typeof row.timeoutMs !== "number" || !Number.isSafeInteger(row.timeoutMs) || row.timeoutMs < 1 || row.timeoutMs > 120000
+      || (Object.hasOwn(row, "recoverSyncId") && (typeof row.recoverSyncId !== "string" || !/^affairs-[a-f0-9]{40}$/.test(row.recoverSyncId)))) return invalid();
     return { deliveryId: row.deliveryId, action: row.action as "history_import" | "affairs_sync", projectId: row.projectId,
-      previewId: row.previewId, turnId: row.turnId, timeoutMs: row.timeoutMs };
+      previewId: row.previewId, turnId: row.turnId, timeoutMs: row.timeoutMs,
+      ...(typeof row.recoverSyncId === "string" ? { recoverSyncId: row.recoverSyncId } : {}) };
   }
   if (!closed(row, ["deliveryId", "action", "projectId", "operation"], ["requestId"])
     || typeof row.deliveryId !== "string" || !/^[a-f0-9]{32}$/.test(row.deliveryId) || !opaque(row.projectId, 160)) return invalid();
@@ -57,20 +60,25 @@ const STATES = new Set(["completed", "queued", "rejected", "unknown", "not_found
 export function affairsSyncMigrationId(projectId: string, previewId: string): string {
   return `affairs-${createHash("sha256").update(`${projectId}:${previewId}`).digest("hex").slice(0, 40)}`;
 }
-export function unknownAffairsSyncResult(input: { projectId: string; previewId: string }): PublicResult {
+export function unknownAffairsSyncResult(input: { projectId: string; previewId: string; recoverSyncId?: string }): PublicResult {
   return { schemaVersion: 1, projectId: input.projectId, previewId: input.previewId,
-    migrationId: affairsSyncMigrationId(input.projectId, input.previewId), state: "unknown", code: "unknown", readyForCutover: false };
+    migrationId: input.recoverSyncId ?? affairsSyncMigrationId(input.projectId, input.previewId), state: "unknown", code: "unknown", readyForCutover: false };
 }
-export function parseAffairsSyncResult(input: { projectId: string; previewId: string }, value: unknown): PublicResult | null {
+export function parseAffairsSyncResult(input: { projectId: string; previewId: string; recoverSyncId?: string }, value: unknown): PublicResult | null {
   if (!closed(value, ["schemaVersion", "projectId", "previewId", "migrationId", "state", "code", "readyForCutover"], ["appliedCount", "conflictCount"])
     || value.schemaVersion !== 1 || value.projectId !== input.projectId || value.previewId !== input.previewId
-    || value.migrationId !== affairsSyncMigrationId(input.projectId, input.previewId) || value.readyForCutover !== false
+    || value.migrationId !== (input.recoverSyncId ?? affairsSyncMigrationId(input.projectId, input.previewId)) || value.readyForCutover !== false
     || typeof value.state !== "string" || typeof value.code !== "string"
-    || !["complete:synchronized", "partial:unresolved", "rejected:preview_invalid", "rejected:project_unavailable", "rejected:cancelled", "rejected:busy", "rejected:unresolved", "rejected:pending", "rejected:baseline_unavailable", "unknown:unknown"].includes(`${value.state}:${value.code}`)) return null;
+    || (input.recoverSyncId !== undefined && !["confirmed", "unknown"].includes(value.state))
+    || !["complete:synchronized", "partial:unresolved", "confirmed:matched", "rejected:preview_invalid", "rejected:project_unavailable", "rejected:cancelled", "rejected:busy", "rejected:unresolved", "rejected:pending", "rejected:baseline_unavailable", "unknown:unknown"].includes(`${value.state}:${value.code}`)) return null;
   if (value.state === "complete" || value.state === "partial") {
     if (typeof value.appliedCount !== "number" || !Number.isSafeInteger(value.appliedCount) || value.appliedCount < 0 || value.appliedCount > 4096
       || typeof value.conflictCount !== "number" || !Number.isSafeInteger(value.conflictCount) || value.conflictCount < 0 || value.conflictCount > 4096
       || (value.state === "complete" ? value.conflictCount !== 0 : value.conflictCount === 0)) return null;
+  } else if (value.state === "confirmed") {
+    if (input.recoverSyncId === undefined || Object.hasOwn(value, "appliedCount")
+      || typeof value.conflictCount !== "number" || !Number.isSafeInteger(value.conflictCount)
+      || value.conflictCount < 0 || value.conflictCount > 4096) return null;
   } else if (Object.hasOwn(value, "appliedCount") || Object.hasOwn(value, "conflictCount")) return null;
   return { ...value };
 }

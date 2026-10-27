@@ -258,7 +258,7 @@ def publish_directory(pending: Path, final: Path, expected_identity: tuple) -> N
 
 
 @contextmanager
-def pinned_mutable_file(path: Path):
+def pinned_mutable_file(path: Path, *, create: bool = True):
     """Pin a regular lock leaf while the existing native lock owner writes it."""
     path = validate_path(path)
     if os.name != "nt":
@@ -267,7 +267,7 @@ def pinned_mutable_file(path: Path):
     from core.web.services.personal_assistant_project.windows_read import _api, _verify
     with pinned_target_directory(path.parent):
         api = _api()
-        handle = api.CreateFileW(str(path), 0x80000000, 3, None, 4, 0x00200000, None)
+        handle = api.CreateFileW(str(path), 0x80000000, 3, None, 4 if create else 3, 0x00200000, None)
         if handle == ctypes.c_void_p(-1).value:
             raise MigrationIOError("target_lock_leaf_unavailable")
         try:

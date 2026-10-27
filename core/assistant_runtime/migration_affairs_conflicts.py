@@ -72,7 +72,7 @@ class _LockedAffairsTarget:
 
 
 @contextmanager
-def locked_affairs_target(root, *, target_agent_id):
+def locked_affairs_target(root, *, target_agent_id, readonly=False):
     """Pin the bound ledger while caller already holds native._LOCK.
 
     Online callers must hold their generation/Turn guard first. Order is
@@ -96,11 +96,18 @@ def locked_affairs_target(root, *, target_agent_id):
     receipts = root / "affairs_sync_receipts"
     lock = (cross_process_file_lock(ledger) if native._OFFLINE_MIGRATION
             else cross_process_file_lock(ledger, timeout=0))
+    if type(readonly) is not bool:
+        raise MigrationIOError("affairs_target_lock_required")
     with ExitStack() as stack:
-        stack.enter_context(pinned_target_directory(receipts, create=True))
+        stack.enter_context(pinned_target_directory(receipts, create=not readonly))
         stack.enter_context(migration_target_lock(receipts))
-        stack.enter_context(pinned_target_directory(ledger.parent, create=True))
-        stack.enter_context(pinned_mutable_file(ledger.with_name(ledger.name + ".lock")))
+        stack.enter_context(pinned_target_directory(ledger.parent, create=not readonly))
+        leaf = ledger.with_name(ledger.name + ".lock")
+        stack.enter_context(pinned_mutable_file(leaf, create=not readonly))
+        # The shared lock seeds empty sidecars. A read-only observation must
+        # use an existing initialized leaf and never create or seed one.
+        if readonly and path_identity(leaf)[2] < 1:
+            raise MigrationIOError("affairs_target_lock_required")
         stack.enter_context(lock)
         snapshot = read_stable_file(ledger, _BYTE_CAP) if ledger.exists() or ledger.is_symlink() else None
         if snapshot is not None:
@@ -601,7 +608,7 @@ def verified_affairs_baseline_locked(root, migration_id, scope, target_agent_id,
     return _verified_baseline(root, migration_id, scope, target_agent_id, target=target)
 
 
-def discover_affairs_conflicts(root, *, target_agent_id, offset=0, limit=6):
+def discover_affairs_conflicts(root, *, target_agent_id, offset=0, limit=6, target=None):
     """Discover conflict sets for the trusted native profile without user IDs."""
     if not _token(target_agent_id) or type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 12:
         raise MigrationIOError("affairs_conflict_query_invalid")
@@ -640,7 +647,7 @@ def discover_affairs_conflicts(root, *, target_agent_id, offset=0, limit=6):
             captured.append(snapshot)
             key = (scope["projectId"], scope["instanceId"], scope["agentId"])
             if key not in verifiers:
-                verifiers[key] = _BaselineVerifier(root, scope, target_agent_id)
+                verifiers[key] = _BaselineVerifier(root, scope, target_agent_id, target=target)
             _verify_record_sources(root, record, verifiers[key])
             item = {"syncId": record["syncId"], "sourceScope": scope,
                     "conflictCount": len(record["conflicts"])}
@@ -662,7 +669,7 @@ def discover_affairs_conflicts(root, *, target_agent_id, offset=0, limit=6):
             "readOnly": True, "untrustedContent": True}
 
 
-def resolve_affairs_conflict_scope(root, *, sync_id, target_agent_id):
+def resolve_affairs_conflict_scope(root, *, sync_id, target_agent_id, target=None):
     """Resolve one set's authenticated source scope for a native-profile reader."""
     root = Path(root)
     raw = strict_json(read_stable_file(_record_path(root, sync_id), _RECORD_CAP).raw)
@@ -670,7 +677,7 @@ def resolve_affairs_conflict_scope(root, *, sync_id, target_agent_id):
         raise MigrationIOError("affairs_conflict_record_invalid")
     scope = _scope(raw.get("sourceScope"))
     record = _load(root, sync_id, scope, target_agent_id)
-    _verify_record_sources(root, record)
+    _verify_record_sources(root, record, target=target)
     return scope
 
 
@@ -755,16 +762,16 @@ def prepare_affairs_conflicts(lease, *, baseline_migration_id, snapshot_migratio
             "readOnly": True, "sourceQuiesced": False, "readyForCutover": False}
 
 
-def list_affairs_conflicts(root, *, sync_id, source_scope, target_agent_id, offset=0, limit=6, query=""):
+def list_affairs_conflicts(root, *, sync_id, source_scope, target_agent_id, offset=0, limit=6, query="", target=None):
     """List one authorized scope, with bounded pagination and no filesystem paths."""
     if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 12 or not isinstance(query, str) or len(query) > 160:
         raise MigrationIOError("affairs_conflict_query_invalid")
     record = _load(Path(root), sync_id, _scope(source_scope), target_agent_id)
-    _verify_record_sources(Path(root), record)
+    _verify_record_sources(Path(root), record, target=target)
     receipt, receipt_snapshot = _sync_receipt(Path(root), record)
     if receipt_snapshot is not None:
         verify_snapshot(receipt_snapshot)
-    statuses = ({row["conflictId"]: row["status"] for row in receipt["decisions"]}
+    statuses = ({row["conflictId"]: "planned_apply" if row["status"] == "applied" else row["status"] for row in receipt["decisions"]}
                 if receipt is not None and receipt["published"] else {})
     needle = query.casefold()
     rows = [row for row in record["conflicts"] if not needle or needle in " ".join(
@@ -776,6 +783,7 @@ def list_affairs_conflicts(root, *, sync_id, source_scope, target_agent_id, offs
     if receipt is not None:
         result["syncStatus"] = "published" if receipt["published"] else "pending"
         result["unresolvedCount"] = receipt["conflictCount"] if receipt["published"] else None
+        result["decisionNotice"] = "planned_apply 是历史计划，不证明该操作实际写入；处理前读取当前事务。"
     for row in rows[offset:offset + limit]:
         item = {"conflictId": row["conflictId"], "kind": row["kind"], "targetState": row["targetState"],
                 "title": (row.get("source") or row.get("baseline"))["title"]}
@@ -790,18 +798,18 @@ def list_affairs_conflicts(root, *, sync_id, source_scope, target_agent_id, offs
 
 
 def read_affairs_conflict(root, *, sync_id, source_scope, target_agent_id, conflict_id,
-                          character_offset=0, max_characters=1200):
+                          character_offset=0, max_characters=1200, target=None):
     """Return a bounded JSON fragment; render the content as untrusted text."""
     if not isinstance(conflict_id, str) or len(conflict_id) != 64 or any(c not in "0123456789abcdef" for c in conflict_id):
         raise MigrationIOError("affairs_conflict_id_invalid")
     if type(character_offset) is not int or character_offset < 0 or type(max_characters) is not int or not 1 <= max_characters <= 1600:
         raise MigrationIOError("affairs_conflict_query_invalid")
     record = _load(Path(root), sync_id, _scope(source_scope), target_agent_id)
-    _verify_record_sources(Path(root), record)
+    _verify_record_sources(Path(root), record, target=target)
     receipt, receipt_snapshot = _sync_receipt(Path(root), record)
     if receipt_snapshot is not None:
         verify_snapshot(receipt_snapshot)
-    statuses = ({row["conflictId"]: row["status"] for row in receipt["decisions"]}
+    statuses = ({row["conflictId"]: "planned_apply" if row["status"] == "applied" else row["status"] for row in receipt["decisions"]}
                 if receipt is not None and receipt["published"] else {})
     for row in record["conflicts"]:
         if row["conflictId"] == conflict_id:
@@ -820,6 +828,7 @@ def read_affairs_conflict(root, *, sync_id, source_scope, target_agent_id, confl
                     "targetNotice": "目标状态为记录时快照；处理前请读取当前事务，不可据此直接覆盖。"}
                 if receipt is not None:
                     result["syncStatus"] = statuses.get(conflict_id, "unknown")
+                    result["decisionNotice"] = "planned_apply 是历史计划，不证明该操作实际写入。"
                 if len(json.dumps(result, ensure_ascii=False)) <= 3300:
                     return result
                 width //= 2

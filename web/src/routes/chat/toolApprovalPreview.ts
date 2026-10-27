@@ -59,7 +59,7 @@ export function toolApprovalActionPreview(
       ? Object.entries(targets).filter(([, value]) => typeof value === "string")
         .slice(0, 20).map(([key, value]) => {
           const historyLabels: Record<string, [string, string]> = {
-            sourceProjectId: ["项目", "Project"], instanceId: ["实例", "Instance"], assistantAgentId: ["旧助理", "Previous assistant"],
+            sourceProjectId: ["项目", "Project"], instanceId: ["实例", "Instance"], assistantAgentId: ["旧助理", "Previous assistant"], syncId: ["原回执", "Original receipt"],
           };
           const label = (action === "history_import" || action === "affairs_sync") && historyLabels[key] ? historyLabels[key][lang === "zh" ? 0 : 1] : key;
           return `${label}: ${String(value).slice(0, key === "base_url" ? 512 : 160)}`;

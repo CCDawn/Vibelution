@@ -404,7 +404,8 @@ export function LauncherAssistantRoute() {
   const preferences = status.data?.settings?.preferences || DEFAULT_PET_PREFERENCES;
   const displayName = status.data?.settings?.displayName || identity?.displayName || copy.title;
   const { tone, animationState } = launcherAssistantActivity(detail.data);
-  const busy = hasExecutionOwnership(resolveSessionActivity(detail.data || {}).execution);
+  const activity = resolveSessionActivity(detail.data || {});
+  const busy = hasExecutionOwnership(activity.execution);
   const stopping = Boolean(detail.data?.stopRequested);
   const canContinue = !draft.trim() && !sendUnconfirmed && Boolean(resolveConversationContinuation(detail.data, sessionId));
   const actionMode = busy || stopping ? "stop" : canContinue ? "continue" : "send";
@@ -414,9 +415,10 @@ export function LauncherAssistantRoute() {
   const queueStatusText = queueReadback.removed ? removedQueueText : queueRow ? launcherAssistantQueueLabel(queueRow.status, lang)
     : queuedAcceptance && !queuedAcceptance.observed ? waitingQueueText : "";
   const statusText = feedback || queueStatusText || (status.isPending ? copy.checking
-    : detail.data ? resolveSessionActivity(detail.data).execution === "idle" && preferences.idleMessage
-      ? preferences.idleMessage : sessionActivityStatusLabel(resolveSessionActivity(detail.data), lang)
-      : preferences.idleMessage || copy.title);
+    : detail.data ? !detail.isError && !approval && !stopping && !acceptedTurnId && !sendPending && !sendUnconfirmed && preferences.idleMessage
+        && (activity.execution === "idle" || (activity.execution === "settled" && activity.outcome === "completed"))
+      ? preferences.idleMessage : sessionActivityStatusLabel(activity, lang)
+      : copy.title);
 
   if (status.isError) return <VStateSurface fill tone="error" title={copy.unavailable}
     actions={<VButton onClick={() => void status.refetch()}>{copy.retry}</VButton>}>{status.error.message}</VStateSurface>;

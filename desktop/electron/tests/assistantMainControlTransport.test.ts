@@ -33,6 +33,9 @@ describe("generation-scoped main control transport", () => {
       expect(projectMainControlResult(parsed, value)).toEqual(unknown);
     const accessor = { ...complete }; Object.defineProperty(accessor, "appliedCount", { enumerable: true, get: () => 2 });
     expect(projectMainControlResult(parsed, accessor)).toEqual(unknown);
+    const recovery = parseMainControlClaim({ schemaVersion: 1, request: { ...row, recoverSyncId: "affairs-" + "f".repeat(40) } })!;
+    expect(projectMainControlResult(recovery, undefined)).toEqual({ ...unknown, migrationId: "affairs-" + "f".repeat(40) });
+    expect(() => parseMainControlClaim({ schemaVersion: 1, request: { ...row, recoverSyncId: "C:/private" } })).toThrow();
   });
   it("applies the deadline to affairs sync and never replays an unknown result", async () => {
     const controller = new AbortController();

@@ -89,6 +89,10 @@ class HistoryImport(BaseModel):
     operationId: str = Field(pattern=r"^[a-f0-9]{32}$")
 
 
+class AffairsSync(HistoryImport):
+    recoverSyncId: str | None = Field(default=None, pattern=r"^affairs-[a-f0-9]{40}$")
+
+
 class CancelHistoryImport(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     operationId: str = Field(pattern=r"^[a-f0-9]{32}$")
@@ -422,11 +426,14 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
 
     if history_control is not None:
         @app.post("/api/assistant/affairs-sync")
-        async def affairs_sync(payload: HistoryImport, request: Request):
+        async def affairs_sync(payload: AffairsSync, request: Request):
             if request.query_params:
                 raise HTTPException(422, detail="Invalid affairs sync request")
-            result = await asyncio.to_thread(history_control.sync_affairs, payload.projectId,
-                payload.previewId, payload.revision, payload.turnId, payload.operationId)
+            args = (payload.projectId, payload.previewId, payload.revision, payload.turnId, payload.operationId)
+            if payload.recoverSyncId is None:
+                result = await asyncio.to_thread(history_control.sync_affairs, *args)
+            else:
+                result = await asyncio.to_thread(history_control.sync_affairs, *args, payload.recoverSyncId)
             return JSONResponse(result, headers={"Cache-Control": "no-store"})
 
         @app.post("/api/assistant/affairs-sync/cancel")

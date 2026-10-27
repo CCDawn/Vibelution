@@ -622,10 +622,12 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
       }
       if (request.action === "affairs_sync") {
         const host = launcherAssistantHost;
-        if (!host || shutdownApproved) return Promise.resolve({ ...unknownAffairsSyncResult(request),
-          state: "rejected", code: "project_unavailable" });
+        if (!host || shutdownApproved) return Promise.resolve(request.recoverSyncId !== undefined
+          ? unknownAffairsSyncResult(request) : { ...unknownAffairsSyncResult(request),
+            state: "rejected", code: "project_unavailable" });
         return projectConnection.withHistoryImport(request.projectId, revision => host.syncAffairs({
           projectId: request.projectId, previewId: request.previewId, turnId: request.turnId, revision, signal,
+          ...(request.recoverSyncId !== undefined ? { recoverSyncId: request.recoverSyncId } : {}),
         }));
       }
       return projectMainControl(request);

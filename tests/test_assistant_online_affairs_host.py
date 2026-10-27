@@ -135,6 +135,12 @@ def test_private_affairs_endpoint_is_closed_and_never_accepts_approval_or_paths(
         assert response.status_code == 200 and response.json()['state'] == 'unknown'
         assert len(calls) == 1 and calls[0] == (request['projectId'], request['previewId'],
             request['revision'], request['turnId'], request['operationId'])
+        recover_id = 'affairs-' + 'b' * 40
+        response = client.post('/api/assistant/affairs-sync', json={**request, 'recoverSyncId': recover_id})
+        assert response.status_code == 200 and calls[-1][-1] == recover_id
+        for bad in ('affairs-' + 'A' * 40, 'affairs-' + 'a' * 39, '../other', 123):
+            assert client.post('/api/assistant/affairs-sync', json={**request, 'recoverSyncId': bad}).status_code == 422
+        assert client.post('/api/assistant/history-import', json={**request, 'recoverSyncId': recover_id}).status_code == 422
 
 
 _HOST_SETUP = _SETUP.split("binding = preview.consume_for_import", 1)[0] + r'''
@@ -371,5 +377,109 @@ try:
     assert committed[0] and service.store.read_jsonl(assistant['agentId'], 'affairs/items.jsonl')[0]['title'] == 'updated'
 finally:
     sync_module._replace_ledger, sync_module.read_stable_file = original_write, original_read
+    cleanup()
+''', config_text=TEST_MODEL_CONFIG)
+
+
+def test_recover_pending_receipt_only_with_matching_authority_and_ledger(tmp_path):
+    _run(tmp_path, _HOST_SETUP + r'''
+import core.assistant_runtime.migration_affairs_sync as sync_module
+original_write = sync_module._replace_ledger
+def fail_before_commit(*args, **kwargs):
+    raise RuntimeError('interrupted before ledger write')
+sync_module._replace_ledger = fail_before_commit
+try:
+    first = sync()
+    assert first['state'] == 'unknown'
+    assert service.store.read_jsonl(assistant['agentId'], 'affairs/items.jsonl') == [old]
+    mid = first['migrationId']
+    path = target / 'affairs_sync_receipts' / (hashlib.sha256(mid.encode()).hexdigest() + '.json')
+    receipt = path.read_bytes()
+    assert json.loads(receipt)['published'] is False
+    sync_module._replace_ledger = lambda *a, **kw: (_ for _ in ()).throw(AssertionError('ledger rewrite'))
+    def recover(op, recover_id=mid):
+        p = preview.preview('registered:1', turn_id='turn-one')
+        return history_host.sync_affairs('registered:1', p['previewId'], 1, 'turn-one', op, recover_id)
+    # A fresh preview for another source identity cannot recover this record.
+    registry_raw = registry.read_text()
+    registry.write_text(registry_raw.replace('old-pa', 'other-pa'))
+    assert recover('1' * 32)['state'] == 'unknown'
+    registry.write_text(registry_raw)
+    # Revoked source authority cannot confirm a pending receipt.
+    p = preview.preview('registered:1', turn_id='turn-one')
+    registry.write_text(registry_raw + ' ')
+    invalid = history_host.sync_affairs('registered:1', p['previewId'], 1, 'turn-one', '2' * 32, mid)
+    assert invalid['state'] != 'complete' and json.loads(path.read_bytes())['published'] is False
+    registry.write_text(registry_raw)
+    # Missing receipts and a mismatching target are never evidence of success.
+    path.unlink()
+    assert recover('b' * 32)['state'] == 'unknown'
+    assert not path.exists()
+    path.write_bytes(receipt)
+    service.store.write_jsonl(assistant['agentId'], 'affairs/items.jsonl', [old])
+    assert recover('c' * 32)['state'] == 'unknown'
+    assert json.loads(path.read_bytes())['published'] is False
+    service.store.write_jsonl(assistant['agentId'], 'affairs/items.jsonl', [{**old, 'title': 'updated'}])
+    result = recover('d' * 32)
+    assert result['migrationId'] == mid and result['state'] == 'confirmed' and result['code'] == 'matched'
+    assert result['conflictCount'] == 0 and 'appliedCount' not in result
+    assert result['readyForCutover'] is False and json.loads(path.read_bytes())['published'] is True
+    from core.assistant_runtime.affairs_conflict_actions import _sync_receipt_status
+    status = _sync_receipt_status(target, mid, assistant['agentId'])
+    assert status['state'] == 'published' and status['plannedAppliedCount'] == 1 and 'appliedCount' not in status
+    # A published receipt can be reread without replaying the write.
+    again = recover('e' * 32)
+    assert again['state'] == 'confirmed' and again['migrationId'] == mid and 'appliedCount' not in again
+    # An edited ledger no longer proves the digest even if the receipt was published.
+    service.store.write_jsonl(assistant['agentId'], 'affairs/items.jsonl', [{**old, 'title': 'user edit'}])
+    assert recover('3' * 32)['state'] == 'unknown'
+    assert service.store.read_jsonl(assistant['agentId'], 'affairs/items.jsonl')[0]['title'] == 'user edit'
+    assert recover('f' * 32, 'affairs-' + 'f' * 40)['state'] == 'unknown'
+finally:
+    sync_module._replace_ledger = original_write
+    cleanup()
+''', config_text=TEST_MODEL_CONFIG)
+
+
+def test_recovery_operation_binding_and_revocation(tmp_path):
+    _run(tmp_path, _HOST_SETUP + r'''
+import threading
+from concurrent.futures import ThreadPoolExecutor
+import core.assistant_runtime.migration_affairs_sync as sync_module
+original_write, original_reconcile = sync_module._replace_ledger, sync_module.reconcile_affairs
+def fail_after_commit(*args, **kwargs):
+    original_write(*args, **kwargs); raise RuntimeError('lost acknowledgement')
+sync_module._replace_ledger = fail_after_commit
+reached, resume = threading.Event(), threading.Event()
+try:
+    first = sync(); mid = first['migrationId']
+    assert first['state'] == 'unknown'
+    path = target / 'affairs_sync_receipts' / (hashlib.sha256(mid.encode()).hexdigest() + '.json')
+    sync_module._replace_ledger = original_write
+    p = preview.preview('registered:1', turn_id='turn-one')
+    def paused(*a, **kw):
+        reached.set(); assert resume.wait(8)
+        return original_reconcile(*a, **kw)
+    sync_module.reconcile_affairs = paused
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        pending = pool.submit(history_host.sync_affairs, 'registered:1', p['previewId'], 1, 'turn-one', 'b' * 32, mid)
+        assert reached.wait(8)
+        owner = history_host._sync_active['owner']
+        revoked = threading.Event(); original_revoke = owner.revoke
+        def mark_revoke():
+            result = original_revoke(); revoked.set(); return result
+        owner.revoke = mark_revoke
+        cancelling = pool.submit(history_host.cancel_affairs, 'b' * 32, p['previewId'])
+        assert revoked.wait(3) and not cancelling.done()
+        resume.set()
+        assert pending.result(timeout=10)['state'] == 'unknown'
+        assert cancelling.result(timeout=10)['cancelled']
+    assert json.loads(path.read_bytes())['published'] is False
+    # Same operation ID cannot be rebound to a different recovery ID.
+    rebound = history_host.sync_affairs('registered:1', p['previewId'], 1, 'turn-one', 'b' * 32, 'affairs-' + 'f' * 40)
+    assert rebound['state'] == 'unknown'
+finally:
+    resume.set()
+    sync_module._replace_ledger, sync_module.reconcile_affairs = original_write, original_reconcile
     cleanup()
 ''', config_text=TEST_MODEL_CONFIG)

@@ -607,6 +607,60 @@ describe("Launcher assistant route lifecycle", () => {
     expect(character).toMatchObject({ characterId: "xiaoluo", name: "小洛" });
   });
 
+  it.each([
+    [{ status: "ready" }, "在这里陪你"],
+    [{ status: "ready", terminalReason: "success" }, "在这里陪你"],
+    [{ status: "ready", terminalReason: "error" }, "失败"],
+    [{ status: "ready", terminalReason: "needs_continue" }, "待继续"],
+    [{ status: "paused" }, "已暂停"],
+    [{ status: "running" }, "进行中"],
+    [{ status: "ready", terminalReason: "stopped_by_user" }, "已停止"],
+  ])("shows the appropriate status for %o", async (state, expected) => {
+    await renderAssistant({ id: "s", messages: [], ...state }, {
+      assistant: { agentId: "a", directSessionId: "s", displayName: "助理" },
+      settings: { ok: true, displayName: "助理", modelId: "m", preferences: {
+        characterId: "xiaoluo", showStatus: true, showTitles: true, showCompletion: true, idleMessage: "在这里陪你",
+      } },
+    });
+    expect(container?.querySelector('[role="status"]')?.textContent).toBe(expected);
+  });
+
+  it("refreshes settings after a successful Turn and then shows the new idle message", async () => {
+    const preferences = { characterId: "xiaoluo", showStatus: true, showTitles: true, showCompletion: true, idleMessage: "旧提示" };
+    await renderAssistant({ id: "s", status: "running", activeTurnId: "settings-turn", messages: [] }, {
+      assistant: { agentId: "a", directSessionId: "s", displayName: "助理" },
+      settings: { ok: true, displayName: "助理", modelId: "m", preferences },
+    });
+    const statusReads = bridge.getLauncherAssistantStatus.mock.calls.length;
+    bridge.getLauncherAssistantStatus.mockResolvedValue({ assistant: { agentId: "a", directSessionId: "s", displayName: "助理" },
+      settings: { ok: true, displayName: "助理", modelId: "m", preferences: { ...preferences, idleMessage: "新提示" } } });
+    bridge.getLauncherAssistantDetail.mockResolvedValue({ id: "s", status: "ready", terminalReason: "success",
+      lastTurnTerminalTurnId: "settings-turn", messages: [] });
+    await act(async () => { await client?.refetchQueries({ queryKey: ["launcher-assistant", "detail", "s"] }); });
+    await settle(); await settle();
+    expect(bridge.getLauncherAssistantStatus).toHaveBeenCalledTimes(statusReads + 1);
+    expect(container?.querySelector('[role="status"]')?.textContent).toBe("新提示");
+  });
+
+  it("keeps the completion label when no idle message is configured", async () => {
+    await renderAssistant({ id: "s", status: "ready", terminalReason: "success", messages: [] });
+    expect(container?.querySelector('[role="status"]')?.textContent).toBe("已完成");
+  });
+
+  it("does not replace a pending approval with the idle message", async () => {
+    await renderAssistant({ id: "s", status: "ready", terminalReason: "success", messages: [] }, {
+      assistant: { agentId: "a", directSessionId: "s", displayName: "助理" },
+      settings: { ok: true, displayName: "助理", modelId: "m", preferences: {
+        characterId: "xiaoluo", showStatus: true, showTitles: true, showCompletion: true, idleMessage: "在这里陪你",
+      } },
+    });
+    bridge.getLauncherAssistantApprovals.mockResolvedValue([{ requestId: "r", sessionId: "s", turnId: "t", agentId: "a",
+      toolName: "command_tool", status: "pending", risk: "high", argumentSummary: {}, availableDecisions: ["accept", "decline"] }]);
+    await click("展开个人助理聊天");
+    expect(container?.querySelector("header [role='status']")?.textContent).toBe("已完成");
+    expect(container?.querySelector('[role="dialog"]')).toBeTruthy();
+  });
+
   it.each(["success", "needs_continue", "error", "stopped_by_user"])("refreshes own name and appearance once after native %s turn readback", async terminalReason => {
     await renderAssistant();
     bridge.getLauncherAssistantDetail.mockResolvedValue({ id: "s", status: "running", activeTurnId: "settings-turn", messages: [] });

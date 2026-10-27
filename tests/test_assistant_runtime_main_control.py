@@ -148,6 +148,15 @@ async def test_affairs_sync_requires_native_governance_and_preserves_unknown_rec
             owner.settle(wire["deliveryId"], {**completed, "path": "C:/forged"})
         assert owner.settle(wire["deliveryId"], completed)
         assert await task == completed
+        original_id = "affairs-" + "f" * 40
+        recover_args = {**args, "recover_sync_id": original_id}
+        recovery = asyncio.create_task(asyncio.to_thread(execute_action, "affairs_sync", recover_args, runtime=runtime, governed=True))
+        recovered_wire = (await owner.claim())["request"]
+        assert recovered_wire["recoverSyncId"] == original_id
+        owner.cancel_history_imports("turn-1")
+        assert (await recovery)["migrationId"] == original_id
+        with pytest.raises(ValueError):
+            await asyncio.to_thread(execute_action, "history_import", recover_args, runtime=runtime, governed=True)
     finally:
         owner.close()
         unbind_actions(service)

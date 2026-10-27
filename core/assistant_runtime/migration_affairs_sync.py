@@ -40,13 +40,15 @@ def _replace_ledger(ledger, encoded):
             os.unlink(pending)
 
 
-def reconcile_affairs(lease, *, sync_id, source_scope):
+def reconcile_affairs(lease, *, sync_id, source_scope, confirmation_only=False):
     """Apply non-conflicting changes once; leave divergent rows untouched.
 
     A pending receipt never initiates another write. If a crash occurs before
     publication, only an exact match to the planned result can be confirmed.
     The target lease and native ledger lock serialize native writers.
     """
+    if type(confirmation_only) is not bool:
+        raise MigrationIOError("affairs_sync_request_invalid")
     scope = _scope(source_scope)
     check_affairs_sync_lease(lease, source_scope=scope,
                             baseline_migration_id=getattr(lease, "baseline_migration_id", None))
@@ -113,6 +115,11 @@ def reconcile_affairs(lease, *, sync_id, source_scope):
             return {"syncId": sync_id, "appliedCount": receipt["appliedCount"],
                     "conflictCount": receipt["conflictCount"], "reused": True,
                     "sourceQuiesced": False, "readyForCutover": False}
+
+        if confirmation_only:
+            # A recovery request may only confirm a matching existing receipt.
+            # It must never issue the original ledger write for the first time.
+            raise MigrationIOError("affairs_sync_outcome_unknown")
 
         by_id = {row["itemId"]: row for row in current}
         applied, conflicts, decisions = 0, 0, []

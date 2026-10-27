@@ -42,6 +42,10 @@ class HistoryImport(MainControlProject):
     preview_id: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class AffairsSync(HistoryImport):
+    recover_sync_id: str | None = Field(default=None, pattern=r"^affairs-[0-9a-f]{40}$")
+
+
 class LauncherTheme(Parameters):
     model_config = ConfigDict(extra="forbid", strict=True)
     theme: Literal["dark", "light"]
@@ -61,14 +65,14 @@ _APPEARANCE_HELP = {
 }
 
 
-_MAIN_SCHEMAS = {"project_status": MainControlProject, "project_lifecycle": ProjectLifecycle, "history_import": HistoryImport, "affairs_sync": HistoryImport,
+_MAIN_SCHEMAS = {"project_status": MainControlProject, "project_lifecycle": ProjectLifecycle, "history_import": HistoryImport, "affairs_sync": AffairsSync,
                  "project_lifecycle_receipt": ProjectLifecycle}
 _MAIN_HELP = {
     "project_status": "只读查询 Launcher 当前已登记主项目的状态与活跃任务数；分支 instance 暂返回 prerequisite_required，不控制分支。",
     "project_lifecycle": "经原生审批控制当前已登记主项目的 start/stop/restart；分支 instance 暂返回 prerequisite_required。不支持 force/interrupt。unknown 时保留同一 request_id 查询 project_lifecycle_receipt，不能换 ID 重放；queued 表示等待执行，不等于完成。",
     "project_lifecycle_receipt": "只读查询同一 project_id、operation、request_id 的主项目原生回执；unknown 时继续查询原 ID，不换 ID 重放，queued 不等于完成；不支持分支 instance 或 force/interrupt。",
     "history_import": "按本轮 history_source_preview 结果，经当前工具审批策略导入所选旧助理的只读历史；不得提供路径或批准标志。成功不表示旧源已冻结、任务已交接或旧助理可退役；unknown 时先查询已有历史，不要自动重复导入。",
-    "affairs_sync": "按本轮 history_source_preview 同步已首次导入的旧个人事务；按现有工具治理策略执行，来源、基线由 Launcher 核验，不得传路径或批准标志。unresolved/pending 表示原差异需处理或回执待确认，查询 affairs_conflict_sets 与原回执；baseline_unavailable 表示尚无可验证的初次导入基线。unknown 使用返回的 migrationId 查询原回执，不得换 ID 自动重放。成功不表示旧源已冻结或可退役。",
+    "affairs_sync": "按本轮 history_source_preview 同步已首次导入的旧个人事务；来源、基线由 Launcher 核验，不得传路径或批准标志。unknown 用 affairs_sync_receipt 查本次 migrationId；rejected/pending 用 affairs_conflict_sets 找先前待确认的 syncId（不是本次 ID）。待确认时用新预览和 recover_sync_id=原 ID 核对，不重写；confirmed/matched 只表示当前结果匹配，不证明原写入归因。unresolved 查询差异；baseline_unavailable 表示尚无初次导入基线。成功不表示旧源已冻结或可退役。",
 }
 
 
@@ -327,6 +331,8 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
             if not isinstance(turn_id, str) or not turn_id.strip():
                 raise ValueError("Launcher native Turn identity is required")
             request = {"projectId": args["project_id"], "previewId": args["preview_id"], "turnId": turn_id}
+            if action == "affairs_sync" and args.get("recover_sync_id") is not None:
+                request["recoverSyncId"] = args["recover_sync_id"]
         else:
             request = {"projectId": args["project_id"], "operation": args.get("operation", "status")}
             if "request_id" in args:

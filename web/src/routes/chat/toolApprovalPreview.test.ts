@@ -125,4 +125,8 @@ it("shows the verified previous assistant for an affairs sync", () => {
     assistantOperationDescription: "同步所选旧助理的个人事务。" }, "personal_assistant_manage_tool", "zh");
   expect(preview).toContain("同步旧助理事务");
   expect(preview).toContain("旧助理: old-pa");
+  const recovery = toolApprovalActionPreview({ assistantAction: "affairs_sync",
+    assistantTargets: { assistantAgentId: "old-pa", syncId: "affairs-" + "f".repeat(40) },
+    assistantOperationDescription: "核对原事务同步回执，不会重新写入事务。" }, "personal_assistant_manage_tool", "zh");
+  expect(recovery).toContain("原回执: affairs-");
 });

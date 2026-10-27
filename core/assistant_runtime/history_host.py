@@ -1,6 +1,7 @@
 """Main-only binding of one approved native-turn preview to archive import."""
 from __future__ import annotations
 
+import re
 import secrets
 from contextlib import contextmanager
 from pathlib import Path
@@ -124,7 +125,7 @@ class HistoryHost:
             self._preview.discard(preview_id)
             return {"schemaVersion": 1, "operationId": operation_id, "cancelled": True}
 
-    def sync_affairs(self, project_id, preview_id, revision, turn_id, operation_id):
+    def sync_affairs(self, project_id, preview_id, revision, turn_id, operation_id, recover_sync_id=None):
         """Consume exactly one main-approved preview and synchronize its affairs."""
         from .main_control import affairs_migration_id
         from .migration_affairs_conflicts import (discover_affairs_baseline_locked, locked_affairs_target,
@@ -134,17 +135,20 @@ class HistoryHost:
         from .online_affairs_sync import synchronize_affairs
         from .online_affairs_sync_lease import OnlineAffairsSyncOwner
 
-        mid = affairs_migration_id(project_id, preview_id)
+        if recover_sync_id is not None and (not isinstance(recover_sync_id, str)
+                or not re.fullmatch(r"affairs-[a-f0-9]{40}", recover_sync_id)):
+            raise ValueError("affairs_sync_recovery_id_invalid")
+        mid = recover_sync_id or affairs_migration_id(project_id, preview_id)
         base = {"schemaVersion": 1, "projectId": project_id, "previewId": preview_id,
                 "migrationId": mid, "readyForCutover": False}
-        binding_key = (project_id, preview_id, revision, turn_id)
+        binding_key = (project_id, preview_id, revision, turn_id, recover_sync_id)
         if not self._import_lock.acquire(blocking=False):
             with self._sync_signal_lock:
                 active = self._sync_active
                 same_preview = active is not None and active["previewId"] == preview_id
             if not same_preview:
                 self._preview.discard(preview_id)
-            return {**base, "state": "rejected", "code": "busy"}
+            return {**base, "state": "unknown", "code": "unknown"} if recover_sync_id else {**base, "state": "rejected", "code": "busy"}
         owner = OnlineAffairsSyncOwner(self._generation,
             lambda generation, turn: self._sync_guard(generation, turn, operation_id))
         current = {"operationId": operation_id, "previewId": preview_id, "turnId": turn_id,
@@ -170,7 +174,7 @@ class HistoryHost:
                     terminal = next((key for key, entry in self._sync_seen.items()
                                      if entry["result"] is not None), None)
                     if terminal is None:
-                        return {**base, "state": "rejected", "code": "busy"}
+                        return {**base, "state": "unknown", "code": "unknown"} if recover_sync_id else {**base, "state": "rejected", "code": "busy"}
                     del self._sync_seen[terminal]
                 self._sync_seen[operation_id] = {"binding": binding_key, "previewId": preview_id, "result": None}
                 self._sync_active = current
@@ -186,29 +190,37 @@ class HistoryHost:
                     if not native._LOCK.acquire(blocking=False):
                         raise MigrationIOError("affairs_sync_busy")
                     try:
-                        with locked_affairs_target(self._owner._profile, target_agent_id=native._AGENT_ID) as target:
-                            try:
-                                baseline = discover_affairs_baseline_locked(self._owner._profile, source_scope=scope,
-                                    target_agent_id=native._AGENT_ID, target=target)["baselineMigrationId"]
-                                unresolved = None
-                            except MigrationIOError as error:
-                                if str(error) != "affairs_baseline_unresolved":
-                                    raise
-                                verifier = _BaselineVerifier(self._owner._profile, scope, native._AGENT_ID, target=target)
-                                verifier.candidates = _sync_candidates(self._owner._profile, scope, native._AGENT_ID)
-                                pending = []
-                                for links in verifier.candidates.values():
-                                    for record, receipt, record_snapshot, receipt_snapshot in links:
-                                        if receipt["published"] is not True or receipt["conflictCount"] == 0:
-                                            continue
-                                        _verify_record_sources(self._owner._profile, record, verifier)
-                                        verifier.snapshots.extend((record_snapshot, receipt_snapshot))
-                                        if not verifier.converged(record, receipt):
-                                            pending.append((record["syncId"], record["baselineMigrationId"]))
-                                verifier.finish()
-                                if len(pending) != 1:
-                                    raise MigrationIOError("affairs_baseline_unresolved")
-                                unresolved = pending[0]
+                        if recover_sync_id is not None:
+                            from .migration_affairs_conflicts import _load
+                            record = _load(self._owner._profile, mid, scope, native._AGENT_ID)
+                            if record["snapshotMigrationId"] != mid:
+                                raise MigrationIOError("affairs_sync_recovery_binding_invalid")
+                            baseline = record["baselineMigrationId"]
+                            unresolved = None
+                        else:
+                            with locked_affairs_target(self._owner._profile, target_agent_id=native._AGENT_ID) as target:
+                                try:
+                                    baseline = discover_affairs_baseline_locked(self._owner._profile, source_scope=scope,
+                                        target_agent_id=native._AGENT_ID, target=target)["baselineMigrationId"]
+                                    unresolved = None
+                                except MigrationIOError as error:
+                                    if str(error) != "affairs_baseline_unresolved":
+                                        raise
+                                    verifier = _BaselineVerifier(self._owner._profile, scope, native._AGENT_ID, target=target)
+                                    verifier.candidates = _sync_candidates(self._owner._profile, scope, native._AGENT_ID)
+                                    pending = []
+                                    for links in verifier.candidates.values():
+                                        for record, receipt, record_snapshot, receipt_snapshot in links:
+                                            if receipt["published"] is not True or receipt["conflictCount"] == 0:
+                                                continue
+                                            _verify_record_sources(self._owner._profile, record, verifier)
+                                            verifier.snapshots.extend((record_snapshot, receipt_snapshot))
+                                            if not verifier.converged(record, receipt):
+                                                pending.append((record["syncId"], record["baselineMigrationId"]))
+                                    verifier.finish()
+                                    if len(pending) != 1:
+                                        raise MigrationIOError("affairs_baseline_unresolved")
+                                    unresolved = pending[0]
                     finally:
                         native._LOCK.release()
                 if unresolved is not None:
@@ -236,7 +248,9 @@ class HistoryHost:
             except Exception as error:
                 with self._sync_signal_lock:
                     cancelled = operation_id in self._sync_cancelled or owner._revoked.is_set()
-                if convergence_attempted and str(error) not in {"affairs_convergence_not_reached", "affairs_convergence_not_required"}:
+                if recover_sync_id is not None:
+                    result = {**base, "state": "unknown", "code": "unknown"}
+                elif convergence_attempted and str(error) not in {"affairs_convergence_not_reached", "affairs_convergence_not_required"}:
                     result = {**base, "state": "unknown", "code": "unknown"}
                 elif not cancelled and validation_phase == "preview" and str(error) == "history_preview_expired":
                     # The preview may already have been consumed by an evicted
@@ -254,8 +268,34 @@ class HistoryHost:
                     result = {**base, "state": "rejected", "code": code}
             else:
                 try:
-                    outcome = synchronize_affairs(preview_binding=binding, owner=owner, generation=self._generation,
-                        turn_id=turn_id, migration_id=mid, baseline_migration_id=baseline)
+                    if recover_sync_id is None:
+                        outcome = synchronize_affairs(preview_binding=binding, owner=owner, generation=self._generation,
+                            turn_id=turn_id, migration_id=mid, baseline_migration_id=baseline)
+                    else:
+                        from .migration_affairs_sync import reconcile_affairs
+                        from .migration_affairs_conflicts import _digest, _load, _sync_receipt
+                        with owner.admit(generation=self._generation, turn_id=turn_id,
+                                         baseline_migration_id=baseline, source_scope=scope) as lease:
+                            binding[4]()
+                            with pinned_source_files(binding[5]):
+                                binding[4]()
+                                # Keep the ledger and receipt mutex held through
+                                # confirmation, including for published receipts.
+                                with locked_affairs_target(lease.root, target_agent_id=lease.agent_id) as target:
+                                    record = _load(lease.root, mid, scope, lease.agent_id)
+                                    if (record["baselineMigrationId"] != baseline
+                                            or record["snapshotMigrationId"] != mid):
+                                        raise MigrationIOError("affairs_sync_recovery_binding_invalid")
+                                    receipt, _ = _sync_receipt(lease.root, record)
+                                    if receipt is None or _digest(target.rows(lease.root, lease.agent_id)) != receipt["targetSha256"]:
+                                        raise MigrationIOError("affairs_sync_outcome_unknown")
+                                    sync = reconcile_affairs(lease, sync_id=mid, source_scope=scope,
+                                                             confirmation_only=True)
+                                binding[4]()
+                                lease.check()
+                        # A matching ledger confirms the planned result, but
+                        # cannot attribute the writes to the interrupted run.
+                        outcome = {"state": "confirmed", "code": "matched", "conflictCount": sync["conflictCount"]}
                 except Exception:
                     outcome = {}
                 if not isinstance(outcome, dict):
@@ -265,7 +305,10 @@ class HistoryHost:
                     and 0 <= outcome["appliedCount"] <= 4096
                     and type(outcome.get("conflictCount")) is int
                     and 0 <= outcome["conflictCount"] <= 4096)
-                if valid_counts and state == "complete" and code == "synchronized" and outcome["conflictCount"] == 0:
+                if (recover_sync_id is not None and state == "confirmed" and code == "matched"
+                        and type(outcome.get("conflictCount")) is int and 0 <= outcome["conflictCount"] <= 4096):
+                    result = {**base, "state": state, "code": code, "conflictCount": outcome["conflictCount"]}
+                elif valid_counts and state == "complete" and code == "synchronized" and outcome["conflictCount"] == 0:
                     result = {**base, "state": state, "code": code, "appliedCount": outcome["appliedCount"], "conflictCount": 0}
                 elif valid_counts and state == "partial" and code == "unresolved" and outcome["conflictCount"] > 0:
                     result = {**base, "state": state, "code": code, "appliedCount": outcome["appliedCount"], "conflictCount": outcome["conflictCount"]}

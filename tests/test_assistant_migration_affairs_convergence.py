@@ -310,6 +310,15 @@ def test_prepare_accepts_converged_head_with_native_admission_and_rechecks_targe
                 assert result['appliedCount'] == 1 and result['conflictCount'] == 0
                 from core.assistant_runtime.affairs_conflict_actions import _sync_receipt_status
                 assert _sync_receipt_status(root, 'next', lease.agent_id)['state'] == 'published'
+                from core.assistant_runtime.affairs_conflict_actions import execute as read_action
+                runtime = {'agentId': lease.agent_id, 'sessionId': lease.session_id}
+                sets = read_action('affairs_conflict_sets', {}, runtime)
+                assert any(item['syncId'] == 'next' for item in sets['sets'])
+                page = read_action('affairs_conflict_list', {'sync_id': 'next'}, runtime)
+                assert page['total'] == 1 and page['conflicts'][0]['syncStatus'] == 'planned_apply'
+                detail = read_action('affairs_conflict_read', {'sync_id': 'next',
+                    'conflict_id': page['conflicts'][0]['conflictId']}, runtime)
+                assert detail['syncStatus'] == 'planned_apply'
         finally:
             assert native.shutdown()['closed']
     ''')

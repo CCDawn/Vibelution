@@ -56,6 +56,10 @@ def test_final_sync_preserves_target_edits_and_recovers_after_publication(tmp_pa
             service.store.write_jsonl(lease.agent_id, 'affairs/items.jsonl', target)
             prepare_affairs_conflicts(lease, baseline_migration_id='initial',
                 snapshot_migration_id='latest', sync_id='final', source_scope=scope)
+            try: reconcile_affairs(lease, sync_id='final', source_scope=scope, confirmation_only=True)
+            except MigrationIOError as error: assert str(error) == 'affairs_sync_outcome_unknown'
+            else: raise AssertionError('recovery started a new ledger write')
+            assert service.store.read_jsonl(lease.agent_id, 'affairs/items.jsonl') == target
             assert _sync_receipt_status(root, 'unknown-id', lease.agent_id)['state'] == 'unknown'
             assert _sync_receipt_status(root, 'latest', lease.agent_id)['state'] == 'archived'
             assert _sync_receipt_status(root, 'final', lease.agent_id)['state'] == 'prepared'
@@ -72,7 +76,7 @@ def test_final_sync_preserves_target_edits_and_recovers_after_publication(tmp_pa
                     else: raise AssertionError('interruption not injected')
                 finally: sync._replace_ledger = original
                 assert _sync_receipt_status(root, 'final', lease.agent_id)['state'] == 'pending'
-                recovered = reconcile_affairs(lease, sync_id='final', source_scope=scope)
+                recovered = reconcile_affairs(lease, sync_id='final', source_scope=scope, confirmation_only=True)
                 assert recovered['reused'] and recovered['appliedCount'] == 2 and recovered['conflictCount'] == 2
                 assert not recovered['readyForCutover'] and not recovered['sourceQuiesced']
                 assert _sync_receipt_status(root, 'final', lease.agent_id)['state'] == 'published'
