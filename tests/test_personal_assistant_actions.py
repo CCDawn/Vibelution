@@ -194,3 +194,18 @@ def test_partial_task_update_preserves_other_profile_fields(assistant_runtime, p
     before = directory.get_agent(target)
     assert call("agent_update", {"agent_id": target, "updates": {"taskProfile": {"unknown": "x"}}})["ok"] is False
     assert directory.get_agent(target) == before
+def test_launcher_history_import_approval_shows_verified_source_only(monkeypatch):
+    from core.infrastructure import native_runtime
+    from core.assistant_runtime import actions
+    from core.web.services.session.tool_approvals import _assistant_management_summary
+    monkeypatch.setattr(native_runtime, "is_launcher_assistant_process", lambda: True)
+    monkeypatch.setattr(actions, "history_import_approval_summary", lambda project, preview: {
+        "sourceProjectId": "fixture-project", "instanceId": "fixture-instance", "assistantAgentId": "old-pa"})
+    summary = _assistant_management_summary({"action": "history_import", "arguments_json": json.dumps({
+        "project_id": "project", "preview_id": "a" * 64})})
+    assert summary["assistantAction"] == "history_import"
+    assert summary["assistantTargets"]["assistantAgentId"] == "old-pa"
+    assert "路径" not in json.dumps(summary, ensure_ascii=False)
+    invalid = _assistant_management_summary({"action": "history_import", "arguments_json": json.dumps({
+        "project_id": "project", "preview_id": "a" * 64, "approved": True})})
+    assert invalid["assistantArgumentsInvalid"] is True

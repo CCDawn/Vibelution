@@ -167,6 +167,54 @@ def migration_target_lock(path: Path):
         api.CloseHandle(handle)
 
 
+@contextmanager
+def pinned_source_files(snapshots):
+    """Hold verified source files stable through a snapshot visibility commit.
+
+    Ancestors permit ordinary writes but deny rename/delete while pinned. File
+    handles deny write/delete sharing. This does not freeze directory contents
+    or establish that a live source is quiescent.
+    """
+    if os.name != "nt":
+        raise MigrationIOError("migration_writes_require_windows")
+    import ctypes
+    from core.web.services.personal_assistant_project.windows_read import _api, _verify
+
+    unique = {}
+    for snapshot in snapshots:
+        if not isinstance(snapshot, FileSnapshot):
+            raise MigrationIOError("source_authority_required")
+        path = check_path(snapshot.path)
+        key = str(path).casefold()
+        if key in unique and unique[key] != snapshot:
+            raise MigrationIOError("source_changed")
+        unique[key] = snapshot
+    if not unique:
+        raise MigrationIOError("source_authority_required")
+    files = [snapshot.path for snapshot in unique.values()]
+    directories = {parent for path in files for parent in path.parents if parent != Path(path.anchor)}
+    api = _api()
+    with ExitStack() as stack:
+        try:
+            for path, directory in [(path, True) for path in sorted(directories, key=lambda p: (len(p.parts), str(p).casefold()))] + \
+                    [(path, False) for path in sorted(files, key=lambda p: str(p).casefold())]:
+                check_path(path)
+                handle = api.CreateFileW(str(path), 0x80000000, 3 if directory else 1,
+                                         None, 3, 0x02200000 if directory else 0x00200000, None)
+                if handle is None or handle == ctypes.c_void_p(-1).value:
+                    raise MigrationIOError("source_guard_unavailable")
+                stack.callback(api.CloseHandle, handle)
+                _verify(api, handle, path, directory=directory)
+            for snapshot in unique.values():
+                verify_snapshot(snapshot)
+        except (OSError, ValueError) as error:
+            if isinstance(error, (MigrationIOError, TimeoutError)):
+                raise
+            raise MigrationIOError("source_guard_unavailable") from None
+        # Do not translate failures from the caller's protected operation.
+        yield
+
+
 def publish_directory(pending: Path, final: Path, expected_identity: tuple) -> None:
     """Publish the verified pending object by handle, never a reusable path."""
     pending, final = validate_path(pending), validate_path(final)

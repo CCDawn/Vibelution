@@ -50,6 +50,38 @@ def _existing_route(paths, config_path):
     return state.path(), runtime, tuple(snapshots), verify
 
 
+def _bound_route(paths, config_path):
+    """Use native routing with a proven formal workspace in this context."""
+    from config.paths import resolve_configured_data_home
+    from config.public_config import read_existing_config_snapshot
+    from core.infrastructure import developer_sandbox
+    config = read_stable_file(config_path, 16 * 1024 * 1024)
+    public = read_existing_config_snapshot(config.path)
+    launcher = public.get('launcher', {})
+    settings = launcher.get('developer_mode', {}) if isinstance(launcher, dict) else None
+    if not isinstance(settings, dict) or type(settings.get('enabled', False)) is not bool:
+        raise MigrationIOError('source_routing_changed')
+    if settings.get('enabled', False):
+        raise MigrationIOError('source_developer_mode_unverified')
+    configured = resolve_configured_data_home(config_path=config.path)
+    formal = (configured / 'workspace').resolve() if configured is not None else paths.workspace
+    token = developer_sandbox._FORMAL_WORKSPACE_SNAPSHOT.set({paths.project_root: formal})
+    try:
+        workspace, runtime, snapshots, verify_route = _existing_route(paths, config.path)
+    finally:
+        developer_sandbox._FORMAL_WORKSPACE_SNAPSHOT.reset(token)
+    verify_snapshot(config)
+    def verify():
+        token = developer_sandbox._FORMAL_WORKSPACE_SNAPSHOT.set({paths.project_root: formal})
+        try:
+            verify_snapshot(config)
+            verify_route()
+        finally:
+            developer_sandbox._FORMAL_WORKSPACE_SNAPSHOT.reset(token)
+    verify()
+    return workspace, runtime, snapshots, verify
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project", type=Path, required=True)
@@ -65,6 +97,8 @@ def main() -> int:
         help="Offline import of explicit episodic/affairs snapshots into an isolated native profile")
     modes.add_argument("--activate-knowledge", metavar="ASSISTANT_AGENT_ID",
         help="Offline import of proven private formal knowledge into a native profile")
+    modes.add_argument("--prepare-affairs-conflicts", metavar="ASSISTANT_AGENT_ID",
+        help="Offline archive a verified source snapshot and preserve ambiguous affairs changes")
     modes.add_argument("--recovery-inventory", metavar="ASSISTANT_AGENT_ID",
         help="Read-only disposition of old recovery bindings and temporary grants")
     modes.add_argument("--correlate-handoff", metavar="ASSISTANT_AGENT_ID")
@@ -74,6 +108,7 @@ def main() -> int:
     parser.add_argument("--target-config", type=Path,
         help="Existing explicit operator config inside the selected activation profile")
     parser.add_argument("--migration-id")
+    parser.add_argument("--baseline-migration-id", help="Published baseline personal import for affairs conflict preparation")
     parser.add_argument("--path-grants", type=Path)
     parser.add_argument("--source-config", type=Path,
         help="Existing source operator config; required for observation and explicit sandbox selection")
@@ -81,11 +116,15 @@ def main() -> int:
     parser.add_argument("--request-id")
     parser.add_argument("--message-id", action="append", default=[])
     args = parser.parse_args()
-    activating = args.activate_personal is not None or args.activate_knowledge is not None
+    activating = args.activate_personal is not None or args.activate_knowledge is not None or args.prepare_affairs_conflicts is not None
     importing = args.history_import is not None or args.source_import is not None or activating
     observing = args.observe_handoff is not None
     if importing and (args.target_profile is None or args.migration_id is None):
         parser.error("Import requires --target-profile and --migration-id together")
+    if (args.prepare_affairs_conflicts is None) != (args.baseline_migration_id is None):
+        parser.error("--baseline-migration-id is required only with --prepare-affairs-conflicts")
+    if args.source_import is not None and args.source_config is None:
+        parser.error("Source import requires --source-config")
     if activating and (args.target_config is None or args.source_config is None):
         parser.error("Activation requires --source-config and an existing --target-config inside --target-profile")
     if not activating and args.target_config is not None:
@@ -104,20 +143,39 @@ def main() -> int:
             from core.infrastructure.native_runtime import is_launcher_assistant_process
             if is_launcher_assistant_process():
                 raise MigrationIOError("activation_requires_source_process")
-        paths = resolve_active_project_storage_paths(args.project.resolve())
+        storage_snapshots, verify_storage = (), None
+        if activating or args.source_import is not None:
+            import os
+            if str(os.environ.get('VIBELUTION_DATA_HOME') or '').strip():
+                raise MigrationIOError('source_environment_unverified')
+            from scripts.assistant_migration_activate import storage_authority
+            paths, storage_snapshots, verify_storage = storage_authority(args.project.resolve(), args.source_config)
+        else:
+            paths = resolve_active_project_storage_paths(args.project.resolve(), config_path=args.source_config)
         kwargs = dict(project_root=paths.project_root, workspace=paths.data / "workspace",
             project_id=paths.project_id, instance_id=paths.instance_id)
         authority_snapshots, authority_verify, runtime_root = (), None, paths.runtime
         if args.source_config is not None:
-            kwargs["workspace"], runtime_root, authority_snapshots, authority_verify = _existing_route(paths, args.source_config)
+            route = _bound_route if verify_storage is not None else _existing_route
+            kwargs["workspace"], runtime_root, authority_snapshots, authority_verify = route(paths, args.source_config)
+        if verify_storage is not None:
+            route_verify = authority_verify
+            def verify_all():
+                verify_storage()
+                route_verify()
+                verify_storage()
+            authority_verify = verify_all
+            authority_snapshots = (*storage_snapshots, *authority_snapshots)
         if activating:
             from scripts.assistant_migration_activate import activate_in_subprocess
             report = activate_in_subprocess(paths=paths, workspace=kwargs["workspace"],
-                agent_id=args.activate_personal or args.activate_knowledge, source_config=args.source_config,
+                agent_id=args.activate_personal or args.activate_knowledge or args.prepare_affairs_conflicts, source_config=args.source_config,
                 target_profile=args.target_profile, target_config=args.target_config,
                 migration_id=args.migration_id, path_grants=args.path_grants,
                 authority_snapshots=authority_snapshots, authority_verify=authority_verify,
-                category="knowledge" if args.activate_knowledge is not None else "personal")
+                category=("knowledge" if args.activate_knowledge is not None else
+                          "affairs_conflicts" if args.prepare_affairs_conflicts is not None else "personal"),
+                baseline_migration_id=args.baseline_migration_id)
         elif observing:
             import anyio
             from core.assistant_runtime.dispatch import DispatchService
@@ -185,10 +243,13 @@ def main() -> int:
             report = captured.report
             if args.source_import is not None:
                 from core.assistant_runtime.migration_source_archive import import_source_snapshots
-                report = {**report, "import": import_source_snapshots(captured, args.target_profile, args.migration_id,
-                    source_roots=(paths.project_root, kwargs["workspace"]),
-                    authority_snapshots=authority_snapshots + ((registry, grant) if grant is not None else (registry,)),
-                    authority_verify=authority_verify)}
+                from core.assistant_runtime.migration_io import pinned_source_files
+                with pinned_source_files(storage_snapshots):
+                    authority_verify()
+                    report = {**report, "import": import_source_snapshots(captured, args.target_profile, args.migration_id,
+                        source_roots=(paths.project_root, kwargs["workspace"]),
+                        authority_snapshots=authority_snapshots + ((registry, grant) if grant is not None else (registry,)),
+                        authority_verify=authority_verify)}
                 verify_snapshot(registry)
                 if grant is not None:
                     verify_snapshot(grant)

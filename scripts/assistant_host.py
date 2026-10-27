@@ -96,11 +96,14 @@ def main():
     import uvicorn
 
     from core.assistant_runtime.dispatch import DispatchError, DispatchService
+    from core.assistant_runtime.history_preview import HistoryPreview
     from core.assistant_runtime.host import NativeFacade, create_app
+    from config.paths import resolve_config_path
     from core.infrastructure.atomic_io import atomic_write_json
     from core.infrastructure.file_lock import cross_process_file_lock
 
     dispatch = DispatchService(root, {}, projects_suspended=args.projects_suspended)
+    dispatch.history_preview = HistoryPreview(dispatch, resolve_config_path())
     try:
         # Install main's complete authorization view even when some physical
         # roots need reconciliation. Startup must never reopen that gate.
@@ -116,6 +119,10 @@ def main():
     # A second Launcher cannot open another writer over the same profile.
     # OS locking releases on crashes; no PID-age heuristic transfers ownership.
     with cross_process_file_lock(root / "host-owner", timeout=0):
+        history_control = None
+        if main_control_enabled:
+            from core.assistant_runtime.history_host import HistoryHost
+            history_control = HistoryHost(root, args.instance_id, dispatch, dispatch.history_preview)
         _seed_tokenizer_cache(tokenizer_cache)
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.bind(("127.0.0.1", 0))
@@ -131,7 +138,7 @@ def main():
                 server.should_exit = True
 
         app = create_app(native=NativeFacade(root), token=token,
-                         dispatch=dispatch, main_control=main_control, on_ready=publish_ready,
+                         dispatch=dispatch, main_control=main_control, history_control=history_control, on_ready=publish_ready,
                          on_shutdown=request_shutdown)
         # Native SSE is intentionally long lived. Bound HTTP connection drain
         # so an open renderer stream cannot prevent lifespan/native shutdown.

@@ -226,6 +226,179 @@ def test_import_is_idempotent_but_changed_source_and_target_are_rejected(tmp_pat
         history.list_history(target)
 
 
+def append_turn(workspace, sid):
+    path = workspace / "sessions" / sid / "turn_journal.jsonl"
+    rows = [dict(eventId=f"{sid}-new-{i}", sessionId=sid, turnId="turn-2", sequence=i,
+                 eventType=kind, payload={}) for i, kind in
+            ((5, "turn_started"), (6, "turn_completed"))]
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write("".join(json.dumps(row) + "\n" for row in rows))
+
+
+def test_reimport_append_keeps_old_archive_and_selects_proven_extension(tmp_path):
+    workspace = source(tmp_path)
+    asset = workspace / "sessions/direct/artifacts/image.png"
+    asset.parent.mkdir(parents=True)
+    asset.write_bytes(b"old")
+    target = tmp_path / "target"
+    history.import_history(discover(workspace), target, "one")
+    old = {p.relative_to(target): p.read_bytes() for p in target.rglob("*") if p.is_file()}
+    append_turn(workspace, "direct")
+    (asset.parent / "new.png").write_bytes(b"new")
+    history.import_history(discover(workspace), target, "two")
+    row, = history.list_history(target)
+    assert row["migrationId"] == "two" and row["watermark"]["eventCount"] == 6
+    detail = history.history_detail(target, row["historyId"])
+    assert len(detail["events"]) == 6 and len(detail["attachments"]) == 2
+    assert all((target / p).read_bytes() == data for p, data in old.items())
+
+
+@pytest.mark.parametrize("change", ["rewrite", "truncate", "attachment_changed", "attachment_removed", "same_journal_new_asset"])
+def test_reimport_rejects_non_append_or_changed_attachments_without_hiding_prior(tmp_path, change):
+    workspace = source(tmp_path)
+    asset = workspace / "sessions/direct/artifacts/image.png"
+    asset.parent.mkdir(parents=True)
+    asset.write_bytes(b"old")
+    target = tmp_path / "target"
+    history.import_history(discover(workspace), target, "one")
+    before = history.list_history(target)
+    journal_path = workspace / "sessions/direct/turn_journal.jsonl"
+    if change == "rewrite":
+        journal_path.write_bytes(journal_path.read_bytes().replace(b"answer", b"edited"))
+    elif change == "truncate":
+        journal_path.write_bytes(b"")
+    elif change == "same_journal_new_asset":
+        (asset.parent / "new.png").write_bytes(b"new")
+    else:
+        append_turn(workspace, "direct")
+        if change == "attachment_changed":
+            asset.write_bytes(b"changed")
+        else:
+            asset.unlink()
+    with pytest.raises(history.MigrationIOError, match="history_archive_identity_conflict"):
+        history.import_history(discover(workspace), target, "two")
+    assert history.list_history(target) == before
+    assert history.history_detail(target, before[0]["historyId"])["migrationId"] == "one"
+
+
+def test_existing_divergent_versions_are_isolated_to_their_history(tmp_path, monkeypatch):
+    workspace = source(tmp_path, [{"id": "direct", "agent_id": AGENT},
+                                  {"id": "other", "agent_id": AGENT}])
+    target = tmp_path / "target"
+    history.import_history(discover(workspace), target, "one")
+    rows = history.list_history(target)
+    ids = {row["sessionId"]: row["historyId"] for row in rows}
+    path = workspace / "sessions/direct/turn_journal.jsonl"
+    path.write_bytes(path.read_bytes().replace(b"answer", b"edited"))
+    # Reproduce archives published by the old importer before this guard.
+    monkeypatch.setattr(history, "_validate_history_extension", lambda *args, **kwargs: None)
+    history.import_history(discover(workspace), target, "two")
+    assert [row["sessionId"] for row in history.list_history(target)] == ["other"]
+    assert history.history_detail(target, ids["other"])["sessionId"] == "other"
+    with pytest.raises(history.MigrationIOError, match="history_archive_identity_conflict"):
+        history.history_detail(target, ids["direct"])
+
+
+def test_proven_chain_selection_does_not_depend_on_archive_iteration_order(tmp_path, monkeypatch):
+    workspace = source(tmp_path)
+    target = tmp_path / "target"
+    history.import_history(discover(workspace), target, "one")
+    append_turn(workspace, "direct")
+    history.import_history(discover(workspace), target, "two")
+    original = history._archives
+    def reversed_archives(root, *, budget):
+        yield from reversed(list(original(root, budget=budget)))
+    monkeypatch.setattr(history, "_archives", reversed_archives)
+    row, = history.list_history(target)
+    assert row["migrationId"] == "two"
+    assert len(history.history_detail(target, row["historyId"])["events"]) == 6
+
+
+def test_newest_common_extension_does_not_hide_incomparable_older_versions(tmp_path, monkeypatch):
+    workspace = source(tmp_path)
+    assets = workspace / "sessions/direct/artifacts"
+    assets.mkdir(parents=True)
+    (assets / "x").write_bytes(b"x")
+    target = tmp_path / "target"
+    history.import_history(discover(workspace), target, "one")
+    hid = history.list_history(target)[0]["historyId"]
+    validate = history._validate_history_extension
+    monkeypatch.setattr(history, "_validate_history_extension", lambda *args, **kwargs: None)
+    append_turn(workspace, "direct")
+    (assets / "x").unlink()
+    (assets / "y").write_bytes(b"y")
+    history.import_history(discover(workspace), target, "two")
+    (assets / "x").write_bytes(b"x")
+    path = workspace / "sessions/direct/turn_journal.jsonl"
+    with path.open("a", encoding="utf-8") as stream:
+        for sequence, kind in ((7, "turn_started"), (8, "turn_completed")):
+            stream.write(json.dumps(dict(eventId=f"third-{sequence}", sessionId="direct",
+                turnId="turn-3", sequence=sequence, eventType=kind, payload={})) + "\n")
+    monkeypatch.setattr(history, "_validate_history_extension", validate)
+    with pytest.raises(history.MigrationIOError, match="history_archive_identity_conflict"):
+        history.import_history(discover(workspace), target, "three")
+    monkeypatch.setattr(history, "_validate_history_extension", lambda *args, **kwargs: None)
+    history.import_history(discover(workspace), target, "three")
+    original = history._archives
+    monkeypatch.setattr(history, "_archives", lambda root, *, budget: reversed(list(original(root, budget=budget))))
+    assert history.list_history(target) == []
+    with pytest.raises(history.MigrationIOError, match="history_archive_identity_conflict"):
+        history.history_detail(target, hid)
+
+
+@pytest.mark.parametrize("dimension", ["bytes", "files", "rows", "archives"])
+def test_candidate_that_would_exceed_reader_budget_is_never_published(tmp_path, monkeypatch, dimension):
+    workspace = source(tmp_path)
+    target = tmp_path / "target"
+    history.import_history(discover(workspace), target, "one")
+    hid = history.list_history(target)[0]["historyId"]
+    baseline = history._ArchiveBudget()
+    list(history._archives(target, budget=baseline))
+    default = history._ArchiveBudget.__init__.__defaults__
+    remaining = (baseline.bytes_left, baseline.files_left, baseline.histories_left, baseline.archives_left)
+    used = [limit - left for limit, left in zip(default, remaining)]
+    index = {"bytes": 0, "files": 1, "rows": 2, "archives": 3}[dimension]
+    limits = list(default)
+    limits[index] = used[index] + (8 if dimension == "bytes" else 0)
+    monkeypatch.setattr(history._ArchiveBudget.__init__, "__defaults__", tuple(limits))
+    kwargs = dict(zip(("max_total_bytes", "max_files", "max_history_rows", "max_archives"), limits))
+    append_turn(workspace, "direct")
+    with pytest.raises(history.MigrationIOError, match="history_archive_limit"):
+        history.import_history(discover(workspace), target, "two")
+    assert not (target / "history_archive/migrations/.two.pending").exists()
+    assert not (target / "history_archive/migrations/two").exists()
+    assert history.list_history(target, **kwargs)[0]["historyId"] == hid
+    assert history.history_detail(target, hid, **kwargs)["migrationId"] == "one"
+
+
+def test_candidate_at_exact_reader_budget_remains_readable(tmp_path, monkeypatch):
+    workspace = source(tmp_path)
+    first = discover(workspace)
+    sample = tmp_path / "sample"
+    history.import_history(first, sample, "one")
+    append_turn(workspace, "direct")
+    second = discover(workspace)
+    history.import_history(second, sample, "two")
+    budget = history._ArchiveBudget()
+    list(history._archives(sample, budget=budget))
+    default = history._ArchiveBudget.__init__.__defaults__
+    remaining = (budget.bytes_left, budget.files_left, budget.histories_left, budget.archives_left)
+    limits = tuple(limit - left for limit, left in zip(default, remaining))
+    target = tmp_path / "target"
+    # Restore the first snapshot as the source for its verified import.
+    path = workspace / "sessions/direct/turn_journal.jsonl"
+    full = path.read_bytes()
+    path.write_bytes(first.sessions[0].journal.raw)
+    history.import_history(discover(workspace), target, "one")
+    path.write_bytes(full)
+    monkeypatch.setattr(history._ArchiveBudget.__init__, "__defaults__", limits)
+    history.import_history(discover(workspace), target, "two")
+    kwargs = dict(zip(("max_total_bytes", "max_files", "max_history_rows", "max_archives"), limits))
+    row, = history.list_history(target, **kwargs)
+    assert row["migrationId"] == "two"
+    assert history.history_detail(target, row["historyId"], **kwargs)["migrationId"] == "two"
+
+
 def test_restart_resumes_exact_pending_copy_and_never_lists_it_early(tmp_path, monkeypatch):
     workspace = source(tmp_path)
     found, target = discover(workspace), tmp_path / "target"

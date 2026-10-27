@@ -39,6 +39,8 @@ def contracts() -> dict:
     result.update(operator_image_actions.contracts())
     from . import history_actions
     result.update(history_actions.contracts())
+    from . import affairs_conflict_actions
+    result.update(affairs_conflict_actions.contracts())
     result["assistant_settings_update"] = {**result["assistant_settings_update"],
         "description": result["assistant_settings_update"]["description"] + " 当前轮结束后自动刷新生效，不要求用户手动刷新或重启。"}
     # This native read action predates describe support. Its empty arguments
@@ -60,6 +62,9 @@ def execute(action: str, parameters: dict, runtime: dict, *, governed: bool = Fa
     if action in {"history_list", "history_read"}:
         from .history_actions import execute as execute_history
         return execute_history(action, parameters)
+    if action in {"affairs_conflict_sets", "affairs_conflict_list", "affairs_conflict_read"}:
+        from .affairs_conflict_actions import execute as execute_conflict
+        return execute_conflict(action, parameters, runtime)
     # The reused config owner currently checks one project. A packaged source
     # tree is not the project registry, and unreadable stores cannot prove that
     # references are absent. Native approval does not fill that evidence gap.

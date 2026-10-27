@@ -57,6 +57,31 @@ export class AssistantProjectRegistryConnection {
   snapshot(): AssistantProjectRegistrySnapshot { this.assertOpen(); return this.registry.snapshot(); }
   registration(projectId: string): AssistantProjectRegistration | null { this.assertOpen(); return this.registry.registration(projectId); }
 
+  /** Main-only lease: reconciliation and retirement wait until import settles. */
+  withHistoryImport<T>(projectId: string, operation: (revision: number) => Promise<T>): Promise<T> {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      const snapshot = this.registry.snapshot();
+      if (!this.host || this.projectsSuspended || snapshot.revision !== this.acknowledgedRevision
+        || !Object.hasOwn(snapshot.projects, projectId) || !this.registry.registration(projectId)) {
+        throw new Error("ASSISTANT_PROJECT_UNAVAILABLE");
+      }
+      try {
+        const result = await operation(snapshot.revision);
+        this.assertOpen();
+        const current = this.registry.snapshot();
+        if (current.revision !== snapshot.revision || current.projects[projectId] !== snapshot.projects[projectId]
+          || !this.registry.registration(projectId)) throw new Error("ASSISTANT_PROJECT_UNAVAILABLE");
+        return result;
+      } catch (error) {
+        // An unconfirmed host cancellation cannot coexist with a later grant.
+        this.closed = true;
+        await this.retire();
+        throw error;
+      }
+    });
+  }
+
   start<T extends ProjectHost>(createHost: (snapshot: AssistantProjectRegistrySnapshot, projectsSuspended: boolean) => T): Promise<T> {
     return this.enqueue(async () => {
       this.assertOpen();

@@ -4,12 +4,13 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from contextlib import nullcontext
 from pathlib import Path
 
-from .migration_history import _canonical_target, _write_new
+from .migration_history import _canonical_target, _confirmation_exists, _confirm_archive, _write_new
 from .migration_io import (
     MigrationIOError, check_path, fingerprint_tree, migration_target_lock, path_identity,
-    pinned_target_directory, publish_directory, read_stable_file, validate_path, verify_snapshot,
+    pinned_source_files, pinned_target_directory, publish_directory, read_stable_file, validate_path, verify_snapshot,
 )
 
 # Session history has its own native parser. Mailboxes, generic plugins and
@@ -24,6 +25,8 @@ def import_source_snapshots(resolved, target_root: Path, migration_id: str, *, s
                             authority_snapshots=(), authority_verify=None) -> dict:
     if not isinstance(migration_id, str) or not _ID.fullmatch(migration_id):
         raise MigrationIOError("migration_id_invalid")
+    if not callable(authority_verify):
+        raise MigrationIOError("source_authority_required")
     target = validate_path(target_root)
     if not source_roots:
         raise MigrationIOError("source_scope_required")
@@ -47,9 +50,9 @@ def import_source_snapshots(resolved, target_root: Path, migration_id: str, *, s
                             "sha256": snapshot.sha256, "size": len(snapshot.raw)})
     if not entries:
         raise MigrationIOError("no_approved_data_sources")
-    manifest = {"schemaVersion": 1, "migrationId": migration_id, "sourceScope": resolved.report["sourceScope"],
+    manifest = {"schemaVersion": 2, "migrationId": migration_id, "sourceScope": resolved.report["sourceScope"],
         "readOnly": True, "untrustedContent": True, "activePluginStateImported": False,
-        "sourceComplete": resolved.report.get("snapshotComplete") is True,
+        "sourceComplete": False, "snapshotCompleteAtScan": resolved.report.get("snapshotComplete") is True,
         "entries": entries, "readyForCutover": False}
     encoded = json.dumps(manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
 
@@ -72,17 +75,42 @@ def import_source_snapshots(resolved, target_root: Path, migration_id: str, *, s
         expected_directories = {Path(".")}
         for relative in expected_files:
             expected_directories.update(Path(relative).parents)
+        # Confirmation is a visibility commit, not part of the copied data.
+        # A crash may leave its empty pending directory for a verified retry.
+        for name in (".confirmed", ".confirmation.pending"):
+            marker = directory / name
+            if marker.exists() or marker.is_symlink():
+                check_path(marker)
+                if not marker.is_dir() or any(marker.iterdir()):
+                    raise MigrationIOError("history_target_conflict")
+                expected_directories.add(Path(name))
         tree = fingerprint_tree(directory, max_files=len(expected_files) + len(expected_directories) - 1,
             max_total_bytes=sum(entry["size"] for entry in entries) + len(encoded))
         if ({snapshot.path.relative_to(directory).as_posix() for snapshot in tree} != expected_files
                 or {path.relative_to(directory) for path, _ in tree.directories} != expected_directories):
             raise MigrationIOError("history_target_conflict")
-        if read_stable_file(directory / "manifest.json", 16 * 1024 * 1024).raw != encoded:
+        stored = read_stable_file(directory / "manifest.json", 16 * 1024 * 1024).raw
+        legacy_manifest = {key: value for key, value in manifest.items() if key != "snapshotCompleteAtScan"}
+        legacy = json.dumps({**legacy_manifest, "schemaVersion": 1,
+                             "sourceComplete": resolved.report.get("snapshotComplete") is True}, ensure_ascii=False,
+                            sort_keys=True, separators=(",", ":")).encode()
+        if stored not in (encoded, legacy):
             raise MigrationIOError("history_target_conflict")
         for entry in entries:
             current = read_stable_file(directory / entry["path"], entry["size"])
             if current.sha256 != entry["sha256"]:
                 raise MigrationIOError("history_target_conflict")
+
+    def confirm_final(directory):
+        # The source and caller authority are checked after publication and
+        # before visibility. Legacy archives acquire the marker only by the
+        # same explicit, verified retry; directory existence alone is not proof.
+        source_files = [snapshot for snapshots in resolved.snapshots.values() for snapshot in snapshots]
+        with pinned_target_directory(directory), pinned_source_files((*authority_snapshots, *source_files)):
+            verify_target(directory)
+            verify_sources()
+            if not _confirmation_exists(directory):
+                _confirm_archive(directory, nullcontext)
 
     verify_sources()
     with pinned_target_directory(target, create=True):
@@ -90,10 +118,10 @@ def import_source_snapshots(resolved, target_root: Path, migration_id: str, *, s
         with pinned_target_directory(root, create=True), migration_target_lock(root):
             final, pending = root / migration_id, root / (".pending-" + migration_id)
             if final.exists():
-                verify_target(final)
-                verify_sources()
+                confirm_final(final)
                 return {"published": True, "reused": True, "files": len(entries),
-                        "sourceComplete": manifest["sourceComplete"], "readyForCutover": False}
+                        "sourceComplete": False, "snapshotCompleteAtScan": manifest["snapshotCompleteAtScan"],
+                        "readyForCutover": False}
             with pinned_target_directory(pending, create=True):
                 for relative, raw in copies.items():
                     _write_new(pending / relative, raw)
@@ -102,8 +130,8 @@ def import_source_snapshots(resolved, target_root: Path, migration_id: str, *, s
                 verify_sources()
                 identity = path_identity(pending)
             publish_directory(pending, final, identity)
-            verify_target(final)
-            verify_sources()
+            confirm_final(final)
     return {"published": True, "reused": False, "files": len(entries),
             "manifestSha256": hashlib.sha256(encoded).hexdigest(),
-            "sourceComplete": manifest["sourceComplete"], "readyForCutover": False}
+            "sourceComplete": False, "snapshotCompleteAtScan": manifest["snapshotCompleteAtScan"],
+            "readyForCutover": False}

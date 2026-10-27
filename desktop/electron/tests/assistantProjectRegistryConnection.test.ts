@@ -29,6 +29,26 @@ function fixture() {
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 describe("main-owned assistant registry connection", () => {
+  it("serializes project revocation until the history operation settles", async () => {
+    const f = fixture(), project = f.directory("history-project"), gate = deferred();
+    await f.connection.start(() => f.host);
+    await f.connection.reconcile(f.payload([f.row(project)]));
+    const id = Object.keys(f.connection.snapshot().projects)[0];
+    const importPromise = f.connection.withHistoryImport(id, async revision => {
+      expect(revision).toBe(1);
+      await gate.promise;
+      return "done";
+    });
+    const revoke = f.connection.reconcile(f.payload([]));
+    await Promise.resolve();
+    expect(f.host.updateProjects).toHaveBeenCalledTimes(1);
+    gate.resolve();
+    await expect(importPromise).resolves.toBe("done");
+    await revoke;
+    expect(f.host.updateProjects).toHaveBeenCalledTimes(2);
+    await expect(f.connection.withHistoryImport(id, async () => undefined)).rejects.toThrow("ASSISTANT_PROJECT_UNAVAILABLE");
+    await f.connection.stop();
+  });
   it("starts standalone with a suspended full snapshot while strict reads still fail", async () => {
     const f = fixture(), project = f.directory("task");
     await f.connection.reconcile(f.payload([f.row(project)]));

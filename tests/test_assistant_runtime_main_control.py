@@ -80,6 +80,46 @@ async def test_governed_action_and_project_permissions_precede_queue_admission()
 
 
 @pytest.mark.anyio
+async def test_history_import_uses_approved_native_turn_and_never_accepts_model_paths():
+    service = Dispatch()
+    owner = broker(service, claim_seconds=2)
+    bind_actions(service, asyncio.get_running_loop(), main_control=owner)
+    args = {"project_id": "p:main", "preview_id": "a" * 64}
+    runtime = {"agentId": "a", "sessionId": "s", "turnId": "turn-1"}
+    try:
+        denied = await asyncio.to_thread(execute_action, "history_import", args, runtime=runtime)
+        assert denied["status"] == "approval_required"
+        with pytest.raises(ValueError):
+            await asyncio.to_thread(execute_action, "history_import", {**args, "approved": True}, runtime=runtime, governed=True)
+        task = asyncio.create_task(asyncio.to_thread(execute_action, "history_import", args, runtime=runtime, governed=True))
+        wire = (await owner.claim())["request"]
+        assert wire["action"] == "history_import" and wire["turnId"] == "turn-1"
+        assert wire["previewId"] == args["preview_id"] and 0 < wire["timeoutMs"] <= 120000
+        result = {"schemaVersion": 1, "projectId": "p:main", "previewId": args["preview_id"],
+                  "state": "published", "code": "imported", "historyCount": 1, "readyForCutover": False}
+        assert owner.settle(wire["deliveryId"], result)
+        assert await task == result
+    finally:
+        owner.close()
+        unbind_actions(service)
+
+
+@pytest.mark.anyio
+async def test_history_turn_stop_does_not_report_a_claimed_import_as_cancelled():
+    owner = broker(claim_seconds=2)
+    request = {"projectId": "p:main", "previewId": "a" * 64, "turnId": "turn-1"}
+    task = asyncio.create_task(owner.invoke("history_import", request, turn_id="turn-1"))
+    claimed = (await owner.claim())["request"]
+    owner.cancel_history_imports("turn-1")
+    result = await task
+    assert result["state"] == "unknown" and result["code"] == "unknown"
+    assert not owner.settle(claimed["deliveryId"], {"schemaVersion": 1, "projectId": "p:main",
+        "previewId": "a" * 64, "state": "published", "code": "imported", "historyCount": 1,
+        "readyForCutover": False})
+    owner.close()
+
+
+@pytest.mark.anyio
 async def test_existing_native_manage_tool_is_the_only_approval_elevation(monkeypatch):
     from core.infrastructure import native_runtime
     from tools import personal_assistant_tools

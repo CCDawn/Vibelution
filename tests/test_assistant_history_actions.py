@@ -20,12 +20,30 @@ def test_import_is_readable_through_closed_native_history_actions(tmp_path, monk
     hid = imported(tmp_path, monkeypatch)
     listing = actions.execute("history_list", {})
     assert listing["total"] == 1 and listing["nextOffset"] is None
+    assert listing["partial"] is False and listing["conflictCount"] == 0
     assert str(tmp_path) not in json.dumps(listing)
     result = actions.execute("history_read", {"history_id": hid})
     assert "PRIVATE_PROMPT" in result["text"]
     assert result["readOnly"] and result["untrustedContent"] and not result["canContinue"]
     assert str(tmp_path) not in json.dumps(result)
     assert all(key not in result for key in ("sourceBody", "events", "path", "projectRoot"))
+
+
+def test_listing_discloses_conflicts_without_blocking_other_history(tmp_path, monkeypatch):
+    workspace = source(tmp_path, [{"id": "direct", "agent_id": "agent-pa"},
+                                  {"id": "other", "agent_id": "agent-pa"}])
+    target = tmp_path / "target"
+    history.import_history(discover(workspace), target, "one")
+    journal = workspace / "sessions/direct/turn_journal.jsonl"
+    journal.write_bytes(journal.read_bytes().replace(b"answer", b"edited"))
+    with monkeypatch.context() as patch:
+        patch.setattr(history, "_validate_history_extension", lambda *args, **kwargs: None)
+        history.import_history(discover(workspace), target, "two")
+    monkeypatch.setattr(actions, "assistant_native_root", lambda: target)
+    result = actions.execute("history_list", {})
+    assert result["partial"] is True and result["conflictCount"] == 1 and result["total"] == 1
+    assert result["histories"][0]["sessionId"] == "other"
+    assert str(tmp_path) not in json.dumps(result) and "PRIVATE_PROMPT" not in json.dumps(result)
 
 
 def test_chunks_reconstruct_the_requested_original_message_without_loss(tmp_path, monkeypatch):

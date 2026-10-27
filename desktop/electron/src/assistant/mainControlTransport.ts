@@ -7,7 +7,8 @@ export type ProjectMainControlRequest = {
   projectId: string;
 } & ({ action: "project_status"; operation: "status"; requestId?: never }
   | { action: "project_lifecycle" | "project_lifecycle_receipt"; operation: "start" | "stop" | "restart"; requestId: string });
-export type MainControlRequest = ProjectMainControlRequest | AppearanceMainControlRequest;
+export type HistoryMainControlRequest = { deliveryId: string; action: "history_import"; projectId: string; previewId: string; turnId: string; timeoutMs: number };
+export type MainControlRequest = ProjectMainControlRequest | AppearanceMainControlRequest | HistoryMainControlRequest;
 type PublicResult = Record<string, unknown>;
 const ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/;
 const forbiddenScheme = /^(?:https?|file|data|javascript|mailto|ftp|wss?):/i;
@@ -27,6 +28,14 @@ export function parseMainControlClaim(value: unknown): MainControlRequest | null
   if (value.request === null) return null;
   const row = value.request;
   if (row && typeof row === "object" && isAppearanceAction(Object.getOwnPropertyDescriptor(row,"action")?.value)) return parseAppearanceClaim(row);
+  if (row && typeof row === "object" && Object.getOwnPropertyDescriptor(row, "action")?.value === "history_import") {
+    if (!closed(row, ["deliveryId", "action", "projectId", "previewId", "turnId", "timeoutMs"])
+      || typeof row.deliveryId !== "string" || !/^[a-f0-9]{32}$/.test(row.deliveryId) || !opaque(row.projectId, 160)
+      || typeof row.previewId !== "string" || !/^[a-f0-9]{64}$/.test(row.previewId) || !opaque(row.turnId, 160)
+      || typeof row.timeoutMs !== "number" || !Number.isSafeInteger(row.timeoutMs) || row.timeoutMs < 1 || row.timeoutMs > 120000) return invalid();
+    return { deliveryId: row.deliveryId, action: "history_import", projectId: row.projectId,
+      previewId: row.previewId, turnId: row.turnId, timeoutMs: row.timeoutMs };
+  }
   if (!closed(row, ["deliveryId", "action", "projectId", "operation"], ["requestId"])
     || typeof row.deliveryId !== "string" || !/^[a-f0-9]{32}$/.test(row.deliveryId) || !opaque(row.projectId, 160)) return invalid();
   const base = { deliveryId: row.deliveryId, projectId: row.projectId };
@@ -46,6 +55,16 @@ const STATES = new Set(["completed", "queued", "rejected", "unknown", "not_found
 /** Fail closed rather than relay arbitrary errors, native rows, paths or messages. */
 export function projectMainControlResult(request: MainControlRequest, value: unknown): PublicResult {
   if (request.action === "launcher_theme_get" || request.action === "launcher_theme_set" || request.action === "operator_image_upload") return appearanceControlResult(request,value);
+  if (request.action === "history_import") {
+    const unavailable = () => ({ schemaVersion: 1, projectId: request.projectId, previewId: request.previewId,
+      state: "unknown", code: "unknown", readyForCutover: false });
+    if (!closed(value, ["schemaVersion", "projectId", "previewId", "state", "code", "readyForCutover"], ["historyCount"])
+      || value.schemaVersion !== 1 || value.projectId !== request.projectId || value.previewId !== request.previewId
+      || value.readyForCutover !== false || typeof value.state !== "string" || typeof value.code !== "string"
+      || !["published:imported", "rejected:preview_invalid", "rejected:project_unavailable", "rejected:cancelled", "rejected:busy", "unknown:unknown"].includes(`${value.state}:${value.code}`)
+      || (value.state === "published" ? typeof value.historyCount !== "number" || !Number.isSafeInteger(value.historyCount) || value.historyCount < 0 || value.historyCount > 10000 : Object.hasOwn(value, "historyCount"))) return unavailable();
+    return { ...value };
+  }
   const status = request.action === "project_status";
   const base = { schemaVersion: 1, projectId: request.projectId, operation: request.operation,
     ...(!status ? { requestId: request.requestId } : {}) };
@@ -98,7 +117,7 @@ export async function runMainControlPump(options: {
         try {
           let value: unknown;
           try {
-            if (request.action === "operator_image_upload") value = await options.onRequest(request, AbortSignal.any([options.signal,AbortSignal.timeout(request.timeoutMs)]));
+            if (request.action === "operator_image_upload" || request.action === "history_import") value = await options.onRequest(request, AbortSignal.any([options.signal,AbortSignal.timeout(request.timeoutMs)]));
             else if (request.action === "launcher_theme_get" || request.action === "launcher_theme_set") value = await options.onRequest(request,options.signal);
             else value = await options.onRequest(request);
           }

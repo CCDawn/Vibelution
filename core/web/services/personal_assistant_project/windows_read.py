@@ -163,7 +163,10 @@ def read_source_bytes(root: Path, path: Path, max_bytes: int) -> bytes:
     """Read at most max_bytes from the same verified, single-link file handle."""
     if type(max_bytes) is not int or not 0 <= max_bytes <= 16 * 1024 * 1024:
         raise ValueError("Invalid source byte budget.")
-    with _locked_source(root, path, directory=False) as (api, handle, info):
+    # A single-file read pins its file against writes and replacement. Ancestor
+    # directories only need rename protection; unrelated directory writers must
+    # not make the requested file transiently unreadable.
+    with _locked_source(root, path, directory=False, allow_child_replacement=True) as (api, handle, info):
         size = (info.size_high << 32) | info.size_low
         if size > max_bytes:
             raise ValueError("Source file exceeds the byte budget.")

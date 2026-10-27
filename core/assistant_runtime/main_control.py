@@ -18,7 +18,7 @@ from . import appearance_protocol as appearance
 
 
 _OPERATIONS = {"start", "stop", "restart"}
-_ACTIONS = {"project_status", "project_lifecycle", "project_lifecycle_receipt"}
+_ACTIONS = {"project_status", "project_lifecycle", "project_lifecycle_receipt", "history_import"}
 _STATUS_STATES = {"stopped", "starting", "running", "stopping", "failed", "unknown"}
 _WRITE_STATES = {"completed", "queued", "rejected", "unknown", "not_found"}
 _FACADE_CODES = {
@@ -46,6 +46,14 @@ def _request(action, request):
         return appearance.validate_request(action, request)
     if type(action) is not str or action not in _ACTIONS or type(request) is not dict:
         raise ValueError("Invalid main control request")
+    if action == "history_import":
+        if (set(request) != {"projectId", "previewId", "turnId"}
+                or not _opaque(request.get("projectId"), 160)
+                or type(request.get("previewId")) is not str
+                or re.fullmatch(r"[0-9a-f]{64}", request["previewId"]) is None
+                or not _opaque(request.get("turnId"), 160)):
+            raise ValueError("Invalid history import request")
+        return dict(request)
     status = action == "project_status"
     expected = {"projectId", "operation"} | (set() if status else {"requestId"})
     if (set(request) != expected or not _opaque(request.get("projectId"), 160)
@@ -60,6 +68,21 @@ def _result(action, request, result):
     """Reject unknown fields rather than copying errors, paths or credentials."""
     if action in appearance.APPEARANCE_ACTIONS:
         return appearance.validate_result(action, request, result)
+    if action == "history_import":
+        required = {"schemaVersion", "projectId", "previewId", "state", "code", "readyForCutover"}
+        if (type(result) is not dict or not required <= result.keys() or result.keys() - required - {"historyCount"}
+                or type(result.get("schemaVersion")) is not int or result["schemaVersion"] != 1
+                or result.get("projectId") != request["projectId"] or result.get("previewId") != request["previewId"]
+                or result.get("readyForCutover") is not False
+                or type(result.get("state")) is not str or type(result.get("code")) is not str
+                or (result.get("state"), result.get("code")) not in {
+                    ("published", "imported"), ("rejected", "preview_invalid"),
+                    ("rejected", "project_unavailable"), ("rejected", "cancelled"),
+                    ("rejected", "busy"), ("unknown", "unknown")}
+                or ("historyCount" in result and (type(result["historyCount"]) is not int or not 0 <= result["historyCount"] <= 10000))
+                or (result.get("state") == "published") != ("historyCount" in result)):
+            raise ValueError("Invalid history import result")
+        return dict(result)
     status = action == "project_status"
     required = {"schemaVersion", *request, "accepted", "code"} if status else {
         "schemaVersion", *request, "state", "code"}
@@ -134,6 +157,9 @@ class MainControlBroker:
     def _unavailable(entry, code="control_unavailable"):
         if entry.action in appearance.APPEARANCE_ACTIONS:
             return appearance.unavailable(entry.action, entry.request)
+        if entry.action == "history_import":
+            return {"schemaVersion": 1, "projectId": entry.request["projectId"], "previewId": entry.request["previewId"],
+                    "state": "unknown", "code": "unknown", "readyForCutover": False}
         if entry.action == "project_status":
             return {"schemaVersion": 1, **entry.request, "accepted": False,
                     "code": "project_unavailable" if code == "project_unavailable" else "status_unavailable"}
@@ -164,13 +190,15 @@ class MainControlBroker:
         captured = _request(action, request)
         if turn_id is not None and not _opaque(turn_id, 160):
             raise ValueError("Invalid appearance turn identity")
+        if action == "history_import" and turn_id != captured["turnId"]:
+            raise ValueError("Invalid history turn identity")
         if action in appearance.APPEARANCE_ACTIONS:
             if not self.appearance_enabled:
                 raise ValueError("Appearance control is not enabled by Launcher")
         elif not self._authorized(captured["projectId"]):
             raise ValueError("Project is not authorized by Launcher")
         loop = asyncio.get_running_loop()
-        timeout = self._image_timeout if action == "operator_image_upload" else self._timeout
+        timeout = self._image_timeout if action == "operator_image_upload" else 120 if action == "history_import" else self._timeout
         entry = _Delivery(action, captured, loop.time() + timeout, loop.create_future(), turn_id=turn_id)
         self._expire()
         if self._closed.is_set():
@@ -215,7 +243,7 @@ class MainControlBroker:
             entry = self._pending.get(delivery_id)
             if entry is not None:
                 entry.claimed = True
-                remaining = {"timeoutMs": max(1, math.floor((entry.deadline - loop.time()) * 1000))} if entry.action == "operator_image_upload" else {}
+                remaining = {"timeoutMs": max(1, math.floor((entry.deadline - loop.time()) * 1000))} if entry.action in {"operator_image_upload", "history_import"} else {}
                 return {"schemaVersion": 1, "request": {"deliveryId": delivery_id, "action": entry.action, **entry.request, **remaining}}
         return empty
 
@@ -226,6 +254,18 @@ class MainControlBroker:
                 self._pending.pop(key)
                 if not entry.future.done():
                     entry.future.set_result({"schemaVersion":1, **entry.request, "code":"cancelled", "verified":False})
+        self._compact_queue()
+
+    def cancel_history_imports(self, turn_id: str) -> None:
+        """Retire this Turn's waiters after the host has fenced publication."""
+        for key, entry in list(self._pending.items()):
+            if entry.action == "history_import" and entry.turn_id == turn_id:
+                self._pending.pop(key)
+                if not entry.future.done():
+                    value = self._unavailable(entry)
+                    if not entry.claimed:
+                        value = {**value, "state": "rejected", "code": "cancelled"}
+                    entry.future.set_result(value)
         self._compact_queue()
 
     def admit_image_import(self, delivery_id: str, kind: str) -> bool:

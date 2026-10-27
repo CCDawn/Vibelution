@@ -8,6 +8,17 @@ const request = wire().request as MainControlRequest;
 const result = { schemaVersion: 1 as const, projectId: request.projectId, operation: "start", requestId: "request-1", state: "completed", code: "accepted", accepted: true };
 
 describe("generation-scoped main control transport", () => {
+  it("keeps history imports bound to the native turn and a closed result", () => {
+    const history = { deliveryId: "a".repeat(32), action: "history_import", projectId: "synthetic:uuid",
+      previewId: "b".repeat(64), turnId: "turn-1", timeoutMs: 10000 };
+    const parsed = parseMainControlClaim({ schemaVersion: 1, request: history });
+    expect(parsed).toEqual(history);
+    expect(() => parseMainControlClaim({ schemaVersion: 1, request: { ...history, path: "C:/private" } })).toThrow();
+    const published = { schemaVersion: 1, projectId: history.projectId, previewId: history.previewId,
+      state: "published", code: "imported", historyCount: 1, readyForCutover: false };
+    expect(projectMainControlResult(parsed!, published)).toEqual(published);
+    expect(projectMainControlResult(parsed!, { ...published, readyForCutover: true })).toMatchObject({ state: "unknown" });
+  });
   it("admits only closed opaque lifecycle/status envelopes", () => {
     expect(parseMainControlClaim(wire())).toEqual(request);
     expect(parseMainControlClaim({ schemaVersion: 1, request: null })).toBeNull();

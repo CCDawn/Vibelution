@@ -61,6 +61,40 @@ function fixture(options: { stale?: boolean; noReadyFirst?: boolean; graceful?: 
 }
 
 describe("AssistantHost", () => {
+  it("fences an aborted history import before returning unknown", async () => {
+    const { host, fetchImpl, native } = fixture({ graceful: true });
+    await host.start();
+    let started = false, operationId = "";
+    fetchImpl.mockImplementationOnce(async (_url, options) => {
+      operationId = JSON.parse(String(options?.body)).operationId;
+      started = true;
+      return await new Promise<Response>((_resolve, reject) => options?.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true }));
+    }).mockImplementationOnce(async (_url, options) => {
+      expect(JSON.parse(String(options?.body)).operationId).toBe(operationId);
+      return Response.json({ schemaVersion: 1, operationId, cancelled: true });
+    });
+    const controller = new AbortController();
+    const pending = host.importHistory({ projectId: "project", previewId: "a".repeat(64), turnId: "turn-1", revision: 0, signal: controller.signal });
+    await vi.waitFor(() => expect(started).toBe(true));
+    controller.abort();
+    await expect(pending).resolves.toMatchObject({ state: "unknown", code: "unknown", readyForCutover: false });
+    expect(native.close).not.toHaveBeenCalled();
+    await host.stop();
+  });
+  it("discards the preview when history is cancelled before sending", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    fetchImpl.mockImplementationOnce(async (url, options) => {
+      expect(String(url)).toMatch(/\/history-import\/cancel$/);
+      const body = JSON.parse(String(options?.body));
+      expect(body.previewId).toBe("a".repeat(64));
+      return Response.json({ schemaVersion: 1, operationId: body.operationId, cancelled: true });
+    });
+    const controller = new AbortController(); controller.abort();
+    await expect(host.importHistory({ projectId: "project", previewId: "a".repeat(64), turnId: "turn-1", revision: 0, signal: controller.signal }))
+      .resolves.toMatchObject({ state: "rejected", code: "cancelled" });
+    await host.stop();
+  });
   it("keeps startup and retries gated until a complete project snapshot is acknowledged", async () => {
     const { host, inputs, fetchImpl, root } = fixture({ graceful: true, projectsSuspended: true });
     await host.start();

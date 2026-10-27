@@ -38,6 +38,10 @@ class ProjectLifecycle(MainControlProject):
     request_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
 
 
+class HistoryImport(MainControlProject):
+    preview_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class LauncherTheme(Parameters):
     model_config = ConfigDict(extra="forbid", strict=True)
     theme: Literal["dark", "light"]
@@ -57,12 +61,13 @@ _APPEARANCE_HELP = {
 }
 
 
-_MAIN_SCHEMAS = {"project_status": MainControlProject, "project_lifecycle": ProjectLifecycle,
+_MAIN_SCHEMAS = {"project_status": MainControlProject, "project_lifecycle": ProjectLifecycle, "history_import": HistoryImport,
                  "project_lifecycle_receipt": ProjectLifecycle}
 _MAIN_HELP = {
     "project_status": "只读查询 Launcher 当前已登记主项目的状态与活跃任务数；分支 instance 暂返回 prerequisite_required，不控制分支。",
     "project_lifecycle": "经原生审批控制当前已登记主项目的 start/stop/restart；分支 instance 暂返回 prerequisite_required。不支持 force/interrupt。unknown 时保留同一 request_id 查询 project_lifecycle_receipt，不能换 ID 重放；queued 表示等待执行，不等于完成。",
     "project_lifecycle_receipt": "只读查询同一 project_id、operation、request_id 的主项目原生回执；unknown 时继续查询原 ID，不换 ID 重放，queued 不等于完成；不支持分支 instance 或 force/interrupt。",
+    "history_import": "按本轮 history_source_preview 结果，经当前工具审批策略导入所选旧助理的只读历史；不得提供路径或批准标志。成功不表示旧源已冻结、任务已交接或旧助理可退役；unknown 时先查询已有历史，不要自动重复导入。",
 }
 
 
@@ -148,8 +153,10 @@ def _project_read_contracts():
 
 _SCHEMAS = {"projects": Parameters, "agents": Project, "dispatch": Dispatch, "receipt": Receipt,
             "agent_get": AgentRead, "management_receipt": ManagementReceipt, "team_status": TeamStatus,
-            "authorization_status": Project, "legacy_observers": LegacyObservers, "legacy_receipts": LegacyReceipts}
+            "authorization_status": Project, "legacy_observers": LegacyObservers, "legacy_receipts": LegacyReceipts,
+            "history_source_preview": MainControlProject}
 _HELP = {
+    "history_source_preview": "用户要求迁移历史时，只预览已登记项目的唯一旧个人助理身份和短期预览编号；不读取会话内容、不授予导入权限，也不表示切换完成。多个候选或来源变化时拒绝。",
     "legacy_observers": "分页只读本主体已明确交接的旧任务观察授权；不创建授权，不继承旧临时控制权限。新legacy:receipts:read须明确授予，旧授权不会自动扩大。",
     "legacy_receipts": "按observer_id分页查询白名单旧任务及迟到回执。businessTaskStatus是显式业务报告，nativeTurnStatus只是执行轮状态；unknown/unresolved不是完成。不得重派或将旧消息ID当external task ID；取消、继续、审批必须重新走原生授权。",
     "projects": "列出 Launcher 已授权项目的 projectId。",
@@ -243,6 +250,19 @@ def unbind_actions(service):
         _binding = None
 
 
+def history_import_approval_summary(project_id: str, preview_id: str) -> dict:
+    """Resolve a preview for display only; this never grants import authority."""
+    if _binding is None:
+        raise ValueError("History preview unavailable")
+    preview = getattr(_binding[0], "history_preview", None)
+    if preview is None:
+        raise ValueError("History preview unavailable")
+    value = preview.verify_preview(preview_id)
+    if value.get("projectId") != project_id:
+        raise ValueError("History preview changed")
+    return {key: value[key] for key in ("sourceProjectId", "instanceId", "assistantAgentId")}
+
+
 def execute_action(action: str, parameters: dict, *, runtime: dict | None = None, governed: bool = False) -> dict:
     """Called only after the canonical tool's native Agent/Session identity gate.
 
@@ -258,7 +278,7 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
     managed = _management_contracts()
     schemas = {**_SCHEMAS, **_documentation_contracts(), **_project_read_contracts()}
     main_contracts = {key: {"action": key, "description": _MAIN_HELP[key],
-        "parameters": model.model_json_schema(), "governed": key == "project_lifecycle"}
+        "parameters": model.model_json_schema(), "governed": key in {"project_lifecycle", "history_import"}}
         for key, model in _MAIN_SCHEMAS.items()} if main_control is not None else {}
     if main_control is not None and getattr(main_control, "appearance_enabled", False):
         main_contracts.update({key: {"action": key, "description": _APPEARANCE_HELP[key],
@@ -295,17 +315,22 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
     if "project_id" in args and args["project_id"] not in projects:
         raise ValueError("Project is not authorized by Launcher")
     if action in main_contracts:
-        if action in {"project_lifecycle", "operator_image_upload"} and governed is not True:
+        if action in {"project_lifecycle", "operator_image_upload", "history_import"} and governed is not True:
             return {"ok": False, "status": "approval_required", "action": action, "tool": "personal_assistant_manage_tool"}
         if action in _APPEARANCE_SCHEMAS:
             if not runtime:
                 raise ValueError("Launcher native tool identity is required")
             request = {"operation": "read"} if action == "launcher_theme_get" else {"operation": "set", "theme": args["theme"]} if action == "launcher_theme_set" else {"operation": "import", "kind": args["kind"]}
+        elif action == "history_import":
+            turn_id = runtime.get("turnId") if isinstance(runtime, dict) else None
+            if not isinstance(turn_id, str) or not turn_id.strip():
+                raise ValueError("Launcher native Turn identity is required")
+            request = {"projectId": args["project_id"], "previewId": args["preview_id"], "turnId": turn_id}
         else:
             request = {"projectId": args["project_id"], "operation": args.get("operation", "status")}
             if "request_id" in args:
                 request["requestId"] = args["request_id"]
-        if action == "operator_image_upload":
+        if action in {"operator_image_upload", "history_import"}:
             turn_id = runtime.get("turnId")
             if not isinstance(turn_id, str) or not turn_id.strip():
                 raise ValueError("Launcher native Turn identity is required")
@@ -353,6 +378,16 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
         coroutine = service.management.documentation(args.pop("project_id"), **args)
     elif action == "projects":
         return {"projects": [{"projectId": key} for key in projects]}
+    elif action == "history_source_preview":
+        from .migration_io import MigrationIOError
+        preview = getattr(service, "history_preview", None)
+        if preview is None:
+            return {"ok": False, "code": "history_preview_unavailable"}
+        try:
+            return preview.preview(args["project_id"], turn_id=runtime.get("turnId") if isinstance(runtime, dict) else None)
+        except MigrationIOError as exc:
+            allowed = {"history_project_unavailable", "history_source_ambiguous", "history_preview_capacity"}
+            return {"ok": False, "code": str(exc) if str(exc) in allowed else "history_source_unavailable"}
     elif action == "agents":
         coroutine = service.discover(args["project_id"])
     elif action == "dispatch":
@@ -363,7 +398,7 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
     elif action == "receipt":
         coroutine = service.reconcile(args["dispatch_id"])
     try:
-        return asyncio.run_coroutine_threadsafe(coroutine, loop).result(timeout=125 if action == "operator_image_upload" else 25)
+        return asyncio.run_coroutine_threadsafe(coroutine, loop).result(timeout=125 if action in {"operator_image_upload", "history_import"} else 25)
     except TimeoutError as exc:
         if action in _APPEARANCE_SCHEMAS:
             raise ValueError("Launcher外观操作尚未确认，请读取当前外观；不要自动重复上传或重新打开选择框。") from exc

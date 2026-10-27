@@ -15,6 +15,41 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def storage_authority(project, source_config, projects_home=None):
+    """Snapshot existing identity and migration marker; never create either."""
+    from vibelution_storage import (PROJECT_IDENTITY_RELATIVE_PATH, instance_id_for_project,
+        resolve_active_project_storage_paths, resolve_project_storage_paths, storage_migration_state_path)
+    from core.assistant_runtime.migration_io import MigrationIOError, read_stable_file, strict_json, verify_snapshot
+    project = Path(project).resolve()
+    if source_config is None:
+        raise MigrationIOError("source_config_required")
+    identity = read_stable_file(project / PROJECT_IDENTITY_RELATIVE_PATH, 64 * 1024)
+    payload = strict_json(identity.raw)
+    if (not isinstance(payload, dict) or type(payload.get("schemaVersion")) is not int
+            or payload["schemaVersion"] != 1 or not isinstance(payload.get("projectId"), str)):
+        raise MigrationIOError("source_project_identity_invalid")
+    canonical = resolve_project_storage_paths(project, projects_home=projects_home)
+    if (payload["projectId"].strip().lower() != canonical.project_id
+            or canonical.instance_id != instance_id_for_project(project)):
+        raise MigrationIOError("source_project_identity_changed")
+    marker = read_stable_file(storage_migration_state_path(canonical), 64 * 1024)
+    active = resolve_active_project_storage_paths(project, projects_home=canonical.projects_home, config_path=source_config)
+    if (active.project_id != canonical.project_id or active.instance_id != canonical.instance_id
+            or active.data != canonical.data):
+        raise MigrationIOError("source_storage_route_invalid")
+    def verify():
+        verify_snapshot(identity)
+        verify_snapshot(marker)
+        current = resolve_active_project_storage_paths(project, projects_home=canonical.projects_home, config_path=source_config)
+        if (current.project_id != active.project_id or current.instance_id != active.instance_id
+                or current.data != active.data or current.runtime != active.runtime):
+            raise MigrationIOError("source_storage_route_changed")
+        verify_snapshot(identity)
+        verify_snapshot(marker)
+    verify()
+    return active, (identity, marker), verify
+
+
 def _capture(project, workspace, scope, grant_path):
     from core.assistant_runtime.migration_inventory import declared_assistant_identities
     from core.assistant_runtime.migration_io import MigrationIOError, read_stable_file, strict_json
@@ -88,7 +123,8 @@ def _isolated_environment(target, config):
 
 
 def activate_in_subprocess(*, paths, workspace, agent_id, source_config, target_profile,
-        target_config, migration_id, path_grants, authority_snapshots, authority_verify, category="personal"):
+        target_config, migration_id, path_grants, authority_snapshots, authority_verify, category="personal",
+        baseline_migration_id=None):
     import re
     import subprocess
     from core.assistant_runtime.migration_active import _selected, _verify_captured
@@ -98,14 +134,24 @@ def activate_in_subprocess(*, paths, workspace, agent_id, source_config, target_
     from core.infrastructure import developer_sandbox
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,95}", migration_id):
         raise MigrationIOError("migration_id_invalid")
-    if category not in {"personal", "knowledge"}:
+    if category not in {"personal", "knowledge", "affairs_conflicts"}:
         raise MigrationIOError("activation_category_invalid")
+    if category == "affairs_conflicts":
+        if (not isinstance(baseline_migration_id, str)
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,95}", baseline_migration_id)
+                or baseline_migration_id == migration_id):
+            raise MigrationIOError("affairs_conflict_baseline_invalid")
+    elif baseline_migration_id is not None:
+        raise MigrationIOError("affairs_conflict_baseline_invalid")
     target, config = _target(target_profile, target_config)
     scope = {"projectId": paths.project_id, "instanceId": paths.instance_id, "agentId": agent_id}
     grant_path = path_grants.absolute() if path_grants is not None else None
     captured, selected_authorities = _capture(paths.project_root, workspace, scope, grant_path)
     if category == "personal":
         migration_episodic._parse_rows(_selected(captured, "episodic_memory").raw, agent_id)
+        migration_affairs._parse_rows(_selected(captured, "personal_affairs").raw)
+        knowledge_authorities = ()
+    elif category == "affairs_conflicts":
         migration_affairs._parse_rows(_selected(captured, "personal_affairs").raw)
         knowledge_authorities = ()
     else:
@@ -132,6 +178,8 @@ def activate_in_subprocess(*, paths, workspace, agent_id, source_config, target_
     request = {"schemaVersion": 1, "project": str(paths.project_root), "workspace": str(workspace),
         "scope": scope, "grant": str(grant_path) if grant_path is not None else None,
         "target": str(target), "config": _snapshot_proof(config), "migrationId": migration_id, "category": category,
+        "baselineMigrationId": baseline_migration_id, "projectsHome": str(paths.projects_home),
+        "sourceConfig": str(Path(source_config).resolve()),
         "route": route_proof, "source": _source_proof(captured, authorities)}
     encoded = json.dumps(request, ensure_ascii=False)
     if len(encoded.encode("utf-8")) > 8 * 1024 * 1024:
@@ -238,13 +286,24 @@ def _child():
             raise MigrationIOError("activation_proof_too_large")
         request = strict_json(raw)
         if (request.get("schemaVersion") != 1 or request["target"] != str(target)
-                or request.get("category") not in {"personal", "knowledge"}):
+                or request.get("category") not in {"personal", "knowledge", "affairs_conflicts"}):
             raise MigrationIOError("activation_request_invalid")
         _target(target, Path(request["config"]["path"]))
         _verify_file_proofs([request["config"]])
         from core.assistant_runtime.migration_paths import _identity_chain
         def verify_route():
             _verify_file_proofs(request["source"]["authorities"])
+            actual, _, verify_storage = storage_authority(Path(request["project"]),
+                Path(request["sourceConfig"]), Path(request["projectsHome"]))
+            if (actual.project_id != request["scope"]["projectId"]
+                    or actual.instance_id != request["scope"]["instanceId"]):
+                raise MigrationIOError("source_project_identity_changed")
+            from scripts.assistant_migration_inventory import _bound_route
+            workspace, _, _, verify_workspace = _bound_route(actual, Path(request["sourceConfig"]))
+            if workspace != Path(request["workspace"]):
+                raise MigrationIOError("source_routing_changed")
+            verify_workspace()
+            verify_storage()
             for path, chain in request["route"]:
                 current = [[str(node), list(identity)] for node, identity in _identity_chain(Path(path))]
                 if current != chain:
@@ -261,22 +320,35 @@ def _child():
         from core.assistant_runtime.migration_profile import offline_migration_profile
         for key in ("HOME", "APPDATA", "LOCALAPPDATA", "TEMP", "VIBELUTION_PROJECTS_HOME"):
             Path(os.environ[key]).mkdir(parents=True, exist_ok=True)
-        from contextlib import ExitStack
-        from core.web.services.personal_assistant_project.windows_read import _locked_source
-        with ExitStack() as source_locks:
-            # Keep source routing, registration and grant proofs from changing
-            # between a check and a native knowledge write. The importer also
-            # pins the selected content; hashes alone do not authorize it.
-            if request["category"] == "knowledge":
-                for authority in authorities:
-                    source_locks.enter_context(_locked_source(Path(authority.path.anchor), authority.path, directory=False))
+        from core.assistant_runtime.migration_io import pinned_source_files
+        # Acquire the target owner before source guards, so a busy profile
+        # returns immediately without holding source files. The source guards
+        # remain held for every archive confirmation or native data write.
+        with offline_migration_profile() as lease:
+            with pinned_source_files(authorities):
                 verify_route()
-            with offline_migration_profile() as lease:
                 activation_started = True
                 if request["category"] == "personal":
                     result = activate_personal_snapshot(lease, captured, migration_id=request["migrationId"],
                         source_roots=(Path(request["project"]), Path(request["workspace"])),
                         authority_snapshots=authorities, authority_verify=verify_route)
+                elif request["category"] == "affairs_conflicts":
+                    from core.assistant_runtime.migration_active import _selected, _verify_captured
+                    from core.assistant_runtime.migration_affairs import _parse_rows
+                    from core.assistant_runtime.migration_affairs_conflicts import prepare_affairs_conflicts
+                    from core.assistant_runtime.migration_source_archive import import_source_snapshots
+                    _parse_rows(_selected(captured, "personal_affairs").raw)
+                    _verify_captured(captured, authorities, verify_route)
+                    archive = import_source_snapshots(captured, lease.root, request["migrationId"],
+                        source_roots=(Path(request["project"]), Path(request["workspace"])),
+                        authority_snapshots=authorities, authority_verify=verify_route)
+                    conflicts = prepare_affairs_conflicts(lease,
+                        baseline_migration_id=request.get("baselineMigrationId"),
+                        snapshot_migration_id=request["migrationId"], sync_id=request["migrationId"],
+                        source_scope=request["scope"])
+                    result = {"status": "complete", "archive": archive, "conflicts": conflicts,
+                        "sourceScope": request["scope"], "sourceQuiesced": False, "readyForCutover": False}
+                    _verify_captured(captured, authorities, verify_route)
                 else:
                     from core.assistant_runtime.migration_knowledge import import_private_knowledge
                     registry_root = Path(request["workspace"]) / "knowledge/sources/registry"

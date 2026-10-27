@@ -158,6 +158,8 @@ export class ElectronWindowProvider {
   private readonly launcherContentVersion?: () => string;
   private launcherLoadedVersion: string | null = null;
   private readonly attachedWindows = new Set<ElectronWindowLike>();
+  private readonly documentTokens = new WeakMap<ElectronWindowLike, object>();
+  private readonly documentListeners = new WeakSet<ElectronWindowLike>();
   private readonly listLauncherWindows: (launcherOrigin: string) => ElectronWindowLike[];
   private readonly listWorkbenchWindows: (workbenchOrigin: string) => ElectronWindowLike[];
   private readonly hungCloseDestroyAfterMs: number;
@@ -434,6 +436,7 @@ export class ElectronWindowProvider {
     if (entry.readyUrl !== safeUrl) {
       window.hide();
       try {
+        this.invalidateWorkbenchDocument(window);
         await window.loadURL(safeUrl);
         if (window.isDestroyed()) {
           throw new Error("Instance workbench window closed before navigation completed");
@@ -534,13 +537,36 @@ export class ElectronWindowProvider {
     return null;
   }
 
+  /** Identify the registered window only; callers must separately require the main frame.
+   * This is not an Agent or project identity.
+   */
+  trustedWorkbenchInstanceForSender(sender: ElectronWindowLike["webContents"], senderUrl: string): string | null {
+    if (!this.trustedWorkbenchOrigin(sender, senderUrl)) return null;
+    const matches: string[] = [];
+    if (this.workbenchWindow?.webContents === sender && !this.workbenchWindow.isDestroyed()) matches.push("main");
+    for (const entry of this.instanceWindows.values()) {
+      if (entry.window.webContents === sender && !entry.window.isDestroyed()) {
+        if (entry.instanceId === "main") return null;
+        matches.push(entry.instanceId);
+      }
+    }
+    return matches.length === 1 && matches[0] !== "" ? matches[0] : null;
+  }
+
   notificationTargetForSender(sender: ElectronWindowLike["webContents"], senderUrl: string) {
     const origin = this.trustedWorkbenchOrigin(sender, senderUrl);
     if (!origin) return null;
     const window = [this.workbenchWindow, ...[...this.instanceWindows.values()].map(entry => entry.window)]
       .find(window => window?.webContents === sender)!;
-    const live = () => this.trustedWorkbenchOrigin(sender, senderUrl) === origin;
+    const documentToken = this.documentTokens.get(window);
+    const instanceId = this.trustedWorkbenchInstanceForSender(sender, senderUrl);
+    if (!documentToken || !instanceId) return null;
+    const live = () => this.documentTokens.get(window) === documentToken
+      && this.trustedWorkbenchInstanceForSender(sender, senderUrl) === instanceId
+      && this.trustedWorkbenchOrigin(sender, senderUrl) === origin;
     return {
+      isLive: live,
+      documentToken,
       isWorkbenchFocused: () => live() && window.isFocused(),
       focusWorkbench: async () => {
         if (live()) {
@@ -791,11 +817,35 @@ export class ElectronWindowProvider {
     };
   }
 
+  private invalidateWorkbenchDocument(window: ElectronWindowLike): void {
+    this.documentTokens.set(window, {});
+  }
+
+  private bindWorkbenchDocument(window: ElectronWindowLike): void {
+    // Rebinding is a new authority even if the same WebContents is adopted.
+    this.invalidateWorkbenchDocument(window);
+    if (this.documentListeners.has(window)) return;
+    this.documentListeners.add(window);
+    window.webContents.on("did-start-navigation", (details, _url, legacyInPlace, legacyMainFrame) => {
+      const row = details && typeof details === "object" ? details as Record<string, unknown> : {};
+      const main = typeof row.isMainFrame === "boolean" ? row.isMainFrame : legacyMainFrame;
+      const sameDocument = typeof row.isSameDocument === "boolean" ? row.isSameDocument : legacyInPlace;
+      // Unknown event shape is conservative. Subframes and same-document SPA
+      // navigation retain the current document's notification targets.
+      if (main !== false && sameDocument !== true) this.invalidateWorkbenchDocument(window);
+    });
+    // Also revoke targets created by the outgoing document after navigation
+    // started but before the new main document committed.
+    window.webContents.on("did-navigate", () => this.invalidateWorkbenchDocument(window));
+    window.webContents.on("render-process-gone", () => this.invalidateWorkbenchDocument(window));
+  }
+
   private attachInstanceWindowEvents(instanceId: string, window: ElectronWindowLike): void {
     if (this.attachedWindows.has(window)) {
       return;
     }
     this.attachedWindows.add(window);
+    this.bindWorkbenchDocument(window);
     window.on("focus", () => {
       this.onWorkbenchFocusAttentionClear(window.webContents);
       this.setWindowAttention(window, { unreadCount: 0 });
@@ -906,6 +956,7 @@ export class ElectronWindowProvider {
       });
     }
     if (role === "workbench") {
+      this.bindWorkbenchDocument(window);
       this.interceptWorkbenchWindowOpenRequests(window);
       window.on("close", (event) => {
         if (this.workbenchCloseAuthorized || !this.shouldInterceptWorkbenchClose()) {
@@ -1001,6 +1052,7 @@ export class ElectronWindowProvider {
       this.workbenchReadyUrl = null;
       workbenchWindow.hide();
       try {
+        this.invalidateWorkbenchDocument(workbenchWindow);
         await workbenchWindow.loadURL(safeUrl);
         if (workbenchWindow.isDestroyed() || this.workbenchWindow !== workbenchWindow) {
           throw new Error("Workbench window closed before navigation completed");
@@ -1053,6 +1105,7 @@ export class ElectronWindowProvider {
     }
     this.workbenchReadyUrl = null;
     try {
+      this.invalidateWorkbenchDocument(workbenchWindow);
       await workbenchWindow.loadURL(workbenchErrorPageDataUrl(input));
     } catch {
       // The error document is best-effort; never mask the original failure.

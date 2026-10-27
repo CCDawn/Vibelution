@@ -5,7 +5,12 @@ import pytest
 
 from core.assistant_runtime.migration_io import MigrationIOError
 from core.assistant_runtime.migration_paths import resolve_source_paths, source_snapshot
-from core.assistant_runtime.migration_source_archive import import_source_snapshots
+from core.assistant_runtime.migration_source_archive import import_source_snapshots as _import_source_snapshots
+
+
+def import_source_snapshots(*args, **kwargs):
+    kwargs.setdefault("authority_verify", lambda: None)
+    return _import_source_snapshots(*args, **kwargs)
 
 
 def source(tmp_path):
@@ -36,6 +41,8 @@ def test_approved_custom_data_import_is_exact_idempotent_and_not_executable(tmp_
     assert second["reused"]
     manifest_path = target / "history_sources/migrations/migration-1/manifest.json"
     manifest = json.loads(manifest_path.read_bytes())
+    assert manifest["schemaVersion"] == 2
+    assert (manifest_path.parent / ".confirmed").is_dir()
     assert manifest["activePluginStateImported"] is False
     assert {entry["category"] for entry in manifest["entries"]} == {"memory"}
     assert all("queue" not in p.name for p in target.rglob("*"))
@@ -106,3 +113,74 @@ def test_reused_archive_rechecks_source_after_reading_target(tmp_path, monkeypat
     monkeypatch.setattr(owner, "read_stable_file", changed)
     with pytest.raises(MigrationIOError):
         import_source_snapshots(snapshots, target, "migration-1", source_roots=(project, workspace))
+
+
+def test_failed_post_publication_authority_check_keeps_archive_unconfirmed_until_verified_retry(tmp_path):
+    project, workspace, _, snapshots = source(tmp_path)
+    target = tmp_path / "target"
+    checks = 0
+
+    def revoked_after_publication():
+        nonlocal checks
+        checks += 1
+        if checks == 3:
+            raise MigrationIOError("source_authority_changed")
+
+    with pytest.raises(MigrationIOError, match="source_authority_changed"):
+        import_source_snapshots(snapshots, target, "migration-1", source_roots=(project, workspace),
+                                authority_verify=revoked_after_publication)
+    archive = target / "history_sources/migrations/migration-1"
+    assert archive.is_dir() and not (archive / ".confirmed").exists()
+    result = import_source_snapshots(snapshots, target, "migration-1", source_roots=(project, workspace),
+                                     authority_verify=lambda: None)
+    assert result["reused"] and (archive / ".confirmed").is_dir()
+
+
+def test_old_archive_is_confirmed_only_after_matching_source_is_reverified(tmp_path):
+    project, workspace, _, snapshots = source(tmp_path)
+    target = tmp_path / "target"
+    import_source_snapshots(snapshots, target, "migration-1", source_roots=(project, workspace))
+    archive = target / "history_sources/migrations/migration-1"
+    (archive / ".confirmed").rmdir()
+    manifest = json.loads((archive / "manifest.json").read_bytes())
+    manifest["schemaVersion"] = 1
+    manifest["sourceComplete"] = manifest.pop("snapshotCompleteAtScan")
+    (archive / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False,
+        sort_keys=True, separators=(",", ":")), encoding="utf-8")
+    result = import_source_snapshots(snapshots, target, "migration-1", source_roots=(project, workspace))
+    assert result["reused"] and (archive / ".confirmed").is_dir()
+
+
+def test_unverified_source_never_creates_a_confirmed_archive(tmp_path):
+    project, workspace, _, snapshots = source(tmp_path)
+    target = tmp_path / "target"
+    with pytest.raises(MigrationIOError, match="source_authority_required"):
+        _import_source_snapshots(snapshots, target, "migration-1", source_roots=(project, workspace))
+    assert not target.exists()
+
+
+def test_source_file_remains_locked_during_confirmation(tmp_path, monkeypatch):
+    from core.assistant_runtime import migration_source_archive as owner
+    project, workspace, external, snapshots = source(tmp_path)
+    original = owner._confirm_archive
+    denied = []
+
+    def attempt_change(directory, guard):
+        try:
+            (external / "original.jsonl").write_bytes(b"changed")
+        except PermissionError:
+            denied.append(True)
+        return original(directory, guard)
+
+    monkeypatch.setattr(owner, "_confirm_archive", attempt_change)
+    result = import_source_snapshots(snapshots, tmp_path / "target", "migration-1", source_roots=(project, workspace))
+    assert result["published"] and denied == [True]
+
+
+def test_source_guard_preserves_callers_busy_error(tmp_path):
+    from core.assistant_runtime.migration_io import pinned_source_files, read_stable_file
+    path = tmp_path / "source.json"
+    path.write_text("{}", encoding="utf-8")
+    with pytest.raises(TimeoutError, match="target busy"):
+        with pinned_source_files([read_stable_file(path, 100)]):
+            raise TimeoutError("target busy")

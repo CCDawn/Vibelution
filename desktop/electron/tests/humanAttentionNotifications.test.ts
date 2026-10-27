@@ -1,7 +1,12 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
+import type { IpcMainInvokeEvent } from "electron";
 import { IPC_CHANNELS } from "../src/ipc.js";
+import { handleHumanAttentionIpc } from "../src/notifications/humanAttentionIpc.js";
+import { LegacyReminderSourceFence } from "../src/notifications/legacyReminderSourceFence.js";
 import {
   createHumanAttentionNotificationService,
   type DesktopHumanAttentionNotification
@@ -435,12 +440,12 @@ describe("human attention shell contract wiring", () => {
     expect(IPC_CHANNELS.humanAttentionOpened).toBe("launcher:human-attention-opened");
   });
 
-  it("handles the notify channel behind the trusted-sender guard in main", () => {
+  it("routes the registered notify channel through the tested sender boundary", () => {
     const handleIndex = mainSource.indexOf("ipcMain.handle(IPC_CHANNELS.notifyHumanAttention");
     expect(handleIndex).toBeGreaterThanOrEqual(0);
     const segment = mainSource.slice(handleIndex, handleIndex + 400);
-    expect(segment).toContain("assertTrustedIpcSender(event, trustedIpcOrigins())");
-    expect(segment).not.toContain("throw new Error");
+    expect(segment).toContain("handleHumanAttentionIpc(event, payload, windowProvider, trustedIpcOrigins(event)");
+    expect(segment).toContain("resolveHumanAttentionNotificationService().notify(acceptedPayload, source)");
   });
 
   it("routes through sendToPet and the opened channel in main", () => {
@@ -465,9 +470,11 @@ class FakeElectronWindow implements ElectronWindowLike {
   readonly webContents: ElectronWindowLike["webContents"];
   readonly sentIpc: Array<{ channel: string; payload: unknown }> = [];
   readonly loadedUrls: string[] = [];
+  readonly flashes: boolean[] = [];
   private url: string;
   private destroyed = false;
   private focused = false;
+  private readonly contentsHandlers = new Map<string, Array<(...args: unknown[]) => void>>();
 
   constructor(id: number, url: string) {
     this.id = id;
@@ -475,11 +482,18 @@ class FakeElectronWindow implements ElectronWindowLike {
     this.webContents = {
       getOSProcessId: () => 9000 + id,
       getURL: () => this.url,
-      on: () => this.webContents,
+      on: (event, listener) => {
+        this.contentsHandlers.set(event, [...(this.contentsHandlers.get(event) ?? []), listener]);
+        return this.webContents;
+      },
       send: (channel: string, payload: unknown) => {
         this.sentIpc.push({ channel, payload });
       }
     };
+  }
+
+  emitContents(event: string, ...args: unknown[]): void {
+    for (const listener of this.contentsHandlers.get(event) ?? []) listener(...args);
   }
 
   focus(): void {
@@ -493,6 +507,8 @@ class FakeElectronWindow implements ElectronWindowLike {
   hide(): void {
     this.focused = false;
   }
+
+  flashFrame(value: boolean): void { this.flashes.push(value); }
 
   close(): void {
     this.destroyed = true;
@@ -528,6 +544,202 @@ const fakeDesktopPaths: DesktopPaths = {
   workspaceRoot: "C:/Users/17533/Desktop/Vibelution",
   userDataRoot: "C:/Users/17533/AppData/Roaming/Vibelution"
 };
+
+describe("human attention IPC sender boundary", () => {
+  it("applies a real persisted source stop to affair reminders through the IPC handler", async () => {
+    const root = mkdtempSync(join(tmpdir(), "legacy-reminder-ipc-"));
+    try {
+      const workbench = new FakeElectronWindow(1, "");
+      const provider = new ElectronWindowProvider(fakeDesktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000/", {
+        createWorkbenchWindow: () => workbench,
+      });
+      await provider.openOrFocusWorkbench();
+      const frame = { url: "http://127.0.0.1:8000/" };
+      const event = { sender: Object.assign(workbench.webContents, { mainFrame: frame }), senderFrame: frame } as unknown as IpcMainInvokeEvent;
+      const fence = new LegacyReminderSourceFence(join(root, "fence"));
+      const info = statSync(root, { bigint: true });
+      const binding = { projectId: "project", instanceId: "main", physicalRoot: root,
+        physicalIdentity: { device: info.dev.toString(), inode: info.ino.toString() } };
+      const notify = vi.fn(async () => ({ delivered: "system_notification" as const }));
+      const controls = { fence, resolveSource: async () => binding };
+      const invoke = (payload: unknown, options = controls) => handleHumanAttentionIpc(event, payload, provider,
+        ["http://127.0.0.1:8000"], notify, options);
+      expect(await invoke(attention({ kind: "affair_reminder" }))).toEqual({ delivered: "system_notification" });
+      await fence.stop(binding);
+      expect(await invoke(attention({ kind: "affair_reminder" }))).toEqual({ delivered: "source_retired" });
+      expect(await invoke(attention({ kind: "anomaly" }))).toEqual({ delivered: "system_notification" });
+      expect(await invoke(attention({ kind: "affair_reminder" }), { fence, resolveSource: async () => null }))
+        .toEqual({ delivered: "system_notification" });
+      expect(notify).toHaveBeenCalledTimes(3);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+  it("admits only registered top-level workbenches and forwards their distinct instance", async () => {
+    const main = new FakeElectronWindow(1, "");
+    const branch = new FakeElectronWindow(2, "");
+    const foreign = new FakeElectronWindow(3, "http://127.0.0.1:8000/");
+    let next = 0;
+    const provider = new ElectronWindowProvider(fakeDesktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000/", {
+      createWorkbenchWindow: () => next++ === 0 ? main : branch,
+    });
+    await provider.openOrFocusWorkbench();
+    await provider.openOrFocusInstanceWorkbench({ instanceId: "branch", url: "http://127.0.0.1:8001/" });
+    const eventFor = (window: FakeElectronWindow) => {
+      const frame = { url: `${new URL(window.webContents.getURL()).origin}/chat` };
+      const sender = Object.assign(window.webContents, { mainFrame: frame });
+      return { sender, senderFrame: frame } as unknown as IpcMainInvokeEvent;
+    };
+    const mainEvent = eventFor(main);
+    const branchEvent = eventFor(branch);
+    const foreignEvent = eventFor(foreign);
+    const payload = attention();
+    const origins = ["http://127.0.0.1:8000", "http://127.0.0.1:8001"];
+    const notify = vi.fn(async (_payload: unknown, _source: unknown) => ({ delivered: "assistant_window" as const }));
+    expect(await handleHumanAttentionIpc(mainEvent, payload, provider, origins, notify)).toEqual({ delivered: "assistant_window" });
+    expect(await handleHumanAttentionIpc(branchEvent, payload, provider, origins, notify)).toEqual({ delivered: "assistant_window" });
+    expect(notify.mock.calls).toEqual([
+      [payload, expect.objectContaining({ instanceId: "main", allowAssistantWindow: expect.any(Function) })],
+      [payload, expect.objectContaining({ instanceId: "branch", allowAssistantWindow: expect.any(Function) })],
+    ]);
+
+    const subframe = { ...mainEvent, senderFrame: { url: "http://127.0.0.1:8000/chat" } } as IpcMainInvokeEvent;
+    await expect(handleHumanAttentionIpc(subframe, payload, provider, origins, notify)).rejects.toThrow("blocked human attention sender");
+    await expect(handleHumanAttentionIpc(foreignEvent, payload, provider, origins, notify)).rejects.toThrow("blocked human attention sender");
+    await expect(handleHumanAttentionIpc(mainEvent, payload, null, origins, notify)).rejects.toThrow("blocked human attention sender");
+    await expect(handleHumanAttentionIpc(mainEvent, payload, provider, ["http://127.0.0.1:8001"], notify)).rejects.toThrow("blocked ipc sender origin");
+    await branch.loadURL("http://127.0.0.1:9999/");
+    await expect(handleHumanAttentionIpc(branchEvent, payload, provider, origins, notify)).rejects.toThrow("blocked human attention sender");
+    await provider.closeInstanceWorkbench("branch");
+    await expect(handleHumanAttentionIpc(branchEvent, payload, provider, origins, notify)).rejects.toThrow("blocked human attention sender");
+    expect(notify).toHaveBeenCalledTimes(2);
+  });
+
+  it("routes real service dedup and toast clicks to the originating workbench", async () => {
+    const main = new FakeElectronWindow(1, "");
+    const branch = new FakeElectronWindow(2, "");
+    const replacement = new FakeElectronWindow(3, "");
+    let next = 0;
+    const provider = new ElectronWindowProvider(fakeDesktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000/", {
+      createWorkbenchWindow: () => [main, branch, replacement][next++]!,
+    });
+    await provider.openOrFocusWorkbench();
+    await provider.openOrFocusInstanceWorkbench({ instanceId: "branch", url: "http://127.0.0.1:8000/" });
+    const eventFor = (window: FakeElectronWindow) => {
+      const frame = { url: "http://127.0.0.1:8000/" };
+      return { sender: Object.assign(window.webContents, { mainFrame: frame }), senderFrame: frame } as unknown as IpcMainInvokeEvent;
+    };
+    const mainEvent = eventFor(main), branchEvent = eventFor(branch);
+    const clicks: Array<() => void> = [];
+    const sendToAssistantWindow = vi.fn(() => false);
+    const service = createHumanAttentionNotificationService({
+      windowBridge: {
+        sendToAssistantWindow, isAssistantWindowVisible: () => false,
+        sendToWorkbench: () => false, focusWorkbench: async () => undefined, setWorkbenchAttention: () => undefined,
+      },
+      notificationSupported: () => true,
+      createNotification: ({ onClick }) => { clicks.push(onClick); return { show: () => undefined }; },
+      openedChannel: OPENED_CHANNEL,
+    });
+    const invoke = (event: IpcMainInvokeEvent, payload = attention()) => handleHumanAttentionIpc(
+      event, payload, provider, ["http://127.0.0.1:8000"], (input, source) => service.notify(input, source),
+    );
+    await invoke(mainEvent);
+    await invoke(branchEvent);
+    await invoke(branchEvent);
+    expect(clicks).toHaveLength(2);
+    clicks[1]();
+    expect(branch.sentIpc).toEqual([{ channel: OPENED_CHANNEL, payload: { id: "ha-1", targetUrl: "/knowledge?review=1" } }]);
+    expect(main.sentIpc).toEqual([]);
+    clicks[0]();
+    expect(main.sentIpc).toEqual([{ channel: OPENED_CHANNEL, payload: { id: "ha-1", targetUrl: "/knowledge?review=1" } }]);
+    await provider.closeInstanceWorkbench("branch");
+    await provider.openOrFocusInstanceWorkbench({ instanceId: "branch", url: "http://127.0.0.1:8000/" });
+    await invoke(eventFor(replacement));
+    expect(clicks).toHaveLength(3);
+    clicks[1]();
+    expect(main.sentIpc).toHaveLength(1);
+    expect(branch.sentIpc).toHaveLength(1);
+    expect(replacement.sentIpc).toEqual([]);
+    clicks[2]();
+    expect(replacement.sentIpc).toHaveLength(1);
+    expect(sendToAssistantWindow).not.toHaveBeenCalled();
+  });
+
+  it("keeps a branch card and its fallback attention away from the main pet and workbench", async () => {
+    const main = new FakeElectronWindow(1, ""), branch = new FakeElectronWindow(2, ""), pet = new FakeElectronWindow(3, "");
+    let next = 0;
+    const provider = new ElectronWindowProvider(fakeDesktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000/", {
+      createWorkbenchWindow: () => next++ === 0 ? main : branch, createPetWindow: () => pet,
+    });
+    await provider.openOrFocusWorkbench();
+    await provider.openOrFocusInstanceWorkbench({ instanceId: "branch", url: "http://127.0.0.1:8001/" });
+    await provider.openPet();
+    const eventFor = (window: FakeElectronWindow) => {
+      const frame = { url: window.webContents.getURL() };
+      return { sender: Object.assign(window.webContents, { mainFrame: frame }), senderFrame: frame } as unknown as IpcMainInvokeEvent;
+    };
+    const sendToAssistantWindow = vi.fn(() => true);
+    const service = createHumanAttentionNotificationService({
+      windowBridge: {
+        sendToAssistantWindow, isAssistantWindowVisible: () => true,
+        sendToWorkbench: () => false, focusWorkbench: async () => undefined, setWorkbenchAttention: () => undefined,
+      },
+      notificationSupported: () => false,
+      createNotification: () => { throw new Error("unsupported"); },
+      openedChannel: OPENED_CHANNEL,
+    });
+    const invoke = (window: FakeElectronWindow) => handleHumanAttentionIpc(
+      eventFor(window), attention(), provider, ["http://127.0.0.1:8000", "http://127.0.0.1:8001"],
+      (input, source) => service.notify(input, source),
+    );
+    expect(await invoke(branch)).toEqual({ delivered: "attention_fallback" });
+    expect(branch.flashes).toEqual([true]);
+    expect(main.flashes).toEqual([]);
+    expect(sendToAssistantWindow).not.toHaveBeenCalled();
+    expect(await invoke(main)).toEqual({ delivered: "assistant_window" });
+    expect(sendToAssistantWindow).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not reuse an old origin's dedup entry or click target after main navigation", async () => {
+    const main = new FakeElectronWindow(1, "");
+    const provider = new ElectronWindowProvider(fakeDesktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000/", {
+      createWorkbenchWindow: () => main,
+    });
+    await provider.openOrFocusWorkbench();
+    const clicks: Array<() => void> = [];
+    const service = createHumanAttentionNotificationService({
+      windowBridge: {
+        sendToAssistantWindow: () => false, isAssistantWindowVisible: () => false,
+        sendToWorkbench: () => false, focusWorkbench: async () => undefined, setWorkbenchAttention: () => undefined,
+      },
+      notificationSupported: () => true,
+      createNotification: ({ onClick }) => { clicks.push(onClick); return { show: () => undefined }; },
+      openedChannel: OPENED_CHANNEL,
+    });
+    const invoke = async () => {
+      const frame = { url: main.webContents.getURL() };
+      const event = { sender: Object.assign(main.webContents, { mainFrame: frame }), senderFrame: frame } as unknown as IpcMainInvokeEvent;
+      return handleHumanAttentionIpc(event, attention(), provider, [new URL(frame.url).origin],
+        (input, source) => service.notify(input, source));
+    };
+    await invoke();
+    await provider.openOrFocusWorkbench("http://127.0.0.1:8002/");
+    await invoke();
+    await provider.openOrFocusWorkbench("http://127.0.0.1:8000/");
+    await invoke();
+    expect(clicks).toHaveLength(3);
+    clicks[0]();
+    clicks[1]();
+    expect(main.sentIpc).toEqual([]);
+    main.emitContents("did-start-navigation", { isMainFrame: true, isSameDocument: false });
+    main.emitContents("did-navigate", {});
+    await invoke();
+    expect(clicks).toHaveLength(4);
+    clicks[2]();
+    expect(main.sentIpc).toEqual([]);
+    clicks[3]();
+    expect(main.sentIpc).toHaveLength(1);
+  });
+});
 
 describe("window provider sendToPet", () => {
   it("delivers only to a ready pet window and stops once it is gone", async () => {

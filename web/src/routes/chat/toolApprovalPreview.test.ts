@@ -111,3 +111,11 @@ describe("toolApprovalPreview", () => {
       .toContain("永久");
   });
 });
+it("shows the verified previous assistant for a history import", () => {
+  const preview = toolApprovalActionPreview({ assistantAction: "history_import",
+    assistantTargets: { sourceProjectId: "fixture-project", instanceId: "fixture-instance", assistantAgentId: "old-pa" },
+    assistantOperationDescription: "只读导入所选旧助理的历史会话和附件。" }, "personal_assistant_manage_tool", "zh");
+  expect(preview).toContain("导入旧助理历史");
+  expect(preview).toContain("项目: fixture-project");
+  expect(preview).toContain("旧助理: old-pa");
+});

@@ -15,8 +15,8 @@ from typing import Callable
 
 from . import migration_history as history
 from .main_control import _opaque
-from .migration_io import (MigrationIOError, check_path, migration_target_lock,
-                           path_identity, pinned_target_directory)
+from .migration_io import (FileSnapshot, MigrationIOError, check_path, migration_target_lock,
+                           path_identity, pinned_source_files, pinned_target_directory)
 
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,159}\Z")
 
@@ -30,6 +30,7 @@ class AuthorizedHistorySource:
     assistant_agent_id: str
     project_id: str
     authority_guard: Callable
+    authority_snapshots: tuple[FileSnapshot, ...] = ()
 
 
 class OnlineHistoryOwner:
@@ -64,6 +65,8 @@ class OnlineHistoryOwner:
                     or not isinstance(source.project_root, Path) or not source.project_root.is_absolute()
                     or not isinstance(source.workspace, Path) or not source.workspace.is_absolute()
                     or not callable(source.authority_guard)
+                    or type(source.authority_snapshots) is not tuple
+                    or any(not isinstance(snapshot, FileSnapshot) for snapshot in source.authority_snapshots)
                     or any(not isinstance(value, str) or not _ID.fullmatch(value)
                            for value in (source.instance_id, source.assistant_agent_id, source.project_id))):
                 raise ValueError("history_sources_invalid")
@@ -148,9 +151,14 @@ class OnlineHistoryOwner:
                                       "projectId": project_id, "generation": self._generation},
                                      sort_keys=True, separators=(",", ":")).encode("utf-8")
                     history._write_new(marker, raw)
+        @contextmanager
+        def confirmation_guard():
+            with pinned_source_files((*found.snapshots, *source.authority_snapshots)):
+                yield
+
         return history.import_history(found, self._profile, migration_id,
                                       authority_verify=lambda: self._verify_locked(project_id, source, revision),
-                                      write_guard=guard)
+                                      write_guard=guard, confirmation_guard=confirmation_guard)
 
     def _verify_locked(self, project_id, source, revision):
         with self._generation_guard(self._generation):

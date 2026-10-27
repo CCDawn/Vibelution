@@ -46,6 +46,7 @@ export function toolApprovalActionPreview(
       assistant_settings_update: ["修改助理偏好", "Update assistant preferences"],
       assistant_model_set: ["切换助理模型", "Change assistant model"],
       dialogue_settings_update: ["调整对话偏好", "Update dialogue preferences"],
+      history_import: ["导入旧助理历史", "Import previous assistant history"],
     };
     const action = String(summary.assistantAction || "");
     const title = actions[action]?.[lang === "zh" ? 0 : 1] ?? toolApprovalDisplayName(toolName, lang);
@@ -55,7 +56,13 @@ export function toolApprovalActionPreview(
     const targets = summary.assistantTargets;
     const targetLines = targets && typeof targets === "object" && !Array.isArray(targets)
       ? Object.entries(targets).filter(([, value]) => typeof value === "string")
-        .slice(0, 20).map(([key, value]) => `${key}: ${String(value).slice(0, key === "base_url" ? 512 : 160)}`) : [];
+        .slice(0, 20).map(([key, value]) => {
+          const historyLabels: Record<string, [string, string]> = {
+            sourceProjectId: ["项目", "Project"], instanceId: ["实例", "Instance"], assistantAgentId: ["旧助理", "Previous assistant"],
+          };
+          const label = action === "history_import" && historyLabels[key] ? historyLabels[key][lang === "zh" ? 0 : 1] : key;
+          return `${label}: ${String(value).slice(0, key === "base_url" ? 512 : 160)}`;
+        }) : [];
     const fields = Array.isArray(summary.assistantChangedFields) ? summary.assistantChangedFields.slice(0, 20) : [];
     const permissions = Array.isArray(summary.assistantPermissions) ? summary.assistantPermissions.slice(0, 3) : [];
     const plan = summary.assistantPlan;

@@ -460,6 +460,54 @@ export class AssistantHost {
       { deliveryId, filename: input.filename, contentType: input.contentType, dataBase64: input.dataBase64 }, REQUEST_MS, false, 8192);
   }
 
+  /** Main-only. Caller owns the registry lease and the native approval policy. */
+  async importHistory(input: { projectId: string; previewId: string; turnId: string; revision: number; signal?: AbortSignal }): Promise<unknown> {
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(input.projectId)
+      || !/^[a-f0-9]{64}$/.test(input.previewId) || typeof input.turnId !== "string"
+      || !/^\S{1,160}$/.test(input.turnId) || !Number.isSafeInteger(input.revision) || input.revision < 0) {
+      throw new HostError("ASSISTANT_REQUEST_INVALID");
+    }
+    const generation = this.current;
+    if (!generation || generation.closed || generation.abort.signal.aborted || this.view.state !== "ready"
+      || this.projectsSuspended || generation.projectRevision !== input.revision) throw new HostError("ASSISTANT_NOT_READY");
+    const operationId = randomBytes(16).toString("hex");
+    const body = { projectId: input.projectId, previewId: input.previewId, turnId: input.turnId, revision: input.revision, operationId };
+    const unknown = { schemaVersion: 1, projectId: input.projectId, previewId: input.previewId,
+      state: "unknown", code: "unknown", readyForCutover: false };
+    const fence = async () => {
+      const result = await this.rpc(generation, "/api/assistant/history-import/cancel", "POST",
+        { operationId, previewId: input.previewId }, 5_000, true, 8192);
+      if (!object(result) || Object.keys(result).length !== 3 || result.schemaVersion !== 1
+        || result.operationId !== operationId || result.cancelled !== true) throw new HostError("ASSISTANT_RESPONSE_INVALID");
+    };
+    if (input.signal?.aborted) {
+      try { await fence(); return { ...unknown, state: "rejected", code: "cancelled" }; }
+      catch { await this.stop(); return unknown; }
+    }
+    try {
+      const result = await this.rpc(generation, "/api/assistant/history-import", "POST", body, 120_000, false, 8192, input.signal);
+      if (!object(result) || !ownKeys(result, ["schemaVersion", "projectId", "previewId", "state", "code", "historyCount", "readyForCutover"])
+        || result.schemaVersion !== 1 || result.projectId !== input.projectId || result.previewId !== input.previewId
+        || result.readyForCutover !== false || !["published", "rejected", "unknown"].includes(String(result.state))
+        || !(result.state === "published" && result.code === "imported" && Number.isSafeInteger(result.historyCount) && Number(result.historyCount) >= 0 && Number(result.historyCount) <= 10_000
+          || result.state === "rejected" && ["preview_invalid", "project_unavailable", "cancelled", "busy"].includes(String(result.code)) && result.historyCount === undefined
+          || result.state === "unknown" && result.code === "unknown" && result.historyCount === undefined)) {
+        throw new HostError("ASSISTANT_RESPONSE_INVALID");
+      }
+      return result;
+    } catch {
+      try {
+        // A fresh request bypasses the aborted signal. Its ACK is sent only
+        // after the host has fenced this operation's publication guard.
+        await fence();
+      } catch {
+        // Never release the main registry lease while an unfenced writer lives.
+        await this.stop();
+      }
+      return unknown;
+    }
+  }
+
   private startMainControl(generation: Generation): void {
     const onRequest = this.options.mainControl!;
     void runMainControlPump({
@@ -499,11 +547,11 @@ export class AssistantHost {
   }
 
   private async rpc(generation: Generation, path: string, method: "GET" | "POST" | "PUT", body?: object,
-    timeoutMs = REQUEST_MS, retiring = false, maxResponseBytes = MAX_RESPONSE_BYTES): Promise<unknown> {
+    timeoutMs = REQUEST_MS, retiring = false, maxResponseBytes = MAX_RESPONSE_BYTES, callerSignal?: AbortSignal): Promise<unknown> {
     if (!generation.origin || generation.closed || (!retiring && generation.abort.signal.aborted)) throw new HostError("ASSISTANT_NOT_READY");
     const timeout = new AbortController();
     const timer = setTimeout(() => timeout.abort(), timeoutMs);
-    const signal = retiring ? timeout.signal : AbortSignal.any([generation.abort.signal, timeout.signal]);
+    const signal = AbortSignal.any([timeout.signal, ...(!retiring ? [generation.abort.signal] : []), ...(callerSignal ? [callerSignal] : [])]);
     try {
       const response = await (this.options.fetch ?? globalThis.fetch)(`${generation.origin}${path}`, {
         method, redirect: "error", signal,

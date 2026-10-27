@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { requestRendererWindowClose } from "./windows/rendererWindowClose.js";
 import { configureWindowsNotificationIdentity } from "./notifications/windowsNotificationIdentity.js";
 import { NativeNotificationLifetime } from "./notifications/nativeNotificationLifetime.js";
+import { handleHumanAttentionIpc } from "./notifications/humanAttentionIpc.js";
 import { mkdirSync, statSync, watch, writeFileSync, type FSWatcher } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
@@ -415,7 +416,11 @@ const desktopSessionMutations = new DesktopSessionMutationQueue();
 const desktopSessionMirror = new DesktopSessionMirrorQueue((error: unknown) => {
   console.warn(error instanceof Error ? error.message : String(error));
 });
-let workbenchNotificationServices = new WeakMap<object, { origin: string; service: ConversationNotificationService }>();
+let workbenchNotificationServices = new WeakMap<object, {
+  origin: string;
+  service: ConversationNotificationService;
+  target: NonNullable<ReturnType<ElectronWindowProvider["notificationTargetForSender"]>>;
+}>();
 let humanAttentionNotificationService: HumanAttentionNotificationService | null = null;
 const nativeNotificationLifetime = new NativeNotificationLifetime();
 const desktopLaunchArgv = process.argv.slice(1);
@@ -586,9 +591,19 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
         ? launcherAssistantWindow.requestTheme(request,signal)
         : {schemaVersion:1,operation:request.operation,code:"unavailable"},
     });
-    const mainControl: NonNullable<ConstructorParameters<typeof AssistantHost>[0]["mainControl"]> = (request,signal) =>
-      request.action === "launcher_theme_get" || request.action === "launcher_theme_set" || request.action === "operator_image_upload"
-        ? appearanceMainControl(request,signal) : projectMainControl(request);
+    const mainControl: NonNullable<ConstructorParameters<typeof AssistantHost>[0]["mainControl"]> = (request,signal) => {
+      if (request.action === "launcher_theme_get" || request.action === "launcher_theme_set" || request.action === "operator_image_upload")
+        return appearanceMainControl(request,signal);
+      if (request.action === "history_import") {
+        const host = launcherAssistantHost;
+        if (!host || shutdownApproved) return Promise.resolve({ schemaVersion: 1, projectId: request.projectId,
+          previewId: request.previewId, state: "rejected", code: "project_unavailable", readyForCutover: false });
+        return projectConnection.withHistoryImport(request.projectId, revision => host.importHistory({
+          projectId: request.projectId, previewId: request.previewId, turnId: request.turnId, revision, signal,
+        }));
+      }
+      return projectMainControl(request);
+    };
     const resources = await resolveAssistantResources({ packaged: app.isPackaged, resourcesRoot: paths.resourcesRoot,
       developmentSourceRoot: paths.workspaceRoot, developmentPythonPath: app.isPackaged ? "" : desktopPythonPath(), env: desktopEnvironment() });
     if (shutdownApproved) return;
@@ -1089,7 +1104,7 @@ function resolveConversationNotificationService(event: IpcMainInvokeEvent): Conv
   if (!target) return null;
   const origin = new URL(event.senderFrame!.url).origin;
   const existing = workbenchNotificationServices.get(event.sender);
-  if (existing?.origin === origin) return existing.service;
+  if (existing?.origin === origin && existing.target.isLive()) return existing.service;
   const service = createConversationNotificationService({
     windowProvider: target,
     notificationSupported: () => Notification.isSupported(),
@@ -1110,7 +1125,7 @@ function resolveConversationNotificationService(event: IpcMainInvokeEvent): Conv
       });
     }
   });
-  workbenchNotificationServices.set(event.sender, { origin, service });
+  workbenchNotificationServices.set(event.sender, { origin, service, target });
   return service;
 }
 
@@ -4064,10 +4079,8 @@ ipcMain.handle(IPC_CHANNELS.notifyConversationCompleted, async (event, payload: 
 });
 
 ipcMain.handle(IPC_CHANNELS.notifyHumanAttention, async (event, payload: unknown) => {
-  assertTrustedIpcSender(event, trustedIpcOrigins());
-  // The service validates the payload and returns a structured error instead
-  // of throwing, so a malformed renderer request cannot reject here.
-  return await resolveHumanAttentionNotificationService().notify(payload);
+  return await handleHumanAttentionIpc(event, payload, windowProvider, trustedIpcOrigins(event),
+    (acceptedPayload, source) => resolveHumanAttentionNotificationService().notify(acceptedPayload, source));
 });
 
 ipcMain.handle(IPC_CHANNELS.openExternalUrl, async (event, rawUrl: unknown) => {

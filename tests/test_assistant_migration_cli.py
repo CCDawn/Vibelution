@@ -1,5 +1,8 @@
 """Migration CLI keeps the old read path and makes every target write explicit."""
 import json
+import os
+import shutil
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -10,15 +13,35 @@ from tests.test_assistant_migration_history import AGENT, source
 
 def fixture(tmp_path, monkeypatch):
     workspace = source(tmp_path)
-    monkeypatch.setattr(cli, "resolve_active_project_storage_paths", lambda root: SimpleNamespace(
+    monkeypatch.setattr(cli, "resolve_active_project_storage_paths", lambda root, **_kwargs: SimpleNamespace(
         project_root=workspace.parent, data=workspace.parent, project_id="p", instance_id="i",
         runtime=tmp_path / "runtime"))
     return workspace
 
 
 def call(monkeypatch, *args):
-    monkeypatch.setattr("sys.argv", ["inventory", "--project", "C:/selected-project", *map(str, args)])
+    monkeypatch.setattr("sys.argv", ["inventory", "--project", os.environ.get("TEST_MIGRATION_PROJECT", "C:/selected-project"), *map(str, args)])
     return cli.main()
+
+
+def authorized_fixture(tmp_path, monkeypatch):
+    from vibelution_storage import resolve_project_storage_paths, storage_migration_state_path
+    old_workspace = source(tmp_path)
+    project = old_workspace.parent
+    identity = project / '.vibelution/project.json'
+    identity.parent.mkdir()
+    identity.write_text(json.dumps({'schemaVersion': 1, 'projectId': 'test-project'}), encoding='utf-8')
+    projects = tmp_path / 'source-projects'
+    monkeypatch.delenv('VIBELUTION_DATA_HOME', raising=False)
+    monkeypatch.setenv('VIBELUTION_PROJECTS_HOME', str(projects))
+    monkeypatch.setenv('TEST_MIGRATION_PROJECT', str(project))
+    paths = resolve_project_storage_paths(project, projects_home=projects)
+    paths.workspace.parent.mkdir(parents=True)
+    shutil.move(str(old_workspace), str(paths.workspace))
+    marker = storage_migration_state_path(paths)
+    marker.write_text(json.dumps({'schemaVersion': 1, 'status': 'completed',
+        'projectId': paths.project_id, 'instanceId': paths.instance_id}), encoding='utf-8')
+    return paths.workspace, paths
 
 
 def test_cli_imports_all_retained_history_into_only_the_explicit_target(tmp_path, monkeypatch, capsys):
@@ -34,7 +57,7 @@ def test_cli_imports_all_retained_history_into_only_the_explicit_target(tmp_path
 
 
 def test_source_path_grants_and_import_preserve_exact_external_bytes(tmp_path, monkeypatch, capsys):
-    workspace = fixture(tmp_path, monkeypatch)
+    workspace, paths = authorized_fixture(tmp_path, monkeypatch)
     external = tmp_path / "external-memory"
     external.mkdir()
     body = b'{"text":"PRIVATE_MEMORY"}\n'
@@ -44,10 +67,12 @@ def test_source_path_grants_and_import_preserve_exact_external_bytes(tmp_path, m
     document["agents"][0]["memoryPolicy"] = {"privateMemoryRoot": str(external)}
     registry.write_text(json.dumps(document), encoding="utf-8")
     grant = tmp_path / "grants.json"
-    grant.write_text(json.dumps({"schemaVersion": 1, "sourceScope": {"projectId": "p", "instanceId": "i", "agentId": AGENT},
+    grant.write_text(json.dumps({"schemaVersion": 1, "sourceScope": {"projectId": paths.project_id, "instanceId": paths.instance_id, "agentId": AGENT},
         "grants": [{"category": "memory", "root": str(external), "revision": 1}]}), encoding="utf-8")
+    source_config = tmp_path / 'source-config.toml'
+    source_config.write_text('[launcher.developer_mode]\nenabled=false\n', encoding='utf8')
     assert call(monkeypatch, "--source-import", AGENT, "--path-grants", grant,
-                "--target-profile", tmp_path / "target", "--migration-id", "source-1") == 0
+                "--target-profile", tmp_path / "target", "--migration-id", "source-1", "--source-config", source_config) == 0
     result = json.loads(capsys.readouterr().out)
     assert result["import"]["published"] and result["readyForCutover"] is False
     assert "PRIVATE_MEMORY" not in json.dumps(result)
@@ -55,7 +80,10 @@ def test_source_path_grants_and_import_preserve_exact_external_bytes(tmp_path, m
 
 
 @pytest.mark.parametrize("args", [("--history-import", AGENT), ("--target-profile", "C:/target"),
-    ("--source-paths", AGENT, "--request-id", "bad"), ("--observe-handoff", AGENT)])
+    ("--source-paths", AGENT, "--request-id", "bad"), ("--observe-handoff", AGENT),
+    ("--prepare-affairs-conflicts", AGENT, "--target-profile", "C:/target", "--migration-id", "current"),
+    ("--source-import", AGENT, "--target-profile", "C:/target", "--migration-id", "source"),
+    ("--baseline-migration-id", "old")])
 def test_incomplete_or_ambiguous_write_intent_is_rejected_before_any_storage_lookup(monkeypatch, args):
     monkeypatch.setattr(cli, "resolve_active_project_storage_paths", lambda *_: pytest.fail("source lookup before validation"))
     with pytest.raises(SystemExit) as error:
@@ -77,7 +105,7 @@ def test_recovery_disposition_cli_only_observes_the_selected_source(tmp_path, mo
     registry.write_text(json.dumps({"agents": [{"agentId": "assistant", "directSessionId": "session-1",
         "roleKey": "personal_assistant", "status": "active", "workspacePath": "workspace/agents/assistant",
         "metadata": {"personalAssistantProfile": "personal_assistant_v1"}}]}), encoding="utf-8")
-    monkeypatch.setattr(cli, "resolve_active_project_storage_paths", lambda root: SimpleNamespace(
+    monkeypatch.setattr(cli, "resolve_active_project_storage_paths", lambda root, **_kwargs: SimpleNamespace(
         project_root=tmp_path, data=tmp_path, project_id="project", instance_id="instance", runtime=tmp_path / "runtime"))
     before = {p: p.read_bytes() for p in workspace.rglob("*") if p.is_file()}
     assert call(monkeypatch, "--recovery-inventory", "assistant") == 0
@@ -97,7 +125,7 @@ def test_recovery_cli_does_not_infer_grants_from_stale_canonical_path(tmp_path, 
     registry.write_text(json.dumps({"agents": [{"agentId": "assistant", "directSessionId": "session-1",
         "roleKey": "personal_assistant", "status": "active", "workspacePath": "workspace/agents/custom",
         "metadata": {"personalAssistantProfile": "personal_assistant_v1"}}]}), encoding="utf-8")
-    monkeypatch.setattr(cli, "resolve_active_project_storage_paths", lambda root: SimpleNamespace(
+    monkeypatch.setattr(cli, "resolve_active_project_storage_paths", lambda root, **_kwargs: SimpleNamespace(
         project_root=tmp_path, data=tmp_path, project_id="project", instance_id="instance", runtime=tmp_path / "runtime"))
     assert call(monkeypatch, "--recovery-inventory", "assistant") == 0
     report = json.loads(capsys.readouterr().out)
@@ -107,10 +135,8 @@ def test_recovery_cli_does_not_infer_grants_from_stale_canonical_path(tmp_path, 
 
 
 def test_active_knowledge_cli_imports_native_private_knowledge_and_restarts(tmp_path, monkeypatch, capsys):
-    from core.infrastructure import developer_sandbox
     from tests.test_assistant_runtime_native import TEST_MODEL_CONFIG, _run
-    workspace = fixture(tmp_path, monkeypatch)
-    monkeypatch.setattr(developer_sandbox, "formal_workspace_path", lambda _root, *parts: workspace.joinpath(*parts))
+    workspace, _ = authorized_fixture(tmp_path, monkeypatch)
     (tmp_path / "source-location.json").write_text(json.dumps({"workspace": str(workspace)}), encoding="utf-8")
     _run(tmp_path, r'''
         import json, os, shutil, sys
@@ -285,7 +311,8 @@ raise SystemExit(entry._child())
         try:
             assert held.wait(5)
             assert call(monkeypatch, *args) == 1
-            assert json.loads(capsys.readouterr().out)['code'] == 'TARGET_PROFILE_BUSY'
+            busy_report = json.loads(capsys.readouterr().out)
+            assert busy_report['code'] == 'TARGET_PROFILE_BUSY', busy_report
         finally:
             release.set()
             future.result(timeout=30)
@@ -335,10 +362,8 @@ raise SystemExit(entry._child())
 
 
 def active_personal_case(tmp_path, monkeypatch):
-    from core.infrastructure import developer_sandbox
     from tests.test_assistant_runtime_native import TEST_MODEL_CONFIG
-    workspace = fixture(tmp_path, monkeypatch)
-    monkeypatch.setattr(developer_sandbox, "formal_workspace_path", lambda _root, *parts: workspace.joinpath(*parts))
+    workspace, _ = authorized_fixture(tmp_path, monkeypatch)
     episode = {"schemaVersion": 1, "episodeId": "old-episode", "eventId": "old-episode", "agentId": AGENT,
         "kind": "preference", "text": "Synthetic preference", "refs": [], "occurredAt": "2025-01-01T00:00:00+00:00",
         "validFrom": "2025-01-01T00:00:00+00:00", "validUntil": "", "supersededByEpisodeId": ""}
@@ -360,6 +385,71 @@ def active_personal_case(tmp_path, monkeypatch):
     args = ('--activate-personal', AGENT, '--source-config', source_config, '--target-profile', target,
             '--target-config', target_config, '--migration-id', 'cli-activation')
     return workspace, target, args
+
+
+def test_real_child_uses_explicit_source_data_home_with_competing_canonical_workspace(tmp_path, monkeypatch, capsys):
+    workspace, target, args = active_personal_case(tmp_path, monkeypatch)
+    override = tmp_path / 'configured-data'
+    shutil.copytree(workspace, override / 'workspace')
+    original = workspace / 'agents' / AGENT / 'plugins/personal-affairs/affairs/items.jsonl'
+    wrong = json.loads(original.read_text(encoding='utf-8'))
+    original.write_text(json.dumps({**wrong, 'title': 'wrong canonical source'}) + '\n', encoding='utf-8')
+    registry = workspace / 'agents/agents.json'
+    raw = json.loads(registry.read_text(encoding='utf-8'))
+    raw['agents'][0]['agentId'] = 'different-pa'
+    registry.write_text(json.dumps(raw), encoding='utf-8')
+    config = args[3]
+    config.write_text('[storage]\ndata_home = ' + json.dumps(str(override).replace('\\', '/'))
+                      + '\n[launcher.developer_mode]\nenabled=false\n', encoding='utf-8')
+    assert call(monkeypatch, *args) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report['status'] == 'complete' and not report['sourceQuiesced']
+    target_ledger = next(target.glob('agents/*/plugins/personal-affairs/affairs/items.jsonl'))
+    assert json.loads(target_ledger.read_text(encoding='utf-8'))['title'] == 'Synthetic task'
+    assert 'wrong canonical source' not in target_ledger.read_text(encoding='utf-8')
+
+
+@pytest.mark.parametrize('authority', ['identity', 'marker'])
+def test_child_rejects_project_or_marker_change_before_source_publication(tmp_path, monkeypatch, capsys, authority):
+    import subprocess
+    from vibelution_storage import resolve_project_storage_paths, storage_migration_state_path
+    workspace, target, args = active_personal_case(tmp_path, monkeypatch)
+    project = Path(os.environ['TEST_MIGRATION_PROJECT'])
+    path = project / '.vibelution/project.json' if authority == 'identity' else storage_migration_state_path(
+        resolve_project_storage_paths(project, projects_home=os.environ['VIBELUTION_PROJECTS_HOME']))
+    real_run = subprocess.run
+    def change_then_run(*a, **k):
+        path.write_bytes(path.read_bytes() + b'\n')
+        return real_run(*a, **k)
+    monkeypatch.setattr(subprocess, 'run', change_then_run)
+    assert call(monkeypatch, *args) == 1
+    assert json.loads(capsys.readouterr().out)['reason'] == 'source_authority_changed'
+    assert not (target / 'history_sources').exists()
+
+
+def test_missing_storage_marker_fails_closed_before_child(tmp_path, monkeypatch, capsys):
+    from vibelution_storage import resolve_project_storage_paths, storage_migration_state_path
+    workspace, target, args = active_personal_case(tmp_path, monkeypatch)
+    project = Path(os.environ['TEST_MIGRATION_PROJECT'])
+    marker = storage_migration_state_path(resolve_project_storage_paths(project, projects_home=os.environ['VIBELUTION_PROJECTS_HOME']))
+    marker.unlink()
+    assert call(monkeypatch, *args) == 1
+    assert json.loads(capsys.readouterr().out)['code'] == 'SOURCE_MIGRATION_UNAVAILABLE'
+    assert not (target / 'history_sources').exists()
+
+
+@pytest.mark.parametrize('mode', ['environment', 'developer'])
+def test_unproven_source_environment_or_developer_route_fails_closed(tmp_path, monkeypatch, capsys, mode):
+    workspace, target, args = active_personal_case(tmp_path, monkeypatch)
+    if mode == 'environment':
+        monkeypatch.setenv('VIBELUTION_DATA_HOME', str(tmp_path / 'unknown-source'))
+        expected = 'source_environment_unverified'
+    else:
+        args[3].write_text('[launcher.developer_mode]\nenabled=true\n', encoding='utf-8')
+        expected = 'source_developer_mode_unverified'
+    assert call(monkeypatch, *args) == 1
+    assert json.loads(capsys.readouterr().out)['reason'] == expected
+    assert not (target / 'history_sources').exists()
 
 
 def test_active_personal_cli_imports_in_isolated_native_process_and_recovers(tmp_path, monkeypatch, capsys):
@@ -388,6 +478,39 @@ def test_active_personal_cli_imports_in_isolated_native_process_and_recovers(tmp
         finally:
             native.shutdown()
     ''', config_text=TEST_MODEL_CONFIG)
+
+
+def test_offline_conflict_preparation_archives_source_and_never_changes_target(tmp_path, monkeypatch, capsys):
+    workspace, target, args = active_personal_case(tmp_path, monkeypatch)
+    assert call(monkeypatch, *args) == 0
+    capsys.readouterr()
+    source = workspace / 'agents' / AGENT / 'plugins/personal-affairs/affairs/items.jsonl'
+    row = json.loads(source.read_text(encoding='utf-8'))
+    source.write_text(json.dumps({**row, 'title': 'source changed'}) + '\n'
+                      + json.dumps({**row, 'itemId': 'source-new', 'title': 'new source item'}) + '\n', encoding='utf-8')
+    target_ledger = next(target.glob('agents/*/plugins/personal-affairs/affairs/items.jsonl'))
+    user_item = {**row, 'title': 'user modified target'}
+    target_ledger.write_text(json.dumps(user_item) + '\n', encoding='utf-8')
+    before = target_ledger.read_bytes()
+    conflict_args = ('--prepare-affairs-conflicts', AGENT, '--source-config', args[3],
+        '--target-profile', target, '--target-config', args[7], '--migration-id', 'cli-latest',
+        '--baseline-migration-id', 'cli-activation')
+    assert call(monkeypatch, *conflict_args) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report['status'] == 'complete' and not report['sourceQuiesced'] and not report['readyForCutover']
+    assert report['conflicts']['conflictCount'] == 2 and not report['conflicts']['reused']
+    assert target_ledger.read_bytes() == before
+    assert call(monkeypatch, *conflict_args) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report['conflicts']['reused'] and target_ledger.read_bytes() == before
+    records = list((target / 'affairs_conflicts').glob('*.json'))
+    assert len(records) == 1
+    record = json.loads(records[0].read_text(encoding='utf-8'))
+    changed = next(item for item in record['conflicts'] if item['itemId'] == 'old-todo')
+    added = next(item for item in record['conflicts'] if item['itemId'] == 'source-new')
+    assert changed['source']['title'] == 'source changed'
+    assert changed['target']['title'] == 'user modified target'
+    assert added['targetState'] == 'missing' and added['source']['title'] == 'new source item'
 
 
 @pytest.mark.parametrize("config_mode", ["outside", "missing"])

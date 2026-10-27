@@ -8,6 +8,7 @@ import secrets
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, suppress
+from contextlib import nullcontext
 from functools import partial
 from typing import Literal
 
@@ -77,6 +78,21 @@ class ProjectSnapshot(BaseModel):
 class SuspendProjects(BaseModel):
     """Main may only close the gate; restoring requires a full snapshot PUT."""
     model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class HistoryImport(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    projectId: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
+    previewId: str = Field(pattern=r"^[a-f0-9]{64}$")
+    turnId: str = Field(min_length=1, max_length=160, pattern=r"^\S+$")
+    revision: int = Field(ge=0)
+    operationId: str = Field(pattern=r"^[a-f0-9]{32}$")
+
+
+class CancelHistoryImport(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    operationId: str = Field(pattern=r"^[a-f0-9]{32}$")
+    previewId: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
 def _operator_profile() -> dict[str, str] | None:
@@ -179,7 +195,7 @@ class NativeFacade:
             yield event
 
 
-def create_app(*, native, token: str, dispatch=None, main_control=None, on_ready: Callable | None = None,
+def create_app(*, native, token: str, dispatch=None, main_control=None, history_control=None, on_ready: Callable | None = None,
                on_shutdown: Callable | None = None) -> FastAPI:
     if len(token) < 16:
         raise ValueError("Assistant host requires a private bearer credential")
@@ -219,6 +235,8 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, on_ready
                 on_ready()
             yield
         finally:
+            if history_control is not None:
+                await asyncio.to_thread(history_control.close)
             # Release synchronous tool waiters before draining their native
             # worker; shutdown must never wait on its own main-control request.
             if main_control is not None:
@@ -370,6 +388,8 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, on_ready
             # Uvicorn starts waiting for HTTP requests to drain.
             if main_control is not None:
                 main_control.close()
+            if history_control is not None:
+                await asyncio.to_thread(history_control.close)
             on_shutdown()
             return {"stopping": True}
 
@@ -378,7 +398,10 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, on_ready
         async def suspend_project_registry(payload: SuspendProjects, request: Request):
             if request.query_params:
                 raise HTTPException(422, detail="Invalid private project suspension")
-            return dispatch.suspend_projects()
+            with history_control.guard() if history_control is not None else nullcontext():
+                if history_control is not None:
+                    history_control.registry_changed()
+                return dispatch.suspend_projects()
 
         @app.put("/api/assistant/project-registry")
         async def project_registry(payload: ProjectSnapshot):
@@ -386,9 +409,30 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, on_ready
             try:
                 # One event loop owns this immutable view and all native calls.
                 # No background thread may race an admission with this update.
-                return dispatch.replace_projects(payload.model_dump())
+                with history_control.guard() if history_control is not None else nullcontext():
+                    if history_control is not None:
+                        history_control.registry_changed()
+                    return dispatch.replace_projects(payload.model_dump())
             except DispatchError as exc:
                 raise HTTPException(409, detail={"code": exc.code}) from None
+
+    if history_control is not None:
+        @app.post("/api/assistant/history-import")
+        async def history_import(payload: HistoryImport, request: Request):
+            if request.query_params:
+                raise HTTPException(422, detail="Invalid history import request")
+            result = await asyncio.to_thread(history_control.import_history, payload.projectId,
+                payload.previewId, payload.revision, payload.turnId, payload.operationId)
+            return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+        @app.post("/api/assistant/history-import/cancel")
+        async def history_cancel(payload: CancelHistoryImport, request: Request):
+            if request.query_params:
+                raise HTTPException(422, detail="Invalid history import request")
+            try:
+                return await asyncio.to_thread(history_control.cancel, payload.operationId, payload.previewId)
+            except Exception:
+                raise HTTPException(503, detail="History cancellation unavailable") from None
 
     @app.get("/api/assistant")
     def assistant():
@@ -476,9 +520,15 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, on_ready
 
     @app.post("/api/assistant/stop", status_code=202)
     async def stop(payload: StopTurn):
-        result = await asyncio.to_thread(native.stop, payload.turnId)
+        if history_control is not None:
+            result = await asyncio.to_thread(history_control.stop_native_turn, native.stop, payload.turnId.strip())
+        else:
+            result = await asyncio.to_thread(native.stop, payload.turnId)
         if main_control is not None and getattr(main_control, "appearance_enabled", False):
             main_control.cancel_image_imports(payload.turnId.strip())
+        cancel_history = getattr(main_control, "cancel_history_imports", None)
+        if callable(cancel_history):
+            cancel_history(payload.turnId.strip())
         return result
 
     @app.post("/api/assistant/continue", status_code=202)

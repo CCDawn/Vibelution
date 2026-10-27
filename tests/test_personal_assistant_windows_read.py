@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import ctypes
 from pathlib import Path
 
 import pytest
@@ -78,6 +79,42 @@ def test_read_handle_blocks_writer_and_rename_then_releases(tmp_path, monkeypatc
     assert checked
     target.write_bytes(b"released")
     target.rename(tmp_path / "moved.py")
+
+
+def test_file_read_allows_unrelated_ancestor_directory_write_handle(tmp_path):
+    folder = tmp_path / "project"
+    folder.mkdir()
+    target = folder / "example.py"
+    target.write_bytes(b"safe")
+    api = source._api()
+    handle = api.CreateFileW(str(tmp_path), 0x40000000, 7, None, 3, 0x02200000, None)
+    if handle is None or handle == ctypes.c_void_p(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        assert source.read_source_bytes(tmp_path, target, 100) == b"safe"
+    finally:
+        api.CloseHandle(handle)
+
+
+def test_file_read_still_blocks_ancestor_directory_rename(tmp_path, monkeypatch):
+    folder = tmp_path / "project"
+    folder.mkdir()
+    target = folder / "example.py"
+    target.write_bytes(b"safe")
+    real_verify = source._verify
+    checked = []
+
+    def verify(api, handle, path, *, directory):
+        info = real_verify(api, handle, path, directory=directory)
+        if not directory and not checked:
+            checked.append(True)
+            with pytest.raises(OSError):
+                folder.rename(tmp_path / "moved")
+        return info
+
+    monkeypatch.setattr(source, "_verify", verify)
+    assert source.read_source_bytes(tmp_path, target, 100) == b"safe"
+    assert checked
 
 
 def test_directory_rename_blocked_and_failure_closes_handles(tmp_path, monkeypatch):

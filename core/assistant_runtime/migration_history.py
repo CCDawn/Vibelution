@@ -476,7 +476,7 @@ def _write_new(path, raw):
             raise MigrationIOError("history_copy_mismatch")
 
 
-def import_history(discovery: HistoryDiscovery, target_root: Path, migration_id: str, *, authority_verify=None, write_guard=None) -> dict:
+def import_history(discovery: HistoryDiscovery, target_root: Path, migration_id: str, *, authority_verify=None, write_guard=None, confirmation_guard=None) -> dict:
     if not _token(migration_id) or not discovery.report.get("historyComplete"):
         raise MigrationIOError("history_discovery_incomplete")
     target = _canonical_target(target_root)
@@ -494,16 +494,18 @@ def import_history(discovery: HistoryDiscovery, target_root: Path, migration_id:
             target = stack.enter_context(pinned_target_directory(target, create=True))
             root = stack.enter_context(pinned_target_directory(target / "history_archive/migrations", create=True))
         with migration_target_lock(root / ".publish"):
-            return _publish_history(discovery, root, migration_id, manifest, copies, authority_verify, guard)
+            return _publish_history(discovery, root, migration_id, manifest, copies, authority_verify, guard, confirmation_guard)
 
 
-def _publish_history(discovery, root, migration_id, manifest, copies, authority_verify=None, write_guard=nullcontext):
+def _publish_history(discovery, root, migration_id, manifest, copies, authority_verify=None, write_guard=nullcontext, confirmation_guard=None):
     """Caller holds the verified migrations parent chain and writer mutex."""
     final, pending = root / migration_id, root / ("." + migration_id + ".pending")
     if final.exists() or final.is_symlink():
-        _verify_and_confirm_final(final, discovery, manifest, authority_verify, write_guard, existing=True)
+        _verify_and_confirm_final(final, discovery, manifest, authority_verify, write_guard, confirmation_guard, existing=True)
         return {"migrationId": migration_id, "published": True, "idempotent": True,
                 "historyCount": len(discovery.sessions), "readyForCutover": False}
+    # Reject an unreadable combined archive before creating a new root entry.
+    _validate_history_extension(root.parent.parent, manifest, dict(copies), pending=pending)
     with ExitStack() as stack:
         with write_guard():
             pending = stack.enter_context(pinned_target_directory(pending, create=True))
@@ -524,15 +526,15 @@ def _publish_history(discovery, root, migration_id, manifest, copies, authority_
     # and renames that object while the destination parent chain stays pinned.
     with write_guard():
         publish_directory(pending, final, pending_identity)
-    _verify_and_confirm_final(final, discovery, manifest, authority_verify, write_guard, existing=False)
+    _verify_and_confirm_final(final, discovery, manifest, authority_verify, write_guard, confirmation_guard, existing=False)
     return {"migrationId": migration_id, "published": True, "idempotent": False,
             "historyCount": len(discovery.sessions), "readyForCutover": False}
 
 
-def _verify_and_confirm_final(final, discovery, manifest, authority_verify, write_guard, *, existing):
+def _verify_and_confirm_final(final, discovery, manifest, authority_verify, write_guard, confirmation_guard, *, existing):
     # Keep the directory identity fixed until its confirmation is published.
     with pinned_target_directory(final):
-        stored, _ = _load_archive(final)
+        stored, snapshots = _load_archive(final)
         # v1 has no confirmation marker and cannot prove an old import finished.
         if stored != manifest and not (existing and stored == {**manifest, "schemaVersion": 1}):
             raise MigrationIOError("history_migration_id_conflict" if existing else "history_copy_mismatch")
@@ -540,7 +542,9 @@ def _verify_and_confirm_final(final, discovery, manifest, authority_verify, writ
         if authority_verify is not None:
             authority_verify()
         if stored["schemaVersion"] == 2:
-            _confirm_archive(final, write_guard)
+            if not _confirmation_exists(final):
+                _validate_history_extension(final.parent.parent.parent, stored, snapshots, pending=final)
+            _confirm_archive(final, write_guard, confirmation_guard, discovery, authority_verify)
 
 
 def _confirmation_exists(directory):
@@ -553,7 +557,7 @@ def _confirmation_exists(directory):
     return True
 
 
-def _confirm_archive(directory, write_guard):
+def _confirm_archive(directory, write_guard, confirmation_guard=None, discovery=None, authority_verify=None):
     # Publish an empty directory by verified handle as the visibility commit.
     # A crash before the rename leaves only the hidden pending marker.
     if _confirmation_exists(directory):
@@ -568,7 +572,12 @@ def _confirm_archive(directory, write_guard):
         identity = path_identity(pending)
         stack.pop_all().close()
     with write_guard():
-        publish_directory(pending, directory / ".confirmed", identity)
+        with confirmation_guard() if confirmation_guard is not None else nullcontext():
+            if confirmation_guard is not None:
+                _verify_source(discovery)
+                if authority_verify is not None:
+                    authority_verify()
+            publish_directory(pending, directory / ".confirmed", identity)
 
 
 def _load_archive(directory, *, migration_id=None, budget=None, visible_only=False):
@@ -634,7 +643,7 @@ def _load_archive(directory, *, migration_id=None, budget=None, visible_only=Fal
     return manifest, actual
 
 
-def _archives(target_root, *, budget):
+def _archives(target_root, *, budget, exclude_migration_id=None):
     root = _archive_root(target_root)
     if not root.exists():
         return
@@ -642,6 +651,8 @@ def _archives(target_root, *, budget):
         for child in children:
             budget.reserve("files_left")
             if child.name.startswith("."):
+                continue
+            if child.name == exclude_migration_id:
                 continue
             if not _token(child.name):
                 raise MigrationIOError("history_archive_invalid")
@@ -659,20 +670,106 @@ def _summary(row, migration_id):
         "untrustedContent": True, "canContinue": False}
 
 
+def _extends_history(old_row, old_raw, new_row, new_raw):
+    """Prove retained history and attachment identities survive a new snapshot."""
+    old_assets = {asset["attachmentId"]: (asset["sha256"], asset["size"])
+                  for asset in old_row["assets"]}
+    new_assets = {asset["attachmentId"]: (asset["sha256"], asset["size"])
+                  for asset in new_row["assets"]}
+    if not new_raw.startswith(old_raw):
+        return False
+    if any(new_assets.get(key) != value for key, value in old_assets.items()):
+        return False
+    # Without a Journal append there is no evidence of a new history version.
+    return len(new_raw) > len(old_raw) or old_assets == new_assets
+
+
+def _reserve_candidate_budget(budget, candidate, snapshots, *, root_entry_exists):
+    """Account for the prospective confirmed archive exactly as a reader does."""
+    snapshots = {path: snapshot for path, snapshot in snapshots.items() if path != "manifest.json"}
+    if not root_entry_exists:
+        budget.reserve("files_left")
+    budget.reserve("archives_left")
+    manifest_raw = _encoded(candidate)
+    budget.reserve("files_left")  # initial manifest read
+    budget.reserve("bytes_left", len(manifest_raw))
+    budget.reserve("histories_left", len(candidate["histories"]))
+    expected_count = 1
+    for row in candidate["histories"]:
+        if expected_count + 1 + len(row["assets"]) > budget.files_left:
+            raise MigrationIOError("history_archive_limit")
+        expected_count += 1 + len(row["assets"])
+    paths = ["manifest.json", *snapshots.keys()]
+    directories = {".confirmed"}
+    for path in paths:
+        parts = path.split("/")
+        directories.update("/".join(parts[:i]) for i in range(1, len(parts)))
+    budget.reserve("files_left", len(paths) + len(directories))
+    budget.reserve("bytes_left", len(manifest_raw) + sum(len(snapshot.raw) for snapshot in snapshots.values()))
+    budget.reserve("files_left")  # verified manifest reread
+    budget.reserve("bytes_left", len(manifest_raw))
+
+
+def _validate_history_extension(target_root, candidate, snapshots, *, pending=None):
+    incoming = {row["historyId"]: row for row in candidate["histories"]}
+    versions = {hid: [(row, candidate["migrationId"], snapshots[row["journal"]["path"]].raw)]
+                for hid, row in incoming.items()}
+    budget = _ArchiveBudget()
+    for manifest, prior_snapshots in _archives(target_root, budget=budget,
+                                               exclude_migration_id=candidate["migrationId"]):
+        for old in manifest["histories"]:
+            new = incoming.get(old["historyId"])
+            if new is not None:
+                old_raw = prior_snapshots[old["journal"]["path"]].raw
+                if not _extends_history(old, old_raw, new, snapshots[new["journal"]["path"]].raw):
+                    raise MigrationIOError("history_archive_identity_conflict")
+                versions[old["historyId"]].append((old, manifest["migrationId"], old_raw))
+    if any(not _proven_history_chain(items) for items in versions.values()):
+        raise MigrationIOError("history_archive_identity_conflict")
+    _reserve_candidate_budget(budget, candidate, snapshots,
+                              root_entry_exists=pending is not None and pending.exists())
+
+
+def _proven_history_chain(versions):
+    # Prefix and attachment preservation are transitive, so sorted adjacent
+    # pairs prove the entire chain without quadratic comparisons.
+    versions.sort(key=lambda version: len(version[2]))
+    return all(_extends_history(old[0], old[2], new[0], new[2])
+               for old, new in zip(versions, versions[1:]))
+
+
+def _select_history_versions(target_root, budget, *, history_id=None):
+    selected, versions, conflicts = {}, {}, set()
+    for manifest, snapshots in _archives(target_root, budget=budget):
+        for row in manifest["histories"]:
+            hid = row["historyId"]
+            if history_id is not None and hid != history_id:
+                continue
+            raw = snapshots[row["journal"]["path"]].raw
+            versions.setdefault(hid, []).append((row, manifest["migrationId"], raw))
+    for hid, history_versions in versions.items():
+        if not _proven_history_chain(history_versions):
+            conflicts.add(hid)
+        else:
+            selected[hid] = history_versions[-1]
+    return selected, conflicts
+
+
 def list_history(target_root: Path, *, max_total_bytes: int = _ARCHIVE_BYTES_CAP,
                  max_files: int = _ARCHIVE_FILES_CAP, max_history_rows: int = 10000,
                  max_archives: int = _ARCHIVE_COUNT_CAP) -> list[dict]:
+    return list_history_with_status(target_root, max_total_bytes=max_total_bytes, max_files=max_files,
+                                    max_history_rows=max_history_rows, max_archives=max_archives)["histories"]
+
+
+def list_history_with_status(target_root: Path, *, max_total_bytes: int = _ARCHIVE_BYTES_CAP,
+                             max_files: int = _ARCHIVE_FILES_CAP, max_history_rows: int = 10000,
+                             max_archives: int = _ARCHIVE_COUNT_CAP) -> dict:
     budget = _ArchiveBudget(max_total_bytes, max_files, max_history_rows, max_archives)
-    rows = {}
-    for manifest, snapshots in _archives(target_root, budget=budget):
-        for row in manifest["histories"]:
-            summary = _summary(row, manifest["migrationId"])
-            prior = rows.get(row["historyId"])
-            if prior and prior["watermark"] != summary["watermark"]:
-                raise MigrationIOError("history_archive_identity_conflict")
-            rows[row["historyId"]] = summary
-        del snapshots
-    return sorted(rows.values(), key=lambda row: row["historyId"])
+    selected, conflicts = _select_history_versions(target_root, budget)
+    rows = sorted((_summary(row, mid) for row, mid, _ in selected.values()),
+                  key=lambda row: row["historyId"])
+    return {"histories": rows, "partial": bool(conflicts), "conflictCount": len(conflicts)}
 
 
 def _safe_projection(value):
@@ -694,22 +791,14 @@ def history_detail(target_root: Path, history_id: str, *, max_total_bytes: int =
                    max_archives: int = _ARCHIVE_COUNT_CAP) -> dict:
     if not isinstance(history_id, str) or not _HASH.fullmatch(history_id):
         raise MigrationIOError("history_id_invalid")
-    found = None
     budget = _ArchiveBudget(max_total_bytes, max_files, max_history_rows, max_archives)
-    for manifest, snapshots in _archives(target_root, budget=budget):
-        for row in manifest["histories"]:
-            if row["historyId"] != history_id:
-                continue
-            if found and found[0]["watermark"] != row["watermark"]:
-                raise MigrationIOError("history_archive_identity_conflict")
-            # Retain only the selected Journal, not all raw assets or other
-            # sessions while checking later archives for identity conflicts.
-            found = (row, manifest["migrationId"], {row["journal"]["path"]: snapshots[row["journal"]["path"]]})
-        del snapshots
-    if found is None:
+    selected, conflicts = _select_history_versions(target_root, budget, history_id=history_id)
+    if history_id in conflicts:
+        raise MigrationIOError("history_archive_identity_conflict")
+    if history_id not in selected:
         raise MigrationIOError("history_not_found")
-    row, mid, snapshots = found
-    events = _events(snapshots[row["journal"]["path"]].raw, row["sessionId"])
+    row, mid, raw = selected[history_id]
+    events = _events(raw, row["sessionId"])
     try:
         projection = project_conversation_ledger(events, include_model_messages=False, include_visible_messages=True)
         items = conversation_turn_items_from_events(events)
@@ -717,6 +806,6 @@ def history_detail(target_root: Path, history_id: str, *, max_total_bytes: int =
         raise MigrationIOError("history_projection_invalid") from None
     return _summary(row, mid) | {"messages": _safe_projection(projection.visible_messages),
         "turnItems": _safe_projection(items), "events": _safe_projection([event.to_dict() for event in events]),
-        "sourceBody": snapshots[row["journal"]["path"]].raw.decode("utf-8-sig"),
+        "sourceBody": raw.decode("utf-8-sig"),
         "attachments": [{"attachmentId": asset["attachmentId"], "size": asset["size"],
                          "sha256": asset["sha256"], "untrustedContent": True} for asset in row["assets"]]}

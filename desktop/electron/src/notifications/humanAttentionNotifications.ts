@@ -47,7 +47,8 @@ export type HumanAttentionDelivery =
  */
 export type DesktopHumanAttentionNotifyResult =
   | { delivered: HumanAttentionDelivery }
-  | { delivered: "invalid_payload"; error: string };
+  | { delivered: "invalid_payload"; error: string }
+  | { delivered: "source_retired" };
 
 type NotificationLike = {
   show(): void;
@@ -82,6 +83,15 @@ export type HumanAttentionWindowBridge = {
   }): void;
 };
 
+/** Main-only source, captured from the registered WebContents. */
+export type HumanAttentionSource = {
+  instanceId: string;
+  origin: string;
+  documentToken: object;
+  target: Pick<HumanAttentionWindowBridge, "sendToWorkbench" | "focusWorkbench" | "setWorkbenchAttention">;
+  allowAssistantWindow: () => boolean;
+};
+
 export type HumanAttentionNotificationServiceOptions = {
   windowBridge: HumanAttentionWindowBridge;
   notificationSupported: () => boolean;
@@ -102,7 +112,7 @@ export type HumanAttentionNotificationServiceOptions = {
 };
 
 export type HumanAttentionNotificationService = {
-  notify(payload: unknown): Promise<DesktopHumanAttentionNotifyResult>;
+  notify(payload: unknown, source?: HumanAttentionSource): Promise<DesktopHumanAttentionNotifyResult>;
 };
 
 /**
@@ -269,6 +279,8 @@ export function createHumanAttentionNotificationService(
   const dedupWindowMs = Math.max(0, options.dedupWindowMs ?? DEFAULT_DEDUP_WINDOW_MS);
   const now = options.now ?? (() => Date.now());
   const deliveredIds = new Map<string, DeliveredRecord>();
+  const documentKeys = new WeakMap<object, number>();
+  let nextDocumentKey = 0;
 
   function record(eventCode: string, message: string, fields: Record<string, unknown>): void {
     void options.recordEvent?.({ eventCode, message, fields });
@@ -320,9 +332,10 @@ export function createHumanAttentionNotificationService(
     }
   }
 
-  function handleNotificationClick(notification: DesktopHumanAttentionNotification): void {
+  function handleNotificationClick(notification: DesktopHumanAttentionNotification, source?: HumanAttentionSource): void {
     try {
-      void Promise.resolve(options.windowBridge.focusWorkbench()).then(
+      const target = source?.target ?? options.windowBridge;
+      void Promise.resolve(target.focusWorkbench()).then(
         () => undefined,
         () => undefined
       );
@@ -330,15 +343,15 @@ export function createHumanAttentionNotificationService(
         id: notification.id,
         ...(notification.targetUrl ? { targetUrl: notification.targetUrl } : {})
       };
-      options.windowBridge.sendToWorkbench(options.openedChannel, opened);
-      options.windowBridge.sendToAssistantWindow(options.openedChannel, opened);
+      target.sendToWorkbench(options.openedChannel, opened);
+      if (!source || source.allowAssistantWindow()) options.windowBridge.sendToAssistantWindow(options.openedChannel, opened);
     } catch {
       // A toast click must never crash the main process.
     }
   }
 
   return {
-    async notify(payload) {
+    async notify(payload, source) {
       const validated = validateHumanAttentionPayload(payload);
       if (!validated.ok) {
         record(
@@ -349,9 +362,15 @@ export function createHumanAttentionNotificationService(
         return { delivered: "invalid_payload", error: validated.error };
       }
       const notification = validated.value;
+      let documentKey = 0;
+      if (source) {
+        documentKey = documentKeys.get(source.documentToken) ?? ++nextDocumentKey;
+        documentKeys.set(source.documentToken, documentKey);
+      }
+      const dedupKey = JSON.stringify([source?.instanceId ?? "", source?.origin ?? "", documentKey, notification.id]);
       const currentMs = now();
       pruneExpiredIds(currentMs);
-      const prior = deliveredIds.get(notification.id);
+      const prior = deliveredIds.get(dedupKey);
       if (prior) {
         const suppressed: DesktopHumanAttentionNotifyResult = { delivered: prior.result.delivered };
         recordOutcome(notification, suppressed, true);
@@ -363,10 +382,10 @@ export function createHumanAttentionNotificationService(
       // minimized assistant window would swallow the card, and the notification
       // would never reach the user while still consuming its dedup slot.
       const assistantVisible = options.windowBridge.isAssistantWindowVisible?.() ?? true;
-      if (assistantVisible
+      if ((!source || source.allowAssistantWindow()) && assistantVisible
         && options.windowBridge.sendToAssistantWindow(options.openedChannel, { ...notification })) {
         const result: DesktopHumanAttentionNotifyResult = { delivered: "assistant_window" };
-        rememberDelivery(notification.id, { delivered: "assistant_window" });
+        rememberDelivery(dedupKey, { delivered: "assistant_window" });
         recordOutcome(notification, result, false);
         return result;
       }
@@ -377,11 +396,11 @@ export function createHumanAttentionNotificationService(
           const toast = options.createNotification({
             title: notification.title,
             body: notification.body ?? "",
-            onClick: () => handleNotificationClick(notification)
+            onClick: () => handleNotificationClick(notification, source)
           });
           toast.show();
           const result: DesktopHumanAttentionNotifyResult = { delivered: "system_notification" };
-          rememberDelivery(notification.id, { delivered: "system_notification" });
+          rememberDelivery(dedupKey, { delivered: "system_notification" });
           recordOutcome(notification, result, false);
           return result;
         } catch {
@@ -389,13 +408,13 @@ export function createHumanAttentionNotificationService(
         }
       }
 
-      options.windowBridge.setWorkbenchAttention({
+      (source?.target ?? options.windowBridge).setWorkbenchAttention({
         unreadCount: 1,
         flash: true,
         description: ATTENTION_FALLBACK_DESCRIPTION
       });
       const result: DesktopHumanAttentionNotifyResult = { delivered: "attention_fallback" };
-      rememberDelivery(notification.id, { delivered: "attention_fallback" });
+      rememberDelivery(dedupKey, { delivered: "attention_fallback" });
       recordOutcome(notification, result, false);
       return result;
     }

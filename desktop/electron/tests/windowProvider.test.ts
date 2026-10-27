@@ -429,6 +429,63 @@ describe("main Workbench open gate", () => {
 });
 
 describe("Electron window provider state", () => {
+  it("never revives a notification target after A to B to A or a document refresh", async () => {
+    const window = new FakeWindow(41, "", 4141);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createWorkbenchWindow: () => window,
+    });
+    await provider.openOrFocusWorkbench();
+    const first = provider.notificationTargetForSender(window.webContents, "http://127.0.0.1:8000/")!;
+    await provider.openOrFocusWorkbench("http://127.0.0.1:8001/");
+    await provider.openOrFocusWorkbench("http://127.0.0.1:8000/");
+    expect(first.isLive()).toBe(false);
+    expect(first.sendToWorkbench("old", {})).toBe(false);
+    const current = provider.notificationTargetForSender(window.webContents, "http://127.0.0.1:8000/")!;
+    window.emit("webContents:did-start-navigation", { isMainFrame: true, isSameDocument: true });
+    expect(current.isLive()).toBe(true);
+    window.emit("webContents:did-start-navigation", { isMainFrame: false, isSameDocument: false });
+    expect(current.isLive()).toBe(true);
+    window.emit("webContents:did-start-navigation", { isMainFrame: true, isSameDocument: false });
+    expect(current.isLive()).toBe(false);
+    expect(current.sendToWorkbench("before-refresh", {})).toBe(false);
+    const outgoingDuringNavigation = provider.notificationTargetForSender(window.webContents, "http://127.0.0.1:8000/")!;
+    window.emit("webContents:did-navigate", {});
+    expect(outgoingDuringNavigation.isLive()).toBe(false);
+    const afterRefresh = provider.notificationTargetForSender(window.webContents, "http://127.0.0.1:8000/")!;
+    expect(afterRefresh.sendToWorkbench("after-refresh", {})).toBe(true);
+    window.emit("webContents:render-process-gone");
+    expect(afterRefresh.isLive()).toBe(false);
+  });
+
+  it("never routes a closed instance's target to a recreated window", async () => {
+    const old = new FakeWindow(41, "", 4141), replacement = new FakeWindow(42, "", 4242);
+    let next = 0;
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createWorkbenchWindow: () => next++ === 0 ? old : replacement,
+    });
+    await provider.openOrFocusInstanceWorkbench({ instanceId: "branch", url: "http://127.0.0.1:8000/" });
+    const target = provider.notificationTargetForSender(old.webContents, "http://127.0.0.1:8000/")!;
+    await provider.closeInstanceWorkbench("branch");
+    await provider.openOrFocusInstanceWorkbench({ instanceId: "branch", url: "http://127.0.0.1:8000/" });
+    expect(target.isLive()).toBe(false);
+    expect(target.sendToWorkbench("old", {})).toBe(false);
+    expect(replacement.sentIpc).toEqual([]);
+    expect(provider.notificationTargetForSender(replacement.webContents, "http://127.0.0.1:8000/")?.isLive()).toBe(true);
+  });
+  it("keeps distinct WebContents identities when workbench windows share an origin", async () => {
+    const main = new FakeWindow(42, "", 4242);
+    const branch = new FakeWindow(43, "", 4343);
+    let next = 0;
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createWorkbenchWindow: () => next++ === 0 ? main : branch,
+    });
+    await provider.openOrFocusWorkbench();
+    await provider.openOrFocusInstanceWorkbench({ instanceId: "branch", url: "http://127.0.0.1:8000/" });
+    expect(provider.trustedWorkbenchInstanceForSender(main.webContents, "http://127.0.0.1:8000/chat")).toBe("main");
+    expect(provider.trustedWorkbenchInstanceForSender(branch.webContents, "http://127.0.0.1:8000/chat")).toBe("branch");
+    await provider.closeInstanceWorkbench("branch");
+    expect(provider.trustedWorkbenchInstanceForSender(branch.webContents, "http://127.0.0.1:8000/chat")).toBeNull();
+  });
   it("binds branch IPC and notification focus, click and attention to its registered WebContents", async () => {
     const main = new FakeWindow(42, "", 4242);
     const branch = new FakeWindow(43, "", 4343);
@@ -440,6 +497,10 @@ describe("Electron window provider state", () => {
     await provider.openOrFocusWorkbench();
     await provider.openOrFocusInstanceWorkbench({ instanceId: "branch", url: "http://127.0.0.1:8001/" });
     branch.blur();
+    expect(provider.trustedWorkbenchInstanceForSender(main.webContents, "http://127.0.0.1:8000/chat")).toBe("main");
+    expect(provider.trustedWorkbenchInstanceForSender(branch.webContents, "http://127.0.0.1:8001/chat")).toBe("branch");
+    expect(provider.trustedWorkbenchInstanceForSender(main.webContents, "http://127.0.0.1:8001/chat")).toBeNull();
+    expect(provider.trustedWorkbenchInstanceForSender({ ...branch.webContents }, "http://127.0.0.1:8001/chat")).toBeNull();
     expect(provider.trustedWorkbenchOrigin(branch.webContents, "http://127.0.0.1:8001/chat")).toBe("http://127.0.0.1:8001");
     expect(provider.trustedWorkbenchOrigin(main.webContents, "http://127.0.0.1:8001/chat")).toBeNull();
     expect(provider.trustedWorkbenchOrigin({ ...branch.webContents }, "http://127.0.0.1:8001/chat")).toBeNull();
@@ -459,6 +520,7 @@ describe("Electron window provider state", () => {
     expect(main.sentIpc).toEqual([]);
     await branch.loadURL("http://127.0.0.1:9999/");
     expect(provider.trustedWorkbenchOrigin(branch.webContents, "http://127.0.0.1:8001/")).toBeNull();
+    expect(provider.trustedWorkbenchInstanceForSender(branch.webContents, "http://127.0.0.1:8001/")).toBeNull();
     expect(target.sendToWorkbench("opened", {})).toBe(false);
     await target.focusWorkbench();
     expect(main.focusCount).toBe(mainFocus);

@@ -1137,6 +1137,21 @@ def _argument_summary(tool_name: str, tool_args: Mapping[str, Any]) -> dict[str,
 
 def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
     """Approval-only projection; never expose nested prompt/policy values."""
+    if args.get("action") == "history_import":
+        from core.infrastructure.native_runtime import is_launcher_assistant_process
+        if not is_launcher_assistant_process():
+            return {"assistantArgumentsInvalid": True}
+        try:
+            raw = args.get("arguments_json")
+            values = json.loads(raw) if isinstance(raw, str) and len(raw) <= 16000 else None
+            if not isinstance(values, dict) or set(values) != {"project_id", "preview_id"}:
+                raise ValueError("invalid history import parameters")
+            from core.assistant_runtime.actions import history_import_approval_summary
+            target = history_import_approval_summary(values["project_id"], values["preview_id"])
+            return {"assistantAction": "history_import", "assistantTargets": target,
+                    "assistantOperationDescription": "只读导入所选旧助理的历史会话和附件；不会恢复旧任务或退役旧助理。"}
+        except (ValueError, TypeError, KeyError, RuntimeError, RecursionError):
+            return {"assistantAction": "history_import", "assistantArgumentsInvalid": True}
     actions = {
         "agent_create", "agent_update", "agent_archive", "session_create",
         "session_update", "session_stop", "session_delete", "knowledge_acl_grant",
