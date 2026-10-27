@@ -383,3 +383,214 @@ def test_crash_inside_native_sqlite_sync_recovers_hot_journal_with_pins(tmp_path
     with opened(root) as recovered:
         assert recovered.get("event") is None
         assert recovered.reserve("event")["created"]
+
+
+def test_closing_blocks_new_senders_and_drains_only_after_live_sender_finishes(tmp_path):
+    root = tmp_path / "receipts"
+    with opened(root, create=True):
+        pass
+    script = r'''
+import json,sys
+from pathlib import Path
+from core.assistant_runtime.reminder_receipts import ReminderReceiptStore
+with ReminderReceiptStore(Path(sys.argv[1]),owner_id='test-owner',maximum=1) as store:
+    attempt=store.reserve('event')
+    print(json.dumps({'token':attempt['attemptToken']}),flush=True)
+    assert sys.stdin.readline().strip()=='finish'
+    store.record_submitted('event',attempt['attemptToken'],channel='system_notification')
+'''
+    child = subprocess.Popen([sys.executable, "-c", script, str(root)], cwd=REPO,
+                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+    try:
+        token = json.loads(child.stdout.readline())["token"]
+        with opened(root) as controller:
+            controller.begin_closing()
+            controller.begin_closing()
+            assert controller.drain_status() == {"epoch": 1, "phase": "CLOSING",
+                "registeredSenders": 1, "inflightAttempts": 1, "upgradedSendersDrained": False}
+            with pytest.raises(ReminderReceiptError, match="receipt_admission_closed"):
+                controller.reserve("second")
+            child.stdin.write("finish\n")
+            child.stdin.flush()
+            _, errors = child.communicate(timeout=10)
+            assert child.returncode == 0, errors
+            assert controller.drain_status()["upgradedSendersDrained"]
+            assert controller.record_recovered_opened("event", token, channel="system_notification")["state"] == "opened"
+        with opened(root) as restarted:
+            assert restarted.drain_status()["upgradedSendersDrained"]
+            with pytest.raises(ReminderReceiptError, match="receipt_admission_closed"):
+                restarted.reserve("second")
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.communicate(timeout=10)
+
+
+def test_crashed_sender_remains_undrained_after_restart(tmp_path):
+    root = tmp_path / "receipts"
+    with opened(root, create=True):
+        pass
+    crashed = run(root, phase="after_effect")
+    assert crashed.returncode == 73
+    with opened(root) as controller:
+        controller.begin_closing()
+        status = controller.drain_status()
+        assert status["registeredSenders"] == 1 and status["inflightAttempts"] == 1
+        assert not status["upgradedSendersDrained"]
+    with opened(root) as restarted:
+        assert restarted.drain_status() == status
+        with pytest.raises(ReminderReceiptError, match="receipt_admission_closed"):
+            restarted.reserve("event")
+
+
+def test_early_click_does_not_settle_still_running_submission(tmp_path):
+    root = tmp_path / "receipts"
+    with opened(root, create=True) as sender:
+        token = sender.reserve("event")["attemptToken"]
+        with opened(root) as controller:
+            controller.begin_closing()
+            assert sender.record_opened("event", token, channel="system_notification")["state"] == "opened"
+            assert controller.drain_status()["inflightAttempts"] == 1
+            assert sender.record_submitted("event", token, channel="system_notification")["state"] == "opened"
+            assert controller.drain_status()["registeredSenders"] == 1
+    with opened(root) as observer:
+        assert observer.drain_status()["upgradedSendersDrained"]
+
+
+def test_closing_races_real_process_reservations_and_stays_closed(tmp_path):
+    root = tmp_path / "receipts"
+    with opened(root, create=True):
+        pass
+    with concurrent.futures.ThreadPoolExecutor(max_workers=9) as pool:
+        attempts = [pool.submit(run, root, f"event-{i}") for i in range(8)]
+        with opened(root) as controller:
+            controller.begin_closing()
+            results = [json.loads(future.result().stdout) for future in attempts]
+            assert sum(row.get("created", False) for row in results) <= 1
+            assert all(row.get("created") or row.get("error") in {
+                "receipt_admission_closed", "receipt_capacity_exceeded"} for row in results)
+            assert controller.drain_status()["upgradedSendersDrained"]
+            for event in ("event-0", "another"):
+                with pytest.raises(ReminderReceiptError, match="receipt_admission_closed"):
+                    controller.reserve(event)
+    assert len(effects(root)) == sum(row.get("created", False) for row in results)
+
+
+@pytest.mark.parametrize("first", ["reserve", "close"])
+def test_closing_and_reservation_serialize_when_either_process_holds_write_lock(tmp_path, first):
+    root = tmp_path / "receipts"
+    with opened(root, create=True):
+        pass
+    script = r'''
+import json,sys,time
+from pathlib import Path
+from core.assistant_runtime.reminder_receipts import ReminderReceiptError,ReminderReceiptStore
+root=Path(sys.argv[1]); operation=sys.argv[2]; directory=root.parent
+def wait(name):
+    deadline=time.monotonic()+15
+    while not (directory/name).exists():
+        if time.monotonic()>deadline: raise RuntimeError('barrier timeout: '+name)
+        time.sleep(.01)
+class TransactionProbe:
+    def __init__(self,connection): self.connection=connection; self.armed=True
+    def __getattr__(self,name): return getattr(self.connection,name)
+    def execute(self,sql,*args):
+        if sql=='BEGIN IMMEDIATE' and self.armed:
+            self.armed=False
+            (directory/(operation+'-attempted')).write_text('1')
+            result=self.connection.execute(sql,*args)
+            (directory/(operation+'-acquired')).write_text('1')
+            wait(operation+'-release')
+            return result
+        return self.connection.execute(sql,*args)
+with ReminderReceiptStore(root,owner_id='test-owner',maximum=1,busy_timeout_ms=5000) as store:
+    store._connection=TransactionProbe(store._connection)
+    (directory/(operation+'-ready')).write_text('1')
+    wait(operation+'-start')
+    try:
+        if operation=='close':
+            store.begin_closing(); result={'closed':True}
+        else:
+            result=store.reserve('event')
+            if result['created']:
+                store.record_submitted('event',result.pop('attemptToken'),channel='system_notification')
+    except ReminderReceiptError as error: result={'error':str(error)}
+    print(json.dumps(result),flush=True)
+'''
+    children = {}
+    try:
+        for operation in ("reserve", "close"):
+            children[operation] = subprocess.Popen(
+                [sys.executable, "-c", script, str(root), operation], cwd=REPO,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW)
+
+        def wait_marker(name):
+            deadline = time.monotonic() + 10
+            while not (tmp_path / name).exists():
+                assert children[name.split("-", 1)[0]].poll() is None, name
+                assert time.monotonic() < deadline, name
+                time.sleep(.01)
+
+        wait_marker("reserve-ready")
+        wait_marker("close-ready")
+        second = "close" if first == "reserve" else "reserve"
+        (tmp_path / f"{first}-start").touch()
+        wait_marker(f"{first}-acquired")
+        (tmp_path / f"{second}-start").touch()
+        wait_marker(f"{second}-attempted")
+        # The second BEGIN has been issued but cannot complete while the
+        # first process holds SQLite's write lock.
+        assert not (tmp_path / f"{second}-acquired").exists()
+        assert children[second].poll() is None
+        (tmp_path / f"{first}-release").touch()
+        wait_marker(f"{second}-acquired")
+        (tmp_path / f"{second}-release").touch()
+        outputs = {}
+        for operation, child in children.items():
+            out, err = child.communicate(timeout=10)
+            assert child.returncode == 0, err
+            outputs[operation] = json.loads(out)
+        assert outputs["close"] == {"closed": True}
+        if first == "reserve":
+            assert outputs["reserve"]["created"]
+        else:
+            assert outputs["reserve"] == {"error": "receipt_admission_closed"}
+        with opened(root) as observer:
+            assert observer.drain_status()["upgradedSendersDrained"]
+            receipt = observer.get("event")
+            assert (receipt is not None) == (first == "reserve")
+            if receipt:
+                assert receipt["state"] == "submitted"
+    finally:
+        for child in children.values():
+            if child.poll() is None:
+                child.kill()
+                child.communicate(timeout=10)
+
+
+def test_v1_ledger_is_rejected_without_automatic_upgrade(tmp_path):
+    import apsw
+    import core.assistant_runtime.reminder_receipts as module
+    root = tmp_path / "receipts"
+    root.mkdir()
+    conn = apsw.Connection(str(root / "reminders.sqlite3"))
+    try:
+        conn.execute("PRAGMA journal_mode=PERSIST")
+        conn.execute(module._META_SQL)
+        conn.execute(module._ATTEMPT_SQL)
+        conn.execute("INSERT INTO receipt_meta VALUES (1,'test-owner',1)")
+        conn.execute("PRAGMA user_version=1")
+        before = list(conn.execute("SELECT type,name,sql FROM sqlite_schema ORDER BY name"))
+    finally:
+        conn.close()
+    with pytest.raises(ReminderReceiptError, match="receipt_schema_invalid"):
+        with opened(root):
+            pass
+    conn = apsw.Connection(str(root / "reminders.sqlite3"))
+    try:
+        assert list(conn.execute("PRAGMA user_version")) == [(1,)]
+        assert list(conn.execute("SELECT type,name,sql FROM sqlite_schema ORDER BY name")) == before
+    finally:
+        conn.close()

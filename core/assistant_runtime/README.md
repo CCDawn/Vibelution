@@ -690,6 +690,10 @@ recovered native click requires the original token and the already committed
 channel. Capacity exhaustion is fail-closed; safe retention and a production
 notification owner are not yet implemented. Existing executors do not consult
 this store, so it cannot establish single ownership or enable cutover.
+Its v2 ledger can permanently close admission for cooperating senders and
+retain in-flight reservations after a crash. A drained v2 ledger proves only
+those registered senders have drained; it does not fence older binaries. The
+store deliberately rejects v1 ledgers instead of upgrading them implicitly.
 
 The resident Launcher assistant cannot use the offline operator entry while it
 owns the profile lock. Its normal shutdown requests cancellation of the current

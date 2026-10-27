@@ -12,6 +12,13 @@ PERSIST/FULL delegates journal recovery and Windows flushes to the project's
 bundled APSW/SQLite. This protects against process crashes under SQLite's normal
 filesystem assumptions, not hostile same-user byte writes or faulty hardware.
 No ordinary Session database/schema, legacy executor or product switch is used.
+
+Schema v2 fences only cooperating senders that use this exact ledger. CLOSING
+forbids new reservations; previously reserved attempts may still submit, and
+the sender stays registered until its context exits after settlement. Process
+death and uncertain outcomes retain the registration, with no lease expiry or
+automatic recovery. A zero count does not establish legacy/global quiescence.
+Existing v1 ledgers are rejected, never automatically upgraded.
 """
 from __future__ import annotations
 
@@ -50,6 +57,20 @@ _ATTEMPT_SQL = """CREATE TABLE reminder_receipts (
     CHECK((state='pending' AND channel IS NULL) OR
           (state IN ('submitted','opened') AND channel IN
            ('assistant_window','system_notification','attention_fallback')))
+) STRICT"""
+_FENCE_SQL = """CREATE TABLE receipt_fence (
+    singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+    epoch INTEGER NOT NULL CHECK(epoch=1),
+    phase TEXT NOT NULL CHECK(phase IN ('OPEN','CLOSING'))
+) STRICT"""
+_SENDERS_SQL = """CREATE TABLE receipt_senders (
+    sender_id TEXT PRIMARY KEY,
+    epoch INTEGER NOT NULL CHECK(epoch=1)
+) STRICT"""
+_INFLIGHT_SQL = """CREATE TABLE receipt_inflight (
+    event_id TEXT PRIMARY KEY,
+    sender_id TEXT NOT NULL,
+    epoch INTEGER NOT NULL CHECK(epoch=1)
 ) STRICT"""
 
 
@@ -100,6 +121,7 @@ class ReminderReceiptStore:
         self._stack = None
         self._used = False
         self._owned = {}
+        self._sender_id = secrets.token_hex(32)
         self._pid, self._thread = os.getpid(), threading.get_ident()
 
     def __enter__(self):
@@ -146,15 +168,25 @@ class ReminderReceiptStore:
                 if not schema and version == 0 and self.create:
                     conn.execute(_META_SQL)
                     conn.execute(_ATTEMPT_SQL)
+                    conn.execute(_FENCE_SQL)
+                    conn.execute(_SENDERS_SQL)
+                    conn.execute(_INFLIGHT_SQL)
                     conn.execute("INSERT INTO receipt_meta VALUES (1,?,?)", (self.owner_id, self.maximum))
-                    conn.execute("PRAGMA user_version=1")
+                    conn.execute("INSERT INTO receipt_fence VALUES (1,1,'OPEN')")
+                    conn.execute("PRAGMA user_version=2")
                 else:
-                    expected = [("table", "receipt_meta", _META_SQL),
+                    expected = [("table", "receipt_fence", _FENCE_SQL),
+                                ("table", "receipt_inflight", _INFLIGHT_SQL),
+                                ("table", "receipt_meta", _META_SQL),
+                                ("table", "receipt_senders", _SENDERS_SQL),
                                 ("table", "reminder_receipts", _ATTEMPT_SQL)]
-                    if schema != expected or version != 1:
+                    if schema != expected or version != 2:
                         raise ReminderReceiptError("receipt_schema_invalid")
                 if list(conn.execute("SELECT * FROM receipt_meta")) != [(1, self.owner_id, self.maximum)]:
                     raise ReminderReceiptError("receipt_owner_or_capacity_mismatch")
+                fence = list(conn.execute("SELECT singleton,epoch,phase FROM receipt_fence"))
+                if len(fence) != 1 or fence[0][:2] != (1, 1) or fence[0][2] not in {"OPEN", "CLOSING"}:
+                    raise ReminderReceiptError("receipt_fence_invalid")
                 if list(conn.execute("PRAGMA quick_check")) != [("ok",)]:
                     raise ReminderReceiptError("receipt_integrity_failed")
             return self
@@ -169,6 +201,16 @@ class ReminderReceiptStore:
             raise ReminderReceiptError("receipt_open_unavailable") from None
 
     def __exit__(self, exc_type, exc, traceback):
+        # A crash, unknown attempt, or failed transaction leaves the sender
+        # registered forever. Only this live context can attest it is done.
+        try:
+            if self._connection is not None:
+                with self._transaction() as conn:
+                    if not list(conn.execute("SELECT 1 FROM receipt_inflight WHERE sender_id=?", (self._sender_id,))):
+                        conn.execute("DELETE FROM receipt_senders WHERE sender_id=?", (self._sender_id,))
+        except ReminderReceiptError:
+            if exc is None:
+                exc = ReminderReceiptError("receipt_sender_drain_unavailable")
         stack, self._stack = self._stack, None
         self._connection = None
         self._owned.clear()
@@ -178,6 +220,8 @@ class ReminderReceiptStore:
             except Exception:
                 if exc is None:
                     raise ReminderReceiptError("receipt_close_unavailable") from None
+        if exc_type is None and exc is not None:
+            raise exc
 
     def _active(self):
         if (self._connection is None or self._pid != os.getpid()
@@ -225,6 +269,8 @@ class ReminderReceiptStore:
         raw = secrets.token_hex(32)
         digest = hashlib.sha256(raw.encode("ascii")).hexdigest()
         with self._transaction() as conn:
+            if list(conn.execute("SELECT phase FROM receipt_fence WHERE singleton=1")) != [("OPEN",)]:
+                raise ReminderReceiptError("receipt_admission_closed")
             rows = list(conn.execute("SELECT event_id,state,channel FROM reminder_receipts WHERE event_id=?", (event_id,)))
             if rows:
                 result = {"created": False, **self._public(rows[0])}
@@ -232,14 +278,39 @@ class ReminderReceiptStore:
                 maximum = list(conn.execute("SELECT maximum FROM receipt_meta WHERE singleton=1"))[0][0]
                 if list(conn.execute("SELECT count(*) FROM reminder_receipts"))[0][0] >= maximum:
                     raise ReminderReceiptError("receipt_capacity_exceeded")
+                conn.execute("INSERT OR IGNORE INTO receipt_senders VALUES (?,1)", (self._sender_id,))
                 conn.execute("INSERT INTO reminder_receipts VALUES (?,?,'pending',NULL)", (event_id, digest))
+                conn.execute("INSERT INTO receipt_inflight VALUES (?,?,1)", (event_id, self._sender_id))
                 result = {"created": True, **self._public((event_id, "pending", None)), "attemptToken": raw}
         if result["created"]:
             self._owned[event_id] = digest
         return result
 
+    def begin_closing(self) -> None:
+        """Permanently close admission for this ledger's upgraded senders.
+
+        This fence does not control legacy binaries and grants no cutover.
+        There is deliberately no reopen, epoch advance, or new-owner API.
+        """
+        with self._transaction() as conn:
+            conn.execute("UPDATE receipt_fence SET phase='CLOSING' WHERE singleton=1")
+
+    def drain_status(self) -> dict:
+        """Observe registered upgraded senders, not global quiescence."""
+        with self._transaction() as conn:
+            phase = list(conn.execute("SELECT phase FROM receipt_fence WHERE singleton=1"))[0][0]
+            senders = list(conn.execute("SELECT count(*) FROM receipt_senders"))[0][0]
+            inflight = list(conn.execute("SELECT count(*) FROM receipt_inflight"))[0][0]
+        return {"epoch": 1, "phase": phase, "registeredSenders": senders,
+                "inflightAttempts": inflight,
+                "upgradedSendersDrained": phase == "CLOSING" and senders == 0 and inflight == 0}
+
     def record_submitted(self, event_id: str, attempt_token: str, *, channel: str) -> dict:
-        """Native send/show accepted the attempt; this is not a seen receipt."""
+        """Native send/show returned and accepted the attempt, not a seen receipt.
+
+        The trusted caller must invoke this only after the external submission
+        has returned and the one permitted submission cannot still be running.
+        """
         return self._record(event_id, attempt_token, channel, "submitted")
 
     def record_opened(self, event_id: str, attempt_token: str, *, channel: str) -> dict:
@@ -291,6 +362,10 @@ class ReminderReceiptStore:
                 raise ReminderReceiptError("receipt_channel_conflict")
             final = "opened" if current == "opened" else state
             conn.execute("UPDATE reminder_receipts SET state=?,channel=? WHERE event_id=?", (final, channel, event_id))
+            # A click can race the sender's return; it never proves the send
+            # call itself finished. Only record_submitted settles that work.
+            if state == "submitted":
+                conn.execute("DELETE FROM receipt_inflight WHERE event_id=? AND sender_id=? AND epoch=1", (event_id, self._sender_id))
         return self._public((event_id, final, channel))
 
     def get(self, event_id: str) -> dict | None:

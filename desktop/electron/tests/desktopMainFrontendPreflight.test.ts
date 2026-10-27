@@ -4,6 +4,7 @@ import { runInNewContext } from "node:vm";
 import { ScriptTarget, transpileModule } from "typescript";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LauncherLifecycleSupervisor } from "../src/lifecycle/launcherLifecycleSupervisor.js";
+import { isWorkbenchStartBlockedByClose } from "../src/lifecycle/workbenchCloseTransactionStore.js";
 import {
   peekFrontendBuild,
   resetFrontendBuildStateForTests,
@@ -60,6 +61,7 @@ function harness(options: { live?: boolean; releaseChanged?: boolean; packaged?:
     createDesktopPathsForApp: () => ({ workspaceRoot: "C:/frontend-preflight-test" }),
     mainWorkbenchCloseStore: { currentTransaction: currentCloseTransaction },
     hasBackgroundWorkbenchRetirement: backgroundRetirement,
+    isWorkbenchStartBlockedByClose, workbenchFailedCloseHandling: false, pendingWorkbenchCloseAck: null,
     app: { isPackaged: options.packaged ?? false },
     windowProvider: { approveWorkbenchCloseOnce: closed },
     shouldDeferOrchestratedWindowClose: () => false,
