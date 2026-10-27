@@ -197,6 +197,9 @@ def preview_legacy_handoff(*, project_root: Path, workspace: Path, project_id: s
                     if not isinstance(item, dict):
                         raise ValueError("row_not_object")
                     mid = item.get("messageId") or item.get("eventId")
+                    if ("messageId" in item and "eventId" in item
+                            and item["messageId"] != item["eventId"]):
+                        raise ValueError("message_identity_conflict")
                     if (not all(_token(v) for v in (mid, item.get("targetAgentId")))
                             or not (item.get("sourceAgentId") == "" or _token(item.get("sourceAgentId")))):
                         raise ValueError("row_identity_invalid")

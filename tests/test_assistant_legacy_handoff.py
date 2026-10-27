@@ -69,6 +69,19 @@ def test_preview_late_receipt_restart_and_no_write_or_prose(tmp_path):
     assert "PRIVATE" not in json.dumps(result)
 
 
+@pytest.mark.parametrize("conflict", ["dispatch", "receipt"])
+def test_conflicting_native_message_and_event_identity_is_not_adopted(tmp_path, conflict):
+    workspace, _, _, dispatch, receipt = fixture(tmp_path)
+    row = dispatch if conflict == "dispatch" else receipt
+    row["eventId"] = "different-native-id"
+    write(workspace, "worker", [dispatch])
+    write(workspace, "pa", [receipt])
+    result = preview(tmp_path, workspace)
+    assert result["previewComplete"] is False
+    assert any(issue["code"] == "invalid_jsonl" for issue in result["issues"])
+    assert all(item["taskStatus"] != "completed" for item in result["dispatches"])
+
+
 @pytest.mark.parametrize("change", ["agent", "target_agent", "source_session", "target_session", "reply", "report_id", "evidence", "prose"])
 def test_invalid_receipt_cannot_complete(tmp_path, change):
     workspace, _, _, _, receipt = fixture(tmp_path)
