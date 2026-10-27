@@ -647,23 +647,51 @@ path grants as source import. The child has a private environment and refuses
 Python network operations and writes outside the selected target. This is not
 an OS sandbox. Check the structured `status`, not only the exit code: `partial`
 or `outcomeUnknown` requires reconciliation using the same migration ID and
-must not trigger automatic replay. Knowledge activation is a separate internal
-adapter and is not invoked by this entry.
+must not trigger automatic replay. `--activate-knowledge` uses the same explicit
+source/target arguments and isolated native owner, but snapshots the source's
+canonical knowledge registry and owner references as additional authority.
+It does not infer an authorization from a file hash. A KB import may have
+partially written before an error; the caller must retain the migration ID and
+reconcile an unknown outcome without automatically starting another import.
 
 The separate private-knowledge adapter reuses native private KB ingestion for
-provable, directly reviewed revision-one items without expiry. Unsupported
-revision chains and future expiry are refused; withdrawn or expired items are
-not made active. It requires independently verified canonical source and owner
-records. Native ingestion is not atomic, so an uncertain result is retained as
+provable direct reviews and a bounded, single-source, same-owner reviewed
+revision chain without expiry. It activates only the current valid version and
+retains the original review and revision evidence in the source archive.
+Unsupported chains and future expiry are refused; withdrawn or expired items
+are not made active. It requires independently verified canonical source and
+owner records. Native ingestion is not atomic, so an uncertain result is retained as
 unknown rather than repeated. A trusted caller must supply the source authority;
-the model cannot invoke these operator adapters. Developer-mode private KB
-activation has not been established by the current native acceptance fixture.
+the model cannot invoke these operator adapters. In developer mode the native
+central-promotion policy rejects private KB activation before creating a
+migration directory or knowledge base. That policy is not bypassed by this
+adapter; the existing knowledge and its archive remain in the source. A
+prototype sandbox restore was not accepted because the existing Windows
+directory pin does not prevent concurrent insertion of unapproved children.
 
 `--recovery-inventory <PA>` only inspects old workflow recovery bindings and
 temporary-grant evidence. Old bindings remain in their source; subsequent
 controls and approvals need fresh native authorization. Unresolved paths,
 legacy relationships or missing evidence cannot establish quiescence or make
 `readyForCutover` true. No old queue, grant or execution lease is transferred.
+
+The internal reminder preview compares the authorized source affairs snapshot
+with the target's native affairs ledger and reports missing/conflicting items
+and the number due. It neither sends a reminder nor transfers execution: the
+legacy Workbench remains the notification owner. A source quiescence fence,
+durable delivery acknowledgement and Launcher reminder consumer still have to
+be established before any reminder cutover can be declared.
+
+The resident Launcher assistant cannot use the offline operator entry while it
+owns the profile lock. Its normal shutdown requests cancellation of the current
+turn, and a status snapshot is not an idle barrier: native queue drain, timers,
+workers and projection may still run. Do not stop a live host for migration or
+pretend its lock is an offline lease. An eventual online owner must bind the
+main-owned project registration and source/target authority to the actual host
+generation, keep a separate lifecycle drain reference, and use short native
+ledger transactions without holding the assistant command lock across source
+scans or knowledge review. It must preserve user edits and receipt recovery,
+and must not allow the model to supply filesystem paths or grant itself access.
 
 ## Observation of in-flight legacy dispatches
 

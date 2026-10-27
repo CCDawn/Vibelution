@@ -88,7 +88,7 @@ def _isolated_environment(target, config):
 
 
 def activate_in_subprocess(*, paths, workspace, agent_id, source_config, target_profile,
-        target_config, migration_id, path_grants, authority_snapshots, authority_verify):
+        target_config, migration_id, path_grants, authority_snapshots, authority_verify, category="personal"):
     import re
     import subprocess
     from core.assistant_runtime.migration_active import _selected, _verify_captured
@@ -98,13 +98,24 @@ def activate_in_subprocess(*, paths, workspace, agent_id, source_config, target_
     from core.infrastructure import developer_sandbox
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,95}", migration_id):
         raise MigrationIOError("migration_id_invalid")
+    if category not in {"personal", "knowledge"}:
+        raise MigrationIOError("activation_category_invalid")
     target, config = _target(target_profile, target_config)
     scope = {"projectId": paths.project_id, "instanceId": paths.instance_id, "agentId": agent_id}
     grant_path = path_grants.absolute() if path_grants is not None else None
     captured, selected_authorities = _capture(paths.project_root, workspace, scope, grant_path)
-    migration_episodic._parse_rows(_selected(captured, "episodic_memory").raw, agent_id)
-    migration_affairs._parse_rows(_selected(captured, "personal_affairs").raw)
-    authorities = (*authority_snapshots, *selected_authorities)
+    if category == "personal":
+        migration_episodic._parse_rows(_selected(captured, "episodic_memory").raw, agent_id)
+        migration_affairs._parse_rows(_selected(captured, "personal_affairs").raw)
+        knowledge_authorities = ()
+    else:
+        from core.assistant_runtime.migration_io import read_stable_file
+        if captured.report.get("categoryStatus", {}).get("private_knowledge") != "available":
+            raise MigrationIOError("active_source_unavailable")
+        registry_root = workspace / "knowledge/sources/registry"
+        knowledge_authorities = tuple(read_stable_file(registry_root / name, 4 * 1024 * 1024)
+            for name in ("source_registry.jsonl", "owner_refs.jsonl"))
+    authorities = (*authority_snapshots, *selected_authorities, *knowledge_authorities)
     # Refuse overlap before native bootstrap, including external grants and
     # authority files that might otherwise be placed inside the target.
     for root in (paths.project_root, workspace, *captured.paths.values(),
@@ -120,7 +131,7 @@ def activate_in_subprocess(*, paths, workspace, agent_id, source_config, target_
                    for path in route_paths]
     request = {"schemaVersion": 1, "project": str(paths.project_root), "workspace": str(workspace),
         "scope": scope, "grant": str(grant_path) if grant_path is not None else None,
-        "target": str(target), "config": _snapshot_proof(config), "migrationId": migration_id,
+        "target": str(target), "config": _snapshot_proof(config), "migrationId": migration_id, "category": category,
         "route": route_proof, "source": _source_proof(captured, authorities)}
     encoded = json.dumps(request, ensure_ascii=False)
     if len(encoded.encode("utf-8")) > 8 * 1024 * 1024:
@@ -195,9 +206,20 @@ def _install_audit(target):
         else:
             return
         for path in paths:
-            if event == "open" and os.path.normcase(os.fsdecode(path)) == os.path.normcase(os.devnull):
+            if isinstance(path, int):
+                raise PermissionError("offline_activation_write_denied")
+            raw = os.fsdecode(path)
+            if event == "open" and os.path.normcase(raw) == os.path.normcase(os.devnull):
                 continue
-            if isinstance(path, int) or not Path(os.fsdecode(path)).resolve().is_relative_to(target):
+            # Native Windows knowledge storage uses extended local paths. Strip
+            # only the drive-letter spelling; device and UNC aliases remain
+            # outside the approved local target and are denied.
+            if os.name == "nt" and raw.startswith("\\\\?\\"):
+                local = raw[4:]
+                if len(local) < 3 or not local[0].isalpha() or local[1:3] != ":\\":
+                    raise PermissionError("offline_activation_write_denied")
+                raw = local
+            if not Path(raw).resolve().is_relative_to(target):
                 raise PermissionError("offline_activation_write_denied")
     sys.addaudithook(audit)
 
@@ -215,7 +237,8 @@ def _child():
         if len(raw) > 8 * 1024 * 1024:
             raise MigrationIOError("activation_proof_too_large")
         request = strict_json(raw)
-        if request.get("schemaVersion") != 1 or request["target"] != str(target):
+        if (request.get("schemaVersion") != 1 or request["target"] != str(target)
+                or request.get("category") not in {"personal", "knowledge"}):
             raise MigrationIOError("activation_request_invalid")
         _target(target, Path(request["config"]["path"]))
         _verify_file_proofs([request["config"]])
@@ -238,12 +261,33 @@ def _child():
         from core.assistant_runtime.migration_profile import offline_migration_profile
         for key in ("HOME", "APPDATA", "LOCALAPPDATA", "TEMP", "VIBELUTION_PROJECTS_HOME"):
             Path(os.environ[key]).mkdir(parents=True, exist_ok=True)
-        with offline_migration_profile() as lease:
-            activation_started = True
-            result = activate_personal_snapshot(lease, captured, migration_id=request["migrationId"],
-                source_roots=(Path(request["project"]), Path(request["workspace"])),
-                authority_snapshots=authorities, authority_verify=verify_route)
-            result["migrationId"] = request["migrationId"]
+        from contextlib import ExitStack
+        from core.web.services.personal_assistant_project.windows_read import _locked_source
+        with ExitStack() as source_locks:
+            # Keep source routing, registration and grant proofs from changing
+            # between a check and a native knowledge write. The importer also
+            # pins the selected content; hashes alone do not authorize it.
+            if request["category"] == "knowledge":
+                for authority in authorities:
+                    source_locks.enter_context(_locked_source(Path(authority.path.anchor), authority.path, directory=False))
+                verify_route()
+            with offline_migration_profile() as lease:
+                activation_started = True
+                if request["category"] == "personal":
+                    result = activate_personal_snapshot(lease, captured, migration_id=request["migrationId"],
+                        source_roots=(Path(request["project"]), Path(request["workspace"])),
+                        authority_snapshots=authorities, authority_verify=verify_route)
+                else:
+                    from core.assistant_runtime.migration_knowledge import import_private_knowledge
+                    registry_root = Path(request["workspace"]) / "knowledge/sources/registry"
+                    selected = {item.path: item for item in authorities}
+                    knowledge = import_private_knowledge(lease, captured,
+                        central=selected[registry_root / "source_registry.jsonl"],
+                        owner_refs=selected[registry_root / "owner_refs.jsonl"],
+                        migration_id=request["migrationId"], authority_verify=verify_route)
+                    result = {"status": "complete", "knowledge": knowledge, "sourceScope": request["scope"],
+                        "sourceQuiesced": False, "readyForCutover": False}
+                result["migrationId"] = request["migrationId"]
         verify_route()
         _verify_file_proofs([request["config"]])
     except TimeoutError:
@@ -256,6 +300,15 @@ def _child():
     except MigrationIOError as error:
         if result is not None and result.get("status") in {"complete", "partial"}:
             mark_reconciliation(result, request["migrationId"], str(error))
+        elif (activation_started and request.get("category") == "knowledge"
+                and str(error) == "knowledge_native_promotion_blocked"):
+            # The adapter checks this policy before any knowledge/receipt
+            # write while the target config and sandbox routing are pinned.
+            result = {"ok": False, "code": "SOURCE_MIGRATION_UNAVAILABLE", "reason": str(error)}
+        elif activation_started and request.get("category") == "knowledge":
+            # Native KB ingestion is not transactional: a failure may follow
+            # committed writes even if the adapter could not return a receipt.
+            result = {"ok": False, "code": "SOURCE_MIGRATION_UNAVAILABLE", "reason": "activation_outcome_unknown"}
         else:
             result = {"ok": False, "code": "SOURCE_MIGRATION_UNAVAILABLE", "reason": str(error)}
     except Exception:
@@ -269,5 +322,5 @@ def _child():
 
 if __name__ == "__main__":
     if sys.argv[1:] != ["--offline-child"]:
-        raise SystemExit("Use assistant_migration_inventory.py --activate-personal")
+        raise SystemExit("Use assistant_migration_inventory.py --activate-personal or --activate-knowledge")
     raise SystemExit(_child())

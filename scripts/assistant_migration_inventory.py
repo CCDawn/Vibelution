@@ -63,6 +63,8 @@ def main() -> int:
         help="Copy approved data to an immutable archive, never active plugin/queue state")
     modes.add_argument("--activate-personal", metavar="ASSISTANT_AGENT_ID",
         help="Offline import of explicit episodic/affairs snapshots into an isolated native profile")
+    modes.add_argument("--activate-knowledge", metavar="ASSISTANT_AGENT_ID",
+        help="Offline import of proven private formal knowledge into a native profile")
     modes.add_argument("--recovery-inventory", metavar="ASSISTANT_AGENT_ID",
         help="Read-only disposition of old recovery bindings and temporary grants")
     modes.add_argument("--correlate-handoff", metavar="ASSISTANT_AGENT_ID")
@@ -79,7 +81,7 @@ def main() -> int:
     parser.add_argument("--request-id")
     parser.add_argument("--message-id", action="append", default=[])
     args = parser.parse_args()
-    activating = args.activate_personal is not None
+    activating = args.activate_personal is not None or args.activate_knowledge is not None
     importing = args.history_import is not None or args.source_import is not None or activating
     observing = args.observe_handoff is not None
     if importing and (args.target_profile is None or args.migration_id is None):
@@ -87,7 +89,7 @@ def main() -> int:
     if activating and (args.target_config is None or args.source_config is None):
         parser.error("Activation requires --source-config and an existing --target-config inside --target-profile")
     if not activating and args.target_config is not None:
-        parser.error("Target config requires --activate-personal")
+        parser.error("Target config requires --activate-personal or --activate-knowledge")
     if not importing and not observing and (args.target_profile is not None or args.migration_id is not None):
         parser.error("Target options require an explicit import mode")
     if observing and (args.target_profile is None or args.migration_id is not None
@@ -96,7 +98,7 @@ def main() -> int:
     if not observing and (args.registered_project_id or args.request_id or args.message_id):
         parser.error("Observer options require --observe-handoff")
     if args.path_grants is not None and args.source_paths is None and args.source_import is None and not activating:
-        parser.error("Path grants apply only to source-paths/source-import")
+        parser.error("Path grants apply only to source-paths/source-import or activation")
     try:
         if activating:
             from core.infrastructure.native_runtime import is_launcher_assistant_process
@@ -111,10 +113,11 @@ def main() -> int:
         if activating:
             from scripts.assistant_migration_activate import activate_in_subprocess
             report = activate_in_subprocess(paths=paths, workspace=kwargs["workspace"],
-                agent_id=args.activate_personal, source_config=args.source_config,
+                agent_id=args.activate_personal or args.activate_knowledge, source_config=args.source_config,
                 target_profile=args.target_profile, target_config=args.target_config,
                 migration_id=args.migration_id, path_grants=args.path_grants,
-                authority_snapshots=authority_snapshots, authority_verify=authority_verify)
+                authority_snapshots=authority_snapshots, authority_verify=authority_verify,
+                category="knowledge" if args.activate_knowledge is not None else "personal")
         elif observing:
             import anyio
             from core.assistant_runtime.dispatch import DispatchService

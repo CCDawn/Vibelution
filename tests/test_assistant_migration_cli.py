@@ -106,6 +106,234 @@ def test_recovery_cli_does_not_infer_grants_from_stale_canonical_path(tmp_path, 
     assert report["temporaryGrants"]["reason"] == "explicit_governance_path_authorization_required"
 
 
+def test_active_knowledge_cli_imports_native_private_knowledge_and_restarts(tmp_path, monkeypatch, capsys):
+    from core.infrastructure import developer_sandbox
+    from tests.test_assistant_runtime_native import TEST_MODEL_CONFIG, _run
+    workspace = fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(developer_sandbox, "formal_workspace_path", lambda _root, *parts: workspace.joinpath(*parts))
+    (tmp_path / "source-location.json").write_text(json.dumps({"workspace": str(workspace)}), encoding="utf-8")
+    _run(tmp_path, r'''
+        import json, os, shutil, sys
+        from pathlib import Path
+        def no_network(event, args):
+            if event == 'socket.connect': raise AssertionError('network forbidden')
+        sys.addaudithook(no_network)
+        from core.assistant_runtime.migration_profile import offline_migration_profile
+        from core.web.services import team_knowledge_service as knowledge, agent_directory_service as directory
+        knowledge._extended_fs_path = lambda path: Path(path).resolve()
+        root = Path(os.environ['VIBELUTION_ASSISTANT_NATIVE_ROOT'])
+        workspace = Path(json.loads((root.parent / 'source-location.json').read_text())['workspace'])
+        with offline_migration_profile() as lease:
+            old = lease.agent_id
+            base = knowledge.create_agent_knowledge_base(old, name='Synthetic', actor_agent_id=old)
+            source = knowledge.collect_source_to_inbox('agent', old, source_type='manual_user_entry',
+                original_content='SYNTHETIC_MIGRATED_KNOWLEDGE', title='Synthetic', actor_agent_id=old)
+            knowledge.review_owner_inbox_source('agent', old, source['inboxSourceId'], decision='accepted',
+                reviewed_by_agent_id=old, ingest_on_accept=True, knowledge_base_id=base['scopedKnowledgeBaseId'],
+                knowledge_content='SYNTHETIC_MIGRATED_KNOWLEDGE')
+            owner = knowledge._require_owner_context('agent', old)
+            shutil.copytree(knowledge._knowledge_root_for_owner(owner), workspace / 'agents' / old / 'knowledge')
+            registry = workspace / 'knowledge/sources/registry'
+            registry.mkdir(parents=True)
+            shutil.copyfile(knowledge._central_source_registry_path(), registry / 'source_registry.jsonl')
+            shutil.copyfile(knowledge._central_owner_refs_path(), registry / 'owner_refs.jsonl')
+            row = {'agentId': old, 'directSessionId': lease.session_id, 'status': 'active',
+                'roleKey': 'personal_assistant', 'metadata': {'personalAssistantProfile': 'personal_assistant_v1'}}
+            (workspace / 'agents/agents.json').write_text(json.dumps({'agents': [row]}), encoding='utf-8')
+            (root.parent / 'old-id.txt').write_text(old, encoding='utf-8')
+    ''', config_text=TEST_MODEL_CONFIG)
+    old_id = (tmp_path / 'old-id.txt').read_text(encoding='utf-8')
+    source_config = tmp_path / 'source-config.toml'
+    source_config.write_text('[launcher.developer_mode]\nenabled=false\n', encoding='utf-8')
+    new_root = tmp_path / 'new-profile'
+    new_root.mkdir()
+    target = new_root / 'native'
+    target_config = target / 'config/config.toml'
+    target_config.parent.mkdir(parents=True)
+    target_config.write_text(TEST_MODEL_CONFIG, encoding='utf-8')
+    before = {p: p.read_bytes() for p in workspace.rglob('*') if p.is_file()}
+    args = ('--activate-knowledge', old_id, '--source-config', source_config, '--target-profile', target,
+            '--target-config', target_config, '--migration-id', 'knowledge-cli')
+    # An uncertain child response must keep the original identity and never
+    # dispatch a second import automatically.
+    import subprocess
+    requests = []
+    with monkeypatch.context() as patcher:
+        def timeout(command, **kwargs):
+            requests.append(command)
+            raise subprocess.TimeoutExpired(command, kwargs['timeout'])
+        patcher.setattr(subprocess, 'run', timeout)
+        assert call(monkeypatch, *args) == 1
+        uncertain = json.loads(capsys.readouterr().out)
+    assert len(requests) == 1 and uncertain['migrationId'] == 'knowledge-cli'
+    assert uncertain['outcomeUnknown'] and uncertain['requiresReconciliation']
+    # A trusted result is retained if its source authority changes after the
+    # child responds; it is not reported as a clean, complete activation.
+    source_bytes = source_config.read_bytes()
+    calls = []
+    with monkeypatch.context() as patcher:
+        def changed(command, **kwargs):
+            request = json.loads(kwargs['input'])
+            calls.append(request)
+            source_config.write_bytes(source_bytes + b'\n# synthetic change\n')
+            return SimpleNamespace(returncode=0, stdout=json.dumps({
+                'status': 'complete', 'sourceScope': request['scope'],
+                'migrationId': request['migrationId'], 'readyForCutover': False,
+                'knowledge': {'importedCount': 1}}), stderr='')
+        patcher.setattr(subprocess, 'run', changed)
+        assert call(monkeypatch, *args) == 0
+        partial = json.loads(capsys.readouterr().out)
+    assert len(calls) == 1 and partial['status'] == 'partial'
+    assert partial['requiresReconciliation'] and partial['knowledge']['importedCount'] == 1
+    source_config.write_bytes(source_bytes)
+    # Fail after a native KB has been created and its next intent persisted.
+    # The CLI must report an unknown outcome without an automatic replay.
+    import sys
+    from scripts import assistant_migration_activate as activation
+    broken = tmp_path / 'broken-profile/native'
+    broken_config = broken / 'config/config.toml'
+    broken_config.parent.mkdir(parents=True)
+    broken_config.write_text(TEST_MODEL_CONFIG, encoding='utf-8')
+    broken_args = ('--activate-knowledge', old_id, '--source-config', source_config,
+        '--target-profile', broken, '--target-config', broken_config, '--migration-id', 'unknown-knowledge')
+    real_run, calls = subprocess.run, []
+    inject = r'''
+import sys
+sys.path.insert(0, sys.argv[1])
+from scripts import assistant_migration_activate as entry
+from core.assistant_runtime import migration_knowledge as knowledge
+original = knowledge._write_state
+def interrupted(path, state):
+    original(path, state)
+    if state.get('phase') == 'collect_intent': raise RuntimeError('synthetic lost acknowledgment')
+knowledge._write_state = interrupted
+raise SystemExit(entry._child())
+'''
+    with monkeypatch.context() as patcher:
+        def interrupted(command, **kwargs):
+            calls.append(command)
+            return real_run([sys.executable, '-I', '-B', '-c', inject, str(activation.ROOT)], **kwargs)
+        patcher.setattr(subprocess, 'run', interrupted)
+        assert call(monkeypatch, *broken_args) == 1
+        unknown = json.loads(capsys.readouterr().out)
+    assert len(calls) == 1 and unknown['migrationId'] == 'unknown-knowledge'
+    assert unknown['outcomeUnknown'] and unknown['requiresReconciliation']
+    states = list((broken / 'knowledge_migrations').glob('*.json'))
+    assert len(states) == 1 and json.loads(states[0].read_text(encoding='utf-8'))['phase'] == 'collect_intent'
+    # While a real child is at the first native write boundary, another
+    # process must be unable to change the source routing configuration.
+    import time
+    fenced = tmp_path / 'fenced-profile/native'
+    fenced_config = fenced / 'config/config.toml'
+    fenced_config.parent.mkdir(parents=True)
+    fenced_config.write_text(TEST_MODEL_CONFIG, encoding='utf-8')
+    fenced_args = ('--activate-knowledge', old_id, '--source-config', source_config,
+        '--target-profile', fenced, '--target-config', fenced_config, '--migration-id', 'fenced-knowledge')
+    fence_code = r'''
+import os, sys, time
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from scripts import assistant_migration_activate as entry
+from core.assistant_runtime import migration_knowledge as knowledge
+original = knowledge._write_state
+def pause(path, state):
+    if state.get('phase') == 'base_intent':
+        root = Path(os.environ['VIBELUTION_ASSISTANT_NATIVE_ROOT'])
+        (root / 'fence-ready').write_text('ready')
+        deadline = time.monotonic() + 20
+        while not (root / 'fence-continue').exists():
+            if time.monotonic() >= deadline: raise RuntimeError('fence timeout')
+            time.sleep(.02)
+    return original(path, state)
+knowledge._write_state = pause
+raise SystemExit(entry._child())
+'''
+    with monkeypatch.context() as patcher:
+        def fenced_child(command, **kwargs):
+            options = {key: kwargs[key] for key in ('cwd', 'env', 'shell', 'creationflags', 'text', 'encoding')}
+            with subprocess.Popen([sys.executable, '-I', '-B', '-c', fence_code, str(activation.ROOT)],
+                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **options) as child:
+                child.stdin.write(kwargs['input'])
+                child.stdin.close()
+                deadline = time.monotonic() + 20
+                while not (fenced / 'fence-ready').exists():
+                    assert child.poll() is None and time.monotonic() < deadline, 'child did not enter fenced write'
+                    time.sleep(.02)
+                try:
+                    with pytest.raises(PermissionError):
+                        source_config.write_bytes(source_bytes + b'\n# unauthorized change\n')
+                finally:
+                    (fenced / 'fence-continue').write_text('continue', encoding='utf-8')
+                output, error = child.stdout.read(), child.stderr.read()
+                child.wait(timeout=30)
+                return SimpleNamespace(returncode=child.returncode, stdout=output, stderr=error)
+        patcher.setattr(subprocess, 'run', fenced_child)
+        assert call(monkeypatch, *fenced_args) == 0
+        fenced_report = json.loads(capsys.readouterr().out)
+    assert fenced_report['status'] == 'complete' and source_config.read_bytes() == source_bytes
+    # An already running native host owns the same lock and prevents migration.
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    from core.infrastructure.file_lock import locked_sidecar
+    held, release = threading.Event(), threading.Event()
+    def hold():
+        with locked_sidecar(target / 'host-owner'):
+            held.set()
+            assert release.wait(30)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(hold)
+        try:
+            assert held.wait(5)
+            assert call(monkeypatch, *args) == 1
+            assert json.loads(capsys.readouterr().out)['code'] == 'TARGET_PROFILE_BUSY'
+        finally:
+            release.set()
+            future.result(timeout=30)
+    assert call(monkeypatch, *args) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report['status'] == 'complete' and not report['readyForCutover']
+    assert report['knowledge']['importedCount'] == 1
+    assert call(monkeypatch, *args) == 0
+    assert json.loads(capsys.readouterr().out)['knowledge']['idempotent']
+    assert before == {p: p.read_bytes() for p in workspace.rglob('*') if p.is_file()}
+    # Native developer policy rejects activation before any knowledge writes;
+    # the formal source and its unrelated sentinel remain untouched.
+    sandbox_target = tmp_path / 'developer-profile/native'
+    sandbox_config = sandbox_target / 'config/config.toml'
+    sandbox_config.parent.mkdir(parents=True)
+    sandbox_config.write_text(TEST_MODEL_CONFIG + '\n[launcher.developer_mode]\nenabled=true\n', encoding='utf-8')
+    formal_sentinel = sandbox_target / 'data/workspace/knowledge/unrelated-sentinel.txt'
+    formal_sentinel.parent.mkdir(parents=True)
+    formal_sentinel.write_text('DO_NOT_COPY_FORMAL', encoding='utf-8')
+    sandbox_args = ('--activate-knowledge', old_id, '--source-config', source_config,
+        '--target-profile', sandbox_target, '--target-config', sandbox_config, '--migration-id', 'sandbox-knowledge')
+    assert call(monkeypatch, *sandbox_args) == 1
+    sandbox_report = json.loads(capsys.readouterr().out)
+    assert sandbox_report['reason'] == 'knowledge_native_promotion_blocked'
+    assert formal_sentinel.read_text(encoding='utf-8') == 'DO_NOT_COPY_FORMAL'
+    assert list(sandbox_target.rglob('unrelated-sentinel.txt')) == [formal_sentinel]
+    assert not (sandbox_target / 'knowledge_migrations').exists()
+    assert not list((sandbox_target / '.runtime').rglob('knowledge_migrations'))
+    _run(new_root, r'''
+        import json, os, sys
+        from pathlib import Path
+        def no_network(event, args):
+            if event == 'socket.connect': raise AssertionError('network forbidden')
+        sys.addaudithook(no_network)
+        from core.assistant_runtime import native
+        from core.web.services import team_knowledge_service as knowledge, agent_directory_service as directory
+        from tools.team_knowledge_tools import search_agent_private_memory_tool
+        knowledge._extended_fs_path = lambda path: Path(path).resolve()
+        try:
+            detail = native.bootstrap(Path(os.environ['VIBELUTION_ASSISTANT_NATIVE_ROOT']))['assistant']
+            with directory.active_agent_runtime(detail['agentId'], session_id=detail['directSessionId'], turn_id='search'):
+                result = json.loads(search_agent_private_memory_tool(query='SYNTHETIC_MIGRATED_KNOWLEDGE', query_mode='exact'))
+                assert result['ok'] and result['results']
+        finally:
+            native.shutdown()
+    ''', config_text=TEST_MODEL_CONFIG)
+
+
 def active_personal_case(tmp_path, monkeypatch):
     from core.infrastructure import developer_sandbox
     from tests.test_assistant_runtime_native import TEST_MODEL_CONFIG
@@ -236,6 +464,7 @@ for key in ('HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP', 'TM
     assert Path(os.environ[key]).is_relative_to(target)
 for operation in (
     lambda: source.write_text('changed'),
+    lambda: Path('\\\\?\\' + str(source)).write_text('changed'),
     lambda: source.parent.joinpath('unexpected').mkdir(),
     lambda: socket.socket().connect(('127.0.0.1', 9)),
     lambda: subprocess.run([sys.executable, '-c', 'pass']),
@@ -244,6 +473,7 @@ for operation in (
     except PermissionError: pass
     else: raise AssertionError('offline isolation escape')
 (target / 'allowed.txt').write_text('allowed')
+Path('\\\\?\\' + str(target / 'allowed-extended.txt')).write_text('allowed')
 '''
     result = subprocess.run([sys.executable, "-I", "-B", "-c", code, str(activation.ROOT), str(target),
         str(workspace / "agents/agents.json")], env=env, capture_output=True,

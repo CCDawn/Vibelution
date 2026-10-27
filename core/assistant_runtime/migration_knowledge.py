@@ -2,13 +2,14 @@
 
 The trusted caller owns source authorization and supplies SourcePaths plus exact
 canonical central-registry/owner-ref snapshots. Hashes prove integrity, not
-authorization. This bounded slice accepts original direct-reviewed items only;
-revision/proposal chains it cannot prove stay archived and never become active.
+authorization. This bounded slice accepts direct reviews and their provable,
+single-source owner-reviewed revisions. Unsupported chains never become active.
 No model action, host, session execution, grant, or cutover claim is introduced.
 """
 from __future__ import annotations
 
 from contextlib import ExitStack
+from collections.abc import Callable
 import hashlib
 import json
 from pathlib import Path
@@ -148,6 +149,7 @@ def _plan(scope, files, central, owner_refs):
     batches = {r["batchId"]: r for r in load("batches.jsonl", "batchId")}
     inbox = {r["inboxSourceId"]: r for r in load("inbox/source_index.jsonl", "inboxSourceId")}
     audit = load("audit.jsonl", "auditId")
+    proposals = {r["proposalId"]: r for r in load("refinement_proposals.jsonl", "proposalId")} if "refinement_proposals.jsonl" in files else {}
     # Parse strictly, then retain only references selected by this private owner.
     central_ids = {a.get("centralSourceId") for a in artifacts.values()}
     central_rows = {r["centralSourceId"]: r for r in _rows(central.raw, "centralSourceId") if r["centralSourceId"] in central_ids}
@@ -155,6 +157,64 @@ def _plan(scope, files, central, owner_refs):
         and _private(r, scope["agentId"])]
     if any(not _private(r, scope["agentId"]) for r in [*bases.values(), *items, *artifacts.values(), *batches.values(), *inbox.values()]):
         _fail("foreign_source_owner")
+    by_id = {r["knowledgeItemId"]: r for r in items}
+    def receipt(action, actor, **fields):
+        return any(r.get("action") == action and r.get("actorAgentId") == actor
+            and _private(r.get("payload", {}), scope["agentId"])
+            and all(r.get("payload", {}).get(k) == v for k, v in fields.items()) for r in audit)
+    def chain_for(item):
+        chain, seen = [], set()
+        while True:
+            iid = item["knowledgeItemId"]
+            if iid in seen or len(chain) >= 128:
+                _fail("revision_chain_unsupported")
+            seen.add(iid)
+            chain.append(item)
+            parent = item.get("supersedesKnowledgeItemId")
+            if item.get("ingestionMode") == "source_review_direct":
+                if type(item.get("revision")) is not int or item["revision"] != 1 or parent:
+                    _fail("revision_chain_unsupported")
+                break
+            previous = by_id.get(parent)
+            if (not previous or type(item.get("revision")) is not int
+                    or type(previous.get("revision")) is not int or item["revision"] != previous["revision"] + 1
+                    or item.get("knowledgeBaseId") != previous.get("knowledgeBaseId")
+                    or item.get("sourceArtifactIds") != previous.get("sourceArtifactIds")
+                    or item.get("centralSourceIds") != previous.get("centralSourceIds")
+                    or item.get("rootKnowledgeItemId") != previous.get("rootKnowledgeItemId")
+                    or sum(r.get("supersedesKnowledgeItemId") == parent for r in items) != 1):
+                _fail("revision_chain_unsupported")
+            item = previous
+        if any(r.get("rootKnowledgeItemId") != iid for r in chain):
+            _fail("revision_chain_unsupported")
+        return chain
+    def prove_proposal(item, batch):
+        proposal_ids = batch.get("proposalIds")
+        if not isinstance(proposal_ids, list) or len(proposal_ids) != 1:
+            _fail("proposal_lineage_unprovable")
+        proposal = proposals.get(proposal_ids[0], {})
+        pid, iid, bid = proposal.get("proposalId"), item["knowledgeItemId"], item["knowledgeBaseId"]
+        reviewer = scope["agentId"]
+        parent = by_id.get(item.get("supersedesKnowledgeItemId"), {})
+        if (not _private(proposal, reviewer) or proposal.get("status") != "applied"
+                or proposal.get("targetKnowledgeBaseId") != bid or proposal.get("batchId") != batch["batchId"]
+                or proposal.get("knowledgeItemIds") != [iid] or proposal.get("proposedByAgentId") != reviewer
+                or proposal.get("reviewedByAgentId") != reviewer or proposal.get("requiredReviewerAgentId")
+                or item.get("requiredReviewerAgentId") or item.get("ingestionMode")
+                or item.get("lifecycleStatus") != "applied"
+                or proposal.get("expectedContentSha256") != lifecycle.content_sha256(parent)
+                or not isinstance(proposal.get("revisionReason"), str)
+                or not 0 < len(proposal["revisionReason"].strip()) <= 1000
+                or any(proposal.get(k) != item.get(k) for k in ("sourceArtifactIds", "centralSourceIds",
+                    "title", "summary", "content", "reviewedAt", "sourceLifecycleRevisions", "revision",
+                    "rootKnowledgeItemId", "supersedesKnowledgeItemId", "revisionReason"))
+                or not receipt("knowledge.proposal.created", reviewer, proposalId=pid, knowledgeBaseId=bid, status="pending")
+                or not receipt("knowledge.proposal.reviewed", reviewer, proposalId=pid, batchId=batch["batchId"],
+                    knowledgeBaseId=bid, status="applied")
+                or not receipt("knowledge.batch.applied", reviewer, batchId=batch["batchId"], knowledgeBaseId=bid, status="applied")):
+            _fail("proposal_lineage_unprovable")
+        for field in ("createdAt", "updatedAt", "reviewedAt"):
+            lifecycle._date(proposal.get(field))
     states = lifecycle.item_lifecycle_states(items, artifacts, central_sources=central_rows, now=s.utc_now_iso())
     planned, excluded = [], []
     for item in items:
@@ -170,9 +230,8 @@ def _plan(scope, files, central, owner_refs):
         if reason != "active":
             excluded.append({"sourceKnowledgeItemId": iid, "reason": reason})
             continue
-        if (item.get("ingestionMode") != "source_review_direct" or item.get("revision") != 1
-                or item.get("supersedesKnowledgeItemId") or item.get("contentSha256") != lifecycle.content_sha256(item)):
-            _fail("revision_chain_unsupported")
+        chain = chain_for(item)
+        root_item = chain[-1]
         source_ids = item.get("sourceArtifactIds")
         if not isinstance(source_ids, list) or len(source_ids) != 1:
             _fail("source_lineage_unprovable")
@@ -183,7 +242,7 @@ def _plan(scope, files, central, owner_refs):
         # a time-limited authorization into perpetual active knowledge.
         if artifact.get("expiresAt") or central_rows.get(cid, {}).get("expiresAt"):
             _fail("source_expiry_unsupported")
-        batch = batches.get(item.get("batchId"), {})
+        batch = batches.get(root_item.get("batchId"), {})
         reviewer = item.get("reviewedByAgentId")
         for record, fields in ((item, ("createdAt", "updatedAt", "reviewedAt", "appliedAt")),
                 (source, ("capturedAt", "reviewedAt")), (batch, ("appliedAt",))):
@@ -193,22 +252,42 @@ def _plan(scope, files, central, owner_refs):
                 or s._normalize_formal_knowledge_content(item["content"]) != item["content"]
                 or not isinstance(item.get("title"), str) or not item["title"].strip()
                 or artifact.get("knowledgeBaseId") != bid or source.get("status") != "accepted"
-                or source.get("knowledgeBaseId") != bid or source.get("knowledgeItemId") != iid
+                or source.get("knowledgeBaseId") != bid or source.get("knowledgeItemId") != root_item["knowledgeItemId"]
                 or source.get("centralSourceId") != cid or item.get("centralSourceIds") != [cid]
                 or batch.get("knowledgeBaseId") != bid or batch.get("status") != "applied"
                 or batch.get("sourceArtifactIds") != source_ids or batch.get("centralSourceIds") != [cid]
                 or reviewer != scope["agentId"] or batch.get("reviewedByAgentId") != reviewer
-                or batch.get("appliedAt") != item.get("appliedAt") or source.get("reviewedAt") != item.get("reviewedAt")
+                or batch.get("appliedAt") != root_item.get("appliedAt") or source.get("reviewedAt") != root_item.get("reviewedAt")
                 or source.get("reviewedByAgentId") != reviewer or not item.get("reviewedAt")
                 or artifact.get("sourceHash") != source.get("sourceHash")
                 or central_rows.get(cid, {}).get("sourceHash") != artifact.get("sourceHash")
                 or not any(r.get("centralSourceId") == cid and r.get("inboxSourceId") == source.get("inboxSourceId")
                     and r.get("decision") == "accepted" and r.get("sourceHash") == artifact.get("sourceHash") for r in refs)
                 or not any(r.get("action") == "knowledge.item.direct_ingested" and r.get("actorAgentId") == reviewer
-                    and r.get("payload", {}).get("knowledgeItemId") == iid for r in audit)
+                    and r.get("payload", {}).get("knowledgeItemId") == root_item["knowledgeItemId"] for r in audit)
                 or not any(r.get("action") == "knowledge.source_inbox.reviewed" and r.get("actorAgentId") == reviewer
                     and r.get("payload", {}).get("inboxSourceId") == source.get("inboxSourceId") for r in audit)):
             _fail("source_lineage_unprovable")
+        for version in chain:
+            version_batch = batches.get(version.get("batchId"), {})
+            if (version.get("contentSha256") != lifecycle.content_sha256(version)
+                    or not isinstance(version.get("content"), str) or not version["content"].strip()
+                    or s._normalize_formal_knowledge_content(version["content"]) != version["content"]
+                    or not isinstance(version.get("title"), str) or not version["title"].strip()
+                    or version.get("status", "active") != "active" or version.get("reviewedByAgentId") != reviewer
+                    or version.get("sourceLifecycleRevisions") != {source_ids[0]: artifact.get("lifecycleRevision", 0)}
+                    or version_batch.get("knowledgeBaseId") != bid or version_batch.get("status") != "applied"
+                    or version_batch.get("sourceArtifactIds") != source_ids or version_batch.get("centralSourceIds") != [cid]
+                    or version_batch.get("reviewedByAgentId") != reviewer
+                    or version_batch.get("appliedAt") != version.get("appliedAt")
+                    or version.get("reviewedAt") != version.get("appliedAt")):
+                _fail("source_lineage_unprovable")
+            for field in ("createdAt", "updatedAt", "reviewedAt", "appliedAt"):
+                lifecycle._date(version.get(field))
+            if version is not root_item:
+                prove_proposal(version, version_batch)
+            elif version_batch.get("proposalIds") != [] or version_batch.get("ingestionMode") != "source_review_direct":
+                _fail("source_lineage_unprovable")
         planned.append(item)
     return planned, excluded, central_rows, refs
 
@@ -266,6 +345,44 @@ def _target_rows(s, owner, path_fn, key):
     return _rows(read_stable_file(path, _MAX_FILE).raw, key) if path.exists() else []
 
 
+def _target(lease, state, s):
+    """Bind native paths and owner identity to one unchanged routing authority."""
+    from core.web.services import agent_directory_service as directory
+    from core.infrastructure.developer_sandbox import existing_sandboxed_workspace_path
+    try:
+        state.verify_workspace()
+        workspace = existing_sandboxed_workspace_path(lease.root, public_config=state.config)
+    except (OSError, ValueError, TypeError):
+        _fail("workspace_changed")
+    if (s.PROJECT_ROOT != lease.root or directory.PROJECT_ROOT != lease.root
+            or workspace.resolve() != state.path() or not workspace.is_relative_to(lease.root)):
+        _fail("target_binding_invalid")
+    check_path(workspace)
+    agent = directory.get_agent(lease.agent_id, include_archived=True)
+    if not agent or agent.get("workspacePath") != f"workspace/agents/{lease.agent_id}":
+        _fail("target_binding_invalid")
+    owner = s._require_owner_context("agent", lease.agent_id)
+    if (s._route_team_knowledge_workspace_path(seed=False) != workspace
+            or s._knowledge_root_for_owner(owner) != workspace / "agents" / lease.agent_id / "knowledge"
+            or s._central_source_registry_path() != workspace / "knowledge/sources/registry/source_registry.jsonl"
+            or s._central_owner_refs_path() != workspace / "knowledge/sources/registry/owner_refs.jsonl"
+            or s._central_source_accepted_dir() != workspace / "knowledge/sources/accepted"):
+        _fail("target_binding_invalid")
+    try:
+        state.verify_workspace()
+    except (OSError, ValueError, TypeError):
+        _fail("workspace_changed")
+    return owner
+
+
+def _promotion_allowed(s):
+    from core.infrastructure.developer_sandbox import DeveloperSandboxWriteBlocked
+    try:
+        s._assert_central_source_write_allowed()
+    except DeveloperSandboxWriteBlocked:
+        _fail("native_promotion_blocked")
+
+
 def _pin_target(stack, s, owner):
     """Reject existing target links/corruption before native lenient readers."""
     private = s._knowledge_root_for_owner(owner)
@@ -311,6 +428,9 @@ def _import_one(lease, s, owner, item, scope, proof, folder, verify, migration_i
         state = {"schemaVersion": 1, "binding": binding, "migrationId": migration_id,
             "phase": phase, **values}
         _write_state(state_path, state)
+        # Routing may change while the durable intent is published. Recheck
+        # before its following native operation can resolve a different path.
+        verify()
     bases = [b for b in s._knowledge_bases_for_owner(owner) if b.get("description") == description]
     if len(bases) > 1:
         _fail("target_conflict")
@@ -373,18 +493,25 @@ def _import_one(lease, s, owner, item, scope, proof, folder, verify, migration_i
 
 
 def import_private_knowledge(lease, resolved: SourcePaths, *, central: FileSnapshot,
-        owner_refs: FileSnapshot, migration_id: str) -> dict:
-    """Activate only provable original private direct reviews under an offline lease.
+        owner_refs: FileSnapshot, migration_id: str,
+        authority_verify: Callable[[], None] | None = None) -> dict:
+    """Activate provable direct reviews and bounded private revision chains.
 
     Pending, withdrawn, expired and superseded items never become active. An
     incomplete revision/proposal proof refuses the entire import. Each origin
     has a durable intent before native writes. Unknown outcomes fail closed;
     retries read the native IDs and never issue a second create/review.
+    A trusted operator adapter may additionally pin its source authorization
+    authority; its verifier runs at the same boundaries as the file proofs.
     """
     _lease(lease)
     if not isinstance(migration_id, str) or not _TOKEN.fullmatch(migration_id):
         _fail("migration_id_invalid")
+    if authority_verify is not None and not callable(authority_verify):
+        _fail("authority_verifier_invalid")
     try:
+        if authority_verify is not None:
+            authority_verify()
         scope, source_root, files, snapshots, verify = _source(resolved, central, owner_refs)
     except MigrationIOError:
         raise
@@ -394,6 +521,8 @@ def import_private_knowledge(lease, resolved: SourcePaths, *, central: FileSnaps
         _fail("source_target_overlap")
     try:
         from core.web.services import team_knowledge_service as s
+        from core.web.services import agent_directory_service as directory
+        from core.web.services.external_management.state_snapshot import ExistingStateSnapshot
         from core.web.services.personal_assistant_project.windows_read import _locked_source
         from . import native
         with ExitStack() as stack:
@@ -405,17 +534,43 @@ def import_private_knowledge(lease, resolved: SourcePaths, *, central: FileSnaps
             planned, excluded, central_rows, refs = _plan(scope, files, central, owner_refs)
             proof = _digest({"files": {n: f.sha256 for n, f in files.items()},
                 "central": central.sha256, "ownerRefs": owner_refs.sha256})
-            owner = s._require_owner_context("agent", lease.agent_id)
-            workspace = s._route_team_knowledge_workspace_path(seed=False)
-            if (s.PROJECT_ROOT != lease.root or not workspace.is_relative_to(lease.root)
-                    or s._knowledge_root_for_owner(owner) != workspace / "agents" / lease.agent_id / "knowledge"):
-                _fail("target_binding_invalid")
+            try:
+                from core.infrastructure import developer_sandbox
+                # Native APIs resolve routing internally after our checks. Hold
+                # the same existing authorities read-only until all native IO
+                # and receipts finish, including their physical namespaces.
+                config_path = Path(directory.CONFIG_PATH)
+                stack.enter_context(_locked_source(Path(config_path.anchor), config_path, directory=False))
+                active_path = developer_sandbox._active_state_path(lease.root)
+                if active_path.exists():
+                    stack.enter_context(_locked_source(Path(active_path.anchor), active_path, directory=False))
+                state = ExistingStateSnapshot(lease.root, directory, pin_workspace=True)
+            except (OSError, ValueError, TypeError):
+                _fail("workspace_changed")
+            source_verify = verify
+            def verify():
+                if authority_verify is not None:
+                    authority_verify()
+                source_verify()
+                _lease(lease)
+                try:
+                    state.verify_workspace()
+                except (OSError, ValueError, TypeError):
+                    _fail("workspace_changed")
+                # Even an empty plan must not reach seeded target resolvers or
+                # create a migration archive while sandbox promotion is blocked.
+                _promotion_allowed(s)
+                _target(lease, state, s)
+            verify()
+            owner = _target(lease, state, s)
             folder = lease.root / "knowledge_migrations"
             with native._LOCK, s._LOCK, pinned_target_directory(folder, create=True), migration_target_lock(folder):
                 _lease(lease)
                 verify()
                 _pin_target(stack, s, owner)
+                verify()
                 _archive(folder / "archives" / proof, files, central_rows, refs, scope, central, owner_refs)
+                verify()
                 mappings, imported = [], 0
                 for item in planned:
                     mapping, reused = _import_one(lease, s, owner, item, scope, proof, folder, verify, migration_id)
