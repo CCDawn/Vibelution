@@ -135,6 +135,31 @@ def _tree(path: Path, *, max_file_bytes: int, max_files: int, expected_file: boo
     return result
 
 
+def declared_assistant_identities(rows: list[dict]) -> list[dict]:
+    """Pure declared PA identity/config adjudication; never reads or repairs."""
+    if not isinstance(rows, list) or len(rows) > 100000 or any(not isinstance(row, dict) for row in rows):
+        raise InventoryError("registry_unavailable_or_changed")
+    candidates = []
+    for row in rows:
+        metadata = row.get("metadata", {})
+        if row.get("roleKey") != "personal_assistant" and not (isinstance(metadata, dict) and metadata.get("personalAssistantProfile")):
+            continue
+        aid, sid = row.get("agentId"), row.get("directSessionId")
+        if (not isinstance(metadata, dict) or metadata.get("personalAssistantProfile") != _PROFILE
+                or row.get("roleKey") != "personal_assistant" or not isinstance(row.get("toolPolicy", {}), dict)
+                or not isinstance(row.get("status"), str) or row["status"] not in {"active", "archived"}
+                or not all(isinstance(v, str) and _TOKEN.fullmatch(v) for v in (aid, sid))
+                or any(candidate["agentId"] == aid or candidate["sessionId"] == sid for candidate in candidates)
+                or any(other is not row and (other.get("agentId") == aid or other.get("directSessionId") == sid) for other in rows)):
+            raise InventoryError("assistant_identity_unavailable")
+        if len(candidates) >= 32:
+            raise InventoryError("too_many_source_candidates")
+        encoded = json.dumps(row, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        candidates.append({"agentId": aid, "sessionId": sid, "status": row.get("status"),
+            "agentConfigSha256": hashlib.sha256(encoded).hexdigest()})
+    return candidates
+
+
 def inventory_sources(*, project_root: Path, workspace: Path, project_id: str, instance_id: str,
                       max_file_bytes: int = 64 * 1024 * 1024, max_files: int = 10000) -> dict:
     """Fingerprint only PA-owned scopes. Never select, pause or import one."""
@@ -166,20 +191,8 @@ def inventory_sources(*, project_root: Path, workspace: Path, project_id: str, i
     except (OSError, ValueError, KeyError, TypeError):
         raise InventoryError("registry_unavailable_or_changed") from None
     candidates = []
-    for row in rows:
-        metadata = row.get("metadata", {})
-        if row.get("roleKey") != "personal_assistant" and not (isinstance(metadata, dict) and metadata.get("personalAssistantProfile")):
-            continue
-        aid, sid = row.get("agentId"), row.get("directSessionId")
-        if (not isinstance(metadata, dict) or metadata.get("personalAssistantProfile") != _PROFILE
-                or row.get("roleKey") != "personal_assistant" or not isinstance(row.get("toolPolicy", {}), dict)
-                or not isinstance(row.get("status"), str) or row["status"] not in {"active", "archived"}
-                or not all(isinstance(v, str) and _TOKEN.fullmatch(v) for v in (aid, sid))
-                or any(candidate["agentId"] == aid or candidate["sessionId"] == sid for candidate in candidates)
-                or any(other is not row and (other.get("agentId") == aid or other.get("directSessionId") == sid) for other in rows)):
-            raise InventoryError("assistant_identity_unavailable")
-        if len(candidates) >= 32:
-            raise InventoryError("too_many_source_candidates")
+    for identity in declared_assistant_identities(rows):
+        aid, sid = identity["agentId"], identity["sessionId"]
         locations = {
             "journal": (workspace, ("sessions", sid, "turn_journal.jsonl")),
             "session_assets": (workspace, ("sessions", sid, "artifacts")),
@@ -204,9 +217,7 @@ def inventory_sources(*, project_root: Path, workspace: Path, project_id: str, i
                     expected_file=category in {"journal", "episodic_memory", "dispatch_events"})
             except (InventoryError, OSError):
                 files[category] = {"available": False, "entries": [], "issues": [{"path": "", "code": "source_unavailable"}]}
-        encoded = json.dumps(row, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-        candidates.append({"agentId": aid, "sessionId": sid, "status": row.get("status"),
-            "agentConfigSha256": hashlib.sha256(encoded).hexdigest(), "files": files,
+        candidates.append({**identity, "files": files,
             "inventoryComplete": files["journal"]["available"] and not any(item["issues"] for item in files.values())})
     return {"schemaVersion": 1, "stage": "inventory", "inventoryScope": "declared_current_identity_only",
             "observedAt": datetime.now(timezone.utc).isoformat(),

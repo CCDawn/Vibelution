@@ -24,6 +24,7 @@ describe("installed Electron package runtime", () => {
     const installed = join(root, "node_modules", "electron");
     const dist = join(installed, "dist");
     mkdirSync(dist, { recursive: true });
+    writeFileSync(join(root, "package.json"), JSON.stringify({ devDependencies: { electron: "42.5.0" } }));
     writeFileSync(join(installed, "package.json"), JSON.stringify({ version: "42.5.0" }));
     writeFileSync(join(dist, "version"), "42.5.0\n");
     writeFileSync(join(dist, "electron.exe"), "fixture");
@@ -59,6 +60,13 @@ describe("installed Electron package runtime", () => {
 
   it("does not reuse the host runtime for a Linux ARM64 cross-build", () => {
     expect(resolveInstalledElectronDistribution("missing-host-installation", "linux-arm64", "win32")).toEqual({});
+  });
+
+  it("refuses an old installed runtime after the project Electron pin changes", () => {
+    fixture((root) => {
+      writeFileSync(join(root, "package.json"), JSON.stringify({ devDependencies: { electron: "43.8.3" } }));
+      expect(() => resolveInstalledElectronDistribution(root, "staging", "win32")).toThrow(/declared.*version/i);
+    });
   });
 
   it("rejects the unsupported migrated assistant cross-build before output", () => {

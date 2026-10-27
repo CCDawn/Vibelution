@@ -56,6 +56,11 @@ export function resolveInstalledElectronDistribution(packageRoot, mode, platform
   const metadata = readJsonFile(join(installed, "package.json"));
   const electronDist = join(installed, "dist");
   const version = readFileSync(join(electronDist, "version"), "utf8").trim();
+  const declaredVersion = readJsonFile(join(packageRoot, "package.json")).devDependencies?.electron;
+  if (typeof declaredVersion !== "string" || !/^\d+\.\d+\.\d+$/.test(declaredVersion)
+      || version !== declaredVersion) {
+    throw new Error("Installed Electron does not match the project's exact declared Electron version; refresh task-local dependencies before packaging.");
+  }
   const executable = platform === "win32" ? "electron.exe"
     : platform === "darwin" ? "Electron.app/Contents/MacOS/Electron" : "electron";
   if (!version || version !== metadata.version || !existsSync(join(electronDist, executable))) {

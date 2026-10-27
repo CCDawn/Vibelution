@@ -558,3 +558,28 @@ This does not discover target-side dispatches, all historical Sessions, custom
 memory/knowledge paths or queue ownership. Old message IDs are not new native
 task capabilities. No old queue, Turn or transcript is copied into the running
 Launcher profile; `readyForCutover` remains false until handoff is verified.
+
+The optional `--handoff-preview <explicit-old-pa-agent-id>` emits a separate
+schema-1 `handoff_preview`. It uses the inventory's declared PA identity and
+registry hash, then reads existing default inbox JSONL for registry targets
+(including archived Agents) and that PA's receipts. Custom workspace routes,
+missing/corrupt/ambiguous/changed sources and limits produce explicit issues
+and `previewComplete=false`. JSONL limits are 256 files, 8 MiB per file,
+64 MiB total, 10,000 rows total and 256 KiB per line; stable verification
+rereads at most that byte count. The registry has its own 16 MiB limit;
+identity adjudication shares the inventory's pure rule without running a
+second inventory or reading other source trees.
+Reports include identities, delivery/task statuses, evidence counts and source
+hashes, without prose, evidence strings or custom metadata. Only an explicit
+reply ID with both Agent and Session bindings can supply task evidence;
+consumption alone never proves completion. Follow-ups are counted separately.
+Canonical top-level Session bindings are adapted only when metadata has no
+conflicting binding. Human/system messages with empty source Agent/Session
+remain unrelated inbox rows; their IDs still participate in ambiguity checks.
+Every row must belong to its declared target inbox. Missing dispatch Session
+evidence stays unresolved without substituting a current direct Session.
+Legacy IDs remain `legacyMessageId`; `nativeTaskId=null` and
+`nativeCorrelation=unresolved` never assert a native task association.
+Late receipts are observed by rerunning the preview. This read does not start,
+replay, copy, enqueue, repair, pause or retire anything. A complete scan still
+has `sourceQuiesced=false` and `readyForCutover=false`.

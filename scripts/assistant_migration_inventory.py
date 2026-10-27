@@ -17,11 +17,18 @@ from vibelution_storage import resolve_active_project_storage_paths
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project", type=Path, required=True)
+    parser.add_argument("--handoff-preview", metavar="ASSISTANT_AGENT_ID",
+        help="Read-only legacy dispatch preview for this explicit PA identity")
     args = parser.parse_args()
     try:
         paths = resolve_active_project_storage_paths(args.project.resolve())
-        report = inventory_sources(project_root=paths.project_root, workspace=paths.data / "workspace",
+        kwargs = dict(project_root=paths.project_root, workspace=paths.data / "workspace",
             project_id=paths.project_id, instance_id=paths.instance_id)
+        if args.handoff_preview is not None:
+            from core.assistant_runtime.legacy_handoff import preview_legacy_handoff
+            report = preview_legacy_handoff(**kwargs, assistant_agent_id=args.handoff_preview)
+        else:
+            report = inventory_sources(**kwargs)
     except (InventoryError, OSError, ValueError):
         print(json.dumps({"ok": False, "code": "SOURCE_INVENTORY_UNAVAILABLE"}))
         return 1

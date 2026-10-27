@@ -920,3 +920,13 @@ Agent归档现已接通动态说明、SDK、独立agents:archive权限和原生�
 迁盘后的完整合入检查在既有原生 fast-close 用例出现资源清退超时；未改动 main 的临时对照同样复现。诊断确认 Job accounting 归零不等于 root process wait、输出 drain 或 TCP listener 已完成，不能把这些资源强行记为关闭。用户随后明确选择窗口及时关闭、Launcher 后台持续回收并显示未完成，决策见 ADR 0014。
 
 实现复用托盘驻留、精确 Job 退休闭包、原有保存/HTTP 机会、生命周期命令及 stopping 投影，分别记录窗口 ACK 和后台确认。源代码、状态读取故障、发布 CAS、late completion 和新启动隔离已有回归；两处普通/开发者 Session 核心均无改动。窗口、后台资源与 Launcher 状态的新包联合验收及最终合入检查仍须闭合，不能用单元测试替代。DeepSeek 仍等用户明确确认额度，正式数据和旧 PA 退役边界保持。
+
+### 2026-10-27：退出运行时修复与旧派遣交接预览
+
+展开会话后的退出异常已在无主进程 Inspector、无 Chromium 调试端口的临时完整应用复现：调用原托盘退出回调，宿主停止后 Electron 42.5.0 两次以 `0x80000003` 退出。相同应用、原生 Job 插件和测试回调仅替换官方运行时后，42.11.18 与 43.8.3 各三次正常退出。两份崩溃 dump 的原生线程链一致，故障位于 Electron 最终退出阶段；具体 Node/V8 函数归因仍以无 PDB 的对应推断表述。官方修复 [Electron #52956](https://github.com/electron/electron/pull/52956) 与 [42 系列回补](https://releases.electronjs.org/pr/53014) 记录了关闭后延迟任务触碰旧句柄的问题，后者从 42.10.0 发布。
+
+本片将依赖固定为仍受支持的 Electron 43.8.3，复用上游修复，不增加应用层销毁窗口或延迟退出补丁。打包 owner 同时验证安装包版本、真实 distribution 版本与项目精确声明版本一致，防止升级声明后仍复制旧 runtime。官方 ZIP SHA256 与 npm 完整性均已核验，开发依赖仅在任务环境更新；最终重新构建包的验收另行记录，正式程序及配置不自动更新。
+
+旧授权继续复用既有显式升级、持久化证明及重启后的只读回执恢复；原 8/9/10 项授权不自动扩大。新增 `assistant_migration_inventory.py --project <source> --handoff-preview <explicit-pa-agent-id>` 只读预览：复用纯身份裁决和旧派遣报告规则，扫描明确来源中 active/archived Agent 的默认 inbox，记录来源指纹、旧 message ID、双方 Session 与严格关联的回执；正常用户/系统消息允许空来源，不作为任务报告。错误路由、重复 ID、来源变化、损坏、限额及自定义路径均显式不完整，报告不导出正文或 evidence 原文。迟到回执可在重跑后被读取，不创建或重放任务。
+
+预览不转移执行权，不把旧 message ID 当成 native task ID；`nativeTaskId=null`、`nativeCorrelation=unresolved`、`sourceQuiesced=false`、`readyForCutover=false` 保持明确。全部历史 Session、自定义路径、原生队列/运行权和真正只读历史导入仍待后续交接。结构化预览本身提供有界问题、数量和哈希证据，不新增运行时日志写入者。此片不修改普通 Session 核心，不调用真实模型，不扫描或修改正式数据；DeepSeek 等额度确认，平台旧助理保留至完整验收通过。
