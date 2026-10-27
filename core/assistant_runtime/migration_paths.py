@@ -311,7 +311,9 @@ def source_snapshot(resolved: SourcePaths, *, max_file_bytes=16 * 1024 * 1024,
             row.pop("entries", None)
             paths.pop(row["sourceRef"], None)
     report["categoryStatus"] = {category: _category_status(report["sources"], category) for category in SOURCE_CATEGORIES}
-    report["snapshotComplete"] = not report["issues"] and all(row["status"] == "available" for row in report["sources"])
+    report["snapshotComplete"] = (not report["issues"]
+                                   and all(status != "conflict" for status in report["categoryStatus"].values())
+                                   and all(row["status"] == "available" for row in report["sources"]))
     return SourcePaths(report, paths, {ref: resolved._identities[ref] for ref in paths},
                        {ref: tuple(snapshot for source_ref, snapshot in snapshots if source_ref == ref) for ref in paths},
                        {ref: directoryproofs[ref] for ref in paths})

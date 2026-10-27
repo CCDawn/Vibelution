@@ -55,6 +55,32 @@ def test_native_defaults_and_existing_only_snapshot_never_write_or_export_body(t
     assert result.snapshots[memory_ref][0].raw == memory.read_bytes()
 
 
+def test_source_snapshot_is_incomplete_when_available_candidates_conflict(tmp_path):
+    first = tmp_path / "first-memory"
+    second = tmp_path / "second-memory"
+    write(first / "one.jsonl")
+    write(second / "two.jsonl")
+    candidates = [
+        {"sourceRef": "mps-first", "category": "memory", "root": str(first),
+         "origins": ["operator_grant"], "status": "available", "issues": []},
+        {"sourceRef": "mps-second", "category": "memory", "root": str(second),
+         "origins": ["operator_grant"], "status": "available", "issues": []},
+    ]
+    paths = {row["sourceRef"]: Path(row["root"]) for row in candidates}
+    resolved = owner.SourcePaths(
+        {"sources": candidates, "categoryStatus": {"memory": "conflict"}, "issues": []},
+        paths,
+        {ref: owner._identity_chain(path) for ref, path in paths.items()},
+    )
+
+    result = owner.source_snapshot(resolved)
+
+    assert result.report["categoryStatus"]["memory"] == "conflict"
+    assert result.report["snapshotComplete"] is False
+    assert [row["status"] for row in result.report["sources"]] == ["available", "available"]
+    assert set(result.snapshots) == set(paths)
+
+
 def test_declared_and_legacy_workspace_preserve_candidates_and_conflicts(tmp_path):
     args = setup_source(tmp_path)
     write(args["workspace"] / "agents/pa/memory/default.jsonl")

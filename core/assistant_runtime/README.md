@@ -615,8 +615,7 @@ read before an exact source/category/root grant. `--path-grants <file>` accepts:
 
 `--source-import <PA> --target-profile <absolute-profile> --migration-id <id>`
 copies approved memory, private knowledge, personal-affairs and asset data to
-`history_sources/migrations`. It preserves sources only: plugin-ledger/KB
-activation and schema promotion remain pending. Generic plugins, inbox/outbox
+`history_sources/migrations`. This command preserves sources only. Generic plugins, inbox/outbox
 and runnable queues are never activated or copied as execution state. Missing,
 unapproved and conflicting paths remain explicit; partial preservation does
 not become `sourceComplete=true`.
@@ -629,6 +628,42 @@ are rechecked before publication. Imports reject aliases, links, physical
 source/target overlap, extra target files, hash conflicts and changed sources;
 stable migration IDs are idempotent. Publication rechecks the final archive
 before reporting success. No source is deleted or frozen.
+
+Offline personal-data adapters can import selected episodic memory and personal
+affairs into the target assistant's existing native ledgers, preserving source
+IDs and lifecycle states. They require a verified source registry and physical
+route, an explicit source snapshot and exclusive target host ownership. The
+native owner does not recover or admit Session turns during migration. An
+unconfirmed shutdown keeps the target locked; a failed directory close cannot
+be retried safely in the same process. Metadata-only receipts preserve stable
+migration identity and do not overwrite later edits on retry. The source is
+not frozen, separate ledger writes can yield a partial result, and reminders
+do not yet have a proven single owner. These adapters are not a cutover.
+
+The operator entry `--activate-personal <PA> --source-config <existing-source-config>
+--target-profile <existing-profile> --target-config <existing-config-inside-profile>
+--migration-id <stable-id>` uses a separate native-role child and the same source
+path grants as source import. The child has a private environment and refuses
+Python network operations and writes outside the selected target. This is not
+an OS sandbox. Check the structured `status`, not only the exit code: `partial`
+or `outcomeUnknown` requires reconciliation using the same migration ID and
+must not trigger automatic replay. Knowledge activation is a separate internal
+adapter and is not invoked by this entry.
+
+The separate private-knowledge adapter reuses native private KB ingestion for
+provable, directly reviewed revision-one items without expiry. Unsupported
+revision chains and future expiry are refused; withdrawn or expired items are
+not made active. It requires independently verified canonical source and owner
+records. Native ingestion is not atomic, so an uncertain result is retained as
+unknown rather than repeated. A trusted caller must supply the source authority;
+the model cannot invoke these operator adapters. Developer-mode private KB
+activation has not been established by the current native acceptance fixture.
+
+`--recovery-inventory <PA>` only inspects old workflow recovery bindings and
+temporary-grant evidence. Old bindings remain in their source; subsequent
+controls and approvals need fresh native authorization. Unresolved paths,
+legacy relationships or missing evidence cannot establish quiescence or make
+`readyForCutover` true. No old queue, grant or execution lease is transferred.
 
 ## Observation of in-flight legacy dispatches
 

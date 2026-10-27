@@ -20,6 +20,22 @@ _STOP_REQUESTED = threading.Event()
 _STARTED = False
 _SESSION_ID = ""
 _AGENT_ID = ""
+_OFFLINE_MIGRATION = False
+_OFFLINE_DIRECTORY_CLOSE_UNCONFIRMED = False
+
+
+def _close_offline_directory(runtime, *, timeout: float) -> None:
+    """A failed directory close cannot be retried after its owner is detached."""
+    global _OFFLINE_DIRECTORY_CLOSE_UNCONFIRMED
+    if _OFFLINE_DIRECTORY_CLOSE_UNCONFIRMED:
+        raise RuntimeError("offline_directory_close_unconfirmed")
+    try:
+        runtime.shutdown_session_directory_runtime(timeout=timeout)
+    except Exception:
+        _OFFLINE_DIRECTORY_CLOSE_UNCONFIRMED = True
+        raise
+
+
 _INITIAL_TOOLS = (
     "personal_assistant_action_tool", "personal_assistant_manage_tool",
     "personal_affairs_tool", "append_personal_memory_tool", "supersede_personal_memory_tool",
@@ -59,13 +75,24 @@ def _projection() -> dict[str, Any]:
 
 def bootstrap(root: Path | str) -> dict[str, Any]:
     """Open one fixed native directory and explicitly provision its singleton."""
-    global _STARTED, _SESSION_ID, _AGENT_ID
+    return _bootstrap(root, offline_migration=False)
+
+
+def bootstrap_for_offline_migration(root: Path | str) -> dict[str, Any]:
+    """Open the native owner without resuming or admitting Session work."""
+    return _bootstrap(root, offline_migration=True)
+
+
+def _bootstrap(root: Path | str, *, offline_migration: bool) -> dict[str, Any]:
+    global _STARTED, _SESSION_ID, _AGENT_ID, _OFFLINE_MIGRATION
     expected = assistant_native_root()
     requested = Path(root)
     if not requested.is_absolute() or requested.resolve() != expected:
         raise ValueError("native assistant root differs from the process identity")
     with _LOCK:
         if _STARTED:
+            if _OFFLINE_MIGRATION != offline_migration:
+                raise RuntimeError("native lifecycle mode differs from the active owner")
             return _projection()
         _STOP_REQUESTED.clear()
         directory, personal, sessions, runtime = _services()
@@ -133,21 +160,37 @@ def bootstrap(root: Path | str) -> dict[str, Any]:
             result = personal.create_personal_assistant()
             _SESSION_ID = result["assistant"]["directSessionId"]
             _AGENT_ID = result["assistant"]["agentId"]
+            _OFFLINE_MIGRATION = offline_migration
             _STARTED = True
-            from core.web.services.session.startup_recovery import (
-                recover_interrupted_session_turns_on_startup,
-            )
-
-            # This owner reads only the already-bound native root. Its operator
-            # switch, retry ledger, and queue drain remain the native authority.
-            recover_interrupted_session_turns_on_startup(should_stop=_STOP_REQUESTED.is_set)
+            if not offline_migration:
+                from core.web.services.session.startup_recovery import (
+                    recover_interrupted_session_turns_on_startup,
+                )
+                # Ordinary startup retains its native recovery and queue drain.
+                recover_interrupted_session_turns_on_startup(should_stop=_STOP_REQUESTED.is_set)
             return _projection()
         except BaseException:
-            _STARTED = False
             _SESSION_ID = ""
             _AGENT_ID = ""
-            sessions.shutdown_session_service(deadline=time.monotonic() + 5)
-            runtime.shutdown_session_directory_runtime(timeout=5)
+            if offline_migration:
+                # A failed bootstrap may still own executors or a directory
+                # store. Keep that ownership visible to the offline lock guard
+                # until cleanup has actually succeeded.
+                _STARTED = True
+                _OFFLINE_MIGRATION = True
+                try:
+                    closed = sessions.shutdown_session_service(deadline=time.monotonic() + 5).get("closed") is True
+                    if closed:
+                        _close_offline_directory(runtime, timeout=5)
+                        _STARTED = False
+                        _OFFLINE_MIGRATION = False
+                except Exception:
+                    pass
+            else:
+                _STARTED = False
+                _OFFLINE_MIGRATION = False
+                sessions.shutdown_session_service(deadline=time.monotonic() + 5)
+                runtime.shutdown_session_directory_runtime(timeout=5)
             raise
 
 
@@ -195,6 +238,8 @@ def _session_command(*, fixed_identity_only: bool = False):
             raise AssistantSessionError("ASSISTANT_STOPPING")
         if not _STARTED:
             raise AssistantSessionError("ASSISTANT_NOT_READY")
+        if _OFFLINE_MIGRATION:
+            raise AssistantSessionError("OFFLINE_MIGRATION_READ_ONLY")
         _, _, sessions, _ = _services()
         try:
             if fixed_identity_only:
@@ -321,7 +366,7 @@ def continue_turn(request_id: str, continuation: dict[str, Any]) -> dict[str, An
 
 def shutdown(*, timeout: float = 8.0) -> dict[str, Any]:
     """Stop owned native work and drain it before closing its directory store."""
-    global _STARTED, _SESSION_ID, _AGENT_ID
+    global _STARTED, _SESSION_ID, _AGENT_ID, _OFFLINE_MIGRATION
     deadline = time.monotonic() + max(0.0, timeout)
     _STOP_REQUESTED.set()
     remaining = max(0.0, deadline - time.monotonic())
@@ -329,21 +374,28 @@ def shutdown(*, timeout: float = 8.0) -> dict[str, Any]:
     if not admitted:
         return {"closed": False, "code": "NATIVE_SHUTDOWN_ADMISSION_BUSY"}
     try:
+        if _OFFLINE_MIGRATION and _OFFLINE_DIRECTORY_CLOSE_UNCONFIRMED:
+            raise RuntimeError("offline_directory_close_unconfirmed")
         if not _STARTED:
             return {"closed": True}
         _, _, sessions, runtime = _services()
         sessions.stop_session_service_admission()
-        try:
-            sessions.request_stop_session_turn(
-                _SESSION_ID, fast_ack=True, stop_reason="launcher_assistant_shutdown",
-            )
-        except sessions.SessionNotFoundError:
-            # A removed singleton must not strand this process's executors.
-            pass
+        if not _OFFLINE_MIGRATION:
+            try:
+                sessions.request_stop_session_turn(
+                    _SESSION_ID, fast_ack=True, stop_reason="launcher_assistant_shutdown",
+                )
+            except sessions.SessionNotFoundError:
+                # A removed singleton must not strand this process's executors.
+                pass
         result = sessions.shutdown_session_service(deadline=deadline)
         if result.get("closed"):
-            runtime.shutdown_session_directory_runtime(timeout=max(0.0, deadline - time.monotonic()))
+            if _OFFLINE_MIGRATION:
+                _close_offline_directory(runtime, timeout=max(0.0, deadline - time.monotonic()))
+            else:
+                runtime.shutdown_session_directory_runtime(timeout=max(0.0, deadline - time.monotonic()))
             _STARTED = False
+            _OFFLINE_MIGRATION = False
             _SESSION_ID = ""
             _AGENT_ID = ""
         return result

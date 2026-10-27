@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -60,10 +61,16 @@ def main() -> int:
     modes.add_argument("--source-paths", metavar="ASSISTANT_AGENT_ID")
     modes.add_argument("--source-import", metavar="ASSISTANT_AGENT_ID",
         help="Copy approved data to an immutable archive, never active plugin/queue state")
+    modes.add_argument("--activate-personal", metavar="ASSISTANT_AGENT_ID",
+        help="Offline import of explicit episodic/affairs snapshots into an isolated native profile")
+    modes.add_argument("--recovery-inventory", metavar="ASSISTANT_AGENT_ID",
+        help="Read-only disposition of old recovery bindings and temporary grants")
     modes.add_argument("--correlate-handoff", metavar="ASSISTANT_AGENT_ID")
     modes.add_argument("--observe-handoff", metavar="ASSISTANT_AGENT_ID",
         help="Provision a receipt-only whitelist using the target profile's existing native SDK")
     parser.add_argument("--target-profile", type=Path)
+    parser.add_argument("--target-config", type=Path,
+        help="Existing explicit operator config inside the selected activation profile")
     parser.add_argument("--migration-id")
     parser.add_argument("--path-grants", type=Path)
     parser.add_argument("--source-config", type=Path,
@@ -72,10 +79,15 @@ def main() -> int:
     parser.add_argument("--request-id")
     parser.add_argument("--message-id", action="append", default=[])
     args = parser.parse_args()
-    importing = args.history_import is not None or args.source_import is not None
+    activating = args.activate_personal is not None
+    importing = args.history_import is not None or args.source_import is not None or activating
     observing = args.observe_handoff is not None
     if importing and (args.target_profile is None or args.migration_id is None):
         parser.error("Import requires --target-profile and --migration-id together")
+    if activating and (args.target_config is None or args.source_config is None):
+        parser.error("Activation requires --source-config and an existing --target-config inside --target-profile")
+    if not activating and args.target_config is not None:
+        parser.error("Target config requires --activate-personal")
     if not importing and not observing and (args.target_profile is not None or args.migration_id is not None):
         parser.error("Target options require an explicit import mode")
     if observing and (args.target_profile is None or args.migration_id is not None
@@ -83,16 +95,27 @@ def main() -> int:
         parser.error("Observation requires --target-profile, --source-config, --registered-project-id, --request-id and --message-id")
     if not observing and (args.registered_project_id or args.request_id or args.message_id):
         parser.error("Observer options require --observe-handoff")
-    if args.path_grants is not None and args.source_paths is None and args.source_import is None:
+    if args.path_grants is not None and args.source_paths is None and args.source_import is None and not activating:
         parser.error("Path grants apply only to source-paths/source-import")
     try:
+        if activating:
+            from core.infrastructure.native_runtime import is_launcher_assistant_process
+            if is_launcher_assistant_process():
+                raise MigrationIOError("activation_requires_source_process")
         paths = resolve_active_project_storage_paths(args.project.resolve())
         kwargs = dict(project_root=paths.project_root, workspace=paths.data / "workspace",
             project_id=paths.project_id, instance_id=paths.instance_id)
         authority_snapshots, authority_verify, runtime_root = (), None, paths.runtime
         if args.source_config is not None:
             kwargs["workspace"], runtime_root, authority_snapshots, authority_verify = _existing_route(paths, args.source_config)
-        if observing:
+        if activating:
+            from scripts.assistant_migration_activate import activate_in_subprocess
+            report = activate_in_subprocess(paths=paths, workspace=kwargs["workspace"],
+                agent_id=args.activate_personal, source_config=args.source_config,
+                target_profile=args.target_profile, target_config=args.target_config,
+                migration_id=args.migration_id, path_grants=args.path_grants,
+                authority_snapshots=authority_snapshots, authority_verify=authority_verify)
+        elif observing:
             import anyio
             from core.assistant_runtime.dispatch import DispatchService
             from core.assistant_runtime.migration_history import _canonical_target
@@ -166,6 +189,21 @@ def main() -> int:
                 verify_snapshot(registry)
                 if grant is not None:
                     verify_snapshot(grant)
+        elif args.recovery_inventory is not None:
+            from core.assistant_runtime.migration_inventory import declared_assistant_identities
+            from core.assistant_runtime.migration_recovery_bindings import inventory_recovery_bindings, verify_recovery_inventory
+            registry = read_stable_file(kwargs["workspace"] / "agents/agents.json", 16 * 1024 * 1024)
+            raw = strict_json(registry.raw)
+            if not isinstance(raw, dict) or not any(
+                    row["agentId"] == args.recovery_inventory for row in declared_assistant_identities(raw.get("agents"))):
+                raise MigrationIOError("assistant_identity_unavailable")
+            row = next(row for row in raw["agents"] if row.get("agentId") == args.recovery_inventory)
+            inventory = inventory_recovery_bindings(workspace=kwargs["workspace"], agent_id=args.recovery_inventory,
+                project_id=kwargs["project_id"], instance_id=kwargs["instance_id"],
+                agent_row=row, project_root=kwargs["project_root"])
+            verify_recovery_inventory(inventory)
+            verify_snapshot(registry)
+            report = {"stage": "recovery_inventory", **inventory.report}
         elif args.handoff_preview is not None or args.correlate_handoff is not None:
             from core.assistant_runtime.legacy_handoff import preview_legacy_handoff
             report = preview_legacy_handoff(**kwargs, assistant_agent_id=args.handoff_preview or args.correlate_handoff)
@@ -175,9 +213,21 @@ def main() -> int:
         else:
             report = inventory_sources(**kwargs)
         if authority_verify is not None:
-            authority_verify()
+            if activating:
+                try:
+                    authority_verify()
+                except (MigrationIOError, OSError, ValueError):
+                    from scripts.assistant_migration_activate import mark_reconciliation
+                    mark_reconciliation(report, args.migration_id, "source_authority_changed")
+            else:
+                authority_verify()
     except MigrationIOError as error:
-        print(json.dumps({"ok": False, "code": "SOURCE_MIGRATION_UNAVAILABLE", "reason": str(error)}))
+        failure = {"ok": False, "code": "SOURCE_MIGRATION_UNAVAILABLE", "reason": str(error)}
+        if activating and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,95}", args.migration_id):
+            failure["migrationId"] = args.migration_id
+            if str(error) == "activation_outcome_unknown":
+                failure.update(outcomeUnknown=True, requiresReconciliation=True)
+        print(json.dumps(failure))
         return 1
     except TimeoutError:
         print(json.dumps({"ok": False, "code": "TARGET_PROFILE_BUSY"}))
