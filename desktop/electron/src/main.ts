@@ -605,14 +605,37 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
         launcherAssistantWindow = new AssistantWindow(paths, host, () => shutdownApproved, requestOpenLauncherFromAssistant);
         stopLauncherAssistantReminders = startAssistantReminderPump({
           host,
-          available: () => !shutdownApproved && Notification.isSupported(),
-          notify: (notice, onClick, onFailure) => {
-            const notification = new Notification({ title: notice.title, body: notice.body, silent: false });
-            notification.on("click", onClick);
-            notification.on("failed", onFailure);
-            nativeNotificationLifetime.retain(notification);
-            notification.show();
-          },
+          available: () => !shutdownApproved,
+          notify: (notice, onClick, onFailure, onFallback) => new Promise((resolve, reject) => {
+            let settled = false;
+            const timeout = setTimeout(() => {
+              if (!settled) { settled = true; reject(new Error("ASSISTANT_REMINDER_NOTIFICATION_UNKNOWN")); }
+            }, 10_000);
+            const fallback = () => {
+              if (settled) { onFailure(); return; }
+              settled = true;
+              clearTimeout(timeout);
+              console.warn("ASSISTANT_REMINDER_NOTIFICATION_FAILED");
+              onFallback();
+              try {
+                void dialog.showMessageBox({ type: "info", title: notice.title, message: notice.body || "已到期",
+                  buttons: ["打开助理", "稍后"], defaultId: 0, cancelId: 1, noLink: true })
+                  .then(result => { if (result.response === 0) onClick(); resolve("attention_fallback"); })
+                  .catch(() => reject(new Error("ASSISTANT_REMINDER_NOTIFICATION_FAILED")));
+              } catch { reject(new Error("ASSISTANT_REMINDER_NOTIFICATION_FAILED")); }
+            };
+            if (!Notification.isSupported()) { fallback(); return; }
+            try {
+              const notification = new Notification({ title: notice.title, body: notice.body, silent: false });
+              notification.on("click", onClick);
+              notification.on("failed", fallback);
+              notification.on("show", () => {
+                if (!settled) { settled = true; clearTimeout(timeout); resolve("system_notification"); }
+              });
+              nativeNotificationLifetime.retain(notification);
+              notification.show();
+            } catch { fallback(); }
+          }),
           openAssistant: () => { void launcherAssistantWindow?.open({ show: true }).catch(() => console.warn("ASSISTANT_WINDOW_FAILED")); },
           onError: reason => {
             console.warn(reason === "notification" ? "ASSISTANT_REMINDER_NOTIFICATION_FAILED" : "ASSISTANT_REMINDER_TRANSPORT_FAILED");

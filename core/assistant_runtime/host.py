@@ -352,7 +352,11 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, on_ready
 
     if on_shutdown is not None:
         @app.post("/api/assistant/shutdown")
-        def shutdown():
+        async def shutdown():
+            # Wake main-control long polls on their owning event loop before
+            # Uvicorn starts waiting for HTTP requests to drain.
+            if main_control is not None:
+                main_control.close()
             on_shutdown()
             return {"stopping": True}
 

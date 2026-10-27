@@ -9,9 +9,11 @@ import os
 import secrets
 import subprocess
 import sys
+import threading
 import time
 import types
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import httpx
@@ -122,7 +124,7 @@ def test_isolated_bootstrap_imports_existing_package_beyond_max_path(tmp_path):
     assert json.loads(result.stdout) == {"value": 17, "sameCount": True, "namespaced": True}
 
 
-def _start(home, *, runtime_name="runtime"):
+def _start(home, *, runtime_name="runtime", main_control=False):
     runtime = home / runtime_name
     runtime.mkdir(exist_ok=True)
     config = home / "config.toml"
@@ -132,6 +134,8 @@ def _start(home, *, runtime_name="runtime"):
     env = {key: value for key, value in os.environ.items() if not key.startswith("VIBELUTION_")}
     env.update(VIBELUTION_ASSISTANT_TOKEN=token, VIBELUTION_CONFIG_PATH=str(config),
                VIBELUTION_PROJECTS_HOME=str(home / "projects"), PYTHONDONTWRITEBYTECODE="1")
+    if main_control:
+        env["VIBELUTION_ASSISTANT_MAIN_CONTROL"] = "1"
     log = (runtime / "host.log").open("wb")
     process = subprocess.Popen([sys.executable, str(SOURCE / "scripts/assistant_host.py"),
         "--profile-root", str(home / "profile"), "--runtime-dir", str(runtime),
@@ -174,6 +178,45 @@ def _stop(child, client):
             process.terminate()
             process.wait(timeout=10)
         log.close()
+
+
+def test_shutdown_releases_main_control_long_polls_before_http_drain(tmp_path):
+    child = _start(tmp_path, main_control=True)
+    client, ready = _connect(child)
+    started = threading.Barrier(5)
+    origin = f"http://127.0.0.1:{ready['port']}"
+
+    def poll():
+        with httpx.Client(base_url=origin, headers={"Authorization": "Bearer " + child[3]},
+                          trust_env=False, timeout=12) as connection:
+            started.wait(timeout=5)
+            return connection.get("/api/assistant/main-control/next")
+
+    try:
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            polls = [pool.submit(poll) for _ in range(4)]
+            started.wait(timeout=5)
+            # The broker normally waits ten seconds; these requests must be
+            # outstanding when the private shutdown endpoint is invoked.
+            time.sleep(0.5)
+            assert all(not poll.done() for poll in polls)
+            before = time.monotonic()
+            assert client.post("/api/assistant/shutdown").json() == {"stopping": True}
+            assert [poll.result(timeout=5).json() for poll in polls] == [
+                {"schemaVersion": 1, "request": None}
+            ] * 4
+            assert time.monotonic() - before < 2
+            child[0].wait(timeout=15)
+            assert child[0].returncode == 0
+    finally:
+        client.close()
+        try:
+            child[0].wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            child[0].terminate()
+            child[0].wait(timeout=10)
+        child[1].close()
+    assert "timeout graceful shutdown exceeded" not in (child[2] / "host.log").read_text(encoding="utf-8")
 
 
 def test_real_host_locks_profile_and_reconnects_to_same_native_identity(tmp_path):

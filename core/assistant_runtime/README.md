@@ -692,6 +692,10 @@ notification click). The reservation token stays in Electron main. An existing
 not establish legacy takeover. A failed or uncertain attempt is not replayed;
 it can therefore remain undelivered. Daily ledgers retain receipts and fail
 closed at their capacity; automatic retention cleanup is not implemented.
+If the system notification fails, Electron presents one reminder dialog at a
+time. The fallback is recorded as submitted after the dialog is answered; only
+the "open assistant" choice records an interaction. Shutdown waits at most two
+seconds for an unanswered dialog and leaves its outcome unconfirmed.
 
 `reminder_receipts.ReminderReceiptStore` uses pinned Windows handles and SQLite transactions to
 reserve a stable event ID before a single submission. A prior pending or

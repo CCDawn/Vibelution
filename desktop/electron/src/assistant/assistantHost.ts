@@ -32,6 +32,7 @@ export type AssistantReminder = {
   id: string; kind: "affair_reminder"; severity: "high" | "medium";
   title: string; body: string; targetUrl: string; attemptToken: string;
 };
+export type AssistantReminderChannel = "system_notification" | "attention_fallback";
 
 export type AssistantHostOptions = {
   profileRoot: string;
@@ -155,15 +156,15 @@ export class AssistantHost {
     return event as AssistantReminder;
   }
 
-  async settleReminder(event: AssistantReminder, opened: boolean): Promise<void> {
+  async settleReminder(event: AssistantReminder, channel: AssistantReminderChannel, opened: boolean): Promise<void> {
     const generation = this.current;
     if (this.view.state !== "ready" || !generation || generation.closed || generation.abort.signal.aborted) throw new HostError("ASSISTANT_NOT_READY");
     const result = await this.rpc(generation, `/api/assistant/reminders/${opened ? "opened" : "submitted"}`, "POST",
-      { eventId: event.id, attemptToken: event.attemptToken, channel: "system_notification" }, REQUEST_MS, false, 8192);
+      { eventId: event.id, attemptToken: event.attemptToken, channel }, REQUEST_MS, false, 8192);
     if (!object(result) || !ownKeys(result, ["schemaVersion", "receipt"]) || result.schemaVersion !== 1
       || !object(result.receipt) || result.receipt.eventId !== event.id
       || result.receipt.state !== (opened ? "opened" : "submitted")
-      || result.receipt.channel !== "system_notification") throw new HostError("ASSISTANT_RESPONSE_INVALID");
+      || result.receipt.channel !== channel) throw new HostError("ASSISTANT_RESPONSE_INVALID");
   }
 
   /** Main-only; this operation is never admitted through renderer request(). */
