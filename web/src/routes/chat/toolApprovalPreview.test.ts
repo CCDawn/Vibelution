@@ -119,3 +119,10 @@ it("shows the verified previous assistant for a history import", () => {
   expect(preview).toContain("项目: fixture-project");
   expect(preview).toContain("旧助理: old-pa");
 });
+it("shows the verified previous assistant for an affairs sync", () => {
+  const preview = toolApprovalActionPreview({ assistantAction: "affairs_sync",
+    assistantTargets: { sourceProjectId: "fixture-project", instanceId: "fixture-instance", assistantAgentId: "old-pa" },
+    assistantOperationDescription: "同步所选旧助理的个人事务。" }, "personal_assistant_manage_tool", "zh");
+  expect(preview).toContain("同步旧助理事务");
+  expect(preview).toContain("旧助理: old-pa");
+});

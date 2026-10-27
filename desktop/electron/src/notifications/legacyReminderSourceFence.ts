@@ -11,6 +11,21 @@ export type LegacyReminderSourceBinding = {
   physicalIdentity: { device: string; inode: string };
 };
 
+type StopResult = {
+  boundCallsDrained: true;
+  preFenceIngressDrained: true;
+  ingressDrainedAtReturn: true;
+  unboundSourcesMayStillSend: true;
+  readyForCutover: false;
+};
+type FenceState = {
+  closing: Set<string>;
+  unconfirmed: Set<string>;
+  active: Map<string, Set<Promise<unknown>>>;
+  ingress: Set<Promise<void>>;
+  stopping: Map<string, Promise<StopResult>>;
+};
+
 function sourceKey(source: LegacyReminderSourceBinding): string {
   if (!source || typeof source.projectId !== "string" || !source.projectId.trim()
       || typeof source.instanceId !== "string" || !source.instanceId.trim()
@@ -37,15 +52,9 @@ function sourceKey(source: LegacyReminderSourceBinding): string {
  * executables, discover all sources, or prove a delivery watermark.
  */
 export class LegacyReminderSourceFence {
-  private static readonly states = new Map<string, {
-    closing: Set<string>; unconfirmed: Set<string>; active: Map<string, Set<Promise<unknown>>>;
-    stopping: Map<string, Promise<{ boundCallsDrained: true; readyForCutover: false }>>;
-  }>();
+  private static readonly states = new Map<string, FenceState>();
   private readonly store: AssistantProjectLifecycleRequestStore;
-  private readonly state: {
-    closing: Set<string>; unconfirmed: Set<string>; active: Map<string, Set<Promise<unknown>>>;
-    stopping: Map<string, Promise<{ boundCallsDrained: true; readyForCutover: false }>>;
-  };
+  private readonly state: FenceState;
 
   constructor(directory: string) {
     this.store = new AssistantProjectLifecycleRequestStore({ directory });
@@ -53,13 +62,26 @@ export class LegacyReminderSourceFence {
     const key = process.platform === "win32" ? physical.toLowerCase() : physical;
     let state = LegacyReminderSourceFence.states.get(key);
     if (!state) {
-      state = { closing: new Set(), unconfirmed: new Set(), active: new Map(), stopping: new Map() };
+      state = { closing: new Set(), unconfirmed: new Set(), active: new Map(), ingress: new Set(), stopping: new Map() };
       LegacyReminderSourceFence.states.set(key, state);
     }
     this.state = state;
   }
 
+  /** Enroll before any asynchronous source lookup; completion includes delivery. */
+  async trackIngress<T>(work: () => Promise<T>): Promise<T> {
+    let finish!: () => void;
+    const complete = new Promise<void>(resolve => { finish = resolve; });
+    this.state.ingress.add(complete);
+    try { return await work(); }
+    finally { this.state.ingress.delete(complete); finish(); }
+  }
+
   async submit<T>(source: LegacyReminderSourceBinding | null, send: () => Promise<T>): Promise<T | { delivered: "source_retired" }> {
+    return await this.trackIngress(() => this.submitEnrolled(source, send));
+  }
+
+  private async submitEnrolled<T>(source: LegacyReminderSourceBinding | null, send: () => Promise<T>): Promise<T | { delivered: "source_retired" }> {
     // Missing trusted binding preserves the old sender, and is never proof for
     // enabling a new sender. Only Electron main supplies this binding.
     if (source === null) return await send();
@@ -79,20 +101,26 @@ export class LegacyReminderSourceFence {
     finally { group.delete(pending); if (!group.size) this.state.active.delete(key); }
   }
 
-  async stop(source: LegacyReminderSourceBinding): Promise<{ boundCallsDrained: true; readyForCutover: false }> {
+  async stop(source: LegacyReminderSourceBinding): Promise<StopResult> {
     const key = sourceKey(source);
     const existing = this.state.stopping.get(key);
     if (existing) return await existing;
     // Synchronous admission close precedes both persistence and any wait.
     this.state.closing.add(key);
+    const preFenceIngress = [...this.state.ingress];
     if (this.state.unconfirmed.has(key)) throw new Error("LEGACY_REMINDER_FENCE_UNCONFIRMED");
     const operation = (async () => {
       try {
         await this.store.reserve({ requestId: key, projectId: "legacy-reminder-source", operation: "stop" });
         if (sourceKey(source) !== key) throw new Error("LEGACY_REMINDER_SOURCE_CHANGED");
+        await Promise.all(preFenceIngress);
         await Promise.allSettled([...(this.state.active.get(key) ?? [])]);
+        // Requests can arrive while the first barrier drains. Wait for every
+        // enrolled request currently outstanding, including unbound requests.
+        while (this.state.ingress.size) await Promise.all([...this.state.ingress]);
         if (sourceKey(source) !== key) throw new Error("LEGACY_REMINDER_SOURCE_CHANGED");
-        return { boundCallsDrained: true, readyForCutover: false } as const;
+        return { boundCallsDrained: true, preFenceIngressDrained: true, ingressDrainedAtReturn: true,
+          unboundSourcesMayStillSend: true, readyForCutover: false } as const;
       } catch (error) { this.state.unconfirmed.add(key); throw error; }
     })();
     this.state.stopping.set(key, operation);

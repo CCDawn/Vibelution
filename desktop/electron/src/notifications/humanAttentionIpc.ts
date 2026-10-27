@@ -36,12 +36,14 @@ export async function handleHumanAttentionIpc(
   const source = { instanceId, origin, documentToken: target.documentToken, target, allowAssistantWindow };
   if (legacyReminders && payload !== null && typeof payload === "object"
       && (payload as { kind?: unknown }).kind === "affair_reminder") {
-    const binding = await legacyReminders.resolveSource(event, source);
-    if (!target.isLive()) throw new Error("blocked human attention sender");
-    if (binding && binding.instanceId !== instanceId) throw new Error("LEGACY_REMINDER_SOURCE_INVALID");
-    return await legacyReminders.fence.submit(binding, () => {
+    return await legacyReminders.fence.trackIngress(async () => {
+      const binding = await legacyReminders.resolveSource(event, source);
       if (!target.isLive()) throw new Error("blocked human attention sender");
-      return notify(payload, source);
+      if (binding && binding.instanceId !== instanceId) throw new Error("LEGACY_REMINDER_SOURCE_INVALID");
+      return await legacyReminders.fence.submit(binding, () => {
+        if (!target.isLive()) throw new Error("blocked human attention sender");
+        return notify(payload, source);
+      });
     });
   }
   return await notify(payload, source);

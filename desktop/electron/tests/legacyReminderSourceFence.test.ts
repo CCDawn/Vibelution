@@ -38,7 +38,8 @@ describe("current-process legacy reminder source fence", () => {
     expect(drained).toBe(false);
     finish("submitted");
     expect(await admitted).toBe("submitted");
-    expect(await stop).toEqual({ boundCallsDrained: true, readyForCutover: false });
+    expect(await stop).toEqual({ boundCallsDrained: true, preFenceIngressDrained: true, ingressDrainedAtReturn: true,
+      unboundSourcesMayStillSend: true, readyForCutover: false });
     // Re-import with a new module state to simulate a process restart; the
     // result must come from the on-disk reservation, not the in-memory fence.
     vi.resetModules();
@@ -66,6 +67,24 @@ describe("current-process legacy reminder source fence", () => {
     await admitted;
     await stopped;
     expect(done).toBe(true);
+  });
+
+  it("drains an unbound submission that arrives while the barrier is waiting", async () => {
+    const { fence, source } = fixture();
+    let finishFirst!: () => void, finishLater!: () => void;
+    const first = fence.submit(null, () => new Promise<void>(resolve => { finishFirst = resolve; }));
+    await vi.waitFor(() => expect(finishFirst).toBeTypeOf("function"));
+    let stopped = false;
+    const stopping = fence.stop(source).then(result => { stopped = true; return result; });
+    const later = fence.submit(null, () => new Promise<void>(resolve => { finishLater = resolve; }));
+    await vi.waitFor(() => expect(finishLater).toBeTypeOf("function"));
+    finishFirst();
+    await first;
+    await Promise.resolve();
+    expect(stopped).toBe(false);
+    finishLater();
+    await later;
+    expect(await stopping).toMatchObject({ ingressDrainedAtReturn: true, unboundSourcesMayStillSend: true, readyForCutover: false });
   });
 
   it("keeps the physical instance fenced across registry ID changes", async () => {

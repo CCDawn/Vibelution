@@ -546,6 +546,47 @@ const fakeDesktopPaths: DesktopPaths = {
 };
 
 describe("human attention IPC sender boundary", () => {
+  it.each(["unbound", "bound"])("waits for a pre-fence %s source lookup and any admitted send", async mode => {
+    const root = mkdtempSync(join(tmpdir(), "legacy-reminder-barrier-"));
+    try {
+      const workbench = new FakeElectronWindow(1, "");
+      const provider = new ElectronWindowProvider(fakeDesktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000/", {
+        createWorkbenchWindow: () => workbench,
+      });
+      await provider.openOrFocusWorkbench();
+      const frame = { url: "http://127.0.0.1:8000/" };
+      const event = { sender: Object.assign(workbench.webContents, { mainFrame: frame }), senderFrame: frame } as unknown as IpcMainInvokeEvent;
+      const fence = new LegacyReminderSourceFence(join(root, "fence"));
+      const info = statSync(root, { bigint: true });
+      const binding = { projectId: "project", instanceId: "main", physicalRoot: root,
+        physicalIdentity: { device: info.dev.toString(), inode: info.ino.toString() } };
+      let finishLookup!: (value: typeof binding | null) => void;
+      let finishSend!: () => void;
+      const lookup = new Promise<typeof binding | null>(resolve => { finishLookup = resolve; });
+      const notify = vi.fn(() => new Promise<{ delivered: "system_notification" }>(resolve => {
+        finishSend = () => resolve({ delivered: "system_notification" });
+      }));
+      const request = handleHumanAttentionIpc(event, attention({ kind: "affair_reminder" }), provider,
+        ["http://127.0.0.1:8000"], notify, { fence, resolveSource: async () => lookup });
+      let stopped = false;
+      const stopping = fence.stop(binding).then(value => { stopped = true; return value; });
+      await Promise.resolve();
+      expect(stopped).toBe(false);
+      finishLookup(mode === "bound" ? binding : null);
+      if (mode === "unbound") {
+        await vi.waitFor(() => expect(notify).toHaveBeenCalledOnce());
+        expect(stopped).toBe(false);
+        finishSend();
+        expect(await request).toEqual({ delivered: "system_notification" });
+      } else {
+        expect(await request).toEqual({ delivered: "source_retired" });
+        expect(notify).not.toHaveBeenCalled();
+      }
+      expect(await stopping).toEqual({ boundCallsDrained: true, preFenceIngressDrained: true, ingressDrainedAtReturn: true,
+        unboundSourcesMayStillSend: true, readyForCutover: false });
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
   it("applies a real persisted source stop to affair reminders through the IPC handler", async () => {
     const root = mkdtempSync(join(tmpdir(), "legacy-reminder-ipc-"));
     try {

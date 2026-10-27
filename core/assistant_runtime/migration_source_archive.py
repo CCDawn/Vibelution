@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from contextlib import nullcontext
+from contextlib import ExitStack, nullcontext
 from pathlib import Path
 
 from .migration_history import _canonical_target, _confirmation_exists, _confirm_archive, _write_new
@@ -22,11 +22,18 @@ _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$")
 
 
 def import_source_snapshots(resolved, target_root: Path, migration_id: str, *, source_roots,
-                            authority_snapshots=(), authority_verify=None) -> dict:
+                            authority_snapshots=(), authority_verify=None, categories=None,
+                            write_guard=None) -> dict:
     if not isinstance(migration_id, str) or not _ID.fullmatch(migration_id):
         raise MigrationIOError("migration_id_invalid")
     if not callable(authority_verify):
         raise MigrationIOError("source_authority_required")
+    if write_guard is not None and not callable(write_guard):
+        raise MigrationIOError("source_write_guard_invalid")
+    guard = write_guard or nullcontext
+    if categories is not None and (not isinstance(categories, frozenset) or not categories
+                                   or not categories.issubset(_CATEGORIES)):
+        raise MigrationIOError("source_categories_invalid")
     target = validate_path(target_root)
     if not source_roots:
         raise MigrationIOError("source_scope_required")
@@ -38,7 +45,8 @@ def import_source_snapshots(resolved, target_root: Path, migration_id: str, *, s
     copies, entries = {}, []
     for row in resolved.report["sources"]:
         ref = row["sourceRef"]
-        if row["category"] not in _CATEGORIES or ref not in resolved.snapshots:
+        if (row["category"] not in _CATEGORIES or ref not in resolved.snapshots
+                or categories is not None and row["category"] not in categories):
             continue
         root = resolved.paths[ref]
         base = root if root.is_dir() else root.parent
@@ -52,7 +60,7 @@ def import_source_snapshots(resolved, target_root: Path, migration_id: str, *, s
         raise MigrationIOError("no_approved_data_sources")
     manifest = {"schemaVersion": 2, "migrationId": migration_id, "sourceScope": resolved.report["sourceScope"],
         "readOnly": True, "untrustedContent": True, "activePluginStateImported": False,
-        "sourceComplete": False, "snapshotCompleteAtScan": resolved.report.get("snapshotComplete") is True,
+        "sourceComplete": False, "snapshotCompleteAtScan": categories is None and resolved.report.get("snapshotComplete") is True,
         "entries": entries, "readyForCutover": False}
     encoded = json.dumps(manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
 
@@ -110,26 +118,35 @@ def import_source_snapshots(resolved, target_root: Path, migration_id: str, *, s
             verify_target(directory)
             verify_sources()
             if not _confirmation_exists(directory):
-                _confirm_archive(directory, nullcontext)
+                _confirm_archive(directory, guard)
 
     verify_sources()
-    with pinned_target_directory(target, create=True):
+    with ExitStack() as stack:
+        with guard():
+            stack.enter_context(pinned_target_directory(target, create=True))
         root = target / "history_sources/migrations"
-        with pinned_target_directory(root, create=True), migration_target_lock(root):
+        with guard():
+            stack.enter_context(pinned_target_directory(root, create=True))
+        with migration_target_lock(root):
             final, pending = root / migration_id, root / (".pending-" + migration_id)
             if final.exists():
                 confirm_final(final)
                 return {"published": True, "reused": True, "files": len(entries),
                         "sourceComplete": False, "snapshotCompleteAtScan": manifest["snapshotCompleteAtScan"],
                         "readyForCutover": False}
-            with pinned_target_directory(pending, create=True):
+            with ExitStack() as pending_stack:
+                with guard():
+                    pending_stack.enter_context(pinned_target_directory(pending, create=True))
                 for relative, raw in copies.items():
-                    _write_new(pending / relative, raw)
-                _write_new(pending / "manifest.json", encoded)
+                    with guard():
+                        _write_new(pending / relative, raw)
+                with guard():
+                    _write_new(pending / "manifest.json", encoded)
                 verify_target(pending)
                 verify_sources()
                 identity = path_identity(pending)
-            publish_directory(pending, final, identity)
+            with guard():
+                publish_directory(pending, final, identity)
             confirm_final(final)
     return {"published": True, "reused": False, "files": len(entries),
             "manifestSha256": hashlib.sha256(encoded).hexdigest(),

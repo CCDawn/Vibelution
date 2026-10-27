@@ -50,7 +50,7 @@ def storage_authority(project, source_config, projects_home=None):
     return active, (identity, marker), verify
 
 
-def _capture(project, workspace, scope, grant_path):
+def _capture(project, workspace, scope, grant_path, *, categories=None):
     from core.assistant_runtime.migration_inventory import declared_assistant_identities
     from core.assistant_runtime.migration_io import MigrationIOError, read_stable_file, strict_json
     from core.assistant_runtime.migration_paths import resolve_source_paths, source_snapshot
@@ -68,7 +68,8 @@ def _capture(project, workspace, scope, grant_path):
     captured = source_snapshot(resolve_source_paths(project_root=project, workspace=workspace,
         project_id=scope["projectId"], instance_id=scope["instanceId"], agent_row=row,
         memory_policy=policies.get(row.get("memoryPolicyId")),
-        grants=strict_json(grant.raw) if grant is not None else None))
+        grants=strict_json(grant.raw) if grant is not None else None, categories=categories),
+        categories=categories)
     return captured, (registry, grant) if grant is not None else (registry,)
 
 
@@ -134,9 +135,9 @@ def activate_in_subprocess(*, paths, workspace, agent_id, source_config, target_
     from core.infrastructure import developer_sandbox
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,95}", migration_id):
         raise MigrationIOError("migration_id_invalid")
-    if category not in {"personal", "knowledge", "affairs_conflicts"}:
+    if category not in {"personal", "knowledge", "affairs_conflicts", "affairs_sync"}:
         raise MigrationIOError("activation_category_invalid")
-    if category == "affairs_conflicts":
+    if category in {"affairs_conflicts", "affairs_sync"}:
         if (not isinstance(baseline_migration_id, str)
                 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,95}", baseline_migration_id)
                 or baseline_migration_id == migration_id):
@@ -151,7 +152,7 @@ def activate_in_subprocess(*, paths, workspace, agent_id, source_config, target_
         migration_episodic._parse_rows(_selected(captured, "episodic_memory").raw, agent_id)
         migration_affairs._parse_rows(_selected(captured, "personal_affairs").raw)
         knowledge_authorities = ()
-    elif category == "affairs_conflicts":
+    elif category in {"affairs_conflicts", "affairs_sync"}:
         migration_affairs._parse_rows(_selected(captured, "personal_affairs").raw)
         knowledge_authorities = ()
     else:
@@ -229,9 +230,10 @@ def mark_reconciliation(result, migration_id, reason):
     result.update(status="partial", migrationId=migration_id, requiresReconciliation=True,
                   sourceQuiesced=False, readyForCutover=False)
     result.setdefault("reason", reason)
-    if reason != "activation_outcome_unknown":
+    if reason in {"source_changed", "source_authority_changed", "source_routing_changed",
+                  "source_storage_route_changed", "source_project_identity_changed", "source_snapshot_changed"}:
         result["sourceValidation"] = "changed"
-    else:
+    elif reason in {"activation_outcome_unknown", "affairs_sync_outcome_unknown"}:
         result["outcomeUnknown"] = True
     return result
 
@@ -286,7 +288,7 @@ def _child():
             raise MigrationIOError("activation_proof_too_large")
         request = strict_json(raw)
         if (request.get("schemaVersion") != 1 or request["target"] != str(target)
-                or request.get("category") not in {"personal", "knowledge", "affairs_conflicts"}):
+                or request.get("category") not in {"personal", "knowledge", "affairs_conflicts", "affairs_sync"}):
             raise MigrationIOError("activation_request_invalid")
         _target(target, Path(request["config"]["path"]))
         _verify_file_proofs([request["config"]])
@@ -332,7 +334,7 @@ def _child():
                     result = activate_personal_snapshot(lease, captured, migration_id=request["migrationId"],
                         source_roots=(Path(request["project"]), Path(request["workspace"])),
                         authority_snapshots=authorities, authority_verify=verify_route)
-                elif request["category"] == "affairs_conflicts":
+                elif request["category"] in {"affairs_conflicts", "affairs_sync"}:
                     from core.assistant_runtime.migration_active import _selected, _verify_captured
                     from core.assistant_runtime.migration_affairs import _parse_rows
                     from core.assistant_runtime.migration_affairs_conflicts import prepare_affairs_conflicts
@@ -341,7 +343,8 @@ def _child():
                     _verify_captured(captured, authorities, verify_route)
                     archive = import_source_snapshots(captured, lease.root, request["migrationId"],
                         source_roots=(Path(request["project"]), Path(request["workspace"])),
-                        authority_snapshots=authorities, authority_verify=verify_route)
+                        authority_snapshots=authorities, authority_verify=verify_route,
+                        categories=frozenset({"personal_affairs"}) if request["category"] == "affairs_sync" else None)
                     conflicts = prepare_affairs_conflicts(lease,
                         baseline_migration_id=request.get("baselineMigrationId"),
                         snapshot_migration_id=request["migrationId"], sync_id=request["migrationId"],
@@ -349,6 +352,17 @@ def _child():
                     result = {"status": "complete", "archive": archive, "conflicts": conflicts,
                         "sourceScope": request["scope"], "sourceQuiesced": False, "readyForCutover": False}
                     _verify_captured(captured, authorities, verify_route)
+                    if request["category"] == "affairs_sync":
+                        from core.assistant_runtime.migration_affairs_sync import reconcile_affairs
+                        # The selected ledger stays pinned through the target
+                        # write, not merely checked before and after it.
+                        with pinned_source_files((_selected(captured, "personal_affairs"),)):
+                            _verify_captured(captured, authorities, verify_route)
+                            result["sync"] = reconcile_affairs(lease, sync_id=request["migrationId"],
+                                source_scope=request["scope"])
+                            if result["sync"]["conflictCount"]:
+                                result["status"] = "partial"
+                            _verify_captured(captured, authorities, verify_route)
                 else:
                     from core.assistant_runtime.migration_knowledge import import_private_knowledge
                     registry_root = Path(request["workspace"]) / "knowledge/sources/registry"

@@ -26,6 +26,7 @@ import {
 } from "./cli/desktopCli.js";
 import { IPC_CHANNELS } from "./ipc.js";
 import { AssistantHost } from "./assistant/assistantHost.js";
+import { unknownAffairsSyncResult } from "./assistant/mainControlTransport.js";
 import { startAssistantReminderPump } from "./assistant/reminderPump.js";
 import { AssistantProjectRegistryConnection } from "./assistant/projectRegistryConnection.js";
 import { createAssistantAppearanceMainControl } from "./assistant/appearanceMainControl.js";
@@ -616,6 +617,14 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
         if (!host || shutdownApproved) return Promise.resolve({ schemaVersion: 1, projectId: request.projectId,
           previewId: request.previewId, state: "rejected", code: "project_unavailable", readyForCutover: false });
         return projectConnection.withHistoryImport(request.projectId, revision => host.importHistory({
+          projectId: request.projectId, previewId: request.previewId, turnId: request.turnId, revision, signal,
+        }));
+      }
+      if (request.action === "affairs_sync") {
+        const host = launcherAssistantHost;
+        if (!host || shutdownApproved) return Promise.resolve({ ...unknownAffairsSyncResult(request),
+          state: "rejected", code: "project_unavailable" });
+        return projectConnection.withHistoryImport(request.projectId, revision => host.syncAffairs({
           projectId: request.projectId, previewId: request.previewId, turnId: request.turnId, revision, signal,
         }));
       }

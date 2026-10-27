@@ -20,7 +20,7 @@ def test_import_is_readable_through_closed_native_history_actions(tmp_path, monk
     hid = imported(tmp_path, monkeypatch)
     listing = actions.execute("history_list", {})
     assert listing["total"] == 1 and listing["nextOffset"] is None
-    assert listing["partial"] is False and listing["conflictCount"] == 0
+    assert listing["partial"] is False and listing["conflictCount"] == 0 and listing["unavailableArchiveCount"] == 0
     assert str(tmp_path) not in json.dumps(listing)
     result = actions.execute("history_read", {"history_id": hid})
     assert "PRIVATE_PROMPT" in result["text"]
@@ -37,12 +37,35 @@ def test_listing_discloses_conflicts_without_blocking_other_history(tmp_path, mo
     journal = workspace / "sessions/direct/turn_journal.jsonl"
     journal.write_bytes(journal.read_bytes().replace(b"answer", b"edited"))
     with monkeypatch.context() as patch:
+        # Recreate a legacy v2 import that predates both chain guards.
         patch.setattr(history, "_validate_history_extension", lambda *args, **kwargs: None)
+        patch.setattr(history, "_incremental_manifest", lambda root, manifest, copies, **kwargs: (manifest, copies))
         history.import_history(discover(workspace), target, "two")
     monkeypatch.setattr(actions, "assistant_native_root", lambda: target)
     result = actions.execute("history_list", {})
     assert result["partial"] is True and result["conflictCount"] == 1 and result["total"] == 1
     assert result["histories"][0]["sessionId"] == "other"
+    assert str(tmp_path) not in json.dumps(result) and "PRIVATE_PROMPT" not in json.dumps(result)
+
+
+def test_listing_reports_unavailable_v3_and_returns_independent_history(tmp_path, monkeypatch):
+    workspace = source(tmp_path)
+    other = source(tmp_path / "other")
+    target = tmp_path / "target"
+    history.import_history(discover(workspace), target, "one")
+    history.import_history(discover(other), target, "other")
+    from tests.test_assistant_migration_history import append_turn
+    append_turn(workspace, "direct")
+    history.import_history(discover(workspace), target, "two")
+    path = target / "history_archive/migrations/two/manifest.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    manifest["histories"][0]["base"] = None
+    path.write_bytes(history._encoded(manifest))
+    monkeypatch.setattr(actions, "assistant_native_root", lambda: target)
+    result = actions.execute("history_list", {})
+    assert result["partial"] and result["conflictCount"] == 1 and result["unavailableArchiveCount"] == 1
+    assert result["total"] == 1 and result["histories"][0]["sourceScope"]["projectId"] == "project-1"
+    assert "PRIVATE_PROMPT" in actions.execute("history_read", {"history_id": result["histories"][0]["historyId"]})["text"]
     assert str(tmp_path) not in json.dumps(result) and "PRIVATE_PROMPT" not in json.dumps(result)
 
 

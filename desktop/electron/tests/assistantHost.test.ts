@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AssistantHost, type AssistantHostRequest } from "../src/assistant/assistantHost.js";
+import { affairsSyncMigrationId } from "../src/assistant/mainControlTransport.js";
 import { applyDesktopLaunchSettingsToEnvironment } from "../src/launch/desktopLaunchSettings.js";
 import type { WorkbenchJobHandle, WorkbenchJobSpawnInput } from "../src/process/workbenchJob.js";
 
@@ -61,6 +62,82 @@ function fixture(options: { stale?: boolean; noReadyFirst?: boolean; graceful?: 
 }
 
 describe("AssistantHost", () => {
+  it("sends affairs sync through the current project revision and validates the response binding", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    const previewId = "a".repeat(64), migrationId = affairsSyncMigrationId("project", previewId);
+    fetchImpl.mockImplementationOnce(async (url, options) => {
+      expect(String(url)).toMatch(/\/api\/assistant\/affairs-sync$/);
+      const body = JSON.parse(String(options?.body));
+      expect(body).toEqual({ projectId: "project", previewId, turnId: "turn-1", revision: 0, operationId: expect.stringMatching(/^[a-f0-9]{32}$/) });
+      return Response.json({ schemaVersion: 1, projectId: "project", previewId, migrationId,
+        state: "partial", code: "unresolved", appliedCount: 1, conflictCount: 2, readyForCutover: false });
+    });
+    await expect(host.syncAffairs({ projectId: "project", previewId, turnId: "turn-1", revision: 0 }))
+      .resolves.toMatchObject({ migrationId, state: "partial", conflictCount: 2, readyForCutover: false });
+    await expect(host.syncAffairs({ projectId: "project", previewId, turnId: "turn-1", revision: 1 })).rejects.toThrow("ASSISTANT_NOT_READY");
+    await host.stop();
+  });
+  it("fences a cancelled in-flight affairs sync and never resends it", async () => {
+    const { host, fetchImpl, native } = fixture({ graceful: true });
+    await host.start();
+    let started = false, operationId = "";
+    fetchImpl.mockImplementationOnce(async (url, options) => {
+      expect(String(url)).toMatch(/\/affairs-sync$/);
+      operationId = JSON.parse(String(options?.body)).operationId; started = true;
+      return await new Promise<Response>((_resolve, reject) => options?.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true }));
+    }).mockImplementationOnce(async (url, options) => {
+      expect(String(url)).toMatch(/\/affairs-sync\/cancel$/);
+      expect(JSON.parse(String(options?.body))).toEqual({ operationId, previewId: "a".repeat(64) });
+      return Response.json({ schemaVersion: 1, operationId, cancelled: true });
+    });
+    const controller = new AbortController();
+    const pending = host.syncAffairs({ projectId: "project", previewId: "a".repeat(64), turnId: "turn-1", revision: 0, signal: controller.signal });
+    await vi.waitFor(() => expect(started).toBe(true)); controller.abort();
+    await expect(pending).resolves.toMatchObject({ state: "unknown", code: "unknown", readyForCutover: false });
+    expect(fetchImpl.mock.calls.filter(([url]) => String(url).endsWith("/affairs-sync"))).toHaveLength(1);
+    expect(native.close).not.toHaveBeenCalled();
+    await host.stop();
+  });
+  it("retires the host when an invalid affairs response cannot be fenced", async () => {
+    const { host, fetchImpl, native } = fixture({ graceful: true });
+    await host.start();
+    fetchImpl.mockResolvedValueOnce(Response.json({ schemaVersion: 1, state: "complete", readyForCutover: true }))
+      .mockRejectedValueOnce(new Error("cancel unavailable"));
+    await expect(host.syncAffairs({ projectId: "project", previewId: "a".repeat(64), turnId: "turn-1", revision: 0 }))
+      .resolves.toMatchObject({ state: "unknown", code: "unknown", readyForCutover: false });
+    expect(native.close).toHaveBeenCalled();
+  });
+  it("fences pre-cancelled affairs sync without invoking publication", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    fetchImpl.mockImplementationOnce(async (url, options) => {
+      expect(String(url)).toMatch(/\/affairs-sync\/cancel$/);
+      return Response.json({ schemaVersion: 1, operationId: JSON.parse(String(options?.body)).operationId, cancelled: true });
+    });
+    await expect(host.syncAffairs({ projectId: "project", previewId: "a".repeat(64), turnId: "turn-1", revision: 0, signal: AbortSignal.abort() }))
+      .resolves.toMatchObject({ state: "rejected", code: "cancelled", readyForCutover: false });
+    expect(fetchImpl.mock.calls.filter(([url]) => String(url).endsWith("/affairs-sync"))).toHaveLength(0);
+    await host.stop();
+  });
+  it("allows the backend up to ten seconds to drain a cancelled affairs sync", async () => {
+    const { host, fetchImpl, native } = fixture({ graceful: true });
+    await host.start();
+    vi.useFakeTimers();
+    fetchImpl.mockImplementationOnce(async (_url, options) => {
+      const operationId = JSON.parse(String(options?.body)).operationId;
+      return await new Promise<Response>((resolve, reject) => {
+        setTimeout(() => resolve(Response.json({ schemaVersion: 1, operationId, cancelled: true })), 10_000);
+        options?.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+      });
+    });
+    const pending = host.syncAffairs({ projectId: "project", previewId: "a".repeat(64), turnId: "turn-1", revision: 0, signal: AbortSignal.abort() });
+    await vi.advanceTimersByTimeAsync(10_000);
+    await expect(pending).resolves.toMatchObject({ state: "rejected", code: "cancelled" });
+    expect(native.close).not.toHaveBeenCalled();
+    vi.useRealTimers();
+    await host.stop();
+  });
   it("fences an aborted history import before returning unknown", async () => {
     const { host, fetchImpl, native } = fixture({ graceful: true });
     await host.start();

@@ -120,6 +120,40 @@ async def test_history_turn_stop_does_not_report_a_claimed_import_as_cancelled()
 
 
 @pytest.mark.anyio
+async def test_affairs_sync_requires_native_governance_and_preserves_unknown_receipt_id():
+    from core.assistant_runtime.main_control import affairs_migration_id
+    service = Dispatch()
+    owner = broker(service, claim_seconds=2)
+    bind_actions(service, asyncio.get_running_loop(), main_control=owner)
+    args = {"project_id": "p:main", "preview_id": "b" * 64}
+    runtime = {"agentId": "a", "sessionId": "s", "turnId": "turn-1"}
+    try:
+        assert (await asyncio.to_thread(execute_action, "affairs_sync", args, runtime=runtime))["status"] == "approval_required"
+        with pytest.raises(ValueError):
+            await asyncio.to_thread(execute_action, "affairs_sync", {**args, "approved": True}, runtime=runtime, governed=True)
+        task = asyncio.create_task(asyncio.to_thread(execute_action, "affairs_sync", args, runtime=runtime, governed=True))
+        wire = (await owner.claim())["request"]
+        assert wire["action"] == "affairs_sync" and wire["turnId"] == "turn-1"
+        owner.cancel_history_imports("turn-1")
+        result = await task
+        assert result["state"] == "unknown" and not result["readyForCutover"]
+        assert result["migrationId"] == affairs_migration_id("p:main", args["preview_id"])
+        assert not owner.settle(wire["deliveryId"], result)
+        task = asyncio.create_task(asyncio.to_thread(execute_action, "affairs_sync", args, runtime=runtime, governed=True))
+        wire = (await owner.claim())["request"]
+        completed = {**result, "state": "complete", "code": "synchronized", "appliedCount": 1, "conflictCount": 0}
+        with pytest.raises(ValueError):
+            owner.settle(wire["deliveryId"], {**completed, "conflictCount": True})
+        with pytest.raises(ValueError):
+            owner.settle(wire["deliveryId"], {**completed, "path": "C:/forged"})
+        assert owner.settle(wire["deliveryId"], completed)
+        assert await task == completed
+    finally:
+        owner.close()
+        unbind_actions(service)
+
+
+@pytest.mark.anyio
 async def test_existing_native_manage_tool_is_the_only_approval_elevation(monkeypatch):
     from core.infrastructure import native_runtime
     from tools import personal_assistant_tools

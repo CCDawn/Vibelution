@@ -5,7 +5,7 @@ import { isAbsolute, join, resolve } from "node:path";
 import { loadWorkbenchJobNative, type WorkbenchJobHandle, type WorkbenchJobNative } from "../process/workbenchJob.js";
 import { resolveNoConsolePython } from "../process/workbenchBackend.js";
 import { MAX_ASSISTANT_PROJECTS, type AssistantProjectRegistrySnapshot } from "./projectRegistry.js";
-import { runMainControlPump, type MainControlRequest } from "./mainControlTransport.js";
+import { parseAffairsSyncResult, runMainControlPump, unknownAffairsSyncResult, type MainControlRequest } from "./mainControlTransport.js";
 
 const STARTUP_MS = 60_000;
 const REQUEST_MS = 15_000;
@@ -504,6 +504,41 @@ export class AssistantHost {
         // Never release the main registry lease while an unfenced writer lives.
         await this.stop();
       }
+      return unknown;
+    }
+  }
+
+  /** Main-only; caller holds the project registry lease through cancellation and drain. */
+  async syncAffairs(input: { projectId: string; previewId: string; turnId: string; revision: number; signal?: AbortSignal }): Promise<unknown> {
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(input.projectId)
+      || !/^[a-f0-9]{64}$/.test(input.previewId) || typeof input.turnId !== "string"
+      || !/^\S{1,160}$/.test(input.turnId) || !Number.isSafeInteger(input.revision) || input.revision < 0) {
+      throw new HostError("ASSISTANT_REQUEST_INVALID");
+    }
+    const generation = this.current;
+    if (!generation || generation.closed || generation.abort.signal.aborted || this.view.state !== "ready"
+      || this.projectsSuspended || generation.projectRevision !== input.revision) throw new HostError("ASSISTANT_NOT_READY");
+    const operationId = randomBytes(16).toString("hex");
+    const body = { projectId: input.projectId, previewId: input.previewId, turnId: input.turnId, revision: input.revision, operationId };
+    const unknown = unknownAffairsSyncResult(input);
+    const fence = async () => {
+      const result = await this.rpc(generation, "/api/assistant/affairs-sync/cancel", "POST",
+        { operationId, previewId: input.previewId }, 15_000, true, 8192);
+      if (!object(result) || Object.keys(result).length !== 3 || result.schemaVersion !== 1
+        || result.operationId !== operationId || result.cancelled !== true) throw new HostError("ASSISTANT_RESPONSE_INVALID");
+    };
+    if (input.signal?.aborted) {
+      try { await fence(); return { ...unknown, state: "rejected", code: "cancelled" }; }
+      catch { await this.stop(); return unknown; }
+    }
+    try {
+      const result = await this.rpc(generation, "/api/assistant/affairs-sync", "POST", body, 120_000, false, 8192, input.signal);
+      const parsed = parseAffairsSyncResult(input, result);
+      if (!parsed) throw new HostError("ASSISTANT_RESPONSE_INVALID");
+      return parsed;
+    } catch {
+      try { await fence(); }
+      catch { await this.stop(); }
       return unknown;
     }
   }

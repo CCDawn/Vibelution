@@ -1137,7 +1137,8 @@ def _argument_summary(tool_name: str, tool_args: Mapping[str, Any]) -> dict[str,
 
 def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
     """Approval-only projection; never expose nested prompt/policy values."""
-    if args.get("action") == "history_import":
+    action = args.get("action")
+    if isinstance(action, str) and action in {"history_import", "affairs_sync"}:
         from core.infrastructure.native_runtime import is_launcher_assistant_process
         if not is_launcher_assistant_process():
             return {"assistantArgumentsInvalid": True}
@@ -1148,10 +1149,11 @@ def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
                 raise ValueError("invalid history import parameters")
             from core.assistant_runtime.actions import history_import_approval_summary
             target = history_import_approval_summary(values["project_id"], values["preview_id"])
-            return {"assistantAction": "history_import", "assistantTargets": target,
-                    "assistantOperationDescription": "只读导入所选旧助理的历史会话和附件；不会恢复旧任务或退役旧助理。"}
+            return {"assistantAction": action, "assistantTargets": target,
+                    "assistantOperationDescription": ("只读导入所选旧助理的历史会话和附件；不会恢复旧任务或退役旧助理。"
+                        if action == "history_import" else "同步所选旧助理的个人事务，保留未决冲突；不会冻结旧来源或退役旧助理。")}
         except (ValueError, TypeError, KeyError, RuntimeError, RecursionError):
-            return {"assistantAction": "history_import", "assistantArgumentsInvalid": True}
+            return {"assistantAction": action, "assistantArgumentsInvalid": True}
     actions = {
         "agent_create", "agent_update", "agent_archive", "session_create",
         "session_update", "session_stop", "session_delete", "knowledge_acl_grant",

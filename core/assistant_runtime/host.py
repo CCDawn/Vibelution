@@ -398,6 +398,8 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
         async def suspend_project_registry(payload: SuspendProjects, request: Request):
             if request.query_params:
                 raise HTTPException(422, detail="Invalid private project suspension")
+            if history_control is not None:
+                history_control.signal_registry_change()
             with history_control.guard() if history_control is not None else nullcontext():
                 if history_control is not None:
                     history_control.registry_changed()
@@ -409,6 +411,8 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
             try:
                 # One event loop owns this immutable view and all native calls.
                 # No background thread may race an admission with this update.
+                if history_control is not None:
+                    history_control.signal_registry_change()
                 with history_control.guard() if history_control is not None else nullcontext():
                     if history_control is not None:
                         history_control.registry_changed()
@@ -417,6 +421,23 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                 raise HTTPException(409, detail={"code": exc.code}) from None
 
     if history_control is not None:
+        @app.post("/api/assistant/affairs-sync")
+        async def affairs_sync(payload: HistoryImport, request: Request):
+            if request.query_params:
+                raise HTTPException(422, detail="Invalid affairs sync request")
+            result = await asyncio.to_thread(history_control.sync_affairs, payload.projectId,
+                payload.previewId, payload.revision, payload.turnId, payload.operationId)
+            return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+        @app.post("/api/assistant/affairs-sync/cancel")
+        async def affairs_sync_cancel(payload: CancelHistoryImport, request: Request):
+            if request.query_params:
+                raise HTTPException(422, detail="Invalid affairs sync cancellation")
+            try:
+                return await asyncio.to_thread(history_control.cancel_affairs, payload.operationId, payload.previewId)
+            except Exception:
+                raise HTTPException(503, detail="Affairs sync cancellation unavailable") from None
+
         @app.post("/api/assistant/history-import")
         async def history_import(payload: HistoryImport, request: Request):
             if request.query_params:

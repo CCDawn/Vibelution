@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
 import { parseMainControlClaim, projectMainControlResult, runMainControlPump, type MainControlRequest } from "../src/assistant/mainControlTransport.js";
 
 const wire = (overrides: object = {}) => ({ schemaVersion: 1, request: {
@@ -8,6 +9,50 @@ const request = wire().request as MainControlRequest;
 const result = { schemaVersion: 1 as const, projectId: request.projectId, operation: "start", requestId: "request-1", state: "completed", code: "accepted", accepted: true };
 
 describe("generation-scoped main control transport", () => {
+  it("binds affairs sync to the exact request and projects only closed results", () => {
+    const row = { deliveryId: "a".repeat(32), action: "affairs_sync", projectId: "synthetic:uuid",
+      previewId: "b".repeat(64), turnId: "turn-1", timeoutMs: 10000 };
+    const parsed = parseMainControlClaim({ schemaVersion: 1, request: row })!;
+    expect(parsed).toEqual(row);
+    for (const changed of [{ path: "C:/private" }, { timeoutMs: 120001 }, { previewId: "a" }, { turnId: "file:///private" }])
+      expect(() => parseMainControlClaim({ schemaVersion: 1, request: { ...row, ...changed } })).toThrow();
+    const migrationId = "affairs-" + createHash("sha256").update(`${row.projectId}:${row.previewId}`).digest("hex").slice(0, 40);
+    const base = { schemaVersion: 1, projectId: row.projectId, previewId: row.previewId, migrationId, readyForCutover: false };
+    const complete = { ...base, state: "complete", code: "synchronized", appliedCount: 2, conflictCount: 0 };
+    const partial = { ...base, state: "partial", code: "unresolved", appliedCount: 1, conflictCount: 2 };
+    const rejected = { ...base, state: "rejected", code: "cancelled" };
+    const unknown = { ...base, state: "unknown", code: "unknown" };
+    for (const value of [complete, partial, rejected, unknown]) expect(projectMainControlResult(parsed, value)).toEqual(value);
+    for (const code of ["unresolved", "pending", "baseline_unavailable"])
+      expect(projectMainControlResult(parsed, { ...rejected, code })).toEqual({ ...rejected, code });
+    for (const value of [{ ...complete, migrationId: "affairs-" + "0".repeat(40) }, { ...complete, projectId: "other" },
+      { ...complete, previewId: "c".repeat(64) }, { ...complete, readyForCutover: true }, { ...complete, conflictCount: 1 },
+      { ...partial, conflictCount: 0 }, { ...partial, appliedCount: true }, { ...partial, conflictCount: -1 },
+      { ...complete, appliedCount: 4097 }, { ...partial, conflictCount: 4097 },
+      { ...rejected, appliedCount: 0 }, { ...complete, detail: "secret" }, { ...complete, code: "unresolved" }])
+      expect(projectMainControlResult(parsed, value)).toEqual(unknown);
+    const accessor = { ...complete }; Object.defineProperty(accessor, "appliedCount", { enumerable: true, get: () => 2 });
+    expect(projectMainControlResult(parsed, accessor)).toEqual(unknown);
+  });
+  it("applies the deadline to affairs sync and never replays an unknown result", async () => {
+    const controller = new AbortController();
+    const row = { deliveryId: "a".repeat(32), action: "affairs_sync", projectId: "synthetic:uuid",
+      previewId: "b".repeat(64), turnId: "turn-1", timeoutMs: 10 };
+    let claimed = false;
+    const invoke = vi.fn(async (path: string) => {
+      if (path.endsWith("/settle")) { controller.abort(); return { schemaVersion: 1, accepted: true }; }
+      if (!claimed) { claimed = true; return { schemaVersion: 1, request: row }; }
+      return await new Promise((_resolve, reject) => controller.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true }));
+    });
+    const onRequest = vi.fn(async (_request: MainControlRequest, signal?: AbortSignal) => {
+      await new Promise<void>(resolve => signal!.addEventListener("abort", () => resolve(), { once: true }));
+      throw new Error("unknown");
+    });
+    await runMainControlPump({ signal: controller.signal, invoke, onRequest, isCurrent: () => !controller.signal.aborted, onFailure: vi.fn() });
+    expect(onRequest).toHaveBeenCalledTimes(1);
+    const settled = invoke.mock.calls.find(([path]) => path.endsWith("/settle"));
+    expect(settled).toBeDefined();
+  });
   it("keeps history imports bound to the native turn and a closed result", () => {
     const history = { deliveryId: "a".repeat(32), action: "history_import", projectId: "synthetic:uuid",
       previewId: "b".repeat(64), turnId: "turn-1", timeoutMs: 10000 };

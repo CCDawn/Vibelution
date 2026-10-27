@@ -27,3 +27,7 @@ def test_only_live_assistant_turn_can_read_its_archived_differences(tmp_path, mo
         actions.execute("affairs_conflict_list", {"sync_id": "migration-1"}, {**runtime, "agentId": "other"})
     with pytest.raises(ValueError):
         actions.execute("affairs_conflict_list", {"sync_id": "migration-1", "path": "C:/private"}, runtime)
+    receipt = actions.execute("affairs_sync_receipt", {"sync_id": "affairs-" + "a" * 40}, runtime)
+    assert receipt["state"] == "unknown" and not receipt["readyForCutover"]
+    with pytest.raises(ValueError):
+        actions.execute("affairs_sync_receipt", {"sync_id": "C:/private"}, runtime)

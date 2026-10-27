@@ -99,6 +99,8 @@ def main() -> int:
         help="Offline import of proven private formal knowledge into a native profile")
     modes.add_argument("--prepare-affairs-conflicts", metavar="ASSISTANT_AGENT_ID",
         help="Offline archive a verified source snapshot and preserve ambiguous affairs changes")
+    modes.add_argument("--sync-affairs", metavar="ASSISTANT_AGENT_ID",
+        help="Offline reconcile non-conflicting changes from a verified affairs snapshot")
     modes.add_argument("--recovery-inventory", metavar="ASSISTANT_AGENT_ID",
         help="Read-only disposition of old recovery bindings and temporary grants")
     modes.add_argument("--correlate-handoff", metavar="ASSISTANT_AGENT_ID")
@@ -116,13 +118,15 @@ def main() -> int:
     parser.add_argument("--request-id")
     parser.add_argument("--message-id", action="append", default=[])
     args = parser.parse_args()
-    activating = args.activate_personal is not None or args.activate_knowledge is not None or args.prepare_affairs_conflicts is not None
+    activating = (args.activate_personal is not None or args.activate_knowledge is not None
+                  or args.prepare_affairs_conflicts is not None or args.sync_affairs is not None)
     importing = args.history_import is not None or args.source_import is not None or activating
     observing = args.observe_handoff is not None
     if importing and (args.target_profile is None or args.migration_id is None):
         parser.error("Import requires --target-profile and --migration-id together")
-    if (args.prepare_affairs_conflicts is None) != (args.baseline_migration_id is None):
-        parser.error("--baseline-migration-id is required only with --prepare-affairs-conflicts")
+    if ((args.prepare_affairs_conflicts is None and args.sync_affairs is None)
+            != (args.baseline_migration_id is None)):
+        parser.error("--baseline-migration-id is required only with affairs preparation or sync")
     if args.source_import is not None and args.source_config is None:
         parser.error("Source import requires --source-config")
     if activating and (args.target_config is None or args.source_config is None):
@@ -169,11 +173,11 @@ def main() -> int:
         if activating:
             from scripts.assistant_migration_activate import activate_in_subprocess
             report = activate_in_subprocess(paths=paths, workspace=kwargs["workspace"],
-                agent_id=args.activate_personal or args.activate_knowledge or args.prepare_affairs_conflicts, source_config=args.source_config,
+                agent_id=args.activate_personal or args.activate_knowledge or args.prepare_affairs_conflicts or args.sync_affairs, source_config=args.source_config,
                 target_profile=args.target_profile, target_config=args.target_config,
                 migration_id=args.migration_id, path_grants=args.path_grants,
                 authority_snapshots=authority_snapshots, authority_verify=authority_verify,
-                category=("knowledge" if args.activate_knowledge is not None else
+                category=("knowledge" if args.activate_knowledge is not None else "affairs_sync" if args.sync_affairs is not None else
                           "affairs_conflicts" if args.prepare_affairs_conflicts is not None else "personal"),
                 baseline_migration_id=args.baseline_migration_id)
         elif observing:

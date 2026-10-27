@@ -8,6 +8,7 @@ All methods belong to the host event loop, including settle and close.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import math
 import re
 import secrets
@@ -18,7 +19,7 @@ from . import appearance_protocol as appearance
 
 
 _OPERATIONS = {"start", "stop", "restart"}
-_ACTIONS = {"project_status", "project_lifecycle", "project_lifecycle_receipt", "history_import"}
+_ACTIONS = {"project_status", "project_lifecycle", "project_lifecycle_receipt", "history_import", "affairs_sync"}
 _STATUS_STATES = {"stopped", "starting", "running", "stopping", "failed", "unknown"}
 _WRITE_STATES = {"completed", "queued", "rejected", "unknown", "not_found"}
 _FACADE_CODES = {
@@ -41,12 +42,16 @@ def _opaque(value, maximum):
             and re.match(r"(?:https?|file|data|javascript|mailto|ftp|wss?):", value, re.I) is None)
 
 
+def affairs_migration_id(project_id, preview_id):
+    return "affairs-" + hashlib.sha256((project_id + ":" + preview_id).encode("utf-8")).hexdigest()[:40]
+
+
 def _request(action, request):
     if type(action) is str and action in appearance.APPEARANCE_ACTIONS:
         return appearance.validate_request(action, request)
     if type(action) is not str or action not in _ACTIONS or type(request) is not dict:
         raise ValueError("Invalid main control request")
-    if action == "history_import":
+    if action in {"history_import", "affairs_sync"}:
         if (set(request) != {"projectId", "previewId", "turnId"}
                 or not _opaque(request.get("projectId"), 160)
                 or type(request.get("previewId")) is not str
@@ -68,6 +73,27 @@ def _result(action, request, result):
     """Reject unknown fields rather than copying errors, paths or credentials."""
     if action in appearance.APPEARANCE_ACTIONS:
         return appearance.validate_result(action, request, result)
+    if action == "affairs_sync":
+        required = {"schemaVersion", "projectId", "previewId", "migrationId", "state", "code", "readyForCutover"}
+        counts = {"appliedCount", "conflictCount"}
+        has_counts = (type(result) is dict and type(result.get("state")) is str
+                      and result["state"] in {"complete", "partial"})
+        if (type(result) is not dict or set(result) != required | (counts if has_counts else set())
+                or type(result.get("schemaVersion")) is not int or result["schemaVersion"] != 1
+                or result.get("projectId") != request["projectId"] or result.get("previewId") != request["previewId"]
+                or result.get("migrationId") != affairs_migration_id(request["projectId"], request["previewId"])
+                or result.get("readyForCutover") is not False
+                or type(result.get("state")) is not str or type(result.get("code")) is not str
+                or (result.get("state"), result.get("code")) not in {
+                    ("complete", "synchronized"), ("partial", "unresolved"),
+                    ("rejected", "preview_invalid"), ("rejected", "project_unavailable"),
+                    ("rejected", "cancelled"), ("rejected", "busy"),
+                    ("rejected", "unresolved"), ("rejected", "pending"),
+                    ("rejected", "baseline_unavailable"), ("unknown", "unknown")}
+                or has_counts and (any(type(result.get(key)) is not int or not 0 <= result[key] <= 4096 for key in counts)
+                    or (result["conflictCount"] == 0) != (result["state"] == "complete"))):
+            raise ValueError("Invalid affairs sync result")
+        return dict(result)
     if action == "history_import":
         required = {"schemaVersion", "projectId", "previewId", "state", "code", "readyForCutover"}
         if (type(result) is not dict or not required <= result.keys() or result.keys() - required - {"historyCount"}
@@ -157,6 +183,10 @@ class MainControlBroker:
     def _unavailable(entry, code="control_unavailable"):
         if entry.action in appearance.APPEARANCE_ACTIONS:
             return appearance.unavailable(entry.action, entry.request)
+        if entry.action == "affairs_sync":
+            return {"schemaVersion": 1, "projectId": entry.request["projectId"], "previewId": entry.request["previewId"],
+                    "migrationId": affairs_migration_id(entry.request["projectId"], entry.request["previewId"]),
+                    "state": "unknown", "code": "unknown", "readyForCutover": False}
         if entry.action == "history_import":
             return {"schemaVersion": 1, "projectId": entry.request["projectId"], "previewId": entry.request["previewId"],
                     "state": "unknown", "code": "unknown", "readyForCutover": False}
@@ -190,7 +220,7 @@ class MainControlBroker:
         captured = _request(action, request)
         if turn_id is not None and not _opaque(turn_id, 160):
             raise ValueError("Invalid appearance turn identity")
-        if action == "history_import" and turn_id != captured["turnId"]:
+        if action in {"history_import", "affairs_sync"} and turn_id != captured["turnId"]:
             raise ValueError("Invalid history turn identity")
         if action in appearance.APPEARANCE_ACTIONS:
             if not self.appearance_enabled:
@@ -198,7 +228,7 @@ class MainControlBroker:
         elif not self._authorized(captured["projectId"]):
             raise ValueError("Project is not authorized by Launcher")
         loop = asyncio.get_running_loop()
-        timeout = self._image_timeout if action == "operator_image_upload" else 120 if action == "history_import" else self._timeout
+        timeout = self._image_timeout if action == "operator_image_upload" else 120 if action in {"history_import", "affairs_sync"} else self._timeout
         entry = _Delivery(action, captured, loop.time() + timeout, loop.create_future(), turn_id=turn_id)
         self._expire()
         if self._closed.is_set():
@@ -243,7 +273,7 @@ class MainControlBroker:
             entry = self._pending.get(delivery_id)
             if entry is not None:
                 entry.claimed = True
-                remaining = {"timeoutMs": max(1, math.floor((entry.deadline - loop.time()) * 1000))} if entry.action in {"operator_image_upload", "history_import"} else {}
+                remaining = {"timeoutMs": max(1, math.floor((entry.deadline - loop.time()) * 1000))} if entry.action in {"operator_image_upload", "history_import", "affairs_sync"} else {}
                 return {"schemaVersion": 1, "request": {"deliveryId": delivery_id, "action": entry.action, **entry.request, **remaining}}
         return empty
 
@@ -259,7 +289,7 @@ class MainControlBroker:
     def cancel_history_imports(self, turn_id: str) -> None:
         """Retire this Turn's waiters after the host has fenced publication."""
         for key, entry in list(self._pending.items()):
-            if entry.action == "history_import" and entry.turn_id == turn_id:
+            if entry.action in {"history_import", "affairs_sync"} and entry.turn_id == turn_id:
                 self._pending.pop(key)
                 if not entry.future.done():
                     value = self._unavailable(entry)

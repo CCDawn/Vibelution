@@ -253,6 +253,221 @@ def test_reimport_append_keeps_old_archive_and_selects_proven_extension(tmp_path
     assert all((target / p).read_bytes() == data for p, data in old.items())
 
 
+def test_incremental_multi_round_history_does_not_recopy_large_base(tmp_path):
+    workspace = source(tmp_path)
+    assets = workspace / "sessions/direct/artifacts"
+    assets.mkdir(parents=True)
+    (assets / "large").write_bytes(b"x" * (8 * 1024 * 1024))
+    target = tmp_path / "target"
+    history.import_history(discover(workspace), target, "one")
+    path = workspace / "sessions/direct/turn_journal.jsonl"
+    for turn in range(2, 5):
+        with path.open("a", encoding="utf-8") as stream:
+            for offset, kind in ((0, "turn_started"), (1, "turn_completed")):
+                sequence = 5 + 2 * (turn - 2) + offset
+                stream.write(json.dumps(dict(eventId=f"e-{sequence}", sessionId="direct",
+                    turnId=f"turn-{turn}", sequence=sequence, eventType=kind, payload={})) + "\n")
+        history.import_history(discover(workspace), target, f"round-{turn}")
+    row, = history.list_history(target)
+    assert row["watermark"]["eventCount"] == 10
+    assert len(history.history_detail(target, row["historyId"])["events"]) == 10
+    total = sum(p.stat().st_size for p in target.rglob("*") if p.is_file())
+    assert total < 9 * 1024 * 1024
+
+
+def test_incremental_large_source_multiple_rounds_fit_physical_budget(tmp_path):
+    workspace = source(tmp_path)
+    assets = workspace / "sessions/direct/artifacts"
+    assets.mkdir(parents=True)
+    body = b"x" * (7 * 1024 * 1024)
+    for index in range(12):
+        (assets / str(index)).write_bytes(body)
+    target = tmp_path / "target"
+    history.import_history(discover(workspace), target, "one")
+    append_turn(workspace, "direct")
+    history.import_history(discover(workspace), target, "two")
+    history.import_history(discover(workspace), target, "three")
+    row, = history.list_history(target)
+    assert history.history_detail(target, row["historyId"])["watermark"]["eventCount"] == 6
+    assert sum(path.stat().st_size for path in target.rglob("*") if path.is_file()) < 85 * 1024 * 1024
+
+
+@pytest.mark.parametrize("damage", ["missing_parent", "self_reference", "wrong_history", "wrong_hash", "unconfirmed_parent", "delta", "delta_rehashed", "base_null"])
+def test_incremental_reference_or_payload_damage_is_rejected(tmp_path, damage):
+    workspace = source(tmp_path)
+    target = tmp_path / "target"
+    history.import_history(discover(workspace), target, "one")
+    append_turn(workspace, "direct")
+    history.import_history(discover(workspace), target, "two")
+    root = target / "history_archive/migrations"
+    path = root / "two/manifest.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    assert manifest["schemaVersion"] == 3
+    row = manifest["histories"][0]
+    if damage == "missing_parent":
+        row["base"]["migrationId"] = "missing"
+    elif damage == "self_reference":
+        row["base"]["migrationId"] = "two"
+    elif damage == "wrong_history":
+        row["base"]["historyId"] = "a" * 64
+    elif damage == "wrong_hash":
+        row["base"]["journalSha256"] = "a" * 64
+    elif damage == "unconfirmed_parent":
+        (root / "one/.confirmed").rmdir()
+    elif damage == "base_null":
+        row["base"] = None
+    elif damage == "delta":
+        (root / "two" / row["delta"]["path"]).write_bytes(b"damaged")
+    else:
+        delta_path = root / "two" / row["delta"]["path"]
+        data = delta_path.read_bytes().replace(b"turn_completed", b"turn_cancelled")
+        assert data != delta_path.read_bytes()
+        delta_path.write_bytes(data)
+        row["delta"]["size"] = len(data)
+        row["delta"]["sha256"] = history.hashlib.sha256(data).hexdigest()
+    path.write_bytes(history._encoded(manifest))
+    with pytest.raises(history.MigrationIOError):
+        history._load_archive(root / "two")
+    old, _ = history._load_archive(root / "one")
+    assert old["histories"][0]["watermark"]["eventCount"] == 4
+
+
+def test_incremental_rejects_changed_inherited_asset_metadata(tmp_path):
+    workspace = source(tmp_path)
+    asset = workspace / "sessions/direct/artifacts/a"
+    asset.parent.mkdir(parents=True)
+    asset.write_bytes(b"asset")
+    target = tmp_path / "target"
+    history.import_history(discover(workspace), target, "one")
+    append_turn(workspace, "direct")
+    history.import_history(discover(workspace), target, "two")
+    root = target / "history_archive/migrations"
+    path = root / "two/manifest.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    manifest["histories"][0]["assets"][0]["sha256"] = "a" * 64
+    path.write_bytes(history._encoded(manifest))
+    with pytest.raises(history.MigrationIOError, match="history_archive_reference_invalid"):
+        history._load_archive(root / "two")
+    assert history._load_archive(root / "one")[0]["histories"][0]["assets"][0]["size"] == 5
+
+
+def test_incremental_retry_keeps_frozen_parent_after_other_import(tmp_path, monkeypatch):
+    workspace = source(tmp_path)
+    target = tmp_path / "target"
+    history.import_history(discover(workspace), target, "one")
+    append_turn(workspace, "direct")
+    found = discover(workspace)
+    publish = history.publish_directory
+    def interrupt(pending, final, identity):
+        if final.name == ".confirmed" and final.parent.name == "two":
+            raise InterruptedError("before confirmation")
+        return publish(pending, final, identity)
+    monkeypatch.setattr(history, "publish_directory", interrupt)
+    with pytest.raises((InterruptedError, history.MigrationIOError)):
+        history.import_history(found, target, "two")
+    root = target / "history_archive/migrations"
+    saved = json.loads((root / "two/manifest.json").read_text(encoding="utf-8"))
+    assert saved["histories"][0]["base"]["migrationId"] == "one"
+    monkeypatch.setattr(history, "publish_directory", publish)
+    history.import_history(found, target, "three")
+    assert history.import_history(found, target, "two")["idempotent"]
+    assert json.loads((root / "two/manifest.json").read_text(encoding="utf-8")) == saved
+    assert history.list_history(target)[0]["watermark"]["eventCount"] == 6
+
+
+def test_incremental_chain_depth_limit_rebases_on_verified_ancestor(tmp_path, monkeypatch):
+    workspace = source(tmp_path)
+    target = tmp_path / "target"
+    monkeypatch.setattr(history, "_HISTORY_CHAIN_CAP", 1)
+    history.import_history(discover(workspace), target, "one")
+    append_turn(workspace, "direct")
+    history.import_history(discover(workspace), target, "two")
+    path = workspace / "sessions/direct/turn_journal.jsonl"
+    with path.open("a", encoding="utf-8") as stream:
+        for sequence, kind in ((7, "turn_started"), (8, "turn_completed")):
+            stream.write(json.dumps(dict(eventId=f"third-{sequence}", sessionId="direct",
+                turnId="turn-3", sequence=sequence, eventType=kind, payload={})) + "\n")
+    history.import_history(discover(workspace), target, "three")
+    manifest = json.loads((target / "history_archive/migrations/three/manifest.json").read_text(encoding="utf-8"))
+    assert manifest["histories"][0]["base"]["migrationId"] == "one"
+    assert history.list_history(target)[0]["watermark"]["eventCount"] == 8
+
+
+def test_many_real_appends_continue_after_repeated_rebasing(tmp_path, monkeypatch):
+    workspace = source(tmp_path)
+    target = tmp_path / "target"
+    monkeypatch.setattr(history, "_HISTORY_CHAIN_CAP", 2)
+    history.import_history(discover(workspace), target, "one")
+    path = workspace / "sessions/direct/turn_journal.jsonl"
+    for turn in range(2, 9):
+        with path.open("a", encoding="utf-8") as stream:
+            for offset, kind in ((0, "turn_started"), (1, "turn_completed")):
+                sequence = 5 + 2 * (turn - 2) + offset
+                stream.write(json.dumps(dict(eventId=f"multi-{sequence}", sessionId="direct",
+                    turnId=f"multi-turn-{turn}", sequence=sequence, eventType=kind, payload={})) + "\n")
+        history.import_history(discover(workspace), target, f"round-{turn}")
+    row, = history.list_history(target)
+    assert row["watermark"]["eventCount"] == 18
+    assert len(history.history_detail(target, row["historyId"])["events"]) == 18
+
+
+def test_identical_import_reuses_existing_archive_without_growing_chain(tmp_path):
+    workspace = source(tmp_path)
+    target = tmp_path / "target"
+    history.import_history(discover(workspace), target, "one")
+    append_turn(workspace, "direct")
+    found = discover(workspace)
+    history.import_history(found, target, "two")
+    for i in range(35):
+        result = history.import_history(found, target, f"repeat-{i}")
+        assert result["idempotent"] and result["migrationId"] == "two"
+    root = target / "history_archive/migrations"
+    assert sorted(p.name for p in root.iterdir() if p.is_dir()) == ["one", "two"]
+
+
+def test_equal_v1_and_v2_prefer_confirmed_parent(tmp_path, monkeypatch):
+    workspace = source(tmp_path)
+    target = tmp_path / "target"
+    found = discover(workspace)
+    history.import_history(found, target, "one")
+    with monkeypatch.context() as patch:
+        patch.setattr(history, "_unchanged_archive", lambda *args: None)
+        patch.setattr(history, "_incremental_manifest", lambda root, manifest, copies, **kwargs: (manifest, copies))
+        history.import_history(found, target, "two")
+    first = target / "history_archive/migrations/one"
+    (first / ".confirmed").rmdir()
+    manifest_path = first / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["schemaVersion"] = 1
+    manifest_path.write_bytes(history._encoded(manifest))
+    append_turn(workspace, "direct")
+    history.import_history(discover(workspace), target, "three")
+    result = json.loads((target / "history_archive/migrations/three/manifest.json").read_text(encoding="utf-8"))
+    assert result["schemaVersion"] == 3 and result["histories"][0]["base"]["migrationId"] == "two"
+
+
+def test_parent_files_are_pinned_through_confirmation(tmp_path, monkeypatch):
+    import os
+    if os.name != "nt":
+        pytest.skip("archive writes require Windows verified directory leases")
+    workspace = source(tmp_path)
+    target = tmp_path / "target"
+    history.import_history(discover(workspace), target, "one")
+    append_turn(workspace, "direct")
+    parent = next((target / "history_archive/migrations/one").rglob("turn_journal.jsonl"))
+    publish = history.publish_directory
+    attempts = []
+    def probe(pending, final, identity):
+        if final.name == ".confirmed" and final.parent.name == "two":
+            with pytest.raises(OSError):
+                parent.write_bytes(b"tampered")
+            attempts.append(True)
+        return publish(pending, final, identity)
+    monkeypatch.setattr(history, "publish_directory", probe)
+    history.import_history(discover(workspace), target, "two")
+    assert attempts and history.list_history(target)[0]["watermark"]["eventCount"] == 6
+
+
 @pytest.mark.parametrize("change", ["rewrite", "truncate", "attachment_changed", "attachment_removed", "same_journal_new_asset"])
 def test_reimport_rejects_non_append_or_changed_attachments_without_hiding_prior(tmp_path, change):
     workspace = source(tmp_path)
@@ -292,6 +507,7 @@ def test_existing_divergent_versions_are_isolated_to_their_history(tmp_path, mon
     path.write_bytes(path.read_bytes().replace(b"answer", b"edited"))
     # Reproduce archives published by the old importer before this guard.
     monkeypatch.setattr(history, "_validate_history_extension", lambda *args, **kwargs: None)
+    monkeypatch.setattr(history, "_incremental_manifest", lambda root, manifest, copies, **kwargs: (manifest, copies))
     history.import_history(discover(workspace), target, "two")
     assert [row["sessionId"] for row in history.list_history(target)] == ["other"]
     assert history.history_detail(target, ids["other"])["sessionId"] == "other"
@@ -306,8 +522,8 @@ def test_proven_chain_selection_does_not_depend_on_archive_iteration_order(tmp_p
     append_turn(workspace, "direct")
     history.import_history(discover(workspace), target, "two")
     original = history._archives
-    def reversed_archives(root, *, budget):
-        yield from reversed(list(original(root, budget=budget)))
+    def reversed_archives(root, *, budget, **kwargs):
+        yield from reversed(list(original(root, budget=budget, **kwargs)))
     monkeypatch.setattr(history, "_archives", reversed_archives)
     row, = history.list_history(target)
     assert row["migrationId"] == "two"
@@ -323,7 +539,9 @@ def test_newest_common_extension_does_not_hide_incomparable_older_versions(tmp_p
     history.import_history(discover(workspace), target, "one")
     hid = history.list_history(target)[0]["historyId"]
     validate = history._validate_history_extension
+    incremental = history._incremental_manifest
     monkeypatch.setattr(history, "_validate_history_extension", lambda *args, **kwargs: None)
+    monkeypatch.setattr(history, "_incremental_manifest", lambda root, manifest, copies, **kwargs: (manifest, copies))
     append_turn(workspace, "direct")
     (assets / "x").unlink()
     (assets / "y").write_bytes(b"y")
@@ -335,12 +553,14 @@ def test_newest_common_extension_does_not_hide_incomparable_older_versions(tmp_p
             stream.write(json.dumps(dict(eventId=f"third-{sequence}", sessionId="direct",
                 turnId="turn-3", sequence=sequence, eventType=kind, payload={})) + "\n")
     monkeypatch.setattr(history, "_validate_history_extension", validate)
+    monkeypatch.setattr(history, "_incremental_manifest", incremental)
     with pytest.raises(history.MigrationIOError, match="history_archive_identity_conflict"):
         history.import_history(discover(workspace), target, "three")
     monkeypatch.setattr(history, "_validate_history_extension", lambda *args, **kwargs: None)
+    monkeypatch.setattr(history, "_incremental_manifest", lambda root, manifest, copies, **kwargs: (manifest, copies))
     history.import_history(discover(workspace), target, "three")
     original = history._archives
-    monkeypatch.setattr(history, "_archives", lambda root, *, budget: reversed(list(original(root, budget=budget))))
+    monkeypatch.setattr(history, "_archives", lambda root, *, budget, **kwargs: reversed(list(original(root, budget=budget, **kwargs))))
     assert history.list_history(target) == []
     with pytest.raises(history.MigrationIOError, match="history_archive_identity_conflict"):
         history.history_detail(target, hid)
@@ -643,7 +863,8 @@ def test_archive_read_budgets_are_shared_before_reading_next_archive(tmp_path, m
     archive = target / "history_archive/migrations/one"
     manifest_size = (archive / "manifest.json").stat().st_size
     single_bytes = sum(p.stat().st_size for p in archive.rglob("*") if p.is_file()) + 2 * manifest_size
-    history.import_history(found, target, "two")
+    append_turn(workspace, "direct")
+    history.import_history(discover(workspace), target, "two")
     kwargs = {"bytes": {"max_total_bytes": single_bytes + 10},
               "files": {"max_files": 10}, "rows": {"max_history_rows": 1},
               "archives": {"max_archives": 1}}[limit]
@@ -671,7 +892,8 @@ def test_archive_iterator_does_not_eagerly_read_later_archives(tmp_path, monkeyp
     target = tmp_path / "target"
     found = discover(workspace)
     history.import_history(found, target, "one")
-    history.import_history(found, target, "two")
+    append_turn(workspace, "direct")
+    history.import_history(discover(workspace), target, "two")
     loaded = []
     original = history._load_archive
     def observed(path, **kwargs):

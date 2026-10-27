@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { isAppearanceAction, parseAppearanceClaim, appearanceControlResult, type AppearanceMainControlRequest } from "./appearanceControlProtocol.js";
 /** Closed, generation-scoped transport over the existing private host connection.
  * It has no credentials, paths, scheduler, transcript or business-state writer.
@@ -8,7 +9,8 @@ export type ProjectMainControlRequest = {
 } & ({ action: "project_status"; operation: "status"; requestId?: never }
   | { action: "project_lifecycle" | "project_lifecycle_receipt"; operation: "start" | "stop" | "restart"; requestId: string });
 export type HistoryMainControlRequest = { deliveryId: string; action: "history_import"; projectId: string; previewId: string; turnId: string; timeoutMs: number };
-export type MainControlRequest = ProjectMainControlRequest | AppearanceMainControlRequest | HistoryMainControlRequest;
+export type AffairsSyncMainControlRequest = Omit<HistoryMainControlRequest, "action"> & { action: "affairs_sync" };
+export type MainControlRequest = ProjectMainControlRequest | AppearanceMainControlRequest | HistoryMainControlRequest | AffairsSyncMainControlRequest;
 type PublicResult = Record<string, unknown>;
 const ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/;
 const forbiddenScheme = /^(?:https?|file|data|javascript|mailto|ftp|wss?):/i;
@@ -28,12 +30,12 @@ export function parseMainControlClaim(value: unknown): MainControlRequest | null
   if (value.request === null) return null;
   const row = value.request;
   if (row && typeof row === "object" && isAppearanceAction(Object.getOwnPropertyDescriptor(row,"action")?.value)) return parseAppearanceClaim(row);
-  if (row && typeof row === "object" && Object.getOwnPropertyDescriptor(row, "action")?.value === "history_import") {
+  if (row && typeof row === "object" && ["history_import", "affairs_sync"].includes(Object.getOwnPropertyDescriptor(row, "action")?.value)) {
     if (!closed(row, ["deliveryId", "action", "projectId", "previewId", "turnId", "timeoutMs"])
       || typeof row.deliveryId !== "string" || !/^[a-f0-9]{32}$/.test(row.deliveryId) || !opaque(row.projectId, 160)
       || typeof row.previewId !== "string" || !/^[a-f0-9]{64}$/.test(row.previewId) || !opaque(row.turnId, 160)
       || typeof row.timeoutMs !== "number" || !Number.isSafeInteger(row.timeoutMs) || row.timeoutMs < 1 || row.timeoutMs > 120000) return invalid();
-    return { deliveryId: row.deliveryId, action: "history_import", projectId: row.projectId,
+    return { deliveryId: row.deliveryId, action: row.action as "history_import" | "affairs_sync", projectId: row.projectId,
       previewId: row.previewId, turnId: row.turnId, timeoutMs: row.timeoutMs };
   }
   if (!closed(row, ["deliveryId", "action", "projectId", "operation"], ["requestId"])
@@ -52,9 +54,30 @@ const CODES = new Set([
   "request_failed", "request_unbound", "receipt_unavailable", "request_not_found", "control_unavailable", "control_busy",
 ]);
 const STATES = new Set(["completed", "queued", "rejected", "unknown", "not_found"]);
+export function affairsSyncMigrationId(projectId: string, previewId: string): string {
+  return `affairs-${createHash("sha256").update(`${projectId}:${previewId}`).digest("hex").slice(0, 40)}`;
+}
+export function unknownAffairsSyncResult(input: { projectId: string; previewId: string }): PublicResult {
+  return { schemaVersion: 1, projectId: input.projectId, previewId: input.previewId,
+    migrationId: affairsSyncMigrationId(input.projectId, input.previewId), state: "unknown", code: "unknown", readyForCutover: false };
+}
+export function parseAffairsSyncResult(input: { projectId: string; previewId: string }, value: unknown): PublicResult | null {
+  if (!closed(value, ["schemaVersion", "projectId", "previewId", "migrationId", "state", "code", "readyForCutover"], ["appliedCount", "conflictCount"])
+    || value.schemaVersion !== 1 || value.projectId !== input.projectId || value.previewId !== input.previewId
+    || value.migrationId !== affairsSyncMigrationId(input.projectId, input.previewId) || value.readyForCutover !== false
+    || typeof value.state !== "string" || typeof value.code !== "string"
+    || !["complete:synchronized", "partial:unresolved", "rejected:preview_invalid", "rejected:project_unavailable", "rejected:cancelled", "rejected:busy", "rejected:unresolved", "rejected:pending", "rejected:baseline_unavailable", "unknown:unknown"].includes(`${value.state}:${value.code}`)) return null;
+  if (value.state === "complete" || value.state === "partial") {
+    if (typeof value.appliedCount !== "number" || !Number.isSafeInteger(value.appliedCount) || value.appliedCount < 0 || value.appliedCount > 4096
+      || typeof value.conflictCount !== "number" || !Number.isSafeInteger(value.conflictCount) || value.conflictCount < 0 || value.conflictCount > 4096
+      || (value.state === "complete" ? value.conflictCount !== 0 : value.conflictCount === 0)) return null;
+  } else if (Object.hasOwn(value, "appliedCount") || Object.hasOwn(value, "conflictCount")) return null;
+  return { ...value };
+}
 /** Fail closed rather than relay arbitrary errors, native rows, paths or messages. */
 export function projectMainControlResult(request: MainControlRequest, value: unknown): PublicResult {
   if (request.action === "launcher_theme_get" || request.action === "launcher_theme_set" || request.action === "operator_image_upload") return appearanceControlResult(request,value);
+  if (request.action === "affairs_sync") return parseAffairsSyncResult(request, value) ?? unknownAffairsSyncResult(request);
   if (request.action === "history_import") {
     const unavailable = () => ({ schemaVersion: 1, projectId: request.projectId, previewId: request.previewId,
       state: "unknown", code: "unknown", readyForCutover: false });
@@ -117,7 +140,7 @@ export async function runMainControlPump(options: {
         try {
           let value: unknown;
           try {
-            if (request.action === "operator_image_upload" || request.action === "history_import") value = await options.onRequest(request, AbortSignal.any([options.signal,AbortSignal.timeout(request.timeoutMs)]));
+            if (request.action === "operator_image_upload" || request.action === "history_import" || request.action === "affairs_sync") value = await options.onRequest(request, AbortSignal.any([options.signal,AbortSignal.timeout(request.timeoutMs)]));
             else if (request.action === "launcher_theme_get" || request.action === "launcher_theme_set") value = await options.onRequest(request,options.signal);
             else value = await options.onRequest(request);
           }

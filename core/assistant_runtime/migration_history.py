@@ -10,7 +10,7 @@ import json
 import os
 import re
 import tempfile
-from contextlib import ExitStack, nullcontext
+from contextlib import ExitStack, contextmanager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -33,6 +33,7 @@ _ROW_CAP = 100000
 _ARCHIVE_BYTES_CAP = _TOTAL_CAP + 3 * _FILE_CAP
 _ARCHIVE_FILES_CAP = 20000
 _ARCHIVE_COUNT_CAP = 1000
+_HISTORY_CHAIN_CAP = 32
 
 
 def _token(value):
@@ -84,6 +85,12 @@ class _ArchiveBudget:
                 (self.archives_left, _ARCHIVE_COUNT_CAP)):
             if type(value) is not int or not 1 <= value <= ceiling:
                 raise MigrationIOError("history_archive_limit")
+        # Per-operation only: cached bytes have already been charged to this
+        # budget, including when a later version references the same parent.
+        self.archive_cache = {}
+        self.resolving = set()
+        self.quarantined_archives = 0
+        self.history_charged = set()
 
     def reserve(self, field, amount=1):
         if amount > getattr(self, field):
@@ -476,6 +483,132 @@ def _write_new(path, raw):
             raise MigrationIOError("history_copy_mismatch")
 
 
+def _parent_chain(root, row, mid, snapshot, budget):
+    chain = [(row, mid, snapshot)]
+    while row.get("base") is not None:
+        mid = row["base"]["migrationId"]
+        loaded = budget.archive_cache.get(mid)
+        if loaded is None:
+            loaded = _load_physical_archive(root / mid, budget=budget, visible_only=True)
+        if loaded is None:
+            raise MigrationIOError("history_archive_reference_invalid")
+        parent_manifest, physical = loaded
+        matches = [item for item in parent_manifest["histories"] if item["historyId"] == row["historyId"]]
+        if len(matches) != 1:
+            raise MigrationIOError("history_archive_reference_invalid")
+        row = matches[0]
+        snapshot = (_LazyJournal(root, parent_manifest, row, physical, budget)
+                    if parent_manifest["schemaVersion"] == 3 and "base" in row
+                    else physical[row["journal"]["path"]])
+        chain.append((row, mid, snapshot))
+        if len(chain) > _HISTORY_CHAIN_CAP + 1:
+            raise MigrationIOError("history_archive_reference_invalid")
+    return chain
+
+
+def _incremental_manifest(root, manifest, copies, *, saved=None):
+    """Freeze each parent while the publish lock is held."""
+    source = dict(copies)
+    selection_budget = _ArchiveBudget()
+    selected, conflicts = _select_history_versions(root.parent.parent, selection_budget, retain_raw=False)
+    saved_rows = {row["historyId"]: row for row in saved["histories"]} if saved else {}
+    rows, physical, used_parent = [], [], False
+    for original in manifest["histories"]:
+        hid = original["historyId"]
+        if hid in conflicts:
+            raise MigrationIOError("history_archive_identity_conflict")
+        saved_row = saved_rows.get(hid)
+        binding = saved_row.get("base") if saved_row else None
+        if saved is not None and saved_row is None:
+            raise MigrationIOError("history_migration_id_conflict")
+        previous = selected.get(hid) if saved is None else None
+        if previous is not None:
+            chain = _parent_chain(root, *previous, selection_budget)
+            if len(chain) - 1 >= _HISTORY_CHAIN_CAP:
+                # Rebase onto a verified ancestor, preserving all archives.
+                previous = chain[max(1, len(chain) // 2)]
+            previous = (previous[0], previous[1], previous[2].raw)
+        if binding is not None:
+            if not isinstance(binding, dict) or not _token(binding.get("migrationId")):
+                raise MigrationIOError("history_archive_reference_invalid")
+            parent_dir = root / binding["migrationId"]
+            if not _confirmation_exists(parent_dir):
+                raise MigrationIOError("history_archive_reference_invalid")
+            loaded = _load_archive(parent_dir, visible_only=True)
+            if loaded is None or loaded[0]["schemaVersion"] not in (2, 3):
+                raise MigrationIOError("history_archive_reference_invalid")
+            parent_rows = [row for row in loaded[0]["histories"] if row["historyId"] == hid]
+            if len(parent_rows) != 1:
+                raise MigrationIOError("history_archive_reference_invalid")
+            parent = parent_rows[0]
+            previous = (parent, binding["migrationId"], loaded[1][parent["journal"]["path"]].raw)
+        if saved is not None and binding is None:
+            previous = None
+        parent_manifest = selection_budget.archive_cache.get(previous[1], (None,))[0] if previous else None
+        if (previous is not None and parent_manifest is not None
+                and parent_manifest["schemaVersion"] in (2, 3)
+                and _confirmation_exists(root / previous[1])):
+            old, mid, old_raw = previous
+            raw = source[original["journal"]["path"]].raw
+            if not _extends_history(old, old_raw, original, raw):
+                raise MigrationIOError("history_archive_identity_conflict")
+            base = {"migrationId": mid, "historyId": hid, "journalSize": len(old_raw),
+                    "journalSha256": hashlib.sha256(old_raw).hexdigest()}
+            if binding is not None and base != binding:
+                raise MigrationIOError("history_archive_reference_invalid")
+            delta_path = original["journal"]["path"].removesuffix("turn_journal.jsonl") + "journal.delta"
+            delta_raw = raw[len(old_raw):]
+            snapshot = source[original["journal"]["path"]]
+            physical.append((delta_path, FileSnapshot(snapshot.path, delta_raw, hashlib.sha256(delta_raw).hexdigest(), snapshot.identity)))
+            old_ids = {asset["attachmentId"] for asset in old["assets"]}
+            assets = []
+            for asset in original["assets"]:
+                if asset["attachmentId"] in old_ids:
+                    assets.append({**asset, "inherited": True})
+                else:
+                    assets.append(asset)
+                    physical.append((asset["path"], source[asset["path"]]))
+            rows.append({**original, "base": base, "delta": {"path": delta_path,
+                "sha256": hashlib.sha256(delta_raw).hexdigest(), "size": len(delta_raw)}, "assets": assets})
+            used_parent = True
+        else:
+            rows.append(original)
+            physical.extend((entry["path"], source[entry["path"]]) for entry in [original["journal"], *original["assets"]])
+    result = {**manifest, "schemaVersion": 3 if used_parent else 2, "histories": rows}
+    if saved is not None and result != saved:
+        raise MigrationIOError("history_migration_id_conflict")
+    return result, physical
+
+
+def _unchanged_archive(root, manifest, copies):
+    if not manifest["histories"]:
+        return None
+    selected, conflicts = _select_history_versions(root.parent.parent, _ArchiveBudget(), retain_raw=False)
+    source = dict(copies)
+    mids = set()
+    for row in manifest["histories"]:
+        hid = row["historyId"]
+        previous = selected.get(hid)
+        if hid in conflicts or previous is None:
+            return None
+        old, mid, journal = previous
+        raw = source[row["journal"]["path"]].raw
+        if journal.raw != raw or not _extends_history(old, raw, row, raw):
+            return None
+        mids.add(mid)
+    if len(mids) != 1:
+        return None
+    mid = next(iter(mids))
+    loaded = _load_archive(root / mid, visible_only=True)
+    if loaded is None or loaded[0]["schemaVersion"] not in (2, 3):
+        return None
+    if loaded[0].get("sourceFingerprint") != manifest.get("sourceFingerprint"):
+        return None
+    if {row["historyId"] for row in loaded[0]["histories"]} != {row["historyId"] for row in manifest["histories"]}:
+        return None
+    return mid
+
+
 def import_history(discovery: HistoryDiscovery, target_root: Path, migration_id: str, *, authority_verify=None, write_guard=None, confirmation_guard=None) -> dict:
     if not _token(migration_id) or not discovery.report.get("historyComplete"):
         raise MigrationIOError("history_discovery_incomplete")
@@ -500,20 +633,45 @@ def import_history(discovery: HistoryDiscovery, target_root: Path, migration_id:
 def _publish_history(discovery, root, migration_id, manifest, copies, authority_verify=None, write_guard=nullcontext, confirmation_guard=None):
     """Caller holds the verified migrations parent chain and writer mutex."""
     final, pending = root / migration_id, root / ("." + migration_id + ".pending")
+    saved = None
+    for directory in (final, pending):
+        if (directory / "manifest.json").exists():
+            saved = strict_json(read_stable_file(directory / "manifest.json", _FILE_CAP).raw)
+            if not isinstance(saved, dict) or saved.get("migrationId") != migration_id:
+                raise MigrationIOError("history_migration_id_conflict")
+            break
+    if saved is None and not (final.exists() or final.is_symlink() or pending.exists() or pending.is_symlink()):
+        unchanged = _unchanged_archive(root, manifest, copies)
+        if unchanged is not None:
+            with confirmation_guard() if confirmation_guard is not None else nullcontext():
+                reused = _load_archive(root / unchanged, visible_only=True)
+                if reused is None:
+                    raise MigrationIOError("history_archive_reference_invalid")
+                reused_manifest = reused[0]
+                with _pin_parent_archives(root / unchanged, reused_manifest, include_self=True):
+                    _verify_source(discovery)
+                    if authority_verify is not None:
+                        authority_verify()
+            return {"migrationId": unchanged, "published": True, "idempotent": True,
+                    "historyCount": len(discovery.sessions), "readyForCutover": False}
+    if saved is None or saved.get("schemaVersion") == 3:
+        manifest, copies = _incremental_manifest(root, manifest, copies, saved=saved)
     if final.exists() or final.is_symlink():
         _verify_and_confirm_final(final, discovery, manifest, authority_verify, write_guard, confirmation_guard, existing=True)
         return {"migrationId": migration_id, "published": True, "idempotent": True,
                 "historyCount": len(discovery.sessions), "readyForCutover": False}
     # Reject an unreadable combined archive before creating a new root entry.
-    _validate_history_extension(root.parent.parent, manifest, dict(copies), pending=pending)
+    logical_manifest, logical_copies = _manifest(discovery, migration_id)
+    _validate_history_extension(root.parent.parent, logical_manifest, dict(logical_copies), pending=pending,
+                                physical_manifest=manifest, physical_copies=dict(copies))
     with ExitStack() as stack:
         with write_guard():
             pending = stack.enter_context(pinned_target_directory(pending, create=True))
+        with write_guard():
+            _write_new(pending / "manifest.json", _encoded(manifest))
         for relative, snapshot in copies:
             with write_guard():
                 _write_new(pending / relative, snapshot.raw)
-        with write_guard():
-            _write_new(pending / "manifest.json", _encoded(manifest))
         stored, _ = _load_archive(pending, migration_id=migration_id)
         if stored != manifest:
             raise MigrationIOError("history_copy_mismatch")
@@ -541,10 +699,14 @@ def _verify_and_confirm_final(final, discovery, manifest, authority_verify, writ
         _verify_source(discovery)
         if authority_verify is not None:
             authority_verify()
-        if stored["schemaVersion"] == 2:
+        if stored["schemaVersion"] in (2, 3):
             if not _confirmation_exists(final):
-                _validate_history_extension(final.parent.parent.parent, stored, snapshots, pending=final)
-            _confirm_archive(final, write_guard, confirmation_guard, discovery, authority_verify)
+                logical_manifest, logical_copies = _manifest(discovery, manifest["migrationId"])
+                physical = {path: snapshot for path, snapshot in snapshots.items()
+                            if path != "manifest.json" and (final / path).is_file()}
+                _validate_history_extension(final.parent.parent.parent, logical_manifest, dict(logical_copies),
+                    pending=final, physical_manifest=stored, physical_copies=physical)
+            _confirm_archive(final, write_guard, confirmation_guard, discovery, authority_verify, stored)
 
 
 def _confirmation_exists(directory):
@@ -557,7 +719,31 @@ def _confirmation_exists(directory):
     return True
 
 
-def _confirm_archive(directory, write_guard, confirmation_guard=None, discovery=None, authority_verify=None):
+@contextmanager
+def _pin_parent_archives(directory, manifest, *, include_self=False):
+    if manifest is None or (manifest["schemaVersion"] != 3 and not include_self):
+        yield
+        return
+    from core.web.services.personal_assistant_project.windows_read import _locked_source, lock_source_directory
+    budget = _ArchiveBudget()
+    _load_archive(directory, budget=budget)
+    root = directory.parent
+    with ExitStack() as stack:
+        for mid in sorted(budget.archive_cache):
+            if mid == manifest["migrationId"] and not include_self:
+                continue
+            parent = root / mid
+            marker = parent / ".confirmed"
+            stack.enter_context(lock_source_directory(Path(marker.anchor), marker, allow_child_replacement=True))
+            for relative in sorted(budget.archive_cache[mid][1]):
+                path = parent / relative
+                stack.enter_context(_locked_source(Path(path.anchor), path, directory=False, allow_child_replacement=True))
+        # Fresh reads after acquiring leases, without trusting the discovery cache.
+        _load_archive(directory, budget=_ArchiveBudget())
+        yield
+
+
+def _confirm_archive(directory, write_guard, confirmation_guard=None, discovery=None, authority_verify=None, manifest=None):
     # Publish an empty directory by verified handle as the visibility commit.
     # A crash before the rename leaves only the hidden pending marker.
     if _confirmation_exists(directory):
@@ -573,28 +759,35 @@ def _confirm_archive(directory, write_guard, confirmation_guard=None, discovery=
         stack.pop_all().close()
     with write_guard():
         with confirmation_guard() if confirmation_guard is not None else nullcontext():
-            if confirmation_guard is not None:
-                _verify_source(discovery)
+            with _pin_parent_archives(directory, manifest):
+                if discovery is not None:
+                    _verify_source(discovery)
                 if authority_verify is not None:
                     authority_verify()
-            publish_directory(pending, directory / ".confirmed", identity)
+                publish_directory(pending, directory / ".confirmed", identity)
 
 
-def _load_archive(directory, *, migration_id=None, budget=None, visible_only=False):
+def _load_physical_archive(directory, *, migration_id=None, budget=None, visible_only=False):
     budget = budget if budget is not None else _ArchiveBudget()
+    mid = migration_id or directory.name
+    cached = budget.archive_cache.get(mid)
+    if cached is not None:
+        if visible_only and cached[0]["schemaVersion"] in (2, 3) and not _confirmation_exists(directory):
+            return None
+        return cached
     check_path(directory)
     manifest_snapshot = budget.read(directory / "manifest.json")
     manifest = strict_json(manifest_snapshot.raw)
-    mid = migration_id or directory.name
-    if (not isinstance(manifest, dict) or manifest.get("schemaVersion") not in (1, 2)
+    if (not isinstance(manifest, dict) or manifest.get("schemaVersion") not in (1, 2, 3)
             or manifest.get("migrationId") != mid or not _token(mid)
             or not isinstance(manifest.get("histories"), list) or len(manifest["histories"]) > 10000
             or manifest.get("readOnly") is not True or manifest.get("canContinue") is not False
             or manifest.get("untrustedContent") is not True):
         raise MigrationIOError("history_archive_invalid")
-    if visible_only and manifest["schemaVersion"] == 2 and not _confirmation_exists(directory):
+    if visible_only and manifest["schemaVersion"] in (2, 3) and not _confirmation_exists(directory):
         return None
     budget.reserve("histories_left", len(manifest["histories"]))
+    budget.history_charged.add(mid)
     expected, ids, snapshots = {"manifest.json"}, set(), {}
     for row in manifest["histories"]:
         if not isinstance(row, dict) or not _token(row.get("sessionId")) or not isinstance(row.get("sourceScope"), dict):
@@ -609,15 +802,35 @@ def _load_archive(directory, *, migration_id=None, budget=None, visible_only=Fal
         journal = row.get("journal", {})
         if not isinstance(journal, dict) or journal.get("path") != prefix + "/turn_journal.jsonl":
             raise MigrationIOError("history_archive_invalid")
-        for entry in [journal, *row["assets"]]:
+        base = row.get("base") if manifest["schemaVersion"] == 3 else None
+        if manifest["schemaVersion"] == 3 and "base" in row and not isinstance(base, dict):
+            raise MigrationIOError("history_archive_invalid")
+        if base is not None:
+            if (not isinstance(base, dict) or set(base) != {"migrationId", "historyId", "journalSize", "journalSha256"}
+                    or not _token(base["migrationId"]) or base["historyId"] != hid
+                    or type(base["journalSize"]) is not int or not 0 <= base["journalSize"] <= _FILE_CAP
+                    or not isinstance(base["journalSha256"], str) or not _HASH.fullmatch(base["journalSha256"])):
+                raise MigrationIOError("history_archive_invalid")
+            delta = row.get("delta")
+            if not isinstance(delta, dict) or delta.get("path") != prefix + "/journal.delta":
+                raise MigrationIOError("history_archive_invalid")
+        else:
+            delta = None
+        for entry in [journal, *row["assets"], *([delta] if delta is not None else [])]:
             if (not isinstance(entry, dict) or not isinstance(entry.get("sha256"), str)
                     or not _HASH.fullmatch(entry["sha256"]) or type(entry.get("size")) is not int
                     or not 0 <= entry["size"] <= _FILE_CAP):
                 raise MigrationIOError("history_archive_invalid")
-            if entry is not journal:
+            if entry is not journal and entry is not delta:
                 aid = entry.get("attachmentId")
                 if not isinstance(aid, str) or not _HASH.fullmatch(aid) or entry.get("path") != prefix + "/assets/" + aid:
                     raise MigrationIOError("history_archive_invalid")
+                if "inherited" in entry and (base is None or entry["inherited"] is not True):
+                    raise MigrationIOError("history_archive_invalid")
+            if entry is journal and base is not None:
+                continue
+            if entry is not journal and entry is not delta and entry.get("inherited") is True:
+                continue
             relative = entry["path"]
             if relative in expected:
                 raise MigrationIOError("history_archive_invalid")
@@ -632,6 +845,8 @@ def _load_archive(directory, *, migration_id=None, budget=None, visible_only=Fal
         if snap.sha256 != entry["sha256"] or len(snap.raw) != entry["size"]:
             raise MigrationIOError("history_archive_hash_mismatch")
     for row in manifest["histories"]:
+        if row.get("base") is not None and manifest["schemaVersion"] == 3:
+            continue
         events = _events(actual[row["journal"]["path"]].raw, row["sessionId"])
         watermark = {"eventCount": len(events), "sequence": events[-1].sequence if events else 0,
             "eventId": events[-1].event_id if events else "", "sha256": row["journal"]["sha256"]}
@@ -640,10 +855,134 @@ def _load_archive(directory, *, migration_id=None, budget=None, visible_only=Fal
     verified = budget.read(manifest_snapshot.path, expected=manifest_snapshot.identity)
     if verified.sha256 != manifest_snapshot.sha256:
         raise MigrationIOError("source_changed")
+    # Attachment bytes are verified, but navigation exposes only metadata.
+    # Do not retain their bodies in the per-operation reference cache.
+    for row in manifest["histories"]:
+        for asset in row["assets"]:
+            if asset.get("inherited") is not True:
+                snap = actual[asset["path"]]
+                actual[asset["path"]] = FileSnapshot(snap.path, b"", snap.sha256, snap.identity)
+    budget.archive_cache[mid] = (manifest, actual)
     return manifest, actual
 
 
-def _archives(target_root, *, budget, exclude_migration_id=None):
+def _resolve_history(root, manifest, row, actual, budget, depth=0):
+    key = (manifest["migrationId"], row["historyId"])
+    if key in budget.resolving or depth > _HISTORY_CHAIN_CAP:
+        raise MigrationIOError("history_archive_reference_invalid")
+    if manifest["schemaVersion"] != 3 or "base" not in row:
+        return actual[row["journal"]["path"]], {a["attachmentId"]: actual[a["path"]] for a in row["assets"]}
+    budget.resolving.add(key)
+    try:
+        base = row["base"]
+        parent_dir = root / base["migrationId"]
+        if not _confirmation_exists(parent_dir):
+            raise MigrationIOError("history_archive_reference_invalid")
+        loaded = _load_physical_archive(parent_dir, budget=budget, visible_only=True)
+        if loaded is None or loaded[0]["schemaVersion"] not in (2, 3):
+            raise MigrationIOError("history_archive_reference_invalid")
+        parent_manifest, parent_actual = loaded
+        matches = [item for item in parent_manifest["histories"] if item["historyId"] == row["historyId"]]
+        if len(matches) != 1:
+            raise MigrationIOError("history_archive_reference_invalid")
+        parent = matches[0]
+        if parent["sessionId"] != row["sessionId"] or parent["sourceScope"] != row["sourceScope"]:
+            raise MigrationIOError("history_archive_reference_invalid")
+        previous, parent_assets = _resolve_history(root, parent_manifest, parent, parent_actual, budget, depth + 1)
+        if len(previous.raw) != base["journalSize"] or previous.sha256 != base["journalSha256"]:
+            raise MigrationIOError("history_archive_reference_invalid")
+        raw = previous.raw + actual[row["delta"]["path"]].raw
+        if (len(raw) > _FILE_CAP or len(raw) != row["journal"]["size"]
+                or hashlib.sha256(raw).hexdigest() != row["journal"]["sha256"]):
+            raise MigrationIOError("history_archive_hash_mismatch")
+        old = {asset["attachmentId"]: asset for asset in parent["assets"]}
+        current = {asset["attachmentId"]: asset for asset in row["assets"]}
+        if len(current) != len(row["assets"]) or not set(old).issubset(current):
+            raise MigrationIOError("history_archive_reference_invalid")
+        assets = {}
+        for aid, asset in current.items():
+            if aid in old:
+                if (asset.get("inherited") is not True or asset["sha256"] != old[aid]["sha256"]
+                        or asset["size"] != old[aid]["size"]):
+                    raise MigrationIOError("history_archive_reference_invalid")
+                assets[aid] = parent_assets[aid]
+            else:
+                if asset.get("inherited") is True:
+                    raise MigrationIOError("history_archive_reference_invalid")
+                assets[aid] = actual[asset["path"]]
+        events = _events(raw, row["sessionId"])
+        watermark = {"eventCount": len(events), "sequence": events[-1].sequence if events else 0,
+                     "eventId": events[-1].event_id if events else "", "sha256": row["journal"]["sha256"]}
+        if watermark != row["watermark"]:
+            raise MigrationIOError("history_archive_watermark_mismatch")
+        return FileSnapshot(root / row["journal"]["path"], raw, row["journal"]["sha256"], ()), assets
+    finally:
+        budget.resolving.remove(key)
+
+
+def _load_archive(directory, *, migration_id=None, budget=None, visible_only=False):
+    budget = budget if budget is not None else _ArchiveBudget()
+    loaded = _load_physical_archive(directory, migration_id=migration_id, budget=budget, visible_only=visible_only)
+    if loaded is None or loaded[0]["schemaVersion"] != 3:
+        return loaded
+    manifest, physical = loaded
+    actual = dict(physical)
+    for row in manifest["histories"]:
+        journal, assets = _resolve_history(directory.parent, manifest, row, physical, budget)
+        # Verify each logical history now, then resolve its bounded Journal
+        # on demand; do not retain all reconstructed versions at once.
+        actual[row["journal"]["path"]] = _LazyJournal(directory.parent, manifest, row, physical, budget)
+        for asset in row["assets"]:
+            actual[asset["path"]] = assets[asset["attachmentId"]]
+        del journal, assets
+    return manifest, actual
+
+
+class _LazyJournal:
+    def __init__(self, root, manifest, row, physical, budget):
+        self.root, self.manifest, self.row, self.physical, self.budget = root, manifest, row, physical, budget
+
+    @property
+    def raw(self):
+        journal, _ = _resolve_history(self.root, self.manifest, self.row, self.physical, self.budget)
+        return journal.raw
+
+
+def _quarantined_v3(directory, budget, failure):
+    # Only confirmed v3 archives with a parseable manifest can be isolated.
+    # Unknown or legacy corruption retains the existing fail-closed behavior.
+    allowed = {"history_archive_invalid", "history_archive_file_mismatch", "history_archive_hash_mismatch",
+               "history_archive_reference_invalid", "history_archive_watermark_mismatch", "history_event_invalid",
+               "history_event_identity_invalid", "history_turn_identity_conflict", "history_identity_conflict",
+               "history_identity_missing", "history_import_not_quiescent", "truncated_history_jsonl",
+               "invalid_source_json"}
+    if str(failure) not in allowed:
+        raise failure
+    cached = budget.archive_cache.get(directory.name)
+    manifest = cached[0] if cached is not None else strict_json(budget.read(directory / "manifest.json").raw)
+    if (not isinstance(manifest, dict) or manifest.get("schemaVersion") != 3
+            or manifest.get("migrationId") != directory.name or not _confirmation_exists(directory)):
+        raise failure
+    rows = manifest.get("histories")
+    if not isinstance(rows, list) or len(rows) > 10000:
+        raise failure
+    if directory.name not in budget.history_charged:
+        budget.reserve("histories_left", len(rows))
+        budget.history_charged.add(directory.name)
+    ids = set()
+    for row in rows:
+        if (not isinstance(row, dict) or not _token(row.get("sessionId"))
+                or not isinstance(row.get("sourceScope"), dict)):
+            raise failure
+        hid = _digest({"sourceScope": row["sourceScope"], "sessionId": row["sessionId"]})
+        if hid != row.get("historyId") or hid in ids:
+            raise failure
+        ids.add(hid)
+    budget.quarantined_archives += 1
+    return {"migrationId": directory.name, "histories": [], "quarantinedHistoryIds": ids}, {}
+
+
+def _archives(target_root, *, budget, exclude_migration_id=None, isolate_errors=False):
     root = _archive_root(target_root)
     if not root.exists():
         return
@@ -659,7 +998,12 @@ def _archives(target_root, *, budget, exclude_migration_id=None):
             budget.reserve("archives_left")
             # A generator keeps at most the current archive's bytes alive;
             # callers must not materialize this iterator before pagination.
-            archive = _load_archive(Path(child.path), budget=budget, visible_only=True)
+            try:
+                archive = _load_archive(Path(child.path), budget=budget, visible_only=True)
+            except MigrationIOError as error:
+                if not isolate_errors:
+                    raise
+                archive = _quarantined_v3(Path(child.path), budget, error)
             if archive is not None:
                 yield archive
 
@@ -698,22 +1042,30 @@ def _reserve_candidate_budget(budget, candidate, snapshots, *, root_entry_exists
     for row in candidate["histories"]:
         if expected_count + 1 + len(row["assets"]) > budget.files_left:
             raise MigrationIOError("history_archive_limit")
-        expected_count += 1 + len(row["assets"])
+        expected_count += 1 + sum(asset.get("inherited") is not True for asset in row["assets"])
     paths = ["manifest.json", *snapshots.keys()]
     directories = {".confirmed"}
     for path in paths:
         parts = path.split("/")
         directories.update("/".join(parts[:i]) for i in range(1, len(parts)))
     budget.reserve("files_left", len(paths) + len(directories))
-    budget.reserve("bytes_left", len(manifest_raw) + sum(len(snapshot.raw) for snapshot in snapshots.values()))
+    physical_sizes = {}
+    for row in candidate["histories"]:
+        entry = row.get("delta") if "base" in row else row["journal"]
+        physical_sizes[entry["path"]] = entry["size"]
+        physical_sizes.update({asset["path"]: asset["size"] for asset in row["assets"]
+                               if asset.get("inherited") is not True})
+    if set(snapshots) != set(physical_sizes):
+        raise MigrationIOError("history_archive_invalid")
+    budget.reserve("bytes_left", len(manifest_raw) + sum(physical_sizes.values()))
     budget.reserve("files_left")  # verified manifest reread
     budget.reserve("bytes_left", len(manifest_raw))
 
 
-def _validate_history_extension(target_root, candidate, snapshots, *, pending=None):
+def _validate_history_extension(target_root, candidate, snapshots, *, pending=None,
+                                physical_manifest=None, physical_copies=None):
     incoming = {row["historyId"]: row for row in candidate["histories"]}
-    versions = {hid: [(row, candidate["migrationId"], snapshots[row["journal"]["path"]].raw)]
-                for hid, row in incoming.items()}
+    versions = {hid: [row] for hid, row in incoming.items()}
     budget = _ArchiveBudget()
     for manifest, prior_snapshots in _archives(target_root, budget=budget,
                                                exclude_migration_id=candidate["migrationId"]):
@@ -723,35 +1075,67 @@ def _validate_history_extension(target_root, candidate, snapshots, *, pending=No
                 old_raw = prior_snapshots[old["journal"]["path"]].raw
                 if not _extends_history(old, old_raw, new, snapshots[new["journal"]["path"]].raw):
                     raise MigrationIOError("history_archive_identity_conflict")
-                versions[old["historyId"]].append((old, manifest["migrationId"], old_raw))
-    if any(not _proven_history_chain(items) for items in versions.values()):
+                versions[old["historyId"]].append(old)
+    if any(not _proven_asset_chain(items) for items in versions.values()):
         raise MigrationIOError("history_archive_identity_conflict")
-    _reserve_candidate_budget(budget, candidate, snapshots,
+    _reserve_candidate_budget(budget, physical_manifest or candidate,
+                              physical_copies if physical_copies is not None else snapshots,
                               root_entry_exists=pending is not None and pending.exists())
 
 
-def _proven_history_chain(versions):
-    # Prefix and attachment preservation are transitive, so sorted adjacent
-    # pairs prove the entire chain without quadratic comparisons.
-    versions.sort(key=lambda version: len(version[2]))
-    return all(_extends_history(old[0], old[2], new[0], new[2])
-               for old, new in zip(versions, versions[1:]))
+def _proven_asset_chain(rows):
+    # All Journal bytes are already proven prefixes of the same candidate.
+    rows.sort(key=lambda row: row["journal"]["size"])
+    for old, new in zip(rows, rows[1:]):
+        before = {asset["attachmentId"]: (asset["sha256"], asset["size"]) for asset in old["assets"]}
+        after = {asset["attachmentId"]: (asset["sha256"], asset["size"]) for asset in new["assets"]}
+        if (any(after.get(key) != value for key, value in before.items())
+                or (old["journal"]["size"] == new["journal"]["size"] and before != after)):
+            return False
+    return True
 
 
-def _select_history_versions(target_root, budget, *, history_id=None):
+def _select_history_versions(target_root, budget, *, history_id=None, retain_raw=True, isolate_errors=False):
     selected, versions, conflicts = {}, {}, set()
-    for manifest, snapshots in _archives(target_root, budget=budget):
+    for manifest, snapshots in _archives(target_root, budget=budget, isolate_errors=isolate_errors):
+        conflicts.update(manifest.get("quarantinedHistoryIds", ()))
         for row in manifest["histories"]:
             hid = row["historyId"]
             if history_id is not None and hid != history_id:
                 continue
-            raw = snapshots[row["journal"]["path"]].raw
-            versions.setdefault(hid, []).append((row, manifest["migrationId"], raw))
+            versions.setdefault(hid, []).append((row, manifest["migrationId"], snapshots[row["journal"]["path"]]))
     for hid, history_versions in versions.items():
-        if not _proven_history_chain(history_versions):
+        if hid in conflicts:
+            continue
+        history_versions.sort(key=lambda item: item[0]["journal"]["size"])
+        largest = history_versions[-1][0]["journal"]["size"]
+        tied = [item for item in history_versions if item[0]["journal"]["size"] == largest]
+        root = _archive_root(target_root)
+        def parent_priority(item):
+            row, mid, snapshot = item
+            stored = budget.archive_cache[mid][0]
+            confirmed = stored["schemaVersion"] in (2, 3) and _confirmation_exists(root / mid)
+            depth = len(_parent_chain(root, row, mid, snapshot, budget)) if confirmed else _HISTORY_CHAIN_CAP + 2
+            return (not confirmed, depth, mid)
+        latest_row, latest_mid, latest_snapshot = min(tied, key=parent_priority)
+        raw = latest_snapshot.raw
+        # Each journal has already passed its archive hash verification. A
+        # matching prefix hash proves its relationship to the longest version
+        # without retaining one full Journal per historical version.
+        view = memoryview(raw)
+        if any(hashlib.sha256(view[:row["journal"]["size"]]).hexdigest() != row["journal"]["sha256"]
+               for row, _, _ in history_versions):
             conflicts.add(hid)
+            continue
+        for (old, _, _), (new, _, _) in zip(history_versions, history_versions[1:]):
+            old_assets = {asset["attachmentId"]: (asset["sha256"], asset["size"]) for asset in old["assets"]}
+            new_assets = {asset["attachmentId"]: (asset["sha256"], asset["size"]) for asset in new["assets"]}
+            if (any(new_assets.get(key) != value for key, value in old_assets.items())
+                    or (old["journal"]["size"] == new["journal"]["size"] and old_assets != new_assets)):
+                conflicts.add(hid)
+                break
         else:
-            selected[hid] = history_versions[-1]
+            selected[hid] = (latest_row, latest_mid, raw if retain_raw else latest_snapshot)
     return selected, conflicts
 
 
@@ -766,10 +1150,11 @@ def list_history_with_status(target_root: Path, *, max_total_bytes: int = _ARCHI
                              max_files: int = _ARCHIVE_FILES_CAP, max_history_rows: int = 10000,
                              max_archives: int = _ARCHIVE_COUNT_CAP) -> dict:
     budget = _ArchiveBudget(max_total_bytes, max_files, max_history_rows, max_archives)
-    selected, conflicts = _select_history_versions(target_root, budget)
+    selected, conflicts = _select_history_versions(target_root, budget, retain_raw=False, isolate_errors=True)
     rows = sorted((_summary(row, mid) for row, mid, _ in selected.values()),
                   key=lambda row: row["historyId"])
-    return {"histories": rows, "partial": bool(conflicts), "conflictCount": len(conflicts)}
+    return {"histories": rows, "partial": bool(conflicts) or bool(budget.quarantined_archives),
+            "conflictCount": len(conflicts), "unavailableArchiveCount": budget.quarantined_archives}
 
 
 def _safe_projection(value):
@@ -792,7 +1177,7 @@ def history_detail(target_root: Path, history_id: str, *, max_total_bytes: int =
     if not isinstance(history_id, str) or not _HASH.fullmatch(history_id):
         raise MigrationIOError("history_id_invalid")
     budget = _ArchiveBudget(max_total_bytes, max_files, max_history_rows, max_archives)
-    selected, conflicts = _select_history_versions(target_root, budget, history_id=history_id)
+    selected, conflicts = _select_history_versions(target_root, budget, history_id=history_id, isolate_errors=True)
     if history_id in conflicts:
         raise MigrationIOError("history_archive_identity_conflict")
     if history_id not in selected:

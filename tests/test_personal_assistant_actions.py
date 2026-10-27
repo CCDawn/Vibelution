@@ -209,3 +209,7 @@ def test_launcher_history_import_approval_shows_verified_source_only(monkeypatch
     invalid = _assistant_management_summary({"action": "history_import", "arguments_json": json.dumps({
         "project_id": "project", "preview_id": "a" * 64, "approved": True})})
     assert invalid["assistantArgumentsInvalid"] is True
+    affair = _assistant_management_summary({"action": "affairs_sync", "arguments_json": json.dumps({
+        "project_id": "project", "preview_id": "a" * 64})})
+    assert affair["assistantAction"] == "affairs_sync" and affair["assistantTargets"]["assistantAgentId"] == "old-pa"
+    assert "个人事务" in affair["assistantOperationDescription"]

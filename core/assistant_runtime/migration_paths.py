@@ -151,13 +151,17 @@ def _category_status(sources: list[dict], category: str) -> str:
 
 
 def resolve_source_paths(*, project_root: Path, workspace: Path, project_id: str, instance_id: str,
-                         agent_row: dict, memory_policy: dict | None = None, grants=None) -> SourcePaths:
+                         agent_row: dict, memory_policy: dict | None = None, grants=None,
+                         categories=None) -> SourcePaths:
     """Resolve only the explicitly selected PA snapshot, without loading any registry.
 
     memory_policy is the raw memoryPolicies[agent_row.memoryPolicyId] snapshot.
     No normalizing getter is called. Grants may also declare an exact extra source,
     including a PersonalAffairs root supplied through the native injected resolver.
     """
+    if categories is not None and (not isinstance(categories, frozenset) or not categories
+                                   or not categories.issubset(SOURCE_CATEGORIES)):
+        raise MigrationIOError("source_categories_invalid")
     project_root, workspace = Path(project_root), Path(workspace)
     if not project_root.is_absolute() or not workspace.is_absolute():
         raise MigrationIOError("absolute_source_roots_required")
@@ -180,6 +184,8 @@ def resolve_source_paths(*, project_root: Path, workspace: Path, project_id: str
     issues = []
 
     def add(category, raw, origin):
+        if categories is not None and category not in categories:
+            return
         try:
             path = _path(raw, project_root=project_root, workspace=workspace)
         except MigrationIOError as error:
@@ -257,7 +263,8 @@ def resolve_source_paths(*, project_root: Path, workspace: Path, project_id: str
 
 
 def source_snapshot(resolved: SourcePaths, *, max_file_bytes=16 * 1024 * 1024,
-                    max_files=10000, max_total_bytes=128 * 1024 * 1024) -> SourcePaths:
+                    max_files=10000, max_total_bytes=128 * 1024 * 1024,
+                    categories=None) -> SourcePaths:
     """Fingerprint approved candidates using one shared budget, retaining all conflicts.
 
     This is a bounded observation, never proof of source quiescence or permission
@@ -266,7 +273,14 @@ def source_snapshot(resolved: SourcePaths, *, max_file_bytes=16 * 1024 * 1024,
     if (any(type(n) is not int or n < 1 for n in (max_file_bytes, max_files, max_total_bytes))
             or max_file_bytes > 16 * 1024 * 1024):
         raise MigrationIOError("invalid_source_budget")
+    if categories is not None and (not isinstance(categories, frozenset) or not categories
+                                   or not categories.issubset(SOURCE_CATEGORIES)):
+        raise MigrationIOError("source_categories_invalid")
     report = json.loads(json.dumps(resolved.report))
+    if categories is not None:
+        report["sources"] = [row for row in report["sources"] if row.get("category") in categories]
+        report["issues"] = [row for row in report["issues"]
+                            if row.get("category") in categories or row.get("category") == "workspace"]
     report["stage"] = "source_snapshot"
     paths, snapshots, directoryproofs, remaining_files, remaining_bytes = {}, [], {}, max_files, max_total_bytes
     for row in report["sources"]:
@@ -322,7 +336,7 @@ def source_snapshot(resolved: SourcePaths, *, max_file_bytes=16 * 1024 * 1024,
             row.pop("entries", None)
             paths.pop(row["sourceRef"], None)
     report["categoryStatus"] = {category: _category_status(report["sources"], category) for category in SOURCE_CATEGORIES}
-    report["snapshotComplete"] = (not report["issues"]
+    report["snapshotComplete"] = (categories is None and not report["issues"]
                                    and all(status != "conflict" for status in report["categoryStatus"].values())
                                    and all(row["status"] == "available" for row in report["sources"]))
     return SourcePaths(report, paths, {ref: resolved._identities[ref] for ref in paths},
