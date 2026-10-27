@@ -169,10 +169,19 @@ def test_imported_history_survives_native_process_restart(tmp_path):
 
 
 def test_custom_source_archive_survives_native_restart_without_activating_queue(tmp_path):
+    from core.assistant_runtime.migration_paths import _identity_chain
+
     project, workspace, external, snapshots = custom_source(tmp_path / "custom")
     source_before = _bytes_under(project, external)
+    identities = {path: _identity_chain(path) for path in (project, workspace, external)}
+
+    def verify_authority():
+        assert identities == {path: _identity_chain(path) for path in identities}
+        assert source_before == _bytes_under(project, external)
+
     root = tmp_path / "native"
-    copied = import_source_snapshots(snapshots, root, "joint-sources", source_roots=(project, workspace))
+    copied = import_source_snapshots(snapshots, root, "joint-sources", source_roots=(project, workspace),
+                                     authority_verify=verify_authority)
     assert copied["published"] is True and copied["readyForCutover"] is False
     retained_before = _bytes_under(root / "history_sources")
     assert retained_before
