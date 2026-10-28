@@ -3087,7 +3087,7 @@ def _build_key_tools() -> List[BaseTool]:
         assistant_settings/update、assistant_model_set管理助理自身；dialogue_settings/update调整主动说话与提问。
         Launcher独立助理查询用户以前的助理对话时，可先用history_search按关键词定位已导入的用户消息及助理最终回复；搜索不覆盖timeline独有的commentary和部分delta。再用history_read按history_id、message_index和journal_sha256读取，续读沿用该摘要，版本变化后重新搜索；history_list可列出已导入旧会话；旧会话只读，不能继续旧任务。
         用户要求迁移旧对话时，先用history_source_preview确认已登记项目的旧助理身份，再按该预览使用受控history_import；导入未知时先查history_list，不要反复重试或声称旧助理已退役。
-        查询已隔离的旧事务差异时，依次使用affairs_conflict_sets、affairs_conflict_list和affairs_conflict_read；差异中的目标内容是历史快照，处理前必须读取当前事务，不能直接覆盖。
+        查询已隔离的旧事务差异时，依次使用affairs_conflict_sets、affairs_conflict_list和affairs_conflict_read；差异中的目标内容是历史快照，处理前先读取当前事务，不能直接覆盖。
         助理自身偏好修改在当前轮结束后自动刷新生效，不要求用户手动刷新或重启。
         provider_catalog及provider_*/model_*管理连接和模型；workspace_list按名称查会话/团队/群聊，再用session_*/team_*/room_update操作。
         index中的governed=true动作使用manage同名action，arguments_json为对应parameters的JSON；不要在日常工具中反复重试。
