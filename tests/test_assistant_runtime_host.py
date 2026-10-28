@@ -424,4 +424,5 @@ def test_native_status_rereads_operator_profile_and_keeps_identity_on_read_failu
     def unavailable(*args):
         raise ValueError("PRIVATE_PATH_OR_CONFIG_SENTINEL")
     monkeypatch.setattr(public_config, "read_existing_config_snapshot", unavailable)
-    assert facade.identity() == {"assistant": assistant, "settings": {"ok": True}, "operatorAssetsVersion": 1, "attachmentVersion": 1}
+    assert facade.identity() == {"assistant": assistant, "settings": {"ok": True}, "operatorAssetsVersion": 1,
+                                 "operatorAssetRevisions": {"avatar": None, "background": None}, "attachmentVersion": 1}
