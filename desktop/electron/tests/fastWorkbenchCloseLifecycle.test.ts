@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { executeMainLineWorkbench } from "../src/process/workbenchBackend.js";
 import { closeOwnedWorkbenchFast } from "../src/process/fastWorkbenchClose.js";
 import { getBackgroundWorkbenchRetirement } from "../src/process/backgroundWorkbenchRetirement.js";
+import { createMainLineCommandQueue, type MainLineQueuedCommand } from "../src/lifecycle/mainLine/commandQueue.js";
 
 vi.mock("../src/process/fastWorkbenchClose.js", () => ({ closeOwnedWorkbenchFast: vi.fn() }));
 const directories: string[] = [];
@@ -91,6 +92,58 @@ describe("explicit fast close lifecycle", () => {
       f.supersede();
       await vi.advanceTimersByTimeAsync(251);
       vi.useRealTimers();
+    }
+  });
+
+  it("drains background retirement before exclusive queue execution", async () => {
+    vi.useFakeTimers();
+    const f = backgroundFixture(), queue = createMainLineCommandQueue();
+    try {
+      const closing = await queue.submit({ operation: "force-stop", execute: command =>
+        executeMainLineWorkbench({ ...f.input, command }) });
+      expect(closing).toMatchObject({ accepted: true, code: "backend_retiring" });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(queue.snapshot().active).toBeNull();
+      const execute = vi.fn(async (command: MainLineQueuedCommand) => ({ schemaVersion: 1 as const, accepted: true,
+        operation: command.operation, commandId: command.commandId }));
+      const safe = queue.submitExclusive!({ operation: "start", execute });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(execute).not.toHaveBeenCalled();
+      f.retireJob(); await vi.advanceTimersByTimeAsync(251);
+      expect(execute).not.toHaveBeenCalled();
+      f.releasePort(); await vi.advanceTimersByTimeAsync(251);
+      expect((await safe).accepted).toBe(true);
+      expect(execute).toHaveBeenCalledOnce();
+      expect(f.state()).toMatchObject({ observedState: "closed", phase: "steady" });
+    } finally {
+      f.supersede(); await vi.advanceTimersByTimeAsync(251); vi.useRealTimers();
+    }
+  });
+
+  it("releases an unsubmitted exclusive wait on cancellation while background retirement remains pending", async () => {
+    vi.useFakeTimers();
+    const f = backgroundFixture(), queue = createMainLineCommandQueue(), abort = new AbortController();
+    try {
+      const close = await queue.submit({ operation: "force-stop", execute: command =>
+        executeMainLineWorkbench({ ...f.input, command }) });
+      expect(close.code).toBe("backend_retiring");
+      await vi.advanceTimersByTimeAsync(0);
+      const owner = getBackgroundWorkbenchRetirement(f.input.workspaceRoot)!;
+      expect(owner.status).toBe("pending");
+      const safeExecute = vi.fn(async (command: MainLineQueuedCommand) => ({ schemaVersion: 1 as const,
+        accepted: true, operation: command.operation }));
+      const safe = queue.submitExclusive!({ operation: "start", signal: abort.signal, execute: safeExecute });
+      const cancelled = expect(safe).rejects.toThrow("cancel pending start");
+      abort.abort(new Error("cancel pending start")); await cancelled;
+      const ordinary = await queue.submit({ operation: "shutdown", execute: async command => ({
+        schemaVersion: 1, accepted: true, operation: command.operation }) });
+      expect(ordinary.accepted).toBe(true);
+      expect(owner.status).toBe("pending"); expect(safeExecute).not.toHaveBeenCalled();
+      f.retireJob(); f.releasePort(); await vi.advanceTimersByTimeAsync(251);
+      expect(await owner.completion).toBe("closed");
+      expect(safeExecute).not.toHaveBeenCalled();
+    } finally {
+      f.supersede(); await vi.advanceTimersByTimeAsync(251); vi.useRealTimers();
     }
   });
 

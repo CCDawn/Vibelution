@@ -39,7 +39,7 @@ import {
 import { instanceIdForProject, resolveCanonicalRuntimeHome } from "../src/lifecycle/projectStoragePaths.js";
 import { ACTIVE_WORK_BLOCK_MESSAGE_STOP, blockLifecycleIfActiveWork } from "../src/process/activeWorkGuard.js";
 import { PythonJsonBridgeError } from "../src/process/pythonJsonBridge.js";
-import { createMainLineCommandQueue } from "../src/lifecycle/mainLine/commandQueue.js";
+import { createMainLineCommandQueue, trackMainLineBackgroundWork } from "../src/lifecycle/mainLine/commandQueue.js";
 import { runWorkbenchLifecycle, parseWorkbenchLifecycleResult } from "../src/process/workbenchLifecycle.js";
 import { __setWorkbenchJobNativeForTests, hasTrackedWorkbenchJob, spawnTrackedWorkbenchProcess } from "../src/process/workbenchJob.js";
 import { BoundedStdioSink } from "../src/process/boundedStdio.js";
@@ -63,6 +63,31 @@ describe("workbench backend pipe ownership", () => {
       expect(spawnImpl.mock.calls[0][2].stdio).toEqual(["ignore", "ignore", "ignore"]);
       expect(readdirSync(root)).toEqual([]);
     } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it("keeps exclusive admission fenced after a log drain timeout", async () => {
+    const root = mkdtempSync(join(tmpdir(), "vibelution-stdio-exclusive-"));
+    const stdout = new PassThrough(), stderr = new PassThrough(), queue = createMainLineCommandQueue();
+    try {
+      spawnWorkbenchBackend({ workspaceRoot: root, pythonPath: "python", port: 8000,
+        spawnImpl: () => ({ ...fakeBackendChild(), stdout, stderr }),
+        logSinkFactory: path => new BoundedStdioSink(join(root, basename(path))) });
+      const result = await queue.submit({ operation: "stop", execute: async command => {
+        const closed = await waitForWorkbenchBackendLogDrain(root, 4242, 5,
+          work => trackMainLineBackgroundWork(command, work));
+        return { schemaVersion: 1, accepted: closed, operation: "stop" };
+      }});
+      expect(result.accepted).toBe(false);
+      await vi.waitFor(() => expect(queue.snapshot().active).toBeNull());
+      const execute = vi.fn(async () => ({ schemaVersion: 1 as const, accepted: true, operation: "start" }));
+      const safe = queue.submitExclusive!({ operation: "start", execute });
+      await Promise.resolve(); expect(execute).not.toHaveBeenCalled();
+      stdout.end(); await Promise.resolve(); expect(execute).not.toHaveBeenCalled();
+      stderr.end(); await safe; expect(execute).toHaveBeenCalledOnce();
+    } finally {
+      stdout.end(); stderr.end(); await waitForWorkbenchBackendLogDrain(root, 4242, 1000);
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("keeps ownership until both log streams drain and then permits a replacement", async () => {

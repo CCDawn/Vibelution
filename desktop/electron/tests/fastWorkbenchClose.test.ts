@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeOwnedWorkbenchFast, type FastWorkbenchCloseInput } from "../src/process/fastWorkbenchClose.js";
 import type { GracefulWorkbenchShutdownResponse } from "../src/process/workbenchBackendRetire.js";
+import { createMainLineCommandQueue, trackMainLineBackgroundWork, type MainLineQueuedCommand } from "../src/lifecycle/mainLine/commandQueue.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -80,6 +81,28 @@ describe("fast owned workbench close", () => {
     pending.resolve(true);
     await vi.advanceTimersByTimeAsync(0);
     expect(f.connect).not.toHaveBeenCalled();
+  });
+
+  it("holds exclusive admission while a timed-out captured Job retirement is still running", async () => {
+    vi.setSystemTime(2_300);
+    const f = fixture(), pending = deferred<boolean>(), queue = createMainLineCommandQueue();
+    f.retire.mockImplementation(() => pending.promise);
+    const closing = queue.submit({ operation: "force-stop", execute: async command => {
+      const closed = await closeOwnedWorkbenchFast({ ...f.input,
+        trackBackground: work => trackMainLineBackgroundWork(command, work) });
+      return { schemaVersion: 1, accepted: closed, operation: command.operation, commandId: command.commandId };
+    }});
+    await vi.advanceTimersByTimeAsync(500);
+    expect((await closing).accepted).toBe(false);
+    await vi.advanceTimersByTimeAsync(0);
+    const execute = vi.fn(async (command: MainLineQueuedCommand) => ({ schemaVersion: 1 as const, accepted: true,
+      operation: command.operation, commandId: command.commandId }));
+    const safe = queue.submitExclusive!({ operation: "start", execute });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(execute).not.toHaveBeenCalled();
+    pending.resolve(true); await vi.advanceTimersByTimeAsync(0);
+    expect((await safe).accepted).toBe(true);
+    expect(execute).toHaveBeenCalledOnce();
   });
 
   it("does nothing without initial Job ownership or after an expired deadline", async () => {

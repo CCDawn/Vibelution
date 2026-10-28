@@ -8,6 +8,7 @@ import {
   CLOSE_BACKOFF_MAX_MS,
   closeBackoffWindowMs,
   createMainLineCommandQueue,
+  trackMainLineBackgroundWork,
   waitForMainLineIntentPersistence,
   type CloseBackoffCoalescedInfo,
   type MainLineLifecycleResult,
@@ -30,6 +31,125 @@ function blocked(operation: string): MainLineLifecycleResult {
 }
 
 describe("mainLineCommandQueue", () => {
+  it("exclusive admission fences a detached execution and refuses ordinary and duplicate submissions", async () => {
+    const queue = createMainLineCommandQueue(), previousAbort = new AbortController();
+    let entered!: () => void, release!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const oldWork = new Promise<void>(resolve => { release = resolve; });
+    const old = queue.submit({ operation: "start", signal: previousAbort.signal,
+      execute: async cmd => { entered(); await oldWork; return ok("start", cmd.commandId); } });
+    const oldRejected = old.catch(() => undefined);
+    await started; previousAbort.abort(); await oldRejected;
+    const execute = vi.fn(async (cmd: MainLineQueuedCommand) => ok(cmd.operation, cmd.commandId));
+    const safe = queue.submitExclusive!({ operation: "start", execute });
+    await Promise.resolve();
+    expect(execute).not.toHaveBeenCalled();
+    await expect(queue.submit({ operation: "start", execute })).rejects.toThrow("MAIN_LINE_EXCLUSIVE_BUSY");
+    await expect(queue.submit({ operation: "shutdown", execute })).rejects.toThrow("MAIN_LINE_EXCLUSIVE_BUSY");
+    await expect(queue.submitExclusive!({ operation: "start", execute })).rejects.toThrow("MAIN_LINE_EXCLUSIVE_BUSY");
+    release(); expect((await safe).accepted).toBe(true);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect((await queue.submit({ operation: "stop", execute })).accepted).toBe(true);
+  });
+
+  it("releases the fence when cancelled before submitting while prior work is still stuck", async () => {
+    const queue = createMainLineCommandQueue(), priorAbort = new AbortController(), safeAbort = new AbortController();
+    let release!: () => void, entered!: () => void;
+    const callback = new Promise<void>(resolve => { release = resolve; });
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const prior = queue.submit({ operation: "start", signal: priorAbort.signal,
+      onCommand: async () => { entered(); await callback; }, execute: async cmd => ok("start", cmd.commandId) });
+    const priorRejected = prior.catch(() => undefined);
+    await started; priorAbort.abort(); await priorRejected;
+    const execute = vi.fn(async (cmd: MainLineQueuedCommand) => ok(cmd.operation, cmd.commandId));
+    const removeListener = vi.spyOn(safeAbort.signal, "removeEventListener");
+    const safe = queue.submitExclusive!({ operation: "start", signal: safeAbort.signal, execute });
+    const safeRejected = expect(safe).rejects.toThrow("cancel wait");
+    await expect(queue.submit({ operation: "stop", execute })).rejects.toThrow("MAIN_LINE_EXCLUSIVE_BUSY");
+    safeAbort.abort(new Error("cancel wait"));
+    await safeRejected;
+    expect(removeListener).toHaveBeenCalledWith("abort", expect.any(Function));
+    expect(execute).not.toHaveBeenCalled();
+    const ordinary = vi.fn(async (cmd: MainLineQueuedCommand) => ok(cmd.operation, cmd.commandId));
+    expect((await queue.submit({ operation: "stop", execute: ordinary })).accepted).toBe(true);
+    expect(ordinary).toHaveBeenCalledOnce(); expect(execute).not.toHaveBeenCalled();
+    release(); await queue.captureExecutionDrain!();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("keeps exclusive admission fenced until aborted work and asynchronous cleanup settle", async () => {
+    let releaseWork!: () => void, releaseMarker!: () => void, workEntered!: () => void, markerEntered!: () => void;
+    const work = new Promise<void>(resolve => { releaseWork = resolve; });
+    const marker = new Promise<void>(resolve => { releaseMarker = resolve; });
+    const started = new Promise<void>(resolve => { workEntered = resolve; });
+    const markerStarted = new Promise<void>(resolve => { markerEntered = resolve; });
+    const queue = createMainLineCommandQueue({ writeOwnerMarker: async () => { markerEntered(); await marker; } });
+    const controller = new AbortController();
+    const execution = queue.submitExclusive!({ operation: "start", signal: controller.signal,
+      execute: async cmd => { workEntered(); await work; return ok("start", cmd.commandId); } });
+    let settled = false;
+    const rejected = execution.catch(() => { settled = true; });
+    await Promise.all([started, markerStarted]);
+    controller.abort();
+    const normal = vi.fn(async (cmd: MainLineQueuedCommand) => ok(cmd.operation, cmd.commandId));
+    await expect(queue.submit({ operation: "stop", execute: normal })).rejects.toThrow("MAIN_LINE_EXCLUSIVE_BUSY");
+    releaseWork(); await work; await Promise.resolve();
+    expect(settled).toBe(false);
+    await expect(queue.submit({ operation: "shutdown", execute: normal })).rejects.toThrow("MAIN_LINE_EXCLUSIVE_BUSY");
+    releaseMarker(); await rejected; expect(settled).toBe(true);
+    expect((await queue.submit({ operation: "stop", execute: normal })).accepted).toBe(true);
+  });
+
+  it("rejects exclusive admission while an ordinary slot is active and does not coalesce with close backoff", async () => {
+    const queue = createMainLineCommandQueue(); let release!: () => void, entered!: () => void;
+    const work = new Promise<void>(resolve => { release = resolve; });
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const execute = vi.fn(async (cmd: MainLineQueuedCommand) => ok(cmd.operation, cmd.commandId));
+    const old = queue.submit({ operation: "start", execute: async cmd => { entered(); await work; return ok("start", cmd.commandId); } });
+    await started;
+    await expect(queue.submitExclusive!({ operation: "start", execute })).rejects.toThrow("MAIN_LINE_EXCLUSIVE_BUSY");
+    expect(execute).not.toHaveBeenCalled(); release(); await old;
+    await queue.submit({ operation: "stop", execute });
+    await queue.captureExecutionDrain!();
+    const safe = await queue.submitExclusive!({ operation: "stop", execute });
+    expect(safe.joined).toBeUndefined(); expect(execute).toHaveBeenCalledTimes(2);
+  });
+  it("drains a concurrent passthrough command before exclusive execution", async () => {
+    const queue = createMainLineCommandQueue(); let enter!: () => void, release!: () => void;
+    const started = new Promise<void>(resolve => { enter = resolve; });
+    const work = new Promise<void>(resolve => { release = resolve; });
+    const ordinary = queue.submit({ operation: "shutdown", execute: async cmd => {
+      enter(); await work; return ok(cmd.operation, cmd.commandId);
+    }});
+    await started;
+    const execute = vi.fn(async (cmd: MainLineQueuedCommand) => ok(cmd.operation, cmd.commandId));
+    const safe = queue.submitExclusive!({ operation: "start", execute });
+    await Promise.resolve(); expect(execute).not.toHaveBeenCalled();
+    await expect(queue.submit({ operation: "shutdown", execute })).rejects.toThrow("MAIN_LINE_EXCLUSIVE_BUSY");
+    release(); await ordinary; await safe;
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
+  it("exclusive admission drains background settlement and owner-marker writes without delaying ordinary results", async () => {
+    let releaseMarker!: () => void, releaseSettlement!: () => void;
+    const marker = new Promise<void>(resolve => { releaseMarker = resolve; });
+    const settlement = new Promise<void>(resolve => { releaseSettlement = resolve; });
+    const queue = createMainLineCommandQueue({ writeOwnerMarker: () => marker });
+    const ordinary = await queue.submit({ operation: "start", execute: async cmd => {
+      trackMainLineBackgroundWork(cmd, settlement);
+      return ok("start", cmd.commandId);
+    }});
+    expect(ordinary.accepted).toBe(true);
+    await vi.waitFor(() => expect(queue.snapshot().active).toBeNull());
+    const execute = vi.fn(async (cmd: MainLineQueuedCommand) => ok(cmd.operation, cmd.commandId));
+    const safe = queue.submitExclusive!({ operation: "start", execute });
+    await Promise.resolve(); expect(execute).not.toHaveBeenCalled();
+    releaseSettlement(); await settlement; await Promise.resolve();
+    expect(execute).not.toHaveBeenCalled();
+    releaseMarker(); expect((await safe).accepted).toBe(true);
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
   it("waits for an aborted admission callback's actual completion", async () => {
     const queue = createMainLineCommandQueue(), abort = new AbortController();
     let entered!: () => void, release!: () => void;

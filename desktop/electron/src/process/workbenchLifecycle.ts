@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import {
   getMainLineCommandQueueForProject,
+  trackMainLineBackgroundWork,
   type CloseBackoffCoalescedInfo,
   type MainLineCommandQueue
 } from "../lifecycle/mainLine/commandQueue.js";
@@ -122,10 +123,10 @@ export async function runWorkbenchLifecycle(input: RunWorkbenchLifecycleInput): 
       return writeMainLineIntent(runtimeManagerDir, intent).catch(() => undefined);
     },
     writeOwnerMarker: () => {
-      void writeMainLineQueueOwnerMarker(runtimeManagerDir).catch(() => undefined);
+      return writeMainLineQueueOwnerMarker(runtimeManagerDir).then(() => undefined).catch(() => undefined);
     },
     onCloseBackoffCoalesced: (info) => {
-      void recordCloseBackoffCoalescedEvent(input.workspaceRoot, runtimeManagerDir, info);
+      return recordCloseBackoffCoalescedEvent(input.workspaceRoot, runtimeManagerDir, info);
     },
   });
   const deadlineMs = Math.max(
@@ -197,17 +198,17 @@ export async function runWorkbenchLifecycle(input: RunWorkbenchLifecycleInput): 
             reason: `Superseded by accepted ${input.operation} command.`
           });
         }
-        void recordMainLineCommandSettlement({
+        trackMainLineBackgroundWork(command, recordMainLineCommandSettlement({
           workspaceRoot: input.workspaceRoot,
           runtimeManagerDir,
           command,
           result,
           startedAtMs,
           settledAtMs: Date.now()
-        });
+        }));
         return result;
       } catch (error: unknown) {
-        void recordMainLineCommandSettlement({
+        trackMainLineBackgroundWork(command, recordMainLineCommandSettlement({
           workspaceRoot: input.workspaceRoot,
           runtimeManagerDir,
           command,
@@ -215,7 +216,7 @@ export async function runWorkbenchLifecycle(input: RunWorkbenchLifecycleInput): 
           timedOut: deadline.signal.aborted && deadline.signal.reason === deadlineReason,
           startedAtMs,
           settledAtMs: Date.now()
-        });
+        }));
         throw error;
       } finally {
         clearTimeout(deadlineTimer);

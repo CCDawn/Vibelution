@@ -64,15 +64,17 @@ describe("runWorkbenchLifecycle command settlement evidence", () => {
   it("records durable evidence when the active-work guard rejects a stop", async () => {
     const { root, runtimeManagerDir } = makeWorkspace();
     try {
+      const queue = createMainLineCommandQueue();
       const result = await runWorkbenchLifecycle({
         ...baseInput(root),
         operation: "stop",
-        queue: createMainLineCommandQueue(),
+        queue,
         listActiveWork: () => [{ kind: "chat_turn", runId: "run-1", status: "running", sessionId: "s1" }]
       });
       expect(result).toMatchObject({ accepted: false, code: "active_work_blocked" });
       const resultPath = mainLineCommandResultPath(runtimeManagerDir, result.commandId || "");
-      await vi.waitFor(() => expect(existsSync(resultPath)).toBe(true));
+      await queue.captureExecutionDrain!();
+      expect(existsSync(resultPath)).toBe(true);
       const evidence = JSON.parse(readFileSync(resultPath, "utf8"));
       expect(evidence).toMatchObject({
         source: "electron_main",

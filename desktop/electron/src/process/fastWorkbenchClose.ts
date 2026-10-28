@@ -20,6 +20,8 @@ export type FastWorkbenchCloseInput = {
   signal?: AbortSignal;
   controlToken?: string;
   captureRetirement?: typeof captureTrackedWorkbenchJobRetirement;
+  /** Main-line queue hook for operations that can outlive the deadline. */
+  trackBackground?: (work: Promise<unknown>) => void;
   connect?: (port: number, host: string) => Promise<boolean>;
   request?: (url: string, options: {
     method: "GET" | "POST";
@@ -97,7 +99,7 @@ export async function closeOwnedWorkbenchFast(input: FastWorkbenchCloseInput): P
       clearTimeout(pollTimer);
       // The native helper may take 8s; the independent deadline still settles
       // this call, and late completion cannot touch a replacement registration.
-      void (async () => {
+      const forceWork = (async () => {
         try {
           if (!(await owned())) {
             finish(false);
@@ -108,6 +110,7 @@ export async function closeOwnedWorkbenchFast(input: FastWorkbenchCloseInput): P
           finish(false);
         }
       })();
+      input.trackBackground?.(forceWork);
     };
     const graceful = async (): Promise<void> => {
       try {
@@ -152,7 +155,8 @@ export async function closeOwnedWorkbenchFast(input: FastWorkbenchCloseInput): P
     if (Date.now() >= input.forceAt) forceRetirement();
     else {
       forceTimer = setTimeout(forceRetirement, Math.max(0, input.forceAt - Date.now()));
-      void graceful();
+      const gracefulWork = graceful();
+      input.trackBackground?.(gracefulWork);
     }
   });
 }

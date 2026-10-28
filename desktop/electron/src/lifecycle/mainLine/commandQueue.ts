@@ -7,6 +7,14 @@ import { ExecutionDrain } from "../executionDrain.js";
 // ever provisioned state.json. Keep this local to the actual queued object;
 // promises must never leak into queue snapshots or protocol payloads.
 const intentPersistenceByCommand = new WeakMap<object, () => Promise<void>>();
+const executionDrainByCommand = new WeakMap<object, ExecutionDrain>();
+
+/** Track best-effort background work without delaying the ordinary result. */
+export function trackMainLineBackgroundWork(command: object, work: Promise<unknown>): void {
+  const handled = work.catch(() => undefined);
+  const owner = executionDrainByCommand.get(command);
+  if (owner) void owner.track(() => handled);
+}
 
 export async function waitForMainLineIntentPersistence(command: object): Promise<void> {
   await intentPersistenceByCommand.get(command)?.();
@@ -90,6 +98,10 @@ export type MainLineIntentSnapshot = {
 
 export type MainLineCommandQueue = {
   submit(input: MainLineSubmitInput): Promise<MainLineSubmitResult>;
+  /** Trusted main-only admission for this in-process queue. Refuses concurrent
+   * submissions and drains tracked work. Executors must await their effects or
+   * register background work before returning; external processes are not fenced. */
+  submitExclusive?(input: MainLineSubmitInput): Promise<MainLineSubmitResult>;
   /** Drain admitted work; new admissions require a separate fence. */
   captureExecutionDrain?(): Promise<void>;
   snapshot(): {
@@ -169,7 +181,7 @@ export function createMainLineCommandQueue(options: {
   now?: () => number;
   persistIntent?: (intent: MainLineIntentSnapshot) => void | Promise<void>;
   writeOwnerMarker?: () => void | Promise<void>;
-  onCloseBackoffCoalesced?: (info: CloseBackoffCoalescedInfo) => void;
+  onCloseBackoffCoalesced?: (info: CloseBackoffCoalescedInfo) => void | Promise<void>;
 } = {}): MainLineCommandQueue {
   type Slot = MainLineQueuedCommand & {
     signal?: AbortSignal;
@@ -186,6 +198,7 @@ export function createMainLineCommandQueue(options: {
   let active: Slot | null = null;
   const pending: Slot[] = [];
   let draining = false;
+  let exclusive = false;
   let lastClose: {
     settledAtMs: number;
     runs: number;
@@ -247,6 +260,7 @@ export function createMainLineCommandQueue(options: {
   };
 
   const persist = (command: MainLineQueuedCommand): void => {
+    executionDrainByCommand.set(command, executionDrain);
     const ordinal = ++persistOrdinal;
     const markIntent = (): void => {
       if (ordinal > latestPersistOrdinal) {
@@ -358,9 +372,8 @@ export function createMainLineCommandQueue(options: {
     });
   };
 
-  return {
-    captureExecutionDrain: () => executionDrain.capture(),
-    submit(input) {
+  const submit = (input: MainLineSubmitInput, exclusiveCall = false): Promise<MainLineSubmitResult> => {
+      if (exclusive && !exclusiveCall) return Promise.reject(new Error("MAIN_LINE_EXCLUSIVE_BUSY"));
       if (input.signal?.aborted) return Promise.reject(input.signal.reason);
       const mapped = JOINABLE_OPERATIONS[input.operation];
       const noBrowser = Boolean(input.noBrowser);
@@ -419,7 +432,8 @@ export function createMainLineCommandQueue(options: {
       // executing it again. Explicit force-close requests and supersede-
       // carrying closes (handled above) never hit this path.
       if (
-        mapped === "close"
+        !exclusiveCall
+        && mapped === "close"
         && lastClose !== null
         && (!active || active.type === "close")
         && pending.length === 0
@@ -428,12 +442,13 @@ export function createMainLineCommandQueue(options: {
         const ageMs = now() - lastClose.settledAtMs;
         if (ageMs < backoffMs) {
           try {
-            options.onCloseBackoffCoalesced?.({
+            const recorded = options.onCloseBackoffCoalesced?.({
               operation: input.operation,
               runs: lastClose.runs,
               backoffMs,
               ageMs
             });
+            if (recorded) void executionDrain.track(() => Promise.resolve(recorded).catch(() => undefined));
           } catch {
             // Observability must not change queue semantics.
           }
@@ -489,6 +504,31 @@ export function createMainLineCommandQueue(options: {
       persist(command);
       drain();
       return result;
+  };
+
+  return {
+    captureExecutionDrain: () => executionDrain.capture(),
+    submit: input => submit(input),
+    async submitExclusive(input) {
+      // The synchronous fence prevents new submissions while capture waits for
+      // detached executions, admission callbacks, and persistence/marker work.
+      // Never join, supersede or coalesce an already-admitted command.
+      if (exclusive || active !== null || pending.length !== 0) throw new Error("MAIN_LINE_EXCLUSIVE_BUSY");
+      if (input.signal?.aborted) throw input.signal.reason;
+      exclusive = true;
+      let submitted = false;
+      try {
+        await executionDrain.capture(input.signal);
+        input.signal?.throwIfAborted();
+        submitted = true;
+        return await submit(input, true);
+      } finally {
+        // Before submission no exclusive effect exists, so cancellation may
+        // release the fence immediately. Once submitted, drain actual work even
+        // when the public queue promise has already rejected on cancellation.
+        if (submitted) await executionDrain.capture();
+        exclusive = false;
+      }
     },
     snapshot() {
       return {

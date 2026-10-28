@@ -63,7 +63,7 @@ import {
   type ActiveWorkRun
 } from "./activeWorkGuard.js";
 import type { WorkbenchLifecycleOperation, WorkbenchLifecycleResult } from "./workbenchLifecycle.js";
-import type { MainLineQueuedCommand } from "../lifecycle/mainLine/commandQueue.js";
+import { trackMainLineBackgroundWork, type MainLineQueuedCommand } from "../lifecycle/mainLine/commandQueue.js";
 
 export const DEFAULT_WORKBENCH_HOST = "127.0.0.1";
 export const DEFAULT_WORKBENCH_PORT = 8000;
@@ -859,6 +859,8 @@ export async function reclaimStaleWorkbenchBackend(input: {
   /** Explicit operator restart consent to pause active work through graceful shutdown. */
   interruptActiveWork?: boolean;
   gracefulShutdown?: typeof requestGracefulWorkbenchShutdown;
+  /** Track log drain work which can outlive its bounded wait. */
+  trackBackground?: (work: Promise<unknown>) => void;
   /** Only an explicitly authorized force-stop may bypass an HTTP 409 active-work refusal. */
   forceRetireOnActiveWorkRefusal?: boolean;
   registeredPids?: number[];
@@ -913,7 +915,7 @@ export async function reclaimStaleWorkbenchBackend(input: {
   const terminateOne = async (pid: number): Promise<boolean> => {
     input.signal?.throwIfAborted();
     const finishLogDrain = async (): Promise<boolean> => {
-      const drained = await waitForWorkbenchBackendLogDrain(input.workspaceRoot, pid);
+      const drained = await waitForWorkbenchBackendLogDrain(input.workspaceRoot, pid, undefined, input.trackBackground);
       if (!drained) failedTreePids.add(pid);
       return drained;
     };
@@ -1052,7 +1054,7 @@ export async function reclaimStaleWorkbenchBackend(input: {
         const ownedJob = hasTrackedWorkbenchJob(input.workspaceRoot);
         const jobClosed = await closeTrackedWorkbenchJob(input.workspaceRoot);
         input.signal?.throwIfAborted();
-        if ((ownedJob && !jobClosed) || !(await waitForWorkbenchBackendLogDrain(input.workspaceRoot, occupant.pid))) {
+        if ((ownedJob && !jobClosed) || !(await waitForWorkbenchBackendLogDrain(input.workspaceRoot, occupant.pid, undefined, input.trackBackground))) {
           return {
             reclaimed: false,
             reason: `backend pid ${occupant.pid} exited but its owned log drains remain pending`,
@@ -1202,6 +1204,8 @@ export async function resolveBindableWorkbenchPort(input: {
   /** Explicit operator restart consent to pause active work through graceful shutdown. */
   interruptActiveWork?: boolean;
   gracefulShutdown?: typeof requestGracefulWorkbenchShutdown;
+  /** Track log drain work which can outlive its bounded wait. */
+  trackBackground?: (work: Promise<unknown>) => void;
   /** Only an explicitly authorized force-stop may bypass an HTTP 409 active-work refusal. */
   forceRetireOnActiveWorkRefusal?: boolean;
   now?: () => number;
@@ -1396,15 +1400,18 @@ export function readWorkbenchBackendLogStatus(workspaceRoot: string): BoundedStd
 }
 
 export async function waitForWorkbenchBackendLogDrain(
-  workspaceRoot: string, expectedPid?: number, timeoutMs = 8_000
+  workspaceRoot: string, expectedPid?: number, timeoutMs = 8_000,
+  trackBackground?: (work: Promise<unknown>) => void
 ): Promise<boolean> {
   const key = backendLogKey(workspaceRoot);
   const owner = backendLogOwners.get(key);
   if (!owner || (expectedPid !== undefined && owner.pid !== expectedPid)) return true;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
+    const retiring = Promise.all(owner.sinks.map((sink) => sink.retire())).then((results) => results.every((result) => result.complete));
+    trackBackground?.(retiring);
     const complete = await Promise.race([
-      Promise.all(owner.sinks.map((sink) => sink.retire())).then((results) => results.every((result) => result.complete)),
+      retiring,
       new Promise<boolean>((resolveWait) => { timer = setTimeout(() => resolveWait(false), Math.max(0, timeoutMs)); })
     ]);
     if (complete && backendLogOwners.get(key) === owner) backendLogOwners.delete(key);
@@ -1566,8 +1573,10 @@ export async function executeMainLineWorkbench(
     : shutdownOwner;
   const operation = input.operation;
   const commandId = input.command.commandId;
+  const trackCommandBackground = (work: Promise<unknown>) => trackMainLineBackgroundWork(input.command, work);
   const pendingRetirement = getBackgroundWorkbenchRetirement(input.workspaceRoot);
   if (pendingRetirement?.status === "pending") {
+    trackMainLineBackgroundWork(input.command, pendingRetirement.completion);
     return {
       schemaVersion: 1, accepted: ["stop", "force-stop", "shutdown"].includes(operation), operation, commandId,
       code: "backend_retiring", message: "Owned backend resources are still being reclaimed."
@@ -1685,9 +1694,10 @@ export async function executeMainLineWorkbench(
           return await closeOwnedWorkbenchFast({ workspaceRoot: input.workspaceRoot, port,
             spawnPid: ownedPid,
             deadlineAt: timing.deadlineAt, forceAt: timing.forceAt,
-            controlToken: input.controlToken, captureRetirement: () => owned });
+            controlToken: input.controlToken, captureRetirement: () => owned,
+            trackBackground: trackCommandBackground });
         };
-        startBackgroundWorkbenchRetirement({
+        const backgroundRetirement = startBackgroundWorkbenchRetirement({
           workspaceRoot: input.workspaceRoot, requestId: retirementId, isCurrent,
           retireCaptured: async () => {
             [jobRetired, buildsRetired] = await Promise.all([
@@ -1709,6 +1719,7 @@ export async function executeMainLineWorkbench(
             return true;
           }
         });
+        trackMainLineBackgroundWork(input.command, backgroundRetirement.completion);
         return { ...accepted(operation, commandId), code: "backend_retiring",
           message: "The window may close; owned backend resources are being reclaimed." };
       }
@@ -1719,7 +1730,8 @@ export async function executeMainLineWorkbench(
           || Number(previous.spawnPid || previous.backendLaunchPid || 0),
         ...input.fastCloseTiming,
         signal: input.signal,
-        controlToken: input.controlToken
+        controlToken: input.controlToken,
+        trackBackground: trackCommandBackground
       });
       input.signal?.throwIfAborted();
       if (!retired) {
@@ -1807,6 +1819,7 @@ export async function executeMainLineWorkbench(
         resolvePortOwner: resolveCurrentPortOwner,
         controlToken: input.controlToken,
         gracefulShutdown,
+        trackBackground: trackCommandBackground,
         interruptActiveWork: input.interruptActiveWork,
         forceRetireOnActiveWorkRefusal: operation === "force-stop",
         registeredPids: retainedBackendTreePids,
@@ -1878,6 +1891,7 @@ export async function executeMainLineWorkbench(
           resolvePortOwner: resolveCurrentPortOwner,
           controlToken: input.controlToken,
           gracefulShutdown,
+          trackBackground: trackCommandBackground,
           forceRetireOnActiveWorkRefusal: operation === "force-stop",
           registeredPids: pendingBackendTreePids,
           extraPids: pendingExtraPids
@@ -1920,6 +1934,7 @@ export async function executeMainLineWorkbench(
         captureProcessIdentity: captureCurrentBackendIdentity,
         resolvePortOwner: resolveCurrentPortOwner,
         controlToken: input.controlToken,
+        trackBackground: trackCommandBackground,
         forceRetireOnActiveWorkRefusal: operation === "force-stop",
         registeredPids: retainedBackendTreePids,
         extraPids: retainedExtraPids
@@ -2161,6 +2176,7 @@ export async function executeMainLineWorkbench(
       captureProcessIdentity: captureCurrentBackendIdentity,
       resolvePortOwner: resolveCurrentPortOwner,
       gracefulShutdown,
+      trackBackground: trackCommandBackground,
       interruptActiveWork: input.interruptActiveWork,
       forceRetireOnActiveWorkRefusal: false
     });
@@ -2268,7 +2284,7 @@ export async function executeMainLineWorkbench(
   };
   const retireSpawnedTree = async (): Promise<void> => {
     const finishLogDrain = async (): Promise<void> => {
-      if (!(await waitForWorkbenchBackendLogDrain(input.workspaceRoot, spawnPid))) {
+      if (!(await waitForWorkbenchBackendLogDrain(input.workspaceRoot, spawnPid, undefined, trackCommandBackground))) {
         throw new Error(`workbench backend log drain remains pending for pid ${spawnPid}`);
       }
     };
