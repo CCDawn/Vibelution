@@ -10,6 +10,36 @@ from core.external_agent.backend_client import BackendClientError
 
 
 @pytest.mark.anyio
+async def test_create_file_preset_requires_native_management_approval(tmp_path):
+    writes = []
+    def factory(root, **kwargs):
+        class Client:
+            async def diagnostics(self): return {"status": "healthy"}
+            async def management_action(self, **values):
+                writes.append(values)
+                return {"status": "unknown", "action": "agent_create", "requestId": values["request_id"], "verified": False, "reused": False}
+        return Client()
+    service = DispatchService(tmp_path / "profile", {"p": tmp_path / "project"}, client_factory=factory)
+    bind_actions(service, asyncio.get_running_loop())
+    parameters = {"project_id": "p", "request_id": "create-1", "display_name": "Worker", "model_id": "model-1",
+                  "capability_preset": "project_files_v1"}
+    try:
+        denied = await asyncio.to_thread(execute_action, "agent_create", parameters)
+        assert denied["status"] == "approval_required" and writes == []
+        for forbidden in ({"capability_preset": "full_access"}, {"toolPolicy": {"allowedTools": ["cli_tool"]}}, {"governed": True}):
+            with pytest.raises(ValueError):
+                await asyncio.to_thread(execute_action, "agent_create", {**parameters, **forbidden}, governed=True)
+        result = await asyncio.to_thread(execute_action, "agent_create", parameters, governed=True)
+        assert result["status"] == "unknown" and writes[0]["parameters"]["capability_preset"] == "project_files_v1"
+        old = {key: value for key, value in parameters.items() if key != "capability_preset"}
+        old["request_id"] = "legacy-create"
+        await asyncio.to_thread(execute_action, "agent_create", old)
+        assert "capability_preset" not in writes[1]["parameters"]
+    finally:
+        unbind_actions(service)
+
+
+@pytest.mark.anyio
 async def test_archive_governed_action_and_restart_receipt_only(tmp_path):
     writes, reads = [], []
     def factory(root, **kwargs):

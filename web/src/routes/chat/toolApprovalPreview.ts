@@ -16,8 +16,14 @@ export function toolApprovalDisplayName(toolName: string | undefined | null, lan
 
 /** Launcher Agent creation grants no tools; require the complete warning. */
 export function launcherAgentCreatePreviewIsValid(summary: Record<string, unknown> | null | undefined): boolean {
-  if (!summary || summary.assistantAction !== "agent_create" || summary.assistantArgumentsInvalid
-    || summary.assistantOperationDescription !== "新 Agent 默认没有工具和读写范围，不能保证读取或修改项目；派遣写任务不会自动增加工具权限。") return false;
+  if (!summary || summary.assistantAction !== "agent_create" || summary.assistantArgumentsInvalid) return false;
+  const preset = summary.assistantCreatePreset;
+  const noTools = preset === undefined && summary.assistantOperationDescription === "新 Agent 默认没有工具和读写范围，不能保证读取或修改项目；派遣写任务不会自动增加工具权限。";
+  const expected = ["glob_tool", "grep_search_tool", "read_file_tool", "apply_diff_edit_tool", "write_file_tool"];
+  const fileTools = preset === "project_files_v1" && summary.assistantOperationDescription === "固定文件工具权限持续生效；写入按当前权限和协作模式审批，edit/yolo 等模式可能自动批准。目标派遣任务的审批目前只能拒绝，不能在 Launcher 批准写入。平台允许的动态目录包括项目、Agent 工作区、项目存储、工具目录、系统临时目录和用户配置允许目录，未来可能变化。不能执行命令或测试。"
+    && Array.isArray(summary.assistantCreateTools) && summary.assistantCreateTools.length === expected.length
+    && expected.every((name, index) => (summary.assistantCreateTools as unknown[])[index] === name);
+  if (!noTools && !fileTools) return false;
   const targets = summary.assistantTargets;
   if (!targets || typeof targets !== "object" || Array.isArray(targets)) return false;
   const { project_id: project, display_name: name, model_id: model } = targets as Record<string, unknown>;
@@ -125,14 +131,20 @@ export function toolApprovalActionPreview(
       return `${title}\n${lang === "zh" ? "参数无法核对，请拒绝并重新发起。" : "Arguments cannot be verified. Decline and request again."}`;
     }
     const targets = summary.assistantTargets;
-    if (action === "agent_create" && summary.assistantOperationDescription === "新 Agent 默认没有工具和读写范围，不能保证读取或修改项目；派遣写任务不会自动增加工具权限。") {
+    if (action === "agent_create" && (summary.assistantCreatePreset !== undefined || summary.assistantOperationDescription === "新 Agent 默认没有工具和读写范围，不能保证读取或修改项目；派遣写任务不会自动增加工具权限。")) {
       if (!launcherAgentCreatePreviewIsValid(summary)) {
         return `${title}\n${lang === "zh" ? "参数无法核对，请拒绝并重新发起。" : "Arguments cannot be verified. Decline and request again."}`;
       }
       const identity = targets as Record<string, string>;
-      return [title, `${lang === "zh" ? "项目" : "Project"}: ${identity.project_id}`,
+      const lines = [title, `${lang === "zh" ? "项目" : "Project"}: ${identity.project_id}`,
         `${lang === "zh" ? "名称" : "Name"}: ${identity.display_name}`,
-        `${lang === "zh" ? "模型" : "Model"}: ${identity.model_id}`,
+        `${lang === "zh" ? "模型" : "Model"}: ${identity.model_id}`];
+      if (summary.assistantCreatePreset === "project_files_v1") return [...lines,
+        `${lang === "zh" ? "工具预设" : "Tool preset"}: project_files_v1`,
+        ...(summary.assistantCreateTools as string[]).map(name => `- ${name}`),
+        lang === "zh" ? "固定文件工具权限持续生效；写入按当前权限和协作模式审批，edit/yolo 等模式可能自动批准。目标派遣任务的审批目前只能拒绝，不能在 Launcher 批准写入。平台允许的动态目录包括项目、Agent 工作区、项目存储、工具目录、系统临时目录和用户配置允许目录，未来可能变化。不能执行命令或测试。"
+          : "The file tool permission persists; write approval depends on current permissions and collaboration mode. Edit/yolo modes may approve automatically. Target task approvals can currently only be declined; Launcher cannot approve writes. Platform allowed directories can include the project, agent workspace, project storage, tools directory, system temporary directories, and user-configured allowed directories; they may change. No command execution or tests."].join("\n");
+      return [...lines,
         lang === "zh" ? "新 Agent 默认没有工具和读写范围，不能保证读取或修改项目；派遣写任务不会自动增加工具权限。"
           : "The new agent has no tools or read/write scopes by default, so it cannot be assumed to read or modify the project. Dispatching a write task does not grant tools."].join("\n");
     }

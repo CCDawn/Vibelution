@@ -59,13 +59,12 @@ class FakeNative:
         return self.compiled(agent_id, self.agents[agent_id]["directSessionId"])
 
     def create(self, parameters, marker):
+        from core.web.services.external_management.contracts import agent_create_tool_policy
         self.calls.append("create")
         agent = {"agentId": "agent-1", "directSessionId": "real-target-session", "displayName": parameters["display_name"],
                  "roleKey": "assistant_worker", "status": "active", "configRevision": 1, "updatedAt": "v1",
                  "llmBindings": {"dialogue": {"modelId": parameters["model_id"]}},
-                 "taskProfile": {"mission": parameters["mission"]}, "toolPolicy": {
-                     "allowedTools": [], "preferredTools": [], "readScopes": [], "writeScopes": [],
-                     "networkAccess": "none", "mutationAccess": "none"},
+                 "taskProfile": {"mission": parameters["mission"]}, "toolPolicy": agent_create_tool_policy(parameters.get("capability_preset")),
                  "delegationPolicy": {"allowSubagents": False, "allowWakeMessages": False},
                  "permissionPreset": "request_approval", "metadata": {"externalManagementCreation": marker,
                      "delegationPolicy": {"allowSubagents": False, "allowWakeMessages": False}}}
@@ -300,6 +299,137 @@ def test_contracts_are_closed_and_do_not_add_daily_action_approval():
         assert not {"subject", "owner", "runtime", "governed", "nativeApproval", "expected_binding"} & set(ACTION_MODELS[name].model_fields)
 
 
+def _grant_file_preset_scope(invoke, grant):
+    upgraded = invoke(grant, action="authorization_upgrade", request_id="files-upgrade",
+                      parameters={"expected_scopes": grant["scopes"], "add_scopes": ["agents:create:files"]})
+    assert upgraded.json()["status"] == "completed"
+
+
+def test_preset_requires_explicit_target_scope(harness):
+    client, service, native, _, bind, headers, invoke = harness
+    grant = bind().json()
+    assert "agents:create:files" not in service.binding()["scopes"]
+    assert bind(client_id="new-client", scopes=["agents:create", "agents:create:files"]).status_code == 403
+    parameters = {"display_name": "Worker", "model_id": "provider/model", "capability_preset": "project_files_v1"}
+    rejected = invoke(grant, parameters=parameters)
+    assert rejected.status_code == 403 and rejected.json()["detail"]["code"] == "SCOPE_DENIED"
+    assert not native.calls
+    _grant_file_preset_scope(invoke, grant)
+    rebound = bind(scopes=sorted(grant["scopes"] + ["agents:create:files"]))
+    assert rebound.status_code == 200 and rebound.json()["subject_id"] == grant["subject_id"]
+    created = invoke(grant, parameters=parameters)
+    assert created.json()["status"] == "completed"
+    assert native.calls == ["create"]
+    path = service.store.path("subjects", grant["subject_id"])
+    current = service.store.read(path)
+    current["scopes"].remove("agents:create:files")
+    service.store.write(path, current)
+    assert invoke(grant, parameters=parameters).status_code == 403
+    assert client.get(PREFIX + "/actions/agent_create/requests/stable-create", headers=headers(grant)).status_code == 403
+    assert native.calls == ["create"]
+
+
+def test_file_scope_alone_cannot_create_an_agent(harness):
+    _, _, native, _, bind, _, invoke = harness
+    grant = bind(scopes=["agents:read"]).json()
+    _grant_file_preset_scope(invoke, grant)
+    parameters = {"display_name": "Worker", "model_id": "provider/model", "capability_preset": "project_files_v1"}
+    assert invoke(grant, parameters=parameters).status_code == 403
+    assert native.calls == []
+
+
+def test_fixed_file_preset_receipt_recovery_and_conflict(harness):
+    _client, _service, native, _control, bind, _headers, invoke = harness
+    grant = bind().json()
+    _grant_file_preset_scope(invoke, grant)
+    parameters = {"display_name": "Worker", "model_id": "provider/model", "mission": "Report evidence.",
+                  "capability_preset": "project_files_v1"}
+    native.lost_ack = True
+    first = invoke(grant, parameters=parameters)
+    assert first.json()["status"] == "unknown"
+    native.lost_ack = False
+    second = invoke(grant, parameters=parameters)
+    assert second.json()["status"] == "completed" and second.json()["reused"] is True
+    assert native.calls == ["create"]
+    assert invoke(grant, parameters={**parameters, "capability_preset": None}).status_code == 409
+    for invalid in ("full_access", "workspace_write", "unknown"):
+        assert invoke(grant, request_id="invalid-" + invalid, parameters={**parameters, "capability_preset": invalid}).status_code == 422
+
+
+def test_preset_receipt_waits_for_matching_compiled_config(harness):
+    _, _, native, _, bind, _, invoke = harness
+    grant = bind().json()
+    _grant_file_preset_scope(invoke, grant)
+    parameters = {"display_name": "Worker", "model_id": "provider/model", "capability_preset": "project_files_v1"}
+    native.compiled_wide = True
+    assert invoke(grant, parameters=parameters).json()["status"] == "unknown"
+    native.compiled_wide = False
+    recovered = invoke(grant, parameters=parameters).json()
+    assert recovered["status"] == "completed" and recovered["reused"] is True
+    assert native.calls == ["create"]
+
+
+def test_fixed_preset_is_intersected_with_external_task_ceiling():
+    from core.authorization import TurnToolGrant, evaluate_tool_policy, normalize_legacy_tool_policy
+    from core.web.services.agent_directory_service import _with_runtime_tool_grants
+    from core.web.services.external_agent.policy import external_runtime_tool_grants
+    from core.web.services.external_management.contracts import agent_create_tool_policy
+    from core.web.services.tool_catalog import build_tool_descriptor
+    from core.authorization.collaboration_mode import with_collaboration_controls
+    from tools.Key_Tools import create_key_tools
+    policy = agent_create_tool_policy("project_files_v1")
+    names = {tool.name for tool in create_key_tools()}
+    assert set(policy["allowedTools"]) <= names
+    assert with_collaboration_controls(policy)["allowedTools"] == policy["allowedTools"]
+    for profile in ("read_only", "workspace_write"):
+        effective = _with_runtime_tool_grants(policy, grants=external_runtime_tool_grants(profile),
+                                             source="external_agent_task:" + profile)
+        assert effective["allowedTools"] == (policy["allowedTools"][:3] if profile == "read_only" else policy["allowedTools"])
+        assert effective["mutationAccess"] == ("none" if profile == "read_only" else "restricted")
+        assert effective["approvalOverrides"] == {"apply_diff_edit_tool": "always", "write_file_tool": "always"}
+    descriptors = tuple(build_tool_descriptor(name, args_schema={}) for name in policy["allowedTools"])
+    normalized = normalize_legacy_tool_policy(policy, policy_id="bounded", registered_tool_names=policy["allowedTools"])
+    grant = TurnToolGrant(turn_id="test", source="session", denied_tools=(), approval_mode="on_request",
+                          allowed_capabilities=tuple(sorted({tag for item in descriptors for tag in item.capabilities})))
+    decision = evaluate_tool_policy(agent_id="worker", policy=normalized, grant=grant, descriptors=descriptors,
+                                    registry_version=1, registry_fingerprint="test")
+    assert set(decision.executable_tools) == set(policy["allowedTools"])
+    assert {name: approval for name, approval, _risk in decision.approval_requirements}["write_file_tool"] == "always"
+    assert {name: approval for name, approval, _risk in decision.approval_requirements}["apply_diff_edit_tool"] == "always"
+
+
+@pytest.mark.parametrize("mode,expected_approvals", [("build", 2), ("edit", 0), ("yolo", 0)])
+def test_preset_real_execution_gate_respects_collaboration_mode(monkeypatch, mode, expected_approvals):
+    from types import SimpleNamespace
+    from core.authorization import TurnToolGrant, evaluate_tool_policy, normalize_legacy_tool_policy, tool_authorization_service as authorization
+    from core.web.services import agent_directory_service
+    from core.web.services.external_management.contracts import agent_create_tool_policy
+    from core.web.services.tool_catalog import build_tool_descriptor
+    policy = agent_create_tool_policy("project_files_v1")
+    descriptors = tuple(build_tool_descriptor(name, args_schema={}) for name in policy["allowedTools"])
+    normalized = normalize_legacy_tool_policy(policy, policy_id="bounded", registered_tool_names=policy["allowedTools"])
+    grant = TurnToolGrant(turn_id="turn-a", source="session", denied_tools=(), approval_mode="on_request",
+                          allowed_capabilities=tuple(sorted({tag for item in descriptors for tag in item.capabilities})))
+    decision = evaluate_tool_policy(agent_id="agent-a", policy=normalized, grant=grant, descriptors=descriptors,
+                                    registry_version=1, registry_fingerprint="test")
+    runtime = {"agentId": "agent-a", "turnId": "turn-a", "sessionId": "session-a", "toolPolicy": policy,
+               "agentConfigSnapshot": {"configRevision": 1, "configHash": "hash"}, "permissionPreset": "request_approval",
+               "collaborationMode": {"mode": mode, "planEnabled": False, "prePlanMode": "build"}}
+    monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: runtime)
+    asked = []
+    monkeypatch.setattr("core.web.services.session.tool_approvals.authorize_or_wait",
+                        lambda **kwargs: asked.append(kwargs) or SimpleNamespace(allowed=True, code="approved", message=""))
+    authorization.install_execution_authorization(SimpleNamespace(decision=decision), runtime=runtime)
+    try:
+        for index, name in enumerate(("write_file_tool", "apply_diff_edit_tool")):
+            result = authorization.authorize_tool_execution(tool_name=name, tool_call_id=f"call-{index}", tool_args={"file_path": "fixture.txt"})
+            assert result.allowed
+        assert len(asked) == expected_approvals
+        assert all(row["approval"] == "always" for row in asked)
+    finally:
+        authorization.clear_execution_authorization()
+
+
 def test_ledger_ack_loss_after_native_creation_recovers_without_recreating(harness, monkeypatch):
     client, service, native, _, bind, headers, invoke = harness
     grant = bind().json()
@@ -330,11 +460,14 @@ def test_changed_canonical_storage_invalidates_existing_subject(harness):
     assert not native.calls
 
 
-def test_concurrent_same_request_has_one_native_creation(harness, monkeypatch):
+@pytest.mark.parametrize("preset", [None, "project_files_v1"])
+def test_concurrent_same_request_has_one_native_creation(harness, monkeypatch, preset):
     from concurrent.futures import ThreadPoolExecutor
     from threading import Event
     _, service, native, _, bind, _, _ = harness
     grant = bind().json()
+    if preset:
+        _grant_file_preset_scope(harness[-1], grant)
     entered, release = Event(), Event()
     original = native.create
 
@@ -346,6 +479,8 @@ def test_concurrent_same_request_has_one_native_creation(harness, monkeypatch):
     monkeypatch.setattr(native, "create", blocked_create)
     body = {"request_id": "concurrent-create", "expected_binding": BINDING,
             "parameters": {"display_name": "Worker", "model_id": "provider/model"}}
+    if preset is not None:
+        body["parameters"]["capability_preset"] = preset
     args = (grant["subject_id"], grant["subject_capability"], "agent_create", body)
     with ThreadPoolExecutor(max_workers=2) as pool:
         first = pool.submit(service.invoke, *args)
@@ -397,12 +532,14 @@ def test_native_avatar_cas_is_inside_the_same_directory_lock(tmp_path, monkeypat
     assert not lock._is_owned()
 
 
-def test_native_creation_is_restricted_from_first_registry_write_and_first_sqlite_snapshot(tmp_path, monkeypatch):
+@pytest.mark.parametrize("preset", [None, "project_files_v1"])
+def test_native_creation_is_restricted_from_first_registry_write_and_first_sqlite_snapshot(tmp_path, monkeypatch, preset):
     from core.chat.conversation_store import ConversationStore
     from core.web.services import agent_directory_service as directory
     from core.web.services import session_service as sessions
     from core.web.services.agent_config_authority import canonical_agent_config_payload
     from core.web.services.external_management.native import NativeAgentGateway
+    from core.web.services.external_management.contracts import agent_create_tool_policy
     from core.web.services.session import directory_runtime
     from tests.test_agent_config_workspace_service import _use_tmp_project_root
 
@@ -415,6 +552,7 @@ def test_native_creation_is_restricted_from_first_registry_write_and_first_sqlit
     monkeypatch.setattr(gateway, "_model", lambda _model: None)
     marker = {"subjectType": "operator", "subjectId": "neutral-operator", "requestKey": "opaque", "requestFingerprint": "frozen"}
     observations = []
+    expected_policy = agent_create_tool_policy(preset)
     save = directory.save_state
 
     def observe(state):
@@ -423,8 +561,8 @@ def test_native_creation_is_restricted_from_first_registry_write_and_first_sqlit
             if (row.get("metadata") or {}).get("externalManagementCreation") != marker:
                 continue
             policy = row["toolPolicy"]
-            assert policy["allowedTools"] == [] and policy["preferredTools"] == []
-            assert policy["networkAccess"] == "none" and policy["mutationAccess"] == "none"
+            for key, value in expected_policy.items():
+                assert policy[key] == value
             assert row["permissionPreset"] == "request_approval"
             assert row["metadata"]["delegationPolicy"]["allowWakeMessages"] is False
             observations.append(bool(row.get("directSessionId")))
@@ -434,37 +572,62 @@ def test_native_creation_is_restricted_from_first_registry_write_and_first_sqlit
 
     def create_session(**kwargs):
         assert kwargs["activate"] is False and kwargs["lightweight"] is True
-        assert kwargs["idempotency_key"] == marker["requestKey"]
+        external = kwargs.get("created_by") == "external_agent_task"
+        if external:
+            assert kwargs["conversation_index_kind"] == "hidden"
+            assert kwargs["session_metadata"]["effectivePermissionProfile"] == "workspace_write"
+        else:
+            assert kwargs["idempotency_key"] == marker["requestKey"]
         agent_id = kwargs["agent_id"]
         raw = next(row for row in directory.load_state()["agents"] if row["agentId"] == agent_id)
         config = canonical_agent_config_payload(raw)
         assert config["taskProfile"]["mission"] == "Report evidence."
-        assert config["toolPolicy"]["allowedTools"] == []
+        for key, value in expected_policy.items():
+            assert config["toolPolicy"][key] == value
         assert config["delegationPolicy"]["allowSubagents"] is False
         assert config["delegationPolicy"]["allowWakeMessages"] is False
         revision = store.repository.import_agent_config_snapshots([{
             "agent_id": agent_id, "display_name": raw["displayName"], "kind": raw["kind"],
             "status": raw["status"], "config": config, "source": "isolated_native_session_binding",
         }]).result(timeout=3)[0]
-        return store.repository.create_session(session_id="native-created-session", agent_id=agent_id,
+        return store.repository.create_session(session_id="external-created-session" if external else "native-created-session", agent_id=agent_id,
             agent_config_revision_id=revision["configRevisionId"], title="New session").result(timeout=3)
 
     monkeypatch.setattr(sessions, "create_chat_session", create_session)
     try:
-        agent = gateway.create({"display_name": "Worker", "model_id": "model-primary", "mission": "Report evidence."}, marker)
+        parameters = {"display_name": "Worker", "model_id": "model-primary", "mission": "Report evidence."}
+        if preset is not None:
+            parameters["capability_preset"] = preset
+        agent = gateway.create(parameters, marker)
         assert observations and observations[0] is False and observations[-1] is True
         assert agent["directSessionId"] == "native-created-session"
         assert "delegationPolicy" not in agent  # This is the real native API shape.
         compiled = gateway.compiled(agent["agentId"], agent["directSessionId"])
-        assert compiled["toolPolicy"]["allowedTools"] == []
+        for key, value in expected_policy.items():
+            assert compiled["toolPolicy"][key] == value
         assert compiled["toolPolicy"]["networkAccess"] == "none"
         assert compiled["taskProfile"]["mission"] == "Report evidence."
         assert compiled["delegationPolicy"]["allowWakeMessages"] is False
         assert gateway.compiled(agent["agentId"], "foreign-session") is None
         service = ManagementService(tmp_path / "receipts", identity=lambda: TargetIdentity(BINDING, "test"), native=gateway)
-        record = {"action": "agent_create", "parameters": {"display_name": "Worker", "model_id": "model-primary", "mission": "Report evidence."}, "marker": marker}
+        record = {"action": "agent_create", "parameters": parameters, "marker": marker}
         assert service._verify(record, agent)
         pinned = store.repository.get_session(agent["directSessionId"])["agentConfigRevisionId"]
+        if preset:
+            from tests.test_external_agent_task_service import FakeRuntime, _service
+            # The isolated create_session stub does not perform the ordinary
+            # directory visibility update made by the real session owner.
+            runtime = FakeRuntime(agents=[{**agent, "conversationIndexKind": "personal_agent"}])
+            runtime.create_session = create_session
+            external = _service(tmp_path / "external-tasks", runtime)
+            started = external.start_task(owner_id="launcher", adapter_connection_id="connection", capabilities=set(),
+                agent_id=agent["agentId"], task="Edit the project", permission_profile="workspace_write",
+                client_request_id="external-preset", title="", runtime_revision="rev")
+            assert started["status"] == "running"
+            hidden = store.repository.get_session("external-created-session")
+            assert hidden["agentConfigRevisionId"] == pinned
+            assert runtime.submit_calls[0]["sessionId"] == "external-created-session"
+            assert runtime.submit_calls[0]["message_metadata"]["effectivePermissionProfile"] == "workspace_write"
         update_marker = {"subjectType": "operator", "subjectId": "neutral-operator", "requestKey": "update", "requestFingerprint": "update-frozen"}
         parameters = {"agent_id": agent["agentId"], "expected_config_revision": agent["configRevision"],
                       "updates": {"displayName": "Edited Worker", "taskProfile": {"mission": "Updated mission."}}}

@@ -493,6 +493,8 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
         args = schema.model_validate(parameters).model_dump(exclude_unset=action == "agent_update")
     except ValidationError as exc:
         raise ValueError("Action parameters do not match describe schema") from exc
+    if action == "agent_create" and args.get("capability_preset") is None:
+        args.pop("capability_preset", None)  # Keep existing Launcher intent fingerprints stable.
     if action == "authorization_upgrade":
         authorization_upgrade_approval_summary(args)
     projects = service.project_ids()
@@ -561,7 +563,7 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
         project_id = args.pop("project_id")
         coroutine = service.dispatch_write_from_source(project_id, **args, runtime=runtime)
     elif action in managed:
-        if managed[action][1]["governed"] and governed is not True:
+        if (managed[action][1]["governed"] or action == "agent_create" and args.get("capability_preset") is not None) and governed is not True:
             return {"ok": False, "status": "approval_required", "action": action, "tool": "personal_assistant_manage_tool"}
         project_id, request_id = args.pop("project_id"), args.pop("request_id")
         coroutine = service.management.invoke(project_id, action=action, request_id=request_id, parameters=args)

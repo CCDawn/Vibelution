@@ -57,13 +57,14 @@ async function click(label: string) {
   await settle(); await settle();
 }
 function assetReads() { return invoke.mock.calls.filter(([request]) => request.operation === "operatorAsset").length; }
-async function renderAssistant(options: { capability?: boolean; failAvatar?: boolean; approval?: Record<string, unknown>; language?: "zh" | "en"; patrol?: { state: "ready" | "unavailable"; deliveryStates: Record<string, number> } } = {}) {
+async function renderAssistant(options: { capability?: boolean; failAvatar?: boolean; approval?: Record<string, unknown>; dispatches?: Array<Record<string, unknown>>; declineFailure?: boolean; language?: "zh" | "en"; patrol?: { state: "ready" | "unavailable"; deliveryStates: Record<string, number> } } = {}) {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   failingAvatar = Boolean(options.failAvatar);
   detail = { id: "s", agentId: "a", status: "ready", messages: [] };
   revisions = undefined;
   assets = { avatar: asset("avatar", "AQI="), background: asset("background", "AwQ=", "soft") };
   fetch = vi.fn(() => { throw new Error("HTTP is forbidden in this window"); }); vi.stubGlobal("fetch", fetch);
+  let dispatchRows = options.dispatches ?? [];
   invoke = vi.fn(async request => {
     switch (request.operation) {
       case "status": return {
@@ -77,7 +78,12 @@ async function renderAssistant(options: { capability?: boolean; failAvatar?: boo
       case "detail": return detail;
       case "approvals": return options.approval ? [options.approval] : [];
       case "resolveApproval": return { ...options.approval, status: request.decision === "decline" ? "rejected" : "approved" };
-      case "dispatches": return { dispatches: [] };
+      case "dispatches": return { dispatches: dispatchRows };
+      case "declineDispatchApproval":
+        if (options.declineFailure) throw new Error("目标审批已变化");
+        dispatchRows = dispatchRows.map(row => row.dispatchId === request.dispatchId
+          ? { ...row, receipt: { ...(row.receipt as Record<string, unknown>), pendingApprovals: [] } } : row);
+        return { dispatchId: request.dispatchId, nativeTaskId: request.taskId };
       case "computerState": return { available: false, status: "idle", message: "测试驱动未连接", grantId: null, window: null, pending: null };
       case "computerWindows": return { windows: [] };
       case "setExpanded": return { expanded: request.expanded };
@@ -102,6 +108,88 @@ async function finishTurn(turnId: string) {
 }
 
 describe("Launcher operator image consumption", () => {
+  it("displays the complete fixed tool preset and dynamic directories before creation approval", async () => {
+    await renderAssistant({ approval: { requestId: "r", sessionId: "s", turnId: "t", agentId: "a",
+      toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
+      argumentSummary: { assistantAction: "agent_create", assistantTargets: { project_id: "registered:1", display_name: "Worker", model_id: "model-1" },
+        assistantCreatePreset: "project_files_v1", assistantCreateTools: ["glob_tool", "grep_search_tool", "read_file_tool", "apply_diff_edit_tool", "write_file_tool"],
+        assistantOperationDescription: "固定文件工具权限持续生效；写入按当前权限和协作模式审批，edit/yolo 等模式可能自动批准。目标派遣任务的审批目前只能拒绝，不能在 Launcher 批准写入。平台允许的动态目录包括项目、Agent 工作区、项目存储、工具目录、系统临时目录和用户配置允许目录，未来可能变化。不能执行命令或测试。" } } });
+    await click("展开个人助理聊天");
+    const preview = container.querySelector("pre");
+    for (const value of ["registered:1", "model-1", "project_files_v1", "glob_tool", "grep_search_tool", "read_file_tool", "apply_diff_edit_tool", "write_file_tool", "项目存储", "系统临时目录", "用户配置允许目录", "edit/yolo", "可能自动批准", "只能拒绝", "不能在 Launcher 批准写入"]) expect(preview?.textContent).toContain(value);
+    expect(preview?.tabIndex).toBe(0);
+    expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"))?.disabled).toBe(false);
+  });
+
+  it("blocks creation approval when the file-tool preset disclosure is incomplete", async () => {
+    await renderAssistant({ approval: { requestId: "r", sessionId: "s", turnId: "t", agentId: "a",
+      toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
+      argumentSummary: { assistantAction: "agent_create", assistantTargets: { project_id: "registered:1", display_name: "Worker", model_id: "model-1" },
+        assistantCreatePreset: "project_files_v1", assistantCreateTools: ["glob_tool"],
+        assistantOperationDescription: "固定文件工具权限持续生效；写入按当前权限和协作模式审批，edit/yolo 等模式可能自动批准。目标派遣任务的审批目前只能拒绝，不能在 Launcher 批准写入。平台允许的动态目录包括项目、Agent 工作区、项目存储、工具目录、系统临时目录和用户配置允许目录，未来可能变化。不能执行命令或测试。" } } });
+    await click("展开个人助理聊天");
+    expect(container.textContent).toContain("参数无法核对");
+    expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"))?.disabled).toBe(true);
+  });
+
+  it("shows target approval identity and summary, blocks approval, and declines its native request once", async () => {
+    const request = { approvalId: "approval-1", toolName: "exec_command", risk: "write", targetSummary: { commandPreview: "echo fixture", commandTruncated: false }, revision: "fp-1", availableDecisions: ["accept", "decline"] };
+    const row = { dispatchId: "dispatch-1", projectId: "registered:1", agentId: "worker-1", nativeTaskId: "task-1", receipt: { taskId: "task-1", status: "awaiting_approval", shouldPoll: true, pendingApprovals: [request] } };
+    await renderAssistant({ dispatches: [row] });
+    await click("展开个人助理聊天");
+    const preview = container.querySelector("pre");
+    for (const value of ["registered:1", "worker-1", "dispatch-1", "task-1", "approval-1", "echo fixture", "不能安全批准"]) expect(preview?.textContent).toContain(value);
+    const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"));
+    const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("否"));
+    expect(approve?.disabled).toBe(true);
+    await act(async () => { approve?.click(); window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true })); });
+    expect(invoke.mock.calls.some(([payload]) => payload.operation === "declineDispatchApproval")).toBe(false);
+    await act(async () => { reject?.click(); reject?.click(); }); await settle(); await settle();
+    const calls = invoke.mock.calls.filter(([payload]) => payload.operation === "declineDispatchApproval");
+    expect(calls).toEqual([[{ operation: "declineDispatchApproval", dispatchId: "dispatch-1", taskId: "task-1", approvalId: "approval-1", revision: "fp-1" }]]);
+    expect(container.textContent).not.toContain("不能安全批准");
+  });
+
+  it("shows only the assistant approval when both sessions require a decision", async () => {
+    const approval = { requestId: "own", sessionId: "s", turnId: "t", agentId: "a", toolName: "exec_command", status: "pending", risk: "write", argumentSummary: { commandPreview: "own command" }, availableDecisions: ["accept", "decline"] };
+    const target = { approvalId: "target", toolName: "unknown_tool", risk: "write", targetSummary: { argumentKeys: ["path"] }, revision: "fp", availableDecisions: ["decline"] };
+    await renderAssistant({ approval, dispatches: [{ dispatchId: "d", nativeTaskId: "task", receipt: { taskId: "task", pendingApprovals: [target] } }] });
+    await click("展开个人助理聊天");
+    expect(container.querySelectorAll('[data-chat-tool-approval-variant="inline"]')).toHaveLength(1);
+    expect(container.textContent).toContain("own command");
+    await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "n", bubbles: true }))); await settle();
+    expect(invoke.mock.calls.filter(([payload]) => payload.operation === "resolveApproval")).toHaveLength(1);
+    expect(invoke.mock.calls.some(([payload]) => payload.operation === "declineDispatchApproval")).toBe(false);
+  });
+
+  it("shows the target summary but disables all decisions and shortcuts when revision is empty", async () => {
+    const target = { approvalId: "target", toolName: "exec_command", risk: "write", targetSummary: { commandPreview: "echo fixture" }, revision: "", availableDecisions: ["accept", "decline"] };
+    await renderAssistant({ dispatches: [{ dispatchId: "d", nativeTaskId: "task", receipt: { taskId: "task", pendingApprovals: [target] } }] });
+    await click("展开个人助理聊天");
+    expect(container.textContent).toContain("echo fixture");
+    expect(container.textContent).toContain("审批版本不可用，无法安全拒绝");
+    const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("否"));
+    expect(reject?.disabled).toBe(true);
+    await act(async () => { reject?.click(); window.dispatchEvent(new KeyboardEvent("keydown", { key: "n" })); window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
+    expect(invoke.mock.calls.some(([payload]) => payload.operation === "declineDispatchApproval")).toBe(false);
+  });
+
+  it.each([
+    { toolName: "exec_command", targetSummary: { commandPreview: "partial", commandTruncated: true } },
+    { toolName: "write_file_tool", targetSummary: { pathPreview: "example.txt" } },
+    { toolName: "unknown_tool", targetSummary: { argumentKeys: ["target"] } },
+  ])("keeps incomplete target previews decline-only and reports a failed decision", async ({ toolName, targetSummary }) => {
+    const target = { approvalId: "target", toolName, risk: "write", targetSummary, revision: "fp", availableDecisions: ["accept", "decline"] };
+    await renderAssistant({ declineFailure: true, dispatches: [{ dispatchId: "d", nativeTaskId: "task", receipt: { taskId: "task", pendingApprovals: [target] } }] });
+    await click("展开个人助理聊天");
+    const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"));
+    const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("否"));
+    expect(approve?.disabled).toBe(true);
+    await act(async () => reject?.click()); await settle();
+    expect(container.textContent).toContain("目标审批已变化");
+    expect(container.textContent).toContain("不能安全批准");
+    expect(invoke.mock.calls.filter(([payload]) => payload.operation === "dispatches").length).toBeGreaterThan(1);
+  });
   it("shows the zero-tool limitation when approving Launcher agent creation", async () => {
     await renderAssistant({ approval: { requestId: "r", sessionId: "s", turnId: "t", agentId: "a",
       toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],

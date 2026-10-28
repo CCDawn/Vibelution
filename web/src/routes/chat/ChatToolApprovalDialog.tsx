@@ -23,6 +23,8 @@ type ChatToolApprovalDialogProps = {
   pending: boolean;
   /** Prevent approval when the caller cannot verify the displayed request. */
   approveDisabled?: boolean;
+  /** Prevent rejection when the caller cannot bind the decision safely. */
+  rejectDisabled?: boolean;
   rawTitle: string;
   riskLabel: string;
   scopeLabel: string;
@@ -61,6 +63,7 @@ export function ChatToolApprovalDialog({
   lang,
   pending,
   approveDisabled = false,
+  rejectDisabled = false,
   rawTitle,
   riskLabel,
   scopeLabel,
@@ -123,13 +126,15 @@ export function ChatToolApprovalDialog({
         return;
       }
       if (key === "n" || key === "escape") {
-        event.preventDefault();
-        onReject();
+        if (!rejectDisabled) {
+          event.preventDefault();
+          onReject();
+        }
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [approveDisabled, onApprove, onApproveForSession, onReject, pending]);
+  }, [approveDisabled, rejectDisabled, onApprove, onApproveForSession, onReject, pending]);
 
   return (
     <div
@@ -185,11 +190,11 @@ export function ChatToolApprovalDialog({
               <span className={styles.toolItem} role="listitem">{lang === "zh" ? `另 ${extraCount} 项` : `+${extraCount}`}</span>
             ) : null}
           </div>
-          <p className={styles.hotkeys}>
+          {!rejectDisabled ? <p className={styles.hotkeys}>
             {lang === "zh"
               ? onApproveForSession ? "Y 是 · A 始终 · N 否" : "Y 是 · N 否"
               : onApproveForSession ? "Y Yes · A Always · N No" : "Y Yes · N No"}
-          </p>
+          </p> : null}
         </div>
         <div className={styles.actions}>
           <VButton
@@ -240,7 +245,7 @@ export function ChatToolApprovalDialog({
             type="button"
             className={styles.noButton}
             onClick={onReject}
-            isDisabled={pending}
+            isDisabled={pending || rejectDisabled}
             title={lang === "zh" ? "拒绝本次（N）" : "Decline (N)"}
           >
             <span>{buttons.no}</span>

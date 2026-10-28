@@ -70,7 +70,7 @@ class ManagementService:
     def binding(self) -> dict:
         current = self.identity()
         Binding.model_validate(current.binding)
-        return {"protocolVersion": 1, "binding": current.binding, "scopes": [scope for scope in SCOPES if scope not in {"tasks:read", "source:read", "knowledge:catalog:read"}], "actions": contracts()}
+        return {"protocolVersion": 1, "binding": current.binding, "scopes": [scope for scope in SCOPES if scope not in {"tasks:read", "source:read", "knowledge:catalog:read", "agents:create:files"}], "actions": contracts()}
 
     def _expected(self, expected: dict):
         current = self.identity()
@@ -96,6 +96,8 @@ class ManagementService:
                     or grant.get("scopes") != scopes):
                     raise ManagementError("SUBJECT_GRANT_CONFLICT", 409)
             else:
+                if "agents:create:files" in scopes:
+                    raise ManagementError("SCOPE_DENIED", 403)
                 grant = {"subject_id": "ops-" + uuid4().hex, "subject_capability": secrets.token_urlsafe(48),
                          "binding": current.binding, "authority": current.signature, "scopes": scopes}
                 # The private grant is durable before its client index and before returning credentials.
@@ -345,8 +347,10 @@ class ManagementService:
         parameters = record["parameters"]
         metadata = agent.get("metadata") or {}
         if record["action"] == "agent_create":
-            low_policy = {"allowedTools": [], "preferredTools": [], "readScopes": [], "writeScopes": [],
-                          "networkAccess": "none", "mutationAccess": "none"}
+            from .contracts import agent_create_tool_policy
+            low_policy = agent_create_tool_policy(parameters.get("capability_preset"))
+            if parameters.get("capability_preset") is None:
+                low_policy.pop("maxCallsPerTurn")  # Historical receipts did not check the budget.
             delegation = {"allowSubagents": False, "allowWakeMessages": False}
             registry_matches = (metadata.get("externalManagementCreation") == record["marker"] and bool(agent.get("directSessionId"))
                 and agent.get("displayName") == parameters["display_name"] and agent.get("roleKey") == "assistant_worker"
@@ -430,8 +434,12 @@ class ManagementService:
             if len(dumps(envelope.parameters, ensure_ascii=False, allow_nan=False).encode()) > 16_000:
                 raise ValueError("parameters too large")
             parameters = ACTION_MODELS[action].model_validate(envelope.parameters).model_dump(exclude_unset=action == "agent_update")
+            if action == "agent_create" and parameters.get("capability_preset") is None:
+                parameters.pop("capability_preset", None)  # Preserve historical intent fingerprints.
         except (ValidationError, ValueError):
             raise ManagementError("INVALID_INPUT", 422) from None
+        if action == "agent_create" and parameters.get("capability_preset") is not None:
+            self._authorize(subject, capability, "agents:create:files", envelope.expected_binding.model_dump())
         key = self._request_key(subject, action, envelope.request_id)
         if action == "authorization_upgrade":
             return self._authorization_upgrades().invoke(subject, capability, envelope.request_id,
@@ -488,6 +496,8 @@ class ManagementService:
             record = self.store.read(path)
             if record is None:
                 raise ManagementError("REQUEST_UNAVAILABLE", 404)
+            if action == "agent_create" and (record.get("parameters") or {}).get("capability_preset") is not None:
+                self._authorize(subject, capability, "agents:create:files")
             if record.get("failure"):
                 raise ManagementError(record["failure"]["code"], record["failure"]["status_code"])
             if not record.get("receipt") and self._confirm(record):

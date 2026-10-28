@@ -306,11 +306,11 @@ class NativeAgentGateway:
         )
         self._owners()
         self._model(parameters["model_id"])
+        from .contracts import agent_create_tool_policy
         return create_configured_agent_with_session(display_name=parameters["display_name"],
             primary_mode="chat", role_key="assistant_worker", prompt_template_id="prompt-chat-default",
             llm_bindings={"dialogue": {"modelId": parameters["model_id"]}},
-            tool_policy={"allowedTools": [], "preferredTools": [], "readScopes": [], "writeScopes": [],
-                "networkAccess": "none", "mutationAccess": "none", "maxCallsPerTurn": 0},
+            tool_policy=agent_create_tool_policy(parameters.get("capability_preset")),
             task_profile={"mission": parameters["mission"]}, permission_preset="request_approval",
             delegation_policy={"allowSubagents": False, "allowWakeMessages": False},
             metadata={"externalManagementCreation": marker}, source="external_operator_management",

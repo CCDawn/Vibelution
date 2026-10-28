@@ -24,14 +24,25 @@ export type LauncherAssistantAcceptance =
 export type LauncherAssistantDispatch = {
   dispatchId: string;
   projectId?: string;
+  agentId?: string;
   nativeTaskId?: string;
-  receipt?: { status?: string; resultSummary?: string; shouldPoll?: boolean } | null;
+  receipt?: { taskId?: string; status?: string; resultSummary?: string; shouldPoll?: boolean; pendingApprovals?: LauncherDispatchApproval[] } | null;
   lastError?: { message?: string; code?: string } | null;
+};
+
+export type LauncherDispatchApproval = {
+  approvalId: string;
+  toolName: string;
+  risk: string;
+  targetSummary: Record<string, unknown>;
+  revision: string;
+  availableDecisions: string[];
 };
 
 export type LauncherAssistantRequest =
   | { operation: "status" | "detail" | "dispatches" | "hide" | "approvals" | "openLauncher" }
   | { operation: "resolveApproval"; requestId: string; decision: "accept" | "decline" }
+  | { operation: "declineDispatchApproval"; dispatchId: string; taskId: string; approvalId: string; revision: string }
   | { operation: "send"; message: string; requestId: string; attachmentIds?: string[] }
   | { operation: "uploadAttachment"; filename: string; contentType: string; dataBase64: string }
   | { operation: "readAttachment"; artifactId: string }
@@ -270,10 +281,42 @@ export async function resolveLauncherAssistantApproval(request: SessionToolAppro
 export async function getLauncherAssistantDispatches(): Promise<LauncherAssistantDispatch[]> {
   const result = await launcherAssistantBridge().invoke({ operation: "dispatches" });
   if (!record(result) || !Array.isArray(result.dispatches)
-    || result.dispatches.some(row => !record(row) || typeof row.dispatchId !== "string")) {
+    || result.dispatches.some(row => {
+      if (!record(row) || typeof row.dispatchId !== "string") return true;
+      if (row.receipt == null) return false;
+      if (!record(row.receipt) || Array.isArray(row.receipt)) return true;
+      const pending = row.receipt.pendingApprovals;
+      if (pending === undefined) return false;
+      if (!Array.isArray(pending)) return true;
+      if (pending.length && (typeof row.nativeTaskId !== "string" || !row.nativeTaskId || row.receipt.taskId !== row.nativeTaskId)) return true;
+      return pending.some(item => !record(item) || Array.isArray(item)
+        || typeof item.approvalId !== "string" || !item.approvalId || typeof item.toolName !== "string"
+        || typeof item.risk !== "string" || !record(item.targetSummary) || Array.isArray(item.targetSummary)
+        || typeof item.revision !== "string" || !Array.isArray(item.availableDecisions)
+        || item.availableDecisions.some((decision: unknown) => typeof decision !== "string"));
+    })) {
     throw new Error("Launcher 派发回执暂不可用。");
   }
   return result.dispatches;
+}
+
+export function launcherDispatchRevisionIsValid(revision: unknown): revision is string {
+  return typeof revision === "string" && /^[A-Za-z0-9_.:-]{1,200}(?![\s\S])/.test(revision);
+}
+
+/** Target-side summaries are not complete action proofs; only decline is exposed. */
+export async function declineLauncherDispatchApproval(row: LauncherAssistantDispatch, approval: LauncherDispatchApproval): Promise<void> {
+  if (!row.nativeTaskId || row.receipt?.taskId !== row.nativeTaskId
+    || !Array.isArray(row.receipt.pendingApprovals) || !row.receipt.pendingApprovals.includes(approval)
+    || !approval.approvalId || !launcherDispatchRevisionIsValid(approval.revision)
+    || !Array.isArray(approval.availableDecisions) || !approval.availableDecisions.includes("decline")) {
+    throw new Error("此派遣审批已变化，请刷新后重试。");
+  }
+  const result = await launcherAssistantBridge().invoke({ operation: "declineDispatchApproval", dispatchId: row.dispatchId,
+    taskId: row.nativeTaskId, approvalId: approval.approvalId, revision: approval.revision });
+  if (!record(result) || result.dispatchId !== row.dispatchId || result.nativeTaskId !== row.nativeTaskId) {
+    throw new Error("Launcher 未确认本次拒绝，请刷新回执核对。");
+  }
 }
 
 export async function setLauncherAssistantExpanded(expanded: boolean): Promise<void> {

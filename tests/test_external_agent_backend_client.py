@@ -160,6 +160,27 @@ async def test_management_legacy_subject_retains_original_scope_set(tmp_path, mo
 
 
 @pytest.mark.anyio
+async def test_explicit_file_scope_is_accepted_only_as_saved_grant(tmp_path, monkeypatch):
+    from core.external_agent.backend_client import _MANAGEMENT_SCOPES
+    assert "agents:create:files" not in _MANAGEMENT_SCOPES
+    _runtime_state(tmp_path)
+    client = ManagedAgentBackendClient(tmp_path, state_path=tmp_path / "credentials.json")
+    binding = {"projectId": "p", "instanceId": "i"}
+    scopes = sorted(["agents:create", "agents:create:files"])
+    client._state["management"] = {"clientId": "existing_client_1234567890", "binding": binding, "scopes": scopes,
+        "subjectId": "ops-1234567890abcdef", "capability": "a" * 48}
+    async def request(method, path, **kwargs):
+        if path.endswith("/binding"):
+            return {"protocolVersion": 1, "binding": binding}
+        assert kwargs["json_payload"]["scopes"] == scopes
+        return {"protocolVersion": 1, "binding": binding, "scopes": scopes,
+            "subject_id": "ops-1234567890abcdef", "subject_capability": "a" * 48}
+    monkeypatch.setattr(client, "_request_json", request)
+    grant = await client._management_grant(require_existing=True)
+    assert grant["scopes"] == scopes
+
+
+@pytest.mark.anyio
 async def test_archive_sdk_strict_local_parameters_and_target_receipt(tmp_path, monkeypatch):
     _runtime_state(tmp_path)
     client = ManagedAgentBackendClient(tmp_path, state_path=tmp_path / "credentials.json")

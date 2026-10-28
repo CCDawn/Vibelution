@@ -20,6 +20,7 @@ export type AssistantHostSnapshot = {
 export type AssistantHostRequest =
   | { operation: "status" | "detail" | "dispatches" | "config" | "approvals" }
   | { operation: "resolveApproval"; requestId: string; decision: "accept" | "decline" }
+  | { operation: "declineDispatchApproval"; dispatchId: string; taskId: string; approvalId: string; revision: string }
   | { operation: "send"; message: string; requestId: string; attachmentIds?: string[] }
   | { operation: "uploadAttachment"; filename: string; contentType: string; dataBase64: string }
   | { operation: "readAttachment"; artifactId: string }
@@ -649,7 +650,7 @@ export class AssistantHost {
     const captured = structuredClone(payload);
     while (this.migrationAdmission) {
       const admission = this.migrationAdmission;
-      const safeWhileWaiting = ["status", "detail", "dispatches", "config", "approvals", "curation", "operatorAsset", "resolveApproval", "stop", "computerState"]
+      const safeWhileWaiting = ["status", "detail", "dispatches", "config", "approvals", "curation", "operatorAsset", "resolveApproval", "declineDispatchApproval", "stop", "computerState"]
         .includes(captured.operation);
       // Confirmation only settles an existing native waiter; it remains a
       // counted writer in the host barrier even after admission is sealed.
@@ -696,6 +697,14 @@ export class AssistantHost {
           || !["accept", "decline"].includes(payload.decision)) throw new HostError("ASSISTANT_REQUEST_INVALID");
         return await this.rpc(generation, "/api/assistant/approvals/decision", "POST",
           { requestId: payload.requestId, decision: payload.decision });
+      case "declineDispatchApproval":
+        if (Object.keys(payload).length !== 5 || !ownKeys(payload, ["operation", "dispatchId", "taskId", "approvalId", "revision"])
+          || typeof payload.dispatchId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(payload.dispatchId)
+          || typeof payload.taskId !== "string" || !/^[A-Za-z0-9_.:-]{1,160}$/.test(payload.taskId)
+          || typeof payload.approvalId !== "string" || !/^[A-Za-z0-9_.:-]{1,160}$/.test(payload.approvalId)
+          || typeof payload.revision !== "string" || !/^[A-Za-z0-9_.:-]{1,200}(?![\s\S])/.test(payload.revision)) throw new HostError("ASSISTANT_REQUEST_INVALID");
+        return await this.rpc(generation, "/api/assistant/dispatches/approval/decline", "POST",
+          { dispatchId: payload.dispatchId, taskId: payload.taskId, approvalId: payload.approvalId, revision: payload.revision });
       case "operatorAsset":
         if (!ownKeys(payload, ["operation", "kind"]) || !["avatar", "background"].includes(payload.kind)) throw new HostError("ASSISTANT_REQUEST_INVALID");
         // Native backgrounds allow 10 MiB; base64 fits this operation's 16 MiB

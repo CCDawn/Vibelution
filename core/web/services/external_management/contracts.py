@@ -7,8 +7,8 @@ import unicodedata
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-Scope = Literal["agents:read", "agents:create", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read", "source:read", "knowledge:catalog:read"]
-SCOPES = ("agents:read", "agents:create", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read", "source:read", "knowledge:catalog:read")
+Scope = Literal["agents:read", "agents:create", "agents:create:files", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read", "source:read", "knowledge:catalog:read"]
+SCOPES = ("agents:read", "agents:create", "agents:create:files", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read", "source:read", "knowledge:catalog:read")
 _AVATAR_EXTENSION = r"(?:[pP][nN][gG]|[jJ][pP][gG]|[jJ][pP][eE][gG]|[wW][eE][bB][pP]|svg)"
 _AVATAR_PATH_PATTERN = r"^workspace/avatars/[A-Za-z0-9_.-]+\." + _AVATAR_EXTENSION + "$"
 
@@ -49,6 +49,7 @@ class AgentCreate(Closed):
     display_name: str = Field(min_length=1, max_length=120)
     model_id: str = Field(min_length=1, max_length=200)
     mission: str = Field(default="执行用户明确交办的任务，报告结果和可核验依据。", max_length=2000)
+    capability_preset: Literal["project_files_v1"] | None = None
 
     @field_validator("display_name", "model_id")
     @classmethod
@@ -57,6 +58,18 @@ class AgentCreate(Closed):
         if not value or len(value.splitlines()) != 1:
             raise ValueError("A nonblank single line is required")
         return value
+
+
+def agent_create_tool_policy(preset: str | None) -> dict:
+    if preset is None:
+        return {"allowedTools": [], "preferredTools": [], "readScopes": [], "writeScopes": [],
+                "networkAccess": "none", "mutationAccess": "none", "maxCallsPerTurn": 0}
+    if preset != "project_files_v1":
+        raise ValueError("Unknown capability preset")
+    names = ["glob_tool", "grep_search_tool", "read_file_tool", "apply_diff_edit_tool", "write_file_tool"]
+    return {"allowedTools": names, "preferredTools": list(names), "blockedTools": ["enter_plan_mode_tool", "exit_plan_mode_tool"], "readScopes": ["private", "shared"],
+            "writeScopes": ["private"], "networkAccess": "none", "mutationAccess": "restricted",
+            "maxCallsPerTurn": 12, "approvalOverrides": {"apply_diff_edit_tool": "always", "write_file_tool": "always"}}
 
 
 class ModelBinding(Closed):
@@ -167,13 +180,13 @@ ACTION_SCOPES = {"agent_create": "agents:create", "agent_update": "agents:update
 
 def contracts() -> dict:
     descriptions = {
-        "agent_create": "在目标项目创建普通 Agent，默认不授予任何工具或读写范围，不能据此认为它能够读取或修改项目；派遣写任务也不会自动增加工具权限。必须选择显式模型，使用稳定 request_id，未知结果查询原回执。",
+        "agent_create": "默认不授予任何工具或读写范围，派遣写任务也不会自动增加工具权限。文件任务可选固定 project_files_v1，须通过 personal_assistant_manage_tool 并具备 agents:create 和独立 agents:create:files；缺少时先 authorization_status，再用 authorization_upgrade 仅增加此权限。创建和权限升级按助理当前原生权限策略执行，full_access 可能自动批准。授权五个工具并持久生效；写入按当前权限和协作模式审批，edit/yolo 等模式可能自动批准。目标派遣任务的审批目前只能拒绝，不能在 Launcher 批准写入。目录遵守平台动态边界，含项目、Agent 工作区、项目存储、工具目录、临时目录和用户配置允许目录，未来可能变化；不能运行命令或测试。必须选择模型和稳定 request_id，未知结果查询原回执。",
         "agent_update": "按原生 configRevision 更新普通 Agent 名称、对话模型、提示词或人物/任务档案；拒绝权限、身份与生命周期字段。",
         "agent_avatar": "按原生 updatedAt 使用已有头像候选或恢复默认；不接收 URL、文件上传或任意路径。",
         "agent_archive": "每次经原生审批，按 configRevision 归档普通 Agent 并封存关联 Session；protected 或关联 Session 忙时拒绝。稳定 request_id，未知结果只查询原回执，不提供 purge、reset、restore 或 force。verified 表示首次原生回读已归档，完成回执保留历史状态。",
         "team_run": "创建内置 dev-team 并受理原生工作流运行；稳定 request_id，未知结果查询原回执，只有 resumeAllowed 才可用原参数续接。",
         "session_pin": "经原生审批置顶或取消置顶普通可见 Session；不改变当前选择。verified 表示首次确认时原生元数据符合目标状态，不证明某次调用的因果；完成回执保留历史状态，当前状态用 session_get 查询。未知结果查询原 action/request_id，不能换 ID 重放。",
-        "authorization_upgrade": "经原生审批显式增加当前Launcher原主体的指定缺失权限；先authorization_status读取当前scopes，expected_scopes和add_scopes必须分别排序、唯一、不重叠。不能默认升级到全部权限，查询只选所需读取权；写权另行明确选择。保留client/subject/capability和任务关联，不支持撤销或换主体。unknown或异常保持同一request_id查询management_receipt(action=authorization_upgrade)，不更换ID重试。需要operator control，旧读取scope本身不授予升级权。完成回执为历史证明，当前状态另查。",
+        "authorization_upgrade": "通过 personal_assistant_manage_tool 按助理当前原生权限策略显式增加当前Launcher原主体的指定缺失权限；full_access 可能自动批准。先authorization_status读取当前scopes，expected_scopes和add_scopes必须分别排序、唯一、不重叠。不能默认升级到全部权限，查询只选所需读取权；写权另行明确选择。保留client/subject/capability和任务关联，不支持撤销或换主体。unknown或异常保持同一request_id查询management_receipt(action=authorization_upgrade)，不更换ID重试。需要operator control，旧读取scope本身不授予升级权。完成回执为历史证明，当前状态另查。",
     }
     return {name: {"action": name, "description": descriptions[name], "parameters": model.model_json_schema(),
                    "governed": name in {"team_run", "session_pin", "agent_archive", "authorization_upgrade"}, "scope": ACTION_SCOPES[name] or "operator:control"} for name, model in ACTION_MODELS.items()}

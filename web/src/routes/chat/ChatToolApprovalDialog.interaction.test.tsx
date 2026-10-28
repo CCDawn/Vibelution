@@ -31,6 +31,16 @@ function findButtonByText(text: string): HTMLButtonElement | null {
 }
 
 describe("ChatToolApprovalDialog interactions", () => {
+  it("disables rejection button and shortcuts when its identity cannot be bound", async () => {
+    const onReject = vi.fn();
+    await act(async () => root!.render(<ChatToolApprovalDialog lang="zh" pending={false} approveDisabled rejectDisabled
+      rawTitle="exec_command" riskLabel="审批" scopeLabel="本次" toolLabels={[]} onApprove={() => {}} onReject={onReject} />));
+    expect(findButtonByText("否")?.disabled).toBe(true);
+    await act(async () => { findButtonByText("否")?.click(); window.dispatchEvent(new KeyboardEvent("keydown", { key: "n" })); window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
+    expect(onReject).not.toHaveBeenCalled();
+    expect(container?.textContent).not.toContain("处理中");
+  });
+
   it("keeps both decision buttons usable with a full preview", async () => {
     const onApprove = vi.fn();
     const onReject = vi.fn();

@@ -13,6 +13,21 @@ import {
 } from "./toolApprovalPreview";
 
 describe("toolApprovalPreview", () => {
+  it("requires and displays every fixed file-tool permission and the dynamic directory boundary", () => {
+    const summary = { assistantAction: "agent_create", assistantTargets: { project_id: "project:1", display_name: "Worker", model_id: "model-1" },
+      assistantCreatePreset: "project_files_v1", assistantCreateTools: ["glob_tool", "grep_search_tool", "read_file_tool", "apply_diff_edit_tool", "write_file_tool"],
+      assistantOperationDescription: "固定文件工具权限持续生效；写入按当前权限和协作模式审批，edit/yolo 等模式可能自动批准。目标派遣任务的审批目前只能拒绝，不能在 Launcher 批准写入。平台允许的动态目录包括项目、Agent 工作区、项目存储、工具目录、系统临时目录和用户配置允许目录，未来可能变化。不能执行命令或测试。" };
+    expect(launcherAgentCreatePreviewIsValid(summary)).toBe(true);
+    const zh = toolApprovalActionPreview(summary, "personal_assistant_manage_tool", "zh");
+    const en = toolApprovalActionPreview(summary, "personal_assistant_manage_tool", "en");
+    for (const name of summary.assistantCreateTools) { expect(zh).toContain(name); expect(en).toContain(name); }
+    for (const value of ["项目存储", "工具目录", "系统临时目录", "用户配置允许目录", "协作模式审批", "edit/yolo", "可能自动批准", "只能拒绝", "不能在 Launcher 批准写入", "未来可能变化", "不能执行命令或测试"]) expect(zh).toContain(value);
+    for (const value of ["project storage", "tools directory", "system temporary directories", "user-configured allowed directories", "collaboration mode", "approve automatically", "only be declined", "cannot approve writes", "may change"]) expect(en).toContain(value);
+    for (const patch of [{ assistantCreateTools: undefined }, { assistantCreateTools: ["glob_tool"] },
+      { assistantCreatePreset: "full_access" }, { assistantOperationDescription: "omitted" }]) {
+      expect(launcherAgentCreatePreviewIsValid({ ...summary, ...patch })).toBe(false);
+    }
+  });
   it("shows the complete Launcher creation project and model in both languages and counts code points", () => {
     const summary = { assistantAction: "agent_create", assistantTargets: {
       project_id: "project:1", display_name: "😀".repeat(120), model_id: "m".repeat(200),

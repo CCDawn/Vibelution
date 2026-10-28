@@ -7,6 +7,7 @@ import {
   hideLauncherAssistant, sendLauncherAssistantMessage, setLauncherAssistantExpanded,
   launcherConversationApi,
   getLauncherAssistantApprovals, resolveLauncherAssistantApproval,
+  declineLauncherDispatchApproval, launcherDispatchRevisionIsValid,
   stopLauncherAssistantTurn, continueLauncherAssistantTurn,
   getLauncherOperatorAsset, openLauncherFromAssistant, uploadLauncherAttachment,
 } from "../../api/launcherAssistant";
@@ -265,6 +266,10 @@ export function LauncherAssistantRoute() {
       ? 2_000 : launcherAssistantPollInterval(reading, detail.data),
     refetchIntervalInBackground: false,
   });
+  // The native approval dialog owns global shortcuts, so show exactly one
+  // request at a time and give the assistant's own session priority.
+  const dispatchApproval = approval ? undefined : dispatches.data?.flatMap(row =>
+    (row.receipt?.pendingApprovals ?? []).map(request => ({ row, request })))[0];
 
   useEffect(() => {
     mounted.current = true;
@@ -461,6 +466,26 @@ export function LauncherAssistantRoute() {
     }
   }
 
+  async function declineDispatch() {
+    const selected = dispatchApproval;
+    if (!selected || approvalGate.current || !selected.request.availableDecisions.includes("decline")
+      || !launcherDispatchRevisionIsValid(selected.request.revision)) return;
+    approvalGate.current = true;
+    setApprovalPending(true);
+    setApprovalError("");
+    try {
+      await declineLauncherDispatchApproval(selected.row, selected.request);
+    } catch (error) {
+      if (mounted.current) setApprovalError(errorMessage(error));
+    } finally {
+      approvalGate.current = false;
+      if (mounted.current) {
+        setApprovalPending(false);
+        void dispatches.refetch();
+      }
+    }
+  }
+
   async function stopTurn() {
     if (controlGate.current || !detail.data || !hasExecutionOwnership(resolveSessionActivity(detail.data).execution)) return;
     const turnId = resolveSessionStopTurnId(detail.data, acceptedTurnId);
@@ -613,8 +638,32 @@ export function LauncherAssistantRoute() {
       fullActionPreview={approval.toolName === "personal_assistant_manage_tool" && ["agent_create", "authorization_upgrade", "dispatch_write", "project_lifecycle"].includes(String(approval.argumentSummary?.assistantAction))}
       approveDisabled={approvalAcceptDisabled(approval)}
       onApprove={() => void decide(approval, "accept")} onReject={() => void decide(approval, "decline")} /> : null}
+    {dispatchApproval ? <ChatToolApprovalDialog lang={lang} variant="inline"
+      pending={approvalPending}
+      approveDisabled rejectDisabled={!dispatchApproval.request.availableDecisions.includes("decline") || !launcherDispatchRevisionIsValid(dispatchApproval.request.revision)} rawTitle={dispatchApproval.request.toolName}
+      riskLabel={toolApprovalRiskLabel(dispatchApproval.request.risk, lang)}
+      scopeLabel={lang === "zh" ? "目标任务 · 仅本次" : "Target task · this call"}
+      toolLabels={[{ id: dispatchApproval.request.toolName, label: toolApprovalDisplayName(dispatchApproval.request.toolName, lang) }]}
+      toolName={dispatchApproval.request.toolName} fullActionPreview
+      actionPreview={[
+        `${lang === "zh" ? "项目" : "Project"}: ${dispatchApproval.row.projectId || "—"}`,
+        `Agent: ${dispatchApproval.row.agentId || "—"}`,
+        `${lang === "zh" ? "派遣 ID" : "Dispatch ID"}: ${dispatchApproval.row.dispatchId}`,
+        `${lang === "zh" ? "任务 ID" : "Task ID"}: ${dispatchApproval.row.nativeTaskId}`,
+        `${lang === "zh" ? "审批 ID" : "Approval ID"}: ${dispatchApproval.request.approvalId}`,
+        lang === "zh" ? "目标项目返回的动作摘要（可能不完整）:" : "Action summary from target project (may be incomplete):",
+        JSON.stringify(dispatchApproval.request.targetSummary, null, 2),
+        lang === "zh" ? "摘要无法证明完整动作，当前不能安全批准。"
+          : "The summary cannot prove the complete action. Approval is unavailable.",
+        !launcherDispatchRevisionIsValid(dispatchApproval.request.revision)
+          ? (lang === "zh" ? "审批版本不可用，无法安全拒绝；请刷新回执。" : "Approval revision unavailable. Decline is disabled; refresh the receipt.")
+          : dispatchApproval.request.availableDecisions.includes("decline")
+            ? (lang === "zh" ? "你可以拒绝本次请求。" : "You can decline this request.")
+            : (lang === "zh" ? "当前不能拒绝本次请求，请刷新回执。" : "Decline is unavailable; refresh the receipt."),
+      ].join("\n")}
+      onApprove={() => {}} onReject={() => void declineDispatch()} /> : null}
     {approvalError || approvals.isError ? <VStateSurface tone="error" title={approvalError || (lang === "zh" ? "待授权查询暂不可用" : "Pending approvals unavailable")}
-      actions={<VButton onClick={() => { setApprovalError(""); void approvals.refetch(); }}>{copy.retry}</VButton>}>{approvals.error?.message}</VStateSurface> : null}
+      actions={<VButton onClick={() => { setApprovalError(""); void approvals.refetch(); void dispatches.refetch(); }}>{copy.retry}</VButton>}>{approvals.error?.message}</VStateSurface> : null}
     {detail.data?.queuedTurns?.length || queuedAcceptance ? <section data-launcher-assistant-queue
       className={petStyles.receiptPanel}
       aria-label={lang === "zh" ? "原生消息队列" : "Native message queue"}>

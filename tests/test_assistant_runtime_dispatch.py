@@ -485,6 +485,11 @@ def native_adapter(tmp_path: Path, runtime: FakeRuntime, *, drop_first_start=Fal
                     raise httpx.ReadError("response lost after commit", request=request)
             elif path.endswith("/heartbeat"):
                 result = service.heartbeat(owner_id=owner, task_id=path.split("/")[-2], adapter_connection_id=connection, **payload)
+            elif path.endswith("/resolve"):
+                parts = path.split("/")
+                result = service.resolve_approval(owner_id=owner, capabilities=set(), task_id=parts[-4],
+                    approval_id=parts[-2], decision=payload["decision"],
+                    expected_revision=payload["expected_revision"], reason=payload["reason"])
             elif path.endswith("/cancel"):
                 result = service.cancel_task(owner_id=owner, task_id=path.split("/")[-2])
             else:
@@ -497,6 +502,40 @@ def native_adapter(tmp_path: Path, runtime: FakeRuntime, *, drop_first_start=Fal
     factory = lambda project_root, **kwargs: ManagedAgentBackendClient(project_root, transport=transport, **kwargs)
     adapter_service = DispatchService(tmp_path / "profile", {"project-a": root}, client_factory=factory)
     return adapter_service, service, calls, factory
+
+
+@pytest.mark.anyio
+async def test_presented_decline_stays_bound_to_original_task_turn_and_request_after_restart(tmp_path):
+    runtime = FakeRuntime()
+    adapter_service, native_service, calls, factory = native_adapter(tmp_path, runtime)
+    started = await start(adapter_service)
+    task = native_service.store.get_task(started["nativeTaskId"])
+    session, turn = task["sessionId"], task["turnId"]
+    runtime.approvals[session] = [
+        {"requestId": "approval-other-turn", "turnId": "other", "status": "pending", "toolName": "exec_command", "argumentSummary": {"commandPreview": "other"}, "decisionFingerprint": "fp-other"},
+        {"requestId": "approval-1", "turnId": turn, "status": "pending", "toolName": "write_file_tool", "argumentSummary": {"pathPreview": "example.txt"}, "decisionFingerprint": "fp-1"},
+    ]
+    observed = await adapter_service.reconcile("dispatch-1")
+    assert [a["approvalId"] for a in observed["receipt"]["pendingApprovals"]] == ["approval-1"]
+    restored = DispatchService(tmp_path / "profile", {"project-a": tmp_path / "project"}, client_factory=factory)
+    runtime.approvals[session][1]["decisionFingerprint"] = ""
+    empty = await restored.reconcile("dispatch-1")
+    assert empty["receipt"]["pendingApprovals"][0]["revision"] == ""
+    for revision in ("", " ", "fp-1\n"):
+        with pytest.raises(DispatchError):
+            await restored.decline_presented_approval("dispatch-1", task_id=started["nativeTaskId"], approval_id="approval-1", expected_revision=revision)
+    assert runtime.resolve_calls == []
+    runtime.approvals[session][1]["decisionFingerprint"] = "fp-1"
+    for task_id, approval_id, revision in [("wrong-task", "approval-1", "fp-1"),
+                                           (started["nativeTaskId"], "approval-other-turn", "fp-other"),
+                                           (started["nativeTaskId"], "approval-1", "stale")]:
+        with pytest.raises(DispatchError):
+            await restored.decline_presented_approval("dispatch-1", task_id=task_id, approval_id=approval_id, expected_revision=revision)
+    assert runtime.resolve_calls == []
+    result = await restored.decline_presented_approval("dispatch-1", task_id=started["nativeTaskId"], approval_id="approval-1", expected_revision="fp-1")
+    assert result["dispatchId"] == "dispatch-1" and result["nativeTaskId"] == started["nativeTaskId"]
+    assert runtime.resolve_calls == [(session, "approval-1", "decline")]
+    assert len([r for r in calls if r.url.path.endswith("/tasks") and r.method == "POST"]) == 1
 
 
 @pytest.mark.anyio

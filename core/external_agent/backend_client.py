@@ -170,7 +170,7 @@ class ManagedAgentBackendClient:
             # grant; only a fresh client may explicitly request the new scope.
             requested_scopes = saved.get("scopes", _LEGACY_MANAGEMENT_SCOPES if saved.get("clientId") else _MANAGEMENT_SCOPES)
             if (not isinstance(requested_scopes, list) or not requested_scopes
-                or any(not isinstance(scope, str) or scope not in (*_MANAGEMENT_SCOPES, "tasks:read", "source:read", "knowledge:catalog:read") for scope in requested_scopes)
+                or any(not isinstance(scope, str) or scope not in (*_MANAGEMENT_SCOPES, "tasks:read", "source:read", "knowledge:catalog:read", "agents:create:files") for scope in requested_scopes)
                 or requested_scopes != sorted(set(requested_scopes))):
                 raise BackendClientError("Invalid management scopes.", code="UNKNOWN_MANAGEMENT_SUBJECT")
             self._state["management"] = {**saved, "clientId": client_id, "binding": binding, "scopes": requested_scopes}

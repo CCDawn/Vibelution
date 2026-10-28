@@ -640,6 +640,44 @@ class DispatchService:
             return await self._resolve_approval(dispatch_id, approval_id=approval_id, decision=decision,
                                                 expected_revision=expected_revision, reason=reason)
 
+    async def decline_presented_approval(
+        self, dispatch_id: str, *, task_id: str, approval_id: str, expected_revision: str,
+    ) -> dict[str, Any]:
+        """Decline an observed native approval on its original, still-bound task.
+
+        The native projection is only a truncated summary, so this entry point
+        deliberately cannot accept an approval on the operator's behalf.
+        """
+        if not isinstance(expected_revision, str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,200}", expected_revision):
+            raise DispatchError("Approval revision is unavailable; refresh the approval.", code="APPROVAL_CONFLICT")
+        async with self._dispatch_admission:
+            self._check_dispatch_unfenced()
+            async with self._dispatch_lock(dispatch_id):
+                record = self._read(dispatch_id)
+                self._require_task(record)
+                if record["nativeTaskId"] != task_id:
+                    raise DispatchError("Native task changed; refresh the approval.", code="APPROVAL_CONFLICT")
+
+                async def decline(client: Any) -> dict[str, Any]:
+                    current = await _checked_task_receipt(client, task_id)
+                    pending = current.get("pendingApprovals")
+                    matches = [item for item in pending if isinstance(item, dict)
+                               and item.get("approvalId") == approval_id] if isinstance(pending, list) else []
+                    if (len(matches) != 1 or str(matches[0].get("revision") or "") != expected_revision
+                            or not isinstance(matches[0].get("availableDecisions"), list)
+                            or "decline" not in matches[0]["availableDecisions"]):
+                        raise DispatchError("Approval changed; refresh the approval.", code="APPROVAL_CONFLICT")
+                    result = await _bounded_native_request(client.resolve_approval(
+                        task_id=task_id, approval_id=approval_id, decision="decline",
+                        expected_revision=expected_revision, reason="",
+                    ))
+                    if (not isinstance(result, dict) or result.get("taskId") != task_id
+                            or result.get("approvalId") != approval_id or result.get("decision") != "decline"):
+                        raise DispatchError("Approval result is unconfirmed; refresh the task.", code="APPROVAL_UNCONFIRMED")
+                    return await _checked_task_receipt(client, task_id)
+
+                return await self._update(record, decline)
+
     async def _resolve_approval(
         self, dispatch_id: str, *, approval_id: str, decision: str, expected_revision: str, reason: str,
     ) -> dict[str, Any]:

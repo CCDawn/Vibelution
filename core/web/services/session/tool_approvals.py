@@ -1155,6 +1155,12 @@ def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
                 import unicodedata
                 if any(unicodedata.category(char) in {"Cc", "Cf", "Cs"} for value in (name, model) for char in value):
                     raise ValueError("Invalid display name or model")
+                if validated.capability_preset == "project_files_v1":
+                    from core.web.services.external_management.contracts import agent_create_tool_policy
+                    return {"assistantAction": action, "assistantTargets": {"project_id": project, "display_name": name, "model_id": model},
+                        "assistantCreatePreset": validated.capability_preset,
+                        "assistantCreateTools": agent_create_tool_policy(validated.capability_preset)["allowedTools"],
+                        "assistantOperationDescription": "固定文件工具权限持续生效；写入按当前权限和协作模式审批，edit/yolo 等模式可能自动批准。目标派遣任务的审批目前只能拒绝，不能在 Launcher 批准写入。平台允许的动态目录包括项目、Agent 工作区、项目存储、工具目录、系统临时目录和用户配置允许目录，未来可能变化。不能执行命令或测试。"}
                 return {"assistantAction": action, "assistantTargets": {"project_id": project, "display_name": name, "model_id": model},
                     "assistantOperationDescription": "新 Agent 默认没有工具和读写范围，不能保证读取或修改项目；派遣写任务不会自动增加工具权限。"}
             except (ValueError, TypeError, KeyError, RuntimeError, RecursionError):
