@@ -57,7 +57,8 @@ def env(tmp_path, monkeypatch, private_operator_environment):
 
     binding = {"projectId": "documentation-project", "instanceId": "documentation-instance"}
     service = ManagementService(tmp_path / "management", identity=lambda: TargetIdentity(binding, "canonical"), native=Native())
-    grant = service.bind({"client_id": "launcher", "expected_binding": binding, "scopes": list(SCOPES)})
+    grant = service.bind({"client_id": "launcher", "expected_binding": binding,
+                          "scopes": [scope for scope in SCOPES if scope != "agents:create:files"]})
     monkeypatch.setattr(route, "_SERVICE", service)
     monkeypatch.setattr(api, "_filter_get_endpoints", lambda paths: {path: item for path, item in paths.items() if "get" in item})
     spec = {"openapi": "3.1.0", "paths": {

@@ -8,7 +8,7 @@ import unicodedata
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Scope = Literal["agents:read", "agents:create", "agents:create:files", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read", "source:read", "knowledge:catalog:read"]
-SCOPES = ("agents:read", "agents:create", "agents:create:files", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read", "source:read", "knowledge:catalog:read")
+SCOPES = ("agents:read", "agents:create", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read", "source:read", "knowledge:catalog:read", "agents:create:files")
 _AVATAR_EXTENSION = r"(?:[pP][nN][gG]|[jJ][pP][gG]|[jJ][pP][eE][gG]|[wW][eE][bB][pP]|svg)"
 _AVATAR_PATH_PATTERN = r"^workspace/avatars/[A-Za-z0-9_.-]+\." + _AVATAR_EXTENSION + "$"
 

@@ -6,7 +6,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.web.services.external_management.contracts import SCOPES
 from core.web.services.external_management.legacy_native import LegacyNativeGateway
 from core.web.services.external_management.service import ManagementError, ManagementService, TargetIdentity
 from tests.test_assistant_legacy_correlation import source, read_rows, write_rows, write_json, disk
@@ -16,6 +15,9 @@ BINDING = {"projectId": "project", "instanceId": "instance"}
 SCOPE = "legacy:receipts:read"
 OLD = sorted(["agents:avatar", "agents:create", "agents:read", "agents:update", "platform:describe",
               "sessions:read", "teams:read", "teams:run"])
+DEFAULT_MANAGEMENT_SCOPES = sorted(["agents:archive", "agents:avatar", "agents:create", "agents:read", "agents:update",
+    "legacy:receipts:read", "platform:describe", "rooms:read", "sessions:parameters:read", "sessions:pin",
+    "sessions:read", "teams:directory:read", "teams:read", "teams:run"])
 
 
 @pytest.fixture
@@ -325,7 +327,8 @@ async def test_sdk_closed_http_lost_ack_restart_and_late_receipt(env, monkeypatc
         await sdk.management_legacy_observer_create(**parameters)
     saved = deepcopy(sdk._state["management"])
     assert saved["clientId"].endswith(random_prefix + "a" * 42)
-    assert saved["scopes"] == sorted(SCOPES[:14]) and len(saved["scopes"]) == 14
+    assert saved["scopes"] == DEFAULT_MANAGEMENT_SCOPES and len(saved["scopes"]) == 14
+    assert "agents:create:files" not in saved["scopes"]
     env.service = env.restart()
     monkeypatch.setattr(env.route, "_SERVICE", env.service)
     restarted = ManagedAgentBackendClient(env.tmp, state_path=sdk_path)
