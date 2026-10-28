@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import secrets
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -15,6 +16,33 @@ from typing import Literal
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+_INITIAL_PREPARE_CODES = frozenset({
+    "initial_migration_request_invalid", "initial_migration_busy", "initial_migration_unavailable",
+    "initial_migration_turn_invalid", "initial_migration_binding_invalid", "initial_migration_binding_changed",
+    "initial_migration_directory_identity_unavailable", "initial_intent_invalid", "initial_intent_limit",
+    "initial_intent_exists", "initial_intent_claimed_unknown", "initial_profile_owner_unavailable",
+    "initial_delivery_unavailable", "history_preview_expired", "history_preview_changed",
+    "history_source_unavailable", "source_unavailable", "source_changed",
+})
+
+
+def _initial_prepare_failure_code(error):
+    """Use only a closed list of internal codes; exceptions may contain paths or secrets."""
+    from .migration_io import MigrationIOError
+    if isinstance(error, MigrationIOError):
+        code = str(error)
+        return code if code in _INITIAL_PREPARE_CODES else "migration_error"
+    if isinstance(error, PermissionError):
+        return "permission_error"
+    if isinstance(error, FileNotFoundError):
+        return "filesystem_missing"
+    if isinstance(error, OSError):
+        return "filesystem_error"
+    if isinstance(error, ValueError):
+        return "value_error"
+    return "unexpected_error"
 
 
 class Message(BaseModel):
@@ -560,6 +588,7 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                 bound = {key: getattr(payload, key) for key in ("projectId", "previewId", "turnId", "category", "operationId")}
                 publication = main_control.initial_delivery(payload.deliveryId, bound, admit=True)
                 if not publication:
+                    logging.getLogger(__name__).warning("assistant_initial_prepare category=%s phase=admission code=delivery_unavailable", payload.category)
                     raise HTTPException(409, detail="Initial migration delivery unavailable")
                 def prepare():
                     try:
@@ -567,11 +596,15 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                             payload.revision, payload.turnId, payload.operationId, payload.category, publication)
                     finally:
                         publication.finished()
+                phase = "prepare"
                 try:
                     result = await asyncio.to_thread(prepare)
+                    phase = "confirmation"
                     if not main_control.initial_delivery(payload.deliveryId, bound, confirm=True):
                         raise ValueError("delivery changed")
-                except Exception:
+                except Exception as error:
+                    logging.getLogger(__name__).warning("assistant_initial_prepare category=%s phase=%s code=%s",
+                        payload.category, phase, _initial_prepare_failure_code(error))
                     history_control.retire_preview(payload.previewId)
                     raise HTTPException(409, detail="Initial migration source unavailable") from None
                 return JSONResponse(result, headers={"Cache-Control": "no-store"})
