@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from contextlib import contextmanager
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -162,6 +163,7 @@ class PersonalAffairsService:
         agent_loader: Callable[..., dict[str, Any] | None] | None = None,
         plugin_root_resolver: Callable[[str], Path] | None = None,
         now_provider: Callable[[], datetime] | None = None,
+        source_mutex_guard: Callable[[dict[str, Any]], bool] | None = None,
     ) -> None:
         def affairs_root(agent_id: str) -> Path:
             if plugin_root_resolver is not None:
@@ -174,6 +176,7 @@ class PersonalAffairsService:
             Path(project_root), plugin_root_resolver=affairs_root
         )
         self._agent_loader = agent_loader
+        self._source_mutex_guard = source_mutex_guard
         self._now_provider = now_provider or (
             lambda: datetime.now(timezone.utc)
         )
@@ -204,6 +207,53 @@ class PersonalAffairsService:
     def _write_rows(self, agent_id: str, rows: list[dict[str, Any]]) -> None:
         self.store.write_jsonl(agent_id, "affairs/items.jsonl", rows[-AFFAIR_LEDGER_LIMIT:])
 
+    @contextmanager
+    def _mutation(self, agent_id: str, agent: dict[str, Any]):
+        """Guard only a trusted legacy PA; all other callers keep the old lock."""
+        ledger = self.store._path(agent_id, "affairs/items.jsonl")
+        guarded = self._source_mutex_guard(agent) if self._source_mutex_guard else False
+        if type(guarded) is not bool:
+            raise PersonalAffairsError("个人事务身份暂时无法核对，请稍后重试。")
+        if not guarded:
+            with cross_process_file_lock(ledger):
+                yield lambda: None
+            return
+        from core.assistant_runtime.initial_migration_binding import _digest, _directory
+        from core.assistant_runtime.migration_io import pinned_target_directory
+        from core.infrastructure.reminder_source_mutex import _try_digest
+
+        normalized_agent_id = str(agent_id or "").strip()
+        if agent.get("agentId") != normalized_agent_id:
+            raise PersonalAffairsError("个人事务身份无法核对，请稍后重试。")
+        expected = self.store.plugin_root(agent_id) / "affairs/items.jsonl"
+        if ledger != expected:
+            raise PersonalAffairsError("个人事务账本身份无法核对，请稍后重试。")
+        # The namespace pin translates ValueError raised *inside* its body.
+        # Keep ordinary domain errors intact while still always releasing it.
+        pin = pinned_target_directory(ledger.parent, create=True)
+        pin.__enter__()
+        try:
+            parent = _directory(ledger.parent)
+            key = _digest({"path": str(ledger).casefold(), "parent": parent, "agentId": normalized_agent_id})
+            lease = _try_digest(key)
+            if lease is None:
+                raise PersonalAffairsError("个人事务正被同步占用，请稍后重试。")
+            try:
+                def verify():
+                    lease.check()
+                    if (self.store._path(agent_id, "affairs/items.jsonl") != ledger
+                            or _directory(ledger.parent) != parent
+                            or not self._source_mutex_guard or self._source_mutex_guard(agent) is not True):
+                        raise PersonalAffairsError("个人事务来源已变化，请稍后重试。")
+                verify()
+                with cross_process_file_lock(ledger):
+                    verify()
+                    yield verify
+            finally:
+                lease.release()
+        finally:
+            pin.__exit__(None, None, None)
+
     def _find(self, rows: list[dict[str, Any]], item_id: str) -> tuple[int, dict[str, Any]]:
         normalized = str(item_id or "").strip()
         for index, row in enumerate(rows):
@@ -221,7 +271,7 @@ class PersonalAffairsService:
         due_at: object = "",
         source_turn_id: str = "",
     ) -> dict[str, Any]:
-        self._require_agent(agent_id)
+        agent = self._require_agent(agent_id)
         normalized_kind = _normalize_kind(kind)
         normalized_title = " ".join(str(title or "").split())
         if not normalized_title or len(normalized_title) > 160:
@@ -247,9 +297,10 @@ class PersonalAffairsService:
             "completedAt": "",
             "sourceTurnId": str(source_turn_id or "").strip()[:200],
         }
-        with cross_process_file_lock(self.store._path(agent_id, "affairs/items.jsonl")):
+        with self._mutation(agent_id, agent) as verify:
             rows = self._rows(agent_id)
             rows.append(item)
+            verify()
             self._write_rows(agent_id, rows)
         return deepcopy_item(item)
 
@@ -273,14 +324,15 @@ class PersonalAffairsService:
         )
 
     def set_due(self, agent_id: str, *, item_id: str, due_at: object) -> dict[str, Any]:
-        self._require_agent(agent_id)
+        agent = self._require_agent(agent_id)
         normalized_due = _normalize_due_at(due_at)
-        with cross_process_file_lock(self.store._path(agent_id, "affairs/items.jsonl")):
+        with self._mutation(agent_id, agent) as verify:
             rows = self._rows(agent_id)
             index, item = self._find(rows, item_id)
             item["dueAt"] = normalized_due
             item["updatedAt"] = _iso(self._now())
             rows[index] = item
+            verify()
             self._write_rows(agent_id, rows)
         return deepcopy_item(item)
 
@@ -292,9 +344,9 @@ class PersonalAffairsService:
         status: str,
         extra: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        self._require_agent(agent_id)
+        agent = self._require_agent(agent_id)
         normalized_status = _normalize_status(status)
-        with cross_process_file_lock(self.store._path(agent_id, "affairs/items.jsonl")):
+        with self._mutation(agent_id, agent) as verify:
             rows = self._rows(agent_id)
             index, item = self._find(rows, item_id)
             if str(item.get("status") or "") == normalized_status:
@@ -304,6 +356,7 @@ class PersonalAffairsService:
             for key, value in (extra or {}).items():
                 item[key] = value
             rows[index] = item
+            verify()
             self._write_rows(agent_id, rows)
         return deepcopy_item(item)
 

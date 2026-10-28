@@ -29,6 +29,7 @@ import re
 import secrets
 import threading
 from contextlib import ExitStack, contextmanager
+from datetime import datetime
 from pathlib import Path
 
 import apsw
@@ -44,6 +45,7 @@ class ReminderReceiptError(RuntimeError):
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 _HEX = re.compile(r"[a-f0-9]{64}\Z")
 _CHANNELS = {"assistant_window", "system_notification", "attention_fallback"}
+_LEGACY_MAPPED_EVENT = re.compile(r"reminder:([0-9]{8}):[a-f0-9]{64}\Z")
 _META_SQL = """CREATE TABLE receipt_meta (
     singleton INTEGER PRIMARY KEY CHECK(singleton=1),
     owner_id TEXT NOT NULL,
@@ -285,6 +287,64 @@ class ReminderReceiptStore:
         if result["created"]:
             self._owned[event_id] = digest
         return result
+
+    def suppress_legacy_events(self, event_ids: list[str], *, source_observation,
+                               ledger_key: str, check_source) -> dict:
+        """Persist unknown old attempts as non-replayable, never as delivered.
+
+        Trusted cutover code must supply a complete, source-bound mapping and
+        hold the target owner and source exclusion throughout this call. A
+        successful call is not itself proof of source quiescence or permission
+        to enable the new reminder owner. It stores no recoverable bearer token
+        and registers no new sender/inflight work. Missing source proof must
+        raise from check_source, never be represented as an empty mapping.
+        """
+        if (type(event_ids) is not list or len(event_ids) > self.maximum
+                or type(ledger_key) is not str or not _HEX.fullmatch(ledger_key)
+                or not callable(check_source)):
+            raise ReminderReceiptError("receipt_legacy_suppression_invalid")
+        try:
+            if datetime.strptime(self.directory.name, "%Y%m%d").strftime("%Y%m%d") != self.directory.name:
+                raise ValueError
+        except ValueError:
+            raise ReminderReceiptError("receipt_legacy_suppression_invalid") from None
+        captured = []
+        for event_id in event_ids:
+            match = _LEGACY_MAPPED_EVENT.fullmatch(event_id) if type(event_id) is str else None
+            if not match or match.group(1) != self.directory.name:
+                raise ReminderReceiptError("receipt_legacy_suppression_invalid")
+            captured.append(event_id)
+        if len(set(captured)) != len(captured):
+            raise ReminderReceiptError("receipt_legacy_suppression_invalid")
+
+        def verify():
+            from core.infrastructure.reminder_source_mutex import trusted_reminder_source_mutex_key
+            if trusted_reminder_source_mutex_key(source_observation) != ledger_key:
+                raise ReminderReceiptError("receipt_legacy_source_unavailable")
+            if check_source() is not None:
+                raise ReminderReceiptError("receipt_legacy_source_unavailable")
+
+        verify()
+        created = 0
+        with self._transaction() as conn:
+            verify()
+            if list(conn.execute("SELECT phase FROM receipt_fence WHERE singleton=1")) != [("OPEN",)]:
+                raise ReminderReceiptError("receipt_admission_closed")
+            for event_id in captured:
+                existing = list(conn.execute("SELECT state,channel FROM reminder_receipts WHERE event_id=?", (event_id,)))
+                inflight = list(conn.execute("SELECT 1 FROM receipt_inflight WHERE event_id=?", (event_id,)))
+                if inflight or (existing and existing[0] == ("submitted", "attention_fallback")):
+                    raise ReminderReceiptError("receipt_legacy_suppression_conflict")
+                if existing:
+                    continue
+                if list(conn.execute("SELECT count(*) FROM reminder_receipts"))[0][0] >= self.maximum:
+                    raise ReminderReceiptError("receipt_capacity_exceeded")
+                digest = hashlib.sha256(secrets.token_bytes(32)).hexdigest()
+                conn.execute("INSERT INTO reminder_receipts VALUES (?,?,'pending',NULL)", (event_id, digest))
+                created += 1
+            verify()
+        verify()
+        return {"created": created, "retained": len(captured) - created}
 
     def begin_closing(self) -> None:
         """Permanently close admission for this ledger's upgraded senders.

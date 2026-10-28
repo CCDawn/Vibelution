@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import os
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -12,7 +13,7 @@ from core.agent_plugins.personal_affairs.service import (
     PersonalAffairsNotFoundError,
     PersonalAffairsService,
 )
-from core.infrastructure.native_runtime import resolve_native_project_root
+from core.infrastructure.native_runtime import is_launcher_assistant_process, resolve_native_project_root
 
 PROJECT_ROOT = resolve_native_project_root(Path(__file__).resolve().parents[3])
 
@@ -26,6 +27,25 @@ def _default_agent_loader(agent_id: str, *, include_archived: bool = False) -> d
     return get_agent(agent_id, include_archived=include_archived)
 
 
+def _is_trusted_legacy_assistant(agent: dict[str, Any]) -> bool:
+    """Protect the unique live Workbench PA, not ordinary or Launcher Agents."""
+    if os.name != "nt" or is_launcher_assistant_process():
+        return False
+    metadata = agent.get("metadata")
+    if not isinstance(metadata, dict) or metadata.get("personalAssistantProfile") != "personal_assistant_v1":
+        return False
+    from . import personal_assistant_service
+    try:
+        current = personal_assistant_service.profile_agent()
+    except Exception as error:
+        raise PersonalAffairsError("个人助理身份暂时无法核对，请稍后重试。") from error
+    if (not isinstance(current, dict) or current.get("agentId") != agent.get("agentId")
+            or current.get("status") != "active" or current.get("roleKey") != "personal_assistant"
+            or current.get("primaryMode") != "general"):
+        raise PersonalAffairsError("个人助理身份暂时无法核对，请稍后重试。")
+    return True
+
+
 def get_personal_affairs_service() -> PersonalAffairsService:
     global _SERVICE
     with _SERVICE_LOCK:
@@ -34,6 +54,7 @@ def get_personal_affairs_service() -> PersonalAffairsService:
                 PROJECT_ROOT,
                 agent_loader=_default_agent_loader,
                 now_provider=None,
+                source_mutex_guard=_is_trusted_legacy_assistant,
             )
         return _SERVICE
 
