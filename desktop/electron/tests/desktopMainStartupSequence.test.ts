@@ -7,6 +7,7 @@ import { parseDesktopCliArgs } from "../src/cli/desktopCli.js";
 import { shouldDeferWorkbenchOpenUntilLifecycleStart } from "../src/process/desktopShellFreshness.js";
 import { normalizeInstanceKey } from "../src/lifecycle/projectStoragePaths.js";
 import { PROJECT_SLOT_LIFECYCLE_COMMANDS } from "../src/protocol/applyProjectSlot.js";
+import { ProjectAdmission } from "../src/lifecycle/projectAdmission.js";
 
 const mainSourcePath = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 
@@ -233,8 +234,11 @@ describe("main project lifecycle admission", () => {
   function harness() {
     const source = readFileSync(mainSourcePath, "utf8");
     const receipt = { duplicate: false, failed: vi.fn(), dispatched: vi.fn() };
+    const admission = new ProjectAdmission();
     const sandbox = {
       Error,
+      withProjectAdmission: (root: () => string, work: Parameters<ProjectAdmission["observe"]>[1]) => admission.observe(root, work),
+      registeredAdmissionRoot: (root: string) => root,
       windowProvider: { openOrFocusWorkbench: vi.fn(), openOrFocusInstanceWorkbench: vi.fn() },
       launcherBootstrap: {},
       pendingProjectRoot: "",
@@ -248,7 +252,7 @@ describe("main project lifecycle admission", () => {
       launcherStateStore: { refresh: vi.fn(async () => { throw new Error("inventory fallback"); }) },
       notifyDesktopTray: vi.fn(),
     };
-    const apply = runInNewContext(transpileModule(`${mainFunction(source, "applyPendingProjectSlot")}\napplyPendingProjectSlot;`, {
+    const apply = runInNewContext(transpileModule(`${mainFunction(source, "applyPendingProjectSlot")}\n${mainFunction(source, "applyPendingProjectSlotImpl")}\napplyPendingProjectSlot;`, {
       compilerOptions: { target: ScriptTarget.ES2022 },
     }).outputText, sandbox) as (root: string, command: string, provenance?: string,
       options?: { hiddenPresentation?: boolean }) => Promise<void>;

@@ -4,6 +4,7 @@ import { runInNewContext } from "node:vm";
 import { ScriptTarget, transpileModule } from "typescript";
 import { describe, expect, it, vi } from "vitest";
 import { isWorkbenchStartBlockedByClose } from "../src/lifecycle/workbenchCloseTransactionStore.js";
+import { ProjectAdmission } from "../src/lifecycle/projectAdmission.js";
 
 const mainSource = readFileSync(fileURLToPath(new URL("../src/main.ts", import.meta.url)), "utf8");
 
@@ -28,7 +29,10 @@ describe("Electron main workbench open backend gate", () => {
     const start = vi.fn(async () => ({ accepted: true }));
     const presentError = vi.fn(async () => undefined);
     const navigate = vi.fn(async () => ({ windowId: 1, rendererProcessId: 1 }));
+    const admission = new ProjectAdmission();
     const context = {
+      withProjectAdmission: (root: () => string, work: Parameters<ProjectAdmission["observe"]>[1]) => admission.observe(root, work),
+      registeredAdmissionRoot: (root: string) => root,
       workbenchCloseGeneration: 0, workbenchFailedCloseHandling: false, pendingWorkbenchCloseAck: null,
       AbortController, workbenchOpenControllers: new Set<AbortController>(),
       currentWorkbenchUrl: "", electronStartupStage: "", desktopEnvironment: () => ({}),

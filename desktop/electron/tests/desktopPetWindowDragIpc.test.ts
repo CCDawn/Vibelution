@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { desktopPetWindowExpandedBounds } from "../src/windows/petWindowBounds.js";
 import { isDesktopPetWindowUrl } from "../src/windows/petWindow.js";
 import { assertTrustedIpcSender } from "../src/security/ipcSenderValidation.js";
+import { ProjectAdmission } from "../src/lifecycle/projectAdmission.js";
 
 vi.mock("electron", () => ({}));
 
@@ -28,8 +29,13 @@ function resizeHandler(ownerDelivery = true) {
   const setBounds = vi.fn();
   const window = { getBounds: () => ({ x: 500, y: 600, width: 300, height: 330 }), isDestroyed: () => false, setBounds };
   const pet = { open: true, url: "http://127.0.0.1:8001/desktop-assistant" };
+  const admission = new ProjectAdmission();
   runInNewContext(ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, {
     URL,
+    withProjectAdmission: (root: () => string, work: Parameters<ProjectAdmission["observe"]>[1]) => admission.observe(root, work),
+    registeredAdmissionRoot: (root: string) => root,
+    instanceAdmissionRoot: (_instanceId: string) => "C:/pet-project",
+    createDesktopPathsForApp: () => ({ workspaceRoot: "C:/pet-project" }),
     IPC_CHANNELS: { setDesktopPetExpanded: "pet:window-expanded", getDesktopAssistantContext: "pet:assistant-context",
       openConversationFromPet: "pet:open-conversation", conversationNotificationOpened: "conversation:opened" },
     ipcMain: { handle: (channel: string, callback: typeof handler) => {
@@ -37,7 +43,7 @@ function resizeHandler(ownerDelivery = true) {
       else if (channel === "pet:assistant-context") contextHandler = callback as typeof contextHandler;
       else openHandler = callback as typeof openHandler;
     } },
-    windowProvider: { snapshot: () => ({ pet }), instanceWindowStates: () => [], focusWorkbench: async () => ({ open: true }), sendToWorkbench, focusAndSendToWorkbenchOrigin },
+    windowProvider: { snapshot: () => ({ pet, workbench: { open: true, url: pet.url } }), instanceWindowStates: () => [], focusWorkbench: async () => ({ open: true }), sendToWorkbench, focusAndSendToWorkbenchOrigin },
     trustedIpcOrigins: () => ["http://127.0.0.1:8000"],
     assertTrustedIpcSender,
     identifyDebugWindow: (pid: number) => ({ role: pid === 9 ? "desktop-pet" : "main-workbench" }),

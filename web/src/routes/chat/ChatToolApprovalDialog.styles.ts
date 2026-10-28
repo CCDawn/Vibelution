@@ -7,6 +7,8 @@ const styles = {
     "min-w-0 grid gap-0.5 [font-size:var(--vui-font-sm)] leading-snug text-[var(--fg-secondary)]",
   commandPreview:
     "m-0 max-h-[2.6rem] min-w-0 overflow-hidden text-ellipsis whitespace-pre-wrap break-words rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-workspace)] px-2 py-1 font-mono [font-size:11px] leading-snug text-[var(--fg-primary)] [display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical]",
+  commandPreviewFull:
+    "m-0 max-h-48 min-w-0 overflow-y-auto overflow-x-hidden whitespace-pre-wrap [overflow-wrap:anywhere] rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-workspace)] px-2 py-1 font-mono [font-size:11px] leading-snug text-[var(--fg-primary)]",
   dialog:
     "mx-auto min-w-0 w-full max-w-[min(44rem,100%)] !grid grid-cols-[22px_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-0.5 rounded-[var(--radius-control)] border border-[var(--vui-border-strong)] bg-[var(--vui-surface-panel)] px-2 py-1.5 text-[var(--fg-primary)] shadow-[var(--vui-shadow-hairline)]",
   header:

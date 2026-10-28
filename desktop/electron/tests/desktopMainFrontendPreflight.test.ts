@@ -4,6 +4,7 @@ import { runInNewContext } from "node:vm";
 import { ScriptTarget, transpileModule } from "typescript";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LauncherLifecycleSupervisor } from "../src/lifecycle/launcherLifecycleSupervisor.js";
+import { ProjectAdmission } from "../src/lifecycle/projectAdmission.js";
 import { isWorkbenchStartBlockedByClose } from "../src/lifecycle/workbenchCloseTransactionStore.js";
 import {
   peekFrontendBuild,
@@ -21,6 +22,7 @@ function harness(options: { live?: boolean; releaseChanged?: boolean; packaged?:
   expect(begin).toBeGreaterThan(-1);
   expect(end).toBeGreaterThan(begin);
   const supervisor = new LauncherLifecycleSupervisor();
+  const admission = new ProjectAdmission();
   const beginIntent = vi.spyOn(supervisor, "beginIntentWithOptions");
   const beginMainLifecycle = vi.fn();
   const currentCloseTransaction = vi.fn((): { phase: string; windowAcknowledged?: boolean } | null => null);
@@ -54,6 +56,8 @@ function harness(options: { live?: boolean; releaseChanged?: boolean; packaged?:
   const sandbox: Record<string, unknown> = {
     AbortSignal, Error, console,
     launcherBootstrap: {},
+    withProjectAdmission: (root: () => string, work: Parameters<ProjectAdmission["observe"]>[1]) => admission.observe(root, work),
+    registeredAdmissionRoot: (root: string) => root,
     authorizeLauncherForceLifecycle: async () => null,
     desktopEnvironment: () => ({ VIBELUTION_PYTHON_PATH: "pythonw.exe" }),
     normalizeSupervisedLifecycleOperation: (operation: string) => operation,

@@ -24,7 +24,7 @@ import { DesktopPetCharacter } from "./DesktopPetCharacter";
 import { DEFAULT_PET_PREFERENCES } from "./desktopPetPreferences";
 import { ChatToolApprovalDialog } from "../chat/ChatToolApprovalDialog";
 import { toolApprovalRiskLabel } from "../chat/toolApprovalLabels";
-import { toolApprovalActionPreview, toolApprovalDisplayName } from "../chat/toolApprovalPreview";
+import { authorizationUpgradePreviewIsValid, toolApprovalActionPreview, toolApprovalDisplayName } from "../chat/toolApprovalPreview";
 import { useLauncherThemeControl } from "./useLauncherThemeControl";
 import { PersonalAssistantComputerPanel } from "../personalAssistant/PersonalAssistantComputerPanel";
 import { launcherAssistantComputer } from "../../api/launcherAssistantComputer";
@@ -493,7 +493,10 @@ export function LauncherAssistantRoute() {
       rawTitle={approval.toolName} riskLabel={toolApprovalRiskLabel(approval.risk, lang)}
       scopeLabel={lang === "zh" ? "仅本次调用" : "This call only"}
       toolLabels={[{ id: approval.toolName, label: toolApprovalDisplayName(approval.toolName, lang) }]}
-      toolName={approval.toolName} actionPreview={toolApprovalActionPreview(approval.argumentSummary, approval.toolName)}
+      toolName={approval.toolName} actionPreview={toolApprovalActionPreview(approval.argumentSummary, approval.toolName, lang)}
+      fullActionPreview={approval.toolName === "personal_assistant_manage_tool" && approval.argumentSummary?.assistantAction === "authorization_upgrade"}
+      approveDisabled={approval.toolName === "personal_assistant_manage_tool" && (approval.argumentSummary?.assistantArgumentsInvalid === true
+        || approval.argumentSummary?.assistantAction === "authorization_upgrade" && !authorizationUpgradePreviewIsValid(approval.argumentSummary))}
       onApprove={() => void decide(approval, "accept")} onReject={() => void decide(approval, "decline")} /> : null}
     {approvalError || approvals.isError ? <VStateSurface tone="error" title={approvalError || (lang === "zh" ? "待授权查询暂不可用" : "Pending approvals unavailable")}
       actions={<VButton onClick={() => { setApprovalError(""); void approvals.refetch(); }}>{copy.retry}</VButton>}>{approvals.error?.message}</VStateSurface> : null}

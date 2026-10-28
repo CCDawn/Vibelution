@@ -31,6 +31,60 @@ function findButtonByText(text: string): HTMLButtonElement | null {
 }
 
 describe("ChatToolApprovalDialog interactions", () => {
+  it("keeps both decision buttons usable with a full preview", async () => {
+    const onApprove = vi.fn();
+    const onReject = vi.fn();
+    const content = Array.from({ length: 30 }, (_, i) => `scope:${i}`).join("\n");
+    await act(async () => {
+      root!.render(
+        <ChatToolApprovalDialog lang="zh" pending={false} rawTitle="personal_assistant_manage_tool"
+          riskLabel="需要审批" scopeLabel="本次调用" actionPreview={content} fullActionPreview
+          toolName="personal_assistant_manage_tool" toolLabels={[{ id: "personal_assistant_manage_tool", label: "平台管理" }]}
+          onApprove={onApprove} onReject={onReject} />,
+      );
+    });
+    const preview = container!.querySelector("pre");
+    expect(preview?.textContent).toBe(content);
+    expect(preview?.tabIndex).toBe(0);
+    await act(async () => findButtonByText("是")!.click());
+    await act(async () => findButtonByText("否")!.click());
+    expect(onApprove).toHaveBeenCalledTimes(1);
+    expect(onReject).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks all approvals and shortcuts while keeping rejection available", async () => {
+    const onApprove = vi.fn();
+    const onApproveForSession = vi.fn();
+    const onApproveForSessionTool = vi.fn();
+    const onApproveWithActionWindow = vi.fn();
+    const onReject = vi.fn();
+    await act(async () => {
+      root!.render(
+        <ChatToolApprovalDialog lang="zh" pending={false} approveDisabled rawTitle="personal_assistant_manage_tool"
+          riskLabel="需要审批" scopeLabel="本次调用" actionPreview="参数无法核对" fullActionPreview
+          toolName="personal_assistant_manage_tool" toolLabels={[{ id: "personal_assistant_manage_tool", label: "平台管理" }]}
+          onApprove={onApprove} onApproveForSession={onApproveForSession}
+          onApproveForSessionTool={onApproveForSessionTool} onApproveWithActionWindow={onApproveWithActionWindow}
+          onReject={onReject} />,
+      );
+    });
+    for (const text of ["是", "始终（此 Agent）", "本会话此工具", "同意并授权 4 小时"]) {
+      const button = findButtonByText(text);
+      expect(button?.disabled).toBe(true);
+      await act(async () => button!.click());
+    }
+    expect(findButtonByText("否")?.disabled).toBe(false);
+    await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true })));
+    await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true })));
+    expect(onApprove).not.toHaveBeenCalled();
+    expect(onApproveForSession).not.toHaveBeenCalled();
+    expect(onApproveForSessionTool).not.toHaveBeenCalled();
+    expect(onApproveWithActionWindow).not.toHaveBeenCalled();
+    await act(async () => findButtonByText("否")!.click());
+    await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "n", bubbles: true })));
+    expect(onReject).toHaveBeenCalledTimes(2);
+  });
+
   it("fires acceptForSessionTool from the tool-level remember button (b1)", async () => {
     const onApprove = vi.fn();
     const onApproveForSession = vi.fn();

@@ -56,7 +56,7 @@ async function click(label: string) {
   await settle(); await settle();
 }
 function assetReads() { return invoke.mock.calls.filter(([request]) => request.operation === "operatorAsset").length; }
-async function renderAssistant(options: { capability?: boolean; failAvatar?: boolean; patrol?: { state: "ready" | "unavailable"; deliveryStates: Record<string, number> } } = {}) {
+async function renderAssistant(options: { capability?: boolean; failAvatar?: boolean; approval?: Record<string, unknown>; language?: "zh" | "en"; patrol?: { state: "ready" | "unavailable"; deliveryStates: Record<string, number> } } = {}) {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   failingAvatar = Boolean(options.failAvatar);
   detail = { id: "s", agentId: "a", status: "ready", messages: [] };
@@ -70,9 +70,10 @@ async function renderAssistant(options: { capability?: boolean; failAvatar?: boo
         ...(options.patrol ? { patrol: options.patrol } : {}),
         ...(options.capability === false ? {} : { operatorAssetsVersion: 1 }),
       };
-      case "config": return { language: "zh" };
+      case "config": return { language: options.language ?? "zh" };
       case "detail": return detail;
-      case "approvals": return [];
+      case "approvals": return options.approval ? [options.approval] : [];
+      case "resolveApproval": return { ...options.approval, status: request.decision === "decline" ? "rejected" : "approved" };
       case "dispatches": return { dispatches: [] };
       case "computerState": return { available: false, status: "idle", message: "测试驱动未连接", grantId: null, window: null, pending: null };
       case "computerWindows": return { windows: [] };
@@ -98,6 +99,34 @@ async function finishTurn(turnId: string) {
 }
 
 describe("Launcher operator image consumption", () => {
+  it("shows the complete project permission request on the actual assistant route", async () => {
+    await renderAssistant({ approval: { requestId: "r", sessionId: "s", turnId: "t", agentId: "a",
+      toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
+      argumentSummary: { assistantAction: "authorization_upgrade", assistantTargets: { project_id: "registered:1" },
+        assistantAddedScopes: ["source:read", "tasks:read"] } } });
+    await click("展开个人助理聊天");
+    const preview = container.querySelector("pre");
+    expect(preview?.textContent).toContain("registered:1");
+    expect(preview?.textContent).toContain("source:read");
+    expect(preview?.textContent).toContain("tasks:read");
+    expect(preview?.className).toContain("overflow-y-auto");
+    expect(preview?.tabIndex).toBe(0);
+  });
+
+  it("prevents approval when the requested permissions cannot be verified", async () => {
+    await renderAssistant({ approval: { requestId: "r", sessionId: "s", turnId: "t", agentId: "a",
+      toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
+      argumentSummary: { assistantArgumentsInvalid: true } } });
+    await click("展开个人助理聊天");
+    expect(container.textContent).toContain("参数无法核对");
+    const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"));
+    const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("否"));
+    expect(approve?.disabled).toBe(true);
+    expect(reject?.disabled).toBe(false);
+    await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true })));
+    expect(invoke.mock.calls.some(([request]) => request.operation === "resolveApproval" && request.decision === "accept")).toBe(false);
+  });
+
   it("shows when task receipts cannot be reported automatically", async () => {
     await renderAssistant({ patrol: { state: "ready", deliveryStates: { unknown: 1 } } });
     await click("展开个人助理聊天");

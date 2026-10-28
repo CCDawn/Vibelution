@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from copy import deepcopy
 from concurrent.futures import TimeoutError
 from typing import Literal
@@ -169,6 +170,20 @@ def _management_contracts():
             request_id=(str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$")))
         result[name] = (schema, {**contracts()[name], "parameters": schema.model_json_schema()})
     return result
+
+
+def authorization_upgrade_approval_summary(parameters: dict) -> dict:
+    """Validate the exact executable request before projecting its approval."""
+    try:
+        values = _management_contracts()["authorization_upgrade"][0].model_validate(parameters).model_dump()
+    except (ValidationError, TypeError) as exc:
+        raise ValueError("Invalid authorization upgrade") from exc
+    project_id = values["project_id"]
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}", project_id) is None:
+        raise ValueError("Project identity cannot be displayed safely")
+    return {"assistantAction": "authorization_upgrade",
+            "assistantTargets": {"project_id": project_id},
+            "assistantAddedScopes": values["add_scopes"]}
 
 
 def _documentation_contracts():
@@ -467,6 +482,8 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
         args = schema.model_validate(parameters).model_dump(exclude_unset=action == "agent_update")
     except ValidationError as exc:
         raise ValueError("Action parameters do not match describe schema") from exc
+    if action == "authorization_upgrade":
+        authorization_upgrade_approval_summary(args)
     projects = service.project_ids()
     if "project_id" in args and args["project_id"] not in projects:
         raise ValueError("Project is not authorized by Launcher")

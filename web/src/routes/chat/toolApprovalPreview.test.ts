@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  authorizationUpgradePreviewIsValid,
   toolApprovalActionPreview,
   toolApprovalCodexButtonLabels,
   toolApprovalCodexTitle,
@@ -22,6 +23,39 @@ describe("toolApprovalPreview", () => {
       .toContain("Archive session");
     expect(toolApprovalActionPreview({ assistantAction: "http_proxy" }, "personal_assistant_manage_tool", "zh"))
       .toContain("参数无法核对");
+  });
+  it("shows every authorization upgrade scope and exact project in both languages", () => {
+    const scopes = ["knowledge:catalog:read", "teams:directory:read", ...Array.from({ length: 20 }, (_, i) => `scope:${i}`)];
+    const summary = { assistantAction: "authorization_upgrade", assistantTargets: { project_id: "project-123" }, assistantAddedScopes: scopes };
+    expect(authorizationUpgradePreviewIsValid(summary)).toBe(true);
+    expect(toolApprovalActionPreview(summary, "personal_assistant_manage_tool", "zh")).toBe(
+      ["新增项目权限", "项目: project-123", "新增权限:", ...scopes.map((scope) => `- ${scope}`)].join("\n"));
+    expect(toolApprovalActionPreview(summary, "personal_assistant_manage_tool", "en")).toBe(
+      ["Add project permissions", "Project: project-123", "Added permissions:", ...scopes.map((scope) => `- ${scope}`)].join("\n"));
+  });
+  it("rejects absent or unsafe authorization upgrade details", () => {
+    const good = { assistantAction: "authorization_upgrade", assistantTargets: { project_id: "project-123" }, assistantAddedScopes: ["source:read"] };
+    const invalid: Record<string, unknown>[] = [
+      { ...good, assistantTargets: undefined }, { ...good, assistantTargets: { project_id: "" } },
+      { ...good, assistantTargets: { project_id: "project\nforged" } },
+      { ...good, assistantTargets: { project_id: "project\n" } },
+      { ...good, assistantTargets: { project_id: "project\u202Eforged" } },
+      { ...good, assistantAddedScopes: undefined }, { ...good, assistantAddedScopes: [] },
+      { ...good, assistantAddedScopes: ["source:read", 3] }, { ...good, assistantAddedScopes: [""] },
+      { ...good, assistantAddedScopes: ["source:read\nforged"] },
+      { ...good, assistantAddedScopes: ["source:read\n"] },
+      { ...good, assistantAddedScopes: ["source:read\u202E"] },
+      { ...good, assistantAddedScopes: Array(1) },
+    ];
+    invalid.push({ ...good, assistantArgumentsInvalid: true });
+    invalid.push({ ...good, assistantAction: "team_run" });
+    expect(authorizationUpgradePreviewIsValid(null)).toBe(false);
+    for (const summary of invalid) {
+      expect(authorizationUpgradePreviewIsValid(summary)).toBe(false);
+      if (summary.assistantAction !== "authorization_upgrade") continue;
+      expect(toolApprovalActionPreview(summary, "personal_assistant_manage_tool", "zh")).toContain("参数无法核对");
+      expect(toolApprovalActionPreview(summary, "personal_assistant_manage_tool", "en")).toContain("Arguments cannot be verified");
+    }
   });
   it("explains the one-step team run and rejects an incomplete scope", () => {
     const summary = { assistantAction: "team_run", assistantTargets: { name: "验收团队", template_id: "dev-team" },

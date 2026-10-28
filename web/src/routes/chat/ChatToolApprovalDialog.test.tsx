@@ -67,6 +67,31 @@ describe("ChatToolApprovalDialog", () => {
     expect(markup).toContain("read_file");
   });
 
+  it("keeps compact previews by default and offers an explicitly scrollable full preview", () => {
+    const content = ["项目: project-a", ...Array.from({ length: 30 }, (_, i) => `scope:${i}`)].join("\n");
+    const props = {
+      lang: "zh" as const, pending: false, rawTitle: "personal_assistant_manage_tool", riskLabel: "需要审批",
+      scopeLabel: "本次调用", actionPreview: content, toolName: "personal_assistant_manage_tool",
+      toolLabels: [{ id: "personal_assistant_manage_tool", label: "平台管理" }],
+      onApprove: () => undefined, onReject: () => undefined,
+    };
+    const compact = renderToStaticMarkup(createElement(ChatToolApprovalDialog, props));
+    const expanded = renderToStaticMarkup(createElement(ChatToolApprovalDialog, { ...props, fullActionPreview: true }));
+    const compactPre = compact.match(/<pre\b[^>]*>/)?.[0] || "";
+    const expandedPre = expanded.match(/<pre\b[^>]*>/)?.[0] || "";
+    expect(compactPre).toContain("[-webkit-line-clamp:2]");
+    expect(compactPre).not.toContain('tabindex="0"');
+    expect(expandedPre).toContain("overflow-y-auto");
+    expect(expandedPre).toContain("max-h-48");
+    expect(expandedPre).toContain('tabindex="0"');
+    expect(expandedPre).not.toContain("line-clamp");
+    expect(expandedPre).not.toContain("overflow-hidden");
+    expect(expanded).toContain("scope:0");
+    expect(expanded).toContain("scope:29");
+    expect(expanded).toContain("是");
+    expect(expanded).toContain("否");
+  });
+
   it("offers the tool-level session grant only when the handler is provided", () => {
     const markup = renderToStaticMarkup(createElement(ChatToolApprovalDialog, {
       lang: "zh",

@@ -15,7 +15,7 @@ function sandbox(nativeColdStart = true) {
   const inFlight = { commandId: "cmd_existing_inflight", epoch: 7 };
   const mutate = vi.fn(() => { inFlight.commandId = "changed"; inFlight.epoch += 1; });
   return {
-    nativeColdStart, shutdownApproved: false, inFlight, mutate, operation: "start", payload: { path: "start" }, signal: undefined,
+    nativeColdStart, admission: undefined, shutdownApproved: false, inFlight, mutate, operation: "start", payload: { path: "start" }, signal: undefined,
     lifecycleCurrent: undefined as (() => boolean) | undefined, provenance: "operator", workbenchFailedCloseHandling: false, pendingWorkbenchCloseAck: null,
     isWorkbenchStartBlockedByClose,
     joinDecisionForLauncherLifecycleStop: () => ({ waitForInFlightRestart: false }),

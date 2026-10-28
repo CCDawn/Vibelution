@@ -21,12 +21,16 @@ export type ChatToolApprovalLabel = {
 type ChatToolApprovalDialogProps = {
   lang: "zh" | "en";
   pending: boolean;
+  /** Prevent approval when the caller cannot verify the displayed request. */
+  approveDisabled?: boolean;
   rawTitle: string;
   riskLabel: string;
   scopeLabel: string;
   toolLabels: ChatToolApprovalLabel[];
   /** Codex-style action body (command/path preview). */
   actionPreview?: string;
+  /** Show the complete preview in a keyboard-scrollable area. */
+  fullActionPreview?: boolean;
   sessionGrantScope?: Record<string, unknown>;
   toolName?: string;
   /** b3: assistant manage action-window projection (remaining delegation time). */
@@ -56,11 +60,13 @@ type ChatToolApprovalDialogProps = {
 export function ChatToolApprovalDialog({
   lang,
   pending,
+  approveDisabled = false,
   rawTitle,
   riskLabel,
   scopeLabel,
   toolLabels,
   actionPreview,
+  fullActionPreview = false,
   sessionGrantScope,
   toolName,
   assistantActionWindow,
@@ -108,12 +114,12 @@ export function ChatToolApprovalDialog({
       const key = event.key.toLowerCase();
       if (key === "y") {
         event.preventDefault();
-        onApprove();
+        if (!approveDisabled) onApprove();
         return;
       }
       if (key === "a" && onApproveForSession) {
         event.preventDefault();
-        onApproveForSession();
+        if (!approveDisabled) onApproveForSession();
         return;
       }
       if (key === "n" || key === "escape") {
@@ -123,7 +129,7 @@ export function ChatToolApprovalDialog({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onApprove, onApproveForSession, onReject, pending]);
+  }, [approveDisabled, onApprove, onApproveForSession, onReject, pending]);
 
   return (
     <div
@@ -148,7 +154,8 @@ export function ChatToolApprovalDialog({
             {scopeText ? <span className={styles.scopeBadge} id={scopeId}>{scopeText}</span> : <span id={scopeId} className="sr-only" />}
             {displayName ? <span className={styles.scopeBadge}>{displayName}</span> : null}
           </div>
-          <pre id={previewId} className={styles.commandPreview} title={preview}>
+          <pre id={previewId} className={fullActionPreview ? styles.commandPreviewFull : styles.commandPreview}
+            title={preview} tabIndex={fullActionPreview ? 0 : undefined}>
             {preview || (lang === "zh" ? "（无命令预览）" : "(no command preview)")}
           </pre>
           {showGrant ? (
@@ -189,7 +196,7 @@ export function ChatToolApprovalDialog({
             type="button"
             className={styles.yesButton}
             onClick={onApprove}
-            isDisabled={pending}
+            isDisabled={pending || approveDisabled}
             title={lang === "zh" ? "仅批准本次（Y）" : "Allow this once (Y)"}
           >
             <span>{pending ? buttons.resolving : buttons.yes}</span>
@@ -199,7 +206,7 @@ export function ChatToolApprovalDialog({
               type="button"
               className={styles.alwaysButton}
               onClick={onApproveForSession}
-              isDisabled={pending}
+              isDisabled={pending || approveDisabled}
               title={lang === "zh" ? "本会话始终允许同类调用（A）" : "Always allow for this session (A)"}
             >
               <span>{buttons.always}</span>
@@ -210,7 +217,7 @@ export function ChatToolApprovalDialog({
               type="button"
               className={styles.alwaysButton}
               onClick={onApproveForSessionTool}
-              isDisabled={pending}
+              isDisabled={pending || approveDisabled}
               data-chat-approval-accept-tool-session="true"
               title={lang === "zh" ? "本会话内此工具不再询问" : "Stop asking for this tool this session"}
             >
@@ -222,7 +229,7 @@ export function ChatToolApprovalDialog({
               type="button"
               className={styles.alwaysButton}
               onClick={onApproveWithActionWindow}
-              isDisabled={pending}
+              isDisabled={pending || approveDisabled}
               data-chat-approval-accept-action-window="true"
               title={lang === "zh" ? "批准本次并授权未来 4 小时内同类低风险操作直办" : "Approve once and allow this low-risk action directly for 4 hours"}
             >

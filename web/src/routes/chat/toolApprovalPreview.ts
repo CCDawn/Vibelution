@@ -14,6 +14,19 @@ export function toolApprovalDisplayName(toolName: string | undefined | null, lan
   return TOOL_APPROVAL_LABELS[key] ?? key;
 }
 
+/** Validate the exact authorization details before rendering or enabling approval. */
+export function authorizationUpgradePreviewIsValid(summary: Record<string, unknown> | null | undefined): boolean {
+  if (!summary || summary.assistantAction !== "authorization_upgrade" || summary.assistantArgumentsInvalid) return false;
+  const targets = summary.assistantTargets;
+  const projectId = targets && typeof targets === "object" && !Array.isArray(targets)
+    ? (targets as Record<string, unknown>).project_id : undefined;
+  const scopes = summary.assistantAddedScopes;
+  // Keep identifiers single-line and unambiguous without truncating them.
+  return typeof projectId === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}(?![\s\S])/.test(projectId)
+    && Array.isArray(scopes) && scopes.length > 0
+    && Array.from(scopes).every((scope) => typeof scope === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]*(?![\s\S])/.test(scope));
+}
+
 export function toolApprovalActionPreview(
   argumentSummary: Record<string, unknown> | null | undefined,
   toolName?: string | null,
@@ -22,6 +35,7 @@ export function toolApprovalActionPreview(
   const summary = argumentSummary && typeof argumentSummary === "object" ? argumentSummary : {};
   if (toolName === "personal_assistant_manage_tool") {
     const actions: Record<string, [string, string]> = {
+      authorization_upgrade: ["新增项目权限", "Add project permissions"],
       agent_create: ["创建 Agent", "Create agent"], agent_update: ["修改 Agent", "Update agent"],
       agent_archive: ["归档 Agent", "Archive agent"], session_create: ["创建会话", "Create session"],
       session_update: ["修改会话", "Update session"], session_stop: ["停止会话任务", "Stop session turn"],
@@ -55,6 +69,16 @@ export function toolApprovalActionPreview(
       return `${title}\n${lang === "zh" ? "参数无法核对，请拒绝并重新发起。" : "Arguments cannot be verified. Decline and request again."}`;
     }
     const targets = summary.assistantTargets;
+    if (action === "authorization_upgrade") {
+      const projectId = targets && typeof targets === "object" && !Array.isArray(targets)
+        ? (targets as Record<string, unknown>).project_id : undefined;
+      const scopes = summary.assistantAddedScopes;
+      if (!authorizationUpgradePreviewIsValid(summary)) {
+        return `${title}\n${lang === "zh" ? "参数无法核对，请拒绝并重新发起。" : "Arguments cannot be verified. Decline and request again."}`;
+      }
+      return [title, `${lang === "zh" ? "项目" : "Project"}: ${projectId}`,
+        lang === "zh" ? "新增权限:" : "Added permissions:", ...(scopes as string[]).map((scope) => `- ${scope}`)].join("\n");
+    }
     const targetLines = targets && typeof targets === "object" && !Array.isArray(targets)
       ? Object.entries(targets).filter(([, value]) => typeof value === "string")
         .slice(0, 20).map(([key, value]) => {
