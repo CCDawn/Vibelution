@@ -6,8 +6,6 @@ import { createAssistantProjectLifecycle } from "../src/assistant/projectLifecyc
 import { createAssistantProjectLifecycleRequests } from "../src/assistant/projectLifecycleRequests.js";
 import { AssistantProjectLifecycleRequestStore } from "../src/assistant/projectLifecycleRequestStore.js";
 import { mainLineCommandResultPath } from "../src/lifecycle/mainLine/commandEvidence.js";
-import { waitForMainLineIntentPersistence } from "../src/lifecycle/mainLine/commandQueue.js";
-import { runWorkbenchLifecycle } from "../src/process/workbenchLifecycle.js";
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true, maxRetries: 10 }); });
@@ -18,34 +16,43 @@ function setup(realNative = false) {
   const directory = join(root, "requests");
   let revision = 1;
   const execute = vi.fn(async (command) => {
-    await waitForMainLineIntentPersistence(command);
+    const blocked = realNative && command.operation === "stop";
+    const queued = realNative && command.operation === "restart";
+    const accepted = !blocked;
+    const code = blocked ? "active_work_blocked" : queued ? "restart_queued" : undefined;
     mkdirSync(join(runtimeManagerDir, "results"), { recursive: true });
     writeFileSync(mainLineCommandResultPath(runtimeManagerDir, command.commandId), JSON.stringify({
       schemaVersion: 1, source: "electron_main", commandId: command.commandId, type: command.type,
-      operation: command.operation, accepted: true, ok: true, completed: true,
+      operation: command.operation, accepted, ok: accepted, completed: true, ...(code ? { code } : {}),
       message: `${root} SECRET`, startedAt: "2026-10-26T00:00:00Z", settledAt: "2026-10-26T00:00:01Z", runMs: 1000,
     }));
-    return { schemaVersion: 1 as const, accepted: true, operation: command.operation, commandId: command.commandId };
+    return { schemaVersion: 1 as const, accepted, code, operation: command.operation, commandId: command.commandId };
   });
-  const facade = createAssistantProjectLifecycle({
+  const realFacade = createAssistantProjectLifecycle({
     getPermissionSnapshot: () => ({ schemaVersion: 1, revision, projects: { synthetic: root } }),
     resolveNativeRuntimeManagerDir: () => runtimeManagerDir,
     resolveRuntimeContext: async () => ({ workspaceRoot: root, runtimeManagerDir, pythonPath: join(root, "python.exe"), operatorConfigPath: join(root, "test.toml") }),
     readStatus: async () => ({ state: "stopped" }),
-    runLifecycle: realNative ? input => runWorkbenchLifecycle({ ...input,
-      spawnImpl: () => { throw new Error("native guard must not spawn"); },
-      readState: () => ({ backendPid: 0, backendPort: 8000 }), writeState: () => undefined,
-      listActiveWork: () => [{ kind: "chat_turn", runId: "synthetic-work", status: "running", sessionId: "synthetic-session" }],
-      connect: async () => false, pidAlive: () => false,
-    }) : async input => input.queue!.submit({ operation: input.operation, execute }),
   });
+  // Isolate the receipt controller with a synthetic native facade: production
+  // facade writes are suspended, while historical native receipts remain valid.
+  let commandSequence = 0;
+  const facade: typeof realFacade = { ...realFacade, dispatch: async (input, execution) => {
+    const request = input as { projectId: string; operation: "start" | "stop" | "restart" };
+    const command = { commandId: `cmd_fixture_${++commandSequence}`, operation: request.operation,
+      type: ({ start: "open", stop: "close", restart: "restart" } as const)[request.operation], noBrowser: true };
+    await execution?.onCommand?.(realFacade.bindingFor(request.projectId), command);
+    const result = await execute(command);
+    return { schemaVersion: 1, projectId: request.projectId, operation: request.operation,
+      accepted: result.accepted, code: result.code ?? (result.accepted ? "accepted" : "rejected") };
+  } };
   const make = () => createAssistantProjectLifecycleRequests({ facade, store: new AssistantProjectLifecycleRequestStore({ directory }) });
   const request = { requestId: "synthetic-request", projectId: "synthetic", operation: "restart" as const };
   return { root, directory, runtimeManagerDir, facade, execute, request, make, revoke: () => { revision++; } };
 }
 
 describe("assistant durable lifecycle request recovery", () => {
-  it("reads actual native active-work settlements after recreation, keeping queued restart distinct", async () => {
+  it("reads historical active-work settlements after recreation, keeping queued restart distinct", async () => {
     const f = setup(true);
     const stop = { ...f.request, requestId: "native-stop", operation: "stop" as const };
     const restart = { ...f.request, requestId: "native-restart" };

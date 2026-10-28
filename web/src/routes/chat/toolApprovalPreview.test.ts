@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   authorizationUpgradePreviewIsValid,
   dispatchWritePreviewIsValid,
+  projectLifecyclePreviewIsValid,
   toolApprovalActionPreview,
   toolApprovalCodexButtonLabels,
   toolApprovalCodexTitle,
@@ -11,6 +12,22 @@ import {
 } from "./toolApprovalPreview";
 
 describe("toolApprovalPreview", () => {
+  it("shows the exact project lifecycle request and rejects incomplete details", () => {
+    const summary = { assistantAction: "project_lifecycle", assistantTargets: {
+      project_id: "project:1", operation: "start", request_id: "request-1",
+    } };
+    expect(projectLifecyclePreviewIsValid(summary)).toBe(true);
+    expect(toolApprovalActionPreview(summary, "personal_assistant_manage_tool", "zh"))
+      .toBe("管理项目\n项目: project:1\n操作: 启动\n请求 ID: request-1");
+    for (const targets of [undefined, { ...summary.assistantTargets, operation: "force-stop" },
+      { ...summary.assistantTargets, project_id: "project\nforged" },
+      { ...summary.assistantTargets, request_id: "x".repeat(129) },
+      { ...summary.assistantTargets, extra: true }]) {
+      const invalid = { ...summary, assistantTargets: targets };
+      expect(projectLifecyclePreviewIsValid(invalid)).toBe(false);
+      expect(toolApprovalActionPreview(invalid, "personal_assistant_manage_tool", "zh")).toContain("参数无法核对");
+    }
+  });
   it("shows the entire write dispatch request and rejects misleading or incomplete details", () => {
     const task = `修改这两个文件\n${"长任务".repeat(300)}\n保留其他内容。`;
     const summary = { assistantAction: "dispatch_write", assistantTargets: { project_id: "project-1", agent_id: "agent-1", dispatch_id: "dispatch-1" },

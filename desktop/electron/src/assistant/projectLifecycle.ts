@@ -214,6 +214,12 @@ export function createAssistantProjectLifecycle(options: AssistantProjectLifecyc
       try {
         checkSignal(signal);
         const expected = permission(captured.projectId);
+        // The native lifecycle can retire a live backend when active-work or
+        // graceful-shutdown evidence is unavailable. Keep existing commands
+        // and receipt lookup untouched while assistant writes are suspended.
+        if (["start", "stop", "restart"].includes(captured.operation)) {
+          return { ...base, accepted: false, code: "prerequisite_required" };
+        }
         if ((captured.operation === "start" || captured.operation === "restart") && options.admission) admission = options.admission.enter(expected.workspaceRoot);
         if (captured.operation === "status") {
           let raw: unknown;

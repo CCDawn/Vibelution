@@ -27,6 +27,18 @@ export function authorizationUpgradePreviewIsValid(summary: Record<string, unkno
     && Array.from(scopes).every((scope) => typeof scope === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]*(?![\s\S])/.test(scope));
 }
 
+/** Lifecycle approval must show the complete bound request. */
+export function projectLifecyclePreviewIsValid(summary: Record<string, unknown> | null | undefined): boolean {
+  if (!summary || summary.assistantAction !== "project_lifecycle" || summary.assistantArgumentsInvalid) return false;
+  const targets = summary.assistantTargets;
+  if (!targets || typeof targets !== "object" || Array.isArray(targets)) return false;
+  const values = targets as Record<string, unknown>;
+  if (Object.keys(values).length !== 3) return false;
+  return typeof values.project_id === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}(?![\s\S])/.test(values.project_id)
+    && typeof values.request_id === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}(?![\s\S])/.test(values.request_id)
+    && (values.operation === "start" || values.operation === "stop" || values.operation === "restart");
+}
+
 /** A write dispatch must show the same complete request that approval binds. */
 export function dispatchWritePreviewIsValid(summary: Record<string, unknown> | null | undefined): boolean {
   if (!summary || summary.assistantAction !== "dispatch_write" || summary.assistantArgumentsInvalid
@@ -46,6 +58,7 @@ export function dispatchWritePreviewIsValid(summary: Record<string, unknown> | n
 }
 
 const MANAGE_ACTIONS: Record<string, [string, string]> = {
+      project_lifecycle: ["管理项目", "Manage project"],
       dispatch_write: ["派遣 Agent 修改项目", "Dispatch agent to modify project"],
       authorization_upgrade: ["新增项目权限", "Add project permissions"],
       agent_create: ["创建 Agent", "Create agent"], agent_update: ["修改 Agent", "Update agent"],
@@ -98,6 +111,16 @@ export function toolApprovalActionPreview(
       return `${title}\n${lang === "zh" ? "参数无法核对，请拒绝并重新发起。" : "Arguments cannot be verified. Decline and request again."}`;
     }
     const targets = summary.assistantTargets;
+    if (action === "project_lifecycle") {
+      if (!projectLifecyclePreviewIsValid(summary)) {
+        return `${title}\n${lang === "zh" ? "参数无法核对，请拒绝并重新发起。" : "Arguments cannot be verified. Decline and request again."}`;
+      }
+      const identity = targets as Record<string, string>;
+      const operations: Record<string, [string, string]> = { start: ["启动", "Start"], stop: ["停止", "Stop"], restart: ["重启", "Restart"] };
+      return [title, `${lang === "zh" ? "项目" : "Project"}: ${identity.project_id}`,
+        `${lang === "zh" ? "操作" : "Operation"}: ${operations[identity.operation][lang === "zh" ? 0 : 1]}`,
+        `${lang === "zh" ? "请求 ID" : "Request ID"}: ${identity.request_id}`].join("\n");
+    }
     if (action === "dispatch_write") {
       if (!dispatchWritePreviewIsValid(summary)) {
         return `${title}\n${lang === "zh" ? "参数无法核对，请拒绝并重新发起。" : "Arguments cannot be verified. Decline and request again."}`;

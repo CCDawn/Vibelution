@@ -1138,6 +1138,20 @@ def _argument_summary(tool_name: str, tool_args: Mapping[str, Any]) -> dict[str,
 def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
     """Approval-only projection; never expose nested prompt/policy values."""
     action = args.get("action")
+    if action == "project_lifecycle":
+        from core.infrastructure.native_runtime import is_launcher_assistant_process
+        if not is_launcher_assistant_process():
+            return {"assistantArgumentsInvalid": True}
+        try:
+            raw = args.get("arguments_json")
+            values = json.loads(raw) if isinstance(raw, str) and len(raw) <= 16000 else None
+            if not isinstance(values, dict):
+                raise ValueError("Invalid lifecycle arguments")
+            from core.assistant_runtime.actions import ProjectLifecycle
+            validated = ProjectLifecycle.model_validate(values)
+            return {"assistantAction": action, "assistantTargets": validated.model_dump()}
+        except (ValueError, TypeError, KeyError, RuntimeError, RecursionError):
+            return {"assistantAction": action, "assistantArgumentsInvalid": True}
     if action == "dispatch_write":
         from core.infrastructure.native_runtime import is_launcher_assistant_process
         if not is_launcher_assistant_process():

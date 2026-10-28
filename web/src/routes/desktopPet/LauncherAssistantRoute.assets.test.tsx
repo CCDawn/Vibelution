@@ -102,6 +102,33 @@ async function finishTurn(turnId: string) {
 }
 
 describe("Launcher operator image consumption", () => {
+  it("shows the complete project lifecycle request before approval", async () => {
+    await renderAssistant({ approval: { requestId: "r", sessionId: "s", turnId: "t", agentId: "a",
+      toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
+      argumentSummary: { assistantAction: "project_lifecycle", assistantTargets: {
+        project_id: "registered:1", operation: "restart", request_id: "lifecycle-1",
+      } } } });
+    await click("展开个人助理聊天");
+    expect(container.textContent).toContain("项目: registered:1");
+    expect(container.textContent).toContain("操作: 重启");
+    expect(container.textContent).toContain("请求 ID: lifecycle-1");
+    const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"));
+    expect(approve?.disabled).toBe(false);
+  });
+
+  it("blocks approval when project lifecycle details cannot be verified", async () => {
+    await renderAssistant({ approval: { requestId: "r", sessionId: "s", turnId: "t", agentId: "a",
+      toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
+      argumentSummary: { assistantAction: "project_lifecycle", assistantTargets: { project_id: "registered:1", operation: "stop" } } } });
+    await click("展开个人助理聊天");
+    expect(container.textContent).toContain("参数无法核对");
+    const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"));
+    expect(approve?.disabled).toBe(true);
+    await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true })));
+    await settle();
+    expect(invoke.mock.calls.some(([request]) => request.operation === "resolveApproval")).toBe(false);
+  });
+
   it("shows the complete project permission request on the actual assistant route", async () => {
     await renderAssistant({ approval: { requestId: "r", sessionId: "s", turnId: "t", agentId: "a",
       toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
