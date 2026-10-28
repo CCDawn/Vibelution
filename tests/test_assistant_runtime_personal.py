@@ -40,7 +40,8 @@ def test_native_personal_tools_persist_own_affairs_and_private_memory_across_pro
         from tools.Key_Tools import create_key_tools
         root = Path(os.environ['VIBELUTION_ASSISTANT_NATIVE_ROOT']).resolve()
         expected = {'personal_assistant_action_tool', 'personal_assistant_manage_tool', 'personal_affairs_tool',
-            'append_personal_memory_tool', 'supersede_personal_memory_tool', 'search_agent_private_memory_tool', 'compress_context_tool'}
+            'append_personal_memory_tool', 'supersede_personal_memory_tool', 'search_agent_private_memory_tool', 'compress_context_tool',
+            'personal_assistant_computer_observe_tool', 'personal_assistant_computer_action_tool'}
         try:
             identity = native.bootstrap(root)['assistant']
             aid, sid = identity['agentId'], identity['directSessionId']
@@ -59,8 +60,7 @@ def test_native_personal_tools_persist_own_affairs_and_private_memory_across_pro
             with directory.active_agent_runtime(aid, session_id=sid, turn_id='personal-tools-test') as context:
                 assert directory.current_agent_runtime()['sessionId'] == sid
                 assert expected <= set(context['toolPolicy']['allowedTools']), context['toolPolicy']['allowedTools']
-                assert not {'personal_assistant_query_tool', 'personal_assistant_platform_api_tool', 'agent_message_tool',
-                    'personal_assistant_computer_action_tool'} & set(context['toolPolicy']['allowedTools'])
+                assert not {'personal_assistant_query_tool', 'personal_assistant_platform_api_tool', 'agent_message_tool'} & set(context['toolPolicy']['allowedTools'])
                 assert invoke('personal_affairs_tool', {'action': 'list', 'kind': ''})['affairs']['items'] == []
                 item = invoke('personal_affairs_tool', {'action': 'add', 'title': '自己的事务', 'kind': 'todo',
                     'note': 'private fixture', 'source_turn_id': 'personal-tools-test'})['item']

@@ -65,6 +65,56 @@ class NativeAgentGateway:
         from .workspace import read_sessions
         return read_sessions(self.project_root, self._owners(), query)
 
+    def read_active_tasks(self, query):
+        from core.assistant_runtime.migration_io import read_stable_file, strict_json
+        from core.web.services import runtime_task_registry as registry
+        from vibelution_storage import resolve_project_runtime_home
+        from .service import ManagementError
+
+        self._owners()
+        if Path(registry.PROJECT_ROOT).resolve() != self.project_root:
+            raise ManagementError("TARGET_BINDING_CHANGED", 409)
+        store = registry.store_for(resolve_project_runtime_home(self.project_root) / registry.STORE_DIR_NAME)
+        try:
+            def read_index():
+                return read_stable_file(store.index_path, 1_000_000).raw
+
+            before = read_index()
+            index = strict_json(before)
+            ids = index.get("activeTaskIds") if isinstance(index, dict) else None
+            if (not isinstance(index, dict) or set(index) != {"schemaVersion", "activeTaskIds"}
+                    or type(index.get("schemaVersion")) is not int or index.get("schemaVersion") != registry.INDEX_SCHEMA_VERSION
+                    or not isinstance(ids, list) or len(ids) > 10000
+                    or any(not isinstance(item, str) or not item for item in ids) or len(ids) != len(set(ids))):
+                raise ValueError("Invalid active index")
+            summaries = {"cli_agent": "CLI agent task", "child_session": "Child session task", "research_task": "Research task"}
+            projected = []
+            bytes_remaining = 8_000_000
+            for task_id in sorted(ids):
+                raw_bytes = read_stable_file(store.task_state_path(task_id), min(1_000_000, bytes_remaining)).raw
+                bytes_remaining -= len(raw_bytes)
+                raw = strict_json(raw_bytes)
+                if not isinstance(raw, dict) or raw.get("taskId") != task_id:
+                    raise ValueError("Inconsistent task snapshot")
+                kind, status = raw.get("kind"), raw.get("status")
+                if kind not in summaries or status not in registry.ACTIVE_STATUSES:
+                    raise ValueError("Invalid task state")
+                projected.append({"taskId": task_id, "kind": kind, "status": status, "summary": summaries[kind],
+                                  "startedAt": raw.get("startedAt"), "updatedAt": raw.get("updatedAt")})
+            from .contracts import ActiveTask
+            projected = [ActiveTask.model_validate(row).model_dump() for row in projected]
+            if read_index() != before:
+                raise ValueError("Changed active index")
+            page = projected[query.offset:query.offset + query.limit]
+            end = query.offset + len(page)
+            return {"source": "native-active-task-index",
+                    "coverage": "active index only; may omit active tasks; total counts indexed tasks only, not all active tasks or project health",
+                    "indexCompleteness": "unknown",
+                    "tasks": page, "offset": query.offset, "total": len(projected),
+                    "nextOffset": end if end < len(projected) else None, "untrustedContent": True}
+        except (OSError, ValueError, TypeError):
+            raise ManagementError("TASK_INDEX_UNAVAILABLE", 503) from None
+
     def read_teams(self, query):
         from .workspace_queries import read_teams
         return read_teams(self.project_root, self._owners(), query)

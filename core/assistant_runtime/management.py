@@ -241,6 +241,12 @@ class ManagementAdapter:
         result = await self._call(project_id, lambda client: client.management_session_list(**parameters))
         return {**result, "projectId": project_id}
 
+    async def active_tasks(self, project_id: str, **parameters):
+        if project_id not in self._projects:
+            raise DispatchError("Project is not authorized.", code="PROJECT_NOT_AUTHORIZED")
+        result = await self._call(project_id, lambda client: client.management_active_tasks(**parameters))
+        return {**result, "projectId": project_id}
+
     async def team_list(self, project_id: str, **parameters):
         if project_id not in self._projects:
             raise DispatchError("Project is not authorized.", code="PROJECT_NOT_AUTHORIZED")

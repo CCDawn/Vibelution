@@ -481,10 +481,21 @@ The management prefix is `/api/v1/launcher-assistant-management`:
 
 | Model action | GET suffix | Required grants | Result boundary |
 | --- | --- | --- | --- |
+| `task_list` | `/active-tasks` | `tasks:read` | Bounded native active-index entries; index completeness is unknown |
 | `team_list` / `team_get` | `/directory/teams[/{team_id}]` | `teams:directory:read` | Ordinary Team summaries and bounded member pages |
 | `room_list` / `room_get` | `/directory/rooms[/{room_id}]` | `rooms:read` | Ordinary room metadata, without message projection |
 | `session_parameters_get` | `/sessions/{session_id}/parameters` | `sessions:read` and `sessions:parameters:read` | Current effective Agent defaults for future Turns |
 | `authorization_status` | `/authorization` | Original subject credentials and operator control | Exact current grants and revision; no automatic local grant update |
+
+The target's active-task index can omit live tasks after index damage. Its
+`total` therefore counts indexed entries only; an empty page does not prove the
+project is idle. The response reports this coverage explicitly. The new
+`tasks:read` grant is added only through the existing explicit authorization
+upgrade; neither existing subjects nor newly bound subjects receive it silently.
+Older target versions may not support this scope or endpoint.
+If a target is rolled back after the grant was upgraded, the old target may
+reject the saved scope set; preserve the original subject and report the
+connection failure rather than silently discarding grants or creating another.
 
 Directory pages contain at most six items, stable IDs and explicit offsets;
 `archived=true` includes archived items. Private/system sources are filtered

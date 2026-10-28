@@ -182,11 +182,11 @@ def _documentation_contracts():
 
 def _project_read_contracts():
     from core.web.services.external_management.contracts import (AvatarOptionsQuery, SessionMetadataQuery, SessionListQuery,
-        DirectoryQuery, TeamReadQuery, RoomReadQuery)
+        DirectoryQuery, TeamReadQuery, RoomReadQuery, ActiveTasksQuery)
 
     return {name: create_model(f"Launcher_{model.__name__}", __base__=model,
         project_id=(str, Field(min_length=1, max_length=160))) for name, model in (
-            ("session_list", SessionListQuery), ("session_get", SessionMetadataQuery), ("session_config_get", SessionMetadataQuery),
+            ("task_list", ActiveTasksQuery), ("session_list", SessionListQuery), ("session_get", SessionMetadataQuery), ("session_config_get", SessionMetadataQuery),
             ("session_config_compare", SessionMetadataQuery),
             ("session_parameters_get", SessionMetadataQuery), ("team_list", DirectoryQuery), ("team_get", TeamReadQuery),
             ("room_list", DirectoryQuery), ("room_get", RoomReadQuery),
@@ -207,6 +207,7 @@ _HELP = {
     "receipt": "查询原生任务回执；离线/超时/等待审批都不代表目标完成。",
     "agent_get": "读取目标项目普通 Agent 当前 configRevision、updatedAt、模型与头像，用于配置 CAS。",
     "avatar_options": "分页只读目标项目现有 Agent 头像 filename/path 候选；offset最多50000，limit最多30。仅使用返回的路径，不接收模型、URL、目录或图片内容；来源不可用时不得猜测路径。",
+    "task_list": "分页只读目标项目原生活跃任务索引，最多6项，按任务ID升序；只返回ID、类型、状态、固定类型摘要和时间，不返回任务原文。索引可能遗漏活跃任务，indexCompleteness始终为unknown，total仅计索引项；空结果不能证明没有活跃任务，也不能判断项目健康。索引缺失或已列项不一致时拒绝。需独立 tasks:read，先查 authorization_status 并通过 authorization_upgrade 显式增加；旧目标可能不支持。分页不是冻结快照。",
     "session_list": "按完整 Session ID 升序发现普通可见会话；query 须单行且不含控制字符，仅检索清洗标题和公开 ID，agent_id 可精确过滤。默认及最多6项，titlePreview 最多48字元，titleTruncated 包含清洗变化。offset/nextOffset 针对本次可见匹配项，不是冻结快照；超过10000候选或权威缺损时拒绝，不返回半页；不搜索对话预览、不修复或改变当前选择。",
     "session_get": "只读目标项目普通会话的标题、归属与置顶状态；不返回正文、路径或提示词，不修改当前选择；拒绝隐藏、团队内部和虚拟人会话。",
     "session_config_get": "只读普通可见会话绑定的历史 compiled revision 中存储的 dialogue 模型标识、上下文覆盖和推理强度；source=session_agent_config_revision。不是 active Turn 实际参数、当前 Agent 设置或模型库默认值；不返回预算、提示词、人物或策略。缺失或损坏时拒绝，不回退当前配置。不能据时间戳判断与当前配置相同，比较请用 session_config_compare。",
@@ -529,6 +530,8 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
         coroutine = service.management.agent(args.pop("project_id"), **args)
     elif action == "session_list":
         coroutine = service.management.session_list(args.pop("project_id"), **args)
+    elif action == "task_list":
+        coroutine = service.management.active_tasks(args.pop("project_id"), **args)
     elif action == "session_get":
         coroutine = service.management.session(args.pop("project_id"), **args)
     elif action == "session_config_get":

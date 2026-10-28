@@ -196,8 +196,8 @@ def test_pin_description_scope_and_native_documentation_mapping():
     assert contracts()["session_pin"]["governed"] is True
     assert contracts()["session_pin"]["scope"] == "sessions:pin"
     assert len(BindSubject.model_validate({"client_id": "fresh", "expected_binding": {"projectId": "p", "instanceId": "i"},
-        "scopes": list(SCOPES)}).scopes) == len(SCOPES) == 14
-    assert SCOPES[-1] == "legacy:receipts:read"
+        "scopes": list(SCOPES)}).scopes) == len(SCOPES)
+    assert SCOPES[13] == "legacy:receipts:read" and "tasks:read" in SCOPES
     for path in ("/api/sessions/{session_id}/pin", "/api/sessions/{session_id}/unpin"):
         entry = _entry({"operationId": "pin", "method": "POST", "path": path, "summary": "pin", "tags": []})
         assert entry["action"] == "session_pin" and entry["executable"] is True

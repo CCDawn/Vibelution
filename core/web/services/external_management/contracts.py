@@ -7,8 +7,8 @@ import unicodedata
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-Scope = Literal["agents:read", "agents:create", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read"]
-SCOPES = ("agents:read", "agents:create", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read")
+Scope = Literal["agents:read", "agents:create", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read"]
+SCOPES = ("agents:read", "agents:create", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read")
 _AVATAR_EXTENSION = r"(?:[pP][nN][gG]|[jJ][pP][gG]|[jJ][pP][eE][gG]|[wW][eE][bB][pP]|svg)"
 _AVATAR_PATH_PATTERN = r"^workspace/avatars/[A-Za-z0-9_.-]+\." + _AVATAR_EXTENSION + "$"
 
@@ -328,6 +328,44 @@ class DirectoryQuery(Closed):
             raise ValueError("Single-line query required")
         return value
 
+
+class ActiveTasksQuery(Closed):
+    offset: int = Field(default=0, ge=0, le=10000)
+    limit: int = Field(default=6, ge=1, le=6)
+
+
+class ActiveTask(Closed):
+    taskId: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+    kind: Literal["cli_agent", "child_session", "research_task"]
+    status: Literal["queued", "sent", "running", "idle"]
+    summary: Literal["CLI agent task", "Child session task", "Research task"]
+    startedAt: str = Field(max_length=40, pattern=r"^(?:|[0-9TZ+:.\-]+)$")
+    updatedAt: str = Field(min_length=1, max_length=40, pattern=r"^[0-9TZ+:.\-]+$")
+
+    @model_validator(mode="after")
+    def fixed_summary(self):
+        if self.summary != {"cli_agent": "CLI agent task", "child_session": "Child session task", "research_task": "Research task"}[self.kind]:
+            raise ValueError("Invalid task summary")
+        return self
+
+
+class ActiveTasksResponse(UntrustedResponse):
+    source: Literal["native-active-task-index"]
+    coverage: Literal["active index only; may omit active tasks; total counts indexed tasks only, not all active tasks or project health"]
+    indexCompleteness: Literal["unknown"]
+    tasks: list[ActiveTask] = Field(max_length=6)
+    offset: int = Field(ge=0, le=10000)
+    total: int = Field(ge=0, le=10000)
+    nextOffset: int | None = Field(ge=0, le=10000)
+
+    @model_validator(mode="after")
+    def coherent_page(self):
+        ids = [item.taskId for item in self.tasks]
+        end = self.offset + len(ids)
+        if (ids != sorted(set(ids)) or ids and end > self.total or self.offset < self.total and not ids
+                or self.nextOffset != (end if end < self.total else None)):
+            raise ValueError("Inconsistent active task page")
+        return self
 
 class TeamReadQuery(Closed):
     team_id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")

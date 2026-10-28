@@ -24,7 +24,7 @@ from core.web.services.external_management.contracts import (
     SessionConfigResponse,
     SessionConfigComparisonResponse,
     DirectoryQuery, TeamListResponse, TeamReadResponse, RoomListResponse, RoomReadResponse, SessionParametersResponse, AuthorizationStateResponse,
-    LegacyObserverView, LegacyObserversResponse, LegacyReceiptsResponse,
+    LegacyObserverView, LegacyObserversResponse, LegacyReceiptsResponse, ActiveTasksResponse,
 )
 from core.web.services.external_management.service import (
     ManagementError,
@@ -165,6 +165,16 @@ async def list_teams(request: Request, query: str = "", offset: int = 0, limit: 
     _require_control(request)
     _directory_query(request)
     return await _call(lambda: _service().read_teams(*_credentials(request), query=query, offset=offset, limit=limit, archived=archived))
+
+
+@router.get("/active-tasks", response_model=ActiveTasksResponse)
+async def list_active_tasks(request: Request, offset: int = 0, limit: int = 6):
+    _require_control(request)
+    values = request.query_params
+    if (set(values) - {"offset", "limit"} or len(values.multi_items()) != len(values)
+            or any(not re.fullmatch(r"[0-9]{1,5}", values[key]) for key in values)):
+        raise HTTPException(status_code=422, detail={"code": "INVALID_INPUT"})
+    return await _call(lambda: _service().read_active_tasks(*_credentials(request), offset=offset, limit=limit))
 
 
 @router.get("/directory/teams/{team_id}", response_model=TeamReadResponse)

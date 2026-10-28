@@ -172,9 +172,8 @@ def test_description_budget_and_zero_mutation_no_pa_no_http(env, monkeypatch):
 def test_seven_scope_bind_never_upgrades_existing_six_scope_subject(env):
     from core.web.services.external_management.contracts import SCOPES
     from core.web.services.external_management.service import ManagementError
-    assert len(SCOPES) == 14
     assert SCOPES[9:13] == ("platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read")
-    assert SCOPES[-1] == "legacy:receipts:read"
+    assert SCOPES[13] == "legacy:receipts:read" and "tasks:read" in SCOPES
     payload = {"client_id": "prototype-six", "expected_binding": env.binding, "scopes": list(SCOPES[:6])}
     env.service.bind(payload)
     with pytest.raises(ManagementError, match="SUBJECT_GRANT_CONFLICT"):

@@ -163,14 +163,14 @@ class ManagedAgentBackendClient:
                 raise BackendClientError("Invalid management binding.", code="BACKEND_PROTOCOL_ERROR")
             if saved.get("binding") and saved["binding"] != binding:
                 raise BackendClientError("Management instance changed.", code="RUNTIME_IDENTITY_MISMATCH")
-            client_id = str(saved.get("clientId") or secrets.token_urlsafe(32))
+            client_id = str(saved.get("clientId") or "client-" + secrets.token_urlsafe(32))
             if not re.fullmatch(r"[A-Za-z0-9_-]{20,128}", client_id):
                 raise BackendClientError("Invalid management credential state.", code="UNKNOWN_MANAGEMENT_SUBJECT")
             # Old credentials did not persist scopes. Keep their original
             # grant; only a fresh client may explicitly request the new scope.
             requested_scopes = saved.get("scopes", _LEGACY_MANAGEMENT_SCOPES if saved.get("clientId") else _MANAGEMENT_SCOPES)
             if (not isinstance(requested_scopes, list) or not requested_scopes
-                or any(not isinstance(scope, str) or scope not in _MANAGEMENT_SCOPES for scope in requested_scopes)
+                or any(not isinstance(scope, str) or scope not in (*_MANAGEMENT_SCOPES, "tasks:read") for scope in requested_scopes)
                 or requested_scopes != sorted(set(requested_scopes))):
                 raise BackendClientError("Invalid management scopes.", code="UNKNOWN_MANAGEMENT_SUBJECT")
             self._state["management"] = {**saved, "clientId": client_id, "binding": binding, "scopes": requested_scopes}
@@ -324,6 +324,18 @@ class ManagedAgentBackendClient:
         except (ValidationError, ValueError):
             raise BackendClientError("Invalid avatar projection.", code="BACKEND_PROTOCOL_ERROR") from None
         return public
+
+    async def management_active_tasks(self, **parameters) -> dict[str, Any]:
+        from pydantic import ValidationError
+        from core.web.services.external_management.contracts import ActiveTasksQuery, ActiveTasksResponse
+        try:
+            query = ActiveTasksQuery.model_validate(parameters)
+        except ValidationError:
+            raise BackendClientError("Invalid task query.", code="INVALID_MANAGEMENT_REQUEST") from None
+        result = await self._management_directory_read("/active-tasks?" + urlencode(query.model_dump()), ActiveTasksResponse)
+        if result["offset"] != query.offset or len(result["tasks"]) > query.limit:
+            raise BackendClientError("Task query binding changed.", code="BACKEND_PROTOCOL_ERROR")
+        return result
 
     async def management_session_list(self, **parameters) -> dict[str, Any]:
         from pydantic import ValidationError

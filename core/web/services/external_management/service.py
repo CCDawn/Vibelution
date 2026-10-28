@@ -70,7 +70,7 @@ class ManagementService:
     def binding(self) -> dict:
         current = self.identity()
         Binding.model_validate(current.binding)
-        return {"protocolVersion": 1, "binding": current.binding, "scopes": list(SCOPES), "actions": contracts()}
+        return {"protocolVersion": 1, "binding": current.binding, "scopes": [scope for scope in SCOPES if scope != "tasks:read"], "actions": contracts()}
 
     def _expected(self, expected: dict):
         current = self.identity()
@@ -185,6 +185,18 @@ class ManagementService:
             return SessionListResponse.model_validate(self.native.read_sessions(query)).model_dump()
         except ValidationError:
             raise ManagementError("SESSION_LIST_UNAVAILABLE", 503) from None
+
+    def read_active_tasks(self, subject: str, capability: str, **parameters) -> dict:
+        from .contracts import ActiveTasksQuery, ActiveTasksResponse
+        self._authorize(subject, capability, "tasks:read")
+        try:
+            query = ActiveTasksQuery.model_validate(parameters)
+        except ValidationError:
+            raise ManagementError("INVALID_INPUT", 422) from None
+        try:
+            return ActiveTasksResponse.model_validate(self.native.read_active_tasks(query)).model_dump()
+        except (ValidationError, ValueError, OSError, TypeError):
+            raise ManagementError("TASK_INDEX_UNAVAILABLE", 503) from None
 
     def _directory_read(self, subject, capability, action, parameters):
         from .contracts import (DirectoryQuery, TeamReadQuery, RoomReadQuery, TeamListResponse,

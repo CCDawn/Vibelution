@@ -304,8 +304,13 @@ async def test_sdk_requires_explicit_valid_source_authority(env, monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_sdk_closed_http_lost_ack_restart_and_late_receipt(env, monkeypatch):
+@pytest.mark.parametrize("random_prefix", ["-", "_"])
+async def test_sdk_closed_http_lost_ack_restart_and_late_receipt(env, monkeypatch, random_prefix):
     from core.external_agent.backend_client import ManagedAgentBackendClient, BackendClientError
+    from core.external_agent import backend_client
+    token_urlsafe = backend_client.secrets.token_urlsafe
+    monkeypatch.setattr(backend_client.secrets, "token_urlsafe",
+                        lambda n: random_prefix + "a" * 42 if n == 32 else token_urlsafe(n))
     sdk_path = env.tmp / "sdk-state.json"
     sdk = ManagedAgentBackendClient(env.tmp, state_path=sdk_path)
     transport = sdk_http(env, sdk, monkeypatch)
@@ -319,7 +324,8 @@ async def test_sdk_closed_http_lost_ack_restart_and_late_receipt(env, monkeypatc
     with pytest.raises(BackendClientError, match="Synthetic lost"):
         await sdk.management_legacy_observer_create(**parameters)
     saved = deepcopy(sdk._state["management"])
-    assert saved["scopes"] == sorted(SCOPES) and len(saved["scopes"]) == 14
+    assert saved["clientId"].endswith(random_prefix + "a" * 42)
+    assert saved["scopes"] == sorted(SCOPES[:14]) and len(saved["scopes"]) == 14
     env.service = env.restart()
     monkeypatch.setattr(env.route, "_SERVICE", env.service)
     restarted = ManagedAgentBackendClient(env.tmp, state_path=sdk_path)
