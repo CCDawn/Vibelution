@@ -10,6 +10,22 @@
 @source "../../routes/desktopPet/DesktopPetCharacter.styles.ts";
 
 /* Compact assistant presentation only; native transcript/composer behavior is retained. */
+/* Keep the native approval controls in the content column of the narrow pet
+   window. The first column is reserved for the warning icon. */
+@media (max-width: 639px) {
+  .launcher-assistant-chat-window [data-chat-tool-approval-variant="inline"] > [role="dialog"] > div:last-child {
+    grid-column: 2 / -1;
+  }
+}
+.launcher-assistant-chat-window [data-chat-tool-approval-variant="inline"] {
+  min-height: 0;
+  max-height: 55%;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+.launcher-assistant-chat-window [data-chat-tool-approval-variant="inline"] pre[tabindex="0"] {
+  max-height: min(12rem, 22vh);
+}
 [data-assistant-chat="compact"] .desktop-assistant-chat-body > .vui-routes-chatcodingroute.layout { flex: 1; height: 100%; max-height: 100%; min-height: 0; grid-template-rows: minmax(0, 1fr); }
 [data-assistant-chat="compact"] .vui-routes-chatcodingroute.centerPane { margin: 0; border: 0; border-radius: 0; grid-template-rows: minmax(0, 1fr); }
 [data-assistant-chat="compact"] .vui-routes-chatcodingroute.tabStrip { display: none; }
