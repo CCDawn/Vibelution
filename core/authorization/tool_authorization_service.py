@@ -784,6 +784,8 @@ def authorize_tool_execution(
     tool_call_id: str,
     tool_args: Mapping[str, Any] | None = None,
     cancel_checker: Callable[[], str] | None = None,
+    external_arguments_json: str | None = None,
+    external_execution_arguments_json: str | None = None,
 ) -> ToolExecutionAuthorizationResult:
     from core.web.services.agent_directory_service import current_agent_runtime
 
@@ -798,6 +800,23 @@ def authorize_tool_execution(
         )
     runtime_turn_id = _coerce_text(runtime.get("turnId") or runtime.get("runId")).strip()
     normalized_tool = _coerce_text(tool_name).strip()
+    external_task_id = ""
+    from core.web.services.external_agent.approval_binding import (
+        ApprovalBindingError, external_session_task, freeze_arguments, registered_external_task,
+    )
+    try:
+        external_task_id = registered_external_task(session_id=str(runtime.get("sessionId") or ""),
+                                                    agent_id=runtime_agent_id)
+        if external_task_id or str(runtime.get("runtimeToolSource") or "").startswith("external_agent_task:"):
+            external_task_id = external_session_task(
+                session_id=str(runtime.get("sessionId") or ""), agent_id=runtime_agent_id,
+            )
+            if (external_arguments_json is None or external_execution_arguments_json is None
+                    or freeze_arguments(tool_args) != external_arguments_json):
+                raise ApprovalBindingError("external arguments do not match")
+    except ApprovalBindingError:
+        return _execution_denial("approval_context_invalid", "外部任务审批身份或参数无法验证。",
+                                 runtime_agent_id, runtime_turn_id, tool_name=normalized_tool)
     context = current_execution_authorization()
     if context is None:
         return _execution_denial(
@@ -997,6 +1016,11 @@ def authorize_tool_execution(
 
         approval, risk = approval_requirement
         try:
+            approval_options = {}
+            if external_task_id:
+                approval_options = {"external_task_id": external_task_id,
+                                    "external_arguments_json": external_arguments_json,
+                                    "external_execution_arguments_json": external_execution_arguments_json}
             approval_outcome = authorize_or_wait(
                 session_id=str(runtime.get("sessionId") or "").strip(),
                 turn_id=context.turn_id,
@@ -1011,6 +1035,7 @@ def authorize_tool_execution(
                 config_hash=context.config_hash,
                 permission_preset=context.permission_preset,
                 cancel_checker=cancel_checker,
+                **approval_options,
             )
         except ToolApprovalError as exc:
             return _execution_denial(

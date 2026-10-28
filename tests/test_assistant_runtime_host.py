@@ -64,9 +64,15 @@ def test_host_denies_missing_credentials_origins_and_wrong_host():
         assert client.get("/docs", headers=headers).status_code == 404
 
 
-def test_dispatch_approval_endpoint_is_private_decline_only_and_bound():
+def test_dispatch_approval_endpoint_is_private_and_bound():
     class Dispatch:
         calls = []
+        async def preview_bound_approval(self, dispatch_id, **kwargs):
+            self.calls.append((dispatch_id, kwargs))
+            return {"taskId": kwargs["task_id"]}
+        async def decide_bound_approval(self, dispatch_id, **kwargs):
+            self.calls.append((dispatch_id, kwargs))
+            return {"dispatchId": dispatch_id, "taskId": kwargs["task_id"]}
         async def decline_presented_approval(self, dispatch_id, **kwargs):
             self.calls.append((dispatch_id, kwargs))
             return {"dispatchId": dispatch_id, "nativeTaskId": kwargs["task_id"]}
@@ -75,17 +81,27 @@ def test_dispatch_approval_endpoint_is_private_decline_only_and_bound():
 
     dispatch = Dispatch()
     client = TestClient(create_app(native=Native(), token="private-test-token", dispatch=dispatch), base_url="http://127.0.0.1")
-    path = "/api/assistant/dispatches/approval/decline"
-    body = {"dispatchId": "dispatch-1", "taskId": "task-1", "approvalId": "approval-1", "revision": "fp-1"}
+    path = "/api/assistant/dispatches/approval/decision"
+    body = {"dispatchId": "dispatch-1", "taskId": "task-1", "approvalId": "approval-1", "revision": "a" * 64, "decision": "accept"}
     assert client.post(path, json=body).status_code == 401
     headers = {"Authorization": "Bearer private-test-token"}
     assert client.post(path, json=body, headers={**headers, "Origin": "https://evil.invalid"}).status_code == 403
-    assert client.post(path, json={**body, "decision": "accept"}, headers=headers).status_code == 422
+    assert client.post(path, json={**body, "decision": "acceptAlways"}, headers=headers).status_code == 422
     assert client.post(path, json={**body, "dispatchId": "../other"}, headers=headers).status_code == 422
-    for revision in ("", " ", "fp-1\n"):
+    for revision in ("", " ", "a" * 64 + "\n"):
         assert client.post(path, json={**body, "revision": revision}, headers=headers).status_code == 422
+    preview_body = {key: body[key] for key in ("dispatchId", "taskId", "approvalId")}
+    preview = client.post("/api/assistant/dispatches/approval/preview", json=preview_body, headers=headers)
+    assert preview.status_code == 200 and preview.headers["cache-control"] == "no-store"
     assert client.post(path, json=body, headers=headers).status_code == 200
-    assert dispatch.calls == [("dispatch-1", {"task_id": "task-1", "approval_id": "approval-1", "expected_revision": "fp-1"})]
+    assert dispatch.calls == [("dispatch-1", {"task_id": "task-1", "approval_id": "approval-1"}),
+        ("dispatch-1", {"task_id": "task-1", "approval_id": "approval-1", "revision": "a" * 64, "decision": "accept"})]
+    fallback = "/api/assistant/dispatches/approval/decline"
+    decline_body = {**preview_body, "revision": "policy-1"}
+    assert client.post(fallback, json={**decline_body, "decision": "accept"}, headers=headers).status_code == 422
+    assert client.post(fallback, json={**decline_body, "revision": ""}, headers=headers).status_code == 422
+    assert client.post(fallback, json=decline_body, headers=headers).status_code == 200
+    assert dispatch.calls[-1] == ("dispatch-1", {"task_id": "task-1", "approval_id": "approval-1", "expected_revision": "policy-1"})
 
 
 def test_host_limits_messages_to_own_native_session_and_reuses_request_id():

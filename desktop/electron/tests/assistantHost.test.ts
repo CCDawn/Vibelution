@@ -66,18 +66,22 @@ function fixture(options: { stale?: boolean; noReadyFirst?: boolean; graceful?: 
 }
 
 describe("AssistantHost", () => {
-  it("only transports a bounded dispatch decline with exact identities", async () => {
+  it("only transports bound dispatch decisions with exact identities", async () => {
     const { host, fetchImpl } = fixture({ graceful: true });
     await host.start();
-    const request = { operation: "declineDispatchApproval" as const, dispatchId: "dispatch-1", taskId: "task-1", approvalId: "approval-1", revision: "fp-1" };
+    const request = { operation: "decideDispatchApproval" as const, dispatchId: "dispatch-1", taskId: "task-1", approvalId: "approval-1", revision: "a".repeat(64), decision: "accept" as const };
     await host.request(request);
-    const call = fetchImpl.mock.calls.find(([url]) => String(url).endsWith("/dispatches/approval/decline"));
-    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ dispatchId: "dispatch-1", taskId: "task-1", approvalId: "approval-1", revision: "fp-1" });
-    await expect(host.request({ ...request, decision: "accept" } as unknown as AssistantHostRequest)).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    const call = fetchImpl.mock.calls.find(([url]) => String(url).endsWith("/dispatches/approval/decision"));
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ dispatchId: "dispatch-1", taskId: "task-1", approvalId: "approval-1", revision: "a".repeat(64), decision: "accept" });
+    await expect(host.request({ ...request, decision: "acceptAlways" } as unknown as AssistantHostRequest)).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
     await expect(host.request({ ...request, dispatchId: "../other" })).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
-    for (const revision of ["", " ", "fp-1\n"]) {
+    for (const revision of ["", " ", "a".repeat(64) + "\n"]) {
       await expect(host.request({ ...request, revision })).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
     }
+    const fallback = { operation: "declineDispatchApproval" as const, dispatchId: "dispatch-1", taskId: "task-1", approvalId: "approval-1", revision: "policy-1" };
+    await host.request(fallback);
+    await expect(host.request({ ...fallback, decision: "accept" } as unknown as AssistantHostRequest)).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    await expect(host.request({ ...fallback, revision: "" })).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
     await host.stop();
   });
   it("transports a fixed-session attachment and sends it without a renderer path", async () => {

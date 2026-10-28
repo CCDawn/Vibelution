@@ -137,6 +137,7 @@ def _seed_conversation(
     session_id: str = SESSION_ID,
     recovery_state: dict[str, Any] | None = None,
     queued_turns: list[dict[str, Any]] | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> None:
     conversation: dict[str, Any] = {
         "conversation_id": session_id,
@@ -146,6 +147,8 @@ def _seed_conversation(
         conversation[startup_recovery.RECOVERY_STATE_KEY] = recovery_state
     if queued_turns is not None:
         conversation["queued_turns"] = queued_turns
+    if metadata is not None:
+        conversation["metadata"] = metadata
     save_chat_state(
         tmp_path,
         {
@@ -471,6 +474,21 @@ def test_idempotent_sweep_accepts_resume_once(
     assert second.get("resumedCount", 0) == 0
     assert len(submit_calls) == 1
     assert len(_recovery_events(tmp_path)) == 1
+
+
+@pytest.mark.parametrize("metadata", [
+    {"source": "external_agent_task", "externalTaskId": "task-1"},
+    {"externalTaskId": "task-1"},
+])
+def test_external_task_never_resumes_or_drains_after_restart(recovery_env, tmp_path, submit_calls, drain_calls, metadata):
+    _seed_conversation(tmp_path, metadata=metadata, queued_turns=[{
+        "id": "queued-1", "content": "queued input", "status": "queued",
+    }])
+    _seed_interrupted_turn(tmp_path)
+    summary = startup_recovery.recover_interrupted_session_turns_on_startup()
+    assert submit_calls == []
+    assert drain_calls == []
+    assert summary["externalTaskSkipCount"] == 1
 
 
 def test_queued_session_schedules_drain(recovery_env, tmp_path, submit_calls, drain_calls) -> None:

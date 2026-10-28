@@ -947,7 +947,8 @@ def _session_context_internal_auto_continue_max_turns(context: dict[str, Any]) -
 
 
 def _external_agent_runtime_permission_profile(context: dict[str, Any]) -> str:
-    if str(context.get("user_message_source") or "").strip() != "external_agent_task":
+    if (str(context.get("user_message_source") or "").strip() != "external_agent_task"
+            and str(context.get("raw_user_message_source") or "").strip() != "external_agent_task"):
         return ""
     metadata = context.get("message_metadata") if isinstance(context.get("message_metadata"), dict) else {}
     if str(metadata.get("source") or "").strip() != "external_agent_task":

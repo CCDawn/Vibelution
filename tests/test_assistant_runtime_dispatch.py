@@ -190,6 +190,38 @@ async def test_approval_cancel_and_heartbeat_are_explicit_native_operations(tmp_
     assert any(name == "heartbeat" for name, _ in probe.calls)
 
 
+@pytest.mark.anyio
+async def test_bound_preview_is_ephemeral_and_decision_preserves_exact_identity(tmp_path):
+    probe = ClientProbe()
+    preview = {"taskId": "eat-1", "requestId": "approval-1", "agentId": "coder", "toolName": "exec_command",
+               "revision": "a" * 64, "argumentsJson": '{"secret":"private-fixture"}', "executionArgumentsJson": "{}"}
+    def factory(project_root, **kwargs):
+        client = probe.factory(project_root, **kwargs)
+        async def get_preview(**payload):
+            probe.calls.append(("preview", payload))
+            return dict(preview)
+        async def decide(**payload):
+            probe.calls.append(("bound-decision", payload))
+            return {"status": "ok", "taskId": payload["task_id"], "approvalId": payload["approval_id"], "decision": payload["decision"]}
+        client.preview_bound_approval, client.resolve_bound_approval = get_preview, decide
+        return client
+    service = DispatchService(tmp_path / "profile", {"project-a": tmp_path / "project"}, client_factory=factory)
+    await start(service)
+    result = await service.preview_bound_approval("dispatch-1", task_id="eat-1", approval_id="approval-1")
+    assert result["argumentsJson"] == preview["argumentsJson"]
+    assert "private-fixture" not in "".join(path.read_text(encoding="utf-8") for path in (tmp_path / "profile").rglob("*.json"))
+    with pytest.raises(DispatchError):
+        await service.decide_bound_approval("dispatch-1", task_id="wrong", approval_id="approval-1", revision="a" * 64, decision="accept")
+    with pytest.raises(DispatchError):
+        await service.decide_bound_approval("dispatch-1", task_id="eat-1", approval_id="approval-1", revision="", decision="accept")
+    result = await service.decide_bound_approval("dispatch-1", task_id="eat-1", approval_id="approval-1", revision="a" * 64, decision="accept")
+    assert result["decision"] == "accept" and result["dispatchId"] == "dispatch-1"
+    assert [payload for name, payload in probe.calls if name == "bound-decision"] == [{"task_id": "eat-1", "approval_id": "approval-1", "decision": "accept", "expected_revision": "a" * 64}]
+    preview["agentId"] = "other"
+    with pytest.raises(DispatchError):
+        await service.preview_bound_approval("dispatch-1", task_id="eat-1", approval_id="approval-1")
+
+
 @pytest.fixture
 def journal_source(monkeypatch):
     from copy import deepcopy
@@ -485,6 +517,13 @@ def native_adapter(tmp_path: Path, runtime: FakeRuntime, *, drop_first_start=Fal
                     raise httpx.ReadError("response lost after commit", request=request)
             elif path.endswith("/heartbeat"):
                 result = service.heartbeat(owner_id=owner, task_id=path.split("/")[-2], adapter_connection_id=connection, **payload)
+            elif path.endswith("/preview"):
+                parts = path.split("/")
+                result = service.preview_task_approval(owner_id=owner, task_id=parts[-4], approval_id=parts[-2])
+            elif path.endswith("/resolve-bound"):
+                parts = path.split("/")
+                result = service.resolve_task_approval_bound(owner_id=owner, task_id=parts[-4], approval_id=parts[-2],
+                    decision=payload["decision"], expected_revision=payload["expected_revision"])
             elif path.endswith("/resolve"):
                 parts = path.split("/")
                 result = service.resolve_approval(owner_id=owner, capabilities=set(), task_id=parts[-4],
@@ -502,6 +541,90 @@ def native_adapter(tmp_path: Path, runtime: FakeRuntime, *, drop_first_start=Fal
     factory = lambda project_root, **kwargs: ManagedAgentBackendClient(project_root, transport=transport, **kwargs)
     adapter_service = DispatchService(tmp_path / "profile", {"project-a": root}, client_factory=factory)
     return adapter_service, service, calls, factory
+
+
+@pytest.mark.anyio
+async def test_bound_preview_and_accept_cross_real_client_and_task_service(tmp_path):
+    from dataclasses import replace
+    runtime = FakeRuntime(agents=[_agent(configRevision=1, configHash="config-hash")])
+    adapter_service, native_service, calls, _ = native_adapter(tmp_path, runtime)
+    decisions = []
+    def preview(**identity):
+        return {"taskId": identity["task_id"], "sessionId": identity["session_id"], "agentId": identity["agent_id"],
+                "requestId": identity["request_id"], "turnId": identity["turn_id"], "callId": "call-1", "toolName": "write_file_tool",
+                "revision": "a" * 64, "approval": "always", "risk": "write", "permissionPreset": "request_approval",
+                "decisionFingerprint": "policy", "configRevision": 1, "configHash": "config-hash",
+                "argumentsJson": '{"content":"private-fixture"}', "executionArgumentsJson": '{"content":"private-fixture"}'}
+    def resolve(**kwargs):
+        if kwargs["expected_revision"] != "a" * 64:
+            raise ValueError("stale")
+        decisions.append(kwargs)
+    native_service.dependencies = replace(native_service.dependencies, preview_bound_approval=preview, resolve_bound_approval=resolve)
+    started = await start(adapter_service)
+    preview_result = await adapter_service.preview_bound_approval("dispatch-1", task_id=started["nativeTaskId"], approval_id="approval-1")
+    assert preview_result["argumentsJson"] == '{"content":"private-fixture"}'
+    result = await adapter_service.decide_bound_approval("dispatch-1", task_id=started["nativeTaskId"], approval_id="approval-1", revision=preview_result["revision"], decision="accept")
+    assert result["decision"] == "accept" and decisions[0]["session_id"] == "session-1" and decisions[0]["turn_id"] == "turn-1"
+    assert len([request for request in calls if request.url.path.endswith("/resolve-bound")]) == 1
+    assert "private-fixture" not in "".join(path.read_text(encoding="utf-8") for path in (tmp_path / "profile").rglob("*.json"))
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("decision", ["accept", "decline"])
+async def test_bound_decision_reaches_live_native_waiter_without_persisting_preview(tmp_path, decision, monkeypatch):
+    import threading
+    import time
+    from dataclasses import replace
+    from core.web.services.session import tool_approvals
+    from core.web.services.external_agent.approval_binding import freeze_arguments, register_external_session, unregister_external_session
+    from core.web.services import agent_directory_service, agent_config_authority
+    runtime = FakeRuntime(agents=[_agent(configRevision=1, configHash="config-hash")])
+    monkeypatch.setattr(agent_directory_service, "load_agent_record", lambda *_args, **_kwargs: runtime.agents[0])
+    monkeypatch.setattr(agent_config_authority, "agent_config_hash", lambda _agent: "config-hash")
+    adapter_service, native_service, _, factory = native_adapter(tmp_path, runtime)
+    workers, outcome = [], {}
+    args = {"cmd": "echo private-fixture"}
+    def submit(session_id, content, **kwargs):
+        def wait():
+            outcome["value"] = tool_approvals.authorize_or_wait(session_id=session_id, turn_id="turn-1", agent_id="coder",
+                call_id="call-1", tool_name="exec_command", tool_args=args, approval="always", risk="execute",
+                decision_fingerprint="policy", config_revision=1, config_hash="config-hash", permission_preset="request_approval",
+                timeout_seconds=10, external_task_id=kwargs["message_metadata"]["taskId"],
+                external_arguments_json=freeze_arguments(args), external_execution_arguments_json=freeze_arguments(args))
+        worker = threading.Thread(target=wait)
+        workers.append(worker)
+        worker.start()
+        return {"turnId": "turn-1"}
+    native_service.dependencies = replace(native_service.dependencies, submit_message=submit,
+        register_approval_session=register_external_session, unregister_approval_session=unregister_external_session,
+        list_approvals=tool_approvals.list_tool_approval_requests,
+        preview_bound_approval=tool_approvals.preview_external_task_approval,
+        resolve_bound_approval=tool_approvals.resolve_external_task_approval)
+    task_id = ""
+    try:
+        started = await start(adapter_service)
+        task_id = started["nativeTaskId"]
+        deadline = time.monotonic() + 3
+        while not tool_approvals.list_tool_approval_requests("session-1", status="pending"):
+            assert time.monotonic() < deadline
+            await anyio.sleep(0.01)
+        request = tool_approvals.list_tool_approval_requests("session-1", status="pending")[0]
+        restored = DispatchService(tmp_path / "profile", {"project-a": tmp_path / "project"}, client_factory=factory)
+        preview = await restored.preview_bound_approval("dispatch-1", task_id=task_id, approval_id=request["requestId"])
+        assert json.loads(preview["executionArgumentsJson"]) == args
+        try:
+            await restored.decide_bound_approval("dispatch-1", task_id=task_id, approval_id=request["requestId"], revision=preview["revision"], decision=decision)
+        except DispatchError as exc:
+            pytest.fail(f"native approval failed: {exc.code}")
+        workers[0].join(timeout=3)
+        assert not workers[0].is_alive() and outcome["value"].allowed == (decision == "accept")
+        assert "private-fixture" not in "".join(path.read_text(encoding="utf-8") for path in (tmp_path / "profile").rglob("*.json"))
+    finally:
+        tool_approvals.reset_tool_approval_state(clear_durable=False)
+        for worker in workers:
+            worker.join(timeout=3)
+        if task_id:
+            unregister_external_session(task_id=task_id, session_id="session-1", agent_id="coder")
 
 
 @pytest.mark.anyio

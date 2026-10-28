@@ -528,6 +528,14 @@ def _recover_session_on_startup(
     conversation = s.load_session_chat_state(s.PROJECT_ROOT, session_id)
     if conversation is None or _shutdown_requested(should_stop):
         return
+    metadata = conversation.get("metadata")
+    if isinstance(metadata, dict) and (
+        metadata.get("source") == "external_agent_task" or "externalTaskId" in metadata
+    ):
+        # External task authority and its approval bindings are process-local.
+        # Never drain or resume this Session as an ordinary chat after restart.
+        summary["externalTaskSkipCount"] = summary.get("externalTaskSkipCount", 0) + 1
+        return
     queued_rows = s._session_queued_turn_rows(conversation)
     if any(str(row.get("status") or "") in {"queued", "starting"} for row in queued_rows):
         if _shutdown_requested(should_stop):

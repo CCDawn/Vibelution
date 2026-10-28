@@ -30,6 +30,13 @@ class ResolveExternalAgentApprovalPayload(BaseModel):
     reason: str = Field(default="", max_length=500)
 
 
+class ResolveBoundExternalAgentApprovalPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decision: str = Field(..., min_length=1, max_length=40)
+    expected_revision: str = Field(..., min_length=64, max_length=64)
+
+
 class CancelExternalAgentTaskPayload(BaseModel):
     model_config = ConfigDict(extra="ignore")
 

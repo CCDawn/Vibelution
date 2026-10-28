@@ -678,6 +678,42 @@ class DispatchService:
 
                 return await self._update(record, decline)
 
+    async def preview_bound_approval(self, dispatch_id: str, *, task_id: str, approval_id: str) -> dict[str, Any]:
+        async with self._dispatch_lock(dispatch_id):
+            record = self._read(dispatch_id)
+            self._require_task(record)
+            if record["nativeTaskId"] != task_id:
+                raise DispatchError("Native task changed.", code="APPROVAL_CONFLICT")
+            async def preview(client: Any) -> dict[str, Any]:
+                result = await _bounded_native_request(client.preview_bound_approval(task_id=task_id, approval_id=approval_id))
+                if (not isinstance(result, dict) or result.get("taskId") != task_id
+                        or result.get("requestId") != approval_id or result.get("agentId") != record.get("agentId")
+                        or not re.fullmatch(r"[0-9a-f]{64}", str(result.get("revision") or ""))):
+                    raise DispatchError("Approval preview identity changed.", code="APPROVAL_CONFLICT")
+                return result
+            # Do not persist complete arguments in dispatch receipts.
+            return await self._call(record["projectId"], preview)
+
+    async def decide_bound_approval(self, dispatch_id: str, *, task_id: str, approval_id: str,
+                                    revision: str, decision: str) -> dict[str, Any]:
+        if decision not in {"accept", "decline"} or not re.fullmatch(r"[0-9a-f]{64}", revision):
+            raise DispatchError("Approval decision is invalid.", code="APPROVAL_CONFLICT")
+        async with self._dispatch_admission:
+            self._check_dispatch_unfenced()
+            async with self._dispatch_lock(dispatch_id):
+                record = self._read(dispatch_id)
+                self._require_task(record)
+                if record["nativeTaskId"] != task_id:
+                    raise DispatchError("Native task changed.", code="APPROVAL_CONFLICT")
+                async def decide(client: Any) -> dict[str, Any]:
+                    result = await _bounded_native_request(client.resolve_bound_approval(
+                        task_id=task_id, approval_id=approval_id, decision=decision, expected_revision=revision))
+                    if (not isinstance(result, dict) or result.get("status") != "ok" or result.get("taskId") != task_id
+                            or result.get("approvalId") != approval_id or result.get("decision") != decision):
+                        raise DispatchError("Approval outcome is unconfirmed.", code="APPROVAL_UNCONFIRMED")
+                    return {"dispatchId": dispatch_id, "taskId": task_id, "approvalId": approval_id, "revision": revision, "decision": decision}
+                return await self._call(record["projectId"], decide)
+
     async def _resolve_approval(
         self, dispatch_id: str, *, approval_id: str, decision: str, expected_revision: str, reason: str,
     ) -> dict[str, Any]:

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import threading
+import weakref
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -58,6 +60,11 @@ class ExternalAgentTaskServiceDependencies:
     resolve_approval: Callable[..., dict[str, Any]]
     stop_turn: Callable[..., dict[str, Any]]
     record_event: Callable[..., Any] | None = None
+    register_approval_session: Callable[..., None] | None = None
+    unregister_approval_session: Callable[..., None] | None = None
+    registered_approval_task: Callable[..., str] | None = None
+    preview_bound_approval: Callable[..., dict[str, Any]] | None = None
+    resolve_bound_approval: Callable[..., dict[str, Any]] | None = None
 
 
 _PROFILES = ("read_only", "workspace_write", "full_access")
@@ -88,6 +95,12 @@ _MANAGED_CONTINUATION_PROMPT = (
     "继续完成当前外部 Agent 任务；复用已有上下文，完成剩余工作并给出最终结果。"
 )
 _POLL_AFTER_MS = 500
+
+# Gateway configuration reloads can create a second service instance while
+# the old instance is still resolving a task. Both must serialize against the
+# same task in this process. Weak values release idle locks automatically.
+_PROCESS_TASK_LOCKS_GUARD = threading.Lock()
+_PROCESS_TASK_LOCKS: weakref.WeakValueDictionary[tuple[str, str], Any] = weakref.WeakValueDictionary()
 
 
 def _now_iso() -> str:
@@ -121,6 +134,9 @@ def default_dependencies() -> ExternalAgentTaskServiceDependencies:
     from core.web.services.runtime_scene_service import record_runtime_scene_event
     from core.web.services.session import tool_approvals
     from core.web.services.team import team_membership
+    from core.web.services.external_agent.approval_binding import (
+        register_external_session, registered_external_task, unregister_external_session,
+    )
 
     return ExternalAgentTaskServiceDependencies(
         list_agents=agent_directory_service.list_agents,
@@ -133,6 +149,11 @@ def default_dependencies() -> ExternalAgentTaskServiceDependencies:
         resolve_approval=tool_approvals.resolve_tool_approval_request,
         stop_turn=session_service.request_stop_session_turn,
         record_event=record_runtime_scene_event,
+        register_approval_session=register_external_session,
+        unregister_approval_session=unregister_external_session,
+        registered_approval_task=registered_external_task,
+        preview_bound_approval=tool_approvals.preview_external_task_approval,
+        resolve_bound_approval=tool_approvals.resolve_external_task_approval,
     )
 
 
@@ -178,8 +199,6 @@ class ExternalAgentTaskService:
         )
         self.approval_persist_enabled = bool(approval_persist_enabled)
         self._refresh_lock = threading.RLock()
-        self._task_lock_guard = threading.Lock()
-        self._task_locks: dict[str, threading.RLock] = {}
 
     def list_agents(self, *, limit: int = 50) -> dict[str, Any]:
         self._require_gateway_enabled()
@@ -305,10 +324,17 @@ class ExternalAgentTaskService:
             runtime_revision=runtime_revision, include_private=include_private)
 
     def _task_lock(self, task_id: str):
-        # One native acceptance boundary per task; unrelated Agents retain
-        # their availability while a Session is being provisioned/submitted.
-        with self._task_lock_guard:
-            return self._task_locks.setdefault(task_id, threading.RLock())
+        # Serialize this task within the process, including service reloads;
+        # unrelated tasks remain available while a Session is provisioned.
+        # Match the store's trimmed filename identity, including Windows'
+        # case-insensitive path aliases.
+        key = (os.path.normcase(str(self.store.root)), os.path.normcase(str(task_id or "").strip()))
+        with _PROCESS_TASK_LOCKS_GUARD:
+            lock = _PROCESS_TASK_LOCKS.get(key)
+            if lock is None:
+                lock = threading.RLock()
+                _PROCESS_TASK_LOCKS[key] = lock
+            return lock
 
     def _start_native_task(self, record, *, resolved_agent_id, normalized_task,
                            title, effective, runtime_revision, include_private):
@@ -317,6 +343,8 @@ class ExternalAgentTaskService:
             if str(record.get("status") or "") in TASK_TERMINAL_STATUSES:
                 return self._public_task(record, include_private=include_private)
             if not str(record.get("sessionId") or "").strip():
+                session_id = ""
+                submission_attempted = False
                 try:
                     session = self.dependencies.create_session(
                         agent_id=resolved_agent_id,
@@ -342,6 +370,17 @@ class ExternalAgentTaskService:
                         raise RuntimeError(
                             "hidden external task session returned no sessionId"
                         )
+                    if self.dependencies.register_approval_session is not None:
+                        self.dependencies.register_approval_session(
+                            task_id=record["taskId"], session_id=session_id, agent_id=resolved_agent_id,
+                        )
+                    # Persist the association before submission. If its result
+                    # is ambiguous, reconciliation must stop rather than retry.
+                    record = self._transition(
+                        record["taskId"], status="queued", expected_revision=int(record["revision"]),
+                        reason_code="submission_pending", fields={"sessionId": session_id},
+                    )
+                    submission_attempted = True
                     submitted = self.dependencies.submit_message(
                         session_id,
                         normalized_task,
@@ -371,6 +410,21 @@ class ExternalAgentTaskService:
                     )
                     self._record_event("external_agent.task.started", record)
                 except Exception:
+                    if submission_attempted:
+                        try:
+                            self._request_cancel(
+                                self.store.get_task(record["taskId"]), terminal_status="cancelled",
+                                reason_code="submission_unconfirmed",
+                            )
+                        except Exception:
+                            # Keep the binding and durable submission_pending or
+                            # cancelling state until a later stop confirmation.
+                            pass
+                        raise
+                    if session_id and self.dependencies.unregister_approval_session is not None:
+                        self.dependencies.unregister_approval_session(
+                            task_id=record["taskId"], session_id=session_id, agent_id=resolved_agent_id,
+                        )
                     latest = self.store.get_task(record["taskId"])
                     if str(latest.get("status") or "") not in TASK_TERMINAL_STATUSES:
                         self._transition(
@@ -428,6 +482,84 @@ class ExternalAgentTaskService:
             return self._resolve_approval_locked(owner_id=owner_id, capabilities=capabilities,
                 task_id=task_id, approval_id=approval_id, decision=decision,
                 expected_revision=expected_revision, reason=reason)
+
+    def _bound_approval_context(self, owner_id: str, task_id: str, approval_id: str):
+        self._require_gateway_enabled()
+        record = self._owned_task(owner_id, task_id)
+        if str(record.get("status") or "") not in {"running", "awaiting_approval"}:
+            raise ExternalAgentConflictError("task is not accepting approval decisions", code="APPROVAL_CONFLICT")
+        now = datetime.now(timezone.utc)
+        expiry = [_parse_iso(str(record.get(key) or "")) for key in ("leaseExpiresAt", "deadlineAt")]
+        if record.get("stopRequestedAt") or any(value is None or value <= now for value in expiry):
+            raise ExternalAgentConflictError("task lease or deadline expired", code="APPROVAL_CONFLICT")
+        session_id, agent_id, turn_id = (str(record.get(key) or "").strip()
+                                         for key in ("sessionId", "agentId", "turnId"))
+        if not all((session_id, agent_id, turn_id, str(approval_id or "").strip())):
+            raise ExternalAgentConflictError("approval identity is unavailable", code="APPROVAL_CONFLICT")
+        agent = self.dependencies.get_agent(agent_id, include_archived=False)
+        self._require_eligible(agent)
+        return record, agent, {"task_id": task_id, "session_id": session_id, "agent_id": agent_id,
+                               "turn_id": turn_id, "request_id": approval_id}
+
+    def preview_task_approval(self, *, owner_id: str, task_id: str, approval_id: str) -> dict[str, Any]:
+        with self._task_lock(task_id):
+            _, agent, identity = self._bound_approval_context(owner_id, task_id, approval_id)
+            if self.dependencies.preview_bound_approval is None:
+                raise ExternalAgentConflictError("approval preview is unavailable", code="APPROVAL_CONFLICT")
+            try:
+                preview = self.dependencies.preview_bound_approval(**identity)
+            except ValueError as exc:
+                raise ExternalAgentConflictError("approval changed or is unavailable", code="APPROVAL_CONFLICT") from exc
+            self._check_bound_approval_config(agent, preview)
+            return preview
+
+    @staticmethod
+    def _check_bound_approval_config(agent, preview):
+        if (not isinstance(agent, dict) or not isinstance(preview, dict)
+                or not agent.get("configRevision") or not agent.get("configHash")
+                or agent.get("configRevision") != preview.get("configRevision")
+                or agent.get("configHash") != preview.get("configHash")):
+            raise ExternalAgentConflictError("Agent configuration changed", code="APPROVAL_CONFLICT")
+
+    def resolve_task_approval_bound(self, *, owner_id: str, task_id: str, approval_id: str,
+                                    decision: str, expected_revision: str) -> dict[str, Any]:
+        if decision not in {"accept", "decline", "cancel"} or not expected_revision:
+            raise ExternalAgentConflictError("explicit approval revision and decision required", code="APPROVAL_CONFLICT")
+        with self._task_lock(task_id):
+            record, agent, identity = self._bound_approval_context(owner_id, task_id, approval_id)
+            previous = (record.get("approvalDecisions") or {}).get(approval_id)
+            if previous:
+                if previous.get("decision") != decision or previous.get("revision") != expected_revision:
+                    raise ExternalAgentConflictError("approval decision conflict", code="APPROVAL_CONFLICT")
+                return {"status": "ok", "taskId": task_id, "approvalId": approval_id,
+                        "decision": decision, "taskStatus": record["status"]}
+            if self.dependencies.preview_bound_approval is None or self.dependencies.resolve_bound_approval is None:
+                raise ExternalAgentConflictError("approval resolution is unavailable", code="APPROVAL_CONFLICT")
+            try:
+                preview = self.dependencies.preview_bound_approval(**identity)
+            except ValueError as exc:
+                raise ExternalAgentConflictError("approval changed or is unavailable", code="APPROVAL_CONFLICT") from exc
+            self._check_bound_approval_config(agent, preview)
+            try:
+                self.dependencies.resolve_bound_approval(
+                    **identity, decision=decision, expected_revision=expected_revision,
+                    task_lease_expires_at=record["leaseExpiresAt"], task_deadline_at=record["deadlineAt"],
+                )
+            except ValueError as exc:
+                raise ExternalAgentConflictError("approval changed or is unavailable", code="APPROVAL_CONFLICT") from exc
+            decisions = dict(record.get("approvalDecisions") or {})
+            decisions[approval_id] = {"decision": decision, "revision": expected_revision, "resolvedAt": _now_iso()}
+            try:
+                latest = self.store.get_task(task_id)
+                status = "running" if latest["status"] == "awaiting_approval" else latest["status"]
+                latest = self._transition(task_id, status=status, expected_revision=int(latest["revision"]),
+                                          reason_code="approval_resolved", fields={"approvalDecisions": decisions})
+                if decision == "cancel":
+                    latest = self._request_cancel(latest, terminal_status="cancelled", reason_code="approval_cancelled")
+            except Exception as exc:
+                raise ExternalAgentConflictError("approval outcome is unconfirmed", code="APPROVAL_UNCONFIRMED") from exc
+            return {"status": "ok", "taskId": task_id, "approvalId": approval_id,
+                    "decision": decision, "taskStatus": latest["status"]}
 
     def _resolve_approval_locked(
         self,
@@ -724,6 +856,16 @@ class ExternalAgentTaskService:
             )
         if not str(record.get("stopRequestedAt") or ""):
             if status not in {"cancelling", "stop_unconfirmed"}:
+                recovery_error = {
+                    "restart_authorization_required": {
+                        "code": "REAUTHORIZATION_REQUIRED",
+                        "message": "Task cannot resume after restart; a new authorization is required.",
+                    },
+                    "submission_unconfirmed": {
+                        "code": "SUBMISSION_UNCONFIRMED",
+                        "message": "Task submission could not be confirmed; stopping the session.",
+                    },
+                }.get(reason_code)
                 record = self._transition(
                     record["taskId"],
                     status="cancelling",
@@ -732,9 +874,25 @@ class ExternalAgentTaskService:
                     fields={
                         "cancellationTerminalStatus": terminal_status,
                         "stopRequestedAt": _now_iso(),
+                        **({"error": recovery_error} if recovery_error else {}),
                     },
                 )
-            self.dependencies.stop_turn(session_id, expected_turn_id=turn_id)
+        if not str(record.get("stopSignalSentAt") or ""):
+            try:
+                self.dependencies.stop_turn(session_id, expected_turn_id=turn_id)
+            except Exception:
+                latest = self.store.get_task(record["taskId"])
+                if str(latest.get("status") or "") == "cancelling":
+                    return self._transition(
+                        latest["taskId"], status="stop_unconfirmed", expected_revision=int(latest["revision"]),
+                        reason_code="stop_signal_unconfirmed",
+                    )
+                return latest
+            latest = self.store.get_task(record["taskId"])
+            record = self._transition(
+                latest["taskId"], status=str(latest["status"]), expected_revision=int(latest["revision"]),
+                reason_code=str(latest.get("reasonCode") or reason_code), fields={"stopSignalSentAt": _now_iso()},
+            )
         detail = self.dependencies.get_session_detail(
             session_id,
             message_limit=20,
@@ -776,6 +934,18 @@ class ExternalAgentTaskService:
                 reason_code=str(record.get("reasonCode") or "cancel_requested"),
             )
             return refreshed, []
+        session_id = str(record.get("sessionId") or "")
+        if session_id and str(record.get("reasonCode") or "") in {"submission_pending", "continuation_submission_pending"}:
+            return self._request_cancel(record, terminal_status="cancelled", reason_code="submission_unconfirmed"), []
+        if session_id and self.dependencies.registered_approval_task is not None:
+            try:
+                bound_task = self.dependencies.registered_approval_task(
+                    session_id=session_id, agent_id=str(record.get("agentId") or ""),
+                )
+            except Exception:
+                bound_task = ""
+            if bound_task != record.get("taskId"):
+                return self._request_cancel(record, terminal_status="cancelled", reason_code="restart_authorization_required"), []
         try:
             self._require_eligible(
                 self.dependencies.get_agent(
@@ -789,7 +959,6 @@ class ExternalAgentTaskService:
                 reason_code="agent_eligibility_revoked",
             )
             return revoked, []
-        session_id = str(record.get("sessionId") or "")
         if not session_id:
             return record, []
         approvals = [
@@ -880,6 +1049,10 @@ class ExternalAgentTaskService:
 
         continuation_index = continuation_count + 1
         session_id = str(record.get("sessionId") or "").strip()
+        record = self._transition(
+            record["taskId"], status="running", expected_revision=int(record["revision"]),
+            reason_code="continuation_submission_pending", fields={"turnId": ""},
+        )
         try:
             submitted = self.dependencies.submit_message(
                 session_id,
@@ -906,35 +1079,21 @@ class ExternalAgentTaskService:
             ).strip()
             if not turn_id:
                 raise RuntimeError("managed continuation returned no turnId")
-        except Exception:  # noqa: BLE001 - project a stable boundary, never raw internals
             latest = self.store.get_task(record["taskId"])
-            failed = self._transition(
+            continued = self._transition(
                 latest["taskId"],
-                status="failed",
+                status="running",
                 expected_revision=int(latest["revision"]),
-                reason_code="turn_continuation_failed",
-                fields={
-                    "resultSummary": result_summary,
-                    "error": {
-                        "code": "TURN_CONTINUATION_FAILED",
-                        "message": "Agent task continuation could not be started.",
-                    },
-                },
+                reason_code="turn_continued",
+                fields={"turnId": turn_id, "continuationCount": continuation_index},
             )
-            self._record_event("external_agent.task.continuation_failed", failed)
-            return failed
-
-        latest = self.store.get_task(record["taskId"])
-        continued = self._transition(
-            latest["taskId"],
-            status="running",
-            expected_revision=int(latest["revision"]),
-            reason_code="turn_continued",
-            fields={
-                "turnId": turn_id,
-                "continuationCount": continuation_index,
-            },
-        )
+        except Exception:  # noqa: BLE001 - project a stable boundary, never raw internals
+            # The submit may already have scheduled work. Stop the current
+            # turn and retain its binding until the stop is confirmed.
+            return self._request_cancel(
+                self.store.get_task(record["taskId"]), terminal_status="cancelled",
+                reason_code="submission_unconfirmed",
+            )
         self._record_event(
             "external_agent.task.continued",
             continued,
@@ -1235,6 +1394,11 @@ class ExternalAgentTaskService:
             reason_code=reason_code,
             fields=fields,
         )
+        if (str(updated.get("status") or "") in TASK_TERMINAL_STATUSES
+                and updated.get("sessionId") and self.dependencies.unregister_approval_session is not None):
+            self.dependencies.unregister_approval_session(
+                task_id=updated["taskId"], session_id=updated["sessionId"], agent_id=updated["agentId"],
+            )
         self._record_event(
             "external_agent.task.state_transition",
             updated,

@@ -4,7 +4,7 @@ import {
   hideLauncherAssistant, launcherAssistantBridge, launcherConversationApi,
   sendLauncherAssistantMessage, setLauncherAssistantExpanded,
   getLauncherAssistantApprovals, resolveLauncherAssistantApproval,
-  declineLauncherDispatchApproval,
+  previewLauncherDispatchApproval, decideLauncherDispatchApproval, declineLauncherDispatchSummary,
   stopLauncherAssistantTurn, continueLauncherAssistantTurn,
   getLauncherOperatorAsset, openLauncherFromAssistant,
 } from "./launcherAssistant";
@@ -234,15 +234,17 @@ describe("Launcher assistant bridge", () => {
     expect(invoke.mock.calls.at(-1)).toEqual([{ operation: "hide" }]);
   });
 
-  it("declines only the approval on the observed native dispatch and checks the response", async () => {
+  it("binds preview and decision to the observed task and rejects mismatched results", async () => {
     const approval = { approvalId: "approval-1", toolName: "write_file_tool", risk: "write", targetSummary: { pathPreview: "x" }, revision: "fp-1", availableDecisions: ["accept", "decline"] };
-    const row = { dispatchId: "dispatch-1", nativeTaskId: "task-1", receipt: { taskId: "task-1", pendingApprovals: [approval] } };
-    const invoke = vi.fn().mockResolvedValueOnce({ dispatchId: "dispatch-1", nativeTaskId: "task-1" }).mockResolvedValueOnce({ dispatchId: "dispatch-1", nativeTaskId: "other" });
+    const row = { dispatchId: "dispatch-1", agentId: "worker", nativeTaskId: "task-1", receipt: { taskId: "task-1", pendingApprovals: [approval] } };
+    const preview = { taskId: "task-1", sessionId: "s", agentId: "worker", requestId: "approval-1", turnId: "t", callId: "c", toolName: "write_file_tool", revision: "a".repeat(64), approval: "always", risk: "write", permissionPreset: "request_approval", decisionFingerprint: "f", configRevision: 1, configHash: "h", argumentsJson: "{}", executionArgumentsJson: "{}" };
+    const invoke = vi.fn().mockResolvedValueOnce(preview).mockResolvedValueOnce({ dispatchId: "dispatch-1", taskId: "task-1", approvalId: "approval-1", revision: preview.revision, decision: "accept" }).mockResolvedValueOnce({ ...preview, agentId: "other" });
     vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
-    await declineLauncherDispatchApproval(row, approval);
-    expect(invoke).toHaveBeenCalledWith({ operation: "declineDispatchApproval", dispatchId: "dispatch-1", taskId: "task-1", approvalId: "approval-1", revision: "fp-1" });
-    await expect(declineLauncherDispatchApproval(row, { ...approval })).rejects.toThrow("已变化");
-    await expect(declineLauncherDispatchApproval(row, approval)).rejects.toThrow("未确认");
+    const actual = await previewLauncherDispatchApproval(row, approval);
+    await decideLauncherDispatchApproval(row, approval, actual, "accept");
+    expect(invoke).toHaveBeenCalledWith({ operation: "decideDispatchApproval", dispatchId: "dispatch-1", taskId: "task-1", approvalId: "approval-1", revision: "a".repeat(64), decision: "accept" });
+    await expect(decideLauncherDispatchApproval(row, { ...approval }, actual, "decline")).rejects.toThrow("已变化");
+    await expect(previewLauncherDispatchApproval(row, approval)).rejects.toThrow("不可核对");
   });
 
   it("fails closed on malformed or mismatched target approval receipts", async () => {
@@ -254,19 +256,16 @@ describe("Launcher assistant bridge", () => {
     await expect(getLauncherAssistantDispatches()).rejects.toThrow("暂不可用");
   });
 
-  it("shows an empty approval revision but refuses to send any decision", async () => {
-    const approval = { approvalId: "a", toolName: "exec_command", risk: "write", targetSummary: {}, revision: "", availableDecisions: ["decline"] };
+  it("only declines a matching summary with a nonempty revision", async () => {
+    const approval = { approvalId: "a", toolName: "exec_command", risk: "write", targetSummary: {}, revision: "policy-1", availableDecisions: ["decline"] };
     const row = { dispatchId: "d", nativeTaskId: "t", receipt: { taskId: "t", pendingApprovals: [approval] } };
-    const invoke = vi.fn().mockResolvedValue({ dispatches: [row] });
+    const invoke = vi.fn().mockResolvedValue({ dispatchId: "d", nativeTaskId: "t" });
     vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
-    const [shown] = await getLauncherAssistantDispatches();
-    expect(shown.receipt?.pendingApprovals?.[0].revision).toBe("");
-    await expect(declineLauncherDispatchApproval(shown, shown.receipt!.pendingApprovals![0])).rejects.toThrow("已变化");
-    expect(invoke).toHaveBeenCalledTimes(1);
-    for (const revision of [" ", "fp-1\n"]) {
-      const request = { ...approval, revision };
-      await expect(declineLauncherDispatchApproval({ ...row, receipt: { ...row.receipt, pendingApprovals: [request] } }, request)).rejects.toThrow("已变化");
-    }
+    await declineLauncherDispatchSummary(row, approval);
+    expect(invoke).toHaveBeenCalledWith({ operation: "declineDispatchApproval", dispatchId: "d", taskId: "t", approvalId: "a", revision: "policy-1" });
+    const empty = { ...approval, revision: "" };
+    await expect(declineLauncherDispatchSummary({ ...row, receipt: { ...row.receipt, pendingApprovals: [empty] } }, empty)).rejects.toThrow("已变化");
+    await expect(declineLauncherDispatchSummary(row, { ...approval })).rejects.toThrow("已变化");
     expect(invoke).toHaveBeenCalledTimes(1);
   });
 

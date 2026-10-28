@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Header, HTTPException, Query, Request, status
+from fastapi import APIRouter, Header, HTTPException, Query, Request, Response, status
 
 from core.external_agent.contracts import API_PROTOCOL_VERSION, SERVER_VERSION
 from core.web.control import validate_control_request
@@ -18,6 +18,7 @@ from core.web.routes.external_agent_models import (
     ExternalAgentInfoResponse,
     ExternalAgentTaskResponse,
     ResolveExternalAgentApprovalPayload,
+    ResolveBoundExternalAgentApprovalPayload,
     StartExternalAgentTaskPayload,
 )
 from core.web.services.external_agent.service import (
@@ -266,6 +267,37 @@ def resolve_external_agent_approval(
             decision=payload.decision,
             expected_revision=payload.expected_revision,
             reason=payload.reason,
+        )
+    except Exception as exc:
+        raise _handle_service_error(exc) from exc
+
+
+@router.get("/v1/external-agent/tasks/{task_id}/approvals/{approval_id}/preview")
+def preview_external_agent_approval(
+    task_id: str, approval_id: str, request: Request, response: Response,
+    task_capability: Annotated[str, Header(alias=TASK_CAPABILITY_HEADER)] = "",
+) -> dict[str, Any]:
+    _require_control(request)
+    owner_id = _require_header(task_capability, "external Agent task capability")
+    try:
+        response.headers["Cache-Control"] = "no-store"
+        return _service().preview_task_approval(owner_id=owner_id, task_id=task_id, approval_id=approval_id)
+    except Exception as exc:
+        raise _handle_service_error(exc) from exc
+
+
+@router.post("/v1/external-agent/tasks/{task_id}/approvals/{approval_id}/resolve-bound",
+             response_model=ExternalAgentApprovalResponse, response_model_exclude_unset=True)
+def resolve_bound_external_agent_approval(
+    task_id: str, approval_id: str, request: Request, payload: ResolveBoundExternalAgentApprovalPayload,
+    task_capability: Annotated[str, Header(alias=TASK_CAPABILITY_HEADER)] = "",
+) -> dict[str, Any]:
+    _require_control(request)
+    owner_id = _require_header(task_capability, "external Agent task capability")
+    try:
+        return _service().resolve_task_approval_bound(
+            owner_id=owner_id, task_id=task_id, approval_id=approval_id,
+            decision=payload.decision, expected_revision=payload.expected_revision,
         )
     except Exception as exc:
         raise _handle_service_error(exc) from exc

@@ -39,10 +39,19 @@ export type LauncherDispatchApproval = {
   availableDecisions: string[];
 };
 
+export type LauncherDispatchApprovalPreview = {
+  taskId: string; sessionId: string; agentId: string; requestId: string; turnId: string; callId: string;
+  toolName: string; revision: string; approval: string; risk: string; permissionPreset: string;
+  decisionFingerprint: string; configRevision: number; configHash: string;
+  argumentsJson: string; executionArgumentsJson: string;
+};
+
 export type LauncherAssistantRequest =
   | { operation: "status" | "detail" | "dispatches" | "hide" | "approvals" | "openLauncher" }
   | { operation: "resolveApproval"; requestId: string; decision: "accept" | "decline" }
+  | { operation: "previewDispatchApproval"; dispatchId: string; taskId: string; approvalId: string }
   | { operation: "declineDispatchApproval"; dispatchId: string; taskId: string; approvalId: string; revision: string }
+  | { operation: "decideDispatchApproval"; dispatchId: string; taskId: string; approvalId: string; revision: string; decision: "accept" | "decline" }
   | { operation: "send"; message: string; requestId: string; attachmentIds?: string[] }
   | { operation: "uploadAttachment"; filename: string; contentType: string; dataBase64: string }
   | { operation: "readAttachment"; artifactId: string }
@@ -300,22 +309,55 @@ export async function getLauncherAssistantDispatches(): Promise<LauncherAssistan
   return result.dispatches;
 }
 
-export function launcherDispatchRevisionIsValid(revision: unknown): revision is string {
+export async function previewLauncherDispatchApproval(row: LauncherAssistantDispatch, approval: LauncherDispatchApproval): Promise<LauncherDispatchApprovalPreview> {
+  if (!row.nativeTaskId || row.receipt?.taskId !== row.nativeTaskId || !row.agentId
+    || !row.receipt.pendingApprovals?.includes(approval)) throw new Error("派遣审批已变化，请刷新回执。");
+  const result = await launcherAssistantBridge().invoke({ operation: "previewDispatchApproval", dispatchId: row.dispatchId,
+    taskId: row.nativeTaskId, approvalId: approval.approvalId });
+  const fields = ["taskId", "sessionId", "agentId", "requestId", "turnId", "callId", "toolName", "revision", "approval", "risk", "permissionPreset", "decisionFingerprint", "configRevision", "configHash", "argumentsJson", "executionArgumentsJson"];
+  if (!exactFields(result, fields) || result.taskId !== row.nativeTaskId || result.requestId !== approval.approvalId
+    || result.agentId !== row.agentId || result.toolName !== approval.toolName
+    || typeof result.revision !== "string" || !/^[a-f0-9]{64}(?![\s\S])/.test(result.revision)
+    || typeof result.configRevision !== "number" || !Number.isSafeInteger(result.configRevision) || result.configRevision < 1
+    || fields.filter(field => field !== "configRevision").some(field => typeof result[field] !== "string" || !(result[field] as string).length)) {
+    throw new Error("完整审批预览不可核对，请刷新回执。");
+  }
+  try {
+    for (const field of ["argumentsJson", "executionArgumentsJson"]) {
+      const value: unknown = JSON.parse(result[field] as string);
+      if (!record(value) || Array.isArray(value)) throw new Error();
+    }
+  } catch { throw new Error("完整审批预览不可核对，请刷新回执。"); }
+  return result as LauncherDispatchApprovalPreview;
+}
+
+export async function decideLauncherDispatchApproval(row: LauncherAssistantDispatch, approval: LauncherDispatchApproval,
+  preview: LauncherDispatchApprovalPreview, decision: "accept" | "decline"): Promise<void> {
+  if (!row.nativeTaskId || row.receipt?.taskId !== row.nativeTaskId || !row.receipt.pendingApprovals?.includes(approval)
+    || preview.taskId !== row.nativeTaskId || preview.requestId !== approval.approvalId || preview.agentId !== row.agentId
+    || preview.toolName !== approval.toolName || !/^[a-f0-9]{64}(?![\s\S])/.test(preview.revision)
+    || !["accept", "decline"].includes(decision)) throw new Error("派遣审批已变化，请刷新回执。");
+  const result = await launcherAssistantBridge().invoke({ operation: "decideDispatchApproval", dispatchId: row.dispatchId,
+    taskId: row.nativeTaskId, approvalId: approval.approvalId, revision: preview.revision, decision });
+  if (!record(result) || result.dispatchId !== row.dispatchId || result.taskId !== row.nativeTaskId
+    || result.approvalId !== approval.approvalId || result.revision !== preview.revision || result.decision !== decision) {
+    throw new Error("审批结果未确认，请刷新回执核对。");
+  }
+}
+
+export function launcherDispatchDeclineRevisionIsValid(revision: unknown): revision is string {
   return typeof revision === "string" && /^[A-Za-z0-9_.:-]{1,200}(?![\s\S])/.test(revision);
 }
 
-/** Target-side summaries are not complete action proofs; only decline is exposed. */
-export async function declineLauncherDispatchApproval(row: LauncherAssistantDispatch, approval: LauncherDispatchApproval): Promise<void> {
-  if (!row.nativeTaskId || row.receipt?.taskId !== row.nativeTaskId
-    || !Array.isArray(row.receipt.pendingApprovals) || !row.receipt.pendingApprovals.includes(approval)
-    || !approval.approvalId || !launcherDispatchRevisionIsValid(approval.revision)
-    || !Array.isArray(approval.availableDecisions) || !approval.availableDecisions.includes("decline")) {
-    throw new Error("此派遣审批已变化，请刷新后重试。");
-  }
+/** No approval can use this path; the host checks the live task and revision. */
+export async function declineLauncherDispatchSummary(row: LauncherAssistantDispatch, approval: LauncherDispatchApproval): Promise<void> {
+  if (!row.nativeTaskId || row.receipt?.taskId !== row.nativeTaskId || !row.receipt.pendingApprovals?.includes(approval)
+    || !approval.approvalId || !launcherDispatchDeclineRevisionIsValid(approval.revision)
+    || !approval.availableDecisions.includes("decline")) throw new Error("派遣审批已变化，请刷新回执。");
   const result = await launcherAssistantBridge().invoke({ operation: "declineDispatchApproval", dispatchId: row.dispatchId,
     taskId: row.nativeTaskId, approvalId: approval.approvalId, revision: approval.revision });
   if (!record(result) || result.dispatchId !== row.dispatchId || result.nativeTaskId !== row.nativeTaskId) {
-    throw new Error("Launcher 未确认本次拒绝，请刷新回执核对。");
+    throw new Error("审批结果未确认，请刷新回执核对。");
   }
 }
 

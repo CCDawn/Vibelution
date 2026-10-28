@@ -7,7 +7,7 @@ import {
   hideLauncherAssistant, sendLauncherAssistantMessage, setLauncherAssistantExpanded,
   launcherConversationApi,
   getLauncherAssistantApprovals, resolveLauncherAssistantApproval,
-  declineLauncherDispatchApproval, launcherDispatchRevisionIsValid,
+  previewLauncherDispatchApproval, decideLauncherDispatchApproval, declineLauncherDispatchSummary, launcherDispatchDeclineRevisionIsValid, type LauncherDispatchApprovalPreview,
   stopLauncherAssistantTurn, continueLauncherAssistantTurn,
   getLauncherOperatorAsset, openLauncherFromAssistant, uploadLauncherAttachment,
 } from "../../api/launcherAssistant";
@@ -64,6 +64,13 @@ function approvalAcceptDisabled(request: SessionToolApprovalRequest): boolean {
     || summary?.assistantAction === "project_lifecycle" && !projectLifecyclePreviewIsValid(summary));
 }
 
+// Decode only JSON string tokens: parsing and reserializing the whole object
+// would round large integers. Escape invisible direction controls for review.
+function readableApprovalJson(source: string): string {
+  return source.replace(/"(?:\\.|[^"\\])*"/g, token => JSON.stringify(JSON.parse(token))
+    .replace(/[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, char => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`));
+}
+
 type ContinueAttempt = { requestId: string; expected: SessionContinuationExpectation; accepted: boolean };
 type ComposerSnapshot = { draft: string; outstanding: LauncherAssistantSubmission | null; acceptedTurnId: string; queuedAcceptance: LauncherAssistantQueuedAcceptance | null; continuation?: ContinueAttempt; attachments?: ComposerImageAttachment[] };
 
@@ -98,6 +105,10 @@ export function LauncherAssistantRoute() {
   const approvalGate = useRef(false);
   const [approvalPending, setApprovalPending] = useState(false);
   const [approvalError, setApprovalError] = useState("");
+  const [boundPreview, setBoundPreview] = useState<{ key: string; value: LauncherDispatchApprovalPreview } | null>(null);
+  const [previewAttempt, setPreviewAttempt] = useState(0);
+  const [previewError, setPreviewError] = useState<{ key: string; message: string } | null>(null);
+  const [decidedDispatchKey, setDecidedDispatchKey] = useState("");
   const controlGate = useRef(false);
   const refreshedTerminal = useRef<{ sessionId: string; turnId: string } | null>(null);
   const [controlPending, setControlPending] = useState(false);
@@ -270,6 +281,25 @@ export function LauncherAssistantRoute() {
   // request at a time and give the assistant's own session priority.
   const dispatchApproval = approval ? undefined : dispatches.data?.flatMap(row =>
     (row.receipt?.pendingApprovals ?? []).map(request => ({ row, request })))[0];
+  const dispatchPreviewKey = dispatchApproval && reading ? JSON.stringify([epoch, dispatchApproval.row.dispatchId,
+    dispatchApproval.row.nativeTaskId, dispatchApproval.row.agentId, dispatchApproval.request.approvalId, dispatchApproval.request.toolName]) : "";
+  useEffect(() => {
+    let active = true;
+    setBoundPreview(null);
+    setPreviewError(null);
+    if (dispatchApproval && dispatchPreviewKey) {
+      void previewLauncherDispatchApproval(dispatchApproval.row, dispatchApproval.request).then(value => {
+        if (active) setBoundPreview({ key: dispatchPreviewKey, value });
+      }).catch(() => { if (active) setPreviewError({ key: dispatchPreviewKey, message: lang === "zh" ? "完整操作暂不可核对，请刷新回执。" : "Complete action preview unavailable; refresh the receipt." }); });
+    }
+    return () => { active = false; };
+    // The scalar key captures identity without restarting on receipt polling.
+  }, [dispatchPreviewKey, previewAttempt, lang]);
+  const activeDispatchPreview = boundPreview?.key === dispatchPreviewKey && reading ? boundPreview.value : null;
+  const activePreviewError = previewError?.key === dispatchPreviewKey && reading ? previewError.message : "";
+  const canDeclineSummary = Boolean(dispatchApproval && activePreviewError && !approvalError
+    && decidedDispatchKey !== dispatchPreviewKey && dispatchApproval.request.availableDecisions.includes("decline")
+    && launcherDispatchDeclineRevisionIsValid(dispatchApproval.request.revision));
 
   useEffect(() => {
     mounted.current = true;
@@ -466,17 +496,21 @@ export function LauncherAssistantRoute() {
     }
   }
 
-  async function declineDispatch() {
+  async function decideDispatch(decision: "accept" | "decline") {
     const selected = dispatchApproval;
-    if (!selected || approvalGate.current || !selected.request.availableDecisions.includes("decline")
-      || !launcherDispatchRevisionIsValid(selected.request.revision)) return;
+    const preview = activeDispatchPreview;
+    if (!selected || approvalGate.current || !selected.request.availableDecisions.includes(decision)
+      || (!preview && (decision !== "decline" || !canDeclineSummary)) || decidedDispatchKey === dispatchPreviewKey) return;
     approvalGate.current = true;
     setApprovalPending(true);
     setApprovalError("");
+    setDecidedDispatchKey(dispatchPreviewKey);
+    setBoundPreview(null);
     try {
-      await declineLauncherDispatchApproval(selected.row, selected.request);
-    } catch (error) {
-      if (mounted.current) setApprovalError(errorMessage(error));
+      if (preview) await decideLauncherDispatchApproval(selected.row, selected.request, preview, decision);
+      else await declineLauncherDispatchSummary(selected.row, selected.request);
+    } catch {
+      if (mounted.current) setApprovalError(lang === "zh" ? "审批结果未确认，请刷新回执核对。" : "Approval outcome is unconfirmed; refresh the receipt.");
     } finally {
       approvalGate.current = false;
       if (mounted.current) {
@@ -640,8 +674,9 @@ export function LauncherAssistantRoute() {
       onApprove={() => void decide(approval, "accept")} onReject={() => void decide(approval, "decline")} /> : null}
     {dispatchApproval ? <ChatToolApprovalDialog lang={lang} variant="inline"
       pending={approvalPending}
-      approveDisabled rejectDisabled={!dispatchApproval.request.availableDecisions.includes("decline") || !launcherDispatchRevisionIsValid(dispatchApproval.request.revision)} rawTitle={dispatchApproval.request.toolName}
-      riskLabel={toolApprovalRiskLabel(dispatchApproval.request.risk, lang)}
+      approveDisabled={!activeDispatchPreview || decidedDispatchKey === dispatchPreviewKey || !dispatchApproval.request.availableDecisions.includes("accept")}
+      rejectDisabled={(!activeDispatchPreview && !canDeclineSummary) || decidedDispatchKey === dispatchPreviewKey || !dispatchApproval.request.availableDecisions.includes("decline")} rawTitle={dispatchApproval.request.toolName}
+      riskLabel={toolApprovalRiskLabel(activeDispatchPreview?.risk || dispatchApproval.request.risk, lang)}
       scopeLabel={lang === "zh" ? "目标任务 · 仅本次" : "Target task · this call"}
       toolLabels={[{ id: dispatchApproval.request.toolName, label: toolApprovalDisplayName(dispatchApproval.request.toolName, lang) }]}
       toolName={dispatchApproval.request.toolName} fullActionPreview
@@ -651,19 +686,23 @@ export function LauncherAssistantRoute() {
         `${lang === "zh" ? "派遣 ID" : "Dispatch ID"}: ${dispatchApproval.row.dispatchId}`,
         `${lang === "zh" ? "任务 ID" : "Task ID"}: ${dispatchApproval.row.nativeTaskId}`,
         `${lang === "zh" ? "审批 ID" : "Approval ID"}: ${dispatchApproval.request.approvalId}`,
-        lang === "zh" ? "目标项目返回的动作摘要（可能不完整）:" : "Action summary from target project (may be incomplete):",
-        JSON.stringify(dispatchApproval.request.targetSummary, null, 2),
-        lang === "zh" ? "摘要无法证明完整动作，当前不能安全批准。"
-          : "The summary cannot prove the complete action. Approval is unavailable.",
-        !launcherDispatchRevisionIsValid(dispatchApproval.request.revision)
-          ? (lang === "zh" ? "审批版本不可用，无法安全拒绝；请刷新回执。" : "Approval revision unavailable. Decline is disabled; refresh the receipt.")
-          : dispatchApproval.request.availableDecisions.includes("decline")
-            ? (lang === "zh" ? "你可以拒绝本次请求。" : "You can decline this request.")
-            : (lang === "zh" ? "当前不能拒绝本次请求，请刷新回执。" : "Decline is unavailable; refresh the receipt."),
+        ...(activeDispatchPreview ? [
+          `${lang === "zh" ? "轮次" : "Turn"}: ${activeDispatchPreview.turnId}`,
+          `${lang === "zh" ? "调用" : "Call"}: ${activeDispatchPreview.callId}`,
+          `${lang === "zh" ? "权限模式" : "Permission preset"}: ${activeDispatchPreview.permissionPreset}`,
+          `${lang === "zh" ? "审批要求" : "Approval requirement"}: ${activeDispatchPreview.approval}`,
+          lang === "zh" ? "完整原始参数:" : "Complete original arguments:", readableApprovalJson(activeDispatchPreview.argumentsJson),
+          lang === "zh" ? "完整执行参数（含默认值）:" : "Complete execution arguments (including defaults):", readableApprovalJson(activeDispatchPreview.executionArgumentsJson),
+        ] : [lang === "zh" ? "目标动作摘要（不完整）:" : "Target action summary (incomplete):",
+          JSON.stringify(dispatchApproval.request.targetSummary, null, 2),
+          activePreviewError || (lang === "zh" ? "正在读取完整操作，暂不能决定。" : "Reading complete action; decisions are unavailable."),
+          ...(canDeclineSummary ? [lang === "zh" ? "完整操作不可用，不能批准；你仍可拒绝本次请求。" : "Complete action unavailable. Approval is disabled; you may decline this request."] : [])]),
       ].join("\n")}
-      onApprove={() => {}} onReject={() => void declineDispatch()} /> : null}
+      onApprove={() => void decideDispatch("accept")} onReject={() => void decideDispatch("decline")} /> : null}
+    {dispatchApproval && activePreviewError ? <VStateSurface tone="error" title={activePreviewError}
+      actions={<VButton onClick={() => { setPreviewAttempt(value => value + 1); void dispatches.refetch(); }}>{copy.retry}</VButton>} /> : null}
     {approvalError || approvals.isError ? <VStateSurface tone="error" title={approvalError || (lang === "zh" ? "待授权查询暂不可用" : "Pending approvals unavailable")}
-      actions={<VButton onClick={() => { setApprovalError(""); void approvals.refetch(); void dispatches.refetch(); }}>{copy.retry}</VButton>}>{approvals.error?.message}</VStateSurface> : null}
+      actions={<VButton onClick={() => { setApprovalError(""); setDecidedDispatchKey(""); setPreviewAttempt(value => value + 1); void approvals.refetch(); void dispatches.refetch(); }}>{copy.retry}</VButton>}>{approvals.error?.message}</VStateSurface> : null}
     {detail.data?.queuedTurns?.length || queuedAcceptance ? <section data-launcher-assistant-queue
       className={petStyles.receiptPanel}
       aria-label={lang === "zh" ? "原生消息队列" : "Native message queue"}>

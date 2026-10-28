@@ -180,7 +180,7 @@ ACTION_SCOPES = {"agent_create": "agents:create", "agent_update": "agents:update
 
 def contracts() -> dict:
     descriptions = {
-        "agent_create": "默认不授予任何工具或读写范围，派遣写任务也不会自动增加工具权限。文件任务可选固定 project_files_v1，须通过 personal_assistant_manage_tool 并具备 agents:create 和独立 agents:create:files；缺少时先 authorization_status，再用 authorization_upgrade 仅增加此权限。创建和权限升级按助理当前原生权限策略执行，full_access 可能自动批准。授权五个工具并持久生效；写入按当前权限和协作模式审批，edit/yolo 等模式可能自动批准。目标派遣任务的审批目前只能拒绝，不能在 Launcher 批准写入。目录遵守平台动态边界，含项目、Agent 工作区、项目存储、工具目录、临时目录和用户配置允许目录，未来可能变化；不能运行命令或测试。必须选择模型和稳定 request_id，未知结果查询原回执。",
+        "agent_create": "默认不授予任何工具或读写范围，派遣写任务也不会自动增加工具权限。文件任务可选固定 project_files_v1，须通过 personal_assistant_manage_tool 并具备 agents:create 和独立 agents:create:files；缺少时先 authorization_status，再用 authorization_upgrade 仅增加此权限。创建和权限升级按助理当前原生权限策略执行，full_access 可能自动批准。授权五个工具并持久生效；写入按当前权限和协作模式审批，edit/yolo 等模式可能自动批准。目标派遣任务的审批只有在完整预览、版本和执行参数均可验证时才能批准。目录遵守平台动态边界，含项目、Agent 工作区、项目存储、工具目录、临时目录和用户配置允许目录，未来可能变化；不能运行命令或测试。必须选择模型和稳定 request_id，未知结果查询原回执。",
         "agent_update": "按原生 configRevision 更新普通 Agent 名称、对话模型、提示词或人物/任务档案；拒绝权限、身份与生命周期字段。",
         "agent_avatar": "按原生 updatedAt 使用已有头像候选或恢复默认；不接收 URL、文件上传或任意路径。",
         "agent_archive": "每次经原生审批，按 configRevision 归档普通 Agent 并封存关联 Session；protected 或关联 Session 忙时拒绝。稳定 request_id，未知结果只查询原回执，不提供 purge、reset、restore 或 force。verified 表示首次原生回读已归档，完成回执保留历史状态。",

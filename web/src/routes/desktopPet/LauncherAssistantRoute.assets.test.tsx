@@ -57,7 +57,7 @@ async function click(label: string) {
   await settle(); await settle();
 }
 function assetReads() { return invoke.mock.calls.filter(([request]) => request.operation === "operatorAsset").length; }
-async function renderAssistant(options: { capability?: boolean; failAvatar?: boolean; approval?: Record<string, unknown>; dispatches?: Array<Record<string, unknown>>; declineFailure?: boolean; language?: "zh" | "en"; patrol?: { state: "ready" | "unavailable"; deliveryStates: Record<string, number> } } = {}) {
+async function renderAssistant(options: { capability?: boolean; failAvatar?: boolean; approval?: Record<string, unknown>; dispatches?: Array<Record<string, unknown>>; boundPreview?: Record<string, unknown>; declineFailure?: boolean; language?: "zh" | "en"; patrol?: { state: "ready" | "unavailable"; deliveryStates: Record<string, number> } } = {}) {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   failingAvatar = Boolean(options.failAvatar);
   detail = { id: "s", agentId: "a", status: "ready", messages: [] };
@@ -79,11 +79,19 @@ async function renderAssistant(options: { capability?: boolean; failAvatar?: boo
       case "approvals": return options.approval ? [options.approval] : [];
       case "resolveApproval": return { ...options.approval, status: request.decision === "decline" ? "rejected" : "approved" };
       case "dispatches": return { dispatches: dispatchRows };
+      case "previewDispatchApproval":
+        if (!options.boundPreview) throw new Error("preview unavailable");
+        return options.boundPreview;
       case "declineDispatchApproval":
-        if (options.declineFailure) throw new Error("目标审批已变化");
+        if (options.declineFailure) throw new Error("approval unavailable");
         dispatchRows = dispatchRows.map(row => row.dispatchId === request.dispatchId
           ? { ...row, receipt: { ...(row.receipt as Record<string, unknown>), pendingApprovals: [] } } : row);
         return { dispatchId: request.dispatchId, nativeTaskId: request.taskId };
+      case "decideDispatchApproval":
+        if (options.declineFailure) throw new Error("目标审批已变化");
+        dispatchRows = dispatchRows.map(row => row.dispatchId === request.dispatchId
+          ? { ...row, receipt: { ...(row.receipt as Record<string, unknown>), pendingApprovals: [] } } : row);
+        return { dispatchId: request.dispatchId, taskId: request.taskId, approvalId: request.approvalId, revision: request.revision, decision: request.decision };
       case "computerState": return { available: false, status: "idle", message: "测试驱动未连接", grantId: null, window: null, pending: null };
       case "computerWindows": return { windows: [] };
       case "setExpanded": return { expanded: request.expanded };
@@ -113,10 +121,10 @@ describe("Launcher operator image consumption", () => {
       toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
       argumentSummary: { assistantAction: "agent_create", assistantTargets: { project_id: "registered:1", display_name: "Worker", model_id: "model-1" },
         assistantCreatePreset: "project_files_v1", assistantCreateTools: ["glob_tool", "grep_search_tool", "read_file_tool", "apply_diff_edit_tool", "write_file_tool"],
-        assistantOperationDescription: "固定文件工具权限持续生效；写入按当前权限和协作模式审批，edit/yolo 等模式可能自动批准。目标派遣任务的审批目前只能拒绝，不能在 Launcher 批准写入。平台允许的动态目录包括项目、Agent 工作区、项目存储、工具目录、系统临时目录和用户配置允许目录，未来可能变化。不能执行命令或测试。" } } });
+        assistantOperationDescription: "固定文件工具权限持续生效；写入按当前权限和协作模式审批，edit/yolo 等模式可能自动批准。目标派遣任务的审批只有在完整预览、版本和执行参数均可验证时才能批准。平台允许的动态目录包括项目、Agent 工作区、项目存储、工具目录、系统临时目录和用户配置允许目录，未来可能变化。不能执行命令或测试。" } } });
     await click("展开个人助理聊天");
     const preview = container.querySelector("pre");
-    for (const value of ["registered:1", "model-1", "project_files_v1", "glob_tool", "grep_search_tool", "read_file_tool", "apply_diff_edit_tool", "write_file_tool", "项目存储", "系统临时目录", "用户配置允许目录", "edit/yolo", "可能自动批准", "只能拒绝", "不能在 Launcher 批准写入"]) expect(preview?.textContent).toContain(value);
+    for (const value of ["registered:1", "model-1", "project_files_v1", "glob_tool", "grep_search_tool", "read_file_tool", "apply_diff_edit_tool", "write_file_tool", "项目存储", "系统临时目录", "用户配置允许目录", "edit/yolo", "可能自动批准", "完整预览", "版本和执行参数"]) expect(preview?.textContent).toContain(value);
     expect(preview?.tabIndex).toBe(0);
     expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"))?.disabled).toBe(false);
   });
@@ -126,28 +134,28 @@ describe("Launcher operator image consumption", () => {
       toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
       argumentSummary: { assistantAction: "agent_create", assistantTargets: { project_id: "registered:1", display_name: "Worker", model_id: "model-1" },
         assistantCreatePreset: "project_files_v1", assistantCreateTools: ["glob_tool"],
-        assistantOperationDescription: "固定文件工具权限持续生效；写入按当前权限和协作模式审批，edit/yolo 等模式可能自动批准。目标派遣任务的审批目前只能拒绝，不能在 Launcher 批准写入。平台允许的动态目录包括项目、Agent 工作区、项目存储、工具目录、系统临时目录和用户配置允许目录，未来可能变化。不能执行命令或测试。" } } });
+        assistantOperationDescription: "固定文件工具权限持续生效；写入按当前权限和协作模式审批，edit/yolo 等模式可能自动批准。目标派遣任务的审批只有在完整预览、版本和执行参数均可验证时才能批准。平台允许的动态目录包括项目、Agent 工作区、项目存储、工具目录、系统临时目录和用户配置允许目录，未来可能变化。不能执行命令或测试。" } } });
     await click("展开个人助理聊天");
     expect(container.textContent).toContain("参数无法核对");
     expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"))?.disabled).toBe(true);
   });
 
-  it("shows target approval identity and summary, blocks approval, and declines its native request once", async () => {
+  it("shows complete bound arguments before allowing a single native approval", async () => {
     const request = { approvalId: "approval-1", toolName: "exec_command", risk: "write", targetSummary: { commandPreview: "echo fixture", commandTruncated: false }, revision: "fp-1", availableDecisions: ["accept", "decline"] };
     const row = { dispatchId: "dispatch-1", projectId: "registered:1", agentId: "worker-1", nativeTaskId: "task-1", receipt: { taskId: "task-1", status: "awaiting_approval", shouldPoll: true, pendingApprovals: [request] } };
-    await renderAssistant({ dispatches: [row] });
+    const boundPreview = { taskId: "task-1", sessionId: "session-1", agentId: "worker-1", requestId: "approval-1", turnId: "turn-1", callId: "call-1", toolName: "exec_command", revision: "a".repeat(64), approval: "always", risk: "write", permissionPreset: "request_approval", decisionFingerprint: "fp-1", configRevision: 1, configHash: "hash", argumentsJson: '{"cmd":"\\u4f60\\u597d", "large":9007199254740993}', executionArgumentsJson: '{"cmd":"\\u4f60\\u597d", "large":9007199254740993,"timeout":60}' };
+    await renderAssistant({ dispatches: [row], boundPreview });
     await click("展开个人助理聊天");
     const preview = container.querySelector("pre");
-    for (const value of ["registered:1", "worker-1", "dispatch-1", "task-1", "approval-1", "echo fixture", "不能安全批准"]) expect(preview?.textContent).toContain(value);
+    for (const value of ["registered:1", "worker-1", "dispatch-1", "task-1", "approval-1", "你好", "9007199254740993", "timeout"]) expect(preview?.textContent).toContain(value);
     const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"));
     const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("否"));
-    expect(approve?.disabled).toBe(true);
-    await act(async () => { approve?.click(); window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true })); });
-    expect(invoke.mock.calls.some(([payload]) => payload.operation === "declineDispatchApproval")).toBe(false);
-    await act(async () => { reject?.click(); reject?.click(); }); await settle(); await settle();
-    const calls = invoke.mock.calls.filter(([payload]) => payload.operation === "declineDispatchApproval");
-    expect(calls).toEqual([[{ operation: "declineDispatchApproval", dispatchId: "dispatch-1", taskId: "task-1", approvalId: "approval-1", revision: "fp-1" }]]);
-    expect(container.textContent).not.toContain("不能安全批准");
+    expect(approve?.disabled).toBe(false);
+    expect(reject?.disabled).toBe(false);
+    await act(async () => { approve?.click(); approve?.click(); }); await settle(); await settle();
+    const calls = invoke.mock.calls.filter(([payload]) => payload.operation === "decideDispatchApproval");
+    expect(calls).toEqual([[{ operation: "decideDispatchApproval", dispatchId: "dispatch-1", taskId: "task-1", approvalId: "approval-1", revision: "a".repeat(64), decision: "accept" }]]);
+    expect(container.textContent).not.toContain("9007199254740993");
   });
 
   it("shows only the assistant approval when both sessions require a decision", async () => {
@@ -159,7 +167,32 @@ describe("Launcher operator image consumption", () => {
     expect(container.textContent).toContain("own command");
     await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "n", bubbles: true }))); await settle();
     expect(invoke.mock.calls.filter(([payload]) => payload.operation === "resolveApproval")).toHaveLength(1);
-    expect(invoke.mock.calls.some(([payload]) => payload.operation === "declineDispatchApproval")).toBe(false);
+    expect(invoke.mock.calls.some(([payload]) => payload.operation === "decideDispatchApproval")).toBe(false);
+  });
+
+  it("does not retry an unconfirmed bound decline and discards the complete preview", async () => {
+    const target = { approvalId: "a", toolName: "write_file_tool", risk: "write", targetSummary: { pathPreview: "fixture" }, revision: "old", availableDecisions: ["accept", "decline"] };
+    const preview = { taskId: "t", sessionId: "s2", agentId: "worker", requestId: "a", turnId: "turn", callId: "call", toolName: "write_file_tool", revision: "b".repeat(64), approval: "always", risk: "write", permissionPreset: "request_approval", decisionFingerprint: "policy", configRevision: 1, configHash: "hash", argumentsJson: '{"content":"PRIVATE-FIXTURE"}', executionArgumentsJson: '{"content":"PRIVATE-FIXTURE"}' };
+    await renderAssistant({ declineFailure: true, boundPreview: preview, dispatches: [{ dispatchId: "d", agentId: "worker", nativeTaskId: "t", receipt: { taskId: "t", pendingApprovals: [target] } }] });
+    await click("展开个人助理聊天");
+    expect(container.textContent).toContain("PRIVATE-FIXTURE");
+    const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("否"));
+    await act(async () => { reject?.click(); reject?.click(); }); await settle(); await settle();
+    expect(invoke.mock.calls.filter(([payload]) => payload.operation === "decideDispatchApproval")).toHaveLength(1);
+    expect(container.textContent).toContain("审批结果未确认");
+    expect(container.textContent).not.toContain("PRIVATE-FIXTURE");
+    expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"))?.disabled).toBe(true);
+  });
+
+  it("drops the private full preview when the assistant is collapsed", async () => {
+    const target = { approvalId: "a", toolName: "write_file_tool", risk: "write", targetSummary: {}, revision: "old", availableDecisions: ["accept", "decline"] };
+    const preview = { taskId: "t", sessionId: "s2", agentId: "worker", requestId: "a", turnId: "turn", callId: "call", toolName: "write_file_tool", revision: "b".repeat(64), approval: "always", risk: "write", permissionPreset: "request_approval", decisionFingerprint: "policy", configRevision: 1, configHash: "hash", argumentsJson: '{"content":"PRIVATE-FIXTURE"}', executionArgumentsJson: '{"content":"PRIVATE-FIXTURE"}' };
+    await renderAssistant({ boundPreview: preview, dispatches: [{ dispatchId: "d", agentId: "worker", nativeTaskId: "t", receipt: { taskId: "t", pendingApprovals: [target] } }] });
+    await click("展开个人助理聊天");
+    expect(container.textContent).toContain("PRIVATE-FIXTURE");
+    expect(JSON.stringify(client.getQueryCache().getAll().map(query => query.state.data))).not.toContain("PRIVATE-FIXTURE");
+    await click("收起聊天");
+    expect(container.textContent).not.toContain("PRIVATE-FIXTURE");
   });
 
   it("shows the target summary but disables all decisions and shortcuts when revision is empty", async () => {
@@ -167,28 +200,43 @@ describe("Launcher operator image consumption", () => {
     await renderAssistant({ dispatches: [{ dispatchId: "d", nativeTaskId: "task", receipt: { taskId: "task", pendingApprovals: [target] } }] });
     await click("展开个人助理聊天");
     expect(container.textContent).toContain("echo fixture");
-    expect(container.textContent).toContain("审批版本不可用，无法安全拒绝");
+    expect(container.textContent).toContain("完整操作暂不可核对");
     const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("否"));
     expect(reject?.disabled).toBe(true);
     await act(async () => { reject?.click(); window.dispatchEvent(new KeyboardEvent("keydown", { key: "n" })); window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
-    expect(invoke.mock.calls.some(([payload]) => payload.operation === "declineDispatchApproval")).toBe(false);
+    expect(invoke.mock.calls.some(([payload]) => payload.operation === "decideDispatchApproval")).toBe(false);
+  });
+
+  it("declines one bound summary when full preview cannot be read", async () => {
+    const target = { approvalId: "target", toolName: "exec_command", risk: "write", targetSummary: { commandPreview: "partial", commandTruncated: true }, revision: "policy-1", availableDecisions: ["accept", "decline"] };
+    await renderAssistant({ dispatches: [{ dispatchId: "d", agentId: "worker", nativeTaskId: "task", receipt: { taskId: "task", pendingApprovals: [target] } }] });
+    await click("展开个人助理聊天");
+    expect(container.textContent).toContain("完整操作不可用，不能批准");
+    expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"))?.disabled).toBe(true);
+    const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("否"));
+    await act(async () => { reject?.click(); reject?.click(); }); await settle(); await settle();
+    expect(invoke.mock.calls.filter(([payload]) => payload.operation === "declineDispatchApproval")).toEqual([[{ operation: "declineDispatchApproval", dispatchId: "d", taskId: "task", approvalId: "target", revision: "policy-1" }]]);
+    expect(invoke.mock.calls.some(([payload]) => payload.operation === "decideDispatchApproval")).toBe(false);
   });
 
   it.each([
     { toolName: "exec_command", targetSummary: { commandPreview: "partial", commandTruncated: true } },
     { toolName: "write_file_tool", targetSummary: { pathPreview: "example.txt" } },
     { toolName: "unknown_tool", targetSummary: { argumentKeys: ["target"] } },
-  ])("keeps incomplete target previews decline-only and reports a failed decision", async ({ toolName, targetSummary }) => {
+  ])("permits only a single decline when the full preview is unavailable", async ({ toolName, targetSummary }) => {
     const target = { approvalId: "target", toolName, risk: "write", targetSummary, revision: "fp", availableDecisions: ["accept", "decline"] };
     await renderAssistant({ declineFailure: true, dispatches: [{ dispatchId: "d", nativeTaskId: "task", receipt: { taskId: "task", pendingApprovals: [target] } }] });
     await click("展开个人助理聊天");
     const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"));
     const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("否"));
     expect(approve?.disabled).toBe(true);
-    await act(async () => reject?.click()); await settle();
-    expect(container.textContent).toContain("目标审批已变化");
-    expect(container.textContent).toContain("不能安全批准");
-    expect(invoke.mock.calls.filter(([payload]) => payload.operation === "dispatches").length).toBeGreaterThan(1);
+    expect(reject?.disabled).toBe(false);
+    await act(async () => { reject?.click(); reject?.click(); }); await settle();
+    expect(container.textContent).toContain("完整操作暂不可核对");
+    expect(container.textContent).toContain("审批结果未确认");
+    expect(invoke.mock.calls.filter(([payload]) => payload.operation === "declineDispatchApproval")).toHaveLength(1);
+    expect(reject?.disabled).toBe(true);
+    expect(invoke.mock.calls.some(([payload]) => payload.operation === "decideDispatchApproval")).toBe(false);
   });
   it("shows the zero-tool limitation when approving Launcher agent creation", async () => {
     await renderAssistant({ approval: { requestId: "r", sessionId: "s", turnId: "t", agentId: "a",

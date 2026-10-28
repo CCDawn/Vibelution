@@ -102,6 +102,9 @@ class _ApprovalRequest:
     permission_preset: str
     created_at: str
     expires_at: float
+    external_task_id: str = ""
+    external_arguments_json: str = field(default="", repr=False)
+    external_execution_arguments_json: str = field(default="", repr=False)
     status: str = "pending"
     decision: str = ""
     resolved_at: str = ""
@@ -185,6 +188,8 @@ def resolve_tool_approval_request(
             raise ToolApprovalConflictError(
                 f"tool approval request is already {request.status}: {request.request_id}"
             )
+        if request.external_task_id and normalized_decision not in {"decline", "cancel"}:
+            raise ToolApprovalConflictError("external task approvals require a bound preview")
         if (
             normalized_decision in {"acceptForSession", "acceptAlways"}
             and request.approval == "always"
@@ -207,6 +212,143 @@ def resolve_tool_approval_request(
     return request.public_projection()
 
 
+def _external_binding_locked(*, task_id: str, session_id: str, agent_id: str,
+                             turn_id: str, request_id: str):
+    from core.web.services.external_agent.approval_binding import (
+        ApprovalBindingError, external_session_task, freeze_approval,
+    )
+    request = _REQUESTS.get(request_id)
+    if (request is None or not request.external_task_id or request.external_task_id != task_id
+            or request.session_id != session_id or request.agent_id != agent_id or request.turn_id != turn_id
+            or request.status != "pending" or time.monotonic() >= request.expires_at):
+        raise ToolApprovalConflictError("external task approval changed or is unavailable")
+    try:
+        if external_session_task(session_id=session_id, agent_id=agent_id) != task_id:
+            raise ApprovalBindingError("external task identity changed")
+        binding = freeze_approval(
+            task_id=task_id, session_id=session_id, agent_id=agent_id, request_id=request_id,
+            turn_id=turn_id, call_id=request.call_id, tool_name=request.tool_name,
+            decision_fingerprint=request.decision_fingerprint, config_revision=request.config_revision,
+            config_hash=request.config_hash, approval=request.approval, risk=request.risk,
+            permission_preset=request.permission_preset, arguments=json.loads(request.external_arguments_json),
+            execution_arguments=json.loads(request.external_execution_arguments_json),
+        )
+    except (ApprovalBindingError, ValueError, TypeError) as exc:
+        raise ToolApprovalConflictError("external task approval cannot be verified") from exc
+    return request, binding
+
+
+def preview_external_task_approval(*, task_id: str, session_id: str, agent_id: str,
+                                   turn_id: str, request_id: str) -> dict[str, Any]:
+    with _LOCK:
+        _, binding = _external_binding_locked(task_id=task_id, session_id=session_id, agent_id=agent_id,
+                                              turn_id=turn_id, request_id=request_id)
+        return binding.preview()
+
+
+def resolve_external_task_approval(*, task_id: str, session_id: str, agent_id: str, turn_id: str,
+                                   request_id: str, decision: str, expected_revision: str,
+                                   task_lease_expires_at: str, task_deadline_at: str) -> dict[str, Any]:
+    from core.web.services.external_agent.approval_binding import ApprovalBindingError, validate_approval
+    from core.web.services import agent_directory_service, team_service
+    from core.web.services.agent_config_authority import agent_config_hash
+    from core.web.services.external_agent.policy import _team_dedicated
+    from core.web.services.team import team_membership, team_store
+    if decision not in {"accept", "decline", "cancel"}:
+        raise ToolApprovalConflictError("external task approval decision is invalid")
+    with _LOCK:
+        try:
+            deadlines = [datetime.fromisoformat(value.replace("Z", "+00:00"))
+                         for value in (task_lease_expires_at, task_deadline_at)]
+            now = datetime.now(timezone.utc)
+            if any(value.tzinfo is None or value <= now for value in deadlines):
+                raise ValueError("task deadline expired")
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ToolApprovalConflictError("external task deadline expired or unavailable") from exc
+        request, binding = _external_binding_locked(task_id=task_id, session_id=session_id, agent_id=agent_id,
+                                                    turn_id=turn_id, request_id=request_id)
+        # Team writes acquire TEAM before STATE when resolving Agent members;
+        # native approval already acquires _LOCK before STATE. Both waits are
+        # bounded and these locks only coordinate writers in this process.
+        team_lock = team_service._TEAM_LOCK
+        if not team_lock.acquire(timeout=2.0):
+            raise ToolApprovalConflictError("Team roster is busy")
+        try:
+            state_lock = agent_directory_service._STATE_LOCK
+            if not state_lock.acquire(timeout=2.0):
+                raise ToolApprovalConflictError("Agent configuration is busy")
+            try:
+                try:
+                    project_root = Path(agent_directory_service._active_project_root()).resolve()
+                    if (Path(team_service.PROJECT_ROOT).resolve() != project_root
+                            or team_service._project_root().resolve() != project_root):
+                        raise ValueError("Team index project binding changed")
+                    index_path = team_service._teams_index_path(seed=False)
+                    try:
+                        # Absence is the Team service's empty-new-project
+                        # state. A present dangling link is not absence.
+                        index_path.lstat()
+                    except FileNotFoundError:
+                        roster = {"teams": []}
+                    else:
+                        roster = team_store.read_index_snapshot(project_root=project_root)
+                    team_ids: set[str] = set()
+                    for team in roster["teams"]:
+                        team_id = team.get("teamId")
+                        status = team.get("status")
+                        if (not isinstance(team_id, str) or not team_id
+                                or team_service._safe_token(team_id, default="", max_length=96) != team_id
+                                or team_id.casefold() in team_ids
+                                or not isinstance(status, str) or status not in team_service.TEAM_STATUSES):
+                            raise ValueError("invalid Team identity or status authority")
+                        team_ids.add(team_id.casefold())
+                        members = team.get("members")
+                        if (not isinstance(members, list) or len(members) > 120
+                                or any(not isinstance(member, dict) or "agent_id" in member
+                                       or not isinstance(member.get("agentId"), str)
+                                       or not member["agentId"].strip() for member in members)):
+                            raise ValueError("invalid Team membership authority")
+                    if team_membership._find_active_team_for_agent_in_state(roster, agent_id):
+                        raise ToolApprovalConflictError("Agent is a Team member")
+                except ToolApprovalConflictError:
+                    raise
+                except Exception as exc:
+                    raise ToolApprovalConflictError("Team roster is unavailable") from exc
+                try:
+                    agent = agent_directory_service.load_agent_record(agent_id, include_archived=False)
+                except Exception as exc:
+                    raise ToolApprovalConflictError("Agent configuration is unavailable") from exc
+                if (not isinstance(agent, dict) or type(agent.get("configRevision")) is not int
+                        or not isinstance(agent.get("configHash"), str) or not agent.get("configHash")
+                        or agent["configRevision"] != request.config_revision
+                        or agent["configHash"] != request.config_hash
+                        or str(agent.get("status") or "active").strip().lower() != "active"
+                        or _team_dedicated(agent)):
+                    raise ToolApprovalConflictError("Agent configuration changed or is unavailable")
+                try:
+                    if agent_config_hash(agent) != request.config_hash:
+                        raise ToolApprovalConflictError("Agent configuration changed or is unavailable")
+                except ToolApprovalConflictError:
+                    raise
+                except Exception as exc:
+                    raise ToolApprovalConflictError("Agent configuration is unavailable") from exc
+                try:
+                    validate_approval(presented=binding, current=binding, expected_revision=expected_revision,
+                                      status=request.status, expired=time.monotonic() >= request.expires_at)
+                except ApprovalBindingError as exc:
+                    raise ToolApprovalConflictError("external task approval changed or is unavailable") from exc
+                if any(value <= datetime.now(timezone.utc) for value in deadlines):
+                    raise ToolApprovalConflictError("external task deadline expired or unavailable")
+                _resolve_request_locked(request, decision, record_event=False)
+                result = {"requestId": request.request_id, "status": request.status, "decision": request.decision}
+            finally:
+                state_lock.release()
+        finally:
+            team_lock.release()
+    _record_approval_event("tool.approval.resolved", request, outcome=request.status)
+    return result
+
+
 def authorize_or_wait(
     *,
     session_id: str,
@@ -223,12 +365,27 @@ def authorize_or_wait(
     permission_preset: str,
     cancel_checker: Callable[[], str] | None = None,
     timeout_seconds: float = DEFAULT_APPROVAL_TIMEOUT_SECONDS,
+    external_task_id: str = "",
+    external_arguments_json: str | None = None,
+    external_execution_arguments_json: str | None = None,
 ) -> ToolApprovalOutcome:
     normalized_session = _required_identity(session_id, "sessionId")
     normalized_turn = _required_identity(turn_id, "turnId")
     normalized_agent = _required_identity(agent_id, "agentId")
     normalized_call = _required_identity(call_id, "callId")
     normalized_tool = _required_identity(tool_name, "toolName")
+    if external_task_id:
+        from core.web.services.external_agent.approval_binding import (
+            ApprovalBindingError, external_session_task, freeze_arguments,
+        )
+        try:
+            if (external_session_task(session_id=normalized_session, agent_id=normalized_agent) != external_task_id
+                    or external_arguments_json is None or freeze_arguments(tool_args) != external_arguments_json
+                    or external_execution_arguments_json is None
+                    or freeze_arguments(json.loads(external_execution_arguments_json)) != external_execution_arguments_json):
+                raise ApprovalBindingError("external approval context changed")
+        except (ApprovalBindingError, ValueError, TypeError) as exc:
+            raise ToolApprovalConflictError("external approval context is invalid") from exc
     normalized_approval = str(approval or "never").strip()
     normalized_risk = str(risk or "read").strip()
     if normalized_approval == "never":
@@ -329,6 +486,9 @@ def authorize_or_wait(
         config_hash=normalized_config_hash,
         permission_preset=normalized_permission_preset,
         timeout_seconds=timeout_seconds,
+        external_task_id=external_task_id,
+        external_arguments_json=external_arguments_json or "",
+        external_execution_arguments_json=external_execution_arguments_json or "",
     )
     while not request.event.wait(0.05):
         if callable(cancel_checker):
@@ -360,6 +520,9 @@ def authorize_or_wait(
                     request.status = "expired"
                     request.decision = "cancel"
                     request.resolved_at = _utc_now()
+                    if request.external_task_id:
+                        request.external_arguments_json = ""
+                        request.external_execution_arguments_json = ""
                     request.event.set()
                     expired_now = True
             if not expired_now:
@@ -485,6 +648,9 @@ def _get_or_create_request(
     config_hash: str,
     permission_preset: str,
     timeout_seconds: float,
+    external_task_id: str = "",
+    external_arguments_json: str = "",
+    external_execution_arguments_json: str = "",
 ) -> _ApprovalRequest:
     key = (session_id, turn_id, call_id)
     with _LOCK:
@@ -501,6 +667,9 @@ def _get_or_create_request(
                 or existing.config_revision != config_revision
                 or existing.config_hash != config_hash
                 or existing.permission_preset != permission_preset
+                or existing.external_task_id != external_task_id
+                or existing.external_arguments_json != external_arguments_json
+                or existing.external_execution_arguments_json != external_execution_arguments_json
             ):
                 raise ToolApprovalConflictError("callId was reused with different approval facts")
             return existing
@@ -524,6 +693,9 @@ def _get_or_create_request(
             permission_preset=permission_preset,
             created_at=_utc_now(),
             expires_at=time.monotonic() + max(0.1, float(timeout_seconds)),
+            external_task_id=external_task_id,
+            external_arguments_json=external_arguments_json,
+            external_execution_arguments_json=external_execution_arguments_json,
         )
         _REQUESTS[request.request_id] = request
         _REQUEST_IDS_BY_CALL[key] = request.request_id
@@ -542,7 +714,7 @@ def _get_request(session_id: str, request_id: str) -> _ApprovalRequest:
         return request
 
 
-def _resolve_request_locked(request: _ApprovalRequest, decision: str) -> None:
+def _resolve_request_locked(request: _ApprovalRequest, decision: str, *, record_event: bool = True) -> None:
     if decision == "acceptAlways":
         _add_durable_grant(
             agent_id=request.agent_id,
@@ -629,8 +801,12 @@ def _resolve_request_locked(request: _ApprovalRequest, decision: str) -> None:
         request.status = "declined"
     else:
         request.status = "cancelled"
+    if request.external_task_id:
+        request.external_arguments_json = ""
+        request.external_execution_arguments_json = ""
     request.event.set()
-    _record_approval_event("tool.approval.resolved", request, outcome=request.status)
+    if record_event:
+        _record_approval_event("tool.approval.resolved", request, outcome=request.status)
 
 
 def _has_durable_grant(*, agent_id: str, tool_name: str, grant_key: str) -> bool:
@@ -1160,7 +1336,7 @@ def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
                     return {"assistantAction": action, "assistantTargets": {"project_id": project, "display_name": name, "model_id": model},
                         "assistantCreatePreset": validated.capability_preset,
                         "assistantCreateTools": agent_create_tool_policy(validated.capability_preset)["allowedTools"],
-                        "assistantOperationDescription": "固定文件工具权限持续生效；写入按当前权限和协作模式审批，edit/yolo 等模式可能自动批准。目标派遣任务的审批目前只能拒绝，不能在 Launcher 批准写入。平台允许的动态目录包括项目、Agent 工作区、项目存储、工具目录、系统临时目录和用户配置允许目录，未来可能变化。不能执行命令或测试。"}
+                        "assistantOperationDescription": "固定文件工具权限持续生效；写入按当前权限和协作模式审批，edit/yolo 等模式可能自动批准。目标派遣任务的审批只有在完整预览、版本和执行参数均可验证时才能批准。平台允许的动态目录包括项目、Agent 工作区、项目存储、工具目录、系统临时目录和用户配置允许目录，未来可能变化。不能执行命令或测试。"}
                 return {"assistantAction": action, "assistantTargets": {"project_id": project, "display_name": name, "model_id": model},
                     "assistantOperationDescription": "新 Agent 默认没有工具和读写范围，不能保证读取或修改项目；派遣写任务不会自动增加工具权限。"}
             except (ValueError, TypeError, KeyError, RuntimeError, RecursionError):

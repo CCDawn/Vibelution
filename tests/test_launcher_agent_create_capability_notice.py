@@ -40,7 +40,7 @@ def test_fixed_preset_approval_discloses_tools_and_actual_dynamic_boundaries(mon
     summary = _assistant_management_summary({"action": "agent_create", "arguments_json": json.dumps(values)})
     assert summary["assistantCreatePreset"] == "project_files_v1"
     assert summary["assistantCreateTools"] == ["glob_tool", "grep_search_tool", "read_file_tool", "apply_diff_edit_tool", "write_file_tool"]
-    for value in ("项目", "Agent 工作区", "项目存储", "工具目录", "系统临时目录", "用户配置允许目录", "未来可能变化", "协作模式审批", "edit/yolo", "可能自动批准", "只能拒绝", "不能在 Launcher 批准写入", "不能执行命令或测试"):
+    for value in ("项目", "Agent 工作区", "项目存储", "工具目录", "系统临时目录", "用户配置允许目录", "未来可能变化", "协作模式审批", "edit/yolo", "可能自动批准", "完整预览", "版本和执行参数", "不能执行命令或测试"):
         assert value in summary["assistantOperationDescription"]
 
 

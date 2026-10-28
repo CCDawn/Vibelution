@@ -1534,6 +1534,15 @@ def submit_session_message(
     prepared_context_limit_ok = False
     accepted_model_parameters = dict(_model_parameters_snapshot) if _model_parameters_snapshot else None
     try:
+        from core.web.services.external_agent.approval_binding import ApprovalBindingError, validate_external_session_submit
+        try:
+            validate_external_session_submit(
+                conversation=s.load_session_chat_state(s.PROJECT_ROOT, conversation_id),
+                session_id=conversation_id, message_source=normalized_message_source,
+                message_metadata=message_metadata,
+            )
+        except ApprovalBindingError as exc:
+            raise s.SessionValidationError("外部任务会话身份不可验证，不能提交新轮次。") from exc
         if normalized_client_submission_id:
             replay = _existing_submission_replay(
                 s,
@@ -2571,6 +2580,9 @@ def _resubmit_session_user_message(
     admit_lock = _session_submit_admit_lock(conversation_id)
     admit_lock.acquire()
     try:
+        from core.web.services.external_agent.approval_binding import is_external_session
+        if is_external_session(s.load_session_chat_state(s.PROJECT_ROOT, conversation_id)):
+            raise s.SessionValidationError("外部任务会话不能通过编辑或重试重新派遣。")
         with (s._CHAT_STATE_LOCK if _safe_retry_expected is not None else nullcontext()):
             if normalized_client_submission_id:
                 accepted_events = journal_bridge.load_session_conversation_events_by_correlation(

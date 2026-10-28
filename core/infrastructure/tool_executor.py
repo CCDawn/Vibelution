@@ -893,10 +893,13 @@ class ToolExecutor:
         call_id = str(tool_call_id or "").strip()
 
         runtime_identity: dict[str, str] = {}
+        runtime: dict[str, Any] = {}
         try:
             from core.web.services.agent_directory_service import current_agent_runtime
 
             runtime = current_agent_runtime() or {}
+            if not isinstance(runtime, dict):
+                runtime = {}
             for source_key, target_key in (
                 ("sessionId", "sessionId"),
                 ("turnId", "turnId"),
@@ -907,6 +910,30 @@ class ToolExecutor:
                     runtime_identity[target_key] = value
         except Exception:
             runtime_identity = {}
+
+        external_arguments_json = None
+        external_execution_arguments_json = None
+        external_func = None
+        from core.web.services.external_agent.approval_binding import (
+            ApprovalBindingError, external_session_task, freeze_arguments, freeze_execution_arguments,
+            registered_external_task,
+        )
+        try:
+            registered_task = registered_external_task(session_id=runtime_identity.get("sessionId", ""),
+                                                       agent_id=runtime_identity.get("agentId", ""))
+            if registered_task or str(runtime.get("runtimeToolSource") or "").startswith("external_agent_task:"):
+                external_session_task(session_id=runtime_identity.get("sessionId", ""),
+                                      agent_id=runtime_identity.get("agentId", ""))
+                external_arguments_json = freeze_arguments(tool_args)
+                external_func = self._tool_map.get(tool_name)
+                if external_func is not None:
+                    external_execution_arguments_json = freeze_execution_arguments(
+                        external_func, json.loads(external_arguments_json),
+                    )
+                # Authorization and observers only receive a disposable copy.
+                tool_args = json.loads(external_arguments_json)
+        except (ApprovalBindingError, ValueError, TypeError):
+            return ("[工具授权] 外部任务身份或参数无法安全验证。", None)
 
         trace.bind(**runtime_identity)
         effective_timeout = self._resolve_timeout(tool_name, tool_args)
@@ -926,12 +953,22 @@ class ToolExecutor:
 
         started_at = time.monotonic()
 
+        auth_options = {"cancel_checker": self._snapshot_cancel_checker()}
+        if external_arguments_json is not None:
+            auth_options["external_arguments_json"] = external_arguments_json
+            auth_options["external_execution_arguments_json"] = external_execution_arguments_json
         execution_authorization = self._check_canonical_execution_authorization(
             tool_name,
             call_id,
             tool_args,
-            cancel_checker=self._snapshot_cancel_checker(),
+            **auth_options,
         )
+        if external_arguments_json is not None:
+            try:
+                if freeze_arguments(tool_args) != external_arguments_json:
+                    return ("[工具授权] 外部任务参数在审批期间发生变化。", None)
+            except ApprovalBindingError:
+                return ("[工具授权] 外部任务参数无法安全验证。", None)
         if execution_authorization is not None and not execution_authorization.allowed:
             authorization_error = execution_authorization.message
             auth_code = str(getattr(execution_authorization, "code", "") or "").strip()
@@ -1030,7 +1067,9 @@ class ToolExecutor:
             )
             return (readonly_block, None)
 
-        blocked_message = self._check_runtime_block(tool_name, tool_args)
+        blocked_message = self._check_runtime_block(
+            tool_name, json.loads(external_arguments_json) if external_arguments_json is not None else tool_args,
+        )
         if blocked_message:
             publish_tool_event(EventNames.TOOL_ERROR, {
                 "name": tool_name,
@@ -1103,12 +1142,15 @@ class ToolExecutor:
             "lifecyclePhase": "arguments_ready",
         })
 
-        func = self._tool_map[tool_name]
-        timeout = self._resolve_timeout(tool_name, tool_args)
-        call_args = dict(tool_args or {})
+        func = external_func if external_arguments_json is not None else self._tool_map[tool_name]
+        timeout = self._resolve_timeout(tool_name, json.loads(external_arguments_json)
+                                        if external_arguments_json is not None else tool_args)
+        call_args = (json.loads(external_execution_arguments_json) if external_execution_arguments_json is not None
+                     else dict(tool_args or {}))
         # 内部治理哨兵只用于执行权限判断，不能透传给真实工具函数。
-        call_args.pop("_internal_delegate", None)
-        call_args.pop("force", None)
+        if external_execution_arguments_json is None:
+            call_args.pop("_internal_delegate", None)
+            call_args.pop("force", None)
         argument_error = _validate_tool_arguments(tool_name, func, call_args)
         if argument_error:
             publish_tool_event(EventNames.TOOL_ERROR, {
@@ -1644,17 +1686,23 @@ class ToolExecutor:
         tool_args: dict,
         *,
         cancel_checker: Optional[Callable[[], str]] = None,
+        external_arguments_json: Optional[str] = None,
+        external_execution_arguments_json: Optional[str] = None,
     ):
         if str(tool_name or "").strip() not in self._tool_map:
             return None
         try:
             from core.authorization.tool_authorization_service import authorize_tool_execution
 
+            options = {"cancel_checker": cancel_checker}
+            if external_arguments_json is not None:
+                options["external_arguments_json"] = external_arguments_json
+                options["external_execution_arguments_json"] = external_execution_arguments_json
             return authorize_tool_execution(
                 tool_name=tool_name,
                 tool_call_id=tool_call_id,
                 tool_args=tool_args,
-                cancel_checker=cancel_checker,
+                **options,
             )
         except Exception as exc:
             _debug_logger.warning(f"[工具授权] canonical execution authorization failed: {type(exc).__name__}: {exc}")

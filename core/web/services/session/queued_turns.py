@@ -1356,9 +1356,16 @@ def drain_session_queued_turns(session_id: str) -> bool:
         if normalized_session_id in _DRAINING_SESSIONS:
             return False
         _DRAINING_SESSIONS.add(normalized_session_id)
+    external_blocked = False
     try:
         # Keep the claim valid until submit/settlement, including cross-process TTL recovery.
         with s._session_submit_admit_lock(normalized_session_id):
+            from core.web.services.external_agent.approval_binding import is_external_session
+            if is_external_session(s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)):
+                # These queue sources lack the external task's permission
+                # profile. Leave all rows untouched for explicit recovery.
+                external_blocked = True
+                return False
             batch = _claim_drain_batch(normalized_session_id)
             if not batch:
                 return False
@@ -1531,7 +1538,8 @@ def drain_session_queued_turns(session_id: str) -> bool:
         # (running sessions, no drainable rows) and is rolling-window capped,
         # so scheduling even after an empty claim is safe. Only after leaving
         # the single-flight set: an earlier schedule would be dropped by it.
-        _schedule_session_queued_turn_drain_continuation(normalized_session_id)
+        if not external_blocked:
+            _schedule_session_queued_turn_drain_continuation(normalized_session_id)
 
 
 def schedule_session_queued_turn_drain(session_id: str) -> None:

@@ -817,6 +817,16 @@ class ManagedAgentBackendClient:
             )
         )
 
+    async def preview_bound_approval(self, *, task_id: str, approval_id: str) -> dict[str, Any]:
+        task_state = await self._task_state(task_id)
+        return await self._request_json("GET", f"/api/v1/external-agent/tasks/{quote(task_id, safe='')}/approvals/{quote(approval_id, safe='')}/preview",
+            task_capability=str(task_state["taskCapability"]), max_response_bytes=4 * 1024 * 1024)
+
+    async def resolve_bound_approval(self, *, task_id: str, approval_id: str, decision: str, expected_revision: str) -> dict[str, Any]:
+        task_state = await self._task_state(task_id)
+        return await self._request_json("POST", f"/api/v1/external-agent/tasks/{quote(task_id, safe='')}/approvals/{quote(approval_id, safe='')}/resolve-bound",
+            task_capability=str(task_state["taskCapability"]), json_payload={"decision": decision, "expected_revision": expected_revision})
+
     async def cancel_task(self, *, task_id: str) -> dict[str, Any]:
         task_state = await self._task_state(task_id)
         payload = await self._request_json(
@@ -953,6 +963,7 @@ class ManagedAgentBackendClient:
         management_auth: tuple[str, str] | None = None,
         json_payload: dict[str, Any] | None = None,
         timeout_seconds: float | None = None,
+        max_response_bytes: int | None = None,
     ) -> dict[str, Any]:
         await self._ensure_connected()
         headers = {
@@ -970,9 +981,16 @@ class ManagedAgentBackendClient:
             trust_env=False,
         ) as client:
             try:
-                response = await client.request(
-                    method, path, headers=headers, json=json_payload
-                )
+                if max_response_bytes is None:
+                    response = await client.request(method, path, headers=headers, json=json_payload)
+                else:
+                    async with client.stream(method, path, headers=headers, json=json_payload) as stream:
+                        chunks = bytearray()
+                        async for chunk in stream.aiter_bytes():
+                            chunks.extend(chunk)
+                            if len(chunks) > max_response_bytes:
+                                raise BackendClientError("managed backend response exceeds preview limit", code="BACKEND_RESPONSE_TOO_LARGE")
+                        response = httpx.Response(stream.status_code, headers=stream.headers, content=bytes(chunks), request=stream.request)
             except httpx.HTTPError as exc:
                 raise BackendClientError(
                     f"managed backend is unreachable: {type(exc).__name__}",

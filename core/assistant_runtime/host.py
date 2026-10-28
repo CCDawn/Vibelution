@@ -171,12 +171,20 @@ class ApprovalDecision(BaseModel):
     decision: Literal["accept", "decline"]
 
 
-class DispatchApprovalDecline(BaseModel):
+class DispatchApprovalPreview(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     dispatchId: str = Field(min_length=1, max_length=120, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
     taskId: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9_.:-]+$")
     approvalId: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9_.:-]+$")
+
+
+class DispatchApprovalDecline(DispatchApprovalPreview):
     revision: str = Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9_.:-]+$")
+
+
+class DispatchApprovalBoundDecision(DispatchApprovalPreview):
+    revision: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+    decision: Literal["accept", "decline"]
 
 
 class ReminderSettlement(BaseModel):
@@ -1259,16 +1267,33 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
         def dispatches():
             return {"dispatches": dispatch.list_dispatches()}
 
+        @app.post("/api/assistant/dispatches/approval/preview")
+        async def preview_dispatch_approval(payload: DispatchApprovalPreview):
+            from .dispatch import DispatchError
+            try:
+                result = await dispatch.preview_bound_approval(payload.dispatchId, task_id=payload.taskId, approval_id=payload.approvalId)
+                return JSONResponse(result, headers={"Cache-Control": "no-store"})
+            except DispatchError as exc:
+                raise HTTPException(409, detail={"code": exc.code}) from None
+
+        @app.post("/api/assistant/dispatches/approval/decision")
+        async def decide_dispatch_approval(payload: DispatchApprovalBoundDecision):
+            from .dispatch import DispatchError
+            try:
+                return await dispatch.decide_bound_approval(payload.dispatchId, task_id=payload.taskId,
+                    approval_id=payload.approvalId, revision=payload.revision, decision=payload.decision)
+            except DispatchError as exc:
+                raise HTTPException(409, detail={"code": exc.code}) from None
+
         @app.post("/api/assistant/dispatches/approval/decline")
         async def decline_dispatch_approval(payload: DispatchApprovalDecline):
             from .dispatch import DispatchError
             try:
-                return await dispatch.decline_presented_approval(
-                    payload.dispatchId, task_id=payload.taskId, approval_id=payload.approvalId,
-                    expected_revision=payload.revision,
-                )
+                return await dispatch.decline_presented_approval(payload.dispatchId, task_id=payload.taskId,
+                    approval_id=payload.approvalId, expected_revision=payload.revision)
             except DispatchError as exc:
                 raise HTTPException(409, detail={"code": exc.code}) from None
+
 
     # Operator-only single-window controls retain the host bearer boundary;
     # the model only sees the separate scoped computer tools.

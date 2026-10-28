@@ -13,6 +13,30 @@ from core.external_agent.backend_client import (
 )
 
 
+@pytest.mark.anyio
+async def test_bound_preview_uses_original_task_capability_and_rejects_oversize(tmp_path, monkeypatch):
+    requests = []
+    too_large = False
+    def handler(request):
+        requests.append(request)
+        if too_large:
+            return httpx.Response(200, content=b'{' + b' ' * (4 * 1024 * 1024) + b'}')
+        return httpx.Response(200, json={"taskId": "task-1", "requestId": "approval-1"})
+    client = ManagedAgentBackendClient(tmp_path, state_path=tmp_path / "state.json", transport=httpx.MockTransport(handler))
+    client._verified, client._base_url, client._control_token = True, "http://127.0.0.1", "control"
+    async def task_state(task_id):
+        assert task_id == "task-1"
+        return {"taskCapability": "original-capability"}
+    monkeypatch.setattr(client, "_task_state", task_state)
+    await client.preview_bound_approval(task_id="task-1", approval_id="approval-1")
+    assert requests[-1].headers["X-Vibelution-External-Agent-Task-Capability"] == "original-capability"
+    assert requests[-1].url.path.endswith("/tasks/task-1/approvals/approval-1/preview")
+    too_large = True
+    with pytest.raises(BackendClientError) as failure:
+        await client.preview_bound_approval(task_id="task-1", approval_id="approval-1")
+    assert failure.value.code == "BACKEND_RESPONSE_TOO_LARGE"
+
+
 @pytest.fixture
 def directory_client(tmp_path, monkeypatch):
     _runtime_state(tmp_path)

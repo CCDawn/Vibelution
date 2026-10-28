@@ -3,6 +3,7 @@ from __future__ import annotations
 from core.infrastructure import developer_sandbox
 from core.ui.chat_state import load_chat_state
 from core.web.services import agent_directory_service, session_service
+from core.web.services.external_agent.approval_binding import register_external_session, unregister_external_session
 
 
 def test_external_task_session_is_hidden_and_does_not_change_active_conversation(
@@ -42,17 +43,21 @@ def test_external_task_session_is_hidden_and_does_not_change_active_conversation
         lightweight=True,
         activate=False,
     )
-    session_service.submit_session_message(
-        external["id"],
-        "External acceptance task",
-        message_source="external_agent_task",
-        message_metadata={
-            "source": "external_agent_task",
-            "taskId": "eat-1",
-            "effectivePermissionProfile": "read_only",
-        },
-        lightweight_response=True,
-    )
+    register_external_session(task_id="eat-1", session_id=external["id"], agent_id=visible["agentId"])
+    try:
+        session_service.submit_session_message(
+            external["id"],
+            "External acceptance task",
+            message_source="external_agent_task",
+            message_metadata={
+                "source": "external_agent_task",
+                "taskId": "eat-1",
+                "effectivePermissionProfile": "read_only",
+            },
+            lightweight_response=True,
+        )
+    finally:
+        unregister_external_session(task_id="eat-1", session_id=external["id"], agent_id=visible["agentId"])
 
     after = load_chat_state(tmp_path)
     assert (
