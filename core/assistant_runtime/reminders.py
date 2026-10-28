@@ -117,7 +117,10 @@ class LauncherReminders:
         return {"schemaVersion": 1, "event": None}
 
     def settle(self, event_id: str, token: str, channel: str, *, opened: bool):
-        self._no_import()
+        # An imported profile cannot submit a new reminder until ownership is
+        # transferred, but an existing private-token click may still settle.
+        if not opened:
+            self._no_import()
         match = _EVENT.fullmatch(event_id) if isinstance(event_id, str) else None
         if not match:
             raise ReminderReceiptError("reminder_event_invalid")
@@ -137,7 +140,8 @@ class LauncherReminders:
         return result
 
     def fallback(self, event_id: str, token: str):
-        self._no_import()
+        # A late system failure only updates its existing receipt; next() stays
+        # blocked for imported profiles and cannot initiate another delivery.
         match = _EVENT.fullmatch(event_id) if isinstance(event_id, str) else None
         if not match:
             raise ReminderReceiptError("reminder_event_invalid")

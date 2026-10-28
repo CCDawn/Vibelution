@@ -79,6 +79,10 @@ body = json.loads((root / 'fixture-event.json').read_text())
 with TestClient(create_app(native=NativeFacade(root), token='isolated-main-token'),
                 base_url='http://127.0.0.1') as client:
     assert client.post('/api/assistant/reminders/next', headers=headers).json()['event'] is None
+    # A completed import must not discard a previous system-notification
+    # callback, while new reminder submission remains blocked.
+    (root / 'affairs_migrations').mkdir()
+    assert client.post('/api/assistant/reminders/submitted', headers=headers, json=body).json()['detail']['code'] == 'reminder_imported_profile_blocked'
     fallback = {key: body[key] for key in ('eventId', 'attemptToken')}
     assert client.post('/api/assistant/reminders/fallback', json=fallback).status_code == 401
     bad = client.post('/api/assistant/reminders/fallback', headers=headers,
@@ -93,7 +97,6 @@ with TestClient(create_app(native=NativeFacade(root), token='isolated-main-token
     opened = client.post('/api/assistant/reminders/opened', headers=headers, json=body)
     assert opened.status_code == 200 and opened.json()['receipt']['interactionObserved']
     assert client.post('/api/assistant/reminders/fallback', headers=headers, json=fallback).status_code == 503
-    (root / 'affairs_migrations').mkdir()
     result = client.post('/api/assistant/reminders/next', headers=headers)
     assert result.status_code == 409 and result.json()['detail']['code'] == 'reminder_imported_profile_blocked'
 ''', config_text=TEST_MODEL_CONFIG)
