@@ -35,6 +35,30 @@ async function setup() {
 }
 
 describe("production main control composition", () => {
+  it("exposes the native queue's actual execution drain through the assistant guard", async () => {
+    const f = await setup();
+    let entered!: () => void, release!: () => void;
+    let capture!: () => Promise<void>;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    f.execute.mockImplementationOnce(input => {
+      capture = input.queue!.captureExecutionDrain!;
+      return input.queue!.submit({ operation: input.operation, execute: async command => {
+        entered(); await gate;
+        return { schemaVersion: 1, accepted: true, operation: command.operation, commandId: command.commandId };
+      } });
+    });
+    const request = f.create()(f.request);
+    await started;
+    let drained = false;
+    const drain = capture().then(() => { drained = true; });
+    await Promise.resolve();
+    expect(drained).toBe(false);
+    release();
+    await request;
+    await drain;
+    expect(drained).toBe(true);
+  });
   it("joins the assistant and ordinary Launcher controls on the same native command", async () => {
     const f = await setup();
     let entered!: () => void, release!: () => void;

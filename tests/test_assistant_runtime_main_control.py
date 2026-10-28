@@ -341,6 +341,45 @@ async def test_affairs_sync_requires_native_governance_and_preserves_unknown_rec
 
 
 @pytest.mark.anyio
+async def test_episodic_sync_requires_approval_and_preserves_original_recovery_id():
+    from core.assistant_runtime.main_control import episodic_migration_id
+    service = Dispatch()
+    owner = broker(service, claim_seconds=2)
+    bind_actions(service, asyncio.get_running_loop(), main_control=owner)
+    args = {"project_id": "p:main", "preview_id": "b" * 64}
+    runtime = {"agentId": "a", "sessionId": "s", "turnId": "turn-1"}
+    try:
+        assert (await asyncio.to_thread(execute_action, "episodic_sync", args, runtime=runtime))["status"] == "approval_required"
+        with pytest.raises(ValueError):
+            await asyncio.to_thread(execute_action, "episodic_sync", {**args, "path": "C:/secret"}, runtime=runtime, governed=True)
+        task = asyncio.create_task(asyncio.to_thread(execute_action, "episodic_sync", args, runtime=runtime, governed=True))
+        wire = (await owner.claim())["request"]
+        assert wire["action"] == "episodic_sync" and wire["turnId"] == "turn-1"
+        owner.cancel_history_imports("turn-1")
+        unknown = await task
+        assert unknown["state"] == "unknown" and unknown["migrationId"] == episodic_migration_id("p:main", args["preview_id"])
+        original = "episodic-" + "f" * 40
+        recovery = asyncio.create_task(asyncio.to_thread(execute_action, "episodic_sync", {**args, "recover_sync_id": original}, runtime=runtime, governed=True))
+        wire = (await owner.claim())["request"]
+        assert wire["recoverSyncId"] == original
+        owner.cancel_history_imports("turn-1")
+        assert (await recovery)["migrationId"] == original
+        resolution_args = {**args, "resolve_sync_id": original, "review_token": "c" * 64}
+        with pytest.raises(ValueError):
+            await asyncio.to_thread(execute_action, "episodic_sync", {**args, "resolve_sync_id": original}, runtime=runtime, governed=True)
+        resolution = asyncio.create_task(asyncio.to_thread(execute_action, "episodic_sync", resolution_args, runtime=runtime, governed=True))
+        wire = (await owner.claim())["request"]
+        assert wire["resolveSyncId"] == original and wire["reviewToken"] == "c" * 64
+        resolved = {"schemaVersion": 1, "projectId": args["project_id"], "previewId": args["preview_id"],
+            "migrationId": episodic_migration_id(args["project_id"], args["preview_id"]),
+            "state": "complete", "code": "resolved", "appliedCount": 0, "conflictCount": 0, "readyForCutover": False}
+        assert owner.settle(wire["deliveryId"], resolved) and await resolution == resolved
+    finally:
+        owner.close()
+        unbind_actions(service)
+
+
+@pytest.mark.anyio
 async def test_existing_native_manage_tool_is_the_only_approval_elevation(monkeypatch):
     from core.infrastructure import native_runtime
     from tools import personal_assistant_tools

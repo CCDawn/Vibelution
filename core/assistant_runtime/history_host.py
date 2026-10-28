@@ -449,6 +449,103 @@ class HistoryHost:
                 current["done"].set()
             self._import_lock.release()
 
+    def sync_episodic(self, project_id, preview_id, revision, turn_id, operation_id, recover_sync_id=None,
+                      resolve_sync_id=None, review_token=None):
+        """Consume an approved preview under the same cancellation fence as affairs."""
+        from .main_control import episodic_migration_id, initial_migration_id
+        from .online_episodic_sync import EpisodicSyncPrewrite, OnlineEpisodicSyncOwner, synchronize_episodic
+        if recover_sync_id is not None and (not isinstance(recover_sync_id, str)
+                or not re.fullmatch(r"episodic-[a-f0-9]{40}", recover_sync_id)):
+            raise ValueError("episodic_sync_recovery_id_invalid")
+        if ((resolve_sync_id is None) != (review_token is None)
+                or resolve_sync_id is not None and (recover_sync_id is not None
+                    or not isinstance(resolve_sync_id, str) or not re.fullmatch(r"episodic-[a-f0-9]{40}", resolve_sync_id)
+                    or not isinstance(review_token, str) or not re.fullmatch(r"[a-f0-9]{64}", review_token))):
+            raise ValueError("episodic_sync_resolution_invalid")
+        mid = recover_sync_id or episodic_migration_id(project_id, preview_id)
+        base = {"schemaVersion": 1, "projectId": project_id, "previewId": preview_id,
+                "migrationId": mid, "readyForCutover": False}
+        unknown = {**base, "state": "unknown", "code": "unknown"}
+        binding_key = ("episodic", project_id, preview_id, revision, turn_id, recover_sync_id, resolve_sync_id, review_token)
+        if not self._import_lock.acquire(blocking=False):
+            with self._sync_signal_lock:
+                active = self._sync_active
+                same = active is not None and active["previewId"] == preview_id
+            if not same:
+                self._preview.discard(preview_id)
+            return unknown if recover_sync_id else {**base, "state": "rejected", "code": "busy"}
+        owner = OnlineEpisodicSyncOwner(self._generation,
+            lambda generation, turn: self._sync_guard(generation, turn, operation_id))
+        current = {"operationId": operation_id, "previewId": preview_id, "turnId": turn_id,
+                   "owner": owner, "done": Event()}
+        try:
+            with self._sync_signal_lock:
+                previous = self._sync_seen.get(operation_id)
+                if previous is not None:
+                    if previous["binding"] != binding_key:
+                        self._preview.discard(preview_id)
+                        return unknown
+                    return previous.get("result") or unknown
+                if operation_id in self._sync_cancelled:
+                    self._preview.discard(preview_id)
+                    return unknown
+                if len(self._sync_seen) >= 256:
+                    terminal = next((key for key, value in self._sync_seen.items() if value["result"] is not None), None)
+                    if terminal is None:
+                        self._preview.discard(preview_id)
+                        return unknown
+                    del self._sync_seen[terminal]
+                self._sync_seen[operation_id] = {"binding": binding_key, "previewId": preview_id, "result": None}
+                self._sync_active = current
+            phase = "preview"
+            try:
+                with self._sync_guard(self._generation, turn_id, operation_id):
+                    binding = self._preview.consume_for_import(preview_id, project_id, revision, turn_id)
+                phase = "sync"
+                options = ({"resolve_sync_id": resolve_sync_id, "review_token": review_token} if resolve_sync_id is not None else {})
+                outcome = synchronize_episodic(preview_binding=binding, owner=owner, generation=self._generation,
+                    turn_id=turn_id, initial_operation_id=initial_migration_id(project_id, "", "personal"),
+                    sync_id=mid, confirmation_only=recover_sync_id is not None, **options)
+                if (type(outcome) is not dict or type(outcome.get("appliedCount")) is not int
+                        or not 0 <= outcome["appliedCount"] <= 4096 or type(outcome.get("conflictCount")) is not int
+                        or not 0 <= outcome["conflictCount"] <= 4096
+                        or resolve_sync_id is not None and (outcome["appliedCount"] != 0 or outcome["conflictCount"] != 0)):
+                    result = unknown
+                elif recover_sync_id is not None:
+                    result = {**base, "state": "confirmed", "code": "matched", "conflictCount": outcome["conflictCount"]}
+                else:
+                    conflict = outcome["conflictCount"]
+                    result = {**base, "state": "partial" if conflict else "complete",
+                              "code": "unresolved" if conflict else "resolved" if resolve_sync_id is not None else "synchronized",
+                              "appliedCount": outcome["appliedCount"], "conflictCount": conflict}
+            except EpisodicSyncPrewrite as error:
+                code = str(error)
+                result = (unknown if recover_sync_id is not None or code not in {
+                    "busy", "baseline_unavailable", "cancelled", "project_unavailable", "unresolved", "pending", "row_limit", "review_changed"}
+                    else {**base, "state": "rejected", "code": code})
+            except MigrationIOError as error:
+                code = str(error)
+                if recover_sync_id is not None or phase != "preview" or code == "history_preview_expired":
+                    result = unknown
+                else:
+                    result = {**base, "state": "rejected", "code": (
+                        "busy" if code == "affairs_sync_busy" else "cancelled" if code == "affairs_sync_cancelled"
+                        else "preview_invalid")}
+            except Exception:
+                # Once the approved operation starts, loss of acknowledgement
+                # never authorizes another write under a replacement ID.
+                result = unknown
+            self._preview.discard(preview_id)
+            with self._sync_signal_lock:
+                self._sync_seen[operation_id]["result"] = result
+            return result
+        finally:
+            with self._sync_signal_lock:
+                if self._sync_active is current:
+                    self._sync_active = None
+                current["done"].set()
+            self._import_lock.release()
+
     def cancel(self, operation_id, preview_id):
         """Fence publication before acknowledging cancellation, even if early."""
         with self._lock:

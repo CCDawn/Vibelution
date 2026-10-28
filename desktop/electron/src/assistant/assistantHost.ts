@@ -5,7 +5,7 @@ import { isAbsolute, join, resolve } from "node:path";
 import { loadWorkbenchJobNative, type WorkbenchJobHandle, type WorkbenchJobNative } from "../process/workbenchJob.js";
 import { resolveNoConsolePython } from "../process/workbenchBackend.js";
 import { MAX_ASSISTANT_PROJECTS, type AssistantProjectRegistrySnapshot } from "./projectRegistry.js";
-import { parseAffairsSyncResult, runMainControlPump, unknownAffairsSyncResult, type InitialMigrationMainControlRequest, type MainControlRequest } from "./mainControlTransport.js";
+import { parseAffairsSyncResult, parseEpisodicSyncResult, runMainControlPump, unknownAffairsSyncResult, unknownEpisodicSyncResult, type InitialMigrationMainControlRequest, type MainControlRequest } from "./mainControlTransport.js";
 
 const STARTUP_MS = 60_000;
 const REQUEST_MS = 15_000;
@@ -647,10 +647,21 @@ export class AssistantHost {
 
   /** Main-only; caller holds the project registry lease through cancellation and drain. */
   async syncAffairs(input: { projectId: string; previewId: string; turnId: string; revision: number; signal?: AbortSignal; recoverSyncId?: string }): Promise<unknown> {
+    return this.syncMemory(input, false);
+  }
+
+  async syncEpisodic(input: { projectId: string; previewId: string; turnId: string; revision: number; signal?: AbortSignal; recoverSyncId?: string; resolveSyncId?: string; reviewToken?: string }): Promise<unknown> {
+    return this.syncMemory(input, true);
+  }
+
+  private async syncMemory(input: { projectId: string; previewId: string; turnId: string; revision: number; signal?: AbortSignal; recoverSyncId?: string; resolveSyncId?: string; reviewToken?: string }, episodic: boolean): Promise<unknown> {
     if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(input.projectId)
       || !/^[a-f0-9]{64}$/.test(input.previewId) || typeof input.turnId !== "string"
       || !/^\S{1,160}$/.test(input.turnId) || !Number.isSafeInteger(input.revision) || input.revision < 0
-      || (input.recoverSyncId !== undefined && !/^affairs-[a-f0-9]{40}$/.test(input.recoverSyncId))) {
+      || (input.recoverSyncId !== undefined && !(episodic ? /^episodic-[a-f0-9]{40}$/ : /^affairs-[a-f0-9]{40}$/).test(input.recoverSyncId))
+      || (input.resolveSyncId === undefined) !== (input.reviewToken === undefined)
+      || (input.resolveSyncId !== undefined && (!episodic || input.recoverSyncId !== undefined
+        || !/^episodic-[a-f0-9]{40}$/.test(input.resolveSyncId) || !/^[a-f0-9]{64}$/.test(input.reviewToken!)))) {
       throw new HostError("ASSISTANT_REQUEST_INVALID");
     }
     const generation = this.current;
@@ -658,10 +669,12 @@ export class AssistantHost {
       || this.projectsSuspended || generation.projectRevision !== input.revision) throw new HostError("ASSISTANT_NOT_READY");
     const operationId = randomBytes(16).toString("hex");
     const body = { projectId: input.projectId, previewId: input.previewId, turnId: input.turnId, revision: input.revision, operationId,
-      ...(input.recoverSyncId !== undefined ? { recoverSyncId: input.recoverSyncId } : {}) };
-    const unknown = unknownAffairsSyncResult(input);
+      ...(input.recoverSyncId !== undefined ? { recoverSyncId: input.recoverSyncId } : {}),
+      ...(input.resolveSyncId !== undefined ? { resolveSyncId: input.resolveSyncId, reviewToken: input.reviewToken } : {}) };
+    const unknown = (episodic ? unknownEpisodicSyncResult : unknownAffairsSyncResult)(input);
+    const path = episodic ? "/api/assistant/episodic-sync" : "/api/assistant/affairs-sync";
     const fence = async () => {
-      const result = await this.rpc(generation, "/api/assistant/affairs-sync/cancel", "POST",
+      const result = await this.rpc(generation, `${path}/cancel`, "POST",
         { operationId, previewId: input.previewId }, 15_000, true, 8192);
       if (!object(result) || Object.keys(result).length !== 3 || result.schemaVersion !== 1
         || result.operationId !== operationId || result.cancelled !== true) throw new HostError("ASSISTANT_RESPONSE_INVALID");
@@ -671,8 +684,8 @@ export class AssistantHost {
       catch { await this.stop(); return unknown; }
     }
     try {
-      const result = await this.rpc(generation, "/api/assistant/affairs-sync", "POST", body, 120_000, false, 8192, input.signal);
-      const parsed = parseAffairsSyncResult(input, result);
+      const result = await this.rpc(generation, path, "POST", body, 120_000, false, 8192, input.signal);
+      const parsed = (episodic ? parseEpisodicSyncResult : parseAffairsSyncResult)(input, result);
       if (!parsed) throw new HostError("ASSISTANT_RESPONSE_INVALID");
       return parsed;
     } catch {

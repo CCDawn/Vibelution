@@ -1138,7 +1138,7 @@ def _argument_summary(tool_name: str, tool_args: Mapping[str, Any]) -> dict[str,
 def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
     """Approval-only projection; never expose nested prompt/policy values."""
     action = args.get("action")
-    if isinstance(action, str) and action in {"history_import", "affairs_sync", "initial_migration_queue"}:
+    if isinstance(action, str) and action in {"history_import", "affairs_sync", "episodic_sync", "initial_migration_queue"}:
         from core.infrastructure.native_runtime import is_launcher_assistant_process
         if not is_launcher_assistant_process():
             return {"assistantArgumentsInvalid": True}
@@ -1146,13 +1146,21 @@ def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
             raw = args.get("arguments_json")
             values = json.loads(raw) if isinstance(raw, str) and len(raw) <= 16000 else None
             required = {"project_id", "preview_id"}
-            optional = {"recover_sync_id"} if action == "affairs_sync" else set()
+            optional = {"recover_sync_id"} if action in {"affairs_sync", "episodic_sync"} else set()
+            if action == "episodic_sync":
+                optional |= {"resolve_sync_id", "review_token"}
             if action == "initial_migration_queue":
                 required.add("category")
             if (not isinstance(values, dict) or not required <= set(values) or set(values) - required - optional
                     or action == "initial_migration_queue" and values.get("category") not in ("personal", "knowledge")
                     or values.get("recover_sync_id") is not None and (not isinstance(values["recover_sync_id"], str)
-                        or re.fullmatch(r"affairs-[0-9a-f]{40}", values["recover_sync_id"]) is None)):
+                        or re.fullmatch((r"episodic-" if action == "episodic_sync" else r"affairs-") + r"[0-9a-f]{40}", values["recover_sync_id"]) is None)
+                    or (values.get("resolve_sync_id") is None) != (values.get("review_token") is None)
+                    or values.get("resolve_sync_id") is not None and (values.get("recover_sync_id") is not None
+                        or not isinstance(values["resolve_sync_id"], str)
+                        or re.fullmatch(r"episodic-[0-9a-f]{40}", values["resolve_sync_id"]) is None
+                        or not isinstance(values["review_token"], str)
+                        or re.fullmatch(r"[0-9a-f]{64}", values["review_token"]) is None)):
                 raise ValueError("invalid history import parameters")
             from core.assistant_runtime.actions import history_import_approval_summary
             target = history_import_approval_summary(values["project_id"], values["preview_id"])
@@ -1160,11 +1168,16 @@ def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
                 target["category"] = values["category"]
             if values.get("recover_sync_id") is not None:
                 target["syncId"] = values["recover_sync_id"]
+            if values.get("resolve_sync_id") is not None:
+                target["syncId"] = values["resolve_sync_id"]
             return {"assistantAction": action, "assistantTargets": target,
                     "assistantOperationDescription": ("排队首次导入所选旧助理的事务和情景记忆。" if action == "initial_migration_queue" and values["category"] == "personal"
                         else "排队首次导入所选旧助理可验证的私有知识。" if action == "initial_migration_queue"
                         else "只读导入所选旧助理的历史会话和附件；不会恢复旧任务或退役旧助理。"
-                        if action == "history_import" else "核对原事务同步回执，不会重新写入事务。" if values.get("recover_sync_id") is not None
+                        if action == "history_import" else "核对原情景记忆同步回执，不会重新写入。" if action == "episodic_sync" and values.get("recover_sync_id") is not None
+                        else "保留当前情景记忆，接受本批全部来源差异（可能包含尚未查看的条目）；若来源或目标变化则拒绝。" if action == "episodic_sync" and values.get("resolve_sync_id") is not None
+                        else "同步所选旧助理的情景记忆，保留目标编辑和删除；不会冻结旧来源。" if action == "episodic_sync"
+                        else "核对原事务同步回执，不会重新写入事务。" if values.get("recover_sync_id") is not None
                         else "同步所选旧助理的个人事务，保留未决冲突；不会冻结旧来源或退役旧助理。")}
         except (ValueError, TypeError, KeyError, RuntimeError, RecursionError):
             return {"assistantAction": action, "assistantArgumentsInvalid": True}

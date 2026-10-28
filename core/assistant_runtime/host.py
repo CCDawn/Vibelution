@@ -14,7 +14,7 @@ from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class Message(BaseModel):
@@ -112,6 +112,19 @@ class HistoryImport(BaseModel):
 
 class AffairsSync(HistoryImport):
     recoverSyncId: str | None = Field(default=None, pattern=r"^affairs-[a-f0-9]{40}$")
+
+
+class EpisodicSync(HistoryImport):
+    recoverSyncId: str | None = Field(default=None, pattern=r"^episodic-[a-f0-9]{40}$")
+    resolveSyncId: str | None = Field(default=None, pattern=r"^episodic-[a-f0-9]{40}$")
+    reviewToken: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+
+    @model_validator(mode="after")
+    def resolution_binding(self):
+        if ((self.resolveSyncId is None) != (self.reviewToken is None)
+                or self.resolveSyncId is not None and self.recoverSyncId is not None):
+            raise ValueError("Invalid episodic resolution")
+        return self
 
 
 class InitialMigrationPrepare(BaseModel):
@@ -593,6 +606,24 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                 return await asyncio.to_thread(history_control.cancel_affairs, payload.operationId, payload.previewId)
             except Exception:
                 raise HTTPException(503, detail="Affairs sync cancellation unavailable") from None
+
+        @app.post("/api/assistant/episodic-sync")
+        async def episodic_sync(payload: EpisodicSync, request: Request):
+            if request.query_params:
+                raise HTTPException(422, detail="Invalid episodic sync request")
+            args = (payload.projectId, payload.previewId, payload.revision, payload.turnId, payload.operationId)
+            result = await asyncio.to_thread(history_control.sync_episodic, *args, payload.recoverSyncId,
+                                             payload.resolveSyncId, payload.reviewToken)
+            return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+        @app.post("/api/assistant/episodic-sync/cancel")
+        async def episodic_sync_cancel(payload: CancelHistoryImport, request: Request):
+            if request.query_params:
+                raise HTTPException(422, detail="Invalid episodic sync cancellation")
+            try:
+                return await asyncio.to_thread(history_control.cancel_affairs, payload.operationId, payload.previewId)
+            except Exception:
+                raise HTTPException(503, detail="Episodic sync cancellation unavailable") from None
 
         @app.post("/api/assistant/history-import")
         async def history_import(payload: HistoryImport, request: Request):

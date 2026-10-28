@@ -46,6 +46,19 @@ class AffairsSync(HistoryImport):
     recover_sync_id: str | None = Field(default=None, pattern=r"^affairs-[0-9a-f]{40}$")
 
 
+class EpisodicSync(HistoryImport):
+    recover_sync_id: str | None = Field(default=None, pattern=r"^episodic-[0-9a-f]{40}$")
+    resolve_sync_id: str | None = Field(default=None, pattern=r"^episodic-[0-9a-f]{40}$")
+    review_token: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def resolution_binding(self):
+        if ((self.resolve_sync_id is None) != (self.review_token is None)
+                or self.resolve_sync_id is not None and self.recover_sync_id is not None):
+            raise ValueError("Choose receipt recovery or a reviewed resolution")
+        return self
+
+
 class InitialMigrationQueue(HistoryImport):
     category: Literal["personal", "knowledge"]
 
@@ -73,7 +86,7 @@ _APPEARANCE_HELP = {
 }
 
 
-_MAIN_SCHEMAS = {"project_status": MainControlProject, "project_lifecycle": ProjectLifecycle, "history_import": HistoryImport, "affairs_sync": AffairsSync,
+_MAIN_SCHEMAS = {"project_status": MainControlProject, "project_lifecycle": ProjectLifecycle, "history_import": HistoryImport, "affairs_sync": AffairsSync, "episodic_sync": EpisodicSync,
                  "project_lifecycle_receipt": ProjectLifecycle}
 _MAIN_HELP = {
     "project_status": "只读查询 Launcher 当前已登记主项目的状态与活跃任务数；分支 instance 暂返回 prerequisite_required，不控制分支。",
@@ -81,6 +94,7 @@ _MAIN_HELP = {
     "project_lifecycle_receipt": "只读查询同一 project_id、operation、request_id 的主项目原生回执；unknown 时继续查询原 ID，不换 ID 重放，queued 不等于完成；不支持分支 instance 或 force/interrupt。",
     "history_import": "按本轮 history_source_preview 结果，经当前工具审批策略导入所选旧助理的只读历史；不得提供路径或批准标志。成功不表示旧源已冻结、任务已交接或旧助理可退役；unknown 时先查询已有历史，不要自动重复导入。",
     "affairs_sync": "按本轮 history_source_preview 同步已首次导入的旧个人事务；来源、基线由 Launcher 核验，不得传路径或批准标志。unknown 用 affairs_sync_receipt 查本次 migrationId；rejected/pending 用 affairs_conflict_sets 找先前待确认的 syncId（不是本次 ID）。待确认时用新预览和 recover_sync_id=原 ID 核对，不重写；confirmed/matched 只表示当前结果匹配，不证明原写入归因。unresolved 查询差异；baseline_unavailable 表示尚无初次导入基线。成功不表示旧源已冻结或可退役。",
+    "episodic_sync": "按本轮 history_source_preview 同步旧情景记忆，保留目标编辑和删除。unresolved 先用 episodic_conflict_review 查看，用户同意保留目标后，以新预览及 resolve_sync_id、review_token 对账，不覆盖目标；目标变化时重新查看，来源变化时先用新预览普通同步刷新差异，再查看新 migrationId。unknown 用新预览和 recover_sync_id=原 migrationId 核对，不重写。不得传路径或批准标志；成功不表示旧源已冻结或退役。",
     "initial_migration_queue": "按本轮 history_source_preview，经原生策略准入申请排队首次导入 personal（事务和情景记忆）或 knowledge（可验证的私有知识）。不得提供路径、旧助理ID或批准标志。queued 仅表示等待 Launcher 下次启动执行，不表示已导入；unknown 保留原 operationId 对账，不得换 ID 重派；旧源未冻结。",
     "initial_migration_receipt": "只读查询已登记项目和类别对应的首次导入原回执，无需重复审批。queued 表示等待，partial 表示部分完成，unknown 表示无法确认；不得换 ID 重派，查询不表示旧源已冻结。",
 }
@@ -293,7 +307,7 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
     managed = _management_contracts()
     schemas = {**_SCHEMAS, **_documentation_contracts(), **_project_read_contracts()}
     main_contracts = {key: {"action": key, "description": _MAIN_HELP[key],
-        "parameters": model.model_json_schema(), "governed": key in {"project_lifecycle", "history_import", "affairs_sync"}}
+        "parameters": model.model_json_schema(), "governed": key in {"project_lifecycle", "history_import", "affairs_sync", "episodic_sync"}}
         for key, model in _MAIN_SCHEMAS.items()} if main_control is not None else {}
     if main_control is not None and getattr(main_control, "initial_migration_enabled", False):
         main_contracts["initial_migration_queue"] = {"action": "initial_migration_queue",
@@ -336,7 +350,7 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
     if "project_id" in args and args["project_id"] not in projects:
         raise ValueError("Project is not authorized by Launcher")
     if action in main_contracts:
-        if action in {"project_lifecycle", "operator_image_upload", "history_import", "affairs_sync", "initial_migration_queue"} and governed is not True:
+        if action in {"project_lifecycle", "operator_image_upload", "history_import", "affairs_sync", "episodic_sync", "initial_migration_queue"} and governed is not True:
             return {"ok": False, "status": "approval_required", "action": action, "tool": "personal_assistant_manage_tool"}
         if action == "initial_migration_queue":
             from .main_control import initial_model_env_unavailable
@@ -346,7 +360,7 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
             if not runtime:
                 raise ValueError("Launcher native tool identity is required")
             request = {"operation": "read"} if action == "launcher_theme_get" else {"operation": "set", "theme": args["theme"]} if action == "launcher_theme_set" else {"operation": "import", "kind": args["kind"]}
-        elif action in {"history_import", "affairs_sync", "initial_migration_queue"}:
+        elif action in {"history_import", "affairs_sync", "episodic_sync", "initial_migration_queue"}:
             turn_id = runtime.get("turnId") if isinstance(runtime, dict) else None
             if not isinstance(turn_id, str) or not turn_id.strip():
                 raise ValueError("Launcher native Turn identity is required")
@@ -354,8 +368,10 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
             if action == "initial_migration_queue":
                 from .main_control import initial_migration_id
                 request.update(category=args["category"], operationId=initial_migration_id(args["project_id"], args["preview_id"], args["category"]))
-            if action == "affairs_sync" and args.get("recover_sync_id") is not None:
+            if action in {"affairs_sync", "episodic_sync"} and args.get("recover_sync_id") is not None:
                 request["recoverSyncId"] = args["recover_sync_id"]
+            if action == "episodic_sync" and args.get("resolve_sync_id") is not None:
+                request.update(resolveSyncId=args["resolve_sync_id"], reviewToken=args["review_token"])
         elif action == "initial_migration_receipt":
             from .main_control import initial_migration_id
             request = {"projectId": args["project_id"], "category": args["category"],
@@ -364,7 +380,7 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
             request = {"projectId": args["project_id"], "operation": args.get("operation", "status")}
             if "request_id" in args:
                 request["requestId"] = args["request_id"]
-        if action in {"operator_image_upload", "history_import", "affairs_sync", "initial_migration_queue"}:
+        if action in {"operator_image_upload", "history_import", "affairs_sync", "episodic_sync", "initial_migration_queue"}:
             turn_id = runtime.get("turnId")
             if not isinstance(turn_id, str) or not turn_id.strip():
                 raise ValueError("Launcher native Turn identity is required")
@@ -432,7 +448,7 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
     elif action == "receipt":
         coroutine = service.reconcile(args["dispatch_id"])
     try:
-        return asyncio.run_coroutine_threadsafe(coroutine, loop).result(timeout=125 if action in {"operator_image_upload", "history_import", "affairs_sync", "initial_migration_queue"} else 25)
+        return asyncio.run_coroutine_threadsafe(coroutine, loop).result(timeout=125 if action in {"operator_image_upload", "history_import", "affairs_sync", "episodic_sync", "initial_migration_queue"} else 25)
     except TimeoutError as exc:
         if action in _APPEARANCE_SCHEMAS:
             raise ValueError("Launcher外观操作尚未确认，请读取当前外观；不要自动重复上传或重新打开选择框。") from exc

@@ -10,12 +10,15 @@ export type ProjectMainControlRequest = {
   | { action: "project_lifecycle" | "project_lifecycle_receipt"; operation: "start" | "stop" | "restart"; requestId: string });
 export type HistoryMainControlRequest = { deliveryId: string; action: "history_import"; projectId: string; previewId: string; turnId: string; timeoutMs: number };
 export type AffairsSyncMainControlRequest = Omit<HistoryMainControlRequest, "action"> & { action: "affairs_sync"; recoverSyncId?: string };
+export type EpisodicSyncMainControlRequest = Omit<HistoryMainControlRequest, "action"> & { action: "episodic_sync" } & (
+  | { recoverSyncId?: string; resolveSyncId?: never; reviewToken?: never }
+  | { recoverSyncId?: never; resolveSyncId: string; reviewToken: string });
 export type InitialMigrationMainControlRequest = Omit<HistoryMainControlRequest, "action"> & {
   action: "initial_migration_queue"; category: "personal" | "knowledge"; operationId: string;
 };
 export type InitialMigrationReceiptRequest = { deliveryId: string; action: "initial_migration_receipt"; projectId: string;
   category: "personal" | "knowledge"; operationId: string };
-export type MainControlRequest = ProjectMainControlRequest | AppearanceMainControlRequest | HistoryMainControlRequest | AffairsSyncMainControlRequest | InitialMigrationMainControlRequest | InitialMigrationReceiptRequest;
+export type MainControlRequest = ProjectMainControlRequest | AppearanceMainControlRequest | HistoryMainControlRequest | AffairsSyncMainControlRequest | EpisodicSyncMainControlRequest | InitialMigrationMainControlRequest | InitialMigrationReceiptRequest;
 type PublicResult = Record<string, unknown>;
 const ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/;
 const forbiddenScheme = /^(?:https?|file|data|javascript|mailto|ftp|wss?):/i;
@@ -53,16 +56,21 @@ export function parseMainControlClaim(value: unknown): MainControlRequest | null
     return { deliveryId: row.deliveryId, action: "initial_migration_queue", projectId: row.projectId,
       previewId: row.previewId, turnId: row.turnId, category: row.category, operationId: row.operationId as string, timeoutMs: row.timeoutMs };
   }
-  if (row && typeof row === "object" && ["history_import", "affairs_sync"].includes(Object.getOwnPropertyDescriptor(row, "action")?.value)) {
+  if (row && typeof row === "object" && ["history_import", "affairs_sync", "episodic_sync"].includes(Object.getOwnPropertyDescriptor(row, "action")?.value)) {
     if (!closed(row, ["deliveryId", "action", "projectId", "previewId", "turnId", "timeoutMs"],
-      Object.getOwnPropertyDescriptor(row, "action")?.value === "affairs_sync" ? ["recoverSyncId"] : [])
+      Object.getOwnPropertyDescriptor(row, "action")?.value === "episodic_sync" ? ["recoverSyncId", "resolveSyncId", "reviewToken"]
+        : Object.getOwnPropertyDescriptor(row, "action")?.value === "affairs_sync" ? ["recoverSyncId"] : [])
       || typeof row.deliveryId !== "string" || !/^[a-f0-9]{32}$/.test(row.deliveryId) || !opaque(row.projectId, 160)
       || typeof row.previewId !== "string" || !/^[a-f0-9]{64}$/.test(row.previewId) || !opaque(row.turnId, 160)
       || typeof row.timeoutMs !== "number" || !Number.isSafeInteger(row.timeoutMs) || row.timeoutMs < 1 || row.timeoutMs > 120000
-      || (Object.hasOwn(row, "recoverSyncId") && (typeof row.recoverSyncId !== "string" || !/^affairs-[a-f0-9]{40}$/.test(row.recoverSyncId)))) return invalid();
-    return { deliveryId: row.deliveryId, action: row.action as "history_import" | "affairs_sync", projectId: row.projectId,
+      || (Object.hasOwn(row, "recoverSyncId") && (typeof row.recoverSyncId !== "string" || !(row.action === "episodic_sync" ? /^episodic-[a-f0-9]{40}$/ : /^affairs-[a-f0-9]{40}$/).test(row.recoverSyncId)))
+      || Object.hasOwn(row, "resolveSyncId") !== Object.hasOwn(row, "reviewToken")
+      || (Object.hasOwn(row, "resolveSyncId") && (Object.hasOwn(row, "recoverSyncId") || typeof row.resolveSyncId !== "string"
+        || !/^episodic-[a-f0-9]{40}$/.test(row.resolveSyncId) || typeof row.reviewToken !== "string" || !/^[a-f0-9]{64}$/.test(row.reviewToken)))) return invalid();
+    return { deliveryId: row.deliveryId, action: row.action as "history_import" | "affairs_sync" | "episodic_sync", projectId: row.projectId,
       previewId: row.previewId, turnId: row.turnId, timeoutMs: row.timeoutMs,
-      ...(typeof row.recoverSyncId === "string" ? { recoverSyncId: row.recoverSyncId } : {}) };
+      ...(typeof row.recoverSyncId === "string" ? { recoverSyncId: row.recoverSyncId } : {}),
+      ...(typeof row.resolveSyncId === "string" ? { resolveSyncId: row.resolveSyncId, reviewToken: row.reviewToken as string } : {}) } as MainControlRequest;
   }
   if (!closed(row, ["deliveryId", "action", "projectId", "operation"], ["requestId"])
     || typeof row.deliveryId !== "string" || !/^[a-f0-9]{32}$/.test(row.deliveryId) || !opaque(row.projectId, 160)) return invalid();
@@ -83,17 +91,23 @@ const STATES = new Set(["completed", "queued", "rejected", "unknown", "not_found
 export function affairsSyncMigrationId(projectId: string, previewId: string): string {
   return `affairs-${createHash("sha256").update(`${projectId}:${previewId}`).digest("hex").slice(0, 40)}`;
 }
+export function episodicSyncMigrationId(projectId: string, previewId: string): string {
+  return `episodic-${createHash("sha256").update(`${projectId}:${previewId}`).digest("hex").slice(0, 40)}`;
+}
 export function unknownAffairsSyncResult(input: { projectId: string; previewId: string; recoverSyncId?: string }): PublicResult {
   return { schemaVersion: 1, projectId: input.projectId, previewId: input.previewId,
     migrationId: input.recoverSyncId ?? affairsSyncMigrationId(input.projectId, input.previewId), state: "unknown", code: "unknown", readyForCutover: false };
 }
-export function parseAffairsSyncResult(input: { projectId: string; previewId: string; recoverSyncId?: string }, value: unknown): PublicResult | null {
+export function parseAffairsSyncResult(input: { projectId: string; previewId: string; recoverSyncId?: string; resolveSyncId?: string }, value: unknown, episodic = false): PublicResult | null {
   if (!closed(value, ["schemaVersion", "projectId", "previewId", "migrationId", "state", "code", "readyForCutover"], ["appliedCount", "conflictCount"])
     || value.schemaVersion !== 1 || value.projectId !== input.projectId || value.previewId !== input.previewId
-    || value.migrationId !== (input.recoverSyncId ?? affairsSyncMigrationId(input.projectId, input.previewId)) || value.readyForCutover !== false
+    || value.migrationId !== (input.recoverSyncId ?? (episodic ? episodicSyncMigrationId : affairsSyncMigrationId)(input.projectId, input.previewId)) || value.readyForCutover !== false
     || typeof value.state !== "string" || typeof value.code !== "string"
     || (input.recoverSyncId !== undefined && !["confirmed", "unknown"].includes(value.state))
-    || !["complete:synchronized", "partial:unresolved", "confirmed:matched", "rejected:preview_invalid", "rejected:project_unavailable", "rejected:cancelled", "rejected:busy", "rejected:unresolved", "rejected:pending", "rejected:baseline_unavailable", "unknown:unknown"].includes(`${value.state}:${value.code}`)) return null;
+    || !["complete:synchronized", "complete:resolved", "partial:unresolved", "confirmed:matched", "rejected:preview_invalid", "rejected:project_unavailable", "rejected:cancelled", "rejected:busy", "rejected:unresolved", "rejected:pending", "rejected:baseline_unavailable", "rejected:row_limit", "rejected:review_changed", "unknown:unknown"].includes(`${value.state}:${value.code}`)
+    || (value.state === "complete" && (value.code === "resolved") !== (episodic && input.resolveSyncId !== undefined))
+    || (input.resolveSyncId !== undefined && value.state === "partial")
+    || (value.code === "resolved" && value.appliedCount !== 0)) return null;
   if (value.state === "complete" || value.state === "partial") {
     if (typeof value.appliedCount !== "number" || !Number.isSafeInteger(value.appliedCount) || value.appliedCount < 0 || value.appliedCount > 4096
       || typeof value.conflictCount !== "number" || !Number.isSafeInteger(value.conflictCount) || value.conflictCount < 0 || value.conflictCount > 4096
@@ -104,6 +118,12 @@ export function parseAffairsSyncResult(input: { projectId: string; previewId: st
       || value.conflictCount < 0 || value.conflictCount > 4096) return null;
   } else if (Object.hasOwn(value, "appliedCount") || Object.hasOwn(value, "conflictCount")) return null;
   return { ...value };
+}
+export function unknownEpisodicSyncResult(input: { projectId: string; previewId: string; recoverSyncId?: string }): PublicResult {
+  return { ...unknownAffairsSyncResult(input), migrationId: input.recoverSyncId ?? episodicSyncMigrationId(input.projectId, input.previewId) };
+}
+export function parseEpisodicSyncResult(input: { projectId: string; previewId: string; recoverSyncId?: string; resolveSyncId?: string }, value: unknown): PublicResult | null {
+  return parseAffairsSyncResult(input, value, true);
 }
 /** Fail closed rather than relay arbitrary errors, native rows, paths or messages. */
 export function projectMainControlResult(request: MainControlRequest, value: unknown): PublicResult {
@@ -130,6 +150,7 @@ export function projectMainControlResult(request: MainControlRequest, value: unk
     return { ...value };
   }
   if (request.action === "affairs_sync") return parseAffairsSyncResult(request, value) ?? unknownAffairsSyncResult(request);
+  if (request.action === "episodic_sync") return parseEpisodicSyncResult(request, value) ?? unknownEpisodicSyncResult(request);
   if (request.action === "history_import") {
     const unavailable = () => ({ schemaVersion: 1, projectId: request.projectId, previewId: request.previewId,
       state: "unknown", code: "unknown", readyForCutover: false });
@@ -192,7 +213,7 @@ export async function runMainControlPump(options: {
         try {
           let value: unknown;
           try {
-            if (request.action === "operator_image_upload" || request.action === "history_import" || request.action === "affairs_sync" || request.action === "initial_migration_queue") value = await options.onRequest(request, AbortSignal.any([options.signal,AbortSignal.timeout(request.timeoutMs)]));
+            if (request.action === "operator_image_upload" || request.action === "history_import" || request.action === "affairs_sync" || request.action === "episodic_sync" || request.action === "initial_migration_queue") value = await options.onRequest(request, AbortSignal.any([options.signal,AbortSignal.timeout(request.timeoutMs)]));
             else if (request.action === "launcher_theme_get" || request.action === "launcher_theme_set") value = await options.onRequest(request,options.signal);
             else value = await options.onRequest(request);
           }

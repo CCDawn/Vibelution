@@ -217,6 +217,21 @@ def test_launcher_history_import_approval_shows_verified_source_only(monkeypatch
         "project_id": "project", "preview_id": "a" * 64, "recover_sync_id": "affairs-" + "b" * 40})})
     assert recovery["assistantTargets"]["syncId"] == "affairs-" + "b" * 40
     assert "不会重新写入事务" in recovery["assistantOperationDescription"]
+    episodic = _assistant_management_summary({"action": "episodic_sync", "arguments_json": json.dumps({
+        "project_id": "project", "preview_id": "a" * 64})})
+    assert episodic["assistantAction"] == "episodic_sync" and "情景记忆" in episodic["assistantOperationDescription"]
+    episodic_recovery = _assistant_management_summary({"action": "episodic_sync", "arguments_json": json.dumps({
+        "project_id": "project", "preview_id": "a" * 64, "recover_sync_id": "episodic-" + "b" * 40})})
+    assert episodic_recovery["assistantTargets"]["syncId"] == "episodic-" + "b" * 40
+    assert "不会重新写入" in episodic_recovery["assistantOperationDescription"]
+    episodic_resolution = _assistant_management_summary({"action": "episodic_sync", "arguments_json": json.dumps({
+        "project_id": "project", "preview_id": "a" * 64, "resolve_sync_id": "episodic-" + "b" * 40,
+        "review_token": "c" * 64})})
+    assert episodic_resolution["assistantTargets"]["syncId"] == "episodic-" + "b" * 40
+    assert "保留当前" in episodic_resolution["assistantOperationDescription"]
+    invalid_resolution = _assistant_management_summary({"action": "episodic_sync", "arguments_json": json.dumps({
+        "project_id": "project", "preview_id": "a" * 64, "resolve_sync_id": "episodic-" + "b" * 40})})
+    assert invalid_resolution["assistantArgumentsInvalid"] is True
     for category in ("personal", "knowledge"):
         queued = _assistant_management_summary({"action": "initial_migration_queue", "arguments_json": json.dumps({
             "project_id": "project", "preview_id": "a" * 64, "category": category})})

@@ -22,7 +22,7 @@ from . import appearance_protocol as appearance
 
 
 _OPERATIONS = {"start", "stop", "restart"}
-_ACTIONS = {"project_status", "project_lifecycle", "project_lifecycle_receipt", "history_import", "affairs_sync", "initial_migration_queue", "initial_migration_receipt"}
+_ACTIONS = {"project_status", "project_lifecycle", "project_lifecycle_receipt", "history_import", "affairs_sync", "episodic_sync", "initial_migration_queue", "initial_migration_receipt"}
 _STATUS_STATES = {"stopped", "starting", "running", "stopping", "failed", "unknown"}
 _WRITE_STATES = {"completed", "queued", "rejected", "unknown", "not_found"}
 _FACADE_CODES = {
@@ -47,6 +47,10 @@ def _opaque(value, maximum):
 
 def affairs_migration_id(project_id, preview_id):
     return "affairs-" + hashlib.sha256((project_id + ":" + preview_id).encode("utf-8")).hexdigest()[:40]
+
+
+def episodic_migration_id(project_id, preview_id):
+    return "episodic-" + hashlib.sha256((project_id + ":" + preview_id).encode("utf-8")).hexdigest()[:40]
 
 
 def initial_migration_id(project_id, preview_id, category):
@@ -79,14 +83,22 @@ def _request(action, request):
                 or request.get("operationId") != initial_migration_id(request["projectId"], request["previewId"], request["category"])):
             raise ValueError("Invalid initial migration request")
         return dict(request)
-    if action in {"history_import", "affairs_sync"}:
+    if action in {"history_import", "affairs_sync", "episodic_sync"}:
         expected = {"projectId", "previewId", "turnId"}
-        if (not expected <= set(request) or set(request) - expected - ({"recoverSyncId"} if action == "affairs_sync" else set())
+        optional = ({"recoverSyncId", "resolveSyncId", "reviewToken"} if action == "episodic_sync"
+                    else {"recoverSyncId"} if action == "affairs_sync" else set())
+        if (not expected <= set(request) or set(request) - expected - optional
                 or not _opaque(request.get("projectId"), 160)
                 or type(request.get("previewId")) is not str
                 or re.fullmatch(r"[0-9a-f]{64}", request["previewId"]) is None
                 or "recoverSyncId" in request and (type(request["recoverSyncId"]) is not str
-                    or re.fullmatch(r"affairs-[0-9a-f]{40}", request["recoverSyncId"]) is None)
+                    or re.fullmatch((r"affairs-" if action == "affairs_sync" else r"episodic-") + r"[0-9a-f]{40}", request["recoverSyncId"]) is None)
+                or ("resolveSyncId" in request) != ("reviewToken" in request)
+                or "resolveSyncId" in request and ("recoverSyncId" in request
+                    or type(request["resolveSyncId"]) is not str
+                    or re.fullmatch(r"episodic-[0-9a-f]{40}", request["resolveSyncId"]) is None
+                    or type(request["reviewToken"]) is not str
+                    or re.fullmatch(r"[0-9a-f]{64}", request["reviewToken"]) is None)
                 or not _opaque(request.get("turnId"), 160)):
             raise ValueError("Invalid history import request")
         return dict(request)
@@ -122,7 +134,7 @@ def _result(action, request, result):
                     ("rejected", "unavailable"), ("rejected", "busy")}):
             raise ValueError("Invalid initial migration result")
         return dict(result)
-    if action == "affairs_sync":
+    if action in {"affairs_sync", "episodic_sync"}:
         required = {"schemaVersion", "projectId", "previewId", "migrationId", "state", "code", "readyForCutover"}
         counts = {"appliedCount", "conflictCount"}
         has_counts = (type(result) is dict and type(result.get("state")) is str
@@ -131,17 +143,21 @@ def _result(action, request, result):
         if (type(result) is not dict or set(result) != required | (counts if has_counts else {"conflictCount"} if has_confirmation else set())
                 or type(result.get("schemaVersion")) is not int or result["schemaVersion"] != 1
                 or result.get("projectId") != request["projectId"] or result.get("previewId") != request["previewId"]
-                or result.get("migrationId") != request.get("recoverSyncId", affairs_migration_id(request["projectId"], request["previewId"]))
+                or result.get("migrationId") != request.get("recoverSyncId", (affairs_migration_id if action == "affairs_sync" else episodic_migration_id)(request["projectId"], request["previewId"]))
                 or result.get("readyForCutover") is not False
                 or type(result.get("state")) is not str or type(result.get("code")) is not str
                 or "recoverSyncId" in request and result.get("state") not in {"confirmed", "unknown"}
                 or has_confirmation and "recoverSyncId" not in request
                 or (result.get("state"), result.get("code")) not in {
-                    ("complete", "synchronized"), ("partial", "unresolved"), ("confirmed", "matched"),
+                    ("complete", "synchronized"), ("complete", "resolved"), ("partial", "unresolved"), ("confirmed", "matched"),
                     ("rejected", "preview_invalid"), ("rejected", "project_unavailable"),
                     ("rejected", "cancelled"), ("rejected", "busy"),
                     ("rejected", "unresolved"), ("rejected", "pending"),
-                    ("rejected", "baseline_unavailable"), ("unknown", "unknown")}
+                    ("rejected", "baseline_unavailable"), ("rejected", "row_limit"), ("rejected", "review_changed"), ("unknown", "unknown")}
+                or (result.get("state"), result.get("code")) == ("complete", "resolved") and (action != "episodic_sync" or "resolveSyncId" not in request)
+                or "resolveSyncId" in request and result.get("state") == "complete" and result.get("code") != "resolved"
+                or "resolveSyncId" in request and result.get("state") == "partial"
+                or result.get("code") == "resolved" and result.get("appliedCount") != 0
                 or has_counts and (any(type(result.get(key)) is not int or not 0 <= result[key] <= 4096 for key in counts)
                     or (result["conflictCount"] == 0) != (result["state"] == "complete"))
                 or has_confirmation and (type(result.get("conflictCount")) is not int or not 0 <= result["conflictCount"] <= 4096)):
@@ -318,9 +334,9 @@ class MainControlBroker:
                     "state": "unknown", "code": "unknown", "readyForCutover": False}
         if entry.action == "initial_migration_receipt":
             return {"schemaVersion": 1, **entry.request, "state": "unknown", "code": "unknown", "readyForCutover": False}
-        if entry.action == "affairs_sync":
+        if entry.action in {"affairs_sync", "episodic_sync"}:
             return {"schemaVersion": 1, "projectId": entry.request["projectId"], "previewId": entry.request["previewId"],
-                    "migrationId": entry.request.get("recoverSyncId", affairs_migration_id(entry.request["projectId"], entry.request["previewId"])),
+                    "migrationId": entry.request.get("recoverSyncId", (affairs_migration_id if entry.action == "affairs_sync" else episodic_migration_id)(entry.request["projectId"], entry.request["previewId"])),
                     "state": "unknown", "code": "unknown", "readyForCutover": False}
         if entry.action == "history_import":
             return {"schemaVersion": 1, "projectId": entry.request["projectId"], "previewId": entry.request["previewId"],
@@ -356,7 +372,7 @@ class MainControlBroker:
         captured = _request(action, request)
         if turn_id is not None and not _opaque(turn_id, 160):
             raise ValueError("Invalid appearance turn identity")
-        if action in {"history_import", "affairs_sync", "initial_migration_queue"} and turn_id != captured["turnId"]:
+        if action in {"history_import", "affairs_sync", "episodic_sync", "initial_migration_queue"} and turn_id != captured["turnId"]:
             raise ValueError("Invalid history turn identity")
         if action in {"initial_migration_queue", "initial_migration_receipt"} and not self.initial_migration_enabled:
             raise ValueError("Initial migration capability is unavailable")
@@ -368,7 +384,7 @@ class MainControlBroker:
         elif not self._authorized(captured["projectId"]):
             raise ValueError("Project is not authorized by Launcher")
         loop = asyncio.get_running_loop()
-        timeout = self._image_timeout if action == "operator_image_upload" else 120 if action in {"history_import", "affairs_sync", "initial_migration_queue"} else self._timeout
+        timeout = self._image_timeout if action == "operator_image_upload" else 120 if action in {"history_import", "affairs_sync", "episodic_sync", "initial_migration_queue"} else self._timeout
         entry = _Delivery(action, captured, loop.time() + timeout, loop.create_future(), turn_id=turn_id)
         self._expire()
         if self._closed.is_set():
@@ -424,7 +440,7 @@ class MainControlBroker:
             entry = self._pending.get(delivery_id)
             if entry is not None:
                 entry.claimed = True
-                remaining = {"timeoutMs": max(1, math.floor((entry.deadline - loop.time()) * 1000))} if entry.action in {"operator_image_upload", "history_import", "affairs_sync", "initial_migration_queue"} else {}
+                remaining = {"timeoutMs": max(1, math.floor((entry.deadline - loop.time()) * 1000))} if entry.action in {"operator_image_upload", "history_import", "affairs_sync", "episodic_sync", "initial_migration_queue"} else {}
                 return {"schemaVersion": 1, "request": {"deliveryId": delivery_id, "action": entry.action, **entry.request, **remaining}}
         return empty
 
@@ -440,12 +456,12 @@ class MainControlBroker:
     def cancel_history_imports(self, turn_id: str) -> None:
         """Retire this Turn's waiters after the host has fenced publication."""
         for key, entry in list(self._pending.items()):
-            if entry.action in {"history_import", "affairs_sync", "initial_migration_queue"} and entry.turn_id == turn_id:
+            if entry.action in {"history_import", "affairs_sync", "episodic_sync", "initial_migration_queue"} and entry.turn_id == turn_id:
                 _revoke_initial(entry)
                 self._pending.pop(key)
                 if not entry.future.done():
                     value = self._unknown(entry)
-                    if not entry.claimed and not (entry.action == "affairs_sync" and "recoverSyncId" in entry.request):
+                    if not entry.claimed and not (entry.action in {"affairs_sync", "episodic_sync"} and "recoverSyncId" in entry.request):
                         value = {**value, "state": "rejected", "code": "cancelled"}
                     entry.future.set_result(value)
         self._compact_queue()

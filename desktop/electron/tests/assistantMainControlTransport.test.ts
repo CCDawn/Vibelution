@@ -9,6 +9,30 @@ const request = wire().request as MainControlRequest;
 const result = { schemaVersion: 1 as const, projectId: request.projectId, operation: "start", requestId: "request-1", state: "completed", code: "accepted", accepted: true };
 
 describe("generation-scoped main control transport", () => {
+  it("binds episodic sync and recovery to the approved project and original operation", () => {
+    const row = { deliveryId: "a".repeat(32), action: "episodic_sync", projectId: "synthetic:uuid",
+      previewId: "b".repeat(64), turnId: "turn-1", timeoutMs: 10000 };
+    const parsed = parseMainControlClaim({ schemaVersion: 1, request: row })!;
+    const migrationId = `episodic-${createHash("sha256").update(`${row.projectId}:${row.previewId}`).digest("hex").slice(0, 40)}`;
+    const complete = { schemaVersion: 1, projectId: row.projectId, previewId: row.previewId, migrationId,
+      state: "complete", code: "synchronized", appliedCount: 1, conflictCount: 0, readyForCutover: false };
+    expect(projectMainControlResult(parsed, complete)).toEqual(complete);
+    expect(projectMainControlResult(parsed, { ...complete, path: "C:/private" })).toMatchObject({ state: "unknown" });
+    const original = "episodic-" + "f".repeat(40);
+    const recovery = parseMainControlClaim({ schemaVersion: 1, request: { ...row, recoverSyncId: original } })!;
+    expect(projectMainControlResult(recovery, undefined)).toMatchObject({ state: "unknown", migrationId: original });
+    expect(() => parseMainControlClaim({ schemaVersion: 1, request: { ...row, recoverSyncId: "affairs-" + "f".repeat(40) } })).toThrow();
+    expect(() => parseMainControlClaim({ schemaVersion: 1, request: { ...row, path: "C:/private" } })).toThrow();
+    const resolveSyncId = "episodic-" + "e".repeat(40), reviewToken = "c".repeat(64);
+    const resolution = parseMainControlClaim({ schemaVersion: 1, request: { ...row, resolveSyncId, reviewToken } })!;
+    expect(resolution).toMatchObject({ resolveSyncId, reviewToken });
+    expect(() => parseMainControlClaim({ schemaVersion: 1, request: { ...row, resolveSyncId } })).toThrow();
+    expect(() => parseMainControlClaim({ schemaVersion: 1, request: { ...row, resolveSyncId, reviewToken, recoverSyncId: original } })).toThrow();
+    const resolved = { ...complete, code: "resolved", appliedCount: 0 };
+    expect(projectMainControlResult(resolution, resolved)).toEqual(resolved);
+    expect(projectMainControlResult(parsed, resolved)).toMatchObject({ state: "unknown" });
+    expect(projectMainControlResult(resolution, complete)).toMatchObject({ state: "unknown" });
+  });
   it("keeps initial migration requests bound to their project, category and stable operation ID", () => {
     const projectId = "synthetic:uuid", category = "personal";
     const operationId = `initial-${createHash("sha256").update(`${projectId}:${category}`).digest("hex").slice(0, 40)}`;

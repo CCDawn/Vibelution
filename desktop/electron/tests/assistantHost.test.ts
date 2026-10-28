@@ -189,6 +189,44 @@ describe("AssistantHost", () => {
     await expect(host.syncAffairs({ projectId: "project", previewId, turnId: "turn-1", revision: 1 })).rejects.toThrow("ASSISTANT_NOT_READY");
     await host.stop();
   });
+  it("fences episodic sync on cancellation without replay", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    let started = false, operationId = "";
+    fetchImpl.mockImplementationOnce(async (url, options) => {
+      expect(String(url)).toMatch(/\/episodic-sync$/);
+      operationId = JSON.parse(String(options?.body)).operationId; started = true;
+      return await new Promise<Response>((_resolve, reject) => options?.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true }));
+    }).mockImplementationOnce(async (url, options) => {
+      expect(String(url)).toMatch(/\/episodic-sync\/cancel$/);
+      expect(JSON.parse(String(options?.body))).toEqual({ operationId, previewId: "a".repeat(64) });
+      return Response.json({ schemaVersion: 1, operationId, cancelled: true });
+    });
+    const controller = new AbortController();
+    const pending = host.syncEpisodic({ projectId: "project", previewId: "a".repeat(64), turnId: "turn-1", revision: 0, signal: controller.signal });
+    await vi.waitFor(() => expect(started).toBe(true)); controller.abort();
+    await expect(pending).resolves.toMatchObject({ state: "unknown", migrationId: expect.stringMatching(/^episodic-/) });
+    expect(fetchImpl.mock.calls.filter(([url]) => String(url).endsWith("/episodic-sync"))).toHaveLength(1);
+    await host.stop();
+  });
+  it("sends a reviewed episodic resolution without exposing a path", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    const previewId = "a".repeat(64), resolveSyncId = "episodic-" + "b".repeat(40), reviewToken = "c".repeat(64);
+    const migrationId = "episodic-" + createHash("sha256").update(`project:${previewId}`).digest("hex").slice(0, 40);
+    fetchImpl.mockImplementationOnce(async (url, options) => {
+      expect(String(url)).toMatch(/\/episodic-sync$/);
+      expect(JSON.parse(String(options?.body))).toEqual({ projectId: "project", previewId, turnId: "turn-1", revision: 0,
+        operationId: expect.stringMatching(/^[a-f0-9]{32}$/), resolveSyncId, reviewToken });
+      return Response.json({ schemaVersion: 1, projectId: "project", previewId, migrationId,
+        state: "complete", code: "resolved", appliedCount: 0, conflictCount: 0, readyForCutover: false });
+    });
+    await expect(host.syncEpisodic({ projectId: "project", previewId, turnId: "turn-1", revision: 0, resolveSyncId, reviewToken }))
+      .resolves.toMatchObject({ state: "complete", code: "resolved" });
+    await expect(host.syncEpisodic({ projectId: "project", previewId, turnId: "turn-1", revision: 0, resolveSyncId }))
+      .rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    await host.stop();
+  });
   it("fences a cancelled in-flight affairs sync and never resends it", async () => {
     const { host, fetchImpl, native } = fixture({ graceful: true });
     await host.start();

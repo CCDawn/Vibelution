@@ -29,7 +29,7 @@ import { AssistantHost } from "./assistant/assistantHost.js";
 import { InitialMigrationResults } from "./assistant/initialMigrationResults.js";
 import { verifyInitialMigrationResult } from "./assistant/initialMigrationJob.js";
 import { recoverInitialMigrations } from "./assistant/initialMigrationStartup.js";
-import { unknownAffairsSyncResult } from "./assistant/mainControlTransport.js";
+import { unknownAffairsSyncResult, unknownEpisodicSyncResult } from "./assistant/mainControlTransport.js";
 import { startAssistantReminderPump } from "./assistant/reminderPump.js";
 import { AssistantProjectRegistryConnection } from "./assistant/projectRegistryConnection.js";
 import { createAssistantAppearanceMainControl } from "./assistant/appearanceMainControl.js";
@@ -668,6 +668,17 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
         return projectConnection.withHistoryImport(request.projectId, revision => host.syncAffairs({
           projectId: request.projectId, previewId: request.previewId, turnId: request.turnId, revision, signal,
           ...(request.recoverSyncId !== undefined ? { recoverSyncId: request.recoverSyncId } : {}),
+        }));
+      }
+      if (request.action === "episodic_sync") {
+        const host = launcherAssistantHost;
+        if (!host || shutdownApproved) return Promise.resolve(request.recoverSyncId !== undefined
+          ? unknownEpisodicSyncResult(request) : { ...unknownEpisodicSyncResult(request),
+            state: "rejected", code: "project_unavailable" });
+        return projectConnection.withHistoryImport(request.projectId, revision => host.syncEpisodic({
+          projectId: request.projectId, previewId: request.previewId, turnId: request.turnId, revision, signal,
+          ...(request.recoverSyncId !== undefined ? { recoverSyncId: request.recoverSyncId } : {}),
+          ...(request.resolveSyncId !== undefined ? { resolveSyncId: request.resolveSyncId, reviewToken: request.reviewToken } : {}),
         }));
       }
       return projectMainControl(request);
