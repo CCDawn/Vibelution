@@ -121,8 +121,26 @@ def personal_assistant_action_tool(action: str = "index", parameters: dict | Non
         from core.infrastructure.native_runtime import is_launcher_assistant_process
         if is_launcher_assistant_process():
             from core.assistant_runtime.actions import execute_action
+            result = execute_action(action, parameters or {}, runtime=runtime)
+            required_scopes = {
+                "task_list": ["tasks:read"], "source_read": ["source:read"], "source_search": ["source:read"],
+                "agent_get": ["agents:read"], "avatar_options": ["agents:read"],
+                "session_list": ["sessions:read"], "session_get": ["sessions:read"],
+                "session_config_get": ["sessions:read"], "session_config_compare": ["sessions:read"],
+                "session_parameters_get": ["sessions:parameters:read", "sessions:read"],
+                "team_list": ["teams:directory:read"], "team_get": ["teams:directory:read"],
+                "room_list": ["rooms:read"], "room_get": ["rooms:read"],
+                "legacy_observers": ["legacy:receipts:read"], "legacy_receipts": ["legacy:receipts:read"],
+            }.get(action)
+            if result.get("code") == "SCOPE_DENIED" and required_scopes:
+                result = {**result, "requiredScopes": required_scopes,
+                    **({"requiredScope": required_scopes[0]} if len(required_scopes) == 1 else {}), "nextStep": (
+                    "用户已请求此查询时，先用 authorization_status 读取该项目当前 scopes，"
+                    "再通过 personal_assistant_manage_tool 的 authorization_upgrade 仅申请 requiredScopes 中缺失的权限；"
+                    "使用原生审批，不自行宣称已授权。成功后继续原查询；拒绝或结果未知时保留原请求并说明。"
+                )}
             return json.dumps({"source": "launcher-assistant", "untrustedContent": True,
-                               **execute_action(action, parameters or {}, runtime=runtime)}, ensure_ascii=False)
+                               **result}, ensure_ascii=False)
         from tools.pa_platform_actions import execute_action
         return json.dumps({"source": "platform-action-adapter", "untrustedContent": True,
                            **execute_action(action, parameters or {}, runtime)}, ensure_ascii=False)

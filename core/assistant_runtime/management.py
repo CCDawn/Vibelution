@@ -59,6 +59,34 @@ def _documentation_wrapper_size(project_id: str, result: dict) -> int:
     return len(json.dumps(wrapped, ensure_ascii=False))
 
 
+def _source_model_page(project_id: str, operation: str, result: dict) -> dict:
+    """Budget the actual model wrapper without losing cursors or search hits."""
+    page = deepcopy(result)
+    if operation == "read" and _documentation_wrapper_size(project_id, page) > 3400:
+        original = page["text"]
+        low, high = 0, len(original)
+        while low < high:
+            middle = (low + high + 1) // 2
+            candidate = {**page, "text": original[:middle], "nextCharOffset": page["charOffset"] + middle,
+                         "nextLine": None, "truncated": True}
+            if _documentation_wrapper_size(project_id, candidate) <= 3400:
+                low = middle
+            else:
+                high = middle - 1
+        if low == 0:
+            raise DispatchError("Source page exceeds the model budget.", code="SOURCE_PAGE_UNAVAILABLE")
+        page.update(text=original[:low], nextCharOffset=page["charOffset"] + low, nextLine=None, truncated=True)
+    elif operation == "search":
+        while _documentation_wrapper_size(project_id, page) > 3400:
+            candidates = [row for row in page["items"] if row["text"]]
+            if not candidates:
+                raise DispatchError("Source page exceeds the model budget.", code="SOURCE_PAGE_UNAVAILABLE")
+            row = max(candidates, key=lambda item: len(json.dumps(item["text"], ensure_ascii=False)))
+            row["text"] = row["text"][:-1]
+            row["snippetTruncated"] = True
+    return {**page, "projectId": project_id}
+
+
 def _documentation_navigation_entry(entry: dict) -> dict:
     projected = deepcopy(entry)
     summary = entry.get("summary")
@@ -246,6 +274,12 @@ class ManagementAdapter:
             raise DispatchError("Project is not authorized.", code="PROJECT_NOT_AUTHORIZED")
         result = await self._call(project_id, lambda client: client.management_active_tasks(**parameters))
         return {**result, "projectId": project_id}
+
+    async def source(self, project_id: str, operation: str, **parameters):
+        if project_id not in self._projects:
+            raise DispatchError("Project is not authorized.", code="PROJECT_NOT_AUTHORIZED")
+        result = await self._call(project_id, lambda client: client.management_source(operation, **parameters))
+        return _source_model_page(project_id, operation, result)
 
     async def team_list(self, project_id: str, **parameters):
         if project_id not in self._projects:

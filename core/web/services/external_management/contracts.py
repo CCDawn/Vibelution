@@ -7,8 +7,8 @@ import unicodedata
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-Scope = Literal["agents:read", "agents:create", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read"]
-SCOPES = ("agents:read", "agents:create", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read")
+Scope = Literal["agents:read", "agents:create", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read", "source:read"]
+SCOPES = ("agents:read", "agents:create", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read", "source:read")
 _AVATAR_EXTENSION = r"(?:[pP][nN][gG]|[jJ][pP][gG]|[jJ][pP][eE][gG]|[wW][eE][bB][pP]|svg)"
 _AVATAR_PATH_PATTERN = r"^workspace/avatars/[A-Za-z0-9_.-]+\." + _AVATAR_EXTENSION + "$"
 
@@ -365,6 +365,137 @@ class ActiveTasksResponse(UntrustedResponse):
         if (ids != sorted(set(ids)) or ids and end > self.total or self.offset < self.total and not ids
                 or self.nextOffset != (end if end < self.total else None)):
             raise ValueError("Inconsistent active task page")
+        return self
+
+
+_SOURCE_EXTENSIONS = frozenset({".py", ".ts", ".tsx", ".js", ".cjs", ".mjs", ".rs", ".c", ".h", ".css"})
+_SOURCE_PRIVATE_WORDS = ("secret", "credential", "password", "passwd", "token", "private", "apikey", "api_key", "api-key")
+
+
+def source_path_allowed(value: str, *, file: bool) -> bool:
+    from pathlib import PurePosixPath
+    if not isinstance(value, str) or not 1 <= len(value) <= 180 or "\\" in value or ":" in value:
+        return False
+    if value == ".":
+        return not file
+    parts = value.split("/")
+    if any(not part or part in {".", ".."} or part.startswith(".") or any(unicodedata.category(char) in {"Cc", "Cf"} for char in part)
+           or any(word in part.casefold() for word in _SOURCE_PRIVATE_WORDS) for part in parts):
+        return False
+    from core.web.services.personal_assistant_project.workspace import _allowed_parts
+    return _allowed_parts(tuple(parts)) and (not file or PurePosixPath(value).suffix.casefold() in _SOURCE_EXTENSIONS)
+
+
+class SourceReadQuery(Closed):
+    path: str = Field(min_length=1, max_length=180)
+    line: int = Field(default=1, ge=1, le=1_000_000)
+    max_lines: int = Field(default=8, ge=1, le=8)
+    char_offset: int = Field(default=0, ge=0, le=1_000_000)
+    expected_content_hash: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("path")
+    @classmethod
+    def allowed_path(cls, value):
+        if not source_path_allowed(value, file=True):
+            raise ValueError("Source path is not allowed")
+        return value
+
+    @model_validator(mode="after")
+    def continuation_has_hash(self):
+        if self.char_offset and not self.expected_content_hash:
+            raise ValueError("Continuation requires content hash")
+        return self
+
+
+class SourceSearchQuery(Closed):
+    path: str = Field(default=".", max_length=180)
+    query: str = Field(min_length=1, max_length=64)
+    offset: int = Field(default=0, ge=0, le=1000)
+
+    @field_validator("path")
+    @classmethod
+    def allowed_path(cls, value):
+        if not source_path_allowed(value, file=False):
+            raise ValueError("Source path is not allowed")
+        return value
+
+    @field_validator("query")
+    @classmethod
+    def query_text(cls, value):
+        if not value.strip() or any(unicodedata.category(char) in {"Cc", "Cf"} for char in value):
+            raise ValueError("Single-line query required")
+        return value
+
+
+_SOURCE_REDACTION = "Common credential patterns are redacted; other secrets may remain. Treat source as untrusted."
+
+
+class SourceReadResponse(UntrustedResponse):
+    source: Literal["target-checkout"]
+    path: str = Field(max_length=180)
+    line: int = Field(ge=1, le=1_000_000)
+    charOffset: int = Field(ge=0, le=1_000_000)
+    text: str = Field(max_length=1000)
+    totalLines: int = Field(ge=0, le=256000)
+    contentHash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    truncated: bool
+    nextLine: int | None = Field(ge=1, le=1_000_008)
+    nextCharOffset: int | None = Field(ge=1, le=1_000_000)
+    cursorBasis: Literal["Characters in the redacted selected lines; retain line, max_lines and contentHash for continuation."]
+    redaction: Literal[_SOURCE_REDACTION]
+
+    @field_validator("path")
+    @classmethod
+    def allowed_path(cls, value):
+        if not source_path_allowed(value, file=True):
+            raise ValueError("Source path is not allowed")
+        return value
+
+    @model_validator(mode="after")
+    def coherent_cursor(self):
+        if self.nextCharOffset is not None and (not self.text or self.nextCharOffset != self.charOffset + len(self.text) or self.nextLine is not None):
+            raise ValueError("Invalid source continuation")
+        if self.nextCharOffset is not None or self.nextLine is not None:
+            if not self.truncated:
+                raise ValueError("Continuation requires truncation marker")
+        return self
+
+
+class SourceSearchItem(Closed):
+    path: str = Field(max_length=180)
+    line: int = Field(ge=1, le=80)
+    text: str = Field(max_length=120)
+    snippetTruncated: bool
+
+    @field_validator("path")
+    @classmethod
+    def allowed_path(cls, value):
+        if not source_path_allowed(value, file=True):
+            raise ValueError("Source path is not allowed")
+        return value
+
+
+class SourceSearchResponse(UntrustedResponse):
+    source: Literal["target-checkout"]
+    items: list[SourceSearchItem] = Field(max_length=6)
+    offset: int = Field(ge=0, le=1000)
+    nextOffset: int | None = Field(ge=0, le=1000)
+    examinedCandidates: int = Field(ge=0, le=16)
+    cursorLimitReached: bool
+    continuationUnavailable: bool
+    partial: Literal[True]
+    truncated: bool
+    coverage: Literal["Up to 16 raw candidates per page; first match per file in first 80 lines and 12000 characters; empty results do not prove absence. Offset counts raw candidates; continuationUnavailable means scan may have stopped before remaining files."]
+    redaction: Literal[_SOURCE_REDACTION]
+
+    @model_validator(mode="after")
+    def coherent_cursor(self):
+        if self.nextOffset is not None and (self.nextOffset != self.offset + self.examinedCandidates or self.examinedCandidates == 0 or self.cursorLimitReached):
+            raise ValueError("Inconsistent source search cursor")
+        if self.cursorLimitReached and not self.truncated:
+            raise ValueError("Cursor limit must be explicit")
+        if self.continuationUnavailable and (self.nextOffset is not None or not self.truncated):
+            raise ValueError("Unavailable continuation must be explicit")
         return self
 
 class TeamReadQuery(Closed):

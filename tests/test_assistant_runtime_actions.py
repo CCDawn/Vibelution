@@ -25,6 +25,35 @@ class Dispatch:
         return await self.dispatch(project_id, **kwargs)
 
 
+@pytest.mark.parametrize(("action", "scope"), [("task_list", "tasks:read"), ("source_read", "source:read"), ("source_search", "source:read")])
+def test_denied_requested_query_explains_native_approval_without_granting_it(monkeypatch, action, scope):
+    from core.infrastructure import native_runtime
+    from core.assistant_runtime import actions
+    from tools import personal_assistant_tools as tool
+
+    monkeypatch.setattr(native_runtime, "is_launcher_assistant_process", lambda: True)
+    monkeypatch.setattr(tool, "_identity", lambda: {"agentId": "assistant", "turnId": "turn"})
+    monkeypatch.setattr(actions, "execute_action", lambda *_args, **_kwargs: {"ok": False, "code": "SCOPE_DENIED"})
+    result = json.loads(tool.personal_assistant_action_tool(action, {"project_id": "project"}))
+    assert result["code"] == "SCOPE_DENIED" and result["requiredScope"] == scope
+    assert result["requiredScopes"] == [scope]
+    assert "authorization_status" in result["nextStep"] and "personal_assistant_manage_tool" in result["nextStep"]
+    assert "不自行宣称已授权" in result["nextStep"]
+
+
+def test_denied_parameter_query_names_both_required_read_scopes(monkeypatch):
+    from core.infrastructure import native_runtime
+    from core.assistant_runtime import actions
+    from tools import personal_assistant_tools as tool
+
+    monkeypatch.setattr(native_runtime, "is_launcher_assistant_process", lambda: True)
+    monkeypatch.setattr(tool, "_identity", lambda: {"agentId": "assistant", "turnId": "turn"})
+    monkeypatch.setattr(actions, "execute_action", lambda *_args, **_kwargs: {"ok": False, "code": "SCOPE_DENIED"})
+    result = json.loads(tool.personal_assistant_action_tool("session_parameters_get", {"project_id": "project"}))
+    assert result["requiredScopes"] == ["sessions:parameters:read", "sessions:read"]
+    assert "requiredScope" not in result and "缺失的权限" in result["nextStep"]
+
+
 def _through_native_model_budget(payload):
     from core.infrastructure.tool_result_budget import apply_tool_result_budget
     from core.infrastructure.tool_result import package_tool_result_facts, render_tool_result_for_model

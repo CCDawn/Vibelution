@@ -70,7 +70,7 @@ class ManagementService:
     def binding(self) -> dict:
         current = self.identity()
         Binding.model_validate(current.binding)
-        return {"protocolVersion": 1, "binding": current.binding, "scopes": [scope for scope in SCOPES if scope != "tasks:read"], "actions": contracts()}
+        return {"protocolVersion": 1, "binding": current.binding, "scopes": [scope for scope in SCOPES if scope not in {"tasks:read", "source:read"}], "actions": contracts()}
 
     def _expected(self, expected: dict):
         current = self.identity()
@@ -197,6 +197,22 @@ class ManagementService:
             return ActiveTasksResponse.model_validate(self.native.read_active_tasks(query)).model_dump()
         except (ValidationError, ValueError, OSError, TypeError):
             raise ManagementError("TASK_INDEX_UNAVAILABLE", 503) from None
+
+    def source_query(self, subject, capability, operation, parameters):
+        from .contracts import SourceReadQuery, SourceReadResponse, SourceSearchQuery, SourceSearchResponse
+        self._authorize(subject, capability, "source:read")
+        query_model, response_model, reader = {
+            "read": (SourceReadQuery, SourceReadResponse, self.native.read_source),
+            "search": (SourceSearchQuery, SourceSearchResponse, self.native.search_source),
+        }[operation]
+        try:
+            query = query_model.model_validate(parameters)
+        except ValidationError:
+            raise ManagementError("INVALID_INPUT", 422) from None
+        try:
+            return response_model.model_validate(reader(query)).model_dump()
+        except ValidationError:
+            raise ManagementError("SOURCE_UNAVAILABLE", 503) from None
 
     def _directory_read(self, subject, capability, action, parameters):
         from .contracts import (DirectoryQuery, TeamReadQuery, RoomReadQuery, TeamListResponse,

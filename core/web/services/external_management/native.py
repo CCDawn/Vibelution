@@ -115,6 +115,95 @@ class NativeAgentGateway:
         except (OSError, ValueError, TypeError):
             raise ManagementError("TASK_INDEX_UNAVAILABLE", 503) from None
 
+    def read_source(self, query):
+        from core.web.services.personal_assistant_project import workspace
+        from .contracts import _SOURCE_REDACTION
+        from .service import ManagementError
+        self._owners()
+        try:
+            target = workspace.resolve_source(self.project_root, query.path)
+            if target.relative_to(self.project_root).as_posix() != query.path:
+                raise ValueError("Source path changed")
+            text, digest = workspace._read_text(self.project_root, target)
+            if query.expected_content_hash is not None and query.expected_content_hash != digest:
+                raise ManagementError("SOURCE_CHANGED", 409)
+            lines = text.splitlines()
+            selected = workspace.redact("\n".join(lines[query.line - 1:query.line - 1 + query.max_lines]))
+            if query.char_offset > len(selected):
+                raise ValueError("Invalid character cursor")
+            end = min(len(selected), query.char_offset + 1000)
+            next_char = end if end < len(selected) else None
+            next_line = query.line + query.max_lines if next_char is None and query.line + query.max_lines <= len(lines) else None
+            return {"source": "target-checkout", "path": query.path, "line": query.line,
+                    "charOffset": query.char_offset, "text": selected[query.char_offset:end],
+                    "totalLines": len(lines), "contentHash": digest, "nextCharOffset": next_char,
+                    "cursorBasis": "Characters in the redacted selected lines; retain line, max_lines and contentHash for continuation.",
+                    "truncated": next_char is not None or next_line is not None, "nextLine": next_line,
+                    "redaction": _SOURCE_REDACTION, "untrustedContent": True}
+        except (OSError, ValueError, TypeError, KeyError):
+            raise ManagementError("SOURCE_UNAVAILABLE", 503) from None
+
+    def search_source(self, query):
+        import time
+        from core.web.services.personal_assistant_project import workspace
+        from .contracts import _SOURCE_REDACTION, source_path_allowed
+        from .service import ManagementError
+        self._owners()
+        try:
+            deadline = time.monotonic() + 4
+            page = workspace.discover_sources(self.project_root, path=query.path, query="", offset=query.offset,
+                                              limit=16, search=False)
+            candidates = page["items"]
+            if not isinstance(candidates, list) or len(candidates) > 16:
+                raise ValueError("Invalid source candidate page")
+            items, examined = [], 0
+            truncated = bool(page["truncated"])
+            for candidate in candidates:
+                if examined and (len(items) >= 6 or time.monotonic() >= deadline):
+                    truncated = True
+                    break
+                examined += 1
+                path = candidate.get("path") if isinstance(candidate, dict) else None
+                if not source_path_allowed(path, file=True):
+                    continue
+                try:
+                    result = workspace.read_source(self.project_root, path, line=1, max_lines=80)
+                    if result["path"] != path:
+                        raise ValueError("Source path changed")
+                    truncated = truncated or result["truncated"]
+                    for line_number, line in enumerate(result["text"].splitlines(), 1):
+                        position = line.casefold().find(query.query.casefold())
+                        if position >= 0:
+                            # casefold can expand a character (for example ß -> ss),
+                            # so its offset cannot index the original line directly.
+                            folded = 0
+                            original_position = 0
+                            for original_position, char in enumerate(line):
+                                folded += len(char.casefold())
+                                if folded > position:
+                                    break
+                            start = max(0, original_position - 30)
+                            items.append({"path": path, "line": line_number, "text": line[start:start + 120],
+                                          "snippetTruncated": start > 0 or len(line) > start + 120})
+                            break
+                except (OSError, ValueError, TypeError, KeyError):
+                    truncated = True
+            more = examined < len(candidates) or page["nextOffset"] is not None
+            cursor = query.offset + examined if more and examined else None
+            limit_reached = cursor is not None and cursor > 1000
+            if limit_reached:
+                cursor, truncated = None, True
+            if more and examined == 0:
+                raise ValueError("Source scan did not advance")
+            continuation_unavailable = cursor is None and (limit_reached or bool(page["truncated"]) and not more)
+            return {"source": "target-checkout", "items": items, "offset": query.offset, "nextOffset": cursor,
+                    "examinedCandidates": examined, "cursorLimitReached": limit_reached, "partial": True,
+                    "continuationUnavailable": continuation_unavailable,
+                    "truncated": truncated, "coverage": "Up to 16 raw candidates per page; first match per file in first 80 lines and 12000 characters; empty results do not prove absence. Offset counts raw candidates; continuationUnavailable means scan may have stopped before remaining files.",
+                    "redaction": _SOURCE_REDACTION, "untrustedContent": True}
+        except (OSError, ValueError, TypeError, KeyError):
+            raise ManagementError("SOURCE_UNAVAILABLE", 503) from None
+
     def read_teams(self, query):
         from .workspace_queries import read_teams
         return read_teams(self.project_root, self._owners(), query)

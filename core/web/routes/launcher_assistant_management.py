@@ -24,7 +24,7 @@ from core.web.services.external_management.contracts import (
     SessionConfigResponse,
     SessionConfigComparisonResponse,
     DirectoryQuery, TeamListResponse, TeamReadResponse, RoomListResponse, RoomReadResponse, SessionParametersResponse, AuthorizationStateResponse,
-    LegacyObserverView, LegacyObserversResponse, LegacyReceiptsResponse, ActiveTasksResponse,
+    LegacyObserverView, LegacyObserversResponse, LegacyReceiptsResponse, ActiveTasksResponse, SourceReadResponse, SourceSearchResponse,
 )
 from core.web.services.external_management.service import (
     ManagementError,
@@ -175,6 +175,29 @@ async def list_active_tasks(request: Request, offset: int = 0, limit: int = 6):
             or any(not re.fullmatch(r"[0-9]{1,5}", values[key]) for key in values)):
         raise HTTPException(status_code=422, detail={"code": "INVALID_INPUT"})
     return await _call(lambda: _service().read_active_tasks(*_credentials(request), offset=offset, limit=limit))
+
+
+def _source_query(request, allowed, integers):
+    values = request.query_params
+    if (set(values) - allowed or len(values.multi_items()) != len(values)
+            or any(not re.fullmatch(r"[0-9]{1,7}", values[key]) for key in integers if key in values)):
+        raise HTTPException(status_code=422, detail={"code": "INVALID_INPUT"})
+
+
+@router.get("/source/read", response_model=SourceReadResponse)
+async def source_read(request: Request, path: str, line: int = 1, max_lines: int = 8, char_offset: int = 0,
+                      expected_content_hash: str | None = None):
+    _require_control(request)
+    _source_query(request, {"path", "line", "max_lines", "char_offset", "expected_content_hash"}, {"line", "max_lines", "char_offset"})
+    return await _call(lambda: _service().source_query(*_credentials(request), "read", {"path": path, "line": line, "max_lines": max_lines,
+                      "char_offset": char_offset, "expected_content_hash": expected_content_hash}))
+
+
+@router.get("/source/search", response_model=SourceSearchResponse)
+async def source_search(request: Request, query: str, path: str = ".", offset: int = 0):
+    _require_control(request)
+    _source_query(request, {"path", "query", "offset"}, {"offset"})
+    return await _call(lambda: _service().source_query(*_credentials(request), "search", {"path": path, "query": query, "offset": offset}))
 
 
 @router.get("/directory/teams/{team_id}", response_model=TeamReadResponse)

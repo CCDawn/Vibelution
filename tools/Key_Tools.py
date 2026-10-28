@@ -3089,6 +3089,9 @@ def _build_key_tools() -> List[BaseTool]:
         助理自身偏好修改在当前轮结束后自动刷新生效，不要求用户手动刷新或重启。
         provider_catalog及provider_*/model_*管理连接和模型；workspace_list按名称查会话/团队/群聊，再用session_*/team_*/room_update操作。
         index中的governed=true动作使用manage同名action，arguments_json为对应parameters的JSON；不要在日常工具中反复重试。
+        Launcher查询返回SCOPE_DENIED且带requiredScopes时，用户已请求该查询：先读authorization_status，
+        再用manage的authorization_upgrade只申请其中缺失的权限；原生审批会处理确认，成功后继续原查询，不要求用户进设置页。
+        未获批准或结果未知时保留原请求并说明，不得自行宣称授权或扩大其他权限。
         team_status: run_id，可选team_id（可省略，由自己的创建记录定位）、wait_seconds最多30秒；完成时返回团队最终产物。
         搭团队并运行使用manage的team_run，单次审批。需要等待完成时用team_status有界等待，勿快速空轮询。
         只以工具成功且verified/原生终态为完成依据；unknown时核验，不能换request_id重复创建。

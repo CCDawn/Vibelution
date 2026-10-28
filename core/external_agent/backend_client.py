@@ -170,7 +170,7 @@ class ManagedAgentBackendClient:
             # grant; only a fresh client may explicitly request the new scope.
             requested_scopes = saved.get("scopes", _LEGACY_MANAGEMENT_SCOPES if saved.get("clientId") else _MANAGEMENT_SCOPES)
             if (not isinstance(requested_scopes, list) or not requested_scopes
-                or any(not isinstance(scope, str) or scope not in (*_MANAGEMENT_SCOPES, "tasks:read") for scope in requested_scopes)
+                or any(not isinstance(scope, str) or scope not in (*_MANAGEMENT_SCOPES, "tasks:read", "source:read") for scope in requested_scopes)
                 or requested_scopes != sorted(set(requested_scopes))):
                 raise BackendClientError("Invalid management scopes.", code="UNKNOWN_MANAGEMENT_SUBJECT")
             self._state["management"] = {**saved, "clientId": client_id, "binding": binding, "scopes": requested_scopes}
@@ -324,6 +324,24 @@ class ManagedAgentBackendClient:
         except (ValidationError, ValueError):
             raise BackendClientError("Invalid avatar projection.", code="BACKEND_PROTOCOL_ERROR") from None
         return public
+
+    async def management_source(self, operation, **parameters) -> dict[str, Any]:
+        from pydantic import ValidationError
+        from core.web.services.external_management.contracts import SourceReadQuery, SourceReadResponse, SourceSearchQuery, SourceSearchResponse
+        if operation not in {"read", "search"}:
+            raise BackendClientError("Invalid source operation.", code="INVALID_MANAGEMENT_REQUEST")
+        query_model, response_model = (SourceReadQuery, SourceReadResponse) if operation == "read" else (SourceSearchQuery, SourceSearchResponse)
+        try:
+            query = query_model.model_validate(parameters)
+        except ValidationError:
+            raise BackendClientError("Invalid source query.", code="INVALID_MANAGEMENT_REQUEST") from None
+        result = await self._management_directory_read("/source/" + operation + "?" + urlencode(query.model_dump(exclude_none=True)), response_model)
+        if (operation == "read" and (result["path"] != query.path or result["line"] != query.line
+                or result["charOffset"] != query.char_offset or query.expected_content_hash is not None and result["contentHash"] != query.expected_content_hash)
+                or operation == "search" and (result["offset"] != query.offset
+                    or query.path != "." and any(not item["path"].startswith(query.path + "/") for item in result["items"]))):
+            raise BackendClientError("Source query binding changed.", code="BACKEND_PROTOCOL_ERROR")
+        return result
 
     async def management_active_tasks(self, **parameters) -> dict[str, Any]:
         from pydantic import ValidationError
