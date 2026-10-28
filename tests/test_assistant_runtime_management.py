@@ -286,6 +286,80 @@ class Probe:
 
 
 @pytest.mark.anyio
+async def test_team_result_action_reads_original_run_in_bound_pages(tmp_path):
+    probe = Probe()
+    text = ('结果\n"' * 1800)
+    original = probe.factory
+
+    def factory(*args, **kwargs):
+        client = original(*args, **kwargs)
+
+        async def team_result(*, request_id):
+            assert request_id == "team-1"
+            return {"status": "available", "text": text, "truncated": False, "untrustedContent": True}
+
+        client.management_team_result = team_result
+        return client
+
+    service = DispatchService(tmp_path / "profile", {"p": tmp_path / "project"}, client_factory=factory)
+    bind_actions(service, asyncio.get_running_loop())
+    try:
+        params = {"project_id": "p", "request_id": "team-1", "name": "Team", "goal": "Build a team"}
+        await asyncio.to_thread(execute_action, "team_run", params, governed=True)
+        collected = ""
+        offset, result_hash = 0, None
+        while True:
+            arguments = {"project_id": "p", "request_id": "team-1", "offset": offset}
+            if result_hash is not None:
+                arguments["expected_hash"] = result_hash
+            page = await asyncio.to_thread(execute_action, "team_result", arguments)
+            assert page["status"] == "available" and page["untrustedContent"] is True
+            assert len(json.dumps({"source": "launcher-assistant", **page}, ensure_ascii=False)) <= 3400
+            assert result_hash in (None, page["resultHash"])
+            result_hash = page["resultHash"]
+            collected += page["text"]
+            if page["nextOffset"] is None:
+                break
+            offset = page["nextOffset"]
+        assert collected == text and len(probe.writes) == 1
+        changed = await asyncio.to_thread(execute_action, "team_result", {
+            "project_id": "p", "request_id": "team-1", "offset": 1, "expected_hash": "0" * 64})
+        assert changed["code"] == "TEAM_RESULT_CHANGED"
+        with pytest.raises(ValueError):
+            await asyncio.to_thread(execute_action, "team_result", {"project_id": "p", "request_id": "team-1", "offset": 1})
+    finally:
+        unbind_actions(service)
+
+
+@pytest.mark.anyio
+async def test_team_result_discards_content_if_project_is_suspended_during_read(tmp_path):
+    probe = Probe()
+    entered, release = asyncio.Event(), asyncio.Event()
+    original = probe.factory
+
+    def factory(*args, **kwargs):
+        client = original(*args, **kwargs)
+
+        async def team_result(*, request_id):
+            entered.set()
+            await release.wait()
+            return {"status": "available", "text": "private result", "truncated": False, "untrustedContent": True}
+
+        client.management_team_result = team_result
+        return client
+
+    service = DispatchService(tmp_path / "profile", {"p": tmp_path / "project"}, client_factory=factory)
+    await service.management.invoke("p", action="team_run", request_id="team-1", parameters={"goal": "x"})
+    pending = asyncio.create_task(service.management.team_result("p", request_id="team-1"))
+    await entered.wait()
+    service.suspend_projects()
+    release.set()
+    with pytest.raises(DispatchError) as exc:
+        await pending
+    assert exc.value.code == "PROJECT_REGISTRY_RECONCILE_REQUIRED"
+
+
+@pytest.mark.anyio
 async def test_session_config_read_has_no_management_intent_or_request_id(tmp_path):
     observed = []
     def factory(root, **_kwargs):

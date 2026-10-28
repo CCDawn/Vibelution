@@ -181,10 +181,11 @@ def _documentation_catalog_navigation(result: dict, project_id: str, parameters:
 
 
 class ManagementAdapter:
-    def __init__(self, profile_root: Path, projects, call):
+    def __init__(self, profile_root: Path, projects, call, *, read_binding=None):
         self._root = Path(profile_root) / "assistant_management"
         self._project_provider = projects if callable(projects) else lambda: projects
         self._call = call
+        self._read_binding = read_binding
         self._locks: dict[str, anyio.Lock] = {}
 
     @property
@@ -250,6 +251,40 @@ class ManagementAdapter:
         self._read(self._root / (key + ".json"))
         result = await self._call(project_id, lambda client: client.management_receipt(action=action, request_id=request_id))
         return {**result, "projectId": project_id}
+
+    async def team_result(self, project_id: str, *, request_id: str, offset: int = 0, expected_hash: str | None = None):
+        # Reuse the original local association and target subject; reading a
+        # result never admits or resumes a team run.
+        if self._read_binding is None:
+            raise DispatchError("Project authorization cannot be checked.", code="TEAM_RESULT_UNAVAILABLE")
+        binding = self._read_binding(project_id)
+        self._read(self._root / (self._key(project_id, "team_run", request_id) + ".json"))
+        result = await self._call(project_id, lambda client: client.management_team_result(request_id=request_id))
+        identity = {key: result[key] for key in ("status", "text", "truncated")}
+        digest = hashlib.sha256(json.dumps(identity, ensure_ascii=True, sort_keys=True).encode("ascii")).hexdigest()
+        if expected_hash is not None and expected_hash != digest:
+            raise DispatchError("Team result changed; restart the result read.", code="TEAM_RESULT_CHANGED")
+        text = result["text"]
+        if offset > len(text):
+            raise DispatchError("Team result offset is invalid.", code="TEAM_RESULT_UNAVAILABLE")
+        page = {"projectId": project_id, "requestId": request_id, "status": result["status"],
+                "text": "", "offset": offset, "nextOffset": None, "resultHash": digest,
+                "sourceTruncated": result["truncated"], "untrustedContent": True}
+        low, high = 0, len(text) - offset
+        while low < high:
+            middle = (low + high + 1) // 2
+            end = offset + middle
+            candidate = {**page, "text": text[offset:end], "nextOffset": end if end < len(text) else None}
+            if _documentation_wrapper_size(project_id, candidate) <= 3400:
+                low = middle
+            else:
+                high = middle - 1
+        if low == 0 and offset < len(text):
+            raise DispatchError("Team result page exceeds the model budget.", code="TEAM_RESULT_UNAVAILABLE")
+        end = offset + low
+        if self._read_binding(project_id) != binding:
+            raise DispatchError("Project authorization changed during the result read.", code="PROJECT_REGISTRY_RECONCILE_REQUIRED")
+        return {**page, "text": text[offset:end], "nextOffset": end if end < len(text) else None}
 
     async def agent(self, project_id: str, *, agent_id: str):
         if project_id not in self._projects:

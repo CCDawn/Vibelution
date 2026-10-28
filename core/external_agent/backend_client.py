@@ -170,7 +170,7 @@ class ManagedAgentBackendClient:
             # grant; only a fresh client may explicitly request the new scope.
             requested_scopes = saved.get("scopes", _LEGACY_MANAGEMENT_SCOPES if saved.get("clientId") else _MANAGEMENT_SCOPES)
             if (not isinstance(requested_scopes, list) or not requested_scopes
-                or any(not isinstance(scope, str) or scope not in (*_MANAGEMENT_SCOPES, "tasks:read", "source:read", "knowledge:catalog:read", "agents:create:files") for scope in requested_scopes)
+                or any(not isinstance(scope, str) or scope not in (*_MANAGEMENT_SCOPES, "tasks:read", "source:read", "knowledge:catalog:read", "agents:create:files", "teams:results:read") for scope in requested_scopes)
                 or requested_scopes != sorted(set(requested_scopes))):
                 raise BackendClientError("Invalid management scopes.", code="UNKNOWN_MANAGEMENT_SUBJECT")
             self._state["management"] = {**saved, "clientId": client_id, "binding": binding, "scopes": requested_scopes}
@@ -232,7 +232,7 @@ class ManagedAgentBackendClient:
             await self._sync_authorization_receipt(grant, public)
         return public
 
-    async def _original_management_grant(self, *, require_original):
+    async def _original_management_grant(self, *, require_original, require_complete=False):
         """Keep original credentials when an explicit upgrade changed server scopes.
 
         Rebinding an old scope list would conflict before its receipt could be
@@ -246,6 +246,8 @@ class ManagedAgentBackendClient:
         if require_original and not saved.get("clientId"):
             raise BackendClientError("Original subject is missing.", code="UNKNOWN_MANAGEMENT_SUBJECT")
         if not saved.get("subjectId") or not saved.get("capability"):
+            if require_complete:
+                raise BackendClientError("Original credentials are incomplete.", code="UNKNOWN_MANAGEMENT_SUBJECT")
             return await self._management_grant(require_existing=bool(saved.get("clientId")))
         try:
             binding = Binding.model_validate(saved["binding"]).model_dump()
@@ -466,6 +468,20 @@ class ManagedAgentBackendClient:
 
     async def management_team_list(self, **parameters):
         return await self._management_directory_list("teams", parameters)
+
+    async def management_team_result(self, *, request_id: str):
+        from pydantic import ValidationError
+        from core.web.services.external_management.contracts import TeamResultResponse
+
+        if not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,95}", request_id):
+            raise BackendClientError("Invalid Team request identity.", code="INVALID_MANAGEMENT_REQUEST")
+        grant = await self._original_management_grant(require_original=True, require_complete=True)
+        result = await self._request_json("GET", f"{_MANAGEMENT_PREFIX}/team-runs/requests/{quote(request_id, safe='')}/result",
+            management_auth=(grant["subjectId"], grant["capability"]))
+        try:
+            return TeamResultResponse.model_validate(result).model_dump()
+        except ValidationError:
+            raise BackendClientError("Invalid Team result.", code="BACKEND_PROTOCOL_ERROR") from None
 
     async def management_room_list(self, **parameters):
         return await self._management_directory_list("rooms", parameters)

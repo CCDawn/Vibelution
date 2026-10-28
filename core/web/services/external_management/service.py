@@ -70,7 +70,7 @@ class ManagementService:
     def binding(self) -> dict:
         current = self.identity()
         Binding.model_validate(current.binding)
-        return {"protocolVersion": 1, "binding": current.binding, "scopes": [scope for scope in SCOPES if scope not in {"tasks:read", "source:read", "knowledge:catalog:read", "agents:create:files"}], "actions": contracts()}
+        return {"protocolVersion": 1, "binding": current.binding, "scopes": [scope for scope in SCOPES if scope not in {"tasks:read", "source:read", "knowledge:catalog:read", "agents:create:files", "teams:results:read"}], "actions": contracts()}
 
     def _expected(self, expected: dict):
         current = self.identity()
@@ -96,7 +96,7 @@ class ManagementService:
                     or grant.get("scopes") != scopes):
                     raise ManagementError("SUBJECT_GRANT_CONFLICT", 409)
             else:
-                if "agents:create:files" in scopes:
+                if {"agents:create:files", "teams:results:read"} & set(scopes):
                     raise ManagementError("SCOPE_DENIED", 403)
                 grant = {"subject_id": "ops-" + uuid4().hex, "subject_capability": secrets.token_urlsafe(48),
                          "binding": current.binding, "authority": current.signature, "scopes": scopes}
@@ -508,6 +508,17 @@ class ManagementService:
         grant = self._authorize(subject, capability, "teams:read")
         self._request_key(subject, "team_run", request_id)
         return self._team_intents(grant).receipt(request_id)
+
+    def team_result(self, subject: str, capability: str, request_id: str) -> dict:
+        from .contracts import TeamResultResponse
+        from .team_result import read_team_result
+
+        grant = self._authorize(subject, capability, "teams:results:read")
+        self._request_key(subject, "team_run", request_id)
+        result = read_team_result(self._team_intents(grant), request_id, self.native.project_root)
+        if self._authorize(subject, capability, "teams:results:read") != grant:
+            raise ManagementError("AUTHORIZATION_CONFLICT", 409)
+        return TeamResultResponse.model_validate(result).model_dump()
 
 
 def build_default_service(project_root: Path) -> ManagementService:

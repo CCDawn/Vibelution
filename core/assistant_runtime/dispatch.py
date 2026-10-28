@@ -247,7 +247,13 @@ class DispatchService:
         self._dispatch_state = RLock()
         self._dispatch_fence_owner: object | None = None
         from .management import ManagementAdapter
-        self.management = ManagementAdapter(profile_root, self._admitted_projects, self._call)
+        self.management = ManagementAdapter(profile_root, self._admitted_projects, self._call,
+                                            read_binding=self._project_read_binding)
+
+    def _project_read_binding(self, project_id: str) -> tuple[int, Path]:
+        """Capture a content read's current registry generation and target."""
+        with self._dispatch_state:
+            return self._registry_gate_generation, self._project(project_id)
 
     def suspend_projects(self) -> dict:
         """Narrow project admissions without changing grants or native history."""

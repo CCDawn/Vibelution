@@ -25,7 +25,7 @@ from core.web.services.external_management.contracts import (
     SessionConfigComparisonResponse,
     DirectoryQuery, TeamListResponse, TeamReadResponse, RoomListResponse, RoomReadResponse, SessionParametersResponse, AuthorizationStateResponse,
     LegacyObserverView, LegacyObserversResponse, LegacyReceiptsResponse, ActiveTasksResponse, SourceReadResponse, SourceSearchResponse,
-    TeamKnowledgeResponse,
+    TeamKnowledgeResponse, TeamResultResponse,
 )
 from core.web.services.external_management.service import (
     ManagementError,
@@ -295,6 +295,14 @@ async def receipt(action: str, request_id: str, request: Request):
 async def team_receipt(original_request_id: str, request: Request):
     _require_control(request)
     return await _call(lambda: _service().team_receipt(*_credentials(request), original_request_id))
+
+
+@router.get("/team-runs/requests/{original_request_id}/result", response_model=TeamResultResponse)
+async def team_result(original_request_id: str, request: Request):
+    _require_control(request)
+    if request.query_params:
+        raise HTTPException(status_code=422, detail={"code": "INVALID_INPUT"})
+    return await _call(lambda: _service().team_result(*_credentials(request), original_request_id))
 
 
 @router.get("/api-documentation/catalog", response_model=DocumentationResponse, response_model_exclude_none=True)

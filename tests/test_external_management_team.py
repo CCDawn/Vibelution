@@ -71,7 +71,7 @@ def env(tmp_path, monkeypatch):
     identity = lambda: TargetIdentity(BINDING, "native-root")
     management = ManagementService(tmp_path / "management", identity=identity, native=None, teams=gateway)
     grant = management.bind({"client_id": "launcher", "expected_binding": BINDING,
-                             "scopes": [scope for scope in SCOPES if scope != "agents:create:files"]})
+                             "scopes": [scope for scope in SCOPES if scope not in {"agents:create:files", "teams:results:read"}]})
     args = (grant["subject_id"], grant["subject_capability"])
     payload = {"request_id": "request-1", "expected_binding": BINDING,
                "parameters": {"name": "Team", "goal": "Produce verified evidence", "template_id": "dev-team"}}
@@ -124,7 +124,7 @@ def test_materialization_ack_loss_recovers_only_known_team_and_requires_explicit
 def test_scope_binding_and_subject_are_not_run_identifiers(env):
     invoke(env)
     other = env.service.bind({"client_id": "other", "expected_binding": BINDING,
-                              "scopes": [scope for scope in SCOPES if scope != "agents:create:files"]})
+                              "scopes": [scope for scope in SCOPES if scope not in {"agents:create:files", "teams:results:read"}]})
     with pytest.raises(ManagementError, match="REQUEST_UNAVAILABLE"):
         env.service.team_receipt(other["subject_id"], other["subject_capability"], "request-1")
     env.service.identity = lambda: TargetIdentity({**BINDING, "instanceId": "different"}, "native-root")
@@ -378,7 +378,7 @@ def test_real_partial_template_never_reenters_native_agent_creation(configured_e
     management = ManagementService(env["root"] / "management", identity=lambda: TargetIdentity(BINDING, "canonical"),
                                    native=NativeAgentGateway(env["root"]))
     grant = management.bind({"client_id": "launcher", "expected_binding": BINDING,
-                             "scopes": [scope for scope in SCOPES if scope != "agents:create:files"]})
+                             "scopes": [scope for scope in SCOPES if scope not in {"agents:create:files", "teams:results:read"}]})
     args = grant["subject_id"], grant["subject_capability"]
     payload = {"request_id": "partial", "expected_binding": BINDING, "parameters": {"name": "Partial", "goal": "No model started"}}
     create = operations.create_configured_agent_with_session

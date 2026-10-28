@@ -5,10 +5,10 @@ from typing import Any, ClassVar, Literal
 import re
 import unicodedata
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
-Scope = Literal["agents:read", "agents:create", "agents:create:files", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read", "source:read", "knowledge:catalog:read"]
-SCOPES = ("agents:read", "agents:create", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read", "source:read", "knowledge:catalog:read", "agents:create:files")
+Scope = Literal["agents:read", "agents:create", "agents:create:files", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:results:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read", "source:read", "knowledge:catalog:read"]
+SCOPES = ("agents:read", "agents:create", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read", "source:read", "knowledge:catalog:read", "agents:create:files", "teams:results:read")
 _AVATAR_EXTENSION = r"(?:[pP][nN][gG]|[jJ][pP][gG]|[jJ][pP][eE][gG]|[wW][eE][bB][pP]|svg)"
 _AVATAR_PATH_PATTERN = r"^workspace/avatars/[A-Za-z0-9_.-]+\." + _AVATAR_EXTENSION + "$"
 
@@ -26,6 +26,21 @@ class UntrustedResponse(Closed):
         if value is not True:
             raise ValueError("Explicit untrusted marker required")
         return value
+
+
+class TeamResultResponse(UntrustedResponse):
+    status: Literal["available", "empty", "unavailable"]
+    text: str = Field(max_length=12000)
+    truncated: StrictBool
+
+    @model_validator(mode="after")
+    def consistent_result(self):
+        if self.status == "available":
+            if not self.text.strip() or self.truncated and len(self.text) != 12000:
+                raise ValueError("Available result requires text")
+        elif self.text or self.truncated:
+            raise ValueError("Unavailable or empty result cannot contain text")
+        return self
 
 
 class Binding(Closed):
