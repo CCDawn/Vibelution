@@ -13,7 +13,7 @@ def test_actual_native_avatar_library_cold_read_has_no_persistent_writes(tmp_pat
     _run(tmp_path, """
         import json, os, sys
         from pathlib import Path
-        from core.web.services import agent_directory_service as directory, session_service as sessions
+        from core.web.services import agent_directory_service as directory
         from core.web.services.external_management.native import NativeAgentGateway
         from core.infrastructure import developer_sandbox
         from config.public_config import read_existing_config_snapshot
@@ -34,7 +34,7 @@ def test_actual_native_avatar_library_cold_read_has_no_persistent_writes(tmp_pat
             (developer_sandbox._sandbox_root(root, 'dev-existing') / 'workspace').mkdir(parents=True)
         mutations._AVATAR_DIR_CACHE.clear()
         directory.PROJECT_ROOT = root
-        sessions.PROJECT_ROOT = root
+        assert 'core.web.services.session_service' not in sys.modules
         home = Path(os.environ['ASSISTANT_TEST_WRITE_ROOT'])
         before = {str(path.relative_to(home)): path.read_bytes() for path in home.rglob('*') if path.is_file()}
         writes = []
@@ -59,8 +59,10 @@ def test_actual_native_avatar_library_cold_read_has_no_persistent_writes(tmp_pat
             legacy = developer_sandbox.existing_sandboxed_workspace_path(root, 'avatars', public_config=snapshot)
             dirs = (('custom', config_path.parent / directory.AGENT_AVATAR_CONFIG_DIR_NAME / directory.AGENT_AVATAR_CONFIG_AGENT_DIR_NAME),
                 ('bundled', assets), ('legacy', legacy))
-            result = mutations.agent_avatar_options_snapshot(dirs)
-            assert NativeAgentGateway(root).avatar_options() == result
+            assert not mutations._AVATAR_DIR_CACHE
+            result = NativeAgentGateway(root).avatar_options()
+            assert 'core.web.services.session_service' not in sys.modules
+            assert result == mutations.agent_avatar_options_snapshot(dirs)
         after = {str(path.relative_to(home)): path.read_bytes() for path in home.rglob('*') if path.is_file()}
         assert any(row['filename'] == 'fixture-avatar.png' for row in result)
         assert not writes, writes[:20]
@@ -160,6 +162,22 @@ def test_avatar_route_requires_operator_control_and_existing_agents_read_scope(e
     assert env.calls == []
 
 
+@pytest.mark.parametrize('changed', ['projectId', 'instanceId', 'authority'])
+def test_avatar_route_rejects_changed_target_identity_before_native_read(env, changed):
+    from core.web.services.external_management.service import TargetIdentity
+    binding = dict(env.binding)
+    authority = 'authority'
+    if changed == 'authority':
+        authority = 'different-authority'
+    else:
+        binding[changed] = 'different-' + changed
+    env.service.identity = lambda: TargetIdentity(binding, authority)
+    result = env.client.get(URL, headers=env.headers)
+    assert result.status_code == 409
+    assert result.json() == {'detail': {'code': 'TARGET_BINDING_CHANGED'}}
+    assert env.calls == []
+
+
 @pytest.mark.parametrize('patch', [{'filename': '../escape.png'}, {'path': '/private/avatar.png'}, {'path': 'workspace/avatars/other.png'}, {'url': 'https://private'}, {'filename': 3}])
 def test_avatar_route_validates_every_candidate_before_paging(env, patch):
     env.rows[-1] = {**env.rows[-1], **patch}
@@ -203,6 +221,18 @@ def test_avatar_native_checks_target_binding_before_config_or_library(tmp_path, 
     monkeypatch.setattr(directory, 'PROJECT_ROOT', tmp_path / 'different-bound-root')
     with pytest.raises(ManagementError, match='TARGET_BINDING_CHANGED'):
         NativeAgentGateway(tmp_path).avatar_options()
+
+
+def test_avatar_native_rejects_a_different_scoped_project_before_config(tmp_path, monkeypatch):
+    from config import public_config
+    from core.web.services import agent_directory_service as directory
+    from core.web.services.external_management.native import NativeAgentGateway
+    from core.web.services.external_management.service import ManagementError
+    monkeypatch.setattr(directory, 'PROJECT_ROOT', tmp_path)
+    monkeypatch.setattr(public_config, 'read_existing_config_snapshot', lambda *_: pytest.fail('wrong root read config'))
+    with directory.scoped_project_root(tmp_path / 'different-scoped-root'):
+        with pytest.raises(ManagementError, match='TARGET_BINDING_CHANGED'):
+            NativeAgentGateway(tmp_path).avatar_options()
 
 
 def test_avatar_native_unavailable_developer_authority_does_not_create_or_fallback(tmp_path, monkeypatch):

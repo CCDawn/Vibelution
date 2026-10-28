@@ -36,11 +36,16 @@ class NativeAgentGateway:
             return {**raw, "avatarImagePath": directory._agent_avatar_path_from_metadata(metadata)}
 
     def avatar_options(self):
-        directory = self._owners()
+        # Avatar discovery only reads the directory's existing library. Importing
+        # session_service here can initialize a developer sandbox on a cold read.
+        from core.web.services import agent_directory_service as directory
+        from .service import ManagementError
+        if (Path(directory.PROJECT_ROOT).resolve() != self.project_root
+                or Path(directory._active_project_root()).resolve() != self.project_root):
+            raise ManagementError("TARGET_BINDING_CHANGED", 409)
         from config.public_config import read_existing_config_snapshot
         from core.infrastructure.developer_sandbox import existing_sandboxed_workspace_path
         from core.web.services.agent_directory.mutations import agent_avatar_options_snapshot
-        from .service import ManagementError
         try:
             config_path = Path(directory.CONFIG_PATH).expanduser().resolve()
             config = read_existing_config_snapshot(config_path)
