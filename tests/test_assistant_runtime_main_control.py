@@ -227,8 +227,11 @@ async def test_initial_migration_receipt_is_read_only_closed_and_capability_gate
     disabled = broker(service)
     bind_actions(service, asyncio.get_running_loop(), main_control=disabled)
     try:
-        listing = await asyncio.to_thread(execute_action, "index", {"query": "initial_migration_receipt"})
-        assert listing["total"] == 0
+        offset = 0
+        while offset is not None:
+            listing = await asyncio.to_thread(execute_action, "index", {"query": "initial_migration_receipt", "offset": offset})
+            assert "initial_migration_receipt" not in {item["action"] for item in listing["actions"]}
+            offset = listing["nextOffset"]
         with pytest.raises(ValueError):
             await asyncio.to_thread(execute_action, "initial_migration_receipt", args)
         with pytest.raises(ValueError):
@@ -782,7 +785,10 @@ async def test_optional_main_actions_have_full_discoverable_contracts_within_too
             schema = contract["parameters"]
             assert schema["additionalProperties"] is False
             assert set(schema["properties"]) == ({"project_id"} if name == "project_status" else {"project_id", "operation", "request_id"})
-            if name != "project_status":
+            if name == "project_status":
+                assert "不返回活跃任务数" in contract["description"]
+                assert "不能据此判断任务是否空闲" in contract["description"]
+            else:
                 assert schema["properties"]["operation"]["enum"] == ["start", "stop", "restart"]
                 assert schema["properties"]["request_id"]["maxLength"] == 128
                 assert "unknown" in contract["description"] and "queued" in contract["description"]
