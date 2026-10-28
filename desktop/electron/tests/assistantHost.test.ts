@@ -614,7 +614,7 @@ describe("AssistantHost", () => {
       return Response.json({ schemaVersion: 1, operationId, cancelled: true });
     });
     const controller = new AbortController();
-    const pending = host.importHistory({ projectId: "project", previewId: "a".repeat(64), turnId: "turn-1", revision: 0, signal: controller.signal });
+    const pending = host.importHistory({ projectId: "project", previewId: "a".repeat(64), turnId: "turn-1", operationId: "b".repeat(32), revision: 0, signal: controller.signal });
     await vi.waitFor(() => expect(started).toBe(true));
     controller.abort();
     await expect(pending).resolves.toMatchObject({ state: "unknown", code: "unknown", readyForCutover: false });
@@ -631,7 +631,7 @@ describe("AssistantHost", () => {
       return Response.json({ schemaVersion: 1, operationId: body.operationId, cancelled: true });
     });
     const controller = new AbortController(); controller.abort();
-    await expect(host.importHistory({ projectId: "project", previewId: "a".repeat(64), turnId: "turn-1", revision: 0, signal: controller.signal }))
+    await expect(host.importHistory({ projectId: "project", previewId: "a".repeat(64), turnId: "turn-1", operationId: "b".repeat(32), revision: 0, signal: controller.signal }))
       .resolves.toMatchObject({ state: "rejected", code: "cancelled" });
     await host.stop();
   });

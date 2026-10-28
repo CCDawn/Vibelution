@@ -8,11 +8,11 @@ from pathlib import Path
 from threading import Event, Lock, RLock
 
 from .migration_io import MigrationIOError
-from .online_history import AuthorizedHistorySource, OnlineHistoryOwner
+from .online_history import AuthorizedHistorySource, HistoryTargetBusy, OnlineHistoryOwner
 
 _LOGGER = logging.getLogger(__name__)
 _HISTORY_DIAGNOSTICS = frozenset({
-    "history_target_unavailable", "history_target_invalid", "history_generation_changed",
+    "history_target_busy", "history_target_unavailable", "history_target_invalid", "history_generation_changed",
     "history_cancelled", "history_authority_revoked", "history_profile_changed",
     "history_preview_expired", "history_preview_changed", "history_outcome_unknown",
     "history_discovery_incomplete", "history_archive_invalid", "history_source_unavailable",
@@ -30,6 +30,10 @@ class HistoryHost:
     def __init__(self, profile_root: Path, generation: str, dispatch, preview, *, initial_owner_check=None):
         self._lock = RLock()
         self._import_lock = Lock()
+        self._history_admission_lock = Lock()
+        self._migration_active = None
+        self._retired_history_deliveries = set()
+        self._history_retirement_full = False
         self._active = True
         self._generation = generation
         self._dispatch = dispatch
@@ -37,7 +41,7 @@ class HistoryHost:
         # Trusted host supplies a nonblocking lifecycle check while it holds
         # the profile's OS host-owner lock. Missing proof forbids refresh.
         self._initial_owner_check = initial_owner_check
-        self._cancelled = set()
+        self._cancelled = {}
         self._operation = None
         self._operation_turn = None
         self._operation_stopped = False
@@ -68,8 +72,43 @@ class HistoryHost:
         self._lock.release()
         return True
 
-    def retire_preview(self, preview_id):
-        self._preview.retire(preview_id)
+    def _acquire_migration(self, action, preview_id, operation_id):
+        with self._history_admission_lock:
+            if not self._import_lock.acquire(blocking=False):
+                return False
+            self._migration_active = (action, preview_id, operation_id)
+            return True
+
+    def _release_migration(self):
+        with self._history_admission_lock:
+            self._migration_active = None
+            self._import_lock.release()
+
+    def retire_preview(self, preview_id, action, operation_id):
+        """Retire only the matching active owner, or an unowned preview."""
+        with self._history_admission_lock:
+            if action == "history_import" and operation_id is not None:
+                # The delivery can still arrive after another action releases
+                # this preview. Fence it even when that action owns the preview.
+                if len(self._retired_history_deliveries) < 4096:
+                    self._retired_history_deliveries.add(operation_id)
+                elif operation_id not in self._retired_history_deliveries:
+                    self._history_retirement_full = True
+            active = self._migration_active
+            if (active is None and self._import_lock.locked()
+                    or active is not None and active[1] == preview_id and active != (action, preview_id, operation_id)):
+                return False
+            self._preview.retire(preview_id)
+            return True
+
+    def _retire_competing_preview(self, preview_id):
+        with self._history_admission_lock:
+            active = self._migration_active
+            if active is None or active[1] == preview_id:
+                return False
+            self._preview.retire(preview_id)
+        self._preview.discard(preview_id)
+        return True
 
     def signal_registry_change(self):
         """Revoke an admitted sync before waiting for the generation guard."""
@@ -190,11 +229,12 @@ class HistoryHost:
                 or operation_id != (knowledge_recovery_id(project_id, preview_id, original_sync_id) if category == "knowledge_recovery"
                                     else knowledge_sync_id(project_id, preview_id) if category == "knowledge_sync"
                                     else initial_migration_id(project_id, preview_id, category))):
-            self._preview.discard(preview_id)
-            raise MigrationIOError("initial_migration_request_invalid")
-        if not self._import_lock.acquire(blocking=False):
-            if not retry_busy:
+            if self.retire_preview(preview_id, "initial_migration_queue", operation_id):
                 self._preview.discard(preview_id)
+            raise MigrationIOError("initial_migration_request_invalid")
+        if not self._acquire_migration("initial_migration_queue", preview_id, operation_id):
+            if not retry_busy:
+                self._retire_competing_preview(preview_id)
             raise InitialPrepareBusy("initial_migration_busy")
         running = locked = False
         try:
@@ -266,7 +306,7 @@ class HistoryHost:
                 sessions._RUNNING_SESSIONS_LOCK.release()
             if locked:
                 self._lock.release()
-            self._import_lock.release()
+            self._release_migration()
 
     @contextmanager
     def _sync_guard(self, generation, turn_id, operation_id):
@@ -297,18 +337,21 @@ class HistoryHost:
                 sessions._RUNNING_SESSIONS_LOCK.release()
             self._lock.release()
 
-    def cancel_affairs(self, operation_id, preview_id):
+    def cancel_affairs(self, operation_id, preview_id, action="affairs_sync"):
         """Revoke before waiting; cancellation acknowledges only a drained owner."""
+        if action not in {"affairs_sync", "episodic_sync"}:
+            raise ValueError("affairs_sync_operation_mismatch")
         with self._sync_signal_lock:
             seen = self._sync_seen.get(operation_id)
             current = self._sync_active
-            if (seen is not None and seen["previewId"] != preview_id
+            if (seen is not None and (seen["previewId"] != preview_id or seen.get("action") != action)
                     or current is not None and current["operationId"] == operation_id
-                    and current["previewId"] != preview_id):
+                    and (current["previewId"] != preview_id or current["action"] != action)
+                    or operation_id in self._sync_cancelled and self._sync_cancelled[operation_id] != (action, preview_id)):
                 raise ValueError("affairs_sync_operation_mismatch")
             if operation_id not in self._sync_cancelled and len(self._sync_cancelled) >= 256:
                 raise MigrationIOError("affairs_sync_cancel_capacity")
-            self._sync_cancelled[operation_id] = preview_id
+            self._sync_cancelled[operation_id] = (action, preview_id)
             if current is not None and current["operationId"] == operation_id:
                 current["owner"].revoke()
                 done = current["done"]
@@ -318,7 +361,8 @@ class HistoryHost:
             raise MigrationIOError("affairs_sync_drain_unconfirmed")
         # The sync guard holds this lock until the write capability drains.
         with self._lock:
-            self._preview.discard(preview_id)
+            if self.retire_preview(preview_id, action, operation_id):
+                self._preview.discard(preview_id)
             return {"schemaVersion": 1, "operationId": operation_id, "cancelled": True}
 
     def sync_affairs(self, project_id, preview_id, revision, turn_id, operation_id, recover_sync_id=None):
@@ -338,16 +382,12 @@ class HistoryHost:
         base = {"schemaVersion": 1, "projectId": project_id, "previewId": preview_id,
                 "migrationId": mid, "readyForCutover": False}
         binding_key = (project_id, preview_id, revision, turn_id, recover_sync_id)
-        if not self._import_lock.acquire(blocking=False):
-            with self._sync_signal_lock:
-                active = self._sync_active
-                same_preview = active is not None and active["previewId"] == preview_id
-            if not same_preview:
-                self._preview.discard(preview_id)
-            return {**base, "state": "unknown", "code": "unknown"} if recover_sync_id else {**base, "state": "rejected", "code": "busy"}
+        if not self._acquire_migration("affairs_sync", preview_id, operation_id):
+            different = self._retire_competing_preview(preview_id)
+            return {**base, "state": "rejected", "code": "busy"} if different and not recover_sync_id else {**base, "state": "unknown", "code": "unknown"}
         owner = OnlineAffairsSyncOwner(self._generation,
             lambda generation, turn: self._sync_guard(generation, turn, operation_id))
-        current = {"operationId": operation_id, "previewId": preview_id, "turnId": turn_id,
+        current = {"action": "affairs_sync", "operationId": operation_id, "previewId": preview_id, "turnId": turn_id,
                    "owner": owner, "done": Event()}
         try:
             with self._sync_signal_lock:
@@ -357,7 +397,7 @@ class HistoryHost:
                         return {**base, "state": "unknown", "code": "unknown"}
                     return previous.get("result") or {**base, "state": "unknown", "code": "unknown"}
                 if operation_id in self._sync_cancelled:
-                    if self._sync_cancelled[operation_id] != preview_id:
+                    if self._sync_cancelled[operation_id] != ("affairs_sync", preview_id):
                         return {**base, "state": "unknown", "code": "unknown"}
                     self._preview.discard(preview_id)
                     # A cancel may arrive after an evicted successful result.
@@ -372,7 +412,7 @@ class HistoryHost:
                     if terminal is None:
                         return {**base, "state": "unknown", "code": "unknown"} if recover_sync_id else {**base, "state": "rejected", "code": "busy"}
                     del self._sync_seen[terminal]
-                self._sync_seen[operation_id] = {"binding": binding_key, "previewId": preview_id, "result": None}
+                self._sync_seen[operation_id] = {"action": "affairs_sync", "binding": binding_key, "previewId": preview_id, "result": None}
                 self._sync_active = current
             validation_phase = "preview"
             convergence_attempted = False
@@ -521,7 +561,7 @@ class HistoryHost:
                 if self._sync_active is current:
                     self._sync_active = None
                 current["done"].set()
-            self._import_lock.release()
+            self._release_migration()
 
     def sync_episodic(self, project_id, preview_id, revision, turn_id, operation_id, recover_sync_id=None,
                       resolve_sync_id=None, review_token=None):
@@ -541,16 +581,12 @@ class HistoryHost:
                 "migrationId": mid, "readyForCutover": False}
         unknown = {**base, "state": "unknown", "code": "unknown"}
         binding_key = ("episodic", project_id, preview_id, revision, turn_id, recover_sync_id, resolve_sync_id, review_token)
-        if not self._import_lock.acquire(blocking=False):
-            with self._sync_signal_lock:
-                active = self._sync_active
-                same = active is not None and active["previewId"] == preview_id
-            if not same:
-                self._preview.discard(preview_id)
-            return unknown if recover_sync_id else {**base, "state": "rejected", "code": "busy"}
+        if not self._acquire_migration("episodic_sync", preview_id, operation_id):
+            different = self._retire_competing_preview(preview_id)
+            return {**base, "state": "rejected", "code": "busy"} if different and not recover_sync_id else unknown
         owner = OnlineEpisodicSyncOwner(self._generation,
             lambda generation, turn: self._sync_guard(generation, turn, operation_id))
-        current = {"operationId": operation_id, "previewId": preview_id, "turnId": turn_id,
+        current = {"action": "episodic_sync", "operationId": operation_id, "previewId": preview_id, "turnId": turn_id,
                    "owner": owner, "done": Event()}
         try:
             with self._sync_signal_lock:
@@ -561,6 +597,8 @@ class HistoryHost:
                         return unknown
                     return previous.get("result") or unknown
                 if operation_id in self._sync_cancelled:
+                    if self._sync_cancelled[operation_id] != ("episodic_sync", preview_id):
+                        return unknown
                     self._preview.discard(preview_id)
                     return unknown
                 if len(self._sync_seen) >= 256:
@@ -569,7 +607,7 @@ class HistoryHost:
                         self._preview.discard(preview_id)
                         return unknown
                     del self._sync_seen[terminal]
-                self._sync_seen[operation_id] = {"binding": binding_key, "previewId": preview_id, "result": None}
+                self._sync_seen[operation_id] = {"action": "episodic_sync", "binding": binding_key, "previewId": preview_id, "result": None}
                 self._sync_active = current
             phase = "preview"
             try:
@@ -618,15 +656,23 @@ class HistoryHost:
                 if self._sync_active is current:
                     self._sync_active = None
                 current["done"].set()
-            self._import_lock.release()
+            self._release_migration()
 
     def cancel(self, operation_id, preview_id):
         """Fence publication before acknowledging cancellation, even if early."""
         with self._lock:
+            with self._history_admission_lock:
+                active = self._migration_active
+            if (active is not None and active[0] == "history_import"
+                    and active[2] == operation_id and active[1] != preview_id):
+                raise ValueError("history_cancel_operation_mismatch")
             if operation_id not in self._cancelled and len(self._cancelled) >= 256:
                 raise MigrationIOError("history_cancel_capacity")
-            self._cancelled.add(operation_id)
-            self._preview.discard(preview_id)
+            if operation_id in self._cancelled and self._cancelled[operation_id] != preview_id:
+                raise ValueError("history_cancel_operation_mismatch")
+            self._cancelled[operation_id] = preview_id
+            if self.retire_preview(preview_id, "history_import", operation_id):
+                self._preview.discard(preview_id)
             if self._operation == operation_id:
                 self._owner.suspend()
             return {"schemaVersion": 1, "operationId": operation_id, "cancelled": True}
@@ -635,8 +681,10 @@ class HistoryHost:
     def _history_target_guard(self):
         from . import native
         from core.infrastructure.native_runtime import assistant_native_root
-        if not native._LOCK.acquire(blocking=False):
+        if native._STOP_REQUESTED.is_set():
             raise MigrationIOError("history_target_unavailable")
+        if not native._LOCK.acquire(blocking=False):
+            raise HistoryTargetBusy("history_target_busy")
         try:
             if (not native._STARTED or native._OFFLINE_MIGRATION or native._STOP_REQUESTED.is_set()
                     or assistant_native_root() != self._owner._profile
@@ -650,7 +698,9 @@ class HistoryHost:
         """Read a past result against a freshly reconstructed source authority."""
         base = {"schemaVersion": 1, "projectId": project_id, "previewId": preview_id,
                 "state": "unknown", "code": "unknown", "readyForCutover": False}
-        if not self._import_lock.acquire(blocking=False):
+        # The lookup key is not a write capability; authority comes from the
+        # fresh preview below and must not block retirement of this key.
+        if not self._acquire_migration("history_receipt", None, None):
             return base
         fresh = None
         try:
@@ -684,20 +734,24 @@ class HistoryHost:
             self._owner.suspend()
             if fresh is not None:
                 self._preview.discard(fresh)
-            self._import_lock.release()
+            self._release_migration()
 
     def import_history(self, project_id, preview_id, revision, turn_id, operation_id):
         base = {"schemaVersion": 1, "projectId": project_id, "previewId": preview_id,
                 "readyForCutover": False}
-        if not self._import_lock.acquire(blocking=False):
-            self._preview.discard(preview_id)
-            return {**base, "state": "rejected", "code": "busy"}
+        if not self._acquire_migration("history_import", preview_id, operation_id):
+            self._retire_competing_preview(preview_id)
+            return {**base, "state": "unknown", "code": "unknown"}
         try:
             try:
                 with self._lock:
                     if operation_id in self._cancelled:
-                        self._preview.discard(preview_id)
-                        return {**base, "state": "rejected", "code": "cancelled"}
+                        # A late cancel cannot prove whether this delivery had
+                        # already completed before the cancellation arrived.
+                        return {**base, "state": "unknown", "code": "unknown"}
+                    with self._history_admission_lock:
+                        if self._history_retirement_full or operation_id in self._retired_history_deliveries:
+                            return {**base, "state": "unknown", "code": "unknown"}
                     self._operation = operation_id
                     self._operation_turn = turn_id
                     self._operation_stopped = False
@@ -721,12 +775,15 @@ class HistoryHost:
             try:
                 result = self._owner.import_bound_history(project_id, preview_id, turn_id,
                                                           target_guard=self._history_target_guard)
+                if result == {"prewriteBusy": True}:
+                    self._preview.discard(preview_id)
+                    return {**base, "state": "rejected", "code": "busy"}
                 return {**base, "state": "published", "code": "imported",
                         "historyCount": result["historyCount"]}
             except Exception as error:
                 # The writer may have reserved or published before losing its
                 # final confirmation. Never replay or guess from an exception.
-                code = str(error) if type(error) is MigrationIOError and str(error) in _HISTORY_DIAGNOSTICS else "unclassified"
+                code = str(error) if isinstance(error, MigrationIOError) and str(error) in _HISTORY_DIAGNOSTICS else "unclassified"
                 _LOGGER.warning("history_import_unconfirmed reason=%s", code)
                 self._preview.discard(preview_id)
                 return {**base, "state": "unknown", "code": "unknown"}
@@ -737,4 +794,4 @@ class HistoryHost:
                 self._operation = None
                 self._operation_turn = None
                 self._operation_stopped = False
-            self._import_lock.release()
+            self._release_migration()

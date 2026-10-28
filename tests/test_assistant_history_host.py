@@ -1,6 +1,6 @@
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 
 import pytest
 from fastapi.testclient import TestClient
@@ -168,6 +168,170 @@ def test_real_history_target_guard_multi_session_import(tmp_path, setup_preview,
     assert result["state"] == "published", errors
 
 
+@pytest.mark.parametrize("interruption", ["none", "cancel", "stop", "revoke", "timeout", "late_scan"])
+@pytest.mark.parametrize("contention_at", ["after_import", "before_commit"])
+def test_confirmed_history_waits_for_native_lock_without_replaying(tmp_path, setup_preview, monkeypatch, interruption, contention_at):
+    from core.assistant_runtime import native
+    from core.assistant_runtime.online_history import HistoryTargetBusy
+    from core.infrastructure import native_runtime
+    dispatch, profile, host, _ = make_host(tmp_path, setup_preview)
+    monkeypatch.setattr(native_runtime, "_ASSISTANT_NATIVE_ROOT", profile.resolve())
+    monkeypatch.setattr(native, "_STARTED", True)
+    monkeypatch.setattr(native, "_AGENT_ID", "target-agent")
+    monkeypatch.setattr(native, "_SESSION_ID", "target-session")
+    monkeypatch.setattr(native, "_STOP_REQUESTED", threading.Event())
+    monkeypatch.setattr(native, "_LOCK", threading.RLock())
+    real_guard = HistoryHost._history_target_guard.__get__(host)
+    busy, acquired, release = threading.Event(), threading.Event(), threading.Event()
+    @contextmanager
+    def guard():
+        try:
+            with real_guard() as target:
+                yield target
+        except HistoryTargetBusy:
+            busy.set()
+            raise
+    host._history_target_guard = guard
+    original = host._owner.import_history
+    calls = []
+    finished = [False]
+    def hold_target():
+        with native._LOCK:
+            acquired.set()
+            assert release.wait(5)
+    def after_import(*args, **kwargs):
+        calls.append(1)
+        result = original(*args, **kwargs)
+        finished[0] = True
+        if contention_at == "after_import":
+            threading.Thread(target=hold_target, daemon=True).start()
+            assert acquired.wait(5)
+        return result
+    monkeypatch.setattr(host._owner, "import_history", after_import)
+    original_load = history._load_archive
+    delayed = [False]
+    def slow_after_busy(*args, **kwargs):
+        if interruption == "late_scan" and busy.is_set() and release.is_set() and not delayed[0]:
+            import time
+            delayed[0] = True
+            time.sleep(2.1)
+        return original_load(*args, **kwargs)
+    monkeypatch.setattr(history, "_load_archive", slow_after_busy)
+    original_pin = history._pin_parent_archives
+    @contextmanager
+    def pin_then_contend(*args, **kwargs):
+        with original_pin(*args, **kwargs):
+            if finished[0] and contention_at == "before_commit" and not acquired.is_set():
+                threading.Thread(target=hold_target, daemon=True).start()
+                assert acquired.wait(5)
+            yield
+    monkeypatch.setattr(history, "_pin_parent_archives", pin_then_contend)
+    request = body(dispatch)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(host.import_history, request["projectId"], request["previewId"], 1,
+                             request["turnId"], request["operationId"])
+        try:
+            assert busy.wait(5)
+            if interruption == "cancel":
+                assert host.cancel(request["operationId"], request["previewId"])["cancelled"]
+            elif interruption == "stop":
+                native._STOP_REQUESTED.set()
+            elif interruption == "revoke":
+                with host.guard():
+                    host.registry_changed()
+                    dispatch.suspend_projects()
+            elif interruption == "timeout":
+                assert future.result(timeout=5)["state"] == "unknown"
+        finally:
+            release.set()
+        result = future.result(timeout=10)
+    assert len(calls) == 1
+    native._STOP_REQUESTED.clear()
+    receipt = host.history_receipt(request["projectId"], request["previewId"], 1)
+    assert result["state"] == ("published" if interruption == "none" else "unknown")
+    assert receipt["state"] == ("published" if interruption == "none" else "unknown")
+    if interruption != "none":
+        assert not any(item.is_dir() for item in (profile / "history_request_receipts").iterdir())
+    if interruption == "late_scan":
+        assert delayed[0]
+
+
+@pytest.mark.parametrize("interruption", ["none", "cancel", "timeout"])
+def test_prewrite_target_contention_never_makes_a_false_unknown(tmp_path, setup_preview, monkeypatch, interruption):
+    from core.assistant_runtime import native
+    from core.assistant_runtime.online_history import HistoryTargetBusy
+    from core.infrastructure import native_runtime
+    dispatch, profile, host, _ = make_host(tmp_path, setup_preview)
+    monkeypatch.setattr(native_runtime, "_ASSISTANT_NATIVE_ROOT", profile.resolve())
+    monkeypatch.setattr(native, "_STARTED", True)
+    monkeypatch.setattr(native, "_AGENT_ID", "target-agent")
+    monkeypatch.setattr(native, "_SESSION_ID", "target-session")
+    monkeypatch.setattr(native, "_STOP_REQUESTED", threading.Event())
+    monkeypatch.setattr(native, "_LOCK", threading.RLock())
+    real_guard = HistoryHost._history_target_guard.__get__(host)
+    busy, acquired, release = threading.Event(), threading.Event(), threading.Event()
+    @contextmanager
+    def guard():
+        try:
+            with real_guard() as target:
+                yield target
+        except HistoryTargetBusy:
+            busy.set()
+            raise
+    host._history_target_guard = guard
+    original = host._owner.import_history
+    calls = []
+    def track(*args, **kwargs):
+        calls.append(1)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(host._owner, "import_history", track)
+    def hold_target():
+        with native._LOCK:
+            acquired.set()
+            assert release.wait(5)
+    request = body(dispatch)
+    threading.Thread(target=hold_target, daemon=True).start()
+    assert acquired.wait(5)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(host.import_history, request["projectId"], request["previewId"], 1,
+                             request["turnId"], request["operationId"])
+        try:
+            assert busy.wait(5)
+            assert not (profile / "history_request_receipts").exists()
+            assert not (profile / "history_archive").exists()
+            if interruption == "cancel":
+                assert host.cancel(request["operationId"], request["previewId"])["cancelled"]
+            elif interruption == "timeout":
+                result = future.result(timeout=5)
+                assert (result["state"], result["code"]) == ("rejected", "busy")
+        finally:
+            release.set()
+        result = future.result(timeout=10)
+    assert len(calls) == (1 if interruption == "none" else 0)
+    assert result["state"] == ("published" if interruption == "none" else "rejected" if interruption == "timeout" else "unknown")
+    if interruption != "none":
+        assert not (profile / "history_request_receipts").exists()
+        assert not (profile / "history_archive").exists()
+
+
+def test_busy_raised_after_receipt_write_never_retries(tmp_path, setup_preview, monkeypatch):
+    from core.assistant_runtime.online_history import HistoryTargetBusy
+    dispatch, profile, host, _ = make_host(tmp_path, setup_preview)
+    original = history._write_new
+    writes = []
+    def fail_after_write(path, raw):
+        original(path, raw)
+        if path.name == "result.json":
+            writes.append(1)
+            raise HistoryTargetBusy("history_target_busy")
+    monkeypatch.setattr(history, "_write_new", fail_after_write)
+    request = body(dispatch)
+    result = host.import_history(request["projectId"], request["previewId"], 1,
+                                 request["turnId"], request["operationId"])
+    assert result["state"] == "unknown" and len(writes) == 1
+    assert host.history_receipt(request["projectId"], request["previewId"], 1)["state"] == "unknown"
+
+
 def test_history_receipt_does_not_hold_host_guard_during_preview(tmp_path, setup_preview, monkeypatch):
     dispatch, _, host, _ = make_host(tmp_path, setup_preview)
     entered, proceed = threading.Event(), threading.Event()
@@ -198,9 +362,23 @@ def test_turn_mismatch_and_cancel_before_request_never_publish(tmp_path, setup_p
         assert client.post("/api/assistant/history-import", json={**request, "turnId": "other-turn"}).json()["code"] == "preview_invalid"
         request = body(dispatch, operation="2" * 32)
         assert client.post("/api/assistant/history-import/cancel", json={"operationId": request["operationId"], "previewId": request["previewId"]}).json()["cancelled"]
-        assert client.post("/api/assistant/history-import", json=request).json()["code"] == "cancelled"
+        assert client.post("/api/assistant/history-import", json=request).json()["state"] == "unknown"
         assert client.post("/api/assistant/history-import", json={**request, "operationId": "3" * 32}).json()["code"] == "preview_invalid"
         assert not (profile / "history_archive").exists()
+
+
+def test_late_cancel_and_same_delivery_keep_published_receipt(tmp_path, setup_preview):
+    dispatch, profile, host, app = make_host(tmp_path, setup_preview)
+    request = body(dispatch)
+    with TestClient(app, base_url="http://127.0.0.1", headers={"Authorization": "Bearer private-test-token"}) as client:
+        assert client.post("/api/assistant/history-import", json=request).json()["state"] == "published"
+        cancel = {"operationId": request["operationId"], "previewId": request["previewId"]}
+        assert client.post("/api/assistant/history-import/cancel", json=cancel).json()["cancelled"]
+        assert client.post("/api/assistant/history-import", json=request).json()["state"] == "unknown"
+        receipt = client.post("/api/assistant/history-receipt", json={key: request[key]
+                              for key in ("projectId", "previewId", "revision")}).json()
+        assert receipt["state"] == "published" and receipt["historyCount"] == 1
+        assert len(history.list_history(profile)) == 1
 
 
 def test_uncertain_history_failure_retires_other_preview_purposes(tmp_path, setup_preview, monkeypatch, caplog):
@@ -271,6 +449,77 @@ def test_broker_unknown_fences_only_its_preview_before_resuming(tmp_path, setup_
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("owner", ["receipt", "affairs"])
+def test_expired_delivery_cannot_import_after_preview_owner_leaves(tmp_path, setup_preview, monkeypatch, owner):
+    import asyncio
+    from core.assistant_runtime.main_control import MainControlBroker
+    from core.assistant_runtime.migration_io import MigrationIOError
+
+    dispatch, profile, host, _ = make_host(tmp_path, setup_preview)
+    reached, resume = threading.Event(), threading.Event()
+    original = dispatch.history_preview.preview
+    def pause(*args, **kwargs):
+        reached.set()
+        assert resume.wait(10)
+        return original(*args, **kwargs)
+
+    async def run():
+        broker = MainControlBroker(dispatch.project_ids)
+        create_app(native=Native(), token="private-test-token", dispatch=dispatch,
+                   history_control=host, main_control=broker)
+        item = body(dispatch)
+        request = {key: item[key] for key in ("projectId", "previewId", "turnId")}
+        pending = asyncio.create_task(broker.invoke("history_import", request, turn_id=item["turnId"]))
+        delivery = (await broker.claim())["request"]["deliveryId"]
+        try:
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                if owner == "receipt":
+                    monkeypatch.setattr(dispatch.history_preview, "preview", pause)
+                    reader = pool.submit(host.history_receipt, item["projectId"], item["previewId"], 1)
+                    assert await asyncio.to_thread(reached.wait, 10)
+                else:
+                    assert host._acquire_migration("affairs_sync", item["previewId"], "3" * 32)
+                try:
+                    broker._pending[delivery].deadline = 0
+                    broker._expire()
+                    assert (await pending)["state"] == "unknown"
+                    if owner == "affairs":
+                        # The other writer retains its preview; only the expired
+                        # delivery's tombstone can fence the late import.
+                        assert dispatch.history_preview.verify_preview(item["previewId"])["previewId"] == item["previewId"]
+                    else:
+                        with pytest.raises(MigrationIOError):
+                            dispatch.history_preview.verify_preview(item["previewId"])
+                finally:
+                    if owner == "receipt":
+                        resume.set()
+                        await asyncio.to_thread(reader.result, 10)
+                    else:
+                        host._release_migration()
+                result = await asyncio.to_thread(host.import_history, item["projectId"], item["previewId"],
+                                                 1, item["turnId"], delivery)
+                assert result["state"] == "unknown"
+                if owner == "affairs":
+                    assert dispatch.history_preview.verify_preview(item["previewId"])["previewId"] == item["previewId"]
+            assert history.list_history(profile) == []
+        finally:
+            resume.set()
+            broker.close()
+    asyncio.run(run())
+
+
+def test_history_retirement_capacity_fails_closed(tmp_path, setup_preview):
+    dispatch, profile, host, _ = make_host(tmp_path, setup_preview)
+    host._retired_history_deliveries.update(f"{index:032x}" for index in range(4096))
+    request = body(dispatch, operation="e" * 32)
+    assert host.retire_preview(request["previewId"], "history_import", "f" * 32)
+    next_request = body(dispatch, operation="d" * 32)
+    result = host.import_history(next_request["projectId"], next_request["previewId"], 1,
+                                 next_request["turnId"], next_request["operationId"])
+    assert result["state"] == "unknown"
+    assert history.list_history(profile) == []
+
+
 def test_unknown_fences_inflight_history_after_expiry_and_new_preview(tmp_path, setup_preview, monkeypatch):
     import asyncio
     from core.assistant_runtime.main_control import MainControlBroker
@@ -296,7 +545,7 @@ def test_unknown_fences_inflight_history_after_expiry_and_new_preview(tmp_path, 
         wire = (await broker.claim())["request"]
         with ThreadPoolExecutor(max_workers=1) as pool:
             worker = pool.submit(history_host.import_history, item["projectId"], item["previewId"],
-                                 1, item["turnId"], item["operationId"])
+                                 1, item["turnId"], wire["deliveryId"])
             assert await asyncio.to_thread(reached.wait, 10)
             try:
                 clock[0] += 30
@@ -445,11 +694,126 @@ def test_busy_import_discards_second_preview(tmp_path, setup_preview, monkeypatc
             future = pool.submit(client.post, "/api/assistant/history-import", json=first)
             assert reached.wait(10)
             try:
-                assert client.post("/api/assistant/history-import", json=second).json()["code"] == "busy"
+                assert client.post("/api/assistant/history-import", json=second).json()["state"] == "unknown"
             finally:
                 resume.set()
             assert future.result(timeout=10).json()["state"] == "published"
         assert client.post("/api/assistant/history-import", json={**second, "operationId": "3" * 32}).json()["code"] == "preview_invalid"
+
+
+def test_duplicate_preview_stays_unknown_without_revoking_original(tmp_path, setup_preview, monkeypatch):
+    import asyncio
+    from core.assistant_runtime.main_control import MainControlBroker, initial_migration_id
+    dispatch, profile, host, _ = make_host(tmp_path, setup_preview)
+    reached, resume = threading.Event(), threading.Event()
+    original = history._load_archive
+    def pause(directory, **kwargs):
+        result = original(directory, **kwargs)
+        if directory.name.endswith(".pending") and directory.name.startswith(".history-"):
+            reached.set()
+            assert resume.wait(10)
+        return result
+    monkeypatch.setattr(history, "_load_archive", pause)
+    async def run():
+        broker = MainControlBroker(dispatch.project_ids, initial_migration_enabled=True)
+        create_app(native=Native(), token="private-test-token", dispatch=dispatch,
+                   history_control=host, main_control=broker)
+        item = body(dispatch)
+        request = {key: item[key] for key in ("projectId", "previewId", "turnId")}
+        first = asyncio.create_task(broker.invoke("history_import", request, turn_id=item["turnId"]))
+        delivery = (await broker.claim())["request"]
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            writer = pool.submit(host.import_history, item["projectId"], item["previewId"], 1,
+                                 item["turnId"], delivery["deliveryId"])
+            assert await asyncio.to_thread(reached.wait, 10)
+            try:
+                duplicate = await broker.invoke("history_import", request, turn_id=item["turnId"])
+                assert duplicate["state"] == "unknown" and broker._queue.empty()
+                for action in ("affairs_sync", "episodic_sync"):
+                    assert (await broker.invoke(action, request, turn_id=item["turnId"]))["state"] == "unknown"
+                    sync = host.sync_affairs if action == "affairs_sync" else host.sync_episodic
+                    assert (await asyncio.to_thread(sync, item["projectId"], item["previewId"], 1,
+                                                    item["turnId"], "3" * 32))["state"] == "unknown"
+                initial_id = initial_migration_id(item["projectId"], item["previewId"], "personal")
+                initial = {**request, "category": "personal", "operationId": initial_id}
+                assert (await broker.invoke("initial_migration_queue", initial, turn_id=item["turnId"]))["state"] == "unknown"
+                from core.assistant_runtime.history_host import InitialPrepareBusy
+                with pytest.raises(InitialPrepareBusy):
+                    await asyncio.to_thread(host.prepare_initial_source, item["projectId"], item["previewId"],
+                                            1, item["turnId"], initial_id, "personal", object(), retry_busy=True)
+                assert not host.retire_preview(item["previewId"], "initial_migration_queue", initial_id)
+                late_delivery = "6" * 32
+                broker._initial_issued_ids[late_delivery] = (initial_id, item["previewId"])
+                assert broker.begin_initial_drain(late_delivery, initial_id)[0]
+                direct = await asyncio.to_thread(host.import_history, item["projectId"], item["previewId"],
+                                                 1, item["turnId"], "2" * 32)
+                assert direct["state"] == "unknown"
+                assert host.cancel("4" * 32, item["previewId"])["cancelled"]
+                assert host.cancel_affairs("5" * 32, item["previewId"], "affairs_sync")["cancelled"]
+                with pytest.raises(ValueError, match="history_cancel_operation_mismatch"):
+                    host.cancel(delivery["deliveryId"], "f" * 64)
+                assert dispatch.history_preview.verify_preview(item["previewId"])["previewId"] == item["previewId"]
+            finally:
+                resume.set()
+            result = await asyncio.to_thread(writer.result, 10)
+        assert result["state"] == "published" and broker.settle(delivery["deliveryId"], result)
+        assert (await first)["state"] == "published"
+        assert host.history_receipt(item["projectId"], item["previewId"], 1)["state"] == "published"
+        assert len(history.list_history(profile)) == 1
+        broker.close()
+    asyncio.run(run())
+
+
+def test_initial_prepare_busy_preserves_active_history_preview(tmp_path, setup_preview, monkeypatch):
+    import asyncio
+    import httpx
+    from core.assistant_runtime.main_control import MainControlBroker, initial_migration_id
+
+    dispatch, profile, host, _ = make_host(tmp_path, setup_preview)
+    reached, resume = threading.Event(), threading.Event()
+    original = history._load_archive
+    def pause(directory, **kwargs):
+        result = original(directory, **kwargs)
+        if directory.name.endswith(".pending") and directory.name.startswith(".history-"):
+            reached.set()
+            assert resume.wait(10)
+        return result
+    monkeypatch.setattr(history, "_load_archive", pause)
+
+    async def run():
+        broker = MainControlBroker(dispatch.project_ids, initial_migration_enabled=True)
+        app = create_app(native=Native(), token="private-test-token", dispatch=dispatch,
+                         history_control=host, main_control=broker)
+        item = body(dispatch)
+        initial_id = initial_migration_id(item["projectId"], item["previewId"], "personal")
+        request = {key: item[key] for key in ("projectId", "previewId", "turnId")}
+        request.update(category="personal", operationId=initial_id)
+        pending = asyncio.create_task(broker.invoke("initial_migration_queue", request, turn_id=item["turnId"]))
+        delivery = (await broker.claim())["request"]["deliveryId"]
+        try:
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                writer = pool.submit(host.import_history, item["projectId"], item["previewId"], 1,
+                                     item["turnId"], item["operationId"])
+                assert await asyncio.to_thread(reached.wait, 10)
+                try:
+                    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                                 base_url="http://127.0.0.1",
+                                                 headers={"Authorization": "Bearer private-test-token"}) as client:
+                        response = await client.post("/api/assistant/initial-migration/prepare",
+                                                     json={**request, "deliveryId": delivery, "revision": 1})
+                    assert response.status_code == 409
+                    assert broker.begin_initial_drain(delivery, initial_id)[0]
+                    assert (await pending)["state"] == "unknown"
+                    assert dispatch.history_preview.verify_preview(item["previewId"])["previewId"] == item["previewId"]
+                finally:
+                    resume.set()
+                assert (await asyncio.to_thread(writer.result, 10))["state"] == "published"
+            assert host.history_receipt(item["projectId"], item["previewId"], 1)["state"] == "published"
+            assert len(history.list_history(profile)) == 1
+        finally:
+            resume.set()
+            broker.close()
+    asyncio.run(run())
 
 
 def test_cancel_waits_for_confirmation_already_in_progress(tmp_path, setup_preview, monkeypatch):

@@ -908,16 +908,16 @@ export class AssistantHost {
   }
 
   /** Main-only. Caller owns the registry lease and the native approval policy. */
-  async importHistory(input: { projectId: string; previewId: string; turnId: string; revision: number; signal?: AbortSignal }): Promise<unknown> {
+  async importHistory(input: { projectId: string; previewId: string; turnId: string; operationId: string; revision: number; signal?: AbortSignal }): Promise<unknown> {
     if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(input.projectId)
       || !/^[a-f0-9]{64}$/.test(input.previewId) || typeof input.turnId !== "string"
-      || !/^\S{1,160}$/.test(input.turnId) || !Number.isSafeInteger(input.revision) || input.revision < 0) {
+      || !/^\S{1,160}$/.test(input.turnId) || !/^[a-f0-9]{32}$/.test(input.operationId) || !Number.isSafeInteger(input.revision) || input.revision < 0) {
       throw new HostError("ASSISTANT_REQUEST_INVALID");
     }
     const generation = this.current;
     if (!generation || generation.closed || generation.abort.signal.aborted || this.view.state !== "ready"
       || this.projectsSuspended || generation.projectRevision !== input.revision) throw new HostError("ASSISTANT_NOT_READY");
-    const operationId = randomBytes(16).toString("hex");
+    const operationId = input.operationId;
     const body = { projectId: input.projectId, previewId: input.previewId, turnId: input.turnId, revision: input.revision, operationId };
     const unknown = { schemaVersion: 1, projectId: input.projectId, previewId: input.previewId,
       state: "unknown", code: "unknown", readyForCutover: false };

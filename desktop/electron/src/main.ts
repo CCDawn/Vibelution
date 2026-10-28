@@ -769,7 +769,7 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
         if (!host || shutdownApproved) return Promise.resolve({ schemaVersion: 1, projectId: request.projectId,
           previewId: request.previewId, state: "rejected", code: "project_unavailable", readyForCutover: false });
         return projectConnection.withHistoryImport(request.projectId, revision => host.importHistory({
-          projectId: request.projectId, previewId: request.previewId, turnId: request.turnId, revision, signal,
+          projectId: request.projectId, previewId: request.previewId, turnId: request.turnId, operationId: request.deliveryId, revision, signal,
         }));
       }
       if (request.action === "affairs_sync") {

@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import json
 import re
-from contextlib import contextmanager
+import time
+from contextlib import contextmanager, ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock
@@ -19,6 +20,14 @@ from .migration_io import (FileSnapshot, MigrationIOError, check_path, migration
                            path_identity, pinned_source_files, pinned_target_directory, publish_directory, read_stable_file, strict_json)
 
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,159}\Z")
+
+
+class HistoryTargetBusy(MigrationIOError):
+    """A nonblocking target-lock acquisition failed before entering its guard."""
+
+
+class _HistoryConfirmationBusy(Exception):
+    """The target guard refused entry before a receipt publication attempt."""
 
 
 @dataclass(frozen=True)
@@ -203,7 +212,22 @@ class OnlineHistoryOwner:
         mid = self._request_id(project_id, preview_id)
         if not _opaque(turn_id, 160) or not callable(target_guard):
             raise ValueError("history_request_invalid")
-        with self._receipt_authority(project_id, target_guard) as (source, scope, src, target, dst, revision):
+        with ExitStack() as stack:
+            deadline = None
+            while True:
+                try:
+                    values = stack.enter_context(self._receipt_authority(project_id, target_guard))
+                    break
+                except HistoryTargetBusy:
+                    if deadline is None:
+                        deadline = time.monotonic() + 2.0
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        return {"prewriteBusy": True}
+                    time.sleep(min(0.05, remaining))
+            source, scope, src, target, dst, revision = values
+            if deadline is not None and time.monotonic() >= deadline:
+                return {"prewriteBusy": True}
             binding = {"schemaVersion": 1, "requestId": mid, "projectId": project_id,
                        "previewId": preview_id, "turnId": turn_id, "sourceScope": scope,
                        "sourceIdentity": src, "targetAgentId": target[0], "targetSessionId": target[1], "targetIdentity": dst}
@@ -214,6 +238,38 @@ class OnlineHistoryOwner:
                         raise MigrationIOError("history_outcome_unknown")
                     history._write_new(path, json.dumps(binding, sort_keys=True, separators=(",", ":")).encode())
         result = self.import_history(project_id, mid, _expected_source=source, _expected_revision=revision)
+        # Retry only a target lock that was never entered. All guards and pins
+        # unwind before waiting; the native import is never called again.
+        @contextmanager
+        def confirmation_guard():
+            with ExitStack() as stack:
+                try:
+                    target = stack.enter_context(target_guard())
+                except HistoryTargetBusy:
+                    raise _HistoryConfirmationBusy() from None
+                yield target
+
+        deadline = None
+        while True:
+            try:
+                if deadline is not None:
+                    with self._generation_guard(self._generation):
+                        with self._lock:
+                            self._verify(project_id, source, revision)
+                            with confirmation_guard():
+                                if time.monotonic() >= deadline:
+                                    raise MigrationIOError("history_outcome_unknown")
+                return self._confirm_bound_history(project_id, preview_id, binding, source, revision, result, confirmation_guard, deadline)
+            except _HistoryConfirmationBusy:
+                if deadline is None:
+                    deadline = time.monotonic() + 2.0
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise MigrationIOError("history_outcome_unknown") from None
+                time.sleep(min(0.05, remaining))
+
+    def _confirm_bound_history(self, project_id, preview_id, binding, source, revision, result, target_guard, deadline):
+        mid = self._request_id(project_id, preview_id)
         with self._receipt_authority(project_id, target_guard) as (current_source, scope, src, target, dst, current_revision):
             if (scope != binding["sourceScope"] or src != binding["sourceIdentity"]
                     or target != (binding["targetAgentId"], binding["targetSessionId"]) or dst != binding["targetIdentity"]
@@ -247,6 +303,8 @@ class OnlineHistoryOwner:
                         with target_guard() as current_target:
                             if current_target != target or target_identity(self._profile, *target)[0] != dst:
                                 raise MigrationIOError("history_target_invalid")
+                            if deadline is not None and time.monotonic() >= deadline:
+                                raise MigrationIOError("history_outcome_unknown")
                             receipt = {"schemaVersion": 1, "requestId": mid, "migrationId": archive_id, "historyCount": count}
                             with pinned_target_directory(self._profile / "history_request_receipts") as root:
                                 with migration_target_lock(root / ".receipts"):
@@ -258,6 +316,8 @@ class OnlineHistoryOwner:
                                     with pinned_target_directory(pending, create=True) as folder:
                                         history._write_new(folder / "result.json", json.dumps(receipt, sort_keys=True, separators=(",", ":")).encode())
                                         identity = path_identity(folder)
+                                    if deadline is not None and time.monotonic() >= deadline:
+                                        raise MigrationIOError("history_outcome_unknown")
                                     publish_directory(pending, final, identity)
         return receipt
 

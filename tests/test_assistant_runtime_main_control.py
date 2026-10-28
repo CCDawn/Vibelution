@@ -99,6 +99,9 @@ async def test_history_import_uses_approved_native_turn_and_never_accepts_model_
                   "state": "published", "code": "imported", "historyCount": 1, "readyForCutover": False}
         assert owner.settle(wire["deliveryId"], result)
         assert await task == result
+        description = execute_action("describe", {"action": "history_import"})["description"]
+        assert "rejected/busy" in description and "重新预览" in description
+        assert "unknown" in description and "原 project_id 和 preview_id" in description
     finally:
         owner.close()
         unbind_actions(service)

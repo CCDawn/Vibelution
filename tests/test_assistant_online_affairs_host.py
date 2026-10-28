@@ -28,6 +28,8 @@ def test_completed_sync_cache_evicts_only_after_preview_retirement(tmp_path, mon
                     "agent", None, ())
         def discard(self, preview_id):
             self.available.discard(preview_id)
+        def retire(self, preview_id):
+            self.available.discard(preview_id)
 
     preview = Preview()
     host = HistoryHost(tmp_path, "generation", None, preview)

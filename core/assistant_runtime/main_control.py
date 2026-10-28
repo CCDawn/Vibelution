@@ -266,6 +266,7 @@ class _Delivery:
     initial_prepared: bool = False
     initial_token: object = None
     turn_id: str | None = None
+    delivery_id: str | None = None
 
 
 class _InitialPublication:
@@ -374,7 +375,8 @@ class MainControlBroker:
 
     def _retire_entry(self, entry):
         if self._retire_preview is not None and entry.action in {"history_import", "initial_migration_queue"}:
-            self._retire_preview(entry.request["previewId"])
+            operation_id = entry.delivery_id if entry.action == "history_import" else entry.request["operationId"]
+            self._retire_preview(entry.request["previewId"], entry.action, operation_id)
 
     def _unknown(self, entry, code="control_unavailable"):
         self._retire_entry(entry)
@@ -452,6 +454,13 @@ class MainControlBroker:
         timeout = self._image_timeout if action == "operator_image_upload" else 120 if action in {"history_import", "affairs_sync", "episodic_sync", "initial_migration_queue"} else self._timeout
         entry = _Delivery(action, captured, loop.time() + timeout, loop.create_future(), turn_id=turn_id)
         self._expire()
+        preview_actions = {"history_import", "affairs_sync", "episodic_sync", "initial_migration_queue"}
+        if action in preview_actions and any(
+                previous.action in preview_actions and previous.request["previewId"] == captured["previewId"]
+                for previous in self._pending.values()):
+            # Do not enqueue a second delivery or retire the preview owned by
+            # the first. Unknown preserves the original key for later receipt.
+            return self._unavailable(entry)
         if self._closed.is_set():
             return self._unknown(entry)
         if action == "initial_migration_queue" and (None in self._initial_fences or turn_id in self._initial_fences):
@@ -466,6 +475,7 @@ class MainControlBroker:
         if (delivery_id in self._pending or delivery_id in self._initial_issued_ids
                 or any(token.delivery_id == delivery_id for token in self._initial_tokens)):
             return self._unknown(entry, "control_busy")
+        entry.delivery_id = delivery_id
         if action == "initial_migration_queue":
             self._initial_issued_ids[delivery_id] = (captured["operationId"], captured["previewId"])
             self._initial_operation_uncertain.add(captured["operationId"])
@@ -577,7 +587,7 @@ class MainControlBroker:
             # worker while a different worker with that ID is still retained.
             return False, None
         if self._retire_preview is not None:
-            self._retire_preview(issued[1])
+            self._retire_preview(issued[1], "initial_migration_queue", operation_id)
         if (entry is not None and entry.claimed and entry.action == "initial_migration_queue"
                 and entry.request["operationId"] == operation_id):
             token = entry.initial_token

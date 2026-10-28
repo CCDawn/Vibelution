@@ -973,9 +973,9 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                 except Exception as error:
                     logging.getLogger(__name__).warning("assistant_initial_prepare category=%s phase=%s code=%s",
                         payload.category, phase, _initial_prepare_failure_code(error))
-                    history_control.retire_preview(payload.previewId)
+                    retired = history_control.retire_preview(payload.previewId, "initial_migration_queue", payload.operationId)
                     from .history_host import InitialPrepareBusy
-                    if (phase == "prepare" and type(error) is InitialPrepareBusy
+                    if (retired and phase == "prepare" and type(error) is InitialPrepareBusy
                             and main_control.initial_delivery(payload.deliveryId, bound, busy=True)):
                         return JSONResponse({"schemaVersion": 1, "operationId": payload.operationId,
                                              "state": "rejected", "code": "busy"},
@@ -1010,7 +1010,7 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
             if request.query_params:
                 raise HTTPException(422, detail="Invalid affairs sync cancellation")
             try:
-                return await asyncio.to_thread(history_control.cancel_affairs, payload.operationId, payload.previewId)
+                return await asyncio.to_thread(history_control.cancel_affairs, payload.operationId, payload.previewId, "affairs_sync")
             except Exception:
                 raise HTTPException(503, detail="Affairs sync cancellation unavailable") from None
 
@@ -1028,7 +1028,7 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
             if request.query_params:
                 raise HTTPException(422, detail="Invalid episodic sync cancellation")
             try:
-                return await asyncio.to_thread(history_control.cancel_affairs, payload.operationId, payload.previewId)
+                return await asyncio.to_thread(history_control.cancel_affairs, payload.operationId, payload.previewId, "episodic_sync")
             except Exception:
                 raise HTTPException(503, detail="Episodic sync cancellation unavailable") from None
 
