@@ -14,6 +14,20 @@ export function toolApprovalDisplayName(toolName: string | undefined | null, lan
   return TOOL_APPROVAL_LABELS[key] ?? key;
 }
 
+/** Launcher Agent creation grants no tools; require the complete warning. */
+export function launcherAgentCreatePreviewIsValid(summary: Record<string, unknown> | null | undefined): boolean {
+  if (!summary || summary.assistantAction !== "agent_create" || summary.assistantArgumentsInvalid
+    || summary.assistantOperationDescription !== "新 Agent 默认没有工具和读写范围，不能保证读取或修改项目；派遣写任务不会自动增加工具权限。") return false;
+  const targets = summary.assistantTargets;
+  if (!targets || typeof targets !== "object" || Array.isArray(targets)) return false;
+  const { project_id: project, display_name: name, model_id: model } = targets as Record<string, unknown>;
+  const displayable = (value: unknown, max: number) => typeof value === "string"
+    && Array.from(value).length > 0 && Array.from(value).length <= max && !/[\p{Cc}\p{Cf}\p{Cs}]/u.test(value);
+  return Object.keys(targets).length === 3
+    && typeof project === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}(?![\s\S])/.test(project)
+    && displayable(name, 120) && displayable(model, 200);
+}
+
 /** Validate the exact authorization details before rendering or enabling approval. */
 export function authorizationUpgradePreviewIsValid(summary: Record<string, unknown> | null | undefined): boolean {
   if (!summary || summary.assistantAction !== "authorization_upgrade" || summary.assistantArgumentsInvalid) return false;
@@ -111,6 +125,17 @@ export function toolApprovalActionPreview(
       return `${title}\n${lang === "zh" ? "参数无法核对，请拒绝并重新发起。" : "Arguments cannot be verified. Decline and request again."}`;
     }
     const targets = summary.assistantTargets;
+    if (action === "agent_create" && summary.assistantOperationDescription === "新 Agent 默认没有工具和读写范围，不能保证读取或修改项目；派遣写任务不会自动增加工具权限。") {
+      if (!launcherAgentCreatePreviewIsValid(summary)) {
+        return `${title}\n${lang === "zh" ? "参数无法核对，请拒绝并重新发起。" : "Arguments cannot be verified. Decline and request again."}`;
+      }
+      const identity = targets as Record<string, string>;
+      return [title, `${lang === "zh" ? "项目" : "Project"}: ${identity.project_id}`,
+        `${lang === "zh" ? "名称" : "Name"}: ${identity.display_name}`,
+        `${lang === "zh" ? "模型" : "Model"}: ${identity.model_id}`,
+        lang === "zh" ? "新 Agent 默认没有工具和读写范围，不能保证读取或修改项目；派遣写任务不会自动增加工具权限。"
+          : "The new agent has no tools or read/write scopes by default, so it cannot be assumed to read or modify the project. Dispatching a write task does not grant tools."].join("\n");
+    }
     if (action === "project_lifecycle") {
       if (!projectLifecyclePreviewIsValid(summary)) {
         return `${title}\n${lang === "zh" ? "参数无法核对，请拒绝并重新发起。" : "Arguments cannot be verified. Decline and request again."}`;

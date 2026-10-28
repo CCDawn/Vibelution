@@ -1138,6 +1138,27 @@ def _argument_summary(tool_name: str, tool_args: Mapping[str, Any]) -> dict[str,
 def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
     """Approval-only projection; never expose nested prompt/policy values."""
     action = args.get("action")
+    if action == "agent_create":
+        from core.infrastructure.native_runtime import is_launcher_assistant_process
+        if is_launcher_assistant_process():
+            try:
+                raw = args.get("arguments_json")
+                values = json.loads(raw) if isinstance(raw, str) and len(raw) <= 16000 else None
+                if not isinstance(values, dict):
+                    raise ValueError("Invalid agent creation arguments")
+                from core.assistant_runtime.actions import _management_contracts
+                validated = _management_contracts()["agent_create"][0].model_validate(values)
+                project = validated.project_id
+                name, model = validated.display_name, validated.model_id
+                if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}", project) is None:
+                    raise ValueError("Invalid project identity")
+                import unicodedata
+                if any(unicodedata.category(char) in {"Cc", "Cf", "Cs"} for value in (name, model) for char in value):
+                    raise ValueError("Invalid display name or model")
+                return {"assistantAction": action, "assistantTargets": {"project_id": project, "display_name": name, "model_id": model},
+                    "assistantOperationDescription": "新 Agent 默认没有工具和读写范围，不能保证读取或修改项目；派遣写任务不会自动增加工具权限。"}
+            except (ValueError, TypeError, KeyError, RuntimeError, RecursionError):
+                return {"assistantAction": action, "assistantArgumentsInvalid": True}
     if action == "project_lifecycle":
         from core.infrastructure.native_runtime import is_launcher_assistant_process
         if not is_launcher_assistant_process():

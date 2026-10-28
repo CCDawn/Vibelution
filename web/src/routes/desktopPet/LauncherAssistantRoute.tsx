@@ -24,7 +24,7 @@ import { DesktopPetCharacter } from "./DesktopPetCharacter";
 import { DEFAULT_PET_PREFERENCES } from "./desktopPetPreferences";
 import { ChatToolApprovalDialog } from "../chat/ChatToolApprovalDialog";
 import { toolApprovalRiskLabel } from "../chat/toolApprovalLabels";
-import { authorizationUpgradePreviewIsValid, dispatchWritePreviewIsValid, projectLifecyclePreviewIsValid, managementApprovalActionIsKnown, toolApprovalActionPreview, toolApprovalDisplayName } from "../chat/toolApprovalPreview";
+import { authorizationUpgradePreviewIsValid, dispatchWritePreviewIsValid, launcherAgentCreatePreviewIsValid, projectLifecyclePreviewIsValid, managementApprovalActionIsKnown, toolApprovalActionPreview, toolApprovalDisplayName } from "../chat/toolApprovalPreview";
 import { useLauncherThemeControl } from "./useLauncherThemeControl";
 import { PersonalAssistantComputerPanel } from "../personalAssistant/PersonalAssistantComputerPanel";
 import { launcherAssistantComputer } from "../../api/launcherAssistantComputer";
@@ -57,6 +57,7 @@ const COPY = {
 function approvalAcceptDisabled(request: SessionToolApprovalRequest): boolean {
   const summary = request.argumentSummary;
   return request.toolName === "personal_assistant_manage_tool" && (!managementApprovalActionIsKnown(summary?.assistantAction) || Boolean(summary.assistantArgumentsInvalid)
+    || summary?.assistantAction === "agent_create" && !launcherAgentCreatePreviewIsValid(summary)
     || summary?.assistantAction === "authorization_upgrade" && !authorizationUpgradePreviewIsValid(summary)
     || summary?.assistantAction === "dispatch_write" && !dispatchWritePreviewIsValid(summary)
     || summary?.assistantAction === "project_lifecycle" && !projectLifecyclePreviewIsValid(summary));
@@ -609,7 +610,7 @@ export function LauncherAssistantRoute() {
       scopeLabel={lang === "zh" ? "仅本次调用" : "This call only"}
       toolLabels={[{ id: approval.toolName, label: toolApprovalDisplayName(approval.toolName, lang) }]}
       toolName={approval.toolName} actionPreview={toolApprovalActionPreview(approval.argumentSummary, approval.toolName, lang)}
-      fullActionPreview={approval.toolName === "personal_assistant_manage_tool" && ["authorization_upgrade", "dispatch_write", "project_lifecycle"].includes(String(approval.argumentSummary?.assistantAction))}
+      fullActionPreview={approval.toolName === "personal_assistant_manage_tool" && ["agent_create", "authorization_upgrade", "dispatch_write", "project_lifecycle"].includes(String(approval.argumentSummary?.assistantAction))}
       approveDisabled={approvalAcceptDisabled(approval)}
       onApprove={() => void decide(approval, "accept")} onReject={() => void decide(approval, "decline")} /> : null}
     {approvalError || approvals.isError ? <VStateSurface tone="error" title={approvalError || (lang === "zh" ? "待授权查询暂不可用" : "Pending approvals unavailable")}

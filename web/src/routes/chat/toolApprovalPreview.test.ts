@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   authorizationUpgradePreviewIsValid,
   dispatchWritePreviewIsValid,
+  launcherAgentCreatePreviewIsValid,
   projectLifecyclePreviewIsValid,
   toolApprovalActionPreview,
   toolApprovalCodexButtonLabels,
@@ -12,6 +13,22 @@ import {
 } from "./toolApprovalPreview";
 
 describe("toolApprovalPreview", () => {
+  it("shows the complete Launcher creation project and model in both languages and counts code points", () => {
+    const summary = { assistantAction: "agent_create", assistantTargets: {
+      project_id: "project:1", display_name: "😀".repeat(120), model_id: "m".repeat(200),
+    }, assistantOperationDescription: "新 Agent 默认没有工具和读写范围，不能保证读取或修改项目；派遣写任务不会自动增加工具权限。" };
+    expect(launcherAgentCreatePreviewIsValid(summary)).toBe(true);
+    const zh = toolApprovalActionPreview(summary, "personal_assistant_manage_tool", "zh");
+    const en = toolApprovalActionPreview(summary, "personal_assistant_manage_tool", "en");
+    expect(zh).toContain(`模型: ${summary.assistantTargets.model_id}`);
+    expect(en).toContain(`Model: ${summary.assistantTargets.model_id}`);
+    expect(en).toContain("Project: project:1");
+    expect(en).toContain("has no tools or read/write scopes by default");
+    expect(en).not.toContain("新 Agent 默认");
+    expect(launcherAgentCreatePreviewIsValid({ ...summary, assistantTargets: { ...summary.assistantTargets, display_name: "😀".repeat(121) } })).toBe(false);
+    expect(launcherAgentCreatePreviewIsValid({ ...summary, assistantTargets: { ...summary.assistantTargets, model_id: "bad\u202evalue" } })).toBe(false);
+    expect(launcherAgentCreatePreviewIsValid({ ...summary, assistantTargets: { project_id: "project:1", display_name: "Worker" } })).toBe(false);
+  });
   it("shows the exact project lifecycle request and rejects incomplete details", () => {
     const summary = { assistantAction: "project_lifecycle", assistantTargets: {
       project_id: "project:1", operation: "start", request_id: "request-1",

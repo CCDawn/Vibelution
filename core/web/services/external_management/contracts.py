@@ -167,7 +167,7 @@ ACTION_SCOPES = {"agent_create": "agents:create", "agent_update": "agents:update
 
 def contracts() -> dict:
     descriptions = {
-        "agent_create": "在目标项目创建普通低权限 Agent；必须选择显式模型，使用稳定 request_id，未知结果查询原回执。",
+        "agent_create": "在目标项目创建普通 Agent，默认不授予任何工具或读写范围，不能据此认为它能够读取或修改项目；派遣写任务也不会自动增加工具权限。必须选择显式模型，使用稳定 request_id，未知结果查询原回执。",
         "agent_update": "按原生 configRevision 更新普通 Agent 名称、对话模型、提示词或人物/任务档案；拒绝权限、身份与生命周期字段。",
         "agent_avatar": "按原生 updatedAt 使用已有头像候选或恢复默认；不接收 URL、文件上传或任意路径。",
         "agent_archive": "每次经原生审批，按 configRevision 归档普通 Agent 并封存关联 Session；protected 或关联 Session 忙时拒绝。稳定 request_id，未知结果只查询原回执，不提供 purge、reset、restore 或 force。verified 表示首次原生回读已归档，完成回执保留历史状态。",

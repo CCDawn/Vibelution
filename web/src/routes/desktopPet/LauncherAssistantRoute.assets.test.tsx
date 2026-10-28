@@ -102,6 +102,29 @@ async function finishTurn(turnId: string) {
 }
 
 describe("Launcher operator image consumption", () => {
+  it("shows the zero-tool limitation when approving Launcher agent creation", async () => {
+    await renderAssistant({ approval: { requestId: "r", sessionId: "s", turnId: "t", agentId: "a",
+      toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
+      argumentSummary: { assistantAction: "agent_create", assistantTargets: { project_id: "registered:1", display_name: "Worker", model_id: "model-1" },
+        assistantOperationDescription: "新 Agent 默认没有工具和读写范围，不能保证读取或修改项目；派遣写任务不会自动增加工具权限。" } } });
+    await click("展开个人助理聊天");
+    const preview = container.querySelector("pre");
+    expect(preview?.textContent).toContain("registered:1");
+    expect(preview?.textContent).toContain("模型: model-1");
+    expect(preview?.textContent).toContain("没有工具和读写范围");
+    expect(preview?.textContent).toContain("派遣写任务不会自动增加工具权限");
+    expect(preview?.tabIndex).toBe(0);
+    expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"))?.disabled).toBe(false);
+  });
+
+  it("refuses Launcher agent creation approval without the zero-tool limitation", async () => {
+    await renderAssistant({ approval: { requestId: "r", sessionId: "s", turnId: "t", agentId: "a",
+      toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
+      argumentSummary: { assistantAction: "agent_create", assistantTargets: { project_id: "registered:1", display_name: "Worker" } } } });
+    await click("展开个人助理聊天");
+    expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"))?.disabled).toBe(true);
+  });
+
   it("shows the complete project lifecycle request before approval", async () => {
     await renderAssistant({ approval: { requestId: "r", sessionId: "s", turnId: "t", agentId: "a",
       toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
