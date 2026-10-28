@@ -48,6 +48,9 @@ try:
     result = receipt(first)
     assert result['state'] == 'published' and result['targetMatch'] == 'matched'
     assert result['plannedAppliedCount'] == 1 and result['conflictCount'] == 0
+    try: local_actions.execute('episodic_conflict_review', {'sync_id': first}, runtime)
+    except ValueError as error: assert 'episodic_sync_receipt' in str(error)
+    else: raise AssertionError('completed receipt was mistaken for a conflict')
     assert before == {p.relative_to(root).as_posix(): p.read_bytes() for p in root.rglob('*') if p.is_file()}
     with owner.admit(**args) as lease:
         assert reconcile_episodic(lease, sync_id=successor)['appliedCount'] == 1

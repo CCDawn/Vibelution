@@ -61,7 +61,11 @@ def execute(action, parameters, runtime):
             raise MigrationIOError("episodic_review_token_required")
         return _review(root, native._AGENT_ID, native._SESSION_ID, args.sync_id, args.offset, args.limit,
                        args.character_offset, args.max_characters, args.review_token)
-    except (MigrationIOError, OSError, TimeoutError):
+    except MigrationIOError as error:
+        if action == "episodic_conflict_review" and str(error) == "episodic_sync_baseline_unresolved":
+            raise ValueError("该编号没有可查看的未解决差异；查询同步原回执请调用 episodic_sync_receipt。") from None
+        raise ValueError("情景差异暂不可用或来源校验未通过") from None
+    except (OSError, TimeoutError):
         raise ValueError("情景差异暂不可用或来源校验未通过") from None
 
 
