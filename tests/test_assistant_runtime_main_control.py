@@ -105,6 +105,27 @@ async def test_history_import_uses_approved_native_turn_and_never_accepts_model_
 
 
 @pytest.mark.anyio
+async def test_history_receipt_queries_original_project_and_preview_without_turn():
+    from core.assistant_runtime.main_control import history_request_id
+    service = Dispatch()
+    owner = broker(service, claim_seconds=2)
+    bind_actions(service, asyncio.get_running_loop(), main_control=owner)
+    args = {"project_id": "p:main", "preview_id": "a" * 64}
+    try:
+        task = asyncio.create_task(asyncio.to_thread(execute_action, "history_import_receipt", args))
+        wire = (await owner.claim())["request"]
+        assert set(wire) == {"deliveryId", "action", "projectId", "previewId"}
+        result = {"schemaVersion": 1, "projectId": "p:main", "previewId": args["preview_id"],
+                  "requestId": history_request_id("p:main", args["preview_id"]), "migrationId": "history-old",
+                  "state": "published", "code": "imported", "historyCount": 1, "readyForCutover": False}
+        assert owner.settle(wire["deliveryId"], result)
+        assert await task == result
+    finally:
+        owner.close()
+        unbind_actions(service)
+
+
+@pytest.mark.anyio
 async def test_initial_migration_requires_negotiated_capability_and_governed_closed_parameters(monkeypatch):
     from core.assistant_runtime.main_control import initial_migration_id
     service = Dispatch()

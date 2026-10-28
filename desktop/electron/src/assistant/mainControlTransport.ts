@@ -9,6 +9,7 @@ export type ProjectMainControlRequest = {
 } & ({ action: "project_status"; operation: "status"; requestId?: never }
   | { action: "project_lifecycle" | "project_lifecycle_receipt"; operation: "start" | "stop" | "restart"; requestId: string });
 export type HistoryMainControlRequest = { deliveryId: string; action: "history_import"; projectId: string; previewId: string; turnId: string; timeoutMs: number };
+export type HistoryReceiptRequest = { deliveryId: string; action: "history_import_receipt"; projectId: string; previewId: string };
 export type AffairsSyncMainControlRequest = Omit<HistoryMainControlRequest, "action"> & { action: "affairs_sync"; recoverSyncId?: string };
 export type EpisodicSyncMainControlRequest = Omit<HistoryMainControlRequest, "action"> & { action: "episodic_sync" } & (
   | { recoverSyncId?: string; resolveSyncId?: never; reviewToken?: never }
@@ -19,7 +20,7 @@ export type InitialMigrationMainControlRequest = Omit<HistoryMainControlRequest,
 };
 export type InitialMigrationReceiptRequest = { deliveryId: string; action: "initial_migration_receipt"; projectId: string;
   category: "personal" | "knowledge" | "reminder_handoff"; operationId: string };
-export type MainControlRequest = ProjectMainControlRequest | AppearanceMainControlRequest | HistoryMainControlRequest | AffairsSyncMainControlRequest | EpisodicSyncMainControlRequest | InitialMigrationMainControlRequest | InitialMigrationReceiptRequest;
+export type MainControlRequest = ProjectMainControlRequest | AppearanceMainControlRequest | HistoryMainControlRequest | HistoryReceiptRequest | AffairsSyncMainControlRequest | EpisodicSyncMainControlRequest | InitialMigrationMainControlRequest | InitialMigrationReceiptRequest;
 type PublicResult = Record<string, unknown>;
 const ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/;
 const forbiddenScheme = /^(?:https?|file|data|javascript|mailto|ftp|wss?):/i;
@@ -39,6 +40,12 @@ export function parseMainControlClaim(value: unknown): MainControlRequest | null
   if (value.request === null) return null;
   const row = value.request;
   if (row && typeof row === "object" && isAppearanceAction(Object.getOwnPropertyDescriptor(row,"action")?.value)) return parseAppearanceClaim(row);
+  if (row && typeof row === "object" && Object.getOwnPropertyDescriptor(row, "action")?.value === "history_import_receipt") {
+    if (!closed(row, ["deliveryId", "action", "projectId", "previewId"])
+      || typeof row.deliveryId !== "string" || !/^[a-f0-9]{32}$/.test(row.deliveryId) || !opaque(row.projectId, 160)
+      || typeof row.previewId !== "string" || !/^[a-f0-9]{64}$/.test(row.previewId)) return invalid();
+    return { deliveryId: row.deliveryId, action: "history_import_receipt", projectId: row.projectId, previewId: row.previewId };
+  }
   if (row && typeof row === "object" && Object.getOwnPropertyDescriptor(row, "action")?.value === "initial_migration_receipt") {
     if (!closed(row, ["deliveryId", "action", "projectId", "category", "operationId"])
       || typeof row.deliveryId !== "string" || !/^[a-f0-9]{32}$/.test(row.deliveryId) || !opaque(row.projectId, 160)
@@ -166,6 +173,19 @@ export function projectMainControlResult(request: MainControlRequest, value: unk
   }
   if (request.action === "affairs_sync") return parseAffairsSyncResult(request, value) ?? unknownAffairsSyncResult(request);
   if (request.action === "episodic_sync") return parseEpisodicSyncResult(request, value) ?? unknownEpisodicSyncResult(request);
+  if (request.action === "history_import_receipt") {
+    const unavailable = () => ({ schemaVersion: 1, projectId: request.projectId, previewId: request.previewId,
+      state: "unknown", code: "unknown", readyForCutover: false });
+    const published = value && typeof value === "object" && Object.getOwnPropertyDescriptor(value, "state")?.value === "published";
+    if (!closed(value, ["schemaVersion", "projectId", "previewId", "state", "code", "readyForCutover", ...(published ? ["requestId", "migrationId", "historyCount"] : [])])
+      || value.schemaVersion !== 1 || value.projectId !== request.projectId || value.previewId !== request.previewId
+      || value.readyForCutover !== false || (published ? value.code !== "imported"
+        || value.requestId !== `history-${createHash("sha256").update(JSON.stringify([request.projectId, request.previewId])).digest("hex").slice(0, 40)}`
+        || typeof value.migrationId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/.test(value.migrationId)
+        || typeof value.historyCount !== "number" || !Number.isSafeInteger(value.historyCount) || value.historyCount < 0 || value.historyCount > 10000
+        : value.state !== "unknown" || value.code !== "unknown")) return unavailable();
+    return { ...value };
+  }
   if (request.action === "history_import") {
     const unavailable = () => ({ schemaVersion: 1, projectId: request.projectId, previewId: request.previewId,
       state: "unknown", code: "unknown", readyForCutover: false });

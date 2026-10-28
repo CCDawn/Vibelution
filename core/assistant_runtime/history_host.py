@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import re
-import secrets
 from contextlib import contextmanager, ExitStack
 from pathlib import Path
 from threading import Event, Lock, RLock
@@ -620,6 +619,61 @@ class HistoryHost:
                 self._owner.suspend()
             return {"schemaVersion": 1, "operationId": operation_id, "cancelled": True}
 
+    @contextmanager
+    def _history_target_guard(self):
+        from . import native
+        from core.infrastructure.native_runtime import assistant_native_root
+        if not native._LOCK.acquire(blocking=False):
+            raise MigrationIOError("history_target_unavailable")
+        try:
+            if (not native._STARTED or native._OFFLINE_MIGRATION or native._STOP_REQUESTED.is_set()
+                    or assistant_native_root() != self._owner._profile
+                    or not native._AGENT_ID or not native._SESSION_ID):
+                raise MigrationIOError("history_target_unavailable")
+            yield native._AGENT_ID, native._SESSION_ID
+        finally:
+            native._LOCK.release()
+
+    def history_receipt(self, project_id, preview_id, revision):
+        """Read a past result against a freshly reconstructed source authority."""
+        base = {"schemaVersion": 1, "projectId": project_id, "previewId": preview_id,
+                "state": "unknown", "code": "unknown", "readyForCutover": False}
+        if not self._import_lock.acquire(blocking=False):
+            return base
+        fresh = None
+        try:
+            with self.guard():
+                if self._dispatch._registry_revision != revision:
+                    return base
+            fresh = self._preview.preview(project_id)["previewId"]
+            with self._preview._lock:
+                public = self._preview.verify_preview(fresh)
+                row = self._preview._previews[fresh]
+                root, workspace, paths, snapshots = row[3], row[4], row[5], row[7]
+                verify = row[1]
+            @contextmanager
+            def authority():
+                verify()
+                yield
+                verify()
+            source = AuthorizedHistorySource(root, workspace, paths.instance_id,
+                public["assistantAgentId"], paths.project_id, authority, snapshots)
+            self._owner.replace_sources({project_id: source})
+            outcome = self._owner.read_bound_history(project_id, preview_id, target_guard=self._history_target_guard)
+            with self.guard():
+                if outcome is None or self._dispatch._registry_revision != revision:
+                    return base
+                return {**base, "state": "published", "code": "imported",
+                        "requestId": outcome["requestId"], "migrationId": outcome["migrationId"],
+                        "historyCount": outcome["historyCount"]}
+        except Exception:
+            return base
+        finally:
+            self._owner.suspend()
+            if fresh is not None:
+                self._preview.discard(fresh)
+            self._import_lock.release()
+
     def import_history(self, project_id, preview_id, revision, turn_id, operation_id):
         base = {"schemaVersion": 1, "projectId": project_id, "previewId": preview_id,
                 "readyForCutover": False}
@@ -653,7 +707,8 @@ class HistoryHost:
                 code = "cancelled" if operation_id in self._cancelled else "preview_invalid"
                 return {**base, "state": "rejected", "code": code}
             try:
-                result = self._owner.import_history(project_id, "history-" + secrets.token_hex(16))
+                result = self._owner.import_bound_history(project_id, preview_id, turn_id,
+                                                          target_guard=self._history_target_guard)
                 return {**base, "state": "published", "code": "imported",
                         "historyCount": result["historyCount"]}
             except Exception:

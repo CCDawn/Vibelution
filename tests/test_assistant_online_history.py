@@ -57,6 +57,204 @@ def test_registered_id_selects_canonical_source_scope_and_never_accepts_paths(tm
         service.replace_sources({REGISTRATION: bad})
 
 
+def test_bound_history_receipt_survives_restart_and_preserves_reused_archive(tmp_path, monkeypatch):
+    service, profile, binding, fence = owner(tmp_path)
+    from dataclasses import replace
+    from core.assistant_runtime.migration_io import read_stable_file
+    binding = replace(binding, authority_snapshots=(read_stable_file(binding.workspace / "agents/agents.json", 16384),))
+    service.replace_sources({REGISTRATION: binding})
+    target = lambda: nullcontext(("target-agent", "target-session"))
+    first = service.import_bound_history(REGISTRATION, "a" * 64, "turn-1", target_guard=target)
+    # A second request reuses the previous confirmed archive. Lose its response.
+    second = service.import_bound_history(REGISTRATION, "b" * 64, "turn-2", target_guard=target)
+    assert first["migrationId"] == second["migrationId"]
+    fence.active = "generation-2"
+    restarted = OnlineHistoryOwner(profile_root=profile, generation="generation-2",
+                                   sources={REGISTRATION: binding}, generation_guard=fence.guard)
+    recovered = restarted.read_bound_history(REGISTRATION, "b" * 64, target_guard=target)
+    assert recovered == second and recovered["historyCount"] == 1
+    import json, subprocess, sys
+    child = """
+import json, sys
+from contextlib import nullcontext
+from pathlib import Path
+from core.assistant_runtime.online_history import AuthorizedHistorySource, OnlineHistoryOwner
+from core.assistant_runtime.migration_io import read_stable_file
+profile, workspace, project = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+source = AuthorizedHistorySource(workspace.parent, workspace, 'instance-1', 'agent-pa', 'canonical-project',
+    nullcontext, (read_stable_file(workspace / 'agents/agents.json', 16384),))
+owner = OnlineHistoryOwner(profile_root=profile, generation='generation-3', sources={project: source},
+    generation_guard=lambda generation: nullcontext())
+print(json.dumps(owner.read_bound_history(project, 'b' * 64,
+    target_guard=lambda: nullcontext(('target-agent', 'target-session')))))
+"""
+    process = subprocess.run([sys.executable, "-c", child, str(profile), str(binding.workspace), REGISTRATION],
+                             capture_output=True, text=True, check=True)
+    assert json.loads(process.stdout) == second
+    assert restarted.read_bound_history(REGISTRATION, "c" * 64, target_guard=target) is None
+    assert restarted.read_bound_history("other-project", "b" * 64, target_guard=target) is None
+    assert restarted.read_bound_history(REGISTRATION, "b" * 64,
+                                        target_guard=lambda: nullcontext(("other-agent", "target-session"))) is None
+    with pytest.raises(history.MigrationIOError, match="history_outcome_unknown"):
+        restarted.import_bound_history(REGISTRATION, "b" * 64, "turn-2", target_guard=target)
+    original = restarted.import_history
+    def lost_before_receipt(project_id, migration_id, **kwargs):
+        original(project_id, migration_id, **kwargs)
+        raise RuntimeError("lost before receipt")
+    monkeypatch.setattr(restarted, "import_history", lost_before_receipt)
+    with pytest.raises(RuntimeError, match="lost before receipt"):
+        restarted.import_bound_history(REGISTRATION, "d" * 64, "turn-3", target_guard=target)
+    assert restarted.read_bound_history(REGISTRATION, "d" * 64, target_guard=target) is None
+    with pytest.raises(history.MigrationIOError, match="history_outcome_unknown"):
+        restarted.import_bound_history(REGISTRATION, "d" * 64, "turn-3", target_guard=target)
+
+
+def test_bound_guard_exit_failure_is_not_success(tmp_path, monkeypatch):
+    from dataclasses import replace
+    from core.assistant_runtime.migration_io import read_stable_file
+    service, profile, binding, _ = owner(tmp_path)
+    fail = [False]
+    @contextmanager
+    def authority():
+        yield
+        if fail[0]:
+            raise history.MigrationIOError("authority_changed")
+    binding = replace(binding, authority_guard=authority,
+                      authority_snapshots=(read_stable_file(binding.workspace / "agents/agents.json", 16384),))
+    service.replace_sources({REGISTRATION: binding})
+    target = lambda: nullcontext(("target-agent", "target-session"))
+    original = service.import_history
+    def fail_next_check(*args, **kwargs):
+        value = original(*args, **kwargs)
+        fail[0] = True
+        return value
+    monkeypatch.setattr(service, "import_history", fail_next_check)
+    with pytest.raises(history.MigrationIOError, match="authority_changed"):
+        service.import_bound_history(REGISTRATION, "e" * 64, "turn-1", target_guard=target)
+    fail[0] = False
+    assert service.read_bound_history(REGISTRATION, "e" * 64, target_guard=target) is None
+
+
+def test_bound_result_interrupted_before_publication_stays_unknown(tmp_path, monkeypatch):
+    from dataclasses import replace
+    from core.assistant_runtime.migration_io import read_stable_file
+    service, _, binding, _ = owner(tmp_path)
+    binding = replace(binding, authority_snapshots=(read_stable_file(binding.workspace / "agents/agents.json", 16384),))
+    service.replace_sources({REGISTRATION: binding})
+    target = lambda: nullcontext(("target-agent", "target-session"))
+    original = history._write_new
+    def interrupted(path, raw):
+        original(path, raw)
+        if path.name == "result.json":
+            raise OSError("lost before receipt publication")
+    monkeypatch.setattr(history, "_write_new", interrupted)
+    with pytest.raises(history.MigrationIOError, match="target_namespace_unavailable"):
+        service.import_bound_history(REGISTRATION, "f" * 64, "turn-1", target_guard=target)
+    assert service.read_bound_history(REGISTRATION, "f" * 64, target_guard=target) is None
+    with pytest.raises(history.MigrationIOError, match="history_outcome_unknown"):
+        service.import_bound_history(REGISTRATION, "f" * 64, "turn-1", target_guard=target)
+
+
+def test_bound_import_rejects_changed_source_revision_before_write(tmp_path, monkeypatch):
+    from dataclasses import replace
+    from core.assistant_runtime.migration_io import read_stable_file
+    service, profile, binding, _ = owner(tmp_path)
+    binding = replace(binding, authority_snapshots=(read_stable_file(binding.workspace / "agents/agents.json", 16384),))
+    service.replace_sources({REGISTRATION: binding})
+    original = service.import_history
+    def changed(*args, **kwargs):
+        service.replace_sources({REGISTRATION: binding})
+        return original(*args, **kwargs)
+    monkeypatch.setattr(service, "import_history", changed)
+    target = lambda: nullcontext(("target-agent", "target-session"))
+    with pytest.raises(history.MigrationIOError, match="history_authority_revoked"):
+        service.import_bound_history(REGISTRATION, "1" * 64, "turn-1", target_guard=target)
+    assert service.read_bound_history(REGISTRATION, "1" * 64, target_guard=target) is None
+    assert not (profile / "history_archive").exists()
+
+
+def test_receipt_archive_read_releases_locks_and_fences_authority_change(tmp_path, monkeypatch):
+    from dataclasses import replace
+    from core.assistant_runtime.migration_io import read_stable_file
+    service, _, binding, fence = owner(tmp_path)
+    binding = replace(binding, authority_snapshots=(read_stable_file(binding.workspace / "agents/agents.json", 16384),))
+    service.replace_sources({REGISTRATION: binding})
+    target_lock = threading.Lock()
+    @contextmanager
+    def target():
+        if not target_lock.acquire(blocking=False):
+            raise history.MigrationIOError("target_busy")
+        try:
+            yield "target-agent", "target-session"
+        finally:
+            target_lock.release()
+    service.import_bound_history(REGISTRATION, "a" * 64, "turn-1", target_guard=target)
+    entered, proceed = threading.Event(), threading.Event()
+    original = history._load_archive
+    def slow(*args, **kwargs):
+        entered.set()
+        assert proceed.wait(5)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(history, "_load_archive", slow)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        query = pool.submit(service.read_bound_history, REGISTRATION, "a" * 64, target_guard=target)
+        assert entered.wait(5)
+        assert target_lock.acquire(blocking=False)
+        target_lock.release()
+        assert fence.lock.acquire(blocking=False)
+        fence.lock.release()
+        service.replace_sources({REGISTRATION: binding})
+        proceed.set()
+        assert query.result(timeout=5) is None
+
+
+def test_receipt_publish_verification_releases_locks_and_fences_shutdown(tmp_path, monkeypatch):
+    from dataclasses import replace
+    from core.assistant_runtime.migration_io import read_stable_file
+    service, profile, binding, fence = owner(tmp_path)
+    binding = replace(binding, authority_snapshots=(read_stable_file(binding.workspace / "agents/agents.json", 16384),))
+    service.replace_sources({REGISTRATION: binding})
+    target_lock = threading.Lock()
+    @contextmanager
+    def target():
+        if not target_lock.acquire(blocking=False):
+            raise history.MigrationIOError("target_busy")
+        try:
+            yield "target-agent", "target-session"
+        finally:
+            target_lock.release()
+    entered, proceed = threading.Event(), threading.Event()
+    finished = [False]
+    original_import, original_load = service.import_history, history._load_archive
+    def import_then_mark(*args, **kwargs):
+        value = original_import(*args, **kwargs)
+        finished[0] = True
+        return value
+    def slow(*args, **kwargs):
+        if finished[0]:
+            entered.set()
+            assert proceed.wait(5)
+        return original_load(*args, **kwargs)
+    monkeypatch.setattr(service, "import_history", import_then_mark)
+    monkeypatch.setattr(history, "_load_archive", slow)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        operation = pool.submit(service.import_bound_history, REGISTRATION, "b" * 64, "turn-1", target_guard=target)
+        assert entered.wait(5)
+        assert target_lock.acquire(blocking=False)
+        target_lock.release()
+        assert fence.lock.acquire(blocking=False)
+        try:
+            fence.active = "generation-2"
+        finally:
+            fence.lock.release()
+        proceed.set()
+        with pytest.raises(history.MigrationIOError, match="generation_changed"):
+            operation.result(timeout=5)
+    restarted = OnlineHistoryOwner(profile_root=profile, generation="generation-2",
+                                   sources={REGISTRATION: binding}, generation_guard=fence.guard)
+    assert restarted.read_bound_history(REGISTRATION, "b" * 64, target_guard=target) is None
+
+
 def test_concurrent_id_is_reserved_once_and_not_replayed_after_restart(tmp_path):
     service, profile, binding, fence = owner(tmp_path)
     barrier = threading.Barrier(2)

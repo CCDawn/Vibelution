@@ -124,6 +124,17 @@ describe("generation-scoped main control transport", () => {
     expect(projectMainControlResult(parsed!, published)).toEqual(published);
     expect(projectMainControlResult(parsed!, { ...published, readyForCutover: true })).toMatchObject({ state: "unknown" });
   });
+  it("validates the original history receipt identity and closed result", () => {
+    const row = { deliveryId: "a".repeat(32), action: "history_import_receipt", projectId: "synthetic:uuid", previewId: "b".repeat(64) };
+    const parsed = parseMainControlClaim({ schemaVersion: 1, request: row })!;
+    const requestId = `history-${createHash("sha256").update(JSON.stringify([row.projectId, row.previewId])).digest("hex").slice(0, 40)}`;
+    const published = { schemaVersion: 1, projectId: row.projectId, previewId: row.previewId, requestId,
+      migrationId: "history-old", historyCount: 1, state: "published", code: "imported", readyForCutover: false };
+    expect(projectMainControlResult(parsed, published)).toEqual(published);
+    expect(projectMainControlResult(parsed, { ...published, requestId: "history-wrong" })).toMatchObject({ state: "unknown" });
+    expect(projectMainControlResult(parsed, { ...published, path: "C:/private" })).toMatchObject({ state: "unknown" });
+    expect(() => parseMainControlClaim({ schemaVersion: 1, request: { ...row, turnId: "forged" } })).toThrow();
+  });
   it("admits only closed opaque lifecycle/status envelopes", () => {
     expect(parseMainControlClaim(wire())).toEqual(request);
     expect(parseMainControlClaim({ schemaVersion: 1, request: null })).toBeNull();

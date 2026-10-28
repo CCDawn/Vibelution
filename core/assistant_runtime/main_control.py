@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import math
 import os
 import re
@@ -22,7 +23,7 @@ from . import appearance_protocol as appearance
 
 
 _OPERATIONS = {"start", "stop", "restart"}
-_ACTIONS = {"project_status", "project_lifecycle", "project_lifecycle_receipt", "history_import", "affairs_sync", "episodic_sync", "initial_migration_queue", "initial_migration_receipt"}
+_ACTIONS = {"project_status", "project_lifecycle", "project_lifecycle_receipt", "history_import", "history_import_receipt", "affairs_sync", "episodic_sync", "initial_migration_queue", "initial_migration_receipt"}
 _STATUS_STATES = {"stopped", "starting", "running", "stopping", "failed", "unknown"}
 _WRITE_STATES = {"completed", "queued", "rejected", "unknown", "not_found"}
 _FACADE_CODES = {
@@ -47,6 +48,11 @@ def _opaque(value, maximum):
 
 def affairs_migration_id(project_id, preview_id):
     return "affairs-" + hashlib.sha256((project_id + ":" + preview_id).encode("utf-8")).hexdigest()[:40]
+
+
+def history_request_id(project_id, preview_id):
+    raw = json.dumps([project_id, preview_id], ensure_ascii=True, separators=(",", ":")).encode("ascii")
+    return "history-" + hashlib.sha256(raw).hexdigest()[:40]
 
 
 def episodic_migration_id(project_id, preview_id):
@@ -95,6 +101,11 @@ def _request(action, request):
                     else knowledge_sync_id(request["projectId"], request["previewId"]) if request["category"] == "knowledge_sync"
                     else initial_migration_id(request["projectId"], request["previewId"], request["category"]))):
             raise ValueError("Invalid initial migration request")
+        return dict(request)
+    if action == "history_import_receipt":
+        if (set(request) != {"projectId", "previewId"} or not _opaque(request.get("projectId"), 160)
+                or type(request.get("previewId")) is not str or re.fullmatch(r"[0-9a-f]{64}", request["previewId"]) is None):
+            raise ValueError("Invalid history receipt request")
         return dict(request)
     if action in {"history_import", "affairs_sync", "episodic_sync"}:
         expected = {"projectId", "previewId", "turnId"}
@@ -183,6 +194,19 @@ def _result(action, request, result):
                     or (result["conflictCount"] == 0) != (result["state"] == "complete"))
                 or has_confirmation and (type(result.get("conflictCount")) is not int or not 0 <= result["conflictCount"] <= 4096)):
             raise ValueError("Invalid affairs sync result")
+        return dict(result)
+    if action == "history_import_receipt":
+        base = {"schemaVersion", "projectId", "previewId", "state", "code", "readyForCutover"}
+        published = type(result) is dict and result.get("state") == "published"
+        if (type(result) is not dict or set(result) != base | ({"requestId", "migrationId", "historyCount"} if published else set())
+                or type(result.get("schemaVersion")) is not int or result["schemaVersion"] != 1
+                or any(result.get(k) != request[k] for k in ("projectId", "previewId"))
+                or result.get("readyForCutover") is not False
+                or (result.get("state"), result.get("code")) not in {("unknown", "unknown"), ("published", "imported")}
+                or published and (result.get("requestId") != history_request_id(request["projectId"], request["previewId"])
+                    or type(result.get("migrationId")) is not str or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,159}", result["migrationId"]) is None
+                    or type(result.get("historyCount")) is not int or not 0 <= result["historyCount"] <= 10000)):
+            raise ValueError("Invalid history receipt result")
         return dict(result)
     if action == "history_import":
         required = {"schemaVersion", "projectId", "previewId", "state", "code", "readyForCutover"}
@@ -379,7 +403,7 @@ class MainControlBroker:
             return {"schemaVersion": 1, "projectId": entry.request["projectId"], "previewId": entry.request["previewId"],
                     "migrationId": entry.request.get("recoverSyncId", (affairs_migration_id if entry.action == "affairs_sync" else episodic_migration_id)(entry.request["projectId"], entry.request["previewId"])),
                     "state": "unknown", "code": "unknown", "readyForCutover": False}
-        if entry.action == "history_import":
+        if entry.action in {"history_import", "history_import_receipt"}:
             return {"schemaVersion": 1, "projectId": entry.request["projectId"], "previewId": entry.request["previewId"],
                     "state": "unknown", "code": "unknown", "readyForCutover": False}
         if entry.action == "project_status":

@@ -1,5 +1,6 @@
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 
 import pytest
 from fastapi.testclient import TestClient
@@ -16,6 +17,7 @@ def make_host(tmp_path, setup_preview):
     profile = tmp_path / "assistant-profile"
     profile.mkdir(exist_ok=True)
     history_host = HistoryHost(profile, "generation-1", dispatch, dispatch.history_preview)
+    history_host._history_target_guard = lambda: nullcontext(("test-agent", "test-session"))
     app = create_app(native=Native(), token="private-test-token", dispatch=dispatch, history_control=history_host)
     return dispatch, profile, history_host, app
 
@@ -114,6 +116,43 @@ def test_private_host_import_uses_native_source_and_preview_once(tmp_path, setup
                           "state": "published", "code": "imported", "historyCount": 1, "readyForCutover": False}
         assert len(history.list_history(profile)) == 1
         assert client.post("/api/assistant/history-import", json=request, headers=headers).json()["code"] == "preview_invalid"
+
+
+def test_private_history_receipt_uses_original_preview_after_host_restart(tmp_path, setup_preview):
+    dispatch, profile, host, _ = make_host(tmp_path, setup_preview)
+    request = body(dispatch)
+    assert host.import_history(request["projectId"], request["previewId"], 1, request["turnId"], request["operationId"])["state"] == "published"
+    from core.assistant_runtime.history_preview import HistoryPreview
+    dispatch.history_preview = HistoryPreview(dispatch, dispatch.history_preview._config)
+    restarted = HistoryHost(profile, "generation-2", dispatch, dispatch.history_preview)
+    restarted._history_target_guard = lambda: nullcontext(("test-agent", "test-session"))
+    receipt = restarted.history_receipt(request["projectId"], request["previewId"], 1)
+    assert receipt["state"] == "published" and receipt["historyCount"] == 1
+    assert restarted.history_receipt(request["projectId"], "f" * 64, 1)["state"] == "unknown"
+    assert restarted.history_receipt("other-project", request["previewId"], 1)["state"] == "unknown"
+    assert not dispatch.history_preview._previews
+
+
+def test_history_receipt_does_not_hold_host_guard_during_preview(tmp_path, setup_preview, monkeypatch):
+    dispatch, _, host, _ = make_host(tmp_path, setup_preview)
+    entered, proceed = threading.Event(), threading.Event()
+    original = dispatch.history_preview.preview
+    def slow(*args, **kwargs):
+        entered.set()
+        assert proceed.wait(5)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(dispatch.history_preview, "preview", slow)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        query = pool.submit(host.history_receipt, "registered:1", "a" * 64, 1)
+        assert entered.wait(5)
+        assert host._lock.acquire(blocking=False)
+        try:
+            host.registry_changed()
+            dispatch.suspend_projects()
+        finally:
+            host._lock.release()
+        proceed.set()
+        assert query.result(timeout=5)["state"] == "unknown"
 
 
 def test_turn_mismatch_and_cancel_before_request_never_publish(tmp_path, setup_preview):

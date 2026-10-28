@@ -755,6 +755,15 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
           return { ...base, state: "unknown", code: "unknown" };
         });
       }
+      if (request.action === "history_import_receipt") {
+        const unknown = { schemaVersion: 1, projectId: request.projectId, previewId: request.previewId,
+          state: "unknown", code: "unknown", readyForCutover: false };
+        const host = launcherAssistantHost;
+        if (!host || shutdownApproved) return Promise.resolve(unknown);
+        return projectConnection.withHistoryImport(request.projectId, revision => host.historyReceipt({
+          projectId: request.projectId, previewId: request.previewId, revision,
+        })).catch(() => unknown);
+      }
       if (request.action === "history_import") {
         const host = launcherAssistantHost;
         if (!host || shutdownApproved) return Promise.resolve({ schemaVersion: 1, projectId: request.projectId,

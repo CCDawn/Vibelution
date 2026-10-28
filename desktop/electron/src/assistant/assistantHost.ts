@@ -893,6 +893,20 @@ export class AssistantHost {
       { deliveryId, filename: input.filename, contentType: input.contentType, dataBase64: input.dataBase64 }, REQUEST_MS, false, 8192);
   }
 
+  /** Main-only, read-only; caller owns the current registry lease. */
+  async historyReceipt(input: { projectId: string; previewId: string; revision: number }): Promise<unknown> {
+    const unknown = { schemaVersion: 1, projectId: input.projectId, previewId: input.previewId,
+      state: "unknown", code: "unknown", readyForCutover: false };
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(input.projectId) || !/^[a-f0-9]{64}$/.test(input.previewId)
+      || !Number.isSafeInteger(input.revision) || input.revision < 0) return unknown;
+    const generation = this.current;
+    if (!generation || generation.closed || generation.abort.signal.aborted || this.view.state !== "ready"
+      || this.projectsSuspended || generation.projectRevision !== input.revision) return unknown;
+    try {
+      return await this.rpc(generation, "/api/assistant/history-receipt", "POST", input, REQUEST_MS, false, 8192);
+    } catch { return unknown; }
+  }
+
   /** Main-only. Caller owns the registry lease and the native approval policy. */
   async importHistory(input: { projectId: string; previewId: string; turnId: string; revision: number; signal?: AbortSignal }): Promise<unknown> {
     if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(input.projectId)

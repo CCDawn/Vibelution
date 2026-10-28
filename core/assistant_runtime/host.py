@@ -222,6 +222,13 @@ class HistoryImport(BaseModel):
     operationId: str = Field(pattern=r"^[a-f0-9]{32}$")
 
 
+class HistoryReceipt(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    projectId: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
+    previewId: str = Field(pattern=r"^[a-f0-9]{64}$")
+    revision: int = Field(ge=0)
+
+
 class AffairsSync(HistoryImport):
     recoverSyncId: str | None = Field(default=None, pattern=r"^affairs-[a-f0-9]{40}$")
 
@@ -1031,6 +1038,14 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                 raise HTTPException(422, detail="Invalid history import request")
             result = await asyncio.to_thread(history_control.import_history, payload.projectId,
                 payload.previewId, payload.revision, payload.turnId, payload.operationId)
+            return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+        @app.post("/api/assistant/history-receipt")
+        async def history_receipt(payload: HistoryReceipt, request: Request):
+            if request.query_params:
+                raise HTTPException(422, detail="Invalid history receipt request")
+            result = await asyncio.to_thread(history_control.history_receipt, payload.projectId,
+                                             payload.previewId, payload.revision)
             return JSONResponse(result, headers={"Cache-Control": "no-store"})
 
         @app.post("/api/assistant/history-import/cancel")

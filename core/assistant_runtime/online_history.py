@@ -14,9 +14,9 @@ from threading import RLock
 from typing import Callable
 
 from . import migration_history as history
-from .main_control import _opaque
+from .main_control import _opaque, history_request_id
 from .migration_io import (FileSnapshot, MigrationIOError, check_path, migration_target_lock,
-                           path_identity, pinned_source_files, pinned_target_directory)
+                           path_identity, pinned_source_files, pinned_target_directory, publish_directory, read_stable_file, strict_json)
 
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,159}\Z")
 
@@ -100,7 +100,7 @@ class OnlineHistoryOwner:
         if self._identity() != self._profile_identity:
             raise MigrationIOError("history_profile_changed")
 
-    def import_history(self, project_id: str, migration_id: str):
+    def import_history(self, project_id: str, migration_id: str, *, _expected_source=None, _expected_revision=None):
         """One attempt only: an existing reservation always means unknown.
 
         Caller retains migration_id after any error; inspecting the immutable
@@ -115,6 +115,8 @@ class OnlineHistoryOwner:
                 if source is None:
                     raise MigrationIOError("history_authority_revoked")
                 revision = self._revision
+                if _expected_source is not None and (source != _expected_source or revision != _expected_revision):
+                    raise MigrationIOError("history_authority_revoked")
 
         @contextmanager
         def guard():
@@ -165,3 +167,160 @@ class OnlineHistoryOwner:
             with source.authority_guard():
                 with self._lock:
                     self._verify(project_id, source, revision)
+
+    @staticmethod
+    def _request_id(project_id, preview_id):
+        if not _opaque(project_id, 160) or type(preview_id) is not str or re.fullmatch(r"[a-f0-9]{64}", preview_id) is None:
+            raise ValueError("history_request_invalid")
+        return history_request_id(project_id, preview_id)
+
+    @contextmanager
+    def _receipt_authority(self, project_id, target_guard):
+        """Trusted host supplies a nonblocking target lock with nonfailing release."""
+        from .initial_migration_binding import source_identity, target_identity
+        with self._generation_guard(self._generation):
+            with self._lock:
+                source = self._sources.get(project_id)
+                if source is None:
+                    raise MigrationIOError("history_authority_revoked")
+                revision = self._revision
+            with source.authority_guard():
+                with self._lock:
+                    # The host guard must be nonblocking and pin the native
+                    # target identity. Pin the source authority through commit.
+                    with pinned_source_files(source.authority_snapshots), target_guard() as target:
+                        if type(target) is not tuple or len(target) != 2 or any(not isinstance(v, str) or not _ID.fullmatch(v) for v in target):
+                            raise MigrationIOError("history_target_invalid")
+                        self._verify(project_id, source, revision)
+                        scope = {"projectId": source.project_id, "instanceId": source.instance_id, "agentId": source.assistant_agent_id}
+                        source_digest, _, _ = source_identity(scope, source.project_root, source.workspace)
+                        target_digest, _ = target_identity(self._profile, *target)
+                        yield source, scope, source_digest, target, target_digest, revision
+                        self._verify(project_id, source, revision)
+
+    def import_bound_history(self, project_id, preview_id, turn_id, *, target_guard):
+        """Admit once, then persist only a confirmed native result; never replay."""
+        mid = self._request_id(project_id, preview_id)
+        if not _opaque(turn_id, 160) or not callable(target_guard):
+            raise ValueError("history_request_invalid")
+        with self._receipt_authority(project_id, target_guard) as (source, scope, src, target, dst, revision):
+            binding = {"schemaVersion": 1, "requestId": mid, "projectId": project_id,
+                       "previewId": preview_id, "turnId": turn_id, "sourceScope": scope,
+                       "sourceIdentity": src, "targetAgentId": target[0], "targetSessionId": target[1], "targetIdentity": dst}
+            with pinned_target_directory(self._profile / "history_request_receipts", create=True) as root:
+                with migration_target_lock(root / ".receipts"):
+                    path = root / (mid + ".intent")
+                    if path.exists() or path.is_symlink():
+                        raise MigrationIOError("history_outcome_unknown")
+                    history._write_new(path, json.dumps(binding, sort_keys=True, separators=(",", ":")).encode())
+        result = self.import_history(project_id, mid, _expected_source=source, _expected_revision=revision)
+        with self._receipt_authority(project_id, target_guard) as (current_source, scope, src, target, dst, current_revision):
+            if (scope != binding["sourceScope"] or src != binding["sourceIdentity"]
+                    or target != (binding["targetAgentId"], binding["targetSessionId"]) or dst != binding["targetIdentity"]
+                    or current_source != source or current_revision != revision):
+                raise MigrationIOError("history_outcome_unknown")
+        # Source checks (including their exit checks) are complete before a
+        # receipt exists. This records a past confirmed result; it does not
+        # assert the source remains unchanged after that confirmation.
+        from .initial_migration_binding import target_identity
+        archive_id = result.get("migrationId")
+        count = result.get("historyCount")
+        if (result.get("published") is not True or not isinstance(archive_id, str) or not _ID.fullmatch(archive_id)
+                or type(count) is not int or not 0 <= count <= 10000):
+            raise MigrationIOError("history_outcome_unknown")
+        archive = self._profile / "history_archive" / "migrations" / archive_id
+        with pinned_target_directory(archive):
+            loaded = history._load_archive(archive, visible_only=True)
+            if (loaded is None or loaded[0]["schemaVersion"] not in (2, 3) or len(loaded[0]["histories"]) != count
+                    or any(row["sourceScope"] != {**scope, "projectRoot": str(source.project_root),
+                          "workspace": str(source.workspace)} for row in loaded[0]["histories"])):
+                raise MigrationIOError("history_outcome_unknown")
+            with history._pin_parent_archives(archive, loaded[0], include_self=True):
+                pinned = history._load_archive(archive, visible_only=True)
+                if pinned is None or pinned[0] != loaded[0]:
+                    raise MigrationIOError("history_outcome_unknown")
+                with self._generation_guard(self._generation):
+                    with self._lock:
+                        if (self._closed or self._sources.get(project_id) != source or self._revision != revision
+                                or self._identity() != self._profile_identity):
+                            raise MigrationIOError("history_authority_revoked")
+                        with target_guard() as current_target:
+                            if current_target != target or target_identity(self._profile, *target)[0] != dst:
+                                raise MigrationIOError("history_target_invalid")
+                            receipt = {"schemaVersion": 1, "requestId": mid, "migrationId": archive_id, "historyCount": count}
+                            with pinned_target_directory(self._profile / "history_request_receipts") as root:
+                                with migration_target_lock(root / ".receipts"):
+                                    if strict_json(read_stable_file(root / (mid + ".intent"), 16384).raw) != binding:
+                                        raise MigrationIOError("history_outcome_unknown")
+                                    pending, final = root / ("." + mid + ".pending"), root / mid
+                                    if any(p.exists() or p.is_symlink() for p in (pending, final)):
+                                        raise MigrationIOError("history_outcome_unknown")
+                                    with pinned_target_directory(pending, create=True) as folder:
+                                        history._write_new(folder / "result.json", json.dumps(receipt, sort_keys=True, separators=(",", ":")).encode())
+                                        identity = path_identity(folder)
+                                    publish_directory(pending, final, identity)
+        return receipt
+
+    def _capture_receipt_authority(self, project_id, target_guard):
+        """Revalidate authority without holding the lifecycle or target lock over archive I/O."""
+        from .initial_migration_binding import source_identity, target_identity
+        with self._generation_guard(self._generation):
+            with self._lock:
+                source = self._sources.get(project_id)
+                revision = self._revision
+                if source is None:
+                    raise MigrationIOError("history_authority_revoked")
+                self._verify(project_id, source, revision)
+        with source.authority_guard():
+            with pinned_source_files(source.authority_snapshots):
+                scope = {"projectId": source.project_id, "instanceId": source.instance_id, "agentId": source.assistant_agent_id}
+                src, _, _ = source_identity(scope, source.project_root, source.workspace)
+                with target_guard() as target:
+                    if type(target) is not tuple or len(target) != 2 or any(not isinstance(v, str) or not _ID.fullmatch(v) for v in target):
+                        raise MigrationIOError("history_target_invalid")
+                    dst, _ = target_identity(self._profile, *target)
+        with self._generation_guard(self._generation):
+            with self._lock:
+                self._verify(project_id, source, revision)
+        return source, scope, src, target, dst, revision
+
+    def read_bound_history(self, project_id, preview_id, *, target_guard):
+        """Read only an independently recorded result under fresh host authority."""
+        mid = self._request_id(project_id, preview_id)
+        try:
+            captured = self._capture_receipt_authority(project_id, target_guard)
+            source, scope, src, target, dst, _ = captured
+            with pinned_target_directory(self._profile / "history_request_receipts") as root:
+                with migration_target_lock(root / ".receipts"):
+                    intent_snapshot = read_stable_file(root / (mid + ".intent"), 16384)
+                    with pinned_target_directory(root / mid) as folder:
+                        result_snapshot = read_stable_file(folder / "result.json", 16384)
+                    binding = strict_json(intent_snapshot.raw)
+                    receipt = strict_json(result_snapshot.raw)
+                with pinned_source_files((intent_snapshot, result_snapshot)):
+                    if (type(binding) is not dict or set(binding) != {"schemaVersion", "requestId", "projectId", "previewId", "turnId", "sourceScope", "sourceIdentity", "targetAgentId", "targetSessionId", "targetIdentity"}
+                            or binding["schemaVersion"] != 1 or binding["requestId"] != mid or binding["projectId"] != project_id
+                            or binding["previewId"] != preview_id or not _opaque(binding["turnId"], 160)
+                            or binding["sourceScope"] != scope or binding["sourceIdentity"] != src
+                            or (binding["targetAgentId"], binding["targetSessionId"]) != target or binding["targetIdentity"] != dst
+                            or type(receipt) is not dict or set(receipt) != {"schemaVersion", "requestId", "migrationId", "historyCount"}
+                            or receipt["schemaVersion"] != 1 or receipt["requestId"] != mid
+                            or type(receipt["migrationId"]) is not str or not _ID.fullmatch(receipt["migrationId"])
+                            or type(receipt["historyCount"]) is not int or not 0 <= receipt["historyCount"] <= 10000):
+                        raise MigrationIOError("history_outcome_unknown")
+                    archive = self._profile / "history_archive" / "migrations" / receipt["migrationId"]
+                    with pinned_target_directory(archive):
+                        loaded = history._load_archive(archive, visible_only=True)
+                        if (loaded is None or loaded[0]["schemaVersion"] not in (2, 3) or len(loaded[0]["histories"]) != receipt["historyCount"]
+                                or any(row["sourceScope"] != {**scope, "projectRoot": str(source.project_root),
+                                      "workspace": str(source.workspace)} for row in loaded[0]["histories"])):
+                            raise MigrationIOError("history_outcome_unknown")
+                        with history._pin_parent_archives(archive, loaded[0], include_self=True):
+                            pinned = history._load_archive(archive, visible_only=True)
+                            if pinned is None or pinned[0] != loaded[0]:
+                                raise MigrationIOError("history_outcome_unknown")
+                            if self._capture_receipt_authority(project_id, target_guard) != captured:
+                                raise MigrationIOError("history_authority_revoked")
+                            return receipt
+        except Exception:
+            return None
