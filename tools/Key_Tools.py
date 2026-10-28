@@ -3073,6 +3073,8 @@ def _build_key_tools() -> List[BaseTool]:
         parameters直接传JSON对象，不能传字符串。agent_update 示例：
         {"agent_id":"概览取得的真实ID","updates":{"displayName":"新名字"}}。
         Launcher独立助理以index/describe返回的实时目录为准：projects查询已授权项目，agents发现可派遣目标，
+        用户只要求查找或读取项目源码时，先用projects定位项目，再describe并调用source_search或source_read；
+        只有用户要求派遣或确需其他Agent处理时才dispatch，避免将简单源码查询转给无法读取源码的Agent。
         dispatch使用project_id、agent_id、稳定dispatch_id，并优先用task_source的start_after/end_before唯一短锚点提取用户任务原文；
         两锚点都为空时使用整条用户消息。不要改写任务、ID和引号文字；task只接受用户消息的精确原文子串。
         receipt查询原任务；项目取自授权目录，同一请求复用原ID和选择参数，原生引用可恢复原任务，不要求用户重新抄写。
