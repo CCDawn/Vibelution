@@ -146,6 +146,35 @@ def test_knowledge_completion_proof_survives_target_edits_and_detects_corruption
     ''', config_text=TEST_MODEL_CONFIG)
 
 
+def test_new_knowledge_import_records_immutable_full_target_fingerprint(tmp_path):
+    _create_isolated_source(tmp_path)
+    _run(tmp_path, _ISOLATED_SNAPSHOTS + r'''
+        with offline_migration_profile() as lease:
+            result = run(lease)
+            proof = migration.verify_knowledge_completion(root, 'workspace-bound')
+            path = root / 'knowledge_migrations/target_baselines' / (proof['originKeys'][0] + '.json')
+            baseline = json.loads(path.read_bytes())
+            assert baseline['mapping'] == result['mappings'][0]
+            assert set(baseline['fingerprints']) == {'base', 'source', 'item', 'artifacts', 'central', 'ownerRefs'}
+            original = path.read_bytes()
+            owner = s._require_owner_context('agent', lease.agent_id)
+            state = json.loads((root / 'knowledge_migrations' / (proof['originKeys'][0] + '.json')).read_bytes())
+            assert migration._target_matches_baseline(lease, s, owner, root / 'knowledge_migrations',
+                proof['originKeys'][0], state)
+            s.update_knowledge_item_metadata(s._owner_scoped_knowledge_base_id(owner, baseline['mapping']['knowledgeBaseId']),
+                baseline['mapping']['knowledgeItemId'], metadata_patch={'user': 'edited'}, actor_agent_id=lease.agent_id)
+            assert not migration._target_matches_baseline(lease, s, owner, root / 'knowledge_migrations',
+                proof['originKeys'][0], state)
+            assert run(lease)['idempotent']
+            assert path.read_bytes() == original
+            assert migration.verify_knowledge_completion(root, 'workspace-bound') == proof
+            path.unlink()
+            assert not migration._target_matches_baseline(lease, s, owner, root / 'knowledge_migrations',
+                proof['originKeys'][0], state)
+            assert migration.verify_knowledge_completion(root, 'workspace-bound') == proof
+    ''', config_text=TEST_MODEL_CONFIG)
+
+
 def test_knowledge_plan_includes_items_not_started_when_import_is_interrupted(tmp_path):
     source_case = tmp_path / 'source-case'
     source_case.mkdir()

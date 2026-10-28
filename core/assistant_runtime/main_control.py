@@ -60,6 +60,14 @@ def initial_migration_id(project_id, preview_id, category):
     return "initial-" + hashlib.sha256((project_id + ":" + category).encode("utf-8")).hexdigest()[:40]
 
 
+def knowledge_sync_id(project_id, preview_id):
+    return "ksync-" + hashlib.sha256((project_id + ":" + preview_id).encode("utf-8")).hexdigest()[:40]
+
+
+def knowledge_recovery_id(project_id, preview_id, original_sync_id):
+    return "krec-" + hashlib.sha256((project_id + ":" + preview_id + ":" + original_sync_id).encode("utf-8")).hexdigest()[:40]
+
+
 def initial_model_env_unavailable():
     return any(key.upper().startswith("AGENT_LLM__") and value.strip() for key, value in os.environ.items())
 
@@ -76,11 +84,16 @@ def _request(action, request):
             raise ValueError("Invalid initial migration receipt request")
         return dict(request)
     if action == "initial_migration_queue":
-        if (set(request) != {"projectId", "previewId", "turnId", "category", "operationId"}
+        recovery = request.get("category") == "knowledge_recovery"
+        if (set(request) != ({"projectId", "previewId", "turnId", "category", "operationId", "originalSyncId"} if recovery
+                             else {"projectId", "previewId", "turnId", "category", "operationId"})
                 or not _opaque(request.get("projectId"), 160) or not _opaque(request.get("turnId"), 160)
                 or type(request.get("previewId")) is not str or re.fullmatch(r"[0-9a-f]{64}", request["previewId"]) is None
-                or type(request.get("category")) is not str or request["category"] not in {"personal", "knowledge"}
-                or request.get("operationId") != initial_migration_id(request["projectId"], request["previewId"], request["category"])):
+                or type(request.get("category")) is not str or request["category"] not in {"personal", "knowledge", "knowledge_sync", "knowledge_recovery"}
+                or recovery and (type(request.get("originalSyncId")) is not str or re.fullmatch(r"ksync-[a-f0-9]{40}", request["originalSyncId"]) is None)
+                or request.get("operationId") != (knowledge_recovery_id(request["projectId"], request["previewId"], request["originalSyncId"]) if recovery
+                    else knowledge_sync_id(request["projectId"], request["previewId"]) if request["category"] == "knowledge_sync"
+                    else initial_migration_id(request["projectId"], request["previewId"], request["category"]))):
             raise ValueError("Invalid initial migration request")
         return dict(request)
     if action in {"history_import", "affairs_sync", "episodic_sync"}:
@@ -126,8 +139,11 @@ def _result(action, request, result):
         return dict(result)
     if action == "initial_migration_queue":
         required = {"schemaVersion", "projectId", "previewId", "category", "operationId", "state", "code", "readyForCutover"}
+        if request["category"] == "knowledge_recovery":
+            required.add("originalSyncId")
         if (type(result) is not dict or set(result) != required or type(result.get("schemaVersion")) is not int
                 or result["schemaVersion"] != 1 or any(result.get(key) != request[key] for key in ("projectId", "previewId", "category", "operationId"))
+                or request["category"] == "knowledge_recovery" and result.get("originalSyncId") != request["originalSyncId"]
                 or result.get("readyForCutover") is not False or type(result.get("state")) is not str
                 or type(result.get("code")) is not str or (result.get("state"), result.get("code")) not in {
                     ("queued", "queued"), ("unknown", "unknown"), ("rejected", "cancelled"),
@@ -331,6 +347,7 @@ class MainControlBroker:
             return appearance.unavailable(entry.action, entry.request)
         if entry.action == "initial_migration_queue":
             return {"schemaVersion": 1, **{key: entry.request[key] for key in ("projectId", "previewId", "category", "operationId")},
+                    **({"originalSyncId": entry.request["originalSyncId"]} if entry.request["category"] == "knowledge_recovery" else {}),
                     "state": "unknown", "code": "unknown", "readyForCutover": False}
         if entry.action == "initial_migration_receipt":
             return {"schemaVersion": 1, **entry.request, "state": "unknown", "code": "unknown", "readyForCutover": False}

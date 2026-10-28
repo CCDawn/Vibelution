@@ -25,6 +25,12 @@ _INITIAL_PREPARE_CODES = frozenset({
     "initial_intent_exists", "initial_intent_claimed_unknown", "initial_profile_owner_unavailable",
     "initial_delivery_unavailable", "history_preview_expired", "history_preview_changed",
     "history_source_unavailable", "source_unavailable", "source_changed",
+    "knowledge_sync_baseline_unavailable", "knowledge_sync_prior_unknown", "knowledge_sync_intent_exists",
+    "knowledge_sync_recovery_invalid", "knowledge_sync_recovery_finished", "knowledge_sync_recovery_pending",
+    "initial_receipts_unknown",
+    "source_unavailable_or_changed", "source_guard_unavailable", "source_authority_required",
+    "migration_lock_unavailable", "target_directory_unavailable", "target_namespace_unavailable",
+    "target_pending_changed", "target_publish_unavailable", "target_lock_leaf_unavailable",
 })
 
 
@@ -162,14 +168,21 @@ class InitialMigrationPrepare(BaseModel):
     previewId: str = Field(pattern=r"^[a-f0-9]{64}$")
     turnId: str = Field(min_length=1, max_length=160, pattern=r"^\S+$")
     revision: int = Field(ge=0)
-    operationId: str = Field(pattern=r"^initial-[a-f0-9]{40}$")
-    category: Literal["personal", "knowledge"]
+    operationId: str = Field(pattern=r"^(?:initial|ksync|krec)-[a-f0-9]{40}$")
+    category: Literal["personal", "knowledge", "knowledge_sync", "knowledge_recovery"]
+    originalSyncId: str | None = Field(default=None, pattern=r"^ksync-[a-f0-9]{40}$")
+
+    @model_validator(mode="after")
+    def recovery_binding(self):
+        if (self.category == "knowledge_recovery") != (self.originalSyncId is not None):
+            raise ValueError("Invalid knowledge recovery binding")
+        return self
 
 
 class InitialMigrationDrain(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     deliveryId: str = Field(pattern=r"^[a-f0-9]{32}$")
-    operationId: str = Field(pattern=r"^initial-[a-f0-9]{40}$")
+    operationId: str = Field(pattern=r"^(?:initial|ksync|krec)-[a-f0-9]{40}$")
 
 
 class CancelHistoryImport(BaseModel):
@@ -586,6 +599,8 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                 if request.query_params:
                     raise HTTPException(422, detail="Invalid initial migration request")
                 bound = {key: getattr(payload, key) for key in ("projectId", "previewId", "turnId", "category", "operationId")}
+                if payload.originalSyncId is not None:
+                    bound["originalSyncId"] = payload.originalSyncId
                 publication = main_control.initial_delivery(payload.deliveryId, bound, admit=True)
                 if not publication:
                     logging.getLogger(__name__).warning("assistant_initial_prepare category=%s phase=admission code=delivery_unavailable", payload.category)
@@ -593,7 +608,8 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                 def prepare():
                     try:
                         return history_control.prepare_initial_source(payload.projectId, payload.previewId,
-                            payload.revision, payload.turnId, payload.operationId, payload.category, publication)
+                            payload.revision, payload.turnId, payload.operationId, payload.category, publication,
+                            **({"original_sync_id": payload.originalSyncId} if payload.originalSyncId is not None else {}))
                     finally:
                         publication.finished()
                 phase = "prepare"

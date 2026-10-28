@@ -127,6 +127,8 @@ def review_refinement_proposal(
     status: str,
     reviewed_by_agent_id: str = "",
     resolution_note: str = "",
+    _migration_lease: Any = None,
+    _migration_parent_sha256: str = "",
 ) -> dict[str, Any]:
     s = _service()
     owner, base = s._require_base_with_owner(knowledge_base_id)
@@ -164,6 +166,22 @@ def review_refinement_proposal(
                 list(proposal.get("sourceArtifactIds") or []),
                 str(proposal.get("content") or ""),
             )
+        protected_parent = None
+        if _migration_lease is not None or _migration_parent_sha256:
+            # Only an exclusively held offline assistant profile can preserve
+            # fields. The ordinary public review path is unchanged.
+            from core.assistant_runtime.migration_profile import OfflineMigrationProfileLease
+            from core.assistant_runtime.migration_knowledge import _digest
+            if (not isinstance(_migration_lease, OfflineMigrationProfileLease)
+                    or normalized_status == "rejected" or owner["ownerType"] != "agent"
+                    or owner["ownerId"] != _migration_lease.agent_id or reviewer_id != _migration_lease.agent_id
+                    or s.PROJECT_ROOT != _migration_lease.root or not proposal.get("supersedesKnowledgeItemId")):
+                raise s.TeamKnowledgePermissionError("Invalid offline migration revision capability.")
+            _migration_lease.check()
+            protected_parent = s._find_by_id(s._read_jsonl(s._items_path_for_owner(owner)),
+                "knowledgeItemId", proposal["supersedesKnowledgeItemId"])
+            if not protected_parent or _digest(protected_parent) != _migration_parent_sha256:
+                raise s.TeamKnowledgeIdempotencyConflictError("Migration revision target has changed.")
         now = s.utc_now_iso()
         proposal["status"] = "rejected" if normalized_status == "rejected" else "applied"
         proposal["updatedAt"] = now
@@ -176,6 +194,14 @@ def review_refinement_proposal(
             batch = s._batch_from_proposal(owner, base, proposal, reviewer_id, now)
             item = s._item_from_proposal(owner, base, proposal, batch, reviewer_id, now)
             item = lifecycle.decorate_revision_item(item, proposal)
+            if protected_parent is not None:
+                from copy import deepcopy
+                for key in ("tags", "importanceLevel", "confidence", "stability", "scope", "reviewPriority",
+                            "markedBy", "markedAt", "markingReason", "metadata"):
+                    if key in protected_parent:
+                        item[key] = deepcopy(protected_parent[key])
+                    else:
+                        item.pop(key, None)
             proposal["batchId"] = batch["batchId"]
             proposal["knowledgeItemIds"] = [item["knowledgeItemId"]]
             s._append_jsonl(s._batches_path_for_owner(owner), batch)

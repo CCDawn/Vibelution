@@ -600,25 +600,41 @@ export class AssistantHost {
   async prepareInitialMigration(request: InitialMigrationMainControlRequest, revision: number, signal?: AbortSignal): Promise<boolean> {
     if (!this.options.initialMigrationControl || !/^[a-f0-9]{32}$/.test(request.deliveryId)
       || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(request.projectId) || !/^[a-f0-9]{64}$/.test(request.previewId)
-      || !/^\S{1,160}$/.test(request.turnId) || !/^initial-[a-f0-9]{40}$/.test(request.operationId)
-      || !["personal", "knowledge"].includes(request.category) || !Number.isSafeInteger(revision) || revision < 0)
+        || !/^\S{1,160}$/.test(request.turnId) || !/^(?:initial|ksync|krec)-[a-f0-9]{40}$/.test(request.operationId)
+        || (request.category === "knowledge_sync") !== request.operationId.startsWith("ksync-")
+        || (request.category === "knowledge_recovery") !== request.operationId.startsWith("krec-")
+        || (request.category === "knowledge_recovery" ? typeof request.originalSyncId !== "string" || !/^ksync-[a-f0-9]{40}$/.test(request.originalSyncId) : request.originalSyncId !== undefined)
+        || !["personal", "knowledge", "knowledge_sync", "knowledge_recovery"].includes(request.category) || !Number.isSafeInteger(revision) || revision < 0) {
+      console.warn("ASSISTANT_INITIAL_PREPARE phase=admission code=request_invalid");
       throw new HostError("ASSISTANT_REQUEST_INVALID");
+    }
     const generation = this.current;
     if (!generation || generation.closed || generation.abort.signal.aborted || this.view.state !== "ready"
-      || this.projectsSuspended || generation.projectRevision !== revision) throw new HostError("ASSISTANT_NOT_READY");
+      || this.projectsSuspended || generation.projectRevision !== revision) {
+      console.warn("ASSISTANT_INITIAL_PREPARE phase=admission code=not_ready");
+      throw new HostError("ASSISTANT_NOT_READY");
+    }
     const body = { deliveryId: request.deliveryId, projectId: request.projectId, previewId: request.previewId,
-      turnId: request.turnId, category: request.category, operationId: request.operationId, revision };
+      turnId: request.turnId, category: request.category, operationId: request.operationId, revision,
+      ...(request.category === "knowledge_recovery" ? { originalSyncId: request.originalSyncId } : {}) };
+    let phase: "rpc" | "validation" = "rpc";
     try {
       const result = await this.rpc(generation, "/api/assistant/initial-migration/prepare", "POST", body, 120_000, false, 8192, signal);
+      phase = "validation";
       const keys = ["schemaVersion", "registeredProjectId", "sourceScope", "category", "turnId", "operationId", "revision",
         "sourceIdentityDigest", "registryDigest", "targetIdentityDigest", "projectDirectory", "workspaceDirectory", "targetDirectory",
         "targetAgentId", "targetSessionId", "authority", "readyForCutover"];
+        if (request.category === "knowledge_sync" || request.category === "knowledge_recovery") keys.push("previewId", "baselineMigrationId");
+        if (request.category === "knowledge_recovery") keys.push("originalSyncId");
       const identity = (value: unknown) => object(value) && Object.keys(value).length === 3
         && ["device", "inode", "birthtimeNs"].every(key => typeof value[key] === "string" && /^[1-9][0-9]{0,24}$/.test(value[key] as string));
       const opaque = (value: unknown) => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(value);
       if (!object(result) || Object.keys(result).length !== keys.length || !ownKeys(result, keys)
         || result.schemaVersion !== 1 || result.registeredProjectId !== request.projectId || result.category !== request.category
         || result.turnId !== request.turnId || result.operationId !== request.operationId || result.revision !== revision
+          || ((request.category === "knowledge_sync" || request.category === "knowledge_recovery") && (result.previewId !== request.previewId
+            || result.baselineMigrationId !== `initial-${createHash("sha256").update(`${request.projectId}:knowledge`).digest("hex").slice(0, 40)}`))
+        || (request.category === "knowledge_recovery" && result.originalSyncId !== request.originalSyncId)
         || result.authority !== "native_policy_admitted" || result.readyForCutover !== false
         || !object(result.sourceScope) || Object.keys(result.sourceScope).length !== 3
         || !["projectId", "instanceId", "agentId"].every(key => opaque((result.sourceScope as Record<string, unknown>)[key]))
@@ -626,7 +642,11 @@ export class AssistantHost {
         || !identity(result.projectDirectory) || !identity(result.workspaceDirectory) || !identity(result.targetDirectory)
         || !opaque(result.targetAgentId) || !opaque(result.targetSessionId)) throw new HostError("ASSISTANT_RESPONSE_INVALID");
       return true;
-    } catch {
+    } catch (error) {
+      const allowed = new Set(["ASSISTANT_HTTP_FAILED", "ASSISTANT_RESPONSE_INVALID", "ASSISTANT_RESPONSE_TOO_LARGE",
+        "ASSISTANT_REQUEST_TIMEOUT", "ASSISTANT_STOPPED", "ASSISTANT_TRANSPORT_FAILED", "ASSISTANT_NOT_READY"]);
+      const failure = error instanceof HostError && allowed.has(error.code) ? error.code : "unexpected";
+      console.warn(`ASSISTANT_INITIAL_PREPARE phase=${phase} code=${failure}`);
       // HTTP abort does not stop a native worker. Revoke and wait for its
       // private drain ACK, or for the captured Job itself to fully exit.
       while (true) {

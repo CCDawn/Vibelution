@@ -629,7 +629,10 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
           operationId: request.operationId, readyForCutover: false };
         return projectConnection.withHistoryImport(request.projectId, async () => {
           let state: "queued" | "completed" | "partial" | "unknown" | "not_found" = initialMigrationStates.get(request.operationId) ?? "not_found";
-          if (state === "not_found" && initialMigrationResults) state = await initialMigrationResults.get(request.operationId) ?? "not_found";
+          if (state === "not_found" && initialMigrationResults) {
+            const stored = await initialMigrationResults.get(request.operationId);
+            state = stored === "not_started" ? "unknown" : stored ?? "not_found";
+          }
           // A re-registered project has a different opaque ID. Existing intents
           // may belong to that source, so a different hash is not proof of absence.
           if (state === "not_found" && (initialMigrationRecoveryUncertain || initialMigrationStates.size > 0)) state = "unknown";
@@ -638,7 +641,8 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
       }
       if (request.action === "initial_migration_queue") {
         const base = { schemaVersion: 1, projectId: request.projectId, previewId: request.previewId,
-          category: request.category, operationId: request.operationId, readyForCutover: false };
+          category: request.category, operationId: request.operationId, readyForCutover: false,
+          ...(request.category === "knowledge_recovery" ? { originalSyncId: request.originalSyncId } : {}) };
         const host = launcherAssistantHost;
         if (!host || shutdownApproved) return Promise.resolve({ ...base, state: "rejected", code: "unavailable" });
         return projectConnection.withHistoryImport(request.projectId, async revision => {

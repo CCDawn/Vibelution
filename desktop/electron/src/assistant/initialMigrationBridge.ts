@@ -13,7 +13,7 @@ export type InitialMigrationLaunchBinding = {
 };
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/;
-const OPERATION = /^initial-[a-f0-9]{40}$/;
+const OPERATION = /^(?:initial|ksync|krec)-[a-f0-9]{40}$/;
 const bad = () => { throw new Error("INITIAL_MIGRATION_BRIDGE_INVALID"); };
 
 /**
@@ -69,6 +69,9 @@ export async function openInitialMigrationBridge(lease: PreHostSourceLease, inpu
       if (body !== "{}" || permitUsed || closed) { send(response, 409, { schemaVersion: 1, code: "unavailable" }); return; }
       permitUsed = true;
       commit = lease.commit(async () => {
+        // Once the drained Job's channel has been closed, no delayed lease
+        // admission may grant a permit or retain the project lease.
+        if (closed) return;
         granted = true;
         send(response, 200, { schemaVersion: 1, granted: true });
         await new Promise<void>(resolve => { release = resolve; });
@@ -92,7 +95,8 @@ export async function openInitialMigrationBridge(lease: PreHostSourceLease, inpu
       release?.();
       server.closeAllConnections();
       await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
-      await commit;
+      try { await commit; }
+      catch (error) { if (granted) throw error; }
     },
   };
 }

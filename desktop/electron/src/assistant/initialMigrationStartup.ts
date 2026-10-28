@@ -38,7 +38,7 @@ export async function recoverInitialMigrations(input: {
   const output: InitialMigrationStartupResult[] = [];
   for (const job of jobs) {
     input.signal?.throwIfAborted();
-    let previous: "completed" | "partial" | null;
+    let previous: "completed" | "partial" | "unknown" | "not_started" | null;
     try { previous = await input.results.get(job.operationId); }
     catch {
       // A damaged receipt is ambiguous and must never cause a replay.
@@ -46,7 +46,7 @@ export async function recoverInitialMigrations(input: {
       continue;
     }
     if (previous || job.state === "claimed_unknown") {
-      output.push({ operationId: job.operationId, state: previous ?? "unknown" });
+      output.push({ operationId: job.operationId, state: previous === "not_started" ? "unknown" : previous ?? "unknown" });
       continue;
     }
     try {
@@ -56,10 +56,13 @@ export async function recoverInitialMigrations(input: {
       const targetConfig = await input.targetConfig(job.operationId, job.registryDigest);
       const result = await input.registry.withPreHostSource(job.registeredProjectId, async lease => {
         const outcome = await runInitialMigrationJob({ ...input, lease, binding: { registeredProjectId: job.registeredProjectId,
-          sourceConfig: input.sourceConfig, targetProfile: input.targetProfile, targetConfig, operationId: job.operationId } });
-        if (outcome.state !== "unknown" && await input.verifyResult(job.operationId, outcome.state)) {
+          sourceConfig: input.sourceConfig, targetProfile: input.targetProfile, targetConfig, operationId: job.operationId },
+          ...(job.category === "knowledge_sync" || job.category === "knowledge_recovery" ? { registryDigest: job.registryDigest, beforeSpawn: async () => {
+            if (!await input.results.begin(job.operationId)) throw new Error("KNOWLEDGE_SYNC_ALREADY_ATTEMPTED");
+          }, onNotStarted: async () => { await input.results.recordNotStarted(job.operationId); } } : {}) });
+        if ((outcome.state === "completed" || outcome.state === "partial") && await input.verifyResult(job.operationId, outcome.state)) {
           await input.results.record(job.operationId, outcome.state);
-          return outcome;
+          return { ...outcome, state: outcome.state as "completed" | "partial" };
         }
         return { ...outcome, state: "unknown" as const };
       });

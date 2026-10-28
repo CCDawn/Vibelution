@@ -114,19 +114,24 @@ class HistoryHost:
                 self._owner.suspend()
             return result
 
-    def prepare_initial_source(self, project_id, preview_id, revision, turn_id, operation_id, category, publication):
+    def prepare_initial_source(self, project_id, preview_id, revision, turn_id, operation_id, category, publication, original_sync_id=None):
         """Publish one intent under the live native Turn and source guards."""
         from . import native
         from .initial_migration_binding import authority_identity, source_identity, target_identity, publish_initial_intent
-        from .main_control import initial_migration_id, initial_model_env_unavailable
+        from .main_control import initial_migration_id, initial_model_env_unavailable, knowledge_sync_id, knowledge_recovery_id
         from .migration_io import check_path, pinned_source_files
         from core.infrastructure.native_runtime import assistant_native_root
         from core.web.services import session_service as sessions
         from core.web.services.session import directory_runtime
         from core.web.services.personal_assistant_project.windows_read import lock_source_directory
 
-        if (category not in ("personal", "knowledge")
-                or operation_id != initial_migration_id(project_id, preview_id, category)):
+        if (category not in ("personal", "knowledge", "knowledge_sync", "knowledge_recovery")
+                or category == "knowledge_recovery" and (type(original_sync_id) is not str
+                    or re.fullmatch(r"ksync-[a-f0-9]{40}", original_sync_id) is None)
+                or category != "knowledge_recovery" and original_sync_id is not None
+                or operation_id != (knowledge_recovery_id(project_id, preview_id, original_sync_id) if category == "knowledge_recovery"
+                                    else knowledge_sync_id(project_id, preview_id) if category == "knowledge_sync"
+                                    else initial_migration_id(project_id, preview_id, category))):
             self._preview.discard(preview_id)
             raise MigrationIOError("initial_migration_request_invalid")
         if not self._import_lock.acquire(blocking=False):
@@ -149,7 +154,7 @@ class HistoryHost:
                 raise MigrationIOError("initial_migration_busy")
             try:
                 project, workspace, paths, source_agent, verify, snapshots = self._preview.consume_for_import(
-                    preview_id, project_id, revision, turn_id, purpose=category)
+                    preview_id, project_id, revision, turn_id, purpose="knowledge" if category in ("knowledge_sync", "knowledge_recovery") else category)
                 root = check_path(self._owner._profile).resolve()
                 if (not native._AGENT_ID or not native._SESSION_ID or assistant_native_root() != root
                         or directory_runtime.directory_store_project_root() != root
@@ -173,6 +178,11 @@ class HistoryHost:
                                "workspaceDirectory": workspace_identity, "targetDirectory": target_directory,
                                "targetAgentId": native._AGENT_ID, "targetSessionId": native._SESSION_ID,
                                "authority": "native_policy_admitted", "readyForCutover": False}
+                    if category in ("knowledge_sync", "knowledge_recovery"):
+                        binding.update(previewId=preview_id,
+                            baselineMigrationId=initial_migration_id(project_id, "", "knowledge"))
+                        if category == "knowledge_recovery":
+                            binding["originalSyncId"] = original_sync_id
                     def recheck():
                         verify()
                         if (initial_model_env_unavailable()

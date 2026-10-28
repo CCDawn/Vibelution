@@ -144,6 +144,8 @@ def _initial_offline():
             source_config=Path(bound["sourceConfig"]), target_profile=target,
             target_config=target_config, migration_id=operation_id, path_grants=None,
             authority_snapshots=(*storage, *routing), authority_verify=verify, category=intent["category"],
+            baseline_migration_id=intent.get("baselineMigrationId"),
+            original_sync_id=intent.get("originalSyncId"),
             initial_control={"binding": bound, "port": port, "token": token})
         state = "completed" if report.get("status") == "complete" and not report.get("requiresReconciliation") else "partial"
         print(json.dumps({"schemaVersion": 1, "operationId": operation_id, "state": state, "readyForCutover": False}))
@@ -151,7 +153,7 @@ def _initial_offline():
     except Exception:
         # The main process must reconcile the original ID after a lost child;
         # never fabricate a new ID or automatically replay it here.
-        valid = isinstance(operation_id, str) and re.fullmatch(r"initial-[a-f0-9]{40}", operation_id)
+        valid = isinstance(operation_id, str) and re.fullmatch(r"(?:initial|ksync|krec)-[a-f0-9]{40}", operation_id)
         print(json.dumps({"schemaVersion": 1, "operationId": operation_id if valid else None,
                           "state": "unknown" if valid else "unavailable", "readyForCutover": False}))
         return 1
@@ -184,6 +186,34 @@ def _initial_list(arguments):
         return 1
 
 
+def _knowledge_preflight(arguments):
+    """Prepare only the credential-free model snapshot before a one-shot Job fence."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--knowledge-preflight", action="store_true", required=True)
+    parser.add_argument("--source-config", type=Path, required=True)
+    parser.add_argument("--target-profile", type=Path, required=True)
+    parser.add_argument("--target-config", type=Path, required=True)
+    parser.add_argument("--operation-id", required=True)
+    parser.add_argument("--registry-digest", required=True)
+    args = parser.parse_args(arguments)
+    try:
+        from core.assistant_runtime.migration_io import check_path, pinned_mutable_file, pinned_target_directory
+        from core.infrastructure.file_lock import locked_sidecar
+        from scripts.assistant_migration_activate import prepare_initial_model_config, _assert_source_target_disjoint
+        target = check_path(args.target_profile)
+        if (target.resolve() != target or re.fullmatch(r"(?:ksync|krec)-[a-f0-9]{40}", args.operation_id) is None):
+            raise MigrationIOError("initial_target_invalid")
+        _assert_source_target_disjoint(target, (args.source_config,))
+        with pinned_target_directory(target), pinned_mutable_file(target / "host-owner.lock", create=False), \
+                locked_sidecar(target / "host-owner", timeout=0):
+            prepare_initial_model_config(args.source_config, target, args.target_config, args.operation_id, args.registry_digest)
+        print(json.dumps({"schemaVersion": 1, "state": "ready"}))
+        return 0
+    except Exception:
+        print(json.dumps({"schemaVersion": 1, "state": "unavailable"}))
+        return 1
+
+
 def _initial_verify(arguments):
     """Read-only business receipt verification after main has drained the Job."""
     parser = argparse.ArgumentParser()
@@ -192,7 +222,7 @@ def _initial_verify(arguments):
     parser.add_argument("--operation-id", required=True)
     parser.add_argument("--allow-partial", action="store_true")
     args = parser.parse_args(arguments)
-    valid = re.fullmatch(r"initial-[a-f0-9]{40}", args.operation_id)
+    valid = re.fullmatch(r"(?:initial|ksync|krec)-[a-f0-9]{40}", args.operation_id)
     result = {"schemaVersion": 1, "operationId": args.operation_id if valid else None,
               "state": "unknown", "readyForCutover": False}
     try:
@@ -213,6 +243,29 @@ def _initial_verify(arguments):
                 verify_initial_personal_receipts(target, args.operation_id, allow_partial=args.allow_partial)
             elif intent["category"] == "knowledge":
                 verify_initial_knowledge_receipts(target, args.operation_id)
+            elif intent["category"] in {"knowledge_sync", "knowledge_recovery"}:
+                from core.assistant_runtime.knowledge_sync_receipt import read_knowledge_sync_receipt
+                claim = strict_json(read_stable_file(target / "initial_migration_claims" / args.operation_id / "claim.json", 16384).raw)
+                if (type(claim) is not dict or type(claim.get("schemaVersion")) is not int
+                        or claim != {"schemaVersion": 1, "operationId": args.operation_id, "category": intent["category"]}):
+                    raise MigrationIOError("initial_receipts_unknown")
+                verify_initial_knowledge_receipts(target, intent["baselineMigrationId"])
+                sync_id = intent["originalSyncId"] if intent["category"] == "knowledge_recovery" else args.operation_id
+                if intent["category"] == "knowledge_recovery":
+                    original = read_initial_intent(target, sync_id)
+                    fixed = ("registeredProjectId", "sourceScope", "sourceIdentityDigest", "projectDirectory", "workspaceDirectory",
+                             "targetDirectory", "targetAgentId", "targetSessionId", "baselineMigrationId")
+                    if (original is None or original["category"] != "knowledge_sync"
+                            or any(original[key] != intent[key] for key in fixed)):
+                        raise MigrationIOError("initial_receipts_unknown")
+                    original_claim = strict_json(read_stable_file(target / "initial_migration_claims" / sync_id / "claim.json", 16384).raw)
+                    if (type(original_claim) is not dict or type(original_claim.get("schemaVersion")) is not int
+                            or original_claim != {"schemaVersion": 1, "operationId": sync_id, "category": "knowledge_sync"}):
+                        raise MigrationIOError("initial_receipts_unknown")
+                receipt = read_knowledge_sync_receipt(target, sync_id=sync_id,
+                    baseline_id=intent["baselineMigrationId"], source_scope=intent["sourceScope"], target_agent_id=intent["targetAgentId"])
+                if receipt["state"] == "unknown" or (not args.allow_partial and receipt["state"] != "completed"):
+                    raise MigrationIOError("initial_receipts_unknown")
             else:
                 raise MigrationIOError("initial_receipts_unknown")
         # A partial receipt proves at least one historical write only. The
@@ -460,5 +513,6 @@ def main() -> int:
 if __name__ == "__main__":
     arguments = sys.argv[1:]
     raise SystemExit(_initial_offline() if arguments == ["--initial-offline"] else
+                     _knowledge_preflight(arguments) if "--knowledge-preflight" in arguments else
                      _initial_list(arguments) if "--initial-list" in arguments else
                      _initial_verify(arguments) if "--initial-verify" in arguments else main())

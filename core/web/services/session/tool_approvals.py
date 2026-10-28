@@ -1138,7 +1138,7 @@ def _argument_summary(tool_name: str, tool_args: Mapping[str, Any]) -> dict[str,
 def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
     """Approval-only projection; never expose nested prompt/policy values."""
     action = args.get("action")
-    if isinstance(action, str) and action in {"history_import", "affairs_sync", "episodic_sync", "initial_migration_queue"}:
+    if isinstance(action, str) and action in {"history_import", "affairs_sync", "episodic_sync", "initial_migration_queue", "knowledge_sync_queue", "knowledge_sync_recover"}:
         from core.infrastructure.native_runtime import is_launcher_assistant_process
         if not is_launcher_assistant_process():
             return {"assistantArgumentsInvalid": True}
@@ -1151,8 +1151,12 @@ def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
                 optional |= {"resolve_sync_id", "review_token"}
             if action == "initial_migration_queue":
                 required.add("category")
+            if action == "knowledge_sync_recover":
+                required.add("operation_id")
             if (not isinstance(values, dict) or not required <= set(values) or set(values) - required - optional
                     or action == "initial_migration_queue" and values.get("category") not in ("personal", "knowledge")
+                    or action == "knowledge_sync_recover" and (type(values.get("operation_id")) is not str
+                        or re.fullmatch(r"ksync-[0-9a-f]{40}", values["operation_id"]) is None)
                     or values.get("recover_sync_id") is not None and (not isinstance(values["recover_sync_id"], str)
                         or re.fullmatch((r"episodic-" if action == "episodic_sync" else r"affairs-") + r"[0-9a-f]{40}", values["recover_sync_id"]) is None)
                     or (values.get("resolve_sync_id") is None) != (values.get("review_token") is None)
@@ -1166,12 +1170,16 @@ def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
             target = history_import_approval_summary(values["project_id"], values["preview_id"])
             if action == "initial_migration_queue":
                 target["category"] = values["category"]
+            if action == "knowledge_sync_recover":
+                target["syncId"] = values["operation_id"]
             if values.get("recover_sync_id") is not None:
                 target["syncId"] = values["recover_sync_id"]
             if values.get("resolve_sync_id") is not None:
                 target["syncId"] = values["resolve_sync_id"]
             return {"assistantAction": action, "assistantTargets": target,
-                    "assistantOperationDescription": ("排队首次导入所选旧助理的事务和情景记忆。" if action == "initial_migration_queue" and values["category"] == "personal"
+                    "assistantOperationDescription": ("排队恢复原知识同步；只续做可证明未开始的项，不重放未知写入。" if action == "knowledge_sync_recover"
+                        else "排队在下次启动时同步所选旧助理的私有知识；保留目标编辑，不冻结旧来源。" if action == "knowledge_sync_queue"
+                        else "排队首次导入所选旧助理的事务和情景记忆。" if action == "initial_migration_queue" and values["category"] == "personal"
                         else "排队首次导入所选旧助理可验证的私有知识。" if action == "initial_migration_queue"
                         else "只读导入所选旧助理的历史会话和附件；不会恢复旧任务或退役旧助理。"
                         if action == "history_import" else "核对原情景记忆同步回执，不会重新写入。" if action == "episodic_sync" and values.get("recover_sync_id") is not None

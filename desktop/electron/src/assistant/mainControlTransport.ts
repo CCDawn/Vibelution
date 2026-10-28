@@ -14,7 +14,8 @@ export type EpisodicSyncMainControlRequest = Omit<HistoryMainControlRequest, "ac
   | { recoverSyncId?: string; resolveSyncId?: never; reviewToken?: never }
   | { recoverSyncId?: never; resolveSyncId: string; reviewToken: string });
 export type InitialMigrationMainControlRequest = Omit<HistoryMainControlRequest, "action"> & {
-  action: "initial_migration_queue"; category: "personal" | "knowledge"; operationId: string;
+  action: "initial_migration_queue"; category: "personal" | "knowledge" | "knowledge_sync" | "knowledge_recovery";
+  operationId: string; originalSyncId?: string;
 };
 export type InitialMigrationReceiptRequest = { deliveryId: string; action: "initial_migration_receipt"; projectId: string;
   category: "personal" | "knowledge"; operationId: string };
@@ -47,14 +48,20 @@ export function parseMainControlClaim(value: unknown): MainControlRequest | null
       category: row.category, operationId: row.operationId as string };
   }
   if (row && typeof row === "object" && Object.getOwnPropertyDescriptor(row, "action")?.value === "initial_migration_queue") {
-    if (!closed(row, ["deliveryId", "action", "projectId", "previewId", "turnId", "category", "operationId", "timeoutMs"])
+    if (!closed(row, ["deliveryId", "action", "projectId", "previewId", "turnId", "category", "operationId", "timeoutMs"], ["originalSyncId"])
       || typeof row.deliveryId !== "string" || !/^[a-f0-9]{32}$/.test(row.deliveryId) || !opaque(row.projectId, 160)
       || typeof row.previewId !== "string" || !/^[a-f0-9]{64}$/.test(row.previewId) || !opaque(row.turnId, 160)
-      || (row.category !== "personal" && row.category !== "knowledge")
-      || row.operationId !== `initial-${createHash("sha256").update(`${row.projectId}:${row.category}`).digest("hex").slice(0, 40)}`
+      || (row.category !== "personal" && row.category !== "knowledge" && row.category !== "knowledge_sync" && row.category !== "knowledge_recovery")
+      || (row.category === "knowledge_recovery" ? typeof row.originalSyncId !== "string" || !/^ksync-[a-f0-9]{40}$/.test(row.originalSyncId) : Object.hasOwn(row, "originalSyncId"))
+      || row.operationId !== (row.category === "knowledge_recovery"
+        ? `krec-${createHash("sha256").update(`${row.projectId}:${row.previewId}:${row.originalSyncId}`).digest("hex").slice(0, 40)}`
+        : row.category === "knowledge_sync"
+        ? `ksync-${createHash("sha256").update(`${row.projectId}:${row.previewId}`).digest("hex").slice(0, 40)}`
+        : `initial-${createHash("sha256").update(`${row.projectId}:${row.category}`).digest("hex").slice(0, 40)}`)
       || typeof row.timeoutMs !== "number" || !Number.isSafeInteger(row.timeoutMs) || row.timeoutMs < 1 || row.timeoutMs > 120000) return invalid();
     return { deliveryId: row.deliveryId, action: "initial_migration_queue", projectId: row.projectId,
-      previewId: row.previewId, turnId: row.turnId, category: row.category, operationId: row.operationId as string, timeoutMs: row.timeoutMs };
+      previewId: row.previewId, turnId: row.turnId, category: row.category, operationId: row.operationId as string, timeoutMs: row.timeoutMs,
+      ...(typeof row.originalSyncId === "string" ? { originalSyncId: row.originalSyncId } : {}) };
   }
   if (row && typeof row === "object" && ["history_import", "affairs_sync", "episodic_sync"].includes(Object.getOwnPropertyDescriptor(row, "action")?.value)) {
     if (!closed(row, ["deliveryId", "action", "projectId", "previewId", "turnId", "timeoutMs"],
@@ -140,11 +147,13 @@ export function projectMainControlResult(request: MainControlRequest, value: unk
   }
   if (request.action === "initial_migration_queue") {
     const base = { schemaVersion: 1, projectId: request.projectId, previewId: request.previewId,
-      category: request.category, operationId: request.operationId, readyForCutover: false };
+      category: request.category, operationId: request.operationId, readyForCutover: false,
+      ...(request.category === "knowledge_recovery" ? { originalSyncId: request.originalSyncId } : {}) };
     const unknown = { ...base, state: "unknown", code: "unknown" };
-    if (!closed(value, ["schemaVersion", "projectId", "previewId", "category", "operationId", "state", "code", "readyForCutover"])
+    if (!closed(value, ["schemaVersion", "projectId", "previewId", "category", "operationId", "state", "code", "readyForCutover", ...(request.category === "knowledge_recovery" ? ["originalSyncId"] : [])])
       || value.schemaVersion !== 1 || value.projectId !== request.projectId || value.previewId !== request.previewId
       || value.category !== request.category || value.operationId !== request.operationId || value.readyForCutover !== false
+      || (request.category === "knowledge_recovery" && value.originalSyncId !== request.originalSyncId)
       || typeof value.state !== "string" || typeof value.code !== "string"
       || !["queued:queued", "unknown:unknown", "rejected:cancelled", "rejected:unavailable", "rejected:busy"].includes(`${value.state}:${value.code}`)) return unknown;
     return { ...value };

@@ -88,6 +88,11 @@ def _initial_receipts_or_claim(target, operation_id, category):
                 _validate_state(state, state["binding"])
                 if state["migrationId"] == operation_id or state["phase"] != "published":
                     return True
+    if category == "knowledge_sync":
+        from core.assistant_runtime.migration_knowledge import _digest
+        folder = target / "knowledge_migrations" / "sync_operations"
+        sync_digest = _digest(operation_id)
+        candidates.extend((folder / (sync_digest + ".plan.json"), folder / (sync_digest + ".complete.json")))
     found = False
     for path in candidates:
         ancestor = path.parent
@@ -124,7 +129,7 @@ def prepare_initial_model_config(source_config, target, destination, operation_i
         pinned_source_files, pinned_target_directory, read_stable_file, validate_path, verify_snapshot)
     target = check_path(target)
     destination = validate_path(destination)
-    if (not isinstance(operation_id, str) or re.fullmatch(r"initial-[a-f0-9]{40}", operation_id) is None
+    if (not isinstance(operation_id, str) or re.fullmatch(r"(?:initial|ksync|krec)-[a-f0-9]{40}", operation_id) is None
             or not isinstance(registry_digest, str) or re.fullmatch(r"[a-f0-9]{64}", registry_digest) is None
             or destination != target / (".initial-migration-models-v1-" + operation_id + "-" + registry_digest + ".toml")):
         raise MigrationIOError("initial_model_config_invalid")
@@ -466,7 +471,7 @@ def _assert_source_target_disjoint(target, roots):
 
 def activate_in_subprocess(*, paths, workspace, agent_id, source_config, target_profile,
         target_config, migration_id, path_grants, authority_snapshots, authority_verify, category="personal",
-        baseline_migration_id=None, initial_control=None):
+        baseline_migration_id=None, initial_control=None, original_sync_id=None):
     import re
     import subprocess
     from core.assistant_runtime.migration_active import _selected, _verify_captured
@@ -477,13 +482,24 @@ def activate_in_subprocess(*, paths, workspace, agent_id, source_config, target_
     from vibelution_storage import storage_migration_state_path
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,95}", migration_id):
         raise MigrationIOError("migration_id_invalid")
-    if category not in {"personal", "knowledge", "affairs_conflicts", "affairs_sync"}:
+    if category not in {"personal", "knowledge", "knowledge_sync", "knowledge_recovery", "affairs_conflicts", "affairs_sync"}:
         raise MigrationIOError("activation_category_invalid")
-    if category in {"affairs_conflicts", "affairs_sync"}:
+    if category in {"knowledge_sync", "knowledge_recovery"} and initial_control is not None and (
+            type(initial_control) is not dict or set(initial_control) != {"binding", "port", "token"}
+            or type(initial_control.get("binding")) is not dict
+            or initial_control["binding"].get("operationId") != migration_id):
+        raise MigrationIOError("knowledge_sync_admission_unavailable")
+    if category == "knowledge_recovery" and (initial_control is None or type(original_sync_id) is not str
+            or re.fullmatch(r"ksync-[a-f0-9]{40}", original_sync_id) is None):
+        raise MigrationIOError("knowledge_sync_admission_unavailable")
+    if category != "knowledge_recovery" and original_sync_id is not None:
+        raise MigrationIOError("knowledge_sync_admission_unavailable")
+    if category in {"affairs_conflicts", "affairs_sync", "knowledge_sync", "knowledge_recovery"}:
         if (not isinstance(baseline_migration_id, str)
                 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,95}", baseline_migration_id)
                 or baseline_migration_id == migration_id):
-            raise MigrationIOError("affairs_conflict_baseline_invalid")
+            raise MigrationIOError("knowledge_sync_baseline_invalid" if category in {"knowledge_sync", "knowledge_recovery"}
+                                   else "affairs_conflict_baseline_invalid")
     elif baseline_migration_id is not None:
         raise MigrationIOError("affairs_conflict_baseline_invalid")
     target, config = _target(target_profile, target_config)
@@ -529,6 +545,8 @@ def activate_in_subprocess(*, paths, workspace, agent_id, source_config, target_
         "route": route_proof, "source": _source_proof(captured, authorities)}
     if initial_control is not None:
         request["initialControl"] = initial_control
+    if category == "knowledge_recovery":
+        request["originalSyncId"] = original_sync_id
     encoded = json.dumps(request, ensure_ascii=False)
     if len(encoded.encode("utf-8")) > 8 * 1024 * 1024:
         raise MigrationIOError("activation_proof_too_large")
@@ -650,8 +668,19 @@ def _child():
             channel = _initial_channel(initial["port"], initial["token"])
             _install_audit(target)
         if (request.get("schemaVersion") != 1 or request["target"] != str(target)
-                or request.get("category") not in {"personal", "knowledge", "affairs_conflicts", "affairs_sync"}):
+                or request.get("category") not in {"personal", "knowledge", "knowledge_sync", "knowledge_recovery", "affairs_conflicts", "affairs_sync"}):
             raise MigrationIOError("activation_request_invalid")
+        if request["category"] in {"knowledge_sync", "knowledge_recovery"}:
+            import re
+            baseline = request.get("baselineMigrationId")
+            if (not isinstance(baseline, str)
+                    or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,95}", baseline)
+                    or baseline == request.get("migrationId")):
+                raise MigrationIOError("knowledge_sync_admission_unavailable")
+            if (request["category"] == "knowledge_recovery" and (initial is None
+                    or type(request.get("originalSyncId")) is not str
+                    or re.fullmatch(r"ksync-[a-f0-9]{40}", request["originalSyncId"]) is None)):
+                raise MigrationIOError("knowledge_sync_admission_unavailable")
         _target(target, Path(request["config"]["path"]))
         _verify_file_proofs([request["config"]])
         from core.assistant_runtime.migration_paths import _identity_chain
@@ -723,6 +752,27 @@ def _child():
                         or Path(bound["targetConfig"]) != target / (".initial-migration-models-v1-"
                             + request["migrationId"] + "-" + intent["registryDigest"] + ".toml")):
                     raise MigrationIOError("initial_migration_binding_changed")
+                if request["category"] in {"knowledge_sync", "knowledge_recovery"}:
+                    from core.assistant_runtime.knowledge_sync_receipt import read_drained_job_result
+                    if (request.get("baselineMigrationId") != intent.get("baselineMigrationId")
+                            or read_drained_job_result(target, intent["baselineMigrationId"]) != "completed"):
+                        raise MigrationIOError("knowledge_sync_baseline_unavailable")
+                    verify_initial_knowledge_receipts(target, intent["baselineMigrationId"])
+                    if request["category"] == "knowledge_recovery":
+                        from core.assistant_runtime.migration_knowledge import _digest
+                        original = read_initial_intent(target, intent["originalSyncId"])
+                        fixed = ("registeredProjectId", "sourceScope", "sourceIdentityDigest", "projectDirectory",
+                                 "workspaceDirectory", "targetDirectory", "targetAgentId", "targetSessionId", "baselineMigrationId")
+                        if (request.get("originalSyncId") != intent["originalSyncId"] or original is None
+                                or original["category"] != "knowledge_sync"
+                                or any(original[key] != intent[key] for key in fixed)):
+                            raise MigrationIOError("knowledge_sync_recovery_invalid")
+                        claim = strict_json(read_stable_file(target / "initial_migration_claims" / original["operationId"] / "claim.json", 16384).raw)
+                        plan = target / "knowledge_migrations" / "sync_operations" / (_digest(original["operationId"]) + ".plan.json")
+                        if (type(claim) is not dict or type(claim.get("schemaVersion")) is not int
+                                or claim != {"schemaVersion": 1, "operationId": original["operationId"], "category": "knowledge_sync"}
+                                or not plan.exists() or plan.is_symlink()):
+                            raise MigrationIOError("knowledge_sync_recovery_invalid")
                 admitted_intent.append(intent)
                 actual, storage, verify_storage = storage_authority(Path(request["project"]),
                     Path(request["sourceConfig"]), Path(request["projectsHome"]), legacy_home=Path(request["legacyHome"]))
@@ -818,14 +868,21 @@ def _child():
                                 result["status"] = "partial"
                             _verify_captured(captured, authorities, verify_route)
                 else:
-                    from core.assistant_runtime.migration_knowledge import import_private_knowledge
                     registry_root = Path(request["workspace"]) / "knowledge/sources/registry"
                     selected = {item.path: item for item in authorities}
-                    knowledge = import_private_knowledge(lease, captured,
-                        central=selected[registry_root / "source_registry.jsonl"],
-                        owner_refs=selected[registry_root / "owner_refs.jsonl"],
-                        migration_id=request["migrationId"], authority_verify=verify_route)
-                    result = {"status": "complete", "knowledge": knowledge, "sourceScope": request["scope"],
+                    common = {"central": selected[registry_root / "source_registry.jsonl"],
+                        "owner_refs": selected[registry_root / "owner_refs.jsonl"], "authority_verify": verify_route}
+                    if request["category"] in {"knowledge_sync", "knowledge_recovery"}:
+                        from core.assistant_runtime.migration_knowledge_sync import sync_private_knowledge
+                        knowledge = sync_private_knowledge(lease, captured, **common,
+                            baseline_migration_id=request["baselineMigrationId"],
+                            sync_id=request["originalSyncId"] if request["category"] == "knowledge_recovery" else request["migrationId"])
+                    else:
+                        from core.assistant_runtime.migration_knowledge import import_private_knowledge
+                        knowledge = import_private_knowledge(lease, captured, **common, migration_id=request["migrationId"])
+                    state = "partial" if request["category"] in {"knowledge_sync", "knowledge_recovery"} and (
+                        knowledge["conflictCount"] or knowledge["pendingCount"] or knowledge["excludedCount"]) else "complete"
+                    result = {"status": state, "knowledge": knowledge, "sourceScope": request["scope"],
                         "sourceQuiesced": False, "readyForCutover": False}
                 result["migrationId"] = request["migrationId"]
         verify_route()
@@ -840,12 +897,12 @@ def _child():
     except MigrationIOError as error:
         if result is not None and result.get("status") in {"complete", "partial"}:
             mark_reconciliation(result, request["migrationId"], str(error))
-        elif (activation_started and request.get("category") == "knowledge"
+        elif (activation_started and request.get("category") in {"knowledge", "knowledge_sync", "knowledge_recovery"}
                 and str(error) == "knowledge_native_promotion_blocked"):
             # The adapter checks this policy before any knowledge/receipt
             # write while the target config and sandbox routing are pinned.
             result = {"ok": False, "code": "SOURCE_MIGRATION_UNAVAILABLE", "reason": str(error)}
-        elif claim_started or activation_started and request.get("category") == "knowledge":
+        elif claim_started or activation_started and request.get("category") in {"knowledge", "knowledge_sync", "knowledge_recovery"}:
             # Native KB ingestion is not transactional: a failure may follow
             # committed writes even if the adapter could not return a receipt.
             result = {"ok": False, "code": "SOURCE_MIGRATION_UNAVAILABLE", "reason": "activation_outcome_unknown"}

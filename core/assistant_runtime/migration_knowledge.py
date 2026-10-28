@@ -547,11 +547,72 @@ def _pin_target(stack, s, owner):
             _fail("target_schema_invalid")
     for path_fn, key in ((s._items_path_for_owner, "knowledgeItemId"), (s._batches_path_for_owner, "batchId"),
             (s._source_artifacts_path_for_owner, "sourceArtifactId"), (s._owner_source_index_path, "inboxSourceId"),
-            (s._audit_path_for_owner, "auditId")):
+            (s._audit_path_for_owner, "auditId"), (s._proposals_path_for_owner, "proposalId")):
         _target_rows(s, owner, path_fn, key)
     for path, key in ((s._central_source_registry_path(), "centralSourceId"), (s._central_owner_refs_path(), "ownerRefId")):
         if path.exists():
             _rows(read_stable_file(path, _MAX_FILE).raw, key)
+
+
+def _target_baseline(s, owner, base, source, item, artifacts, mapping, migration_id, *, base_items=None):
+    """Fingerprint complete target records while the importing locks are held."""
+    artifact_ids = mapping["sourceArtifactIds"]
+    central_ids = mapping["centralSourceIds"]
+    registry = {row["centralSourceId"]: row for row in _rows(
+        read_stable_file(s._central_source_registry_path(), _MAX_FILE).raw, "centralSourceId")}
+    refs = _rows(read_stable_file(s._central_owner_refs_path(), _MAX_FILE).raw, "ownerRefId")
+    selected_refs = sorted((row for row in refs if row.get("centralSourceId") in central_ids
+        and row.get("inboxSourceId") == mapping["inboxSourceId"]), key=lambda row: row["ownerRefId"])
+    if (any(value not in artifacts for value in artifact_ids)
+            or any(value not in registry for value in central_ids) or not selected_refs):
+        _fail("target_baseline_invalid")
+    result = {"schemaVersion": 1, "migrationId": migration_id, "mapping": mapping,
+        "fingerprints": {"base": _digest(base), "source": _digest(source), "item": _digest(item),
+            "artifacts": _digest([artifacts[value] for value in artifact_ids]),
+            "central": _digest([registry[value] for value in central_ids]), "ownerRefs": _digest(selected_refs)}}
+    if base_items is not None:
+        result["fingerprints"]["baseItems"] = _digest(base_items)
+    return result
+
+
+def _target_matches_baseline(lease, s, owner, folder, origin_key, state):
+    """Compare the whole published target under the caller's native/knowledge locks.
+
+    Missing historical baselines and any missing or changed target are conflicts.
+    The historical migration receipt itself remains valid in all these cases.
+    """
+    _lease(lease)
+    path = folder / "target_baselines" / (origin_key + ".json")
+    if not path.exists() or path.is_symlink():
+        return False
+    try:
+        baseline = strict_json(read_stable_file(path, _MAX_FILE).raw)
+        mapping = state["mapping"]
+        if (state.get("phase") != "published" or not isinstance(baseline, dict)
+                or set(baseline) != {"schemaVersion", "migrationId", "mapping", "fingerprints"}
+                or type(baseline["schemaVersion"]) is not int or baseline["schemaVersion"] != 1
+                or baseline["migrationId"] != state["migrationId"] or baseline["mapping"] != mapping):
+            return False
+        base = next((row for row in s._knowledge_bases_for_owner(owner)
+                     if row.get("knowledgeBaseId") == mapping["knowledgeBaseId"]), None)
+        source = next((row for row in _target_rows(s, owner, s._owner_source_index_path, "inboxSourceId")
+                       if row["inboxSourceId"] == mapping["inboxSourceId"]), None)
+        base_items = [row for row in _target_rows(s, owner, s._items_path_for_owner, "knowledgeItemId")
+                      if row.get("knowledgeBaseId") == mapping["knowledgeBaseId"]]
+        item = next((row for row in base_items if row["knowledgeItemId"] == mapping["knowledgeItemId"]), None)
+        artifacts = {row["sourceArtifactId"]: row for row in _target_rows(
+            s, owner, s._source_artifacts_path_for_owner, "sourceArtifactId")}
+        if not base or not source or not item:
+            return False
+        has_versions = isinstance(baseline.get("fingerprints"), dict) and "baseItems" in baseline["fingerprints"]
+        if not has_versions and len(base_items) != 1:
+            return False
+        if s._tk_lifecycle.lifecycle_states_for_base(owner, base, base_items, artifacts).get(item["knowledgeItemId"]) != "active":
+            return False
+        return baseline == _target_baseline(s, owner, base, source, item, artifacts, mapping, state["migrationId"],
+                                            base_items=base_items if has_versions else None)
+    except (KeyError, TypeError, ValueError, OSError, MigrationIOError):
+        return False
 
 
 def _import_one(lease, s, owner, item, scope, proof, folder, verify, migration_id):
@@ -608,12 +669,14 @@ def _import_one(lease, s, owner, item, scope, proof, folder, verify, migration_i
     source = sources[0]
     if not _private(source, lease.agent_id) or source.get("sourceHash") != "sha256:" + _digest(binding):
         _fail("target_conflict")
+    reviewed_here = False
     if state["phase"] == "collect_intent":
         save("review_intent", knowledgeBaseId=base["knowledgeBaseId"], inboxSourceId=source["inboxSourceId"])
         s.review_owner_inbox_source("agent", lease.agent_id, source["inboxSourceId"], decision="accepted",
             reviewed_by_agent_id=lease.agent_id, resolution_note="Operator-authorized migration; original review is archived, not replayed.",
             ingest_on_accept=True, knowledge_base_id=scoped, knowledge_title=item["title"],
             knowledge_summary=str(item.get("summary") or ""), knowledge_content=item["content"])
+        reviewed_here = True
     # Read persisted native objects, including after lost ACK. Never re-run a
     # review with unknown outcome: native direct ingestion is not transactional.
     source = next((r for r in _target_rows(s, owner, s._owner_source_index_path, "inboxSourceId")
@@ -633,6 +696,15 @@ def _import_one(lease, s, owner, item, scope, proof, folder, verify, migration_i
     mapping = {**origin, "knowledgeBaseId": base["knowledgeBaseId"], "knowledgeItemId": target_item["knowledgeItemId"],
         "inboxSourceId": source["inboxSourceId"], "sourceArtifactIds": target_item["sourceArtifactIds"],
         "centralSourceIds": target_item["centralSourceIds"], "operation": "operator_authorized_migration"}
+    if reviewed_here:
+        # A recovery after a lost native acknowledgement cannot reconstruct
+        # when the target was last edited. Only capture on the same locked
+        # call that actually returned from the direct review.
+        verify()
+        baseline = _target_baseline(s, owner, base, source, target_item, artifacts, mapping, migration_id)
+        with pinned_target_directory(folder / "target_baselines", create=True):
+            _immutable(folder / "target_baselines" / (key + ".json"), baseline)
+        verify()
     save("published", mapping=mapping)
     return mapping, False
 
