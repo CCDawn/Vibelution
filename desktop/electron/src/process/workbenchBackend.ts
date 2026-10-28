@@ -38,7 +38,7 @@ import {
   type WorkbenchPortOwnerResolution
 } from "./resolveWorkbenchPortOwner.js";
 import { knownPidIsAlive, observeMainLineWorkbench, probeTcpConnect } from "../lifecycle/mainLine/observation.js";
-import { captureTrackedWorkbenchJobRetirement, closeTrackedWorkbenchJob, getTrackedWorkbenchJobPid, hasTrackedWorkbenchJob, spawnTrackedWorkbenchProcess, terminateTrackedWorkbenchJob } from "./workbenchJob.js";
+import { captureTrackedWorkbenchJobRetirement, closeTrackedWorkbenchJob, getTrackedWorkbenchJobPid, hasTrackedWorkbenchJob, spawnTrackedWorkbenchProcess, terminateTrackedWorkbenchJob, type WorkbenchNaturalJobRetirement } from "./workbenchJob.js";
 import { closeOwnedWorkbenchFast, type WorkbenchCloseTiming } from "./fastWorkbenchClose.js";
 import { getBackgroundWorkbenchRetirement, startBackgroundWorkbenchRetirement } from "./backgroundWorkbenchRetirement.js";
 import {
@@ -98,6 +98,51 @@ export type WorkbenchBackendSpawn = (
 ) => WorkbenchBackendSpawnChild;
 
 export type WorkbenchBackendState = Record<string, unknown>;
+
+/** Trusted main-only, same captured owner for all retries. The caller must
+ * retain source/admission fences and verify the port, token and Job binding. */
+export function beginNaturalWorkbenchShutdown(input: {
+  job: WorkbenchNaturalJobRetirement; port: number; controlToken: string;
+  verifyBinding(): void;
+  /** Test seam; production uses the native graceful request. */
+  shutdown?: typeof requestGracefulWorkbenchShutdown;
+}): { observe(): Promise<"pending" | "drained"> } {
+  if (!input || !input.job || typeof input.job !== "function" || typeof input.job.isCurrent !== "function"
+    || !Number.isSafeInteger(input.job.pid) || input.job.pid <= 0 || !Number.isInteger(input.port)
+    || input.port <= 0 || input.port > 65535 || typeof input.controlToken !== "string"
+    || input.controlToken.trim().length < 16 || typeof input.verifyBinding !== "function")
+    throw new Error("WORKBENCH_NATURAL_RETIREMENT_INVALID");
+  let attempted = false;
+  let running: Promise<"pending" | "drained"> | undefined;
+  const check = () => {
+    if ((input.verifyBinding as () => unknown)() !== undefined) throw new Error("WORKBENCH_NATURAL_RETIREMENT_UNKNOWN");
+  };
+  const observe = (): Promise<"pending" | "drained"> => {
+    if (running) return running;
+    const operation = (async (): Promise<"pending" | "drained"> => {
+      try {
+        check();
+        if (await input.job()) { check(); return "drained"; }
+        if (attempted || !input.job.isCurrent()) return "pending";
+        // A timeout/lost acknowledgement may follow acceptance. It must not
+        // trigger another shutdown; only explicit 409 proves no request won.
+        attempted = true;
+        const result = await (input.shutdown ?? requestGracefulWorkbenchShutdown)({ port: input.port,
+          backendPid: input.job.pid, host: DEFAULT_WORKBENCH_HOST, controlToken: input.controlToken,
+          healthVerified: true, interruptActiveWork: false });
+        check();
+        if (result.status === 409 && !result.requested) attempted = false;
+        if (!result.completed) return "pending";
+        if (await input.job()) { check(); return "drained"; }
+      } catch { /* Unknown keeps the captured Job and never forces a stop. */ }
+      return "pending";
+    })();
+    running = operation;
+    void operation.finally(() => { if (running === operation) running = undefined; });
+    return operation;
+  };
+  return { observe };
+}
 
 export type ExecuteMainLineWorkbenchInput = {
   workspaceRoot: string;

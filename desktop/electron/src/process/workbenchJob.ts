@@ -10,6 +10,8 @@ const JOB_REAP_INTERVAL_MS = 1_000;
 
 export type WorkbenchJobHandle = object;
 export type WorkbenchJobRetirement = (() => Promise<boolean>) & { isCurrent: () => boolean };
+/** A captured Job protected from automatic or explicit force while held. */
+export type WorkbenchNaturalJobRetirement = WorkbenchJobRetirement & { readonly pid: number; release(): void };
 
 export type WorkbenchJobSpawnInput = {
   executable: string;
@@ -55,6 +57,7 @@ type TrackedJob = {
   native: WorkbenchJobNative;
   retiring?: Promise<boolean>;
   released?: boolean;
+  naturalOwner?: object;
 };
 
 const tracked = new Map<string, TrackedJob>();
@@ -84,7 +87,8 @@ function ensureReaper(): void {
   if (reapTimer !== null) return;
   reapTimer = setInterval(() => {
     for (const current of tracked.values()) {
-      if (current.retiring) continue;
+      // The capture owner alone may acknowledge and release this exact Job.
+      if (current.retiring || current.naturalOwner) continue;
       try {
         const status = current.native.drainStatus(current.job);
         if (isJobIdle(current.job, current.native, status)) {
@@ -176,6 +180,7 @@ export function spawnTrackedWorkbenchProcess(
   const key = jobKey(workspaceRoot);
   const previous = tracked.get(key);
   if (previous) {
+    if (previous.naturalOwner) throw new Error("previous workbench job is awaiting natural retirement");
     let idle = false;
     try {
       idle = isJobIdle(previous.job, previous.native);
@@ -225,6 +230,37 @@ export function captureTrackedWorkbenchJobRetirement(workspaceRoot: string, pid:
   });
 }
 
+/**
+ * Capture the original Job and prevent force while the caller retains this
+ * capability. The caller separately fences new work and authenticates the
+ * graceful shutdown; an idle observation is never a source cutover proof.
+ */
+export function captureTrackedWorkbenchJobNaturalRetirement(workspaceRoot: string, pid: number): WorkbenchNaturalJobRetirement | null {
+  const current = tracked.get(jobKey(workspaceRoot));
+  if (!current || current.pid !== pid || current.retiring || current.naturalOwner
+    || typeof current.native.exitCode !== "function") return null;
+  const owner = {};
+  current.naturalOwner = owner;
+  let held = true;
+  const retire = async (): Promise<boolean> => {
+    if (!held) return false;
+    if (current.released) return true;
+    if (tracked.get(current.key) !== current || current.naturalOwner !== owner) return false;
+    try {
+      if (!isJobIdle(current.job, current.native)) return false;
+      reportDrainIssues(current.workspaceRoot, current.native.drainStatus(current.job));
+      current.native.close(current.job);
+      forgetJob(current);
+      return true;
+    } catch { return false; }
+  };
+  return Object.assign(retire, {
+    pid: current.pid,
+    isCurrent: () => held && !current.released && current.naturalOwner === owner && tracked.get(current.key) === current,
+    release: () => { if (held) { held = false; if (current.naturalOwner === owner) current.naturalOwner = undefined; } },
+  });
+}
+
 async function waitUntilIdle(job: WorkbenchJobHandle, native: WorkbenchJobNative, isReleased?: () => boolean): Promise<boolean> {
   const deadline = Date.now() + JOB_TERMINATE_WAIT_MS;
   while (Date.now() < deadline) {
@@ -247,6 +283,7 @@ export async function terminateTrackedWorkbenchJob(workspaceRoot: string, expect
 }
 
 async function retireJob(current: TrackedJob): Promise<boolean> {
+  if (current.naturalOwner) return false;
   if (current.retiring) return await current.retiring;
   const retirement = (async (): Promise<boolean> => {
     try {
@@ -271,7 +308,7 @@ async function retireJob(current: TrackedJob): Promise<boolean> {
 
 export async function closeTrackedWorkbenchJob(workspaceRoot: string): Promise<boolean> {
   const current = tracked.get(jobKey(workspaceRoot));
-  if (!current) {
+  if (!current || current.naturalOwner) {
     return false;
   }
   try {
@@ -280,6 +317,7 @@ export async function closeTrackedWorkbenchJob(workspaceRoot: string): Promise<b
     if (!(await waitUntilIdle(current.job, current.native, () => Boolean(current.released)))) {
       return false;
     }
+    if (current.naturalOwner) return false;
     if (current.released) return true;
     if (tracked.get(current.key) !== current) return false;
     reportDrainIssues(current.workspaceRoot, current.native.drainStatus(current.job));

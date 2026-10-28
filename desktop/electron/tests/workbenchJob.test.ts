@@ -1,10 +1,14 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createRequire } from "node:module";
+import { spawn, spawnSync } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { beginNaturalWorkbenchShutdown } from "../src/process/workbenchBackend.js";
 
 import {
   __setWorkbenchJobNativeForTests,
+  captureTrackedWorkbenchJobNaturalRetirement,
   captureTrackedWorkbenchJobRetirement,
   closeTrackedWorkbenchJob,
   hasTrackedWorkbenchJob,
@@ -20,6 +24,35 @@ describe("workbench job registry", () => {
   afterEach(() => {
     __setWorkbenchJobNativeForTests(undefined);
     vi.useRealTimers();
+  });
+
+  it("holds a captured natural Job without force when root, children or output remain", async () => {
+    vi.useFakeTimers();
+    let active = 1, exited = false, drained = false;
+    const terminate = vi.fn(() => true), close = vi.fn();
+    __setWorkbenchJobNativeForTests({ spawn: () => ({ pid: 987654321, job: {} }), terminate,
+      activeCount: () => active, exitCode: () => exited ? 0 : null,
+      drainStatus: () => ({ complete: drained, channels: [] }), close });
+    const input = { executable: "pythonw.exe", arguments: [], cwd: "C:/", env: {}, stdoutPath: "out", stderrPath: "err" };
+    spawnTrackedWorkbenchProcess("C:/natural-protected", input);
+    const captured = captureTrackedWorkbenchJobNaturalRetirement("C:/natural-protected", 987654321)!;
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(await captured()).toBe(false);
+    expect(await terminateTrackedWorkbenchJob("C:/natural-protected")).toBe(false);
+    expect(() => spawnTrackedWorkbenchProcess("C:/natural-protected", input)).toThrow("natural retirement");
+    expect(terminate).not.toHaveBeenCalled();
+    active = 0;
+    expect(await captured()).toBe(false);
+    exited = true;
+    expect(await captured()).toBe(false);
+    drained = true;
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(close).not.toHaveBeenCalled();
+    expect(() => spawnTrackedWorkbenchProcess("C:/natural-protected", input)).toThrow("natural retirement");
+    expect(await captured()).toBe(true);
+    expect(close).toHaveBeenCalledOnce();
+    expect(terminate).not.toHaveBeenCalled();
+    captured.release();
   });
 
   it("retains the captured Job until the root exit is signaled after empty accounting and completed drains", async () => {
@@ -351,6 +384,117 @@ const nativeAddon = process.platform === "win32"
   : describe.skip;
 
 nativeAddon("windows workbench job", () => {
+  it("does not terminate a live descendant after the captured root exits", async () => {
+    __setWorkbenchJobNativeForTests(undefined);
+    const { loadWorkbenchJobNative } = await import("../src/process/workbenchJob.js");
+    const native = process.env.VIBELUTION_TEST_JOB_ADDON
+      ? createRequire(import.meta.url)(process.env.VIBELUTION_TEST_JOB_ADDON) as WorkbenchJobNative
+      : loadWorkbenchJobNative();
+    const terminate = vi.fn((job: WorkbenchJobHandle) => native.terminate(job));
+    const observed: string[] = [];
+    __setWorkbenchJobNativeForTests({ ...native, terminate, activeCount: (job) => { const value = native.activeCount(job); observed.push(`active:${value}`); return value; }, close: (job) => { observed.push("close"); native.close(job); } });
+    const directory = mkdtempSync(join(tmpdir(), "vibelution-natural-child-"));
+    const childPath = join(directory, "child.txt"), donePath = join(directory, "done.txt"), startPath = join(directory, "start.txt");
+    const python = spawnSync("python", ["-c", "import sys; print(sys.executable)"], { encoding: "utf8", windowsHide: true });
+    expect(python.status).toBe(0);
+    const childCode = `import os,time,pathlib; pathlib.Path(${JSON.stringify(startPath)}).write_text(str(os.getpid())); time.sleep(5); pathlib.Path(${JSON.stringify(donePath)}).write_text('done')`;
+    const script = ["import sys,subprocess,pathlib,time;",
+      `child=subprocess.Popen([sys.executable,'-c',${JSON.stringify(childCode)}],creationflags=0x08000000);`,
+      `pathlib.Path(${JSON.stringify(childPath)}).write_text(str(child.pid));print('root-out',flush=True);print('root-err',file=sys.stderr,flush=True);time.sleep(1.5)`].join("");
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => ["SYSTEMROOT", "WINDIR", "PATH", "PATHEXT"].includes(key.toUpperCase())));
+    env.TEMP = directory; env.TMP = directory;
+    const spawned = spawnTrackedWorkbenchProcess(directory, { executable: python.stdout.trim(), arguments: ["-c", script], cwd: directory,
+      env, containDescendants: true, stdoutPath: join(directory, "stdout.log"), stderrPath: join(directory, "stderr.log") });
+    const captured = captureTrackedWorkbenchJobNaturalRetirement(directory, spawned.pid)!;
+    try {
+      const deadline = Date.now() + 10_000;
+      while (!existsSync(childPath) && Date.now() < deadline) await new Promise(done => setTimeout(done, 20));
+      const childPid = Number(readFileSync(childPath, "utf8"));
+      const monitorPath = join(directory, "monitor.txt");
+      const monitor = spawn("python", ["-c", [
+        "import ctypes,sys",
+        "k=ctypes.WinDLL('kernel32',use_last_error=True)",
+        "k.OpenProcess.restype=ctypes.c_void_p",
+        "k.WaitForSingleObject.argtypes=[ctypes.c_void_p,ctypes.c_ulong]",
+        "k.GetExitCodeProcess.argtypes=[ctypes.c_void_p,ctypes.POINTER(ctypes.c_ulong)]",
+        "h=k.OpenProcess(0x101000,False,int(sys.argv[1]))",
+        "result=k.WaitForSingleObject(h,8000) if h else -1",
+        "code=ctypes.c_ulong()",
+        "ok=k.GetExitCodeProcess(h,ctypes.byref(code)) if h else 0",
+        "open(sys.argv[2],'w').write(f'{result},{ok},{code.value},{ctypes.get_last_error()}')",
+      ].join(";"), String(childPid), monitorPath], { windowsHide: true, stdio: "ignore" });
+      const monitorExited = new Promise<number | null>(done => monitor.once("exit", done));
+      expect(await captured()).toBe(false);
+      await new Promise(done => setTimeout(done, 2300));
+      expect(pidAlive(spawned.pid)).toBe(false);
+      expect(readFileSync(startPath, "utf8")).toBe(String(childPid));
+      expect(pidAlive(childPid), `child pid ${childPid}, native exit ${existsSync(monitorPath) ? readFileSync(monitorPath, "utf8") : "missing"}, done ${existsSync(donePath)}, tracked ${hasTrackedWorkbenchJob(directory)}, terminate ${terminate.mock.calls.length}, observations ${observed.join(";")}, stderr: ${existsSync(join(directory, "stderr.log")) ? readFileSync(join(directory, "stderr.log"), "utf8") : "missing"}`).toBe(true);
+      expect(await captured()).toBe(false);
+      expect(terminate).not.toHaveBeenCalled();
+      while (!existsSync(donePath) && Date.now() < deadline) await new Promise(done => setTimeout(done, 20));
+      expect(readFileSync(donePath, "utf8")).toBe("done");
+      let drained = await captured();
+      while (!drained && Date.now() < deadline) { await new Promise(done => setTimeout(done, 20)); drained = await captured(); }
+      expect(drained).toBe(true);
+      expect(await monitorExited).toBe(0);
+      expect(readFileSync(monitorPath, "utf8")).toMatch(/^0,1,0,/);
+      expect(readFileSync(join(directory, "stdout.log"), "utf8")).toContain("root-out");
+      expect(readFileSync(join(directory, "stderr.log"), "utf8")).toContain("root-err");
+      expect(terminate).not.toHaveBeenCalled();
+    } finally {
+      captured.release();
+      if (hasTrackedWorkbenchJob(directory)) await terminateTrackedWorkbenchJob(directory);
+      __setWorkbenchJobNativeForTests(undefined);
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  it("waits for a real task and graceful backend exit without terminating its Job", async () => {
+    __setWorkbenchJobNativeForTests(undefined);
+    const { loadWorkbenchJobNative } = await import("../src/process/workbenchJob.js");
+    const native = process.env.VIBELUTION_TEST_JOB_ADDON
+      ? createRequire(import.meta.url)(process.env.VIBELUTION_TEST_JOB_ADDON) as WorkbenchJobNative
+      : loadWorkbenchJobNative();
+    const terminate = vi.fn((job: WorkbenchJobHandle) => native.terminate(job));
+    const observed: string[] = [];
+    __setWorkbenchJobNativeForTests({ ...native, terminate, activeCount: (job) => { const value = native.activeCount(job); observed.push(`active:${value}`); return value; }, close: (job) => { observed.push("close"); native.close(job); } });
+    const directory = mkdtempSync(join(tmpdir(), "vibelution-natural-task-"));
+    const portPath = join(directory, "port.txt"), donePath = join(directory, "done.txt");
+    const script = [
+      "const http=require('node:http'),fs=require('node:fs');let active=true;",
+      `setTimeout(()=>{active=false;fs.writeFileSync(${JSON.stringify(donePath)},'done');},1800);`,
+      "const server=http.createServer((req,res)=>{if(req.url!=='/api/runtime/shutdown'){res.writeHead(404).end();return;}",
+      "if(active){res.writeHead(409).end();return;}res.writeHead(202).end();server.close(()=>process.exit(0));});",
+      `server.listen(0,'127.0.0.1',()=>fs.writeFileSync(${JSON.stringify(portPath)},String(server.address().port)));`,
+    ].join("");
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => ["SYSTEMROOT", "WINDIR", "PATH", "PATHEXT"].includes(key.toUpperCase())));
+    env.TEMP = directory; env.TMP = directory;
+    const spawned = spawnTrackedWorkbenchProcess(directory, { executable: process.execPath, arguments: ["-e", script], cwd: directory,
+      env, containDescendants: true, stdoutPath: join(directory, "stdout.log"), stderrPath: join(directory, "stderr.log") });
+    const captured = captureTrackedWorkbenchJobNaturalRetirement(directory, spawned.pid)!;
+    try {
+      const deadline = Date.now() + 10_000;
+      while (!existsSync(portPath) && Date.now() < deadline) await new Promise(done => setTimeout(done, 20));
+      expect(existsSync(portPath)).toBe(true);
+      const owner = beginNaturalWorkbenchShutdown({ job: captured, port: Number(readFileSync(portPath, "utf8")),
+        controlToken: "private-fixture-token", verifyBinding: () => undefined });
+      expect(await owner.observe()).toBe("pending");
+      expect(pidAlive(spawned.pid)).toBe(true);
+      expect(existsSync(donePath)).toBe(false);
+      expect(terminate).not.toHaveBeenCalled();
+      while (!existsSync(donePath) && Date.now() < deadline) await new Promise(done => setTimeout(done, 20));
+      expect(readFileSync(donePath, "utf8")).toBe("done");
+      expect(await owner.observe()).toBe("drained");
+      expect(pidAlive(spawned.pid)).toBe(false);
+      expect(terminate).not.toHaveBeenCalled();
+    } finally {
+      captured.release();
+      if (hasTrackedWorkbenchJob(directory)) await terminateTrackedWorkbenchJob(directory);
+      __setWorkbenchJobNativeForTests(undefined);
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, 15_000);
+
   it("gracefully closes real output pipes after delayed drain completion", async () => {
     __setWorkbenchJobNativeForTests(undefined);
     const { loadWorkbenchJobNative } = await import("../src/process/workbenchJob.js");

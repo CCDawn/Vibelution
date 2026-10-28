@@ -31,6 +31,7 @@ export type ElectronWindowLike = {
   isMinimized?(): boolean;
   restore?(): void;
   on(event: string, listener: ElectronWindowEventListener): unknown;
+  removeListener?(event: string, listener: ElectronWindowEventListener): unknown;
   setTitle?(title: string): void;
   setOverlayIcon?(icon: unknown, description: string): void;
   flashFrame?(flag: boolean): void;
@@ -105,18 +106,17 @@ function waitForWindowClosed(
   }
   return new Promise((resolve) => {
     let settled = false;
+    const onClosed = () => { clearTimeout(timer); finish("closed"); };
     const finish = (reason: "closed" | "timeout") => {
       if (settled) {
         return;
       }
       settled = true;
+      window.removeListener?.("closed", onClosed);
       resolve(reason);
     };
     const timer = setTimeout(() => finish("timeout"), Math.max(0, timeoutMs));
-    window.on("closed", () => {
-      clearTimeout(timer);
-      finish("closed");
-    });
+    window.on("closed", onClosed);
   });
 }
 
@@ -896,9 +896,11 @@ export class ElectronWindowProvider {
 
   /** Capture only an already attributed, live managed window. Main must hold
    * its source-specific admission barrier until the retirement is complete. */
-  captureWorkbenchWindowRetirement(row: CompleteWorkbenchWindowObservation): CapturedWorkbenchWindowRetirement | null {
+  captureWorkbenchWindowRetirement(row: CompleteWorkbenchWindowObservation,
+    options?: { naturalOnly?: boolean }): CapturedWorkbenchWindowRetirement | null {
     try {
-      if (!row || (row.kind !== "main" && row.kind !== "instance") || !row.instanceId
+      if ((options?.naturalOnly !== undefined && typeof options.naturalOnly !== "boolean")
+          || !row || (row.kind !== "main" && row.kind !== "instance") || !row.instanceId
           || (row.kind === "main") !== (row.instanceId === "main")) return null;
       const found = this.completeWorkbenchWindowInventory().find(item => item.windowId === row.windowId);
       if (!found || JSON.stringify(found) !== JSON.stringify(row)) return null;
@@ -926,6 +928,7 @@ export class ElectronWindowProvider {
             if (!window.isDestroyed()) {
               await waitForWindowClosed(window, this.hungCloseDestroyAfterMs);
               if (!window.isDestroyed()) {
+                if (options?.naturalOnly) return false;
                 if (!current()) return false;
                 try { window.destroy(); } catch { return false; }
               }
