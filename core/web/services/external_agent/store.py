@@ -33,7 +33,7 @@ _TRANSITIONS: dict[str, frozenset[str]] = {
         {"running", "awaiting_approval", "succeeded", "failed", "cancelling"}
     ),
     "awaiting_approval": frozenset(
-        {"awaiting_approval", "running", "failed", "cancelling"}
+        {"awaiting_approval", "running", "succeeded", "failed", "cancelling"}
     ),
     "cancelling": frozenset(
         {"cancelling", "cancelled", "timed_out", "stop_unconfirmed"}

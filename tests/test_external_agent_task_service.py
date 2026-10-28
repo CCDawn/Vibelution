@@ -511,6 +511,44 @@ def test_resumable_session_phase_fails_after_bounded_continuations(tmp_path) -> 
     assert len(runtime.submit_calls) == 4
 
 
+def test_get_succeeds_when_turn_completes_before_approval_refresh(tmp_path) -> None:
+    runtime = FakeRuntime()
+    service = _service(tmp_path, runtime)
+    started = service.start_task(
+        owner_id="host-a",
+        adapter_connection_id="connection-a",
+        capabilities=set(),
+        agent_id="coder",
+        task="finish the managed task",
+        permission_profile="read_only",
+        client_request_id="",
+        title="",
+        runtime_revision="rev-1",
+    )
+    task_id = started["taskId"]
+    session_id = service.store.get_task(task_id)["sessionId"]
+    runtime.approvals[session_id] = [
+        {"requestId": "approval-1", "turnId": "turn-1", "status": "pending"}
+    ]
+    assert service.get_task(owner_id="host-a", task_id=task_id)["status"] == "awaiting_approval"
+
+    runtime.approvals[session_id][0]["status"] = "accepted"
+    runtime.details[session_id] = {
+        "sessionId": session_id,
+        "status": "completed",
+        "messages": [{"role": "assistant", "content": "Task completed."}],
+    }
+    result = service.get_task(owner_id="host-a", task_id=task_id)
+
+    assert result["status"] == "succeeded"
+    assert result["resultSummary"] == "Task completed."
+    assert result["pendingApprovals"] == []
+    persisted = service.store.get_task(task_id)
+    assert persisted["status"] == "succeeded"
+    assert persisted["reasonCode"] == "turn_succeeded"
+    assert persisted["completedAt"]
+
+
 def test_succeeded_task_uses_canonical_final_answer_as_result_summary(
     tmp_path,
 ) -> None:
