@@ -16,7 +16,7 @@ def test_catalog_reuses_native_schema_and_governance_without_project_actions():
         "operator_image_options", "operator_image_select",
         "history_list", "history_read",
         "affairs_conflict_sets", "affairs_conflict_list", "affairs_conflict_read", "affairs_sync_receipt",
-        "episodic_conflict_review", "episodic_sync_receipt",
+        "episodic_conflict_review", "episodic_sync_receipt", "personal_memory_list",
     }
     assert set(contracts) == expected
     for owner in (assistant, config):
