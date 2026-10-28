@@ -170,6 +170,11 @@ def _management_contracts():
             project_id=(str, Field(min_length=1, max_length=160)),
             request_id=(str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$")))
         result[name] = (schema, {**contracts()[name], "parameters": schema.model_json_schema()})
+    result["dispatch_write"] = (DispatchWrite, {
+        "action": "dispatch_write", "governed": True,
+        "description": "按原生审批策略派遣单个已有 Agent 修改项目，仅申请 workspace_write，实际权限以目标项目回执为准。task 必须是当前用户消息去除首尾空白后的完整正文，不得截取、改写或追加；过长时请用户重新提供完整消息，不截断。使用稳定 dispatch_id，未知时查询原回执，不换 ID 重派。",
+        "parameters": DispatchWrite.model_json_schema(),
+    })
     return result
 
 
@@ -432,11 +437,6 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
     from . import local_actions
     local = local_actions.contracts()
     managed = _management_contracts()
-    managed["dispatch_write"] = (DispatchWrite, {
-        "action": "dispatch_write", "governed": True,
-        "description": "按原生审批策略派遣单个已有 Agent 修改项目，仅申请 workspace_write，实际权限以目标项目回执为准。task 必须是当前用户消息去除首尾空白后的完整正文，不得截取、改写或追加；过长时请用户重新提供完整消息，不截断。使用稳定 dispatch_id，未知时查询原回执，不换 ID 重派。",
-        "parameters": DispatchWrite.model_json_schema(),
-    })
     schemas = {**_SCHEMAS, **_documentation_contracts(), **_project_read_contracts()}
     main_contracts = {key: {"action": key, "description": _MAIN_HELP[key],
         "parameters": model.model_json_schema(), "governed": key in {"project_lifecycle", "history_import", "affairs_sync", "episodic_sync"}}
