@@ -11,8 +11,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model, model_validator
 
 from .dispatch import DispatchError
+from .dispatch_approval import DispatchWrite, MAX_WRITE_TASK_CHARS
 from .task_source import TaskSelector
-
 
 class Parameters(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -432,6 +432,11 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
     from . import local_actions
     local = local_actions.contracts()
     managed = _management_contracts()
+    managed["dispatch_write"] = (DispatchWrite, {
+        "action": "dispatch_write", "governed": True,
+        "description": "按原生审批策略派遣单个已有 Agent 修改项目，仅申请 workspace_write，实际权限以目标项目回执为准。task 必须是当前用户消息去除首尾空白后的完整正文，不得截取、改写或追加；过长时请用户重新提供完整消息，不截断。使用稳定 dispatch_id，未知时查询原回执，不换 ID 重派。",
+        "parameters": DispatchWrite.model_json_schema(),
+    })
     schemas = {**_SCHEMAS, **_documentation_contracts(), **_project_read_contracts()}
     main_contracts = {key: {"action": key, "description": _MAIN_HELP[key],
         "parameters": model.model_json_schema(), "governed": key in {"project_lifecycle", "history_import", "affairs_sync", "episodic_sync"}}
@@ -477,6 +482,9 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
         return local_actions.execute(action, parameters, runtime, governed=governed)
     if action not in {*schemas, *managed, *main_contracts}:
         raise ValueError("Unknown Launcher action; use index for supported operations")
+    if (action == "dispatch_write" and isinstance(parameters.get("task"), str)
+            and len(parameters["task"]) > MAX_WRITE_TASK_CHARS):
+        return {"ok": False, "code": "TASK_SOURCE_TOO_LONG", "message": "用户消息过长，无法完整派遣；请重新提供范围明确的完整消息。"}
     try:
         schema = {**_MAIN_SCHEMAS, **_APPEARANCE_SCHEMAS, "initial_migration_queue": InitialMigrationQueue,
                   "initial_migration_receipt": InitialMigrationReceipt, "knowledge_sync_queue": HistoryImport,
@@ -545,6 +553,13 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
             coroutine = main_control.invoke("initial_migration_queue" if action in {"knowledge_sync_queue", "knowledge_sync_recover", "reminder_handoff_queue"} else action, request, turn_id=turn_id)
         else:
             coroutine = main_control.invoke("initial_migration_receipt" if action == "reminder_handoff_receipt" else action, request)
+    elif action == "dispatch_write":
+        if governed is not True:
+            return {"ok": False, "status": "approval_required", "action": action, "tool": "personal_assistant_manage_tool"}
+        if not runtime:
+            raise ValueError("Launcher native tool identity is required")
+        project_id = args.pop("project_id")
+        coroutine = service.dispatch_write_from_source(project_id, **args, runtime=runtime)
     elif action in managed:
         if managed[action][1]["governed"] and governed is not True:
             return {"ok": False, "status": "approval_required", "action": action, "tool": "personal_assistant_manage_tool"}
@@ -613,6 +628,9 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
         coroutine = service.reconcile(args["dispatch_id"])
     try:
         value = asyncio.run_coroutine_threadsafe(coroutine, loop).result(timeout=125 if action in {"operator_image_upload", "history_import", "affairs_sync", "episodic_sync", "initial_migration_queue", "knowledge_sync_queue", "knowledge_sync_recover", "reminder_handoff_queue"} else 25)
+        if action == "dispatch_write" and isinstance(value.get("receipt"), dict):
+            if value["receipt"].get("effectivePermissionProfile") == "read_only":
+                return {**value, "permissionNotice": "目标项目将实际权限限制为只读，不能据此认为已执行修改。"}
         if action == "knowledge_sync_recover":
             return {"schemaVersion": 1, "projectId": args["project_id"], "operationId": args["operation_id"],
                     "recoveryId": value["operationId"], "state": value["state"], "code": value["code"], "readyForCutover": False}

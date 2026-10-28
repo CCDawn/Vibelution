@@ -77,6 +77,33 @@ def test_host_limits_messages_to_own_native_session_and_reuses_request_id():
         assert client.get("/api/sessions/other-session").status_code == 404
 
 
+def test_host_attachment_transport_uses_fixed_native_owner():
+    class AttachmentNative(Native):
+        def upload_attachment(self, payload, filename, content_type):
+            assert payload == b"fixture" and filename == "note.txt"
+            return {"artifactId": "file-1", "filename": filename, "contentType": content_type,
+                    "sizeBytes": len(payload), "kind": "user_document", "status": "ready"}
+
+        def read_attachment(self, artifact_id):
+            assert artifact_id == "file-1"
+            return b"fixture", "text/plain"
+
+        def submit(self, message, request_id, attachment_ids=None):
+            return {"acceptedRequestId": request_id, "attachmentIds": attachment_ids}
+
+    app = create_app(native=AttachmentNative(), token="private-test-token")
+    with TestClient(app, base_url="http://127.0.0.1", headers={"Authorization": "Bearer private-test-token"}) as client:
+        body = {"filename": "note.txt", "contentType": "text/plain", "dataBase64": "Zml4dHVyZQ=="}
+        assert client.post("/api/assistant/attachments/upload", json=body).json()["artifactId"] == "file-1"
+        assert client.post("/api/assistant/attachments/read", json={"artifactId": "file-1"}).json() == {
+            "contentType": "text/plain", "dataBase64": "Zml4dHVyZQ=="}
+        result = client.post("/api/assistant/messages", json={"message": "", "requestId": "one", "attachmentIds": ["file-1"]})
+        assert result.json() == {"acceptedRequestId": "one", "attachmentIds": ["file-1"]}
+        assert client.post("/api/assistant/attachments/upload", json={**body, "sessionId": "other"}).status_code == 422
+        assert client.post("/api/assistant/attachments/upload", json={**body, "dataBase64": "!!!!"}).status_code == 422
+        assert client.post("/api/assistant/attachments/read", json={"artifactId": "../file"}).status_code == 422
+
+
 def test_health_does_not_disclose_token_or_project_paths():
     app = create_app(native=Native(), token="private-test-token")
     with TestClient(app, base_url="http://127.0.0.1", headers={"Authorization": "Bearer private-test-token"}) as client:
@@ -373,4 +400,4 @@ def test_native_status_rereads_operator_profile_and_keeps_identity_on_read_failu
     def unavailable(*args):
         raise ValueError("PRIVATE_PATH_OR_CONFIG_SENTINEL")
     monkeypatch.setattr(public_config, "read_existing_config_snapshot", unavailable)
-    assert facade.identity() == {"assistant": assistant, "settings": {"ok": True}, "operatorAssetsVersion": 1}
+    assert facade.identity() == {"assistant": assistant, "settings": {"ok": True}, "operatorAssetsVersion": 1, "attachmentVersion": 1}

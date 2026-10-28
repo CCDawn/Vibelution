@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import json
 import logging
 import secrets
@@ -118,8 +120,24 @@ async def migration_runtime_quiescence(native, dispatch, history_control, main_c
 
 class Message(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    message: str = Field(min_length=1, max_length=64000)
+    message: str = Field(max_length=64000)
     requestId: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.:-]+$")
+    attachmentIds: list[str] = Field(default_factory=list, max_length=8)
+
+    @model_validator(mode="after")
+    def validate_content(self):
+        if not self.message.strip() and not self.attachmentIds:
+            raise ValueError("Message or attachments required")
+        if any(not isinstance(item, str) or not item or len(item) > 255
+               or item in {".", ".."} or not all(ch.isascii() and (ch.isalnum() or ch in "_.-") for ch in item)
+               for item in self.attachmentIds):
+            raise ValueError("Invalid attachment IDs")
+        return self
+
+
+class AttachmentRead(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    artifactId: str = Field(min_length=1, max_length=255, pattern=r"^[A-Za-z0-9_.-]+$")
 
 
 class StopTurn(BaseModel):
@@ -321,6 +339,7 @@ class NativeFacade:
         from . import native
         result = native.identity()
         result["operatorAssetsVersion"] = 1
+        result["attachmentVersion"] = 1
         result["settings"] = pa_assistant_actions.execute("assistant_settings", {}, {}, governed=False)
         profile = _operator_profile()
         if profile is not None:
@@ -337,9 +356,17 @@ class NativeFacade:
         )
         return resolve_tool_approval_request(self.assistant["directSessionId"], request_id, decision=decision)
 
-    def submit(self, message, request_id):
+    def submit(self, message, request_id, attachment_ids=None):
         from . import native
-        return native.submit(message, request_id)
+        return native.submit(message, request_id, attachment_ids)
+
+    def upload_attachment(self, payload, filename, content_type):
+        from . import native
+        return native.upload_attachment(payload, filename=filename, content_type=content_type)
+
+    def read_attachment(self, artifact_id):
+        from . import native
+        return native.read_attachment(artifact_id)
 
     def stop(self, turn_id):
         from . import native
@@ -1139,9 +1166,56 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
     @app.post("/api/assistant/messages")
     def message(payload: Message):
         try:
+            if payload.attachmentIds:
+                return native.submit(payload.message, payload.requestId, payload.attachmentIds)
             return native.submit(payload.message, payload.requestId)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post("/api/assistant/attachments/upload")
+    async def upload_attachment(request: Request):
+        if request.query_params or not callable(getattr(native, "upload_attachment", None)):
+            raise HTTPException(422, detail="Attachment upload unavailable")
+        body = bytearray()
+        async for chunk in request.stream():
+            if len(body) + len(chunk) > 12 * 1024 * 1024:
+                raise HTTPException(413, detail="Attachment payload too large")
+            body.extend(chunk)
+        def unique(pairs):
+            value = {}
+            for key, item in pairs:
+                if key in value:
+                    raise ValueError("Duplicate field")
+                value[key] = item
+            return value
+        try:
+            payload = json.loads(body, object_pairs_hook=unique)
+            if (type(payload) is not dict or set(payload) != {"filename", "contentType", "dataBase64"}
+                    or any(type(value) is not str for value in payload.values())
+                    or not 0 < len(payload["filename"]) <= 255 or not 0 < len(payload["contentType"]) <= 128
+                    or not 0 < len(payload["dataBase64"]) <= ((8 * 1024 * 1024 + 2) // 3) * 4):
+                raise ValueError("Invalid attachment")
+            raw = base64.b64decode(payload["dataBase64"], validate=True)
+            if not raw or len(raw) > 8 * 1024 * 1024 or base64.b64encode(raw).decode("ascii") != payload["dataBase64"]:
+                raise ValueError("Invalid attachment")
+        except (ValueError, UnicodeError, RecursionError, binascii.Error):
+            raise HTTPException(422, detail="Invalid attachment payload") from None
+        try:
+            return await asyncio.to_thread(native.upload_attachment, raw, payload["filename"], payload["contentType"])
+        except (ValueError, OSError):
+            raise HTTPException(422, detail="Attachment could not be stored") from None
+
+    @app.post("/api/assistant/attachments/read")
+    async def read_attachment(payload: AttachmentRead, request: Request):
+        if request.query_params or payload.artifactId in {".", ".."} or not callable(getattr(native, "read_attachment", None)):
+            raise HTTPException(422, detail="Attachment unavailable")
+        try:
+            raw, content_type = await asyncio.to_thread(native.read_attachment, payload.artifactId)
+            if type(raw) is not bytes or not raw or len(raw) > 8 * 1024 * 1024 or type(content_type) is not str or len(content_type) > 128:
+                raise ValueError("Invalid attachment")
+            return {"contentType": content_type, "dataBase64": base64.b64encode(raw).decode("ascii")}
+        except (ValueError, OSError):
+            raise HTTPException(404, detail="Attachment unavailable") from None
 
     @app.post("/api/assistant/stop", status_code=202)
     async def stop(payload: StopTurn):

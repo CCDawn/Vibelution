@@ -8,7 +8,7 @@ import {
   launcherConversationApi,
   getLauncherAssistantApprovals, resolveLauncherAssistantApproval,
   stopLauncherAssistantTurn, continueLauncherAssistantTurn,
-  getLauncherOperatorAsset, openLauncherFromAssistant,
+  getLauncherOperatorAsset, openLauncherFromAssistant, uploadLauncherAttachment,
 } from "../../api/launcherAssistant";
 import type { SessionContinuationExpectation } from "../../api/chat";
 import { queryKeys } from "../../api/queryKeys";
@@ -24,11 +24,13 @@ import { DesktopPetCharacter } from "./DesktopPetCharacter";
 import { DEFAULT_PET_PREFERENCES } from "./desktopPetPreferences";
 import { ChatToolApprovalDialog } from "../chat/ChatToolApprovalDialog";
 import { toolApprovalRiskLabel } from "../chat/toolApprovalLabels";
-import { authorizationUpgradePreviewIsValid, toolApprovalActionPreview, toolApprovalDisplayName } from "../chat/toolApprovalPreview";
+import { authorizationUpgradePreviewIsValid, dispatchWritePreviewIsValid, managementApprovalActionIsKnown, toolApprovalActionPreview, toolApprovalDisplayName } from "../chat/toolApprovalPreview";
 import { useLauncherThemeControl } from "./useLauncherThemeControl";
 import { PersonalAssistantComputerPanel } from "../personalAssistant/PersonalAssistantComputerPanel";
 import { launcherAssistantComputer } from "../../api/launcherAssistantComputer";
 import petStyles from "./DesktopAssistantRoute.styles";
+import { useLauncherAttachmentHistory } from "./useLauncherAttachmentHistory";
+import { classifyComposerFiles, mergeComposerAttachmentsWithRejections, type ComposerImageAttachment } from "../chat/chatComposerSubmitModel";
 import {
   launcherAssistantActivity, launcherAssistantPollInterval, launcherAssistantSubmission,
   launcherAssistantQueueReadback, launcherAssistantQueueLabel, launcherAssistantRequestReadback,
@@ -52,8 +54,15 @@ const COPY = {
   },
 } as const;
 
+function approvalAcceptDisabled(request: SessionToolApprovalRequest): boolean {
+  const summary = request.argumentSummary;
+  return request.toolName === "personal_assistant_manage_tool" && (!managementApprovalActionIsKnown(summary?.assistantAction) || Boolean(summary.assistantArgumentsInvalid)
+    || summary?.assistantAction === "authorization_upgrade" && !authorizationUpgradePreviewIsValid(summary)
+    || summary?.assistantAction === "dispatch_write" && !dispatchWritePreviewIsValid(summary));
+}
+
 type ContinueAttempt = { requestId: string; expected: SessionContinuationExpectation; accepted: boolean };
-type ComposerSnapshot = { draft: string; outstanding: LauncherAssistantSubmission | null; acceptedTurnId: string; queuedAcceptance: LauncherAssistantQueuedAcceptance | null; continuation?: ContinueAttempt };
+type ComposerSnapshot = { draft: string; outstanding: LauncherAssistantSubmission | null; acceptedTurnId: string; queuedAcceptance: LauncherAssistantQueuedAcceptance | null; continuation?: ContinueAttempt; attachments?: ComposerImageAttachment[] };
 
 export function LauncherAssistantRoute() {
   useLauncherThemeControl();
@@ -70,6 +79,10 @@ export function LauncherAssistantRoute() {
   const resizing = useRef(false);
   const outstanding = useRef<LauncherAssistantSubmission | null>(null);
   const [draft, setDraft] = useState("");
+  const [attachments, setAttachments] = useState<ComposerImageAttachment[]>([]);
+  const [visibleMessageIds, setVisibleMessageIds] = useState<string[]>([]);
+  const attachmentsRef = useRef<ComposerImageAttachment[]>([]);
+  const uploadGate = useRef(false);
   const draftRef = useRef("");
   const [sendPending, setSendPending] = useState(false);
   const [resizePending, setResizePending] = useState(false);
@@ -90,6 +103,8 @@ export function LauncherAssistantRoute() {
     retry: false, staleTime: 0, refetchInterval: expanded && visible ? 10_000 : false,
   });
   const sessionId = status.data?.assistant.directSessionId || "";
+  const sessionIdRef = useRef(sessionId);
+  sessionIdRef.current = sessionId;
   const reading = expanded && visible && Boolean(sessionId);
   const observingOwnSession = visible && Boolean(sessionId);
   const readingAssets = reading && status.data?.operatorAssetsVersion === 1;
@@ -116,6 +131,8 @@ export function LauncherAssistantRoute() {
     const saved = client.getQueryData<ComposerSnapshot>(["launcher-assistant", "composer", sessionId]);
     draftRef.current = saved?.draft || "";
     setDraft(draftRef.current);
+    attachmentsRef.current = (saved?.attachments || []).map(item => item.uploadStatus === "uploading" ? { ...item, uploadStatus: "pending" } : item);
+    setAttachments(attachmentsRef.current);
     outstanding.current = saved?.outstanding || null;
     setSendUnconfirmed(Boolean(saved?.outstanding));
     setAcceptedTurnId(saved?.acceptedTurnId || "");
@@ -151,6 +168,7 @@ export function LauncherAssistantRoute() {
       sending.current = null;
       setSendPending(false);
     }
+    clearAcceptedAttachments(submission);
     const remainingDraft = draftRef.current === (submission.draftSnapshot ?? submission.message) ? "" : draftRef.current;
     draftRef.current = remainingDraft;
     saveComposer({ draft: remainingDraft, outstanding: null, acceptedTurnId: recovered.turnId, queuedAcceptance: recovered.queuedAcceptance });
@@ -295,9 +313,77 @@ export function LauncherAssistantRoute() {
     finally { launcherGate.current = false; if (mounted.current) setLauncherPending(false); }
   }
 
+  const historyAttachments = useLauncherAttachmentHistory(detail.data?.messages || [], sessionId, reading && status.data?.attachmentVersion === 1, visibleMessageIds);
+
+  function updateAttachments(next: ComposerImageAttachment[]) {
+    attachmentsRef.current = next;
+    setAttachments(next);
+    saveComposer({ attachments: next });
+  }
+  function clearAcceptedAttachments(submission: LauncherAssistantSubmission) {
+    const accepted = new Set(submission.attachmentSnapshotIds || []);
+    if (!accepted.size) return;
+    const remaining = attachmentsRef.current.filter(item => {
+      if (!accepted.has(item.id)) return true;
+      URL.revokeObjectURL(item.previewUrl);
+      return false;
+    });
+    updateAttachments(remaining);
+  }
+  function addAttachments(files: FileList | File[]) {
+    if (status.data?.attachmentVersion !== 1 || sendPending || sendUnconfirmed || uploadGate.current) return;
+    const incoming = classifyComposerFiles(files);
+    const merged = mergeComposerAttachmentsWithRejections(attachmentsRef.current, incoming.accepted);
+    merged.rejected.forEach(item => URL.revokeObjectURL(item.previewUrl));
+    updateAttachments(merged.attachments);
+    if (incoming.rejected.length || merged.rejected.length) setFeedback(lang === "zh" ? "部分附件类型不支持、过大或超过数量限制。" : "Some attachments are unsupported, too large, or exceed the limit.");
+    else setFeedback("");
+  }
+  function removeAttachment(id: string) {
+    if (sendPending || sendUnconfirmed || uploadGate.current) return;
+    const item = attachmentsRef.current.find(row => row.id === id);
+    if (item) URL.revokeObjectURL(item.previewUrl);
+    updateAttachments(attachmentsRef.current.filter(row => row.id !== id));
+  }
+  async function uploadAttachments(onlyId?: string): Promise<boolean> {
+    if (uploadGate.current || status.data?.attachmentVersion !== 1 || !sessionId) return false;
+    const uploadSessionId = sessionId;
+    const targets = attachmentsRef.current.filter(item => (!onlyId || item.id === onlyId) && !(item.uploadStatus === "uploaded" && item.artifactId));
+    if (!targets.length) return true;
+    uploadGate.current = true;
+    setSendPending(true);
+    const ids = new Set(targets.map(item => item.id));
+    updateAttachments(attachmentsRef.current.map(item => ids.has(item.id) ? { ...item, uploadStatus: "uploading" } : item));
+    const results = await Promise.allSettled(targets.map(item => uploadLauncherAttachment(item.file)));
+    const byId = new Map(targets.map((item, index) => [item.id, results[index]]));
+    const updateOutcomes = (items: ComposerImageAttachment[]): ComposerImageAttachment[] => items.map(item => {
+      const result = byId.get(item.id);
+      return !result ? item : result.status === "fulfilled" ? { ...item, uploadStatus: "uploaded", artifactId: result.value }
+        : { ...item, uploadStatus: "failed" };
+    });
+    if (sessionIdRef.current !== uploadSessionId || !mounted.current) {
+      client.setQueryData<ComposerSnapshot>(["launcher-assistant", "composer", uploadSessionId], previous => previous
+        ? { ...previous, attachments: updateOutcomes(previous.attachments || []) } : previous);
+      uploadGate.current = false;
+      if (mounted.current) setSendPending(false);
+      return false;
+    }
+    updateAttachments(updateOutcomes(attachmentsRef.current));
+    uploadGate.current = false;
+    setSendPending(false);
+    const failed = results.some(result => result.status === "rejected");
+    if (failed) setFeedback(lang === "zh" ? "附件上传失败，请重试。" : "Attachment upload failed; retry.");
+    else setFeedback("");
+    return !failed;
+  }
+
   async function submit() {
-    if (sending.current || controlGate.current || !sessionId) return;
-    const submission = launcherAssistantSubmission(outstanding.current, draftRef.current);
+    if (sending.current || uploadGate.current || controlGate.current || !sessionId
+      || (attachmentsRef.current.length > 0 && status.data?.attachmentVersion !== 1)) return;
+    if (!outstanding.current && attachmentsRef.current.length && !(await uploadAttachments())) return;
+    const snapshot = attachmentsRef.current;
+    const submission = launcherAssistantSubmission(outstanding.current, draftRef.current, undefined,
+      snapshot.map(item => item.artifactId || "").filter(Boolean), snapshot.map(item => item.id));
     if (!submission) return;
     outstanding.current = submission;
     saveComposer({ draft: draftRef.current, outstanding: submission });
@@ -308,9 +394,10 @@ export function LauncherAssistantRoute() {
     setFeedback("");
     const requestEpoch = epochRef.current;
     try {
-      const acceptance = await sendLauncherAssistantMessage(submission.message, submission.requestId);
+      const acceptance = await sendLauncherAssistantMessage(submission.message, submission.requestId, submission.attachmentIds);
       if (!mounted.current || requestEpoch !== epochRef.current || sending.current !== flight || outstanding.current !== submission) return;
       outstanding.current = null;
+      clearAcceptedAttachments(submission);
       const queueReceipt = acceptance.queuedTurnId ? { id: acceptance.queuedTurnId, clientSubmissionId: acceptance.clientSubmissionId, observed: false } : null;
       const remainingDraft = draftRef.current === (submission.draftSnapshot ?? submission.message) ? "" : draftRef.current;
       draftRef.current = remainingDraft;
@@ -335,7 +422,8 @@ export function LauncherAssistantRoute() {
   }
 
   async function decide(request: SessionToolApprovalRequest, decision: "accept" | "decline") {
-    if (approvalGate.current || request.requestId !== approval?.requestId || !request.availableDecisions.includes(decision)) return;
+    if (approvalGate.current || request.requestId !== approval?.requestId || !request.availableDecisions.includes(decision)
+      || decision === "accept" && (approvalAcceptDisabled(request) || approvalAcceptDisabled(approval))) return;
     approvalGate.current = true;
     setApprovalPending(true);
     setApprovalError("");
@@ -410,7 +498,7 @@ export function LauncherAssistantRoute() {
   const activity = resolveSessionActivity(detail.data || {});
   const busy = hasExecutionOwnership(activity.execution);
   const stopping = Boolean(detail.data?.stopRequested);
-  const canContinue = !draft.trim() && !sendUnconfirmed && Boolean(resolveConversationContinuation(detail.data, sessionId));
+  const canContinue = !draft.trim() && !attachments.length && !sendUnconfirmed && Boolean(resolveConversationContinuation(detail.data, sessionId));
   const actionMode = busy || stopping ? "stop" : canContinue ? "continue" : "send";
   const queueRow = detail.data?.queuedTurns?.find(row => row.id === queuedAcceptance?.id) || detail.data?.queuedTurns?.[0];
   const waitingQueueText = lang === "zh" ? "已排队，正在读取原生队列…" : "Queued; reading the native queue…";
@@ -467,22 +555,31 @@ export function LauncherAssistantRoute() {
       onCollapse={() => setComputerOpen(false)} /> : detail.data ? <LazyConversationView
       runtimeApi={launcherConversationApi}
       sessionId={detail.data.id} title={detail.data.title || identity?.displayName || copy.title}
-      phase={resolveSessionActivity(detail.data).execution} messages={detail.data.messages}
+      phase={resolveSessionActivity(detail.data).execution} messages={historyAttachments.messages}
+      onVisibleTimelineMessageIds={setVisibleMessageIds}
       turnError={detail.data.lastTurnError}
       defaultFileContext={detail.data.defaultFileContext} assistantDisplayName={displayName}
       userDisplayName={status.data?.operatorProfile?.displayName} userAvatarPreset={status.data?.operatorProfile?.avatarPreset}
       userAvatarImageUrl={avatarImage?.url}
       showHeader={false} showSessionOverview={false} showMentalSnapshots={false} density="compact" composerVariant="codex"
       composerValue={draft} composerPlaceholder={copy.placeholder} composerDisabled={sendPending || sendUnconfirmed || controlPending}
-      composerPending={sendPending || controlPending || stopping} composerActionMode={actionMode} composerAttachmentInputDisabled
-      composerError={sendUnconfirmed ? copy.unknownSend : ""}
+      composerPending={sendPending || controlPending || stopping} composerActionMode={actionMode}
+      composerAttachmentInputDisabled={status.data?.attachmentVersion !== 1 || sendPending || sendUnconfirmed || controlPending}
+      composerAttachments={attachments}
+      onAddComposerAttachments={addAttachments} onRemoveComposerAttachment={removeAttachment}
+      onRetryComposerAttachment={id => void uploadAttachments(id)} onRetryComposerAttachmentUploads={() => void uploadAttachments()}
+      composerError={sendUnconfirmed ? copy.unknownSend : attachments.some(item => item.uploadStatus === "failed") ? (lang === "zh" ? "附件上传失败，请重试。" : "Attachment upload failed; retry.") : ""}
       submitLabel={sendUnconfirmed ? copy.retry : copy.send} submitPendingLabel={copy.sending}
-      composerActionDisabled={sendPending || controlPending || (actionMode === "stop" ? stopping || !resolveSessionStopTurnId(detail.data, acceptedTurnId) : actionMode === "send" && !sendUnconfirmed && !draft.trim())}
+      composerActionDisabled={sendPending || controlPending || (attachments.length > 0 && status.data?.attachmentVersion !== 1) || (actionMode === "stop" ? stopping || !resolveSessionStopTurnId(detail.data, acceptedTurnId) : actionMode === "send" && !sendUnconfirmed && !draft.trim() && !attachments.length)}
       onComposerChange={value => { draftRef.current = value; setDraft(value); saveComposer({ draft: value }); }} onSubmit={() => void submit()}
       onStop={() => void stopTurn()} onContinueTurn={() => void continueTurn()}
       fallback={<VStateSurface fill tone="loading" title={copy.loading} />}
     /> : <VStateSurface fill tone={detail.isError ? "error" : "loading"} title={detail.isError ? copy.unavailable : copy.loading}
       actions={detail.isError ? <VButton onClick={() => void detail.refetch()}>{copy.retry}</VButton> : undefined}>{detail.error?.message}</VStateSurface>}
+    {historyAttachments.missingGenerated ? <VStateSurface tone="error" title={lang === "zh" ? "历史图片缺少附件标识，暂不可查看" : "Historical image has no artifact ID"}
+      actions={<VButton onClick={() => void detail.refetch()}>{copy.retry}</VButton>} /> : null}
+    {historyAttachments.failed ? <VStateSurface tone="error" title={lang === "zh" ? "历史附件暂不可用（单个文件上限 8 MiB）" : "Historical attachment unavailable (8 MiB per file limit)"}
+      actions={<VButton onClick={historyAttachments.retry}>{copy.retry}</VButton>} /> : null}
     {readingAssets && (avatar.isError || background.isError) ? <VStateSurface tone="error"
       title={lang === "zh" ? "部分外观图片暂不可用，聊天仍可使用" : "Some appearance images are unavailable; chat is ready"}
       actions={<VButton onClick={() => { if (avatar.isError) void avatar.refetch(); if (background.isError) void background.refetch(); }}>{copy.retry}</VButton>} /> : null}
@@ -494,9 +591,8 @@ export function LauncherAssistantRoute() {
       scopeLabel={lang === "zh" ? "仅本次调用" : "This call only"}
       toolLabels={[{ id: approval.toolName, label: toolApprovalDisplayName(approval.toolName, lang) }]}
       toolName={approval.toolName} actionPreview={toolApprovalActionPreview(approval.argumentSummary, approval.toolName, lang)}
-      fullActionPreview={approval.toolName === "personal_assistant_manage_tool" && approval.argumentSummary?.assistantAction === "authorization_upgrade"}
-      approveDisabled={approval.toolName === "personal_assistant_manage_tool" && (approval.argumentSummary?.assistantArgumentsInvalid === true
-        || approval.argumentSummary?.assistantAction === "authorization_upgrade" && !authorizationUpgradePreviewIsValid(approval.argumentSummary))}
+      fullActionPreview={approval.toolName === "personal_assistant_manage_tool" && ["authorization_upgrade", "dispatch_write"].includes(String(approval.argumentSummary?.assistantAction))}
+      approveDisabled={approvalAcceptDisabled(approval)}
       onApprove={() => void decide(approval, "accept")} onReject={() => void decide(approval, "decline")} /> : null}
     {approvalError || approvals.isError ? <VStateSurface tone="error" title={approvalError || (lang === "zh" ? "待授权查询暂不可用" : "Pending approvals unavailable")}
       actions={<VButton onClick={() => { setApprovalError(""); void approvals.refetch(); }}>{copy.retry}</VButton>}>{approvals.error?.message}</VStateSurface> : null}

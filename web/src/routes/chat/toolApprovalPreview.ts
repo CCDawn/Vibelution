@@ -27,14 +27,26 @@ export function authorizationUpgradePreviewIsValid(summary: Record<string, unkno
     && Array.from(scopes).every((scope) => typeof scope === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]*(?![\s\S])/.test(scope));
 }
 
-export function toolApprovalActionPreview(
-  argumentSummary: Record<string, unknown> | null | undefined,
-  toolName?: string | null,
-  lang: "zh" | "en" = "zh",
-): string {
-  const summary = argumentSummary && typeof argumentSummary === "object" ? argumentSummary : {};
-  if (toolName === "personal_assistant_manage_tool") {
-    const actions: Record<string, [string, string]> = {
+/** A write dispatch must show the same complete request that approval binds. */
+export function dispatchWritePreviewIsValid(summary: Record<string, unknown> | null | undefined): boolean {
+  if (!summary || summary.assistantAction !== "dispatch_write" || summary.assistantArgumentsInvalid
+    || summary.assistantRequestedPermission !== "workspace_write") return false;
+  const targets = summary.assistantTargets;
+  if (!targets || typeof targets !== "object" || Array.isArray(targets)) return false;
+  const { project_id: project, agent_id: agent, dispatch_id: dispatch } = targets as Record<string, unknown>;
+  const idPattern = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}(?![\s\S])/;
+  const dispatchPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,119}(?![\s\S])/;
+  const task = summary.assistantTask;
+  return typeof project === "string" && idPattern.test(project)
+    && typeof agent === "string" && idPattern.test(agent)
+    && typeof dispatch === "string" && dispatchPattern.test(dispatch)
+    && typeof task === "string" && !!task && task === task.trim()
+    && Array.from(task).length <= 12000
+    && !/[\p{Cc}\p{Cf}\p{Cs}]/u.test(task.replace(/[\n\t]/g, ""));
+}
+
+const MANAGE_ACTIONS: Record<string, [string, string]> = {
+      dispatch_write: ["派遣 Agent 修改项目", "Dispatch agent to modify project"],
       authorization_upgrade: ["新增项目权限", "Add project permissions"],
       agent_create: ["创建 Agent", "Create agent"], agent_update: ["修改 Agent", "Update agent"],
       agent_archive: ["归档 Agent", "Archive agent"], session_create: ["创建会话", "Create session"],
@@ -62,13 +74,41 @@ export function toolApprovalActionPreview(
       dialogue_settings_update: ["调整对话偏好", "Update dialogue preferences"],
       history_import: ["导入旧助理历史", "Import previous assistant history"],
       affairs_sync: ["同步旧助理事务", "Sync previous assistant affairs"],
-    };
+      episodic_sync: ["同步情景记忆", "Sync episodic memory"],
+      initial_migration_queue: ["开始旧助理迁移", "Start previous assistant migration"],
+      knowledge_sync_queue: ["同步旧助理知识", "Sync previous assistant knowledge"],
+      knowledge_sync_recover: ["恢复知识同步", "Recover knowledge sync"],
+      reminder_handoff_queue: ["交接旧助理提醒", "Transfer previous assistant reminders"],
+};
+
+export function managementApprovalActionIsKnown(value: unknown): boolean {
+  return typeof value === "string" && Object.hasOwn(MANAGE_ACTIONS, value);
+}
+
+export function toolApprovalActionPreview(
+  argumentSummary: Record<string, unknown> | null | undefined,
+  toolName?: string | null,
+  lang: "zh" | "en" = "zh",
+): string {
+  const summary = argumentSummary && typeof argumentSummary === "object" ? argumentSummary : {};
+  if (toolName === "personal_assistant_manage_tool") {
     const action = String(summary.assistantAction || "");
-    const title = actions[action]?.[lang === "zh" ? 0 : 1] ?? toolApprovalDisplayName(toolName, lang);
-    if (summary.assistantArgumentsInvalid || !Object.hasOwn(actions, action)) {
+    const title = MANAGE_ACTIONS[action]?.[lang === "zh" ? 0 : 1] ?? toolApprovalDisplayName(toolName, lang);
+    if (summary.assistantArgumentsInvalid || !managementApprovalActionIsKnown(action)) {
       return `${title}\n${lang === "zh" ? "参数无法核对，请拒绝并重新发起。" : "Arguments cannot be verified. Decline and request again."}`;
     }
     const targets = summary.assistantTargets;
+    if (action === "dispatch_write") {
+      if (!dispatchWritePreviewIsValid(summary)) {
+        return `${title}\n${lang === "zh" ? "参数无法核对，请拒绝并重新发起。" : "Arguments cannot be verified. Decline and request again."}`;
+      }
+      const identity = targets as Record<string, string>;
+      return [title, `${lang === "zh" ? "项目" : "Project"}: ${identity.project_id}`,
+        `Agent: ${identity.agent_id}`, `${lang === "zh" ? "派遣 ID" : "Dispatch ID"}: ${identity.dispatch_id}`,
+        `${lang === "zh" ? "申请权限" : "Requested permission"}: workspace_write`,
+        lang === "zh" ? "目标项目可能限制实际权限，请以回执为准。" : "The project may restrict effective permission; check the receipt.",
+        `${lang === "zh" ? "任务原文" : "Original task"}:`, summary.assistantTask as string].join("\n");
+    }
     if (action === "authorization_upgrade") {
       const projectId = targets && typeof targets === "object" && !Array.isArray(targets)
         ? (targets as Record<string, unknown>).project_id : undefined;

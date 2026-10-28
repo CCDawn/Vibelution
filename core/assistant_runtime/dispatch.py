@@ -561,8 +561,24 @@ class DispatchService:
             return await self._dispatch_from_source(project_id, agent_id=agent_id, dispatch_id=dispatch_id,
                 runtime=runtime, task=task, task_source=task_source, title=title)
 
+    async def dispatch_write_from_source(self, project_id: str, *, agent_id: str, dispatch_id: str,
+                                         runtime: dict, task: str, title: str = "") -> dict:
+        """Request workspace write for an exact source span after the caller's native policy gate.
+
+        This internal entry point does not grant or decide approval. The caller
+        must bind its approval to these exact arguments and route through the
+        native manage tool; the target still applies its own permission ceiling.
+        """
+        if not isinstance(task, str) or not task or task != task.strip():
+            raise DispatchError("Invalid exact task source.", code="TASK_SOURCE_INVALID")
+        async with self._dispatch_admission:
+            self._check_dispatch_unfenced()
+            return await self._dispatch_from_source(project_id, agent_id=agent_id, dispatch_id=dispatch_id,
+                runtime=runtime, task=task, title=title, permission_profile="workspace_write")
+
     async def _dispatch_from_source(self, project_id: str, *, agent_id: str, dispatch_id: str, runtime: dict,
-                                    task: str | None = None, task_source: dict | None = None, title: str = "") -> dict:
+                                    task: str | None = None, task_source: dict | None = None, title: str = "",
+                                    permission_profile: str = "read_only") -> dict:
         from .task_source import resolve_task
 
         self._project(project_id)
@@ -573,14 +589,16 @@ class DispatchService:
                 # Legacy acknowledged raw repeats can only return the known
                 # task through the unchanged request digest. Never materialize
                 # an unknown legacy request without original source proof.
-                if not record.get("nativeTaskId") or task is None or task_source is not None:
+                if (permission_profile != "read_only" or not record.get("nativeTaskId")
+                        or task is None or task_source is not None):
                     raise DispatchError("原请求缺少任务原文引用；请先查询原 dispatch_id 回执，不要重新创建。", code="TASK_SOURCE_UNAVAILABLE")
                 resolved, reference = task, None
             else:
                 resolved, reference = await asyncio.to_thread(resolve_task, runtime, task=task, task_source=task_source,
-                    source_ref=record.get("sourceRef") if record is not None else None)
+                    source_ref=record.get("sourceRef") if record is not None else None,
+                    require_full_message=permission_profile == "workspace_write")
         return await self._dispatch(project_id, agent_id=agent_id, dispatch_id=dispatch_id, task=resolved,
-            title=title, permission_profile="read_only", source_ref=reference)
+            title=title, permission_profile=permission_profile, source_ref=reference)
 
     async def reconcile(self, dispatch_id: str) -> dict[str, Any]:
         """Renew and read the known native task; never infer or create a new task."""

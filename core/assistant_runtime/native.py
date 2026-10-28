@@ -236,17 +236,42 @@ def identity() -> dict[str, Any]:
         return _projection()
 
 
-def submit(message: str, request_id: str) -> dict[str, Any]:
+def submit(message: str, request_id: str, attachment_ids: list[str] | None = None) -> dict[str, Any]:
     """Use native acceptance and journal idempotency, without a second queue."""
     if not isinstance(message, str):
         raise ValueError("message must be text")  # noqa: TRY004 - preserve the existing submit contract.
     if not isinstance(request_id, str) or not request_id.strip():
         raise ValueError("request_id is required")
     with _session_command() as (sessions, session_id):
+        if attachment_ids is not None:
+            from . import attachments
+            attachments.validate_ids(sessions, session_id, attachment_ids)
         return sessions.submit_session_message_lightweight(
             session_id, message,
-            client_submission_id=request_id.strip(), queue_if_busy=True,
+            client_submission_id=request_id.strip(), queue_if_busy=True, attachment_ids=attachment_ids,
         )
+
+
+def upload_attachment(payload: bytes, *, filename: str, content_type: str) -> dict[str, Any]:
+    """Store bytes only in the fixed assistant Session; return public metadata."""
+    from . import attachments
+
+    with _session_command() as (sessions, session_id):
+        return attachments.store(sessions, session_id, payload, filename=filename, content_type=content_type)
+
+
+def read_attachment(artifact_id: str) -> tuple[bytes, str]:
+    """Read an artifact belonging to the fixed assistant Session."""
+    from . import attachments
+
+    with _session_command() as (sessions, session_id):
+        try:
+            from .migration_io import read_stable_file
+            path, content_type = attachments.resolve(session_id, artifact_id)
+            snapshot = read_stable_file(path, sessions.SESSION_USER_IMAGE_MAX_BYTES)
+            return snapshot.raw, content_type
+        except (FileNotFoundError, OSError, ValueError):
+            raise AssistantSessionError("ATTACHMENT_NOT_FOUND") from None
 
 
 @contextmanager

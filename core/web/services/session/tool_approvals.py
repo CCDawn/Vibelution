@@ -1138,6 +1138,19 @@ def _argument_summary(tool_name: str, tool_args: Mapping[str, Any]) -> dict[str,
 def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
     """Approval-only projection; never expose nested prompt/policy values."""
     action = args.get("action")
+    if action == "dispatch_write":
+        from core.infrastructure.native_runtime import is_launcher_assistant_process
+        if not is_launcher_assistant_process():
+            return {"assistantArgumentsInvalid": True}
+        try:
+            raw = args.get("arguments_json")
+            values = json.loads(raw) if isinstance(raw, str) and len(raw) <= 16000 else None
+            if not isinstance(values, dict):
+                raise ValueError("Invalid dispatch arguments")
+            from core.assistant_runtime.dispatch_approval import dispatch_write_approval_summary
+            return dispatch_write_approval_summary(values)
+        except (ValueError, TypeError, KeyError, RuntimeError, RecursionError):
+            return {"assistantAction": action, "assistantArgumentsInvalid": True}
     if action == "authorization_upgrade":
         from core.infrastructure.native_runtime import is_launcher_assistant_process
         if not is_launcher_assistant_process():

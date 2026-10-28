@@ -4,7 +4,7 @@ import type { SessionDetail, SessionQueuedTurn } from "../../api/types";
 import { exactAcceptedSubmitTurnId, findSubmitAcceptanceEvidence } from "../chat/chatSubmitAcceptanceReadback";
 import { hasExecutionOwnership, resolveSessionActivity, type SessionActivitySource } from "../sessionActivityState";
 
-export type LauncherAssistantSubmission = { message: string; requestId: string; draftSnapshot?: string };
+export type LauncherAssistantSubmission = { message: string; requestId: string; draftSnapshot?: string; attachmentIds?: string[]; attachmentSnapshotIds?: string[] };
 export type LauncherAssistantQueuedAcceptance = { id: string; clientSubmissionId: string; observed: boolean };
 type LauncherAssistantActivitySource = SessionActivitySource & Partial<Pick<SessionDetail, "messages" | "activeTask">>
   & { queuedTurns?: Array<Pick<SessionQueuedTurn, "id" | "status" | "clientSubmissionId">> };
@@ -51,10 +51,14 @@ export function launcherAssistantSubmission(
   outstanding: LauncherAssistantSubmission | null,
   draft: string,
   createId: () => string = () => crypto.randomUUID(),
+  attachmentIds: string[] = [],
+  attachmentSnapshotIds: string[] = [],
 ): LauncherAssistantSubmission | null {
   if (outstanding) return outstanding;
   const message = draft.trim();
-  return message ? { message, requestId: createId(), draftSnapshot: draft } : null;
+  if (!message && !attachmentIds.length) return null;
+  return attachmentIds.length ? { message, requestId: createId(), draftSnapshot: draft, attachmentIds, attachmentSnapshotIds }
+    : { message, requestId: createId(), draftSnapshot: draft };
 }
 
 export function launcherAssistantActivity(source: SessionActivitySource = {}): {

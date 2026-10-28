@@ -66,6 +66,31 @@ function fixture(options: { stale?: boolean; noReadyFirst?: boolean; graceful?: 
 }
 
 describe("AssistantHost", () => {
+  it("transports a fixed-session attachment and sends it without a renderer path", async () => {
+    const { host, fetchImpl } = fixture();
+    await host.start();
+    fetchImpl.mockImplementationOnce(async (url, options) => {
+      expect(String(url)).toContain("/api/assistant/attachments/upload");
+      expect(JSON.parse(String(options?.body))).toEqual({ filename: "note.txt", contentType: "text/plain", dataBase64: "Zml4dHVyZQ==" });
+      return Response.json({ artifactId: "file-1", filename: "note.txt", contentType: "text/plain", sizeBytes: 7, kind: "user_document", status: "ready" });
+    });
+    const uploaded = await host.request({ operation: "uploadAttachment", filename: "note.txt", contentType: "text/plain", dataBase64: "Zml4dHVyZQ==" });
+    expect(uploaded).toMatchObject({ artifactId: "file-1" });
+    fetchImpl.mockImplementationOnce(async (url, options) => {
+      expect(String(url)).toContain("/api/assistant/messages");
+      expect(JSON.parse(String(options?.body))).toEqual({ message: "", requestId: "request-1", attachmentIds: ["file-1"] });
+      return Response.json({ accepted: true, turnId: "turn-1" });
+    });
+    await expect(host.request({ operation: "send", message: "", requestId: "request-1", attachmentIds: ["file-1"] })).resolves.toMatchObject({ accepted: true });
+    fetchImpl.mockImplementationOnce(async (url, options) => {
+      expect(String(url)).toContain("/api/assistant/attachments/read");
+      expect(JSON.parse(String(options?.body))).toEqual({ artifactId: "file-1" });
+      return Response.json({ contentType: "text/plain", dataBase64: "Zml4dHVyZQ==" });
+    });
+    await expect(host.request({ operation: "readAttachment", artifactId: "file-1" })).resolves.toEqual({ contentType: "text/plain", dataBase64: "Zml4dHVyZQ==" });
+    await expect(host.request({ operation: "readAttachment", artifactId: "../file" })).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    await expect(host.request({ operation: "uploadAttachment", filename: "note.txt", contentType: "text/plain", dataBase64: "!!!!" })).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+  });
   it("retries the same migration host after a pre-spawn restart failure", async () => {
     const { host, native, root } = fixture({ graceful: true });
     Object.assign(native, { exitCode: vi.fn(() => 0) });

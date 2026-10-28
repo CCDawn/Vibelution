@@ -46,7 +46,7 @@ def _unique(content: str, anchor: str) -> int:
 
 
 def resolve_task(runtime: dict, *, task: str | None = None, task_source: dict | None = None,
-                 source_ref: dict | None = None) -> tuple[str, dict]:
+                 source_ref: dict | None = None, require_full_message: bool = False) -> tuple[str, dict]:
     """Resolve a fresh span or verify a frozen span without persisting its text."""
     if (task is None) == (task_source is None):
         _invalid()
@@ -71,6 +71,13 @@ def resolve_task(runtime: dict, *, task: str | None = None, task_source: dict | 
         _invalid()
     if not isinstance(runtime, dict) or any(source.get(key) != runtime.get(key) for key in ("agentId", "sessionId")):
         _invalid()
+    if require_full_message:
+        from .dispatch_approval import MAX_WRITE_TASK_CHARS
+        complete = content.strip()
+        if len(complete) > MAX_WRITE_TASK_CHARS:
+            raise DispatchError("用户消息过长，无法完整派遣；请重新提供范围明确的完整消息。", code="TASK_SOURCE_TOO_LONG")
+        if source.get("turnId") != runtime.get("turnId") or task is None or task != complete:
+            raise DispatchError("写入派遣必须使用当前用户消息的完整正文。", code="TASK_SOURCE_MISMATCH")
     if frozen is not None:
         if (any(source.get(key) != frozen[key] for key in ("agentId", "sessionId", "turnId", "eventId"))
             or frozen["contentHash"] != _hash(content) or not 0 <= frozen["start"] < frozen["end"] <= len(content)):

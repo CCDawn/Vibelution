@@ -273,6 +273,109 @@ async def test_raw_original_source_and_corrupt_ref_receipt_stay_separate(tmp_pat
 
 
 @pytest.mark.anyio
+async def test_write_dispatch_is_exact_source_bound_and_reuses_original_request(tmp_path, journal_source):
+    runtime, original, current = journal_source
+    probe = ClientProbe()
+    service = adapter(tmp_path, probe)
+    params = {"agent_id": "coder", "dispatch_id": "write-a", "runtime": runtime, "task": original["content"]}
+    probe.start_error = True
+    with pytest.raises(DispatchError):
+        await service.dispatch_write_from_source("project-a", **params)
+    record = json.loads(service._path("write-a").read_text(encoding="utf-8"))
+    assert original["content"] not in json.dumps(record, ensure_ascii=False)
+    probe.start_error = False
+    restarted = adapter(tmp_path, probe)
+    await restarted.dispatch_write_from_source("project-a", **params)
+    await restarted.dispatch_write_from_source("project-a", **params)
+    starts = [args for name, args in probe.calls if name == "start"]
+    assert [call["permission_profile"] for call in starts] == ["workspace_write"] * 2
+    assert [call["task"] for call in starts] == [original["content"]] * 2
+    assert [call["client_request_id"] for call in starts] == ["launcher-assistant:write-a"] * 2
+    assert starts[1]["require_existing_capability"] is True
+    runtime["turnId"] = "turn-new"
+    current.update(turnId="turn-new", eventId="user-new", content="查询原请求")
+    with pytest.raises(DispatchError) as stale:
+        await restarted.dispatch_write_from_source("project-a", **params)
+    assert stale.value.code == "TASK_SOURCE_MISMATCH"
+    assert [name for name, _ in probe.calls].count("start") == 2
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("content,task", [
+    ("不要修改文件", "修改文件"),
+    ("修改文件，但不要提交", "修改文件"),
+    ("修改文件，但不要提交", "但不要提交"),
+])
+async def test_write_dispatch_rejects_omitted_current_message_constraints(tmp_path, journal_source, content, task):
+    runtime, original, current = journal_source
+    original["content"] = current["content"] = content
+    probe = ClientProbe()
+    service = adapter(tmp_path, probe)
+    with pytest.raises(DispatchError) as error:
+        await service.dispatch_write_from_source("project-a", agent_id="coder", dispatch_id="write-a", runtime=runtime, task=task)
+    assert error.value.code == "TASK_SOURCE_MISMATCH"
+    assert not service._path("write-a").exists() and not probe.calls
+
+
+@pytest.mark.anyio
+async def test_write_dispatch_only_normalizes_complete_message_outer_whitespace(tmp_path, journal_source):
+    runtime, original, current = journal_source
+    original["content"] = current["content"] = " \n  修改文件，但不要提交  \n"
+    probe = ClientProbe()
+    service = adapter(tmp_path, probe)
+    await service.dispatch_write_from_source("project-a", agent_id="coder", dispatch_id="write-a", runtime=runtime, task="修改文件，但不要提交")
+    assert next(kwargs for name, kwargs in probe.calls if name == "start")["task"] == "修改文件，但不要提交"
+
+
+@pytest.mark.anyio
+async def test_long_write_source_refuses_partial_message_instead_of_truncating(tmp_path, journal_source):
+    runtime, original, current = journal_source
+    original["content"] = current["content"] = "x" * 12001
+    probe = ClientProbe()
+    service = adapter(tmp_path, probe)
+    with pytest.raises(DispatchError) as error:
+        await service.dispatch_write_from_source("project-a", agent_id="coder", dispatch_id="write-a", runtime=runtime, task="x" * 12000)
+    assert error.value.code == "TASK_SOURCE_TOO_LONG"
+    assert not service._path("write-a").exists() and not probe.calls
+
+
+@pytest.mark.anyio
+async def test_read_only_dispatch_retains_existing_substring_semantics(tmp_path, journal_source):
+    runtime, original, current = journal_source
+    original["content"] = current["content"] = "先查询，然后修改文件，但不要提交"
+    probe = ClientProbe()
+    service = adapter(tmp_path, probe)
+    await service.dispatch_from_source("project-a", agent_id="coder", dispatch_id="read-a", runtime=runtime, task="先查询")
+    start_args = next(kwargs for name, kwargs in probe.calls if name == "start")
+    assert start_args["task"] == "先查询" and start_args["permission_profile"] == "read_only"
+
+
+@pytest.mark.anyio
+async def test_write_dispatch_rejects_unverified_or_changed_task_before_start(tmp_path, journal_source):
+    runtime, original, _ = journal_source
+    probe = ClientProbe()
+    service = adapter(tmp_path, probe)
+    for task in (original["content"] + " 并修改文件", " " + original["content"]):
+        with pytest.raises(DispatchError):
+            await service.dispatch_write_from_source("project-a", agent_id="coder", dispatch_id="write-a", runtime=runtime, task=task)
+    assert not service._path("write-a").exists()
+    assert not probe.calls
+
+
+@pytest.mark.anyio
+async def test_write_and_read_dispatch_cannot_share_an_id(tmp_path, journal_source):
+    runtime, original, _ = journal_source
+    probe = ClientProbe()
+    service = adapter(tmp_path, probe)
+    params = {"agent_id": "coder", "dispatch_id": "same-a", "runtime": runtime, "task": original["content"]}
+    await service.dispatch_from_source("project-a", **params)
+    with pytest.raises(DispatchError) as conflict:
+        await service.dispatch_write_from_source("project-a", **params)
+    assert conflict.value.code == "DISPATCH_CONFLICT"
+    assert [name for name, _ in probe.calls].count("start") == 1
+
+
+@pytest.mark.anyio
 async def test_unknown_legacy_model_retry_denied_but_known_raw_repeat_is_read_only(tmp_path, journal_source):
     runtime, _, _ = journal_source
     probe = ClientProbe()
@@ -394,6 +497,20 @@ def native_adapter(tmp_path: Path, runtime: FakeRuntime, *, drop_first_start=Fal
     factory = lambda project_root, **kwargs: ManagedAgentBackendClient(project_root, transport=transport, **kwargs)
     adapter_service = DispatchService(tmp_path / "profile", {"project-a": root}, client_factory=factory)
     return adapter_service, service, calls, factory
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("ceiling", ["read_only", "workspace_write"])
+async def test_write_source_dispatch_preserves_native_effective_permission(tmp_path, journal_source, ceiling):
+    caller, original, _ = journal_source
+    runtime = FakeRuntime(agents=[_agent(externalMaximumPermissionProfile=ceiling)])
+    service, _, calls, _ = native_adapter(tmp_path, runtime)
+    result = await service.dispatch_write_from_source("project-a", agent_id="coder", dispatch_id="write-ceiling",
+        runtime=caller, task=original["content"])
+    request = next(request for request in calls if request.method == "POST" and request.url.path.endswith("/tasks"))
+    assert json.loads(request.content)["permission_profile"] == "workspace_write"
+    assert result["receipt"]["effectivePermissionProfile"] == ceiling
+    assert len(runtime.create_calls) == len(runtime.submit_calls) == 1
 
 
 @pytest.mark.anyio

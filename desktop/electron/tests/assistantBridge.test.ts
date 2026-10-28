@@ -32,6 +32,14 @@ describe("Launcher assistant private bridge", () => {
     await expect(invokeAssistant({ ...event, sender: {} }, { operation: "status" }, owner)).rejects.toThrow("SENDER_FORBIDDEN");
     await expect(invokeAssistant({ ...event, senderFrame: { ...event.senderFrame } }, { operation: "status" }, owner)).rejects.toThrow("SENDER_FORBIDDEN");
   });
+  it("routes attachment operations only from the owned assistant frame", async () => {
+    const { owner, event } = setup();
+    const upload = { operation: "uploadAttachment", filename: "note.txt", contentType: "text/plain", dataBase64: "Zml4dHVyZQ==" };
+    await expect(invokeAssistant({ ...event, sender: {} }, upload, owner)).rejects.toThrow("SENDER_FORBIDDEN");
+    await invokeAssistant(event, upload, owner);
+    await invokeAssistant(event, { operation: "readAttachment", artifactId: "file-1" }, owner);
+    expect(owner.host.request).toHaveBeenCalledTimes(2);
+  });
   it("accepts fixed computer verbs only from the owned top-level assistant frame", async () => {
     const { owner, event } = setup();
     Object.assign(owner.host, { snapshot: () => ({ state: "ready" }) });

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   authorizationUpgradePreviewIsValid,
+  dispatchWritePreviewIsValid,
   toolApprovalActionPreview,
   toolApprovalCodexButtonLabels,
   toolApprovalCodexTitle,
@@ -10,6 +11,29 @@ import {
 } from "./toolApprovalPreview";
 
 describe("toolApprovalPreview", () => {
+  it("shows the entire write dispatch request and rejects misleading or incomplete details", () => {
+    const task = `修改这两个文件\n${"长任务".repeat(300)}\n保留其他内容。`;
+    const summary = { assistantAction: "dispatch_write", assistantTargets: { project_id: "project-1", agent_id: "agent-1", dispatch_id: "dispatch-1" },
+      assistantRequestedPermission: "workspace_write", assistantTask: task };
+    expect(dispatchWritePreviewIsValid(summary)).toBe(true);
+    const preview = toolApprovalActionPreview(summary, "personal_assistant_manage_tool", "zh");
+    expect(preview).toContain("项目: project-1");
+    expect(preview).toContain("Agent: agent-1");
+    expect(preview).toContain("派遣 ID: dispatch-1");
+    expect(preview).toContain("申请权限: workspace_write");
+    expect(preview.endsWith(task)).toBe(true);
+    for (const invalid of [
+      { ...summary, assistantTargets: { ...summary.assistantTargets, agent_id: "agent\nforged" } },
+      { ...summary, assistantRequestedPermission: "full_access" },
+      { ...summary, assistantTask: "altered\u202Etext" },
+      { ...summary, assistantTask: "x".repeat(12001) },
+      { ...summary, assistantTask: undefined },
+      { ...summary, assistantArgumentsInvalid: true },
+    ]) {
+      expect(dispatchWritePreviewIsValid(invalid)).toBe(false);
+      expect(toolApprovalActionPreview(invalid, "personal_assistant_manage_tool", "zh")).toContain("参数无法核对");
+    }
+  });
   it("names semantic API operations and shows concrete targets and impact", () => {
     const preview = toolApprovalActionPreview({ assistantAction: "provider_update",
       assistantTargets: { provider_id: "local-ai" }, assistantChangedFields: ["enabled"],

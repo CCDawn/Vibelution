@@ -87,6 +87,8 @@ export type ConversationViewProps = {
   title: string;
   phase: string;
   messages: ConversationMessage[];
+  /** Optional IDs represented by mounted virtual rows, including folded source messages. */
+  onVisibleTimelineMessageIds?: (ids: string[]) => void;
   activeTurnMessage?: ConversationMessage;
   /**
    * True while the session message window is still hydrating after a switch.

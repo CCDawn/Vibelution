@@ -9,6 +9,7 @@ export type LauncherOperatorProfile = {
 
 export type LauncherAssistantStatus = {
   operatorAssetsVersion?: 1;
+  attachmentVersion?: 1;
   operatorProfile?: LauncherOperatorProfile;
   assistant: { agentId: string; directSessionId: string; displayName: string };
   settings?: { ok: boolean; preferences: DesktopPetPreferences; displayName: string; modelId: string };
@@ -30,7 +31,9 @@ export type LauncherAssistantDispatch = {
 export type LauncherAssistantRequest =
   | { operation: "status" | "detail" | "dispatches" | "hide" | "approvals" | "openLauncher" }
   | { operation: "resolveApproval"; requestId: string; decision: "accept" | "decline" }
-  | { operation: "send"; message: string; requestId: string }
+  | { operation: "send"; message: string; requestId: string; attachmentIds?: string[] }
+  | { operation: "uploadAttachment"; filename: string; contentType: string; dataBase64: string }
+  | { operation: "readAttachment"; artifactId: string }
   | { operation: "stop"; turnId: string }
   | { operation: "continue"; requestId: string; continuation: SessionContinuationExpectation }
   | { operation: "config" }
@@ -111,6 +114,7 @@ export async function getLauncherAssistantStatus(): Promise<LauncherAssistantSta
   if (Object.prototype.hasOwnProperty.call(result, "operatorAssetsVersion") && result.operatorAssetsVersion !== 1) {
     throw new Error("Launcher 图片资源版本不可用。");
   }
+  if (result.attachmentVersion !== undefined && result.attachmentVersion !== 1) throw new Error("Launcher 附件版本不可用。");
   if (result.settings !== undefined) {
     const settings = result.settings;
     if (!record(settings) || typeof settings.ok !== "boolean" || !record(settings.preferences)
@@ -149,9 +153,10 @@ export async function getLauncherAssistantDetail(sessionId: string): Promise<Ses
   return result as SessionDetail;
 }
 
-export async function sendLauncherAssistantMessage(message: string, requestId: string): Promise<LauncherAssistantAcceptance> {
-  if (!message.trim() || !/^[A-Za-z0-9_.:-]{1,128}$/.test(requestId)) throw new Error("消息或请求标识无效。");
-  const result = await launcherAssistantBridge().invoke({ operation: "send", message, requestId });
+export async function sendLauncherAssistantMessage(message: string, requestId: string, attachmentIds: string[] = []): Promise<LauncherAssistantAcceptance> {
+  if ((!message.trim() && !attachmentIds.length) || !attachmentIds.every(validArtifactId) || !/^[A-Za-z0-9_.:-]{1,128}$/.test(requestId)) throw new Error("消息或请求标识无效。");
+  const result = await launcherAssistantBridge().invoke(attachmentIds.length
+    ? { operation: "send", message, requestId, attachmentIds } : { operation: "send", message, requestId });
   if (record(result) && (result.status === "queued" || result.queuedTurnId !== undefined)) {
     if (result.accepted !== true || result.status !== "queued" || result.turnId !== ""
       || typeof result.queuedTurnId !== "string" || !result.queuedTurnId.trim() || result.clientSubmissionId !== requestId) {
@@ -161,6 +166,51 @@ export async function sendLauncherAssistantMessage(message: string, requestId: s
   }
   if (!record(result) || result.accepted !== true || typeof result.turnId !== "string" || !result.turnId.trim()) throw new Error("Launcher 尚未确认消息所属轮次。");
   return { turnId: result.turnId };
+}
+
+
+function validArtifactId(id: string): boolean {
+  return typeof id === "string" && /^[A-Za-z0-9_.-]{1,255}$/.test(id) && id !== "." && id !== "..";
+}
+
+/** Bytes travel only through the fixed Launcher assistant identity. */
+export async function uploadLauncherAttachment(file: File): Promise<string> {
+  const dataBase64 = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("无法读取附件。"));
+    reader.onload = () => {
+      const value = reader.result;
+      if (typeof value !== "string" || !value.includes(",")) return reject(new Error("无法读取附件。"));
+      resolve(value.slice(value.indexOf(",") + 1));
+    };
+    reader.readAsDataURL(file);
+  });
+  const result = await launcherAssistantBridge().invoke({ operation: "uploadAttachment", filename: file.name, contentType: file.type || "application/octet-stream", dataBase64 });
+  if (!exactFields(result, ["artifactId", "filename", "contentType", "sizeBytes", "kind", "status"])
+    || !validArtifactId(result.artifactId as string) || typeof result.filename !== "string"
+    || typeof result.contentType !== "string" || !Number.isSafeInteger(result.sizeBytes)
+    || result.sizeBytes !== file.size || !["user_image", "user_document"].includes(String(result.kind)) || result.status !== "ready") {
+    throw new Error("Launcher 未确认附件上传。");
+  }
+  return result.artifactId as string;
+}
+
+/** Never expose native URLs or arbitrary MIME types to the conversation. */
+export async function readLauncherAttachment(artifactId: string): Promise<string> {
+  if (!validArtifactId(artifactId)) throw new Error("附件标识无效。");
+  const result = await launcherAssistantBridge().invoke({ operation: "readAttachment", artifactId });
+  if (!exactFields(result, ["contentType", "dataBase64"]) || typeof result.contentType !== "string"
+    || typeof result.dataBase64 !== "string" || !result.dataBase64.length || result.dataBase64.length > Math.ceil(8 * 1024 * 1024 / 3) * 4
+    || result.dataBase64.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(result.dataBase64)) throw new Error("附件暂不可用。");
+  const data = result.dataBase64;
+  const padding = data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0;
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  const decodedLength = data.length / 4 * 3 - padding;
+  if (!decodedLength || decodedLength > 8 * 1024 * 1024
+    || (padding === 2 && alphabet.indexOf(data[data.length - 3]) % 16 !== 0)
+    || (padding === 1 && alphabet.indexOf(data[data.length - 2]) % 4 !== 0)) throw new Error("附件暂不可用。");
+  const mime = ["image/png", "image/jpeg", "image/webp", "image/gif"].includes(result.contentType) ? result.contentType : "application/octet-stream";
+  return `data:${mime};base64,${result.dataBase64}`;
 }
 
 export async function stopLauncherAssistantTurn(sessionId: string, turnId: string): Promise<SessionDetail> {
@@ -185,15 +235,26 @@ function isApproval(value: unknown, sessionId: string): value is SessionToolAppr
     && Array.isArray(value.availableDecisions) && value.availableDecisions.every(decision => typeof decision === "string");
 }
 
+// Preserve the decline path for a management request whose summary is absent.
+// The route must treat the empty summary as unsafe to approve.
+function normalizeApprovalSummary(value: unknown): unknown {
+  if (record(value) && value.toolName === "personal_assistant_manage_tool" && value.argumentSummary == null) {
+    return { ...value, argumentSummary: {} };
+  }
+  return value;
+}
+
 export async function getLauncherAssistantApprovals(sessionId: string): Promise<SessionToolApprovalRequest[]> {
   const result = await launcherAssistantBridge().invoke({ operation: "approvals" });
-  if (!Array.isArray(result) || !result.every(request => isApproval(request, sessionId))) throw new Error("Launcher 待授权请求与个人助理身份不一致。");
-  return result;
+  if (!Array.isArray(result)) throw new Error("Launcher 待授权请求与个人助理身份不一致。");
+  const requests = result.map(normalizeApprovalSummary);
+  if (!requests.every(request => isApproval(request, sessionId))) throw new Error("Launcher 待授权请求与个人助理身份不一致。");
+  return requests;
 }
 
 export async function resolveLauncherAssistantApproval(request: SessionToolApprovalRequest, decision: "accept" | "decline"): Promise<SessionToolApprovalRequest> {
   if (!["accept", "decline"].includes(decision) || request.status !== "pending" || !request.availableDecisions.includes(decision)) throw new Error("此授权决定不可用。");
-  const result = await launcherAssistantBridge().invoke({ operation: "resolveApproval", requestId: request.requestId, decision });
+  const result = normalizeApprovalSummary(await launcherAssistantBridge().invoke({ operation: "resolveApproval", requestId: request.requestId, decision }));
   if (!isApproval(result, request.sessionId) || result.requestId !== request.requestId || result.turnId !== request.turnId || result.agentId !== request.agentId) throw new Error("Launcher 未确认本次授权结果。");
   return result;
 }

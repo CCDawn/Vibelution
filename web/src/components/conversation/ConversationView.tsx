@@ -249,6 +249,7 @@ export const ConversationView = React.memo(function ConversationView({
   hasEarlierMessages = false,
   earlierMessagesLoading = false,
   onStreamingFramePaint,
+  onVisibleTimelineMessageIds,
   composerValue,
   composerPlaceholder,
   composerDisabled,
@@ -733,6 +734,29 @@ export const ConversationView = React.memo(function ConversationView({
   for (let tailOffset = 0; tailOffset < timelineLiveTailMessages.length; tailOffset += 1) {
     timelineRowPlan.push({ index: timelineLiveTailStartIndex + tailOffset, virtualStartPx: null });
   }
+  // Report the mounted range only when requested. Folded assistant rows retain
+  // their source ids; user messages retain their own ids in this projection.
+  const sourceIdsByTurn = useMemo(() => {
+    const byTurn = new Map<string, string[]>();
+    if (!onVisibleTimelineMessageIds) return byTurn;
+    for (const source of messages) {
+      if (source.role !== "assistant") continue;
+      const turn = String(source.turnId || source.metadata?.turnId || source.metadata?.turn_id || "").replace(/^live:/, "").trim();
+      if (turn) byTurn.set(turn, [...(byTurn.get(turn) || []), source.id]);
+    }
+    return byTurn;
+  }, [messages, onVisibleTimelineMessageIds]);
+  const mountedMessageIds = onVisibleTimelineMessageIds ? timelineRowPlan.flatMap(({ index }) => {
+    const message = activeTimelineMessages[index];
+    if (!message) return [];
+    const projected = message.metadata?.projectedMessageIds;
+    const turn = message.role === "assistant" ? String(message.turnId || message.metadata?.turnId || message.metadata?.turn_id || "").replace(/^live:/, "").trim() : "";
+    return [message.id, ...(Array.isArray(projected) ? projected.filter((id): id is string => typeof id === "string") : []), ...(sourceIdsByTurn.get(turn) || [])];
+  }) : [];
+  const mountedMessageIdsKey = JSON.stringify([...new Set(mountedMessageIds)]);
+  useEffect(() => {
+    onVisibleTimelineMessageIds?.(JSON.parse(mountedMessageIdsKey) as string[]);
+  }, [mountedMessageIdsKey, onVisibleTimelineMessageIds]);
   // Turn navigator directory and live current index, beside the row plan so
   // the minimap highlight reads the same virtualizer snapshot.
   const {

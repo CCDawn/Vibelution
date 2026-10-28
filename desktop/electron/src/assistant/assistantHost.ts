@@ -20,7 +20,9 @@ export type AssistantHostSnapshot = {
 export type AssistantHostRequest =
   | { operation: "status" | "detail" | "dispatches" | "config" | "approvals" }
   | { operation: "resolveApproval"; requestId: string; decision: "accept" | "decline" }
-  | { operation: "send"; message: string; requestId: string }
+  | { operation: "send"; message: string; requestId: string; attachmentIds?: string[] }
+  | { operation: "uploadAttachment"; filename: string; contentType: string; dataBase64: string }
+  | { operation: "readAttachment"; artifactId: string }
   | { operation: "stop"; turnId: string }
   | { operation: "continue"; requestId: string; continuation: { turnId: string; headId: string; ledgerSeq: number; agentId: string } }
   | { operation: "curation"; sessionId: string }
@@ -730,10 +732,53 @@ export class AssistantHost {
         return result;
       }
       case "send":
-        if (!ownKeys(payload, ["operation", "message", "requestId"])
-          || typeof payload.message !== "string" || !payload.message.trim() || payload.message.length > 64_000
+        if (!ownKeys(payload, ["operation", "message", "requestId", "attachmentIds"])
+          || typeof payload.message !== "string" || payload.message.length > 64_000
+          || (payload.attachmentIds !== undefined && (!Array.isArray(payload.attachmentIds) || payload.attachmentIds.length > 8
+            || payload.attachmentIds.some(id => typeof id !== "string" || !/^[A-Za-z0-9_.-]{1,255}$/.test(id) || id === "." || id === "..")))
+          || (!payload.message.trim() && !payload.attachmentIds?.length)
           || typeof payload.requestId !== "string" || !/^[A-Za-z0-9_.:-]{1,128}$/.test(payload.requestId)) throw new HostError("ASSISTANT_REQUEST_INVALID");
-        return await this.rpc(generation, "/api/assistant/messages", "POST", { message: payload.message, requestId: payload.requestId });
+        return await this.rpc(generation, "/api/assistant/messages", "POST", { message: payload.message, requestId: payload.requestId,
+          ...(payload.attachmentIds?.length ? { attachmentIds: payload.attachmentIds } : {}) });
+      case "uploadAttachment": {
+        if (!ownKeys(payload, ["operation", "filename", "contentType", "dataBase64"])
+          || typeof payload.filename !== "string" || !payload.filename.length || payload.filename.length > 255
+          || typeof payload.contentType !== "string" || !payload.contentType.length || payload.contentType.length > 128
+          || typeof payload.dataBase64 !== "string" || !payload.dataBase64.length
+          || payload.dataBase64.length > Math.ceil(8 * 1024 * 1024 / 3) * 4
+          || !/^[A-Za-z0-9+/]*={0,2}$/.test(payload.dataBase64) || payload.dataBase64.length % 4 !== 0)
+          throw new HostError("ASSISTANT_REQUEST_INVALID");
+        const bytes = Buffer.from(payload.dataBase64, "base64");
+        if (!bytes.length || bytes.length > 8 * 1024 * 1024 || bytes.toString("base64") !== payload.dataBase64)
+          throw new HostError("ASSISTANT_REQUEST_INVALID");
+        const result = await this.rpc(generation, "/api/assistant/attachments/upload", "POST",
+          { filename: payload.filename, contentType: payload.contentType, dataBase64: payload.dataBase64 });
+        if (!object(result) || Object.keys(result).length !== 6
+          || !ownKeys(result, ["artifactId", "filename", "contentType", "sizeBytes", "kind", "status"])
+          || typeof result.artifactId !== "string" || !/^[A-Za-z0-9_.-]{1,255}$/.test(result.artifactId)
+          || result.artifactId === "." || result.artifactId === ".." || typeof result.filename !== "string"
+          || typeof result.contentType !== "string" || result.sizeBytes !== bytes.length
+          || !["user_image", "user_document"].includes(String(result.kind)) || result.status !== "ready")
+          throw new HostError("ASSISTANT_RESPONSE_INVALID");
+        return result;
+      }
+      case "readAttachment": {
+        if (!ownKeys(payload, ["operation", "artifactId"]) || typeof payload.artifactId !== "string"
+          || !/^[A-Za-z0-9_.-]{1,255}$/.test(payload.artifactId) || payload.artifactId === "." || payload.artifactId === "..")
+          throw new HostError("ASSISTANT_REQUEST_INVALID");
+        const result = await this.rpc(generation, "/api/assistant/attachments/read", "POST",
+          { artifactId: payload.artifactId }, REQUEST_MS, false, 16 * 1024 * 1024);
+        if (!object(result) || Object.keys(result).length !== 2 || !ownKeys(result, ["contentType", "dataBase64"])
+          || typeof result.contentType !== "string" || !result.contentType.length || result.contentType.length > 128
+          || typeof result.dataBase64 !== "string" || !result.dataBase64.length
+          || result.dataBase64.length > Math.ceil(8 * 1024 * 1024 / 3) * 4
+          || !/^[A-Za-z0-9+/]*={0,2}$/.test(result.dataBase64) || result.dataBase64.length % 4 !== 0)
+          throw new HostError("ASSISTANT_RESPONSE_INVALID");
+        const bytes = Buffer.from(result.dataBase64, "base64");
+        if (!bytes.length || bytes.length > 8 * 1024 * 1024 || bytes.toString("base64") !== result.dataBase64)
+          throw new HostError("ASSISTANT_RESPONSE_INVALID");
+        return result;
+      }
       case "stop":
         if (!ownKeys(payload, ["operation", "turnId"]) || typeof payload.turnId !== "string"
           || !payload.turnId.trim() || payload.turnId.length > 160) throw new HostError("ASSISTANT_REQUEST_INVALID");

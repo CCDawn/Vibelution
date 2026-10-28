@@ -113,6 +113,65 @@ describe("Launcher operator image consumption", () => {
     expect(preview?.tabIndex).toBe(0);
   });
 
+  it("shows the complete write dispatch before allowing approval", async () => {
+    const task = `请修改项目\n${"完整任务内容".repeat(100)}\n任务结尾`;
+    await renderAssistant({ approval: { requestId: "r", sessionId: "s", turnId: "t", agentId: "a",
+      toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
+      argumentSummary: { assistantAction: "dispatch_write", assistantTargets: { project_id: "registered:1", agent_id: "agent-1", dispatch_id: "dispatch-1" },
+        assistantRequestedPermission: "workspace_write", assistantTask: task } } });
+    await click("展开个人助理聊天");
+    const preview = container.querySelector("pre");
+    for (const value of ["registered:1", "agent-1", "dispatch-1", "workspace_write", task]) expect(preview?.textContent).toContain(value);
+    expect(preview?.className).toContain("overflow-y-auto");
+    expect(preview?.tabIndex).toBe(0);
+    const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"));
+    expect(approve?.disabled).toBe(false);
+    await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true })));
+    await settle();
+    expect(invoke.mock.calls.some(([request]) => request.operation === "resolveApproval" && request.decision === "accept")).toBe(true);
+  });
+
+  it("blocks button and keyboard approval when the write dispatch task is missing", async () => {
+    await renderAssistant({ approval: { requestId: "r", sessionId: "s", turnId: "t", agentId: "a",
+      toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
+      argumentSummary: { assistantAction: "dispatch_write", assistantTargets: { project_id: "registered:1", agent_id: "agent-1", dispatch_id: "dispatch-1" },
+        assistantRequestedPermission: "workspace_write" } } });
+    await click("展开个人助理聊天");
+    expect(container.textContent).toContain("参数无法核对");
+    const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"));
+    const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("否"));
+    expect(approve?.disabled).toBe(true);
+    expect(reject?.disabled).toBe(false);
+    await act(async () => { approve?.click(); window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true })); });
+    expect(invoke.mock.calls.some(([request]) => request.operation === "resolveApproval" && request.decision === "accept")).toBe(false);
+  });
+
+  it.each([null, {}, { assistantAction: "unknown_action" }])("fails closed for a missing or unknown management action while allowing rejection", async argumentSummary => {
+    await renderAssistant({ approval: { requestId: "r", sessionId: "s", turnId: "t", agentId: "a",
+      toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"], argumentSummary } });
+    await click("展开个人助理聊天");
+    const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"));
+    const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("否"));
+    expect(approve?.disabled).toBe(true);
+    expect(reject?.disabled).toBe(false);
+    await act(async () => { approve?.click(); window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true })); });
+    expect(invoke.mock.calls.some(([request]) => request.operation === "resolveApproval" && request.decision === "accept")).toBe(false);
+    await act(async () => reject?.click()); await settle();
+    expect(invoke.mock.calls.some(([request]) => request.operation === "resolveApproval" && request.decision === "decline")).toBe(true);
+  });
+
+  it.each(["episodic_sync", "initial_migration_queue", "knowledge_sync_queue", "knowledge_sync_recover", "reminder_handoff_queue"])("allows a recognized native management action %s", async action => {
+    await renderAssistant({ approval: { requestId: "r", sessionId: "s", turnId: "t", agentId: "a",
+      toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
+      argumentSummary: { assistantAction: action, assistantOperationDescription: "原生迁移说明" } } });
+    await click("展开个人助理聊天");
+    expect(container.querySelector("pre")?.textContent).toContain("原生迁移说明");
+    const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"));
+    expect(approve?.disabled).toBe(false);
+    await act(async () => approve?.click()); await settle();
+    expect(invoke.mock.calls.some(([request]) => request.operation === "resolveApproval" && request.decision === "accept")).toBe(true);
+  });
+
   it("prevents approval when the requested permissions cannot be verified", async () => {
     await renderAssistant({ approval: { requestId: "r", sessionId: "s", turnId: "t", agentId: "a",
       toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
