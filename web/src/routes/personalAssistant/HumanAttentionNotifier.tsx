@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { fetchPersonalAssistantHumanAttention } from "../../api/personalAssistant";
@@ -24,6 +24,9 @@ import {
 export function HumanAttentionNotifier({ startupReady = true }: { startupReady?: boolean }) {
   const navigate = useNavigate();
   const bridge = useMemo(() => humanAttentionBridge(), []);
+  const [affairMode, setAffairMode] = useState<"legacy" | "probing" | "main_owned">(
+    () => bridge?.getHumanAttentionCapabilities ? "probing" : "legacy",
+  );
   const ledger = useMemo(
     () => createHumanAttentionLedger(browserHumanAttentionStorage(), localDayKey(new Date())),
     [],
@@ -31,6 +34,28 @@ export function HumanAttentionNotifier({ startupReady = true }: { startupReady?:
   const latestNavigate = useRef(navigate);
   latestNavigate.current = navigate;
   const kindById = useRef(new Map<string, string>());
+
+  useEffect(() => {
+    if (!bridge?.getHumanAttentionCapabilities) return;
+    let active = true;
+    let attempt = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const probe = () => {
+      const current = ++attempt;
+      // A lost reply may follow a committed grant. Retry the same document,
+      // and ignore late results from an older attempt instead of guessing.
+      timer = setTimeout(probe, 1000);
+      void Promise.resolve().then(() => bridge.getHumanAttentionCapabilities!()).then(value => {
+        if (!active || current !== attempt) return;
+        const result = value && typeof value === "object" ? value as Record<string, unknown> : {};
+        if (result.schemaVersion !== 1 || (result.legacyAffairReminder !== "main_owned" && result.legacyAffairReminder !== "legacy")) return;
+        clearTimeout(timer);
+        setAffairMode(result.legacyAffairReminder);
+      }, () => undefined);
+    };
+    probe();
+    return () => { active = false; clearTimeout(timer); };
+  }, [bridge]);
 
   const attention = useQuery({
     queryKey: queryKeys.personalAssistantHumanAttention(),
@@ -49,10 +74,10 @@ export function HumanAttentionNotifier({ startupReady = true }: { startupReady?:
     if (!rows) {
       return;
     }
-    for (const payload of emitNewHumanAttentionNotifications({ rows, bridge, ledger })) {
+    for (const payload of emitNewHumanAttentionNotifications({ rows, bridge, ledger, affairMode })) {
       kindById.current.set(payload.id, payload.kind);
     }
-  }, [attention.data, bridge, ledger]);
+  }, [attention.data, bridge, ledger, affairMode]);
 
   useEffect(() => {
     if (!bridge) {

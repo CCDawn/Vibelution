@@ -217,3 +217,11 @@ def test_launcher_history_import_approval_shows_verified_source_only(monkeypatch
         "project_id": "project", "preview_id": "a" * 64, "recover_sync_id": "affairs-" + "b" * 40})})
     assert recovery["assistantTargets"]["syncId"] == "affairs-" + "b" * 40
     assert "不会重新写入事务" in recovery["assistantOperationDescription"]
+    for category in ("personal", "knowledge"):
+        queued = _assistant_management_summary({"action": "initial_migration_queue", "arguments_json": json.dumps({
+            "project_id": "project", "preview_id": "a" * 64, "category": category})})
+        assert queued["assistantTargets"]["category"] == category
+        assert "排队" in queued["assistantOperationDescription"]
+    invalid_initial = _assistant_management_summary({"action": "initial_migration_queue", "arguments_json": json.dumps({
+        "project_id": "project", "preview_id": "a" * 64, "category": "personal", "agent_id": "other"})})
+    assert invalid_initial["assistantArgumentsInvalid"] is True

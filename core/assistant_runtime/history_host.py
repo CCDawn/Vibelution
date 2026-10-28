@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 import secrets
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from pathlib import Path
 from threading import Event, Lock, RLock
 
@@ -12,13 +12,16 @@ from .online_history import AuthorizedHistorySource, OnlineHistoryOwner
 
 
 class HistoryHost:
-    def __init__(self, profile_root: Path, generation: str, dispatch, preview):
+    def __init__(self, profile_root: Path, generation: str, dispatch, preview, *, initial_owner_check=None):
         self._lock = RLock()
         self._import_lock = Lock()
         self._active = True
         self._generation = generation
         self._dispatch = dispatch
         self._preview = preview
+        # Trusted host supplies a nonblocking lifecycle check while it holds
+        # the profile's OS host-owner lock. Missing proof forbids refresh.
+        self._initial_owner_check = initial_owner_check
         self._cancelled = set()
         self._operation = None
         self._operation_turn = None
@@ -43,9 +46,45 @@ class HistoryHost:
         """Called under guard before any project snapshot or suspension."""
         self._owner.suspend()
 
+    def wait_guard_idle(self, timeout=2.0):
+        """Bounded worker-side drain before event-loop registry mutation."""
+        if not self._lock.acquire(timeout=timeout):
+            return False
+        self._lock.release()
+        return True
+
     def signal_registry_change(self):
         """Revoke an admitted sync before waiting for the generation guard."""
         self._signal_sync()
+
+    def legacy_reminder_source(self, project_id, revision):
+        """Return a point-in-time main-only identity, never an import authority."""
+        from .initial_migration_binding import authority_identity, source_identity
+
+        with self.guard():
+            if self._dispatch._registry_revision != revision:
+                raise MigrationIOError("history_preview_changed")
+            preview = self._preview.preview(project_id)
+            token = preview["previewId"]
+            try:
+                # HistoryPreview owns the snapshot and verifies its complete
+                # route. Keep its lock while reading its private proof tuple.
+                with self._preview._lock:
+                    public = self._preview.verify_preview(token)
+                    row = self._preview._previews[token]
+                    root, workspace, paths, snapshots = row[3], row[4], row[5], row[7]
+                    scope = {"projectId": paths.project_id, "instanceId": paths.instance_id,
+                             "agentId": public["assistantAgentId"]}
+                    digest, project_identity, _ = source_identity(scope, root, workspace)
+                    authority = authority_identity(snapshots)
+                    self._preview.verify_preview(token)
+                    if self._dispatch._registry_revision != revision:
+                        raise MigrationIOError("history_preview_changed")
+                    return {"schemaVersion": 1, "projectId": project_id, "revision": revision,
+                            "sourceScope": scope, "sourceIdentityDigest": digest,
+                            "authorityDigest": authority, "projectDirectory": project_identity}
+            finally:
+                self._preview.discard(token)
 
     def _signal_sync(self, *, turn_id=None, operation_id=None, preview_id=None):
         with self._sync_signal_lock:
@@ -71,6 +110,81 @@ class HistoryHost:
                 self._operation_stopped = True
                 self._owner.suspend()
             return result
+
+    def prepare_initial_source(self, project_id, preview_id, revision, turn_id, operation_id, category, publication):
+        """Publish one intent under the live native Turn and source guards."""
+        from . import native
+        from .initial_migration_binding import authority_identity, source_identity, target_identity, publish_initial_intent
+        from .main_control import initial_migration_id, initial_model_env_unavailable
+        from .migration_io import check_path, pinned_source_files
+        from core.infrastructure.native_runtime import assistant_native_root
+        from core.web.services import session_service as sessions
+        from core.web.services.session import directory_runtime
+        from core.web.services.personal_assistant_project.windows_read import lock_source_directory
+
+        if (category not in ("personal", "knowledge")
+                or operation_id != initial_migration_id(project_id, preview_id, category)):
+            raise MigrationIOError("initial_migration_request_invalid")
+        if not self._import_lock.acquire(blocking=False):
+            raise MigrationIOError("initial_migration_busy")
+        running = locked = False
+        try:
+            if not self._lock.acquire(blocking=False):
+                raise MigrationIOError("initial_migration_busy")
+            locked = True
+            if (not self._active or native._STOP_REQUESTED.is_set() or not native._STARTED or native._OFFLINE_MIGRATION):
+                raise MigrationIOError("initial_migration_unavailable")
+            if not sessions._RUNNING_SESSIONS_LOCK.acquire(blocking=False):
+                raise MigrationIOError("initial_migration_busy")
+            running = True
+            if (native._SESSION_ID not in sessions._RUNNING_SESSION_IDS
+                    or sessions._SESSION_ACTIVE_TURN_IDS.get(native._SESSION_ID) != turn_id):
+                raise MigrationIOError("initial_migration_turn_invalid")
+            if not native._LOCK.acquire(blocking=False):
+                raise MigrationIOError("initial_migration_busy")
+            try:
+                project, workspace, paths, source_agent, verify, snapshots = self._preview.consume_for_import(
+                    preview_id, project_id, revision, turn_id)
+                root = check_path(self._owner._profile).resolve()
+                if (not native._AGENT_ID or not native._SESSION_ID or assistant_native_root() != root
+                        or directory_runtime.directory_store_project_root() != root
+                        or any(root.is_relative_to(path.resolve()) or path.resolve().is_relative_to(root)
+                               for path in (project, workspace))):
+                    raise MigrationIOError("initial_migration_binding_invalid")
+                scope = {"projectId": paths.project_id, "instanceId": paths.instance_id, "agentId": source_agent}
+                with ExitStack() as stack:
+                    stack.enter_context(pinned_source_files(snapshots))
+                    for directory in (project, workspace):
+                        stack.enter_context(lock_source_directory(Path(directory.anchor), directory, allow_child_replacement=True))
+                    verify()
+                    source_digest, project_identity, workspace_identity = source_identity(scope, project, workspace)
+                    registry_digest = authority_identity(snapshots)
+                    target_digest, target_directory = target_identity(root, native._AGENT_ID, native._SESSION_ID)
+                    verify()
+                    binding = {"schemaVersion": 1, "registeredProjectId": project_id, "sourceScope": scope,
+                               "category": category, "turnId": turn_id, "operationId": operation_id, "revision": revision,
+                               "sourceIdentityDigest": source_digest, "registryDigest": registry_digest,
+                               "targetIdentityDigest": target_digest, "projectDirectory": project_identity,
+                               "workspaceDirectory": workspace_identity, "targetDirectory": target_directory,
+                               "targetAgentId": native._AGENT_ID, "targetSessionId": native._SESSION_ID,
+                               "authority": "native_policy_admitted", "readyForCutover": False}
+                    def recheck():
+                        verify()
+                        if (initial_model_env_unavailable()
+                                or source_identity(scope, project, workspace) != (source_digest, project_identity, workspace_identity)
+                                or authority_identity(snapshots) != registry_digest
+                                or target_identity(root, native._AGENT_ID, native._SESSION_ID) != (target_digest, target_directory)):
+                            raise MigrationIOError("initial_migration_binding_changed")
+                    return publish_initial_intent(root, binding, publication, recheck,
+                                                  owner_check=self._initial_owner_check)
+            finally:
+                native._LOCK.release()
+        finally:
+            if running:
+                sessions._RUNNING_SESSIONS_LOCK.release()
+            if locked:
+                self._lock.release()
+            self._import_lock.release()
 
     @contextmanager
     def _sync_guard(self, generation, turn_id, operation_id):

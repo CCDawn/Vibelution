@@ -175,6 +175,9 @@ describe("Explicit Workbench close", () => {
     expect(h.pendingAck()).toMatchObject({ projectionEpoch: 1 });
     expect(h.commitClosed).not.toHaveBeenCalled();
     expect(h.canarySummary).not.toHaveBeenCalled();
+    expect(h.notify).toHaveBeenCalledWith("Vibelution", "工作台窗口已关闭，后台仍在回收。可在 Launcher 查看“停止中”状态。");
+    await h.acknowledge();
+    expect(h.notify).toHaveBeenCalledTimes(1);
 
     h.backend.resolve("closed");
     await flushCloseCallbacks();
@@ -526,7 +529,7 @@ describe("Explicit Workbench close", () => {
     expect(h.store.currentTransaction()).toMatchObject({ phase: "failed", failureCode: "backend_stop_admission_failed" });
     expect(h.pending()).toBe(false);
     expect(h.commitClosed).not.toHaveBeenCalled();
-    expect(h.notify).toHaveBeenCalledOnce();
+    expect(h.notify).toHaveBeenCalledWith("Vibelution", "后台回收未完成；请查看 Launcher 状态后重试。", "warning");
     await vi.advanceTimersByTimeAsync(2000);
     expect(h.stop).toHaveBeenCalledTimes(2);
   });

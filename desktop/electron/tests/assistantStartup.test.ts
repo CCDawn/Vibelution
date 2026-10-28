@@ -1,10 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
 import { createSourceFile, isCallExpression, isExpressionStatement, isFunctionDeclaration, isNewExpression, isVariableStatement, ScriptTarget, transpileModule } from "typescript";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AssistantProjectRegistryConnection } from "../src/assistant/projectRegistryConnection.js";
+import { InitialMigrationResults } from "../src/assistant/initialMigrationResults.js";
 import { unwrapSource } from "../src/state/launcherStateStore.js";
 import { createSingleInstanceEnvelope, resolveSecondInstanceIntent, resolveSingleInstanceCliIntent, resolveSingleInstanceProvenance } from "../src/appLock.js";
 import { parseDesktopCliArgs } from "../src/cli/desktopCli.js";
@@ -43,10 +45,12 @@ function fixture() {
     stop: vi.fn(async () => { await pendingStart.catch(() => undefined); await host.stop(); }),
   };
   const context: Record<string, any> = {
-    launcherAssistantStarting: null, launcherAssistantHost: null, launcherAssistantWindow: null,
+    launcherAssistantStarting: null, launcherAssistantStopping: null, launcherAssistantStartupAbort: new AbortController(),
+    launcherAssistantHost: null, launcherAssistantWindow: null, showAssistantStartupWait: null, dismissAssistantStartupWait: null, assistantMigrationPending: false,
     launcherAssistantProjects: null, stopLauncherAssistantReminders: null, pendingAssistantOpen: null,
     launcherAssistantExitReady: false, desktopTray: null, assistantOnly: true, shutdownApproved: false,
     app: { isPackaged: true, quit: vi.fn(), on: vi.fn(), getPath: vi.fn(() => "private") }, join, console,
+    AbortController, setTimeout, clearTimeout, dialog: { showMessageBox: vi.fn(async () => ({ response: 0 })) },
     desktopCliArgs: { hiddenPresentation: true }, desktopPythonPath: vi.fn(() => ""),
     desktopEnvironment: () => ({ VIBELUTION_CONFIG_PATH: "private-config" }),
     desktopLaunchSettings: () => ({ configPath: "private-config" }),
@@ -253,7 +257,7 @@ describe("resident assistant startup", () => {
       fileExists: () => { throw new Error("project Python probe"); } });
     Object.assign(context, { desktopCliArgs: cliArgs,
       desktopEnvironment: () => applyDesktopLaunchSettingsToEnvironment(inherited, settings),
-      process: { resourcesPath: "resources" }, resolveDesktopBundleRoot: vi.fn(() => "sealed-bundle"),
+      process: { env: {}, resourcesPath: "resources" }, resolveDesktopBundleRoot: vi.fn(() => "sealed-bundle"),
       createDesktopPathsForApp: vi.fn(() => { throw new Error("project paths must not be created"); }),
       claimElectronDesktopShellOwner: vi.fn(), localDebuggingEnabled: false,
       registerLauncherAppProtocolHandle: vi.fn(), resolveLauncherDistRoot: vi.fn(),
@@ -341,6 +345,122 @@ describe("resident assistant startup", () => {
     expect(window.open).toHaveBeenCalledWith({ show: false });
     await context.stop();
     expect(host.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("exposes the tray while recovery waits, and starts the host only after recovery ends", async () => {
+    const { context, host, paths } = fixture();
+    context.process.env.VIBELUTION_INITIAL_MIGRATION_EXPERIMENT = "1";
+    context.InitialMigrationResults = vi.fn(function () { return {}; });
+    context.verifyInitialMigrationResult = vi.fn();
+    let finish!: (value: unknown[]) => void;
+    context.recoverInitialMigrations = vi.fn(() => new Promise(resolve => { finish = resolve; }));
+    const starting = context.start(paths);
+    await vi.waitFor(() => expect(context.recoverInitialMigrations).toHaveBeenCalledOnce());
+    expect(context.createAssistantTray).toHaveBeenCalledOnce();
+    expect(context.AssistantHost).not.toHaveBeenCalled();
+    const actions = context.createAssistantTray.mock.calls[0][1];
+    actions.open();
+    expect(context.dialog.showMessageBox).toHaveBeenCalledOnce();
+    actions.openLauncher();
+    expect(context.requestOpenLauncherFromAssistant).toHaveBeenCalledOnce();
+    finish([]);
+    await starting;
+    expect(host.start).toHaveBeenCalledOnce();
+  });
+
+  it("starts the host with an unknown receipt when the intent listing cannot be read", async () => {
+    const { context, host, paths } = fixture();
+    context.process.env.VIBELUTION_INITIAL_MIGRATION_EXPERIMENT = "1";
+    context.InitialMigrationResults = vi.fn(function () { return { get: vi.fn(async () => null) }; });
+    context.recoverInitialMigrations = vi.fn(async () => { throw new Error("INTENTS_UNAVAILABLE"); });
+    context.verifyInitialMigrationResult = vi.fn();
+    await context.start(paths);
+    expect(host.start).toHaveBeenCalledOnce();
+    context.launcherAssistantProjects.withHistoryImport = vi.fn(async (_id: string, work: () => Promise<unknown>) => work());
+    const control = context.AssistantHost.mock.calls[0][0].mainControl;
+    const receipt = await control({ action: "initial_migration_receipt", projectId: "project:one",
+      category: "personal", operationId: "initial-" + "a".repeat(40) });
+    expect(receipt.state).toBe("unknown");
+  });
+
+  it("leaves damaged result storage untouched and starts with unknown receipts", async () => {
+    const { context, host, paths } = fixture();
+    const root = mkdtempSync(join(tmpdir(), "assistant-start-damaged-")); ownedRoots.push(root);
+    paths.userDataRoot = root;
+    const directory = join(root, "assistant", "initial-migration-results"); mkdirSync(directory, { recursive: true });
+    const operationId = "initial-" + "a".repeat(40);
+    const damaged = join(directory, createHash("sha256").update(operationId).digest("hex") + ".json");
+    writeFileSync(damaged, "{broken");
+    context.process.env.VIBELUTION_INITIAL_MIGRATION_EXPERIMENT = "1";
+    context.InitialMigrationResults = InitialMigrationResults;
+    context.recoverInitialMigrations = vi.fn();
+    await context.start(paths);
+    expect(host.start).toHaveBeenCalledOnce();
+    expect(context.recoverInitialMigrations).not.toHaveBeenCalled();
+    context.launcherAssistantProjects.withHistoryImport = vi.fn(async (_id: string, work: () => Promise<unknown>) => work());
+    const control = context.AssistantHost.mock.calls[0][0].mainControl;
+    const receipt = await control({ action: "initial_migration_receipt", projectId: "project:one",
+      category: "personal", operationId });
+    expect(receipt.state).toBe("unknown");
+    expect(readFileSync(damaged, "utf8")).toBe("{broken");
+  });
+
+  it("retries owned cleanup after an earlier exit attempt fails", async () => {
+    const { context, paths } = fixture();
+    await context.start(paths);
+    const stop = context.launcherAssistantProjects.stop;
+    stop.mockRejectedValueOnce(new Error("still running"));
+    await expect(context.stop()).rejects.toThrow("still running");
+    expect(context.launcherAssistantExitReady).toBe(false);
+    await expect(context.stop()).resolves.toBeUndefined();
+    expect(stop).toHaveBeenCalledTimes(2);
+    expect(context.launcherAssistantExitReady).toBe(true);
+  });
+
+  it("keeps quit pending until recovery has released its owned writer", async () => {
+    const { context, host, paths } = fixture();
+    context.process.env.VIBELUTION_INITIAL_MIGRATION_EXPERIMENT = "1";
+    context.InitialMigrationResults = vi.fn(function () { return {}; });
+    context.verifyInitialMigrationResult = vi.fn();
+    let finish!: (value: unknown[]) => void;
+    context.recoverInitialMigrations = vi.fn(() => new Promise(resolve => { finish = resolve; }));
+    const starting = context.start(paths);
+    await vi.waitFor(() => expect(context.recoverInitialMigrations).toHaveBeenCalledOnce());
+    context.shutdownApproved = true;
+    let stopped = false;
+    const stopping = context.stop().then(() => { stopped = true; });
+    expect(context.launcherAssistantStartupAbort.signal.aborted).toBe(true);
+    await Promise.resolve();
+    expect(stopped).toBe(false);
+    expect(host.start).not.toHaveBeenCalled();
+    finish([]);
+    await Promise.all([starting, stopping]);
+    expect(stopped).toBe(true);
+    expect(host.start).not.toHaveBeenCalled();
+  });
+
+  it("intercepts app quit before a host exists and waits for recovery to retire", async () => {
+    const { context, host, paths } = fixture();
+    context.process.env.VIBELUTION_INITIAL_MIGRATION_EXPERIMENT = "1";
+    context.InitialMigrationResults = vi.fn(function () { return {}; });
+    context.verifyInitialMigrationResult = vi.fn();
+    let finish!: (value: unknown[]) => void;
+    context.recoverInitialMigrations = vi.fn(() => new Promise(resolve => { finish = resolve; }));
+    const beforeQuit = ast.statements.find(node => isExpressionStatement(node) && isCallExpression(node.expression)
+      && node.expression.expression.getText(ast) === "app.on" && node.expression.arguments[0]?.getText(ast) === '"before-quit"')!;
+    runInNewContext(transpileModule(beforeQuit.getFullText(ast), { compilerOptions: { target: ScriptTarget.ES2022 } }).outputText, context);
+    const starting = context.start(paths);
+    await vi.waitFor(() => expect(context.recoverInitialMigrations).toHaveBeenCalledOnce());
+    const handler = context.app.on.mock.calls.find(([name]: [string]) => name === "before-quit")[1];
+    const event = { preventDefault: vi.fn() };
+    handler(event);
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(context.launcherAssistantStartupAbort.signal.aborted).toBe(true);
+    expect(context.app.quit).not.toHaveBeenCalled();
+    finish([]);
+    await starting;
+    await vi.waitFor(() => expect(context.app.quit).toHaveBeenCalledOnce());
+    expect(host.start).not.toHaveBeenCalled();
   });
 
   it("bootstraps persisted projects without granting the workspace or starting its Python", async () => {

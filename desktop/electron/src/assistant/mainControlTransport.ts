@@ -10,7 +10,12 @@ export type ProjectMainControlRequest = {
   | { action: "project_lifecycle" | "project_lifecycle_receipt"; operation: "start" | "stop" | "restart"; requestId: string });
 export type HistoryMainControlRequest = { deliveryId: string; action: "history_import"; projectId: string; previewId: string; turnId: string; timeoutMs: number };
 export type AffairsSyncMainControlRequest = Omit<HistoryMainControlRequest, "action"> & { action: "affairs_sync"; recoverSyncId?: string };
-export type MainControlRequest = ProjectMainControlRequest | AppearanceMainControlRequest | HistoryMainControlRequest | AffairsSyncMainControlRequest;
+export type InitialMigrationMainControlRequest = Omit<HistoryMainControlRequest, "action"> & {
+  action: "initial_migration_queue"; category: "personal" | "knowledge"; operationId: string;
+};
+export type InitialMigrationReceiptRequest = { deliveryId: string; action: "initial_migration_receipt"; projectId: string;
+  category: "personal" | "knowledge"; operationId: string };
+export type MainControlRequest = ProjectMainControlRequest | AppearanceMainControlRequest | HistoryMainControlRequest | AffairsSyncMainControlRequest | InitialMigrationMainControlRequest | InitialMigrationReceiptRequest;
 type PublicResult = Record<string, unknown>;
 const ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/;
 const forbiddenScheme = /^(?:https?|file|data|javascript|mailto|ftp|wss?):/i;
@@ -30,6 +35,24 @@ export function parseMainControlClaim(value: unknown): MainControlRequest | null
   if (value.request === null) return null;
   const row = value.request;
   if (row && typeof row === "object" && isAppearanceAction(Object.getOwnPropertyDescriptor(row,"action")?.value)) return parseAppearanceClaim(row);
+  if (row && typeof row === "object" && Object.getOwnPropertyDescriptor(row, "action")?.value === "initial_migration_receipt") {
+    if (!closed(row, ["deliveryId", "action", "projectId", "category", "operationId"])
+      || typeof row.deliveryId !== "string" || !/^[a-f0-9]{32}$/.test(row.deliveryId) || !opaque(row.projectId, 160)
+      || (row.category !== "personal" && row.category !== "knowledge")
+      || row.operationId !== `initial-${createHash("sha256").update(`${row.projectId}:${row.category}`).digest("hex").slice(0, 40)}`) return invalid();
+    return { deliveryId: row.deliveryId, action: "initial_migration_receipt", projectId: row.projectId,
+      category: row.category, operationId: row.operationId as string };
+  }
+  if (row && typeof row === "object" && Object.getOwnPropertyDescriptor(row, "action")?.value === "initial_migration_queue") {
+    if (!closed(row, ["deliveryId", "action", "projectId", "previewId", "turnId", "category", "operationId", "timeoutMs"])
+      || typeof row.deliveryId !== "string" || !/^[a-f0-9]{32}$/.test(row.deliveryId) || !opaque(row.projectId, 160)
+      || typeof row.previewId !== "string" || !/^[a-f0-9]{64}$/.test(row.previewId) || !opaque(row.turnId, 160)
+      || (row.category !== "personal" && row.category !== "knowledge")
+      || row.operationId !== `initial-${createHash("sha256").update(`${row.projectId}:${row.category}`).digest("hex").slice(0, 40)}`
+      || typeof row.timeoutMs !== "number" || !Number.isSafeInteger(row.timeoutMs) || row.timeoutMs < 1 || row.timeoutMs > 120000) return invalid();
+    return { deliveryId: row.deliveryId, action: "initial_migration_queue", projectId: row.projectId,
+      previewId: row.previewId, turnId: row.turnId, category: row.category, operationId: row.operationId as string, timeoutMs: row.timeoutMs };
+  }
   if (row && typeof row === "object" && ["history_import", "affairs_sync"].includes(Object.getOwnPropertyDescriptor(row, "action")?.value)) {
     if (!closed(row, ["deliveryId", "action", "projectId", "previewId", "turnId", "timeoutMs"],
       Object.getOwnPropertyDescriptor(row, "action")?.value === "affairs_sync" ? ["recoverSyncId"] : [])
@@ -85,6 +108,27 @@ export function parseAffairsSyncResult(input: { projectId: string; previewId: st
 /** Fail closed rather than relay arbitrary errors, native rows, paths or messages. */
 export function projectMainControlResult(request: MainControlRequest, value: unknown): PublicResult {
   if (request.action === "launcher_theme_get" || request.action === "launcher_theme_set" || request.action === "operator_image_upload") return appearanceControlResult(request,value);
+  if (request.action === "initial_migration_receipt") {
+    const base = { schemaVersion: 1, projectId: request.projectId, category: request.category,
+      operationId: request.operationId, readyForCutover: false };
+    const unknown = { ...base, state: "unknown", code: "unknown" };
+    if (!closed(value, ["schemaVersion", "projectId", "category", "operationId", "state", "code", "readyForCutover"])
+      || value.schemaVersion !== 1 || value.projectId !== request.projectId || value.category !== request.category
+      || value.operationId !== request.operationId || value.readyForCutover !== false || typeof value.state !== "string"
+      || value.code !== value.state || !["queued", "completed", "partial", "unknown", "not_found"].includes(value.state)) return unknown;
+    return { ...value };
+  }
+  if (request.action === "initial_migration_queue") {
+    const base = { schemaVersion: 1, projectId: request.projectId, previewId: request.previewId,
+      category: request.category, operationId: request.operationId, readyForCutover: false };
+    const unknown = { ...base, state: "unknown", code: "unknown" };
+    if (!closed(value, ["schemaVersion", "projectId", "previewId", "category", "operationId", "state", "code", "readyForCutover"])
+      || value.schemaVersion !== 1 || value.projectId !== request.projectId || value.previewId !== request.previewId
+      || value.category !== request.category || value.operationId !== request.operationId || value.readyForCutover !== false
+      || typeof value.state !== "string" || typeof value.code !== "string"
+      || !["queued:queued", "unknown:unknown", "rejected:cancelled", "rejected:unavailable", "rejected:busy"].includes(`${value.state}:${value.code}`)) return unknown;
+    return { ...value };
+  }
   if (request.action === "affairs_sync") return parseAffairsSyncResult(request, value) ?? unknownAffairsSyncResult(request);
   if (request.action === "history_import") {
     const unavailable = () => ({ schemaVersion: 1, projectId: request.projectId, previewId: request.previewId,
@@ -148,7 +192,7 @@ export async function runMainControlPump(options: {
         try {
           let value: unknown;
           try {
-            if (request.action === "operator_image_upload" || request.action === "history_import" || request.action === "affairs_sync") value = await options.onRequest(request, AbortSignal.any([options.signal,AbortSignal.timeout(request.timeoutMs)]));
+            if (request.action === "operator_image_upload" || request.action === "history_import" || request.action === "affairs_sync" || request.action === "initial_migration_queue") value = await options.onRequest(request, AbortSignal.any([options.signal,AbortSignal.timeout(request.timeoutMs)]));
             else if (request.action === "launcher_theme_get" || request.action === "launcher_theme_set") value = await options.onRequest(request,options.signal);
             else value = await options.onRequest(request);
           }

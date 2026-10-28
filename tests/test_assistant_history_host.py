@@ -26,6 +26,60 @@ def body(dispatch, operation="1" * 32, *, turn="turn-1"):
             "turnId": turn, "revision": 1, "operationId": operation}
 
 
+def test_legacy_reminder_source_private_point_in_time_binding(tmp_path, setup_preview):
+    dispatch, _, history_host, app = make_host(tmp_path, setup_preview)
+    request = {"projectId": "registered:1", "revision": 1}
+    headers = {"Authorization": "Bearer private-test-token"}
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        endpoint = "/api/assistant/legacy-reminders/source"
+        assert client.post(endpoint, json=request).status_code == 401
+        assert client.post(endpoint, json={**request, "agentId": "forged"}, headers=headers).status_code == 422
+        assert client.post(endpoint + "?x=1", json=request, headers=headers).status_code == 422
+        response = client.post(endpoint, json=request, headers=headers)
+        assert response.status_code == 200
+        assert response.headers["cache-control"] == "no-store"
+        value = response.json()
+        assert value["projectId"] == "registered:1" and value["revision"] == 1
+        assert value["sourceScope"]["agentId"] == "agent-pa"
+        assert len(value["sourceIdentityDigest"]) == len(value["authorityDigest"]) == 64
+        assert set(value["projectDirectory"]) == {"device", "inode", "birthtimeNs"}
+        assert not dispatch.history_preview._previews
+        assert client.post(endpoint, json={**request, "revision": 0}, headers=headers).status_code == 409
+        dispatch.suspend_projects()
+        assert client.post(endpoint, json=request, headers=headers).status_code == 409
+        assert not dispatch.history_preview._previews
+
+
+def test_legacy_reminder_source_discards_preview_on_changed_authority(tmp_path, setup_preview, monkeypatch):
+    from core.assistant_runtime.migration_io import MigrationIOError
+    dispatch, _, history_host, _ = make_host(tmp_path, setup_preview)
+    original = dispatch.history_preview.verify_preview
+    calls = 0
+    def changed(token):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise MigrationIOError("history_preview_changed")
+        return original(token)
+    monkeypatch.setattr(dispatch.history_preview, "verify_preview", changed)
+    with pytest.raises(MigrationIOError, match="history_preview_changed"):
+        history_host.legacy_reminder_source("registered:1", 1)
+    assert not dispatch.history_preview._previews
+
+
+def test_legacy_reminder_source_changes_version_when_registry_changes(tmp_path, setup_preview):
+    dispatch, _, history_host, _ = make_host(tmp_path, setup_preview)
+    workspace = setup_preview[1]
+    first = history_host.legacy_reminder_source("registered:1", 1)
+    registry = workspace / "agents/agents.json"
+    registry.write_text(registry.read_text(encoding="utf-8") + " ", encoding="utf-8")
+    second = history_host.legacy_reminder_source("registered:1", 1)
+    assert first["sourceScope"] == second["sourceScope"]
+    assert first["sourceIdentityDigest"] == second["sourceIdentityDigest"]
+    assert first["authorityDigest"] != second["authorityDigest"]
+    assert not dispatch.history_preview._previews
+
+
 def test_private_host_import_uses_native_source_and_preview_once(tmp_path, setup_preview):
     dispatch, profile, _, app = make_host(tmp_path, setup_preview)
     request = body(dispatch)

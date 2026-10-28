@@ -64,6 +64,7 @@ export type HumanAttentionEvent =
 
 export type HumanAttentionBridge = {
   notifyHumanAttention?: (payload: HumanAttentionNotificationPayload) => Promise<unknown>;
+  getHumanAttentionCapabilities?: () => Promise<unknown>;
   onHumanAttentionOpened?: (listener: (payload: unknown) => void) => () => void;
 };
 
@@ -206,12 +207,15 @@ export function humanAttentionBridge(globalLike: unknown = globalThis): HumanAtt
   }
   const candidate = bridge as HumanAttentionBridge;
   const notify = typeof candidate.notifyHumanAttention === "function" ? candidate.notifyHumanAttention.bind(bridge) : undefined;
+  const capabilities = typeof candidate.getHumanAttentionCapabilities === "function"
+    ? candidate.getHumanAttentionCapabilities.bind(bridge) : undefined;
   const subscribe = typeof candidate.onHumanAttentionOpened === "function" ? candidate.onHumanAttentionOpened.bind(bridge) : undefined;
   if (!notify && !subscribe) {
     return undefined;
   }
   return {
     ...(notify ? { notifyHumanAttention: notify } : {}),
+    ...(capabilities ? { getHumanAttentionCapabilities: capabilities } : {}),
     ...(subscribe ? { onHumanAttentionOpened: subscribe } : {}),
   };
 }
@@ -396,19 +400,25 @@ function isInvalidPayloadDeliveryResult(result: unknown): boolean {
   );
 }
 
+const mainOwnedInflight = new WeakMap<HumanAttentionLedger, Set<string>>();
+function isExplicitUnsent(result: unknown): boolean {
+  if (typeof result !== "object" || result === null) return false;
+  const delivered = (result as { delivered?: unknown }).delivered;
+  return delivered === "source_retired" || delivered === "invalid_payload";
+}
+
 /**
- * Emit notifications for every unseen human-attention row. Ids are marked
- * before the async bridge call (at-most-once per id per day). A missing
- * bridge skips silently and marks nothing. Because the ledger already
- * consumed the id, a rejected IPC call or an invalid_payload result is
- * reported to the personal-assistant inbox (fire-and-forget, deduped and
- * capped inside the reporter) instead of being lost — a missing bridge is
- * the plain-browser case and is never reported.
+ * Emit unseen human-attention rows. The legacy path marks before sending.
+ * A negotiated affair uses main's durable intent and an in-memory in-flight
+ * guard; only an explicitly unsent result avoids a local day mark. Unknown
+ * results remain marked and must never cause automatic replay.
  */
 export function emitNewHumanAttentionNotifications(input: {
   rows: readonly PersonalAssistantAttentionRow[];
   bridge: HumanAttentionBridge | undefined;
   ledger: HumanAttentionLedger;
+  /** Enabled only after the trusted main-process source capability handshake. */
+  affairMode?: "legacy" | "probing" | "main_owned";
   reportFailure?: (report: {
     id: string;
     kind: string;
@@ -439,6 +449,35 @@ export function emitNewHumanAttentionNotifications(input: {
   for (const row of input.rows ?? []) {
     const payload = buildHumanAttentionNotificationPayload(row);
     if (!payload || input.ledger.has(payload.id)) {
+      continue;
+    }
+    if (payload.kind === "affair_reminder" && input.affairMode === "probing") continue;
+    if (payload.kind === "affair_reminder" && input.affairMode === "main_owned") {
+      let pending = mainOwnedInflight.get(input.ledger);
+      if (!pending) { pending = new Set(); mainOwnedInflight.set(input.ledger, pending); }
+      if (pending.has(payload.id)) continue;
+      pending.add(payload.id);
+      emitted.push(payload);
+      let result: Promise<unknown>;
+      try { result = Promise.resolve(notify(payload)); }
+      catch (error: unknown) {
+        input.ledger.add(payload.id);
+        pending.delete(payload.id);
+        safeReportFailure({ id: payload.id, kind: payload.kind, severity: payload.severity,
+          reason: `notify rejected: ${error instanceof Error ? error.message : String(error)}`, title: payload.title });
+        continue;
+      }
+      void result.then(value => {
+        // Only main-owned durable intent can authorize a retry; never delete
+        // a shared localStorage ID that a different window may have written.
+        if (!isExplicitUnsent(value)) input.ledger.add(payload.id);
+        if (isInvalidPayloadDeliveryResult(value)) safeReportFailure({ id: payload.id, kind: payload.kind,
+          severity: payload.severity, reason: "notify resolved with delivered=invalid_payload", title: payload.title });
+      }, (error: unknown) => {
+        input.ledger.add(payload.id);
+        safeReportFailure({ id: payload.id, kind: payload.kind, severity: payload.severity,
+          reason: `notify rejected: ${error instanceof Error ? error.message : String(error)}`, title: payload.title });
+      }).finally(() => { pending.delete(payload.id); });
       continue;
     }
     input.ledger.add(payload.id);

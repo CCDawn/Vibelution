@@ -1,6 +1,7 @@
 """Private online affairs host contract and generation fences."""
 
 from fastapi.testclient import TestClient
+import pytest
 from contextlib import contextmanager
 from types import SimpleNamespace
 
@@ -174,6 +175,486 @@ try:
     assert sync() == result  # Same operation reuses the result, never reruns.
     assert history_host.cancel_affairs('a' * 32, value['previewId'])['cancelled']
     assert sync() == result  # A later fence never erases a committed result.
+finally:
+    cleanup()
+''', config_text=TEST_MODEL_CONFIG)
+
+
+def test_initial_queue_consumes_only_live_claimed_preview_and_returns_private_binding(tmp_path):
+    _run(tmp_path, _HOST_SETUP + r'''
+import asyncio
+import httpx
+from core.assistant_runtime.main_control import MainControlBroker, initial_migration_id
+from core.assistant_runtime.host import create_app
+async def run_case():
+    broker = MainControlBroker(dispatch.project_ids, claim_seconds=1, initial_migration_enabled=True)
+    app = create_app(native=object(), token='private-test-token', dispatch=dispatch,
+                     history_control=history_host, main_control=broker)
+    project_id, preview_id, category = 'registered:1', value['previewId'], 'personal'
+    op = initial_migration_id(project_id, preview_id, category)
+    request = {'projectId': project_id, 'previewId': preview_id, 'turnId': 'turn-one',
+               'category': category, 'operationId': op}
+    task = asyncio.create_task(broker.invoke('initial_migration_queue', request, turn_id='turn-one'))
+    wire = (await broker.claim())['request']
+    body = {**request, 'revision': 1, 'deliveryId': wire['deliveryId']}
+    try:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url='http://127.0.0.1') as client:
+            assert (await client.post('/api/assistant/initial-migration/prepare', json=body)).status_code == 401
+            client.headers['Authorization'] = 'Bearer private-test-token'
+            assert (await client.post('/api/assistant/initial-migration/prepare', json={**body, 'approved': True})).status_code == 422
+            assert (await client.post('/api/assistant/initial-migration/prepare', json={**body, 'deliveryId': 'f'*32})).status_code == 409
+            result = await client.post('/api/assistant/initial-migration/prepare', json=body)
+            assert result.status_code == 200, result.text
+            bound = result.json()
+            assert bound['sourceScope'] == scope and bound['operationId'] == op and bound['revision'] == 1
+            assert bound['targetAgentId'] == assistant['agentId'] and bound['targetSessionId'] == assistant['directSessionId']
+            assert bound['authority'] == 'native_policy_admitted' and bound['readyForCutover'] is False
+            assert all(len(bound[key]) == 64 for key in ('sourceIdentityDigest', 'registryDigest', 'targetIdentityDigest'))
+            assert all(int(bound['projectDirectory'][key]) > 0 for key in ('device', 'inode', 'birthtimeNs'))
+            assert str(project) not in result.text and str(workspace) not in result.text and str(target) not in result.text
+            from core.assistant_runtime.initial_migration_binding import read_initial_intent, list_initial_intents, publish_initial_intent
+            from core.assistant_runtime.migration_io import MigrationIOError
+            assert read_initial_intent(target, op) == bound
+            assert list_initial_intents(target) == [{'operationId': op, 'registeredProjectId': project_id, 'category': category,
+                                                     'registryDigest': bound['registryDigest']}]
+            # Re-registration must not mint a second execution authority for
+            # the same source, target and category even with a different ID.
+            other = {**bound, 'registeredProjectId': 'registered:2',
+                     'operationId': initial_migration_id('registered:2', preview_id, category)}
+            class Token:
+                def publish(self, writer): return writer()
+            try:
+                publish_initial_intent(target, other, Token(), lambda: None)
+            except MigrationIOError as error:
+                assert str(error) == 'initial_intent_exists'
+            else:
+                raise AssertionError('duplicate source was accepted')
+            invalid = target / 'initial_migration_intents' / ('e' * 64)
+            invalid.mkdir()
+            (invalid / 'intent.json').write_text('{"schemaVersion":1}', encoding='utf-8')
+            try:
+                read_initial_intent(target, op)
+            except MigrationIOError:
+                pass
+            else:
+                raise AssertionError('corrupt intent was accepted')
+            try:
+                list_initial_intents(target)
+            except MigrationIOError:
+                pass
+            else:
+                raise AssertionError('corrupt intent was listed')
+            (invalid / 'intent.json').unlink()
+            invalid.rmdir()
+            assert (await client.post('/api/assistant/initial-migration/prepare', json=body)).status_code == 409
+        public = {'schemaVersion': 1, 'projectId': project_id, 'previewId': preview_id, 'category': category,
+                  'operationId': op, 'state': 'queued', 'code': 'queued', 'readyForCutover': False}
+        assert broker.settle(wire['deliveryId'], public)
+        assert await task == public
+        assert not (target / 'affairs_migrations' / (hashlib.sha256(op.encode()).hexdigest() + '.json')).exists()
+    finally:
+        broker.close()
+try:
+    asyncio.run(run_case())
+finally:
+    cleanup()
+''', config_text=TEST_MODEL_CONFIG)
+
+
+def test_initial_reauthorizes_unclaimed_intent_after_model_change_but_not_after_claim(tmp_path):
+    _run(tmp_path, _HOST_SETUP + r'''
+import asyncio
+import httpx
+from core.infrastructure.file_lock import cross_process_file_lock
+from core.assistant_runtime.main_control import MainControlBroker, initial_migration_id
+from core.assistant_runtime.initial_migration_binding import read_initial_intent, list_initial_intents
+from core.assistant_runtime.host import create_app
+async def run_case():
+    broker = MainControlBroker(dispatch.project_ids, claim_seconds=1, initial_migration_enabled=True)
+    app = create_app(native=object(), token='private-test-token', dispatch=dispatch,
+                     history_control=history_host, main_control=broker)
+    op = initial_migration_id('registered:1', value['previewId'], 'personal')
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url='http://127.0.0.1',
+                                 headers={'Authorization': 'Bearer private-test-token'}) as client:
+        async def prepare(p):
+            request = {'projectId': 'registered:1', 'previewId': p['previewId'], 'turnId': 'turn-one',
+                       'category': 'personal', 'operationId': op}
+            task = asyncio.create_task(broker.invoke('initial_migration_queue', request, turn_id='turn-one'))
+            wire = (await broker.claim())['request']
+            result = await client.post('/api/assistant/initial-migration/prepare',
+                json={**request, 'revision': 1, 'deliveryId': wire['deliveryId']})
+            if result.status_code == 200:
+                settled = {'schemaVersion': 1, **{k: request[k] for k in ('projectId','previewId','category','operationId')},
+                           'state': 'queued', 'code': 'queued', 'readyForCutover': False}
+                assert broker.settle(wire['deliveryId'], settled)
+                assert (await task)['state'] == 'queued'
+            else:
+                broker.cancel_history_imports('turn-one')
+                assert (await task)['state'] == 'unknown'
+            return result
+        first = await prepare(value)
+        assert first.status_code == 200, first.text
+        old = first.json()
+        original_file = next((target / 'initial_migration_intents').glob('*/intent.json'))
+        original_bytes = original_file.read_bytes()
+        config = Path(os.environ['VIBELUTION_CONFIG_PATH'])
+        config.write_text(config.read_text().replace('context_window = 8192', 'context_window = 16384'))
+        history_host._initial_owner_check = None
+        assert (await prepare(preview.preview('registered:1', turn_id='turn-one'))).status_code == 409
+        assert read_initial_intent(target, op) == old
+        history_host._initial_owner_check = lambda: True
+        newer = preview.preview('registered:1', turn_id='turn-one')
+        second = await prepare(newer)
+        assert second.status_code == 200, second.text
+        current = second.json()
+        assert current['operationId'] == op and current['registryDigest'] != old['registryDigest']
+        assert read_initial_intent(target, op) == current
+        assert original_file.read_bytes() == original_bytes
+        assert list_initial_intents(target) == [{'operationId': op, 'registeredProjectId': 'registered:1', 'category': 'personal',
+                                                 'registryDigest': current['registryDigest']}]
+        # A second valid successor to the same predecessor is ambiguous, even
+        # when both records have valid hashes and matching identity.
+        from core.assistant_runtime.initial_migration_binding import _digest
+        from core.assistant_runtime.migration_io import MigrationIOError
+        chain = next((target / 'initial_migration_intent_refreshes').iterdir())
+        record_path = next(chain.glob('*/intent.json'))
+        record = json.loads(record_path.read_text())
+        fork = {**record, 'binding': {**record['binding'], 'turnId': 'other-turn'}}
+        fork_dir = chain / _digest(fork)
+        fork_dir.mkdir()
+        (fork_dir / 'intent.json').write_text(json.dumps(fork), encoding='utf-8')
+        try:
+            read_initial_intent(target, op)
+        except MigrationIOError:
+            pass
+        else:
+            raise AssertionError('forked intent chain was accepted')
+        (fork_dir / 'intent.json').unlink()
+        fork_dir.rmdir()
+        # A claim observed at the final commit check cannot publish a refresh.
+        import scripts.assistant_migration_activate as activate
+        from core.assistant_runtime.initial_migration_binding import publish_initial_intent
+        original_check = activate._initial_receipts_or_claim
+        calls = []
+        def claim_race(*args):
+            calls.append(1)
+            return len(calls) == 2
+        class Token:
+            def publish(self, writer): return writer()
+            def check(self): pass
+        activate._initial_receipts_or_claim = claim_race
+        try:
+            publish_initial_intent(target, {**current, 'turnId': 'turn-two'}, Token(), lambda: None,
+                                   owner_check=lambda: True)
+        except MigrationIOError as error:
+            assert str(error) == 'initial_intent_claimed_unknown'
+        else:
+            raise AssertionError('claim race allowed a refresh')
+        finally:
+            activate._initial_receipts_or_claim = original_check
+        assert len(calls) == 2 and read_initial_intent(target, op) == current
+        (target / 'initial_migration_claims' / op).mkdir(parents=True)
+        config.write_text(config.read_text().replace('context_window = 16384', 'context_window = 32768'))
+        final = await prepare(preview.preview('registered:1', turn_id='turn-one'))
+        assert final.status_code == 409
+        assert read_initial_intent(target, op) == current
+    broker.close()
+try:
+    with cross_process_file_lock(target / 'host-owner', timeout=0):
+        history_host._initial_owner_check = lambda: True
+        asyncio.run(run_case())
+finally:
+    cleanup()
+''', config_text=TEST_MODEL_CONFIG)
+
+
+@pytest.mark.parametrize('mode', ['stop', 'registry', 'registry_update'])
+def test_initial_endpoint_revokes_before_guard_wait(tmp_path, mode):
+    _run(tmp_path, _HOST_SETUP + '\nmode = ' + repr(mode) + r'''
+import asyncio, threading
+from types import SimpleNamespace
+import httpx
+import core.assistant_runtime.migration_history as migration_history
+from core.assistant_runtime.main_control import MainControlBroker, initial_migration_id
+from core.assistant_runtime.initial_migration_binding import read_initial_intent, list_initial_intents
+from core.assistant_runtime.host import create_app
+reached, resume = threading.Event(), threading.Event()
+original = migration_history._write_new
+def blocked(*args, **kwargs):
+    original(*args, **kwargs)
+    reached.set()
+    assert resume.wait(8)
+migration_history._write_new = blocked
+async def run_case():
+    broker = MainControlBroker(dispatch.project_ids, claim_seconds=1, initial_migration_enabled=True)
+    fake_native = SimpleNamespace(stop=lambda turn: {'turnId': turn, 'stopped': True})
+    app = create_app(native=fake_native, token='private-test-token', dispatch=dispatch,
+                     history_control=history_host, main_control=broker)
+    op = initial_migration_id('registered:1', value['previewId'], 'personal')
+    request = {'projectId': 'registered:1', 'previewId': value['previewId'], 'turnId': 'turn-one',
+               'category': 'personal', 'operationId': op}
+    task = asyncio.create_task(broker.invoke('initial_migration_queue', request, turn_id='turn-one'))
+    wire = (await broker.claim())['request']
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url='http://127.0.0.1',
+                                 headers={'Authorization': 'Bearer private-test-token'}) as client:
+        preparing = asyncio.create_task(client.post('/api/assistant/initial-migration/prepare',
+            json={**request, 'revision': 1, 'deliveryId': wire['deliveryId']}))
+        assert await asyncio.to_thread(reached.wait, 8)
+        if mode == 'stop':
+            stopping = asyncio.create_task(client.post('/api/assistant/stop', json={'turnId': 'turn-one'}))
+        elif mode == 'registry':
+            stopping = asyncio.create_task(client.post('/api/assistant/project-registry/suspend', json={}))
+        else:
+            stopping = asyncio.create_task(client.put('/api/assistant/project-registry',
+                json={'schemaVersion': 1, 'revision': 2, 'projects': {}}))
+        async def revoked():
+            while not next(iter(broker._initial_tokens))._revoked.is_set():
+                await asyncio.sleep(0.01)
+        await asyncio.wait_for(revoked(), 2)
+        assert (await asyncio.wait_for(client.get('/health'), 1)).status_code == 200
+        assert not stopping.done()
+        resume.set()
+        assert (await preparing).status_code == 409
+        assert (await stopping).status_code == (202 if mode == 'stop' else 200)
+        assert (await task)['state'] == 'unknown'
+        assert read_initial_intent(target, op) is None
+        assert list_initial_intents(target) == []
+    broker.close()
+try:
+    asyncio.run(run_case())
+finally:
+    resume.set()
+    cleanup()
+''', config_text=TEST_MODEL_CONFIG)
+
+
+def test_initial_intent_cancel_before_publication_never_authorizes(tmp_path):
+    _run(tmp_path, _HOST_SETUP + r'''
+import asyncio, threading
+import httpx
+import core.assistant_runtime.migration_history as migration_history
+from core.assistant_runtime.main_control import MainControlBroker, initial_migration_id
+from core.assistant_runtime.initial_migration_binding import read_initial_intent
+from core.assistant_runtime.host import create_app
+reached, resume = threading.Event(), threading.Event()
+original = migration_history._write_new
+def blocked(*args, **kwargs):
+    original(*args, **kwargs)
+    reached.set()
+    assert resume.wait(8)
+migration_history._write_new = blocked
+async def run_case():
+    broker = MainControlBroker(dispatch.project_ids, claim_seconds=1, initial_migration_enabled=True)
+    app = create_app(native=object(), token='private-test-token', dispatch=dispatch,
+                     history_control=history_host, main_control=broker)
+    op = initial_migration_id('registered:1', value['previewId'], 'personal')
+    request = {'projectId': 'registered:1', 'previewId': value['previewId'], 'turnId': 'turn-one',
+               'category': 'personal', 'operationId': op}
+    task = asyncio.create_task(broker.invoke('initial_migration_queue', request, turn_id='turn-one'))
+    wire = (await broker.claim())['request']
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url='http://127.0.0.1',
+                                 headers={'Authorization': 'Bearer private-test-token'}) as client:
+        preparing = asyncio.create_task(client.post('/api/assistant/initial-migration/prepare',
+            json={**request, 'revision': 1, 'deliveryId': wire['deliveryId']}))
+        assert await asyncio.to_thread(reached.wait, 8)
+        broker.cancel_history_imports('turn-one')
+        resume.set()
+        assert (await preparing).status_code == 409
+        assert (await task)['state'] == 'unknown'
+        assert read_initial_intent(target, op) is None
+    broker.close()
+try:
+    asyncio.run(run_case())
+finally:
+    resume.set()
+    cleanup()
+''', config_text=TEST_MODEL_CONFIG)
+
+
+def test_initial_endpoint_times_out_without_claiming_stop_when_commit_is_busy(tmp_path):
+    _run(tmp_path, _HOST_SETUP + r'''
+import asyncio, threading
+from types import SimpleNamespace
+import httpx
+import core.assistant_runtime.migration_io as migration_io
+from core.assistant_runtime.main_control import MainControlBroker, initial_migration_id
+from core.assistant_runtime.initial_migration_binding import read_initial_intent
+from core.assistant_runtime.host import create_app
+reached, resume, called = threading.Event(), threading.Event(), threading.Event()
+original = migration_io.publish_directory
+def blocked(*args, **kwargs):
+    reached.set()
+    assert resume.wait(8)
+    return original(*args, **kwargs)
+migration_io.publish_directory = blocked
+async def run_case():
+    broker = MainControlBroker(dispatch.project_ids, claim_seconds=1, initial_migration_enabled=True)
+    fake_native = SimpleNamespace(stop=lambda turn: called.set() or {'turnId': turn, 'stopped': True})
+    app = create_app(native=fake_native, token='private-test-token', dispatch=dispatch,
+                     history_control=history_host, main_control=broker)
+    op = initial_migration_id('registered:1', value['previewId'], 'personal')
+    request = {'projectId': 'registered:1', 'previewId': value['previewId'], 'turnId': 'turn-one',
+               'category': 'personal', 'operationId': op}
+    task = asyncio.create_task(broker.invoke('initial_migration_queue', request, turn_id='turn-one'))
+    wire = (await broker.claim())['request']
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url='http://127.0.0.1',
+                                 headers={'Authorization': 'Bearer private-test-token'}) as client:
+        preparing = asyncio.create_task(client.post('/api/assistant/initial-migration/prepare',
+            json={**request, 'revision': 1, 'deliveryId': wire['deliveryId']}))
+        assert await asyncio.to_thread(reached.wait, 8)
+        stopping = asyncio.create_task(client.post('/api/assistant/stop', json={'turnId': 'turn-one'}))
+        assert (await asyncio.wait_for(client.get('/health'), 1)).status_code == 200
+        assert (await asyncio.wait_for(stopping, 4)).status_code == 503
+        assert not called.is_set()
+        assert (await task)['state'] == 'unknown'
+        resume.set()
+        assert (await preparing).status_code == 409
+        assert read_initial_intent(target, op)['operationId'] == op
+    broker.close()
+try:
+    asyncio.run(run_case())
+finally:
+    resume.set()
+    cleanup()
+''', config_text=TEST_MODEL_CONFIG)
+
+
+def test_initial_prepare_drain_waits_for_expired_delivery_worker(tmp_path):
+    _run(tmp_path, _HOST_SETUP + r'''
+import asyncio, threading
+import httpx
+import core.assistant_runtime.migration_history as migration_history
+from core.assistant_runtime.main_control import MainControlBroker, initial_migration_id
+from core.assistant_runtime.initial_migration_binding import read_initial_intent
+from core.assistant_runtime.host import create_app
+reached, resume = threading.Event(), threading.Event()
+original = migration_history._write_new
+def blocked(*args, **kwargs):
+    original(*args, **kwargs)
+    reached.set()
+    assert resume.wait(12)
+migration_history._write_new = blocked
+async def run_case():
+    broker = MainControlBroker(dispatch.project_ids, claim_seconds=1, initial_migration_enabled=True)
+    app = create_app(native=object(), token='private-test-token', dispatch=dispatch,
+                     history_control=history_host, main_control=broker)
+    op = initial_migration_id('registered:1', value['previewId'], 'personal')
+    request = {'projectId': 'registered:1', 'previewId': value['previewId'], 'turnId': 'turn-one',
+               'category': 'personal', 'operationId': op}
+    task = asyncio.create_task(broker.invoke('initial_migration_queue', request, turn_id='turn-one'))
+    wire = (await broker.claim())['request']
+    delivery = wire['deliveryId']
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url='http://127.0.0.1',
+                                 headers={'Authorization': 'Bearer private-test-token'}) as client:
+        preparing = asyncio.create_task(client.post('/api/assistant/initial-migration/prepare',
+            json={**request, 'revision': 1, 'deliveryId': delivery}))
+        assert await asyncio.to_thread(reached.wait, 8)
+        preparing.cancel()  # Aborting the HTTP waiter does not stop its thread.
+        try:
+            await preparing
+        except asyncio.CancelledError:
+            pass
+        else:
+            raise AssertionError('prepare request was not interrupted')
+        broker._pending[delivery].deadline = 0
+        broker._expire()
+        assert (await task)['state'] == 'unknown'
+        assert delivery not in broker._pending
+        wrong = await client.post('/api/assistant/initial-migration/drain',
+            json={'deliveryId': delivery, 'operationId': 'initial-' + 'f' * 40})
+        assert wrong.status_code == 503 and wrong.json()['drained'] is False
+        draining = asyncio.create_task(client.post('/api/assistant/initial-migration/drain',
+            json={'deliveryId': delivery, 'operationId': op}))
+        assert (await asyncio.wait_for(client.get('/health'), 1)).status_code == 200
+        first = await asyncio.wait_for(draining, 4)
+        assert first.status_code == 503 and first.json() == {
+            'schemaVersion': 1, 'operationId': op, 'state': 'unknown', 'drained': False}
+        draining = asyncio.create_task(client.post('/api/assistant/initial-migration/drain',
+            json={'deliveryId': delivery, 'operationId': op}))
+        await asyncio.sleep(0.05)
+        assert not draining.done()
+        resume.set()
+        result = await asyncio.wait_for(draining, 4)
+        assert result.status_code == 200 and result.json() == {
+            'schemaVersion': 1, 'operationId': op, 'state': 'unknown', 'drained': True}
+        assert read_initial_intent(target, op) is None
+        assert (await client.post('/api/assistant/initial-migration/drain?x=1',
+            json={'deliveryId': delivery, 'operationId': op})).status_code == 422
+    broker.close()
+try:
+    asyncio.run(run_case())
+finally:
+    resume.set()
+    cleanup()
+''', config_text=TEST_MODEL_CONFIG)
+
+
+def test_initial_intent_lost_confirmation_recovers_same_id(tmp_path):
+    _run(tmp_path, _HOST_SETUP + r'''
+import asyncio
+import httpx
+from core.assistant_runtime.main_control import MainControlBroker, initial_migration_id
+from core.assistant_runtime.initial_migration_binding import read_initial_intent
+from core.assistant_runtime.host import create_app
+async def run_case():
+    broker = MainControlBroker(dispatch.project_ids, claim_seconds=1, initial_migration_enabled=True)
+    app = create_app(native=object(), token='private-test-token', dispatch=dispatch,
+                     history_control=history_host, main_control=broker)
+    original = broker.initial_delivery
+    def interrupted(delivery, request, **kwargs):
+        if kwargs.get('confirm'):
+            broker.cancel_history_imports('turn-one')
+            return False
+        return original(delivery, request, **kwargs)
+    broker.initial_delivery = interrupted
+    op = initial_migration_id('registered:1', value['previewId'], 'personal')
+    request = {'projectId': 'registered:1', 'previewId': value['previewId'], 'turnId': 'turn-one',
+               'category': 'personal', 'operationId': op}
+    task = asyncio.create_task(broker.invoke('initial_migration_queue', request, turn_id='turn-one'))
+    wire = (await broker.claim())['request']
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url='http://127.0.0.1',
+                                 headers={'Authorization': 'Bearer private-test-token'}) as client:
+        result = await client.post('/api/assistant/initial-migration/prepare',
+            json={**request, 'revision': 1, 'deliveryId': wire['deliveryId']})
+        assert result.status_code == 409
+        assert (await task)['state'] == 'unknown'
+        assert read_initial_intent(target, op)['operationId'] == op
+    broker.close()
+try:
+    asyncio.run(run_case())
+finally:
+    cleanup()
+''', config_text=TEST_MODEL_CONFIG)
+
+
+def test_initial_prepare_refuses_changed_authority_or_inactive_turn(tmp_path):
+    _run(tmp_path, _HOST_SETUP + r'''
+from core.assistant_runtime.main_control import initial_migration_id
+from core.assistant_runtime.migration_io import MigrationIOError
+def prepare(p, turn='turn-one'):
+    return history_host.prepare_initial_source('registered:1', p['previewId'], 1, turn,
+        initial_migration_id('registered:1', p['previewId'], 'knowledge'), 'knowledge', None)
+try:
+    original = registry.read_text()
+    registry.write_text(original + ' ')
+    try: prepare(value)
+    except MigrationIOError: pass
+    else: raise AssertionError('changed source was accepted')
+    registry.write_text(original)
+    fresh = preview.preview('registered:1', turn_id='turn-one')
+    with sessions._RUNNING_SESSIONS_LOCK:
+        sessions._SESSION_ACTIVE_TURN_IDS[assistant['directSessionId']] = 'other-turn'
+    try: prepare(fresh)
+    except MigrationIOError: pass
+    else: raise AssertionError('inactive turn was accepted')
+    assert not (target / 'knowledge_migrations').exists()
 finally:
     cleanup()
 ''', config_text=TEST_MODEL_CONFIG)

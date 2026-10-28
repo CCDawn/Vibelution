@@ -66,6 +66,38 @@ def test_busy_profile_is_rejected_before_bootstrap(tmp_path):
     """, config_text=TEST_MODEL_CONFIG)
 
 
+def test_before_bootstrap_runs_under_owner_and_rejection_never_bootstraps(tmp_path):
+    _run(tmp_path, """
+        import os
+        from pathlib import Path
+        from core.assistant_runtime import native
+        from core.assistant_runtime.migration_profile import offline_migration_profile
+        from core.infrastructure.file_lock import locked_sidecar
+        root = Path(os.environ['VIBELUTION_ASSISTANT_NATIVE_ROOT']).resolve()
+        calls = []
+        def check_owner(actual):
+            assert actual == root and not native._STARTED
+            try:
+                with locked_sidecar(root / 'host-owner', timeout=0):
+                    raise AssertionError('hook lacks exclusive owner')
+            except TimeoutError:
+                pass
+            calls.append('checked')
+        def reject(actual):
+            check_owner(actual)
+            raise RuntimeError('permit unavailable')
+        try:
+            with offline_migration_profile(before_bootstrap=reject):
+                raise AssertionError('rejected hook admitted writer')
+        except RuntimeError as error:
+            assert str(error) == 'permit unavailable'
+        assert not native._STARTED and not (root / 'data').exists()
+        with offline_migration_profile(before_bootstrap=check_owner) as lease:
+            lease.check()
+        assert calls == ['checked', 'checked'] and not native._STARTED
+    """, config_text=TEST_MODEL_CONFIG)
+
+
 def test_offline_profile_never_recovers_or_stops_a_pending_native_turn(tmp_path):
     _run(tmp_path, """
         import os

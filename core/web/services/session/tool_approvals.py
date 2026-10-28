@@ -1138,7 +1138,7 @@ def _argument_summary(tool_name: str, tool_args: Mapping[str, Any]) -> dict[str,
 def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
     """Approval-only projection; never expose nested prompt/policy values."""
     action = args.get("action")
-    if isinstance(action, str) and action in {"history_import", "affairs_sync"}:
+    if isinstance(action, str) and action in {"history_import", "affairs_sync", "initial_migration_queue"}:
         from core.infrastructure.native_runtime import is_launcher_assistant_process
         if not is_launcher_assistant_process():
             return {"assistantArgumentsInvalid": True}
@@ -1147,16 +1147,23 @@ def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
             values = json.loads(raw) if isinstance(raw, str) and len(raw) <= 16000 else None
             required = {"project_id", "preview_id"}
             optional = {"recover_sync_id"} if action == "affairs_sync" else set()
+            if action == "initial_migration_queue":
+                required.add("category")
             if (not isinstance(values, dict) or not required <= set(values) or set(values) - required - optional
+                    or action == "initial_migration_queue" and values.get("category") not in ("personal", "knowledge")
                     or values.get("recover_sync_id") is not None and (not isinstance(values["recover_sync_id"], str)
                         or re.fullmatch(r"affairs-[0-9a-f]{40}", values["recover_sync_id"]) is None)):
                 raise ValueError("invalid history import parameters")
             from core.assistant_runtime.actions import history_import_approval_summary
             target = history_import_approval_summary(values["project_id"], values["preview_id"])
+            if action == "initial_migration_queue":
+                target["category"] = values["category"]
             if values.get("recover_sync_id") is not None:
                 target["syncId"] = values["recover_sync_id"]
             return {"assistantAction": action, "assistantTargets": target,
-                    "assistantOperationDescription": ("只读导入所选旧助理的历史会话和附件；不会恢复旧任务或退役旧助理。"
+                    "assistantOperationDescription": ("排队首次导入所选旧助理的事务和情景记忆。" if action == "initial_migration_queue" and values["category"] == "personal"
+                        else "排队首次导入所选旧助理可验证的私有知识。" if action == "initial_migration_queue"
+                        else "只读导入所选旧助理的历史会话和附件；不会恢复旧任务或退役旧助理。"
                         if action == "history_import" else "核对原事务同步回执，不会重新写入事务。" if values.get("recover_sync_id") is not None
                         else "同步所选旧助理的个人事务，保留未决冲突；不会冻结旧来源或退役旧助理。")}
         except (ValueError, TypeError, KeyError, RuntimeError, RecursionError):

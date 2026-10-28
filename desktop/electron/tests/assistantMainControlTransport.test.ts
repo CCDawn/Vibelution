@@ -9,6 +9,26 @@ const request = wire().request as MainControlRequest;
 const result = { schemaVersion: 1 as const, projectId: request.projectId, operation: "start", requestId: "request-1", state: "completed", code: "accepted", accepted: true };
 
 describe("generation-scoped main control transport", () => {
+  it("keeps initial migration requests bound to their project, category and stable operation ID", () => {
+    const projectId = "synthetic:uuid", category = "personal";
+    const operationId = `initial-${createHash("sha256").update(`${projectId}:${category}`).digest("hex").slice(0, 40)}`;
+    const row = { deliveryId: "a".repeat(32), action: "initial_migration_queue", projectId,
+      previewId: "b".repeat(64), turnId: "turn-1", category, operationId, timeoutMs: 10000 };
+    const parsed = parseMainControlClaim({ schemaVersion: 1, request: row })!;
+    expect(parsed).toEqual(row);
+    for (const change of [{ path: "C:/private" }, { category: "history" }, { operationId: "initial-" + "0".repeat(40) }, { timeoutMs: 120001 }])
+      expect(() => parseMainControlClaim({ schemaVersion: 1, request: { ...row, ...change } })).toThrow();
+    const result = { schemaVersion: 1, projectId, previewId: row.previewId, category, operationId,
+      state: "queued", code: "queued", readyForCutover: false };
+    expect(projectMainControlResult(parsed, result)).toEqual(result);
+    for (const change of [{ readyForCutover: true }, { operationId: "initial-" + "0".repeat(40) }, { path: "C:/private" }, { state: "completed" }])
+      expect(projectMainControlResult(parsed, { ...result, ...change })).toMatchObject({ state: "unknown", code: "unknown" });
+    const receipt = parseMainControlClaim({ schemaVersion: 1, request: { deliveryId: row.deliveryId,
+      action: "initial_migration_receipt", projectId, category, operationId } })!;
+    const completed = { schemaVersion: 1, projectId, category, operationId, state: "completed", code: "completed", readyForCutover: false };
+    expect(projectMainControlResult(receipt, completed)).toEqual(completed);
+    expect(projectMainControlResult(receipt, { ...completed, sourcePath: "C:/private" })).toMatchObject({ state: "unknown" });
+  });
   it("binds affairs sync to the exact request and projects only closed results", () => {
     const row = { deliveryId: "a".repeat(32), action: "affairs_sync", projectId: "synthetic:uuid",
       previewId: "b".repeat(64), turnId: "turn-1", timeoutMs: 10000 };

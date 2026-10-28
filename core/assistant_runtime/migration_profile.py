@@ -38,15 +38,20 @@ class OfflineMigrationProfileLease:
 
 
 @contextmanager
-def offline_migration_profile():
+def offline_migration_profile(*, before_bootstrap=None):
     """Acquire the same OS lock as the host *before* native bootstrap.
 
     ``locked_sidecar`` is deliberately not thread-reentrant, so even a host
     owning the same lock in this process cannot treat a migration as offline.
     Only this context can create a live lease, and it shuts down its own native
     lifecycle on exit. The caller must separately verify all source authority.
+    A trusted synchronous before_bootstrap(root) runs while the owner lock and
+    pinned target namespace are held, before any native bootstrap or writer.
+    Raising rejects admission. It must not bootstrap native or release locks.
     """
     global _active, _quarantined
+    if before_bootstrap is not None and not callable(before_bootstrap):
+        raise TypeError("before_bootstrap must be callable")
     root = assistant_native_root()
     lexical = validate_path(Path(os.environ.get("VIBELUTION_ASSISTANT_NATIVE_ROOT", "")))
     check_path(lexical)
@@ -61,6 +66,10 @@ def offline_migration_profile():
             locks.enter_context(pinned_mutable_file(root / "host-owner.lock"))
             locks.enter_context(locked_sidecar(root / "host-owner", timeout=0))
             try:
+                if before_bootstrap is not None:
+                    before_bootstrap(root)
+                    if native._STARTED or assistant_native_root() != root or lexical.resolve() != root:
+                        raise RuntimeError("offline_migration_profile_changed")
                 projection = native.bootstrap_for_offline_migration(root)
                 assistant = projection.get("assistant") or {}
                 agent_id, session_id = assistant.get("agentId"), assistant.get("directSessionId")

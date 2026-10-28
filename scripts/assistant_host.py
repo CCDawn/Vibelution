@@ -10,10 +10,23 @@ import os
 import re
 import socket
 import sys
+import threading
+from contextlib import contextmanager
 from pathlib import Path
 
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SOURCE_ROOT))
+
+
+@contextmanager
+def _initial_owner_lifetime():
+    """Expose owner validity only inside the surrounding host-owner lock."""
+    active = threading.Event()
+    active.set()
+    try:
+        yield active.is_set
+    finally:
+        active.clear()
 
 
 def _namespace_windows_import_paths() -> None:
@@ -69,6 +82,7 @@ def main():
     token = os.environ.pop("VIBELUTION_ASSISTANT_TOKEN", "")
     main_control_enabled = os.environ.pop("VIBELUTION_ASSISTANT_MAIN_CONTROL", "") == "1"
     appearance_enabled = os.environ.pop("VIBELUTION_ASSISTANT_APPEARANCE_CONTROL", "") == "1"
+    initial_migration_enabled = os.environ.pop("VIBELUTION_ASSISTANT_INITIAL_MIGRATION_CONTROL", "") == "1"
     if len(token) < 32:
         parser.error("Launcher private bootstrap credential is missing")
     root = args.profile_root.resolve()
@@ -113,16 +127,18 @@ def main():
     main_control = None
     if main_control_enabled:
         from core.assistant_runtime.main_control import MainControlBroker
-        main_control = MainControlBroker(dispatch.project_ids, appearance_enabled=appearance_enabled)
+        main_control = MainControlBroker(dispatch.project_ids, appearance_enabled=appearance_enabled,
+                                         initial_migration_enabled=initial_migration_enabled)
 
     ready = args.runtime_dir / "ready.json"
     # A second Launcher cannot open another writer over the same profile.
     # OS locking releases on crashes; no PID-age heuristic transfers ownership.
-    with cross_process_file_lock(root / "host-owner", timeout=0):
+    with cross_process_file_lock(root / "host-owner", timeout=0), _initial_owner_lifetime() as initial_owner_check:
         history_control = None
         if main_control_enabled:
             from core.assistant_runtime.history_host import HistoryHost
-            history_control = HistoryHost(root, args.instance_id, dispatch, dispatch.history_preview)
+            history_control = HistoryHost(root, args.instance_id, dispatch, dispatch.history_preview,
+                                          initial_owner_check=initial_owner_check)
         _seed_tokenizer_cache(tokenizer_cache)
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.bind(("127.0.0.1", 0))

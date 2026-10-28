@@ -82,6 +82,144 @@ def _bound_route(paths, config_path):
     return workspace, runtime, snapshots, verify
 
 
+def _initial_offline():
+    """Private main-only entry; no path, operation or approval is accepted in argv."""
+    import os
+    from core.assistant_runtime.migration_io import check_path
+    from core.assistant_runtime.initial_migration_binding import (read_initial_intent, source_identity,
+        target_identity, authority_identity)
+    from scripts.assistant_migration_activate import (initial_binding, storage_authority,
+        activate_in_subprocess, prepare_initial_model_config)
+    token = os.environ.pop("VIBELUTION_INITIAL_MIGRATION_TOKEN", "")
+    url = os.environ.pop("VIBELUTION_INITIAL_MIGRATION_URL", "")
+    operation_id = None
+    try:
+        match = re.fullmatch(r"http://127\.0\.0\.1:([1-9][0-9]{0,4})", url)
+        if match is None:
+            raise MigrationIOError("initial_channel_invalid")
+        port = int(match.group(1))
+        bound = initial_binding(port, token)
+        operation_id = bound["operationId"]
+        for key in ("projectRoot", "sourceConfig", "targetProfile"):
+            path = check_path(Path(bound[key]))
+            if path.resolve() != path:
+                raise MigrationIOError("initial_channel_binding_invalid")
+        target = Path(bound["targetProfile"])
+        intent = read_initial_intent(target, operation_id)
+        if (intent is None or intent["registeredProjectId"] != bound["registeredProjectId"]
+                or intent["revision"] > bound["revision"]):
+            raise MigrationIOError("initial_migration_binding_changed")
+        if str(os.environ.get("VIBELUTION_DATA_HOME") or "").strip():
+            raise MigrationIOError("source_environment_unverified")
+        paths, storage, verify_storage = storage_authority(Path(bound["projectRoot"]), Path(bound["sourceConfig"]))
+        workspace, _, routing, verify_routing = _bound_route(paths, Path(bound["sourceConfig"]))
+        scope = intent["sourceScope"]
+        if (scope["projectId"] != paths.project_id or scope["instanceId"] != paths.instance_id):
+            raise MigrationIOError("initial_migration_binding_changed")
+        for root in (paths.project_root, workspace, Path(bound["sourceConfig"])):
+            resolved = root.resolve()
+            if target.is_relative_to(resolved) or resolved.is_relative_to(target):
+                raise MigrationIOError("history_source_target_overlap")
+        def verify():
+            verify_storage()
+            verify_routing()
+            verify_storage()
+        verify()
+        registry = read_stable_file(workspace / "agents/agents.json", 16 * 1024 * 1024)
+        sd, project_id, workspace_id = source_identity(scope, paths.project_root, workspace)
+        td, target_id = target_identity(target, intent["targetAgentId"], intent["targetSessionId"])
+        if (sd != intent["sourceIdentityDigest"] or project_id != intent["projectDirectory"]
+                or workspace_id != intent["workspaceDirectory"] or authority_identity((*routing, registry, *storage)) != intent["registryDigest"]
+                or td != intent["targetIdentityDigest"] or target_id != intent["targetDirectory"]):
+            raise MigrationIOError("initial_migration_binding_changed")
+        target_config = prepare_initial_model_config(Path(bound["sourceConfig"]), target,
+            Path(bound["targetConfig"]), operation_id, intent["registryDigest"])
+        verify()
+        report = activate_in_subprocess(paths=paths, workspace=workspace, agent_id=scope["agentId"],
+            source_config=Path(bound["sourceConfig"]), target_profile=target,
+            target_config=target_config, migration_id=operation_id, path_grants=None,
+            authority_snapshots=(*storage, *routing), authority_verify=verify, category=intent["category"],
+            initial_control={"binding": bound, "port": port, "token": token})
+        state = "completed" if report.get("status") == "complete" and not report.get("requiresReconciliation") else "partial"
+        print(json.dumps({"schemaVersion": 1, "operationId": operation_id, "state": state, "readyForCutover": False}))
+        return 0
+    except Exception:
+        # The main process must reconcile the original ID after a lost child;
+        # never fabricate a new ID or automatically replay it here.
+        valid = isinstance(operation_id, str) and re.fullmatch(r"initial-[a-f0-9]{40}", operation_id)
+        print(json.dumps({"schemaVersion": 1, "operationId": operation_id if valid else None,
+                          "state": "unknown" if valid else "unavailable", "readyForCutover": False}))
+        return 1
+
+
+def _initial_list(arguments):
+    """Read only native intent identities; malformed state is never an empty list."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--initial-list", action="store_true", required=True)
+    parser.add_argument("--target-profile", type=Path, required=True)
+    args = parser.parse_args(arguments)
+    try:
+        from core.assistant_runtime.initial_migration_binding import list_initial_intents
+        from core.assistant_runtime.migration_io import check_path, pinned_mutable_file, pinned_target_directory
+        from core.infrastructure.file_lock import locked_sidecar
+        from scripts.assistant_migration_activate import _initial_receipts_or_claim
+        target = check_path(args.target_profile)
+        if target.resolve() != target:
+            raise MigrationIOError("initial_target_invalid")
+        with pinned_target_directory(target), pinned_mutable_file(target / "host-owner.lock", create=False), \
+                locked_sidecar(target / "host-owner", timeout=0):
+            rows = list_initial_intents(target)
+            output = [{**{key: row[key] for key in ("operationId", "registeredProjectId", "category", "registryDigest")},
+                "state": "claimed_unknown" if _initial_receipts_or_claim(target, row["operationId"], row["category"])
+                         else "dispatchable"} for row in rows]
+        print(json.dumps({"schemaVersion": 1, "intents": output}))
+        return 0
+    except Exception:
+        print(json.dumps({"schemaVersion": 1, "error": "initial_intents_unavailable"}))
+        return 1
+
+
+def _initial_verify(arguments):
+    """Read-only business receipt verification after main has drained the Job."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--initial-verify", action="store_true", required=True)
+    parser.add_argument("--target-profile", type=Path, required=True)
+    parser.add_argument("--operation-id", required=True)
+    parser.add_argument("--allow-partial", action="store_true")
+    args = parser.parse_args(arguments)
+    valid = re.fullmatch(r"initial-[a-f0-9]{40}", args.operation_id)
+    result = {"schemaVersion": 1, "operationId": args.operation_id if valid else None,
+              "state": "unknown", "readyForCutover": False}
+    try:
+        from core.assistant_runtime.migration_io import check_path, pinned_mutable_file, pinned_target_directory
+        from core.infrastructure.file_lock import locked_sidecar
+        from scripts.assistant_migration_activate import (verify_initial_personal_receipts,
+            verify_initial_knowledge_receipts)
+        from core.assistant_runtime.initial_migration_binding import read_initial_intent
+        target = check_path(args.target_profile)
+        if not valid or target.resolve() != target:
+            raise MigrationIOError("initial_receipts_unknown")
+        with pinned_target_directory(target), pinned_mutable_file(target / "host-owner.lock", create=False), \
+                locked_sidecar(target / "host-owner", timeout=0):
+            intent = read_initial_intent(target, args.operation_id)
+            if intent is None:
+                raise MigrationIOError("initial_receipts_unknown")
+            if intent["category"] == "personal":
+                verify_initial_personal_receipts(target, args.operation_id, allow_partial=args.allow_partial)
+            elif intent["category"] == "knowledge":
+                verify_initial_knowledge_receipts(target, args.operation_id)
+            else:
+                raise MigrationIOError("initial_receipts_unknown")
+        # A partial receipt proves at least one historical write only. The
+        # caller must separately own the drained Job and its partial result.
+        result["state"] = "confirmed_partial" if args.allow_partial else "confirmed_completed"
+        print(json.dumps(result))
+        return 0
+    except Exception:
+        print(json.dumps(result))
+        return 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project", type=Path, required=True)
@@ -315,4 +453,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    arguments = sys.argv[1:]
+    raise SystemExit(_initial_offline() if arguments == ["--initial-offline"] else
+                     _initial_list(arguments) if "--initial-list" in arguments else
+                     _initial_verify(arguments) if "--initial-verify" in arguments else main())

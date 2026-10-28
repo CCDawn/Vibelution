@@ -1,4 +1,5 @@
 /** Fake-Job coverage for the Launcher-owned assistant source-host lifecycle. */
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -18,7 +19,7 @@ afterEach(() => {
   }
 });
 
-function fixture(options: { stale?: boolean; noReadyFirst?: boolean; graceful?: boolean; pythonArguments?: string[]; env?: NodeJS.ProcessEnv; projectsSuspended?: boolean } = {}) {
+function fixture(options: { stale?: boolean; noReadyFirst?: boolean; graceful?: boolean; pythonArguments?: string[]; env?: NodeJS.ProcessEnv; projectsSuspended?: boolean; initialMigrationControl?: boolean } = {}) {
   const root = mkdtempSync(join(tmpdir(), "assistant-host-test-"));
   tempRoots.push(root);
   const python = join(root, "pythonw.exe");
@@ -46,7 +47,8 @@ function fixture(options: { stale?: boolean; noReadyFirst?: boolean; graceful?: 
   };
   const fetchImpl = vi.fn(async (...args: Parameters<typeof globalThis.fetch>): Promise<Response> => {
     const url = String(args[0]);
-    if (url.endsWith("/health")) return Response.json({ status: "ok", protocolVersion: 1, role: "launcher_assistant" });
+    if (url.endsWith("/health")) return Response.json({ status: "ok", protocolVersion: 1, role: "launcher_assistant",
+      ...(options.initialMigrationControl ? { initialMigrationControlVersion: 1 } : {}) });
     if (url.endsWith("/api/assistant")) return Response.json({ assistant: { agentId: "a", directSessionId: "s", displayName: "Assistant" } });
     if (url.endsWith("/api/assistant/session")) return Response.json({ id: "s", messages: [] });
     if (url.endsWith("/shutdown")) {
@@ -56,12 +58,121 @@ function fixture(options: { stale?: boolean; noReadyFirst?: boolean; graceful?: 
     return Response.json({ accepted: true });
   });
   const host = new AssistantHost({ profileRoot: join(root, "profile"), runtimeRoot: join(root, "runtime"),
-    sourceRoot: root, pythonPath: python, pythonArguments: options.pythonArguments, projects: { project: root }, projectsSuspended: options.projectsSuspended, native, fetch: fetchImpl,
+    sourceRoot: root, pythonPath: python, pythonArguments: options.pythonArguments, projects: { project: root }, projectsSuspended: options.projectsSuspended, initialMigrationControl: options.initialMigrationControl, native, fetch: fetchImpl,
     env: { VIBELUTION_CONFIG_PATH: join(root, "config.toml"), ...options.env, VIBELUTION_ASSISTANT_TOKEN: "must-not-override-token" } });
   return { host, native, fetchImpl, inputs, root, active };
 }
 
 describe("AssistantHost", () => {
+  it("resolves a main-only source identity and rejects stale or forged responses", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    const identity = { schemaVersion: 1, projectId: "project", revision: 0,
+      sourceScope: { projectId: "source", instanceId: "instance", agentId: "agent" },
+      sourceIdentityDigest: "a".repeat(64), authorityDigest: "b".repeat(64),
+      projectDirectory: { device: "1", inode: "2", birthtimeNs: "3" } };
+    fetchImpl.mockImplementationOnce(async (url, options) => {
+      expect(String(url)).toMatch(/\/legacy-reminders\/source$/);
+      expect(JSON.parse(String(options?.body))).toEqual({ projectId: "project", revision: 0 });
+      expect(new Headers(options?.headers).get("authorization")).toMatch(/^Bearer /);
+      return Response.json(identity);
+    });
+    await expect(host.resolveLegacyReminderIdentity("project", 0)).resolves.toEqual(identity);
+    fetchImpl.mockResolvedValueOnce(Response.json({ ...identity, path: "forged" }));
+    await expect(host.resolveLegacyReminderIdentity("project", 0)).rejects.toThrow("ASSISTANT_RESPONSE_INVALID");
+    await expect(host.request({ operation: "legacy-reminders/source" } as never)).rejects.toThrow();
+    let release!: (value: Response) => void;
+    fetchImpl.mockImplementationOnce(async () => await new Promise<Response>(resolve => { release = resolve; }));
+    const pending = host.resolveLegacyReminderIdentity("project", 0);
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    fetchImpl.mockResolvedValueOnce(Response.json({ schemaVersion: 1, revision: 0, projectsSuspended: true }));
+    const suspended = host.suspendProjects();
+    release(Response.json(identity));
+    await expect(pending).rejects.toThrow("ASSISTANT_NOT_READY");
+    await suspended;
+    await host.stop();
+  });
+
+  it("keeps legacy receipt attempts on the main-only private transport and validates replies", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    const request = { sourceKey: "a".repeat(64), eventId: "affair-reminder:test:20261028" };
+    const eventKey = "legacy:" + createHash("sha256").update(JSON.stringify([request.sourceKey, request.eventId]), "ascii").digest("hex");
+    const token = "b".repeat(64);
+    fetchImpl.mockImplementationOnce(async (url, options) => {
+      expect(String(url)).toMatch(/\/legacy-reminders\/reserve$/);
+      expect(JSON.parse(String(options?.body))).toEqual(request);
+      return Response.json({ schemaVersion: 1, eventKey, state: "reserved", attemptToken: token });
+    });
+    expect(await host.reserveLegacyReminder(request)).toMatchObject({ eventKey, attemptToken: token });
+    fetchImpl.mockResolvedValueOnce(Response.json({ schemaVersion: 1, eventKey, state: "submitted", channel: "system_notification" }));
+    expect(await host.settleLegacyReminder({ ...request, attemptToken: token, channel: "system_notification" }))
+      .toMatchObject({ state: "submitted" });
+    fetchImpl.mockImplementationOnce(async (url, options) => {
+      expect(String(url)).toMatch(/\/legacy-reminders\/abandon$/);
+      expect(JSON.parse(String(options?.body))).toEqual({ ...request, attemptToken: token });
+      return Response.json({ schemaVersion: 1, eventKey, state: "abandoned" });
+    });
+    expect(await host.abandonLegacyReminder({ ...request, attemptToken: token })).toMatchObject({ state: "abandoned" });
+    fetchImpl.mockResolvedValueOnce(Response.json({ schemaVersion: 1, eventKey, state: "pending" }));
+    await expect(host.abandonLegacyReminder({ ...request, attemptToken: token })).rejects.toThrow("ASSISTANT_RESPONSE_INVALID");
+    fetchImpl.mockResolvedValueOnce(Response.json({ schemaVersion: 1, eventKey: "wrong", state: "reserved", attemptToken: token }));
+    await expect(host.reserveLegacyReminder(request)).rejects.toThrow("ASSISTANT_RESPONSE_INVALID");
+    await expect(host.request({ operation: "legacy-reminders/reserve" } as never)).rejects.toThrow();
+    await host.stop();
+  });
+  it("confirms a main-only initial migration binding and drains an aborted prepare", async () => {
+    const { host, fetchImpl, native } = fixture({ graceful: true, initialMigrationControl: true });
+    await host.start();
+    const row = { deliveryId: "a".repeat(32), action: "initial_migration_queue" as const, projectId: "project",
+      previewId: "b".repeat(64), turnId: "turn-1", category: "personal" as const,
+      operationId: "initial-" + "c".repeat(40), timeoutMs: 10000 };
+    const directory = { device: "1", inode: "2", birthtimeNs: "3" };
+    fetchImpl.mockResolvedValueOnce(Response.json({ schemaVersion: 1, registeredProjectId: row.projectId,
+      sourceScope: { projectId: "source", instanceId: "instance", agentId: "agent" }, category: row.category,
+      turnId: row.turnId, operationId: row.operationId, revision: 0, sourceIdentityDigest: "a".repeat(64),
+      registryDigest: "b".repeat(64), targetIdentityDigest: "c".repeat(64), projectDirectory: directory,
+      workspaceDirectory: directory, targetDirectory: directory, targetAgentId: "agent", targetSessionId: "session",
+      authority: "native_policy_admitted", readyForCutover: false }));
+    await expect(host.prepareInitialMigration(row, 0)).resolves.toBe(true);
+    let started = false;
+    fetchImpl.mockImplementationOnce(async (_url, options) => {
+      started = true;
+      return await new Promise<Response>((_resolve, reject) => options?.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true }));
+    }).mockImplementationOnce(async (url, options) => {
+      expect(String(url)).toMatch(/initial-migration\/drain$/);
+      expect(JSON.parse(String(options?.body))).toEqual({ deliveryId: row.deliveryId, operationId: row.operationId });
+      return Response.json({ schemaVersion: 1, operationId: row.operationId, state: "unknown", drained: true });
+    });
+    const controller = new AbortController();
+    const pending = host.prepareInitialMigration(row, 0, controller.signal);
+    await vi.waitFor(() => expect(started).toBe(true));
+    controller.abort();
+    await expect(pending).resolves.toBe(false);
+    expect(native.close).not.toHaveBeenCalled();
+    await host.stop();
+  });
+  it("does not release a failed prepare until the root Job handle is signaled", async () => {
+    const { host, fetchImpl, native } = fixture({ graceful: true, initialMigrationControl: true });
+    await host.start();
+    let exit: number | null = null;
+    Object.assign(native, { exitCode: vi.fn(() => exit) });
+    native.activeCount.mockReturnValue(0);
+    fetchImpl.mockRejectedValue(new Error("connection unavailable"));
+    const row = { deliveryId: "a".repeat(32), action: "initial_migration_queue" as const, projectId: "project",
+      previewId: "b".repeat(64), turnId: "turn-1", category: "personal" as const,
+      operationId: "initial-" + "c".repeat(40), timeoutMs: 10000 };
+    vi.useFakeTimers();
+    let finished = false;
+    const pending = host.prepareInitialMigration(row, 0).then(value => { finished = true; return value; });
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(finished).toBe(false);
+    exit = 0;
+    await vi.advanceTimersByTimeAsync(1000);
+    await expect(pending).resolves.toBe(false);
+    vi.useRealTimers();
+    await host.stop();
+  });
   it("sends affairs sync through the current project revision and validates the response binding", async () => {
     const { host, fetchImpl } = fixture({ graceful: true });
     await host.start();

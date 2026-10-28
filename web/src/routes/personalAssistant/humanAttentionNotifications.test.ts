@@ -286,6 +286,54 @@ describe("human attention notification ledger", () => {
 });
 
 describe("human attention emission", () => {
+  it("never erases another window's successful ID after a negotiated source rejection", async () => {
+    const storage = memoryStorage();
+    const first = createHumanAttentionLedger(storage, "2026-10-18");
+    const second = createHumanAttentionLedger(storage, "2026-10-18");
+    let finish!: (result: unknown) => void;
+    const notifyHumanAttention = vi.fn().mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }))
+      .mockResolvedValueOnce({ delivered: "system_notification" });
+    const rows = [attentionRow({ id: "shared-affair", kind: "affair_reminder" })];
+    emitNewHumanAttentionNotifications({ rows, bridge: { notifyHumanAttention }, ledger: first, affairMode: "main_owned" });
+    expect(emitNewHumanAttentionNotifications({ rows, bridge: { notifyHumanAttention }, ledger: first, affairMode: "main_owned" })).toEqual([]);
+    emitNewHumanAttentionNotifications({ rows, bridge: { notifyHumanAttention }, ledger: second, affairMode: "main_owned" });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    finish({ delivered: "source_retired" });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(createHumanAttentionLedger(storage, "2026-10-18").has("shared-affair")).toBe(true);
+    expect(notifyHumanAttention).toHaveBeenCalledTimes(2);
+  });
+  it.each(["source_retired", "invalid_payload"])("does not persist negotiated %s", async delivered => {
+    const storage = memoryStorage();
+    const ledger = createHumanAttentionLedger(storage, "2026-10-18");
+    const rows = [attentionRow({ id: "rejected-affair", kind: "affair_reminder" })];
+    const notifyHumanAttention = vi.fn().mockResolvedValue({ delivered });
+    emitNewHumanAttentionNotifications({ rows, bridge: { notifyHumanAttention }, ledger, affairMode: "main_owned", reportFailure: vi.fn() });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(ledger.has("rejected-affair")).toBe(false);
+    expect(createHumanAttentionLedger(storage, "2026-10-18").has("rejected-affair")).toBe(false);
+  });
+  it("retains unknown negotiated outcomes without an automatic retry", async () => {
+    const storage = memoryStorage();
+    const ledger = createHumanAttentionLedger(storage, "2026-10-18");
+    const rows = [attentionRow({ id: "unknown-affair", kind: "affair_reminder" })];
+    const notifyHumanAttention = vi.fn().mockRejectedValue(new Error("reply lost"));
+    emitNewHumanAttentionNotifications({ rows, bridge: { notifyHumanAttention }, ledger, affairMode: "main_owned", reportFailure: vi.fn() });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(createHumanAttentionLedger(storage, "2026-10-18").has("unknown-affair")).toBe(true);
+    expect(emitNewHumanAttentionNotifications({ rows, bridge: { notifyHumanAttention }, ledger, affairMode: "main_owned" })).toEqual([]);
+    expect(notifyHumanAttention).toHaveBeenCalledTimes(1);
+  });
+  it("does not change the unnegotiated or non-affair notification path", async () => {
+    const storage = memoryStorage();
+    const ledger = createHumanAttentionLedger(storage, "2026-10-18");
+    const notifyHumanAttention = vi.fn().mockResolvedValue({ delivered: "source_retired" });
+    const rows = [attentionRow({ id: "legacy-affair", kind: "affair_reminder" }), attentionRow({ id: "other", kind: "session_completed" })];
+    emitNewHumanAttentionNotifications({ rows, bridge: { notifyHumanAttention }, ledger });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(createHumanAttentionLedger(storage, "2026-10-18").has("legacy-affair")).toBe(true);
+    expect(createHumanAttentionLedger(storage, "2026-10-18").has("other")).toBe(true);
+  });
   it("notifies each unseen id exactly once and persists the dedup", () => {
     const storage = memoryStorage();
     const ledger = createHumanAttentionLedger(storage, "2026-10-18");

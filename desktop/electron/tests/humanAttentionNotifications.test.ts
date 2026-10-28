@@ -5,8 +5,9 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import type { IpcMainInvokeEvent } from "electron";
 import { IPC_CHANNELS } from "../src/ipc.js";
-import { handleHumanAttentionIpc } from "../src/notifications/humanAttentionIpc.js";
+import { handleHumanAttentionCapabilityIpc, handleHumanAttentionIpc } from "../src/notifications/humanAttentionIpc.js";
 import { LegacyReminderSourceFence } from "../src/notifications/legacyReminderSourceFence.js";
+import { LegacyReminderNegotiatedDocuments } from "../src/notifications/legacyReminderCoordinator.js";
 import {
   createHumanAttentionNotificationService,
   type DesktopHumanAttentionNotification
@@ -546,6 +547,163 @@ const fakeDesktopPaths: DesktopPaths = {
 };
 
 describe("human attention IPC sender boundary", () => {
+  it("grants capability only to a verified document and never downgrades a granted document", async () => {
+    const root = mkdtempSync(join(tmpdir(), "legacy-reminder-capability-"));
+    try {
+      const workbench = new FakeElectronWindow(1, "");
+      const provider = new ElectronWindowProvider(fakeDesktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000/", {
+        createWorkbenchWindow: () => workbench,
+      });
+      await provider.openOrFocusWorkbench();
+      const frame = { url: "http://127.0.0.1:8000/" };
+      const event = { sender: Object.assign(workbench.webContents, { mainFrame: frame }), senderFrame: frame } as unknown as IpcMainInvokeEvent;
+      const info = statSync(root, { bigint: true });
+      const binding = { projectId: "project", instanceId: "main", physicalRoot: root,
+        physicalIdentity: { device: info.dev.toString(), inode: info.ino.toString() } };
+      const docs = new LegacyReminderNegotiatedDocuments();
+      const options = { documents: docs, resolveSource: vi.fn().mockResolvedValue(binding), authorize: vi.fn().mockResolvedValue(() => true) };
+      expect(await handleHumanAttentionCapabilityIpc(event, provider, ["http://127.0.0.1:8000"])).toEqual({ schemaVersion: 1, legacyAffairReminder: "legacy" });
+      expect(await handleHumanAttentionCapabilityIpc(event, provider, ["http://127.0.0.1:8000"], options)).toEqual({ schemaVersion: 1, legacyAffairReminder: "main_owned" });
+      options.resolveSource.mockResolvedValue(null);
+      expect(await handleHumanAttentionCapabilityIpc(event, provider, ["http://127.0.0.1:8000"], options)).toEqual({ schemaVersion: 1, legacyAffairReminder: "main_owned" });
+      const child = { ...event, senderFrame: { url: frame.url } } as unknown as IpcMainInvokeEvent;
+      await expect(handleHumanAttentionCapabilityIpc(child, provider, ["http://127.0.0.1:8000"], options)).rejects.toThrow();
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+  it("keeps a capability grant fail-closed when binding commit throws or its reply is lost", async () => {
+    const root = mkdtempSync(join(tmpdir(), "legacy-reminder-capability-failed-"));
+    try {
+      const workbench = new FakeElectronWindow(1, "");
+      const provider = new ElectronWindowProvider(fakeDesktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000/", {
+        createWorkbenchWindow: () => workbench,
+      });
+      await provider.openOrFocusWorkbench();
+      const frame = { url: "http://127.0.0.1:8000/" };
+      const event = { sender: Object.assign(workbench.webContents, { mainFrame: frame }), senderFrame: frame } as unknown as IpcMainInvokeEvent;
+      const info = statSync(root, { bigint: true });
+      const binding = { projectId: "project", instanceId: "main", physicalRoot: root,
+        physicalIdentity: { device: info.dev.toString(), inode: info.ino.toString() } };
+      const documents = new LegacyReminderNegotiatedDocuments();
+      const resolveSource = vi.fn().mockResolvedValue(binding);
+      const options = { documents, resolveSource, authorize: vi.fn().mockResolvedValue(() => { throw new Error("binding lost"); }) };
+      await expect(handleHumanAttentionCapabilityIpc(event, provider, ["http://127.0.0.1:8000"], options)).rejects.toThrow();
+      resolveSource.mockResolvedValue(null);
+      await expect(handleHumanAttentionCapabilityIpc(event, provider, ["http://127.0.0.1:8000"], options)).rejects.toThrow();
+      const notify = vi.fn(async () => ({ delivered: "system_notification" as const }));
+      const coordinated = { documents,
+        dispatch: vi.fn(async () => ({ delivered: "attempt_pending" as const })) };
+      const result = await handleHumanAttentionIpc(event, attention({ kind: "affair_reminder" }), provider, ["http://127.0.0.1:8000"], notify,
+        { fence: new LegacyReminderSourceFence(join(root, "fence")), resolveSource, coordinated });
+      expect(result).toEqual({ delivered: "attempt_pending" });
+      expect(notify).not.toHaveBeenCalled();
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+  it("does not return legacy from a delayed capability lookup after another lookup commits", async () => {
+    const root = mkdtempSync(join(tmpdir(), "legacy-reminder-capability-race-"));
+    try {
+      const workbench = new FakeElectronWindow(1, "");
+      const provider = new ElectronWindowProvider(fakeDesktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000/", {
+        createWorkbenchWindow: () => workbench,
+      });
+      await provider.openOrFocusWorkbench();
+      const frame = { url: "http://127.0.0.1:8000/" };
+      const event = { sender: Object.assign(workbench.webContents, { mainFrame: frame }), senderFrame: frame } as unknown as IpcMainInvokeEvent;
+      const info = statSync(root, { bigint: true });
+      const binding = { projectId: "project", instanceId: "main", physicalRoot: root,
+        physicalIdentity: { device: info.dev.toString(), inode: info.ino.toString() } };
+      let finish!: (value: typeof binding | null) => void;
+      const resolveSource = vi.fn().mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }))
+        .mockResolvedValue(binding);
+      const options = { documents: new LegacyReminderNegotiatedDocuments(), resolveSource, authorize: async () => () => true };
+      const slow = handleHumanAttentionCapabilityIpc(event, provider, ["http://127.0.0.1:8000"], options);
+      expect(await handleHumanAttentionCapabilityIpc(event, provider, ["http://127.0.0.1:8000"], options))
+        .toEqual({ schemaVersion: 1, legacyAffairReminder: "main_owned" });
+      finish(null);
+      expect(await slow).toEqual({ schemaVersion: 1, legacyAffairReminder: "main_owned" });
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+  it("keeps negotiated reminders fail-closed if source binding disappears and validates before coordination", async () => {
+    const root = mkdtempSync(join(tmpdir(), "legacy-reminder-negotiated-"));
+    try {
+      const workbench = new FakeElectronWindow(1, "");
+      const provider = new ElectronWindowProvider(fakeDesktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000/", {
+        createWorkbenchWindow: () => workbench,
+      });
+      await provider.openOrFocusWorkbench();
+      const frame = { url: "http://127.0.0.1:8000/" };
+      const event = { sender: Object.assign(workbench.webContents, { mainFrame: frame }), senderFrame: frame } as unknown as IpcMainInvokeEvent;
+      const fence = new LegacyReminderSourceFence(join(root, "fence"));
+      const info = statSync(root, { bigint: true });
+      const binding = { projectId: "project", instanceId: "main", physicalRoot: root,
+        physicalIdentity: { device: info.dev.toString(), inode: info.ino.toString() } };
+      const notify = vi.fn(async () => ({ delivered: "system_notification" as const }));
+      const dispatch = vi.fn(async () => ({ delivered: "attempt_pending" as const }));
+      const documents = new LegacyReminderNegotiatedDocuments();
+      const documentToken = provider.notificationTargetForSender(event.sender, frame.url)!.documentToken;
+      documents.begin(documentToken);
+      documents.commit(documentToken);
+      const coordinated = { documents, dispatch };
+      const invoke = (payload: unknown, resolveSource: () => Promise<typeof binding | null>) => handleHumanAttentionIpc(event, payload, provider,
+        ["http://127.0.0.1:8000"], notify, { fence, resolveSource, coordinated });
+      expect(await invoke(attention({ kind: "affair_reminder" }), async () => null)).toEqual({ delivered: "attempt_pending" });
+      expect(await invoke(attention({ kind: "affair_reminder", id: "" }), async () => binding)).toMatchObject({ delivered: "invalid_payload" });
+      expect(dispatch).not.toHaveBeenCalled();
+      expect(notify).not.toHaveBeenCalled();
+      expect(await invoke(attention({ kind: "affair_reminder" }), async () => binding)).toEqual({ delivered: "attempt_pending" });
+      expect(dispatch).toHaveBeenCalledOnce();
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+  it("waits for an already received legacy reminder to finish sending before granting capability", async () => {
+    const root = mkdtempSync(join(tmpdir(), "legacy-reminder-grant-drain-"));
+    try {
+      const workbench = new FakeElectronWindow(1, "");
+      const provider = new ElectronWindowProvider(fakeDesktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000/", {
+        createWorkbenchWindow: () => workbench,
+      });
+      await provider.openOrFocusWorkbench();
+      const frame = { url: "http://127.0.0.1:8000/" };
+      const event = { sender: Object.assign(workbench.webContents, { mainFrame: frame }), senderFrame: frame } as unknown as IpcMainInvokeEvent;
+      const info = statSync(root, { bigint: true });
+      const binding = { projectId: "project", instanceId: "main", physicalRoot: root,
+        physicalIdentity: { device: info.dev.toString(), inode: info.ino.toString() } };
+      const documents = new LegacyReminderNegotiatedDocuments();
+      const fence = new LegacyReminderSourceFence(join(root, "fence"));
+      let releaseFence!: () => void;
+      const fenceGate = new Promise<void>(resolve => { releaseFence = resolve; });
+      const originalSubmit = fence.submit.bind(fence);
+      vi.spyOn(fence, "submit").mockImplementation(async (source, send) => {
+        await fenceGate;
+        return originalSubmit(source, send);
+      });
+      let releaseSend!: () => void;
+      const notify = vi.fn(() => new Promise<{ delivered: "system_notification" }>(resolve => {
+        releaseSend = () => resolve({ delivered: "system_notification" });
+      }));
+      const dispatch = vi.fn(async () => ({ delivered: "attempt_pending" as const }));
+      const resolveSource = async () => binding;
+      const coordinated = { documents, dispatch };
+      const invoke = () => handleHumanAttentionIpc(event, attention({ kind: "affair_reminder" }), provider,
+        ["http://127.0.0.1:8000"], notify, { fence, resolveSource, coordinated });
+      const old = invoke();
+      await vi.waitFor(() => expect(fence.submit).toHaveBeenCalledOnce());
+      const commit = vi.fn(() => true);
+      let granted = false;
+      const grant = handleHumanAttentionCapabilityIpc(event, provider, ["http://127.0.0.1:8000"],
+        { documents, resolveSource, authorize: async () => commit }).then(result => { granted = true; return result; });
+      await vi.waitFor(() => expect(documents.has(provider.notificationTargetForSender(event.sender, frame.url)!.documentToken)).toBe(true));
+      expect(await invoke()).toEqual({ delivered: "attempt_pending" });
+      expect(commit).not.toHaveBeenCalled();
+      releaseFence();
+      await vi.waitFor(() => expect(notify).toHaveBeenCalledOnce());
+      expect(granted).toBe(false);
+      releaseSend();
+      expect(await old).toEqual({ delivered: "system_notification" });
+      expect(await grant).toEqual({ schemaVersion: 1, legacyAffairReminder: "main_owned" });
+      expect(await invoke()).toEqual({ delivered: "attempt_pending" });
+      expect(dispatch).toHaveBeenCalledOnce();
+      expect(notify).toHaveBeenCalledOnce();
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
   it.each(["unbound", "bound"])("waits for a pre-fence %s source lookup and any admitted send", async mode => {
     const root = mkdtempSync(join(tmpdir(), "legacy-reminder-barrier-"));
     try {

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { requestRendererWindowClose } from "./windows/rendererWindowClose.js";
 import { configureWindowsNotificationIdentity } from "./notifications/windowsNotificationIdentity.js";
 import { NativeNotificationLifetime } from "./notifications/nativeNotificationLifetime.js";
-import { handleHumanAttentionIpc } from "./notifications/humanAttentionIpc.js";
+import { handleHumanAttentionCapabilityIpc, handleHumanAttentionIpc } from "./notifications/humanAttentionIpc.js";
 import { LegacyReminderSourceFence } from "./notifications/legacyReminderSourceFence.js";
 import { createLegacyReminderSourceResolver } from "./notifications/resolveLegacyReminderSource.js";
 import { mkdirSync, statSync, watch, writeFileSync, type FSWatcher } from "node:fs";
@@ -26,6 +26,9 @@ import {
 } from "./cli/desktopCli.js";
 import { IPC_CHANNELS } from "./ipc.js";
 import { AssistantHost } from "./assistant/assistantHost.js";
+import { InitialMigrationResults } from "./assistant/initialMigrationResults.js";
+import { verifyInitialMigrationResult } from "./assistant/initialMigrationJob.js";
+import { recoverInitialMigrations } from "./assistant/initialMigrationStartup.js";
 import { unknownAffairsSyncResult } from "./assistant/mainControlTransport.js";
 import { startAssistantReminderPump } from "./assistant/reminderPump.js";
 import { AssistantProjectRegistryConnection } from "./assistant/projectRegistryConnection.js";
@@ -522,6 +525,8 @@ let launcherAssistantHost: AssistantHost | null = null;
 let launcherAssistantWindow: AssistantWindow | null = null;
 let launcherAssistantExitReady = false;
 let launcherAssistantStarting: Promise<void> | null = null;
+let launcherAssistantStopping: Promise<void> | null = null;
+const launcherAssistantStartupAbort = new AbortController();
 let launcherAssistantProjects: AssistantProjectRegistryConnection | null = null;
 let legacyReminderAdmission: {
   fence: LegacyReminderSourceFence;
@@ -530,6 +535,9 @@ let legacyReminderAdmission: {
 let stopLauncherAssistantReminders: (() => Promise<void>) | null = null;
 let assistantOnly = desktopCliArgs.assistant === true;
 let pendingAssistantOpen: { show: boolean } | null = null;
+let showAssistantStartupWait: (() => void) | null = null;
+let dismissAssistantStartupWait: (() => void) | null = null;
+let assistantMigrationPending = false;
 
 async function requestOpenAssistantFromSecondInstance(hiddenPresentation: boolean): Promise<void> {
   if (shutdownApproved) throw new Error("ASSISTANT_NOT_READY");
@@ -541,6 +549,7 @@ async function requestOpenAssistantFromSecondInstance(hiddenPresentation: boolea
   // Ready may precede resource verification/window creation. Only remember
   // presentation; this request never creates or restarts a native host.
   pendingAssistantOpen = { show: pendingAssistantOpen?.show === true || show };
+  if (show) showAssistantStartupWait?.();
 }
 
 let assistantLauncherEntry: ReturnType<typeof createAssistantLauncherEntry> | null = null;
@@ -580,6 +589,9 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
   launcherAssistantStarting = (async () => {
     const projectConnection = new AssistantProjectRegistryConnection(join(paths.userDataRoot, "assistant", "projects.json"));
     launcherAssistantProjects = projectConnection;
+    const initialMigrationStates = new Map<string, "queued" | "completed" | "partial" | "unknown">();
+    let initialMigrationResults: InitialMigrationResults | null = null;
+    let initialMigrationRecoveryUncertain = false;
     try {
       const directory = join(paths.userDataRoot, "assistant", "legacy-reminder-admission");
       mkdirSync(directory, { recursive: true });
@@ -612,6 +624,34 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
     const mainControl: NonNullable<ConstructorParameters<typeof AssistantHost>[0]["mainControl"]> = (request,signal) => {
       if (request.action === "launcher_theme_get" || request.action === "launcher_theme_set" || request.action === "operator_image_upload")
         return appearanceMainControl(request,signal);
+      if (request.action === "initial_migration_receipt") {
+        const base = { schemaVersion: 1, projectId: request.projectId, category: request.category,
+          operationId: request.operationId, readyForCutover: false };
+        return projectConnection.withHistoryImport(request.projectId, async () => {
+          let state: "queued" | "completed" | "partial" | "unknown" | "not_found" = initialMigrationStates.get(request.operationId) ?? "not_found";
+          if (state === "not_found" && initialMigrationResults) state = await initialMigrationResults.get(request.operationId) ?? "not_found";
+          // A re-registered project has a different opaque ID. Existing intents
+          // may belong to that source, so a different hash is not proof of absence.
+          if (state === "not_found" && (initialMigrationRecoveryUncertain || initialMigrationStates.size > 0)) state = "unknown";
+          return { ...base, state, code: state };
+        }).catch(() => ({ ...base, state: "unknown", code: "unknown" }));
+      }
+      if (request.action === "initial_migration_queue") {
+        const base = { schemaVersion: 1, projectId: request.projectId, previewId: request.previewId,
+          category: request.category, operationId: request.operationId, readyForCutover: false };
+        const host = launcherAssistantHost;
+        if (!host || shutdownApproved) return Promise.resolve({ ...base, state: "rejected", code: "unavailable" });
+        return projectConnection.withHistoryImport(request.projectId, async revision => {
+          const prepared = await host.prepareInitialMigration(request, revision, signal);
+          const previous = initialMigrationStates.get(request.operationId);
+          if (prepared || (previous !== "completed" && previous !== "partial")) initialMigrationStates.set(request.operationId, prepared ? "queued" : "unknown");
+          return prepared ? { ...base, state: "queued", code: "queued" } : { ...base, state: "unknown", code: "unknown" };
+        }).catch(() => {
+          const previous = initialMigrationStates.get(request.operationId);
+          if (previous !== "completed" && previous !== "partial") initialMigrationStates.set(request.operationId, "unknown");
+          return { ...base, state: "unknown", code: "unknown" };
+        });
+      }
       if (request.action === "history_import") {
         const host = launcherAssistantHost;
         if (!host || shutdownApproved) return Promise.resolve({ schemaVersion: 1, projectId: request.projectId,
@@ -635,6 +675,70 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
     const resources = await resolveAssistantResources({ packaged: app.isPackaged, resourcesRoot: paths.resourcesRoot,
       developmentSourceRoot: paths.workspaceRoot, developmentPythonPath: app.isPackaged ? "" : desktopPythonPath(), env: desktopEnvironment() });
     if (shutdownApproved) return;
+    let migrationPending = false;
+    const migrationDialog: { current: AbortController | null } = { current: null };
+    const showMigrationWait = () => {
+      if (!migrationPending || migrationDialog.current || shutdownApproved) return;
+      const controller = new AbortController();
+      migrationDialog.current = controller;
+      void dialog.showMessageBox({ type: "info", title: "个人助理正在准备",
+        message: "正在处理首次迁移，个人助理将在处理完成后打开。",
+        detail: "也可以打开 Launcher，或退出并安全停止迁移。",
+        buttons: ["继续等待", "打开 Launcher", "退出"], cancelId: 0, noLink: true, signal: controller.signal,
+      }).then(({ response }) => {
+        if (controller.signal.aborted || shutdownApproved) return;
+        if (response === 1) void requestOpenLauncherFromAssistant().catch(() => console.warn("ASSISTANT_LAUNCHER_UNAVAILABLE"));
+        if (response === 2) { if (assistantOnly) { shutdownApproved = true; app.quit(); }
+          else void requestDesktopShellExit().catch(() => console.warn("ASSISTANT_STOP_FAILED")); }
+      }).catch(() => console.warn("ASSISTANT_STARTUP_DIALOG_FAILED"))
+        .finally(() => { if (migrationDialog.current === controller) migrationDialog.current = null; });
+    };
+    showAssistantStartupWait = showMigrationWait;
+    dismissAssistantStartupWait = () => migrationDialog.current?.abort();
+    desktopTray ??= createAssistantTray(resources.sourceRoot, {
+      open: () => { if (launcherAssistantWindow) void launcherAssistantWindow.open().catch(() => console.warn("ASSISTANT_WINDOW_FAILED"));
+        else showMigrationWait(); },
+      openLauncher: () => { void requestOpenLauncherFromAssistant().catch(() => {
+        void dialog.showMessageBox({ type: "error", title: "Launcher 暂不可用",
+          message: "未能打开项目管理，请确认选择的是可用的 Vibelution 项目目录后重试。" });
+      }); },
+      quit: () => { if (!assistantOnly) { void requestDesktopShellExit().catch(() => console.warn("ASSISTANT_STOP_FAILED")); return; }
+        shutdownApproved = true; app.quit(); },
+    });
+    // Keep the new cold-start writer isolated while the complete packaged
+    // migration and retirement acceptance is still being completed.
+    const initialMigrationControl = process.env.VIBELUTION_INITIAL_MIGRATION_EXPERIMENT === "1";
+    if (initialMigrationControl) {
+      migrationPending = true;
+      assistantMigrationPending = true;
+      const waitTimer = setTimeout(() => { if (!desktopCliArgs.hiddenPresentation || pendingAssistantOpen?.show) showMigrationWait(); }, 1000);
+      const profileRoot = join(paths.userDataRoot, "assistant", "profile");
+      try {
+        initialMigrationResults = new InitialMigrationResults(join(paths.userDataRoot, "assistant", "initial-migration-results"));
+        const recovered = await recoverInitialMigrations({ registry: projectConnection,
+        results: initialMigrationResults,
+        targetProfile: profileRoot, sourceConfig: desktopLaunchSettings().configPath,
+        targetConfig: async (operationId, registryDigest) => join(profileRoot, `.initial-migration-models-v1-${operationId}-${registryDigest}.toml`),
+        verifyResult: (operationId, state) => verifyInitialMigrationResult({ targetProfile: profileRoot,
+          sourceRoot: resources.sourceRoot, pythonPath: resources.pythonPath, pythonArguments: resources.pythonArguments,
+          runtimeRoot: join(paths.userDataRoot, "assistant", "runtime"), env: resources.env, signal: launcherAssistantStartupAbort.signal }, operationId, state),
+        sourceRoot: resources.sourceRoot, pythonPath: resources.pythonPath, pythonArguments: resources.pythonArguments,
+        runtimeRoot: join(paths.userDataRoot, "assistant", "runtime"), env: resources.env, signal: launcherAssistantStartupAbort.signal });
+        for (const item of recovered) initialMigrationStates.set(item.operationId, item.state);
+      } catch {
+        // Listing/receipt failures leave intents unknown; no writer is replayed.
+        initialMigrationRecoveryUncertain = true;
+        console.warn("ASSISTANT_INITIAL_MIGRATION_RECOVERY_UNAVAILABLE");
+      } finally {
+        migrationPending = false;
+        assistantMigrationPending = false;
+        showAssistantStartupWait = null;
+        dismissAssistantStartupWait = null;
+        clearTimeout(waitTimer);
+        migrationDialog.current?.abort();
+      }
+    }
+    if (shutdownApproved) return;
     await new Promise<void>((windowOpened, startupFailed) => {
       void projectConnection.start((snapshot, projectsSuspended) => {
         const host = new AssistantHost({
@@ -642,7 +746,7 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
           runtimeRoot: join(paths.userDataRoot, "assistant", "runtime"),
           sourceRoot: resources.sourceRoot, pythonPath: resources.pythonPath, pythonArguments: resources.pythonArguments,
           env: resources.env, projects: snapshot.projects, projectSnapshot: snapshot, projectsSuspended,
-          mainControl, appearanceControl: true,
+          mainControl, appearanceControl: true, initialMigrationControl,
         });
         launcherAssistantHost = host;
         launcherAssistantWindow = new AssistantWindow(paths, host, () => shutdownApproved, requestOpenLauncherFromAssistant);
@@ -705,18 +809,6 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
             }).catch(() => console.warn("ASSISTANT_REMINDER_WARNING_FAILED"));
           },
         });
-        desktopTray ??= createAssistantTray(resources.sourceRoot, {
-          open: () => { void launcherAssistantWindow?.open().catch(() => console.warn("ASSISTANT_WINDOW_FAILED")); },
-          openLauncher: () => { void requestOpenLauncherFromAssistant().catch(() => {
-            void dialog.showMessageBox({ type: "error", title: "Launcher 暂不可用",
-              message: "未能打开项目管理，请确认选择的是可用的 Vibelution 项目目录后重试。" });
-          }); },
-          quit: () => {
-            if (!assistantOnly) { void requestDesktopShellExit().catch(() => console.warn("ASSISTANT_STOP_FAILED")); return; }
-            shutdownApproved = true;
-            app.quit();
-          },
-        });
         // The character can show starting/error state while native readiness
         // remains queued ahead of every authorization update.
         const show = !desktopCliArgs.hiddenPresentation || pendingAssistantOpen?.show === true;
@@ -733,19 +825,43 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
 }
 
 async function stopLauncherAssistant(): Promise<void> {
-  const stoppingReminders = stopLauncherAssistantReminders?.();
-  const connection = launcherAssistantProjects;
-  const stoppingProjects = connection
-    ? (stoppingReminders ? stoppingReminders.then(() => connection.stop()) : connection.stop())
-    : undefined;
-  await launcherAssistantStarting?.catch(() => undefined);
-  if (stoppingProjects) await stoppingProjects;
-  else {
-    await stopLauncherAssistantReminders?.();
-    await launcherAssistantProjects?.stop();
+  if (launcherAssistantStopping) return launcherAssistantStopping;
+  dismissAssistantStartupWait?.();
+  launcherAssistantStartupAbort.abort();
+  const stopping = (async () => {
+    const stoppingDialog = new AbortController();
+    const waitTimer = assistantMigrationPending ? setTimeout(() => {
+      void dialog.showMessageBox({ type: "info", title: "正在退出个人助理",
+        message: "正在安全停止迁移，请稍候。",
+        detail: "退出会等待迁移进程及其输出完全结束。", buttons: ["继续等待"], noLink: true,
+        signal: stoppingDialog.signal }).catch(() => console.warn("ASSISTANT_STOP_DIALOG_FAILED"));
+    }, 1000) : null;
+    try {
+      const stoppingReminders = stopLauncherAssistantReminders?.();
+      const connection = launcherAssistantProjects;
+      const stoppingProjects = connection
+        ? (stoppingReminders ? stoppingReminders.then(() => connection.stop()) : connection.stop())
+        : undefined;
+      await launcherAssistantStarting?.catch(() => undefined);
+      if (stoppingProjects) await stoppingProjects;
+      else {
+        await stopLauncherAssistantReminders?.();
+        await launcherAssistantProjects?.stop();
+      }
+      stopLauncherAssistantReminders = null;
+      launcherAssistantExitReady = true;
+    } finally {
+      if (waitTimer) clearTimeout(waitTimer);
+      stoppingDialog.abort();
+    }
+  })();
+  launcherAssistantStopping = stopping;
+  try { await stopping; }
+  catch (error) {
+    // A later explicit exit must be able to retry the retained owner cleanup.
+    if (launcherAssistantStopping === stopping) launcherAssistantStopping = null;
+    throw error;
   }
-  stopLauncherAssistantReminders = null;
-  launcherAssistantExitReady = true;
 }
 
 async function exitDesktopShellProcess(): Promise<void> {
@@ -2232,8 +2348,13 @@ async function acknowledgeTransactionalWorkbenchClose(
     }
     return;
   }
+  const wasAcknowledged = transaction.windowAcknowledged === true;
   const settled = mainWorkbenchCloseStore.windowClosed(transaction.closeId);
   if (settled.phase === "background_closing") {
+    if (!wasAcknowledged) {
+      try { notifyDesktopTray("Vibelution", "工作台窗口已关闭，后台仍在回收。可在 Launcher 查看“停止中”状态。"); }
+      catch { console.warn("WORKBENCH_CLOSE_NOTICE_FAILED"); }
+    }
     recordSupervisorEventFallbackLocally({ eventCode: "electron.workbench_close.window_closed_backend_pending",
       message: "Workbench window closed; owned backend retirement remains pending.",
       fields: { closeId: settled.closeId, workspaceRoot: paths.workspaceRoot } });
@@ -4110,6 +4231,11 @@ ipcMain.handle(IPC_CHANNELS.notifyHumanAttention, async (event, payload: unknown
   return await handleHumanAttentionIpc(event, payload, windowProvider, trustedIpcOrigins(event),
     (acceptedPayload, source) => resolveHumanAttentionNotificationService().notify(acceptedPayload, source),
     legacyReminderAdmission ?? undefined);
+});
+
+ipcMain.handle(IPC_CHANNELS.humanAttentionCapabilities, async (event) => {
+  // Until a source has a verified main-owned sender, retain existing delivery.
+  return await handleHumanAttentionCapabilityIpc(event, windowProvider, trustedIpcOrigins(event));
 });
 
 ipcMain.handle(IPC_CHANNELS.openExternalUrl, async (event, rawUrl: unknown) => {
@@ -6071,7 +6197,8 @@ async function bootstrapProjectControlPlane(paths: DesktopPaths, allowShellRefre
   desktopTray?.destroy();
   desktopTray = createDesktopTray(paths, {
     openAssistant: () => {
-      void launcherAssistantWindow?.open().catch(() => console.warn("ASSISTANT_WINDOW_FAILED"));
+      if (launcherAssistantWindow) void launcherAssistantWindow.open().catch(() => console.warn("ASSISTANT_WINDOW_FAILED"));
+      else showAssistantStartupWait?.();
     },
     openLauncher: () => {
       void windowProvider?.openLauncher().catch((error: unknown) => {
@@ -6401,7 +6528,7 @@ app.on("open-url", (event, rawUrl) => {
 
 app.on("before-quit", (event) => {
   if (assistantOnly) shutdownApproved = true;
-  if (shutdownApproved && launcherAssistantHost && !launcherAssistantExitReady) {
+  if (shutdownApproved && launcherAssistantStarting && !launcherAssistantExitReady) {
     event.preventDefault();
     void stopLauncherAssistant().then(() => app.quit()).catch(() => console.warn("ASSISTANT_STOP_FAILED"));
     return;

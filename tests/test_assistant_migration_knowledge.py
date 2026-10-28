@@ -80,6 +80,103 @@ def _create_isolated_source(tmp_path):
     _run(source_case, _ISOLATED_SOURCE, config_text=TEST_MODEL_CONFIG)
 
 
+def test_knowledge_operation_plan_and_completion_proof(tmp_path):
+    _create_isolated_source(tmp_path)
+    _run(tmp_path, _ISOLATED_SNAPSHOTS + r'''
+        with offline_migration_profile() as lease:
+            original = s.create_agent_knowledge_base
+            def stop_before_write(*args, **kwargs):
+                raise RuntimeError('synthetic interruption')
+            s.create_agent_knowledge_base = stop_before_write
+            fails('knowledge_native_operation_unavailable', lambda: run(lease))
+            s.create_agent_knowledge_base = original
+            folder = root / 'knowledge_migrations'
+            plan_path = folder / 'operations' / (migration._digest('workspace-bound') + '.plan.json')
+            plan = json.loads(plan_path.read_bytes())
+            assert plan['operationId'] == 'workspace-bound' and len(plan['items']) == 1
+            assert 'SYNTHETIC_APPROVED' not in json.dumps(plan)
+            fails('knowledge_completion_unavailable', lambda: migration.verify_knowledge_completion(root, 'workspace-bound'))
+            # An intent with unknown outcome must never be retried.
+            fails('knowledge_outcome_unknown', lambda: run(lease))
+            plan_path.unlink()
+            fails('knowledge_operation_conflict', lambda: run(lease))
+            assert not plan_path.exists()
+    ''', config_text=TEST_MODEL_CONFIG)
+
+
+def test_knowledge_completion_proof_survives_target_edits_and_detects_corruption(tmp_path):
+    _create_isolated_source(tmp_path)
+    _run(tmp_path, _ISOLATED_SNAPSHOTS + r'''
+        with offline_migration_profile() as lease:
+            result = run(lease)
+            before_proof = contents(root / 'knowledge_migrations')
+            proof = migration.verify_knowledge_completion(root, 'workspace-bound')
+            assert contents(root / 'knowledge_migrations') == before_proof
+            assert proof['operationId'] == 'workspace-bound'
+            assert proof['targetAgentId'] == lease.agent_id and proof['mappings'] == result['mappings']
+            assert proof['sourceQuiesced'] is False and proof['readyForCutover'] is False
+            plan_path = root / 'knowledge_migrations' / 'operations' / (migration._digest('workspace-bound') + '.plan.json')
+            saved_plan = plan_path.read_bytes()
+            corrupt_plan = json.loads(saved_plan)
+            corrupt_plan['schemaVersion'] = True
+            plan_path.write_text(json.dumps(corrupt_plan))
+            fails('knowledge_completion_invalid', lambda: migration.verify_knowledge_completion(root, 'workspace-bound'))
+            fails('knowledge_operation_conflict', lambda: run(lease))
+            plan_path.write_bytes(saved_plan)
+            plan_path.unlink()
+            fails('knowledge_operation_conflict', lambda: run(lease))
+            assert not plan_path.exists()
+            plan_path.write_bytes(saved_plan)
+            owner = s._require_owner_context('agent', lease.agent_id)
+            items = s._items_path_for_owner(owner)
+            rows = [json.loads(line) for line in items.read_bytes().splitlines()]
+            rows[0]['content'] = 'USER_EDIT_AFTER_MIGRATION'
+            rows[0]['contentSha256'] = hashlib.sha256(rows[0]['content'].encode()).hexdigest()
+            items.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+            assert migration.verify_knowledge_completion(root, 'workspace-bound') == proof
+            folder = root / 'knowledge_migrations'
+            manifest = folder / 'archives' / proof['sourceProofSha256'] / 'manifest.json'
+            old_manifest = manifest.read_bytes()
+            manifest.write_bytes(old_manifest + b' ')
+            fails('knowledge_completion_invalid', lambda: migration.verify_knowledge_completion(root, 'workspace-bound'))
+            manifest.write_bytes(old_manifest)
+            state = folder / (proof['originKeys'][0] + '.json')
+            state.write_bytes(b'{}')
+            fails('knowledge_completion_invalid', lambda: migration.verify_knowledge_completion(root, 'workspace-bound'))
+    ''', config_text=TEST_MODEL_CONFIG)
+
+
+def test_knowledge_plan_includes_items_not_started_when_import_is_interrupted(tmp_path):
+    source_case = tmp_path / 'source-case'
+    source_case.mkdir()
+    second = r'''
+            second = s.collect_source_to_inbox('agent', old, source_type='manual_user_entry',
+                original_content='SYNTHETIC_SECOND', title='Second', actor_agent_id=old)
+            s.review_owner_inbox_source('agent', old, second['inboxSourceId'], decision='accepted',
+                reviewed_by_agent_id=old, ingest_on_accept=True, knowledge_base_id=base['scopedKnowledgeBaseId'],
+                knowledge_content='SYNTHETIC_SECOND')
+'''
+    _run(source_case, _ISOLATED_SOURCE.replace("            workspace = root.parent / 'legacy-workspace'", second + "            workspace = root.parent / 'legacy-workspace'"), config_text=TEST_MODEL_CONFIG)
+    _run(tmp_path, _ISOLATED_SNAPSHOTS + r'''
+        with offline_migration_profile() as lease:
+            original = migration._import_one
+            calls = []
+            def interrupt(*args, **kwargs):
+                calls.append(1)
+                if len(calls) == 2:
+                    raise RuntimeError('synthetic interruption')
+                return original(*args, **kwargs)
+            migration._import_one = interrupt
+            fails('knowledge_native_operation_unavailable', lambda: run(lease))
+            folder = root / 'knowledge_migrations'
+            plan = json.loads((folder / 'operations' / (migration._digest('workspace-bound') + '.plan.json')).read_bytes())
+            keys = [entry['originKey'] for entry in plan['items']]
+            assert len(keys) == 2 and keys == sorted(set(keys))
+            assert sum((folder / (key + '.json')).exists() for key in keys) == 1
+            fails('knowledge_completion_unavailable', lambda: migration.verify_knowledge_completion(root, 'workspace-bound'))
+    ''', config_text=TEST_MODEL_CONFIG)
+
+
 def _create_revision_source(tmp_path, *, state='active'):
     source_case = tmp_path / 'source-case'
     source_case.mkdir()
@@ -508,6 +605,10 @@ def test_native_private_knowledge_migration_and_crash_safety(tmp_path):
             assert knowledge.list_agent_knowledge_bases(lease.agent_id, actor_agent_id=lease.agent_id)['summary']['knowledgeBaseCount'] == 1
             # New migration IDs still bind the same origin to the existing mapping.
             assert run('same-origin')['idempotent']
+            reused_proof = migration.verify_knowledge_completion(root, 'same-origin')
+            assert reused_proof['mappings'] == result['mappings']
+            receipt = root / 'knowledge_migrations' / 'operations' / (migration._digest('same-origin') + '.complete.json')
+            assert json.loads(receipt.read_bytes())['items'][0]['publishedMigrationId'] == 'knowledge-one'
             target_owner = knowledge._require_owner_context('agent', lease.agent_id)
             assert len(knowledge._read_jsonl(knowledge._items_path_for_owner(target_owner))) == 1
             assert len(knowledge._read_jsonl(knowledge._owner_source_index_path(target_owner))) == 1
@@ -604,6 +705,8 @@ def test_native_unknown_outcome_never_repeats_create_or_review(tmp_path, stage):
                 result = run()
                 assert result['importedCount'] == 0 and result['excluded'][0]['reason'] == 'source_expired'
                 assert not s._knowledge_bases_for_owner(owner)
+                proof = migration.verify_knowledge_completion(root, 'crash')
+                assert proof['mappings'] == [] and proof['originKeys'] == [] and proof['excluded'] == result['excluded']
                 raise SystemExit(0)
             original_base, original_collect, original_review, original_append = s.create_agent_knowledge_base, s.collect_source_to_inbox, s.review_owner_inbox_source, s._append_jsonl
             def crash(*args, **kwargs):

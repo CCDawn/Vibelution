@@ -48,7 +48,8 @@ export type HumanAttentionDelivery =
 export type DesktopHumanAttentionNotifyResult =
   | { delivered: HumanAttentionDelivery }
   | { delivered: "invalid_payload"; error: string }
-  | { delivered: "source_retired" };
+  | { delivered: "source_retired" }
+  | { delivered: "attempt_pending" };
 
 type NotificationLike = {
   show(): void;
@@ -218,7 +219,7 @@ function normalizeMeta(raw: unknown): DesktopHumanAttentionMeta | undefined {
   return Object.keys(meta).length > 0 ? meta : undefined;
 }
 
-function validateHumanAttentionPayload(
+export function validateHumanAttentionPayload(
   payload: unknown
 ): { ok: true; value: DesktopHumanAttentionNotification } | { ok: false; error: string } {
   if (typeof payload !== "object" || payload === null) {

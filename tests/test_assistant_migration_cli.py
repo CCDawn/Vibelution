@@ -387,6 +387,520 @@ def active_personal_case(tmp_path, monkeypatch):
     return workspace, target, args
 
 
+@pytest.mark.parametrize('category', ['personal', 'knowledge'])
+def test_initial_offline_real_child_requires_permit_and_never_replays(tmp_path, monkeypatch, category):
+    import http.server
+    import subprocess
+    import sys
+    import threading
+    from tests.test_assistant_runtime_native import TEST_MODEL_CONFIG, _run
+    from core.assistant_runtime.initial_migration_binding import (source_identity, target_identity,
+        authority_identity, publish_initial_intent)
+    from core.assistant_runtime.main_control import initial_migration_id
+    from core.assistant_runtime.migration_io import read_stable_file
+    from scripts.assistant_migration_activate import storage_authority
+
+    workspace, target, args = active_personal_case(tmp_path, monkeypatch)
+    source_agent = AGENT
+    if category == 'knowledge':
+        legacy = tmp_path / 'legacy'
+        legacy.mkdir()
+        _run(legacy, r'''
+            import json, os, shutil
+            from pathlib import Path
+            from core.assistant_runtime.migration_profile import offline_migration_profile
+            from core.web.services import team_knowledge_service as knowledge
+            knowledge._extended_fs_path = lambda path: Path(path).resolve()
+            root = Path(os.environ['VIBELUTION_ASSISTANT_NATIVE_ROOT'])
+            with offline_migration_profile() as lease:
+                base = knowledge.create_agent_knowledge_base(lease.agent_id, name='Synthetic', actor_agent_id=lease.agent_id)
+                source = knowledge.collect_source_to_inbox('agent', lease.agent_id, source_type='manual_user_entry',
+                    original_content='SYNTHETIC', title='Synthetic', actor_agent_id=lease.agent_id)
+                knowledge.review_owner_inbox_source('agent', lease.agent_id, source['inboxSourceId'], decision='accepted',
+                    reviewed_by_agent_id=lease.agent_id, ingest_on_accept=True, knowledge_base_id=base['scopedKnowledgeBaseId'],
+                    knowledge_content='SYNTHETIC')
+                owner = knowledge._require_owner_context('agent', lease.agent_id)
+                out = root.parent / 'copy'
+                out.mkdir()
+                shutil.copytree(knowledge._knowledge_root_for_owner(owner), out / 'knowledge')
+                shutil.copyfile(knowledge._central_source_registry_path(), out / 'source_registry.jsonl')
+                shutil.copyfile(knowledge._central_owner_refs_path(), out / 'owner_refs.jsonl')
+                (out / 'identity.json').write_text(json.dumps({'agent': lease.agent_id, 'session': lease.session_id}), encoding='utf-8')
+        ''', config_text=TEST_MODEL_CONFIG)
+        source_info = json.loads((legacy / 'copy/identity.json').read_text(encoding='utf-8'))
+        source_agent = source_info['agent']
+        shutil.copytree(legacy / 'copy/knowledge', workspace / 'agents' / source_agent / 'knowledge')
+        registry_dir = workspace / 'knowledge/sources/registry'
+        registry_dir.mkdir(parents=True)
+        for name in ('source_registry.jsonl', 'owner_refs.jsonl'):
+            shutil.copyfile(legacy / 'copy' / name, registry_dir / name)
+        (workspace / 'agents/agents.json').write_text(json.dumps({'agents': [{
+            'agentId': source_agent, 'directSessionId': source_info['session'], 'status': 'active',
+            'roleKey': 'personal_assistant', 'metadata': {'personalAssistantProfile': 'personal_assistant_v1'}}]}), encoding='utf-8')
+    _run(tmp_path, '''
+        import json, os
+        from pathlib import Path
+        from core.assistant_runtime import native
+        root = Path(os.environ['VIBELUTION_ASSISTANT_NATIVE_ROOT'])
+        assistant = native.bootstrap(root)['assistant']
+        (root.parent / 'identity.json').write_text(json.dumps({
+            'agent': assistant['agentId'], 'session': assistant['directSessionId']}), encoding='utf-8')
+        assert native.shutdown()['closed']
+    ''', config_text=TEST_MODEL_CONFIG)
+    identity = json.loads((tmp_path / 'identity.json').read_text(encoding='utf-8'))
+    project, source_config = Path(os.environ['TEST_MIGRATION_PROJECT']), args[3]
+    source_config.write_text(TEST_MODEL_CONFIG + '\n[launcher.developer_mode]\nenabled=false\n', encoding='utf-8')
+    paths, storage, _ = storage_authority(project, source_config)
+    routed, _, routing, _ = cli._bound_route(paths, source_config)
+    assert routed == workspace
+    scope = {'projectId': paths.project_id, 'instanceId': paths.instance_id, 'agentId': source_agent}
+    sd, project_identity, workspace_identity = source_identity(scope, project, workspace)
+    td, target_directory = target_identity(target, identity['agent'], identity['session'])
+    op = initial_migration_id('registered:1', '', category)
+    intent = {'schemaVersion': 1, 'registeredProjectId': 'registered:1', 'sourceScope': scope,
+        'category': category, 'turnId': 'turn-1', 'operationId': op, 'revision': 1,
+        'sourceIdentityDigest': sd, 'registryDigest': authority_identity((*routing,
+            read_stable_file(workspace / 'agents/agents.json', 16 * 1024 * 1024), *storage)),
+        'targetIdentityDigest': td, 'projectDirectory': project_identity, 'workspaceDirectory': workspace_identity,
+        'targetDirectory': target_directory, 'targetAgentId': identity['agent'],
+        'targetSessionId': identity['session'], 'authority': 'native_policy_admitted', 'readyForCutover': False}
+    class Token:
+        def publish(self, writer): writer()
+        def check(self): pass
+    publish_initial_intent(target, intent, Token(), lambda: None)
+    binding = {'schemaVersion': 1, 'registeredProjectId': 'registered:1', 'revision': 1,
+        'projectRoot': str(project), 'sourceConfig': str(source_config), 'targetProfile': str(target),
+        'targetConfig': str(target / ('.initial-migration-models-v1-' + op + '-' + intent['registryDigest'] + '.toml')), 'operationId': op}
+    original_source = {path: path.read_bytes() for path in workspace.rglob('*') if path.is_file()}
+    token = 'a' * 64
+    control = {'permit': False, 'requests': 0}
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *_args): pass
+        def do_GET(self):
+            assert self.path == '/binding' and self.headers.get('Authorization') == 'Bearer ' + token
+            raw = json.dumps(binding).encode()
+            self.send_response(200); self.send_header('Content-Length', str(len(raw))); self.end_headers(); self.wfile.write(raw)
+        def do_POST(self):
+            assert self.path == '/permit' and self.headers.get('Authorization') == 'Bearer ' + token
+            assert self.rfile.read(int(self.headers['Content-Length'])) == b'{}'
+            control['requests'] += 1
+            raw = json.dumps({'schemaVersion': 1, 'granted': control['permit']}).encode()
+            self.send_response(200); self.send_header('Content-Length', str(len(raw))); self.end_headers(); self.wfile.write(raw)
+    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    env = {k: v for k, v in os.environ.items() if not k.upper().startswith('VIBELUTION_')}
+    env.update({'VIBELUTION_PROJECTS_HOME': os.environ['VIBELUTION_PROJECTS_HOME'],
+        'VIBELUTION_INITIAL_MIGRATION_URL': 'http://127.0.0.1:' + str(server.server_port),
+        'VIBELUTION_INITIAL_MIGRATION_TOKEN': token, 'PYTHONIOENCODING': 'utf-8',
+        'USERPROFILE': str(tmp_path / 'user'), 'HOME': str(tmp_path / 'user'),
+        'LOCALAPPDATA': str(tmp_path / 'user/AppData/Local'), 'APPDATA': str(tmp_path / 'user/AppData/Roaming'),
+        'TEMP': str(tmp_path / 'tmp'), 'TMP': str(tmp_path / 'tmp')})
+    command = [sys.executable, str(cli.ROOT / 'scripts/assistant_migration_inventory.py'), '--initial-offline']
+    def run():
+        result = subprocess.run(command, env=env, cwd=cli.ROOT, capture_output=True,
+                                text=True, encoding='utf-8', timeout=120)
+        return result, json.loads(result.stdout)
+    try:
+        binding['revision'] = 0
+        mismatched, value = run()
+        assert mismatched.returncode == 1 and value['state'] == 'unknown'
+        assert control['requests'] == 0 and not (target / 'initial_migration_claims').exists()
+        binding['revision'] = 2
+        binding['registeredProjectId'] = 'registered:replacement'
+        replaced, value = run()
+        assert replaced.returncode == 1 and value['state'] == 'unknown'
+        assert control['requests'] == 0 and not (target / 'initial_migration_claims').exists()
+        binding['registeredProjectId'] = 'registered:1'
+        other_config = tmp_path / 'other-source-config.toml'
+        other_config.write_bytes(source_config.read_bytes())
+        binding['sourceConfig'] = str(other_config)
+        changed_source, value = run()
+        assert changed_source.returncode == 1 and value['state'] == 'unknown'
+        assert control['requests'] == 0 and not (target / 'initial_migration_claims').exists()
+        binding['sourceConfig'] = str(source_config)
+        denied, value = run()
+        assert denied.returncode == 1 and value['state'] == 'unknown'
+        assert control['requests'] == 1 and not (target / 'initial_migration_claims' / op).exists()
+        # Native reauthorization after a model/source-config change creates a
+        # new head for the same unclaimed operation; the old snapshot remains.
+        previous_snapshot = Path(binding['targetConfig'])
+        previous_bytes = previous_snapshot.read_bytes()
+        source_config.write_text(TEST_MODEL_CONFIG.replace('models.test', 'models.other').replace(
+            'local/test', 'local/other') + '\n[launcher.developer_mode]\nenabled=false\n', encoding='utf-8')
+        paths, refreshed_storage, _ = storage_authority(project, source_config)
+        _, _, refreshed_routing, _ = cli._bound_route(paths, source_config)
+        refreshed = {**intent, 'turnId': 'turn-2', 'revision': 2,
+            'registryDigest': authority_identity((*refreshed_routing,
+                read_stable_file(workspace / 'agents/agents.json', 16 * 1024 * 1024), *refreshed_storage))}
+        assert refreshed['registryDigest'] != intent['registryDigest']
+        from core.assistant_runtime.migration_io import pinned_mutable_file, pinned_target_directory
+        from core.infrastructure.file_lock import locked_sidecar
+        with pinned_target_directory(target), pinned_mutable_file(target / 'host-owner.lock', create=False), \
+                locked_sidecar(target / 'host-owner', timeout=0):
+            publish_initial_intent(target, refreshed, Token(), lambda: None, owner_check=lambda: True)
+        intent = refreshed
+        stale, value = run()
+        assert stale.returncode == 1 and value['state'] == 'unknown' and control['requests'] == 1
+        assert previous_snapshot.read_bytes() == previous_bytes
+        binding['targetConfig'] = str(target / ('.initial-migration-models-v1-' + op + '-' + intent['registryDigest'] + '.toml'))
+        denied, value = run()
+        assert denied.returncode == 1 and value['state'] == 'unknown' and control['requests'] == 2
+        assert previous_snapshot.read_bytes() == previous_bytes and Path(binding['targetConfig']).exists()
+        listing_command = [sys.executable, str(cli.ROOT / 'scripts/assistant_migration_inventory.py'),
+            '--initial-list', '--target-profile', str(target)]
+        available = subprocess.run(listing_command, env=env, cwd=cli.ROOT,
+            capture_output=True, text=True, encoding='utf-8', timeout=30)
+        assert available.returncode == 0 and json.loads(available.stdout)['intents'][0] == {
+            'operationId': op, 'registeredProjectId': 'registered:1', 'category': category,
+            'registryDigest': intent['registryDigest'], 'state': 'dispatchable'}
+        import hashlib
+        receipt_dir = target / 'affairs_migrations'
+        receipt_dir.mkdir()
+        receipt_path = receipt_dir / (hashlib.sha256(op.encode()).hexdigest() + '.json')
+        receipt_path.write_text(json.dumps({'migrationId': op, 'published': False}), encoding='utf-8')
+        prior, value = run()
+        assert prior.returncode == 1 and value['state'] == 'unknown' and control['requests'] == 2
+        blocked_list = subprocess.run(listing_command, env=env, cwd=cli.ROOT,
+            capture_output=True, text=True, encoding='utf-8', timeout=30)
+        assert json.loads(blocked_list.stdout)['intents'][0]['state'] == 'claimed_unknown'
+        receipt_path.unlink()
+        receipt_dir.rmdir()
+        control['permit'] = True
+        completed, value = run()
+        assert completed.returncode == 0, (value, completed.stderr)
+        assert value == {'schemaVersion': 1, 'operationId': op, 'state': 'completed', 'readyForCutover': False}
+        assert (target / 'initial_migration_claims' / op).is_dir()
+        assert json.loads((target / 'initial_migration_claims' / op / 'claim.json').read_text())['operationId'] == op
+        if category == 'personal':
+            digest = hashlib.sha256(op.encode()).hexdigest()
+            for name in ('episodic_migrations', 'affairs_migrations'):
+                receipt = json.loads((target / name / (digest + '.json')).read_text(encoding='utf-8'))
+                assert receipt['published'] is True and receipt['migrationId'] == op and receipt['sourceScope'] == scope
+            assert (target / 'history_sources/migrations' / op / '.confirmed').is_dir()
+        else:
+            states = [json.loads(path.read_text(encoding='utf-8')) for path in (target / 'knowledge_migrations').glob('*.json')]
+            assert len(states) == 1 and states[0]['phase'] == 'published' and states[0]['migrationId'] == op
+        assert original_source == {path: path.read_bytes() for path in workspace.rglob('*') if path.is_file()}
+        verify_command = [sys.executable, str(cli.ROOT / 'scripts/assistant_migration_inventory.py'),
+            '--initial-verify', '--target-profile', str(target), '--operation-id', op]
+        checked = subprocess.run(verify_command, env=env, cwd=cli.ROOT,
+            capture_output=True, text=True, encoding='utf-8', timeout=30)
+        assert json.loads(checked.stdout) == {'schemaVersion': 1, 'operationId': op,
+            'state': 'confirmed_completed', 'readyForCutover': False}
+        assert checked.returncode == 0
+        if category == 'personal':
+            bad_receipt = target / 'affairs_migrations' / (hashlib.sha256(op.encode()).hexdigest() + '.json')
+            original_receipt = bad_receipt.read_bytes()
+            bad_receipt.write_text('{}', encoding='utf-8')
+            invalid = subprocess.run(verify_command, env=env, cwd=cli.ROOT,
+                capture_output=True, text=True, encoding='utf-8', timeout=30)
+            assert invalid.returncode == 1 and json.loads(invalid.stdout)['state'] == 'unknown'
+            bad_receipt.write_bytes(original_receipt)
+            partial_command = [*verify_command, '--allow-partial']
+            bad_receipt.unlink()
+            partial = subprocess.run(partial_command, env=env, cwd=cli.ROOT,
+                capture_output=True, text=True, encoding='utf-8', timeout=30)
+            assert partial.returncode == 0 and json.loads(partial.stdout)['state'] == 'confirmed_partial'
+            incomplete = subprocess.run(verify_command, env=env, cwd=cli.ROOT,
+                capture_output=True, text=True, encoding='utf-8', timeout=30)
+            assert incomplete.returncode == 1 and json.loads(incomplete.stdout)['state'] == 'unknown'
+            episode_receipt = target / 'episodic_migrations' / (hashlib.sha256(op.encode()).hexdigest() + '.json')
+            episode_bytes = episode_receipt.read_bytes()
+            episode_receipt.unlink()
+            empty = subprocess.run(partial_command, env=env, cwd=cli.ROOT,
+                capture_output=True, text=True, encoding='utf-8', timeout=30)
+            assert empty.returncode == 1 and json.loads(empty.stdout)['state'] == 'unknown'
+            episode_receipt.write_bytes(episode_bytes)
+            bad_receipt.write_bytes(original_receipt)
+            manifest_path = target / 'history_sources/migrations' / op / 'manifest.json'
+            manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+            archived = manifest_path.parent / manifest['entries'][0]['path']
+            archived_bytes = archived.read_bytes()
+            archived.write_bytes(archived_bytes + b'tampered')
+            invalid_archive = subprocess.run(verify_command, env=env, cwd=cli.ROOT,
+                capture_output=True, text=True, encoding='utf-8', timeout=30)
+            assert invalid_archive.returncode == 1 and json.loads(invalid_archive.stdout)['state'] == 'unknown'
+            archived.write_bytes(archived_bytes)
+        else:
+            from core.assistant_runtime import migration_knowledge, initial_migration_binding
+            from core.assistant_runtime.migration_io import MigrationIOError
+            from scripts.assistant_migration_activate import (_initial_receipts_or_claim,
+                verify_initial_knowledge_receipts)
+            plan_path, completion_path = migration_knowledge._operation_paths(target / 'knowledge_migrations', op)
+            plan = json.loads(plan_path.read_text(encoding='utf-8'))
+            archive_file = target / 'knowledge_migrations/archives' / plan['sourceProofSha256'] / 'manifest.json'
+            claim_file = target / 'initial_migration_claims' / op / 'claim.json'
+            item_state = next((target / 'knowledge_migrations').glob('*.json'))
+            # A completed import from another project must not block the next
+            # project, while its own plan and uncertain older origins still do.
+            other_op = 'initial-' + 'f' * 40
+            assert not _initial_receipts_or_claim(target, other_op, 'knowledge')
+            assert _initial_receipts_or_claim(target, op, 'knowledge')
+            old_state = item_state.read_bytes()
+            interrupted_state = json.loads(old_state)
+            interrupted_state['phase'] = 'base_intent'
+            interrupted_state.pop('mapping')
+            item_state.write_text(json.dumps(interrupted_state), encoding='utf-8')
+            assert _initial_receipts_or_claim(target, other_op, 'knowledge')
+            item_state.write_bytes(old_state)
+            other_plan, _ = migration_knowledge._operation_paths(target / 'knowledge_migrations', other_op)
+            other_plan.write_text('{}', encoding='utf-8')
+            assert _initial_receipts_or_claim(target, other_op, 'knowledge')
+            other_plan.unlink()
+            for path in (completion_path, plan_path, archive_file, claim_file, item_state):
+                original = path.read_bytes()
+                path.write_bytes(b'{}')
+                invalid = subprocess.run(verify_command, env=env, cwd=cli.ROOT,
+                    capture_output=True, text=True, encoding='utf-8', timeout=30)
+                assert invalid.returncode == 1 and json.loads(invalid.stdout)['state'] == 'unknown'
+                path.write_bytes(original)
+            original_completion = completion_path.read_bytes()
+            completion_path.unlink()
+            missing = subprocess.run(verify_command, env=env, cwd=cli.ROOT,
+                capture_output=True, text=True, encoding='utf-8', timeout=30)
+            assert missing.returncode == 1 and json.loads(missing.stdout)['state'] == 'unknown'
+            completion_path.write_bytes(original_completion)
+            proof = migration_knowledge.verify_knowledge_completion(target, op)
+            for field, changed in [('targetAgentId', 'wrong-target'),
+                                   ('sourceScope', {**scope, 'agentId': 'wrong-source'})]:
+                with monkeypatch.context() as isolated:
+                    isolated.setattr(migration_knowledge, 'verify_knowledge_completion',
+                        lambda *_args, field=field, changed=changed: {**proof, field: changed})
+                    with pinned_target_directory(target), pinned_mutable_file(target / 'host-owner.lock', create=False), \
+                            locked_sidecar(target / 'host-owner', timeout=0), pytest.raises(MigrationIOError):
+                        verify_initial_knowledge_receipts(target, op)
+            with monkeypatch.context() as isolated:
+                isolated.setattr(initial_migration_binding, 'target_identity', lambda *_args: ('0' * 64, intent['targetDirectory']))
+                with pinned_target_directory(target), pinned_mutable_file(target / 'host-owner.lock', create=False), \
+                        locked_sidecar(target / 'host-owner', timeout=0), pytest.raises(MigrationIOError):
+                    verify_initial_knowledge_receipts(target, op)
+        repeated, value = run()
+        assert repeated.returncode == 1 and value['state'] == 'unknown'
+        assert control['requests'] == 3
+        listing = subprocess.run(listing_command, env=env, cwd=cli.ROOT,
+            capture_output=True, text=True, encoding='utf-8', timeout=30)
+        assert listing.returncode == 0, listing.stderr
+        assert json.loads(listing.stdout) == {'schemaVersion': 1, 'intents': [
+            {'operationId': op, 'registeredProjectId': 'registered:1', 'category': category,
+             'registryDigest': intent['registryDigest'], 'state': 'claimed_unknown'}]}
+        invalid = target / 'initial_migration_intents' / ('e' * 64)
+        invalid.mkdir()
+        (invalid / 'intent.json').write_text('{}', encoding='utf-8')
+        corrupt = subprocess.run([sys.executable, str(cli.ROOT / 'scripts/assistant_migration_inventory.py'),
+            '--initial-list', '--target-profile', str(target)], env=env, cwd=cli.ROOT,
+            capture_output=True, text=True, encoding='utf-8', timeout=30)
+        assert corrupt.returncode == 1
+        assert json.loads(corrupt.stdout) == {'schemaVersion': 1, 'error': 'initial_intents_unavailable'}
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+@pytest.mark.parametrize('url', ['', 'http://localhost:1234', 'http://127.0.0.1:1234/path',
+                                 'http://127.0.0.1:1234?redirect=1'])
+def test_initial_private_entry_rejects_missing_or_untrusted_channel(monkeypatch, capsys, url):
+    monkeypatch.setenv('VIBELUTION_INITIAL_MIGRATION_URL', url)
+    monkeypatch.setenv('VIBELUTION_INITIAL_MIGRATION_TOKEN', 'a' * 64)
+    assert cli._initial_offline() == 1
+    assert json.loads(capsys.readouterr().out) == {'schemaVersion': 1, 'operationId': None,
+        'state': 'unavailable', 'readyForCutover': False}
+    assert 'VIBELUTION_INITIAL_MIGRATION_TOKEN' not in os.environ
+
+
+@pytest.mark.parametrize('legacy', ['profile', 'model'])
+@pytest.mark.parametrize('config_kind', ['offline', 'matching'])
+def test_offline_bootstrap_legacy_model_repair_depends_on_target_config(tmp_path, legacy, config_kind):
+    from tests.test_assistant_runtime_native import TEST_MODEL_CONFIG, _run
+    offline_config = TEST_MODEL_CONFIG.replace('providers.local', 'providers.offline').replace(
+        'models.test', 'models.offline').replace('local/test', 'offline/offline')
+    _run(tmp_path, f'''
+        import json, os
+        from pathlib import Path
+        from core.assistant_runtime import native
+        from core.web.services import agent_directory_service as directory
+        root = Path(os.environ['VIBELUTION_ASSISTANT_NATIVE_ROOT'])
+        assistant = native.bootstrap(root)['assistant']
+        path = directory.registry_path()
+        assert native.shutdown()['closed']
+        registry = json.loads(path.read_text(encoding='utf-8'))
+        agent = next(row for row in registry['agents'] if row['agentId'] == assistant['agentId'])
+        if {legacy!r} == 'profile':
+            agent['profileId'] = 'primary'
+            agent['llmBindings'] = {{}}
+        else:
+            agent['llmBindings'] = {{'dialogue': {{'modelId': 'model-primary'}}}}
+        path.write_text(json.dumps(registry), encoding='utf-8')
+        (root.parent / 'agent-id.txt').write_text(assistant['agentId'], encoding='utf-8')
+    ''', config_text=TEST_MODEL_CONFIG)
+    _run(tmp_path, f'''
+        import os
+        from pathlib import Path
+        from core.assistant_runtime.migration_profile import offline_migration_profile
+        from core.web.services import agent_directory_service as directory
+        root = Path(os.environ['VIBELUTION_ASSISTANT_NATIVE_ROOT'])
+        agent_id = (root.parent / 'agent-id.txt').read_text(encoding='utf-8')
+        with offline_migration_profile():
+            agent = directory.get_agent(agent_id, include_archived=True)
+            assert agent['llmBindings']['dialogue']['modelId'] == {('offline/offline' if config_kind == 'offline' else 'local/test')!r}
+    ''', config_text=offline_config if config_kind == 'offline' else TEST_MODEL_CONFIG)
+
+
+def test_synthetic_v2_secret_free_model_snapshot_preserves_repair_resolution(tmp_path):
+    """Evaluate the project's parser/serializer on an isolated config, not the operator config."""
+    import tomllib
+    from config.llm_projection import project_v2_llm_for_runtime
+    from config.models import LLMConfig
+    from config.toml_writer import dumps_public_config
+
+    def provider(models):
+        return {'service_class': 'official_api', 'vendor': 'custom', 'driver': 'openai',
+            'base_url': 'https://example.invalid/v1', 'auth_kind': 'api_key',
+            'credential_ref': 'env:SYNTHETIC_PRIVATE_KEY', 'requires_credential': True,
+            'protocols': {'default': 'chat_completions', 'allowed': ['chat_completions']},
+            'models': {key: {'upstream_id': value, 'enabled': True} for key, value in models.items()}}
+    source = {'llm': {'schema_version': 2, 'providers': {
+        'alpha': provider({'first': 'model-a', 'second': 'model-b'}),
+        'beta': provider({'third': 'model-c'})},
+        'model_aliases': {'saved-alias': 'alpha/second'},
+        'profiles': {'primary': {'model_ref': 'saved-alias', 'fallback': 'backup'},
+                     'backup': {'model_ref': 'beta/third'}, 'other': {'model_ref': 'alpha/first'}}}}
+    from scripts.assistant_migration_activate import prepare_initial_model_config
+    source_file = tmp_path / 'source.toml'
+    source_file.write_text(dumps_public_config(source), encoding='utf-8')
+    profile_root = tmp_path / 'model-profile'
+    profile_root.mkdir()
+    op = 'initial-' + 'a' * 40
+    registry_digest = 'b' * 64
+    file = prepare_initial_model_config(source_file, profile_root,
+        profile_root / ('.initial-migration-models-v1-' + op + '-' + registry_digest + '.toml'), op, registry_digest)
+    encoded = file.read_bytes()
+    assert b'SYNTHETIC_PRIVATE_KEY' not in encoded and b'example.invalid' not in encoded
+    assert source_file.read_text(encoding='utf-8') == dumps_public_config(source)
+    assert prepare_initial_model_config(source_file, profile_root, file, op, registry_digest) == file
+
+    def effective(config):
+        return LLMConfig.model_validate(project_v2_llm_for_runtime(config)['llm'])
+    old, new = effective(source), effective(tomllib.loads(file.read_text(encoding='utf-8')))
+    assert list(old.model_library) == list(new.model_library)
+    assert list(old.profiles) == list(new.profiles)
+    assert old.declared_fallback_profile_ids() == new.declared_fallback_profile_ids()
+    def resolve(config, name):
+        candidates = [name] if name else []
+        if 'primary' not in candidates: candidates.append('primary')
+        for candidate in candidates:
+            try:
+                value, _ = config.get_model_library_entry_for_profile(config.get_profile(profile_id=candidate))
+                if value: return value
+            except Exception:
+                continue
+        return next((key for key, value in config.model_library.items() if isinstance(value, dict)), '')
+    # _profile_id_to_model_id's full input partition: every declared profile,
+    # empty legacy value, and an undeclared legacy value falling back to primary.
+    for profile in [*old.profiles, '', 'missing-profile']:
+        assert resolve(old, profile) == resolve(new, profile)
+    from tests.test_assistant_runtime_native import _run
+    for legacy, expected in [('profile', 'alpha/first'), ('model', 'alpha/second')]:
+        case = tmp_path / legacy
+        case.mkdir()
+        _run(case, f'''
+            import json, os
+            from pathlib import Path
+            from core.assistant_runtime import native
+            from core.web.services import agent_directory_service as directory
+            root = Path(os.environ['VIBELUTION_ASSISTANT_NATIVE_ROOT'])
+            assistant = native.bootstrap(root)['assistant']
+            registry_file = directory.registry_path()
+            assert native.shutdown()['closed']
+            registry = json.loads(registry_file.read_text(encoding='utf-8'))
+            agent = next(row for row in registry['agents'] if row['agentId'] == assistant['agentId'])
+            agent['metadata']['testUserSentinel'] = 'retain-user-setting'
+            unchanged = {{key: agent.get(key) for key in ('displayName', 'directSessionId', 'toolPolicyId', 'memoryPolicyId', 'status')}}
+            unchanged['personaProfile'] = (agent.get('metadata') or {{}}).get('personaProfile')
+            unchanged['taskProfile'] = (agent.get('metadata') or {{}}).get('taskProfile')
+            if {legacy!r} == 'profile':
+                agent['profileId'] = 'other'
+                agent['llmBindings'] = {{}}
+            else:
+                agent['llmBindings'] = {{'dialogue': {{'modelId': 'model-primary'}}}}
+            registry_file.write_text(json.dumps(registry), encoding='utf-8')
+            (root.parent / 'agent-id.txt').write_text(assistant['agentId'], encoding='utf-8')
+            (root.parent / 'unchanged.json').write_text(json.dumps(unchanged), encoding='utf-8')
+        ''', config_text=dumps_public_config(source))
+        _run(case, f'''
+            import os
+            from pathlib import Path
+            from core.assistant_runtime.migration_profile import offline_migration_profile
+            from core.web.services import agent_directory_service as directory
+            import json
+            root = Path(os.environ['VIBELUTION_ASSISTANT_NATIVE_ROOT'])
+            agent_id = (root.parent / 'agent-id.txt').read_text(encoding='utf-8')
+            with offline_migration_profile():
+                agent = directory.get_agent(agent_id, include_archived=True)
+                assert agent['llmBindings']['dialogue']['modelId'] == {expected!r}
+                unchanged = json.loads((root.parent / 'unchanged.json').read_text(encoding='utf-8'))
+                assert all(agent.get(key) == value for key, value in unchanged.items() if key not in ('personaProfile', 'taskProfile'))
+                assert agent.get('personaProfile') == unchanged['personaProfile']
+                assert agent.get('taskProfile') == unchanged['taskProfile']
+                assert agent['metadata']['testUserSentinel'] == 'retain-user-setting'
+        ''', config_text=encoded.decode('utf-8'))
+
+
+def test_initial_model_config_never_overwrites_and_rejects_unsupported_schema(tmp_path):
+    from tests.test_assistant_runtime_native import TEST_MODEL_CONFIG
+    from scripts.assistant_migration_activate import prepare_initial_model_config
+    from core.assistant_runtime.migration_io import MigrationIOError
+    target = tmp_path / 'target'
+    target.mkdir()
+    source_config = tmp_path / 'source.toml'
+    source_config.write_text(TEST_MODEL_CONFIG, encoding='utf-8')
+    op = 'initial-' + 'a' * 40
+    registry_digest = 'b' * 64
+    destination = target / ('.initial-migration-models-v1-' + op + '-' + registry_digest + '.toml')
+    destination.write_text('user data must survive', encoding='utf-8')
+    with pytest.raises(MigrationIOError):
+        prepare_initial_model_config(source_config, target, destination, op, registry_digest)
+    assert destination.read_text(encoding='utf-8') == 'user data must survive'
+    destination.unlink()
+    source_config.write_text('[llm]\nschema_version = 1\n', encoding='utf-8')
+    with pytest.raises(MigrationIOError):
+        prepare_initial_model_config(source_config, target, destination, op, registry_digest)
+    assert not destination.exists()
+
+
+def test_initial_model_config_is_isolated_per_original_operation_id(tmp_path):
+    from tests.test_assistant_runtime_native import TEST_MODEL_CONFIG
+    from scripts.assistant_migration_activate import prepare_initial_model_config
+    from core.assistant_runtime.migration_io import MigrationIOError
+    target = tmp_path / 'target'
+    target.mkdir()
+    source_config = tmp_path / 'source.toml'
+    source_config.write_text(TEST_MODEL_CONFIG, encoding='utf-8')
+    first_id, second_id = 'initial-' + 'a' * 40, 'initial-' + 'b' * 40
+    first_digest, second_digest = 'a' * 64, 'b' * 64
+    first = target / ('.initial-migration-models-v1-' + first_id + '-' + first_digest + '.toml')
+    second = target / ('.initial-migration-models-v1-' + second_id + '-' + second_digest + '.toml')
+    prepare_initial_model_config(source_config, target, first, first_id, first_digest)
+    first_content = first.read_bytes()
+    source_config.write_text(TEST_MODEL_CONFIG.replace('models.test', 'models.other').replace(
+        'local/test', 'local/other'), encoding='utf-8')
+    with pytest.raises(MigrationIOError):
+        prepare_initial_model_config(source_config, target, first, first_id, first_digest)
+    assert first.read_bytes() == first_content
+    refreshed = target / ('.initial-migration-models-v1-' + first_id + '-' + second_digest + '.toml')
+    prepare_initial_model_config(source_config, target, refreshed, first_id, second_digest)
+    assert b'local/other' in refreshed.read_bytes() and first.read_bytes() == first_content
+    prepare_initial_model_config(source_config, target, second, second_id, second_digest)
+    assert b'local/other' in second.read_bytes() and first.read_bytes() == first_content
+    with pytest.raises(MigrationIOError):
+        prepare_initial_model_config(source_config, target, second, '../invalid', second_digest)
+    with pytest.raises(MigrationIOError):
+        prepare_initial_model_config(source_config, target, first, first_id, second_digest)
+    with pytest.raises(MigrationIOError):
+        prepare_initial_model_config(source_config, target, second, second_id, 'invalid')
+
+
 def test_real_child_uses_explicit_source_data_home_with_competing_canonical_workspace(tmp_path, monkeypatch, capsys):
     workspace, target, args = active_personal_case(tmp_path, monkeypatch)
     override = tmp_path / 'configured-data'

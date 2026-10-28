@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -29,6 +29,153 @@ function fixture() {
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 describe("main-owned assistant registry connection", () => {
+  it("holds a pre-host source lease across identical observations and serializes startup", async () => {
+    const f = fixture(), project = f.directory("pre-host"), entered = deferred(), release = deferred();
+    await f.connection.reconcile(f.payload([f.row(project)]));
+    const id = Object.keys(f.connection.snapshot().projects)[0];
+    let checkAfterReturn!: () => void;
+    const work = f.connection.withPreHostSource(id, async lease => {
+      expect(lease.revision).toBe(1);
+      expect(lease.registration.root).toBe(f.connection.registration(id)?.root);
+      expect(Object.isFrozen(lease.registration)).toBe(true);
+      checkAfterReturn = lease.check;
+      entered.resolve(); await release.promise;
+      expect(lease.signal.aborted).toBe(false);
+      lease.check();
+      return "done";
+    });
+    await entered.promise;
+    const unchanged = f.connection.reconcile(f.payload([f.row(project)]));
+    const starting = f.connection.start(() => f.host);
+    await Promise.resolve();
+    expect(f.host.start).not.toHaveBeenCalled();
+    release.resolve();
+    await expect(work).resolves.toBe("done");
+    expect(checkAfterReturn).toThrow("ASSISTANT_PROJECT_UNAVAILABLE");
+    await unchanged; await starting;
+    expect(f.host.start).toHaveBeenCalledTimes(1);
+    await f.connection.stop();
+  });
+
+  it("revokes an in-flight lease on a changed or unprovable observation before a commit", async () => {
+    for (const mode of ["removed", "unprovable", "malformed"]) {
+      const f = fixture(), project = f.directory("pre-host"), entered = deferred(), release = deferred();
+      await f.connection.reconcile(f.payload([f.row(project)]));
+      const id = Object.keys(f.connection.snapshot().projects)[0];
+      let committed = false, signal!: AbortSignal;
+      const work = f.connection.withPreHostSource(id, async lease => {
+        signal = lease.signal; entered.resolve(); await release.promise;
+        lease.check(); committed = true;
+      });
+      const checked = expect(work).rejects.toThrow("ASSISTANT_PROJECT_UNAVAILABLE");
+      await entered.promise;
+      if (mode === "unprovable") rmSync(project, { recursive: true });
+      const observation = f.connection.reconcile(mode === "malformed" ? null : f.payload(mode === "removed" ? [] : [f.row(project)]));
+      const observationChecked = mode === "malformed" ? expect(observation).rejects.toThrow("ASSISTANT_INVENTORY_INVALID") : expect(observation).resolves.toBeUndefined();
+      expect(signal.aborted).toBe(true);
+      release.resolve(); await checked; await observationChecked;
+      expect(committed).toBe(false);
+      await f.connection.stop();
+    }
+  });
+
+  it("immediately revokes a pre-host lease when stopped", async () => {
+    const f = fixture(), project = f.directory("pre-host"), entered = deferred(), release = deferred();
+    await f.connection.reconcile(f.payload([f.row(project)]));
+    const id = Object.keys(f.connection.snapshot().projects)[0];
+    let signal!: AbortSignal;
+    const work = f.connection.withPreHostSource(id, async lease => {
+      signal = lease.signal; entered.resolve(); await release.promise; lease.check();
+    });
+    const checked = expect(work).rejects.toThrow("ASSISTANT_PROJECT_UNAVAILABLE");
+    await entered.promise;
+    const stopped = f.connection.stop();
+    expect(signal.aborted).toBe(true);
+    release.resolve(); await checked; await stopped;
+  });
+
+  it("waits for an admitted writer to drain before stopping the source lease", async () => {
+    const f = fixture(), project = f.directory("pre-host"), entered = deferred(), release = deferred();
+    await f.connection.reconcile(f.payload([f.row(project)]));
+    const id = Object.keys(f.connection.snapshot().projects)[0];
+    let signal!: AbortSignal, drained = false, stopped = false;
+    const work = f.connection.withPreHostSource(id, async lease => {
+      signal = lease.signal;
+      return await lease.commit(async () => { entered.resolve(); await release.promise; drained = true; return "receipt"; });
+    });
+    const checked = expect(work).rejects.toThrow("ASSISTANT_PROJECT_UNAVAILABLE");
+    await entered.promise;
+    const stopping = f.connection.stop().then(() => { stopped = true; });
+    await Promise.resolve();
+    expect(signal.aborted).toBe(false);
+    expect(stopped).toBe(false);
+    release.resolve(); await checked; await stopping;
+    expect(drained).toBe(true);
+    expect(stopped).toBe(true);
+    expect(signal.aborted).toBe(true);
+  });
+
+  it("revokes a pre-host lease when the registered directory is replaced at the same path", async () => {
+    const f = fixture(), project = f.directory("pre-host"), entered = deferred(), release = deferred();
+    await f.connection.reconcile(f.payload([f.row(project)]));
+    const id = Object.keys(f.connection.snapshot().projects)[0];
+    let signal!: AbortSignal, committed = false;
+    const work = f.connection.withPreHostSource(id, async lease => {
+      signal = lease.signal; entered.resolve(); await release.promise;
+      lease.check(); committed = true;
+    });
+    const checked = expect(work).rejects.toThrow("ASSISTANT_PROJECT_UNAVAILABLE");
+    await entered.promise;
+    renameSync(project, join(f.root, "original-project"));
+    f.directory("pre-host");
+    const observation = f.connection.reconcile(f.payload([f.row(project)]));
+    expect(signal.aborted).toBe(true);
+    release.resolve(); await checked; await observation;
+    expect(committed).toBe(false);
+    await f.connection.stop();
+  });
+
+  it("rejects same-path replacement on final check without an inventory observation", async () => {
+    const f = fixture(), project = f.directory("pre-host");
+    await f.connection.reconcile(f.payload([f.row(project)]));
+    const id = Object.keys(f.connection.snapshot().projects)[0];
+    await expect(f.connection.withPreHostSource(id, async () => {
+      renameSync(project, join(f.root, "original-project"));
+      f.directory("pre-host");
+      return "not confirmed";
+    })).rejects.toThrow("ASSISTANT_PROJECT_UNAVAILABLE");
+    await f.connection.stop();
+  });
+
+  it("rejects existing hosts and suspended registries without invoking the callback", async () => {
+    const f = fixture(), project = f.directory("pre-host");
+    await f.connection.reconcile(f.payload([f.row(project)]));
+    const id = Object.keys(f.connection.snapshot().projects)[0];
+    const callback = vi.fn(async () => undefined);
+    await f.connection.start(() => f.host);
+    await expect(f.connection.withPreHostSource(id, callback)).rejects.toThrow("ASSISTANT_PROJECT_UNAVAILABLE");
+    expect(callback).not.toHaveBeenCalled();
+    await f.connection.stop();
+    rmSync(project, { recursive: true });
+    const suspended = new AssistantProjectRegistryConnection(f.filePath);
+    await expect(suspended.withPreHostSource(id, callback)).rejects.toThrow("ASSISTANT_PROJECT_UNAVAILABLE");
+    expect(callback).not.toHaveBeenCalled();
+    await suspended.stop();
+  });
+
+  it("propagates a callback failure without closing an unchanged connection and detects registry tampering", async () => {
+    const f = fixture(), project = f.directory("pre-host");
+    await f.connection.reconcile(f.payload([f.row(project)]));
+    const id = Object.keys(f.connection.snapshot().projects)[0];
+    await expect(f.connection.withPreHostSource(id, async () => { throw new Error("CALLBACK_FAILED"); })).rejects.toThrow("CALLBACK_FAILED");
+    await expect(f.connection.withPreHostSource(id, async lease => { lease.check(); return "retry"; })).resolves.toBe("retry");
+    await expect(f.connection.withPreHostSource(id, async () => {
+      writeFileSync(f.filePath, "{tampered");
+      return "must not return";
+    })).rejects.toThrow("ASSISTANT_PROJECT_UNAVAILABLE");
+    await f.connection.stop();
+  });
+
   it("serializes project revocation until the history operation settles", async () => {
     const f = fixture(), project = f.directory("history-project"), gate = deferred();
     await f.connection.start(() => f.host);

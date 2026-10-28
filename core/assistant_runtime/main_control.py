@@ -10,8 +10,11 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import math
+import os
 import re
 import secrets
+import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -19,7 +22,7 @@ from . import appearance_protocol as appearance
 
 
 _OPERATIONS = {"start", "stop", "restart"}
-_ACTIONS = {"project_status", "project_lifecycle", "project_lifecycle_receipt", "history_import", "affairs_sync"}
+_ACTIONS = {"project_status", "project_lifecycle", "project_lifecycle_receipt", "history_import", "affairs_sync", "initial_migration_queue", "initial_migration_receipt"}
 _STATUS_STATES = {"stopped", "starting", "running", "stopping", "failed", "unknown"}
 _WRITE_STATES = {"completed", "queued", "rejected", "unknown", "not_found"}
 _FACADE_CODES = {
@@ -46,11 +49,36 @@ def affairs_migration_id(project_id, preview_id):
     return "affairs-" + hashlib.sha256((project_id + ":" + preview_id).encode("utf-8")).hexdigest()[:40]
 
 
+def initial_migration_id(project_id, preview_id, category):
+    # New previews of the same registered project and category must never mint
+    # a replacement ID for an earlier unconfirmed attempt.
+    _ = preview_id
+    return "initial-" + hashlib.sha256((project_id + ":" + category).encode("utf-8")).hexdigest()[:40]
+
+
+def initial_model_env_unavailable():
+    return any(key.upper().startswith("AGENT_LLM__") and value.strip() for key, value in os.environ.items())
+
+
 def _request(action, request):
     if type(action) is str and action in appearance.APPEARANCE_ACTIONS:
         return appearance.validate_request(action, request)
     if type(action) is not str or action not in _ACTIONS or type(request) is not dict:
         raise ValueError("Invalid main control request")
+    if action == "initial_migration_receipt":
+        if (set(request) != {"projectId", "category", "operationId"} or not _opaque(request.get("projectId"), 160)
+                or type(request.get("category")) is not str or request["category"] not in {"personal", "knowledge"}
+                or request.get("operationId") != initial_migration_id(request["projectId"], "", request["category"])):
+            raise ValueError("Invalid initial migration receipt request")
+        return dict(request)
+    if action == "initial_migration_queue":
+        if (set(request) != {"projectId", "previewId", "turnId", "category", "operationId"}
+                or not _opaque(request.get("projectId"), 160) or not _opaque(request.get("turnId"), 160)
+                or type(request.get("previewId")) is not str or re.fullmatch(r"[0-9a-f]{64}", request["previewId"]) is None
+                or type(request.get("category")) is not str or request["category"] not in {"personal", "knowledge"}
+                or request.get("operationId") != initial_migration_id(request["projectId"], request["previewId"], request["category"])):
+            raise ValueError("Invalid initial migration request")
+        return dict(request)
     if action in {"history_import", "affairs_sync"}:
         expected = {"projectId", "previewId", "turnId"}
         if (not expected <= set(request) or set(request) - expected - ({"recoverSyncId"} if action == "affairs_sync" else set())
@@ -76,6 +104,24 @@ def _result(action, request, result):
     """Reject unknown fields rather than copying errors, paths or credentials."""
     if action in appearance.APPEARANCE_ACTIONS:
         return appearance.validate_result(action, request, result)
+    if action == "initial_migration_receipt":
+        if (type(result) is not dict or set(result) != {"schemaVersion", "projectId", "category", "operationId", "state", "code", "readyForCutover"}
+                or type(result.get("schemaVersion")) is not int or result["schemaVersion"] != 1
+                or any(result.get(key) != request[key] for key in ("projectId", "category", "operationId"))
+                or type(result.get("state")) is not str or result["state"] not in {"queued", "completed", "partial", "unknown", "not_found"}
+                or result.get("code") != result["state"] or result.get("readyForCutover") is not False):
+            raise ValueError("Invalid initial migration receipt result")
+        return dict(result)
+    if action == "initial_migration_queue":
+        required = {"schemaVersion", "projectId", "previewId", "category", "operationId", "state", "code", "readyForCutover"}
+        if (type(result) is not dict or set(result) != required or type(result.get("schemaVersion")) is not int
+                or result["schemaVersion"] != 1 or any(result.get(key) != request[key] for key in ("projectId", "previewId", "category", "operationId"))
+                or result.get("readyForCutover") is not False or type(result.get("state")) is not str
+                or type(result.get("code")) is not str or (result.get("state"), result.get("code")) not in {
+                    ("queued", "queued"), ("unknown", "unknown"), ("rejected", "cancelled"),
+                    ("rejected", "unavailable"), ("rejected", "busy")}):
+            raise ValueError("Invalid initial migration result")
+        return dict(result)
     if action == "affairs_sync":
         required = {"schemaVersion", "projectId", "previewId", "migrationId", "state", "code", "readyForCutover"}
         counts = {"appliedCount", "conflictCount"}
@@ -155,11 +201,64 @@ class _Delivery:
     future: asyncio.Future
     claimed: bool = False
     image_admitted: bool = False
+    initial_admitted: bool = False
+    initial_prepared: bool = False
+    initial_token: object = None
     turn_id: str | None = None
 
 
+class _InitialPublication:
+    """Order revocation and publication without waiting on the event loop."""
+    def __init__(self, deadline, turn_id, delivery_id, operation_id):
+        self._lock = threading.Lock()
+        self._deadline = deadline
+        self._revoked = threading.Event()
+        self._done = threading.Event()
+        self.turn_id = turn_id
+        self.delivery_id = delivery_id
+        self.operation_id = operation_id
+        self._published = False
+
+    def revoke(self):
+        # The event loop must never wait for a filesystem commit.
+        self._revoked.set()
+
+    def drain(self, timeout):
+        if not self._lock.acquire(timeout=max(0, timeout)):
+            return False
+        self._lock.release()
+        return True
+
+    def finished(self):
+        self._done.set()
+
+    def wait_finished(self, timeout):
+        return self._done.wait(max(0, timeout))
+
+    def check(self):
+        if self._revoked.is_set() or time.monotonic() >= self._deadline:
+            raise ValueError("initial migration delivery unavailable")
+
+    def publish(self, writer):
+        with self._lock:
+            if self._revoked.is_set() or self._published or time.monotonic() >= self._deadline:
+                raise ValueError("initial migration delivery unavailable")
+            result = writer()
+            self._published = True
+            return result
+
+    def published(self):
+        with self._lock:
+            return self._published and not self._revoked.is_set() and time.monotonic() < self._deadline
+
+
+def _revoke_initial(entry):
+    if entry.initial_token is not None:
+        entry.initial_token.revoke()
+
+
 class MainControlBroker:
-    def __init__(self, project_ids: Callable, *, timeout_seconds=20, claim_seconds=10, max_pending=32, appearance_enabled=False, image_timeout_seconds=appearance.IMAGE_SELECTION_SECONDS):
+    def __init__(self, project_ids: Callable, *, timeout_seconds=20, claim_seconds=10, max_pending=32, appearance_enabled=False, image_timeout_seconds=appearance.IMAGE_SELECTION_SECONDS, initial_migration_enabled=False):
         if (not callable(project_ids) or type(max_pending) is not int or not 1 <= max_pending <= 128
                 or any(type(value) not in {int, float} or not math.isfinite(value) or value <= 0
                        for value in (timeout_seconds, claim_seconds))
@@ -168,6 +267,9 @@ class MainControlBroker:
         if type(appearance_enabled) is not bool or type(image_timeout_seconds) not in {int, float} or not math.isfinite(image_timeout_seconds) or not 0 < image_timeout_seconds <= appearance.IMAGE_SELECTION_SECONDS:
             raise ValueError("Invalid appearance transport limits")
         self.appearance_enabled = appearance_enabled
+        if type(initial_migration_enabled) is not bool:
+            raise ValueError("Invalid initial migration capability")
+        self.initial_migration_enabled = initial_migration_enabled
         self._image_timeout = image_timeout_seconds
         self._project_ids = project_ids
         self._timeout = timeout_seconds
@@ -176,6 +278,12 @@ class MainControlBroker:
         self._queue = asyncio.Queue(maxsize=max_pending)
         self._pending: dict[str, _Delivery] = {}
         self._closed = asyncio.Event()
+        self._initial_fences: dict[str | None, int] = {}
+        self._initial_tokens: set[_InitialPublication] = set()
+        # Never reuse an issued initial delivery ID during this host lifetime.
+        # Reserve capacity before admitting a request, so every issued ID can
+        # later be drained even after the pending entry has expired.
+        self._initial_issued_ids: dict[str, str] = {}
 
     def _authorized(self, project_id):
         try:
@@ -190,6 +298,11 @@ class MainControlBroker:
     def _unavailable(entry, code="control_unavailable"):
         if entry.action in appearance.APPEARANCE_ACTIONS:
             return appearance.unavailable(entry.action, entry.request)
+        if entry.action == "initial_migration_queue":
+            return {"schemaVersion": 1, **{key: entry.request[key] for key in ("projectId", "previewId", "category", "operationId")},
+                    "state": "unknown", "code": "unknown", "readyForCutover": False}
+        if entry.action == "initial_migration_receipt":
+            return {"schemaVersion": 1, **entry.request, "state": "unknown", "code": "unknown", "readyForCutover": False}
         if entry.action == "affairs_sync":
             return {"schemaVersion": 1, "projectId": entry.request["projectId"], "previewId": entry.request["previewId"],
                     "migrationId": entry.request.get("recoverSyncId", affairs_migration_id(entry.request["projectId"], entry.request["previewId"])),
@@ -207,6 +320,7 @@ class MainControlBroker:
         for delivery_id, entry in list(self._pending.items()):
             authorized = self._authorized_request(entry)
             if entry.deadline <= now or not authorized:
+                _revoke_initial(entry)
                 self._pending.pop(delivery_id)
                 if not entry.future.done():
                     entry.future.set_result(self._unavailable(entry, "control_unavailable" if authorized else "project_unavailable"))
@@ -227,22 +341,35 @@ class MainControlBroker:
         captured = _request(action, request)
         if turn_id is not None and not _opaque(turn_id, 160):
             raise ValueError("Invalid appearance turn identity")
-        if action in {"history_import", "affairs_sync"} and turn_id != captured["turnId"]:
+        if action in {"history_import", "affairs_sync", "initial_migration_queue"} and turn_id != captured["turnId"]:
             raise ValueError("Invalid history turn identity")
+        if action in {"initial_migration_queue", "initial_migration_receipt"} and not self.initial_migration_enabled:
+            raise ValueError("Initial migration capability is unavailable")
+        if action == "initial_migration_queue" and initial_model_env_unavailable():
+            raise ValueError("Initial migration source model configuration unavailable")
         if action in appearance.APPEARANCE_ACTIONS:
             if not self.appearance_enabled:
                 raise ValueError("Appearance control is not enabled by Launcher")
         elif not self._authorized(captured["projectId"]):
             raise ValueError("Project is not authorized by Launcher")
         loop = asyncio.get_running_loop()
-        timeout = self._image_timeout if action == "operator_image_upload" else 120 if action in {"history_import", "affairs_sync"} else self._timeout
+        timeout = self._image_timeout if action == "operator_image_upload" else 120 if action in {"history_import", "affairs_sync", "initial_migration_queue"} else self._timeout
         entry = _Delivery(action, captured, loop.time() + timeout, loop.create_future(), turn_id=turn_id)
         self._expire()
         if self._closed.is_set():
             return self._unavailable(entry)
+        if action == "initial_migration_queue" and (None in self._initial_fences or turn_id in self._initial_fences):
+            return self._unavailable(entry)
         if len(self._pending) >= self._max_pending:
             return self._unavailable(entry, "control_busy")
+        if action == "initial_migration_queue" and len(self._initial_issued_ids) >= 4096:
+            return self._unavailable(entry, "control_busy")
         delivery_id = secrets.token_hex(16)
+        if (delivery_id in self._pending or delivery_id in self._initial_issued_ids
+                or any(token.delivery_id == delivery_id for token in self._initial_tokens)):
+            return self._unavailable(entry, "control_busy")
+        if action == "initial_migration_queue":
+            self._initial_issued_ids[delivery_id] = captured["operationId"]
         self._pending[delivery_id] = entry
         self._queue.put_nowait(delivery_id)
         try:
@@ -250,6 +377,7 @@ class MainControlBroker:
         except asyncio.TimeoutError:
             return self._unavailable(entry)
         finally:
+            _revoke_initial(entry)
             self._pending.pop(delivery_id, None)
             if not entry.future.done():
                 entry.future.cancel()
@@ -280,7 +408,7 @@ class MainControlBroker:
             entry = self._pending.get(delivery_id)
             if entry is not None:
                 entry.claimed = True
-                remaining = {"timeoutMs": max(1, math.floor((entry.deadline - loop.time()) * 1000))} if entry.action in {"operator_image_upload", "history_import", "affairs_sync"} else {}
+                remaining = {"timeoutMs": max(1, math.floor((entry.deadline - loop.time()) * 1000))} if entry.action in {"operator_image_upload", "history_import", "affairs_sync", "initial_migration_queue"} else {}
                 return {"schemaVersion": 1, "request": {"deliveryId": delivery_id, "action": entry.action, **entry.request, **remaining}}
         return empty
 
@@ -296,7 +424,8 @@ class MainControlBroker:
     def cancel_history_imports(self, turn_id: str) -> None:
         """Retire this Turn's waiters after the host has fenced publication."""
         for key, entry in list(self._pending.items()):
-            if entry.action in {"history_import", "affairs_sync"} and entry.turn_id == turn_id:
+            if entry.action in {"history_import", "affairs_sync", "initial_migration_queue"} and entry.turn_id == turn_id:
+                _revoke_initial(entry)
                 self._pending.pop(key)
                 if not entry.future.done():
                     value = self._unavailable(entry)
@@ -304,6 +433,98 @@ class MainControlBroker:
                         value = {**value, "state": "rejected", "code": "cancelled"}
                     entry.future.set_result(value)
         self._compact_queue()
+
+    def begin_initial_fence(self, turn_id=None):
+        """Revoke on the event loop before a stop/registry guard wait."""
+        self._initial_fences[turn_id] = self._initial_fences.get(turn_id, 0) + 1
+        tokens = [token for token in self._initial_tokens
+                  if not token._done.is_set() and (turn_id is None or token.turn_id == turn_id)]
+        for token in tokens:
+            token.revoke()
+        for key, entry in list(self._pending.items()):
+            if entry.action != "initial_migration_queue" or (turn_id is not None and entry.turn_id != turn_id):
+                continue
+            if entry.initial_token is not None:
+                entry.initial_token.revoke()
+            self._pending.pop(key)
+            if not entry.future.done():
+                entry.future.set_result(self._unavailable(entry))
+        self._compact_queue()
+        return tokens
+
+    def end_initial_fence(self, turn_id=None):
+        count = self._initial_fences[turn_id] - 1
+        if count:
+            self._initial_fences[turn_id] = count
+        else:
+            del self._initial_fences[turn_id]
+
+    def begin_initial_drain(self, delivery_id, operation_id):
+        """Revoke an exact claimed delivery, including an expired in-flight worker."""
+        if not self.initial_migration_enabled:
+            return False, None
+        if self._initial_issued_ids.get(delivery_id) != operation_id:
+            return False, None
+        entry = self._pending.get(delivery_id)
+        related = [item for item in self._initial_tokens if item.delivery_id == delivery_id]
+        if (entry is not None and (not entry.claimed or entry.action != "initial_migration_queue"
+                                  or entry.request["operationId"] != operation_id)
+                or any(item.operation_id != operation_id for item in related)):
+            return False, None
+        if entry is not None and any(item is not entry.initial_token for item in related):
+            # A broken or reused delivery identity cannot acknowledge one
+            # worker while a different worker with that ID is still retained.
+            return False, None
+        if (entry is not None and entry.claimed and entry.action == "initial_migration_queue"
+                and entry.request["operationId"] == operation_id):
+            token = entry.initial_token
+            if token is not None:
+                token.revoke()
+            self._pending.pop(delivery_id)
+            if not entry.future.done():
+                entry.future.set_result(self._unavailable(entry))
+            self._compact_queue()
+            return True, token
+        token = next((item for item in self._initial_tokens
+                      if item.delivery_id == delivery_id and item.operation_id == operation_id), None)
+        if token is None:
+            # The issued ID cannot be reused, and without a pending entry a
+            # delayed prepare cannot admit a worker after this acknowledgement.
+            return True, None
+        token.revoke()
+        return True, token
+
+    @staticmethod
+    def drain_initial_fence(tokens, timeout=2.0):
+        deadline = time.monotonic() + timeout
+        return all(token.drain(deadline - time.monotonic()) for token in tokens)
+
+    def initial_delivery(self, delivery_id, request, *, admit=False, confirm=False):
+        """Check one claimed, live, exact native-policy-admitted delivery."""
+        self._expire()
+        entry = self._pending.get(delivery_id) if type(delivery_id) is str else None
+        if (not self.initial_migration_enabled or self._closed.is_set() or entry is None or not entry.claimed
+                or entry.action != "initial_migration_queue" or entry.request != request
+                or None in self._initial_fences or entry.turn_id in self._initial_fences
+                or not self._authorized_request(entry) or (admit and (entry.initial_admitted or initial_model_env_unavailable()))
+                or (not admit and not entry.initial_admitted)):
+            return False
+        if admit:
+            # Keep completed identities for a lost drain response. Reclaim
+            # only under the bound; in-flight workers are never evicted.
+            if len(self._initial_tokens) >= 512:
+                self._initial_tokens = {token for token in self._initial_tokens if not token._done.is_set()}
+            if len(self._initial_tokens) >= 512:
+                return False
+            entry.initial_admitted = True
+            entry.initial_token = _InitialPublication(time.monotonic() + max(0, entry.deadline - asyncio.get_running_loop().time()),
+                                                      entry.turn_id, delivery_id, entry.request["operationId"])
+            self._initial_tokens.add(entry.initial_token)
+        if confirm:
+            if entry.initial_token is None or not entry.initial_token.published():
+                return False
+            entry.initial_prepared = True
+        return entry.initial_token if admit else True
 
     def admit_image_import(self, delivery_id: str, kind: str) -> bool:
         """One live chooser result may enter the canonical writer; no upload replay."""
@@ -324,7 +545,10 @@ class MainControlBroker:
         entry = self._pending.get(delivery_id)
         if entry is None or not entry.claimed or self._closed.is_set():
             return False
+        if entry.action == "initial_migration_queue" and type(result) is dict and result.get("state") == "queued" and not entry.initial_prepared:
+            raise ValueError("Initial migration source not prepared")
         captured = _result(entry.action, entry.request, result)
+        _revoke_initial(entry)
         self._pending.pop(delivery_id)
         entry.future.set_result(captured)
         return True
@@ -332,6 +556,7 @@ class MainControlBroker:
     def close(self) -> None:
         self._closed.set()
         for entry in self._pending.values():
+            _revoke_initial(entry)
             if not entry.future.done():
                 entry.future.set_result(self._unavailable(entry))
         self._pending.clear()

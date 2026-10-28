@@ -1,11 +1,11 @@
 /** Launcher-owned source-host lifecycle; packaged host distribution is a separate boundary. */
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { loadWorkbenchJobNative, type WorkbenchJobHandle, type WorkbenchJobNative } from "../process/workbenchJob.js";
 import { resolveNoConsolePython } from "../process/workbenchBackend.js";
 import { MAX_ASSISTANT_PROJECTS, type AssistantProjectRegistrySnapshot } from "./projectRegistry.js";
-import { parseAffairsSyncResult, runMainControlPump, unknownAffairsSyncResult, type MainControlRequest } from "./mainControlTransport.js";
+import { parseAffairsSyncResult, runMainControlPump, unknownAffairsSyncResult, type InitialMigrationMainControlRequest, type MainControlRequest } from "./mainControlTransport.js";
 
 const STARTUP_MS = 60_000;
 const REQUEST_MS = 15_000;
@@ -34,6 +34,14 @@ export type AssistantReminder = {
 };
 export type AssistantReminderChannel = "system_notification" | "attention_fallback";
 
+/** A point-in-time proof for Electron main; it does not pin future source state. */
+export type LegacyReminderSourceIdentity = {
+  schemaVersion: 1; projectId: string; revision: number;
+  sourceScope: { projectId: string; instanceId: string; agentId: string };
+  sourceIdentityDigest: string; authorityDigest: string;
+  projectDirectory: { device: string; inode: string; birthtimeNs: string };
+};
+
 export type AssistantHostOptions = {
   profileRoot: string;
   runtimeRoot: string;
@@ -49,6 +57,7 @@ export type AssistantHostOptions = {
   /** Main-only native lifecycle capability; deliberately absent from renderer IPC. */
   mainControl?: (request: MainControlRequest, signal?: AbortSignal) => Promise<unknown>;
   appearanceControl?: boolean;
+  initialMigrationControl?: boolean;
 };
 
 type Generation = {
@@ -177,6 +186,82 @@ export class AssistantHost {
     if (!object(result) || !ownKeys(result, ["schemaVersion", "receipt"]) || result.schemaVersion !== 1
       || !object(result.receipt) || result.receipt.eventId !== event.id
       || result.receipt.state !== "submitted" || result.receipt.channel !== "attention_fallback") throw new HostError("ASSISTANT_RESPONSE_INVALID");
+  }
+
+  /** Main-only: sourceKey must be derived from a verified source and PA agent. */
+  async resolveLegacyReminderIdentity(projectId: string, revision: number): Promise<LegacyReminderSourceIdentity> {
+    if (typeof projectId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(projectId)
+      || !Number.isSafeInteger(revision) || revision < 0) throw new HostError("ASSISTANT_REQUEST_INVALID");
+    const generation = this.current;
+    const root = this.projectSnapshot.projects[projectId];
+    const current = () => this.view.state === "ready" && this.current === generation && generation && !generation.closed
+      && !generation.abort.signal.aborted && !this.projectsSuspended && generation.projectRevision === revision
+      && this.projectSnapshot.revision === revision && this.projectSnapshot.projects[projectId] === root && Boolean(root);
+    if (!current() || !generation) throw new HostError("ASSISTANT_NOT_READY");
+    const result = await this.rpc(generation, "/api/assistant/legacy-reminders/source", "POST", { projectId, revision }, REQUEST_MS, false, 8192);
+    if (!current()) throw new HostError("ASSISTANT_NOT_READY");
+    const keys = ["schemaVersion", "projectId", "revision", "sourceScope", "sourceIdentityDigest", "authorityDigest", "projectDirectory"];
+    const opaque = (value: unknown) => typeof value === "string" && /^\S{1,160}$/.test(value);
+    const decimal = (value: unknown) => typeof value === "string" && /^[1-9][0-9]{0,24}$/.test(value);
+    if (!object(result) || Object.keys(result).length !== keys.length || !ownKeys(result, keys)
+      || result.schemaVersion !== 1 || result.projectId !== projectId || result.revision !== revision
+      || !object(result.sourceScope) || Object.keys(result.sourceScope).length !== 3
+      || !ownKeys(result.sourceScope, ["projectId", "instanceId", "agentId"])
+      || !opaque(result.sourceScope.projectId) || !opaque(result.sourceScope.instanceId) || !opaque(result.sourceScope.agentId)
+      || typeof result.sourceIdentityDigest !== "string" || !/^[a-f0-9]{64}$/.test(result.sourceIdentityDigest)
+      || typeof result.authorityDigest !== "string" || !/^[a-f0-9]{64}$/.test(result.authorityDigest)
+      || !object(result.projectDirectory) || Object.keys(result.projectDirectory).length !== 3
+      || !ownKeys(result.projectDirectory, ["device", "inode", "birthtimeNs"])
+      || !decimal(result.projectDirectory.device) || !decimal(result.projectDirectory.inode) || !decimal(result.projectDirectory.birthtimeNs))
+      throw new HostError("ASSISTANT_RESPONSE_INVALID");
+    return result as LegacyReminderSourceIdentity;
+  }
+
+  /** Main-only: sourceKey must be derived from a verified source and PA agent. */
+  async reserveLegacyReminder(request: { sourceKey: string; eventId: string }): Promise<unknown> {
+    return await this.legacyReminderRpc("reserve", request);
+  }
+
+  /** Main-only: the attempt token must never cross the renderer bridge. */
+  async settleLegacyReminder(request: { sourceKey: string; eventId: string; attemptToken: string;
+    channel: "assistant_window" | "system_notification" | "attention_fallback" }): Promise<unknown> {
+    return await this.legacyReminderRpc("settle", request);
+  }
+
+  /** Main-only; call after the dispatch has stopped, never to authorize retry. */
+  async abandonLegacyReminder(request: { sourceKey: string; eventId: string; attemptToken: string }): Promise<unknown> {
+    return await this.legacyReminderRpc("abandon", request);
+  }
+
+  private async legacyReminderRpc(operation: "reserve" | "settle" | "abandon", request: { sourceKey: string; eventId: string;
+    attemptToken?: string; channel?: string }): Promise<unknown> {
+    if (!/^[a-f0-9]{64}$/.test(request.sourceKey) || typeof request.eventId !== "string" || request.eventId.length > 128
+      || !/^affair-reminder:[A-Za-z0-9._:-]{1,103}:[0-9]{8}$/.test(request.eventId)
+      || (operation === "reserve" && (request.attemptToken !== undefined || request.channel !== undefined))
+      || (operation === "abandon" && (!/^[a-f0-9]{64}$/.test(request.attemptToken ?? "") || request.channel !== undefined))
+      || (operation === "settle" && (!/^[a-f0-9]{64}$/.test(request.attemptToken ?? "")
+        || !["assistant_window", "system_notification", "attention_fallback"].includes(request.channel ?? ""))))
+      throw new HostError("ASSISTANT_REQUEST_INVALID");
+    const generation = this.current;
+    if (this.view.state !== "ready" || !generation || generation.closed || generation.abort.signal.aborted) throw new HostError("ASSISTANT_NOT_READY");
+    const body = operation === "reserve" ? { sourceKey: request.sourceKey, eventId: request.eventId }
+      : operation === "abandon" ? { sourceKey: request.sourceKey, eventId: request.eventId, attemptToken: request.attemptToken }
+      : { sourceKey: request.sourceKey, eventId: request.eventId, attemptToken: request.attemptToken, channel: request.channel };
+    const result = await this.rpc(generation, `/api/assistant/legacy-reminders/${operation}`, "POST", body, REQUEST_MS, false, 8192);
+    const key = "legacy:" + createHash("sha256").update(JSON.stringify([request.sourceKey, request.eventId]), "ascii").digest("hex");
+    if (!object(result) || result.schemaVersion !== 1 || result.eventKey !== key
+      || (operation === "abandon" && (Object.keys(result).length !== 3 || !ownKeys(result, ["schemaVersion", "eventKey", "state"])
+        || result.state !== "abandoned"))
+      || (operation === "settle" && (Object.keys(result).length !== 4 || !ownKeys(result, ["schemaVersion", "eventKey", "state", "channel"])
+        || result.state !== "submitted" || result.channel !== request.channel))
+      || (operation === "reserve" && !(result.state === "reserved" && Object.keys(result).length === 4
+          && ownKeys(result, ["schemaVersion", "eventKey", "state", "attemptToken"]) && typeof result.attemptToken === "string"
+          && /^[a-f0-9]{64}$/.test(result.attemptToken)
+        || result.state === "pending" && Object.keys(result).length === 3 && ownKeys(result, ["schemaVersion", "eventKey", "state"])
+        || result.state === "submitted" && Object.keys(result).length === 4 && ownKeys(result, ["schemaVersion", "eventKey", "state", "channel"])
+          && ["assistant_window", "system_notification", "attention_fallback"].includes(String(result.channel)))))
+      throw new HostError("ASSISTANT_RESPONSE_INVALID");
+    return result;
   }
 
   /** Main-only; this operation is never admitted through renderer request(). */
@@ -395,8 +480,10 @@ export class AssistantHost {
         if (excluded.has(key.toUpperCase()) || key.toUpperCase() === "VIBELUTION_ASSISTANT_MAIN_CONTROL") delete environment[key];
       }
       for (const key of Object.keys(environment)) if (key.toUpperCase() === "VIBELUTION_ASSISTANT_APPEARANCE_CONTROL") delete environment[key];
+      for (const key of Object.keys(environment)) if (key.toUpperCase() === "VIBELUTION_ASSISTANT_INITIAL_MIGRATION_CONTROL") delete environment[key];
       if (this.options.mainControl) environment.VIBELUTION_ASSISTANT_MAIN_CONTROL = "1";
       if (this.options.mainControl && this.options.appearanceControl) environment.VIBELUTION_ASSISTANT_APPEARANCE_CONTROL = "1";
+      if (this.options.mainControl && this.options.initialMigrationControl) environment.VIBELUTION_ASSISTANT_INITIAL_MIGRATION_CONTROL = "1";
       const spawned = native.spawn({
         executable: python,
         arguments: [...this.options.pythonArguments!, join(this.options.sourceRoot, "scripts", "assistant_host.py"), "--profile-root", this.options.profileRoot,
@@ -424,6 +511,7 @@ export class AssistantHost {
             if (!object(health) || health.status !== "ok" || health.role !== "launcher_assistant" || health.protocolVersion !== 1) throw new HostError("ASSISTANT_HEALTH_INVALID");
             if (this.options.mainControl && health.mainControlVersion !== 1) throw new HostError("ASSISTANT_MAIN_CONTROL_UNAVAILABLE");
             if (this.options.appearanceControl && health.appearanceControlVersion !== 1) throw new HostError("ASSISTANT_APPEARANCE_CONTROL_UNAVAILABLE");
+            if (this.options.initialMigrationControl && health.initialMigrationControlVersion !== 1) throw new HostError("ASSISTANT_INITIAL_MIGRATION_UNAVAILABLE");
             const status = await this.rpc(generation, "/api/assistant", "GET", undefined, Math.max(1, deadline - Date.now()));
             generation.sessionId = identity(status);
             if (revision !== this.revision || generation.abort.signal.aborted) throw new HostError("ASSISTANT_STOPPED");
@@ -505,6 +593,55 @@ export class AssistantHost {
         await this.stop();
       }
       return unknown;
+    }
+  }
+
+  /** Main-only. The caller keeps the registry lease until this worker drains. */
+  async prepareInitialMigration(request: InitialMigrationMainControlRequest, revision: number, signal?: AbortSignal): Promise<boolean> {
+    if (!this.options.initialMigrationControl || !/^[a-f0-9]{32}$/.test(request.deliveryId)
+      || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(request.projectId) || !/^[a-f0-9]{64}$/.test(request.previewId)
+      || !/^\S{1,160}$/.test(request.turnId) || !/^initial-[a-f0-9]{40}$/.test(request.operationId)
+      || !["personal", "knowledge"].includes(request.category) || !Number.isSafeInteger(revision) || revision < 0)
+      throw new HostError("ASSISTANT_REQUEST_INVALID");
+    const generation = this.current;
+    if (!generation || generation.closed || generation.abort.signal.aborted || this.view.state !== "ready"
+      || this.projectsSuspended || generation.projectRevision !== revision) throw new HostError("ASSISTANT_NOT_READY");
+    const body = { deliveryId: request.deliveryId, projectId: request.projectId, previewId: request.previewId,
+      turnId: request.turnId, category: request.category, operationId: request.operationId, revision };
+    try {
+      const result = await this.rpc(generation, "/api/assistant/initial-migration/prepare", "POST", body, 120_000, false, 8192, signal);
+      const keys = ["schemaVersion", "registeredProjectId", "sourceScope", "category", "turnId", "operationId", "revision",
+        "sourceIdentityDigest", "registryDigest", "targetIdentityDigest", "projectDirectory", "workspaceDirectory", "targetDirectory",
+        "targetAgentId", "targetSessionId", "authority", "readyForCutover"];
+      const identity = (value: unknown) => object(value) && Object.keys(value).length === 3
+        && ["device", "inode", "birthtimeNs"].every(key => typeof value[key] === "string" && /^[1-9][0-9]{0,24}$/.test(value[key] as string));
+      const opaque = (value: unknown) => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(value);
+      if (!object(result) || Object.keys(result).length !== keys.length || !ownKeys(result, keys)
+        || result.schemaVersion !== 1 || result.registeredProjectId !== request.projectId || result.category !== request.category
+        || result.turnId !== request.turnId || result.operationId !== request.operationId || result.revision !== revision
+        || result.authority !== "native_policy_admitted" || result.readyForCutover !== false
+        || !object(result.sourceScope) || Object.keys(result.sourceScope).length !== 3
+        || !["projectId", "instanceId", "agentId"].every(key => opaque((result.sourceScope as Record<string, unknown>)[key]))
+        || !["sourceIdentityDigest", "registryDigest", "targetIdentityDigest"].every(key => typeof result[key] === "string" && /^[a-f0-9]{64}$/.test(result[key] as string))
+        || !identity(result.projectDirectory) || !identity(result.workspaceDirectory) || !identity(result.targetDirectory)
+        || !opaque(result.targetAgentId) || !opaque(result.targetSessionId)) throw new HostError("ASSISTANT_RESPONSE_INVALID");
+      return true;
+    } catch {
+      // HTTP abort does not stop a native worker. Revoke and wait for its
+      // private drain ACK, or for the captured Job itself to fully exit.
+      while (true) {
+        try {
+          const result = await this.rpc(generation, "/api/assistant/initial-migration/drain", "POST",
+            { deliveryId: request.deliveryId, operationId: request.operationId }, 5_000, true, 8192);
+          if (object(result) && Object.keys(result).length === 4 && result.schemaVersion === 1
+            && result.operationId === request.operationId && result.state === "unknown" && result.drained === true) return false;
+        } catch { /* Retain the lease until a worker or Job drain is confirmed. */ }
+        try {
+          if (generation.native.activeCount(generation.job) === 0 && generation.native.drainStatus(generation.job).complete
+            && typeof generation.native.exitCode === "function" && generation.native.exitCode(generation.job) !== null) return false;
+        } catch { /* Continue to own the original Job. */ }
+        await sleep(1000);
+      }
     }
   }
 

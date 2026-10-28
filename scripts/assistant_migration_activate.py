@@ -15,6 +15,323 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _initial_channel(port, token):
+    """Connect only to the main-owned, per-child loopback capability."""
+    import http.client
+    import re
+    from core.assistant_runtime.migration_io import MigrationIOError
+    if type(port) is not int or not 1 <= port <= 65535 or not isinstance(token, str) or not re.fullmatch(r"[a-f0-9]{64}", token):
+        raise MigrationIOError("initial_channel_invalid")
+    channel = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    channel.connect()
+    return channel
+
+
+def _initial_call(channel, token, method, path):
+    from core.assistant_runtime.migration_io import MigrationIOError, strict_json
+    try:
+        channel.request(method, path, body=b"{}" if method == "POST" else None,
+                        headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"})
+        response = channel.getresponse()
+        raw = response.read(16385)
+        if response.status != 200 or len(raw) > 16384:
+            raise ValueError("invalid response")
+        return strict_json(raw)
+    except Exception:
+        raise MigrationIOError("initial_channel_unavailable") from None
+
+
+def initial_binding(port, token):
+    from core.assistant_runtime.migration_io import MigrationIOError
+    channel = _initial_channel(port, token)
+    try:
+        value = _initial_call(channel, token, "GET", "/binding")
+    finally:
+        channel.close()
+    keys = {"schemaVersion", "registeredProjectId", "revision", "projectRoot", "sourceConfig",
+            "targetProfile", "targetConfig", "operationId"}
+    if (type(value) is not dict or set(value) != keys or type(value["schemaVersion"]) is not int or value["schemaVersion"] != 1
+            or type(value["revision"]) is not int or value["revision"] < 0
+            or any(not isinstance(value[k], str) or not value[k] for k in keys - {"schemaVersion", "revision"})):
+        raise MigrationIOError("initial_channel_binding_invalid")
+    return value
+
+
+def _initial_receipts_or_claim(target, operation_id, category):
+    """Conservative read-only detection: any previous artifact forbids dispatch."""
+    import hashlib
+    from core.assistant_runtime.migration_io import check_path, read_stable_file, strict_json
+    digest = hashlib.sha256(operation_id.encode("ascii")).hexdigest()
+    candidates = [target / "initial_migration_claims" / operation_id,
+                  target / "history_sources/migrations" / operation_id,
+                  target / "history_sources/migrations" / (".pending-" + operation_id),
+                  target / "episodic_migrations" / (digest + ".json"),
+                  target / "affairs_migrations" / (digest + ".json")]
+    if category == "knowledge":
+        # Archives can be shared by unrelated completed imports. Only this
+        # operation's immutable plan/receipt proves that this operation ran.
+        from core.assistant_runtime.migration_knowledge import _operation_paths, _validate_state
+        folder = target / "knowledge_migrations"
+        candidates.extend(_operation_paths(folder, operation_id))
+        if folder.exists() or folder.is_symlink():
+            check_path(folder)
+            # Older imports may have written origin state without a plan. Do
+            # not infer absence from a damaged or unfinished origin record.
+            states = list(folder.glob("*.json"))
+            if len(states) > 4096:
+                return True
+            for state_path in states:
+                check_path(state_path)
+                state = strict_json(read_stable_file(state_path, 4 * 1024 * 1024).raw)
+                if not isinstance(state, dict) or not isinstance(state.get("binding"), dict):
+                    return True
+                _validate_state(state, state["binding"])
+                if state["migrationId"] == operation_id or state["phase"] != "published":
+                    return True
+    found = False
+    for path in candidates:
+        ancestor = path.parent
+        while not ancestor.exists() and not ancestor.is_symlink():
+            ancestor = ancestor.parent
+        check_path(ancestor)
+        if path.exists() or path.is_symlink():
+            check_path(path)
+            found = True
+            # Read exact-ID receipts for reconciliation evidence only. Both a
+            # mismatched receipt and a matching one forbid another dispatch.
+            if path in (candidates[3], candidates[4]):
+                receipt = strict_json(read_stable_file(path, 16384).raw)
+                if type(receipt) is not dict or receipt.get("migrationId") != operation_id:
+                    return True
+            if path == candidates[1] and path.is_dir():
+                manifest = path / "manifest.json"
+                if manifest.exists() or manifest.is_symlink():
+                    receipt = strict_json(read_stable_file(manifest, 16 * 1024 * 1024).raw)
+                    if type(receipt) is not dict or receipt.get("migrationId") != operation_id:
+                        return True
+    return found
+
+
+def prepare_initial_model_config(source_config, target, destination, operation_id, registry_digest):
+    """Create a credential-free v2 model identity snapshot, or fail closed."""
+    import re
+    import tomllib
+    from config.llm_projection import project_v2_llm_for_runtime
+    from config.models import LLMConfig
+    from config.toml_writer import dumps_public_config
+    from core.assistant_runtime.migration_history import _write_new
+    from core.assistant_runtime.migration_io import (MigrationIOError, check_path, migration_target_lock,
+        pinned_source_files, pinned_target_directory, read_stable_file, validate_path, verify_snapshot)
+    target = check_path(target)
+    destination = validate_path(destination)
+    if (not isinstance(operation_id, str) or re.fullmatch(r"initial-[a-f0-9]{40}", operation_id) is None
+            or not isinstance(registry_digest, str) or re.fullmatch(r"[a-f0-9]{64}", registry_digest) is None
+            or destination != target / (".initial-migration-models-v1-" + operation_id + "-" + registry_digest + ".toml")):
+        raise MigrationIOError("initial_model_config_invalid")
+    source = read_stable_file(source_config, 16 * 1024 * 1024)
+    try:
+        raw = tomllib.loads(source.raw.decode("utf-8"))
+        llm = raw["llm"]
+        if type(llm) is not dict or type(llm.get("schema_version")) is not int or llm["schema_version"] != 2:
+            raise ValueError("unsupported schema")
+        old_providers, old_profiles = llm["providers"], llm["profiles"]
+        aliases = llm.get("model_aliases", {})
+        if (type(old_providers) is not dict or not old_providers or type(old_profiles) is not dict
+                or not old_profiles or type(aliases) is not dict):
+            raise ValueError("invalid models")
+        identifier = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z")
+        reference = re.compile(r"[A-Za-z0-9][A-Za-z0-9_./-]{0,255}\Z")
+        if (any(not isinstance(k, str) or not identifier.fullmatch(k) for k in (*old_providers, *old_profiles))
+                or any(not isinstance(k, str) or not reference.fullmatch(k) or not isinstance(v, str)
+                       or not reference.fullmatch(v) for k, v in aliases.items())):
+            raise ValueError("invalid model identity")
+        providers = {}
+        for name, provider in old_providers.items():
+            if type(provider) is not dict or type(provider.get("models")) is not dict:
+                raise ValueError("invalid provider")
+            models = {}
+            for key, model in provider["models"].items():
+                if (not isinstance(key, str) or not identifier.fullmatch(key) or type(model) is not dict
+                        or type(model.get("enabled", True)) is not bool):
+                    raise ValueError("invalid model")
+                # A fixed local upstream is enough for reference resolution;
+                # original URLs, credentials and arbitrary metadata stay out.
+                models[key] = {"upstream_id": "offline", "enabled": model.get("enabled", True)}
+            providers[name] = {"service_class": "local_runtime", "vendor": "custom", "driver": "openai",
+                "base_url": "http://127.0.0.1:9/v1", "auth_kind": "none", "credential_ref": "none",
+                "requires_credential": False, "protocols": {"default": "chat_completions", "allowed": ["chat_completions"]},
+                "models": models}
+        profiles = {}
+        for name, profile in old_profiles.items():
+            if type(profile) is not dict:
+                raise ValueError("invalid profile")
+            model_ref, fallback = profile.get("model_ref", ""), profile.get("fallback", "")
+            if (not isinstance(model_ref, str) or not isinstance(fallback, str)
+                    or model_ref and not reference.fullmatch(model_ref)
+                    or fallback and not identifier.fullmatch(fallback)):
+                raise ValueError("invalid profile identity")
+            profiles[name] = {"model_ref": model_ref, "fallback": fallback}
+        snapshot = {"llm": {"schema_version": 2, "providers": providers,
+                            "profiles": profiles, "model_aliases": dict(aliases)}}
+        encoded = dumps_public_config(snapshot).encode("utf-8")
+        if len(encoded) > 16 * 1024 * 1024:
+            raise ValueError("snapshot too large")
+        def effective(value):
+            return LLMConfig.model_validate(project_v2_llm_for_runtime({"llm": value})["llm"])
+        original = effective(llm)
+        sanitized = effective(tomllib.loads(encoded.decode("utf-8"))["llm"])
+        if (list(original.model_library) != list(sanitized.model_library)
+                or list(original.profiles) != list(sanitized.profiles)
+                or original.declared_fallback_profile_ids() != sanitized.declared_fallback_profile_ids()
+                or original.model_aliases != sanitized.model_aliases
+                or any(original.model_library[key].get("enabled", True) != sanitized.model_library[key].get("enabled", True)
+                       for key in original.model_library)):
+            raise ValueError("model library mismatch")
+        if any(original.resolve_model_ref(alias) != sanitized.resolve_model_ref(alias) for alias in original.model_aliases):
+            raise ValueError("model alias mismatch")
+        def resolve(config, name):
+            candidates = [name] if name else []
+            if "primary" not in candidates:
+                candidates.append("primary")
+            for candidate in candidates:
+                try:
+                    value, _ = config.get_model_library_entry_for_profile(config.get_profile(profile_id=candidate))
+                    if value:
+                        return str(value).strip()
+                except Exception:
+                    continue
+            return next((str(key).strip() for key, value in config.model_library.items()
+                         if isinstance(value, dict) and str(key).strip()), "")
+        names = [*original.profiles, "", "__initial_missing_profile__"]
+        if any(resolve(original, name) != resolve(sanitized, name) for name in names):
+            raise ValueError("profile mapping mismatch")
+    except Exception:
+        raise MigrationIOError("initial_model_config_invalid") from None
+    # Auxiliary config only. It grants no migration authority and is never
+    # overwritten; incomplete or conflicting existing files fail closed.
+    with pinned_source_files((source,)), pinned_target_directory(target), migration_target_lock(target):
+        verify_snapshot(source)
+        _write_new(destination, encoded)
+        verify_snapshot(source)
+    return destination
+
+
+def verify_initial_personal_receipts(target, operation_id, *, allow_partial=False):
+    """Read-only original-ID receipt check. Caller must hold host-owner lock."""
+    import hashlib
+    from pathlib import PurePosixPath
+    from core.assistant_runtime.initial_migration_binding import read_initial_intent, target_identity
+    from core.assistant_runtime.migration_io import MigrationIOError, check_path, fingerprint_tree, read_stable_file, strict_json
+    from core.assistant_runtime.migration_history import _confirmation_exists
+    from core.assistant_runtime import migration_affairs, migration_episodic
+    intent = read_initial_intent(target, operation_id)
+    if intent is None or intent["category"] != "personal":
+        raise MigrationIOError("initial_receipts_unknown")
+    td, directory = target_identity(target, intent["targetAgentId"], intent["targetSessionId"])
+    if td != intent["targetIdentityDigest"] or directory != intent["targetDirectory"]:
+        raise MigrationIOError("initial_receipts_unknown")
+    claim = strict_json(read_stable_file(target / "initial_migration_claims" / operation_id / "claim.json", 16384).raw)
+    if (type(claim) is not dict or type(claim.get("schemaVersion")) is not int
+            or claim != {"schemaVersion": 1, "operationId": operation_id, "category": "personal"}):
+        raise MigrationIOError("initial_receipts_unknown")
+    archive = check_path(target / "history_sources/migrations" / operation_id)
+    if not _confirmation_exists(archive):
+        raise MigrationIOError("initial_receipts_unknown")
+    tree = fingerprint_tree(archive)
+    files = {item.path.relative_to(archive).as_posix(): item for item in tree}
+    manifest = strict_json(files["manifest.json"].raw)
+    keys = {"schemaVersion", "migrationId", "sourceScope", "readOnly", "untrustedContent",
+            "activePluginStateImported", "sourceComplete", "snapshotCompleteAtScan", "entries", "readyForCutover"}
+    if (type(manifest) is not dict or set(manifest) != keys or type(manifest["schemaVersion"]) is not int
+            or manifest["schemaVersion"] != 2 or manifest["migrationId"] != operation_id
+            or manifest["sourceScope"] != intent["sourceScope"] or manifest["readOnly"] is not True
+            or manifest["untrustedContent"] is not True or manifest["activePluginStateImported"] is not False
+            or manifest["sourceComplete"] is not False or type(manifest["snapshotCompleteAtScan"]) is not bool
+            or manifest["readyForCutover"] is not False or type(manifest["entries"]) is not list):
+        raise MigrationIOError("initial_receipts_unknown")
+    entries = {}
+    for row in manifest["entries"]:
+        if (type(row) is not dict or set(row) != {"sourceRef", "category", "path", "sha256", "size"}
+                or not isinstance(row["path"], str) or not isinstance(row["category"], str)
+                or not isinstance(row["sourceRef"], str) or not isinstance(row["sha256"], str)
+                or type(row["size"]) is not int or row["size"] < 0):
+            raise MigrationIOError("initial_receipts_unknown")
+        relative = PurePosixPath(row["path"])
+        if (relative.is_absolute() or not relative.parts or any(part in (".", "..") for part in relative.parts)
+                or relative.as_posix() != row["path"] or row["path"] in entries):
+            raise MigrationIOError("initial_receipts_unknown")
+        item = files.get(row["path"])
+        if item is None or item.sha256 != row["sha256"] or len(item.raw) != row["size"]:
+            raise MigrationIOError("initial_receipts_unknown")
+        entries[row["path"]] = (row, item)
+    if set(files) != {"manifest.json", *entries}:
+        raise MigrationIOError("initial_receipts_unknown")
+    expected_directories = {Path('.'), Path('.confirmed')}
+    for name in files:
+        expected_directories.update(Path(name).parents)
+    pending = archive / '.confirmation.pending'
+    if pending.exists() or pending.is_symlink():
+        check_path(pending)
+        if not pending.is_dir() or any(pending.iterdir()):
+            raise MigrationIOError("initial_receipts_unknown")
+        expected_directories.add(Path('.confirmation.pending'))
+    if {path.relative_to(archive) for path, _ in tree.directories} != expected_directories:
+        raise MigrationIOError("initial_receipts_unknown")
+    episodes = [(row, item) for row, item in entries.values() if row["category"] == "episodic_memory"]
+    affairs = [(row, item) for path, (row, item) in entries.items()
+               if row["category"] == "personal_affairs" and path.endswith("/affairs/items.jsonl")]
+    if len(episodes) != 1 or len(affairs) != 1:
+        raise MigrationIOError("initial_receipts_unknown")
+    digest = hashlib.sha256(operation_id.encode("ascii")).hexdigest()
+    confirmed = 0
+    for name, count_name, item, count in (
+            ("episodic_migrations", "episodeCount", episodes[0][1],
+             len(migration_episodic._parse_rows(episodes[0][1].raw, intent["sourceScope"]["agentId"]))),
+            ("affairs_migrations", "itemCount", affairs[0][1], len(migration_affairs._parse_rows(affairs[0][1].raw)))):
+        receipt_path = target / name / (digest + ".json")
+        if allow_partial and not receipt_path.exists() and not receipt_path.is_symlink():
+            continue
+        receipt = strict_json(read_stable_file(receipt_path, 16384).raw)
+        expected = {"schemaVersion": 1, "migrationId": operation_id, "sourceScope": intent["sourceScope"],
+                    "sourceSha256": item.sha256, "targetAgentId": intent["targetAgentId"],
+                    count_name: count, "published": True}
+        if (type(receipt) is not dict or type(receipt.get("schemaVersion")) is not int
+                or receipt != expected or type(receipt.get(count_name)) is not int):
+            raise MigrationIOError("initial_receipts_unknown")
+        confirmed += 1
+    if confirmed == 0:
+        raise MigrationIOError("initial_receipts_unknown")
+    return True
+
+
+def verify_initial_knowledge_receipts(target, operation_id):
+    """Bind the knowledge operation proof to the approved native intent and claim.
+
+    Caller holds the target host-owner lock. This proves historical knowledge
+    completion only; main must separately confirm outer success and Job drain.
+    """
+    from core.assistant_runtime.initial_migration_binding import read_initial_intent, target_identity
+    from core.assistant_runtime.migration_io import MigrationIOError, read_stable_file, strict_json
+    from core.assistant_runtime.migration_knowledge import verify_knowledge_completion
+    intent = read_initial_intent(target, operation_id)
+    if intent is None or intent["category"] != "knowledge":
+        raise MigrationIOError("initial_receipts_unknown")
+    td, directory = target_identity(target, intent["targetAgentId"], intent["targetSessionId"])
+    if td != intent["targetIdentityDigest"] or directory != intent["targetDirectory"]:
+        raise MigrationIOError("initial_receipts_unknown")
+    claim = strict_json(read_stable_file(target / "initial_migration_claims" / operation_id / "claim.json", 16384).raw)
+    if (type(claim) is not dict or type(claim.get("schemaVersion")) is not int
+            or claim != {"schemaVersion": 1, "operationId": operation_id, "category": "knowledge"}):
+        raise MigrationIOError("initial_receipts_unknown")
+    proof = verify_knowledge_completion(target, operation_id)
+    if (type(proof) is not dict or type(proof.get("schemaVersion")) is not int or proof["schemaVersion"] != 1
+            or proof.get("operationId") != operation_id or proof.get("sourceScope") != intent["sourceScope"]
+            or proof.get("targetAgentId") != intent["targetAgentId"] or proof.get("sourceQuiesced") is not False
+            or proof.get("readyForCutover") is not False):
+        raise MigrationIOError("initial_receipts_unknown")
+    return True
+
+
 def storage_authority(project, source_config, projects_home=None):
     """Snapshot existing identity and migration marker; never create either."""
     from vibelution_storage import (PROJECT_IDENTITY_RELATIVE_PATH, instance_id_for_project,
@@ -125,7 +442,7 @@ def _isolated_environment(target, config):
 
 def activate_in_subprocess(*, paths, workspace, agent_id, source_config, target_profile,
         target_config, migration_id, path_grants, authority_snapshots, authority_verify, category="personal",
-        baseline_migration_id=None):
+        baseline_migration_id=None, initial_control=None):
     import re
     import subprocess
     from core.assistant_runtime.migration_active import _selected, _verify_captured
@@ -182,14 +499,19 @@ def activate_in_subprocess(*, paths, workspace, agent_id, source_config, target_
         "baselineMigrationId": baseline_migration_id, "projectsHome": str(paths.projects_home),
         "sourceConfig": str(Path(source_config).resolve()),
         "route": route_proof, "source": _source_proof(captured, authorities)}
+    if initial_control is not None:
+        request["initialControl"] = initial_control
     encoded = json.dumps(request, ensure_ascii=False)
     if len(encoded.encode("utf-8")) > 8 * 1024 * 1024:
         raise MigrationIOError("activation_proof_too_large")
     verify_snapshot(config)
+    environment = _isolated_environment(target, config.path)
+    if initial_control is not None:
+        environment["VIBELUTION_INITIAL_MIGRATION_CHILD"] = "1"
     try:
         process = subprocess.run([sys.executable, "-I", "-B", str(Path(__file__).resolve()), "--offline-child"],
             input=encoded, cwd=ROOT,
-            env=_isolated_environment(target, config.path), shell=False,
+            env=environment, shell=False,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             capture_output=True, text=True, encoding="utf-8", timeout=120, check=False)
     except (subprocess.TimeoutExpired, OSError):
@@ -278,15 +600,27 @@ def _child():
     # All imports which freeze native identity happen after environment setup
     # and the Python I/O audit hook. The request travels over stdin, not disk.
     target = Path(os.environ["VIBELUTION_ASSISTANT_NATIVE_ROOT"]).resolve()
-    _install_audit(target)
+    initial_child = os.environ.pop("VIBELUTION_INITIAL_MIGRATION_CHILD", "") == "1"
+    if not initial_child:
+        _install_audit(target)
     sys.path.insert(0, str(ROOT))
     from core.assistant_runtime.migration_io import MigrationIOError, strict_json
-    result, request, activation_started = None, None, False
+    from contextlib import ExitStack
+    result, request, activation_started, channel, claim_started = None, None, False, None, False
     try:
         raw = sys.stdin.buffer.read(8 * 1024 * 1024 + 1)
         if len(raw) > 8 * 1024 * 1024:
             raise MigrationIOError("activation_proof_too_large")
         request = strict_json(raw)
+        initial = request.get("initialControl")
+        if (initial is not None) != initial_child:
+            raise MigrationIOError("initial_channel_invalid")
+        if initial_child:
+            if (type(initial) is not dict or set(initial) != {"binding", "port", "token"}
+                    or type(initial["binding"]) is not dict):
+                raise MigrationIOError("initial_channel_invalid")
+            channel = _initial_channel(initial["port"], initial["token"])
+            _install_audit(target)
         if (request.get("schemaVersion") != 1 or request["target"] != str(target)
                 or request.get("category") not in {"personal", "knowledge", "affairs_conflicts", "affairs_sync"}):
             raise MigrationIOError("activation_request_invalid")
@@ -320,15 +654,98 @@ def _child():
             raise MigrationIOError("source_snapshot_changed")
         from core.assistant_runtime.migration_active import activate_personal_snapshot
         from core.assistant_runtime.migration_profile import offline_migration_profile
-        for key in ("HOME", "APPDATA", "LOCALAPPDATA", "TEMP", "VIBELUTION_PROJECTS_HOME"):
-            Path(os.environ[key]).mkdir(parents=True, exist_ok=True)
+        def prepare_private_dirs():
+            for key in ("HOME", "APPDATA", "LOCALAPPDATA", "TEMP", "VIBELUTION_PROJECTS_HOME"):
+                Path(os.environ[key]).mkdir(parents=True, exist_ok=True)
+        if initial is None:
+            prepare_private_dirs()
         from core.assistant_runtime.migration_io import pinned_source_files
         # Acquire the target owner before source guards, so a busy profile
         # returns immediately without holding source files. The source guards
         # remain held for every archive confirmation or native data write.
-        with offline_migration_profile() as lease:
-            with pinned_source_files(authorities):
+        with ExitStack() as initial_guards:
+            admitted_intent = []
+            def before_bootstrap(locked_root):
+                nonlocal claim_started
+                from core.assistant_runtime.initial_migration_binding import (read_initial_intent,
+                    source_identity, authority_identity, target_identity)
+                from core.assistant_runtime.migration_io import pinned_target_directory
+                from scripts.assistant_migration_inventory import _bound_route
+                if initial is None:
+                    return
+                if locked_root != target:
+                    raise MigrationIOError("initial_migration_binding_changed")
+                bound = initial["binding"]
+                intent = read_initial_intent(target, request["migrationId"])
+                if (intent is None or intent["registeredProjectId"] != bound["registeredProjectId"]
+                        or intent["revision"] > bound["revision"] or intent["category"] != request["category"]
+                        or intent["sourceScope"] != request["scope"]
+                        or bound["operationId"] != request["migrationId"]
+                        or Path(bound["projectRoot"]) != Path(request["project"])
+                        or Path(bound["sourceConfig"]) != Path(request["sourceConfig"])
+                        or Path(bound["targetProfile"]) != target
+                        or Path(bound["targetConfig"]) != Path(request["config"]["path"])
+                        or Path(bound["targetConfig"]) != target / (".initial-migration-models-v1-"
+                            + request["migrationId"] + "-" + intent["registryDigest"] + ".toml")):
+                    raise MigrationIOError("initial_migration_binding_changed")
+                admitted_intent.append(intent)
+                actual, storage, verify_storage = storage_authority(Path(request["project"]),
+                    Path(request["sourceConfig"]), Path(request["projectsHome"]))
+                workspace, _, routing, verify_workspace = _bound_route(actual, Path(request["sourceConfig"]))
+                registry = next((x for x in selected if x.path == workspace / "agents/agents.json"), None)
+                if registry is None or workspace != Path(request["workspace"]):
+                    raise MigrationIOError("initial_migration_binding_changed")
+                snapshots = (*routing, registry, *storage)
+                all_source = tuple(item for rows in captured.snapshots.values() for item in rows)
+                target_config = read_stable_file(Path(request["config"]["path"]), 16 * 1024 * 1024)
+                if _snapshot_proof(target_config) != request["config"]:
+                    raise MigrationIOError("initial_migration_binding_changed")
+                initial_guards.enter_context(pinned_source_files((*authorities, *all_source, target_config)))
+                verify_storage()
+                verify_workspace()
                 verify_route()
+                sd, project_id, workspace_id = source_identity(request["scope"], actual.project_root, workspace)
+                td, target_id = target_identity(target, intent["targetAgentId"], intent["targetSessionId"])
+                if (sd != intent["sourceIdentityDigest"] or project_id != intent["projectDirectory"]
+                        or workspace_id != intent["workspaceDirectory"] or authority_identity(snapshots) != intent["registryDigest"]
+                        or td != intent["targetIdentityDigest"] or target_id != intent["targetDirectory"]):
+                    raise MigrationIOError("initial_migration_binding_changed")
+                if _initial_receipts_or_claim(target, request["migrationId"], request["category"]):
+                    raise MigrationIOError("activation_outcome_unknown")
+                permit = _initial_call(channel, initial["token"], "POST", "/permit")
+                if (type(permit) is not dict or set(permit) != {"schemaVersion", "granted"}
+                        or type(permit["schemaVersion"]) is not int or permit["schemaVersion"] != 1
+                        or permit["granted"] is not True):
+                    raise MigrationIOError("initial_permit_denied")
+                # A directory creation is the one-way claim. A crash during
+                # metadata publication still leaves a permanent unknown claim.
+                with pinned_target_directory(target / "initial_migration_claims", create=True) as claims:
+                    try:
+                        (claims / request["migrationId"]).mkdir()
+                    except FileExistsError:
+                        raise MigrationIOError("activation_outcome_unknown") from None
+                    claim_started = True
+                    from core.assistant_runtime.migration_history import _write_new
+                    _write_new(claims / request["migrationId"] / "claim.json", json.dumps({
+                        "schemaVersion": 1, "operationId": request["migrationId"],
+                        "category": request["category"]}, sort_keys=True, separators=(",", ":")).encode("ascii"))
+                prepare_private_dirs()
+                verify_route()
+            if initial is not None:
+                import inspect
+                if "before_bootstrap" not in inspect.signature(offline_migration_profile).parameters:
+                    raise MigrationIOError("initial_profile_hook_unavailable")
+                profile = offline_migration_profile(before_bootstrap=before_bootstrap)
+            else:
+                profile = offline_migration_profile()
+            with profile as lease, pinned_source_files(authorities):
+                verify_route()
+                if initial is not None:
+                    from core.assistant_runtime.initial_migration_binding import read_initial_intent
+                    intent = read_initial_intent(target, request["migrationId"])
+                    if (not admitted_intent or intent != admitted_intent[0]
+                            or (lease.agent_id, lease.session_id) != (intent["targetAgentId"], intent["targetSessionId"])):
+                        raise MigrationIOError("initial_migration_binding_changed")
                 activation_started = True
                 if request["category"] == "personal":
                     result = activate_personal_snapshot(lease, captured, migration_id=request["migrationId"],
@@ -379,7 +796,7 @@ def _child():
     except TimeoutError:
         if result is not None and result.get("status") in {"complete", "partial"}:
             mark_reconciliation(result, request["migrationId"], "activation_outcome_unknown")
-        elif activation_started:
+        elif activation_started or claim_started:
             result = {"ok": False, "code": "SOURCE_MIGRATION_UNAVAILABLE", "reason": "activation_outcome_unknown"}
         else:
             result = {"ok": False, "code": "TARGET_PROFILE_BUSY"}
@@ -391,7 +808,7 @@ def _child():
             # The adapter checks this policy before any knowledge/receipt
             # write while the target config and sandbox routing are pinned.
             result = {"ok": False, "code": "SOURCE_MIGRATION_UNAVAILABLE", "reason": str(error)}
-        elif activation_started and request.get("category") == "knowledge":
+        elif claim_started or activation_started and request.get("category") == "knowledge":
             # Native KB ingestion is not transactional: a failure may follow
             # committed writes even if the adapter could not return a receipt.
             result = {"ok": False, "code": "SOURCE_MIGRATION_UNAVAILABLE", "reason": "activation_outcome_unknown"}
@@ -402,6 +819,9 @@ def _child():
             mark_reconciliation(result, request["migrationId"], "activation_outcome_unknown")
         else:
             result = {"ok": False, "code": "SOURCE_MIGRATION_UNAVAILABLE", "reason": "activation_outcome_unknown"}
+    finally:
+        if channel is not None:
+            channel.close()
     print(json.dumps(result, ensure_ascii=False))
     return 1 if result.get("ok") is False else 0
 

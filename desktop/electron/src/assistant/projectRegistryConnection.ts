@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { lstatSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 
 import { readProjectId } from "../lifecycle/projectStoragePaths.js";
@@ -12,6 +12,15 @@ type ProjectHost = {
   suspendProjects?(): Promise<void>;
 };
 type Inventory = { integrationRoot: string; items: Array<{ id: string; path: string; checkedOut: boolean }> };
+type DirectoryIdentity = { dev: bigint; ino: bigint; birthtimeNs: bigint };
+export type PreHostSourceLease = Readonly<{
+  revision: number;
+  registration: Readonly<AssistantProjectRegistration>;
+  signal: AbortSignal;
+  check(): void;
+  /** One admitted writer holds the lease until its owned Job has fully drained. */
+  commit<T>(work: () => Promise<T>): Promise<T>;
+}>;
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -39,6 +48,20 @@ function physical(path: string): string {
   const result = resolve(realpathSync.native(path));
   return process.platform === "win32" ? result.toLowerCase() : result;
 }
+function directoryIdentity(path: string): DirectoryIdentity {
+  const before = lstatSync(path, { bigint: true });
+  if (!before.isDirectory() || before.isSymbolicLink() || before.dev <= 0n || before.ino <= 0n || before.birthtimeNs <= 0n) {
+    throw new Error("ASSISTANT_PROJECT_UNAVAILABLE");
+  }
+  if (physical(path) !== path) throw new Error("ASSISTANT_PROJECT_UNAVAILABLE");
+  const after = lstatSync(path, { bigint: true });
+  if (!after.isDirectory() || after.isSymbolicLink() || before.dev !== after.dev || before.ino !== after.ino
+    || before.birthtimeNs !== after.birthtimeNs) throw new Error("ASSISTANT_PROJECT_UNAVAILABLE");
+  return { dev: after.dev, ino: after.ino, birthtimeNs: after.birthtimeNs };
+}
+function sameDirectory(a: DirectoryIdentity, b: DirectoryIdentity): boolean {
+  return a.dev === b.dev && a.ino === b.ino && a.birthtimeNs === b.birthtimeNs;
+}
 
 /** Electron-main connection only. No renderer input, instance history, or directory discovery. */
 export class AssistantProjectRegistryConnection {
@@ -48,6 +71,10 @@ export class AssistantProjectRegistryConnection {
   private acknowledgedRevision = -1;
   private projectsSuspended = false;
   private closed = false;
+  private preHostAbort: AbortController | null = null;
+  private preHostRoot: { path: string; identity: DirectoryIdentity } | null = null;
+  private preHostCommitting = false;
+  private preHostRevoked = false;
 
   constructor(filePath: string) {
     this.registry = new AssistantProjectRegistry({ filePath });
@@ -56,6 +83,108 @@ export class AssistantProjectRegistryConnection {
   /** Trusted main callers only; both reads retain disk/physical-root validation. */
   snapshot(): AssistantProjectRegistrySnapshot { this.assertOpen(); return this.registry.snapshot(); }
   registration(projectId: string): AssistantProjectRegistration | null { this.assertOpen(); return this.registry.registration(projectId); }
+
+  /** Main-only. The callback must not await another operation on this connection.
+   * It must await and confirm the drain of every controlled child before returning;
+   * abort is a revocation signal, not evidence that a child has stopped. A final
+   * check failure may follow a write: preserve the operation ID and report its
+   * outcome unknown rather than replaying it as an unexecuted operation.
+   */
+  withPreHostSource<T>(projectId: string, operation: (lease: PreHostSourceLease) => Promise<T>): Promise<T> {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      if (this.host || this.projectsSuspended) throw new Error("ASSISTANT_PROJECT_UNAVAILABLE");
+      const startup = this.registry.startupState();
+      if (startup.projectsSuspended) throw new Error("ASSISTANT_PROJECT_UNAVAILABLE");
+      const registration = this.registry.registration(projectId);
+      if (!registration || startup.snapshot.projects[projectId] !== registration.root) throw new Error("ASSISTANT_PROJECT_UNAVAILABLE");
+      const captured = Object.freeze({ ...registration });
+      let rootIdentity: DirectoryIdentity;
+      try { rootIdentity = directoryIdentity(captured.root); }
+      catch { throw new Error("ASSISTANT_PROJECT_UNAVAILABLE"); }
+      const abort = new AbortController();
+      const check = () => {
+        try {
+          this.assertOpen();
+          if (abort.signal.aborted || this.host || this.projectsSuspended) throw new Error();
+          const current = this.registry.startupState();
+          const row = this.registry.registration(projectId);
+          if (current.projectsSuspended || current.snapshot.revision !== startup.snapshot.revision
+            || current.snapshot.projects[projectId] !== captured.root || !row
+            || JSON.stringify(row) !== JSON.stringify(captured)
+            || !sameDirectory(rootIdentity, directoryIdentity(captured.root))) throw new Error();
+        } catch {
+          abort.abort();
+          throw new Error("ASSISTANT_PROJECT_UNAVAILABLE");
+        }
+      };
+      let committed = false;
+      const commit = async <R>(work: () => Promise<R>): Promise<R> => {
+        if (committed || typeof work !== "function") throw new Error("ASSISTANT_PROJECT_UNAVAILABLE");
+        check();
+        // The caller must await its captured Job's exit and output drain in
+        // work(). Later stop/reconciliation waits for this admitted writer.
+        committed = true;
+        this.preHostCommitting = true;
+        try { return await work(); }
+        finally {
+          this.preHostCommitting = false;
+          if (this.preHostRevoked) abort.abort();
+        }
+      };
+      const lease = Object.freeze({ revision: startup.snapshot.revision, registration: captured, signal: abort.signal, check, commit });
+      this.preHostAbort = abort;
+      this.preHostRoot = { path: captured.root, identity: rootIdentity };
+      this.preHostRevoked = false;
+      try {
+        check();
+        try {
+          const result = await operation(lease);
+          check();
+          return result;
+        } catch (error) {
+          check();
+          throw error;
+        }
+      } finally {
+        abort.abort();
+        if (this.preHostAbort === abort) { this.preHostAbort = null; this.preHostRoot = null; this.preHostRevoked = false; }
+      }
+    });
+  }
+
+  private revokePreHost(): void {
+    this.preHostRevoked = true;
+    if (!this.preHostCommitting) this.preHostAbort?.abort();
+  }
+
+  /** True only when this whole integration group exactly matches the validated registry. */
+  private observationUnchanged(input: Inventory): boolean {
+    try {
+      if (!this.preHostRoot || !sameDirectory(this.preHostRoot.identity, directoryIdentity(this.preHostRoot.path))) return false;
+      const integrationRoot = physical(input.integrationRoot);
+      const realm = hash(integrationRoot);
+      const snapshot = this.registry.snapshot();
+      const existing: string[] = [];
+      for (const id of Object.keys(snapshot.projects)) {
+        const row = this.registry.registration(id);
+        if (!row) return false;
+        if (row.integrationRoot === integrationRoot) existing.push(JSON.stringify([row.baseProjectId, row.root]));
+      }
+      const desired: string[] = [];
+      const roots = new Set<string>(), bases = new Set<string>();
+      for (const row of input.items) {
+        if (!row.checkedOut) continue;
+        if (!statSync(row.path).isDirectory()) return false;
+        const root = physical(row.path);
+        const base = `${readable(readProjectId(row.path) || "project")}:${readable(row.id)}:${hash(row.id).slice(0, 12)}:${realm}`;
+        if (roots.has(root) || bases.has(base)) return false;
+        roots.add(root); bases.add(base);
+        desired.push(JSON.stringify([base, root]));
+      }
+      return JSON.stringify(existing.sort()) === JSON.stringify(desired.sort());
+    } catch { return false; }
+  }
 
   /** Main-only lease: reconciliation and retirement wait until import settles. */
   withHistoryImport<T>(projectId: string, operation: (revision: number) => Promise<T>): Promise<T> {
@@ -101,7 +230,11 @@ export class AssistantProjectRegistryConnection {
     // must never turn an incomplete observation into an authoritative revoke.
     let input: Inventory;
     try { input = inventory(payload); }
-    catch (error) { return Promise.reject(error); }
+    catch (error) {
+      this.revokePreHost();
+      return Promise.reject(error);
+    }
+    if (this.preHostAbort && !this.observationUnchanged(input)) this.revokePreHost();
     return this.enqueue(async () => {
       this.assertOpen();
       let snapshot: AssistantProjectRegistrySnapshot;
@@ -135,6 +268,7 @@ export class AssistantProjectRegistryConnection {
 
   stop(): Promise<void> {
     this.closed = true;
+    this.revokePreHost();
     return this.enqueue(() => this.retire());
   }
 

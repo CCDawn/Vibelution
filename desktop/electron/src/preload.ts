@@ -39,6 +39,7 @@ contextBridge.exposeInMainWorld("vibelutionLauncher", {
   },
   notifyHumanAttention: (payload: unknown) =>
     ipcRenderer.invoke(IPC_CHANNELS.notifyHumanAttention, payload),
+  getHumanAttentionCapabilities: () => ipcRenderer.invoke(IPC_CHANNELS.humanAttentionCapabilities),
   onHumanAttentionOpened: (listener: (payload: unknown) => void) => {
     const wrapped = (_event: unknown, payload: unknown) => listener(payload);
     ipcRenderer.on(IPC_CHANNELS.humanAttentionOpened, wrapped);

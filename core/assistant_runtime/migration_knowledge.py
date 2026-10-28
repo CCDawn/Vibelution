@@ -22,6 +22,7 @@ from .migration_io import (FileSnapshot, MigrationIOError, check_path, path_iden
 from .migration_paths import SourcePaths
 
 _TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,159}\Z")
+_SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _MAX_FILES, _MAX_BYTES, _MAX_FILE = 256, 16 * 1024 * 1024, 4 * 1024 * 1024
 
 
@@ -340,6 +341,151 @@ def _archive(path, files, central_rows, refs, scope, central, owner_refs):
             "globalRegistryFiltered": True, "readyForCutover": False}, sort_keys=True).encode())
 
 
+def _archive_entries(path):
+    # Filtered registry JSON can expand when non-ASCII strings are escaped;
+    # match the existing archive writer's per-file limit, not the source limit.
+    archive_file_cap = 16 * 1024 * 1024
+    tree = fingerprint_tree(path, max_file_bytes=archive_file_cap, max_files=_MAX_FILES + 4,
+        max_total_bytes=_MAX_BYTES + 2 * archive_file_cap + _MAX_FILE)
+    return [{"path": f.path.relative_to(path).as_posix(), "sha256": f.sha256} for f in tree]
+
+
+def _immutable(path, value):
+    """Publish once under the caller's migration lock; never repair bad bytes."""
+    if path.exists() or path.is_symlink():
+        if _digest(strict_json(read_stable_file(path, _MAX_FILE).raw)) != _digest(value):
+            _fail("operation_conflict")
+        return
+    atomic_write_json(path, value, strict_replace=True, sort_keys=True)
+    if _digest(strict_json(read_stable_file(path, _MAX_FILE).raw)) != _digest(value):
+        _fail("operation_conflict")
+
+
+def _operation_paths(folder, operation_id):
+    if not isinstance(operation_id, str) or not _TOKEN.fullmatch(operation_id):
+        _fail("migration_id_invalid")
+    stem = _digest(operation_id)
+    return folder / "operations" / (stem + ".plan.json"), folder / "operations" / (stem + ".complete.json")
+
+
+def _item_binding(item, scope, proof, agent):
+    origin = {"sourceScope": scope, "sourceKnowledgeBaseId": item["knowledgeBaseId"],
+        "sourceKnowledgeItemId": item["knowledgeItemId"]}
+    return {**origin, "sourceContentSha256": item["contentSha256"], "sourceProofSha256": proof,
+        "targetAgentId": agent, "operation": "operator_authorized_migration"}
+
+
+def _completion(folder, plan):
+    """Validate immutable published states; never inspect current target content."""
+    rows = []
+    for entry in plan["items"]:
+        snapshot = read_stable_file(folder / (entry["originKey"] + ".json"), _MAX_FILE)
+        state = strict_json(snapshot.raw)
+        _validate_state(state, entry["binding"])
+        if state["phase"] != "published":
+            _fail("completion_invalid")
+        rows.append({"originKey": entry["originKey"], "stateSha256": snapshot.sha256,
+            "publishedMigrationId": state["migrationId"], "mapping": state["mapping"]})
+    return {"schemaVersion": 1, "operationId": plan["operationId"], "planSha256": _digest(plan),
+        "items": rows}
+
+
+def _validate_plan(plan, operation_id, target_root):
+    if (not isinstance(plan, dict) or set(plan) != {"schemaVersion", "operationId", "targetRootSha256", "targetWorkspaceSha256",
+            "targetAgentId", "sourceScope", "sourceProofSha256", "archiveEntries", "items", "excluded"}
+            or plan["schemaVersion"] != 1 or type(plan["schemaVersion"]) is not int
+            or plan["operationId"] != operation_id or plan["targetRootSha256"] != _digest(str(target_root).casefold())
+            or not isinstance(plan["targetWorkspaceSha256"], str) or not _SHA256.fullmatch(plan["targetWorkspaceSha256"])
+            or not isinstance(plan["targetAgentId"], str) or not _TOKEN.fullmatch(plan["targetAgentId"])
+            or not isinstance(plan["sourceProofSha256"], str) or not _SHA256.fullmatch(plan["sourceProofSha256"])
+            or not isinstance(plan["sourceScope"], dict) or set(plan["sourceScope"]) != {"projectId", "instanceId", "agentId"}
+            or any(not isinstance(v, str) or not _TOKEN.fullmatch(v) for v in plan["sourceScope"].values())
+            or not isinstance(plan["items"], list) or len(plan["items"]) > 4096
+            or not isinstance(plan["excluded"], list) or len(plan["excluded"]) > 4096
+            or not isinstance(plan["archiveEntries"], list) or len(plan["archiveEntries"]) > _MAX_FILES + 3):
+        _fail("completion_invalid")
+    keys, source_ids = [], set()
+    for entry in plan["items"]:
+        if not isinstance(entry, dict) or set(entry) != {"originKey", "binding"}:
+            _fail("completion_invalid")
+        binding = entry["binding"]
+        fields = {"sourceScope", "sourceKnowledgeBaseId", "sourceKnowledgeItemId", "sourceContentSha256",
+            "sourceProofSha256", "targetAgentId", "operation"}
+        if (not isinstance(binding, dict) or set(binding) != fields or binding["sourceScope"] != plan["sourceScope"]
+                or binding["sourceProofSha256"] != plan["sourceProofSha256"]
+                or binding["targetAgentId"] != plan["targetAgentId"]
+                or binding["operation"] != "operator_authorized_migration"
+                or any(not isinstance(binding[k], str) or not _TOKEN.fullmatch(binding[k])
+                    for k in ("sourceKnowledgeBaseId", "sourceKnowledgeItemId"))
+                or not isinstance(binding["sourceContentSha256"], str) or not _SHA256.fullmatch(binding["sourceContentSha256"])):
+            _fail("completion_invalid")
+        origin = {k: binding[k] for k in ("sourceScope", "sourceKnowledgeBaseId", "sourceKnowledgeItemId")}
+        if entry["originKey"] != _digest(origin) or binding["sourceKnowledgeItemId"] in source_ids:
+            _fail("completion_invalid")
+        source_ids.add(binding["sourceKnowledgeItemId"])
+        keys.append(entry["originKey"])
+    if keys != sorted(set(keys)):
+        _fail("completion_invalid")
+    for row in plan["excluded"]:
+        if (not isinstance(row, dict) or set(row) != {"sourceKnowledgeItemId", "reason"}
+                or not isinstance(row["sourceKnowledgeItemId"], str) or not _TOKEN.fullmatch(row["sourceKnowledgeItemId"])
+                or not isinstance(row["reason"], str) or not _TOKEN.fullmatch(row["reason"])
+                or row["sourceKnowledgeItemId"] in source_ids):
+            _fail("completion_invalid")
+        source_ids.add(row["sourceKnowledgeItemId"])
+    if plan["excluded"] != sorted(plan["excluded"], key=lambda row: row["sourceKnowledgeItemId"]):
+        _fail("completion_invalid")
+
+
+def verify_knowledge_completion(target_root: Path, operation_id: str) -> dict:
+    """Read historical knowledge-step proof only; does not prove activation or quiescence.
+
+    A caller must independently confirm outer activation success and Job drain.
+    Missing, interrupted, conflicting and corrupted evidence never counts as success.
+    """
+    target_root = Path(target_root)
+    folder = target_root / "knowledge_migrations"
+    plan_path, receipt_path = _operation_paths(folder, operation_id)
+    if not plan_path.exists() or not receipt_path.exists():
+        _fail("completion_unavailable")
+    try:
+        with pinned_target_directory(folder), migration_target_lock(folder):
+            plan = strict_json(read_stable_file(plan_path, _MAX_FILE).raw)
+            _validate_plan(plan, operation_id, target_root)
+            archive = folder / "archives" / plan["sourceProofSha256"]
+            if _archive_entries(archive) != plan["archiveEntries"]:
+                _fail("completion_invalid")
+            manifest = strict_json(read_stable_file(archive / "manifest.json", _MAX_FILE).raw)
+            archive_hashes = {row["path"]: row["sha256"] for row in plan["archiveEntries"]}
+            private_hashes = {name.removeprefix("private/"): digest for name, digest in archive_hashes.items()
+                if name.startswith("private/")}
+            if (not isinstance(manifest, dict) or set(manifest) != {"schemaVersion", "sourceScope", "readOnly",
+                    "untrustedContent", "originalReviewReplayed", "privateFiles", "centralRegistrySha256",
+                    "ownerRefsSha256", "globalRegistryFiltered", "readyForCutover"}
+                    or type(manifest["schemaVersion"]) is not int or manifest["schemaVersion"] != 1
+                    or manifest["readOnly"] is not True or manifest["untrustedContent"] is not True
+                    or manifest["originalReviewReplayed"] is not False or manifest["globalRegistryFiltered"] is not True
+                    or manifest["readyForCutover"] is not False or manifest["privateFiles"] != private_hashes
+                    or set(archive_hashes) != {"private/" + name for name in private_hashes} | {
+                        "selected-central.json", "selected-owner-refs.json", "manifest.json"}):
+                _fail("completion_invalid")
+            proof = _digest({"files": manifest["privateFiles"], "central": manifest["centralRegistrySha256"],
+                "ownerRefs": manifest["ownerRefsSha256"]})
+            if proof != plan["sourceProofSha256"] or manifest["sourceScope"] != plan["sourceScope"]:
+                _fail("completion_invalid")
+            receipt = strict_json(read_stable_file(receipt_path, _MAX_FILE).raw)
+            if _digest(receipt) != _digest(_completion(folder, plan)):
+                _fail("completion_invalid")
+            return {"schemaVersion": 1, "operationId": operation_id, "targetAgentId": plan["targetAgentId"],
+                "targetRootSha256": plan["targetRootSha256"], "targetWorkspaceSha256": plan["targetWorkspaceSha256"],
+                "sourceScope": plan["sourceScope"], "sourceProofSha256": proof, "planSha256": _digest(plan),
+                "originKeys": [row["originKey"] for row in receipt["items"]],
+                "mappings": [row["mapping"] for row in receipt["items"]],
+                "excluded": plan["excluded"], "sourceQuiesced": False, "readyForCutover": False}
+    except Exception:
+        _fail("completion_invalid")
+
+
 def _target_rows(s, owner, path_fn, key):
     path = path_fn(owner)
     return _rows(read_stable_file(path, _MAX_FILE).raw, key) if path.exists() else []
@@ -412,8 +558,7 @@ def _import_one(lease, s, owner, item, scope, proof, folder, verify, migration_i
     origin = {"sourceScope": scope, "sourceKnowledgeBaseId": item["knowledgeBaseId"],
         "sourceKnowledgeItemId": item["knowledgeItemId"]}
     key = _digest(origin)
-    binding = {**origin, "sourceContentSha256": item["contentSha256"], "sourceProofSha256": proof,
-        "targetAgentId": lease.agent_id, "operation": "operator_authorized_migration"}
+    binding = _item_binding(item, scope, proof, lease.agent_id)
     state_path = folder / (key + ".json")
     state = strict_json(read_stable_file(state_path, _MAX_FILE).raw) if state_path.exists() else None
     if state is not None:
@@ -569,13 +714,55 @@ def import_private_knowledge(lease, resolved: SourcePaths, *, central: FileSnaps
                 verify()
                 _pin_target(stack, s, owner)
                 verify()
-                _archive(folder / "archives" / proof, files, central_rows, refs, scope, central, owner_refs)
+                archive = folder / "archives" / proof
+                _archive(archive, files, central_rows, refs, scope, central, owner_refs)
                 verify()
-                mappings, imported = [], 0
+                archive_entries = _archive_entries(archive)
+                expected_paths = {"private/" + name for name in files} | {
+                    "selected-central.json", "selected-owner-refs.json", "manifest.json"}
+                if {row["path"] for row in archive_entries} != expected_paths:
+                    _fail("archive_conflict")
+                entries = []
                 for item in planned:
+                    binding = _item_binding(item, scope, proof, lease.agent_id)
+                    origin = {k: binding[k] for k in ("sourceScope", "sourceKnowledgeBaseId", "sourceKnowledgeItemId")}
+                    entries.append({"originKey": _digest(origin), "binding": binding})
+                entries.sort(key=lambda row: row["originKey"])
+                plan = {"schemaVersion": 1, "operationId": migration_id,
+                    "targetRootSha256": _digest(str(Path(lease.root)).casefold()), "targetAgentId": lease.agent_id,
+                    "targetWorkspaceSha256": _digest(str(state.path()).casefold()),
+                    "sourceScope": scope, "sourceProofSha256": proof, "archiveEntries": archive_entries,
+                    "items": entries, "excluded": sorted(excluded, key=lambda row: row["sourceKnowledgeItemId"])}
+                _validate_plan(plan, migration_id, Path(lease.root))
+                plan_path, receipt_path = _operation_paths(folder, migration_id)
+                with pinned_target_directory(plan_path.parent, create=True):
+                    if not plan_path.exists() and not plan_path.is_symlink():
+                        # A lost plan must not be recreated from a later source
+                        # snapshot after this same operation already wrote state.
+                        if receipt_path.exists() or receipt_path.is_symlink():
+                            _fail("operation_conflict")
+                        for entry in entries:
+                            previous_path = folder / (entry["originKey"] + ".json")
+                            if previous_path.exists() or previous_path.is_symlink():
+                                previous = strict_json(read_stable_file(previous_path, _MAX_FILE).raw)
+                                if not isinstance(previous, dict) or previous.get("migrationId") == migration_id:
+                                    _fail("operation_conflict")
+                    _immutable(plan_path, plan)
+                    verify()
+                    if receipt_path.exists() or receipt_path.is_symlink():
+                        if _digest(strict_json(read_stable_file(receipt_path, _MAX_FILE).raw)) != _digest(_completion(folder, plan)):
+                            _fail("completion_invalid")
+                mappings, imported = [], 0
+                for item in sorted(planned, key=lambda value: _digest({"sourceScope": scope,
+                        "sourceKnowledgeBaseId": value["knowledgeBaseId"], "sourceKnowledgeItemId": value["knowledgeItemId"]})):
                     mapping, reused = _import_one(lease, s, owner, item, scope, proof, folder, verify, migration_id)
                     mappings.append(mapping)
                     imported += not reused
+                verify()
+                receipt = _completion(folder, plan)
+                verify()
+                with pinned_target_directory(receipt_path.parent):
+                    _immutable(receipt_path, receipt)
                 verify()
                 return {"schemaVersion": 1, "targetAgentId": lease.agent_id, "importedCount": imported,
                     "idempotent": imported == 0, "mappings": mappings, "excluded": excluded,
@@ -586,4 +773,4 @@ def import_private_knowledge(lease, resolved: SourcePaths, *, central: FileSnaps
         _fail("native_operation_unavailable")
 
 
-__all__ = ["import_private_knowledge"]
+__all__ = ["import_private_knowledge", "verify_knowledge_completion"]

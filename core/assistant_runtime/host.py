@@ -67,6 +67,27 @@ class ReminderFallback(BaseModel):
     attemptToken: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
+class LegacyReminderReservation(BaseModel):
+    """Private main-only request; sourceKey is bound by Electron main."""
+    model_config = ConfigDict(extra="forbid", strict=True)
+    sourceKey: str = Field(pattern=r"^[a-f0-9]{64}$")
+    eventId: str = Field(max_length=128, pattern=r"^affair-reminder:[A-Za-z0-9._:-]{1,103}:[0-9]{8}$")
+
+
+class LegacyReminderAttempt(LegacyReminderReservation):
+    attemptToken: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+class LegacyReminderSettlement(LegacyReminderAttempt):
+    channel: Literal["assistant_window", "system_notification", "attention_fallback"]
+
+
+class LegacyReminderSource(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    projectId: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
+    revision: int = Field(ge=0, le=2**53 - 1)
+
+
 class ProjectSnapshot(BaseModel):
     """Main-only authorization projection; deliberately absent from renderer IPC."""
     model_config = ConfigDict(extra="forbid", strict=True)
@@ -91,6 +112,23 @@ class HistoryImport(BaseModel):
 
 class AffairsSync(HistoryImport):
     recoverSyncId: str | None = Field(default=None, pattern=r"^affairs-[a-f0-9]{40}$")
+
+
+class InitialMigrationPrepare(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    deliveryId: str = Field(pattern=r"^[a-f0-9]{32}$")
+    projectId: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
+    previewId: str = Field(pattern=r"^[a-f0-9]{64}$")
+    turnId: str = Field(min_length=1, max_length=160, pattern=r"^\S+$")
+    revision: int = Field(ge=0)
+    operationId: str = Field(pattern=r"^initial-[a-f0-9]{40}$")
+    category: Literal["personal", "knowledge"]
+
+
+class InitialMigrationDrain(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    deliveryId: str = Field(pattern=r"^[a-f0-9]{32}$")
+    operationId: str = Field(pattern=r"^initial-[a-f0-9]{40}$")
 
 
 class CancelHistoryImport(BaseModel):
@@ -204,6 +242,22 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
     if len(token) < 16:
         raise ValueError("Assistant host requires a private bearer credential")
 
+    @asynccontextmanager
+    async def initial_fence(turn_id=None, *, registry=False):
+        if main_control is None or not getattr(main_control, "initial_migration_enabled", False):
+            yield
+            return
+        tokens = main_control.begin_initial_fence(turn_id)
+        try:
+            if not await asyncio.to_thread(main_control.drain_initial_fence, tokens):
+                raise HTTPException(503, detail="Initial migration publication outcome unknown")
+            if registry and tokens and history_control is not None:
+                if not await asyncio.to_thread(history_control.wait_guard_idle):
+                    raise HTTPException(503, detail="Initial migration publication outcome unknown")
+            yield
+        finally:
+            main_control.end_initial_fence(turn_id)
+
     async def maintain_dispatches():
         while True:
             try:
@@ -219,6 +273,7 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
         task = None
         bound = False
         reminder_executor = None
+        legacy_reminder_executor = None
         try:
             if dispatch is not None:
                 from .actions import bind_actions, unbind_actions
@@ -233,6 +288,11 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                 app.state.reminder_executor = reminder_executor
                 app.state.reminders = await asyncio.get_running_loop().run_in_executor(
                     reminder_executor, LauncherReminders, native.root, native.assistant["agentId"])
+                from .legacy_reminder_receipts import LegacyReminderReceipts
+                legacy_reminder_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="legacy-reminder-receipts")
+                app.state.legacy_reminder_executor = legacy_reminder_executor
+                app.state.legacy_reminder_receipts = await asyncio.get_running_loop().run_in_executor(
+                    legacy_reminder_executor, LegacyReminderReceipts, native.root / "legacy_reminder_receipts")
             if dispatch is not None:
                 task = asyncio.create_task(maintain_dispatches())
             if on_ready is not None:
@@ -253,13 +313,22 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
             # an HTTP connection, renderer close, or this host's shutdown.
             try:
                 try:
-                    if reminder_executor is not None:
-                        if hasattr(app.state, "reminders"):
+                    try:
+                        if legacy_reminder_executor is not None and hasattr(app.state, "legacy_reminder_receipts"):
+                            await asyncio.get_running_loop().run_in_executor(legacy_reminder_executor, app.state.legacy_reminder_receipts.close)
+                    finally:
+                        if reminder_executor is not None and hasattr(app.state, "reminders"):
                             await asyncio.get_running_loop().run_in_executor(reminder_executor, app.state.reminders.close)
                 finally:
-                    if reminder_executor is not None:
-                        await asyncio.to_thread(reminder_executor.shutdown, wait=True)
-                    await asyncio.to_thread(native.shutdown)
+                    try:
+                        if legacy_reminder_executor is not None:
+                            await asyncio.to_thread(legacy_reminder_executor.shutdown, wait=True)
+                    finally:
+                        try:
+                            if reminder_executor is not None:
+                                await asyncio.to_thread(reminder_executor.shutdown, wait=True)
+                        finally:
+                            await asyncio.to_thread(native.shutdown)
             finally:
                 if bound:
                     unbind_actions(dispatch)
@@ -296,6 +365,7 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
     def health():
         return {"status": "ok", "role": "launcher_assistant", "protocolVersion": 1,
                 **({"mainControlVersion": 1} if main_control is not None else {}),
+                **({"initialMigrationControlVersion": 1} if main_control is not None and getattr(main_control, "initial_migration_enabled", False) else {}),
                 **({"appearanceControlVersion": 1} if main_control is not None and getattr(main_control, "appearance_enabled", False) else {})}
 
     async def reminder_call(method, *args, **kwargs):
@@ -344,6 +414,32 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
             raise HTTPException(422, detail="Invalid reminder request")
         result = await reminder_call("fallback", payload.eventId, payload.attemptToken)
         return {"schemaVersion": 1, "receipt": result}
+
+    async def legacy_reminder_call(method, payload, request):
+        if request.query_params:
+            raise HTTPException(422, detail="Invalid legacy reminder request")
+        if not hasattr(app.state, "legacy_reminder_receipts"):
+            raise HTTPException(503, detail={"code": "legacy_reminder_unavailable"})
+        try:
+            result = await asyncio.get_running_loop().run_in_executor(
+                app.state.legacy_reminder_executor,
+                partial(getattr(app.state.legacy_reminder_receipts, method), payload.model_dump()))
+            return JSONResponse(result, headers={"Cache-Control": "no-store"})
+        except Exception:
+            # The RPC result may be unknown after a committed write. Do not retry.
+            raise HTTPException(503, detail={"code": "legacy_reminder_unavailable"}) from None
+
+    @app.post("/api/assistant/legacy-reminders/reserve")
+    async def legacy_reminder_reserve(payload: LegacyReminderReservation, request: Request):
+        return await legacy_reminder_call("reserve", payload, request)
+
+    @app.post("/api/assistant/legacy-reminders/settle")
+    async def legacy_reminder_settle(payload: LegacyReminderSettlement, request: Request):
+        return await legacy_reminder_call("settle", payload, request)
+
+    @app.post("/api/assistant/legacy-reminders/abandon")
+    async def legacy_reminder_abandon(payload: LegacyReminderAttempt, request: Request):
+        return await legacy_reminder_call("abandon", payload, request)
 
     if main_control is not None:
         async def main_control_body(request):
@@ -404,10 +500,11 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                 raise HTTPException(422, detail="Invalid private project suspension")
             if history_control is not None:
                 history_control.signal_registry_change()
-            with history_control.guard() if history_control is not None else nullcontext():
-                if history_control is not None:
-                    history_control.registry_changed()
-                return dispatch.suspend_projects()
+            async with initial_fence(registry=True):
+                with history_control.guard() if history_control is not None else nullcontext():
+                    if history_control is not None:
+                        history_control.registry_changed()
+                    return dispatch.suspend_projects()
 
         @app.put("/api/assistant/project-registry")
         async def project_registry(payload: ProjectSnapshot):
@@ -417,14 +514,61 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                 # No background thread may race an admission with this update.
                 if history_control is not None:
                     history_control.signal_registry_change()
-                with history_control.guard() if history_control is not None else nullcontext():
-                    if history_control is not None:
-                        history_control.registry_changed()
-                    return dispatch.replace_projects(payload.model_dump())
+                async with initial_fence(registry=True):
+                    with history_control.guard() if history_control is not None else nullcontext():
+                        if history_control is not None:
+                            history_control.registry_changed()
+                        return dispatch.replace_projects(payload.model_dump())
             except DispatchError as exc:
                 raise HTTPException(409, detail={"code": exc.code}) from None
 
     if history_control is not None:
+        @app.post("/api/assistant/legacy-reminders/source")
+        async def legacy_reminder_source(payload: LegacyReminderSource, request: Request):
+            from .migration_io import MigrationIOError
+            if request.query_params:
+                raise HTTPException(422, detail="Invalid legacy reminder source request")
+            try:
+                result = await asyncio.to_thread(history_control.legacy_reminder_source,
+                                                 payload.projectId, payload.revision)
+            except MigrationIOError:
+                raise HTTPException(409, detail="Legacy reminder source unavailable") from None
+            return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+        if main_control is not None and getattr(main_control, "initial_migration_enabled", False):
+            @app.post("/api/assistant/initial-migration/prepare")
+            async def prepare_initial_migration(payload: InitialMigrationPrepare, request: Request):
+                if request.query_params:
+                    raise HTTPException(422, detail="Invalid initial migration request")
+                bound = {key: getattr(payload, key) for key in ("projectId", "previewId", "turnId", "category", "operationId")}
+                publication = main_control.initial_delivery(payload.deliveryId, bound, admit=True)
+                if not publication:
+                    raise HTTPException(409, detail="Initial migration delivery unavailable")
+                def prepare():
+                    try:
+                        return history_control.prepare_initial_source(payload.projectId, payload.previewId,
+                            payload.revision, payload.turnId, payload.operationId, payload.category, publication)
+                    finally:
+                        publication.finished()
+                try:
+                    result = await asyncio.to_thread(prepare)
+                    if not main_control.initial_delivery(payload.deliveryId, bound, confirm=True):
+                        raise ValueError("delivery changed")
+                except Exception:
+                    raise HTTPException(409, detail="Initial migration source unavailable") from None
+                return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+            @app.post("/api/assistant/initial-migration/drain")
+            async def drain_initial_migration(payload: InitialMigrationDrain, request: Request):
+                if request.query_params:
+                    raise HTTPException(422, detail="Invalid initial migration request")
+                found, publication = main_control.begin_initial_drain(payload.deliveryId, payload.operationId)
+                drained = found and (publication is None or await asyncio.to_thread(publication.wait_finished, 2.0))
+                return JSONResponse({"schemaVersion": 1, "operationId": payload.operationId,
+                                     "state": "unknown", "drained": bool(drained)},
+                                    status_code=200 if drained else 503,
+                                    headers={"Cache-Control": "no-store"})
+
         @app.post("/api/assistant/affairs-sync")
         async def affairs_sync(payload: AffairsSync, request: Request):
             if request.query_params:
@@ -548,16 +692,17 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
 
     @app.post("/api/assistant/stop", status_code=202)
     async def stop(payload: StopTurn):
-        if history_control is not None:
-            result = await asyncio.to_thread(history_control.stop_native_turn, native.stop, payload.turnId.strip())
-        else:
-            result = await asyncio.to_thread(native.stop, payload.turnId)
-        if main_control is not None and getattr(main_control, "appearance_enabled", False):
-            main_control.cancel_image_imports(payload.turnId.strip())
-        cancel_history = getattr(main_control, "cancel_history_imports", None)
-        if callable(cancel_history):
-            cancel_history(payload.turnId.strip())
-        return result
+        async with initial_fence(payload.turnId.strip()):
+            if history_control is not None:
+                result = await asyncio.to_thread(history_control.stop_native_turn, native.stop, payload.turnId.strip())
+            else:
+                result = await asyncio.to_thread(native.stop, payload.turnId)
+            if main_control is not None and getattr(main_control, "appearance_enabled", False):
+                main_control.cancel_image_imports(payload.turnId.strip())
+            cancel_history = getattr(main_control, "cancel_history_imports", None)
+            if callable(cancel_history):
+                cancel_history(payload.turnId.strip())
+            return result
 
     @app.post("/api/assistant/continue", status_code=202)
     def continue_turn(payload: ContinueTurn):
