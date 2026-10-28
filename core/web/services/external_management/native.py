@@ -217,6 +217,11 @@ class NativeAgentGateway:
         from .workspace_queries import read_team
         return read_team(self.project_root, self._owners(), team_id, query)
 
+    def read_team_knowledge(self, query):
+        from .knowledge_directory import read_team_knowledge_directory
+        return read_team_knowledge_directory(self.project_root, self._owners(), query.team_id,
+                                             offset=query.offset, limit=query.limit)
+
     def read_rooms(self, query):
         from .workspace_queries import read_rooms
         return read_rooms(self.project_root, self._owners(), query)

@@ -129,6 +129,7 @@ def personal_assistant_action_tool(action: str = "index", parameters: dict | Non
                 "session_config_get": ["sessions:read"], "session_config_compare": ["sessions:read"],
                 "session_parameters_get": ["sessions:parameters:read", "sessions:read"],
                 "team_list": ["teams:directory:read"], "team_get": ["teams:directory:read"],
+                "team_knowledge_list": ["knowledge:catalog:read", "teams:directory:read"],
                 "room_list": ["rooms:read"], "room_get": ["rooms:read"],
                 "legacy_observers": ["legacy:receipts:read"], "legacy_receipts": ["legacy:receipts:read"],
             }.get(action)

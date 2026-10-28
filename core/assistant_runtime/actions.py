@@ -197,13 +197,14 @@ def _documentation_contracts():
 
 def _project_read_contracts():
     from core.web.services.external_management.contracts import (AvatarOptionsQuery, SessionMetadataQuery, SessionListQuery,
-        DirectoryQuery, TeamReadQuery, RoomReadQuery, ActiveTasksQuery, SourceReadQuery, SourceSearchQuery)
+        DirectoryQuery, TeamReadQuery, TeamKnowledgeQuery, RoomReadQuery, ActiveTasksQuery, SourceReadQuery, SourceSearchQuery)
 
     return {name: create_model(f"Launcher_{model.__name__}", __base__=model,
         project_id=(str, Field(min_length=1, max_length=160))) for name, model in (
             ("task_list", ActiveTasksQuery), ("source_read", SourceReadQuery), ("source_search", SourceSearchQuery), ("session_list", SessionListQuery), ("session_get", SessionMetadataQuery), ("session_config_get", SessionMetadataQuery),
             ("session_config_compare", SessionMetadataQuery),
             ("session_parameters_get", SessionMetadataQuery), ("team_list", DirectoryQuery), ("team_get", TeamReadQuery),
+            ("team_knowledge_list", TeamKnowledgeQuery),
             ("room_list", DirectoryQuery), ("room_get", RoomReadQuery),
             ("avatar_options", AvatarOptionsQuery))}
 
@@ -234,6 +235,7 @@ _HELP = {
     "authorization_status": "读取当前Launcher SDK主体的subjectId、精确scopes和grantRevision；不返回capability，不改变已有授权。首次连接沿用原有SDK绑定流程。旧主体缺权限时以此scopes为expected_scopes，只显式增加本次所需项，不能默认全量升级。",
     "team_list": "只读发现普通团队元数据摘要，按完整ID升序；name最多32字元、purpose最多64字元，query仅匹配返回的公开摘要，最多6项，archived=true包含已归档。详情用team_get。独立teams:directory:read，不扩大旧teams:read。缺失/损坏权威拒绝，不初始化或修复；不读取canvas或成员配置。",
     "team_get": "只读普通团队名称、状态、目的和成员Agent ID；成员默认及最多6项，用nextMemberOffset继续member_offset。独立teams:directory:read，不hydrate成员、不读取canvas或任务正文。",
+    "team_knowledge_list": "分页查询已授权普通团队的知识库目录，仅返回ID、名称与状态，不读取知识内容或判断Agent访问权。需同时具有knowledge:catalog:read和teams:directory:read；缺失时先查authorization_status，再经原生审批只申请缺失权限。未迁移或数据归属无法确认时返回不可用，不代表目录为空。",
     "room_list": "只读发现普通房间ID、清洗标题和状态，按ID升序；query仅匹配公开元数据，最多6项，archived=true包含已归档。要求rooms:read，系统/私有房间过滤；损坏或未知来源拒绝。物理读取canonical JSON时会解码同文件rounds，但不遍历、搜索或返回消息，不对账或修复。",
     "room_get": "只读普通房间ID、清洗标题和状态，要求rooms:read；不返回消息、参与者Session或路径，不对账、修复或切换房间。",
     "session_parameters_get": "只读普通可见会话当前Agent的模型、推理选项、上下文上限和预算覆盖及同一configRevision；要求sessions:read和sessions:parameters:read。来源是已保存候选+已加载runtime配置+冻结catalog，不是active Turn实际参数或历史compiled revision。catalogState=absent表示尚无已保存verified观察；配置尚未加载、来源损坏或变化时拒绝，不ensure/repair。预算0为无限制，null为未设置覆盖。",
@@ -565,6 +567,8 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
         coroutine = service.management.team_list(args.pop("project_id"), **args)
     elif action == "team_get":
         coroutine = service.management.team(args.pop("project_id"), **args)
+    elif action == "team_knowledge_list":
+        coroutine = service.management.team_knowledge(args.pop("project_id"), **args)
     elif action == "room_list":
         coroutine = service.management.room_list(args.pop("project_id"), **args)
     elif action == "room_get":

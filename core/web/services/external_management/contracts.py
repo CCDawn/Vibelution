@@ -7,8 +7,8 @@ import unicodedata
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-Scope = Literal["agents:read", "agents:create", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read", "source:read"]
-SCOPES = ("agents:read", "agents:create", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read", "source:read")
+Scope = Literal["agents:read", "agents:create", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read", "source:read", "knowledge:catalog:read"]
+SCOPES = ("agents:read", "agents:create", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read", "source:read", "knowledge:catalog:read")
 _AVATAR_EXTENSION = r"(?:[pP][nN][gG]|[jJ][pP][gG]|[jJ][pP][eE][gG]|[wW][eE][bB][pP]|svg)"
 _AVATAR_PATH_PATTERN = r"^workspace/avatars/[A-Za-z0-9_.-]+\." + _AVATAR_EXTENSION + "$"
 
@@ -502,6 +502,39 @@ class TeamReadQuery(Closed):
     team_id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
     member_offset: int = Field(default=0, ge=0, le=120)
     limit: int = Field(default=6, ge=1, le=6)
+
+
+class TeamKnowledgeQuery(Closed):
+    team_id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+    offset: int = Field(default=0, ge=0, le=10_000)
+    limit: int = Field(default=6, ge=1, le=6)
+
+
+class TeamKnowledgeItem(Closed):
+    id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+    name: str = Field(min_length=1, max_length=64)
+    status: Literal["active"]
+
+
+class TeamKnowledgeResponse(UntrustedResponse):
+    teamId: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+    knowledgeBases: list[TeamKnowledgeItem] = Field(max_length=6)
+    total: int = Field(ge=0, le=10_000)
+    offset: int = Field(ge=0, le=10_000)
+    nextOffset: int | None = Field(ge=0, le=10_000)
+    requiredScopes: list[Scope]
+    coverage: Literal["Existing metadata for one validated ordinary active Team only; the metadata JSON contains ACL and descriptions, which are decoded but never returned or used as Agent authorization. No bodies, statistics or Agent libraries are read."]
+
+    @model_validator(mode="after")
+    def coherent_page(self):
+        ids = [item.id for item in self.knowledgeBases]
+        end = self.offset + len(ids)
+        if (self.requiredScopes != ["knowledge:catalog:read", "teams:directory:read"]
+                or ids != sorted(set(ids)) or ids and end > self.total
+                or self.offset < self.total and not ids
+                or self.nextOffset != (end if end < self.total else None)):
+            raise ValueError("Inconsistent knowledge directory page")
+        return self
 
 
 class RoomReadQuery(Closed):

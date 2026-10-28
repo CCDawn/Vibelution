@@ -170,7 +170,7 @@ class ManagedAgentBackendClient:
             # grant; only a fresh client may explicitly request the new scope.
             requested_scopes = saved.get("scopes", _LEGACY_MANAGEMENT_SCOPES if saved.get("clientId") else _MANAGEMENT_SCOPES)
             if (not isinstance(requested_scopes, list) or not requested_scopes
-                or any(not isinstance(scope, str) or scope not in (*_MANAGEMENT_SCOPES, "tasks:read", "source:read") for scope in requested_scopes)
+                or any(not isinstance(scope, str) or scope not in (*_MANAGEMENT_SCOPES, "tasks:read", "source:read", "knowledge:catalog:read") for scope in requested_scopes)
                 or requested_scopes != sorted(set(requested_scopes))):
                 raise BackendClientError("Invalid management scopes.", code="UNKNOWN_MANAGEMENT_SUBJECT")
             self._state["management"] = {**saved, "clientId": client_id, "binding": binding, "scopes": requested_scopes}
@@ -483,6 +483,19 @@ class ManagedAgentBackendClient:
             or len(public["team"]["members"]) > query.limit):
             raise BackendClientError("Team query binding changed.", code="BACKEND_PROTOCOL_ERROR")
         return public
+
+    async def management_team_knowledge(self, *, team_id, offset=0, limit=6):
+        from pydantic import ValidationError
+        from core.web.services.external_management.contracts import TeamKnowledgeQuery, TeamKnowledgeResponse
+        try:
+            query = TeamKnowledgeQuery.model_validate({"team_id": team_id, "offset": offset, "limit": limit})
+        except ValidationError:
+            raise BackendClientError("Invalid Team knowledge query.", code="INVALID_MANAGEMENT_REQUEST") from None
+        result = await self._management_directory_read("/directory/teams/" + quote(query.team_id, safe="") +
+            "/knowledge-bases?" + urlencode(query.model_dump(exclude={"team_id"})), TeamKnowledgeResponse)
+        if result["teamId"] != query.team_id or result["offset"] != query.offset or len(result["knowledgeBases"]) > query.limit:
+            raise BackendClientError("Team knowledge query binding changed.", code="BACKEND_PROTOCOL_ERROR")
+        return result
 
     async def management_room(self, *, room_id):
         from pydantic import ValidationError

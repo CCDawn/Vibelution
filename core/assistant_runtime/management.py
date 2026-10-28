@@ -316,6 +316,12 @@ class ManagementAdapter:
         result = await self._call(project_id, lambda client: client.management_team(**parameters))
         return {**result, "projectId": project_id}
 
+    async def team_knowledge(self, project_id: str, **parameters):
+        if project_id not in self._projects:
+            raise DispatchError("Project is not authorized.", code="PROJECT_NOT_AUTHORIZED")
+        result = await self._call(project_id, lambda client: client.management_team_knowledge(**parameters))
+        return {**result, "projectId": project_id}
+
     async def room_list(self, project_id: str, **parameters):
         if project_id not in self._projects:
             raise DispatchError("Project is not authorized.", code="PROJECT_NOT_AUTHORIZED")

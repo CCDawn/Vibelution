@@ -25,6 +25,7 @@ from core.web.services.external_management.contracts import (
     SessionConfigComparisonResponse,
     DirectoryQuery, TeamListResponse, TeamReadResponse, RoomListResponse, RoomReadResponse, SessionParametersResponse, AuthorizationStateResponse,
     LegacyObserverView, LegacyObserversResponse, LegacyReceiptsResponse, ActiveTasksResponse, SourceReadResponse, SourceSearchResponse,
+    TeamKnowledgeResponse,
 )
 from core.web.services.external_management.service import (
     ManagementError,
@@ -205,6 +206,16 @@ async def read_team(team_id: str, request: Request, member_offset: int = 0, limi
     _require_control(request)
     _directory_query(request, detail=True)
     return await _call(lambda: _service().read_team(*_credentials(request), team_id, member_offset=member_offset, limit=limit))
+
+
+@router.get("/directory/teams/{team_id}/knowledge-bases", response_model=TeamKnowledgeResponse)
+async def read_team_knowledge(team_id: str, request: Request, offset: int = 0, limit: int = 6):
+    _require_control(request)
+    values = request.query_params
+    if (set(values) - {"offset", "limit"} or len(values.multi_items()) != len(values)
+            or any(not re.fullmatch(r"[0-9]{1,5}", value) for value in values.values())):
+        raise HTTPException(status_code=422, detail={"code": "INVALID_INPUT"})
+    return await _call(lambda: _service().read_team_knowledge(*_credentials(request), team_id, offset=offset, limit=limit))
 
 
 @router.get("/directory/rooms", response_model=RoomListResponse)

@@ -70,7 +70,7 @@ class ManagementService:
     def binding(self) -> dict:
         current = self.identity()
         Binding.model_validate(current.binding)
-        return {"protocolVersion": 1, "binding": current.binding, "scopes": [scope for scope in SCOPES if scope not in {"tasks:read", "source:read"}], "actions": contracts()}
+        return {"protocolVersion": 1, "binding": current.binding, "scopes": [scope for scope in SCOPES if scope not in {"tasks:read", "source:read", "knowledge:catalog:read"}], "actions": contracts()}
 
     def _expected(self, expected: dict):
         current = self.identity()
@@ -246,6 +246,20 @@ class ManagementService:
 
     def read_team(self, subject, capability, team_id, **parameters):
         return self._directory_read(subject, capability, "team_get", {**parameters, "team_id": team_id})
+
+    def read_team_knowledge(self, subject, capability, team_id, **parameters):
+        from .contracts import TeamKnowledgeQuery, TeamKnowledgeResponse
+        grant = self._authorize(subject, capability, "teams:directory:read")
+        if "knowledge:catalog:read" not in grant.get("scopes", []):
+            raise ManagementError("SCOPE_DENIED")
+        try:
+            query = TeamKnowledgeQuery.model_validate({**parameters, "team_id": team_id})
+        except ValidationError:
+            raise ManagementError("INVALID_INPUT", 422) from None
+        try:
+            return TeamKnowledgeResponse.model_validate(self.native.read_team_knowledge(query)).model_dump()
+        except ValidationError:
+            raise ManagementError("KNOWLEDGE_DIRECTORY_UNAVAILABLE", 503) from None
 
     def read_rooms(self, subject, capability, **parameters):
         return self._directory_read(subject, capability, "room_list", parameters)
