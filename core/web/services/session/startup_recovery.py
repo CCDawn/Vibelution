@@ -528,10 +528,8 @@ def _recover_session_on_startup(
     conversation = s.load_session_chat_state(s.PROJECT_ROOT, session_id)
     if conversation is None or _shutdown_requested(should_stop):
         return
-    metadata = conversation.get("metadata")
-    if isinstance(metadata, dict) and (
-        metadata.get("source") == "external_agent_task" or "externalTaskId" in metadata
-    ):
+    from core.web.services.external_agent.approval_binding import is_external_session
+    if is_external_session(conversation):
         # External task authority and its approval bindings are process-local.
         # Never drain or resume this Session as an ordinary chat after restart.
         summary["externalTaskSkipCount"] = summary.get("externalTaskSkipCount", 0) + 1

@@ -27,9 +27,39 @@ _TASKS: dict[str, tuple[str, str]] = {}
 
 
 def is_external_session(conversation: Any) -> bool:
-    metadata = conversation.get("metadata") if isinstance(conversation, dict) else None
+    if not isinstance(conversation, dict):
+        return False
+    session_id = str(conversation.get("conversation_id") or conversation.get("conversationId")
+                     or conversation.get("sessionId") or conversation.get("id") or "").strip()
+    with _TASKS_LOCK:
+        if session_id and session_id in _TASKS:
+            return True
+    metadata = conversation.get("metadata")
+    if isinstance(metadata, dict):
+        task_id = metadata.get("externalTaskId")
+        source = metadata.get("source")
+        if (source == "external_agent_task" or "effectivePermissionProfile" in metadata
+                or (isinstance(task_id, str) and task_id.casefold().startswith("eat-"))):
+            return True
+        # These native owners use externalTaskId for their own correlation,
+        # not for the external-agent task. The field is not an auth token.
+        if session_id and isinstance(source, str) and isinstance(task_id, str) and task_id.strip() == task_id and task_id:
+            keys = set(metadata)
+            if keys == {"source", "externalTaskId"}:
+                if source == "generic_team_workflow" and re.fullmatch(r"gw-[0-9a-f]{48}", task_id):
+                    return False
+                if source == "external_operator_management" and re.fullmatch(r"[0-9a-f]{64}", task_id):
+                    return False
+                if source in {"virtual_human_self_wake", "virtual_human_life_steward"}:
+                    return False
+            revision = metadata.get("runtimeRevision")
+            if (source == "self_evolution_candidate_review"
+                    and keys == {"source", "externalTaskId", "runtimeRevision"}
+                    and isinstance(revision, str) and re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", revision)):
+                return False
     return isinstance(metadata, dict) and (
         metadata.get("source") == "external_agent_task" or "externalTaskId" in metadata
+        or "effectivePermissionProfile" in metadata or "runtimeRevision" in metadata
     )
 
 
