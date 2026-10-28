@@ -67,7 +67,7 @@ def execute(action: str, parameters: dict, runtime: dict, *, governed: bool = Fa
     if action in {"affairs_conflict_sets", "affairs_conflict_list", "affairs_conflict_read", "affairs_sync_receipt"}:
         from .affairs_conflict_actions import execute as execute_conflict
         return execute_conflict(action, parameters, runtime)
-    if action == "episodic_conflict_review":
+    if action in {"episodic_conflict_review", "episodic_sync_receipt"}:
         from .episodic_conflict_actions import execute as execute_episodic_conflict
         return execute_episodic_conflict(action, parameters, runtime)
     # The reused config owner currently checks one project. A packaged source
