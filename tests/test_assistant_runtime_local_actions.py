@@ -17,6 +17,7 @@ def test_catalog_reuses_native_schema_and_governance_without_project_actions():
         "history_list", "history_read", "history_search",
         "affairs_conflict_sets", "affairs_conflict_list", "affairs_conflict_read", "affairs_sync_receipt",
         "episodic_conflict_review", "episodic_sync_receipt", "personal_memory_list",
+        "legacy_memory_list", "legacy_memory_read",
     }
     assert set(contracts) == expected
     for owner in (assistant, config):
@@ -34,6 +35,22 @@ def test_catalog_reuses_native_schema_and_governance_without_project_actions():
         assert contract["action"] == name
         assert contract["parameters"]["additionalProperties"] is False
         assert type(contract["governed"]) is bool
+
+
+def test_legacy_memory_actions_reuse_reader_and_require_version_for_continuation(monkeypatch):
+    from core.assistant_runtime import legacy_memory_read
+    operation = "initial-" + "a" * 40
+    calls = []
+    monkeypatch.setattr(legacy_memory_read, "list_legacy_memory", lambda operation_id: {"operationId": operation_id})
+    monkeypatch.setattr(legacy_memory_read, "read_legacy_memory", lambda **args: calls.append(args) or {"text": "old"})
+    runtime = {"agentId": "assistant", "sessionId": "session"}
+    assert local.execute("legacy_memory_list", {"operation_id": operation}, runtime)["operationId"] == operation
+    with pytest.raises(ValueError):
+        local.execute("legacy_memory_read", {"operation_id": operation, "kind": "memory", "offset": 1}, runtime)
+    assert not calls
+    assert local.execute("legacy_memory_read", {"operation_id": operation, "kind": "memory", "offset": 1,
+        "expected_version": "b" * 64}, runtime)["text"] == "old"
+    assert calls[0]["expected_version"] == "b" * 64
 
 
 @pytest.mark.parametrize("name", [
