@@ -17,14 +17,14 @@ from .migration_io import MigrationIOError, read_stable_file, strict_json, verif
 from .migration_paths import _identity_chain
 
 
-def _project_source_paths(root, config):
+def _project_source_paths(root, config, *, projects_home=None, legacy_home=None):
     """Resolve the project route without the assistant's DATA_HOME override."""
     from config.paths import default_data_home, resolve_configured_data_home
     from vibelution_storage import (legacy_project_storage_paths, resolve_project_storage_paths,
         storage_migration_complete, storage_migration_state_path)
     from .migration_io import check_path
 
-    target = resolve_project_storage_paths(root)
+    target = resolve_project_storage_paths(root, projects_home=projects_home)
     marker = storage_migration_state_path(target)
     if marker.exists() or marker.is_symlink():
         check_path(marker)
@@ -32,7 +32,8 @@ def _project_source_paths(root, config):
             raise MigrationIOError("history_source_unavailable")
         return target
 
-    legacy_home = resolve_configured_data_home(config_path=config) or default_data_home().resolve()
+    legacy_home = (Path(legacy_home) if legacy_home is not None else
+                   resolve_configured_data_home(config_path=config) or default_data_home().resolve())
     legacy = replace(legacy_project_storage_paths(root, target=target, config_path=config), data=legacy_home)
 
     def nonempty(path):

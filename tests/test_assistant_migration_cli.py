@@ -388,7 +388,9 @@ def active_personal_case(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize('category', ['personal', 'knowledge'])
-def test_initial_offline_real_child_requires_permit_and_never_replays(tmp_path, monkeypatch, category):
+@pytest.mark.parametrize('route,active_state', [('canonical', False), ('legacy-default', False),
+    ('legacy-configured', False), ('canonical', True)])
+def test_initial_offline_real_child_requires_permit_and_never_replays(tmp_path, monkeypatch, category, route, active_state):
     import http.server
     import subprocess
     import sys
@@ -401,6 +403,21 @@ def test_initial_offline_real_child_requires_permit_and_never_replays(tmp_path, 
     from scripts.assistant_migration_activate import storage_authority
 
     workspace, target, args = active_personal_case(tmp_path, monkeypatch)
+    project = Path(os.environ['TEST_MIGRATION_PROJECT'])
+    user_root = tmp_path / 'user'
+    monkeypatch.setenv('USERPROFILE', str(user_root))
+    if route != 'canonical':
+        from vibelution_storage import resolve_project_storage_paths, storage_migration_state_path
+        storage_migration_state_path(resolve_project_storage_paths(project)).unlink()
+        (project / '.git').mkdir()
+        (project / '.runtime').mkdir()
+        if route == 'legacy-default':
+            (project / '.runtime/legacy-state').write_text('synthetic', encoding='utf-8')
+        home = (user_root / 'Documents/Vibelution/data' if route == 'legacy-default'
+                else tmp_path / 'configured-source-data')
+        home.mkdir(parents=True)
+        shutil.move(str(workspace), str(home / 'workspace'))
+        workspace = home / 'workspace'
     source_agent = AGENT
     if category == 'knowledge':
         legacy = tmp_path / 'legacy'
@@ -448,8 +465,17 @@ def test_initial_offline_real_child_requires_permit_and_never_replays(tmp_path, 
         assert native.shutdown()['closed']
     ''', config_text=TEST_MODEL_CONFIG)
     identity = json.loads((tmp_path / 'identity.json').read_text(encoding='utf-8'))
-    project, source_config = Path(os.environ['TEST_MIGRATION_PROJECT']), args[3]
-    source_config.write_text(TEST_MODEL_CONFIG + '\n[launcher.developer_mode]\nenabled=false\n', encoding='utf-8')
+    source_config = args[3]
+    storage_config = ('\n[storage]\ndata_home = ' + json.dumps(str(home).replace('\\', '/')) + '\n'
+                      if route == 'legacy-configured' else '')
+    source_config.write_text(TEST_MODEL_CONFIG + storage_config + '\n[launcher.developer_mode]\nenabled=false\n', encoding='utf-8')
+    if active_state:
+        from vibelution_storage import resolve_project_storage_paths
+        state = resolve_project_storage_paths(project).runtime / 'developer-mode/active.json'
+        state.parent.mkdir(parents=True)
+        state.write_text('{"schemaVersion":1,"sandboxId":"synthetic"}', encoding='utf-8')
+    if os.name == 'nt':
+        project = Path(project.drive.lower() + str(project)[len(project.drive):])
     paths, storage, _ = storage_authority(project, source_config)
     routed, _, routing, _ = cli._bound_route(paths, source_config)
     assert routed == workspace
@@ -457,6 +483,18 @@ def test_initial_offline_real_child_requires_permit_and_never_replays(tmp_path, 
     sd, project_identity, workspace_identity = source_identity(scope, project, workspace)
     td, target_directory = target_identity(target, identity['agent'], identity['session'])
     op = initial_migration_id('registered:1', '', category)
+    from core.assistant_runtime.dispatch import DispatchService
+    from core.assistant_runtime.history_preview import HistoryPreview
+    dispatch = DispatchService(target, {})
+    dispatch.replace_projects({'schemaVersion': 1, 'revision': 1, 'projects': {'registered:1': str(project)}})
+    preview = HistoryPreview(dispatch, source_config)
+    with monkeypatch.context() as host_env:
+        host_env.setenv('VIBELUTION_DATA_HOME', str(target / 'data'))
+        preview_id = preview.preview('registered:1')['previewId']
+    preview_row = preview._previews[preview_id]
+    assert str(preview_row[3]) == str(project)
+    assert authority_identity(preview_row[7]) == authority_identity((*routing,
+        read_stable_file(workspace / 'agents/agents.json', 16 * 1024 * 1024), *storage))
     intent = {'schemaVersion': 1, 'registeredProjectId': 'registered:1', 'sourceScope': scope,
         'category': category, 'turnId': 'turn-1', 'operationId': op, 'revision': 1,
         'sourceIdentityDigest': sd, 'registryDigest': authority_identity((*routing,
@@ -473,7 +511,7 @@ def test_initial_offline_real_child_requires_permit_and_never_replays(tmp_path, 
         'targetConfig': str(target / ('.initial-migration-models-v1-' + op + '-' + intent['registryDigest'] + '.toml')), 'operationId': op}
     original_source = {path: path.read_bytes() for path in workspace.rglob('*') if path.is_file()}
     token = 'a' * 64
-    control = {'permit': False, 'requests': 0}
+    control = {'permit': False, 'requests': 0, 'switch_marker': False}
     class Handler(http.server.BaseHTTPRequestHandler):
         def log_message(self, *_args): pass
         def do_GET(self):
@@ -484,6 +522,9 @@ def test_initial_offline_real_child_requires_permit_and_never_replays(tmp_path, 
             assert self.path == '/permit' and self.headers.get('Authorization') == 'Bearer ' + token
             assert self.rfile.read(int(self.headers['Content-Length'])) == b'{}'
             control['requests'] += 1
+            if control['switch_marker']:
+                marker.write_text(json.dumps({'schemaVersion': 1, 'status': 'completed',
+                    'projectId': paths.project_id, 'instanceId': paths.instance_id}), encoding='utf-8')
             raw = json.dumps({'schemaVersion': 1, 'granted': control['permit']}).encode()
             self.send_response(200); self.send_header('Content-Length', str(len(raw))); self.end_headers(); self.wfile.write(raw)
     server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
@@ -527,7 +568,7 @@ def test_initial_offline_real_child_requires_permit_and_never_replays(tmp_path, 
         previous_snapshot = Path(binding['targetConfig'])
         previous_bytes = previous_snapshot.read_bytes()
         source_config.write_text(TEST_MODEL_CONFIG.replace('models.test', 'models.other').replace(
-            'local/test', 'local/other') + '\n[launcher.developer_mode]\nenabled=false\n', encoding='utf-8')
+            'local/test', 'local/other') + storage_config + '\n[launcher.developer_mode]\nenabled=false\n', encoding='utf-8')
         paths, refreshed_storage, _ = storage_authority(project, source_config)
         _, _, refreshed_routing, _ = cli._bound_route(paths, source_config)
         refreshed = {**intent, 'turnId': 'turn-2', 'revision': 2,
@@ -567,6 +608,14 @@ def test_initial_offline_real_child_requires_permit_and_never_replays(tmp_path, 
         receipt_path.unlink()
         receipt_dir.rmdir()
         control['permit'] = True
+        if route != 'canonical':
+            marker = storage_migration_state_path(resolve_project_storage_paths(project))
+            control['switch_marker'] = True
+            switched, value = run()
+            assert switched.returncode == 1 and value['state'] == 'unknown'
+            assert not (target / 'initial_migration_claims' / op).exists()
+            marker.unlink()
+            control['switch_marker'] = False
         completed, value = run()
         assert completed.returncode == 0, (value, completed.stderr)
         assert value == {'schemaVersion': 1, 'operationId': op, 'state': 'completed', 'readyForCutover': False}
@@ -677,7 +726,7 @@ def test_initial_offline_real_child_requires_permit_and_never_replays(tmp_path, 
                     verify_initial_knowledge_receipts(target, op)
         repeated, value = run()
         assert repeated.returncode == 1 and value['state'] == 'unknown'
-        assert control['requests'] == 3
+        assert control['requests'] == (3 if route == 'canonical' else 4)
         listing = subprocess.run(listing_command, env=env, cwd=cli.ROOT,
             capture_output=True, text=True, encoding='utf-8', timeout=30)
         assert listing.returncode == 0, listing.stderr
@@ -950,6 +999,48 @@ def test_missing_storage_marker_fails_closed_before_child(tmp_path, monkeypatch,
     assert call(monkeypatch, *args) == 1
     assert json.loads(capsys.readouterr().out)['code'] == 'SOURCE_MIGRATION_UNAVAILABLE'
     assert not (target / 'history_sources').exists()
+
+
+@pytest.mark.parametrize('change', ['marker', 'route'])
+def test_legacy_storage_authority_rejects_new_marker_or_route_change(tmp_path, monkeypatch, change):
+    from core.assistant_runtime.migration_io import MigrationIOError
+    from scripts.assistant_migration_activate import storage_authority
+    from vibelution_storage import resolve_project_storage_paths, storage_migration_state_path
+    workspace, target, args = active_personal_case(tmp_path, monkeypatch)
+    project = Path(os.environ['TEST_MIGRATION_PROJECT'])
+    monkeypatch.setenv('USERPROFILE', str(tmp_path / 'user'))
+    marker = storage_migration_state_path(resolve_project_storage_paths(project))
+    marker.unlink()
+    (project / '.git').mkdir()
+    (project / '.runtime').mkdir()
+    legacy_state = project / '.runtime/legacy-state'
+    legacy_state.write_text('synthetic', encoding='utf-8')
+    home = tmp_path / 'source-data'
+    home.mkdir()
+    shutil.move(str(workspace), str(home / 'workspace'))
+    args[3].write_text('[storage]\ndata_home = ' + json.dumps(home.as_posix()) +
+                       '\n[launcher.developer_mode]\nenabled=false\n', encoding='utf-8')
+    paths, _, verify = storage_authority(project, args[3])
+    assert not paths.migrated and paths.data == home
+    if change == 'marker':
+        marker.write_text('{}', encoding='utf-8')
+    else:
+        legacy_state.unlink()
+        shutil.move(str(home / 'workspace'), str(tmp_path / 'removed-workspace'))
+    with pytest.raises((MigrationIOError, ValueError)):
+        verify()
+    assert not (target / 'history_sources').exists()
+
+
+@pytest.mark.parametrize('relation', ['target-inside-data', 'data-inside-target', 'equal'])
+def test_source_data_home_overlap_is_rejected(tmp_path, relation):
+    from core.assistant_runtime.migration_io import MigrationIOError
+    from scripts.assistant_migration_activate import _assert_source_target_disjoint
+    data = tmp_path / 'data'
+    target = (data / 'native' if relation == 'target-inside-data' else
+              tmp_path if relation == 'data-inside-target' else data)
+    with pytest.raises(MigrationIOError, match='history_source_target_overlap'):
+        _assert_source_target_disjoint(target, (data,))
 
 
 @pytest.mark.parametrize('mode', ['environment', 'developer'])

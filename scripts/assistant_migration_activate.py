@@ -332,12 +332,16 @@ def verify_initial_knowledge_receipts(target, operation_id):
     return True
 
 
-def storage_authority(project, source_config, projects_home=None):
-    """Snapshot existing identity and migration marker; never create either."""
+def storage_authority(project, source_config, projects_home=None, *, legacy_home=None):
+    """Snapshot identity and the selected route, including an absent marker."""
     from vibelution_storage import (PROJECT_IDENTITY_RELATIVE_PATH, instance_id_for_project,
-        resolve_active_project_storage_paths, resolve_project_storage_paths, storage_migration_state_path)
-    from core.assistant_runtime.migration_io import MigrationIOError, read_stable_file, strict_json, verify_snapshot
-    project = Path(project).resolve()
+        resolve_project_storage_paths, storage_migration_state_path)
+    from core.assistant_runtime.migration_io import MigrationIOError, check_path, read_stable_file, strict_json, verify_snapshot
+    from dataclasses import replace
+    from core.assistant_runtime.history_preview import _project_source_paths
+    project = check_path(Path(project))
+    if project.resolve(strict=True) != project:
+        raise MigrationIOError("source_project_identity_invalid")
     if source_config is None:
         raise MigrationIOError("source_config_required")
     identity = read_stable_file(project / PROJECT_IDENTITY_RELATIVE_PATH, 64 * 1024)
@@ -349,22 +353,33 @@ def storage_authority(project, source_config, projects_home=None):
     if (payload["projectId"].strip().lower() != canonical.project_id
             or canonical.instance_id != instance_id_for_project(project)):
         raise MigrationIOError("source_project_identity_changed")
-    marker = read_stable_file(storage_migration_state_path(canonical), 64 * 1024)
-    active = resolve_active_project_storage_paths(project, projects_home=canonical.projects_home, config_path=source_config)
-    if (active.project_id != canonical.project_id or active.instance_id != canonical.instance_id
-            or active.data != canonical.data):
+    marker_path = storage_migration_state_path(canonical)
+    marker_present = marker_path.exists() or marker_path.is_symlink()
+    marker = read_stable_file(marker_path, 64 * 1024) if marker_present else None
+    active = _project_source_paths(project, source_config, projects_home=canonical.projects_home, legacy_home=legacy_home)
+    if not marker_present and active.migrated:
+        raise MigrationIOError("source_storage_route_invalid")
+    # Preview already checks its process-wide resolver. The offline processes
+    # have different DATA_HOME values, so re-evaluate the same explicit route.
+    if active.project_id != canonical.project_id or active.instance_id != canonical.instance_id:
         raise MigrationIOError("source_storage_route_invalid")
     def verify():
         verify_snapshot(identity)
-        verify_snapshot(marker)
-        current = resolve_active_project_storage_paths(project, projects_home=canonical.projects_home, config_path=source_config)
-        if (current.project_id != active.project_id or current.instance_id != active.instance_id
-                or current.data != active.data or current.runtime != active.runtime):
+        if marker is not None:
+            verify_snapshot(marker)
+        elif marker_path.exists() or marker_path.is_symlink():
+            raise MigrationIOError("source_storage_route_changed")
+        current = _project_source_paths(project, source_config, projects_home=canonical.projects_home, legacy_home=legacy_home)
+        if current != active:
             raise MigrationIOError("source_storage_route_changed")
         verify_snapshot(identity)
-        verify_snapshot(marker)
+        if marker is not None:
+            verify_snapshot(marker)
+        elif marker_path.exists() or marker_path.is_symlink():
+            raise MigrationIOError("source_storage_route_changed")
     verify()
-    return active, (identity, marker), verify
+    # Preserve the registered spelling used in the preview's existing digest.
+    return replace(active, project_root=project), (identity, *((marker,) if marker is not None else ())), verify
 
 
 def _capture(project, workspace, scope, grant_path, *, categories=None):
@@ -440,6 +455,15 @@ def _isolated_environment(target, config):
     return env
 
 
+def _assert_source_target_disjoint(target, roots):
+    from core.assistant_runtime.migration_io import MigrationIOError
+    target = Path(target).resolve()
+    for root in roots:
+        resolved = Path(root).resolve()
+        if target.is_relative_to(resolved) or resolved.is_relative_to(target):
+            raise MigrationIOError('history_source_target_overlap')
+
+
 def activate_in_subprocess(*, paths, workspace, agent_id, source_config, target_profile,
         target_config, migration_id, path_grants, authority_snapshots, authority_verify, category="personal",
         baseline_migration_id=None, initial_control=None):
@@ -449,7 +473,8 @@ def activate_in_subprocess(*, paths, workspace, agent_id, source_config, target_
     from core.assistant_runtime import migration_affairs, migration_episodic
     from core.assistant_runtime.migration_io import MigrationIOError, verify_snapshot
     from core.assistant_runtime.migration_paths import _identity_chain
-    from core.infrastructure import developer_sandbox
+    from config.paths import default_data_home, resolve_configured_data_home
+    from vibelution_storage import storage_migration_state_path
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,95}", migration_id):
         raise MigrationIOError("migration_id_invalid")
     if category not in {"personal", "knowledge", "affairs_conflicts", "affairs_sync"}:
@@ -482,22 +507,25 @@ def activate_in_subprocess(*, paths, workspace, agent_id, source_config, target_
     authorities = (*authority_snapshots, *selected_authorities, *knowledge_authorities)
     # Refuse overlap before native bootstrap, including external grants and
     # authority files that might otherwise be placed inside the target.
-    for root in (paths.project_root, workspace, *captured.paths.values(),
-                 *(item.path for item in authorities)):
-        resolved = root.resolve()
-        if target.is_relative_to(resolved) or resolved.is_relative_to(target):
-            raise MigrationIOError("history_source_target_overlap")
+    _assert_source_target_disjoint(target, (paths.project_root, paths.data, workspace.parent, workspace,
+        *captured.paths.values(), *(item.path for item in authorities)))
     _verify_captured(captured, authorities, authority_verify)
     # Include absence and ancestor identity, so creating/replacing a routing
     # authority cannot hide behind an unchanged selected source directory.
-    route_paths = (paths.project_root, workspace, developer_sandbox._active_state_path(paths.project_root))
+    route_paths = (paths.project_root, workspace, paths.runtime / 'developer-mode/active.json',
+                   storage_migration_state_path(paths))
     route_proof = [[str(path), [[str(node), list(identity)] for node, identity in _identity_chain(path)]]
                    for path in route_paths]
+    legacy_home = resolve_configured_data_home(config_path=source_config) or default_data_home().resolve()
+    marker_path = storage_migration_state_path(paths)
+    marker_present = marker_path.exists() or marker_path.is_symlink()
+    authority_verify()
     request = {"schemaVersion": 1, "project": str(paths.project_root), "workspace": str(workspace),
         "scope": scope, "grant": str(grant_path) if grant_path is not None else None,
         "target": str(target), "config": _snapshot_proof(config), "migrationId": migration_id, "category": category,
         "baselineMigrationId": baseline_migration_id, "projectsHome": str(paths.projects_home),
-        "sourceConfig": str(Path(source_config).resolve()),
+        "sourceConfig": str(source_config), "legacyHome": str(legacy_home),
+        "storageMarkerPresent": marker_present, "storageData": str(paths.data), "storageRuntime": str(paths.runtime),
         "route": route_proof, "source": _source_proof(captured, authorities)}
     if initial_control is not None:
         request["initialControl"] = initial_control
@@ -630,14 +658,21 @@ def _child():
         def verify_route():
             _verify_file_proofs(request["source"]["authorities"])
             actual, _, verify_storage = storage_authority(Path(request["project"]),
-                Path(request["sourceConfig"]), Path(request["projectsHome"]))
+                Path(request["sourceConfig"]), Path(request["projectsHome"]), legacy_home=Path(request["legacyHome"]))
+            from vibelution_storage import storage_migration_state_path
+            marker_path = storage_migration_state_path(actual)
+            if ((marker_path.exists() or marker_path.is_symlink()) != request["storageMarkerPresent"]
+                    or actual.data != Path(request["storageData"]) or actual.runtime != Path(request["storageRuntime"])):
+                raise MigrationIOError("source_storage_route_changed")
             if (actual.project_id != request["scope"]["projectId"]
                     or actual.instance_id != request["scope"]["instanceId"]):
                 raise MigrationIOError("source_project_identity_changed")
             from scripts.assistant_migration_inventory import _bound_route
-            workspace, _, _, verify_workspace = _bound_route(actual, Path(request["sourceConfig"]))
+            workspace, _, _, verify_workspace = _bound_route(actual, Path(request["sourceConfig"]),
+                                                            formal_home=Path(request["workspace"]).parent)
             if workspace != Path(request["workspace"]):
                 raise MigrationIOError("source_routing_changed")
+            _assert_source_target_disjoint(target, (actual.project_root, actual.data, workspace.parent, workspace))
             verify_workspace()
             verify_storage()
             for path, chain in request["route"]:
@@ -690,8 +725,9 @@ def _child():
                     raise MigrationIOError("initial_migration_binding_changed")
                 admitted_intent.append(intent)
                 actual, storage, verify_storage = storage_authority(Path(request["project"]),
-                    Path(request["sourceConfig"]), Path(request["projectsHome"]))
-                workspace, _, routing, verify_workspace = _bound_route(actual, Path(request["sourceConfig"]))
+                    Path(request["sourceConfig"]), Path(request["projectsHome"]), legacy_home=Path(request["legacyHome"]))
+                workspace, _, routing, verify_workspace = _bound_route(actual, Path(request["sourceConfig"]),
+                                                                    formal_home=Path(request["workspace"]).parent)
                 registry = next((x for x in selected if x.path == workspace / "agents/agents.json"), None)
                 if registry is None or workspace != Path(request["workspace"]):
                     raise MigrationIOError("initial_migration_binding_changed")
@@ -717,6 +753,7 @@ def _child():
                         or type(permit["schemaVersion"]) is not int or permit["schemaVersion"] != 1
                         or permit["granted"] is not True):
                     raise MigrationIOError("initial_permit_denied")
+                verify_route()
                 # A directory creation is the one-way claim. A crash during
                 # metadata publication still leaves a permanent unknown claim.
                 with pinned_target_directory(target / "initial_migration_claims", create=True) as claims:

@@ -50,11 +50,12 @@ def _existing_route(paths, config_path):
     return state.path(), runtime, tuple(snapshots), verify
 
 
-def _bound_route(paths, config_path):
-    """Use native routing with a proven formal workspace in this context."""
+def _bound_route(paths, config_path, *, formal_home=None):
+    """Bind a disabled developer route to source-owned paths and snapshots."""
     from config.paths import resolve_configured_data_home
     from config.public_config import read_existing_config_snapshot
-    from core.infrastructure import developer_sandbox
+    from core.assistant_runtime.migration_io import check_path
+    from core.assistant_runtime.migration_paths import _identity_chain
     config = read_stable_file(config_path, 16 * 1024 * 1024)
     public = read_existing_config_snapshot(config.path)
     launcher = public.get('launcher', {})
@@ -63,23 +64,29 @@ def _bound_route(paths, config_path):
         raise MigrationIOError('source_routing_changed')
     if settings.get('enabled', False):
         raise MigrationIOError('source_developer_mode_unverified')
-    configured = resolve_configured_data_home(config_path=config.path)
-    formal = (configured / 'workspace').resolve() if configured is not None else paths.workspace
-    token = developer_sandbox._FORMAL_WORKSPACE_SNAPSHOT.set({paths.project_root: formal})
-    try:
-        workspace, runtime, snapshots, verify_route = _existing_route(paths, config.path)
-    finally:
-        developer_sandbox._FORMAL_WORKSPACE_SNAPSHOT.reset(token)
-    verify_snapshot(config)
+    configured = resolve_configured_data_home(config_path=config.path) if formal_home is None else None
+    formal = ((Path(formal_home) / 'workspace') if formal_home is not None else
+              (configured / 'workspace').resolve() if configured is not None else paths.workspace)
+    check_path(formal)
+    if not formal.is_dir():
+        raise MigrationIOError('source_routing_changed')
+    workspace = formal.resolve()
+    active = paths.runtime / 'developer-mode/active.json'
+    active_chain = _identity_chain(active)
+    active_snapshot = read_stable_file(active, 64 * 1024) if active.exists() or active.is_symlink() else None
+    snapshots = (config, *((active_snapshot,) if active_snapshot is not None else ()))
     def verify():
-        token = developer_sandbox._FORMAL_WORKSPACE_SNAPSHOT.set({paths.project_root: formal})
-        try:
-            verify_snapshot(config)
-            verify_route()
-        finally:
-            developer_sandbox._FORMAL_WORKSPACE_SNAPSHOT.reset(token)
+        for snapshot in snapshots:
+            verify_snapshot(snapshot)
+        if active_snapshot is None and (active.exists() or active.is_symlink()):
+            raise MigrationIOError('source_routing_changed')
+        if _identity_chain(active) != active_chain:
+            raise MigrationIOError('source_routing_changed')
+        check_path(formal)
+        if not formal.is_dir() or formal.resolve() != workspace:
+            raise MigrationIOError('source_routing_changed')
     verify()
-    return workspace, runtime, snapshots, verify
+    return workspace, paths.runtime, snapshots, verify
 
 
 def _initial_offline():
@@ -89,7 +96,7 @@ def _initial_offline():
     from core.assistant_runtime.initial_migration_binding import (read_initial_intent, source_identity,
         target_identity, authority_identity)
     from scripts.assistant_migration_activate import (initial_binding, storage_authority,
-        activate_in_subprocess, prepare_initial_model_config)
+        activate_in_subprocess, prepare_initial_model_config, _assert_source_target_disjoint)
     token = os.environ.pop("VIBELUTION_INITIAL_MIGRATION_TOKEN", "")
     url = os.environ.pop("VIBELUTION_INITIAL_MIGRATION_URL", "")
     operation_id = None
@@ -116,10 +123,8 @@ def _initial_offline():
         scope = intent["sourceScope"]
         if (scope["projectId"] != paths.project_id or scope["instanceId"] != paths.instance_id):
             raise MigrationIOError("initial_migration_binding_changed")
-        for root in (paths.project_root, workspace, Path(bound["sourceConfig"])):
-            resolved = root.resolve()
-            if target.is_relative_to(resolved) or resolved.is_relative_to(target):
-                raise MigrationIOError("history_source_target_overlap")
+        _assert_source_target_disjoint(target, (paths.project_root, paths.data, workspace.parent,
+                                                 workspace, Path(bound["sourceConfig"])))
         def verify():
             verify_storage()
             verify_routing()
