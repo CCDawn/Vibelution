@@ -14,11 +14,11 @@ from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 from core.infrastructure.atomic_io import atomic_write_json
-from core.infrastructure.file_lock import cross_process_file_lock
+from core.infrastructure.file_lock import DEFAULT_LOCK_TIMEOUT_SECONDS, cross_process_file_lock
 
 from .migration_affairs import _BYTE_CAP, _parse_rows, _token
 from .online_affairs_sync_lease import check_affairs_sync_lease
-from .migration_io import (MigrationIOError, check_path, migration_target_lock, pinned_mutable_file,
+from .migration_io import (MigrationIOError, check_path, existing_migration_file_lock, migration_target_lock, pinned_mutable_file,
     path_identity, pinned_source_files, pinned_target_directory, read_stable_file, strict_json, verify_snapshot)
 
 _RECORD_CAP = 16 * 1024 * 1024
@@ -94,20 +94,17 @@ def locked_affairs_target(root, *, target_agent_id, readonly=False):
         raise MigrationIOError("affairs_target_binding_invalid")
     ledger = plugin / "affairs/items.jsonl"
     receipts = root / "affairs_sync_receipts"
-    lock = (cross_process_file_lock(ledger) if native._OFFLINE_MIGRATION
-            else cross_process_file_lock(ledger, timeout=0))
+    lock = (existing_migration_file_lock(ledger, timeout=DEFAULT_LOCK_TIMEOUT_SECONDS if native._OFFLINE_MIGRATION else 0) if readonly else
+            cross_process_file_lock(ledger) if native._OFFLINE_MIGRATION else cross_process_file_lock(ledger, timeout=0))
     if type(readonly) is not bool:
         raise MigrationIOError("affairs_target_lock_required")
     with ExitStack() as stack:
         stack.enter_context(pinned_target_directory(receipts, create=not readonly))
         stack.enter_context(migration_target_lock(receipts))
         stack.enter_context(pinned_target_directory(ledger.parent, create=not readonly))
-        leaf = ledger.with_name(ledger.name + ".lock")
-        stack.enter_context(pinned_mutable_file(leaf, create=not readonly))
-        # The shared lock seeds empty sidecars. A read-only observation must
-        # use an existing initialized leaf and never create or seed one.
-        if readonly and path_identity(leaf)[2] < 1:
-            raise MigrationIOError("affairs_target_lock_required")
+        if not readonly:
+            leaf = ledger.with_name(ledger.name + ".lock")
+            stack.enter_context(pinned_mutable_file(leaf))
         stack.enter_context(lock)
         snapshot = read_stable_file(ledger, _BYTE_CAP) if ledger.exists() or ledger.is_symlink() else None
         if snapshot is not None:

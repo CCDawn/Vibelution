@@ -307,6 +307,44 @@ async def test_initial_migration_receipt_reaches_existing_read_tool(monkeypatch)
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(("code", "count_key", "count"), [
+    ("affairs_conflicts", "conflictCount", 2),
+    ("sender_proof_unavailable", "uncertainCount", 0),
+])
+async def test_reminder_pending_receipt_reaches_native_read_tool(monkeypatch, code, count_key, count):
+    from core.infrastructure import native_runtime
+    from core.assistant_runtime.main_control import initial_migration_id
+    from tools import personal_assistant_tools
+
+    monkeypatch.setattr(native_runtime, "is_launcher_assistant_process", lambda: True)
+    monkeypatch.setattr(personal_assistant_tools, "_identity", lambda: {"agentId": "a", "sessionId": "s"})
+    service = Dispatch()
+    owner = broker(service, claim_seconds=2, initial_migration_enabled=True)
+    bind_actions(service, asyncio.get_running_loop(), main_control=owner)
+    try:
+        pending = asyncio.create_task(asyncio.to_thread(personal_assistant_tools.personal_assistant_action_tool,
+                                                        "reminder_handoff_receipt", {"project_id": "p:main"}))
+        wire = (await owner.claim())["request"]
+        operation_id = initial_migration_id("p:main", "", "reminder_handoff")
+        expected = {"schemaVersion": 1, "projectId": "p:main", "category": "reminder_handoff",
+                    "operationId": operation_id, "syncId": "affairs-" + operation_id[len("initial-"):],
+                    "state": "pending", "code": code, count_key: count, "readyForCutover": False}
+        assert wire["operationId"] == operation_id
+        bad_limit = 0 if code == "affairs_conflicts" else 2049
+        other_code = "sender_proof_unavailable" if code == "affairs_conflicts" else "affairs_conflicts"
+        for invalid in ({**expected, count_key: True}, {**expected, count_key: -1},
+                        {**expected, count_key: bad_limit}, {**expected, "code": other_code},
+                        {**expected, "syncId": "affairs-" + "a" * 40},
+                        {**expected, "readyForCutover": True}, {**expected, "extra": "not allowed"}):
+            with pytest.raises(ValueError):
+                owner.settle(wire["deliveryId"], invalid)
+        assert owner.settle(wire["deliveryId"], expected)
+        assert json.loads(await pending) == {"source": "launcher-assistant", "untrustedContent": True, **expected}
+    finally:
+        owner.close(); unbind_actions(service)
+
+
+@pytest.mark.anyio
 async def test_history_turn_stop_does_not_report_a_claimed_import_as_cancelled():
     owner = broker(claim_seconds=2)
     request = {"projectId": "p:main", "previewId": "a" * 64, "turnId": "turn-1"}

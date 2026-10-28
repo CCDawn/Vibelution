@@ -63,7 +63,7 @@ def execute(action: str, parameters: dict, runtime: dict, *, governed: bool = Fa
     contract = contracts().get(action)
     if contract is None:
         raise ValueError("未知的 Launcher 本地操作，请先 index/describe 查询。")
-    if action in {"history_list", "history_read"}:
+    if action in {"history_list", "history_read", "history_search"}:
         from .history_actions import execute as execute_history
         return execute_history(action, parameters)
     if action in {"affairs_conflict_sets", "affairs_conflict_list", "affairs_conflict_read", "affairs_sync_receipt"}:

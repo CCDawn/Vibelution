@@ -1,13 +1,148 @@
 """Migration readers never create, repair or silently truncate their sources."""
 import hashlib
 import json
+import os
+import subprocess
+import sys
+import threading
+import time
+from types import SimpleNamespace
 
 import pytest
 
 from core.assistant_runtime.migration_io import (
     MigrationIOError, check_path, fingerprint_tree, read_stable_file, strict_json, verify_snapshot,
     path_identity, publish_directory,
+    existing_migration_file_lock,
 )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows physical namespace pinning")
+def test_existing_migration_lock_rejects_missing_empty_and_linked_leaf(tmp_path):
+    target = tmp_path / "ledger"
+    leaf = tmp_path / "ledger.lock"
+    before = {p.name for p in tmp_path.iterdir()}
+    with pytest.raises(MigrationIOError):
+        with existing_migration_file_lock(target):
+            pass
+    assert {p.name for p in tmp_path.iterdir()} == before
+    leaf.write_bytes(b"")
+    with pytest.raises(MigrationIOError):
+        with existing_migration_file_lock(target):
+            pass
+    assert leaf.read_bytes() == b""
+    leaf.write_bytes(b"L")
+    alias = tmp_path / "other.lock"
+    alias.hardlink_to(leaf)
+    with pytest.raises(MigrationIOError):
+        with existing_migration_file_lock(tmp_path / "other"):
+            pass
+    assert leaf.read_bytes() == alias.read_bytes() == b"L"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows physical namespace pinning")
+def test_existing_migration_lock_excludes_writer_across_processes_without_writes(tmp_path):
+    from core.infrastructure.file_lock import cross_process_file_lock
+
+    target = tmp_path / "ledger"
+    leaf = tmp_path / "ledger.lock"
+    leaf.write_bytes(b"sentinel")
+    replacement = tmp_path / "replacement"
+    replacement.write_bytes(b"other")
+    before = {p.name for p in tmp_path.iterdir()}
+    script = (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "from core.infrastructure.file_lock import cross_process_file_lock\n"
+        "from core.assistant_runtime.migration_io import existing_migration_file_lock\n"
+        "target=Path(sys.argv[1])\n"
+        "lock=cross_process_file_lock(target, timeout=0) if sys.argv[2]=='writer' else existing_migration_file_lock(target, timeout=0)\n"
+        "try:\n"
+        " with lock:\n"
+        "  print('acquired', flush=True)\n"
+        "  sys.stdin.readline()\n"
+        "except TimeoutError:\n"
+        " print('blocked', flush=True)\n"
+    )
+    def child(kind):
+        return subprocess.Popen([sys.executable, "-c", script, str(target), kind],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            creationflags=subprocess.CREATE_NO_WINDOW)
+
+    with existing_migration_file_lock(target):
+        with pytest.raises(OSError):
+            os.replace(replacement, leaf)
+        process = child("writer")
+        output, error = process.communicate(timeout=10)
+        assert process.returncode == 0, error
+        assert output.strip() == "blocked"
+
+    with cross_process_file_lock(target):
+        process = child("reader")
+        output, error = process.communicate(timeout=10)
+        assert process.returncode == 0, error
+        assert output.strip() == "blocked"
+
+    with existing_migration_file_lock(target):
+        with existing_migration_file_lock(target):
+            pass
+    assert {p.name for p in tmp_path.iterdir()} == before
+    assert leaf.read_bytes() == b"sentinel"
+    assert replacement.read_bytes() == b"other"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows physical namespace pinning")
+def test_affairs_readonly_keeps_offline_wait_and_online_nonblocking(tmp_path, monkeypatch):
+    from core.assistant_runtime import migration_affairs_conflicts as conflicts, native
+    from core.infrastructure import native_runtime
+    from core.infrastructure.file_lock import cross_process_file_lock
+    from core.web.services import personal_affairs_service
+    from core.web.services.session import directory_runtime
+
+    plugin = tmp_path / "agents" / "assistant" / "plugins" / "personal-affairs"
+    ledger = plugin / "affairs" / "items.jsonl"
+    ledger.parent.mkdir(parents=True)
+    (tmp_path / "affairs_sync_receipts").mkdir()
+    leaf = ledger.with_name(ledger.name + ".lock")
+    leaf.write_bytes(b"sentinel")
+    monkeypatch.setattr(native, "_STARTED", True)
+    monkeypatch.setattr(native, "_AGENT_ID", "assistant")
+    monkeypatch.setattr(native, "_SESSION_ID", "test")
+    monkeypatch.setattr(native, "_STOP_REQUESTED", threading.Event())
+    monkeypatch.setattr(native_runtime, "assistant_native_root", lambda: tmp_path)
+    monkeypatch.setattr(directory_runtime, "directory_store_project_root", lambda: tmp_path)
+    monkeypatch.setattr(personal_affairs_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(personal_affairs_service, "get_personal_affairs_service",
+        lambda: SimpleNamespace(store=SimpleNamespace(plugin_root=lambda agent_id: plugin)))
+
+    acquired, release = threading.Event(), threading.Event()
+    def writer():
+        with cross_process_file_lock(ledger):
+            acquired.set()
+            release.wait(5)
+    worker = threading.Thread(target=writer, daemon=True)
+    worker.start()
+    assert acquired.wait(2)
+    timer = None
+    try:
+        monkeypatch.setattr(native, "_OFFLINE_MIGRATION", False)
+        with native._LOCK, pytest.raises(TimeoutError):
+            with conflicts.locked_affairs_target(tmp_path, target_agent_id="assistant", readonly=True):
+                pass
+        monkeypatch.setattr(native, "_OFFLINE_MIGRATION", True)
+        timer = threading.Timer(0.2, release.set)
+        timer.start()
+        start = time.monotonic()
+        with native._LOCK, conflicts.locked_affairs_target(tmp_path, target_agent_id="assistant", readonly=True):
+            assert time.monotonic() - start >= 0.1
+    finally:
+        release.set()
+        if timer is not None:
+            timer.join()
+        worker.join(timeout=2)
+    assert not worker.is_alive()
+    assert leaf.read_bytes() == b"sentinel"
+    assert not ledger.exists()
 
 
 def test_stable_file_and_tree_are_exact_read_only_snapshots(tmp_path):

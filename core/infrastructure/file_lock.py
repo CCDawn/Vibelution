@@ -67,6 +67,7 @@ def cross_process_file_lock(
     timeout: float | None = DEFAULT_LOCK_TIMEOUT_SECONDS,
     poll_interval: float = _DEFAULT_POLL_INTERVAL_SECONDS,
     lock_path: str | os.PathLike[str] | None = None,
+    _existing_only: bool = False,
 ) -> Iterator[None]:
     """Hold one exclusive per-target lock across threads and processes.
 
@@ -112,6 +113,7 @@ def cross_process_file_lock(
                 key=key,
                 timeout=None if deadline is None else max(0.0, deadline - time.monotonic()),
                 poll_interval=poll_interval,
+                existing_only=_existing_only,
             ):
                 depth[key] = 1
                 try:
@@ -161,8 +163,10 @@ def _locked_sidecar(
     key: str,
     timeout: float | None,
     poll_interval: float,
+    existing_only: bool = False,
 ) -> Iterator[BinaryIO]:
-    sidecar.parent.mkdir(parents=True, exist_ok=True)
+    if not existing_only:
+        sidecar.parent.mkdir(parents=True, exist_ok=True)
     deadline: float | None = None
     if timeout is not None:
         deadline = time.monotonic() + max(0.0, float(timeout))
@@ -171,9 +175,11 @@ def _locked_sidecar(
         key=key,
         deadline=deadline,
         poll_interval=poll_interval,
+        existing_only=existing_only,
     )
     try:
-        _seed_lock_byte(handle)
+        if not existing_only:
+            _seed_lock_byte(handle)
         yield handle
     finally:
         _release_os_lock(handle)
@@ -186,6 +192,7 @@ def _open_locked_sidecar(
     key: str,
     deadline: float | None,
     poll_interval: float,
+    existing_only: bool = False,
 ) -> BinaryIO:
     """Open the sidecar and take its OS lock, bounded by one shared deadline.
 
@@ -198,7 +205,11 @@ def _open_locked_sidecar(
         handle: BinaryIO | None = None
         blocked: OSError | None = None
         try:
-            handle = sidecar.open("a+b")
+            handle = sidecar.open("rb" if existing_only else "a+b")
+        except FileNotFoundError as exc:
+            if existing_only:
+                raise
+            blocked = exc
         except OSError as exc:
             blocked = exc
         if handle is not None and _try_lock_handle(handle):

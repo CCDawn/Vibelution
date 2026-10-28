@@ -281,6 +281,35 @@ def pinned_mutable_file(path: Path, *, create: bool = True):
             api.CloseHandle(handle)
 
 
+@contextmanager
+def existing_migration_file_lock(path: Path, *, timeout=0):
+    """Lock an existing initialized sidecar without creating or seeding it.
+
+    On Windows, pin the verified namespace and lock leaf against replacement.
+    The byte-range lock is the same exclusive lock used by ordinary writers.
+    """
+    from core.infrastructure.file_lock import cross_process_file_lock, lock_path_for
+
+    path = validate_path(path)
+    leaf = lock_path_for(path)
+    with pinned_mutable_file(leaf, create=False):
+        try:
+            check_path(leaf)
+            before = path_identity(leaf)
+            if not stat.S_ISREG(before[5]) or before[6] != 1 or before[2] < 1:
+                raise MigrationIOError("target_lock_leaf_unavailable")
+            with cross_process_file_lock(path, timeout=timeout, _existing_only=True):
+                if path_identity(leaf) != before:
+                    raise MigrationIOError("target_lock_leaf_unavailable")
+                yield
+                if path_identity(leaf) != before:
+                    raise MigrationIOError("target_lock_leaf_unavailable")
+        except TimeoutError:
+            raise
+        except OSError:
+            raise MigrationIOError("target_lock_leaf_unavailable") from None
+
+
 def read_stable_file(path: Path, max_bytes: int, expected: tuple | None = None) -> FileSnapshot:
     if type(max_bytes) is not int or not 0 <= max_bytes <= 16 * 1024 * 1024:
         raise MigrationIOError("invalid_source_budget")

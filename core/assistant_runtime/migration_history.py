@@ -10,8 +10,9 @@ import json
 import os
 import re
 import tempfile
+import unicodedata
 from contextlib import ExitStack, contextmanager, nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from core.assistant_runtime.migration_inventory import declared_assistant_identities
@@ -1157,6 +1158,128 @@ def list_history_with_status(target_root: Path, *, max_total_bytes: int = _ARCHI
             "conflictCount": len(conflicts), "unavailableArchiveCount": budget.quarantined_archives}
 
 
+
+def _history_visible_messages(events):
+    """Project archive messages after removing structured non-text payloads.
+
+    The ordinary Journal projection stringifies arbitrary payloads. Archive
+    navigation keeps only explicitly typed text parts before invoking it, so
+    both search indexes and read indexes use the same safe projection.
+    """
+    fields = {"user_message": "content", "assistant_message": "content",
+              "assistant_partial": "content", "assistant_delta_committed": "content",
+              "assistant_item_committed": "text"}
+    source_roles = {"user_message": "user", "assistant_message": "assistant",
+                    "assistant_partial": "assistant", "assistant_delta_committed": "assistant",
+                    "assistant_item_committed": "assistant"}
+    sources = {event.event_id: source_roles.get(event.event_type) for event in events}
+    sanitized = []
+    for event in events:
+        key = fields.get(event.event_type)
+        if key is None:
+            sanitized.append(event)
+            continue
+        payload = dict(event.payload)
+        metadata = payload.get("metadata")
+        if isinstance(metadata, dict):
+            # The Journal projection normally lets payload metadata override
+            # its generated eventId. Restore the verified source identity while
+            # keeping legitimate kinds such as user_guidance intact.
+            payload["metadata"] = {**metadata, "eventId": event.event_id}
+        if key in payload and not isinstance(payload[key], str):
+            value = payload[key]
+            text = ""
+            if isinstance(value, list):
+                text = "\n".join(part["text"] for part in value
+                                 if isinstance(part, dict) and isinstance(part.get("type"), str)
+                                 and part["type"] in {"text", "input_text", "output_text"}
+                                 and isinstance(part.get("text"), str))
+            payload[key] = text
+        sanitized.append(replace(event, payload=payload))
+    try:
+        messages = project_conversation_ledger(sanitized, include_model_messages=False,
+                                               include_visible_messages=True).visible_messages
+        # Only source Journal message events contribute text. Tool lifecycle
+        # and recovery rows can also be projected with an assistant role.
+        safe = []
+        for message in messages:
+            metadata = message.get("metadata")
+            event_id = metadata.get("eventId") if isinstance(metadata, dict) else None
+            role = message.get("role")
+            if not isinstance(event_id, str) or sources.get(event_id) != role or role not in ("user", "assistant"):
+                message = {**message, "content": ""}
+            safe.append(message)
+        return safe
+    except (ValueError, TypeError, KeyError, RecursionError):
+        raise MigrationIOError("history_projection_invalid") from None
+
+
+def search_history(target_root: Path, query: str, *, cursor: str = "", limit: int = 6) -> dict:
+    """Search a bounded, verified visible-message projection; never return content."""
+    normalized = unicodedata.normalize("NFKC", query).strip().casefold()
+    if not normalized or len(normalized) > 256:
+        raise MigrationIOError("history_search_query_invalid")
+    try:
+        normalized.encode("utf-8")
+    except UnicodeEncodeError:
+        raise MigrationIOError("history_search_query_invalid") from None
+    budget = _ArchiveBudget()
+    selected, conflicts = _select_history_versions(target_root, budget, retain_raw=False, isolate_errors=True)
+    # Verified manifests commit to every physical and logical archive object.
+    # Partial/quarantined corpora cannot offer a stable archive snapshot.
+    incomplete = bool(conflicts) or bool(budget.quarantined_archives)
+    snapshot = _digest({"archives": sorted((mid, _digest(entry[0])) for mid, entry in budget.archive_cache.items()),
+                        "selected": sorted((hid, row["journal"]["sha256"], mid)
+                                           for hid, (row, mid, _) in selected.items()),
+                        "conflicts": sorted(conflicts), "unavailable": budget.quarantined_archives})
+    binding = _digest({"query": normalized, "snapshot": snapshot})
+    offset = 0
+    if cursor:
+        match = re.fullmatch(r"v1\.([a-f0-9]{64})\.([0-9]{1,6})", cursor)
+        if not match or match.group(1) != binding or incomplete:
+            raise MigrationIOError("history_search_cursor_invalidated")
+        offset = int(match.group(2))
+    results, seen, scanned_messages, scanned_characters = [], 0, 0, 0
+    scan_limited = False
+    for hid in sorted(selected):
+        row, _, journal = selected[hid]
+        events = _events(journal.raw, row["sessionId"])
+        messages = _history_visible_messages(events)
+        searchable = {event.event_id: event.event_type for event in events
+                      if event.event_type in {"user_message", "assistant_message", "assistant_item_committed"}
+                      and not (event.event_type == "assistant_message" and event.status.lower() in
+                               {"aborted", "cancelled", "canceled", "interrupted", "stopped", "stopped_by_user"})}
+        for index, message in enumerate(messages):
+            role, content = message.get("role"), message.get("content")
+            metadata = message.get("metadata")
+            event_id = metadata.get("eventId") if isinstance(metadata, dict) else None
+            if (role not in ("user", "assistant") or not isinstance(event_id, str)
+                    or event_id not in searchable or not isinstance(content, str) or not content):
+                continue
+            if scanned_messages >= 10000 or scanned_characters + len(content) > 2000000:
+                scan_limited = True
+                break
+            scanned_messages += 1
+            scanned_characters += len(content)
+            if normalized in unicodedata.normalize("NFKC", content).casefold():
+                if offset <= seen < offset + limit:
+                    results.append({"historyId": hid, "messageIndex": index, "role": role,
+                                    "journalSha256": row["journal"]["sha256"]})
+                seen += 1
+        if scan_limited:
+            break
+    next_offset = offset + len(results)
+    # An incomplete corpus cannot guarantee snapshot stability, so expose its
+    # first page only and report that additional results may be omitted.
+    next_cursor = f"v1.{binding}.{next_offset}" if seen > next_offset and not incomplete else None
+    return {"matches": results, "nextCursor": next_cursor,
+            "searchScope": "user_and_final_assistant; excludes timeline-only commentary and deltas",
+            "partial": incomplete or scan_limited,
+            "scanLimited": scan_limited, "conflictCount": len(conflicts),
+            "unavailableArchiveCount": budget.quarantined_archives,
+            "readOnly": True, "untrustedContent": True}
+
+
 def _safe_projection(value):
     # URLs and paths from transcript/tool data are untrusted text, never a
     # directly loadable src. Dedicated archive attachments have logical IDs.
@@ -1171,11 +1294,15 @@ def _safe_projection(value):
     return result
 
 
-def history_detail(target_root: Path, history_id: str, *, max_total_bytes: int = _ARCHIVE_BYTES_CAP,
+def history_detail(target_root: Path, history_id: str, *, expected_journal_sha256: str | None = None,
+                   max_total_bytes: int = _ARCHIVE_BYTES_CAP,
                    max_files: int = _ARCHIVE_FILES_CAP, max_history_rows: int = 10000,
                    max_archives: int = _ARCHIVE_COUNT_CAP) -> dict:
     if not isinstance(history_id, str) or not _HASH.fullmatch(history_id):
         raise MigrationIOError("history_id_invalid")
+    if expected_journal_sha256 is not None and (not isinstance(expected_journal_sha256, str)
+                                                   or not _HASH.fullmatch(expected_journal_sha256)):
+        raise MigrationIOError("history_journal_digest_invalid")
     budget = _ArchiveBudget(max_total_bytes, max_files, max_history_rows, max_archives)
     selected, conflicts = _select_history_versions(target_root, budget, history_id=history_id, isolate_errors=True)
     if history_id in conflicts:
@@ -1183,13 +1310,15 @@ def history_detail(target_root: Path, history_id: str, *, max_total_bytes: int =
     if history_id not in selected:
         raise MigrationIOError("history_not_found")
     row, mid, raw = selected[history_id]
+    if expected_journal_sha256 is not None and row["journal"]["sha256"] != expected_journal_sha256:
+        raise MigrationIOError("history_version_changed")
     events = _events(raw, row["sessionId"])
     try:
-        projection = project_conversation_ledger(events, include_model_messages=False, include_visible_messages=True)
+        messages = _history_visible_messages(events)
         items = conversation_turn_items_from_events(events)
     except (ValueError, TypeError, KeyError, RecursionError):
         raise MigrationIOError("history_projection_invalid") from None
-    return _summary(row, mid) | {"messages": _safe_projection(projection.visible_messages),
+    return _summary(row, mid) | {"messages": _safe_projection(messages),
         "turnItems": _safe_projection(items), "events": _safe_projection([event.to_dict() for event in events]),
         "sourceBody": raw.decode("utf-8-sig"),
         "attachments": [{"attachmentId": asset["attachmentId"], "size": asset["size"],

@@ -142,6 +142,21 @@ def _result(action, request, result):
         return appearance.validate_result(action, request, result)
     if action == "initial_migration_receipt":
         required = {"schemaVersion", "projectId", "category", "operationId", "state", "code", "readyForCutover"}
+        if request["category"] == "reminder_handoff" and type(result) is dict and result.get("state") == "pending":
+            codes = {"affairs_conflicts": ("conflictCount", 1, 4096),
+                     "sender_proof_unavailable": ("uncertainCount", 0, 2048)}
+            code = result.get("code")
+            if type(code) is not str or code not in codes:
+                raise ValueError("Invalid initial migration receipt result")
+            count_key, minimum, maximum = codes[code]
+            if (set(result) != required | {"syncId", count_key}
+                    or type(result.get("schemaVersion")) is not int or result["schemaVersion"] != 1
+                    or any(result.get(key) != request[key] for key in ("projectId", "category", "operationId"))
+                    or result.get("syncId") != "affairs-" + request["operationId"][len("initial-"):]
+                    or result.get("readyForCutover") is not False
+                    or type(result.get(count_key)) is not int or not minimum <= result[count_key] <= maximum):
+                raise ValueError("Invalid initial migration receipt result")
+            return dict(result)
         extra = {"waitingFor", "syncId"} if request["category"] == "reminder_handoff" and type(result) is dict and result.get("state") == "queued" else set()
         if (type(result) is not dict or set(result) != required | extra
                 or type(result.get("schemaVersion")) is not int or result["schemaVersion"] != 1
