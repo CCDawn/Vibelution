@@ -2104,6 +2104,7 @@ describe("resolveWorkbenchUrl", () => {
 describe("IPC channels", () => {
   it("keeps the bridge narrow", () => {
     expect(IPC_CHANNELS.assistantThemeResult).toBe("vibelution:assistant-theme-result");
+    expect(IPC_CHANNELS.humanAttentionCapabilities).toBe("launcher:human-attention-capabilities");
     expect(Object.keys(IPC_CHANNELS).sort()).toEqual([
       "assistantInvoke",
       "assistantThemeResult",
@@ -2117,6 +2118,7 @@ describe("IPC channels", () => {
       "getLauncherFreshness",
       "getLauncherState",
       "getVersion",
+      "humanAttentionCapabilities",
       "humanAttentionOpened",
       "launcherInvoke",
       "launcherStateChanged",

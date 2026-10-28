@@ -53,6 +53,9 @@ class HistoryHost:
         self._lock.release()
         return True
 
+    def retire_preview(self, preview_id):
+        self._preview.retire(preview_id)
+
     def signal_registry_change(self):
         """Revoke an admitted sync before waiting for the generation guard."""
         self._signal_sync()
@@ -124,8 +127,10 @@ class HistoryHost:
 
         if (category not in ("personal", "knowledge")
                 or operation_id != initial_migration_id(project_id, preview_id, category)):
+            self._preview.discard(preview_id)
             raise MigrationIOError("initial_migration_request_invalid")
         if not self._import_lock.acquire(blocking=False):
+            self._preview.discard(preview_id)
             raise MigrationIOError("initial_migration_busy")
         running = locked = False
         try:
@@ -144,7 +149,7 @@ class HistoryHost:
                 raise MigrationIOError("initial_migration_busy")
             try:
                 project, workspace, paths, source_agent, verify, snapshots = self._preview.consume_for_import(
-                    preview_id, project_id, revision, turn_id)
+                    preview_id, project_id, revision, turn_id, purpose=category)
                 root = check_path(self._owner._profile).resolve()
                 if (not native._AGENT_ID or not native._SESSION_ID or assistant_native_root() != root
                         or directory_runtime.directory_store_project_root() != root
@@ -179,6 +184,9 @@ class HistoryHost:
                                                   owner_check=self._initial_owner_check)
             finally:
                 native._LOCK.release()
+        except BaseException:
+            self._preview.discard(preview_id)
+            raise
         finally:
             if running:
                 sessions._RUNNING_SESSIONS_LOCK.release()
@@ -469,7 +477,7 @@ class HistoryHost:
                     self._operation_stopped = False
                 with self.guard():
                     root, workspace, paths, agent_id, verify, snapshots = self._preview.consume_for_import(
-                        preview_id, project_id, revision, turn_id)
+                        preview_id, project_id, revision, turn_id, purpose="history")
 
                     @contextmanager
                     def authority():
@@ -481,6 +489,7 @@ class HistoryHost:
                                                      paths.project_id, authority, snapshots)
                     self._owner.replace_sources({project_id: source})
             except (MigrationIOError, ValueError):
+                self._preview.discard(preview_id)
                 code = "cancelled" if operation_id in self._cancelled else "preview_invalid"
                 return {**base, "state": "rejected", "code": code}
             try:
@@ -490,6 +499,7 @@ class HistoryHost:
             except Exception:
                 # The writer may have reserved or published before losing its
                 # final confirmation. Never replay or guess from an exception.
+                self._preview.discard(preview_id)
                 return {**base, "state": "unknown", "code": "unknown"}
             finally:
                 self._owner.suspend()

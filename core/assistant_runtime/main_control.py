@@ -283,7 +283,22 @@ class MainControlBroker:
         # Never reuse an issued initial delivery ID during this host lifetime.
         # Reserve capacity before admitting a request, so every issued ID can
         # later be drained even after the pending entry has expired.
-        self._initial_issued_ids: dict[str, str] = {}
+        self._initial_issued_ids: dict[str, tuple[str, str]] = {}
+        self._retire_preview = None
+
+    def bind_preview_retirement(self, callback):
+        """Bind the host's nonblocking preview fence before requests are served."""
+        if not callable(callback) or self._retire_preview is not None:
+            raise ValueError("Invalid preview retirement owner")
+        self._retire_preview = callback
+
+    def _retire_entry(self, entry):
+        if self._retire_preview is not None and entry.action in {"history_import", "initial_migration_queue"}:
+            self._retire_preview(entry.request["previewId"])
+
+    def _unknown(self, entry, code="control_unavailable"):
+        self._retire_entry(entry)
+        return self._unavailable(entry, code)
 
     def _authorized(self, project_id):
         try:
@@ -323,7 +338,7 @@ class MainControlBroker:
                 _revoke_initial(entry)
                 self._pending.pop(delivery_id)
                 if not entry.future.done():
-                    entry.future.set_result(self._unavailable(entry, "control_unavailable" if authorized else "project_unavailable"))
+                    entry.future.set_result(self._unknown(entry, "control_unavailable" if authorized else "project_unavailable"))
         self._compact_queue()
 
     def _compact_queue(self):
@@ -357,29 +372,30 @@ class MainControlBroker:
         entry = _Delivery(action, captured, loop.time() + timeout, loop.create_future(), turn_id=turn_id)
         self._expire()
         if self._closed.is_set():
-            return self._unavailable(entry)
+            return self._unknown(entry)
         if action == "initial_migration_queue" and (None in self._initial_fences or turn_id in self._initial_fences):
-            return self._unavailable(entry)
+            return self._unknown(entry)
         if len(self._pending) >= self._max_pending:
-            return self._unavailable(entry, "control_busy")
+            return self._unknown(entry, "control_busy")
         if action == "initial_migration_queue" and len(self._initial_issued_ids) >= 4096:
-            return self._unavailable(entry, "control_busy")
+            return self._unknown(entry, "control_busy")
         delivery_id = secrets.token_hex(16)
         if (delivery_id in self._pending or delivery_id in self._initial_issued_ids
                 or any(token.delivery_id == delivery_id for token in self._initial_tokens)):
-            return self._unavailable(entry, "control_busy")
+            return self._unknown(entry, "control_busy")
         if action == "initial_migration_queue":
-            self._initial_issued_ids[delivery_id] = captured["operationId"]
+            self._initial_issued_ids[delivery_id] = (captured["operationId"], captured["previewId"])
         self._pending[delivery_id] = entry
         self._queue.put_nowait(delivery_id)
         try:
             return await asyncio.wait_for(asyncio.shield(entry.future), timeout=timeout)
         except asyncio.TimeoutError:
-            return self._unavailable(entry)
+            return self._unknown(entry)
         finally:
             _revoke_initial(entry)
             self._pending.pop(delivery_id, None)
             if not entry.future.done():
+                self._retire_entry(entry)
                 entry.future.cancel()
             self._compact_queue()
 
@@ -428,7 +444,7 @@ class MainControlBroker:
                 _revoke_initial(entry)
                 self._pending.pop(key)
                 if not entry.future.done():
-                    value = self._unavailable(entry)
+                    value = self._unknown(entry)
                     if not entry.claimed and not (entry.action == "affairs_sync" and "recoverSyncId" in entry.request):
                         value = {**value, "state": "rejected", "code": "cancelled"}
                     entry.future.set_result(value)
@@ -448,7 +464,7 @@ class MainControlBroker:
                 entry.initial_token.revoke()
             self._pending.pop(key)
             if not entry.future.done():
-                entry.future.set_result(self._unavailable(entry))
+                entry.future.set_result(self._unknown(entry))
         self._compact_queue()
         return tokens
 
@@ -463,7 +479,8 @@ class MainControlBroker:
         """Revoke an exact claimed delivery, including an expired in-flight worker."""
         if not self.initial_migration_enabled:
             return False, None
-        if self._initial_issued_ids.get(delivery_id) != operation_id:
+        issued = self._initial_issued_ids.get(delivery_id)
+        if issued is None or issued[0] != operation_id:
             return False, None
         entry = self._pending.get(delivery_id)
         related = [item for item in self._initial_tokens if item.delivery_id == delivery_id]
@@ -475,6 +492,8 @@ class MainControlBroker:
             # A broken or reused delivery identity cannot acknowledge one
             # worker while a different worker with that ID is still retained.
             return False, None
+        if self._retire_preview is not None:
+            self._retire_preview(issued[1])
         if (entry is not None and entry.claimed and entry.action == "initial_migration_queue"
                 and entry.request["operationId"] == operation_id):
             token = entry.initial_token
@@ -482,7 +501,7 @@ class MainControlBroker:
                 token.revoke()
             self._pending.pop(delivery_id)
             if not entry.future.done():
-                entry.future.set_result(self._unavailable(entry))
+                entry.future.set_result(self._unknown(entry))
             self._compact_queue()
             return True, token
         token = next((item for item in self._initial_tokens
@@ -548,6 +567,8 @@ class MainControlBroker:
         if entry.action == "initial_migration_queue" and type(result) is dict and result.get("state") == "queued" and not entry.initial_prepared:
             raise ValueError("Initial migration source not prepared")
         captured = _result(entry.action, entry.request, result)
+        if entry.action in {"history_import", "initial_migration_queue"} and captured.get("state") not in {"published", "queued"}:
+            self._retire_entry(entry)
         _revoke_initial(entry)
         self._pending.pop(delivery_id)
         entry.future.set_result(captured)
@@ -558,6 +579,6 @@ class MainControlBroker:
         for entry in self._pending.values():
             _revoke_initial(entry)
             if not entry.future.done():
-                entry.future.set_result(self._unavailable(entry))
+                entry.future.set_result(self._unknown(entry))
         self._pending.clear()
         self._compact_queue()

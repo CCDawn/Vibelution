@@ -107,6 +107,107 @@ def test_turn_mismatch_and_cancel_before_request_never_publish(tmp_path, setup_p
         assert not (profile / "history_archive").exists()
 
 
+def test_uncertain_history_failure_retires_other_preview_purposes(tmp_path, setup_preview, monkeypatch):
+    dispatch, _, history_host, _ = make_host(tmp_path, setup_preview)
+    request = body(dispatch)
+    def fail(*args, **kwargs):
+        raise RuntimeError("publication outcome unknown")
+    monkeypatch.setattr(history_host._owner, "import_history", fail)
+    assert history_host.import_history(request["projectId"], request["previewId"], 1,
+                                       request["turnId"], request["operationId"])["state"] == "unknown"
+    from core.assistant_runtime.migration_io import MigrationIOError
+    with pytest.raises(MigrationIOError):
+        dispatch.history_preview.consume_for_import(request["previewId"], request["projectId"], 1,
+                                                    request["turnId"], purpose="personal")
+
+
+@pytest.mark.parametrize("action", ["history_import", "initial_migration_queue"])
+@pytest.mark.parametrize("outcome", ["expired", "unknown_settle"])
+def test_broker_unknown_fences_only_its_preview_before_resuming(tmp_path, setup_preview, action, outcome):
+    import asyncio
+    from core.assistant_runtime.main_control import MainControlBroker, initial_migration_id
+    from core.assistant_runtime.migration_io import MigrationIOError
+
+    dispatch, _, history_host, _ = make_host(tmp_path, setup_preview)
+    async def run():
+        broker = MainControlBroker(dispatch.project_ids, initial_migration_enabled=True)
+        create_app(native=Native(), token="private-test-token", dispatch=dispatch,
+                   history_control=history_host, main_control=broker)
+        item = body(dispatch)
+        other = body(dispatch, operation="2" * 32)["previewId"]
+        request = {key: item[key] for key in ("projectId", "previewId", "turnId")}
+        if action == "initial_migration_queue":
+            request.update(category="personal", operationId=initial_migration_id(
+                request["projectId"], request["previewId"], "personal"))
+        task = asyncio.create_task(broker.invoke(action, request, turn_id="turn-1"))
+        wire = (await broker.claim())["request"]
+        if action == "history_import":
+            assert history_host.import_history(item["projectId"], item["previewId"], 1,
+                                               item["turnId"], item["operationId"])["state"] == "published"
+        else:
+            dispatch.history_preview.consume_for_import(item["previewId"], item["projectId"], 1,
+                                                        item["turnId"], purpose="personal")
+        if outcome == "expired":
+            broker._pending[wire["deliveryId"]].deadline = 0
+            broker._expire()
+        else:
+            result = {"schemaVersion": 1, "projectId": item["projectId"], "previewId": item["previewId"],
+                      "state": "unknown", "code": "unknown", "readyForCutover": False}
+            if action == "initial_migration_queue":
+                result.update(category="personal", operationId=request["operationId"])
+            assert broker.settle(wire["deliveryId"], result)
+        # Retirement precedes delivery of the unknown result to the model.
+        with pytest.raises(MigrationIOError):
+            dispatch.history_preview.consume_for_import(item["previewId"], item["projectId"], 1,
+                                                        item["turnId"], purpose="knowledge")
+        assert dispatch.history_preview.verify_preview(other)["previewId"] == other
+        assert (await task)["state"] == "unknown"
+        broker.close()
+    asyncio.run(run())
+
+
+def test_unknown_fences_inflight_history_after_expiry_and_new_preview(tmp_path, setup_preview, monkeypatch):
+    import asyncio
+    from core.assistant_runtime.main_control import MainControlBroker
+
+    dispatch, profile, history_host, _ = make_host(tmp_path, setup_preview)
+    clock = setup_preview[2]
+    reached, resume = threading.Event(), threading.Event()
+    original = history._load_archive
+    def pause(directory, **kwargs):
+        result = original(directory, **kwargs)
+        if directory.name.endswith(".pending") and directory.name.startswith(".history-"):
+            reached.set()
+            assert resume.wait(10)
+        return result
+    monkeypatch.setattr(history, "_load_archive", pause)
+    async def run():
+        broker = MainControlBroker(dispatch.project_ids)
+        create_app(native=Native(), token="private-test-token", dispatch=dispatch,
+                   history_control=history_host, main_control=broker)
+        item = body(dispatch)
+        request = {key: item[key] for key in ("projectId", "previewId", "turnId")}
+        task = asyncio.create_task(broker.invoke("history_import", request, turn_id="turn-1"))
+        wire = (await broker.claim())["request"]
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            worker = pool.submit(history_host.import_history, item["projectId"], item["previewId"],
+                                 1, item["turnId"], item["operationId"])
+            assert await asyncio.to_thread(reached.wait, 10)
+            try:
+                clock[0] += 30
+                other = body(dispatch, operation="2" * 32)["previewId"]
+                broker._pending[wire["deliveryId"]].deadline = 0
+                broker._expire()
+                assert (await task)["state"] == "unknown"
+                assert dispatch.history_preview.verify_preview(other)["previewId"] == other
+            finally:
+                resume.set()
+            assert (await asyncio.to_thread(worker.result, 10))["state"] == "unknown"
+        assert history.list_history(profile) == []
+        broker.close()
+    asyncio.run(run())
+
+
 def test_cancel_fences_inflight_before_confirmation(tmp_path, setup_preview, monkeypatch):
     dispatch, profile, _, app = make_host(tmp_path, setup_preview)
     request = body(dispatch)

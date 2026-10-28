@@ -241,6 +241,10 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                on_shutdown: Callable | None = None) -> FastAPI:
     if len(token) < 16:
         raise ValueError("Assistant host requires a private bearer credential")
+    if main_control is not None and history_control is not None:
+        bind_retirement = getattr(main_control, "bind_preview_retirement", None)
+        if callable(bind_retirement):
+            bind_retirement(history_control.retire_preview)
 
     @asynccontextmanager
     async def initial_fence(turn_id=None, *, registry=False):
@@ -555,6 +559,7 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                     if not main_control.initial_delivery(payload.deliveryId, bound, confirm=True):
                         raise ValueError("delivery changed")
                 except Exception:
+                    history_control.retire_preview(payload.previewId)
                     raise HTTPException(409, detail="Initial migration source unavailable") from None
                 return JSONResponse(result, headers={"Cache-Control": "no-store"})
 

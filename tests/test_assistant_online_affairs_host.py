@@ -262,6 +262,111 @@ finally:
 ''', config_text=TEST_MODEL_CONFIG)
 
 
+def test_one_preview_history_then_both_independently_admitted_initial_intents(tmp_path):
+    _run(tmp_path, _HOST_SETUP + r'''
+import asyncio
+import httpx
+from core.assistant_runtime.main_control import MainControlBroker, initial_migration_id
+from core.assistant_runtime.initial_migration_binding import read_initial_intent
+from core.assistant_runtime.host import create_app
+from tests.test_assistant_migration_history import journal, write_json
+write_json(workspace / 'chat/chat_state.json', {'conversations': [{'id': 'direct', 'agent_id': 'old-pa'}]})
+journal(workspace, 'direct')
+value = preview.preview('registered:1', turn_id='turn-one')
+async def run_case():
+    broker = MainControlBroker(dispatch.project_ids, claim_seconds=5, initial_migration_enabled=True)
+    app = create_app(native=object(), token='private-test-token', dispatch=dispatch,
+                     history_control=history_host, main_control=broker)
+    token = value['previewId']
+    result = history_host.import_history('registered:1', token, 1, 'turn-one', '1' * 32)
+    assert result['state'] == 'published', result
+    transport = httpx.ASGITransport(app=app)
+    try:
+        async with httpx.AsyncClient(transport=transport, base_url='http://127.0.0.1',
+                                     headers={'Authorization': 'Bearer private-test-token'}) as client:
+            for category in ('personal', 'knowledge'):
+                op = initial_migration_id('registered:1', token, category)
+                request = {'projectId': 'registered:1', 'previewId': token, 'turnId': 'turn-one',
+                           'category': category, 'operationId': op}
+                # A preview is not authority: each category needs its own live delivery.
+                assert (await client.post('/api/assistant/initial-migration/prepare',
+                    json={**request, 'revision': 1, 'deliveryId': 'f' * 32})).status_code == 409
+                task = asyncio.create_task(broker.invoke('initial_migration_queue', request, turn_id='turn-one'))
+                wire = (await broker.claim())['request']
+                body = {**request, 'revision': 1, 'deliveryId': wire['deliveryId']}
+                response = await client.post('/api/assistant/initial-migration/prepare', json=body)
+                assert response.status_code == 200, response.text
+                assert read_initial_intent(target, op)['category'] == category
+                assert (await client.post('/api/assistant/initial-migration/prepare', json=body)).status_code == 409
+                public = {'schemaVersion': 1, 'projectId': 'registered:1', 'previewId': token,
+                          'category': category, 'operationId': op, 'state': 'queued', 'code': 'queued',
+                          'readyForCutover': False}
+                assert broker.settle(wire['deliveryId'], public)
+                assert await task == public
+    finally:
+        broker.close()
+try:
+    asyncio.run(run_case())
+finally:
+    cleanup()
+''', config_text=TEST_MODEL_CONFIG)
+
+
+@pytest.mark.parametrize('mode', ['before_admit', 'published', 'expired_before_admit', 'expired_published'])
+def test_initial_drain_retires_only_its_issued_preview(tmp_path, mode):
+    _run(tmp_path, _HOST_SETUP + '\nmode = ' + repr(mode) + r'''
+import asyncio
+import httpx
+from core.assistant_runtime.main_control import MainControlBroker, initial_migration_id
+from core.assistant_runtime.migration_io import MigrationIOError
+from core.assistant_runtime.host import create_app
+async def run_case():
+    broker = MainControlBroker(dispatch.project_ids, claim_seconds=5, initial_migration_enabled=True)
+    app = create_app(native=object(), token='private-test-token', dispatch=dispatch,
+                     history_control=history_host, main_control=broker)
+    token = value['previewId']
+    other = preview.preview('registered:1', turn_id='turn-one')['previewId']
+    op = initial_migration_id('registered:1', token, 'personal')
+    request = {'projectId': 'registered:1', 'previewId': token, 'turnId': 'turn-one',
+               'category': 'personal', 'operationId': op}
+    task = asyncio.create_task(broker.invoke('initial_migration_queue', request, turn_id='turn-one'))
+    wire = (await broker.claim())['request']
+    delivery = wire['deliveryId']
+    transport = httpx.ASGITransport(app=app)
+    try:
+        async with httpx.AsyncClient(transport=transport, base_url='http://127.0.0.1',
+                                     headers={'Authorization': 'Bearer private-test-token'}) as client:
+            if mode.endswith('published'):
+                result = await client.post('/api/assistant/initial-migration/prepare',
+                    json={**request, 'revision': 1, 'deliveryId': delivery})
+                assert result.status_code == 200, result.text
+            if mode.startswith('expired'):
+                broker._pending[delivery].deadline = 0
+                broker._expire()
+                assert (await task)['state'] == 'unknown'
+            bad = await client.post('/api/assistant/initial-migration/drain',
+                json={'deliveryId': delivery, 'operationId': 'initial-' + 'f' * 40})
+            assert bad.status_code == 503 and bad.json()['drained'] is False
+            if not mode.startswith('expired'):
+                assert preview.verify_preview(token)['previewId'] == token
+            assert preview.verify_preview(other)['previewId'] == other
+            good = await client.post('/api/assistant/initial-migration/drain',
+                json={'deliveryId': delivery, 'operationId': op})
+            assert good.status_code == 200 and good.json()['drained'] is True
+            assert (await task)['state'] == 'unknown'
+            try: preview.consume_for_import(token, 'registered:1', 1, 'turn-one', purpose='knowledge')
+            except MigrationIOError: pass
+            else: raise AssertionError('drained preview remained usable')
+            assert preview.verify_preview(other)['previewId'] == other
+    finally:
+        broker.close()
+try:
+    asyncio.run(run_case())
+finally:
+    cleanup()
+''', config_text=TEST_MODEL_CONFIG)
+
+
 def test_initial_reauthorizes_unclaimed_intent_after_model_change_but_not_after_claim(tmp_path):
     _run(tmp_path, _HOST_SETUP + r'''
 import asyncio
@@ -654,6 +759,11 @@ try:
     try: prepare(fresh)
     except MigrationIOError: pass
     else: raise AssertionError('inactive turn was accepted')
+    with sessions._RUNNING_SESSIONS_LOCK:
+        sessions._SESSION_ACTIVE_TURN_IDS[assistant['directSessionId']] = 'turn-one'
+    try: prepare(fresh)
+    except MigrationIOError: pass
+    else: raise AssertionError('failed preview was replayed')
     assert not (target / 'knowledge_migrations').exists()
 finally:
     cleanup()

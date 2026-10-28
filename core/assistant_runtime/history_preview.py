@@ -10,7 +10,7 @@ import time
 import os
 from dataclasses import replace
 from pathlib import Path
-from threading import RLock
+from threading import Event, Lock, RLock
 
 from .migration_inventory import declared_assistant_identities
 from .migration_io import MigrationIOError, read_stable_file, strict_json, verify_snapshot
@@ -57,6 +57,8 @@ class HistoryPreview:
         self._clock = clock
         self._ttl = ttl
         self._lock = RLock()
+        self._retirement_lock = Lock()
+        self._retirements = {}
         self._previews = {}
         self._stopped_turns = set()
         self._stop_capacity_exhausted = False
@@ -143,10 +145,26 @@ class HistoryPreview:
                     raise MigrationIOError("history_turn_stopped")
                 now = self._clock()
                 self._previews = {key: row for key, row in self._previews.items() if row[0] > now}
+                with self._retirement_lock:
+                    for key, (expiry, flag) in list(self._retirements.items()):
+                        if expiry <= now:
+                            flag.set()
+                            del self._retirements[key]
+                    if len(self._retirements) >= 4096:
+                        raise MigrationIOError("history_preview_capacity")
                 if len(self._previews) >= 16:
                     raise MigrationIOError("history_preview_capacity")
-                self._previews[token] = (now + self._ttl, verify, public,
-                                         root, workspace, paths, turn_id, authority_snapshots)
+                retired = Event()
+                def guarded_verify():
+                    if retired.is_set():
+                        raise ValueError("preview retired")
+                    verify()
+                    if retired.is_set():
+                        raise ValueError("preview retired")
+                self._previews[token] = (now + self._ttl, guarded_verify, public,
+                                         root, workspace, paths, turn_id, authority_snapshots, set(), retired)
+                with self._retirement_lock:
+                    self._retirements[token] = (now + self._ttl, retired)
             return dict(public)
         except MigrationIOError:
             raise
@@ -157,35 +175,64 @@ class HistoryPreview:
         """Revalidate metadata only; this never grants an import capability."""
         with self._lock:
             row = self._previews.get(preview_id)
-            if row is None or row[0] <= self._clock():
+            if row is None or row[0] <= self._clock() or row[9].is_set():
                 self._previews.pop(preview_id, None)
                 raise MigrationIOError("history_preview_expired")
             try:
                 row[1]()
+                if row[9].is_set():
+                    raise ValueError("preview retired")
             except Exception:
                 self._previews.pop(preview_id, None)
                 raise MigrationIOError("history_preview_changed") from None
             return dict(row[2])
 
-    def consume_for_import(self, preview_id, project_id, revision, turn_id):
-        """Consume a matching native-turn preview; no approval is inferred."""
+    def consume_for_import(self, preview_id, project_id, revision, turn_id, *, purpose=None):
+        """Consume one migration purpose, or exclusively consume for legacy callers.
+
+        The caller must independently establish native authorization for each use.
+        An exclusive use (such as affairs sync) cannot share a migration preview.
+        """
         with self._lock:
-            row = self._previews.pop(preview_id, None)
-            if row is None or row[0] <= self._clock():
+            row = self._previews.get(preview_id)
+            if row is None or row[0] <= self._clock() or row[9].is_set():
+                self._previews.pop(preview_id, None)
                 raise MigrationIOError("history_preview_expired")
             if (not turn_id or self._stop_capacity_exhausted or turn_id in self._stopped_turns
                     or row[6] != turn_id or row[2]["projectId"] != project_id
-                    or self._dispatch._registry_revision != revision):
+                    or self._dispatch._registry_revision != revision
+                    or purpose not in (None, "history", "personal", "knowledge")):
+                self._previews.pop(preview_id, None)
                 raise MigrationIOError("history_preview_changed")
+            if purpose is None:
+                self._previews.pop(preview_id, None)
+                if row[8]:
+                    raise MigrationIOError("history_preview_changed")
+            elif purpose in row[8]:
+                raise MigrationIOError("history_preview_expired")
+            else:
+                # Reserve before any source verification or downstream work.
+                row[8].add(purpose)
             try:
                 row[1]()
+                if row[9].is_set():
+                    raise ValueError("preview retired")
             except Exception:
+                self._previews.pop(preview_id, None)
                 raise MigrationIOError("history_preview_changed") from None
             return row[3], row[4], row[5], row[2]["assistantAgentId"], row[1], row[7]
 
     def discard(self, preview_id):
+        self.retire(preview_id)
         with self._lock:
             self._previews.pop(preview_id, None)
+
+    def retire(self, preview_id):
+        """Fence later uses without waiting for source verification to finish."""
+        with self._retirement_lock:
+            entry = self._retirements.get(preview_id)
+            if entry is not None:
+                entry[1].set()
 
     def stop_turn(self, turn_id):
         """Retire existing and still-being-created previews for this Turn."""
@@ -194,7 +241,12 @@ class HistoryPreview:
                 if len(self._stopped_turns) >= 4096:
                     # Never evict a tombstone while delayed requests can exist.
                     self._stop_capacity_exhausted = True
+                    for row in self._previews.values():
+                        row[9].set()
                     self._previews.clear()
                     return
                 self._stopped_turns.add(turn_id)
+            for row in self._previews.values():
+                if row[6] == turn_id:
+                    row[9].set()
             self._previews = {key: row for key, row in self._previews.items() if row[6] != turn_id}

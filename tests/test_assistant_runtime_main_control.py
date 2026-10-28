@@ -188,7 +188,7 @@ async def test_initial_drain_fences_expired_unadmitted_delivery():
         assert owner.begin_initial_drain(delivery, args["operationId"]) == (True, None)
         assert owner.begin_initial_drain(delivery, "initial-" + "f" * 40) == (False, None)
         assert not owner.initial_delivery(delivery, args, admit=True)
-        owner._initial_issued_ids.update({f"{i:032x}": "initial-" + "b" * 40 for i in range(4096)})
+        owner._initial_issued_ids.update({f"{i:032x}": ("initial-" + "b" * 40, "b" * 64) for i in range(4096)})
         assert (await owner.invoke("initial_migration_queue", args, turn_id="turn-1"))["state"] == "unknown"
         assert owner.begin_initial_drain(delivery, args["operationId"]) == (True, None)
     finally:

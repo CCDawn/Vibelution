@@ -1,6 +1,8 @@
 import asyncio
 import json
 import shutil
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -88,6 +90,116 @@ def test_multiple_old_assistants_never_auto_select(setup_preview):
     registry.write_text(json.dumps(data), encoding="utf-8")
     with pytest.raises(MigrationIOError, match="history_source_ambiguous"):
         dispatch.history_preview.preview("registered:1")
+
+
+def test_one_turn_preview_allows_each_migration_purpose_once(setup_preview):
+    dispatch, _, _ = setup_preview
+    preview = dispatch.history_preview
+    token = preview.preview("registered:1", turn_id="turn-1")["previewId"]
+    for purpose in ("history", "personal", "knowledge"):
+        assert preview.consume_for_import(token, "registered:1", 1, "turn-1", purpose=purpose)[3] == AGENT
+        with pytest.raises(MigrationIOError):
+            preview.consume_for_import(token, "registered:1", 1, "turn-1", purpose=purpose)
+
+
+@pytest.mark.parametrize("change", ["turn", "revision", "registry", "stop", "expiry", "exclusive"])
+def test_reused_preview_revalidates_authority_and_remains_turn_bound(setup_preview, change):
+    dispatch, workspace, clock = setup_preview
+    preview = dispatch.history_preview
+    token = preview.preview("registered:1", turn_id="turn-1")["previewId"]
+    preview.consume_for_import(token, "registered:1", 1, "turn-1", purpose="history")
+    turn, revision = "turn-1", 1
+    if change == "turn":
+        turn = "turn-2"
+    elif change == "revision":
+        revision = 2
+    elif change == "registry":
+        registry = workspace / "agents/agents.json"
+        registry.write_text(registry.read_text(encoding="utf-8") + " ", encoding="utf-8")
+    elif change == "stop":
+        preview.stop_turn(turn)
+    elif change == "expiry":
+        clock[0] += 30
+    with pytest.raises(MigrationIOError):
+        if change == "exclusive":
+            preview.consume_for_import(token, "registered:1", revision, turn)
+        else:
+            preview.consume_for_import(token, "registered:1", revision, turn, purpose="personal")
+
+
+def test_exclusive_preview_cannot_be_used_for_migration_afterwards(setup_preview):
+    dispatch, _, _ = setup_preview
+    preview = dispatch.history_preview
+    token = preview.preview("registered:1", turn_id="turn-1")["previewId"]
+    preview.consume_for_import(token, "registered:1", 1, "turn-1")
+    with pytest.raises(MigrationIOError):
+        preview.consume_for_import(token, "registered:1", 1, "turn-1", purpose="personal")
+
+
+def test_retirement_fences_an_inflight_source_verification(setup_preview):
+    dispatch, _, _ = setup_preview
+    preview = dispatch.history_preview
+    token = preview.preview("registered:1", turn_id="turn-1")["previewId"]
+    reached, resume = threading.Event(), threading.Event()
+    row = list(preview._previews[token])
+    verify = row[1]
+    def paused_verify():
+        reached.set()
+        assert resume.wait(5)
+        verify()
+    row[1] = paused_verify
+    preview._previews[token] = tuple(row)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(preview.consume_for_import, token, "registered:1", 1, "turn-1", purpose="personal")
+        assert reached.wait(5)
+        try:
+            preview.retire(token)
+        finally:
+            resume.set()
+        with pytest.raises(MigrationIOError, match="history_preview_changed"):
+            future.result(timeout=5)
+
+
+def test_retirement_revokes_already_issued_source_guard_after_all_purposes(setup_preview):
+    dispatch, _, _ = setup_preview
+    preview = dispatch.history_preview
+    token = preview.preview("registered:1", turn_id="turn-1")["previewId"]
+    for purpose in ("history", "personal", "knowledge"):
+        binding = preview.consume_for_import(token, "registered:1", 1, "turn-1", purpose=purpose)
+    preview.retire(token)
+    with pytest.raises(ValueError, match="preview retired"):
+        binding[4]()
+
+
+@pytest.mark.parametrize("mode", ["exclusive", "removed", "expired"])
+def test_new_preview_cannot_orphan_inflight_retirement_guard(setup_preview, mode):
+    dispatch, _, clock = setup_preview
+    preview = dispatch.history_preview
+    token = preview.preview("registered:1", turn_id="turn-1")["previewId"]
+    if mode == "exclusive":
+        binding = preview.consume_for_import(token, "registered:1", 1, "turn-1")
+    else:
+        binding = preview.consume_for_import(token, "registered:1", 1, "turn-1", purpose="history")
+        if mode == "removed":
+            with pytest.raises(MigrationIOError):
+                preview.consume_for_import(token, "registered:1", 1, "wrong-turn", purpose="personal")
+        else:
+            clock[0] += 30
+    reached, resume = threading.Event(), threading.Event()
+    def worker():
+        reached.set()
+        assert resume.wait(5)
+        binding[4]()
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(worker)
+        assert reached.wait(5)
+        try:
+            preview.preview("registered:1", turn_id="turn-1")
+            preview.retire(token)
+        finally:
+            resume.set()
+        with pytest.raises(ValueError, match="preview retired"):
+            future.result(timeout=5)
 
 
 def test_legacy_project_ignores_assistant_host_data_home(tmp_path, monkeypatch):
