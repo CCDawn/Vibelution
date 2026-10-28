@@ -2759,6 +2759,32 @@ destroy_orphaned_purged_team_agent_sessions = destroy_orphaned_purged_team_agent
 destroy_team_agent_sessions = destroy_team_agent_session_reset
 
 
+def _reject_external_child_parent(s: Any, session_id: str, conversation: dict[str, Any], lang: str) -> None:
+    """An external task cannot start a child without inheriting its ceiling."""
+    from core.web.services.external_agent.approval_binding import (
+        ApprovalBindingError,
+        is_external_session,
+        registered_external_task,
+    )
+
+    try:
+        bound_task = registered_external_task(
+            session_id=session_id,
+            agent_id=str(conversation.get("agent_id") or conversation.get("agentId") or "").strip(),
+        )
+    except ApprovalBindingError:
+        # An agent mismatch on an existing process binding is not an ordinary session.
+        bound_task = True
+    if is_external_session(conversation) or bound_task:
+        raise s.SessionValidationError(
+            s.text_for(
+                lang,
+                zh="外部 Agent 任务不能创建子会话。",
+                en="External Agent tasks cannot create child sessions.",
+            )
+        )
+
+
 def create_child_session(
     parent_session_id: str,
     *,
@@ -2795,6 +2821,7 @@ def create_child_session(
                 source_parent = s.load_session_chat_state(s.PROJECT_ROOT, parent_id)
         if source_parent is None:
             raise s.SessionNotFoundError(s.text_for(lang, zh="未找到父会话。", en="Parent session not found."))
+        _reject_external_child_parent(s, parent_id, source_parent, lang)
         s._ensure_session_mutable(parent_id, conversation=source_parent)
         s._ensure_conversation_workspace_metadata(source_parent)
         s._ensure_conversation_agent_metadata(source_parent)
@@ -2805,6 +2832,7 @@ def create_child_session(
         parent = source_parent
         if root_id != parent_id:
             parent = s.load_session_chat_state(s.PROJECT_ROOT, root_id) or source_parent
+            _reject_external_child_parent(s, root_id, parent, lang)
         s._ensure_conversation_workspace_metadata(parent)
         s._ensure_conversation_agent_metadata(parent)
         existing_ids = set(s.list_session_runtime_ids(s.PROJECT_ROOT))
