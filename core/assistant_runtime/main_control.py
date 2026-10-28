@@ -79,7 +79,7 @@ def _request(action, request):
         raise ValueError("Invalid main control request")
     if action == "initial_migration_receipt":
         if (set(request) != {"projectId", "category", "operationId"} or not _opaque(request.get("projectId"), 160)
-                or type(request.get("category")) is not str or request["category"] not in {"personal", "knowledge"}
+                or type(request.get("category")) is not str or request["category"] not in {"personal", "knowledge", "reminder_handoff"}
                 or request.get("operationId") != initial_migration_id(request["projectId"], "", request["category"])):
             raise ValueError("Invalid initial migration receipt request")
         return dict(request)
@@ -89,7 +89,7 @@ def _request(action, request):
                              else {"projectId", "previewId", "turnId", "category", "operationId"})
                 or not _opaque(request.get("projectId"), 160) or not _opaque(request.get("turnId"), 160)
                 or type(request.get("previewId")) is not str or re.fullmatch(r"[0-9a-f]{64}", request["previewId"]) is None
-                or type(request.get("category")) is not str or request["category"] not in {"personal", "knowledge", "knowledge_sync", "knowledge_recovery"}
+                or type(request.get("category")) is not str or request["category"] not in {"personal", "knowledge", "knowledge_sync", "knowledge_recovery", "reminder_handoff"}
                 or recovery and (type(request.get("originalSyncId")) is not str or re.fullmatch(r"ksync-[a-f0-9]{40}", request["originalSyncId"]) is None)
                 or request.get("operationId") != (knowledge_recovery_id(request["projectId"], request["previewId"], request["originalSyncId"]) if recovery
                     else knowledge_sync_id(request["projectId"], request["previewId"]) if request["category"] == "knowledge_sync"
@@ -130,11 +130,16 @@ def _result(action, request, result):
     if action in appearance.APPEARANCE_ACTIONS:
         return appearance.validate_result(action, request, result)
     if action == "initial_migration_receipt":
-        if (type(result) is not dict or set(result) != {"schemaVersion", "projectId", "category", "operationId", "state", "code", "readyForCutover"}
+        required = {"schemaVersion", "projectId", "category", "operationId", "state", "code", "readyForCutover"}
+        extra = {"waitingFor", "syncId"} if request["category"] == "reminder_handoff" and type(result) is dict and result.get("state") == "queued" else set()
+        if (type(result) is not dict or set(result) != required | extra
                 or type(result.get("schemaVersion")) is not int or result["schemaVersion"] != 1
                 or any(result.get(key) != request[key] for key in ("projectId", "category", "operationId"))
                 or type(result.get("state")) is not str or result["state"] not in {"queued", "completed", "partial", "unknown", "not_found"}
-                or result.get("code") != result["state"] or result.get("readyForCutover") is not False):
+                or result.get("code") != result["state"] or result.get("readyForCutover") is not False
+                or request["category"] == "reminder_handoff" and result["state"] not in {"queued", "unknown"}
+                or extra and (result.get("waitingFor") not in {"window", "close_transaction", "drain", "unknown"}
+                    or result.get("syncId") != "affairs-" + request["operationId"][len("initial-"):])):
             raise ValueError("Invalid initial migration receipt result")
         return dict(result)
     if action == "initial_migration_queue":

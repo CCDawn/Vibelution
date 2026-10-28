@@ -124,6 +124,59 @@ def test_ready_publication_failure_drains_native_owner():
     assert owner.stopped
 
 
+@pytest.mark.parametrize("construct_fails", [False, True])
+def test_cancelled_startup_waits_for_patrol_constructor_and_releases_owner(tmp_path, monkeypatch, construct_fails):
+    import asyncio
+    import threading
+    from core.assistant_runtime import host, patrol, reminders, legacy_reminder_receipts
+
+    entered, release = threading.Event(), threading.Event()
+    closed = []
+
+    class FakePatrol:
+        def __init__(self, *args):
+            entered.set()
+            assert release.wait(10)
+            if construct_fails:
+                raise RuntimeError("construction failed")
+
+        def close(self):
+            closed.append("patrol")
+
+    class Store:
+        def __init__(self, *args):
+            pass
+
+        def close(self):
+            pass
+
+    class Owner(host.NativeFacade):
+        def bootstrap(self):
+            self.assistant = Native.assistant
+            return {"assistant": self.assistant}
+
+        def shutdown(self):
+            closed.append("native")
+            return {"closed": True}
+
+    monkeypatch.setattr(patrol, "LauncherPatrol", FakePatrol)
+    monkeypatch.setattr(reminders, "LauncherReminders", Store)
+    monkeypatch.setattr(legacy_reminder_receipts, "LegacyReminderReceipts", Store)
+    app = create_app(native=Owner(tmp_path), token="private-test-token", dispatch=object())
+
+    async def run():
+        context = app.router.lifespan_context(app)
+        starting = asyncio.create_task(context.__aenter__())
+        assert await asyncio.to_thread(entered.wait, 10)
+        starting.cancel()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await starting
+
+    asyncio.run(run())
+    assert closed == (["native"] if construct_fails else ["patrol", "native"])
+
+
 def test_startup_recovery_can_use_the_bound_action_owner():
     from core.assistant_runtime.actions import execute_action
     class Dispatch:

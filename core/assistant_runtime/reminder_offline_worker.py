@@ -10,12 +10,12 @@ import hashlib
 import os
 import re
 from contextlib import contextmanager
-from itertools import islice
+from itertools import islice, product
 from pathlib import Path
 
 from core.infrastructure.atomic_io import atomic_write_json
 from core.infrastructure.reminder_source_mutex import try_acquire_reminder_source_mutex
-from .initial_migration_binding import (_directory, list_initial_intents, read_initial_intent,
+from .initial_migration_binding import (_digest, _directory, list_initial_intents, read_initial_intent,
                                         source_identity, target_identity)
 from .migration_active import _selected, _verify_captured
 from .migration_affairs import _parse_rows
@@ -28,13 +28,14 @@ from .migration_io import MigrationIOError, pinned_source_files, pinned_target_d
 from .migration_profile import offline_migration_profile
 from .migration_source_archive import import_source_snapshots
 from .reminder_source_identity import ReminderSourceObservation
+from .reminder_handoff_intent import read_handoff_intent
 from .reminder_uncertain_preparation import inspect_uncertainty_preparation, prepare_current_day_uncertainty
 
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,95}\Z")
 _RECOVERY = re.compile(r"rprep-[a-f0-9]{40}\Z")
 
 
-def _matches_origin(intent, target, scope, project: Path, workspace: Path) -> bool:
+def _matches_origin(intent, target, scope, project: Path, workspace: Path, *, category="personal") -> bool:
     try:
         source_digest, project_id, workspace_id = source_identity(scope, project, workspace)
         source_digests = {source_digest}
@@ -54,11 +55,37 @@ def _matches_origin(intent, target, scope, project: Path, workspace: Path) -> bo
         target_digest, target_id = target_identity(target.root, target.agent_id, target.session_id)
     except Exception:
         raise MigrationIOError("reminder_worker_baseline_authority_unavailable") from None
-    return (intent is not None and intent["category"] == "personal" and intent["sourceScope"] == scope
+    return (intent is not None and intent["category"] == category and intent["sourceScope"] == scope
             and intent["sourceIdentityDigest"] in source_digests
             and intent["projectDirectory"] == project_id and intent["workspaceDirectory"] == workspace_id
             and intent["targetDirectory"] == target_id and intent["targetAgentId"] == target.agent_id
             and intent["targetSessionId"] == target.session_id and intent["targetIdentityDigest"] == target_digest)
+
+
+def _registry_digest_matches(snapshots, expected: str) -> bool:
+    """Check approved bytes/identities with bounded Windows path spelling variants."""
+    from dataclasses import replace
+    from .migration_io import verify_snapshot
+    if not snapshots or len(snapshots) > 8:
+        return False
+    alternatives = []
+    for snapshot in snapshots:
+        candidates = [snapshot.path]
+        if os.name == "nt":
+            candidates.extend((snapshot.path.resolve(), Path(str(snapshot.path).lower())))
+        unique = []
+        for path in candidates:
+            if str(path) in [str(item.path) for item in unique]:
+                continue
+            item = replace(snapshot, path=path)
+            verify_snapshot(item)
+            unique.append(item)
+        alternatives.append(unique)
+    for chosen in product(*alternatives):
+        rows = [[str(item.path), item.sha256, len(item.raw), list(item.identity)] for item in chosen]
+        if _digest(sorted(rows, key=lambda row: row[0].casefold())) == expected:
+            return True
+    return False
 
 
 def _verify_baseline_origin(target, scope, project: Path, workspace: Path, baseline_id: str) -> None:
@@ -87,7 +114,7 @@ def _verify_baseline_origin(target, scope, project: Path, workspace: Path, basel
 
 
 def run_reminder_offline_worker(*, source: ReminderSourceObservation,
-                                sync_id: str, mode: str = "start", recovery_id: str | None = None) -> dict:
+                                sync_id: str, check_admission, mode: str = "start", recovery_id: str | None = None) -> dict:
     """Run on the source-mutex-owning thread with no caller-supplied paths.
 
     The source observation and IDs must originate from a trusted main-owned,
@@ -100,9 +127,15 @@ def run_reminder_offline_worker(*, source: ReminderSourceObservation,
     """
     if (type(source) is not ReminderSourceObservation or type(sync_id) is not str
             or _ID.fullmatch(sync_id) is None
+            or not callable(check_admission)
             or mode not in ("start", "resume") or mode == "start" and recovery_id is not None
             or recovery_id is not None and (type(recovery_id) is not str or _RECOVERY.fullmatch(recovery_id) is None)):
         raise MigrationIOError("reminder_worker_request_invalid")
+    def admission():
+        if check_admission() is not None:
+            raise MigrationIOError("reminder_worker_admission_unavailable")
+
+    admission()
     mutex = try_acquire_reminder_source_mutex(source)
     if mutex is None:
         raise MigrationIOError("reminder_worker_source_busy")
@@ -114,8 +147,15 @@ def run_reminder_offline_worker(*, source: ReminderSourceObservation,
                 source._check()
                 row = source._preview._previews[source._token]
                 project, workspace, paths, authority = Path(row[3]), Path(row[4]), row[5], tuple(row[7])
+                registered_id = row[2]["projectId"]
                 scope = _scope({"projectId": paths.project_id, "instanceId": paths.instance_id,
                                 "agentId": source.agent_id})
+            approved = read_handoff_intent(target.root, registered_id)
+            if (approved is None or approved["syncId"] != sync_id
+                    or approved["revision"] > source._preview._dispatch._registry_revision
+                    or not _matches_origin(approved, target, scope, project, workspace, category="reminder_handoff")
+                    or not _registry_digest_matches(authority, approved["registryDigest"])):
+                raise MigrationIOError("reminder_worker_handoff_authority_unavailable")
             from scripts.assistant_migration_activate import _capture
             captured, selected_authorities = _capture(project, workspace, scope, None,
                                                        categories=frozenset({"personal_affairs"}))
@@ -124,11 +164,15 @@ def run_reminder_offline_worker(*, source: ReminderSourceObservation,
             authority = (*authority, *selected_authorities)
 
             def verify():
+                admission()
                 mutex.check()
                 target.check()
                 _verify_captured(captured, authority, source._check)
+                if read_handoff_intent(target.root, registered_id) != approved:
+                    raise MigrationIOError("reminder_worker_handoff_authority_unavailable")
                 mutex.check()
                 target.check()
+                admission()
 
             @contextmanager
             def guard():

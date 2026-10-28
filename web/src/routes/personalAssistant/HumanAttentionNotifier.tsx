@@ -77,7 +77,7 @@ export function HumanAttentionNotifier({ startupReady = true }: { startupReady?:
     for (const payload of emitNewHumanAttentionNotifications({ rows, bridge, ledger, affairMode })) {
       kindById.current.set(payload.id, payload.kind);
     }
-  }, [attention.data, bridge, ledger, affairMode]);
+  }, [attention.data, attention.dataUpdatedAt, bridge, ledger, affairMode]);
 
   useEffect(() => {
     if (!bridge) {

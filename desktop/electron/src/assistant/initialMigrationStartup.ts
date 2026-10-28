@@ -65,7 +65,7 @@ export async function recoverInitialMigrations(input: {
           return { ...outcome, state: outcome.state as "completed" | "partial" };
         }
         return { ...outcome, state: "unknown" as const };
-      });
+      }, { operationId: job.operationId, receiptConfirmed: outcome => outcome.state === "completed" || outcome.state === "partial" });
       output.push({ operationId: job.operationId, state: result.state });
     } catch {
       // The writer may have committed before authority or delivery was lost.

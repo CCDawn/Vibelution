@@ -224,7 +224,8 @@ def test_native_bootstrap_uses_real_directory_and_keeps_custom_policy(tmp_path, 
         root = Path(os.environ['VIBELUTION_ASSISTANT_NATIVE_ROOT'])
         expected_tools = ['personal_assistant_action_tool', 'personal_assistant_manage_tool',
             'personal_affairs_tool', 'append_personal_memory_tool', 'supersede_personal_memory_tool',
-            'search_agent_private_memory_tool', 'compress_context_tool']
+            'search_agent_private_memory_tool', 'compress_context_tool',
+            'personal_assistant_computer_observe_tool', 'personal_assistant_computer_action_tool']
         original_create = directory.create_agent_instance
         def checked_create(**kwargs):
             assert kwargs['initial_tool_policy']['allowedTools'] == expected_tools
@@ -269,11 +270,17 @@ def test_native_bootstrap_uses_real_directory_and_keeps_custom_policy(tmp_path, 
                 pass
             else:
                 raise AssertionError('runtime root switched')
-            directory.update_agent_instance(first['agentId'], tool_policy={'allowedTools': [], 'networkAccess': 'none'})
+            policy = directory.get_agent(first['agentId'])['toolPolicy']
+            old_tools = expected_tools[:-2]
+            directory.update_agent_instance(first['agentId'], tool_policy={**policy, 'allowedTools': old_tools, 'preferredTools': old_tools})
             assert native.shutdown()['closed']
             assert not directory_runtime.is_directory_store_open()
             second = native.bootstrap(root)['assistant']
             assert second['directSessionId'] == sid
+            assert directory.get_agent(first['agentId'])['toolPolicy']['allowedTools'] == expected_tools
+            directory.update_agent_instance(first['agentId'], tool_policy={'allowedTools': [], 'networkAccess': 'none'})
+            assert native.shutdown()['closed']
+            assert native.bootstrap(root)['assistant']['directSessionId'] == sid
             assert directory.get_agent(first['agentId'])['toolPolicy']['allowedTools'] == []
         finally:
             native.shutdown()

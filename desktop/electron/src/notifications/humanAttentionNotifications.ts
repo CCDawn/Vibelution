@@ -49,6 +49,7 @@ export type DesktopHumanAttentionNotifyResult =
   | { delivered: HumanAttentionDelivery }
   | { delivered: "invalid_payload"; error: string }
   | { delivered: "source_retired" }
+  | { delivered: "source_busy" | "source_unavailable" | "source_recovery_required" }
   | { delivered: "attempt_pending" };
 
 type NotificationLike = {

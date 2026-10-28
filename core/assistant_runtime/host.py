@@ -191,6 +191,15 @@ class LegacyReminderSource(BaseModel):
     revision: int = Field(ge=0, le=2**53 - 1)
 
 
+class LegacyReminderPermit(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    permitId: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+class LegacyReminderPermitAcquire(LegacyReminderSource):
+    permitId: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
 class ProjectSnapshot(BaseModel):
     """Main-only authorization projection; deliberately absent from renderer IPC."""
     model_config = ConfigDict(extra="forbid", strict=True)
@@ -238,7 +247,7 @@ class InitialMigrationPrepare(BaseModel):
     turnId: str = Field(min_length=1, max_length=160, pattern=r"^\S+$")
     revision: int = Field(ge=0)
     operationId: str = Field(pattern=r"^(?:initial|ksync|krec)-[a-f0-9]{40}$")
-    category: Literal["personal", "knowledge", "knowledge_sync", "knowledge_recovery"]
+    category: Literal["personal", "knowledge", "knowledge_sync", "knowledge_recovery", "reminder_handoff"]
     originalSyncId: str | None = Field(default=None, pattern=r"^ksync-[a-f0-9]{40}$")
 
     @model_validator(mode="after")
@@ -373,6 +382,31 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
         if callable(bind_retirement):
             bind_retirement(history_control.retire_preview)
 
+    source_permits = None
+    if dispatch is not None and history_control is not None:
+        preview = getattr(history_control, "_preview", None)
+        if getattr(preview, "_dispatch", None) is dispatch:
+            from .reminder_source_lease import ReminderSourceLeaseOwner
+            source_permits = ReminderSourceLeaseOwner(dispatch, preview)
+    source_fence_lock = asyncio.Lock()
+
+    @asynccontextmanager
+    async def source_permit_fence():
+        if source_permits is None:
+            yield
+            return
+        async with source_fence_lock:
+            source_permits.begin_revocation()
+            drained = False
+            try:
+                await asyncio.to_thread(source_permits.wait_revocation)
+                drained = True
+                yield
+            finally:
+                # An interrupted wait cannot certify that the sender drained.
+                if drained:
+                    source_permits.end_revocation()
+
     migration = {"gate": False, "writers": 0, "changed": asyncio.Event(),
                  "task": None, "release": None, "state": "idle", "committing": False}
 
@@ -382,12 +416,13 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                 migration["changed"].clear()
                 if migration["writers"]:
                     await migration["changed"].wait()
-            async with migration_runtime_quiescence(native, dispatch, history_control, main_control):
-                if migration["release"].is_set():
-                    migration["state"] = "released"
-                    return
-                migration["state"] = "ready"
-                await migration["release"].wait()
+            async with source_permit_fence():
+                async with migration_runtime_quiescence(native, dispatch, history_control, main_control):
+                    if migration["release"].is_set():
+                        migration["state"] = "released"
+                        return
+                    migration["state"] = "ready"
+                    await migration["release"].wait()
             migration["state"] = "released"
         except asyncio.CancelledError:
             migration["state"] = "busy"
@@ -414,14 +449,49 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
         finally:
             main_control.end_initial_fence(turn_id)
 
+    async def patrol_call(method, *args):
+        # Cancellation must not release the owner while its thread is still
+        # admitting a native turn or committing a receipt.
+        work = asyncio.create_task(asyncio.to_thread(method, *args))
+        try:
+            return await asyncio.shield(work)
+        except asyncio.CancelledError:
+            with suppress(Exception):
+                await work
+            raise
+
+    async def create_patrol(*args):
+        from .patrol import LauncherPatrol
+        work = asyncio.create_task(asyncio.to_thread(LauncherPatrol, *args))
+        try:
+            return await asyncio.shield(work)
+        except asyncio.CancelledError:
+            # Constructor acquires a process-global owner and directory pin.
+            # An abandoned executor future could acquire them after shutdown.
+            try:
+                owner = await work
+            except Exception:
+                pass
+            else:
+                await asyncio.to_thread(owner.close)
+            raise
+
     async def maintain_dispatches():
         while True:
             try:
                 await dispatch.heartbeat()
-            except Exception:  # noqa: BLE001, S110 - private backend errors must not enter host logs.
+                patrol = getattr(app.state, "patrol", None)
+                if patrol is not None:
+                    # Heartbeat omits previously terminal tasks; use the full
+                    # durable native projection so delayed wakeups survive.
+                    await patrol.refresh_stale_terminals(dispatch.list_dispatches())
+                    result = await patrol_call(patrol.inspect, dispatch.list_dispatches())
+                    app.state.patrol_status = {"state": "ready", "deliveryStates": result.get("deliveryStates", {})}
+            except Exception:  # noqa: BLE001 - private backend data stays out of logs.
                 # Native IDs and credentials remain durable. A failed poll is
                 # not permission to repeat a task or cancel it.
-                pass
+                if getattr(app.state, "patrol", None) is not None:
+                    app.state.patrol_status = {"state": "unavailable", "deliveryStates": {}}
             await asyncio.sleep(10)
 
     @asynccontextmanager
@@ -430,6 +500,9 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
         bound = False
         reminder_executor = None
         legacy_reminder_executor = None
+        patrol = None
+        app.state.patrol = None
+        app.state.patrol_status = None
         try:
             if dispatch is not None:
                 from .actions import bind_actions, unbind_actions
@@ -449,6 +522,18 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                 app.state.legacy_reminder_executor = legacy_reminder_executor
                 app.state.legacy_reminder_receipts = await asyncio.get_running_loop().run_in_executor(
                     legacy_reminder_executor, LegacyReminderReceipts, native.root / "legacy_reminder_receipts")
+            if dispatch is not None and isinstance(native, NativeFacade):
+                try:
+                    patrol = await create_patrol(native.root, native.assistant["agentId"],
+                                                 native.assistant["directSessionId"], dispatch)
+                    state = await patrol_call(patrol.reconcile)
+                    app.state.patrol = patrol
+                    app.state.patrol_status = {"state": "ready", "deliveryStates": state}
+                except Exception:  # noqa: BLE001 - corrupted patrol state must not block chat startup.
+                    if patrol is not None:
+                        await asyncio.to_thread(patrol.close)
+                        patrol = None
+                    app.state.patrol_status = {"state": "unavailable", "deliveryStates": {}}
             if dispatch is not None:
                 task = asyncio.create_task(maintain_dispatches())
             if on_ready is not None:
@@ -460,6 +545,8 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                 barrier_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await barrier_task
+            if source_permits is not None:
+                await asyncio.to_thread(source_permits.close)
             if history_control is not None:
                 await asyncio.to_thread(history_control.close)
             # Release synchronous tool waiters before draining their native
@@ -489,7 +576,11 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                             if reminder_executor is not None:
                                 await asyncio.to_thread(reminder_executor.shutdown, wait=True)
                         finally:
-                            await asyncio.to_thread(native.shutdown)
+                            closed = await asyncio.to_thread(native.shutdown)
+                            # Native plugin cancellation/finalization can still
+                            # use patrol until the real session owner is closed.
+                            if patrol is not None and isinstance(closed, dict) and closed.get("closed") is True:
+                                await asyncio.to_thread(patrol.close)
             finally:
                 if bound:
                     unbind_actions(dispatch)
@@ -525,7 +616,9 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
         writing = request.method not in {"GET", "HEAD", "OPTIONS"} and not control
         # Existing control deliveries must be able to settle normally; their
         # native waiter remains part of the barrier until settlement finishes.
-        settling_control = path == "/api/assistant/main-control/settle"
+        settling_control = path in {"/api/assistant/main-control/settle", "/api/assistant/legacy-reminders/settle",
+                                   "/api/assistant/legacy-reminders/abandon", "/api/assistant/legacy-reminders/permit/release",
+                                   "/api/assistant/computer/confirm"}
         if writing and migration["gate"] and not settling_control:
             return JSONResponse({"error": "assistant_migration_wait"}, status_code=503)
         if writing:
@@ -710,10 +803,15 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                     raise HTTPException(503, detail="Migration barrier release unknown")
             # Wake main-control long polls on their owning event loop before
             # Uvicorn starts waiting for HTTP requests to drain.
-            if main_control is not None:
-                main_control.close()
-            if history_control is not None:
-                await asyncio.to_thread(history_control.close)
+            async with source_permit_fence():
+                if main_control is not None:
+                    main_control.close()
+                if history_control is not None:
+                    await asyncio.to_thread(history_control.close)
+            if source_permits is not None:
+                # Same event-loop turn: no admission can slip between fence
+                # release and owner close.
+                source_permits.close()
             on_shutdown()
             return {"stopping": True}
 
@@ -722,13 +820,14 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
         async def suspend_project_registry(payload: SuspendProjects, request: Request):
             if request.query_params:
                 raise HTTPException(422, detail="Invalid private project suspension")
-            if history_control is not None:
-                history_control.signal_registry_change()
-            async with initial_fence(registry=True):
-                with history_control.guard() if history_control is not None else nullcontext():
-                    if history_control is not None:
-                        history_control.registry_changed()
-                    return dispatch.suspend_projects()
+            async with source_permit_fence():
+                if history_control is not None:
+                    history_control.signal_registry_change()
+                async with initial_fence(registry=True):
+                    with history_control.guard() if history_control is not None else nullcontext():
+                        if history_control is not None:
+                            history_control.registry_changed()
+                        return dispatch.suspend_projects()
 
         @app.put("/api/assistant/project-registry")
         async def project_registry(payload: ProjectSnapshot):
@@ -736,17 +835,48 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
             try:
                 # One event loop owns this immutable view and all native calls.
                 # No background thread may race an admission with this update.
-                if history_control is not None:
-                    history_control.signal_registry_change()
-                async with initial_fence(registry=True):
-                    with history_control.guard() if history_control is not None else nullcontext():
-                        if history_control is not None:
-                            history_control.registry_changed()
-                        return dispatch.replace_projects(payload.model_dump())
+                async with source_permit_fence():
+                    if history_control is not None:
+                        history_control.signal_registry_change()
+                    async with initial_fence(registry=True):
+                        with history_control.guard() if history_control is not None else nullcontext():
+                            if history_control is not None:
+                                history_control.registry_changed()
+                            return dispatch.replace_projects(payload.model_dump())
             except DispatchError as exc:
                 raise HTTPException(409, detail={"code": exc.code}) from None
 
     if history_control is not None:
+        @app.post("/api/assistant/legacy-reminders/permit/acquire")
+        async def acquire_legacy_source_permit(payload: LegacyReminderPermitAcquire, request: Request):
+            if request.query_params or source_permits is None:
+                raise HTTPException(409, detail="Legacy source permit unavailable")
+            try:
+                result = await asyncio.to_thread(source_permits.acquire_permit, payload.projectId, payload.revision, payload.permitId)
+            except Exception:
+                raise HTTPException(409, detail="Legacy source permit unavailable") from None
+            return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+        @app.post("/api/assistant/legacy-reminders/permit/check")
+        async def check_legacy_source_permit(payload: LegacyReminderPermit, request: Request):
+            if request.query_params or source_permits is None:
+                raise HTTPException(409, detail="Legacy source permit unavailable")
+            try:
+                result = await asyncio.to_thread(source_permits.check_permit, payload.permitId)
+            except Exception:
+                raise HTTPException(409, detail="Legacy source permit unavailable") from None
+            return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+        @app.post("/api/assistant/legacy-reminders/permit/release")
+        async def release_legacy_source_permit(payload: LegacyReminderPermit, request: Request):
+            if request.query_params or source_permits is None:
+                raise HTTPException(409, detail="Legacy source permit unavailable")
+            try:
+                await asyncio.to_thread(source_permits.release_permit, payload.permitId)
+            except Exception:
+                raise HTTPException(409, detail="Legacy source permit unavailable") from None
+            return JSONResponse({"schemaVersion": 1, "released": True}, headers={"Cache-Control": "no-store"})
+
         @app.post("/api/assistant/legacy-reminders/source")
         async def legacy_reminder_source(payload: LegacyReminderSource, request: Request):
             from .migration_io import MigrationIOError
@@ -769,6 +899,32 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                                                  payload.projectId, payload.revision)
             except (MigrationIOError, ValueError):
                 raise HTTPException(409, detail="Legacy reminder ledger unavailable") from None
+            return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+        @app.post("/api/assistant/legacy-reminders/handoff-receipt")
+        async def legacy_reminder_handoff_receipt(payload: LegacyReminderSource, request: Request):
+            if request.query_params:
+                raise HTTPException(422, detail="Invalid reminder handoff receipt request")
+            def read():
+                from .actions import _reminder_handoff_receipt
+                with history_control.guard():
+                    if dispatch._registry_revision != payload.revision:
+                        raise ValueError("registration changed")
+                    return _reminder_handoff_receipt(dispatch, payload.projectId)
+            try:
+                result = await asyncio.to_thread(read)
+            except Exception:
+                raise HTTPException(409, detail="Reminder handoff receipt unavailable") from None
+            return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+        @app.post("/api/assistant/legacy-reminders/handoff-source")
+        async def legacy_reminder_handoff_source(payload: LegacyReminderSource, request: Request):
+            if request.query_params:
+                raise HTTPException(422, detail="Invalid reminder handoff source request")
+            try:
+                result = await asyncio.to_thread(history_control.legacy_reminder_handoff, payload.projectId, payload.revision)
+            except Exception:
+                raise HTTPException(409, detail="Reminder handoff source unavailable") from None
             return JSONResponse(result, headers={"Cache-Control": "no-store"})
 
         if main_control is not None and getattr(main_control, "initial_migration_enabled", False):
@@ -888,7 +1044,9 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
 
     @app.get("/api/assistant")
     def assistant():
-        return native.identity() if callable(getattr(native, "identity", None)) else app.state.assistant
+        result = native.identity() if callable(getattr(native, "identity", None)) else app.state.assistant
+        patrol_status = getattr(app.state, "patrol_status", None)
+        return {**result, "patrol": patrol_status} if isinstance(result, dict) and patrol_status is not None else result
 
     @app.get("/api/assistant/approvals")
     def approvals():
@@ -1003,4 +1161,8 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
         def dispatches():
             return {"dispatches": dispatch.list_dispatches()}
 
+    # Operator-only single-window controls retain the host bearer boundary;
+    # the model only sees the separate scoped computer tools.
+    from .computer_control import create_router as create_computer_router
+    app.include_router(create_computer_router(token))
     return app

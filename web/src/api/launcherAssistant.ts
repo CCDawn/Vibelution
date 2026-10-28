@@ -12,6 +12,7 @@ export type LauncherAssistantStatus = {
   operatorProfile?: LauncherOperatorProfile;
   assistant: { agentId: string; directSessionId: string; displayName: string };
   settings?: { ok: boolean; preferences: DesktopPetPreferences; displayName: string; modelId: string };
+  patrol?: { state: "ready" | "unavailable"; deliveryStates: Record<string, number> };
 };
 
 export type LauncherAssistantAcceptance =
@@ -34,6 +35,10 @@ export type LauncherAssistantRequest =
   | { operation: "continue"; requestId: string; continuation: SessionContinuationExpectation }
   | { operation: "config" }
   | { operation: "operatorAsset"; kind: LauncherOperatorAssetKind }
+  | { operation: "computerState" | "computerWindows" }
+  | { operation: "computerGrant"; selectionId: string; allowVision: true }
+  | { operation: "computerControl"; grantId: string; action: "pause" | "resume" | "takeover" | "return" | "end" }
+  | { operation: "computerConfirm"; grantId: string; pendingId: string; approved: boolean }
   | { operation: "curation"; sessionId: string }
   | { operation: "curate"; sessionId: string; messageId: string; action: SessionMessageCurationAction }
   | { operation: "setExpanded"; expanded: boolean };
@@ -123,6 +128,14 @@ export async function getLauncherAssistantStatus(): Promise<LauncherAssistantSta
       || /[\u0000-\u001f\u007f-\u009f]/.test(profile.displayName)
       || typeof profile.avatarPreset !== "string" || !["default", "circle", "spark", "codex", "minimal", "initial"].includes(profile.avatarPreset)) {
       throw new Error("Launcher operator profile is unavailable.");
+    }
+  }
+  if (result.patrol !== undefined) {
+    const patrol = result.patrol;
+    if (!record(patrol) || !["ready", "unavailable"].includes(String(patrol.state))
+      || !record(patrol.deliveryStates) || Array.isArray(patrol.deliveryStates)
+      || Object.values(patrol.deliveryStates).some(value => !Number.isSafeInteger(value) || (value as number) < 0)) {
+      throw new Error("Launcher 回执自动汇报状态不可用。");
     }
   }
   return result as LauncherAssistantStatus;

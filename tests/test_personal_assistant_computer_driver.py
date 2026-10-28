@@ -88,6 +88,33 @@ def test_current_instance_default_legacy_config_is_supported(driver_paths):
     assert adapter.driver_binary() == binary
 
 
+def test_launcher_only_discovers_fixed_installed_driver_after_explicit_config(driver_paths, monkeypatch, tmp_path):
+    local = tmp_path / "local"
+    installed = local / "Vibelution" / "Tools" / "cua-driver" / "0.36.0" / "cua-driver.exe"
+    installed.parent.mkdir(parents=True)
+    installed.touch()
+    monkeypatch.setenv("LOCALAPPDATA", str(local))
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path / "launcher-data"))
+    monkeypatch.setattr(adapter, "is_launcher_assistant_process", lambda: False)
+    with pytest.raises(adapter.ComputerBlocked):
+        adapter.driver_binary()
+    monkeypatch.setattr(adapter, "is_launcher_assistant_process", lambda: True)
+    assert adapter.driver_binary() == installed.resolve()
+    configured, config = _driver_config(tmp_path / "launcher-data")
+    assert adapter.driver_binary() == configured
+    config.write_text(json.dumps({"binaryPath": "bad.exe"}), encoding="utf-8")
+    with pytest.raises(adapter.ComputerBlocked):
+        adapter.driver_binary()
+    config.unlink()
+    monkeypatch.setenv("VIBELUTION_DESKTOP_CUA_CONFIG", str(tmp_path / "missing-explicit.json"))
+    with pytest.raises(adapter.ComputerBlocked):
+        adapter.driver_binary()
+    monkeypatch.delenv("VIBELUTION_DESKTOP_CUA_CONFIG")
+    installed.unlink()
+    with pytest.raises(adapter.ComputerBlocked):
+        adapter.driver_binary()
+
+
 def test_pre_migration_legacy_data_precedes_canonical_data(driver_paths, monkeypatch, tmp_path):
     storage_migration_state_path(driver_paths).unlink()
     (driver_paths.project_root / ".git").mkdir()

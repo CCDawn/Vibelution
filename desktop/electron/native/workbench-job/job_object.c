@@ -1172,6 +1172,129 @@ static napi_value close_job(napi_env env, napi_callback_info info) {
   return result;
 }
 
+/* A reminder lock is a thread-owned Windows mutex, not a cutover proof.
+ * Keep each external strongly referenced until explicit same-thread release.
+ * In-process name tracking also rejects Windows mutex recursive acquisition. */
+typedef struct ReminderMutexBox {
+  HANDLE handle;
+  DWORD owner_thread;
+  char key[65];
+  napi_ref reference;
+  struct ReminderMutexBox *next;
+} ReminderMutexBox;
+static SRWLOCK reminder_mutex_guard = SRWLOCK_INIT;
+static ReminderMutexBox *reminder_mutexes = NULL;
+
+static void reminder_mutex_unlink(ReminderMutexBox *box) {
+  ReminderMutexBox **cursor = &reminder_mutexes;
+  while (*cursor != NULL) {
+    if (*cursor == box) { *cursor = box->next; return; }
+    cursor = &(*cursor)->next;
+  }
+}
+
+static void reminder_mutex_finalize(napi_env env, void *data, void *hint) {
+  ReminderMutexBox *box = (ReminderMutexBox *)data;
+  (void)env; (void)hint;
+  if (box == NULL) return;
+  AcquireSRWLockExclusive(&reminder_mutex_guard);
+  reminder_mutex_unlink(box);
+  if (box->handle != NULL) CloseHandle(box->handle);
+  ReleaseSRWLockExclusive(&reminder_mutex_guard);
+  free(box);
+}
+
+static napi_value try_reminder_mutex(napi_env env, napi_callback_info info) {
+  size_t argc = 1, length = 0, i;
+  napi_value argv[1], result, external, abandoned;
+  char key[65];
+  wchar_t name[128];
+  ReminderMutexBox *box, *existing;
+  DWORD wait;
+  napi_get_cb_info(env, info, &argc, argv, NULL, NULL);
+  if (argc != 1 || napi_get_value_string_utf8(env, argv[0], NULL, 0, &length) != napi_ok || length != 64
+      || napi_get_value_string_utf8(env, argv[0], key, sizeof(key), &length) != napi_ok || length != 64) {
+    napi_throw_error(env, NULL, "REMINDER_MUTEX_INVALID"); return NULL;
+  }
+  for (i = 0; i < length; i++) {
+    if (!((key[i] >= '0' && key[i] <= '9') || (key[i] >= 'a' && key[i] <= 'f'))) {
+      napi_throw_error(env, NULL, "REMINDER_MUTEX_INVALID"); return NULL;
+    }
+  }
+  AcquireSRWLockExclusive(&reminder_mutex_guard);
+  for (existing = reminder_mutexes; existing != NULL; existing = existing->next) {
+    if (strcmp(existing->key, key) == 0) {
+      ReleaseSRWLockExclusive(&reminder_mutex_guard);
+      napi_get_null(env, &result); return result;
+    }
+  }
+  box = (ReminderMutexBox *)calloc(1, sizeof(*box));
+  if (box == NULL) { ReleaseSRWLockExclusive(&reminder_mutex_guard); napi_throw_error(env, NULL, "REMINDER_MUTEX_UNAVAILABLE"); return NULL; }
+  memcpy(box->key, key, sizeof(key));
+  swprintf(name, sizeof(name) / sizeof(name[0]), L"Local\\Vibelution.ReminderSource.v1.%hs", key);
+  box->handle = CreateMutexW(NULL, FALSE, name);
+  if (box->handle == NULL) { free(box); ReleaseSRWLockExclusive(&reminder_mutex_guard); napi_throw_error(env, NULL, "REMINDER_MUTEX_UNAVAILABLE"); return NULL; }
+  wait = WaitForSingleObject(box->handle, 0);
+  if (wait == WAIT_TIMEOUT) {
+    CloseHandle(box->handle); free(box); ReleaseSRWLockExclusive(&reminder_mutex_guard);
+    napi_get_null(env, &result); return result;
+  }
+  if (wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED) {
+    CloseHandle(box->handle); free(box); ReleaseSRWLockExclusive(&reminder_mutex_guard);
+    napi_throw_error(env, NULL, "REMINDER_MUTEX_UNAVAILABLE"); return NULL;
+  }
+  box->owner_thread = GetCurrentThreadId();
+  box->next = reminder_mutexes; reminder_mutexes = box;
+  ReleaseSRWLockExclusive(&reminder_mutex_guard);
+  if (napi_create_external(env, box, reminder_mutex_finalize, NULL, &external) != napi_ok) {
+    AcquireSRWLockExclusive(&reminder_mutex_guard);
+    reminder_mutex_unlink(box);
+    ReleaseMutex(box->handle); CloseHandle(box->handle);
+    ReleaseSRWLockExclusive(&reminder_mutex_guard);
+    free(box); napi_throw_error(env, NULL, "REMINDER_MUTEX_UNAVAILABLE"); return NULL;
+  }
+  if (napi_create_reference(env, external, 1, &box->reference) != napi_ok
+      || napi_create_object(env, &result) != napi_ok
+      || napi_set_named_property(env, result, "handle", external) != napi_ok
+      || napi_get_boolean(env, wait == WAIT_ABANDONED, &abandoned) != napi_ok
+      || napi_set_named_property(env, result, "abandoned", abandoned) != napi_ok) {
+    AcquireSRWLockExclusive(&reminder_mutex_guard);
+    reminder_mutex_unlink(box);
+    ReleaseMutex(box->handle); CloseHandle(box->handle); box->handle = NULL;
+    ReleaseSRWLockExclusive(&reminder_mutex_guard);
+    if (box->reference != NULL) napi_delete_reference(env, box->reference);
+    napi_throw_error(env, NULL, "REMINDER_MUTEX_UNAVAILABLE"); return NULL;
+  }
+  return result;
+}
+
+static napi_value release_reminder_mutex(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value argv[1], result;
+  ReminderMutexBox *box = NULL;
+  ReminderMutexBox *current;
+  napi_ref reference;
+  napi_get_cb_info(env, info, &argc, argv, NULL, NULL);
+  if (argc != 1 || napi_get_value_external(env, argv[0], (void **)&box) != napi_ok || box == NULL) {
+    napi_throw_error(env, NULL, "REMINDER_MUTEX_INVALID"); return NULL;
+  }
+  AcquireSRWLockExclusive(&reminder_mutex_guard);
+  for (current = reminder_mutexes; current != NULL && current != box; current = current->next) {}
+  if (current == NULL || box->handle == NULL || box->owner_thread != GetCurrentThreadId() || !ReleaseMutex(box->handle)) {
+    ReleaseSRWLockExclusive(&reminder_mutex_guard);
+    napi_throw_error(env, NULL, "REMINDER_MUTEX_RELEASE_UNAVAILABLE"); return NULL;
+  }
+  reminder_mutex_unlink(box);
+  CloseHandle(box->handle);
+  box->handle = NULL;
+  reference = box->reference;
+  box->reference = NULL;
+  ReleaseSRWLockExclusive(&reminder_mutex_guard);
+  napi_delete_reference(env, reference);
+  napi_get_undefined(env, &result);
+  return result;
+}
+
 static napi_value init(napi_env env, napi_value exports) {
   napi_value fn;
   napi_create_function(env, "spawn", NAPI_AUTO_LENGTH, spawn, NULL, &fn);
@@ -1186,6 +1309,10 @@ static napi_value init(napi_env env, napi_value exports) {
   napi_set_named_property(env, exports, "drainStatus", fn);
   napi_create_function(env, "close", NAPI_AUTO_LENGTH, close_job, NULL, &fn);
   napi_set_named_property(env, exports, "close", fn);
+  napi_create_function(env, "tryAcquireReminderMutex", NAPI_AUTO_LENGTH, try_reminder_mutex, NULL, &fn);
+  napi_set_named_property(env, exports, "tryAcquireReminderMutex", fn);
+  napi_create_function(env, "releaseReminderMutex", NAPI_AUTO_LENGTH, release_reminder_mutex, NULL, &fn);
+  napi_set_named_property(env, exports, "releaseReminderMutex", fn);
   return exports;
 }
 

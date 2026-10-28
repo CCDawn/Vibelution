@@ -36,6 +36,26 @@ async function render(active = true) {
 function button(label: string) { const found = [...container.querySelectorAll("button")].find(row => row.textContent === label || row.getAttribute("aria-label") === label); if (!found) throw new Error(`Missing button ${label}`); return found; }
 async function click(label: string) { await act(async () => button(label).click()); await settle(); }
 describe("single-window personal assistant controls", () => {
+  it("uses an injected Launcher transport without sharing the Workbench cache", async () => {
+    const launcher = { scope: "launcher" as const, state: vi.fn().mockResolvedValue(idle),
+      windows: vi.fn().mockResolvedValue({ windows: [target] }), grant: vi.fn().mockResolvedValue(ready),
+      control: vi.fn(), confirm: vi.fn() };
+    client.setQueryData(queryKeys.personalAssistantComputer(), ready);
+    await act(async () => root.render(<QueryClientProvider client={client}>
+      <PersonalAssistantComputerPanel active onCollapse={collapse} transport={launcher} />
+    </QueryClientProvider>));
+    await settle();
+    expect(launcher.state).toHaveBeenCalled();
+    expect(launcher.windows).toHaveBeenCalled();
+    expect(fetchPersonalAssistantComputer).not.toHaveBeenCalled();
+    expect(button("授权这个窗口").disabled).toBe(true);
+    await act(async () => (container.querySelector('[aria-pressed="false"]') as HTMLButtonElement).click());
+    await act(async () => (container.querySelector('input[type="checkbox"]') as HTMLInputElement).click());
+    await click("授权这个窗口");
+    expect(launcher.grant).toHaveBeenCalledWith({ selectionId: "selection", allowVision: true });
+    expect(grantPersonalAssistantComputer).not.toHaveBeenCalled();
+    expect(client.getQueryData(queryKeys.personalAssistantComputer())).toEqual(ready);
+  });
   it("requires both an explicit target and vision consent, and grants only that selection", async () => {
     await render();
     expect(button("授权这个窗口").disabled).toBe(true);

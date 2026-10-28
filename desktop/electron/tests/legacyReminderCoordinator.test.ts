@@ -64,6 +64,10 @@ describe("legacy reminder attempt coordination", () => {
     const request = { sourceKey, eventId, isCurrent: () => true, send };
     const first = new LegacyReminderCoordinator(new LegacyReminderDailyIntentStores(root), attempts, clock);
     expect(await first.dispatch(request)).toEqual({ delivered: "attempt_pending" });
+    const seal = first.sealSource(sourceKey);
+    expect(await first.dispatch(request)).toEqual({ delivered: "source_busy" });
+    seal.release();
+    expect(await first.dispatch(request)).toEqual({ delivered: "attempt_pending" });
     const second = new LegacyReminderCoordinator(new LegacyReminderDailyIntentStores(root), attempts, clock);
     expect(await second.dispatch(request)).toEqual({ delivered: "attempt_pending" });
     expect(attempts.reserve).toHaveBeenCalledTimes(1);
@@ -117,6 +121,117 @@ describe("legacy reminder attempt coordination", () => {
     expect(drained).toBe(true);
     expect(await coordinator.dispatch(request)).toEqual({ delivered: "attempt_pending" });
     expect(send).toHaveBeenCalledOnce();
+  });
+  it("temporarily fences one trusted source and waits for its send and settlement only", async () => {
+    const other = "c".repeat(64), attempts = api();
+    let releaseSend!: () => void, releaseSettlement!: () => void;
+    const send = vi.fn(() => new Promise<{ delivered: "system_notification" }>(resolve => {
+      releaseSend = () => resolve({ delivered: "system_notification" });
+    }));
+    attempts.settle.mockImplementation(async input => ({ schemaVersion: 1,
+      eventKey: "legacy:" + createHash("sha256").update(JSON.stringify([input.sourceKey, input.eventId]), "ascii").digest("hex"),
+      state: "submitted", channel: "system_notification" }));
+    attempts.settle.mockImplementationOnce(() => new Promise(resolve => {
+      releaseSettlement = () => resolve({ schemaVersion: 1, eventKey: key, state: "submitted", channel: "system_notification" });
+    }));
+    attempts.reserve.mockImplementation(async input => ({ schemaVersion: 1,
+      eventKey: "legacy:" + createHash("sha256").update(JSON.stringify([input.sourceKey, input.eventId]), "ascii").digest("hex"),
+      state: "reserved", attemptToken: token }));
+    const coordinator = new LegacyReminderCoordinator(new LegacyReminderDailyIntentStores(directory()), attempts, clock);
+    const request = { sourceKey, eventId, isCurrent: () => true, send };
+    const first = coordinator.dispatch(request);
+    await vi.waitFor(() => expect(send).toHaveBeenCalledOnce());
+    const seal = coordinator.sealSource(sourceKey);
+    let drained = false;
+    const waiting = seal.drain().then(() => { drained = true; });
+    expect(await coordinator.dispatch({ ...request, eventId: "affair-reminder:later:20261028" })).toEqual({ delivered: "source_busy" });
+    expect(drained).toBe(false);
+    const otherSend = vi.fn().mockResolvedValue({ delivered: "system_notification" });
+    // The independent source is admitted while the first source drains.
+    releaseSend();
+    await vi.waitFor(() => expect(attempts.settle).toHaveBeenCalledOnce());
+    const otherResult = await coordinator.dispatch({ sourceKey: other, eventId, isCurrent: () => true, send: otherSend });
+    expect(otherResult).toEqual({ delivered: "system_notification" });
+    expect(drained).toBe(false);
+    releaseSettlement();
+    await first;
+    await waiting;
+    expect(drained).toBe(true);
+    expect(await coordinator.dispatch({ ...request, eventId: "affair-reminder:later:20261028" })).toEqual({ delivered: "source_busy" });
+    seal.release();
+    expect(await coordinator.dispatch({ ...request, eventId: "affair-reminder:later:20261028", send: otherSend })).toEqual({ delivered: "system_notification" });
+    expect(otherSend).toHaveBeenCalledTimes(2);
+  });
+
+  it("fails closed for invalid or duplicated seals and aborts a released drain", async () => {
+    const attempts = api();
+    let finish!: () => void;
+    const send = () => new Promise<{ delivered: "system_notification" }>(resolve => {
+      finish = () => resolve({ delivered: "system_notification" });
+    });
+    const coordinator = new LegacyReminderCoordinator(new LegacyReminderDailyIntentStores(directory()), attempts, clock);
+    expect(() => coordinator.sealSource("untrusted-path")).toThrow();
+    const work = coordinator.dispatch({ sourceKey, eventId, isCurrent: () => true, send });
+    await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+    const seal = coordinator.sealSource(sourceKey);
+    expect(() => coordinator.sealSource(sourceKey)).toThrow();
+    const waiting = seal.drain();
+    const rejected = expect(waiting).rejects.toThrow("LEGACY_REMINDER_SEAL_RELEASED");
+    seal.release();
+    finish();
+    await work;
+    await rejected;
+    const retry = coordinator.sealSource(sourceKey);
+    await retry.drain();
+    retry.release();
+  });
+  it("drains abandonment after failure before certifying its local barrier", async () => {
+    const attempts = api();
+    let release!: () => void;
+    attempts.settle.mockRejectedValueOnce(new Error("unknown settlement"));
+    attempts.abandon.mockImplementationOnce(() => new Promise(resolve => {
+      release = () => resolve({ schemaVersion: 1, eventKey: key, state: "abandoned" });
+    }));
+    const coordinator = new LegacyReminderCoordinator(new LegacyReminderDailyIntentStores(directory()), attempts, clock);
+    const work = coordinator.dispatch({ sourceKey, eventId, isCurrent: () => true,
+      send: async () => ({ delivered: "system_notification" }) });
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    const seal = coordinator.sealSource(sourceKey);
+    let drained = false;
+    const waiting = seal.drain().then(() => { drained = true; });
+    await Promise.resolve();
+    expect(drained).toBe(false);
+    release();
+    expect(await work).toEqual({ delivered: "attempt_pending" });
+    await waiting;
+    seal.release();
+    expect(await coordinator.dispatch({ sourceKey, eventId, isCurrent: () => true,
+      send: async () => ({ delivered: "system_notification" }) })).toEqual({ delivered: "attempt_pending" });
+  });
+  it("includes an already admitted reservation and preserves a global stop", async () => {
+    const attempts = api();
+    let release!: () => void;
+    attempts.reserve.mockImplementationOnce(() => new Promise(resolve => {
+      release = () => resolve({ schemaVersion: 1, eventKey: key, state: "reserved", attemptToken: token });
+    }));
+    const coordinator = new LegacyReminderCoordinator(new LegacyReminderDailyIntentStores(directory()), attempts, clock);
+    const send = vi.fn(async () => ({ delivered: "system_notification" as const }));
+    const work = coordinator.dispatch({ sourceKey, eventId, isCurrent: () => true, send });
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    const seal = coordinator.sealSource(sourceKey);
+    let drained = false;
+    const waiting = seal.drain().then(() => { drained = true; });
+    const globalStop = coordinator.stopAndDrain();
+    await Promise.resolve();
+    expect(drained).toBe(false);
+    release();
+    expect(await work).toEqual({ delivered: "system_notification" });
+    await waiting;
+    await globalStop;
+    seal.release();
+    expect(await coordinator.dispatch({ sourceKey, eventId: "affair-reminder:new:20261028", isCurrent: () => true, send }))
+      .toEqual({ delivered: "attempt_pending" });
+    expect(() => coordinator.sealSource(sourceKey)).toThrow("LEGACY_REMINDER_SEAL_UNAVAILABLE");
   });
   it("rotates the durable intent namespace by UTC day without deleting the old day", async () => {
     const root = directory();

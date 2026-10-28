@@ -1,8 +1,10 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { isAbsolute, relative } from "node:path";
 import type { PreHostSourceLease } from "./projectRegistryConnection.js";
+import type { ProjectAdmissionSeal } from "../lifecycle/projectAdmission.js";
 
 /** Only main constructs this binding after authorization; no renderer paths. */
 export type ReminderOfflineBinding = {
@@ -13,7 +15,7 @@ const ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$/;
 const PREP = /^rprep-[a-f0-9]{40}$/;
 
 /** One captured Job; the registry permit remains held until its complete drain. */
-export async function openReminderOfflineBridge(lease: PreHostSourceLease, input: ReminderOfflineBinding) {
+export async function openReminderOfflineBridge(lease: PreHostSourceLease, seal: ProjectAdmissionSeal, input: ReminderOfflineBinding) {
   if (!input || input.registeredProjectId !== `${lease.registration.baseProjectId}:${lease.registration.registrationUuid}`
       || !ID.test(input.syncId)
       || !["start", "resume"].includes(input.mode) || input.mode === "start" && input.recoveryId !== null
@@ -28,9 +30,20 @@ export async function openReminderOfflineBridge(lease: PreHostSourceLease, input
   // Python's existing default_data_home uses USERPROFILE on Windows.
   const sourceUserProfile = homedir();
   if (!isAbsolute(sourceUserProfile) || sourceUserProfile.includes("\0")) throw new Error("REMINDER_WORKER_BINDING_INVALID");
-  lease.check();
+  const check = () => {
+    lease.check();
+    if (!seal || !seal.signal || typeof seal.signal.addEventListener !== "function"
+        || typeof seal.check !== "function" || (seal.check as () => unknown)() !== undefined)
+      throw new Error("REMINDER_WORKER_BINDING_INVALID");
+    const canonical = (path: string) => {
+      const value = realpathSync.native(path);
+      return process.platform === "win32" ? value.toLowerCase() : value;
+    };
+    if (canonical(seal.root) !== canonical(lease.registration.root)) throw new Error("REMINDER_WORKER_BINDING_INVALID");
+  };
+  check();
   const token = randomBytes(32).toString("hex");
-  let used = false, granted = false, closed = false, release: (() => void) | undefined;
+  let used = false, granted = false, closed = false, revoked = false, release: (() => void) | undefined;
   let commit: Promise<void> | undefined;
   let server!: Server;
   const send = (res: ServerResponse, status: number, body: object) => {
@@ -41,12 +54,20 @@ export async function openReminderOfflineBridge(lease: PreHostSourceLease, input
   server = createServer((request, response) => {
     const actual = Buffer.from(request.headers.authorization ?? "", "utf8");
     const expected = Buffer.from(`Bearer ${token}`, "ascii");
-    if (closed || request.socket.remoteAddress !== "127.0.0.1" || actual.length !== expected.length
+    if (closed || revoked || request.socket.remoteAddress !== "127.0.0.1" || actual.length !== expected.length
         || !timingSafeEqual(actual, expected)) { send(response, 403, { code: "unavailable" }); return; }
     if (request.method === "GET" && request.url === "/binding") {
       try {
-        lease.check();
+        check();
         send(response, 200, { schemaVersion: 1, ...input, revision: lease.revision, projectRoot: lease.registration.root, sourceUserProfile });
+      } catch { send(response, 409, { code: "unavailable" }); }
+      return;
+    }
+    if (request.method === "GET" && request.url === "/check") {
+      try {
+        if (!granted) throw new Error("REMINDER_WORKER_PERMIT_UNAVAILABLE");
+        check();
+        send(response, 200, { schemaVersion: 1, current: true });
       } catch { send(response, 409, { code: "unavailable" }); }
       return;
     }
@@ -57,10 +78,11 @@ export async function openReminderOfflineBridge(lease: PreHostSourceLease, input
     request.setEncoding("utf8");
     request.on("data", chunk => { body += chunk; if (body.length > 32) request.destroy(); });
     request.on("end", () => {
-      if (closed || used || body !== "{}") { send(response, 409, { code: "unavailable" }); return; }
+      if (closed || revoked || used || body !== "{}") { send(response, 409, { code: "unavailable" }); return; }
       used = true;
       commit = lease.commit(async () => {
-        if (closed) return;
+        if (closed || revoked) return;
+        check();
         granted = true;
         send(response, 200, { schemaVersion: 1, granted: true });
         await new Promise<void>(resolve => { release = resolve; });
@@ -74,13 +96,19 @@ export async function openReminderOfflineBridge(lease: PreHostSourceLease, input
   });
   const address = server.address();
   if (!address || typeof address === "string") { server.close(); throw new Error("REMINDER_WORKER_BRIDGE_UNAVAILABLE"); }
+  const revoke = () => { revoked = true; };
+  seal.signal.addEventListener("abort", revoke, { once: true });
+  if (seal.signal.aborted) revoke();
   return {
     environment: Object.freeze({ VIBELUTION_REMINDER_WORKER_URL: `http://127.0.0.1:${address.port}`,
       VIBELUTION_REMINDER_WORKER_TOKEN: token }),
     wasGranted: () => granted,
+    /** Reject new checkpoints immediately; keep the permit until Job drain. */
+    revoke,
     async closeAfterDrain() {
       if (closed) return;
       closed = true; release?.(); server.closeAllConnections();
+      seal.signal.removeEventListener("abort", revoke);
       await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
       try { await commit; } catch (error) { if (granted) throw error; }
     },

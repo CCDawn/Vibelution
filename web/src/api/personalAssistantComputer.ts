@@ -1,6 +1,15 @@
 import { fetchJson } from "./client";
 import type { ComputerControlAction, ComputerState, ComputerWindow } from "./types/personalAssistantComputer";
 
+export type ComputerTransport = {
+  scope: "workbench" | "launcher";
+  state: typeof fetchPersonalAssistantComputer;
+  windows: typeof fetchPersonalAssistantComputerWindows;
+  grant: typeof grantPersonalAssistantComputer;
+  control: typeof controlPersonalAssistantComputer;
+  confirm: typeof confirmPersonalAssistantComputer;
+};
+
 export function fetchPersonalAssistantComputer(options?: { signal?: AbortSignal }): Promise<ComputerState> {
   return fetchJson("/api/personal-assistant/computer", { signal: options?.signal });
 }

@@ -3,18 +3,22 @@ import { isAbsolute, join } from "node:path";
 import { loadWorkbenchJobNative, type WorkbenchJobHandle, type WorkbenchJobNative } from "../process/workbenchJob.js";
 import { resolveNoConsolePython } from "../process/workbenchBackend.js";
 import type { PreHostSourceLease } from "./projectRegistryConnection.js";
+import type { ProjectAdmissionSeal } from "../lifecycle/projectAdmission.js";
 import { openReminderOfflineBridge, type ReminderOfflineBinding } from "./reminderOfflineBridge.js";
 
 /** Main persists syncId and its authorization before calling this once. */
 export async function runReminderOfflineJob(input: { sourceRoot: string; pythonPath: string; pythonArguments: string[];
-  runtimeRoot: string; env: NodeJS.ProcessEnv; lease: PreHostSourceLease; binding: ReminderOfflineBinding;
+  runtimeRoot: string; env: NodeJS.ProcessEnv; lease: PreHostSourceLease; projectSeal: ProjectAdmissionSeal; binding: ReminderOfflineBinding;
   native?: WorkbenchJobNative; signal?: AbortSignal }): Promise<Record<string, unknown>> {
   const unknown = { schemaVersion: 1, state: "unknown", syncId: input.binding.syncId, readyForCutover: false };
   if (![input.sourceRoot, input.pythonPath, input.runtimeRoot].every(isAbsolute)) throw new Error("REMINDER_JOB_INVALID");
   const native = input.native ?? loadWorkbenchJobNative();
   if (typeof native.exitCode !== "function" || typeof native.drainStatus !== "function") throw new Error("REMINDER_JOB_UNAVAILABLE");
-  const bridge = await openReminderOfflineBridge(input.lease, input.binding);
+  await input.projectSeal.drain();
+  const bridge = await openReminderOfflineBridge(input.lease, input.projectSeal, input.binding);
   let job: WorkbenchJobHandle | undefined, drained = false;
+  const revoke = () => bridge.revoke();
+  input.signal?.addEventListener("abort", revoke, { once: true });
   try {
     input.signal?.throwIfAborted();
     mkdirSync(input.runtimeRoot, { recursive: true });
@@ -31,7 +35,6 @@ export async function runReminderOfflineJob(input: { sourceRoot: string; pythonP
     let exit: number | null = null;
     let status: ReturnType<NonNullable<WorkbenchJobNative["drainStatus"]>> | undefined;
     while (!drained) {
-      if (input.signal?.aborted) { try { native.terminate(job); } catch { /* Retain and retry the captured Job. */ } }
       try {
         status = native.drainStatus(job); exit = native.exitCode(job);
         drained = native.activeCount(job) === 0 && status.complete && exit !== null;
@@ -60,6 +63,7 @@ export async function runReminderOfflineJob(input: { sourceRoot: string; pythonP
     } catch { return unknown; }
   } catch { return unknown; }
   finally {
+    input.signal?.removeEventListener("abort", revoke);
     if (job && drained) native.close(job);
     // Never release the permit while a spawned Job is still unconfirmed.
     if (!job || drained) await bridge.closeAfterDrain();

@@ -25,7 +25,12 @@ export type AssistantHostRequest =
   | { operation: "continue"; requestId: string; continuation: { turnId: string; headId: string; ledgerSeq: number; agentId: string } }
   | { operation: "curation"; sessionId: string }
   | { operation: "curate"; sessionId: string; messageId: string; action: "include" | "exclude" }
-  | { operation: "operatorAsset"; kind: "avatar" | "background" };
+  | { operation: "operatorAsset"; kind: "avatar" | "background" }
+  | { operation: "computerState" }
+  | { operation: "computerWindows" }
+  | { operation: "computerGrant"; selectionId: string; allowVision: true }
+  | { operation: "computerControl"; grantId: string; action: "pause" | "resume" | "takeover" | "return" | "end" }
+  | { operation: "computerConfirm"; grantId: string; pendingId: string; approved: boolean };
 
 /** Private to Electron main; attemptToken must never cross the renderer bridge. */
 export type AssistantReminder = {
@@ -234,9 +239,117 @@ export class AssistantHost {
     return result as LegacyReminderSourceIdentity;
   }
 
+  /** Main-only: the caller owns its registry/document admission until release drains. */
+  async acquireLegacyReminderPermit(projectId: string, revision: number): Promise<Readonly<{
+    ledgerKey: string; check(): Promise<void>; release(): Promise<void>;
+  }>> {
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(projectId)
+      || !Number.isSafeInteger(revision) || revision < 0) throw new HostError("ASSISTANT_REQUEST_INVALID");
+    const generation = this.current, root = this.projectSnapshot.projects[projectId];
+    const current = () => Boolean(generation && this.current === generation && !generation.closed
+      && !generation.abort.signal.aborted && this.view.state === "ready" && !this.projectsSuspended
+      && generation.projectRevision === revision && this.projectSnapshot.revision === revision
+      && root && this.projectSnapshot.projects[projectId] === root);
+    if (!generation || !current()) throw new HostError("ASSISTANT_NOT_READY");
+    const permitId = randomBytes(32).toString("hex");
+    let released = false;
+    // The host tombstones this exact main-generated ID even if release wins
+    // the race against acquisition; a lost reply cannot leak an unknown ID.
+    const release = async () => {
+      if (released) throw new HostError("ASSISTANT_REQUEST_INVALID");
+      released = true;
+      while (true) {
+        try {
+          const result = await this.rpc(generation, "/api/assistant/legacy-reminders/permit/release", "POST", { permitId }, 5_000, true, 8192);
+          if (object(result) && ownKeys(result, ["schemaVersion", "released"]) && Object.keys(result).length === 2
+            && result.schemaVersion === 1 && result.released === true) return;
+        } catch { /* A missing acknowledgement does not prove release. */ }
+        try {
+          if (generation.native.activeCount(generation.job) === 0 && generation.native.drainStatus(generation.job).complete
+            && typeof generation.native.exitCode === "function" && generation.native.exitCode(generation.job) !== null) return;
+        } catch { /* Retain the exact Job until its exit and output are certain. */ }
+        await sleep(1000);
+      }
+    };
+    const valid = (result: unknown, acquired: boolean, key?: string): result is Record<string, unknown> => {
+      const keys = ["schemaVersion", "ledgerKey", "coverage", "unmanagedSenders", "readyForCutover", ...(acquired ? ["permitId"] : [])];
+      return object(result) && Object.keys(result).length === keys.length && ownKeys(result, keys)
+        && result.schemaVersion === 1 && typeof result.ledgerKey === "string" && /^[a-f0-9]{64}$/.test(result.ledgerKey)
+        && (!key || result.ledgerKey === key) && (!acquired || result.permitId === permitId)
+        && result.coverage === "cooperating_route_writers" && result.unmanagedSenders === "unknown" && result.readyForCutover === false;
+    };
+    try {
+      const result = await this.rpc(generation, "/api/assistant/legacy-reminders/permit/acquire", "POST",
+        { projectId, revision, permitId }, REQUEST_MS, false, 8192);
+      if (!current() || !valid(result, true)) throw new HostError("ASSISTANT_RESPONSE_INVALID");
+      const ledgerKey = result.ledgerKey as string;
+      const check = async () => {
+        if (released || !current()) throw new HostError("ASSISTANT_NOT_READY");
+        const result = await this.rpc(generation, "/api/assistant/legacy-reminders/permit/check", "POST", { permitId }, REQUEST_MS, false, 8192);
+        if (released || !current() || !valid(result, false, ledgerKey)) throw new HostError("ASSISTANT_RESPONSE_INVALID");
+      };
+      await check();
+      return Object.freeze({ ledgerKey, check, release });
+    } catch (error) {
+      await release();
+      throw error;
+    }
+  }
+
   /** Main-only: sourceKey must be derived from a verified source and PA agent. */
   async reserveLegacyReminder(request: { sourceKey: string; eventId: string }): Promise<unknown> {
     return await this.legacyReminderRpc("reserve", request);
+  }
+
+  /** Main-only read of the same native-authorized handoff ID. */
+  async reminderHandoffReceipt(projectId: string, revision: number): Promise<"pending" | "unknown"> {
+    const generation = this.current;
+    const root = this.projectSnapshot.projects[projectId];
+    const current = () => this.view.state === "ready" && this.current === generation && generation && !generation.closed
+      && !generation.abort.signal.aborted && !this.projectsSuspended && generation.projectRevision === revision
+      && this.projectSnapshot.revision === revision && this.projectSnapshot.projects[projectId] === root && Boolean(root);
+    if (!current() || !generation || !Number.isSafeInteger(revision) || revision < 0) throw new HostError("ASSISTANT_NOT_READY");
+    const result = await this.rpc(generation, "/api/assistant/legacy-reminders/handoff-receipt", "POST",
+      { projectId, revision }, REQUEST_MS, false, 8192);
+    const digest = createHash("sha256").update(`${projectId}:reminder_handoff`).digest("hex").slice(0, 40);
+    if (!current() || !object(result) || result.schemaVersion !== 1 || result.projectId !== projectId
+      || result.operationId !== `initial-${digest}` || result.syncId !== `affairs-${digest}` || result.readyForCutover !== false
+      || !((result.state === "unknown" && result.code === "unknown" && Object.keys(result).length === 7)
+        || (result.state === "pending" && result.code === "source_proof_unavailable" && result.baselineState === "unknown"
+          && Object.keys(result).length === 8))) throw new HostError("ASSISTANT_RESPONSE_INVALID");
+    return result.state as "pending" | "unknown";
+  }
+
+  /** Trusted, revalidated identity for one original pending handoff. */
+  async reminderHandoffSource(projectId: string, revision: number): Promise<{ operationId: string; syncId: string;
+    sourceScope: { projectId: string; instanceId: string; agentId: string }; sourceIdentityDigest: string; registryDigest: string }> {
+    const generation = this.current, root = this.projectSnapshot.projects[projectId];
+    const current = () => this.view.state === "ready" && this.current === generation && generation && !generation.closed
+      && !generation.abort.signal.aborted && !this.projectsSuspended && generation.projectRevision === revision
+      && this.projectSnapshot.revision === revision && this.projectSnapshot.projects[projectId] === root && Boolean(root);
+    if (!current() || !generation || !Number.isSafeInteger(revision) || revision < 0) throw new HostError("ASSISTANT_NOT_READY");
+    const result = await this.rpc(generation, "/api/assistant/legacy-reminders/handoff-source", "POST",
+      { projectId, revision }, REQUEST_MS, false, 8192);
+    const digest = createHash("sha256").update(`${projectId}:reminder_handoff`).digest("hex").slice(0, 40);
+    const keys = ["schemaVersion", "registeredProjectId", "sourceScope", "category", "turnId", "operationId", "syncId", "revision",
+      "sourceIdentityDigest", "registryDigest", "targetIdentityDigest", "projectDirectory", "workspaceDirectory", "targetDirectory",
+      "targetAgentId", "targetSessionId", "authority", "baselineId", "baselineState", "readyForCutover"];
+    const opaque = (value: unknown) => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(value);
+    const identity = (value: unknown) => object(value) && Object.keys(value).length === 3
+      && ["device", "inode", "birthtimeNs"].every(key => typeof value[key] === "string" && /^[1-9][0-9]{0,24}$/.test(value[key] as string));
+    if (!current() || !object(result) || Object.keys(result).length !== keys.length || !ownKeys(result, keys)
+      || result.schemaVersion !== 1 || result.registeredProjectId !== projectId || result.category !== "reminder_handoff"
+      || result.operationId !== `initial-${digest}` || result.syncId !== `affairs-${digest}`
+      || result.authority !== "native_policy_admitted" || result.baselineId !== null || result.baselineState !== "unknown"
+      || result.readyForCutover !== false || !Number.isSafeInteger(result.revision) || !opaque(result.turnId)
+      || !object(result.sourceScope) || Object.keys(result.sourceScope).length !== 3
+      || !["projectId", "instanceId", "agentId"].every(key => opaque((result.sourceScope as Record<string, unknown>)[key]))
+      || !["sourceIdentityDigest", "registryDigest", "targetIdentityDigest"].every(key => typeof result[key] === "string" && /^[a-f0-9]{64}$/.test(result[key] as string))
+      || !identity(result.projectDirectory) || !identity(result.workspaceDirectory) || !identity(result.targetDirectory)
+      || !opaque(result.targetAgentId) || !opaque(result.targetSessionId)) throw new HostError("ASSISTANT_RESPONSE_INVALID");
+    return { operationId: result.operationId as string, syncId: result.syncId as string,
+      sourceScope: result.sourceScope as { projectId: string; instanceId: string; agentId: string },
+      sourceIdentityDigest: result.sourceIdentityDigest as string, registryDigest: result.registryDigest as string };
   }
 
   /** Main-only: the attempt token must never cross the renderer bridge. */
@@ -517,9 +630,12 @@ export class AssistantHost {
     const captured = structuredClone(payload);
     while (this.migrationAdmission) {
       const admission = this.migrationAdmission;
-      const safeWhileWaiting = ["status", "detail", "dispatches", "config", "approvals", "curation", "operatorAsset", "resolveApproval", "stop"]
+      const safeWhileWaiting = ["status", "detail", "dispatches", "config", "approvals", "curation", "operatorAsset", "resolveApproval", "stop", "computerState"]
         .includes(captured.operation);
-      if (!admission.sealed && safeWhileWaiting) break;
+      // Confirmation only settles an existing native waiter; it remains a
+      // counted writer in the host barrier even after admission is sealed.
+      if (captured.operation === "computerConfirm" || captured.operation === "computerState"
+        || (!admission.sealed && safeWhileWaiting)) break;
       await admission.released;
     }
     this.rendererRequests += 1;
@@ -566,6 +682,53 @@ export class AssistantHost {
         // Native backgrounds allow 10 MiB; base64 fits this operation's 16 MiB
         // envelope without widening ordinary JSON or main-control budgets.
         return await this.rpc(generation, `/api/assistant/operator-assets/${payload.kind}`, "GET", undefined, REQUEST_MS, false, 16 * 1024 * 1024);
+      case "computerState":
+      case "computerWindows":
+      case "computerGrant":
+      case "computerControl":
+      case "computerConfirm": {
+        const token = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= 100;
+        const exact = (value: Record<string, unknown>, keys: string[]) => Object.keys(value).length === keys.length && ownKeys(value, keys);
+        let path = "/api/assistant/computer", method: "GET" | "POST" = "POST", body: object | undefined;
+        if (payload.operation === "computerState" || payload.operation === "computerWindows") {
+          if (!exact(payload, ["operation"])) throw new HostError("ASSISTANT_REQUEST_INVALID");
+          if (payload.operation === "computerState") method = "GET";
+          else { path += "/windows"; body = {}; }
+        } else if (payload.operation === "computerGrant") {
+          if (!exact(payload, ["operation", "selectionId", "allowVision"]) || !token(payload.selectionId) || payload.allowVision !== true)
+            throw new HostError("ASSISTANT_REQUEST_INVALID");
+          path += "/grant"; body = { selectionId: payload.selectionId, allowVision: true };
+        } else if (payload.operation === "computerControl") {
+          if (!exact(payload, ["operation", "grantId", "action"]) || !token(payload.grantId)
+            || !["pause", "resume", "takeover", "return", "end"].includes(payload.action)) throw new HostError("ASSISTANT_REQUEST_INVALID");
+          path += "/control"; body = { grantId: payload.grantId, action: payload.action };
+        } else {
+          if (!exact(payload, ["operation", "grantId", "pendingId", "approved"]) || !token(payload.grantId)
+            || !token(payload.pendingId) || typeof payload.approved !== "boolean") throw new HostError("ASSISTANT_REQUEST_INVALID");
+          path += "/confirm"; body = { grantId: payload.grantId, pendingId: payload.pendingId, approved: payload.approved };
+        }
+        const result = await this.rpc(generation, path, method, body, REQUEST_MS, false, 1024 * 1024);
+        const bounded = (value: unknown, max: number): value is string => typeof value === "string" && value.length <= max;
+        const validWindow = (value: unknown): boolean => object(value) && exact(value, ["selectionId", "title", "appName"])
+          && token(value.selectionId) && bounded(value.title, 240) && bounded(value.appName, 80);
+        if (payload.operation === "computerWindows") {
+          if (!object(result) || !exact(result, ["windows"]) || !Array.isArray(result.windows)
+            || result.windows.length > 256 || !result.windows.every(validWindow)) throw new HostError("ASSISTANT_RESPONSE_INVALID");
+          return result;
+        }
+        if (!object(result) || !exact(result, ["available", "status", "message", "grantId", "window", "pending"])
+          || typeof result.available !== "boolean" || typeof result.status !== "string"
+          || !["idle", "ready", "working", "waiting_confirmation", "paused", "manual", "ended", "error"].includes(result.status)
+          || !bounded(result.message, 2000) || !(result.grantId === null || token(result.grantId))
+          || !(result.window === null || validWindow(result.window)) || (result.grantId === null) !== (result.window === null))
+          throw new HostError("ASSISTANT_RESPONSE_INVALID");
+        if (result.pending !== null && (!object(result.pending) || !exact(result.pending, ["id", "action", "targetLabel", "text"])
+          || !token(result.pending.id) || typeof result.pending.action !== "string"
+          || !["click", "set_value", "type_text", "scroll"].includes(result.pending.action)
+          || !bounded(result.pending.targetLabel, 400) || !(result.pending.text === null || bounded(result.pending.text, 2000))
+          || result.grantId === null || result.status !== "waiting_confirmation")) throw new HostError("ASSISTANT_RESPONSE_INVALID");
+        return result;
+      }
       case "send":
         if (!ownKeys(payload, ["operation", "message", "requestId"])
           || typeof payload.message !== "string" || !payload.message.trim() || payload.message.length > 64_000
@@ -786,7 +949,7 @@ export class AssistantHost {
         || (request.category === "knowledge_sync") !== request.operationId.startsWith("ksync-")
         || (request.category === "knowledge_recovery") !== request.operationId.startsWith("krec-")
         || (request.category === "knowledge_recovery" ? typeof request.originalSyncId !== "string" || !/^ksync-[a-f0-9]{40}$/.test(request.originalSyncId) : request.originalSyncId !== undefined)
-        || !["personal", "knowledge", "knowledge_sync", "knowledge_recovery"].includes(request.category) || !Number.isSafeInteger(revision) || revision < 0) {
+        || !["personal", "knowledge", "knowledge_sync", "knowledge_recovery", "reminder_handoff"].includes(request.category) || !Number.isSafeInteger(revision) || revision < 0) {
       console.warn("ASSISTANT_INITIAL_PREPARE phase=admission code=request_invalid");
       throw new HostError("ASSISTANT_REQUEST_INVALID");
     }
@@ -811,6 +974,7 @@ export class AssistantHost {
         "targetAgentId", "targetSessionId", "authority", "readyForCutover"];
         if (request.category === "knowledge_sync" || request.category === "knowledge_recovery") keys.push("previewId", "baselineMigrationId");
         if (request.category === "knowledge_recovery") keys.push("originalSyncId");
+        if (request.category === "reminder_handoff") keys.push("syncId", "baselineId", "baselineState");
       const identity = (value: unknown) => object(value) && Object.keys(value).length === 3
         && ["device", "inode", "birthtimeNs"].every(key => typeof value[key] === "string" && /^[1-9][0-9]{0,24}$/.test(value[key] as string));
       const opaque = (value: unknown) => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(value);
@@ -820,6 +984,8 @@ export class AssistantHost {
           || ((request.category === "knowledge_sync" || request.category === "knowledge_recovery") && (result.previewId !== request.previewId
             || result.baselineMigrationId !== `initial-${createHash("sha256").update(`${request.projectId}:knowledge`).digest("hex").slice(0, 40)}`))
         || (request.category === "knowledge_recovery" && result.originalSyncId !== request.originalSyncId)
+        || (request.category === "reminder_handoff" && (result.baselineId !== null || result.baselineState !== "unknown"
+          || result.syncId !== `affairs-${createHash("sha256").update(`${request.projectId}:reminder_handoff`).digest("hex").slice(0, 40)}`))
         || result.authority !== "native_policy_admitted" || result.readyForCutover !== false
         || !object(result.sourceScope) || Object.keys(result.sourceScope).length !== 3
         || !["projectId", "instanceId", "agentId"].every(key => opaque((result.sourceScope as Record<string, unknown>)[key]))

@@ -56,7 +56,7 @@ async function click(label: string) {
   await settle(); await settle();
 }
 function assetReads() { return invoke.mock.calls.filter(([request]) => request.operation === "operatorAsset").length; }
-async function renderAssistant(options: { capability?: boolean; failAvatar?: boolean } = {}) {
+async function renderAssistant(options: { capability?: boolean; failAvatar?: boolean; patrol?: { state: "ready" | "unavailable"; deliveryStates: Record<string, number> } } = {}) {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   failingAvatar = Boolean(options.failAvatar);
   detail = { id: "s", agentId: "a", status: "ready", messages: [] };
@@ -67,12 +67,15 @@ async function renderAssistant(options: { capability?: boolean; failAvatar?: boo
       case "status": return {
         assistant: { agentId: "a", directSessionId: "s", displayName: "助理" },
         operatorProfile: { displayName: "当前用户", avatarPreset: "initial" },
+        ...(options.patrol ? { patrol: options.patrol } : {}),
         ...(options.capability === false ? {} : { operatorAssetsVersion: 1 }),
       };
       case "config": return { language: "zh" };
       case "detail": return detail;
       case "approvals": return [];
       case "dispatches": return { dispatches: [] };
+      case "computerState": return { available: false, status: "idle", message: "测试驱动未连接", grantId: null, window: null, pending: null };
+      case "computerWindows": return { windows: [] };
       case "setExpanded": return { expanded: request.expanded };
       case "operatorAsset":
         if (Object.keys(request).sort().join(",") !== "kind,operation" || !["avatar", "background"].includes(request.kind)) throw new Error("invalid_asset_request");
@@ -95,6 +98,28 @@ async function finishTurn(turnId: string) {
 }
 
 describe("Launcher operator image consumption", () => {
+  it("shows when task receipts cannot be reported automatically", async () => {
+    await renderAssistant({ patrol: { state: "ready", deliveryStates: { unknown: 1 } } });
+    await click("展开个人助理聊天");
+    expect(container.textContent).toContain("部分任务回执无法自动汇报，请查看派发回执");
+  });
+  it("opens computer controls only on request and returns to the conversation", async () => {
+    await renderAssistant();
+    await click("展开个人助理聊天");
+    expect(invoke.mock.calls.some(([request]) => request.operation === "computerWindows")).toBe(false);
+    const button = [...container.querySelectorAll("button")].find(item => item.textContent?.includes("电脑操作"));
+    expect(button).toBeTruthy();
+    await act(async () => { button?.click(); });
+    await settle(); await settle();
+    expect(invoke.mock.calls.some(([request]) => request.operation === "computerWindows")).toBe(true);
+    expect(container.textContent).toContain("测试驱动未连接");
+    expect(container.querySelector('[data-testid="native-conversation"]')).toBeNull();
+    const collapse = container.querySelector<HTMLButtonElement>('button[aria-label="收起电脑操作栏"]');
+    expect(collapse).toBeTruthy();
+    await act(async () => { collapse?.click(); });
+    await settle(); await settle();
+    expect(container.querySelector('[data-testid="native-conversation"]')).toBeTruthy();
+  });
   it("paints the expanded recipe in both themes, including below a transparent wallpaper, and keeps the avatar transparent", async () => {
     await renderAssistant({ capability: false });
     const collapsed = container.querySelector<HTMLElement>('[data-expanded="false"]')!;

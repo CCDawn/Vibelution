@@ -182,15 +182,15 @@ severity 用 `--state-error`/`--state-warning` 与 `--vui-border-subtle`/`--vui-
 ### 功能
 在个人助理右栏提供单窗口授权、暂停与继续、人工接管与交回、具体操作确认和结束重选。
 ### 适用范围
-仅个人助理工作台右栏与窄屏电脑操作 VDialog。普通聊天、Companion 和桌面浮动窗不挂载。
+个人助理工作台右栏、窄屏电脑操作 VDialog 和 Launcher 个人助理的电脑操作入口可复用。普通聊天和 Companion 不挂载。
 ### 使用方式
-`<PersonalAssistantComputerPanel active onCollapse={...} />`。组合 VButton、VIconButton、VCheckbox、VSurface 与 VStateSurface。打开页或手动刷新才读取窗口列表，普通状态一秒轮询且隐藏时停止。用户选定窗口、勾选画面许可后提交授权。顶部保留收起、暂停或继续、交给我或交回助理；结束撤销授权后重新选择。
+`<PersonalAssistantComputerPanel active onCollapse={...} />` 默认使用工作台传输；Launcher 注入其专用 transport，缓存按宿主隔离。组合 VButton、VIconButton、VCheckbox、VSurface 与 VStateSurface。打开页或手动刷新才读取窗口列表，普通状态一秒轮询且隐藏时停止。用户选定窗口、勾选画面许可后提交授权。顶部保留收起、暂停或继续、交给我或交回助理；结束撤销授权后重新选择。
 ### 非职责
 不读取截图、不发送鼠标键盘输入、不持有消息或执行历史；不修改原生聊天语义，不以 UI 状态替代服务端授权与确认。
 ### 视觉与状态
 授权前列出应用名和窗口标题，明确画面交给当前助理模型，并固定提交、发送、删除前确认。授权后展示唯一窗口、服务端状态和待确认动作、目标、完整输入；确认与取消分别提交 approved。失窗、结束和错误使用后端状态与原因，不伪造进度。mutation 失败保留原因与原状态，加载、不可用、空窗口和刷新失败均独立显示。长标题与输入换行，面板内容滚动，顶部控制与底部边界说明保持可见。
 ### 实现落点
-`routes/personalAssistant/PersonalAssistantComputerPanel.tsx` 与 `.styles.ts`；transport 为 `api/personalAssistantComputer.ts`，DTO 为 `api/types/personalAssistantComputer.ts`。
+`routes/personalAssistant/PersonalAssistantComputerPanel.tsx` 与 `.styles.ts`；transport 为 `api/personalAssistantComputer.ts` 或 `api/launcherAssistantComputer.ts`，DTO 为 `api/types/personalAssistantComputer.ts`。
 ### 反冗余
 复用 VUI 控件、React Query 缓存和现有 VSplitWorkspace 的 personalAssistant 宽度记忆；不引入截图预览、第二套控制状态或额外布局持久化。
 

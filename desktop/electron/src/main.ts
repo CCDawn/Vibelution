@@ -6,7 +6,7 @@ import { NativeNotificationLifetime } from "./notifications/nativeNotificationLi
 import { handleHumanAttentionCapabilityIpc, handleHumanAttentionIpc } from "./notifications/humanAttentionIpc.js";
 import { LegacyReminderSourceFence } from "./notifications/legacyReminderSourceFence.js";
 import { createLegacyReminderSourceResolver } from "./notifications/resolveLegacyReminderSource.js";
-import { mkdirSync, realpathSync, statSync, watch, writeFileSync, type FSWatcher } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, statSync, watch, writeFileSync, type FSWatcher } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { deflateSync } from "node:zlib";
@@ -29,6 +29,7 @@ import { AssistantHost } from "./assistant/assistantHost.js";
 import { InitialMigrationResults } from "./assistant/initialMigrationResults.js";
 import { verifyInitialMigrationResult } from "./assistant/initialMigrationJob.js";
 import { recoverInitialMigrations } from "./assistant/initialMigrationStartup.js";
+import { PrehostRecoveryDrainedUnknown, startPrehostRecoveryJob } from "./assistant/prehostRecoveryJob.js";
 import { unknownAffairsSyncResult, unknownEpisodicSyncResult } from "./assistant/mainControlTransport.js";
 import { startAssistantReminderPump, type AssistantReminderPump } from "./assistant/reminderPump.js";
 import { AssistantProjectRegistryConnection } from "./assistant/projectRegistryConnection.js";
@@ -148,7 +149,9 @@ import {
   readLauncherStateFile,
   spawnWorkbenchBackend
 } from "./process/workbenchBackend.js";
-import { captureTrackedWorkbenchJobRetirement } from "./process/workbenchJob.js";
+import { captureTrackedWorkbenchJobRetirement, captureTrackedWorkbenchJobNaturalRetirement, getTrackedWorkbenchJobPid,
+  type WorkbenchNaturalJobRetirement } from "./process/workbenchJob.js";
+import { startManagedLegacyReminderRetirement } from "./notifications/managedLegacyReminderRetirement.js";
 import { captureFrontendBuildRetirement } from "./process/ownedFrontendBuildBridge.js";
 import { waitForPortRelease } from "./process/workbenchBackendRetire.js";
 import { waitForBackendHealthy } from "./process/workbenchBackendHealth.js";
@@ -158,7 +161,7 @@ import {
   type ServingProcessIdentity
 } from "./process/servingVersion.js";
 import { recordAdmissionOutcome } from "./lifecycle/instanceAdmissionStore.js";
-import { normalizeInstanceKey, resolveActiveCanonicalRuntimeHome, resolveConfigHome, resolveDataHomeForProject, resolveRuntimeManagerDir } from "./lifecycle/projectStoragePaths.js";
+import { normalizeInstanceKey, resolveActiveCanonicalRuntimeHome, resolveConfigHome, resolveDataHomeForProject, resolveProjectsHome, resolveRuntimeManagerDir } from "./lifecycle/projectStoragePaths.js";
 import {
   claimStopIfGeneration,
   instancesRegistryPath,
@@ -356,7 +359,8 @@ const launcherStateStatSignatures = new Map<string, string>();
 const inProcessDesktopSessionStore = new InProcessDesktopSessionStore();
 const mainWorkbenchCloseStore = new MainWorkbenchCloseTransactionStore();
 const launcherLifecycleSupervisor = new LauncherLifecycleSupervisor();
-const projectAdmission = process.env.VIBELUTION_PROJECT_ADMISSION_EXPERIMENT === "1" ? new ProjectAdmission() : null;
+const projectAdmission = new ProjectAdmission();
+const projectAdmissionExperiment = process.env.VIBELUTION_PROJECT_ADMISSION_EXPERIMENT === "1";
 let experimentalAdmissionSeal: ProjectAdmissionSeal | null = null;
 
 function registeredAdmissionRoot(root: string): string {
@@ -378,11 +382,10 @@ function instanceAdmissionRoot(instanceId: string): string {
 
 /** Enrol synchronously; unresolved source stays visible to seal until settled. */
 async function withProjectAdmission<T>(root: () => string, work: (ticket?: ProjectAdmissionTicket) => Promise<T>): Promise<T> {
-  if (!projectAdmission) return await work();
-  return await projectAdmission.run(root, work);
+  return await projectAdmission.observe(root, work);
 }
 
-function assertProjectOpen(root: string): void { if (projectAdmission) projectAdmission.assertOpen(registeredAdmissionRoot(root)); }
+function assertProjectOpen(root: string): void { if (projectAdmission.hasSeals()) projectAdmission.assertOpen(registeredAdmissionRoot(root)); }
 
 /** Experimental main-only observation. External executables and full exit remain unknown. */
 async function observeExperimentalProjectAdmission(projectId: string): Promise<{ state: "unknown"; readyForCutover: false }> {
@@ -650,7 +653,7 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
     const projectConnection = new AssistantProjectRegistryConnection(join(paths.userDataRoot, "assistant", "projects.json"));
     launcherAssistantProjects = projectConnection;
     const experimentalProjectId = process.env.VIBELUTION_PROJECT_ADMISSION_PROJECT_ID;
-    if (projectAdmission && experimentalProjectId) {
+    if (projectAdmissionExperiment && experimentalProjectId) {
       void observeExperimentalProjectAdmission(experimentalProjectId).then(() => {
         console.warn("PROJECT_ADMISSION_EXPERIMENT_OUTCOME_UNKNOWN");
       });
@@ -659,6 +662,7 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
     let initialMigrationResults: InitialMigrationResults | null = null;
     let initialMigrationRecoveryUncertain = false;
     let scheduleInitialMigration: () => void = () => undefined;
+    let scheduleReminderHandoff: (projectId: string) => void = () => undefined;
     try {
       const directory = join(paths.userDataRoot, "assistant", "legacy-reminder-admission");
       mkdirSync(directory, { recursive: true });
@@ -671,7 +675,7 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
       console.warn("LEGACY_REMINDER_ADMISSION_UNAVAILABLE");
     }
     const projectMainControl = createAssistantProjectMainControl({
-      ...(projectAdmission ? { admission: projectAdmission } : {}),
+      ...(projectAdmissionExperiment ? { admission: projectAdmission } : {}),
       directory: join(paths.userDataRoot, "assistant", "lifecycle-requests"), registry: projectConnection,
       operatorConfigPath: desktopLaunchSettings().configPath,
       launch: { env: process.env, cliArgs: desktopCliArgs, resourcesRoot: process.resourcesPath, userDataRoot: app.getPath("userData") },
@@ -696,6 +700,16 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
         const base = { schemaVersion: 1, projectId: request.projectId, category: request.category,
           operationId: request.operationId, readyForCutover: false };
         return projectConnection.withHistoryImport(request.projectId, async () => {
+          if (request.category === "reminder_handoff") {
+            const host = launcherAssistantHost;
+            let state: "pending" | "unknown" = "unknown";
+            try { if (host) state = await host.reminderHandoffReceipt(request.projectId, projectConnection.snapshot().revision); }
+            catch { /* A missing or changed original remains unknown. */ }
+            return state === "pending" ? { ...base, state: "queued", code: "queued",
+              syncId: `affairs-${request.operationId.slice("initial-".length)}`,
+              waitingFor: reminderHandoffStages.get(request.operationId) ?? "unknown" }
+              : { ...base, state: "unknown", code: "unknown" };
+          }
           let state: "queued" | "completed" | "partial" | "unknown" | "not_found" = initialMigrationStates.get(request.operationId) ?? "not_found";
           if (state === "not_found" && initialMigrationResults) {
             const stored = await initialMigrationResults.get(request.operationId);
@@ -715,6 +729,18 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
         if (!host || shutdownApproved) return Promise.resolve({ ...base, state: "rejected", code: "unavailable" });
         return projectConnection.withHistoryImport(request.projectId, async revision => {
           const prepared = await host.prepareInitialMigration(request, revision, signal);
+          // A reminder handoff is a separate durable intent, never an initial
+          // import job or evidence that old notification senders have stopped.
+          if (request.category === "reminder_handoff") {
+            if (prepared === "busy") {
+              // Consult the same original ID, but neither an absent/unknown
+              // receipt nor a still-active publisher proves non-publication.
+              try { await host.reminderHandoffReceipt(request.projectId, revision); } catch { /* Keep the original ID unknown. */ }
+            }
+            if (prepared === true) setTimeout(() => scheduleReminderHandoff(request.projectId), 0);
+            return prepared === true ? { ...base, state: "queued", code: "queued" }
+              : { ...base, state: "unknown", code: "unknown" };
+          }
           const previous = initialMigrationStates.get(request.operationId);
           if (prepared === "busy" && !signal?.aborted && !initialMigrationRecoveryUncertain && !previous
               && initialMigrationResults && await initialMigrationResults.get(request.operationId) === null && !signal?.aborted) {
@@ -757,6 +783,13 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
           ...(request.recoverSyncId !== undefined ? { recoverSyncId: request.recoverSyncId } : {}),
           ...(request.resolveSyncId !== undefined ? { resolveSyncId: request.resolveSyncId, reviewToken: request.reviewToken } : {}),
         }));
+      }
+      if (request.action === "project_lifecycle" && (request.operation === "start" || request.operation === "restart")) {
+        return projectAdmission.observe(() => {
+          const registration = projectConnection.registration(request.projectId);
+          if (!registration) throw new Error("PROJECT_ADMISSION_UNKNOWN");
+          return registeredAdmissionRoot(registration.root);
+        }, () => projectMainControl(request));
       }
       return projectMainControl(request);
     };
@@ -815,6 +848,55 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
         sourceRoot: resources.sourceRoot, pythonPath: resources.pythonPath, pythonArguments: resources.pythonArguments,
         runtimeRoot: join(paths.userDataRoot, "assistant", "runtime"), env: resources.env, signal: launcherAssistantStartupAbort.signal });
     };
+    // A crash marker is only examined before starting the resident host. A
+    // trusted new inventory is needed; failure keeps the original ID pending.
+    const pendingRecovery = projectConnection.pendingPreHostRecovery();
+    if (pendingRecovery && !shutdownApproved) {
+      migrationPending = true;
+      assistantMigrationPending = true;
+      const waitTimer = setTimeout(() => { if (!desktopCliArgs.hiddenPresentation || pendingAssistantOpen?.show) showMigrationWait(); }, 1000);
+      try {
+        await launcherStateStore.refresh("assistant_recovery_source");
+        if (!shutdownApproved) await projectConnection.recoverPreHostSource(pendingRecovery.operationId, async marker => {
+          let finishDrain!: () => void;
+          const drained = new Promise<void>(resolveDrain => { finishDrain = resolveDrain; });
+          let seal: ProjectAdmissionSeal | undefined;
+          const onRevoke = () => projectConnection.revokePreHostRecovery();
+          const releaseSeal = () => { if (seal) { seal.signal.removeEventListener("abort", onRevoke); seal.release(); } };
+          try {
+            seal = projectAdmission.seal(marker.registration.root, { drainOnRevoke: () => drained });
+            seal.signal.addEventListener("abort", onRevoke, { once: true });
+            await seal.drain();
+          } catch { finishDrain(); releaseSeal(); return null; }
+          try {
+            if (shutdownApproved) { finishDrain(); releaseSeal(); return null; }
+            const worker = await startPrehostRecoveryJob({ marker, sourceRoot: resources.sourceRoot,
+              pythonPath: resources.pythonPath, pythonArguments: resources.pythonArguments,
+              runtimeRoot: join(paths.userDataRoot, "assistant", "runtime"), sourceConfig: desktopLaunchSettings().configPath,
+              sourceProjectsHome: resolveProjectsHome(), targetProfile: profileRoot, env: resources.env, projectSeal: seal });
+            if (!worker) { finishDrain(); releaseSeal(); return null; }
+            return { ...worker, release: async () => {
+              try { await worker.release(); }
+              catch (error) {
+                if (error instanceof PrehostRecoveryDrainedUnknown) { finishDrain(); releaseSeal(); }
+                throw error;
+              }
+              finishDrain(); releaseSeal();
+            } };
+          } catch (error) {
+            if (error instanceof PrehostRecoveryDrainedUnknown) { finishDrain(); releaseSeal(); }
+            // Any other failed startup may still own an undrained Job.
+            return null;
+          }
+        });
+      } catch { /* Keep the same recovery marker and do not replay its operation. */ }
+      finally {
+        migrationPending = false;
+        assistantMigrationPending = false;
+        clearTimeout(waitTimer);
+        migrationDialog.current?.abort();
+      }
+    }
     if (initialMigrationControl) {
       migrationPending = true;
       assistantMigrationPending = true;
@@ -839,7 +921,7 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
     let migrationTimer: ReturnType<typeof setTimeout> | undefined;
     let migrationRunning = false;
     let migrationWarningShown = false;
-    let migrationWarningPending = false;
+    let migrationWarningPending = projectConnection.hasPendingPreHostRecovery();
     const migrationReceiptDetails: string[] = [];
     flushAssistantMigrationFeedback = () => {
       if (shutdownApproved || !canShowMigrationFeedback()) return;
@@ -847,15 +929,130 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
       if (migrationWarningPending && !migrationWarningShown) {
         migrationWarningPending = false;
         migrationWarningShown = true;
+        const recoveryReceipt = projectConnection.pendingPreHostRecovery();
         void dialog.showMessageBox({ type: "warning", title: "个人助理迁移等待中",
           message: "暂时无法确认所有工作已安全结束，迁移仍在等待。",
-          detail: "已有任务不会因为这次等待被强制停止；可以继续使用原回执查询结果。",
+          detail: `已有任务不会因为这次等待被强制停止；可以继续使用原回执查询结果。${
+            recoveryReceipt ? ` 原编号：${recoveryReceipt.operationId}` : ""}`,
           buttons: ["确定"], noLink: true }).catch(() => console.warn("ASSISTANT_MIGRATION_WARNING_FAILED"));
       }
       for (const detail of migrationReceiptDetails.splice(0)) {
         void dialog.showMessageBox({ type: "info", title: "个人助理迁移结果", message: "迁移处理结果",
           detail, buttons: ["确定"], noLink: true }).catch(() => console.warn("ASSISTANT_MIGRATION_RECEIPT_DISPLAY_FAILED"));
       }
+    };
+    if (migrationWarningPending) flushAssistantMigrationFeedback();
+    const activeReminderHandoffs = new Set<string>();
+    const reminderHandoffStages = new Map<string, string>();
+    const showReminderHandoffStage = (operationId: string, stage: string) => {
+      if (reminderHandoffStages.get(operationId) === stage) return;
+      reminderHandoffStages.set(operationId, stage);
+      const text = stage === "window" ? "等待原工作台窗口自行关闭，未保存内容仍在原窗口。"
+        : stage === "close_transaction" ? "等待原工作台关闭事务完成。"
+        : "正在等待旧来源和提醒发送者的安全证明。";
+      if (canShowMigrationFeedback()) notifyDesktopTray("旧提醒交接等待中", `${text} 原编号：${operationId}`);
+    };
+    scheduleReminderHandoff = (projectId: string) => {
+      if (shutdownApproved || activeReminderHandoffs.has(projectId)) return;
+      const host = launcherAssistantHost, provider = windowProvider, legacy = legacyReminderAdmission;
+      if (!host || !provider || !legacy) return;
+      activeReminderHandoffs.add(projectId);
+      void (async () => {
+        let seal: ProjectAdmissionSeal | undefined;
+        let captured: WorkbenchNaturalJobRetirement[] = [];
+        let owner: ReturnType<typeof startManagedLegacyReminderRetirement> | undefined;
+        const delay = () => new Promise<void>(resolveDelay => setTimeout(resolveDelay, 250));
+        try {
+          const source = await projectConnection.withHistoryImport(projectId, async revision => {
+            try { return await host.reminderHandoffSource(projectId, revision); } catch { return null; }
+          });
+          if (!source || shutdownApproved || launcherAssistantHost !== host || windowProvider !== provider) return;
+          showReminderHandoffStage(source.operationId, "unknown");
+          const snapshot = projectConnection.snapshot(), registration = projectConnection.registration(projectId);
+          if (!registration || snapshot.projects[projectId] !== registration.root) return;
+          // Only a launched offline writer delays a revoked, unbound request.
+          // The original Workbench Job retains its own natural protection.
+          let workerDrain: Promise<void> | undefined;
+          seal = projectAdmission.seal(registration.root, { drainOnRevoke: () => workerDrain ?? Promise.resolve() });
+          await seal.drain();
+          seal.check();
+          const registry = await readRegistry(instancesRegistryPath());
+          seal.check();
+          const instanceIds = registeredInstancesForPhysicalRoot(registry.instances, registration.root);
+          try {
+            if (paths.workspaceRoot && registeredAdmissionRoot(paths.workspaceRoot) === registration.root && !instanceIds.includes("main")) instanceIds.push("main");
+          } catch { /* A separately registered source need not be the main workspace. */ }
+          if (!instanceIds.length) return;
+          const pid = getTrackedWorkbenchJobPid(registration.root);
+          const matchingRows = Object.values(registry.instances).filter(row => typeof row.projectRoot === "string"
+            && registeredInstancesForPhysicalRoot({ row }, registration.root).length === 1);
+          if (!pid || !matchingRows.length || matchingRows.some(row => row.spawnPid !== pid)) return;
+          const job = captureTrackedWorkbenchJobNaturalRetirement(registration.root, pid);
+          if (!job) return;
+          captured = [job];
+          const verifyBinding = () => {
+            seal!.check();
+            const current = projectConnection.snapshot(), row = projectConnection.registration(projectId);
+            if (launcherAssistantHost !== host || windowProvider !== provider || current.revision !== snapshot.revision
+                || current.projects[projectId] !== registration.root || JSON.stringify(row) !== JSON.stringify(registration))
+              throw new Error("REMINDER_HANDOFF_SOURCE_CHANGED");
+            // Re-read the complete physical attribution; a new or unknown row
+            // cannot be silently treated as an absent sender.
+            const raw = JSON.parse(readFileSync(instancesRegistryPath(), "utf8")) as { instances?: Record<string, { projectRoot?: unknown }> };
+            if (!raw || !raw.instances || typeof raw.instances !== "object" || Array.isArray(raw.instances)) throw new Error("REMINDER_HANDOFF_SOURCE_CHANGED");
+            const currentIds = registeredInstancesForPhysicalRoot(raw.instances, registration.root);
+            if (instanceIds.includes("main") && !currentIds.includes("main")) currentIds.push("main");
+            if (JSON.stringify(currentIds.sort()) !== JSON.stringify([...instanceIds].sort())) throw new Error("REMINDER_HANDOFF_SOURCE_CHANGED");
+          };
+          const verifyWindowCloseSettled = () => {
+            const transaction = mainWorkbenchCloseStore.currentTransaction();
+            if (desktopLifecycleCoordinator.pendingReason() || pendingWorkbenchCloseAck
+                || transaction && transaction.phase !== "succeeded" && transaction.phase !== "failed"
+                || instanceIds.some(id => { const state = launcherLifecycleSupervisor.snapshot(id); return state && state.phase !== "ready"; }))
+              throw new Error("REMINDER_HANDOFF_CLOSE_PENDING");
+          };
+          owner = startManagedLegacyReminderRetirement({ provider, instanceIds, jobs: captured, admission: seal,
+            verifyBinding, verifyWindowCloseSettled, drainIngress: async () => {
+              await legacy.fence.drainIngress();
+              await Promise.all(instanceIds.map(id => launcherLifecycleSupervisor.captureExecutionDrain(id)));
+            } });
+          const onAbort = () => owner?.dispose();
+          seal.signal.addEventListener("abort", onAbort, { once: true });
+          while (!shutdownApproved && !seal.signal.aborted && owner.state === "pending") {
+            showReminderHandoffStage(source.operationId, owner.waitingFor ?? "unknown");
+            await delay();
+          }
+          if (shutdownApproved) owner.dispose();
+          const result = await owner.completion;
+          seal.signal.removeEventListener("abort", onAbort);
+          // The managed drain deliberately does not certify other senders.
+          if (result.state === "managed_drained") showReminderHandoffStage(source.operationId, "unknown");
+        } catch { /* Missing identity, ownership, or a changed source stays pending. */ }
+        finally {
+          owner?.dispose();
+          seal?.release();
+          // release() cannot remove the protection while a captured Job lives;
+          // revocation waits for its real exit and output drain first.
+          if (captured.length) {
+            while (!(await Promise.all(captured.map(job => job()))).every(Boolean)) await delay();
+            captured.forEach(job => job.release());
+          }
+          activeReminderHandoffs.delete(projectId);
+        }
+      })();
+    };
+    const retryReminderHandoffs = () => {
+      if (shutdownApproved || !launcherAssistantHost) return;
+      try {
+        const host = launcherAssistantHost;
+        for (const projectId of Object.keys(projectConnection.snapshot().projects)) {
+          void projectConnection.withHistoryImport(projectId, async revision => {
+            try { return await host.reminderHandoffReceipt(projectId, revision); } catch { return "unknown"; }
+          }).then(state => { if (state === "pending") scheduleReminderHandoff(projectId); }).catch(() => undefined);
+        }
+      } catch { /* No registry authority means no handoff admission. */ }
+      const timer = setTimeout(retryReminderHandoffs, 15_000);
+      timer.unref?.();
     };
     const delayMigration = () => new Promise<void>(resolve => setTimeout(resolve, 1000));
     scheduleInitialMigration = () => {
@@ -1054,6 +1251,7 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
         startupFailed(error);
       });
     });
+    retryReminderHandoffs();
   })();
   return launcherAssistantStarting;
 }
@@ -1266,7 +1464,7 @@ function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapR
         pendingWorkbenchCloseAck !== null);
       },
       assertInstanceOpenAllowed: instanceId => {
-        if (projectAdmission) projectAdmission.assertOpen(instanceAdmissionRoot(instanceId));
+        if (projectAdmission.hasSeals()) projectAdmission.assertOpen(instanceAdmissionRoot(instanceId));
       },
       shouldInterceptInstanceClose: () => !shutdownApproved,
       onWorkbenchCloseRequest: () =>
@@ -4361,8 +4559,6 @@ ipcMain.handle(IPC_CHANNELS.controlDesktopPet, async (event, open: unknown, mode
 });
 
 ipcMain.handle(IPC_CHANNELS.openConversationFromPet, async (event, rawSessionId: unknown) => {
-  let admission: ProjectAdmissionTicket | undefined;
-  try {
   assertDesktopPetIpcSender(event);
   const fromDesktopAssistant = new URL(String(event.senderFrame?.url)).pathname === "/desktop-assistant";
   const sessionId = String(rawSessionId || "").trim();
@@ -4373,20 +4569,22 @@ ipcMain.handle(IPC_CHANNELS.openConversationFromPet, async (event, rawSessionId:
   if (provider === null) {
     return { schemaVersion: 1, opened: false };
   }
+  return await withProjectAdmission(() => {
+    if (!fromDesktopAssistant) return registeredAdmissionRoot(createDesktopPathsForApp().workspaceRoot);
+    const pet = provider.snapshot().pet;
+    const origin = new URL(pet.url).origin;
+    const main = provider.snapshot().workbench;
+    const candidates = [
+      ...(main.open && new URL(main.url).origin === origin ? ["main"] : []),
+      ...provider.instanceWindowStates().filter(item => item.open && new URL(item.url).origin === origin).map(item => item.instanceId),
+    ];
+    if (candidates.length !== 1) throw new Error("PROJECT_ADMISSION_UNKNOWN");
+    return instanceAdmissionRoot(candidates[0]);
+  }, async admission => {
   if (fromDesktopAssistant) {
     const pet = provider.snapshot().pet;
     if (!pet.open || new URL(pet.url).pathname !== "/desktop-assistant") {
       return { schemaVersion: 1, opened: false };
-    }
-    if (projectAdmission) {
-      const origin = new URL(pet.url).origin;
-      const main = provider.snapshot().workbench;
-      const candidates = [
-        ...(main.open && new URL(main.url).origin === origin ? ["main"] : []),
-        ...provider.instanceWindowStates().filter(item => item.open && new URL(item.url).origin === origin).map(item => item.instanceId),
-      ];
-      if (candidates.length !== 1) throw new Error("PROJECT_ADMISSION_UNKNOWN");
-      admission = projectAdmission.enter(instanceAdmissionRoot(candidates[0]));
     }
     const delivered = provider.focusAndSendToWorkbenchOrigin(new URL(pet.url).origin, IPC_CHANNELS.conversationNotificationOpened, {
       schemaVersion: 1,
@@ -4395,7 +4593,6 @@ ipcMain.handle(IPC_CHANNELS.openConversationFromPet, async (event, rawSessionId:
     });
     return { schemaVersion: 1, opened: delivered };
   }
-  if (projectAdmission) admission = projectAdmission.enter(registeredAdmissionRoot(createDesktopPathsForApp().workspaceRoot));
   let state = await provider.focusWorkbench();
   admission?.check();
   if (!state.open) {
@@ -4410,7 +4607,7 @@ ipcMain.handle(IPC_CHANNELS.openConversationFromPet, async (event, rawSessionId:
     sessionId,
   });
   return { schemaVersion: 1, opened: state.open && delivered };
-  } finally { admission?.finish(); }
+  });
 });
 
 let activeDesktopPetWindowDrag: { senderId: number; drag: DesktopPetWindowDrag } | null = null;

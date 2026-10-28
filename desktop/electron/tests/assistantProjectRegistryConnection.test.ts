@@ -1,11 +1,15 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
+import { buildSync } from "esbuild";
+import { writeLauncherStateFile } from "../src/process/workbenchBackend.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AssistantProjectRegistryConnection } from "../src/assistant/projectRegistryConnection.js";
 import type { AssistantProjectRegistrySnapshot } from "../src/assistant/projectRegistry.js";
 
 const roots: string[] = [];
+const sourceLease = (verified = true) => ({ check: async () => true, verifyReceipt: async () => verified, release: async () => undefined });
 const deferred = () => {
   let resolve!: () => void;
   const promise = new Promise<void>(done => { resolve = done; });
@@ -76,7 +80,7 @@ describe("main-owned assistant registry connection", () => {
     const writer = f.connection.withPreHostSource(id, async lease => {
       entered.resolve();
       await lease.commit(async () => { await release.promise; });
-    });
+    }, { operationId: "initial-" + "1".repeat(40), receiptConfirmed: () => true });
     await entered.promise;
     const restarted = f.connection.start(() => host);
     await Promise.resolve();
@@ -161,7 +165,7 @@ describe("main-owned assistant registry connection", () => {
     const work = f.connection.withPreHostSource(id, async lease => {
       signal = lease.signal;
       return await lease.commit(async () => { entered.resolve(); await release.promise; drained = true; return "receipt"; });
-    });
+    }, { operationId: "initial-" + "2".repeat(40), receiptConfirmed: () => true });
     const checked = expect(work).rejects.toThrow("ASSISTANT_PROJECT_UNAVAILABLE");
     await entered.promise;
     const stopping = f.connection.stop().then(() => { stopped = true; });
@@ -172,6 +176,248 @@ describe("main-owned assistant registry connection", () => {
     expect(drained).toBe(true);
     expect(stopped).toBe(true);
     expect(signal.aborted).toBe(true);
+  });
+
+  it("latches malformed inventory until a later trusted reconciliation after the writer drains", async () => {
+    const f = fixture(), project = f.directory("pre-host"), entered = deferred(), release = deferred();
+    await f.connection.reconcile(f.payload([f.row(project)]));
+    const id = Object.keys(f.connection.snapshot().projects)[0];
+    let signal!: AbortSignal, drained = false;
+    const work = f.connection.withPreHostSource(id, async lease => {
+      signal = lease.signal;
+      return await lease.commit(async () => { entered.resolve(); await release.promise; drained = true; return "result"; });
+    }, { operationId: "initial-" + "3".repeat(40), receiptConfirmed: () => true });
+    const workRejected = expect(work).rejects.toThrow("ASSISTANT_PROJECT_UNAVAILABLE");
+    await entered.promise;
+    const older = f.connection.reconcile(f.payload([f.row(project)]));
+    const olderRejected = expect(older).rejects.toThrow("ASSISTANT_PROJECT_UNAVAILABLE");
+    await expect(f.connection.reconcile(null)).rejects.toThrow("ASSISTANT_INVENTORY_INVALID");
+    expect(signal.aborted).toBe(false);
+    expect(() => f.connection.snapshot()).toThrow("ASSISTANT_PROJECT_UNAVAILABLE");
+    const after = f.connection.withPreHostSource(id, async () => "must not run");
+    const afterRejected = expect(after).rejects.toThrow("ASSISTANT_PROJECT_UNAVAILABLE");
+    release.resolve();
+    await workRejected; await olderRejected; await afterRejected;
+    expect(drained).toBe(true);
+    expect(signal.aborted).toBe(true);
+    await expect(f.connection.withPreHostSource(id, async () => "must not run")).rejects.toThrow("ASSISTANT_PROJECT_UNAVAILABLE");
+    await f.connection.reconcile(f.payload([f.row(project)]));
+    await expect(f.connection.recoverPreHostSource("initial-" + "3".repeat(40), async () => sourceLease())).resolves.toBe(false);
+    await expect(f.connection.withPreHostSource(id, async () => "must remain blocked")).rejects.toThrow("ASSISTANT_PROJECT_UNAVAILABLE");
+    await f.connection.stop();
+  });
+
+  it("persists the original writer before permit and resumes only after fresh source and receipt proof", async () => {
+    const f = fixture(), project = f.directory("restart-marker"), entered = deferred(), release = deferred();
+    await f.connection.reconcile(f.payload([f.row(project)]));
+    const id = Object.keys(f.connection.snapshot().projects)[0], operationId = "initial-" + "a".repeat(40);
+    const markerPath = `${f.filePath}.prehost-recovery.json`;
+    const writer = f.connection.withPreHostSource(id, async lease => {
+      expect(JSON.parse(readFileSync(markerPath, "utf8")).operationId).toBe(operationId);
+      return await lease.commit(async () => { entered.resolve(); await release.promise; return { state: "unknown" }; });
+    }, { operationId, receiptConfirmed: value => value.state === "completed" });
+    const checked = expect(writer).rejects.toThrow("ASSISTANT_PROJECT_UNAVAILABLE");
+    await entered.promise;
+    await expect(f.connection.reconcile(null)).rejects.toThrow("ASSISTANT_INVENTORY_INVALID");
+    release.resolve(); await checked;
+    const bundle = join(f.root, "recovery-check.mjs");
+    buildSync({ stdin: { resolveDir: process.cwd(), sourcefile: "recovery-check.ts", contents: `
+      import {AssistantProjectRegistryConnection} from ${JSON.stringify(join(process.cwd(), "src/assistant/projectRegistryConnection.ts"))};
+      const connection=new AssistantProjectRegistryConnection(${JSON.stringify(f.filePath)});let suspended=false;
+      await connection.start((_snapshot,value)=>{suspended=value;return {start:async()=>{},stop:async()=>{},updateProjects:async()=>{}};});
+      process.stdout.write(JSON.stringify({suspended,pending:connection.pendingPreHostRecovery()}));await connection.stop();
+    ` }, bundle: true, platform: "node", format: "esm", outfile: bundle, logLevel: "silent" });
+    const child = spawnSync(process.execPath, [bundle], { cwd: f.root, encoding: "utf8", windowsHide: true, timeout: 10000 });
+    expect(child.status, child.stderr).toBe(0);
+    expect(JSON.parse(child.stdout)).toEqual({ suspended: true, pending: { projectId: id, operationId } });
+    const next = new AssistantProjectRegistryConnection(f.filePath);
+    expect(next.pendingPreHostRecovery()).toEqual({ projectId: id, operationId });
+    const recoveryHost = { ...f.host, suspendProjects: vi.fn(async () => undefined) };
+    const factory = vi.fn((_snapshot: AssistantProjectRegistrySnapshot, _suspended: boolean) => recoveryHost);
+    await next.start(factory);
+    expect(factory).toHaveBeenCalledWith(expect.anything(), true);
+    await expect(next.recoverPreHostSource(operationId, async () => sourceLease())).resolves.toBe(false);
+    await next.reconcile(f.payload([f.row(project)]));
+    await expect(next.recoverPreHostSource(operationId, async () => sourceLease(false))).resolves.toBe(false);
+    await expect(next.recoverPreHostSource(operationId, async () => null)).resolves.toBe(false);
+    await expect(next.recoverPreHostSource(operationId, async () => sourceLease())).resolves.toBe(false);
+    expect(next.pendingPreHostRecovery()?.operationId).toBe(operationId);
+    expect(recoveryHost.updateProjects).not.toHaveBeenCalled();
+    await next.stop(); await f.connection.stop();
+  });
+
+  it("keeps the original marker until deletion is atomically ordered with source and inventory revocation", async () => {
+    const f = fixture(), project = f.directory("verifier-lease"), operationId = "ksync-" + "f".repeat(40);
+    await f.connection.reconcile(f.payload([f.row(project)]));
+    const id = Object.keys(f.connection.snapshot().projects)[0];
+    await f.connection.withPreHostSource(id, lease => lease.commit(async () => "unknown"),
+      { operationId, receiptConfirmed: () => false });
+    const connection = new AssistantProjectRegistryConnection(f.filePath);
+    await connection.reconcile(f.payload([f.row(project)]));
+    const acquire = vi.fn(async () => sourceLease());
+    expect(await connection.recoverPreHostSource(operationId, acquire)).toBe(false);
+    expect(acquire).toHaveBeenCalledOnce();
+    expect(connection.pendingPreHostRecovery()?.operationId).toBe(operationId);
+    const restarted = new AssistantProjectRegistryConnection(f.filePath);
+    await restarted.start((_snapshot, suspended) => { expect(suspended).toBe(true); return f.host; });
+    await restarted.stop(); await connection.stop(); await f.connection.stop();
+  });
+
+  it("writes a durable pending record before an isolated verifier commits and never opens the host", async () => {
+    const f = fixture(), project = f.directory("commit-proof"), operationId = "initial-" + "a".repeat(40);
+    await f.connection.reconcile(f.payload([f.row(project)]));
+    const id = Object.keys(f.connection.snapshot().projects)[0];
+    await f.connection.withPreHostSource(id, lease => lease.commit(async () => "unknown"), { operationId, receiptConfirmed: () => false });
+    const connection = new AssistantProjectRegistryConnection(f.filePath);
+    await connection.reconcile(f.payload([f.row(project)]));
+    const release = vi.fn(async () => undefined), commitMarker = vi.fn(async input => {
+      input.checkAuthority();
+      const pending = JSON.parse(readFileSync(input.markerPath + ".commit-pending", "utf8"));
+      expect(pending).toMatchObject({ projectId: id, operationId, markerSha256: input.markerSha256, state: "pending" });
+      unlinkSync(input.markerPath);
+      return true;
+    });
+    expect(await connection.recoverPreHostSource(operationId, async () => ({ ...sourceLease(), commitMarker, release }))).toBe(false);
+    expect(commitMarker).toHaveBeenCalledOnce(); expect(release).toHaveBeenCalledOnce();
+    const restarted = new AssistantProjectRegistryConnection(f.filePath);
+    expect(restarted.pendingPreHostRecovery()).toEqual({ projectId: id, operationId });
+    await restarted.start((_snapshot, suspended) => { expect(suspended).toBe(true); return f.host; });
+    await restarted.stop(); await connection.stop(); await f.connection.stop();
+  });
+
+  it.each(["inventory", "admission"])("durably revokes the exact commit when %s changes during verifier work", async reason => {
+    const f = fixture(), project = f.directory("commit-revoke"), operationId = "initial-" + "b".repeat(40);
+    await f.connection.reconcile(f.payload([f.row(project)]));
+    const id = Object.keys(f.connection.snapshot().projects)[0];
+    await f.connection.withPreHostSource(id, lease => lease.commit(async () => "unknown"), { operationId, receiptConfirmed: () => false });
+    const entered = deferred(), releaseCommit = deferred(), release = vi.fn(async () => undefined);
+    const gate = { abandoned: false, check: vi.fn(), release: vi.fn() };
+    const connection = new AssistantProjectRegistryConnection(f.filePath, { acquireRecoveryCommitGate: () => gate });
+    await connection.reconcile(f.payload([f.row(project)]));
+    const work = connection.recoverPreHostSource(operationId, async () => ({ ...sourceLease(), release,
+      commitMarker: async input => { entered.resolve(); await releaseCommit.promise; input.checkAuthority(); return true; } }));
+    await entered.promise;
+    if (reason === "inventory") await expect(connection.reconcile(null)).rejects.toThrow("ASSISTANT_INVENTORY_INVALID");
+    else connection.revokePreHostRecovery();
+    expect(JSON.parse(readFileSync(`${f.filePath}.prehost-recovery.json.revoked`, "utf8")).reason).toBe("revoked");
+    releaseCommit.resolve(); expect(await work).toBe(false);
+    expect(release).toHaveBeenCalledOnce();
+    const restarted = new AssistantProjectRegistryConnection(f.filePath);
+    await restarted.start((_snapshot, suspended) => { expect(suspended).toBe(true); return f.host; });
+    await restarted.stop(); await connection.stop(); await f.connection.stop();
+  });
+
+  it("keeps registry reconciliation queued while a busy verifier gate and its Job drain", async () => {
+    const f = fixture(), project = f.directory("commit-busy"), operationId = "initial-" + "c".repeat(40);
+    await f.connection.reconcile(f.payload([f.row(project)]));
+    const id = Object.keys(f.connection.snapshot().projects)[0];
+    await f.connection.withPreHostSource(id, lease => lease.commit(async () => "unknown"), { operationId, receiptConfirmed: () => false });
+    const entered = deferred(), commitFinish = deferred(), jobDrain = deferred();
+    let busy = true, drained = false;
+    const gate = { abandoned: false, check: vi.fn(), release: vi.fn() };
+    const connection = new AssistantProjectRegistryConnection(f.filePath, { acquireRecoveryCommitGate: () => busy ? null : gate });
+    await connection.reconcile(f.payload([f.row(project)]));
+    const work = connection.recoverPreHostSource(operationId, async () => ({ ...sourceLease(),
+      release: async () => { await jobDrain.promise; drained = true; },
+      commitMarker: async () => { entered.resolve(); await commitFinish.promise; return true; } }));
+    await entered.promise;
+    const observation = connection.reconcile(f.payload([f.row(project)]));
+    let reconciled = false; void observation.then(() => { reconciled = true; });
+    commitFinish.resolve(); await Promise.resolve();
+    expect(reconciled).toBe(false); expect(drained).toBe(false);
+    busy = false; jobDrain.resolve();
+    expect(await work).toBe(false); await observation;
+    expect(drained).toBe(true);
+    expect(JSON.parse(readFileSync(`${f.filePath}.prehost-recovery.json.revoked`, "utf8")).reason).toBe("revoked");
+    const acquireAgain = vi.fn(async () => sourceLease());
+    expect(await connection.recoverPreHostSource(operationId, acquireAgain)).toBe(false);
+    expect(acquireAgain).not.toHaveBeenCalled();
+    await connection.stop(); await f.connection.stop();
+  });
+
+  it("does not start a marker commit if stop wins during verifier acquisition", async () => {
+    const f = fixture(), project = f.directory("commit-stop"), operationId = "initial-" + "d".repeat(40);
+    await f.connection.reconcile(f.payload([f.row(project)]));
+    const id = Object.keys(f.connection.snapshot().projects)[0];
+    await f.connection.withPreHostSource(id, lease => lease.commit(async () => "unknown"), { operationId, receiptConfirmed: () => false });
+    const connection = new AssistantProjectRegistryConnection(f.filePath), entered = deferred(), finish = deferred();
+    await connection.reconcile(f.payload([f.row(project)]));
+    const release = vi.fn(async () => undefined), commitMarker = vi.fn(async () => true);
+    const work = connection.recoverPreHostSource(operationId, async () => { entered.resolve(); await finish.promise;
+      return { ...sourceLease(), release, commitMarker }; });
+    await entered.promise; const stopping = connection.stop(); finish.resolve();
+    expect(await work).toBe(false); await stopping;
+    expect(release).toHaveBeenCalledOnce(); expect(commitMarker).not.toHaveBeenCalled();
+    expect(readFileSync(`${f.filePath}.prehost-recovery.json`, "utf8")).toContain(operationId);
+    await f.connection.stop();
+  });
+
+  it.each([".commit-pending", ".revoked"])("starts suspended when only an unresolved %s sidecar survives", async suffix => {
+    const f = fixture(), project = f.directory("surviving-sidecar");
+    await f.connection.reconcile(f.payload([f.row(project)]));
+    writeFileSync(`${f.filePath}.prehost-recovery.json${suffix}`, "unconfirmed");
+    const restarted = new AssistantProjectRegistryConnection(f.filePath);
+    await restarted.start((_snapshot, suspended) => { expect(suspended).toBe(true); return f.host; });
+    await restarted.reconcile(f.payload([f.row(project)]));
+    expect(f.host.updateProjects).not.toHaveBeenCalled();
+    expect(readFileSync(`${f.filePath}.prehost-recovery.json${suffix}`, "utf8")).toBe("unconfirmed");
+    await restarted.stop(); await f.connection.stop();
+  });
+
+  it("retains the original project and operation ID from a surviving pending commit", async () => {
+    const f = fixture(), project = f.directory("pending-identity"), operationId = "affairs-" + "a".repeat(40);
+    await f.connection.reconcile(f.payload([f.row(project)]));
+    const projectId = Object.keys(f.connection.snapshot().projects)[0];
+    const pendingPath = `${f.filePath}.prehost-recovery.json.commit-pending`;
+    writeFileSync(pendingPath, JSON.stringify({ schemaVersion: 1, projectId, revision: 1, operationId,
+      markerSha256: "c".repeat(64), state: "pending" }));
+    const restarted = new AssistantProjectRegistryConnection(f.filePath);
+    expect(restarted.pendingPreHostRecovery()).toEqual({ projectId, operationId });
+    await restarted.start((_snapshot, suspended) => { expect(suspended).toBe(true); return f.host; });
+    expect(readFileSync(pendingPath, "utf8")).toContain(operationId);
+    await restarted.stop(); await f.connection.stop();
+  });
+
+  it("clears an owned marker after the writer drains with a confirmed original receipt", async () => {
+    const f = fixture(), project = f.directory("normal-marker");
+    await f.connection.reconcile(f.payload([f.row(project)]));
+    const id = Object.keys(f.connection.snapshot().projects)[0], operationId = "initial-" + "b".repeat(40);
+    const result = await f.connection.withPreHostSource(id, async lease => await lease.commit(async () => ({ state: "completed" })),
+      { operationId, receiptConfirmed: value => value.state === "completed" });
+    expect(result.state).toBe("completed");
+    const next = new AssistantProjectRegistryConnection(f.filePath);
+    expect(next.pendingPreHostRecovery()).toBeNull();
+    await next.start((_snapshot, suspended) => { expect(suspended).toBe(false); return f.host; });
+    await next.stop(); await f.connection.stop();
+  });
+
+  it("never grants a pre-host write permit without a durable original operation marker", async () => {
+    const f = fixture(), project = f.directory("missing-marker");
+    await f.connection.reconcile(f.payload([f.row(project)]));
+    const id = Object.keys(f.connection.snapshot().projects)[0], mutate = vi.fn(async () => undefined);
+    await expect(f.connection.withPreHostSource(id, lease => lease.commit(mutate))).rejects.toThrow("ASSISTANT_PROJECT_UNAVAILABLE");
+    expect(mutate).not.toHaveBeenCalled();
+    await f.connection.stop();
+  });
+
+  it("latches a revoke that arrives while its marker is being published", async () => {
+    const f = fixture(), project = f.directory("marker-publication"), writing = deferred(), release = deferred();
+    await f.connection.reconcile(f.payload([f.row(project)]));
+    const id = Object.keys(f.connection.snapshot().projects)[0], operationId = "initial-" + "d".repeat(40);
+    const connection = new AssistantProjectRegistryConnection(f.filePath, { writeRecoveryMarker: async (path, marker) => {
+      writing.resolve(); await release.promise; await writeLauncherStateFile(path, marker);
+    } });
+    const callback = vi.fn(async () => undefined);
+    const work = connection.withPreHostSource(id, callback, { operationId, receiptConfirmed: () => true });
+    const rejected = expect(work).rejects.toThrow("ASSISTANT_PROJECT_UNAVAILABLE");
+    await writing.promise;
+    await expect(connection.reconcile(null)).rejects.toThrow("ASSISTANT_INVENTORY_INVALID");
+    release.resolve(); await rejected;
+    expect(callback).not.toHaveBeenCalled();
+    expect(connection.pendingPreHostRecovery()).toEqual({ projectId: id, operationId });
+    const restarted = new AssistantProjectRegistryConnection(f.filePath);
+    await restarted.start((_snapshot, suspended) => { expect(suspended).toBe(true); return f.host; });
+    await restarted.stop(); await connection.stop(); await f.connection.stop();
   });
 
   it("revokes a pre-host lease when the registered directory is replaced at the same path", async () => {

@@ -648,17 +648,19 @@ def apply_storage_migration(
     the completion marker absent, so all current readers stay on legacy paths.
     """
 
-    return _run_logged_storage_migration_step(
-        action="apply",
-        project_root=project_root,
-        projects_home=projects_home,
-        run=lambda: _apply_storage_migration_unchecked(
-            project_root,
+    from .reminder_route_gate import route_writer_gate
+    with route_writer_gate(Path(project_root)):
+        return _run_logged_storage_migration_step(
+            action="apply",
+            project_root=project_root,
             projects_home=projects_home,
-            config_path=config_path,
-            quiescence_window_seconds=quiescence_window_seconds,
-        ),
-    )
+            run=lambda: _apply_storage_migration_unchecked(
+                project_root,
+                projects_home=projects_home,
+                config_path=config_path,
+                quiescence_window_seconds=quiescence_window_seconds,
+            ),
+        )
 
 
 def _apply_storage_migration_unchecked(
@@ -742,15 +744,17 @@ def rollback_storage_switch(
 ) -> dict[str, object]:
     """Deactivate the switch by archiving its marker; copied data is retained."""
 
-    return _run_logged_storage_migration_step(
-        action="rollback",
-        project_root=project_root,
-        projects_home=projects_home,
-        run=lambda: _rollback_storage_switch_unchecked(
-            project_root,
+    from .reminder_route_gate import route_writer_gate
+    with route_writer_gate(Path(project_root)):
+        return _run_logged_storage_migration_step(
+            action="rollback",
+            project_root=project_root,
             projects_home=projects_home,
-        ),
-    )
+            run=lambda: _rollback_storage_switch_unchecked(
+                project_root,
+                projects_home=projects_home,
+            ),
+        )
 
 
 def _rollback_storage_switch_unchecked(

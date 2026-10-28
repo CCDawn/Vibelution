@@ -77,6 +77,13 @@ export class LegacyReminderSourceFence {
     finally { this.state.ingress.delete(complete); finish(); }
   }
 
+  /** Observe already-enrolled main-process ingress after the caller has closed
+   * its source windows and fenced their admission. Does not fence other
+   * processes or prove that unbound sources have stopped. */
+  async drainIngress(): Promise<void> {
+    while (this.state.ingress.size) await Promise.all([...this.state.ingress]);
+  }
+
   async submit<T>(source: LegacyReminderSourceBinding | null, send: () => Promise<T>): Promise<T | { delivered: "source_retired" }> {
     return await this.trackIngress(() => this.submitEnrolled(source, send));
   }

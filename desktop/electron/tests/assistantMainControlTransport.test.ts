@@ -9,6 +9,19 @@ const request = wire().request as MainControlRequest;
 const result = { schemaVersion: 1 as const, projectId: request.projectId, operation: "start", requestId: "request-1", state: "completed", code: "accepted", accepted: true };
 
 describe("generation-scoped main control transport", () => {
+  it("accepts only the stable, Turn-bound reminder handoff registration", () => {
+    const projectId = "synthetic:uuid";
+    const operationId = `initial-${createHash("sha256").update(`${projectId}:reminder_handoff`).digest("hex").slice(0, 40)}`;
+    const row = { deliveryId: "a".repeat(32), action: "initial_migration_queue", projectId,
+      previewId: "b".repeat(64), turnId: "turn-1", category: "reminder_handoff", operationId, timeoutMs: 10000 };
+    const parsed = parseMainControlClaim({ schemaVersion: 1, request: row })!;
+    const queued = { schemaVersion: 1, projectId, previewId: row.previewId, category: row.category, operationId,
+      state: "queued", code: "queued", readyForCutover: false };
+    expect(projectMainControlResult(parsed, queued)).toEqual(queued);
+    expect(projectMainControlResult(parsed, { ...queued, readyForCutover: true })).toMatchObject({ state: "unknown" });
+    expect(() => parseMainControlClaim({ schemaVersion: 1, request: { ...row, operationId: "initial-" + "0".repeat(40) } })).toThrow();
+    expect(() => parseMainControlClaim({ schemaVersion: 1, request: { ...row, sourcePath: "C:/other" } })).toThrow();
+  });
   it("binds episodic sync and recovery to the approved project and original operation", () => {
     const row = { deliveryId: "a".repeat(32), action: "episodic_sync", projectId: "synthetic:uuid",
       previewId: "b".repeat(64), turnId: "turn-1", timeoutMs: 10000 };

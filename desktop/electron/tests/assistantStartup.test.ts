@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,6 +6,7 @@ import { runInNewContext } from "node:vm";
 import { createSourceFile, isCallExpression, isExpressionStatement, isFunctionDeclaration, isNewExpression, isVariableStatement, ScriptTarget, transpileModule } from "typescript";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AssistantProjectRegistryConnection } from "../src/assistant/projectRegistryConnection.js";
+import { PrehostRecoveryDrainedUnknown } from "../src/assistant/prehostRecoveryJob.js";
 import { InitialMigrationResults } from "../src/assistant/initialMigrationResults.js";
 import { unwrapSource } from "../src/state/launcherStateStore.js";
 import { createSingleInstanceEnvelope, resolveSecondInstanceIntent, resolveSingleInstanceCliIntent, resolveSingleInstanceProvenance } from "../src/appLock.js";
@@ -13,6 +14,8 @@ import { parseDesktopCliArgs } from "../src/cli/desktopCli.js";
 import { applyDesktopLaunchSettingsToEnvironment, resolveDesktopLaunchSettings } from "../src/launch/desktopLaunchSettings.js";
 import { planProjectSlot, projectSlotWindowAction } from "../src/protocol/applyProjectSlot.js";
 import { parseBranchInstanceRecords } from "../src/protocol/launcherControlClient.js";
+import { ProjectAdmission, registeredInstancesForPhysicalRoot } from "../src/lifecycle/projectAdmission.js";
+import { startManagedLegacyReminderRetirement } from "../src/notifications/managedLegacyReminderRetirement.js";
 
 const ownedRoots: string[] = [];
 afterEach(() => { for (const root of ownedRoots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -42,6 +45,10 @@ function fixture() {
   let pendingStart: Promise<unknown> = Promise.resolve();
   const projects = {
     snapshot: vi.fn(() => projectSnapshot),
+    hasPendingPreHostRecovery: vi.fn(() => false),
+    pendingPreHostRecovery: vi.fn(() => null as { projectId: string; operationId: string } | null),
+    recoverPreHostSource: vi.fn(async (_operationId: string, _acquire: (marker: unknown) => Promise<unknown>) => false),
+    revokePreHostRecovery: vi.fn(),
     start: vi.fn(async (createHost: (snapshot: unknown) => typeof host) => { const result = createHost(projectSnapshot); pendingStart = result.start(); await pendingStart; return result; }),
     stop: vi.fn(async () => { await pendingStart.catch(() => undefined); await host.stop(); }),
   };
@@ -49,10 +56,11 @@ function fixture() {
     launcherAssistantStarting: null, launcherAssistantStopping: null, launcherAssistantStartupAbort: new AbortController(),
     launcherAssistantHost: null, launcherAssistantWindow: null, showAssistantStartupWait: null, dismissAssistantStartupWait: null, flushAssistantMigrationFeedback: null, assistantMigrationPending: false,
     launcherAssistantProjects: null, stopLauncherAssistantReminders: null, pendingAssistantOpen: null,
+    projectAdmissionExperiment: false,
     projectAdmission: null, legacyReminderAdmission: null,
     launcherAssistantExitReady: false, desktopTray: null, assistantOnly: true, shutdownApproved: false,
     app: { isPackaged: true, quit: vi.fn(), on: vi.fn(), getPath: vi.fn(() => "private") }, join, console,
-    AbortController, setTimeout, clearTimeout, dialog: { showMessageBox: vi.fn(async () => ({ response: 0 })) },
+    AbortController, PrehostRecoveryDrainedUnknown, setTimeout, clearTimeout, dialog: { showMessageBox: vi.fn(async () => ({ response: 0 })) },
     BrowserWindow: { getAllWindows: vi.fn(() => []) },
     desktopCliArgs: { hiddenPresentation: true }, desktopPythonPath: vi.fn(() => ""),
     desktopEnvironment: () => ({ VIBELUTION_CONFIG_PATH: "private-config" }),
@@ -78,7 +86,7 @@ function fixture() {
   runInNewContext(transpileModule(`${declarations}\n${assistantOpenDeclaration}\n${secondInstanceRegistration}\nglobalThis.start=startLauncherAssistant;globalThis.stop=stopLauncherAssistant;`, {
     compilerOptions: { target: ScriptTarget.ES2022 },
   }).outputText, context);
-  return { context, host, window, projectSnapshot, paths: { resourcesRoot: "resources", workspaceRoot: "", userDataRoot: "private", desktopBundleRoot: "bundle" } };
+  return { context, host, window, projects, projectSnapshot, paths: { resourcesRoot: "resources", workspaceRoot: "", userDataRoot: "private", desktopBundleRoot: "bundle" } };
 }
 
 function projectEntryFixture() {
@@ -232,6 +240,108 @@ describe("resident assistant followed by an ordinary project entry", () => {
 });
 
 describe("resident assistant startup", () => {
+  it("uses a fresh inventory and one sealed verifier for the original recovery ID before starting the host", async () => {
+    const { context, projects, paths } = fixture();
+    const operationId = "initial-" + "b".repeat(40), projectId = "project";
+    const marker = { projectId, operationId, registration: { root: "source-root" } };
+    const signal = new AbortController().signal;
+    const seal = { signal, check: vi.fn(), drain: vi.fn(async () => {}), release: vi.fn() };
+    const worker = { check: vi.fn(async () => true), verifyReceipt: vi.fn(async () => true),
+      commitMarker: vi.fn(async () => true), release: vi.fn(async () => {}) };
+    projects.hasPendingPreHostRecovery.mockReturnValue(true);
+    projects.pendingPreHostRecovery.mockReturnValue({ projectId, operationId });
+    projects.recoverPreHostSource.mockImplementation(async (id, acquire) => {
+      expect(id).toBe(operationId);
+      expect(context.launcherStateStore.refresh).toHaveBeenCalledOnce();
+      const lease = await acquire(marker) as typeof worker;
+      expect(lease).toBeTruthy(); await lease.release(); return false;
+    });
+    context.launcherStateStore = { refresh: vi.fn(async () => ({})) };
+    context.projectAdmission = { seal: vi.fn(() => seal) };
+    context.resolveProjectsHome = () => "source-projects";
+    context.startPrehostRecoveryJob = vi.fn(async () => worker);
+    await context.start(paths);
+    expect(context.startPrehostRecoveryJob).toHaveBeenCalledWith(expect.objectContaining({ marker, projectSeal: seal, sourceProjectsHome: "source-projects" }));
+    expect(worker.release).toHaveBeenCalledOnce();
+    expect(seal.release).toHaveBeenCalledOnce();
+    expect(projects.start).toHaveBeenCalledOnce();
+    await context.stop();
+  });
+
+  it("forwards a source admission revoke to the registry before releasing the original verifier", async () => {
+    const { context, projects, paths } = fixture();
+    const operationId = "initial-" + "e".repeat(40), projectId = "project", abort = new AbortController();
+    const marker = { projectId, operationId, registration: { root: "source-root" } };
+    const seal = { signal: abort.signal, check: vi.fn(), drain: vi.fn(async () => {}), release: vi.fn() };
+    const worker = { check: vi.fn(async () => true), verifyReceipt: vi.fn(async () => true),
+      commitMarker: vi.fn(async () => true), release: vi.fn(async () => {}) };
+    projects.hasPendingPreHostRecovery.mockReturnValue(true);
+    projects.pendingPreHostRecovery.mockReturnValue({ projectId, operationId });
+    projects.recoverPreHostSource.mockImplementation(async (_id, acquire) => {
+      const lease = await acquire(marker) as typeof worker;
+      abort.abort(); expect(projects.revokePreHostRecovery).toHaveBeenCalledOnce();
+      await lease.release(); return false;
+    });
+    context.launcherStateStore = { refresh: vi.fn(async () => ({})) };
+    context.projectAdmission = { seal: vi.fn(() => seal) };
+    context.resolveProjectsHome = () => "source-projects";
+    context.startPrehostRecoveryJob = vi.fn(async () => worker);
+    await context.start(paths);
+    expect(worker.release).toHaveBeenCalledOnce();
+    expect(seal.release).toHaveBeenCalledOnce();
+    await context.stop();
+  });
+
+  it("retains source admission if verifier startup leaves output drain unknown", async () => {
+    const { context, projects, paths } = fixture();
+    const operationId = "initial-" + "c".repeat(40), projectId = "project";
+    const marker = { projectId, operationId, registration: { root: "source-root" } };
+    const seal = { signal: new AbortController().signal, check: vi.fn(), drain: vi.fn(async () => {}), release: vi.fn() };
+    projects.hasPendingPreHostRecovery.mockReturnValue(true);
+    projects.pendingPreHostRecovery.mockReturnValue({ projectId, operationId });
+    projects.recoverPreHostSource.mockImplementation(async (_id, acquire) => { expect(await acquire(marker)).toBeNull(); return false; });
+    context.launcherStateStore = { refresh: vi.fn(async () => ({})) };
+    context.projectAdmission = { seal: vi.fn(() => seal) };
+    context.resolveProjectsHome = () => "source-projects";
+    context.startPrehostRecoveryJob = vi.fn(async () => { throw new Error("PREHOST_RECOVERY_DRAIN_UNKNOWN"); });
+    await context.start(paths);
+    expect(seal.release).not.toHaveBeenCalled();
+    await context.stop();
+  });
+
+  it("releases admission after a confirmed Job drain with unknown result while retaining recovery", async () => {
+    const { context, projects, paths } = fixture();
+    const operationId = "initial-" + "d".repeat(40), projectId = "project";
+    const marker = { projectId, operationId, registration: { root: "source-root" } };
+    const seal = { signal: new AbortController().signal, check: vi.fn(), drain: vi.fn(async () => {}), release: vi.fn() };
+    projects.hasPendingPreHostRecovery.mockReturnValue(true);
+    projects.pendingPreHostRecovery.mockReturnValue({ projectId, operationId });
+    projects.recoverPreHostSource.mockImplementation(async (_id, acquire) => { expect(await acquire(marker)).toBeNull(); return false; });
+    context.launcherStateStore = { refresh: vi.fn(async () => ({})) };
+    context.projectAdmission = { seal: vi.fn(() => seal) };
+    context.resolveProjectsHome = () => "source-projects";
+    context.startPrehostRecoveryJob = vi.fn(async () => { throw new PrehostRecoveryDrainedUnknown(); });
+    await context.start(paths);
+    expect(seal.release).toHaveBeenCalledOnce();
+    expect(projects.pendingPreHostRecovery()).toEqual({ projectId, operationId });
+    await context.stop();
+  });
+
+  it("shows a surviving recovery receipt when a hidden assistant is opened", async () => {
+    const { context, projects, paths } = fixture();
+    const operationId = "affairs-" + "a".repeat(40);
+    projects.hasPendingPreHostRecovery.mockReturnValue(true);
+    projects.pendingPreHostRecovery.mockReturnValue({ projectId: "project", operationId });
+    await context.start(paths);
+    expect(context.dialog.showMessageBox).not.toHaveBeenCalled();
+    context.pendingAssistantOpen = { show: true };
+    context.flushAssistantMigrationFeedback();
+    expect(context.dialog.showMessageBox).toHaveBeenCalledWith(expect.objectContaining({
+      detail: expect.stringContaining(operationId),
+    }));
+    await context.stop();
+  });
+
   it("passes an approved episodic conflict resolution through the registered project lease", async () => {
     const { context, host, paths } = fixture();
     const sync = vi.fn(async () => ({ state: "resolved" }));
@@ -398,6 +508,81 @@ describe("resident assistant startup", () => {
     expect(context.AssistantHost.mock.calls[0][0].initialMigrationControl).toBe(true);
     await context.stop();
   });
+
+  it("checks the original reminder handoff receipt when preparation is busy and preserves unknown", async () => {
+    const { context, host, paths } = fixture();
+    context.InitialMigrationResults = vi.fn(function () { return { get: vi.fn(async () => null) }; });
+    context.recoverInitialMigrations = vi.fn(async () => []);
+    context.verifyInitialMigrationResult = vi.fn();
+    Object.assign(host, { prepareInitialMigration: vi.fn(async () => "busy"), reminderHandoffReceipt: vi.fn(async () => "pending") });
+    await context.start(paths);
+    const registry = context.launcherAssistantProjects;
+    registry.withHistoryImport = vi.fn(async (_id: string, work: (revision: number) => Promise<unknown>) => work(0));
+    const control = context.AssistantHost.mock.calls[0][0].mainControl;
+    const request = { action: "initial_migration_queue", projectId: "project:one", previewId: "b".repeat(64),
+      turnId: "turn", category: "reminder_handoff", operationId: "initial-" + "c".repeat(40), deliveryId: "d".repeat(32), timeoutMs: 10000 };
+    const result = await control(request);
+    expect(host.reminderHandoffReceipt).toHaveBeenCalledWith(request.projectId, 0);
+    expect(result).toMatchObject({ operationId: request.operationId, state: "unknown", code: "unknown", readyForCutover: false });
+    expect(context.recoverInitialMigrations).toHaveBeenCalledOnce();
+    await context.stop();
+  });
+
+  it("starts the original handoff wait, preserves the open window and running Job, then observes user close", async () => {
+    const { context, host, paths, projectSnapshot } = fixture();
+    const root = mkdtempSync(join(tmpdir(), "handoff-main-")); ownedRoots.push(root);
+    const physical = process.platform === "win32" ? realpathSync.native(root).toLowerCase() : realpathSync.native(root);
+    paths.userDataRoot = root;
+    const registryPath = join(root, "instances.json"), id = "project:one";
+    const registryData = { instances: { source: { projectRoot: physical, spawnPid: 4242 } } };
+    writeFileSync(registryPath, JSON.stringify(registryData));
+    projectSnapshot.projects = { [id]: physical };
+    const registration = { root: physical, baseProjectId: "project", registrationUuid: "fixture" };
+    const row = { kind: "instance", instanceId: "source", windowId: 1, rendererProcessId: 11, ready: true };
+    let closed = false, jobExited = false, closePending = false;
+    const windowClose = vi.fn(async () => { throw new Error("must not automatically close"); });
+    const provider = { completeWorkbenchWindowInventory: () => closed ? [] : [row],
+      captureWorkbenchWindowRetirement: () => ({ isClosed: () => closed, close: windowClose }),
+      hasPendingUserWorkbenchClose: () => closePending };
+    const job = Object.assign(vi.fn(async () => jobExited), { pid: 4242, isCurrent: () => !jobExited, release: vi.fn() });
+    const admission = new ProjectAdmission();
+    Object.assign(context, { windowProvider: provider, projectAdmission: admission, mkdirSync, readFileSync,
+      LegacyReminderSourceFence: vi.fn(function () { return { drainIngress: async () => {} }; }),
+      createLegacyReminderSourceResolver: () => () => null, instancesRegistryPath: () => registryPath,
+      readRegistry: async () => registryData, registeredInstancesForPhysicalRoot,
+      registeredAdmissionRoot: () => physical, getTrackedWorkbenchJobPid: () => 4242,
+      captureTrackedWorkbenchJobNaturalRetirement: () => job, startManagedLegacyReminderRetirement,
+      desktopLifecycleCoordinator: { pendingReason: () => null }, mainWorkbenchCloseStore: { currentTransaction: () => null },
+      pendingWorkbenchCloseAck: null, launcherLifecycleSupervisor: { snapshot: () => null, captureExecutionDrain: async () => {} },
+      InitialMigrationResults: vi.fn(function () { return { get: vi.fn(async () => null) }; }),
+      recoverInitialMigrations: vi.fn(async () => []), verifyInitialMigrationResult: vi.fn() });
+    Object.assign(host, { prepareInitialMigration: vi.fn(async () => true), reminderHandoffReceipt: vi.fn(async () => "pending"),
+      reminderHandoffSource: vi.fn(async () => ({ operationId: "initial-" + "c".repeat(40), syncId: "affairs-" + "c".repeat(40) })) });
+    await context.start(paths);
+    const registry = context.launcherAssistantProjects;
+    registry.registration = vi.fn(() => registration);
+    registry.withHistoryImport = vi.fn(async (_id: string, work: (revision: number) => Promise<unknown>) => work(0));
+    const control = context.AssistantHost.mock.calls[0][0].mainControl;
+    const request = { action: "initial_migration_queue", projectId: id, previewId: "b".repeat(64), turnId: "turn",
+      category: "reminder_handoff", operationId: "initial-" + "c".repeat(40), deliveryId: "d".repeat(32), timeoutMs: 10000 };
+    expect((await control(request)).state).toBe("queued");
+    await vi.waitFor(() => expect(admission.hasSeals()).toBe(true));
+    const receiptRequest = { action: "initial_migration_receipt", projectId: id, category: "reminder_handoff", operationId: request.operationId };
+    await vi.waitFor(async () => expect(await control(receiptRequest)).toMatchObject({ state: "queued", waitingFor: "window",
+      operationId: request.operationId, readyForCutover: false }));
+    expect(windowClose).not.toHaveBeenCalled();
+    expect(jobExited).toBe(false);
+    expect(host.stop).not.toHaveBeenCalled();
+    closePending = true; closed = true; // The existing user close, not migration.
+    await vi.waitFor(async () => expect(await control(receiptRequest)).toMatchObject({ waitingFor: "close_transaction" }));
+    expect(admission.hasSeals()).toBe(true);
+    closePending = false; jobExited = true;
+    await vi.waitFor(() => expect(admission.hasSeals()).toBe(false));
+    expect(windowClose).not.toHaveBeenCalled();
+    expect(job.release).toHaveBeenCalledOnce();
+    context.shutdownApproved = true;
+    await context.stop();
+  }, 10000);
 
   it("retries a busy migration without stopping the host, then executes and exposes the original receipt", async () => {
     const { context, host, window, paths } = fixture();

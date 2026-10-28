@@ -404,7 +404,8 @@ const mainOwnedInflight = new WeakMap<HumanAttentionLedger, Set<string>>();
 function isExplicitUnsent(result: unknown): boolean {
   if (typeof result !== "object" || result === null) return false;
   const delivered = (result as { delivered?: unknown }).delivered;
-  return delivered === "source_retired" || delivered === "invalid_payload";
+  return delivered === "source_retired" || delivered === "invalid_payload"
+    || delivered === "source_busy" || delivered === "source_unavailable" || delivered === "source_recovery_required";
 }
 
 /**
@@ -471,6 +472,13 @@ export function emitNewHumanAttentionNotifications(input: {
         // Only main-owned durable intent can authorize a retry; never delete
         // a shared localStorage ID that a different window may have written.
         if (!isExplicitUnsent(value)) input.ledger.add(payload.id);
+        const delivery = typeof value === "object" && value !== null ? (value as { delivered?: unknown }).delivered : undefined;
+        if (delivery === "source_busy" || delivery === "source_unavailable" || delivery === "source_recovery_required") {
+          safeReportFailure({ id: payload.id, kind: payload.kind, severity: payload.severity,
+            reason: delivery === "source_busy" ? "事务提醒暂被同步占用，将稍后重试。"
+              : delivery === "source_unavailable" ? "事务提醒来源暂不可用，将稍后重试。" : "本次事务提醒尚未发送，来源状态需要恢复。",
+            title: payload.title });
+        }
         if (isInvalidPayloadDeliveryResult(value)) safeReportFailure({ id: payload.id, kind: payload.kind,
           severity: payload.severity, reason: "notify resolved with delivered=invalid_payload", title: payload.title });
       }, (error: unknown) => {

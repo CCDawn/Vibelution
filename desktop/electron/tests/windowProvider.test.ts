@@ -429,18 +429,18 @@ describe("main Workbench open gate", () => {
 });
 
 describe("Electron window provider state", () => {
-  it("keeps an unresponsive captured window alive in natural-only retirement", async () => {
-    const window = new FakeWindow(290, "", 1290, false);
+  it("waits for the user to close a captured window during natural-only retirement", async () => {
+    const window = new FakeWindow(290, "", 1290);
     const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
       createWorkbenchWindow: () => window, listAllWindows: () => [window], hungCloseDestroyAfterMs: 0,
     });
     await provider.openOrFocusInstanceWorkbench({ instanceId: "target", url: "http://127.0.0.1:8001/" });
     const captured = provider.captureWorkbenchWindowRetirement(provider.completeWorkbenchWindowInventory()[0], { naturalOnly: true })!;
     expect(await captured.close()).toBe(false);
-    expect(window.closeCount).toBe(1);
+    expect(window.closeCount).toBe(0);
     expect(window.destroyCount).toBe(0);
     expect(window.isDestroyed()).toBe(false);
-    window.destroy(); // Simulate the independently confirmed window exit.
+    window.close(); // Simulate an independently initiated user close.
     expect(await captured.close()).toBe(true);
   });
 

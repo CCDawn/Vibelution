@@ -26,6 +26,8 @@ import { ChatToolApprovalDialog } from "../chat/ChatToolApprovalDialog";
 import { toolApprovalRiskLabel } from "../chat/toolApprovalLabels";
 import { toolApprovalActionPreview, toolApprovalDisplayName } from "../chat/toolApprovalPreview";
 import { useLauncherThemeControl } from "./useLauncherThemeControl";
+import { PersonalAssistantComputerPanel } from "../personalAssistant/PersonalAssistantComputerPanel";
+import { launcherAssistantComputer } from "../../api/launcherAssistantComputer";
 import petStyles from "./DesktopAssistantRoute.styles";
 import {
   launcherAssistantActivity, launcherAssistantPollInterval, launcherAssistantSubmission,
@@ -59,6 +61,7 @@ export function LauncherAssistantRoute() {
   const { lang } = useShellI18n();
   const copy = COPY[lang];
   const [expanded, setExpanded] = useState(false);
+  const [computerOpen, setComputerOpen] = useState(false);
   const [visible, setVisible] = useState(() => document.visibilityState !== "hidden");
   const [epoch, setEpoch] = useState(0);
   const epochRef = useRef(0);
@@ -84,7 +87,7 @@ export function LauncherAssistantRoute() {
   const [controlPending, setControlPending] = useState(false);
   const status = useQuery({
     queryKey: ["launcher-assistant", "status"], queryFn: getLauncherAssistantStatus,
-    retry: false, staleTime: 0,
+    retry: false, staleTime: 0, refetchInterval: expanded && visible ? 10_000 : false,
   });
   const sessionId = status.data?.assistant.directSessionId || "";
   const reading = expanded && visible && Boolean(sessionId);
@@ -453,12 +456,15 @@ export function LauncherAssistantRoute() {
         <h1 className={petStyles.chatTitle} hidden={!preferences.showTitles}>{displayName}</h1>
         <span className={petStyles.chatStatus} hidden={!preferences.showStatus && !feedback} role={feedback ? "alert" : "status"}>{statusText}</span>
       </div>
+      <VButton density="compact" variant="ghost" aria-pressed={computerOpen}
+        onClick={() => setComputerOpen(value => !value)}>{lang === "zh" ? "电脑操作" : "Computer"}</VButton>
       <VButton density="compact" variant="ghost" isPending={launcherPending} isDisabled={launcherPending}
         onClick={() => void openLauncher()}>{lang === "zh" ? "打开 Launcher" : "Open Launcher"}</VButton>
       <VNativeButton className={petStyles.close} aria-label={copy.refresh} onClick={() => { void status.refetch(); void detail.refetch(); void dispatches.refetch(); void approvals.refetch(); void client.invalidateQueries({ queryKey: assetQueryPrefix }); }}><RefreshCw size={14} /></VNativeButton>
       <VNativeButton className={petStyles.close} aria-label={copy.collapse} disabled={resizePending} onClick={() => void toggle()}><X size={14} /></VNativeButton>
     </header>}>
-    {detail.data ? <LazyConversationView
+    {computerOpen ? <PersonalAssistantComputerPanel active={reading} transport={launcherAssistantComputer}
+      onCollapse={() => setComputerOpen(false)} /> : detail.data ? <LazyConversationView
       runtimeApi={launcherConversationApi}
       sessionId={detail.data.id} title={detail.data.title || identity?.displayName || copy.title}
       phase={resolveSessionActivity(detail.data).execution} messages={detail.data.messages}
@@ -480,6 +486,8 @@ export function LauncherAssistantRoute() {
     {readingAssets && (avatar.isError || background.isError) ? <VStateSurface tone="error"
       title={lang === "zh" ? "部分外观图片暂不可用，聊天仍可使用" : "Some appearance images are unavailable; chat is ready"}
       actions={<VButton onClick={() => { if (avatar.isError) void avatar.refetch(); if (background.isError) void background.refetch(); }}>{copy.retry}</VButton>} /> : null}
+    {status.data?.patrol?.state === "unavailable" || ["unknown", "failed", "interrupted"].some(key => (status.data?.patrol?.deliveryStates[key] || 0) > 0)
+      ? <VStateSurface tone="error" title={lang === "zh" ? "部分任务回执无法自动汇报，请查看派发回执" : "Some task receipts could not be reported automatically; check dispatch receipts"} /> : null}
     {approval ? <ChatToolApprovalDialog lang={lang} variant="inline"
       pending={approvalPending || !approval.availableDecisions.includes("accept") || !approval.availableDecisions.includes("decline")}
       rawTitle={approval.toolName} riskLabel={toolApprovalRiskLabel(approval.risk, lang)}

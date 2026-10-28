@@ -1138,7 +1138,7 @@ def _argument_summary(tool_name: str, tool_args: Mapping[str, Any]) -> dict[str,
 def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
     """Approval-only projection; never expose nested prompt/policy values."""
     action = args.get("action")
-    if isinstance(action, str) and action in {"history_import", "affairs_sync", "episodic_sync", "initial_migration_queue", "knowledge_sync_queue", "knowledge_sync_recover"}:
+    if isinstance(action, str) and action in {"history_import", "affairs_sync", "episodic_sync", "initial_migration_queue", "knowledge_sync_queue", "knowledge_sync_recover", "reminder_handoff_queue"}:
         from core.infrastructure.native_runtime import is_launcher_assistant_process
         if not is_launcher_assistant_process():
             return {"assistantArgumentsInvalid": True}
@@ -1177,7 +1177,8 @@ def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
             if values.get("resolve_sync_id") is not None:
                 target["syncId"] = values["resolve_sync_id"]
             return {"assistantAction": action, "assistantTargets": target,
-                    "assistantOperationDescription": ("排队恢复原知识同步；只续做可证明未开始的项，不重放未知写入。" if action == "knowledge_sync_recover"
+                    "assistantOperationDescription": ("登记所选旧助理的提醒交接请求；等待来源、窗口和发送者安全证明，不会立即停止旧工作台或切换提醒。" if action == "reminder_handoff_queue"
+                        else "排队恢复原知识同步；只续做可证明未开始的项，不重放未知写入。" if action == "knowledge_sync_recover"
                         else "排队在下次启动时同步所选旧助理的私有知识；保留目标编辑，不冻结旧来源。" if action == "knowledge_sync_queue"
                         else "排队首次导入所选旧助理的事务和情景记忆。" if action == "initial_migration_queue" and values["category"] == "personal"
                         else "排队首次导入所选旧助理可验证的私有知识。" if action == "initial_migration_queue"

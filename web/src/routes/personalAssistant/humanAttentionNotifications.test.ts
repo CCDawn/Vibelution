@@ -324,6 +324,38 @@ describe("human attention emission", () => {
     expect(emitNewHumanAttentionNotifications({ rows, bridge: { notifyHumanAttention }, ledger, affairMode: "main_owned" })).toEqual([]);
     expect(notifyHumanAttention).toHaveBeenCalledTimes(1);
   });
+  it.each(["source_busy", "source_unavailable", "source_recovery_required"])("reports %s and retries only a proven unsent affair", async delivered => {
+    const storage = memoryStorage(), ledger = createHumanAttentionLedger(storage, "2026-10-18");
+    const rows = [attentionRow({ id: "retryable-affair", kind: "affair_reminder" })];
+    const reportFailure = vi.fn();
+    const notifyHumanAttention = vi.fn().mockResolvedValueOnce({ delivered }).mockResolvedValueOnce({ delivered: "system_notification" });
+    emitNewHumanAttentionNotifications({ rows, bridge: { notifyHumanAttention }, ledger, affairMode: "main_owned", reportFailure });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(ledger.has("retryable-affair")).toBe(false);
+    expect(reportFailure).toHaveBeenCalledOnce();
+    emitNewHumanAttentionNotifications({ rows, bridge: { notifyHumanAttention }, ledger, affairMode: "main_owned", reportFailure });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(notifyHumanAttention).toHaveBeenCalledTimes(2);
+    expect(ledger.has("retryable-affair")).toBe(true);
+  });
+  it("keeps an earlier unknown attempt marked while a later recovery-blocked affair can retry after refresh", async () => {
+    const storage = memoryStorage(), ledger = createHumanAttentionLedger(storage, "2026-10-18"), reportFailure = vi.fn();
+    const rows = [attentionRow({ id: "prior-affair", kind: "affair_reminder" }),
+      attentionRow({ id: "new-affair", kind: "affair_reminder" })];
+    const notifyHumanAttention = vi.fn().mockResolvedValueOnce({ delivered: "attempt_pending" })
+      .mockResolvedValueOnce({ delivered: "source_recovery_required" }).mockResolvedValueOnce({ delivered: "system_notification" });
+    emitNewHumanAttentionNotifications({ rows, bridge: { notifyHumanAttention }, ledger, affairMode: "main_owned", reportFailure });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const restarted = createHumanAttentionLedger(storage, "2026-10-18");
+    expect(restarted.has("prior-affair")).toBe(true);
+    expect(restarted.has("new-affair")).toBe(false);
+    expect(reportFailure).toHaveBeenCalledOnce();
+    emitNewHumanAttentionNotifications({ rows, bridge: { notifyHumanAttention }, ledger: restarted, affairMode: "main_owned", reportFailure });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(notifyHumanAttention).toHaveBeenCalledTimes(3);
+    expect(notifyHumanAttention).toHaveBeenLastCalledWith(expect.objectContaining({ id: "new-affair" }));
+    expect(restarted.has("new-affair")).toBe(true);
+  });
   it("does not change the unnegotiated or non-affair notification path", async () => {
     const storage = memoryStorage();
     const ledger = createHumanAttentionLedger(storage, "2026-10-18");

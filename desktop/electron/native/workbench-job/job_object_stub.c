@@ -21,6 +21,10 @@ static napi_value init(napi_env env, napi_value exports) {
   napi_set_named_property(env, exports, "drainStatus", fn);
   napi_create_function(env, "close", NAPI_AUTO_LENGTH, unsupported, NULL, &fn);
   napi_set_named_property(env, exports, "close", fn);
+  napi_create_function(env, "tryAcquireReminderMutex", NAPI_AUTO_LENGTH, unsupported, NULL, &fn);
+  napi_set_named_property(env, exports, "tryAcquireReminderMutex", fn);
+  napi_create_function(env, "releaseReminderMutex", NAPI_AUTO_LENGTH, unsupported, NULL, &fn);
+  napi_set_named_property(env, exports, "releaseReminderMutex", fn);
   return exports;
 }
 

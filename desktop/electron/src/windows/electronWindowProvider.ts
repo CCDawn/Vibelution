@@ -178,6 +178,8 @@ export class ElectronWindowProvider {
   private readonly instanceCloseAuthorized = new Map<string, ElectronWindowLike>();
   private readonly capturedCloseAuthorized = new WeakSet<ElectronWindowLike>();
   private readonly instanceCloseInFlight = new Set<string>();
+  private readonly instanceCloseCallbacks = new Map<string, number>();
+  private workbenchCloseCallbacks = 0;
   private launcherOpen: Promise<ManagedWindowState> | null = null;
   private readonly launcherContentVersion?: () => string;
   private launcherLoadedVersion: string | null = null;
@@ -895,7 +897,9 @@ export class ElectronWindowProvider {
   }
 
   /** Capture only an already attributed, live managed window. Main must hold
-   * its source-specific admission barrier until the retirement is complete. */
+   * its source-specific admission barrier until the retirement is complete.
+   * Natural-only capture observes user-driven closure: the renderer can hold
+   * unsaved drafts that its beforeunload handler does not protect. */
   captureWorkbenchWindowRetirement(row: CompleteWorkbenchWindowObservation,
     options?: { naturalOnly?: boolean }): CapturedWorkbenchWindowRetirement | null {
     try {
@@ -918,6 +922,7 @@ export class ElectronWindowProvider {
       let closing: Promise<boolean> | null = null;
       const close = async (): Promise<boolean> => {
         if (window.isDestroyed()) return true;
+        if (options?.naturalOnly) return false;
         if (closing) return await closing;
         const operation = (async () => {
           try {
@@ -928,7 +933,6 @@ export class ElectronWindowProvider {
             if (!window.isDestroyed()) {
               await waitForWindowClosed(window, this.hungCloseDestroyAfterMs);
               if (!window.isDestroyed()) {
-                if (options?.naturalOnly) return false;
                 if (!current()) return false;
                 try { window.destroy(); } catch { return false; }
               }
@@ -944,6 +948,11 @@ export class ElectronWindowProvider {
       };
       return Object.freeze({ instanceId, windowId: row.windowId, isClosed: () => window.isDestroyed(), close });
     } catch { return null; }
+  }
+
+  /** User close callbacks may outlive the native window and its closed event. */
+  hasPendingUserWorkbenchClose(instanceId: string): boolean {
+    return instanceId === "main" ? this.workbenchCloseCallbacks > 0 : (this.instanceCloseCallbacks.get(instanceId) ?? 0) > 0;
   }
 
   workbenchDialogParent(): ElectronWindowLike | null {
@@ -1010,9 +1019,13 @@ export class ElectronWindowProvider {
         return;
       }
       this.instanceCloseInFlight.add(instanceId);
+      this.instanceCloseCallbacks.set(instanceId, (this.instanceCloseCallbacks.get(instanceId) ?? 0) + 1);
       void Promise.resolve(this.onInstanceCloseRequest(instanceId))
         .catch(() => undefined)
         .finally(() => {
+          const remaining = (this.instanceCloseCallbacks.get(instanceId) ?? 1) - 1;
+          if (remaining) this.instanceCloseCallbacks.set(instanceId, remaining);
+          else this.instanceCloseCallbacks.delete(instanceId);
           this.instanceCloseInFlight.delete(instanceId);
         });
     });
@@ -1299,7 +1312,9 @@ export class ElectronWindowProvider {
     }
     this.workbenchCloseGeneration += 1;
     this.workbenchCloseInFlight = true;
+    this.workbenchCloseCallbacks += 1;
     void Promise.resolve(this.onWorkbenchCloseRequest()).finally(() => {
+      this.workbenchCloseCallbacks -= 1;
       if (!this.workbenchCloseAuthorized) {
         this.workbenchCloseInFlight = false;
       }

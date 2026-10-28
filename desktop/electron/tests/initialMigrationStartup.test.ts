@@ -64,6 +64,7 @@ describe("initial migration startup", () => {
       expect(output).toEqual([{ operationId: first, state: "unknown" }, { operationId: second, state: "completed" }]);
       expect(runInitialMigrationJob).toHaveBeenCalledTimes(1);
       expect(vi.mocked(runInitialMigrationJob).mock.calls[0][0].binding.operationId).toBe(second);
+      expect(vi.mocked(registry.withPreHostSource).mock.calls[0][2]).toMatchObject({ operationId: second, receiptConfirmed: expect.any(Function) });
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
   it("does not replay a claimed attempt and records only a drained confirmed result", async () => {

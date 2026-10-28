@@ -10,6 +10,7 @@ import type { PersonalAssistantHumanAttentionResponse } from "../../api/types/pe
 import { HumanAttentionNotifier } from "./HumanAttentionNotifier";
 
 vi.mock("../../api/personalAssistant", () => ({ fetchPersonalAssistantHumanAttention: vi.fn() }));
+vi.mock("../../api/personalAttentionFailureReport", () => ({ reportHumanAttentionDeliveryFailure: vi.fn() }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 type AttentionRow = PersonalAssistantHumanAttentionResponse["humanAttention"][number];
@@ -76,6 +77,37 @@ afterEach(async () => {
 });
 
 describe("main workbench human-attention trigger chain", () => {
+  it.each(["source_busy", "source_recovery_required"])("retries %s after an unchanged successful feed refresh", async delivered => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const feed = feedWith([{ id: "affair-reminder:busy:20261028", kind: "affair_reminder", title: "虚构提醒" }]);
+    vi.mocked(fetchPersonalAssistantHumanAttention).mockResolvedValue(feed);
+    notifyHumanAttention.mockResolvedValueOnce({ delivered }).mockResolvedValueOnce({ delivered: "system_notification" });
+    vi.stubGlobal("vibelutionLauncher", { notifyHumanAttention,
+      getHumanAttentionCapabilities: vi.fn().mockResolvedValue({ schemaVersion: 1, legacyAffairReminder: "main_owned" }) });
+    await renderInto(root, client);
+    expect(notifyHumanAttention).toHaveBeenCalledOnce();
+    const original = client.getQueryData(queryKeys.personalAssistantHumanAttention());
+    expect(localStorage.getItem("vibelution.human-attention.notified.v1")).toBeNull();
+    await act(async () => { await client.refetchQueries({ queryKey: queryKeys.personalAssistantHumanAttention() }); });
+    await act(async () => new Promise(resolve => setTimeout(resolve, 20)));
+    expect(client.getQueryData(queryKeys.personalAssistantHumanAttention())).toBe(original);
+    expect(notifyHumanAttention).toHaveBeenCalledTimes(2);
+    expect(localStorage.getItem("vibelution.human-attention.notified.v1")).toContain("affair-reminder:busy:20261028");
+  });
+  it("does not retry an unknown affair after an unchanged successful feed refresh", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const feed = feedWith([{ id: "affair-reminder:unknown:20261028", kind: "affair_reminder", title: "虚构提醒" }]);
+    vi.mocked(fetchPersonalAssistantHumanAttention).mockResolvedValue(feed);
+    notifyHumanAttention.mockResolvedValue({ delivered: "attempt_pending" });
+    vi.stubGlobal("vibelutionLauncher", { notifyHumanAttention,
+      getHumanAttentionCapabilities: vi.fn().mockResolvedValue({ schemaVersion: 1, legacyAffairReminder: "main_owned" }) });
+    await renderInto(root, client);
+    expect(notifyHumanAttention).toHaveBeenCalledOnce();
+    await act(async () => { await client.refetchQueries({ queryKey: queryKeys.personalAssistantHumanAttention() }); });
+    await act(async () => new Promise(resolve => setTimeout(resolve, 20)));
+    expect(notifyHumanAttention).toHaveBeenCalledOnce();
+    expect(localStorage.getItem("vibelution.human-attention.notified.v1")).toContain("affair-reminder:unknown:20261028");
+  });
   it("waits for source capability and leaves an explicitly retired affair unmarked", async () => {
     let finish!: (value: unknown) => void;
     const capability = vi.fn(() => new Promise(resolve => { finish = resolve; }));

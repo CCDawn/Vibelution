@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from core.infrastructure.native_runtime import resolve_native_project_root
+from core.infrastructure.reminder_route_gate import route_writer_gate
 from config.paths import (
     CONFIG_HOME_ENV,
     CONFIG_PATH_ENV,
@@ -457,6 +458,11 @@ def sandboxed_project_root(project_root: Path) -> Path:
 
 def clear_active_sandbox(*, project_root: Path | None = None) -> dict[str, Any]:
     root = _project_root(project_root)
+    with route_writer_gate(root):
+        return _clear_active_sandbox_locked(root)
+
+
+def _clear_active_sandbox_locked(root: Path) -> dict[str, Any]:
     state = _read_active_state(root)
     sandbox_id = str(state.get("sandboxId") or "").strip()
     deleted_root = ""
@@ -478,14 +484,15 @@ def clear_active_sandbox(*, project_root: Path | None = None) -> dict[str, Any]:
 
 
 def reset_active_sandbox(*, project_root: Path | None = None) -> dict[str, Any]:
-    clear_active_sandbox(project_root=project_root)
     root = _project_root(project_root)
-    state = _ensure_active_state(root)
-    return {
-        "ok": True,
-        "sandboxId": str(state.get("sandboxId") or ""),
-        "root": str(_sandbox_root(root, str(state.get("sandboxId") or ""))),
-    }
+    with route_writer_gate(root):
+        _clear_active_sandbox_locked(root)
+        state = _ensure_active_state(root)
+        return {
+            "ok": True,
+            "sandboxId": str(state.get("sandboxId") or ""),
+            "root": str(_sandbox_root(root, str(state.get("sandboxId") or ""))),
+        }
 
 
 def sandbox_prompt_cache_partition(partition: str, *, surface: str, project_root: Path | None = None) -> str:
@@ -584,13 +591,23 @@ def _invalidate_active_state_cache(project_root: Path) -> None:
 
 
 def _write_active_state(project_root: Path, payload: dict[str, Any]) -> None:
-    path = _active_state_path(project_root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    _invalidate_active_state_cache(project_root)
+    with route_writer_gate(project_root):
+        path = _active_state_path(project_root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        _invalidate_active_state_cache(project_root)
 
 
 def _ensure_active_state(project_root: Path) -> dict[str, Any]:
+    state = _read_active_state(project_root)
+    sandbox_id = str(state.get("sandboxId") or "").strip()
+    if sandbox_id and (_sandbox_root(project_root, sandbox_id) / "workspace").is_dir():
+        return state
+    with route_writer_gate(project_root):
+        return _ensure_active_state_locked(project_root)
+
+
+def _ensure_active_state_locked(project_root: Path) -> dict[str, Any]:
     state = _read_active_state(project_root)
     sandbox_id = str(state.get("sandboxId") or "").strip()
     if not sandbox_id:

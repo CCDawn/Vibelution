@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Hand, Monitor, PanelRightClose, Pause, Play, RefreshCw } from "lucide-react";
 import { confirmPersonalAssistantComputer, controlPersonalAssistantComputer, fetchPersonalAssistantComputer,
   fetchPersonalAssistantComputerWindows, grantPersonalAssistantComputer } from "../../api/personalAssistantComputer";
+import type { ComputerTransport } from "../../api/personalAssistantComputer";
 import { queryKeys } from "../../api/queryKeys";
 import type { ComputerControlAction, ComputerState } from "../../api/types/personalAssistantComputer";
 import { VButton, VCheckbox, VIconButton, VStateSurface, VSurface } from "../../components/vui";
@@ -13,8 +14,13 @@ import styles from "./PersonalAssistantComputerPanel.styles";
 type Command = { kind: "grant"; selectionId: string } | { kind: "control"; grantId: string; action: ComputerControlAction }
   | { kind: "confirm"; grantId: string; pendingId: string; approved: boolean };
 type CommandError = { kind: "fallback" } | { kind: "backend"; message: string };
+const defaultTransport: ComputerTransport = { scope: "workbench", state: fetchPersonalAssistantComputer,
+  windows: fetchPersonalAssistantComputerWindows, grant: grantPersonalAssistantComputer,
+  control: controlPersonalAssistantComputer, confirm: confirmPersonalAssistantComputer };
 
-export function PersonalAssistantComputerPanel({ active = true, onCollapse }: { active?: boolean; onCollapse: () => void }) {
+export function PersonalAssistantComputerPanel({ active = true, onCollapse, transport = defaultTransport }: {
+  active?: boolean; onCollapse: () => void; transport?: ComputerTransport;
+}) {
   const { lang } = useShellI18n();
   const copy = COMPUTER_COPY[lang];
   const client = useQueryClient();
@@ -24,29 +30,31 @@ export function PersonalAssistantComputerPanel({ active = true, onCollapse }: { 
   const [commandError, setCommandError] = useState<CommandError | null>(null);
   const inFlight = useRef(false);
   const enabled = active && visible;
+  const stateKey = transport.scope === "launcher" ? queryKeys.launcherAssistantComputer() : queryKeys.personalAssistantComputer();
+  const windowsKey = transport.scope === "launcher" ? queryKeys.launcherAssistantComputerWindows() : queryKeys.personalAssistantComputerWindows();
   useEffect(() => {
     const update = () => setVisible(document.visibilityState !== "hidden");
     document.addEventListener("visibilitychange", update);
     return () => document.removeEventListener("visibilitychange", update);
   }, []);
-  const computer = useQuery({ queryKey: queryKeys.personalAssistantComputer(), queryFn: ({ signal }) => fetchPersonalAssistantComputer({ signal }),
+  const computer = useQuery({ queryKey: stateKey, queryFn: ({ signal }) => transport.state({ signal }),
     enabled, refetchInterval: enabled ? 1000 : false, refetchIntervalInBackground: false, retry: false });
   const state = computer.data;
   const granted = Boolean(state?.grantId);
   // Only an explicit panel visit/refresh enumerates windows. Status polling never invalidates this query.
-  const windows = useQuery({ queryKey: queryKeys.personalAssistantComputerWindows(), queryFn: ({ signal }) => fetchPersonalAssistantComputerWindows({ signal }),
+  const windows = useQuery({ queryKey: windowsKey, queryFn: ({ signal }) => transport.windows({ signal }),
     enabled: active, staleTime: Infinity, refetchOnMount: "always", refetchOnWindowFocus: false, refetchOnReconnect: false, retry: false });
   const mutation = useMutation({ mutationFn: (command: Command) => command.kind === "grant"
-    ? grantPersonalAssistantComputer({ selectionId: command.selectionId, allowVision: true })
-    : command.kind === "control" ? controlPersonalAssistantComputer({ grantId: command.grantId, action: command.action })
-      : confirmPersonalAssistantComputer({ grantId: command.grantId, pendingId: command.pendingId, approved: command.approved }),
-    onMutate: async () => { setCommandError(null); await client.cancelQueries({ queryKey: queryKeys.personalAssistantComputer(), exact: true }); },
+    ? transport.grant({ selectionId: command.selectionId, allowVision: true })
+    : command.kind === "control" ? transport.control({ grantId: command.grantId, action: command.action })
+      : transport.confirm({ grantId: command.grantId, pendingId: command.pendingId, approved: command.approved }),
+    onMutate: async () => { setCommandError(null); await client.cancelQueries({ queryKey: stateKey, exact: true }); },
     onSuccess: async (data, command) => {
-      await client.cancelQueries({ queryKey: queryKeys.personalAssistantComputer(), exact: true });
-      client.setQueryData(queryKeys.personalAssistantComputer(), data);
+      await client.cancelQueries({ queryKey: stateKey, exact: true });
+      client.setQueryData(stateKey, data);
       if (command.kind === "grant" || !data.grantId) { setSelectionId(""); setAllowVision(false); }
       if (command.kind === "control" && command.action === "end") void windows.refetch();
-      void client.invalidateQueries({ queryKey: queryKeys.personalAssistantComputer(), exact: true });
+      void client.invalidateQueries({ queryKey: stateKey, exact: true });
     },
     onError: error => setCommandError(error instanceof Error ? { kind: "backend", message: error.message } : { kind: "fallback" }),
     onSettled: () => { inFlight.current = false; },

@@ -25,6 +25,21 @@ function fixture() {
 afterEach(() => { vi.clearAllMocks(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 describe("current-process legacy reminder source fence", () => {
+  it("drains enrolled ingress without persisting a stop or blocking other sources", async () => {
+    const { fence, source, other } = fixture();
+    let finishFirst!: () => void, finishLater!: () => void;
+    const first = fence.trackIngress(() => new Promise<void>(resolve => { finishFirst = resolve; }));
+    let drained = false;
+    const waiting = fence.drainIngress().then(() => { drained = true; });
+    const later = fence.trackIngress(() => new Promise<void>(resolve => { finishLater = resolve; }));
+    finishFirst(); await first; await Promise.resolve();
+    expect(drained).toBe(false);
+    finishLater(); await later; await waiting;
+    expect(drained).toBe(true);
+    expect(await fence.isStopped(source)).toBe(false);
+    expect(await fence.submit(other, async () => "still-active")).toBe("still-active");
+  });
+
   it("persists stop before draining admitted submissions and leaves other sources active", async () => {
     const { fence, directory, source, other } = fixture();
     let finish!: (value: string) => void;

@@ -112,6 +112,30 @@ class HistoryHost:
                     raise MigrationIOError("reminder_source_observation_changed")
                 return {**before, "ledgerKey": key}
 
+    def legacy_reminder_handoff(self, project_id, revision):
+        """Revalidate one published handoff against the live source and target."""
+        from . import native
+        from .initial_migration_binding import target_identity
+        from .reminder_handoff_intent import read_handoff_intent
+        from core.infrastructure.native_runtime import assistant_native_root
+        with self.guard():
+            if self._dispatch._registry_revision != revision:
+                raise MigrationIOError("reminder_handoff_source_unavailable")
+            with native._LOCK:
+                if not native._STARTED or native._OFFLINE_MIGRATION:
+                    raise MigrationIOError("reminder_handoff_source_unavailable")
+                root = assistant_native_root()
+                intent = read_handoff_intent(root, project_id)
+                if (intent is None or (native._AGENT_ID, native._SESSION_ID) != (intent["targetAgentId"], intent["targetSessionId"])
+                        or target_identity(root, native._AGENT_ID, native._SESSION_ID) != (intent["targetIdentityDigest"], intent["targetDirectory"])):
+                    raise MigrationIOError("reminder_handoff_source_unavailable")
+                source = self.legacy_reminder_source(project_id, revision)
+                if (source["sourceScope"] != intent["sourceScope"] or source["sourceIdentityDigest"] != intent["sourceIdentityDigest"]
+                        or source["authorityDigest"] != intent["registryDigest"] or source["projectDirectory"] != intent["projectDirectory"]
+                        or self._dispatch._registry_revision != revision):
+                    raise MigrationIOError("reminder_handoff_source_unavailable")
+                return intent
+
     def _signal_sync(self, *, turn_id=None, operation_id=None, preview_id=None):
         with self._sync_signal_lock:
             current = self._sync_active
@@ -148,7 +172,7 @@ class HistoryHost:
         from core.web.services.session import directory_runtime
         from core.web.services.personal_assistant_project.windows_read import lock_source_directory
 
-        if (category not in ("personal", "knowledge", "knowledge_sync", "knowledge_recovery")
+        if (category not in ("personal", "knowledge", "knowledge_sync", "knowledge_recovery", "reminder_handoff")
                 or category == "knowledge_recovery" and (type(original_sync_id) is not str
                     or re.fullmatch(r"ksync-[a-f0-9]{40}", original_sync_id) is None)
                 or category != "knowledge_recovery" and original_sync_id is not None
@@ -178,7 +202,7 @@ class HistoryHost:
                 raise InitialPrepareBusy("initial_migration_busy")
             try:
                 project, workspace, paths, source_agent, verify, snapshots = self._preview.consume_for_import(
-                    preview_id, project_id, revision, turn_id, purpose="knowledge" if category in ("knowledge_sync", "knowledge_recovery") else category)
+                    preview_id, project_id, revision, turn_id, purpose="knowledge" if category in ("knowledge_sync", "knowledge_recovery") else "personal" if category == "reminder_handoff" else category)
                 root = check_path(self._owner._profile).resolve()
                 if (not native._AGENT_ID or not native._SESSION_ID or assistant_native_root() != root
                         or directory_runtime.directory_store_project_root() != root
@@ -214,6 +238,10 @@ class HistoryHost:
                                 or authority_identity(snapshots) != registry_digest
                                 or target_identity(root, native._AGENT_ID, native._SESSION_ID) != (target_digest, target_directory)):
                             raise MigrationIOError("initial_migration_binding_changed")
+                    if category == "reminder_handoff":
+                        from .reminder_handoff_intent import publish_handoff_intent, sync_id
+                        binding.update(syncId=sync_id(project_id), baselineId=None, baselineState="unknown")
+                        return publish_handoff_intent(root, binding, publication, recheck)
                     return publish_initial_intent(root, binding, publication, recheck,
                                                   owner_check=self._initial_owner_check)
             finally:

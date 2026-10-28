@@ -19,6 +19,7 @@ import psutil
 from config.paths import PROJECT_ROOT
 from core.infrastructure.cua_driver_client import CuaDriverClient
 from core.infrastructure.file_lock import locked_sidecar
+from core.infrastructure.native_runtime import is_launcher_assistant_process
 from vibelution_storage import (
     ProjectIdentityError, ProjectStorageMigrationStateError, resolve_active_project_storage_paths,
 )
@@ -55,6 +56,14 @@ def driver_binary() -> Path:
                 raw = str(json.loads(config.read_text(encoding="utf-8")).get("binaryPath") or "")
                 if raw:
                     break
+        # The Launcher has its own data root, so it cannot discover a driver
+        # configured by an unrelated Workbench project. Reuse the fixed local
+        # installation only for the frozen Launcher role and only after its own
+        # explicit configuration candidates. The MCP client verifies version.
+        if not raw and not legacy and is_launcher_assistant_process():
+            local_app_data = Path(os.environ.get("LOCALAPPDATA", ""))
+            if local_app_data.is_absolute():
+                raw = str(local_app_data / "Vibelution" / "Tools" / "cua-driver" / "0.36.0" / "cua-driver.exe")
     binary = Path(raw)
     if (not raw or not binary.is_absolute() or not binary.is_file()
             or binary.name.lower() != "cua-driver.exe" or binary.is_symlink()):

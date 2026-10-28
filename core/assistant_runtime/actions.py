@@ -105,6 +105,8 @@ _MAIN_HELP = {
     "episodic_sync": "按本轮 history_source_preview 同步旧情景记忆，保留目标编辑和删除。unresolved 先用 episodic_conflict_review 查看，用户同意保留目标后，以新预览及 resolve_sync_id、review_token 对账，不覆盖目标；目标变化时重新查看，来源变化时先用新预览普通同步刷新差异，再查看新 migrationId。unknown 用新预览和 recover_sync_id=原 migrationId 核对，不重写。不得传路径或批准标志；成功不表示旧源已冻结或退役。",
     "initial_migration_queue": "按本轮 history_source_preview，经原生策略准入申请排队首次导入 personal（事务和情景记忆）或 knowledge（可验证的私有知识）。不得提供路径、旧助理ID或批准标志。queued 仅表示已排队；Launcher 会在当前工作安全结束后自动执行，必要时在下次启动继续，不表示已导入；rejected/busy 表示本次未发布，可重新预览并经审批重试；unknown 保留原 operationId 对账，不得换 ID 重派；旧源未冻结。",
     "initial_migration_receipt": "只读查询已登记项目和类别对应的首次导入原回执，无需重复审批。queued 表示等待，partial 表示部分完成，unknown 表示无法确认；不得换 ID 重派，查询不表示旧源已冻结。",
+    "reminder_handoff_queue": "经原生审批登记旧提醒交接请求，使用本轮来源预览；只返回原 operationId，不关闭工作台或停止旧来源。等待来源、窗口和发送者安全证明，不代表交接完成。",
+    "reminder_handoff_receipt": "查询已登记项目的旧提醒交接原回执；queued 表示仍等待，waitingFor 为 window（等待窗口自行关闭）、close_transaction（等待关闭事务）、drain（等待后台排空）或 unknown（来源证明不全）。保留原 operationId 和 syncId，不换 ID 重派。",
     "knowledge_sync_queue": "经原生审批，按本轮 history_source_preview 排队同步已完成首次导入的旧私有知识。返回独立 operationId；queued 表示已排队；Launcher 会在当前工作安全结束后自动执行，必要时在下次启动继续，不表示已经同步；rejected/busy 表示本次未发布，可重新预览并经审批重试；排队后停止当前对话不会撤销已保存的任务。unknown 保留原 ID 查询，不换 ID 重派；不冻结旧来源。",
     "knowledge_sync_receipt": "只读查询原 project_id 和 operation_id 的知识同步任务，不会续写未开始项。queued 表示等待安全执行；not_started 表示已确认本次没有取得写入许可，可在用户同意后使用新预览发起新的同步；unknown 不代表未执行，不得换 ID 重派。partial 中 skippedCount 是未处理项，pendingCount 包含它们；excludedCount 是未纳入的项。不表示旧来源已冻结。",
     "knowledge_sync_recover": "经原生审批，使用新 history_source_preview 为原 operation_id 排队离线恢复。只确认已完成项，并只续做可证明从未开始的项；已开始但无法确认的项保持 unknown，绝不重放。queued 表示已排队，Launcher 会在当前工作安全结束后自动执行，必要时在下次启动继续，不代表已完成；rejected/busy 表示本次恢复未发布，可重新预览并经审批重试；查询继续使用原 operation_id。",
@@ -303,6 +305,33 @@ def history_import_approval_summary(project_id: str, preview_id: str) -> dict:
     return {key: value[key] for key in ("sourceProjectId", "instanceId", "assistantAgentId")}
 
 
+def _reminder_handoff_receipt(service, project_id):
+    from core.infrastructure.native_runtime import assistant_native_root
+    from . import native
+    from .initial_migration_binding import _directory, target_identity
+    from .reminder_handoff_intent import handoff_id, read_handoff_intent, sync_id
+    result = {"schemaVersion": 1, "projectId": project_id, "operationId": handoff_id(project_id),
+              "syncId": sync_id(project_id), "state": "unknown", "code": "unknown", "readyForCutover": False}
+    try:
+        root = assistant_native_root()
+        with native._LOCK:
+            if not native._STARTED or native._OFFLINE_MIGRATION:
+                return result
+            revision = service._registry_revision
+            project_root = service._admitted_projects().get(project_id)
+            if project_root is None:
+                return result
+            intent = read_handoff_intent(root, project_id)
+            if (intent is None or (native._AGENT_ID, native._SESSION_ID) != (intent["targetAgentId"], intent["targetSessionId"])
+                    or _directory(project_root) != intent["projectDirectory"]
+                    or target_identity(root, native._AGENT_ID, native._SESSION_ID) != (intent["targetIdentityDigest"], intent["targetDirectory"])
+                    or service._registry_revision != revision or service._admitted_projects().get(project_id) != project_root):
+                return result
+            return {**result, "state": "pending", "code": "source_proof_unavailable", "baselineState": "unknown"}
+    except Exception:
+        return result
+
+
 def _knowledge_sync_receipt(service, project_id, operation_id):
     """Read an exact authorized intent and receipt; never invoke the sync writer."""
     from core.infrastructure.native_runtime import assistant_native_root
@@ -397,6 +426,10 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
             "description": _MAIN_HELP["knowledge_sync_receipt"], "parameters": KnowledgeSyncReceipt.model_json_schema(), "governed": False}
         main_contracts["knowledge_sync_recover"] = {"action": "knowledge_sync_recover",
             "description": _MAIN_HELP["knowledge_sync_recover"], "parameters": KnowledgeSyncRecover.model_json_schema(), "governed": True}
+        main_contracts["reminder_handoff_queue"] = {"action": "reminder_handoff_queue",
+            "description": _MAIN_HELP["reminder_handoff_queue"], "parameters": HistoryImport.model_json_schema(), "governed": True}
+        main_contracts["reminder_handoff_receipt"] = {"action": "reminder_handoff_receipt",
+            "description": _MAIN_HELP["reminder_handoff_receipt"], "parameters": MainControlProject.model_json_schema(), "governed": False}
     if main_control is not None and getattr(main_control, "appearance_enabled", False):
         main_contracts.update({key: {"action": key, "description": _APPEARANCE_HELP[key],
             "parameters": model.model_json_schema(), "governed": key == "operator_image_upload"}
@@ -426,7 +459,8 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
     try:
         schema = {**_MAIN_SCHEMAS, **_APPEARANCE_SCHEMAS, "initial_migration_queue": InitialMigrationQueue,
                   "initial_migration_receipt": InitialMigrationReceipt, "knowledge_sync_queue": HistoryImport,
-                  "knowledge_sync_receipt": KnowledgeSyncReceipt, "knowledge_sync_recover": KnowledgeSyncRecover}[action] if action in main_contracts else managed[action][0] if action in managed else schemas[action]
+                  "knowledge_sync_receipt": KnowledgeSyncReceipt, "knowledge_sync_recover": KnowledgeSyncRecover,
+                  "reminder_handoff_queue": HistoryImport, "reminder_handoff_receipt": MainControlProject}[action] if action in main_contracts else managed[action][0] if action in managed else schemas[action]
         args = schema.model_validate(parameters).model_dump(exclude_unset=action == "agent_update")
     except ValidationError as exc:
         raise ValueError("Action parameters do not match describe schema") from exc
@@ -434,7 +468,7 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
     if "project_id" in args and args["project_id"] not in projects:
         raise ValueError("Project is not authorized by Launcher")
     if action in main_contracts:
-        if action in {"project_lifecycle", "operator_image_upload", "history_import", "affairs_sync", "episodic_sync", "initial_migration_queue", "knowledge_sync_queue", "knowledge_sync_recover"} and governed is not True:
+        if action in {"project_lifecycle", "operator_image_upload", "history_import", "affairs_sync", "episodic_sync", "initial_migration_queue", "knowledge_sync_queue", "knowledge_sync_recover", "reminder_handoff_queue"} and governed is not True:
             return {"ok": False, "status": "approval_required", "action": action, "tool": "personal_assistant_manage_tool"}
         if action in {"initial_migration_queue", "knowledge_sync_queue", "knowledge_sync_recover"}:
             from .main_control import initial_model_env_unavailable
@@ -444,7 +478,7 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
             if not runtime:
                 raise ValueError("Launcher native tool identity is required")
             request = {"operation": "read"} if action == "launcher_theme_get" else {"operation": "set", "theme": args["theme"]} if action == "launcher_theme_set" else {"operation": "import", "kind": args["kind"]}
-        elif action in {"history_import", "affairs_sync", "episodic_sync", "initial_migration_queue", "knowledge_sync_queue", "knowledge_sync_recover"}:
+        elif action in {"history_import", "affairs_sync", "episodic_sync", "initial_migration_queue", "knowledge_sync_queue", "knowledge_sync_recover", "reminder_handoff_queue"}:
             turn_id = runtime.get("turnId") if isinstance(runtime, dict) else None
             if not isinstance(turn_id, str) or not turn_id.strip():
                 raise ValueError("Launcher native Turn identity is required")
@@ -459,10 +493,16 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
                 from .main_control import knowledge_recovery_id
                 request.update(category="knowledge_recovery", originalSyncId=args["operation_id"],
                     operationId=knowledge_recovery_id(args["project_id"], args["preview_id"], args["operation_id"]))
+            if action == "reminder_handoff_queue":
+                from .reminder_handoff_intent import handoff_id
+                request.update(category="reminder_handoff", operationId=handoff_id(args["project_id"]))
             if action in {"affairs_sync", "episodic_sync"} and args.get("recover_sync_id") is not None:
                 request["recoverSyncId"] = args["recover_sync_id"]
             if action == "episodic_sync" and args.get("resolve_sync_id") is not None:
                 request.update(resolveSyncId=args["resolve_sync_id"], reviewToken=args["review_token"])
+        elif action == "reminder_handoff_receipt":
+            from .reminder_handoff_intent import handoff_id
+            request = {"projectId": args["project_id"], "category": "reminder_handoff", "operationId": handoff_id(args["project_id"])}
         elif action == "knowledge_sync_receipt":
             return _knowledge_sync_receipt(service, args["project_id"], args["operation_id"])
         elif action == "initial_migration_receipt":
@@ -473,13 +513,13 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
             request = {"projectId": args["project_id"], "operation": args.get("operation", "status")}
             if "request_id" in args:
                 request["requestId"] = args["request_id"]
-        if action in {"operator_image_upload", "history_import", "affairs_sync", "episodic_sync", "initial_migration_queue", "knowledge_sync_queue", "knowledge_sync_recover"}:
+        if action in {"operator_image_upload", "history_import", "affairs_sync", "episodic_sync", "initial_migration_queue", "knowledge_sync_queue", "knowledge_sync_recover", "reminder_handoff_queue"}:
             turn_id = runtime.get("turnId")
             if not isinstance(turn_id, str) or not turn_id.strip():
                 raise ValueError("Launcher native Turn identity is required")
-            coroutine = main_control.invoke("initial_migration_queue" if action in {"knowledge_sync_queue", "knowledge_sync_recover"} else action, request, turn_id=turn_id)
+            coroutine = main_control.invoke("initial_migration_queue" if action in {"knowledge_sync_queue", "knowledge_sync_recover", "reminder_handoff_queue"} else action, request, turn_id=turn_id)
         else:
-            coroutine = main_control.invoke(action, request)
+            coroutine = main_control.invoke("initial_migration_receipt" if action == "reminder_handoff_receipt" else action, request)
     elif action in managed:
         if managed[action][1]["governed"] and governed is not True:
             return {"ok": False, "status": "approval_required", "action": action, "tool": "personal_assistant_manage_tool"}
@@ -541,7 +581,7 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
     elif action == "receipt":
         coroutine = service.reconcile(args["dispatch_id"])
     try:
-        value = asyncio.run_coroutine_threadsafe(coroutine, loop).result(timeout=125 if action in {"operator_image_upload", "history_import", "affairs_sync", "episodic_sync", "initial_migration_queue", "knowledge_sync_queue", "knowledge_sync_recover"} else 25)
+        value = asyncio.run_coroutine_threadsafe(coroutine, loop).result(timeout=125 if action in {"operator_image_upload", "history_import", "affairs_sync", "episodic_sync", "initial_migration_queue", "knowledge_sync_queue", "knowledge_sync_recover", "reminder_handoff_queue"} else 25)
         if action == "knowledge_sync_recover":
             return {"schemaVersion": 1, "projectId": args["project_id"], "operationId": args["operation_id"],
                     "recoveryId": value["operationId"], "state": value["state"], "code": value["code"], "readyForCutover": False}

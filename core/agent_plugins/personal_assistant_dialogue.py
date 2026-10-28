@@ -28,6 +28,22 @@ class PersonalAssistantDialogueRuntimeExtension:
     def build_prompt_segments(
         self, agent_id: str, *, session_id: str = "", run_id: str = ""
     ) -> list[dict[str, Any]]:
+        segments = self._dialogue_segments(agent_id, session_id=session_id, run_id=run_id)
+        from core.infrastructure.native_runtime import is_launcher_assistant_process
+        if is_launcher_assistant_process():
+            from core.assistant_runtime.patrol import owner
+            patrol = owner()
+            if patrol is not None:
+                block = patrol.prompt(agent_id, session_id, run_id)
+                if block:
+                    segments.append({"key": "launcher_dispatch_receipt", "block": block,
+                                     "placement": "volatile_turn", "stability": "turn_dynamic",
+                                     "trust": "operator_controlled"})
+        return segments
+
+    def _dialogue_segments(
+        self, agent_id: str, *, session_id: str = "", run_id: str = ""
+    ) -> list[dict[str, Any]]:
         normalized_agent_id = str(agent_id or "").strip()
         normalized_session_id = str(session_id or "").strip()
         if not normalized_agent_id or not normalized_session_id:
@@ -95,15 +111,30 @@ class PersonalAssistantDialogueRuntimeExtension:
     def proactive_turn_is_current(
         self, *, agent_id: str, binding_revision: int, delivery_token: str,
     ) -> bool:
-        return False
+        from core.infrastructure.native_runtime import is_launcher_assistant_process
+        if not is_launcher_assistant_process():
+            return False
+        from core.assistant_runtime.patrol import owner
+        patrol = owner()
+        return bool(patrol and patrol.current(agent_id, binding_revision, delivery_token))
 
     def cancel_proactive_attempt(
         self, *, agent_id: str, delivery_token: str, reason: str,
     ) -> None:
-        return None
+        from core.infrastructure.native_runtime import is_launcher_assistant_process
+        if is_launcher_assistant_process():
+            from core.assistant_runtime.patrol import owner
+            patrol = owner()
+            if patrol is not None:
+                patrol.cancel(agent_id, delivery_token)
 
     def finalize_proactive_delivery(self, context: dict[str, Any]) -> dict[str, Any] | None:
-        return None
+        from core.infrastructure.native_runtime import is_launcher_assistant_process
+        if not is_launcher_assistant_process():
+            return None
+        from core.assistant_runtime.patrol import owner
+        patrol = owner()
+        return patrol.finish(context) if patrol is not None else None
 
     def proactive_runtime_metadata(self, context: dict[str, Any]) -> dict[str, Any]:
         return {}

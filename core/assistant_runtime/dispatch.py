@@ -229,6 +229,9 @@ class DispatchService:
         # a valid revision-zero initial authorization. Zero is not an already
         # accepted empty snapshot.
         self._registry_revision = -1
+        # Invalidates only reads explicitly bound to a live registry gate.
+        # Ordinary admitted transactions and heartbeat retain their contract.
+        self._registry_gate_generation = 0
         self._seen_projects = dict(self._projects)
         self._revoked_projects: set[str] = set()
         self._client_factory = client_factory
@@ -251,6 +254,7 @@ class DispatchService:
         with self._dispatch_state:
             self._check_registry_unfenced()
             self._projects_suspended.set()
+            self._registry_gate_generation += 1
             return {"schemaVersion": 1, "revision": self._registry_revision, "projectsSuspended": True}
 
     def _admitted_projects(self) -> Mapping[str, Path]:
@@ -452,6 +456,7 @@ class DispatchService:
         self._seen_projects.update(projects)
         self._projects = MappingProxyType(projects)
         self._registry_revision = revision
+        self._registry_gate_generation += 1
         if not retain_suspension:
             self._projects_suspended.clear()
         return {"schemaVersion": 1, "revision": revision, "projectCount": len(projects)}
@@ -659,7 +664,8 @@ class DispatchService:
         return sorted([*invalid, *(await self._refresh_batch(ids, include_terminal=False))],
                       key=lambda item: item["dispatchId"])
 
-    async def _refresh_batch(self, ids: list[str], *, include_terminal: bool) -> list[dict[str, Any]]:
+    async def _refresh_batch(self, ids: list[str], *, include_terminal: bool,
+                             terminal_registry_generation: int | None = None) -> list[dict[str, Any]]:
         """Use one authenticated SDK per project and renew its tasks concurrently.
 
         The SDK serializes its shared credential writes internally. Holding the
@@ -706,6 +712,25 @@ class DispatchService:
                     async def attempt(record: dict[str, Any]) -> None:
                         try:
                             task_id = record.get("nativeTaskId") or ""
+                            if terminal_registry_generation is not None:
+                                # Patrol's recheck is a new read admission, not
+                                # a lease renewal. Diagnose first, then fence
+                                # each read against suspend/rebind. No await is
+                                # performed while holding the registry lock.
+                                receipt = record.get("receipt")
+                                if (not task_id or not isinstance(receipt, dict)
+                                        or receipt.get("status") not in TASK_TERMINAL_STATUSES):
+                                    raise DispatchError("Terminal task changed.", code="DISPATCH_STATE_INVALID")
+                                with self._dispatch_state:
+                                    self._project(project_id)
+                                    if self._registry_gate_generation != terminal_registry_generation:
+                                        raise DispatchError("Project registry changed.", code="PROJECT_REGISTRY_RECONCILE_REQUIRED")
+                                payload = await _checked_task_receipt(client, task_id)
+                                record["receipt"] = {key: deepcopy(value) for key, value in payload.items() if key in _RECEIPT_FIELDS}
+                                record["lastError"] = None
+                                self._save(record)
+                                outcomes[record["dispatchId"]] = self._public(record)
+                                return
                             if not task_id:
                                 request_id = record.get("clientRequestId")
                                 if not isinstance(request_id, str) or not request_id:

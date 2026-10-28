@@ -32,6 +32,17 @@ describe("Launcher assistant private bridge", () => {
     await expect(invokeAssistant({ ...event, sender: {} }, { operation: "status" }, owner)).rejects.toThrow("SENDER_FORBIDDEN");
     await expect(invokeAssistant({ ...event, senderFrame: { ...event.senderFrame } }, { operation: "status" }, owner)).rejects.toThrow("SENDER_FORBIDDEN");
   });
+  it("accepts fixed computer verbs only from the owned top-level assistant frame", async () => {
+    const { owner, event } = setup();
+    Object.assign(owner.host, { snapshot: () => ({ state: "ready" }) });
+    for (const operation of ["computerState", "computerWindows", "computerGrant", "computerControl", "computerConfirm"]) {
+      await expect(invokeAssistant({ ...event, sender: {} }, { operation }, owner)).rejects.toThrow("SENDER_FORBIDDEN");
+      await invokeAssistant(event, { operation }, owner);
+    }
+    expect(owner.host.request).toHaveBeenCalledTimes(5);
+    expect(owner.host.start).toHaveBeenCalledTimes(3);
+    await expect(invokeAssistant(event, { operation: "computerExecute" }, owner)).rejects.toThrow("REQUEST_INVALID");
+  });
   it("hides or resizes without changing native owner lifecycle", async () => {
     const { owner, event } = setup();
     expect(await invokeAssistant(event, { operation: "hide" }, owner)).toEqual({ hidden: true });

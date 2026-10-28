@@ -38,11 +38,13 @@ def _close_offline_directory(runtime, *, timeout: float) -> None:
         raise
 
 
-_INITIAL_TOOLS = (
+_LEGACY_LAUNCHER_TOOLS = (
     "personal_assistant_action_tool", "personal_assistant_manage_tool",
     "personal_affairs_tool", "append_personal_memory_tool", "supersede_personal_memory_tool",
     "search_agent_private_memory_tool", "compress_context_tool",
 )
+_INITIAL_TOOLS = (*_LEGACY_LAUNCHER_TOOLS,
+                  "personal_assistant_computer_observe_tool", "personal_assistant_computer_action_tool")
 
 
 class AssistantSessionError(RuntimeError):
@@ -132,6 +134,7 @@ def _bootstrap(root: Path | str, *, offline_migration: bool) -> dict[str, Any]:
                         "私人偏好和事实用 append_personal_memory_tool 记录、supersede_personal_memory_tool 更新；"
                         "自己的私有正式知识用 search_agent_private_memory_tool 查询；"
                         "上下文需要整理时用 compress_context_tool，不删除或改写原生历史。"
+                        "电脑窗口操作使用原生电脑工具，只能操作用户已选择并授权的窗口。"
                         "只执行实时目录已登记的动作；目录之外的旧平台动作尚不可用。"
                     ),
                     "constraints": (
@@ -157,6 +160,21 @@ def _bootstrap(root: Path | str, *, offline_migration: bool) -> dict[str, Any]:
                         "delegationPolicy": {"allowSubagents": False, "allowWakeMessages": False},
                     },
                 )
+            # Upgrade only the exact previous Launcher default; user-edited or
+            # zero-tool policies remain untouched, and migration stays read-only.
+            if existing is not None and not offline_migration:
+                agent_id = existing.get("agentId")
+                existing = directory.get_agent(agent_id) if agent_id else None
+                policy = existing.get("toolPolicy") if existing else None
+                policy_id = f"tool-{agent_id}"
+                old_default = {**personal.current_policy(), "allowedTools": list(_LEGACY_LAUNCHER_TOOLS),
+                               "preferredTools": list(_LEGACY_LAUNCHER_TOOLS), "approvalOverrides": {}}
+                if (existing is not None and existing.get("createdBy") == "user_personal_assistant"
+                        and existing.get("toolPolicyId") == policy_id and isinstance(policy, dict)
+                        and personal._matches_provisioning_snapshot(policy, old_default, policy_id)):
+                    directory.update_agent_instance(agent_id,
+                        tool_policy={**policy, "allowedTools": list(_INITIAL_TOOLS), "preferredTools": list(_INITIAL_TOOLS)},
+                        expected_tool_policy_fingerprint=directory.tool_policy_fingerprint(policy))
             # Reuse native direct-Session provisioning/repair and its existing
             # preservation rules for user-authored profiles and tool policies.
             result = personal.create_personal_assistant()

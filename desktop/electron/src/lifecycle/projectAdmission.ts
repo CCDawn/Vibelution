@@ -32,12 +32,42 @@ export type ProjectAdmissionTicket = {
   check(root?: string): void;
   finish(): void;
 };
-export type ProjectAdmissionSeal = { root: string; drain(): Promise<void>; release(): void };
+export type ProjectAdmissionSeal = { root: string; readonly signal: AbortSignal; check(): void; drain(): Promise<void>; release(): void };
 
 /** Single Electron process; does not authorize writes or account for other executables. */
 export class ProjectAdmission {
   private readonly entries = new Set<{ identity: Identity | null; done: Promise<void>; finish: () => void }>();
   private readonly seals = new Set<Identity>();
+  private readonly releaseSeals = new Set<() => Promise<void>>();
+  private unboundWaiting = 0;
+
+  hasSeals(): boolean { return this.seals.size > 0; }
+
+  /** Observe ordinary calls without changing them while no seal is held.
+   * An unclassifiable new call revokes seals before running, so it cannot be
+   * silently blocked or mistaken for a drained source. */
+  async observe<T>(root: () => string, work: (ticket?: ProjectAdmissionTicket) => Promise<T>): Promise<T> {
+    let resolved: string | undefined;
+    try { resolved = root(); identity(resolved); } catch {
+      // Revoke synchronously, but do not let an unknown producer enter until
+      // the captured operation's real drain has completed.
+      const release = [...this.releaseSeals];
+      if (release.length) {
+        this.unboundWaiting += 1;
+        try { await Promise.all(release.map(revoke => revoke())); }
+        finally { this.unboundWaiting -= 1; }
+      }
+    }
+    if (this.seals.size && resolved !== undefined) return await this.run(() => resolved!, work);
+    const ticket = this.enter();
+    let bound = false;
+    if (resolved !== undefined) {
+      try { ticket.bind(resolved); bound = true; } catch { /* Keep an unbound observer until work settles. */ }
+    }
+    const observed = bound ? { ...ticket, check: (path?: string) => { if (this.seals.size) ticket.check(path); } } : undefined;
+    try { return await work(observed); }
+    finally { ticket.finish(); }
+  }
 
   /** Trusted root resolution and enrollment both finish before the first await. */
   async run<T>(root: () => string, work: (ticket: ProjectAdmissionTicket) => Promise<T>): Promise<T> {
@@ -82,24 +112,40 @@ export class ProjectAdmission {
   }
 
   /** Trusted main caller must validate registration separately, and fence other processes separately. */
-  seal(root: string): ProjectAdmissionSeal {
+  seal(root: string, options?: { drainOnRevoke(): Promise<void> }): ProjectAdmissionSeal {
     const target = identity(root);
-    if ([...this.entries].some(entry => !entry.identity) || [...this.seals].some(item => intersects(item, target)))
+    if (this.unboundWaiting || [...this.entries].some(entry => !entry.identity) || [...this.seals].some(item => intersects(item, target)))
       throw new Error("PROJECT_ADMISSION_UNKNOWN");
     this.seals.add(target);
     let held = true;
+    const abort = new AbortController();
     const check = () => {
-      if (!held || !same(target, identity(target.root))) throw new Error("PROJECT_ADMISSION_UNKNOWN");
+      if (!held || abort.signal.aborted || !same(target, identity(target.root))) throw new Error("PROJECT_ADMISSION_UNKNOWN");
     };
+    let draining: Promise<void> | undefined;
+    const finish = () => { held = false; this.seals.delete(target); this.releaseSeals.delete(revoke); };
+    const revoke = (): Promise<void> => {
+      if (!held) return Promise.resolve();
+      if (draining) return draining;
+      abort.abort();
+      if (!options?.drainOnRevoke) { finish(); return Promise.resolve(); }
+      try {
+        draining = Promise.resolve(options.drainOnRevoke()).then(finish, () => new Promise<void>(() => {}));
+      } catch { draining = new Promise<void>(() => {}); }
+      return draining;
+    };
+    this.releaseSeals.add(revoke);
     return {
       root: target.root,
+      signal: abort.signal,
+      check,
       drain: async () => {
         check();
         const active = [...this.entries].filter(entry => entry.identity && intersects(entry.identity, target));
         await Promise.all(active.map(entry => entry.done));
         check();
       },
-      release: () => { if (held) { held = false; this.seals.delete(target); } },
+      release: () => { void revoke(); },
     };
   }
 }

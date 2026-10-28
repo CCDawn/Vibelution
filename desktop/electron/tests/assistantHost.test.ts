@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AssistantHost, type AssistantHostRequest } from "../src/assistant/assistantHost.js";
+import { invokeAssistant, LAUNCHER_ASSISTANT_URL } from "../src/assistant/assistantBridge.js";
 import { affairsSyncMigrationId } from "../src/assistant/mainControlTransport.js";
 import { applyDesktopLaunchSettingsToEnvironment } from "../src/launch/desktopLaunchSettings.js";
 import type { WorkbenchJobHandle, WorkbenchJobSpawnInput } from "../src/process/workbenchJob.js";
@@ -189,6 +190,63 @@ describe("AssistantHost", () => {
     await host.stop();
   });
 
+  it("routes only the five fixed computer verbs with bounded DTOs and main-owned credentials", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    const idle = { available: true, status: "idle", message: "", grantId: null, window: null, pending: null };
+    const rows = [
+      [{ operation: "computerState" }, "/api/assistant/computer", "GET", undefined, idle],
+      [{ operation: "computerWindows" }, "/api/assistant/computer/windows", "POST", {}, { windows: [{ selectionId: "sel", title: "Title", appName: "App" }] }],
+      [{ operation: "computerGrant", selectionId: "sel", allowVision: true }, "/api/assistant/computer/grant", "POST", { selectionId: "sel", allowVision: true }, idle],
+      [{ operation: "computerControl", grantId: "grant", action: "pause" }, "/api/assistant/computer/control", "POST", { grantId: "grant", action: "pause" }, idle],
+      [{ operation: "computerConfirm", grantId: "grant", pendingId: "pending", approved: false }, "/api/assistant/computer/confirm", "POST", { grantId: "grant", pendingId: "pending", approved: false }, idle],
+    ] as const;
+    for (const [request, path, method, body, result] of rows) {
+      fetchImpl.mockImplementationOnce(async (url, options) => {
+        expect(String(url)).toMatch(new RegExp(path + "$"));
+        expect(options?.method).toBe(method);
+        expect(new Headers(options?.headers).get("authorization")).toMatch(/^Bearer /);
+        expect(options?.body ? JSON.parse(String(options.body)) : undefined).toEqual(body);
+        return Response.json(result);
+      });
+      expect(await host.request(request as AssistantHostRequest)).toEqual(result);
+    }
+    const count = fetchImpl.mock.calls.length;
+    for (const bad of [
+      { operation: "computerGrant", selectionId: "x", allowVision: false },
+      { operation: "computerConfirm", grantId: "g", pendingId: "p", approved: "yes" },
+      { operation: "computerControl", grantId: "g", action: "click" },
+      { operation: "computerState", url: "http://external" },
+      { operation: "computerWindows", selectionId: "untrusted" },
+    ]) await expect(host.request(bad as AssistantHostRequest)).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    expect(fetchImpl.mock.calls).toHaveLength(count);
+    fetchImpl.mockResolvedValueOnce(Response.json({ ...idle, path: "private" }));
+    await expect(host.request({ operation: "computerState" })).rejects.toThrow("ASSISTANT_RESPONSE_INVALID");
+    await host.stop();
+  });
+
+  it("lets the assistant view and confirm an existing computer action while a sealed migration waits", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    const fence = host.beginMigrationAdmission(); await fence.seal();
+    const state = { available: true, status: "waiting_confirmation", message: "", grantId: "g",
+      window: { selectionId: "sel", title: "Title", appName: "App" },
+      pending: { id: "p", action: "click", targetLabel: "Button", text: null } };
+    const idle = { available: true, status: "idle", message: "", grantId: null, window: null, pending: null };
+    const frame = { url: LAUNCHER_ASSISTANT_URL }, contents = { mainFrame: frame, isDestroyed: () => false };
+    const owner = { contents, host, hide: () => {}, setExpanded: () => undefined };
+    const event = { sender: contents, senderFrame: frame };
+    const queued = invokeAssistant(event, { operation: "computerGrant", selectionId: "sel", allowVision: true }, owner);
+    fetchImpl.mockResolvedValueOnce(Response.json(state));
+    expect(await invokeAssistant(event, { operation: "computerState" }, owner)).toEqual(state);
+    fetchImpl.mockResolvedValueOnce(Response.json(idle));
+    expect(await invokeAssistant(event, { operation: "computerConfirm", grantId: "g", pendingId: "p", approved: false }, owner)).toEqual(idle);
+    expect(fetchImpl.mock.calls.filter(([url]) => String(url).endsWith("/computer/grant"))).toHaveLength(0);
+    fetchImpl.mockResolvedValueOnce(Response.json(idle));
+    fence.release(); expect(await queued).toEqual(idle);
+    await host.stop();
+  });
+
   it("resolves a main-only source identity and rejects stale or forged responses", async () => {
     const { host, fetchImpl } = fixture({ graceful: true });
     await host.start();
@@ -219,6 +277,70 @@ describe("AssistantHost", () => {
     release(Response.json(identity));
     await expect(pending).rejects.toThrow("ASSISTANT_NOT_READY");
     await suspended;
+    await host.stop();
+  });
+
+  it("releases the original main-generated source permit even when acquire acknowledgement is lost", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    let permitId = "";
+    fetchImpl.mockImplementationOnce(async (_url, options) => {
+      permitId = JSON.parse(String(options?.body)).permitId;
+      expect(permitId).toMatch(/^[a-f0-9]{64}$/);
+      throw new Error("response lost");
+    });
+    fetchImpl.mockImplementationOnce(async (url, options) => {
+      expect(String(url)).toMatch(/\/legacy-reminders\/permit\/release$/);
+      expect(JSON.parse(String(options?.body))).toEqual({ permitId });
+      return Response.json({ schemaVersion: 1, released: true });
+    });
+    await expect(host.acquireLegacyReminderPermit("project", 0)).rejects.toThrow();
+    await host.stop();
+  });
+
+  it("waits for a confirmed permit release and retries with the original ID", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    const ledgerKey = "c".repeat(64);
+    const proof = { schemaVersion: 1, ledgerKey, coverage: "cooperating_route_writers", unmanagedSenders: "unknown", readyForCutover: false };
+    let permitId = "";
+    fetchImpl.mockImplementationOnce(async (_url, options) => {
+      permitId = JSON.parse(String(options?.body)).permitId;
+      return Response.json({ ...proof, permitId });
+    });
+    fetchImpl.mockResolvedValueOnce(Response.json(proof));
+    const permit = await host.acquireLegacyReminderPermit("project", 0);
+    fetchImpl.mockImplementationOnce(async () => { throw new Error("release response lost"); });
+    fetchImpl.mockImplementationOnce(async (_url, options) => {
+      expect(JSON.parse(String(options?.body))).toEqual({ permitId });
+      return Response.json({ schemaVersion: 1, released: true });
+    });
+    await permit.release();
+    expect(fetchImpl.mock.calls.filter(([url]) => String(url).endsWith("/permit/release"))).toHaveLength(2);
+    await host.stop();
+  });
+
+  it("keeps source permit private, checks the pinned ledger and explicitly releases it", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    const ledgerKey = "c".repeat(64);
+    let permitId = "";
+    const proof = { schemaVersion: 1, ledgerKey, coverage: "cooperating_route_writers", unmanagedSenders: "unknown", readyForCutover: false };
+    fetchImpl.mockImplementationOnce(async (_url, options) => {
+      permitId = JSON.parse(String(options?.body)).permitId;
+      return Response.json({ ...proof, permitId });
+    });
+    fetchImpl.mockResolvedValueOnce(Response.json(proof));
+    const permit = await host.acquireLegacyReminderPermit("project", 0);
+    expect(permit.ledgerKey).toBe(ledgerKey);
+    fetchImpl.mockResolvedValueOnce(Response.json({ ...proof, ledgerKey: "d".repeat(64) }));
+    await expect(permit.check()).rejects.toThrow("ASSISTANT_RESPONSE_INVALID");
+    fetchImpl.mockImplementationOnce(async (_url, options) => {
+      expect(JSON.parse(String(options?.body))).toEqual({ permitId });
+      return Response.json({ schemaVersion: 1, released: true });
+    });
+    await permit.release();
+    await expect(permit.check()).rejects.toThrow();
     await host.stop();
   });
 
@@ -295,6 +417,40 @@ describe("AssistantHost", () => {
     controller.abort();
     await expect(pending).resolves.toBe(false);
     expect(native.close).not.toHaveBeenCalled();
+    await host.stop();
+  });
+  it("accepts only an unknown-baseline reminder handoff binding", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true, initialMigrationControl: true });
+    await host.start();
+    const projectId = "project", digest = createHash("sha256").update(`${projectId}:reminder_handoff`).digest("hex").slice(0, 40);
+    const row = { deliveryId: "a".repeat(32), action: "initial_migration_queue" as const, projectId,
+      previewId: "b".repeat(64), turnId: "turn-1", category: "reminder_handoff" as const,
+      operationId: `initial-${digest}`, timeoutMs: 10000 };
+    const directory = { device: "1", inode: "2", birthtimeNs: "3" };
+    const binding = { schemaVersion: 1, registeredProjectId: projectId,
+      sourceScope: { projectId: "source", instanceId: "instance", agentId: "agent" }, category: row.category,
+      turnId: row.turnId, operationId: row.operationId, syncId: `affairs-${digest}`, revision: 0,
+      sourceIdentityDigest: "a".repeat(64), registryDigest: "b".repeat(64), targetIdentityDigest: "c".repeat(64),
+      projectDirectory: directory, workspaceDirectory: directory, targetDirectory: directory,
+      targetAgentId: "agent", targetSessionId: "session", authority: "native_policy_admitted",
+      baselineId: null, baselineState: "unknown", readyForCutover: false };
+    fetchImpl.mockResolvedValueOnce(Response.json(binding));
+    await expect(host.prepareInitialMigration(row, 0)).resolves.toBe(true);
+    fetchImpl.mockResolvedValueOnce(Response.json({ ...binding, baselineState: "verified" }))
+      .mockResolvedValueOnce(Response.json({ schemaVersion: 1, operationId: row.operationId, state: "unknown", drained: true }));
+    await expect(host.prepareInitialMigration(row, 0)).resolves.toBe(false);
+    await host.stop();
+  });
+  it("reads only the original native handoff receipt with false cutover", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true, initialMigrationControl: true });
+    await host.start();
+    const projectId = "project", digest = createHash("sha256").update(`${projectId}:reminder_handoff`).digest("hex").slice(0, 40);
+    const result = { schemaVersion: 1, projectId, operationId: `initial-${digest}`, syncId: `affairs-${digest}`,
+      state: "pending", code: "source_proof_unavailable", baselineState: "unknown", readyForCutover: false };
+    fetchImpl.mockResolvedValueOnce(Response.json(result));
+    expect(await host.reminderHandoffReceipt(projectId, 0)).toBe("pending");
+    fetchImpl.mockResolvedValueOnce(Response.json({ ...result, readyForCutover: true }));
+    await expect(host.reminderHandoffReceipt(projectId, 0)).rejects.toThrow();
     await host.stop();
   });
   it("does not release a failed prepare until the root Job handle is signaled", async () => {

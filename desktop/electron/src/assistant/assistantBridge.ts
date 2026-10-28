@@ -6,7 +6,8 @@ type Contents = { mainFrame: unknown; isDestroyed(): boolean };
 type Sender = { sender: unknown; senderFrame?: { url: string } | null };
 export type AssistantBridgeOwner = {
   contents: Contents;
-  host: { start(): Promise<unknown>; request(payload: AssistantHostRequest): Promise<unknown> };
+  host: { start(): Promise<unknown>; request(payload: AssistantHostRequest): Promise<unknown>;
+    snapshot?(): { state: string } };
   setExpanded(expanded: boolean): unknown;
   hide(): void;
   openLauncher?(): Promise<{ opened: boolean }>;
@@ -39,13 +40,16 @@ export async function invokeAssistant(event: Sender, payload: unknown, owner: As
     if (Object.keys(request).length !== 2 || typeof request.expanded !== "boolean") throw new Error("ASSISTANT_REQUEST_INVALID");
     return owner.setExpanded(request.expanded);
   }
-  if (!["status", "detail", "dispatches", "config", "send", "stop", "continue", "curation", "curate", "approvals", "resolveApproval", "operatorAsset"].includes(String(request.operation))) {
+  if (!["status", "detail", "dispatches", "config", "send", "stop", "continue", "curation", "curate", "approvals", "resolveApproval", "operatorAsset", "computerState", "computerWindows", "computerGrant", "computerControl", "computerConfirm"].includes(String(request.operation))) {
     throw new Error("ASSISTANT_REQUEST_INVALID");
   }
   try {
     // A fresh invocation may recover a confirmed dead owner. Failed writes
     // are returned once; neither this bridge nor host.start replays them.
-    await owner.host.start();
+    // Confirmation can only settle an existing native waiter. Starting a new
+    // host here would also wait behind migration admission and deadlock it.
+    if (request.operation !== "computerConfirm"
+      && !(request.operation === "computerState" && owner.host.snapshot?.().state === "ready")) await owner.host.start();
     return await owner.host.request(payload as AssistantHostRequest);
   } catch (error) {
     const code = error instanceof Error && /^ASSISTANT_[A-Z_]+$/.test(error.message)
