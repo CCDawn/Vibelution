@@ -29,6 +29,16 @@ export class InitialMigrationResults {
     this.ownedAttempts.delete(operationId);
   }
 
+  /** Persist a fail-closed receipt without replacing a prior final result. */
+  async recordUnknown(operationId: string): Promise<"completed" | "partial" | "unknown"> {
+    const existing = await this.get(operationId);
+    if (existing) return existing === "not_started" ? "unknown" : existing;
+    await this.store.reserve({ requestId: operationId, projectId: "unknown", operation: "start" });
+    const persisted = await this.get(operationId);
+    if (persisted !== "unknown") throw new Error("INITIAL_MIGRATION_RESULT_INVALID");
+    return persisted;
+  }
+
   async get(operationId: string): Promise<"completed" | "partial" | "unknown" | "not_started" | null> {
     if (!/^(?:initial|ksync|krec)-[a-f0-9]{40}$/.test(operationId)) throw new Error("INITIAL_MIGRATION_RESULT_INVALID");
     const row = await this.store.get(operationId);
@@ -42,7 +52,7 @@ export class InitialMigrationResults {
       return "unknown";
     }
     if (row.request.requestId !== operationId || row.request.operation !== "start" || row.binding !== null || row.command !== null
-      || (row.request.projectId !== "completed" && row.request.projectId !== "partial" && row.request.projectId !== "not_started"))
+      || (row.request.projectId !== "completed" && row.request.projectId !== "partial" && row.request.projectId !== "unknown" && row.request.projectId !== "not_started"))
       throw new Error("INITIAL_MIGRATION_RESULT_INVALID");
     if (row.request.projectId === "not_started") {
       if (!operationId.startsWith("ksync-") && !operationId.startsWith("krec-")) throw new Error("INITIAL_MIGRATION_RESULT_INVALID");

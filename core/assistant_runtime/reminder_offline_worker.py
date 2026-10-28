@@ -9,9 +9,10 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from itertools import islice, product
 from pathlib import Path
+from types import SimpleNamespace
 
 from core.infrastructure.atomic_io import atomic_write_json
 from core.infrastructure.reminder_source_mutex import try_acquire_reminder_source_mutex
@@ -27,7 +28,7 @@ from .migration_affairs_sync import reconcile_affairs
 from .migration_io import MigrationIOError, pinned_source_files, pinned_target_directory, read_stable_file, strict_json
 from .migration_profile import offline_migration_profile
 from .migration_source_archive import import_source_snapshots
-from .reminder_source_identity import ReminderSourceObservation
+from .reminder_source_identity import ReminderSourceObservation, observe_reminder_source
 from .reminder_handoff_intent import read_handoff_intent
 from .reminder_uncertain_preparation import inspect_uncertainty_preparation, prepare_current_day_uncertainty
 
@@ -114,7 +115,8 @@ def _verify_baseline_origin(target, scope, project: Path, workspace: Path, basel
 
 
 def run_reminder_offline_worker(*, source: ReminderSourceObservation,
-                                sync_id: str, check_admission, mode: str = "start", recovery_id: str | None = None) -> dict:
+                                sync_id: str, check_admission, mode: str = "start", recovery_id: str | None = None,
+                                target_config: Path | None = None) -> dict:
     """Run on the source-mutex-owning thread with no caller-supplied paths.
 
     The source observation and IDs must originate from a trusted main-owned,
@@ -136,13 +138,62 @@ def run_reminder_offline_worker(*, source: ReminderSourceObservation,
             raise MigrationIOError("reminder_worker_admission_unavailable")
 
     admission()
-    mutex = try_acquire_reminder_source_mutex(source)
-    if mutex is None:
+    mutex = try_acquire_reminder_source_mutex(source) if target_config is None else None
+    if target_config is None and mutex is None:
         raise MigrationIOError("reminder_worker_source_busy")
     try:
-        if mutex.abandoned:
+        if mutex is not None and mutex.abandoned:
             raise MigrationIOError("reminder_uncertainty_source_recovery_required")
-        with offline_migration_profile() as target:
+        with ExitStack() as guards:
+            def prepare_config(target_root):
+                nonlocal source, mutex
+                # Validate the admitted intent under the route gate and target
+                # owner lock; obtain the source mutex before native bootstrap.
+                admission()
+                with source._preview._lock:
+                    source._check()
+                    row = source._preview._previews[source._token]
+                    project, workspace, paths, authority = Path(row[3]), Path(row[4]), row[5], tuple(row[7])
+                    registered_id = row[2]["projectId"]
+                    scope = _scope({"projectId": paths.project_id, "instanceId": paths.instance_id, "agentId": source.agent_id})
+                intent = read_handoff_intent(target_root, registered_id)
+                if (intent is None or intent["syncId"] != sync_id
+                        or intent["revision"] > source._preview._dispatch._registry_revision
+                        or not _registry_digest_matches(authority, intent["registryDigest"])
+                        or not _matches_origin(intent, SimpleNamespace(root=target_root, agent_id=intent["targetAgentId"],
+                            session_id=intent["targetSessionId"]), scope, project, workspace, category="reminder_handoff")):
+                    raise MigrationIOError("reminder_worker_handoff_authority_unavailable")
+                expected = target_root / (".initial-migration-models-v1-" + intent["operationId"] + "-" + intent["registryDigest"] + ".toml")
+                if target_config != expected or Path(os.environ.get("VIBELUTION_CONFIG_PATH", "")) != expected:
+                    raise MigrationIOError("reminder_worker_binding_changed")
+                guards.enter_context(pinned_source_files(authority))
+                if not expected.exists() and not expected.is_symlink():
+                    from scripts.assistant_migration_activate import prepare_initial_model_config
+                    source._check()
+                    admission()
+                    prepare_initial_model_config(source._preview._config, target_root, expected,
+                                                 intent["operationId"], intent["registryDigest"])
+                    # The routing fingerprint includes existence of the active
+                    # target config. Re-observe under the same route gate after
+                    # this one authorized auxiliary creation.
+                    previous = source
+                    source = observe_reminder_source(previous._preview._dispatch, previous._preview,
+                                                     registered_id, previous._preview._dispatch._registry_revision)
+                    guards.callback(source.close)
+                    if source._ledger != previous._ledger or source._authority != previous._authority:
+                        raise MigrationIOError("reminder_worker_binding_changed")
+                snapshot = read_stable_file(expected, 16 * 1024 * 1024)
+                guards.enter_context(pinned_source_files((snapshot,)))
+                source._check()
+                mutex = try_acquire_reminder_source_mutex(source)
+                if mutex is None:
+                    raise MigrationIOError("reminder_worker_source_busy")
+                if mutex.abandoned:
+                    raise MigrationIOError("reminder_uncertainty_source_recovery_required")
+                mutex.check()
+                admission()
+
+            target = guards.enter_context(offline_migration_profile(before_bootstrap=prepare_config if target_config is not None else None))
             with source._preview._lock:
                 source._check()
                 row = source._preview._previews[source._token]
@@ -304,4 +355,5 @@ def run_reminder_offline_worker(*, source: ReminderSourceObservation,
                         "syncId": sync_id, "preparationId": prepared["operationId"],
                         "uncertainCount": prepared["uncertainCount"], "readyForCutover": False}
     finally:
-        mutex.release()
+        if mutex is not None:
+            mutex.release()

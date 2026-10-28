@@ -146,6 +146,18 @@ export function projectMainControlResult(request: MainControlRequest, value: unk
     const base = { schemaVersion: 1, projectId: request.projectId, category: request.category,
       operationId: request.operationId, readyForCutover: false };
     const unknown = { ...base, state: "unknown", code: "unknown" };
+    if (request.category === "reminder_handoff" && value && typeof value === "object" && !Array.isArray(value)) {
+      const row = value as Record<string, unknown>;
+      const code = Object.getOwnPropertyDescriptor(row, "code")?.value;
+      const isConflict = code === "affairs_conflicts";
+      const isSender = code === "sender_proof_unavailable";
+      const countKey = isConflict ? "conflictCount" : "uncertainCount";
+      if ((isConflict || isSender) && closed(row, ["schemaVersion", "projectId", "category", "operationId", "syncId", "state", "code", "readyForCutover", countKey])
+        && row.schemaVersion === 1 && row.projectId === request.projectId && row.category === request.category
+        && row.operationId === request.operationId && row.syncId === `affairs-${request.operationId.slice("initial-".length)}`
+        && row.state === "pending" && row.readyForCutover === false && Number.isSafeInteger(row[countKey])
+        && (row[countKey] as number) >= (isConflict ? 1 : 0) && (row[countKey] as number) <= (isConflict ? 4096 : 2048)) return { ...row };
+    }
     if (request.category === "reminder_handoff" && closed(value, ["schemaVersion", "projectId", "category", "operationId", "state", "code", "readyForCutover", "waitingFor", "syncId"])
       && value.schemaVersion === 1 && value.projectId === request.projectId && value.category === request.category
       && value.operationId === request.operationId && value.state === "queued" && value.code === "queued" && value.readyForCutover === false

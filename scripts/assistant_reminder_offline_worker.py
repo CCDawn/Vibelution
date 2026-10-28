@@ -77,7 +77,7 @@ def main() -> int:
         if match is None:
             raise ValueError("invalid channel")
         from scripts.assistant_migration_activate import _initial_call, _initial_channel, _isolated_environment
-        from core.assistant_runtime.migration_io import check_path
+        from core.assistant_runtime.migration_io import check_path, validate_path
         channel = _initial_channel(int(match.group(1)), token)
         bound = _initial_call(channel, token, "GET", "/binding")
         keys = {"schemaVersion", "registeredProjectId", "revision", "projectRoot", "sourceConfig",
@@ -92,12 +92,12 @@ def main() -> int:
                     or re.fullmatch(r"rprep-[a-f0-9]{40}", bound["recoveryId"]) is None)):
             raise ValueError("invalid binding")
         sync_id = bound["syncId"]
-        for key in ("projectRoot", "sourceConfig", "sourceProjectsHome", "sourceUserProfile", "targetProfile", "targetConfig"):
+        for key in ("projectRoot", "sourceConfig", "sourceProjectsHome", "sourceUserProfile", "targetProfile"):
             path = check_path(Path(bound[key]))
             if not path.is_absolute() or path.resolve(strict=True) != path:
                 raise ValueError("invalid path")
-        target, target_config = Path(bound["targetProfile"]), Path(bound["targetConfig"])
-        if not target_config.is_file() or not target_config.is_relative_to(target):
+        target, target_config = Path(bound["targetProfile"]), validate_path(Path(bound["targetConfig"]))
+        if target_config.parent != target:
             raise ValueError("invalid target")
         permit = _initial_call(channel, token, "POST", "/permit")
         if type(permit) is not dict or permit != {"schemaVersion": 1, "granted": True} or type(permit["schemaVersion"]) is not int:
@@ -139,7 +139,7 @@ def main() -> int:
             check_bound_admission()
             with observe_reminder_source(dispatch, preview, bound["registeredProjectId"], bound["revision"]) as source:
                 result = run_reminder_offline_worker(source=source, sync_id=sync_id, check_admission=check_bound_admission,
-                                                    mode=bound["mode"], recovery_id=bound["recoveryId"])
+                                                    mode=bound["mode"], recovery_id=bound["recoveryId"], target_config=target_config)
             check_bound_admission()
             print(json.dumps(result, separators=(",", ":")))
             return 0

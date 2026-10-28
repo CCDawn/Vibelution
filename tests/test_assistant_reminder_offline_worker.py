@@ -318,8 +318,8 @@ def test_offline_worker_snapshot_sync_and_original_recovery(tmp_path, configured
             else: raise AssertionError('released verifier continued to certify')
             # Exercise the actual private child over a one-use loopback capability.
             import http.server, threading
-            target_config = root / 'worker-config.toml'
-            target_config.write_text(config.read_text(encoding='utf-8'), encoding='utf-8')
+            target_config = root / ('.initial-migration-models-v1-' + handoff_id('registered:1') + '-' + template['registryDigest'] + '.toml')
+            assert not target_config.exists()
             capability = 'b' * 64
             binding = {'schemaVersion': 1, 'registeredProjectId': 'registered:1', 'revision': 1,
                 'projectRoot': str(project), 'sourceConfig': str(config),
@@ -356,6 +356,7 @@ def test_offline_worker_snapshot_sync_and_original_recovery(tmp_path, configured
             finally:
                 server.shutdown(); server.server_close(); thread.join()
             assert child.returncode == 0, child.stdout + child.stderr
+            assert target_config.is_file()
             assert Handler.permits == 1
             bridge_result = json.loads(child.stdout)
             assert bridge_result['syncId'] == primary_sync and bridge_result['state'] == 'pending'
@@ -394,6 +395,7 @@ def test_offline_worker_snapshot_sync_and_original_recovery(tmp_path, configured
                   const electronSync='affairs-'+digest(projectId+':reminder_handoff').slice(0,40);
                   const handoff={...JSON.parse(process.env.FIXTURE_HANDOFF_TEMPLATE),registeredProjectId:projectId,
                     operationId,syncId:electronSync,revision:connection.snapshot().revision};
+                  const targetConfig=join(process.env.FIXTURE_TARGET,'.initial-migration-models-v1-'+operationId+'-'+handoff.registryDigest+'.toml');
                   const handoffDir=join(process.env.FIXTURE_TARGET,'reminder_handoff_intents',digest(operationId));
                   mkdirSync(handoffDir,{recursive:true});writeFileSync(join(handoffDir,'intent.json'),JSON.stringify(handoff));
                   const registeredRoot = connection.snapshot().projects[projectId];
@@ -408,7 +410,7 @@ def test_offline_worker_snapshot_sync_and_original_recovery(tmp_path, configured
                     runtimeRoot:join(process.env.FIXTURE_ROOT,'jobs'),env:process.env,native,lease,projectSeal,
                     binding:{registeredProjectId:projectId,sourceConfig:process.env.FIXTURE_SOURCE_CONFIG,
                       sourceProjectsHome:process.env.FIXTURE_PROJECTS_HOME,targetProfile:process.env.FIXTURE_TARGET,
-                      targetConfig:process.env.FIXTURE_TARGET_CONFIG,syncId:electronSync,
+                      targetConfig,syncId:electronSync,
                       mode,recoveryId:null}});
                     try { return await running; } finally { projectSeal.release(); await new Promise(resolve=>setImmediate(resolve)); }
                   }, {operationId:electronSync,receiptConfirmed:result=>result.state==='pending'&&typeof result.preparationId==='string'});
@@ -457,7 +459,7 @@ def test_offline_worker_snapshot_sync_and_original_recovery(tmp_path, configured
                       pythonArguments:['-c',python],runtimeRoot:join(process.env.FIXTURE_ROOT,'jobs'),env:process.env,
                       native:tracked,lease,projectSeal,binding:{registeredProjectId:projectId,sourceConfig:process.env.FIXTURE_SOURCE_CONFIG,
                         sourceProjectsHome:process.env.FIXTURE_PROJECTS_HOME,targetProfile:process.env.FIXTURE_TARGET,
-                        targetConfig:process.env.FIXTURE_TARGET_CONFIG,syncId:electronSync,mode:'resume',recoveryId:null}});
+                        targetConfig,syncId:electronSync,mode:'resume',recoveryId:null}});
                     const deadline=Date.now()+12000;
                     while(!existsSync(mark)&&Date.now()<deadline) await new Promise(r=>setTimeout(r,25));
                     if(!existsSync(mark)) throw Error('worker checkpoint unavailable');
@@ -493,7 +495,7 @@ def test_offline_worker_snapshot_sync_and_original_recovery(tmp_path, configured
             env.update({'FIXTURE_ROOT':str(fixture), 'FIXTURE_ADDON':str(addon), 'FIXTURE_PROJECT':str(project),
                 'FIXTURE_REPO':str(repo), 'FIXTURE_PYTHON':sys.executable, 'FIXTURE_SOURCE_CONFIG':str(config),
                 'FIXTURE_PROJECTS_HOME':os.environ['VIBELUTION_PROJECTS_HOME'], 'FIXTURE_TARGET':str(root),
-                'FIXTURE_TARGET_CONFIG':str(target_config), 'FIXTURE_HANDOFF_TEMPLATE':json.dumps(template)})
+                'FIXTURE_HANDOFF_TEMPLATE':json.dumps(template)})
             electron_result = subprocess.run([str(electron), str(fixture), '--disable-gpu'], cwd=electron_dir,
                 env=env, capture_output=True, text=True, timeout=45, creationflags=subprocess.CREATE_NO_WINDOW)
             assert electron_result.returncode == 0, electron_result.stderr + electron_result.stdout
@@ -507,6 +509,27 @@ def test_offline_worker_snapshot_sync_and_original_recovery(tmp_path, configured
             assert lost_sync.returncode == 77, lost_sync.stderr + lost_sync.stdout
             unknown_sync = launch('resume', baseline=electron_sync, sync=sync_id('registered:second'), registration='registered:second')
             assert json.loads(unknown_sync.stdout)['error'] == 'affairs_sync_outcome_unknown', unknown_sync.stderr
+            # Divergent edits to the same existing item must remain a pending
+            # conflict, including on confirmation-only recovery of this ID.
+            # Isolate this scenario from the deliberately interrupted sync
+            # above, which correctly blocks all later baseline discovery.
+            lost_record = root / 'affairs_conflicts' / (hashlib.sha256(sync_id('registered:second').encode()).hexdigest() + '.json')
+            saved_lost_record = lost_record.read_bytes()
+            lost_record.unlink()
+            with offline_migration_profile() as target:
+                personal_affairs_service.get_personal_affairs_service().store.write_jsonl(
+                    target.agent_id, 'affairs/items.jsonl',
+                    [row('old', 'target changed'), row('new', 'source'), row('target-only', 'target')])
+            ledger.write_bytes(raw([row('old', 'source changed'), row('new', 'source')]))
+            write_handoff('registered:conflict')
+            conflict_sync = sync_id('registered:conflict')
+            conflict = launch('fresh', sync=conflict_sync, registration='registered:conflict')
+            conflict_result = json.loads(conflict.stdout)
+            assert conflict_result.get('state') == 'pending' and conflict_result.get('code') == 'affairs_conflicts', conflict.stdout + conflict.stderr
+            assert conflict_result['conflictCount'] > 0 and conflict_result['readyForCutover'] is False
+            conflict_resume = launch('resume', sync=conflict_sync, registration='registered:conflict')
+            assert json.loads(conflict_resume.stdout).get('code') == 'affairs_conflicts', conflict_resume.stdout + conflict_resume.stderr
+            lost_record.write_bytes(saved_lost_record)
             original_handoff = __import__('core.assistant_runtime.reminder_handoff_intent', fromlist=['read_handoff_intent']).read_handoff_intent(root, result['projectId'])
             snapshot = root / ('.initial-migration-models-v1-' + original_handoff['operationId'] + '-' + original_handoff['registryDigest'] + '.toml')
             saved_snapshot = snapshot.read_bytes()

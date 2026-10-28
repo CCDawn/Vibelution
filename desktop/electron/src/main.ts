@@ -27,6 +27,8 @@ import {
 import { IPC_CHANNELS } from "./ipc.js";
 import { AssistantHost } from "./assistant/assistantHost.js";
 import { InitialMigrationResults } from "./assistant/initialMigrationResults.js";
+import { AssistantProjectLifecycleRequestStore } from "./assistant/projectLifecycleRequestStore.js";
+import { runReminderOfflineJob } from "./assistant/reminderOfflineJob.js";
 import { verifyInitialMigrationResult } from "./assistant/initialMigrationJob.js";
 import { recoverInitialMigrations } from "./assistant/initialMigrationStartup.js";
 import { PrehostRecoveryDrainedUnknown, startPrehostRecoveryJob } from "./assistant/prehostRecoveryJob.js";
@@ -587,6 +589,7 @@ let launcherAssistantWindow: AssistantWindow | null = null;
 let launcherAssistantExitReady = false;
 let launcherAssistantStarting: Promise<void> | null = null;
 let launcherAssistantStopping: Promise<void> | null = null;
+let initialMigrationReceiptFence: Promise<void> | null = null;
 const launcherAssistantStartupAbort = new AbortController();
 let launcherAssistantProjects: AssistantProjectRegistryConnection | null = null;
 let legacyReminderAdmission: {
@@ -659,6 +662,28 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
       });
     }
     const initialMigrationStates = new Map<string, "queued" | "completed" | "partial" | "unknown">();
+    let reminderAttempts: AssistantProjectLifecycleRequestStore | undefined;
+    const reminderStore = () => reminderAttempts ??= new AssistantProjectLifecycleRequestStore({
+      directory: join(paths.userDataRoot, "assistant", "reminder-handoff-attempts") });
+    const reminderAttemptResult = async (projectId: string, syncId: string) => {
+      const store = reminderStore();
+      const attempt = await store.get(`${syncId}.attempt`);
+      const result = await store.get(`${syncId}.result`);
+      if (!attempt && !result) return null;
+      if (!attempt || attempt.request.requestId !== `${syncId}.attempt` || attempt.request.projectId !== projectId
+          || attempt.request.operation !== "start" || attempt.binding !== null || attempt.command !== null) throw new Error("REMINDER_ATTEMPT_INVALID");
+      if (!result) return { state: "unknown" as const };
+      if (result.request.requestId !== `${syncId}.result` || result.request.operation !== "start"
+          || result.binding !== null || result.command !== null) throw new Error("REMINDER_ATTEMPT_INVALID");
+      const match = /^(conflicts|sender)-(0|[1-9][0-9]{0,3})$/.exec(result.request.projectId);
+      if (!match) throw new Error("REMINDER_ATTEMPT_INVALID");
+      const count = Number(match[2]);
+      if (match[1] === "conflicts" && count > 0 && count <= 4096)
+        return { state: "pending" as const, code: "affairs_conflicts" as const, conflictCount: count };
+      if (match[1] === "sender" && count <= 2048)
+        return { state: "pending" as const, code: "sender_proof_unavailable" as const, uncertainCount: count };
+      throw new Error("REMINDER_ATTEMPT_INVALID");
+    };
     let initialMigrationResults: InitialMigrationResults | null = null;
     let initialMigrationRecoveryUncertain = false;
     let scheduleInitialMigration: () => void = () => undefined;
@@ -701,7 +726,19 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
           operationId: request.operationId, readyForCutover: false };
         return projectConnection.withHistoryImport(request.projectId, async () => {
           if (request.category === "reminder_handoff") {
+            const syncId = `affairs-${request.operationId.slice("initial-".length)}`;
             const host = launcherAssistantHost;
+            let observed: Awaited<ReturnType<typeof reminderAttemptResult>>;
+            try { observed = await reminderAttemptResult(request.projectId, syncId); }
+            catch { return { ...base, state: "unknown", code: "unknown" }; }
+            if (observed) {
+              if (observed.state !== "pending" || !host) return { ...base, state: "unknown", code: "unknown" };
+              try {
+                if (await host.reminderHandoffReceipt(request.projectId, projectConnection.snapshot().revision) === "pending")
+                  return { ...base, syncId, ...observed };
+              } catch { /* The original target or registration is no longer confirmed. */ }
+              return { ...base, state: "unknown", code: "unknown" };
+            }
             let state: "pending" | "unknown" = "unknown";
             try { if (host) state = await host.reminderHandoffReceipt(request.projectId, projectConnection.snapshot().revision); }
             catch { /* A missing or changed original remains unknown. */ }
@@ -728,6 +765,8 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
         const host = launcherAssistantHost;
         if (!host || shutdownApproved) return Promise.resolve({ ...base, state: "rejected", code: "unavailable" });
         return projectConnection.withHistoryImport(request.projectId, async revision => {
+          if (request.category !== "reminder_handoff" && initialMigrationRecoveryUncertain)
+            return { ...base, state: "unknown", code: "unknown" };
           const prepared = await host.prepareInitialMigration(request, revision, signal);
           // A reminder handoff is a separate durable intent, never an initial
           // import job or evidence that old notification senders have stopped.
@@ -976,13 +1015,14 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
             try { return await host.reminderHandoffSource(projectId, revision); } catch { return null; }
           });
           if (!source || shutdownApproved || launcherAssistantHost !== host || windowProvider !== provider) return;
+          if (await reminderAttemptResult(projectId, source.syncId)) return;
           showReminderHandoffStage(source.operationId, "unknown");
           const snapshot = projectConnection.snapshot(), registration = projectConnection.registration(projectId);
           if (!registration || snapshot.projects[projectId] !== registration.root) return;
           // Only a launched offline writer delays a revoked, unbound request.
           // The original Workbench Job retains its own natural protection.
-          let workerDrain: Promise<void> | undefined;
-          seal = projectAdmission.seal(registration.root, { drainOnRevoke: () => workerDrain ?? Promise.resolve() });
+          let workerDrain: Promise<Record<string, unknown>> | undefined;
+          seal = projectAdmission.seal(registration.root, { drainOnRevoke: () => workerDrain?.then(() => undefined, () => undefined) ?? Promise.resolve() });
           await seal.drain();
           seal.check();
           const registry = await readRegistry(instancesRegistryPath());
@@ -1035,7 +1075,127 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
           const result = await owner.completion;
           seal.signal.removeEventListener("abort", onAbort);
           // The managed drain deliberately does not certify other senders.
-          if (result.state === "managed_drained") showReminderHandoffStage(source.operationId, "unknown");
+          if (result.state !== "managed_drained" || shutdownApproved || seal.signal.aborted) return;
+          showReminderHandoffStage(source.operationId, "unknown");
+          const sealedSource = seal;
+          let retryOffline = false;
+          const attemptOffline = async () => {
+            while (migrationRunning && !shutdownApproved && !sealedSource.signal.aborted) await delay();
+            if (shutdownApproved || sealedSource.signal.aborted) return;
+            migrationRunning = true;
+            let admission: ReturnType<AssistantHost["beginMigrationAdmission"]> | undefined;
+            let registryGate: ReturnType<AssistantProjectRegistryConnection["beginMigrationTransition"]> | undefined;
+            let barrierAttempted = false, retired = false, reopened = false, remindersDrained = false;
+            const reminders = stopLauncherAssistantReminders;
+            try {
+              if (!reminders) return;
+              verifyBinding();
+              await reminders.drainForMigration();
+              remindersDrained = true;
+              if (shutdownApproved || sealedSource.signal.aborted) return;
+              admission = host.beginMigrationAdmission();
+              await admission.drained;
+              registryGate = projectConnection.beginMigrationTransition();
+              await registryGate.drained;
+              verifyBinding();
+              const queueDrains = Object.values(projectConnection.snapshot().projects).map(root => {
+                const queue = existingMainLineCommandQueueForProject(root);
+                if (!queue) return Promise.resolve();
+                if (!queue.captureExecutionDrain) throw new Error("ASSISTANT_EXECUTION_DRAIN_UNKNOWN");
+                return queue.captureExecutionDrain();
+              });
+              let queuesDrained = false;
+              const queued = Promise.all(queueDrains).then(() => { queuesDrained = true; });
+              while (!queuesDrained && !shutdownApproved && !sealedSource.signal.aborted) await Promise.race([queued, delayMigration()]);
+              if (!queuesDrained || shutdownApproved || sealedSource.signal.aborted) return;
+              await admission.seal();
+              verifyBinding();
+              barrierAttempted = true;
+              await host.migrationBarrier("prepare");
+              let state = await host.migrationBarrier("status");
+              while (state === "probing" && !shutdownApproved && !sealedSource.signal.aborted) {
+                await delayMigration();
+                state = await host.migrationBarrier("status");
+              }
+              // Busy may need an ordinary user action to settle. Release the
+              // host gates, retaining the captured source and its project seal.
+              if (state === "busy" && !shutdownApproved && !sealedSource.signal.aborted) { retryOffline = true; return; }
+              if (state !== "ready" || shutdownApproved || sealedSource.signal.aborted) return;
+              while (!shutdownApproved && !sealedSource.signal.aborted && !(retired = await projectConnection.retireHostForMigration())) {
+                // Only an acknowledged retirement can stay in this wait. A
+                // failed host must go through the separate dead-Job path in
+                // finally; it never authorizes the offline worker.
+                if (host.snapshot().state !== "stopping") return;
+                await delayMigration();
+              }
+              if (!retired || shutdownApproved || sealedSource.signal.aborted) return;
+              const outcome = await projectConnection.withPreHostSource(projectId, async lease => {
+                verifyBinding();
+                if (lease.revision !== snapshot.revision || JSON.stringify(lease.registration) !== JSON.stringify(registration))
+                  throw new Error("REMINDER_HANDOFF_SOURCE_CHANGED");
+                const attempt = await reminderStore().reserve({ requestId: `${source.syncId}.attempt`, projectId, operation: "start" });
+                if (!attempt.created) return { state: "unknown" as const };
+                verifyBinding();
+                workerDrain = runReminderOfflineJob({ sourceRoot: resources.sourceRoot, pythonPath: resources.pythonPath,
+                  pythonArguments: resources.pythonArguments, runtimeRoot: join(paths.userDataRoot, "assistant", "runtime"),
+                  env: resources.env, lease, projectSeal: sealedSource, signal: launcherAssistantStartupAbort.signal,
+                  binding: { registeredProjectId: projectId, sourceConfig: desktopLaunchSettings().configPath,
+                    sourceProjectsHome: resolveProjectsHome(), targetProfile: profileRoot,
+                    targetConfig: join(profileRoot, `.initial-migration-models-v1-${source.operationId}-${source.registryDigest}.toml`),
+                    syncId: source.syncId, mode: "start", recoveryId: null } });
+                return await workerDrain;
+              }, { operationId: source.syncId, receiptConfirmed: outcome => outcome.state === "pending" });
+              if (outcome.state === "pending") {
+                verifyBinding();
+                const label = outcome.code === "affairs_conflicts" ? `conflicts-${outcome.conflictCount}`
+                  : outcome.code === "sender_proof_unavailable" ? `sender-${outcome.uncertainCount}` : "";
+                if (label) {
+                  const recorded = await reminderStore().reserve({ requestId: `${source.syncId}.result`, projectId: label, operation: "start" });
+                  if (recorded.created && outcome.code === "affairs_conflicts" && canShowMigrationFeedback())
+                    notifyDesktopTray("旧提醒交接等待中", `事务存在冲突，仍需处理。原编号：${source.operationId}`);
+                }
+              }
+            } finally {
+              if (!retired && barrierAttempted && !shutdownApproved) {
+                while (!shutdownApproved) {
+                  try { if (await host.migrationBarrier("release") === "idle") break; } catch { /* Inspect only the captured Job below. */ }
+                  try {
+                    if (host.prepareDeadForMigrationRetirement() && await projectConnection.retireHostForMigration()) {
+                      retired = true;
+                      break;
+                    }
+                  } catch { /* Retain every fence until the same Job is confirmed drained. */ }
+                  await delayMigration();
+                }
+              }
+              if (retired && !shutdownApproved) {
+                while (!shutdownApproved && !reopened) {
+                  try {
+                    const recovery = projectConnection.hasPendingPreHostRecovery();
+                    await projectConnection.start((current, suspended) => {
+                      host.prepareForMigrationRestart(current, suspended); return host;
+                    }, { migration: true, ...(recovery ? { recovery: true } : {}) });
+                    reopened = true;
+                  } catch {
+                    // Keep the same host and every admission fence. A failed
+                    // migration start may still own its undexited native Job.
+                    await delayMigration();
+                  }
+                }
+              }
+              if (!shutdownApproved && (!retired || reopened)) {
+                registryGate?.release(); admission?.release();
+                if (remindersDrained) reminders?.resumeAfterMigration();
+              }
+              migrationRunning = false;
+              scheduleInitialMigration();
+            }
+          };
+          do {
+            retryOffline = false;
+            await attemptOffline();
+            if (retryOffline && !shutdownApproved && !seal.signal.aborted) await delayMigration();
+          } while (retryOffline && !shutdownApproved && !seal.signal.aborted);
         } catch { /* Missing identity, ownership, or a changed source stays pending. */ }
         finally {
           owner?.dispose();
@@ -1083,15 +1243,51 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
       let retired = false;
       let reopened = false;
       let remindersDrained = false;
-      const queuedIds = [...initialMigrationStates].filter(([, state]) => state === "queued").map(([id]) => id);
+      let releaseReceiptFence: (() => void) | undefined;
+      let queuedIds: string[] = [];
+      let intentsCaptured = false;
+      const captureAdmittedIntents = () => {
+        queuedIds = [...initialMigrationStates].filter(([, state]) => state === "queued" || state === "unknown").map(([id]) => id);
+        intentsCaptured = true;
+      };
+      // Shutdown must wait even if it arrives while the reminder pump or an
+      // already admitted initial-migration request is still draining.
+      initialMigrationReceiptFence = new Promise<void>(resolve => { releaseReceiptFence = resolve; });
+      const persistUnknownReceipts = async () => {
+        while (true) {
+          try {
+            for (const id of queuedIds) {
+              const state = initialMigrationStates.get(id);
+              if (state !== "queued" && state !== "unknown") continue;
+              initialMigrationStates.set(id, await initialMigrationResults.recordUnknown(id));
+            }
+            initialMigrationRecoveryUncertain = true;
+            return;
+          } catch { await delayMigration(); }
+        }
+      };
       try {
-        await reminders.drainForMigration();
+        // Migration needs every dialog to settle, but normal shutdown has its
+        // own bounded dialog wait and still drains accepted click writes.
+        // Let shutdown reach that stop path without pretending this drain ended.
+        const signal = launcherAssistantStartupAbort.signal;
+        let onAbort!: () => void;
+        const exit = new Promise<boolean>(resolve => {
+          onAbort = () => resolve(false);
+          signal.addEventListener("abort", onAbort, { once: true });
+          if (signal.aborted) onAbort();
+        });
+        let drained: boolean;
+        try { drained = await Promise.race([reminders.drainForMigration().then(() => true), exit]); }
+        finally { signal.removeEventListener("abort", onAbort); }
+        if (!drained) return;
         remindersDrained = true;
         if (shutdownApproved) return;
         admission = host.beginMigrationAdmission();
         await admission.drained;
         registryGate = projectConnection.beginMigrationTransition();
         await registryGate.drained;
+        captureAdmittedIntents();
         if (shutdownApproved) return;
         // A lifecycle delivery can return while its native queue executor is
         // still running. The host gate excludes new assistant submissions;
@@ -1120,7 +1316,7 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
         while (!shutdownApproved && !(retired = await projectConnection.retireHostForMigration())) {
           // A still-ready host never accepted a retirement request. Release
           // the proof and retry later; a stopping host retains the same Job.
-          if (host.snapshot().state === "ready") return;
+          if (host.snapshot().state !== "stopping") return;
           await delayMigration();
         }
         if (!retired || shutdownApproved) return;
@@ -1133,19 +1329,6 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
           initialMigrationRecoveryUncertain = true;
           for (const [id, status] of initialMigrationStates) if (status === "queued") initialMigrationStates.set(id, "unknown");
         }
-        while (!shutdownApproved && !reopened) {
-          try {
-            await projectConnection.start((snapshot, suspended) => {
-              host.prepareForMigrationRestart(snapshot, suspended);
-              return host;
-            }, { migration: true });
-            reopened = true;
-          } catch {
-            // Never create a replacement while the registry still owns an
-            // uncertain host; keep the original admission gate in place.
-            await delayMigration();
-          }
-        }
       } catch {
         console.warn("ASSISTANT_INITIAL_MIGRATION_WAITING");
         if (!migrationWarningShown && !shutdownApproved) { migrationWarningPending = true; flushAssistantMigrationFeedback?.(); }
@@ -1156,14 +1339,56 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
           while (!shutdownApproved) {
             try { if (await host.migrationBarrier("release") === "idle") break; }
             catch { /* Retain the original host and producer fences. */ }
+            try {
+              if (host.prepareDeadForMigrationRetirement()) {
+                // The visible unknown must survive a restart before gates can
+                // open. Shutdown also waits for this same durable fence.
+                await persistUnknownReceipts();
+                if (!await projectConnection.retireHostForMigration()) { await delayMigration(); continue; }
+                retired = true;
+                break;
+              }
+            } catch { /* Keep the fences on incomplete or ambiguous drain. */ }
             await delayMigration();
           }
+        }
+        if (retired && !shutdownApproved) {
+          while (!shutdownApproved && !reopened) {
+            try {
+              const recovery = projectConnection.hasPendingPreHostRecovery();
+              await projectConnection.start((snapshot, suspended) => {
+                host.prepareForMigrationRestart(snapshot, suspended);
+                return host;
+              }, { migration: true, ...(recovery ? { recovery: true } : {}) });
+              reopened = true;
+            } catch {
+              // Keep the original host and all producer fences until the
+              // captured startup Job has been confirmed drained.
+              await delayMigration();
+            }
+          }
+        }
+        if (shutdownApproved) {
+          // If exit won before the ordinary drain, close both admission gates
+          // and wait for their existing writers before taking the snapshot.
+          while (!intentsCaptured) {
+            try {
+              admission ??= host.beginMigrationAdmission();
+              registryGate ??= projectConnection.beginMigrationTransition();
+              await admission.seal();
+              await registryGate.drained;
+              captureAdmittedIntents();
+            } catch { await delayMigration(); }
+          }
+          await persistUnknownReceipts();
         }
         if (!shutdownApproved && (!retired || reopened)) {
           registryGate?.release();
           admission?.release();
           if (remindersDrained) reminders.resumeAfterMigration();
         }
+        releaseReceiptFence?.();
+        if (releaseReceiptFence) initialMigrationReceiptFence = null;
         clearTimeout(waitTimer);
         migrationDialog.current?.abort();
         migrationPending = false;
@@ -1278,6 +1503,9 @@ async function stopLauncherAssistant(): Promise<void> {
         signal: stoppingDialog.signal }).catch(() => console.warn("ASSISTANT_STOP_DIALOG_FAILED"));
     }, 1000) : null;
     try {
+      // A dead initial-migration owner cannot be released before its original
+      // operations are durably fenced against restart replay.
+      if (initialMigrationReceiptFence) await initialMigrationReceiptFence;
       const stoppingReminders = stopLauncherAssistantReminders?.();
       const connection = launcherAssistantProjects;
       const stoppingProjects = connection

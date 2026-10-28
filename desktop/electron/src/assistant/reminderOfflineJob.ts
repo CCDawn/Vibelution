@@ -64,8 +64,13 @@ export async function runReminderOfflineJob(input: { sourceRoot: string; pythonP
   } catch { return unknown; }
   finally {
     input.signal?.removeEventListener("abort", revoke);
-    if (job && drained) native.close(job);
+    let closeFailed = false;
+    if (job && drained) {
+      try { native.close(job); } catch { closeFailed = true; }
+    }
     // Never release the permit while a spawned Job is still unconfirmed.
+    // Even a failed native handle close must not strand a drained capability.
     if (!job || drained) await bridge.closeAfterDrain();
+    if (closeFailed) throw new Error("REMINDER_JOB_CLOSE_UNKNOWN");
   }
 }

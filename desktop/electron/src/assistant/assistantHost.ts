@@ -578,6 +578,23 @@ export class AssistantHost {
     } catch { return false; }
   }
 
+  /** The original barrier cannot reply after its Job dies. Only arm the
+   * existing retirement path after all local producers and that exact Job
+   * have independently drained; no remote work is retried here. */
+  prepareDeadForMigrationRetirement(): boolean {
+    const generation = this.current;
+    if (!this.migrationAdmission?.sealed || !generation || generation.closed
+      || this.mainControlUncertain || this.rendererRequests !== 0 || this.mainControlRequests !== 0) return false;
+    try {
+      if (generation.native.activeCount(generation.job) !== 0
+        || typeof generation.native.exitCode !== "function" || generation.native.exitCode(generation.job) === null
+        || !generation.native.drainStatus(generation.job).complete) return false;
+    } catch { return false; }
+    generation.migrationRetirementRequested = true;
+    generation.abort.abort();
+    return true;
+  }
+
   /** Rebind the same window-facing host to the latest validated registry. */
   prepareForMigrationRestart(snapshot: AssistantProjectRegistrySnapshot, projectsSuspended: boolean): void {
     if (this.current?.migrationRetirementRequested && !this.finishMigrationRetirement(this.current))
@@ -912,9 +929,15 @@ export class AssistantHost {
       let failure = code(error);
       if (generation) {
         if (migration) {
-          // Never reclaim an uncertain failed startup by force. Retry only
-          // after this exact Job and its streams have naturally drained.
+          // Startup is still fenced from user work. Ask the captured ready
+          // origin to shut down once, even if its health response failed.
+          // An unconfirmed request stays unknown; never force or replay it.
           generation.migrationRetirementRequested = true;
+          generation.abort.abort();
+          if (generation.origin) {
+            try { await this.rpc(generation, "/api/assistant/shutdown", "POST", {}, 2_000, true); }
+            catch { /* Retain the Job and observe natural exit and output drain. */ }
+          }
           this.finishMigrationRetirement(generation);
         } else {
           try { await this.retire(generation, false); }

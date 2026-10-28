@@ -9,6 +9,7 @@ export type LauncherOperatorProfile = {
 
 export type LauncherAssistantStatus = {
   operatorAssetsVersion?: 1;
+  operatorAssetRevisions?: { avatar: string | null; background: string | null };
   attachmentVersion?: 1;
   operatorProfile?: LauncherOperatorProfile;
   assistant: { agentId: string; directSessionId: string; displayName: string };
@@ -113,6 +114,13 @@ export async function getLauncherAssistantStatus(): Promise<LauncherAssistantSta
   }
   if (Object.prototype.hasOwnProperty.call(result, "operatorAssetsVersion") && result.operatorAssetsVersion !== 1) {
     throw new Error("Launcher 图片资源版本不可用。");
+  }
+  if (result.operatorAssetRevisions !== undefined) {
+    const revisions = result.operatorAssetRevisions;
+    if (!record(revisions) || Array.isArray(revisions) || !exactFields(revisions, ["avatar", "background"])
+      || ![revisions.avatar, revisions.background].every(value => value === null || (typeof value === "string" && /^[a-f0-9]{64}$/.test(value)))) {
+      throw new Error("Launcher 图片资源版本不可用。");
+    }
   }
   if (result.attachmentVersion !== undefined && result.attachmentVersion !== 1) throw new Error("Launcher 附件版本不可用。");
   if (result.settings !== undefined) {

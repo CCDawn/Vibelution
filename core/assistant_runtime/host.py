@@ -336,9 +336,10 @@ class NativeFacade:
     def identity(self):
         from tools import pa_assistant_actions
 
-        from . import native
+        from . import native, operator_assets
         result = native.identity()
         result["operatorAssetsVersion"] = 1
+        result["operatorAssetRevisions"] = operator_assets.operator_asset_revisions()
         result["attachmentVersion"] = 1
         result["settings"] = pa_assistant_actions.execute("assistant_settings", {}, {}, governed=False)
         profile = _operator_profile()

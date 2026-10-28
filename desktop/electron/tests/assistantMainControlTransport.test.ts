@@ -21,6 +21,19 @@ describe("generation-scoped main control transport", () => {
     expect(projectMainControlResult(parsed, { ...queued, readyForCutover: true })).toMatchObject({ state: "unknown" });
     expect(() => parseMainControlClaim({ schemaVersion: 1, request: { ...row, operationId: "initial-" + "0".repeat(40) } })).toThrow();
     expect(() => parseMainControlClaim({ schemaVersion: 1, request: { ...row, sourcePath: "C:/other" } })).toThrow();
+    const receipt = parseMainControlClaim({ schemaVersion: 1, request: { deliveryId: row.deliveryId,
+      action: "initial_migration_receipt", projectId, category: row.category, operationId } })!;
+    const conflict = { schemaVersion: 1, projectId, category: row.category, operationId,
+      syncId: `affairs-${operationId.slice(8)}`, state: "pending", code: "affairs_conflicts", conflictCount: 2, readyForCutover: false };
+    const sender = { schemaVersion: 1, projectId, category: row.category, operationId,
+      syncId: conflict.syncId, state: "pending", code: "sender_proof_unavailable", uncertainCount: 0, readyForCutover: false };
+    expect(projectMainControlResult(receipt, conflict)).toEqual(conflict);
+    expect(projectMainControlResult(receipt, sender)).toEqual(sender);
+    for (const value of [{ ...conflict, conflictCount: 0 }, { ...conflict, readyForCutover: true },
+      { ...sender, syncId: "affairs-" + "0".repeat(40) }, { ...sender, detail: "private" }])
+      expect(projectMainControlResult(receipt, value)).toMatchObject({ state: "unknown" });
+    const getter = Object.defineProperty({ ...sender }, "code", { enumerable: true, get: () => { throw new Error("accessed"); } });
+    expect(projectMainControlResult(receipt, getter)).toMatchObject({ state: "unknown" });
   });
   it("binds episodic sync and recovery to the approved project and original operation", () => {
     const row = { deliveryId: "a".repeat(32), action: "episodic_sync", projectId: "synthetic:uuid",

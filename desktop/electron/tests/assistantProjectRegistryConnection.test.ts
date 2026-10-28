@@ -33,6 +33,43 @@ function fixture() {
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 describe("main-owned assistant registry connection", () => {
+  it("restarts the retained host with suspended projects across an unknown pre-host result", async () => {
+    const f = fixture(), project = f.directory("unknown-restart");
+    await f.connection.reconcile(f.payload([f.row(project)]));
+    const id = Object.keys(f.connection.snapshot().projects)[0], operationId = "affairs-" + "f".repeat(40);
+    await expect(f.connection.start(() => f.host, { migration: true, recovery: true })).rejects.toThrow("ASSISTANT_PROJECT_UNAVAILABLE");
+    const gate = f.connection.beginMigrationTransition();
+    await gate.drained;
+    await f.connection.withPreHostSource(id, lease => lease.commit(async () => "unknown"),
+      { operationId, receiptConfirmed: () => false });
+    expect(f.connection.hasPendingPreHostRecovery()).toBe(true);
+    const host = { ...f.host, startForMigration: vi.fn().mockRejectedValueOnce(new Error("job undrained")).mockResolvedValueOnce(undefined) };
+    const create = vi.fn((_snapshot: AssistantProjectRegistrySnapshot, suspended: boolean) => { expect(suspended).toBe(true); return host; });
+    await expect(f.connection.start(create, { migration: true, recovery: true })).rejects.toThrow("job undrained");
+    await expect(f.connection.start(() => ({ ...host }), { migration: true, recovery: true })).rejects.toThrow("ASSISTANT_ALREADY_STARTED");
+    await expect(f.connection.start(create, { migration: true, recovery: true })).resolves.toBe(host);
+    expect(host.startForMigration).toHaveBeenCalledTimes(2);
+    expect(host.start).not.toHaveBeenCalled();
+    expect(host.stop).not.toHaveBeenCalled();
+    expect(f.connection.pendingPreHostRecovery()?.operationId).toBe(operationId);
+    await expect(f.connection.withPreHostSource(id, async () => "must not run")).rejects.toThrow("ASSISTANT_PROJECT_UNAVAILABLE");
+    gate.release();
+    await expect(f.connection.withHistoryImport(id, async () => "must not run")).rejects.toThrow("ASSISTANT_PROJECT_UNAVAILABLE");
+    await f.connection.stop();
+  });
+
+  it("does not allow a recovery restart without its existing migration gate", async () => {
+    const f = fixture(), project = f.directory("ungated-recovery");
+    await f.connection.reconcile(f.payload([f.row(project)]));
+    const id = Object.keys(f.connection.snapshot().projects)[0];
+    await f.connection.withPreHostSource(id, lease => lease.commit(async () => "unknown"),
+      { operationId: "affairs-" + "e".repeat(40), receiptConfirmed: () => false });
+    const host = { ...f.host, startForMigration: vi.fn() };
+    await expect(f.connection.start(() => host, { migration: true, recovery: true })).rejects.toThrow("ASSISTANT_PROJECT_UNAVAILABLE");
+    expect(host.startForMigration).not.toHaveBeenCalled();
+    await f.connection.stop();
+  });
+
   it("retries the same retained host after migration startup fails", async () => {
     const f = fixture();
     const host = { ...f.host, startForMigration: vi.fn().mockRejectedValueOnce(new Error("not ready")).mockResolvedValueOnce(undefined) };

@@ -42,3 +42,15 @@ def test_asset_failure_does_not_return_paths_credentials_or_internal_errors(monk
         assert result.status_code == 503
         assert "SECRET" not in result.text and "/private" not in result.text
         assert "operator_asset_unavailable" in result.text
+
+
+def test_status_exposes_only_opaque_asset_revisions(monkeypatch):
+    from core.assistant_runtime import host, native, operator_assets
+    from tools import pa_assistant_actions
+    monkeypatch.setattr(native, "identity", lambda: {"assistant": {"agentId": "fixture", "directSessionId": "fixture"}})
+    monkeypatch.setattr(pa_assistant_actions, "execute", lambda *args, **kwargs: {})
+    monkeypatch.setattr(host, "_operator_profile", lambda: None)
+    monkeypatch.setattr(operator_assets, "operator_asset_revisions", lambda: {"avatar": "a" * 64, "background": None})
+    result = host.NativeFacade(None).identity()
+    assert result["operatorAssetRevisions"] == {"avatar": "a" * 64, "background": None}
+    assert result["operatorAssetsVersion"] == 1

@@ -5,12 +5,31 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { recoverInitialMigrations } from "../src/assistant/initialMigrationStartup.js";
 import { listInitialMigrationJobs, runInitialMigrationJob } from "../src/assistant/initialMigrationJob.js";
 import type { AssistantProjectRegistryConnection } from "../src/assistant/projectRegistryConnection.js";
-import type { InitialMigrationResults } from "../src/assistant/initialMigrationResults.js";
+import { InitialMigrationResults } from "../src/assistant/initialMigrationResults.js";
 
 vi.mock("../src/assistant/initialMigrationJob.js", () => ({ listInitialMigrationJobs: vi.fn(), runInitialMigrationJob: vi.fn() }));
 afterEach(() => vi.clearAllMocks());
 
 describe("initial migration startup", () => {
+  it("does not dispatch a persisted unknown original intent after restart", async () => {
+    const root = mkdtempSync(join(tmpdir(), "initial-startup-unknown-"));
+    const profile = join(root, "profile"), directory = join(root, "results");
+    mkdirSync(join(profile, "initial_migration_intents"), { recursive: true });
+    const operationId = "initial-" + "e".repeat(40);
+    vi.mocked(listInitialMigrationJobs).mockResolvedValue([{ operationId, registeredProjectId: "project:one",
+      category: "personal", registryDigest: "c".repeat(64), state: "dispatchable" }]);
+    try {
+      await new InitialMigrationResults(directory).recordUnknown(operationId);
+      const registry = { withPreHostSource: vi.fn() } as unknown as AssistantProjectRegistryConnection;
+      const output = await recoverInitialMigrations({ registry, results: new InitialMigrationResults(directory),
+        targetProfile: profile, sourceConfig: join(root, "source.toml"), targetConfig: async () => join(profile, "config.toml"),
+        sourceRoot: root, pythonPath: join(root, "pythonw.exe"), verifyResult: async () => true,
+        pythonArguments: [], runtimeRoot: join(root, "runtime"), env: {} });
+      expect(output).toEqual([{ operationId, state: "unknown" }]);
+      expect(registry.withPreHostSource).not.toHaveBeenCalled();
+      expect(runInitialMigrationJob).not.toHaveBeenCalled();
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
   it("does not claim an orphaned refresh is an empty migration history", async () => {
     const root = mkdtempSync(join(tmpdir(), "initial-startup-orphan-"));
     const profile = join(root, "profile"); mkdirSync(join(profile, "initial_migration_intent_refreshes"), { recursive: true });

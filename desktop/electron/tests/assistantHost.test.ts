@@ -122,8 +122,14 @@ describe("AssistantHost", () => {
     host.prepareForMigrationRestart(snapshot, false);
     exited = false; drained = false;
     fetchImpl.mockResolvedValueOnce(Response.json({ status: "invalid" }));
+    // Lost shutdown acknowledgement: the same Job must remain owned until it
+    // actually exits and drains, even though the private request was sent.
+    fetchImpl.mockRejectedValueOnce(new Error("shutdown reply lost"));
     await expect(host.startForMigration()).rejects.toThrow("ASSISTANT_HEALTH_INVALID");
+    expect(fetchImpl.mock.calls.filter(([url]) => String(url).endsWith("/shutdown"))).toHaveLength(2);
     expect(() => host.prepareForMigrationRestart(snapshot, false)).toThrow("ASSISTANT_DRAIN_PENDING");
+    await expect(host.stop()).rejects.toThrow("ASSISTANT_DRAIN_PENDING");
+    expect(native.spawn).toHaveBeenCalledTimes(2);
     expect(native.terminate).not.toHaveBeenCalled();
     const job = [...active.keys()][0];
     active.set(job, 0); exited = true;
@@ -134,6 +140,81 @@ describe("AssistantHost", () => {
     expect(native.terminate).not.toHaveBeenCalled();
     admission.release();
     await host.stop();
+  });
+
+  it("gracefully shuts down the reachable failed migration startup before retry", async () => {
+    const { host, native, root, fetchImpl } = fixture({ graceful: true });
+    Object.assign(native, { exitCode: vi.fn(() => 0) });
+    await host.start();
+    const admission = host.beginMigrationAdmission();
+    await admission.seal();
+    expect(await host.retireForMigration()).toBe(true);
+    const snapshot = { schemaVersion: 1 as const, revision: 0, projects: { project: root } };
+    host.prepareForMigrationRestart(snapshot, true);
+    fetchImpl.mockResolvedValueOnce(Response.json({ status: "invalid" }));
+    await expect(host.startForMigration()).rejects.toThrow("ASSISTANT_HEALTH_INVALID");
+    expect(fetchImpl.mock.calls.filter(([url]) => String(url).endsWith("/shutdown"))).toHaveLength(2);
+    expect(native.terminate).not.toHaveBeenCalled();
+    host.prepareForMigrationRestart(snapshot, true);
+    await expect(host.startForMigration()).resolves.toMatchObject({ state: "ready" });
+    admission.release();
+    await host.stop();
+  });
+
+  it.each([
+    ["HTTP error", () => new Response("failure", { status: 500 }), "ASSISTANT_HTTP_FAILED"],
+    ["invalid JSON", () => new Response("invalid", { status: 200 }), "ASSISTANT_RESPONSE_INVALID"],
+  ])("requests shutdown after startup health returns %s", async (_label, response, expectedError) => {
+    const { host, native, root, fetchImpl } = fixture({ graceful: true });
+    Object.assign(native, { exitCode: vi.fn(() => 0) });
+    await host.start();
+    const admission = host.beginMigrationAdmission();
+    await admission.seal();
+    expect(await host.retireForMigration()).toBe(true);
+    const snapshot = { schemaVersion: 1 as const, revision: 0, projects: { project: root } };
+    host.prepareForMigrationRestart(snapshot, true);
+    fetchImpl.mockResolvedValueOnce(response());
+    await expect(host.startForMigration()).rejects.toThrow(expectedError);
+    expect(fetchImpl.mock.calls.filter(([url]) => String(url).endsWith("/shutdown"))).toHaveLength(2);
+    expect(native.terminate).not.toHaveBeenCalled();
+    host.prepareForMigrationRestart(snapshot, true);
+    await expect(host.startForMigration()).resolves.toMatchObject({ state: "ready" });
+    admission.release();
+    await host.stop();
+  });
+
+  it("retains an unreachable startup Job when its shutdown request also fails", async () => {
+    const { host, native, root, fetchImpl } = fixture({ graceful: true });
+    const exitCode = vi.fn<() => number | null>(() => null);
+    Object.assign(native, { exitCode });
+    await host.start();
+    const admission = host.beginMigrationAdmission();
+    await admission.seal();
+    // The first host is known drained; the new Job stays unconfirmed.
+    exitCode.mockReturnValueOnce(0);
+    expect(await host.retireForMigration()).toBe(true);
+    const snapshot = { schemaVersion: 1 as const, revision: 0, projects: { project: root } };
+    host.prepareForMigrationRestart(snapshot, true);
+    let healthStarted = false;
+    fetchImpl.mockImplementation(async (url, init) => {
+      if (String(url).endsWith("/health")) {
+        healthStarted = true;
+        return await new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new Error("unreachable")), { once: true });
+        });
+      }
+      throw new Error("unreachable");
+    });
+    const startup = expect(host.startForMigration()).rejects.toThrow();
+    await vi.waitFor(() => expect(healthStarted).toBe(true));
+    const stopping = expect(host.stop()).rejects.toThrow("ASSISTANT_DRAIN_PENDING");
+    await startup;
+    await stopping;
+    expect(fetchImpl.mock.calls.filter(([url]) => String(url).endsWith("/shutdown"))).toHaveLength(2);
+    expect(native.spawn).toHaveBeenCalledTimes(2);
+    expect(native.terminate).not.toHaveBeenCalled();
+    expect(() => host.prepareForMigrationRestart(snapshot, true)).toThrow("ASSISTANT_DRAIN_PENDING");
+    admission.release();
   });
 
   it("keeps approvals usable while waiting and fences them only for the final proof", async () => {
@@ -179,6 +260,38 @@ describe("AssistantHost", () => {
     expect(native.terminate).not.toHaveBeenCalled();
     expect(native.close).toHaveBeenCalledOnce();
     expect(fetchImpl.mock.calls.filter(([url]) => String(url).endsWith("/shutdown"))).toHaveLength(1);
+    admission.release();
+  });
+
+  it("retires a crashed barrier owner only after its exact Job and output drain", async () => {
+    const { host, native, active, fetchImpl } = fixture();
+    let exit: number | null = null, drained = false;
+    Object.assign(native, { exitCode: vi.fn(() => exit) });
+    native.drainStatus.mockImplementation(() => ({ complete: drained, channels: [] }));
+    await host.start();
+    let finishRequest!: (response: Response) => void;
+    fetchImpl.mockImplementationOnce(async () => await new Promise<Response>(resolve => { finishRequest = resolve; }));
+    const request = host.request({ operation: "send", message: "queued", requestId: "one" });
+    await vi.waitFor(() => expect(finishRequest).toBeTypeOf("function"));
+    const admission = host.beginMigrationAdmission();
+    const sealing = admission.seal();
+    const job = [...active.keys()][0];
+    active.set(job, 0); exit = 0; drained = true;
+    expect(host.prepareDeadForMigrationRetirement()).toBe(false);
+    finishRequest(Response.json({ accepted: true }));
+    await request;
+    await sealing;
+    active.set(job, 1); exit = null; drained = false;
+    expect(host.prepareDeadForMigrationRetirement()).toBe(false);
+    active.set(job, 0);
+    expect(host.prepareDeadForMigrationRetirement()).toBe(false);
+    exit = 0;
+    expect(host.prepareDeadForMigrationRetirement()).toBe(false);
+    drained = true;
+    expect(host.prepareDeadForMigrationRetirement()).toBe(true);
+    expect(await host.retireForMigration()).toBe(true);
+    expect(native.terminate).not.toHaveBeenCalled();
+    expect(native.close).toHaveBeenCalledOnce();
     admission.release();
   });
 

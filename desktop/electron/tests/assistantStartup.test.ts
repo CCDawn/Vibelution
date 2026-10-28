@@ -8,6 +8,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AssistantProjectRegistryConnection } from "../src/assistant/projectRegistryConnection.js";
 import { PrehostRecoveryDrainedUnknown } from "../src/assistant/prehostRecoveryJob.js";
 import { InitialMigrationResults } from "../src/assistant/initialMigrationResults.js";
+import { startAssistantReminderPump } from "../src/assistant/reminderPump.js";
+import { AssistantProjectLifecycleRequestStore } from "../src/assistant/projectLifecycleRequestStore.js";
 import { unwrapSource } from "../src/state/launcherStateStore.js";
 import { createSingleInstanceEnvelope, resolveSecondInstanceIntent, resolveSingleInstanceCliIntent, resolveSingleInstanceProvenance } from "../src/appLock.js";
 import { parseDesktopCliArgs } from "../src/cli/desktopCli.js";
@@ -49,11 +51,16 @@ function fixture() {
     pendingPreHostRecovery: vi.fn(() => null as { projectId: string; operationId: string } | null),
     recoverPreHostSource: vi.fn(async (_operationId: string, _acquire: (marker: unknown) => Promise<unknown>) => false),
     revokePreHostRecovery: vi.fn(),
-    start: vi.fn(async (createHost: (snapshot: unknown) => typeof host) => { const result = createHost(projectSnapshot); pendingStart = result.start(); await pendingStart; return result; }),
+    start: vi.fn(async (createHost: (snapshot: unknown, suspended: boolean) => typeof host, options?: { migration?: boolean }) => {
+      const result = createHost(projectSnapshot, projects.hasPendingPreHostRecovery());
+      const migrating = result as typeof host & { startForMigration?: () => Promise<unknown> };
+      pendingStart = options?.migration && migrating.startForMigration ? migrating.startForMigration() : result.start();
+      await pendingStart; return result;
+    }),
     stop: vi.fn(async () => { await pendingStart.catch(() => undefined); await host.stop(); }),
   };
   const context: Record<string, any> = {
-    launcherAssistantStarting: null, launcherAssistantStopping: null, launcherAssistantStartupAbort: new AbortController(),
+    launcherAssistantStarting: null, launcherAssistantStopping: null, initialMigrationReceiptFence: null, launcherAssistantStartupAbort: new AbortController(),
     launcherAssistantHost: null, launcherAssistantWindow: null, showAssistantStartupWait: null, dismissAssistantStartupWait: null, flushAssistantMigrationFeedback: null, assistantMigrationPending: false,
     launcherAssistantProjects: null, stopLauncherAssistantReminders: null, pendingAssistantOpen: null,
     projectAdmissionExperiment: false,
@@ -74,6 +81,7 @@ function fixture() {
       pythonArguments: ["-I"], env: { VIBELUTION_CONFIG_PATH: "private-config" } })),
     readProjectId: vi.fn(() => "p"), instanceIdForProject: vi.fn(() => "i"),
     AssistantHost: vi.fn(function () { return host; }), AssistantWindow: vi.fn(function () { return window; }),
+    AssistantProjectLifecycleRequestStore: vi.fn(function () { return { get: vi.fn(async () => null) }; }),
     startAssistantReminderPump: vi.fn(() => vi.fn(async () => undefined)),
     AssistantProjectRegistryConnection: vi.fn(function () { return projects; }),
     createAssistantTray: vi.fn(() => ({ destroy: vi.fn() })), requestDesktopShellExit: vi.fn(),
@@ -528,7 +536,7 @@ describe("resident assistant startup", () => {
     await context.stop();
   });
 
-  it("starts the original handoff wait, preserves the open window and running Job, then observes user close", async () => {
+  it.each(["conflict", "unknown", "revoked", "slow", "busy", "failed_reopen", "barrier_crash", "retirement_crash"])("runs one %s handoff only after the original window and Job drain", async kind => {
     const { context, host, paths, projectSnapshot } = fixture();
     const root = mkdtempSync(join(tmpdir(), "handoff-main-")); ownedRoots.push(root);
     const physical = process.platform === "win32" ? realpathSync.native(root).toLowerCase() : realpathSync.native(root);
@@ -546,6 +554,17 @@ describe("resident assistant startup", () => {
       hasPendingUserWorkbenchClose: () => closePending };
     const job = Object.assign(vi.fn(async () => jobExited), { pid: 4242, isCurrent: () => !jobExited, release: vi.fn() });
     const admission = new ProjectAdmission();
+    const operationId = "initial-" + "c".repeat(40), syncId = "affairs-" + "c".repeat(40);
+    const pump = Object.assign(vi.fn(async () => undefined), { drainForMigration: vi.fn(async () => undefined), resumeAfterMigration: vi.fn() });
+    let finishWorker!: (value: object) => void;
+    const heldWorker = new Promise<object>(resolve => { finishWorker = resolve; });
+    let finishQueue!: () => void;
+    const heldQueue = new Promise<void>(resolve => { finishQueue = resolve; });
+    const releaseHostAdmission = vi.fn(), releaseRegistry = vi.fn();
+    let restartJobDrained = false, crashedJobDrained = false;
+    const runWorker = vi.fn(async () => kind === "revoked" ? await heldWorker : ["conflict", "slow", "busy"].includes(kind)
+      ? { state: "pending", code: "affairs_conflicts", conflictCount: 2, syncId, readyForCutover: false }
+      : { state: "unknown", syncId, readyForCutover: false });
     Object.assign(context, { windowProvider: provider, projectAdmission: admission, mkdirSync, readFileSync,
       LegacyReminderSourceFence: vi.fn(function () { return { drainIngress: async () => {} }; }),
       createLegacyReminderSourceResolver: () => () => null, instancesRegistryPath: () => registryPath,
@@ -554,14 +573,44 @@ describe("resident assistant startup", () => {
       captureTrackedWorkbenchJobNaturalRetirement: () => job, startManagedLegacyReminderRetirement,
       desktopLifecycleCoordinator: { pendingReason: () => null }, mainWorkbenchCloseStore: { currentTransaction: () => null },
       pendingWorkbenchCloseAck: null, launcherLifecycleSupervisor: { snapshot: () => null, captureExecutionDrain: async () => {} },
+      AssistantProjectLifecycleRequestStore: function ({ directory }: { directory: string }) {
+        const store = new AssistantProjectLifecycleRequestStore({ directory });
+        return { get: (id: string) => store.get(id), reserve: (request: { requestId: string; projectId: string; operation: "start" }) =>
+          store.reserve({ requestId: request.requestId, projectId: request.projectId, operation: request.operation }) };
+      }, runReminderOfflineJob: runWorker, resolveProjectsHome: () => root,
+      existingMainLineCommandQueueForProject: () => kind === "slow" ? { captureExecutionDrain: () => heldQueue } : undefined,
+      startAssistantReminderPump: vi.fn(() => pump),
       InitialMigrationResults: vi.fn(function () { return { get: vi.fn(async () => null) }; }),
       recoverInitialMigrations: vi.fn(async () => []), verifyInitialMigrationResult: vi.fn() });
+    let barrierBusy = kind === "busy";
     Object.assign(host, { prepareInitialMigration: vi.fn(async () => true), reminderHandoffReceipt: vi.fn(async () => "pending"),
-      reminderHandoffSource: vi.fn(async () => ({ operationId: "initial-" + "c".repeat(40), syncId: "affairs-" + "c".repeat(40) })) });
+      reminderHandoffSource: vi.fn(async () => ({ operationId, syncId, registryDigest: "d".repeat(64) })),
+      beginMigrationAdmission: () => ({ drained: Promise.resolve(), seal: async () => {}, release: releaseHostAdmission }),
+      migrationBarrier: vi.fn(async (op: string) => {
+        if (kind === "barrier_crash" || kind === "retirement_crash" && op === "release") throw new Error("host unavailable");
+        if (op === "status" && barrierBusy) { barrierBusy = false; return "busy"; }
+        return op === "release" ? "idle" : "ready";
+      }),
+      prepareDeadForMigrationRetirement: vi.fn(() => ["barrier_crash", "retirement_crash"].includes(kind) && crashedJobDrained),
+      snapshot: vi.fn(() => ({ state: "failed" })),
+      startForMigration: vi.fn(async () => {
+        if (kind === "failed_reopen" && !restartJobDrained) throw new Error("startup Job still alive");
+      }),
+      prepareForMigrationRestart: vi.fn(() => {
+        if (kind === "failed_reopen" && host.startForMigration.mock.calls.length && !restartJobDrained)
+          throw new Error("original Job not drained");
+      }) });
     await context.start(paths);
     const registry = context.launcherAssistantProjects;
     registry.registration = vi.fn(() => registration);
     registry.withHistoryImport = vi.fn(async (_id: string, work: (revision: number) => Promise<unknown>) => work(0));
+    registry.beginMigrationTransition = vi.fn(() => ({ drained: Promise.resolve(), release: releaseRegistry }));
+    registry.retireHostForMigration = vi.fn(async () => kind !== "retirement_crash" || crashedJobDrained);
+    registry.withPreHostSource = vi.fn(async (_id: string, work: (lease: unknown) => Promise<unknown>) => {
+      const result = await work({ revision: 0, registration, check: () => {} });
+      if (kind === "unknown" || kind === "failed_reopen") registry.hasPendingPreHostRecovery.mockReturnValue(true);
+      return result;
+    });
     const control = context.AssistantHost.mock.calls[0][0].mainControl;
     const request = { action: "initial_migration_queue", projectId: id, previewId: "b".repeat(64), turnId: "turn",
       category: "reminder_handoff", operationId: "initial-" + "c".repeat(40), deliveryId: "d".repeat(32), timeoutMs: 10000 };
@@ -572,14 +621,95 @@ describe("resident assistant startup", () => {
       operationId: request.operationId, readyForCutover: false }));
     expect(windowClose).not.toHaveBeenCalled();
     expect(jobExited).toBe(false);
+    expect(runWorker).not.toHaveBeenCalled();
     expect(host.stop).not.toHaveBeenCalled();
     closePending = true; closed = true; // The existing user close, not migration.
     await vi.waitFor(async () => expect(await control(receiptRequest)).toMatchObject({ waitingFor: "close_transaction" }));
     expect(admission.hasSeals()).toBe(true);
     closePending = false; jobExited = true;
+    if (["barrier_crash", "retirement_crash"].includes(kind)) {
+      await vi.waitFor(() => expect(host.prepareDeadForMigrationRetirement).toHaveBeenCalled(), { timeout: 4000 });
+      expect(registry.retireHostForMigration).toHaveBeenCalledTimes(kind === "barrier_crash" ? 0 : 1);
+      expect(releaseRegistry).not.toHaveBeenCalled();
+      expect(releaseHostAdmission).not.toHaveBeenCalled();
+      expect(pump.resumeAfterMigration).not.toHaveBeenCalled();
+      expect(runWorker).not.toHaveBeenCalled();
+      crashedJobDrained = true;
+      await vi.waitFor(() => expect(host.startForMigration).toHaveBeenCalledOnce(), { timeout: 4000 });
+      await vi.waitFor(() => expect(pump.resumeAfterMigration).toHaveBeenCalledOnce());
+      expect(registry.retireHostForMigration).toHaveBeenCalledTimes(kind === "barrier_crash" ? 1 : 2);
+      expect(runWorker).not.toHaveBeenCalled();
+      expect(host.stop).not.toHaveBeenCalled();
+      context.shutdownApproved = true;
+      await context.stop();
+      return;
+    }
+    if (kind === "slow") {
+      await new Promise(resolve => setTimeout(resolve, 1250));
+      expect(runWorker).not.toHaveBeenCalled();
+      expect(admission.hasSeals()).toBe(true);
+      finishQueue();
+    }
+    await vi.waitFor(() => expect(runWorker).toHaveBeenCalledOnce(), { timeout: 4000 });
+    if (kind === "revoked") {
+      let entered = false;
+      const incoming = admission.observe(() => { throw new Error("unbound"); }, async () => { entered = true; });
+      await new Promise(resolve => setTimeout(resolve, 50));
+      expect(entered).toBe(false);
+      finishWorker({ state: "pending", code: "affairs_conflicts", conflictCount: 2, syncId, readyForCutover: false });
+      await incoming;
+      expect(entered).toBe(true);
+    }
+    if (kind === "failed_reopen") {
+      await vi.waitFor(() => expect(host.startForMigration).toHaveBeenCalledOnce());
+      await new Promise(resolve => setTimeout(resolve, 1200));
+      expect(host.startForMigration).toHaveBeenCalledOnce();
+      expect(releaseRegistry).not.toHaveBeenCalled();
+      expect(releaseHostAdmission).not.toHaveBeenCalled();
+      expect(pump.resumeAfterMigration).not.toHaveBeenCalled();
+      expect(admission.hasSeals()).toBe(true);
+      expect(host.start).toHaveBeenCalledOnce();
+      expect(host.stop).not.toHaveBeenCalled();
+      restartJobDrained = true;
+      await vi.waitFor(() => expect(host.startForMigration).toHaveBeenCalledTimes(2), { timeout: 4000 });
+    }
     await vi.waitFor(() => expect(admission.hasSeals()).toBe(false));
+    if (kind === "failed_reopen") {
+      expect(releaseRegistry).toHaveBeenCalledOnce();
+      expect(releaseHostAdmission).toHaveBeenCalledOnce();
+      expect(pump.resumeAfterMigration).toHaveBeenCalledOnce();
+    }
+    if (kind === "busy") {
+      expect(pump.drainForMigration).toHaveBeenCalledTimes(2);
+      expect(pump.resumeAfterMigration).toHaveBeenCalledTimes(2);
+    }
+    if (kind === "unknown" || kind === "failed_reopen") expect(host.prepareForMigrationRestart).toHaveBeenCalledWith(projectSnapshot, true);
+    expect(await control(receiptRequest)).toMatchObject(["conflict", "slow", "busy"].includes(kind)
+      ? { state: "pending", code: "affairs_conflicts", conflictCount: 2, syncId, readyForCutover: false }
+      : { state: "unknown", code: "unknown", readyForCutover: false });
+    const restartedStore = new AssistantProjectLifecycleRequestStore({ directory: join(root, "assistant", "reminder-handoff-attempts") });
+    expect((await restartedStore.get(`${syncId}.result`))?.request.projectId ?? null).toBe(["conflict", "slow", "busy"].includes(kind) ? "conflicts-2" : null);
+    await control(request);
+    await new Promise(resolve => setTimeout(resolve, 350));
+    expect(runWorker).toHaveBeenCalledOnce();
     expect(windowClose).not.toHaveBeenCalled();
     expect(job.release).toHaveBeenCalledOnce();
+    context.shutdownApproved = true;
+    await context.stop();
+    // A new startup gets a new store instance over the same durable attempts.
+    context.launcherAssistantStarting = null;
+    context.launcherAssistantStopping = null;
+    context.launcherAssistantStartupAbort = new AbortController();
+    context.shutdownApproved = false;
+    runWorker.mockClear();
+    await context.start(paths);
+    const restartedControl = context.AssistantHost.mock.calls.at(-1)[0].mainControl;
+    expect(await restartedControl(receiptRequest)).toMatchObject(["conflict", "slow", "busy"].includes(kind)
+      ? { state: "pending", code: "affairs_conflicts", conflictCount: 2, syncId, readyForCutover: false }
+      : { state: "unknown", code: "unknown", readyForCutover: false });
+    await restartedControl(request);
+    await new Promise(resolve => setTimeout(resolve, 350));
+    expect(runWorker).not.toHaveBeenCalled();
     context.shutdownApproved = true;
     await context.stop();
   }, 10000);
@@ -638,6 +768,194 @@ describe("resident assistant startup", () => {
     })));
     await context.stop();
   }, 15000);
+
+  it.each(["resume", "shutdown", "shutdown_first", "late_wait_exit", "late_inflight_exit"])("persists a crashed initial migration before %s without dispatching its queued operation", async mode => {
+    const { context, host, paths } = fixture();
+    const operationId = "initial-" + "e".repeat(40);
+    const root = mkdtempSync(join(tmpdir(), "initial-crash-receipt-")); ownedRoots.push(root);
+    const directory = join(root, "results"), results = new InitialMigrationResults(directory);
+    let allowReceipt = false;
+    const originalRecordUnknown = results.recordUnknown.bind(results);
+    const writeReceipt = vi.spyOn(results, "recordUnknown").mockImplementation(async id => {
+      if (!allowReceipt) throw new Error("receipt unavailable");
+      return await originalRecordUnknown(id);
+    });
+    context.InitialMigrationResults = vi.fn(function () { return results; });
+    context.recoverInitialMigrations = vi.fn(async () => []);
+    context.verifyInitialMigrationResult = vi.fn();
+    const reminders = Object.assign(vi.fn(async () => undefined), {
+      drainForMigration: vi.fn(async () => undefined), resumeAfterMigration: vi.fn(),
+    });
+    let finishReminderDrain!: () => void;
+    if (["late_wait_exit", "late_inflight_exit"].includes(mode)) reminders.drainForMigration.mockImplementation(async () => await new Promise<void>(resolve => { finishReminderDrain = resolve; }));
+    context.startAssistantReminderPump = vi.fn(() => reminders);
+    const releaseAdmission = vi.fn(), releaseRegistry = vi.fn();
+    let drained = false;
+    let failBarrier!: (error: Error) => void;
+    Object.assign(host, {
+      prepareInitialMigration: vi.fn(async () => true),
+      beginMigrationAdmission: vi.fn(() => ({ drained: Promise.resolve(), seal: vi.fn(async () => undefined), release: releaseAdmission })),
+      migrationBarrier: vi.fn(async () => {
+        if (mode === "shutdown_first") return await new Promise((_resolve, reject) => { failBarrier = reject; });
+        throw new Error("host unavailable");
+      }),
+      prepareDeadForMigrationRetirement: vi.fn(() => drained),
+      prepareForMigrationRestart: vi.fn(), startForMigration: vi.fn(async () => undefined),
+    });
+    await context.start(paths);
+    const registry = context.launcherAssistantProjects;
+    registry.withHistoryImport = vi.fn(async (_id: string, work: (revision: number) => Promise<unknown>) => work(0));
+    registry.beginMigrationTransition = vi.fn(() => ({ drained: Promise.resolve(), release: releaseRegistry }));
+    registry.retireHostForMigration = vi.fn(async () => true);
+    const control = context.AssistantHost.mock.calls[0][0].mainControl;
+    const request = { action: "initial_migration_queue", projectId: "project:one", previewId: "b".repeat(64),
+      turnId: "turn", category: "personal", operationId, deliveryId: "c".repeat(32), timeoutMs: 10000 };
+    expect((await control(request)).state).toBe("queued");
+    if (["late_wait_exit", "late_inflight_exit"].includes(mode)) {
+      await vi.waitFor(() => expect(finishReminderDrain).toBeTypeOf("function"), { timeout: 4000 });
+      const lateId = "initial-" + "f".repeat(40);
+      let finishPrepare!: (value: boolean) => void;
+      if (mode === "late_inflight_exit") host.prepareInitialMigration.mockImplementationOnce(async () => await new Promise<boolean>(resolve => { finishPrepare = resolve; }));
+      const late = control({ ...request, operationId: lateId, deliveryId: "d".repeat(32) });
+      if (mode === "late_inflight_exit") {
+        await vi.waitFor(() => expect(finishPrepare).toBeTypeOf("function"));
+        host.beginMigrationAdmission.mockImplementation(() => ({ drained: late.then(() => undefined), seal: () => late.then(() => undefined), release: releaseAdmission }));
+        registry.beginMigrationTransition.mockImplementation(() => ({ drained: late.then(() => undefined), release: releaseRegistry }));
+      } else expect((await late).state).toBe("queued");
+      context.shutdownApproved = true;
+      let stopped = false;
+      const stopping = context.stop().then(() => { stopped = true; });
+      finishReminderDrain();
+      if (mode === "late_inflight_exit") {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        expect(stopped).toBe(false);
+        expect(writeReceipt).not.toHaveBeenCalled();
+        finishPrepare(true);
+        expect((await late).state).toBe("queued");
+      }
+      await vi.waitFor(() => expect(writeReceipt).toHaveBeenCalled(), { timeout: 4000 });
+      expect(stopped).toBe(false);
+      expect(registry.retireHostForMigration).not.toHaveBeenCalled();
+      expect(releaseAdmission).not.toHaveBeenCalled();
+      expect(releaseRegistry).not.toHaveBeenCalled();
+      allowReceipt = true;
+      await stopping;
+      const reopenedResults = new InitialMigrationResults(directory);
+      expect(await reopenedResults.get(operationId)).toBe("unknown");
+      expect(await reopenedResults.get(lateId)).toBe("unknown");
+      expect(context.recoverInitialMigrations).toHaveBeenCalledOnce();
+      return;
+    }
+    if (mode === "shutdown_first") {
+      await vi.waitFor(() => expect(failBarrier).toBeTypeOf("function"), { timeout: 4000 });
+      context.shutdownApproved = true;
+      let stopped = false;
+      const stopping = context.stop().then(() => { stopped = true; });
+      failBarrier(new Error("host unavailable"));
+      await vi.waitFor(() => expect(writeReceipt).toHaveBeenCalled(), { timeout: 4000 });
+      expect(stopped).toBe(false);
+      expect(registry.retireHostForMigration).not.toHaveBeenCalled();
+      expect(releaseAdmission).not.toHaveBeenCalled();
+      expect(releaseRegistry).not.toHaveBeenCalled();
+      expect(reminders.resumeAfterMigration).not.toHaveBeenCalled();
+      allowReceipt = true;
+      await stopping;
+      expect(await new InitialMigrationResults(directory).get(operationId)).toBe("unknown");
+      expect(host.startForMigration).not.toHaveBeenCalled();
+      expect(context.recoverInitialMigrations).toHaveBeenCalledOnce();
+      return;
+    }
+    await vi.waitFor(() => expect(host.prepareDeadForMigrationRetirement).toHaveBeenCalled(), { timeout: 5000 });
+    expect(registry.retireHostForMigration).not.toHaveBeenCalled();
+    expect(releaseAdmission).not.toHaveBeenCalled();
+    expect(releaseRegistry).not.toHaveBeenCalled();
+    expect(reminders.resumeAfterMigration).not.toHaveBeenCalled();
+    drained = true;
+    await vi.waitFor(() => expect(writeReceipt).toHaveBeenCalled(), { timeout: 4000 });
+    expect(registry.retireHostForMigration).not.toHaveBeenCalled();
+    expect(releaseAdmission).not.toHaveBeenCalled();
+    expect(releaseRegistry).not.toHaveBeenCalled();
+    expect(reminders.resumeAfterMigration).not.toHaveBeenCalled();
+    if (mode === "shutdown") {
+      context.shutdownApproved = true;
+      let stopped = false;
+      const stopping = context.stop().then(() => { stopped = true; });
+      await new Promise(resolve => setTimeout(resolve, 100));
+      expect(stopped).toBe(false);
+      allowReceipt = true;
+      await stopping;
+      expect(await new InitialMigrationResults(directory).get(operationId)).toBe("unknown");
+      expect(host.startForMigration).not.toHaveBeenCalled();
+      expect(context.recoverInitialMigrations).toHaveBeenCalledOnce();
+      return;
+    }
+    allowReceipt = true;
+    await vi.waitFor(() => expect(host.startForMigration).toHaveBeenCalledOnce(), { timeout: 4000 });
+    await vi.waitFor(() => expect(reminders.resumeAfterMigration).toHaveBeenCalledOnce());
+    await new Promise(resolve => setTimeout(resolve, 1250));
+    expect(context.recoverInitialMigrations).toHaveBeenCalledOnce(); // Initial startup only; no migration Job.
+    expect(await new InitialMigrationResults(directory).get(operationId)).toBe("unknown");
+    expect(await control({ action: "initial_migration_receipt", projectId: request.projectId,
+      category: request.category, operationId })).toMatchObject({ state: "unknown", code: "unknown" });
+    expect(await control(request)).toMatchObject({ state: "unknown", code: "unknown" });
+    expect(host.prepareInitialMigration).toHaveBeenCalledOnce();
+    expect(host.stop).not.toHaveBeenCalled();
+    context.shutdownApproved = true;
+    await context.stop();
+  }, 15000);
+
+  it("exits a migration with an unanswered reminder dialog after draining its in-flight click", async () => {
+    const { context, host, paths } = fixture();
+    const root = mkdtempSync(join(tmpdir(), "initial-reminder-exit-")); ownedRoots.push(root);
+    const directory = join(root, "results"), operationId = "initial-" + "a".repeat(40);
+    context.InitialMigrationResults = vi.fn(function () { return new InitialMigrationResults(directory); });
+    context.recoverInitialMigrations = vi.fn(async () => []);
+    context.verifyInitialMigrationResult = vi.fn();
+    let click!: () => void, finishClick!: () => void;
+    const pendingClick = new Promise<void>(resolve => { finishClick = resolve; });
+    const event = { id: `reminder:20261027:${"a".repeat(64)}`, kind: "affair_reminder" as const, severity: "medium" as const,
+      title: "Reminder", body: "Due", targetUrl: "", attemptToken: "b".repeat(64), recoveredFallback: false };
+    const reminderHost = { snapshot: () => ({ state: "ready" as const, errorCode: null }),
+      nextReminder: vi.fn().mockResolvedValueOnce(event).mockResolvedValue(null),
+      settleReminder: vi.fn(async (_event, _channel, clicked) => { if (clicked) await pendingClick; }),
+      fallbackReminder: vi.fn(async () => undefined) };
+    const pump = startAssistantReminderPump({ host: reminderHost, available: () => true,
+      notify: async (_notice, _recovered, onClick, _failure, fallback) => {
+        click = onClick; fallback(new Promise<boolean>(() => {})); return "attention_fallback";
+      }, openAssistant: vi.fn(), onError: vi.fn() });
+    const drain = vi.spyOn(pump, "drainForMigration");
+    const stopPump = Object.assign(vi.fn(async () => await pump()), {
+      drainForMigration: () => pump.drainForMigration(), resumeAfterMigration: () => pump.resumeAfterMigration(),
+    });
+    context.startAssistantReminderPump = vi.fn(() => stopPump);
+    const releaseAdmission = vi.fn(), releaseRegistry = vi.fn();
+    Object.assign(host, { prepareInitialMigration: vi.fn(async () => true),
+      beginMigrationAdmission: vi.fn(() => ({ drained: Promise.resolve(), seal: vi.fn(async () => undefined), release: releaseAdmission })) });
+    await context.start(paths);
+    const registry = context.launcherAssistantProjects;
+    registry.withHistoryImport = vi.fn(async (_id: string, work: (revision: number) => Promise<unknown>) => work(0));
+    registry.beginMigrationTransition = vi.fn(() => ({ drained: Promise.resolve(), release: releaseRegistry }));
+    const control = context.AssistantHost.mock.calls[0][0].mainControl;
+    await vi.waitFor(() => expect(click).toBeTypeOf("function"));
+    click();
+    await vi.waitFor(() => expect(reminderHost.settleReminder).toHaveBeenCalledWith(event, "attention_fallback", true));
+    expect((await control({ action: "initial_migration_queue", projectId: "project:one", previewId: "b".repeat(64),
+      turnId: "turn", category: "personal", operationId, deliveryId: "c".repeat(32), timeoutMs: 10000 })).state).toBe("queued");
+    await vi.waitFor(() => expect(drain).toHaveBeenCalled(), { timeout: 4000 });
+    context.shutdownApproved = true;
+    let stopped = false;
+    const stopping = context.stop().then(() => { stopped = true; });
+    await vi.waitFor(() => expect(stopPump).toHaveBeenCalledOnce(), { timeout: 4000 });
+    expect(await new InitialMigrationResults(directory).get(operationId)).toBe("unknown");
+    await new Promise(resolve => setTimeout(resolve, 2100));
+    expect(stopped).toBe(false); // The admitted click still owns its settlement.
+    expect(releaseAdmission).not.toHaveBeenCalled();
+    expect(releaseRegistry).not.toHaveBeenCalled();
+    finishClick();
+    await stopping;
+    expect(stopped).toBe(true);
+    expect(context.recoverInitialMigrations).toHaveBeenCalledOnce();
+  }, 12000);
 
   it("does not retire while an already returned lifecycle command is still executing", async () => {
     const { context, host, paths, projectSnapshot } = fixture();

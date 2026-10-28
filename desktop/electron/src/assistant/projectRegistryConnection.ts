@@ -351,11 +351,14 @@ export class AssistantProjectRegistryConnection {
   }
 
   start<T extends ProjectHost>(createHost: (snapshot: AssistantProjectRegistrySnapshot, projectsSuspended: boolean) => T,
-    options?: { migration?: boolean }): Promise<T> {
+    options?: { migration?: boolean; recovery?: boolean }): Promise<T> {
     if (this.migrationGate && !options?.migration) return this.migrationGate.released.then(() => this.start(createHost, options));
     return this.enqueue(async () => {
       this.assertNotClosed();
-      if ((this.recovery || this.authorityRequiredAfter) && options?.migration) throw new Error("ASSISTANT_PROJECT_UNAVAILABLE");
+      if (options?.recovery && (!options.migration || !this.migrationGate || !this.recovery))
+        throw new Error("ASSISTANT_PROJECT_UNAVAILABLE");
+      if ((this.recovery || this.authorityRequiredAfter) && options?.migration && !options.recovery)
+        throw new Error("ASSISTANT_PROJECT_UNAVAILABLE");
       if (this.host && !options?.migration) throw new Error("ASSISTANT_ALREADY_STARTED");
       const startup = this.registry.startupState();
       const { snapshot } = startup;

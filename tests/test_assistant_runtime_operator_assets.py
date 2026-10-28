@@ -48,6 +48,32 @@ def image_file(config, kind="avatar", filename="picture.png", payload=PNG):
     return path
 
 
+def test_revisions_detect_selection_file_and_readability_without_reading_image_bytes(operator, monkeypatch):
+    select(operator, "avatar", "a.png")
+    first = image_file(operator, filename="a.png")
+    image_file(operator, filename="b.png", payload=PNG + b"other")
+    def forbidden(*args, **kwargs):
+        raise AssertionError("revision must not read image bytes")
+    monkeypatch.setattr(assets, "_read_image", forbidden)
+    one = assets.operator_asset_revisions()["avatar"]
+    assert one and len(one) == 64
+    assert assets.operator_asset_revisions()["avatar"] == one
+    first.write_bytes(PNG + b"changed")
+    two = assets.operator_asset_revisions()["avatar"]
+    assert two != one
+    select(operator, "avatar", "b.png")
+    assert assets.operator_asset_revisions()["avatar"] not in {one, two}
+    select(operator, "background", "wall.png", readability="soft")
+    image_file(operator, "background", "wall.png")
+    soft = assets.operator_asset_revisions()["background"]
+    select(operator, "background", "wall.png", readability="strong")
+    assert assets.operator_asset_revisions()["background"] != soft
+    select(operator, "avatar", "missing.png")
+    assert assets.operator_asset_revisions()["avatar"] is None
+    image_file(operator, filename="missing.png")
+    assert assets.operator_asset_revisions()["avatar"] is not None
+
+
 def unavailable(kind="avatar"):
     with pytest.raises(ValueError, match="^operator_asset_unavailable$") as error:
         assets.read_operator_asset(kind)

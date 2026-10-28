@@ -113,6 +113,33 @@ def _file_stamp(info: os.stat_result) -> tuple:
     return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
 
 
+def operator_asset_revisions() -> dict[str, str | None]:
+    """Return opaque change markers without reading or transferring image bytes."""
+    result: dict[str, str | None] = {"avatar": None, "background": None}
+    for kind in result:
+        try:
+            config_path = public_config.resolve_config_path()
+            config_identity = _path_identity(config_path)
+            _owner_config(kind, config_path)
+            selection, readability = _selection(kind, config_path)
+            stamp = None
+            if selection:
+                path, limit = _asset_path(kind, selection, config_path)
+                chain = _path_identity(path)
+                info = path.stat()
+                stamp = _file_stamp(info)
+                if not 0 < info.st_size <= limit or chain != _path_identity(path):
+                    raise ValueError(_UNAVAILABLE)
+                stamp = (*stamp, info.st_ctime_ns)
+            if config_identity != _path_identity(config_path) or (selection, readability) != _selection(kind, config_path):
+                raise ValueError(_UNAVAILABLE)
+            value = repr((kind, selection, readability, stamp)).encode("utf-8")
+            result[kind] = hashlib.sha256(value).hexdigest()
+        except (OSError, ValueError, TypeError):
+            pass
+    return result
+
+
 def _read_image(path: Path, limit: int) -> dict[str, str]:
     chain = _path_identity(path)
     before = path.stat()

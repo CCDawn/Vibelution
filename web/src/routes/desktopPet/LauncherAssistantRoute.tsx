@@ -109,6 +109,23 @@ export function LauncherAssistantRoute() {
   const observingOwnSession = visible && Boolean(sessionId);
   const readingAssets = reading && status.data?.operatorAssetsVersion === 1;
   const assetQueryPrefix = ["launcher-assistant", "operator-asset"];
+  const assetRevisions = status.data?.operatorAssetRevisions;
+  const previousAssetRevisions = useRef<{ sessionId: string; avatar: string | null; background: string | null } | null>(null);
+  useEffect(() => {
+    if (!sessionId) { previousAssetRevisions.current = null; return; }
+    if (!assetRevisions) {
+      if (previousAssetRevisions.current?.sessionId !== sessionId) previousAssetRevisions.current = null;
+      return;
+    }
+    const previous = previousAssetRevisions.current;
+    previousAssetRevisions.current = { sessionId, ...assetRevisions };
+    if (!previous || previous.sessionId !== sessionId) return;
+    for (const kind of ["avatar", "background"] as const) {
+      if (previous[kind] !== assetRevisions[kind]) {
+        void client.invalidateQueries({ queryKey: ["launcher-assistant", "operator-asset", kind, sessionId], exact: true });
+      }
+    }
+  }, [client, sessionId, assetRevisions?.avatar, assetRevisions?.background]);
   const avatar = useQuery({
     queryKey: [...assetQueryPrefix, "avatar", sessionId],
     queryFn: ({ signal }) => getLauncherOperatorAsset("avatar", { signal }),

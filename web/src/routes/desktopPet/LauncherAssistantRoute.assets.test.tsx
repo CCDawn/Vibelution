@@ -30,6 +30,7 @@ let container: HTMLDivElement;
 let client: QueryClient;
 let detail: Record<string, unknown>;
 let assets: { avatar: Record<string, unknown>; background: Record<string, unknown> };
+let revisions: { avatar: string | null; background: string | null } | undefined;
 let invoke: ReturnType<typeof vi.fn>;
 let failingAvatar = false;
 let presentation: HTMLStyleElement | undefined;
@@ -60,6 +61,7 @@ async function renderAssistant(options: { capability?: boolean; failAvatar?: boo
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   failingAvatar = Boolean(options.failAvatar);
   detail = { id: "s", agentId: "a", status: "ready", messages: [] };
+  revisions = undefined;
   assets = { avatar: asset("avatar", "AQI="), background: asset("background", "AwQ=", "soft") };
   fetch = vi.fn(() => { throw new Error("HTTP is forbidden in this window"); }); vi.stubGlobal("fetch", fetch);
   invoke = vi.fn(async request => {
@@ -67,6 +69,7 @@ async function renderAssistant(options: { capability?: boolean; failAvatar?: boo
       case "status": return {
         assistant: { agentId: "a", directSessionId: "s", displayName: "助理" },
         operatorProfile: { displayName: "当前用户", avatarPreset: "initial" },
+        ...(revisions ? { operatorAssetRevisions: revisions } : {}),
         ...(options.patrol ? { patrol: options.patrol } : {}),
         ...(options.capability === false ? {} : { operatorAssetsVersion: 1 }),
       };
@@ -271,6 +274,29 @@ describe("Launcher operator image consumption", () => {
     expect(expanded().dataset.themeBackground).toBe("default");
     expect(expanded().style.getPropertyValue("--workbench-theme-background-image")).toBe("");
     expect(conversation?.userDisplayName).toBe("当前用户");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("refreshes only changed image revisions on idle status updates", async () => {
+    await renderAssistant();
+    revisions = { avatar: "a".repeat(64), background: "b".repeat(64) };
+    await act(async () => { await client.invalidateQueries({ queryKey: ["launcher-assistant", "status"] }); });
+    await settle(); await click("展开个人助理聊天");
+    expect(assetReads()).toBe(2);
+    await act(async () => { await client.invalidateQueries({ queryKey: ["launcher-assistant", "status"] }); });
+    await settle(); expect(assetReads()).toBe(2);
+    assets.avatar = asset("avatar", "BQY=");
+    revisions = { ...revisions, avatar: "c".repeat(64) };
+    await act(async () => { await client.invalidateQueries({ queryKey: ["launcher-assistant", "status"] }); });
+    await settle(); await settle();
+    expect(assetReads()).toBe(3);
+    expect(container.querySelector("img")?.getAttribute("src")).toBe("data:image/png;base64,BQY=");
+    assets.background = asset("background", "Bwg=", "strong");
+    revisions = { ...revisions, background: "d".repeat(64) };
+    await act(async () => { await client.invalidateQueries({ queryKey: ["launcher-assistant", "status"] }); });
+    await settle(); await settle();
+    expect(assetReads()).toBe(4);
+    expect(container.querySelector<HTMLElement>('[data-expanded="true"]')?.style.getPropertyValue("--workbench-theme-background-image")).toContain("Bwg=");
     expect(fetch).not.toHaveBeenCalled();
   });
 
