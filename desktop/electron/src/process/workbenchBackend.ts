@@ -107,6 +107,8 @@ export type ExecuteMainLineWorkbenchInput = {
   command: MainLineQueuedCommand;
   signal?: AbortSignal;
   spawnImpl?: WorkbenchBackendSpawn;
+  /** Trusted in-process admission check immediately before backend spawn. */
+  beforeSpawn?: () => void;
   fileExists?: (path: string) => boolean;
   readState?: () => WorkbenchBackendState;
   writeState?: (state: WorkbenchBackendState) => void | Promise<void>;
@@ -2175,6 +2177,8 @@ export async function executeMainLineWorkbench(
     throw error;
   }
   input.signal?.throwIfAborted();
+  try { input.beforeSpawn?.(); }
+  catch (error) { await persistStartPreflightFailure(error); throw error; }
   const spawned = spawnWorkbenchBackend({
     workspaceRoot: input.workspaceRoot,
     baseEnv: input.targetEnvironment,

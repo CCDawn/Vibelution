@@ -103,11 +103,11 @@ _MAIN_HELP = {
     "history_import": "按本轮 history_source_preview 结果，经当前工具审批策略导入所选旧助理的只读历史；不得提供路径或批准标志。成功不表示旧源已冻结、任务已交接或旧助理可退役；unknown 时先查询已有历史，不要自动重复导入。",
     "affairs_sync": "按本轮 history_source_preview 同步已首次导入的旧个人事务；来源、基线由 Launcher 核验，不得传路径或批准标志。unknown 用 affairs_sync_receipt 查本次 migrationId；rejected/pending 用 affairs_conflict_sets 找先前待确认的 syncId（不是本次 ID）。待确认时用新预览和 recover_sync_id=原 ID 核对，不重写；confirmed/matched 只表示当前结果匹配，不证明原写入归因。unresolved 查询差异；baseline_unavailable 表示尚无初次导入基线。成功不表示旧源已冻结或可退役。",
     "episodic_sync": "按本轮 history_source_preview 同步旧情景记忆，保留目标编辑和删除。unresolved 先用 episodic_conflict_review 查看，用户同意保留目标后，以新预览及 resolve_sync_id、review_token 对账，不覆盖目标；目标变化时重新查看，来源变化时先用新预览普通同步刷新差异，再查看新 migrationId。unknown 用新预览和 recover_sync_id=原 migrationId 核对，不重写。不得传路径或批准标志；成功不表示旧源已冻结或退役。",
-    "initial_migration_queue": "按本轮 history_source_preview，经原生策略准入申请排队首次导入 personal（事务和情景记忆）或 knowledge（可验证的私有知识）。不得提供路径、旧助理ID或批准标志。queued 仅表示等待 Launcher 下次启动执行，不表示已导入；rejected/busy 表示本次未发布，可重新预览并经审批重试；unknown 保留原 operationId 对账，不得换 ID 重派；旧源未冻结。",
+    "initial_migration_queue": "按本轮 history_source_preview，经原生策略准入申请排队首次导入 personal（事务和情景记忆）或 knowledge（可验证的私有知识）。不得提供路径、旧助理ID或批准标志。queued 仅表示已排队；Launcher 会在当前工作安全结束后自动执行，必要时在下次启动继续，不表示已导入；rejected/busy 表示本次未发布，可重新预览并经审批重试；unknown 保留原 operationId 对账，不得换 ID 重派；旧源未冻结。",
     "initial_migration_receipt": "只读查询已登记项目和类别对应的首次导入原回执，无需重复审批。queued 表示等待，partial 表示部分完成，unknown 表示无法确认；不得换 ID 重派，查询不表示旧源已冻结。",
-    "knowledge_sync_queue": "经原生审批，按本轮 history_source_preview 排队同步已完成首次导入的旧私有知识。返回独立 operationId；queued 表示等待 Launcher 下次启动离线执行，不表示已经同步；rejected/busy 表示本次未发布，可重新预览并经审批重试；排队后停止当前对话不会撤销已保存的任务。unknown 保留原 ID 查询，不换 ID 重派；不冻结旧来源。",
-    "knowledge_sync_receipt": "只读查询原 project_id 和 operation_id 的知识同步任务，不会续写未开始项。queued 等待启动；not_started 表示已确认本次没有取得写入许可，可在用户同意后使用新预览发起新的同步；unknown 不代表未执行，不得换 ID 重派。partial 中 skippedCount 是未处理项，pendingCount 包含它们；excludedCount 是未纳入的项。不表示旧来源已冻结。",
-    "knowledge_sync_recover": "经原生审批，使用新 history_source_preview 为原 operation_id 排队离线恢复。只确认已完成项，并只续做可证明从未开始的项；已开始但无法确认的项保持 unknown，绝不重放。queued 等待下次 Launcher 启动，不代表已完成；rejected/busy 表示本次恢复未发布，可重新预览并经审批重试；查询继续使用原 operation_id。",
+    "knowledge_sync_queue": "经原生审批，按本轮 history_source_preview 排队同步已完成首次导入的旧私有知识。返回独立 operationId；queued 表示已排队；Launcher 会在当前工作安全结束后自动执行，必要时在下次启动继续，不表示已经同步；rejected/busy 表示本次未发布，可重新预览并经审批重试；排队后停止当前对话不会撤销已保存的任务。unknown 保留原 ID 查询，不换 ID 重派；不冻结旧来源。",
+    "knowledge_sync_receipt": "只读查询原 project_id 和 operation_id 的知识同步任务，不会续写未开始项。queued 表示等待安全执行；not_started 表示已确认本次没有取得写入许可，可在用户同意后使用新预览发起新的同步；unknown 不代表未执行，不得换 ID 重派。partial 中 skippedCount 是未处理项，pendingCount 包含它们；excludedCount 是未纳入的项。不表示旧来源已冻结。",
+    "knowledge_sync_recover": "经原生审批，使用新 history_source_preview 为原 operation_id 排队离线恢复。只确认已完成项，并只续做可证明从未开始的项；已开始但无法确认的项保持 unknown，绝不重放。queued 表示已排队，Launcher 会在当前工作安全结束后自动执行，必要时在下次启动继续，不代表已完成；rejected/busy 表示本次恢复未发布，可重新预览并经审批重试；查询继续使用原 operation_id。",
 }
 
 

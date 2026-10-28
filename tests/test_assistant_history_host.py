@@ -80,6 +80,28 @@ def test_legacy_reminder_source_changes_version_when_registry_changes(tmp_path, 
     assert not dispatch.history_preview._previews
 
 
+def test_private_ledger_observation_matches_physical_source_and_does_not_grant_ownership(tmp_path, setup_preview):
+    from core.assistant_runtime.reminder_source_identity import observe_reminder_source
+    from core.infrastructure.reminder_source_mutex import trusted_reminder_source_mutex_key
+    from tests.test_assistant_reminder_source_identity import prepare
+    dispatch, _, history_host, app = make_host(tmp_path, setup_preview)
+    _, ledger = prepare(dispatch, setup_preview[1])
+    headers = {"Authorization": "Bearer private-test-token"}
+    with observe_reminder_source(dispatch, dispatch.history_preview, "registered:1", 1) as observation:
+        expected = trusted_reminder_source_mutex_key(observation)
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        endpoint = "/api/assistant/legacy-reminders/source-ledger"
+        request = {"projectId": "registered:1", "revision": 1}
+        assert client.post(endpoint, json=request).status_code == 401
+        assert client.post(endpoint, json={**request, "ledgerPath": str(ledger)}, headers=headers).status_code == 422
+        result = client.post(endpoint, json=request, headers=headers)
+        assert result.status_code == 200 and result.json()["ledgerKey"] == expected
+        assert str(ledger) not in result.text and "readyForCutover" not in result.json()
+        ledger.unlink()
+        assert client.post(endpoint, json=request, headers=headers).status_code == 409
+    assert not dispatch.history_preview._previews
+
+
 def test_private_host_import_uses_native_source_and_preview_once(tmp_path, setup_preview):
     dispatch, profile, _, app = make_host(tmp_path, setup_preview)
     request = body(dispatch)

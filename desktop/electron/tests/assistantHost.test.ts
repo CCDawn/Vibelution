@@ -51,6 +51,7 @@ function fixture(options: { stale?: boolean; noReadyFirst?: boolean; graceful?: 
       ...(options.initialMigrationControl ? { initialMigrationControlVersion: 1 } : {}) });
     if (url.endsWith("/api/assistant")) return Response.json({ assistant: { agentId: "a", directSessionId: "s", displayName: "Assistant" } });
     if (url.endsWith("/api/assistant/session")) return Response.json({ id: "s", messages: [] });
+    if (url.endsWith("/migration-barrier/status")) return Response.json({ schemaVersion: 1, state: "ready" });
     if (url.endsWith("/shutdown")) {
       if (options.graceful) active.set(currentJob, 0);
       return Response.json({ stopping: true });
@@ -64,6 +65,130 @@ function fixture(options: { stale?: boolean; noReadyFirst?: boolean; graceful?: 
 }
 
 describe("AssistantHost", () => {
+  it("retries the same migration host after a pre-spawn restart failure", async () => {
+    const { host, native, root } = fixture({ graceful: true });
+    Object.assign(native, { exitCode: vi.fn(() => 0) });
+    await host.start();
+    const admission = host.beginMigrationAdmission();
+    await admission.seal();
+    expect(await host.retireForMigration()).toBe(true);
+    const snapshot = { schemaVersion: 1 as const, revision: 0, projects: { project: root } };
+    host.prepareForMigrationRestart(snapshot, false);
+    native.spawn.mockImplementationOnce(() => { throw new Error("synthetic spawn failure"); });
+    await expect(host.startForMigration()).rejects.toThrow();
+    host.prepareForMigrationRestart(snapshot, false);
+    await expect(host.startForMigration()).resolves.toMatchObject({ state: "ready" });
+    expect(native.terminate).not.toHaveBeenCalled();
+    admission.release();
+    await host.stop();
+  });
+
+  it("keeps an unconfirmed failed restart Job until its actual exit and output drain", async () => {
+    const { host, native, root, active, fetchImpl } = fixture({ graceful: true });
+    let exited = true, drained = true;
+    Object.assign(native, { exitCode: vi.fn(() => exited ? 0 : null) });
+    native.drainStatus.mockImplementation(() => ({ complete: drained, channels: [] }));
+    await host.start();
+    const admission = host.beginMigrationAdmission();
+    await admission.seal();
+    expect(await host.retireForMigration()).toBe(true);
+    const snapshot = { schemaVersion: 1 as const, revision: 0, projects: { project: root } };
+    host.prepareForMigrationRestart(snapshot, false);
+    exited = false; drained = false;
+    fetchImpl.mockResolvedValueOnce(Response.json({ status: "invalid" }));
+    await expect(host.startForMigration()).rejects.toThrow("ASSISTANT_HEALTH_INVALID");
+    expect(() => host.prepareForMigrationRestart(snapshot, false)).toThrow("ASSISTANT_DRAIN_PENDING");
+    expect(native.terminate).not.toHaveBeenCalled();
+    const job = [...active.keys()][0];
+    active.set(job, 0); exited = true;
+    expect(() => host.prepareForMigrationRestart(snapshot, false)).toThrow("ASSISTANT_DRAIN_PENDING");
+    drained = true;
+    host.prepareForMigrationRestart(snapshot, false);
+    await expect(host.startForMigration()).resolves.toMatchObject({ state: "ready" });
+    expect(native.terminate).not.toHaveBeenCalled();
+    admission.release();
+    await host.stop();
+  });
+
+  it("keeps approvals usable while waiting and fences them only for the final proof", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    const fence = host.beginMigrationAdmission();
+    await host.start();
+    await host.request({ operation: "resolveApproval", requestId: "approval-1", decision: "accept" });
+    expect(fetchImpl.mock.calls.some(([url]) => String(url).endsWith("/approvals/decision"))).toBe(true);
+    await fence.seal();
+    const blocked = host.request({ operation: "resolveApproval", requestId: "approval-2", decision: "accept" });
+    await Promise.resolve();
+    expect(fetchImpl.mock.calls.filter(([url]) => String(url).endsWith("/approvals/decision"))).toHaveLength(1);
+    fence.release();
+    await blocked;
+    expect(fetchImpl.mock.calls.filter(([url]) => String(url).endsWith("/approvals/decision"))).toHaveLength(2);
+    await host.stop();
+  });
+
+  it("keeps the same migration Job until root exit and both output drains are confirmed", async () => {
+    const { host, native, fetchImpl, active } = fixture();
+    let exit: number | null = null;
+    let outputDrained = false;
+    Object.assign(native, { exitCode: vi.fn(() => exit) });
+    native.drainStatus.mockImplementation(() => ({ complete: outputDrained, channels: [] }));
+    await host.start();
+    const admission = host.beginMigrationAdmission();
+    await admission.seal();
+    expect(await host.retireForMigration()).toBe(false);
+    expect(native.terminate).not.toHaveBeenCalled();
+    expect(native.close).not.toHaveBeenCalled();
+    await expect(host.startForMigration()).rejects.toThrow("ASSISTANT_JOB_STILL_OWNED");
+    await expect(host.stop()).rejects.toThrow("ASSISTANT_DRAIN_PENDING");
+    expect(native.terminate).not.toHaveBeenCalled();
+    expect(native.close).not.toHaveBeenCalled();
+    const job = [...active.keys()][0];
+    active.set(job, 0);
+    expect(await host.retireForMigration()).toBe(false);
+    exit = 0;
+    expect(await host.retireForMigration()).toBe(false);
+    outputDrained = true;
+    expect(await host.retireForMigration()).toBe(true);
+    expect(native.terminate).not.toHaveBeenCalled();
+    expect(native.close).toHaveBeenCalledOnce();
+    expect(fetchImpl.mock.calls.filter(([url]) => String(url).endsWith("/shutdown"))).toHaveLength(1);
+    admission.release();
+  });
+
+  it("drains already admitted renderer calls and keeps later message identity until release", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    let finishFirst!: (response: Response) => void;
+    fetchImpl.mockImplementationOnce(async () => await new Promise<Response>(done => { finishFirst = done; }));
+    const first = host.request({ operation: "send", message: "first", requestId: "first-id" });
+    await vi.waitFor(() => expect(finishFirst).toBeTypeOf("function"));
+    const fence = host.beginMigrationAdmission();
+    const sealing = fence.seal();
+    let startReturned = false;
+    const bridgeStart = host.start().then(() => { startReturned = true; });
+    let drained = false;
+    void fence.drained.then(() => { drained = true; });
+    const message = { operation: "send" as const, message: "keep me", requestId: "original-id" };
+    const later = host.request(message);
+    message.message = "changed after admission";
+    await Promise.resolve();
+    expect(drained).toBe(false);
+    expect(startReturned).toBe(false);
+    finishFirst(Response.json({ accepted: true }));
+    await first;
+    await fence.drained;
+    await sealing;
+    expect(fetchImpl.mock.calls.filter(([url]) => String(url).endsWith("/messages"))).toHaveLength(1);
+    fence.release();
+    await bridgeStart;
+    await later;
+    const writes = fetchImpl.mock.calls.filter(([url]) => String(url).endsWith("/messages"));
+    expect(writes).toHaveLength(2);
+    expect(JSON.parse(String(writes[1][1]?.body))).toEqual({ message: "keep me", requestId: "original-id" });
+    await host.stop();
+  });
+
   it("resolves a main-only source identity and rejects stale or forged responses", async () => {
     const { host, fetchImpl } = fixture({ graceful: true });
     await host.start();
@@ -78,6 +203,10 @@ describe("AssistantHost", () => {
       return Response.json(identity);
     });
     await expect(host.resolveLegacyReminderIdentity("project", 0)).resolves.toEqual(identity);
+    fetchImpl.mockResolvedValueOnce(Response.json({ ...identity, ledgerKey: "c".repeat(64) }));
+    await expect(host.observeLegacyReminderLedger("project", 0)).resolves.toEqual({ ...identity, ledgerKey: "c".repeat(64) });
+    fetchImpl.mockResolvedValueOnce(Response.json({ ...identity, ledgerKey: "not-a-digest" }));
+    await expect(host.observeLegacyReminderLedger("project", 0)).rejects.toThrow("ASSISTANT_RESPONSE_INVALID");
     fetchImpl.mockResolvedValueOnce(Response.json({ ...identity, path: "forged" }));
     await expect(host.resolveLegacyReminderIdentity("project", 0)).rejects.toThrow("ASSISTANT_RESPONSE_INVALID");
     await expect(host.request({ operation: "legacy-reminders/source" } as never)).rejects.toThrow();
@@ -119,6 +248,22 @@ describe("AssistantHost", () => {
     fetchImpl.mockResolvedValueOnce(Response.json({ schemaVersion: 1, eventKey: "wrong", state: "reserved", attemptToken: token }));
     await expect(host.reserveLegacyReminder(request)).rejects.toThrow("ASSISTANT_RESPONSE_INVALID");
     await expect(host.request({ operation: "legacy-reminders/reserve" } as never)).rejects.toThrow();
+    await host.stop();
+  });
+  it("reads a validated private full legacy reminder inventory", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    const row = { day: "20261028", eventKey: "legacy:" + "a".repeat(64), state: "pending", channel: null, inflight: true };
+    fetchImpl.mockImplementationOnce(async (url, options) => {
+      expect(String(url)).toMatch(/\/legacy-reminders\/inventory$/);
+      expect(JSON.parse(String(options?.body))).toEqual({});
+      expect(new Headers(options?.headers).get("authorization")).toMatch(/^Bearer /);
+      return Response.json({ schemaVersion: 1, records: [row], senders: 1 });
+    });
+    expect(await host.inventoryLegacyReminders()).toEqual({ schemaVersion: 1, records: [row], senders: 1 });
+    fetchImpl.mockResolvedValueOnce(Response.json({ schemaVersion: 1, records: [{ ...row, channel: "system_notification" }], senders: 1 }));
+    await expect(host.inventoryLegacyReminders()).rejects.toThrow("ASSISTANT_RESPONSE_INVALID");
+    await expect(host.request({ operation: "legacy-reminders/inventory" } as never)).rejects.toThrow();
     await host.stop();
   });
   it("confirms a main-only initial migration binding and drains an aborted prepare", async () => {

@@ -282,13 +282,14 @@ describe("Electron main Launcher IPC facade", () => {
     expect(lifecycleBody).toContain("已打开工作台窗口。");
 
     const branchStart = mainSource.indexOf("async function orchestrateBranchInstanceLifecycle");
-    const branchBody = mainSource.slice(branchStart, branchStart + 4200);
+    const branchBody = mainSource.slice(branchStart, mainSource.indexOf("function supersededBranchLifecycleResult", branchStart));
     expect(branchBody).toContain("launcherLifecycleSupervisor.beginIntent");
     expect(branchBody).toContain("launcherLifecycleSupervisor.bindCommand");
     expect(branchBody).toContain("lease,");
     expect(branchBody).toContain("isCurrent:");
     expect(branchBody).toContain("claimReady:");
     expect(branchBody).toContain("completeReady:");
+    expect(branchBody).toContain("launcherLifecycleSupervisor.trackObservation(instanceId");
     expect(branchBody).toContain("AbortSignal.any([signal, intentLease.signal])");
     expect(branchBody).toContain("signal: lifecycleSignal");
   });
@@ -477,7 +478,7 @@ describe("Electron main Launcher IPC facade", () => {
   });
 
   it("preserves restart provenance through isolated branch retirement", () => {
-    const branchStart = mainSource.indexOf("async function orchestrateBranchInstanceLifecycle");
+    const branchStart = mainSource.indexOf("async function orchestrateBranchInstanceLifecycleImpl");
     const branchEnd = mainSource.indexOf("async function", branchStart + 1);
     const branchBody = mainSource.slice(branchStart, branchEnd);
     expect(branchBody).toContain('provenance: LauncherLifecycleProvenance = "operator"');
@@ -486,7 +487,7 @@ describe("Electron main Launcher IPC facade", () => {
       'interruptActiveWork: provenance === "operator-restart" || (operation === "restart" && provenance === "operator")'
     );
 
-    const slotStart = mainSource.indexOf("async function applyPendingProjectSlot");
+    const slotStart = mainSource.indexOf("async function applyPendingProjectSlotImpl");
     const slotEnd = mainSource.indexOf("async function", slotStart + 1);
     const slotBody = mainSource.slice(slotStart, slotEnd);
     expect(slotBody).toContain("}, provenance);");

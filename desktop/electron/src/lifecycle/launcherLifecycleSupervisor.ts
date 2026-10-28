@@ -1,4 +1,5 @@
 import { PythonJsonBridgeError } from "../process/pythonJsonBridge.js";
+import { ExecutionDrain } from "./executionDrain.js";
 
 export type LauncherDesiredState = "open" | "closed";
 
@@ -94,6 +95,25 @@ export class LauncherLifecycleSupervisor {
   private readonly slots = new Map<string, LifecycleSlot>();
   private readonly generations = new Map<string, number>();
   private readonly mutationTails = new Map<string, Promise<void>>();
+  private readonly executions = new Map<string, ExecutionDrain>();
+
+  private executionTracker(instanceId: string): ExecutionDrain {
+    const id = instanceId.trim();
+    if (!id) throw new Error("launcher lifecycle instance id is required");
+    let tracker = this.executions.get(id);
+    if (!tracker) { tracker = new ExecutionDrain(); this.executions.set(id, tracker); }
+    return tracker;
+  }
+
+  /** Drain enrolled work; callers must separately prevent new work. */
+  captureExecutionDrain(instanceId: string): Promise<void> {
+    return this.executionTracker(instanceId).capture();
+  }
+
+  /** Track detached readiness/window work without changing its result. */
+  trackObservation<T>(instanceId: string, work: () => Promise<T>): Promise<T> {
+    return this.executionTracker(instanceId).track(work);
+  }
 
   /** Read-only admission fence; clearing a slot never erases its generation. */
   intentGeneration(instanceId: string): number {
@@ -284,7 +304,15 @@ export class LauncherLifecycleSupervisor {
     };
   }
 
-  async executeMutation<T>(input: {
+  executeMutation<T>(input: {
+    lease: LauncherLifecycleLease;
+    mutate: (lease: LauncherLifecycleLease) => Promise<T>;
+    reconcile: (lease: LauncherLifecycleLease) => Promise<void>;
+  }): Promise<LifecycleMutationResult<T>> {
+    return this.executionTracker(input.lease.instanceId).track(() => this.executeTrackedMutation(input));
+  }
+
+  private async executeTrackedMutation<T>(input: {
     lease: LauncherLifecycleLease;
     mutate: (lease: LauncherLifecycleLease) => Promise<T>;
     reconcile: (lease: LauncherLifecycleLease) => Promise<void>;

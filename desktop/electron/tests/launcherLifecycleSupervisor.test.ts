@@ -20,6 +20,51 @@ function bind(
 }
 
 describe("LauncherLifecycleSupervisor", () => {
+  it("drains child work enrolled by an already tracked operation", async () => {
+    const supervisor = new LauncherLifecycleSupervisor();
+    let releaseParent!: () => void;
+    let releaseChild!: () => void;
+    const parentWork = new Promise<void>(resolve => { releaseParent = resolve; });
+    const childWork = new Promise<void>(resolve => { releaseChild = resolve; });
+    let child!: Promise<void>;
+    const parent = supervisor.trackObservation("main", async () => {
+      await parentWork;
+      child = supervisor.trackObservation("main", () => childWork);
+    });
+    let drained = false;
+    const drain = supervisor.captureExecutionDrain("main").then(() => { drained = true; });
+    releaseParent();
+    await parent;
+    await Promise.resolve();
+    expect(drained).toBe(false);
+    releaseChild();
+    await child;
+    await drain;
+    expect(drained).toBe(true);
+  });
+  it("captures actual mutation and detached observation after cancellation without blocking a newer intent", async () => {
+    const supervisor = new LauncherLifecycleSupervisor();
+    let finishMutation!: () => void;
+    let finishObservation!: () => void;
+    const mutationWork = new Promise<void>(resolve => { finishMutation = resolve; });
+    const observationWork = new Promise<void>(resolve => { finishObservation = resolve; });
+    const start = supervisor.beginIntent({ instanceId: "isolated", operation: "start", desiredState: "open" });
+    const mutation = supervisor.executeMutation({ lease: start, mutate: async () => { await mutationWork; return true; }, reconcile: async () => {} });
+    await Promise.resolve();
+    const observation = supervisor.trackObservation("isolated", () => observationWork);
+    const stop = supervisor.beginIntent({ instanceId: "isolated", operation: "stop", desiredState: "closed" });
+    const newer = supervisor.executeMutation({ lease: stop, mutate: async () => true, reconcile: async () => {} });
+    expect((await newer).outcome).toBe("committed");
+    let drained = false;
+    const drain = supervisor.captureExecutionDrain("isolated").then(() => { drained = true; });
+    finishMutation();
+    await mutation;
+    expect(drained).toBe(false);
+    finishObservation();
+    await observation;
+    await drain;
+    expect(drained).toBe(true);
+  });
   it("retains a read-only generation fence after an intent slot is cleared", () => {
     const supervisor = new LauncherLifecycleSupervisor();
     expect(supervisor.intentGeneration("main")).toBe(0);

@@ -41,22 +41,27 @@ function fixture() {
   const projectSnapshot = { schemaVersion: 1, revision: 0, projects: {} };
   let pendingStart: Promise<unknown> = Promise.resolve();
   const projects = {
+    snapshot: vi.fn(() => projectSnapshot),
     start: vi.fn(async (createHost: (snapshot: unknown) => typeof host) => { const result = createHost(projectSnapshot); pendingStart = result.start(); await pendingStart; return result; }),
     stop: vi.fn(async () => { await pendingStart.catch(() => undefined); await host.stop(); }),
   };
   const context: Record<string, any> = {
     launcherAssistantStarting: null, launcherAssistantStopping: null, launcherAssistantStartupAbort: new AbortController(),
-    launcherAssistantHost: null, launcherAssistantWindow: null, showAssistantStartupWait: null, dismissAssistantStartupWait: null, assistantMigrationPending: false,
+    launcherAssistantHost: null, launcherAssistantWindow: null, showAssistantStartupWait: null, dismissAssistantStartupWait: null, flushAssistantMigrationFeedback: null, assistantMigrationPending: false,
     launcherAssistantProjects: null, stopLauncherAssistantReminders: null, pendingAssistantOpen: null,
+    projectAdmission: null, legacyReminderAdmission: null,
     launcherAssistantExitReady: false, desktopTray: null, assistantOnly: true, shutdownApproved: false,
     app: { isPackaged: true, quit: vi.fn(), on: vi.fn(), getPath: vi.fn(() => "private") }, join, console,
     AbortController, setTimeout, clearTimeout, dialog: { showMessageBox: vi.fn(async () => ({ response: 0 })) },
+    BrowserWindow: { getAllWindows: vi.fn(() => []) },
     desktopCliArgs: { hiddenPresentation: true }, desktopPythonPath: vi.fn(() => ""),
     desktopEnvironment: () => ({ VIBELUTION_CONFIG_PATH: "private-config" }),
     desktopLaunchSettings: () => ({ configPath: "private-config" }),
     process: { env: {}, resourcesPath: "resources" },
     createAssistantProjectMainControl: vi.fn(() => async () => ({ state: "unknown" })),
     createAssistantAppearanceMainControl: vi.fn(() => async () => ({ code: "unavailable" })),
+    existingMainLineCommandQueueForProject: vi.fn(() => undefined),
+    withProjectAdmission: async (_root: () => string, work: () => Promise<unknown>) => work(),
     resolveAssistantResources: vi.fn(async () => ({ sourceRoot: "sealed-source", pythonPath: "sealed-pythonw",
       pythonArguments: ["-I"], env: { VIBELUTION_CONFIG_PATH: "private-config" } })),
     readProjectId: vi.fn(() => "p"), instanceIdForProject: vi.fn(() => "i"),
@@ -105,7 +110,7 @@ function projectEntryFixture() {
     notifyDesktopTray: vi.fn(), process: { env: {}, resourcesPath: "resources" },
   });
   context.app.whenReady = vi.fn(async () => undefined);
-  const functions = ["ensureProjectControlPlane", "applyPendingProjectSlot"].map(name =>
+  const functions = ["ensureProjectControlPlane", "applyPendingProjectSlot", "applyPendingProjectSlotImpl"].map(name =>
     ast.statements.find(node => isFunctionDeclaration(node) && node.name?.text === name)?.getFullText(ast) || "").join("\n");
   runInNewContext(transpileModule(`${functions}\nglobalThis.ensureProject=typeof ensureProjectControlPlane === 'undefined' ? undefined : ensureProjectControlPlane;`, {
     compilerOptions: { target: ScriptTarget.ES2022 },
@@ -227,6 +232,21 @@ describe("resident assistant followed by an ordinary project entry", () => {
 });
 
 describe("resident assistant startup", () => {
+  it("passes an approved episodic conflict resolution through the registered project lease", async () => {
+    const { context, host, paths } = fixture();
+    const sync = vi.fn(async () => ({ state: "resolved" }));
+    Object.assign(host, { syncEpisodic: sync });
+    await context.start(paths);
+    context.launcherAssistantProjects.withHistoryImport = vi.fn(async (_id: string, work: (revision: number) => Promise<unknown>) => work(7));
+    const control = context.AssistantHost.mock.calls[0][0].mainControl;
+    const request = { action: "episodic_sync", projectId: "project:one", previewId: "a".repeat(64),
+      turnId: "turn-one", resolveSyncId: "episodic-" + "b".repeat(40), reviewToken: "c".repeat(64) };
+    const signal = new AbortController().signal;
+    await control(request, signal);
+    expect(context.launcherAssistantProjects.withHistoryImport).toHaveBeenCalledWith(request.projectId, expect.any(Function));
+    expect(sync).toHaveBeenCalledWith({ projectId: request.projectId, previewId: request.previewId,
+      turnId: request.turnId, revision: 7, signal, resolveSyncId: request.resolveSyncId, reviewToken: request.reviewToken });
+  });
   it("rejects a first assistant/deep-link launch before requesting the primary lock", () => {
     const declarations = ast.statements.filter(isVariableStatement);
     const named = (name: string) => declarations.find(statement => statement.declarationList.declarations
@@ -367,6 +387,109 @@ describe("resident assistant startup", () => {
     await starting;
     expect(host.start).toHaveBeenCalledOnce();
   });
+
+  it("enables initial migration without an environment opt-in", async () => {
+    const { context, paths } = fixture();
+    context.InitialMigrationResults = vi.fn(function () { return { get: vi.fn(async () => null) }; });
+    context.recoverInitialMigrations = vi.fn(async () => []);
+    context.verifyInitialMigrationResult = vi.fn();
+    await context.start(paths);
+    expect(context.recoverInitialMigrations).toHaveBeenCalledOnce();
+    expect(context.AssistantHost.mock.calls[0][0].initialMigrationControl).toBe(true);
+    await context.stop();
+  });
+
+  it("retries a busy migration without stopping the host, then executes and exposes the original receipt", async () => {
+    const { context, host, window, paths } = fixture();
+    const operationId = "initial-" + "a".repeat(40);
+    let visible = false;
+    window.open.mockImplementation(async (options?: { show?: boolean }) => { visible = options?.show !== false; });
+    context.BrowserWindow.getAllWindows.mockImplementation(() => [{ isDestroyed: () => false, isVisible: () => visible,
+      webContents: { getURL: () => "vibelution-launcher://launcher/launcher-assistant" } }]);
+    context.process.env.VIBELUTION_INITIAL_MIGRATION_EXPERIMENT = "1";
+    context.InitialMigrationResults = vi.fn(function () { return { get: vi.fn(async () => null) }; });
+    context.verifyInitialMigrationResult = vi.fn();
+    context.recoverInitialMigrations = vi.fn().mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ operationId, state: "completed" }]);
+    const reminders = Object.assign(vi.fn(async () => undefined), {
+      drainForMigration: vi.fn(async () => undefined), resumeAfterMigration: vi.fn(),
+    });
+    context.startAssistantReminderPump = vi.fn(() => reminders);
+    Object.assign(host, {
+      prepareInitialMigration: vi.fn(async () => true),
+      beginMigrationAdmission: vi.fn(() => ({ drained: Promise.resolve(), seal: vi.fn(async () => undefined), release: vi.fn() })),
+      migrationBarrier: vi.fn(async (operation: string) => operation === "prepare" ? "probing"
+        : operation === "release" ? "idle" : "busy"),
+      prepareForMigrationRestart: vi.fn(),
+    });
+    await context.start(paths);
+    const registry = context.launcherAssistantProjects;
+    registry.withHistoryImport = vi.fn(async (_id: string, work: (revision: number) => Promise<unknown>) => work(0));
+    registry.beginMigrationTransition = vi.fn(() => ({ drained: Promise.resolve(), release: vi.fn() }));
+    registry.retireHostForMigration = vi.fn(async () => true);
+    const control = context.AssistantHost.mock.calls[0][0].mainControl;
+    const request = { action: "initial_migration_queue", projectId: "project:one", previewId: "b".repeat(64),
+      turnId: "turn", category: "personal", operationId, deliveryId: "c".repeat(32), timeoutMs: 10000 };
+    expect((await control(request)).state).toBe("queued");
+    await vi.waitFor(() => expect(host.migrationBarrier).toHaveBeenCalledWith("release"), { timeout: 5000 });
+    expect(registry.retireHostForMigration).not.toHaveBeenCalled();
+    expect(host.stop).not.toHaveBeenCalled();
+    host.migrationBarrier.mockImplementation(async (operation: string) => operation === "prepare" ? "probing"
+      : operation === "release" ? "idle" : "ready");
+    await vi.waitFor(() => expect(context.recoverInitialMigrations).toHaveBeenCalledTimes(2), { timeout: 5000 });
+    await vi.waitFor(() => expect(host.prepareForMigrationRestart).toHaveBeenCalledOnce(), { timeout: 5000 });
+    const receipt = await control({ action: "initial_migration_receipt", projectId: request.projectId,
+      category: request.category, operationId });
+    expect(receipt).toMatchObject({ operationId, state: "completed", code: "completed" });
+    expect(host.stop).not.toHaveBeenCalled();
+    expect(context.dialog.showMessageBox).not.toHaveBeenCalled();
+    const tray = source.slice(source.indexOf("desktopTray = createDesktopTray(paths,"));
+    const open = tray.match(/openAssistant:\s*(\(\)\s*=>\s*\{[\s\S]*?\n    \}),/);
+    if (!open) throw new Error("Missing normal tray assistant action");
+    runInNewContext(`globalThis.openNormalTray = (${open[1]});`, context);
+    context.openNormalTray();
+    await vi.waitFor(() => expect(context.dialog.showMessageBox).toHaveBeenCalledWith(expect.objectContaining({
+      title: "个人助理迁移结果", detail: expect.stringContaining(operationId),
+    })));
+    await context.stop();
+  }, 15000);
+
+  it("does not retire while an already returned lifecycle command is still executing", async () => {
+    const { context, host, paths, projectSnapshot } = fixture();
+    projectSnapshot.projects = { "project:one": "fixture-project" };
+    const operationId = "initial-" + "d".repeat(40);
+    context.InitialMigrationResults = vi.fn(function () { return { get: vi.fn(async () => null) }; });
+    context.recoverInitialMigrations = vi.fn().mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ operationId, state: "completed" }]);
+    context.verifyInitialMigrationResult = vi.fn();
+    const reminders = Object.assign(vi.fn(async () => undefined), {
+      drainForMigration: vi.fn(async () => undefined), resumeAfterMigration: vi.fn(),
+    });
+    context.startAssistantReminderPump = vi.fn(() => reminders);
+    let finish!: () => void;
+    const execution = new Promise<void>(done => { finish = done; });
+    context.existingMainLineCommandQueueForProject = vi.fn(() => ({ captureExecutionDrain: () => execution }));
+    Object.assign(host, { prepareInitialMigration: vi.fn(async () => true),
+      beginMigrationAdmission: vi.fn(() => ({ drained: Promise.resolve(), seal: vi.fn(async () => undefined), release: vi.fn() })),
+      migrationBarrier: vi.fn(async (op: string) => op === "prepare" ? "probing" : op === "release" ? "idle" : "ready"),
+      prepareForMigrationRestart: vi.fn() });
+    await context.start(paths);
+    const registry = context.launcherAssistantProjects;
+    registry.snapshot = vi.fn(() => projectSnapshot);
+    registry.withHistoryImport = vi.fn(async (_id: string, work: (revision: number) => Promise<unknown>) => work(0));
+    registry.beginMigrationTransition = vi.fn(() => ({ drained: Promise.resolve(), release: vi.fn() }));
+    registry.retireHostForMigration = vi.fn(async () => true);
+    const control = context.AssistantHost.mock.calls[0][0].mainControl;
+    await control({ action: "initial_migration_queue", projectId: "project:one", previewId: "b".repeat(64),
+      turnId: "turn", category: "personal", operationId, deliveryId: "c".repeat(32), timeoutMs: 10000 });
+    await vi.waitFor(() => expect(context.existingMainLineCommandQueueForProject).toHaveBeenCalled(), { timeout: 5000 });
+    expect(registry.retireHostForMigration).not.toHaveBeenCalled();
+    expect(host.stop).not.toHaveBeenCalled();
+    finish();
+    await vi.waitFor(() => expect(registry.retireHostForMigration).toHaveBeenCalledOnce(), { timeout: 5000 });
+    await vi.waitFor(() => expect(host.prepareForMigrationRestart).toHaveBeenCalledOnce(), { timeout: 5000 });
+    await context.stop();
+  }, 15000);
 
   it("starts the host with an unknown receipt when the intent listing cannot be read", async () => {
     const { context, host, paths } = fixture();

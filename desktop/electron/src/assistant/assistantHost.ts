@@ -41,6 +41,7 @@ export type LegacyReminderSourceIdentity = {
   sourceIdentityDigest: string; authorityDigest: string;
   projectDirectory: { device: string; inode: string; birthtimeNs: string };
 };
+export type LegacyReminderLedgerObservation = LegacyReminderSourceIdentity & { ledgerKey: string };
 
 export type AssistantHostOptions = {
   profileRoot: string;
@@ -71,6 +72,7 @@ type Generation = {
   sessionId?: string;
   closed: boolean;
   projectRevision: number;
+  migrationRetirementRequested?: boolean;
 };
 
 class HostError extends Error {
@@ -132,6 +134,11 @@ export class AssistantHost {
   private starting?: Promise<AssistantHostSnapshot>;
   private startingRevision = -1;
   private stopping?: Promise<AssistantHostSnapshot>;
+  private migrationAdmission: { release: () => void; released: Promise<void>; sealed: boolean } | null = null;
+  private rendererRequests = 0;
+  private mainControlRequests = 0;
+  private mainControlUncertain = false;
+  private rendererDrainWaiters = new Set<() => void>();
   private projectSnapshot: AssistantProjectRegistrySnapshot;
   private projectsSuspended: boolean;
 
@@ -190,6 +197,15 @@ export class AssistantHost {
 
   /** Main-only: sourceKey must be derived from a verified source and PA agent. */
   async resolveLegacyReminderIdentity(projectId: string, revision: number): Promise<LegacyReminderSourceIdentity> {
+    return await this.resolveLegacyReminderObservation(projectId, revision, false) as LegacyReminderSourceIdentity;
+  }
+
+  /** A point-in-time digest, not a synchronous source or process proof. */
+  async observeLegacyReminderLedger(projectId: string, revision: number): Promise<LegacyReminderLedgerObservation> {
+    return await this.resolveLegacyReminderObservation(projectId, revision, true) as LegacyReminderLedgerObservation;
+  }
+
+  private async resolveLegacyReminderObservation(projectId: string, revision: number, ledger: boolean): Promise<LegacyReminderSourceIdentity | LegacyReminderLedgerObservation> {
     if (typeof projectId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(projectId)
       || !Number.isSafeInteger(revision) || revision < 0) throw new HostError("ASSISTANT_REQUEST_INVALID");
     const generation = this.current;
@@ -198,9 +214,9 @@ export class AssistantHost {
       && !generation.abort.signal.aborted && !this.projectsSuspended && generation.projectRevision === revision
       && this.projectSnapshot.revision === revision && this.projectSnapshot.projects[projectId] === root && Boolean(root);
     if (!current() || !generation) throw new HostError("ASSISTANT_NOT_READY");
-    const result = await this.rpc(generation, "/api/assistant/legacy-reminders/source", "POST", { projectId, revision }, REQUEST_MS, false, 8192);
+    const result = await this.rpc(generation, `/api/assistant/legacy-reminders/${ledger ? "source-ledger" : "source"}`, "POST", { projectId, revision }, REQUEST_MS, false, 8192);
     if (!current()) throw new HostError("ASSISTANT_NOT_READY");
-    const keys = ["schemaVersion", "projectId", "revision", "sourceScope", "sourceIdentityDigest", "authorityDigest", "projectDirectory"];
+    const keys = ["schemaVersion", "projectId", "revision", "sourceScope", "sourceIdentityDigest", "authorityDigest", "projectDirectory", ...(ledger ? ["ledgerKey"] : [])];
     const opaque = (value: unknown) => typeof value === "string" && /^\S{1,160}$/.test(value);
     const decimal = (value: unknown) => typeof value === "string" && /^[1-9][0-9]{0,24}$/.test(value);
     if (!object(result) || Object.keys(result).length !== keys.length || !ownKeys(result, keys)
@@ -210,6 +226,7 @@ export class AssistantHost {
       || !opaque(result.sourceScope.projectId) || !opaque(result.sourceScope.instanceId) || !opaque(result.sourceScope.agentId)
       || typeof result.sourceIdentityDigest !== "string" || !/^[a-f0-9]{64}$/.test(result.sourceIdentityDigest)
       || typeof result.authorityDigest !== "string" || !/^[a-f0-9]{64}$/.test(result.authorityDigest)
+      || (ledger && (typeof result.ledgerKey !== "string" || !/^[a-f0-9]{64}$/.test(result.ledgerKey)))
       || !object(result.projectDirectory) || Object.keys(result.projectDirectory).length !== 3
       || !ownKeys(result.projectDirectory, ["device", "inode", "birthtimeNs"])
       || !decimal(result.projectDirectory.device) || !decimal(result.projectDirectory.inode) || !decimal(result.projectDirectory.birthtimeNs))
@@ -231,6 +248,30 @@ export class AssistantHost {
   /** Main-only; call after the dispatch has stopped, never to authorize retry. */
   async abandonLegacyReminder(request: { sourceKey: string; eventId: string; attemptToken: string }): Promise<unknown> {
     return await this.legacyReminderRpc("abandon", request);
+  }
+
+  /** Private main-only full inventory. Main holds its cross-writer guard across this RPC. */
+  async inventoryLegacyReminders(): Promise<unknown> {
+    const generation = this.current;
+    if (this.view.state !== "ready" || !generation || generation.closed || generation.abort.signal.aborted)
+      throw new HostError("ASSISTANT_NOT_READY");
+    const result = await this.rpc(generation, "/api/assistant/legacy-reminders/inventory", "POST", {}, REQUEST_MS, false, MAX_RESPONSE_BYTES);
+    if (this.current !== generation || generation.closed || generation.abort.signal.aborted || this.view.state !== "ready")
+      throw new HostError("ASSISTANT_NOT_READY");
+    if (!object(result) || Object.keys(result).length !== 3 || !ownKeys(result, ["schemaVersion", "records", "senders"])
+        || result.schemaVersion !== 1 || !Array.isArray(result.records) || result.records.length > 20000
+        || !Number.isSafeInteger(result.senders) || (result.senders as number) < 0 || (result.senders as number) > 20000)
+      throw new HostError("ASSISTANT_RESPONSE_INVALID");
+    for (const row of result.records) {
+      if (!object(row) || Object.keys(row).length !== 5 || !ownKeys(row, ["day", "eventKey", "state", "channel", "inflight"])
+          || typeof row.day !== "string" || !/^[0-9]{8}$/.test(row.day)
+          || typeof row.eventKey !== "string" || !/^legacy:[a-f0-9]{64}$/.test(row.eventKey)
+          || typeof row.inflight !== "boolean" || !["pending", "submitted", "opened"].includes(String(row.state))
+          || (row.state === "pending" ? row.channel !== null
+            : !["assistant_window", "system_notification", "attention_fallback"].includes(String(row.channel))))
+        throw new HostError("ASSISTANT_RESPONSE_INVALID");
+    }
+    return result;
   }
 
   private async legacyReminderRpc(operation: "reserve" | "settle" | "abandon", request: { sourceKey: string; eventId: string;
@@ -328,9 +369,23 @@ export class AssistantHost {
   }
 
   start(): Promise<AssistantHostSnapshot> {
+    if (this.migrationAdmission) {
+      if (!this.migrationAdmission.sealed && this.view.state === "ready" && this.current && !this.current.abort.signal.aborted)
+        return Promise.resolve(this.snapshot());
+      return this.migrationAdmission.released.then(() => this.start());
+    }
+    return this.startOwned(false);
+  }
+
+  /** Registry-only startup while renderer admission remains fenced. */
+  startForMigration(): Promise<AssistantHostSnapshot> {
+    return this.startOwned(true);
+  }
+
+  private startOwned(migration: boolean): Promise<AssistantHostSnapshot> {
     if (this.starting && this.startingRevision === this.revision) return this.starting;
     const revision = this.revision;
-    const operation = this.serial.then(() => this.startGeneration(revision));
+    const operation = this.serial.then(() => this.startGeneration(revision, migration));
     this.serial = operation.catch(() => undefined);
     this.starting = operation;
     this.startingRevision = revision;
@@ -346,7 +401,9 @@ export class AssistantHost {
       this.view = { state: "stopping", errorCode: null };
       const generation = this.current;
       try {
-        if (generation) await this.retire(generation, true);
+        if (generation?.migrationRetirementRequested) {
+          if (!this.finishMigrationRetirement(generation)) throw new HostError("ASSISTANT_DRAIN_PENDING");
+        } else if (generation) await this.retire(generation, true);
         this.view = { state: "stopped", errorCode: null };
       } catch (error) {
         this.view = { state: "failed", errorCode: code(error) };
@@ -362,7 +419,124 @@ export class AssistantHost {
     return operation;
   }
 
+  /**
+   * Main-only: caller must retain every producer and native-session fence from
+   * before this call until the captured Job has exited and output has drained.
+   * A missing acknowledgement or incomplete drain retains the same Job and is
+   * reported as pending. Never terminate, close, or respawn it in this path.
+   */
+  retireForMigration(): Promise<boolean> {
+    const operation = this.serial.then(async () => {
+      const generation = this.current;
+      if (!generation || generation.closed) return false;
+      if (!generation.migrationRetirementRequested) {
+        if (!this.migrationAdmission?.sealed || this.view.state !== "ready" || !generation.origin
+          || generation.abort.signal.aborted || this.mainControlUncertain) return false;
+        try {
+          const proof = await this.rpc(generation, "/api/assistant/migration-barrier/status", "GET", undefined, REQUEST_MS, false, 8192);
+          if (!object(proof) || Object.keys(proof).length !== 2 || proof.schemaVersion !== 1 || proof.state !== "ready") return false;
+        } catch { return false; }
+        if (this.mainControlUncertain) return false;
+        generation.migrationRetirementRequested = true;
+        this.view = { state: "stopping", errorCode: null };
+        generation.abort.abort();
+        try { await this.rpc(generation, "/api/assistant/shutdown", "POST", {}, 2_000, true); }
+        catch { /* A lost reply is ambiguous; retain and observe the same Job. */ }
+      }
+      return this.finishMigrationRetirement(generation);
+    });
+    this.serial = operation.catch(() => undefined);
+    return operation;
+  }
+
+  private finishMigrationRetirement(generation: Generation): boolean {
+    try {
+      if (generation.native.activeCount(generation.job) !== 0
+        || typeof generation.native.exitCode !== "function" || generation.native.exitCode(generation.job) === null
+        || !generation.native.drainStatus(generation.job).complete) return false;
+      generation.native.close(generation.job);
+      generation.closed = true;
+      generation.token = "";
+      if (this.current === generation) this.current = null;
+      this.view = { state: "stopped", errorCode: null };
+      return true;
+    } catch { return false; }
+  }
+
+  /** Rebind the same window-facing host to the latest validated registry. */
+  prepareForMigrationRestart(snapshot: AssistantProjectRegistrySnapshot, projectsSuspended: boolean): void {
+    if (this.current?.migrationRetirementRequested && !this.finishMigrationRetirement(this.current))
+      throw new HostError("ASSISTANT_DRAIN_PENDING");
+    if (!this.migrationAdmission || this.current || !["stopped", "failed"].includes(this.view.state) || typeof projectsSuspended !== "boolean")
+      throw new HostError("ASSISTANT_NOT_READY");
+    this.projectSnapshot = projectSnapshot(snapshot);
+    this.projectsSuspended = projectsSuspended;
+  }
+
+  /** Caller owns the external producer fences throughout this private probe. */
+  async migrationBarrier(operation: "prepare" | "status" | "release"): Promise<"idle" | "probing" | "ready" | "busy" | "released"> {
+    const generation = this.current;
+    if (!this.migrationAdmission?.sealed || !generation || generation.closed || generation.abort.signal.aborted
+        || this.view.state !== "ready" || (this.mainControlUncertain && operation !== "release")) throw new HostError("ASSISTANT_NOT_READY");
+    const result = await this.rpc(generation, `/api/assistant/migration-barrier/${operation}`,
+      operation === "status" ? "GET" : "POST", operation === "status" ? undefined : {}, REQUEST_MS, false, 8192);
+    if (!object(result) || Object.keys(result).length !== 2 || result.schemaVersion !== 1
+      || !["idle", "probing", "ready", "busy", "released"].includes(String(result.state)))
+      throw new HostError("ASSISTANT_RESPONSE_INVALID");
+    return result.state as "idle" | "probing" | "ready" | "busy" | "released";
+  }
+
+  /**
+   * Fence renderer commands before starting the larger migration barrier.
+   * Requests already sent are drained without replay. Requests arriving after
+   * the fence retain their original payload until release and have not yet
+   * reached the native Session. This is not proof that other producers drained.
+   */
+  beginMigrationAdmission(): { drained: Promise<void>; seal: () => Promise<void>; release: () => void } {
+    if (this.migrationAdmission || this.mainControlUncertain) throw new HostError("ASSISTANT_MIGRATION_BUSY");
+    let resolve!: () => void;
+    const released = new Promise<void>(done => { resolve = done; });
+    const admission = { released, sealed: false, release: () => {
+      if (this.migrationAdmission !== admission) return;
+      this.migrationAdmission = null;
+      resolve();
+    } };
+    this.migrationAdmission = admission;
+    const drain = () => this.rendererRequests === 0 && this.mainControlRequests === 0
+      ? Promise.resolve() : new Promise<void>(done => this.rendererDrainWaiters.add(done));
+    return { drained: drain(), seal: () => {
+      if (this.migrationAdmission !== admission) return Promise.reject(new HostError("ASSISTANT_MIGRATION_BUSY"));
+      admission.sealed = true;
+      return drain();
+    }, release: admission.release };
+  }
+
   async request(payload: AssistantHostRequest): Promise<unknown> {
+    // Capture the exact request before waiting. Only admission failures are
+    // delayed; an uncertain native response is never automatically retried.
+    const captured = structuredClone(payload);
+    while (this.migrationAdmission) {
+      const admission = this.migrationAdmission;
+      const safeWhileWaiting = ["status", "detail", "dispatches", "config", "approvals", "curation", "operatorAsset", "resolveApproval", "stop"]
+        .includes(captured.operation);
+      if (!admission.sealed && safeWhileWaiting) break;
+      await admission.released;
+    }
+    this.rendererRequests += 1;
+    try { return await this.requestNow(captured); }
+    finally {
+      this.rendererRequests -= 1;
+      this.settleMigrationAdmissionDrain();
+    }
+  }
+
+  private settleMigrationAdmissionDrain(): void {
+    if (this.rendererRequests !== 0 || this.mainControlRequests !== 0) return;
+    for (const done of this.rendererDrainWaiters) done();
+    this.rendererDrainWaiters.clear();
+  }
+
+  private async requestNow(payload: AssistantHostRequest): Promise<unknown> {
     const generation = this.current;
     if (this.view.state !== "ready" || !generation || generation.closed || generation.abort.signal.aborted) {
       throw new HostError("ASSISTANT_NOT_READY");
@@ -427,10 +601,11 @@ export class AssistantHost {
     }
   }
 
-  private async startGeneration(revision: number): Promise<AssistantHostSnapshot> {
+  private async startGeneration(revision: number, migration = false): Promise<AssistantHostSnapshot> {
     if (revision !== this.revision) throw new HostError("ASSISTANT_STOPPED");
     const previous = this.current;
     if (previous && !previous.closed) {
+      if (previous.migrationRetirementRequested) throw new HostError("ASSISTANT_JOB_STILL_OWNED");
       let active: number;
       try { active = previous.native.activeCount(previous.job); }
       catch {
@@ -528,8 +703,15 @@ export class AssistantHost {
     } catch (error) {
       let failure = code(error);
       if (generation) {
-        try { await this.retire(generation, false); }
-        catch (retirementError) { failure = code(retirementError); }
+        if (migration) {
+          // Never reclaim an uncertain failed startup by force. Retry only
+          // after this exact Job and its streams have naturally drained.
+          generation.migrationRetirementRequested = true;
+          this.finishMigrationRetirement(generation);
+        } else {
+          try { await this.retire(generation, false); }
+          catch (retirementError) { failure = code(retirementError); }
+        }
         if (this.current === generation && generation.closed) this.current = null;
       }
       this.view = { state: "failed", errorCode: failure };
@@ -720,13 +902,35 @@ export class AssistantHost {
 
   private startMainControl(generation: Generation): void {
     const onRequest = this.options.mainControl!;
+    this.mainControlUncertain = false;
     void runMainControlPump({
       signal: generation.abort.signal,
       isCurrent: () => this.current === generation && !generation.closed && this.view.state === "ready",
       invoke: (path, method, body) => this.rpc(generation, path, method, body, REQUEST_MS, false, 8_192),
-      onRequest,
+      onRequest: async (request, signal) => {
+        while (this.migrationAdmission) {
+          const admission = this.migrationAdmission;
+          const aborted = AbortSignal.any([generation.abort.signal, ...(signal ? [signal] : [])]);
+          if (aborted.aborted) throw new HostError("ASSISTANT_STOPPED");
+          await new Promise<void>((resolve, reject) => {
+            const cancel = () => { aborted.removeEventListener("abort", cancel); reject(new HostError("ASSISTANT_STOPPED")); };
+            aborted.addEventListener("abort", cancel, { once: true });
+            admission.released.then(() => { aborted.removeEventListener("abort", cancel); resolve(); });
+          });
+        }
+        if (generation.abort.signal.aborted || signal?.aborted) throw new HostError("ASSISTANT_STOPPED");
+        this.mainControlRequests += 1;
+        try { return await onRequest(request, signal); }
+        finally { this.mainControlRequests -= 1; this.settleMigrationAdmissionDrain(); }
+      },
       onFailure: () => {
         if (this.current !== generation || generation.abort.signal.aborted) return;
+        if (this.migrationAdmission) {
+          // A failed control pump is not proof that its effects drained. Keep
+          // the host and heartbeat alive; migration must remain unavailable.
+          this.mainControlUncertain = true;
+          return;
+        }
         generation.abort.abort();
         this.view = { state: "failed", errorCode: "ASSISTANT_MAIN_CONTROL_FAILED" };
         // Reuse the same serialized Job owner; never race another retirement or

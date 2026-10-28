@@ -26,7 +26,8 @@ from .migration_io import (
 
 _TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,159}\Z")
 _HASH = re.compile(r"[a-f0-9]{64}\Z")
-_BYTE_CAP = 4 * 1024 * 1024
+# Match the stable reader and native ledger observation; valid Unicode rows can exceed 4 MiB.
+_BYTE_CAP = 16 * 1024 * 1024
 _FIELDS = frozenset({"schemaVersion", "itemId", "kind", "title", "note", "status",
                      "dueAt", "createdAt", "updatedAt", "completedAt", "sourceTurnId"})
 _REQUIRED = frozenset({"schemaVersion", "itemId", "kind", "title", "status", "createdAt"})

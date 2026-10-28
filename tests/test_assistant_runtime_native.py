@@ -523,6 +523,133 @@ def test_fixed_session_continue_uses_real_snapshot_admission_and_same_request_re
     assert not sessions.load_session_chat_state(tmp_path, sid).get("queued_turns")
 
 
+def test_assistant_quiescence_rejects_concurrent_commands_without_losing_original_request(assistant_command_session, tmp_path):
+    import threading
+    from core.chat.conversation_ledger import load_conversation_events
+
+    native, sessions, sid, expected, scheduled, _ = assistant_command_session
+    before = load_conversation_events(tmp_path, sid)
+    results = []
+    draft, request_id = "保留草稿 e\u0301", "original-request-123"
+    def submit():
+        try:
+            native.submit(draft, request_id)
+        except native.AssistantSessionError as exc:
+            results.append(exc.code)
+    with native.session_quiescence():
+        thread = threading.Thread(target=submit)
+        thread.start()
+        thread.join(timeout=2)
+        assert not thread.is_alive()
+        with pytest.raises(native.AssistantSessionError, match="ASSISTANT_QUIESCING"):
+            native.continue_turn("continue-original", expected)
+        with pytest.raises(native.AssistantSessionError, match="ASSISTANT_QUIESCING"):
+            native.stop("old-turn")
+        assert native.shutdown() == {"closed": False, "code": "NATIVE_QUIESCENCE_ACTIVE"}
+        assert not native._STOP_REQUESTED.is_set()
+        assert results == ["ASSISTANT_QUIESCING"]
+        assert load_conversation_events(tmp_path, sid) == before and not scheduled
+    receipt = native.submit(draft, request_id)
+    users = [event for event in load_conversation_events(tmp_path, sid) if event.event_type == "user_message"]
+    assert users[-1].payload["content"] == draft and users[-1].correlation_id == request_id
+    assert native.submit(draft, request_id)["turnId"] == receipt["turnId"]
+    assert len(scheduled) == 1
+
+
+def test_assistant_quiescence_will_not_stop_running_or_queued_turns(assistant_command_session, tmp_path, monkeypatch):
+    from core.chat.conversation_ledger import load_conversation_events
+    from core.web.services.session.queued_turns import enqueue_session_queued_turn
+
+    native, sessions, sid, _, _, _ = assistant_command_session
+    sessions._set_session_running(sid, True)
+    try:
+        before = load_conversation_events(tmp_path, sid)
+        with pytest.raises(native.AssistantSessionError, match="ASSISTANT_QUIESCENCE_BUSY"):
+            with native.session_quiescence():
+                pytest.fail("running session entered quiescence")
+        assert sessions._is_session_running(sid)
+        assert load_conversation_events(tmp_path, sid) == before
+    finally:
+        sessions._set_session_running(sid, False)
+    # The real native queue stores and preserves the user's accepted draft.
+    monkeypatch.setattr(sessions, "_schedule_session_queued_turn_drain", lambda _: None)
+    enqueue_session_queued_turn(sid, content="queued draft", attachments=[], references=[],
+                                mental_model_enabled=None, runtime_status_enabled=None,
+                                turn_mode="chat", write_intent=None, client_submission_id="queued-original")
+    before_state = sessions.load_session_chat_state(tmp_path, sid)
+    with pytest.raises(native.AssistantSessionError, match="ASSISTANT_QUIESCENCE_BUSY"):
+        with native.session_quiescence():
+            pytest.fail("queued session entered quiescence")
+    assert sessions.load_session_chat_state(tmp_path, sid) == before_state
+
+
+@pytest.mark.anyio
+async def test_assistant_quiescence_does_not_cancel_an_external_running_dispatch(assistant_command_session, tmp_path):
+    from tests.test_assistant_runtime_dispatch import ClientProbe, adapter, start
+
+    native, _, _, _, _, _ = assistant_command_session
+    probe = ClientProbe()
+    service = adapter(tmp_path, probe)
+    receipt = await start(service)
+    assert receipt["receipt"]["status"] == "running"
+    before = service.list_dispatches()
+    # This component deliberately does not certify external dispatches as
+    # drained; the owner must fence and drain them before a real migration.
+    with native.session_quiescence():
+        assert service.list_dispatches() == before
+    assert service.list_dispatches() == before
+    assert not any(name in {"cancel", "shutdown"} for name, _ in probe.calls)
+
+
+@pytest.mark.parametrize("status", ["pending", "unknown"])
+def test_assistant_quiescence_refuses_pending_or_unknown_approval(assistant_command_session, monkeypatch, status):
+    from core.web.services.session import tool_approvals
+
+    native, _, _, _, _, _ = assistant_command_session
+    monkeypatch.setattr(tool_approvals, "list_tool_approval_requests", lambda _: [{"status": status}])
+    with pytest.raises(native.AssistantSessionError, match="ASSISTANT_QUIESCENCE_BUSY"):
+        with native.session_quiescence():
+            pytest.fail("unsettled approval entered quiescence")
+    assert not native._QUIESCING
+
+
+def test_assistant_quiescence_waits_for_command_already_in_admission(assistant_command_session, monkeypatch):
+    import threading
+
+    native, sessions, sid, _, scheduled, _ = assistant_command_session
+    admitted, release, observed = threading.Event(), threading.Event(), []
+    original_submit = sessions.submit_session_message_lightweight
+    def slow_submit(*args, **kwargs):
+        receipt = original_submit(*args, **kwargs)
+        admitted.set()
+        assert release.wait(3)
+        return receipt
+    monkeypatch.setattr(sessions, "submit_session_message_lightweight", slow_submit)
+    def acquire():
+        try:
+            with native.session_quiescence():
+                observed.append("entered")
+        except native.AssistantSessionError as exc:
+            observed.append(exc.code)
+    submitter = threading.Thread(target=lambda: native.submit("已有请求", "already-admitted"))
+    submitter.start()
+    assert admitted.wait(3)
+    barrier = threading.Thread(target=acquire)
+    barrier.start()
+    try:
+        assert not barrier.join(timeout=0.1) and barrier.is_alive()
+        release.set()
+        submitter.join(timeout=3)
+        barrier.join(timeout=3)
+        assert not submitter.is_alive() and not barrier.is_alive()
+        assert observed == ["ASSISTANT_QUIESCENCE_BUSY"]
+        assert len(scheduled) == 1 and sessions._is_session_running(sid)
+    finally:
+        release.set()
+        submitter.join(timeout=3)
+        barrier.join(timeout=3)
+
+
 @pytest.mark.parametrize("field,value", [("turnId", "stale"), ("headId", "stale"),
                                          ("ledgerSeq", 1), ("agentId", "other")])
 def test_fixed_session_continue_rejects_stale_snapshot_without_journal_or_queue_writes(assistant_command_session, tmp_path, field, value):

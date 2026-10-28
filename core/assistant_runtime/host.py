@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import secrets
+import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -50,6 +51,69 @@ def _initial_prepare_failure_code(error):
     if isinstance(error, ValueError):
         return "value_error"
     return "unexpected_error"
+
+
+class MigrationQuiescenceUnavailable(RuntimeError):
+    """No completed drain proof; keep the resident host and retry later."""
+
+
+@asynccontextmanager
+async def migration_runtime_quiescence(native, dispatch, history_control, main_control):
+    """Hold native Session, history writer, and dispatch fences together.
+
+    Caller must first fence and drain every external/main producer, including
+    reminder senders and HTTP mutation admission, and retain those fences for
+    this entire scope. This helper never itself authorizes host shutdown.
+    """
+    if dispatch is None or not callable(getattr(dispatch, "drain_fence", None)):
+        raise MigrationQuiescenceUnavailable("dispatch_unavailable")
+    session_quiescence = getattr(native, "session_quiescence", None)
+    if not callable(session_quiescence):
+        raise MigrationQuiescenceUnavailable("session_unavailable")
+    loop = asyncio.get_running_loop()
+    ready = loop.create_future()
+    release = threading.Event()
+
+    def worker():
+        try:
+            with session_quiescence():
+                lock = getattr(history_control, "_import_lock", None) if history_control is not None else None
+                if history_control is not None and (lock is None or not lock.acquire(blocking=False)):
+                    raise MigrationQuiescenceUnavailable("history_busy")
+                try:
+                    loop.call_soon_threadsafe(lambda: not ready.done() and ready.set_result(None))
+                    release.wait()
+                finally:
+                    if lock is not None:
+                        lock.release()
+            return True
+        except Exception:
+            loop.call_soon_threadsafe(lambda: not ready.done() and ready.set_exception(
+                MigrationQuiescenceUnavailable("session_busy_or_unknown")))
+            return False
+
+    owner = asyncio.create_task(asyncio.to_thread(worker))
+    try:
+        await ready
+        async with dispatch.drain_fence() as fence:
+            observation = await fence.observe()
+            blocked = None
+            if not isinstance(observation, dict) or observation.get("drained") is not True:
+                blocked = "dispatch_busy_or_unknown"
+            elif main_control is not None:
+                pending = getattr(main_control, "_pending", None)
+                tokens = getattr(main_control, "_initial_tokens", None)
+                if not isinstance(pending, dict) or pending or not isinstance(tokens, set) or any(
+                        not token._done.is_set() for token in tokens):
+                    blocked = "main_control_busy_or_unknown"
+            if blocked is None:
+                yield
+        if blocked is not None:
+            raise MigrationQuiescenceUnavailable(blocked)
+    finally:
+        release.set()
+        if not await asyncio.shield(owner):
+            raise MigrationQuiescenceUnavailable("session_release_unknown")
 
 
 class Message(BaseModel):
@@ -115,6 +179,10 @@ class LegacyReminderAttempt(LegacyReminderReservation):
 
 class LegacyReminderSettlement(LegacyReminderAttempt):
     channel: Literal["assistant_window", "system_notification", "attention_fallback"]
+
+
+class LegacyReminderInventory(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
 
 
 class LegacyReminderSource(BaseModel):
@@ -269,6 +337,10 @@ class NativeFacade:
         from . import native
         return native.shutdown()
 
+    def session_quiescence(self):
+        from . import native
+        return native.session_quiescence()
+
     def config(self):
         from core.web.services.config_service import get_config_bootstrap
         return get_config_bootstrap()
@@ -300,6 +372,31 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
         bind_retirement = getattr(main_control, "bind_preview_retirement", None)
         if callable(bind_retirement):
             bind_retirement(history_control.retire_preview)
+
+    migration = {"gate": False, "writers": 0, "changed": asyncio.Event(),
+                 "task": None, "release": None, "state": "idle", "committing": False}
+
+    async def hold_migration_barrier():
+        try:
+            while migration["writers"]:
+                migration["changed"].clear()
+                if migration["writers"]:
+                    await migration["changed"].wait()
+            async with migration_runtime_quiescence(native, dispatch, history_control, main_control):
+                if migration["release"].is_set():
+                    migration["state"] = "released"
+                    return
+                migration["state"] = "ready"
+                await migration["release"].wait()
+            migration["state"] = "released"
+        except asyncio.CancelledError:
+            migration["state"] = "busy"
+            raise
+        except Exception:
+            migration["state"] = "busy"
+        finally:
+            if not migration["committing"]:
+                migration["gate"] = False
 
     @asynccontextmanager
     async def initial_fence(turn_id=None, *, registry=False):
@@ -358,6 +455,11 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                 on_ready()
             yield
         finally:
+            barrier_task = migration["task"]
+            if barrier_task is not None and not barrier_task.done():
+                barrier_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await barrier_task
             if history_control is not None:
                 await asyncio.to_thread(history_control.close)
             # Release synchronous tool waiters before draining their native
@@ -418,7 +520,22 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
         supplied = request.headers.get("authorization", "")
         if not secrets.compare_digest(supplied, "Bearer " + token):
             return JSONResponse({"error": "launcher_auth_required"}, status_code=401)
-        return await call_next(request)
+        path = request.url.path
+        control = path.startswith("/api/assistant/migration-barrier/") or path == "/api/assistant/shutdown"
+        writing = request.method not in {"GET", "HEAD", "OPTIONS"} and not control
+        # Existing control deliveries must be able to settle normally; their
+        # native waiter remains part of the barrier until settlement finishes.
+        settling_control = path == "/api/assistant/main-control/settle"
+        if writing and migration["gate"] and not settling_control:
+            return JSONResponse({"error": "assistant_migration_wait"}, status_code=503)
+        if writing:
+            migration["writers"] += 1
+        try:
+            return await call_next(request)
+        finally:
+            if writing:
+                migration["writers"] -= 1
+                migration["changed"].set()
 
     @app.get("/health")
     def health():
@@ -482,7 +599,7 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
         try:
             result = await asyncio.get_running_loop().run_in_executor(
                 app.state.legacy_reminder_executor,
-                partial(getattr(app.state.legacy_reminder_receipts, method), payload.model_dump()))
+                partial(getattr(app.state.legacy_reminder_receipts, method), *(() if method == "inventory" else (payload.model_dump(),))))
             return JSONResponse(result, headers={"Cache-Control": "no-store"})
         except Exception:
             # The RPC result may be unknown after a committed write. Do not retry.
@@ -499,6 +616,12 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
     @app.post("/api/assistant/legacy-reminders/abandon")
     async def legacy_reminder_abandon(payload: LegacyReminderAttempt, request: Request):
         return await legacy_reminder_call("abandon", payload, request)
+
+    @app.post("/api/assistant/legacy-reminders/inventory")
+    async def legacy_reminder_inventory(payload: LegacyReminderInventory, request: Request):
+        # Electron owns the global writer barrier; the dedicated host thread
+        # must not try to acquire that same Windows mutex across this RPC.
+        return await legacy_reminder_call("inventory", payload, request)
 
     if main_control is not None:
         async def main_control_body(request):
@@ -541,8 +664,50 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
             return {"schemaVersion": 1, "accepted": accepted}
 
     if on_shutdown is not None:
+        @app.post("/api/assistant/migration-barrier/prepare")
+        async def migration_barrier_prepare(request: Request):
+            if request.query_params or migration["gate"] or migration["committing"]:
+                raise HTTPException(409, detail="Migration barrier unavailable")
+            if dispatch is None or not callable(getattr(native, "session_quiescence", None)):
+                raise HTTPException(503, detail="Migration barrier unavailable")
+            migration["gate"] = True
+            migration["state"] = "probing"
+            migration["release"] = asyncio.Event()
+            migration["task"] = asyncio.create_task(hold_migration_barrier())
+            return {"schemaVersion": 1, "state": "probing"}
+
+        @app.get("/api/assistant/migration-barrier/status")
+        async def migration_barrier_status(request: Request):
+            if request.query_params:
+                raise HTTPException(422, detail="Invalid migration barrier request")
+            return {"schemaVersion": 1, "state": migration["state"]}
+
+        @app.post("/api/assistant/migration-barrier/release")
+        async def migration_barrier_release(request: Request):
+            if request.query_params or migration["committing"]:
+                raise HTTPException(409, detail="Migration barrier unavailable")
+            task = migration["task"]
+            if task is not None and not task.done():
+                # Never cancel an observation that owns native/thread fences;
+                # wait for its actual exit before reopening HTTP admission.
+                migration["release"].set()
+                with suppress(asyncio.CancelledError):
+                    await task
+            migration["gate"] = False
+            migration["state"] = "idle"
+            migration["task"] = None
+            return {"schemaVersion": 1, "state": "idle"}
+
         @app.post("/api/assistant/shutdown")
         async def shutdown():
+            if migration["gate"]:
+                if migration["state"] != "ready":
+                    raise HTTPException(409, detail="Migration barrier not ready")
+                migration["committing"] = True
+                migration["release"].set()
+                await migration["task"]
+                if migration["state"] != "released":
+                    raise HTTPException(503, detail="Migration barrier release unknown")
             # Wake main-control long polls on their owning event loop before
             # Uvicorn starts waiting for HTTP requests to drain.
             if main_control is not None:
@@ -592,6 +757,18 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                                                  payload.projectId, payload.revision)
             except MigrationIOError:
                 raise HTTPException(409, detail="Legacy reminder source unavailable") from None
+            return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+        @app.post("/api/assistant/legacy-reminders/source-ledger")
+        async def legacy_reminder_ledger(payload: LegacyReminderSource, request: Request):
+            from .migration_io import MigrationIOError
+            if request.query_params:
+                raise HTTPException(422, detail="Invalid legacy reminder source request")
+            try:
+                result = await asyncio.to_thread(history_control.legacy_reminder_ledger,
+                                                 payload.projectId, payload.revision)
+            except (MigrationIOError, ValueError):
+                raise HTTPException(409, detail="Legacy reminder ledger unavailable") from None
             return JSONResponse(result, headers={"Cache-Control": "no-store"})
 
         if main_control is not None and getattr(main_control, "initial_migration_enabled", False):

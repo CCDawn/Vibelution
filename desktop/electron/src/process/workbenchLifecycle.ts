@@ -64,6 +64,9 @@ export type RunWorkbenchLifecycleInput = {
   fastCloseTiming?: WorkbenchCloseTiming;
   controlToken?: string;
   spawnImpl?: WorkbenchBackendSpawn;
+  /** Trusted in-process checks; not supplied by renderer payloads. */
+  beforeExecute?: () => void;
+  beforeSpawn?: () => void;
   signal?: AbortSignal;
   queue?: MainLineCommandQueue;
   /**
@@ -141,6 +144,7 @@ export async function runWorkbenchLifecycle(input: RunWorkbenchLifecycleInput): 
       if (input.signal?.aborted) {
         throw new PythonJsonBridgeError("aborted", "workbench lifecycle was aborted before spawn");
       }
+      input.beforeExecute?.();
       const startedAtMs = Date.now();
       // Chain the caller's lease signal with an execution deadline so a command
       // can never stay in flight forever: either the caller aborts, the deadline
@@ -169,6 +173,7 @@ export async function runWorkbenchLifecycle(input: RunWorkbenchLifecycleInput): 
           command,
           signal: deadline.signal,
           spawnImpl: input.spawnImpl,
+          beforeSpawn: input.beforeSpawn,
           fileExists: input.fileExists,
           readState: input.readState,
           writeState: input.writeState,

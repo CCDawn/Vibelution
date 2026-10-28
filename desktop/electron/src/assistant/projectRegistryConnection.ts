@@ -7,9 +7,11 @@ import { AssistantProjectRegistry, type AssistantProjectRegistrySnapshot, type A
 
 type ProjectHost = {
   start(): Promise<unknown>;
+  startForMigration?(): Promise<unknown>;
   stop(): Promise<unknown>;
   updateProjects(snapshot: AssistantProjectRegistrySnapshot): Promise<void>;
   suspendProjects?(): Promise<void>;
+  retireForMigration?(): Promise<boolean>;
 };
 type Inventory = { integrationRoot: string; items: Array<{ id: string; path: string; checkedOut: boolean }> };
 type DirectoryIdentity = { dev: bigint; ino: bigint; birthtimeNs: bigint };
@@ -75,6 +77,7 @@ export class AssistantProjectRegistryConnection {
   private preHostRoot: { path: string; identity: DirectoryIdentity } | null = null;
   private preHostCommitting = false;
   private preHostRevoked = false;
+  private migrationGate: { released: Promise<void>; release: () => void } | null = null;
 
   constructor(filePath: string) {
     this.registry = new AssistantProjectRegistry({ filePath });
@@ -83,6 +86,21 @@ export class AssistantProjectRegistryConnection {
   /** Trusted main callers only; both reads retain disk/physical-root validation. */
   snapshot(): AssistantProjectRegistrySnapshot { this.assertOpen(); return this.registry.snapshot(); }
   registration(projectId: string): AssistantProjectRegistration | null { this.assertOpen(); return this.registry.registration(projectId); }
+
+  /** Serialize registry observers and live-host writers around a migration. */
+  beginMigrationTransition(): { drained: Promise<void>; release: () => void } {
+    this.assertOpen();
+    if (this.migrationGate) throw new Error("ASSISTANT_MIGRATION_BUSY");
+    let resolve!: () => void;
+    const released = new Promise<void>(done => { resolve = done; });
+    const gate = { released, release: () => {
+      if (this.migrationGate !== gate) return;
+      this.migrationGate = null;
+      resolve();
+    } };
+    this.migrationGate = gate;
+    return { drained: this.enqueue(async () => { this.assertOpen(); }), release: gate.release };
+  }
 
   /** Main-only. The callback must not await another operation on this connection.
    * It must await and confirm the drain of every controlled child before returning;
@@ -188,6 +206,7 @@ export class AssistantProjectRegistryConnection {
 
   /** Main-only lease: reconciliation and retirement wait until import settles. */
   withHistoryImport<T>(projectId: string, operation: (revision: number) => Promise<T>): Promise<T> {
+    if (this.migrationGate) return this.migrationGate.released.then(() => this.withHistoryImport(projectId, operation));
     return this.enqueue(async () => {
       this.assertOpen();
       const snapshot = this.registry.snapshot();
@@ -211,17 +230,40 @@ export class AssistantProjectRegistryConnection {
     });
   }
 
-  start<T extends ProjectHost>(createHost: (snapshot: AssistantProjectRegistrySnapshot, projectsSuspended: boolean) => T): Promise<T> {
+  start<T extends ProjectHost>(createHost: (snapshot: AssistantProjectRegistrySnapshot, projectsSuspended: boolean) => T,
+    options?: { migration?: boolean }): Promise<T> {
+    if (this.migrationGate && !options?.migration) return this.migrationGate.released.then(() => this.start(createHost, options));
     return this.enqueue(async () => {
       this.assertOpen();
-      if (this.host) throw new Error("ASSISTANT_ALREADY_STARTED");
+      if (this.host && !options?.migration) throw new Error("ASSISTANT_ALREADY_STARTED");
       const { snapshot, projectsSuspended } = this.registry.startupState();
       const host = createHost(snapshot, projectsSuspended);
+      if (this.host && this.host !== host) throw new Error("ASSISTANT_ALREADY_STARTED");
       this.host = host;
-      await host.start();
+      if (options?.migration) {
+        if (!host.startForMigration) throw new Error("ASSISTANT_PROJECT_UNAVAILABLE");
+        await host.startForMigration();
+      } else await host.start();
       this.acknowledgedRevision = snapshot.revision;
       this.projectsSuspended = projectsSuspended;
       return host;
+    });
+  }
+
+  /** Main-only, after the caller has fenced and drained every host producer.
+   * A pending or ambiguous retirement retains the original host registration;
+   * pre-host writers cannot acquire a lease until the original Job has drained.
+   */
+  retireHostForMigration(): Promise<boolean> {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      const host = this.host;
+      if (!host?.retireForMigration) return false;
+      if (!await host.retireForMigration()) return false;
+      if (this.host !== host) throw new Error("ASSISTANT_PROJECT_UNAVAILABLE");
+      this.host = null;
+      this.acknowledgedRevision = -1;
+      return true;
     });
   }
 
@@ -235,6 +277,7 @@ export class AssistantProjectRegistryConnection {
       return Promise.reject(error);
     }
     if (this.preHostAbort && !this.observationUnchanged(input)) this.revokePreHost();
+    if (this.migrationGate) return this.migrationGate.released.then(() => this.reconcile(payload));
     return this.enqueue(async () => {
       this.assertOpen();
       let snapshot: AssistantProjectRegistrySnapshot;

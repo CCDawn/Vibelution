@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
+import { ExecutionDrain } from "../executionDrain.js";
 
 // Settlement may need a durable queue fingerprint before the Python daemon has
 // ever provisioned state.json. Keep this local to the actual queued object;
@@ -89,6 +90,8 @@ export type MainLineIntentSnapshot = {
 
 export type MainLineCommandQueue = {
   submit(input: MainLineSubmitInput): Promise<MainLineSubmitResult>;
+  /** Drain admitted work; new admissions require a separate fence. */
+  captureExecutionDrain?(): Promise<void>;
   snapshot(): {
     active: MainLineQueuedCommand | null;
     pending: MainLineQueuedCommand[];
@@ -175,9 +178,11 @@ export function createMainLineCommandQueue(options: {
     result: Promise<MainLineSubmitResult>;
     resolve: (result: MainLineSubmitResult) => void;
     reject: (error: unknown) => void;
+    finishTracking: () => void;
   };
 
   const now = options.now ?? Date.now;
+  const executionDrain = new ExecutionDrain();
   let active: Slot | null = null;
   const pending: Slot[] = [];
   let draining = false;
@@ -204,10 +209,12 @@ export function createMainLineCommandQueue(options: {
       commandId: command.commandId, type: command.type,
       operation: command.operation, noBrowser: command.noBrowser,
     };
-    const called = Promise.resolve().then(() => {
+    // The race may release the caller before an uncooperative callback ends.
+    // Track the underlying callback separately from the admission result.
+    const called = executionDrain.track(() => Promise.resolve().then(() => {
       input.signal?.throwIfAborted();
       return input.onCommand?.(projection);
-    });
+    }));
     if (!input.signal) return called;
     const signal = input.signal;
     let abort!: () => void;
@@ -233,11 +240,10 @@ export function createMainLineCommandQueue(options: {
 
   const execute = (input: MainLineSubmitInput, command: MainLineQueuedCommand): Promise<MainLineLifecycleResult> => {
     const admission = admissions.get(command);
-    if (!admission) return input.execute(command);
-    return admission.ready.then(() => {
+    return executionDrain.track(() => admission ? admission.ready.then(() => {
       input.signal?.throwIfAborted();
       return input.execute(command);
-    });
+    }) : input.execute(command));
   };
 
   const persist = (command: MainLineQueuedCommand): void => {
@@ -269,6 +275,8 @@ export function createMainLineCommandQueue(options: {
       const admission = admissions.get(command);
       return admission ? admission.ready.then(write) : write();
     }).catch(() => undefined);
+    // Persistence can remain in flight after command cancellation or settlement.
+    void executionDrain.track(() => intentPersistence);
     if (options.persistIntent) {
       intentPersistenceByCommand.set(command, async () => {
         let observed: Promise<unknown>;
@@ -278,12 +286,12 @@ export function createMainLineCommandQueue(options: {
         } while (observed !== intentPersistence);
       });
     }
-    const writeMarker = (): void => {
-      try { void Promise.resolve(options.writeOwnerMarker?.()).catch(() => undefined); }
-      catch { /* Owner marker is best-effort for the daemon idle skip. */ }
+    const writeMarker = (): Promise<void> => {
+      try { return Promise.resolve(options.writeOwnerMarker?.()).catch(() => undefined); }
+      catch { return Promise.resolve(); }
     };
-    if (admission) void admission.ready.then(writeMarker).catch(() => undefined);
-    else writeMarker();
+    const marker = admission ? admission.ready.then(writeMarker).catch(() => undefined) : writeMarker();
+    void executionDrain.track(() => marker);
   };
 
   const findJoinable = (type: MainLineQueueType, noBrowser: boolean): Slot | null => {
@@ -339,6 +347,7 @@ export function createMainLineCommandQueue(options: {
         next.reject(error instanceof Error ? error : new Error(String(error)));
       },
     ).finally(() => {
+      next.finishTracking();
       next.detachAbort?.();
       // An aborted command can finish after its replacement has started.
       if (active === next) {
@@ -350,6 +359,7 @@ export function createMainLineCommandQueue(options: {
   };
 
   return {
+    captureExecutionDrain: () => executionDrain.capture(),
     submit(input) {
       if (input.signal?.aborted) return Promise.reject(input.signal.reason);
       const mapped = JOINABLE_OPERATIONS[input.operation];
@@ -396,6 +406,7 @@ export function createMainLineCommandQueue(options: {
         const item = pending[index];
         if (item && supersedesPending(mapped, item.type)) {
           pending.splice(index, 1);
+          item.finishTracking();
           item.detachAbort?.();
           admissions.get(item)?.cancel(new Error("main-line lifecycle command superseded"));
           item.resolve(supersededResult(item.operation));
@@ -440,6 +451,9 @@ export function createMainLineCommandQueue(options: {
 
       let resolve!: (result: MainLineSubmitResult) => void;
       let reject!: (error: unknown) => void;
+      let finishTracking!: () => void;
+      const executionSettled = new Promise<void>(done => { finishTracking = done; });
+      void executionDrain.track(() => executionSettled);
       const result = new Promise<MainLineSubmitResult>((next, fail) => {
         resolve = next;
         reject = fail;
@@ -454,13 +468,14 @@ export function createMainLineCommandQueue(options: {
         result,
         resolve,
         reject,
+        finishTracking,
       };
       prepareAdmission(input, command);
       const abort = (): void => {
         command.detachAbort?.();
         admissions.get(command)?.cancel(input.signal?.reason ?? new Error("main-line lifecycle command aborted"));
         const index = pending.indexOf(command);
-        if (index >= 0) pending.splice(index, 1);
+        if (index >= 0) { pending.splice(index, 1); command.finishTracking(); }
         command.reject(input.signal?.reason ?? new Error("main-line lifecycle command aborted"));
         if (active === command) {
           active = null;
@@ -503,6 +518,11 @@ const projectQueues = new Map<string, {
   runtimeManagerDir: string;
   queue: MainLineCommandQueue;
 }>();
+
+/** Does not create a queue or change the existing persistence owner. */
+export function existingMainLineCommandQueueForProject(workspaceRoot: string): MainLineCommandQueue | null {
+  return projectQueues.get(canonicalQueuePath(workspaceRoot))?.queue ?? null;
+}
 
 function canonicalQueuePath(path: string): string {
   const resolvedPath = resolve(path);

@@ -190,6 +190,51 @@ def test_abandon_checks_token_and_fences_late_settlement(tmp_path):
     reopened.close()
 
 
+def test_inventory_reads_all_days_without_replaying_or_releasing_pending(tmp_path):
+    root = tmp_path / "legacy-receipts"
+    now = [NOW]
+    store = LegacyReminderReceipts(root, clock=lambda: now[0])
+    assert store.inventory() == {"schemaVersion": 1, "records": [], "senders": 0}
+    first = {"sourceKey": SOURCE, "eventId": EVENT}
+    pending = store.reserve(first)
+    now[0] += timedelta(days=1)
+    second = {"sourceKey": "b" * 64, "eventId": "affair-reminder:later:20261029"}
+    submitted = store.reserve(second)
+    store.settle({**second, "attemptToken": submitted["attemptToken"], "channel": "system_notification"})
+    result = store.inventory()
+    assert result["records"] == [
+        {"day": "20261028", "eventKey": pending["eventKey"], "state": "pending", "channel": None, "inflight": True},
+        {"day": "20261029", "eventKey": submitted["eventKey"], "state": "submitted", "channel": "system_notification", "inflight": False},
+    ]
+    store.close()
+    reopened = owner(root)
+    assert reopened.inventory()["records"] == result["records"]
+    assert reopened.reserve(first)["state"] == "pending"
+    reopened.close()
+
+
+def test_inventory_rejects_unexpected_or_missing_day_evidence(tmp_path):
+    root = tmp_path / "legacy-receipts"
+    store = owner(root)
+    store.reserve({"sourceKey": SOURCE, "eventId": EVENT})
+    store.close()
+    (root / "unexpected").mkdir()
+    reopened = owner(root)
+    with pytest.raises(ReminderReceiptError, match="inventory_invalid"):
+        reopened.inventory()
+    reopened.close()
+
+
+def test_inventory_does_not_truncate_at_pending_api_limit(tmp_path):
+    store = owner(tmp_path / "legacy-receipts")
+    for index in range(105):
+        store.reserve({"sourceKey": SOURCE, "eventId": f"affair-reminder:item-{index}:20261028"})
+    result = store.inventory()
+    assert len(result["records"]) == 105
+    assert all(row["state"] == "pending" and row["inflight"] for row in result["records"])
+    store.close()
+
+
 def test_settlement_before_abandon_cannot_be_undone(tmp_path):
     store = owner(tmp_path / "legacy-receipts")
     request = {"sourceKey": SOURCE, "eventId": EVENT}
@@ -220,6 +265,9 @@ def test_private_host_reserve_settle_and_shutdown_use_one_owned_thread(tmp_path,
         def abandon(self, request):
             calls.append(("abandon", threading.get_ident()))
             return super().abandon(request)
+        def inventory(self):
+            calls.append(("inventory", threading.get_ident()))
+            return super().inventory()
         def close(self):
             calls.append(("close", threading.get_ident()))
             super().close()
@@ -256,5 +304,13 @@ def test_private_host_reserve_settle_and_shutdown_use_one_owned_thread(tmp_path,
                                 json={**other_request, "attemptToken": other["attemptToken"]})
         assert abandoned.json()["state"] == "abandoned"
         assert client.post(path, json=other_request, headers=headers).json()["state"] == "pending"
-    assert [name for name, _ in calls] == ["init", "reserve", "reserve", "settle", "reserve", "abandon", "reserve", "close"]
+        inventory = "/api/assistant/legacy-reminders/inventory"
+        assert client.post(inventory, json={}).status_code == 401
+        assert client.post(inventory, json={"sourceKey": SOURCE}, headers=headers).status_code == 422
+        assert client.post(inventory + "?x=1", json={}, headers=headers).status_code == 422
+        assert client.post(inventory, json={}, headers={**headers, "Origin": "http://127.0.0.1"}).status_code == 403
+        evidence = client.post(inventory, json={}, headers=headers)
+        assert evidence.status_code == 200 and evidence.headers["cache-control"] == "no-store"
+        assert {row["state"] for row in evidence.json()["records"]} == {"pending", "submitted"}
+    assert [name for name, _ in calls] == ["init", "reserve", "reserve", "settle", "reserve", "abandon", "reserve", "inventory", "close"]
     assert len({thread for _, thread in calls}) == 1

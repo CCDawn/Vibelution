@@ -9,6 +9,7 @@ import { mainLineQueueOwnerPath } from "../src/lifecycle/mainLine/ownerMarker.js
 import { resolveRuntimeManagerDir } from "../src/lifecycle/projectStoragePaths.js";
 import { existsSync } from "node:fs";
 import { runWorkbenchLifecycle, type RunWorkbenchLifecycleInput } from "../src/process/workbenchLifecycle.js";
+import { ProjectAdmission } from "../src/lifecycle/projectAdmission.js";
 
 const A = "project-a:11111111-1111-4111-8111-111111111111";
 const B = "project-b:22222222-2222-4222-8222-222222222222";
@@ -33,6 +34,38 @@ function setup() {
 }
 
 describe("registered project lifecycle facade", () => {
+  it("enrolls before runtime resolution and rechecks the seal before native execution", async () => {
+    const f = setup(), wait = deferred(), entered = deferred();
+    const admission = new ProjectAdmission();
+    f.options.admission = admission;
+    f.resolveRuntime.mockImplementation(async ({ workspaceRoot }) => { entered.resolve(); await wait.promise; return f.runtime(workspaceRoot); });
+    const pending = createAssistantProjectLifecycle(f.options).dispatch({ projectId: A, operation: "start" });
+    await entered.promise;
+    const seal = admission.seal(f.a);
+    let drained = false;
+    const drain = seal.drain().then(() => { drained = true; });
+    await Promise.resolve(); expect(drained).toBe(false);
+    wait.resolve();
+    expect((await pending).accepted).toBe(false);
+    expect(f.run).not.toHaveBeenCalled();
+    await drain; expect(drained).toBe(true);
+    seal.release();
+  });
+  it("does not execute an already queued assistant start after admission is sealed", async () => {
+    const f = setup(), gate = deferred(), entered = deferred(), admission = new ProjectAdmission();
+    f.options.admission = admission;
+    const effect = vi.fn(async () => ({ schemaVersion: 1 as const, accepted: true, operation: "start" }));
+    f.options.runLifecycle = input => input.queue!.submit({ operation: input.operation, execute: effect });
+    const pending = createAssistantProjectLifecycle(f.options).dispatch({ projectId: A, operation: "start" }, {
+      onCommand: async () => { entered.resolve(); await gate.promise; },
+    });
+    await entered.promise;
+    const seal = admission.seal(f.a);
+    gate.resolve();
+    expect((await pending).accepted).toBe(false);
+    expect(effect).not.toHaveBeenCalled();
+    await seal.drain(); seal.release();
+  });
   it("binds trusted native metadata before execution and rechecks registration after the bind", async () => {
     const f = setup(), gate = deferred(), entered = deferred();
     const bind = vi.fn(async (_binding: unknown, _command: unknown) => { entered.resolve(); await gate.promise; });

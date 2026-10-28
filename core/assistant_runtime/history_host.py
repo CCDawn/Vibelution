@@ -93,6 +93,25 @@ class HistoryHost:
             finally:
                 self._preview.discard(token)
 
+    def legacy_reminder_ledger(self, project_id, revision):
+        """Return a point-in-time ledger digest for private main diagnostics.
+
+        This result is not a live verification capability or sender proof.
+        Main must independently revalidate the source before any operation.
+        """
+        from .reminder_source_identity import observe_reminder_source
+        from core.infrastructure.reminder_source_mutex import trusted_reminder_source_mutex_key
+
+        with self.guard():
+            with observe_reminder_source(self._dispatch, self._preview, project_id, revision) as observation:
+                before = self.legacy_reminder_source(project_id, revision)
+                key = trusted_reminder_source_mutex_key(observation)
+                after = self.legacy_reminder_source(project_id, revision)
+                observation._check()
+                if before != after or before["sourceScope"]["agentId"] != observation.agent_id:
+                    raise MigrationIOError("reminder_source_observation_changed")
+                return {**before, "ledgerKey": key}
+
     def _signal_sync(self, *, turn_id=None, operation_id=None, preview_id=None):
         with self._sync_signal_lock:
             current = self._sync_active

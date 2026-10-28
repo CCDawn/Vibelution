@@ -26,6 +26,9 @@ _CHANNELS = {"assistant_window", "system_notification", "attention_fallback"}
 _OWNER = "legacy-reminders-v1"
 _CAPACITY = 4096
 _MAX_OPEN_DAYS = 32
+_MAX_INVENTORY_DAYS = 4096
+_MAX_INVENTORY_RECORDS = 20000
+_EVENT_KEY = re.compile(r"legacy:[a-f0-9]{64}\Z")
 
 
 def _request(value, fields):
@@ -152,6 +155,79 @@ class LegacyReminderReceipts:
         self._owned_attempt(day, event_key, token)
         self.outstanding[day].pop(event_key)
         return {"schemaVersion": 1, "eventKey": event_key, "state": "abandoned"}
+
+    def inventory(self) -> dict:
+        """Read all historical evidence, never claiming delivery or quiescence.
+
+        The private caller must keep a global admission barrier for *all*
+        writers throughout this call and the matching Electron inventory.
+        This method does not acquire that barrier or certify other processes.
+        Missing or malformed namespaces fail closed; an absent receipt root is
+        empty only while its existing parent is pinned by this call.
+        """
+        self._check_owner()
+        records = []
+        with pinned_target_directory(self.directory.parent):
+            if not self.directory.exists() and not self.directory.is_symlink():
+                return {"schemaVersion": 1, "records": [], "senders": 0}
+            with pinned_target_directory(self.directory):
+                days = sorted(p.name for p in self.directory.iterdir())
+                if len(days) > _MAX_INVENTORY_DAYS:
+                    raise ReminderReceiptError("legacy_reminder_inventory_limit")
+                for day in days:
+                    if not re.fullmatch(r"[0-9]{8}", day):
+                        raise ReminderReceiptError("legacy_reminder_inventory_invalid")
+                    try:
+                        datetime.strptime(day, "%Y%m%d")
+                    except ValueError:
+                        raise ReminderReceiptError("legacy_reminder_inventory_invalid") from None
+                senders = 0
+                for day in days:
+                    store = self.stores.get(day)
+                    owned = store is not None
+                    if not owned:
+                        store = ReminderReceiptStore(self.directory / day, owner_id=_OWNER,
+                                                     maximum=_CAPACITY, create=False)
+                        store.__enter__()
+                    try:
+                        with store._transaction() as conn:
+                            rows = list(conn.execute("SELECT event_id,state,channel FROM reminder_receipts ORDER BY event_id"))
+                            inflight = list(conn.execute("SELECT event_id,sender_id,epoch FROM receipt_inflight"))
+                            owners = list(conn.execute("SELECT sender_id,epoch FROM receipt_senders"))
+                            if (len(rows) > _CAPACITY or len(inflight) > _CAPACITY or len(owners) > _CAPACITY
+                                    or len(records) + len(rows) > _MAX_INVENTORY_RECORDS
+                                    or senders + len(owners) > _MAX_INVENTORY_RECORDS):
+                                raise ReminderReceiptError("legacy_reminder_inventory_limit")
+                            owner_ids = set()
+                            for sender, epoch in owners:
+                                if not isinstance(sender, str) or not _TOKEN.fullmatch(sender) or epoch != 1 or sender in owner_ids:
+                                    raise ReminderReceiptError("legacy_reminder_inventory_invalid")
+                                owner_ids.add(sender)
+                            inflight_ids = set()
+                            for event_key, sender, epoch in inflight:
+                                if (not isinstance(event_key, str) or not _EVENT_KEY.fullmatch(event_key)
+                                        or event_key in inflight_ids or sender not in owner_ids or epoch != 1):
+                                    raise ReminderReceiptError("legacy_reminder_inventory_invalid")
+                                inflight_ids.add(event_key)
+                            row_ids = set()
+                            for event_key, state, channel in rows:
+                                if (not isinstance(event_key, str) or not _EVENT_KEY.fullmatch(event_key)
+                                        or event_key in row_ids or state not in {"pending", "submitted", "opened"}
+                                        or (state == "pending" and channel is not None)
+                                        or (state != "pending" and channel not in _CHANNELS)):
+                                    raise ReminderReceiptError("legacy_reminder_inventory_invalid")
+                                row_ids.add(event_key)
+                                records.append({"day": day, "eventKey": event_key, "state": state,
+                                                "channel": channel, "inflight": event_key in inflight_ids})
+                            if not inflight_ids.issubset(row_ids):
+                                raise ReminderReceiptError("legacy_reminder_inventory_invalid")
+                            senders += len(owner_ids)
+                    finally:
+                        if not owned:
+                            store.__exit__(None, None, None)
+                if sorted(p.name for p in self.directory.iterdir()) != days:
+                    raise ReminderReceiptError("legacy_reminder_inventory_changed")
+        return {"schemaVersion": 1, "records": records, "senders": senders}
 
     def close(self):
         if self.closed:

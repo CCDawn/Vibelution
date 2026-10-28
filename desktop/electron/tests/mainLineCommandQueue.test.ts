@@ -30,6 +30,83 @@ function blocked(operation: string): MainLineLifecycleResult {
 }
 
 describe("mainLineCommandQueue", () => {
+  it("waits for an aborted admission callback's actual completion", async () => {
+    const queue = createMainLineCommandQueue(), abort = new AbortController();
+    let entered!: () => void, release!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    const request = queue.submit({ operation: "start", signal: abort.signal,
+      onCommand: async () => { entered(); await pending; }, execute: async cmd => ok("start", cmd.commandId) });
+    const rejected = request.catch(() => undefined);
+    await started; abort.abort(); await rejected;
+    let drained = false;
+    const drain = queue.captureExecutionDrain!().then(() => { drained = true; });
+    await Promise.resolve(); expect(drained).toBe(false);
+    release(); await drain; expect(drained).toBe(true);
+  });
+
+  it("waits for real intent and owner-marker writes after command settlement", async () => {
+    let releaseIntent!: () => void, releaseMarker!: () => void, enteredIntent!: () => void, enteredMarker!: () => void;
+    const intent = new Promise<void>(resolve => { releaseIntent = resolve; });
+    const marker = new Promise<void>(resolve => { releaseMarker = resolve; });
+    const intentStarted = new Promise<void>(resolve => { enteredIntent = resolve; });
+    const markerStarted = new Promise<void>(resolve => { enteredMarker = resolve; });
+    const queue = createMainLineCommandQueue({ persistIntent: async () => { enteredIntent(); await intent; },
+      writeOwnerMarker: async () => { enteredMarker(); await marker; } });
+    await queue.submit({ operation: "start", execute: async cmd => ok("start", cmd.commandId) });
+    await Promise.all([intentStarted, markerStarted]);
+    let drained = false;
+    const drain = queue.captureExecutionDrain!().then(() => { drained = true; });
+    releaseIntent(); await intent; await Promise.resolve();
+    expect(drained).toBe(false);
+    releaseMarker(); await drain; expect(drained).toBe(true);
+  });
+  it("drains underlying execution after abort without delaying a subsequent command", async () => {
+    const queue = createMainLineCommandQueue();
+    const controller = new AbortController();
+    let finish!: () => void;
+    let entered!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const work = new Promise<void>(resolve => { finish = resolve; });
+    const first = queue.submit({ operation: "start", signal: controller.signal, execute: async cmd => {
+      entered(); await work; return ok("start", cmd.commandId);
+    }});
+    const rejected = first.catch(() => undefined);
+    await started;
+    controller.abort();
+    await rejected;
+    const next = await queue.submit({ operation: "stop", execute: async cmd => ok("stop", cmd.commandId) });
+    expect(next.accepted).toBe(true);
+    let drained = false;
+    const drain = queue.captureExecutionDrain!().then(() => { drained = true; });
+    await Promise.resolve();
+    expect(drained).toBe(false);
+    finish();
+    await drain;
+    expect(drained).toBe(true);
+  });
+
+  it("captures a queued command even when its execution begins after capture", async () => {
+    const queue = createMainLineCommandQueue();
+    let releaseFirst!: () => void;
+    let releaseSecond!: () => void;
+    let enteredSecond!: () => void;
+    const firstWork = new Promise<void>(resolve => { releaseFirst = resolve; });
+    const secondWork = new Promise<void>(resolve => { releaseSecond = resolve; });
+    const secondStarted = new Promise<void>(resolve => { enteredSecond = resolve; });
+    const first = queue.submit({ operation: "start", execute: async cmd => { await firstWork; return ok("start", cmd.commandId); } });
+    const second = queue.submit({ operation: "stop", execute: async cmd => { enteredSecond(); await secondWork; return ok("stop", cmd.commandId); } });
+    let drained = false;
+    const drain = queue.captureExecutionDrain!().then(() => { drained = true; });
+    releaseFirst();
+    await first;
+    await secondStarted;
+    expect(drained).toBe(false);
+    releaseSecond();
+    await second;
+    await drain;
+    expect(drained).toBe(true);
+  });
   it("records the Electron executable with the marker timestamp", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vibelution-main-line-owner-"));
     try {
@@ -178,7 +255,10 @@ describe("mainLineCommandQueue durable request admission", () => {
     await started;
     signal.abort(new Error("cancel stalled bind"));
     expect(await Promise.race([outcome, new Promise(resolve => setTimeout(() => resolve("stalled"), 30))])).toBe("cancelled");
-    release(); await active;
+    let drained = false;
+    const drain = queue.captureExecutionDrain!().then(() => { drained = true; });
+    await Promise.resolve(); expect(drained).toBe(false);
+    release(); await active; await drain;
   });
   it("waits for durable association before native intent and execution", async () => {
     let release!: () => void;

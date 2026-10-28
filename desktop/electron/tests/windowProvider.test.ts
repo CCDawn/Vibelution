@@ -429,6 +429,136 @@ describe("main Workbench open gate", () => {
 });
 
 describe("Electron window provider state", () => {
+  it("closes only the captured unready instance without touching other windows", async () => {
+    const target = new FakeWindow(291, "", 1291), other = new FakeWindow(292, "", 1292);
+    let release!: () => void;
+    const waiting = new Promise<void>(resolve => { release = resolve; });
+    const load = target.loadURL.bind(target);
+    target.loadURL = async url => { await waiting; await load(url); };
+    let created = 0;
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createWorkbenchWindow: () => created++ === 0 ? target : other,
+      listAllWindows: () => [target, other], shouldInterceptInstanceClose: () => true,
+    });
+    const opening = provider.openOrFocusInstanceWorkbench({ instanceId: "target", url: "http://127.0.0.1:8001/" });
+    const openingFailure = expect(opening).rejects.toThrow();
+    await provider.openOrFocusInstanceWorkbench({ instanceId: "other", url: "http://127.0.0.1:8002/" });
+    const row = provider.completeWorkbenchWindowInventory().find(item => item.instanceId === "target")!;
+    expect(row.ready).toBe(false);
+    const captured = provider.captureWorkbenchWindowRetirement(row)!;
+    expect(await captured.close()).toBe(true);
+    expect(captured.isClosed()).toBe(true);
+    expect(other.isDestroyed()).toBe(false);
+    release(); await openingFailure;
+  });
+
+  it("does not close a captured window after its document identity changes", async () => {
+    const window = new FakeWindow(293, "", 1293);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createWorkbenchWindow: () => window, listAllWindows: () => [window],
+    });
+    await provider.openOrFocusInstanceWorkbench({ instanceId: "target", url: "http://127.0.0.1:8001/" });
+    const captured = provider.captureWorkbenchWindowRetirement(provider.completeWorkbenchWindowInventory()[0])!;
+    window.emit("webContents:did-start-navigation", { isMainFrame: true, isSameDocument: false });
+    expect(await captured.close()).toBe(false);
+    expect(window.closeCount).toBe(0);
+    expect(window.isDestroyed()).toBe(false);
+  });
+
+  it("inventories live unready main and instance windows and never hides an unattributed window", async () => {
+    const main = new FakeWindow(201, "", 1201), branch = new FakeWindow(202, "", 1202);
+    const unknown = new FakeWindow(203, "", 1203), destroyed = new FakeWindow(204, "", 1204);
+    destroyed.destroy();
+    let release!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    const loadMain = main.loadURL.bind(main), loadBranch = branch.loadURL.bind(branch);
+    main.loadURL = async url => { await pending; await loadMain(url); };
+    branch.loadURL = async url => { await pending; await loadBranch(url); };
+    let n = 0;
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createWorkbenchWindow: () => n++ === 0 ? main : branch,
+      listAllWindows: () => [main, branch, unknown, destroyed],
+    });
+    const a = provider.openOrFocusWorkbench();
+    await vi.waitFor(() => expect(n).toBe(1));
+    const b = provider.openOrFocusInstanceWorkbench({ instanceId: "branch", url: "http://127.0.0.1:8001/" });
+    await vi.waitFor(() => expect(n).toBe(2));
+    expect(provider.completeWorkbenchWindowInventory()).toEqual([
+      expect.objectContaining({ kind: "main", instanceId: "main", windowId: 201, rendererProcessId: 1201, ready: false }),
+      expect.objectContaining({ kind: "instance", instanceId: "branch", windowId: 202, rendererProcessId: 1202, ready: false }),
+      expect.objectContaining({ kind: "unattributed", instanceId: null, windowId: 203, rendererProcessId: 1203, ready: false }),
+    ]);
+    release(); await a; await b;
+    branch.destroy();
+    expect(provider.completeWorkbenchWindowInventory().map(row => row.windowId)).toEqual([201, 203]);
+  });
+
+  it("rejects unavailable or changing window inventories instead of inferring closure", async () => {
+    const window = new FakeWindow(210, "", 1210);
+    const withoutInventory = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000");
+    expect(() => withoutInventory.completeWorkbenchWindowInventory()).toThrow("WORKBENCH_WINDOW_INVENTORY_UNAVAILABLE");
+    let calls = 0;
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createWorkbenchWindow: () => window,
+      listAllWindows: () => ++calls === 1 ? [window] : [],
+    });
+    await provider.openOrFocusWorkbench();
+    expect(() => provider.completeWorkbenchWindowInventory()).toThrow("WORKBENCH_WINDOW_INVENTORY_UNAVAILABLE");
+    calls = 0;
+    window.webContents.getOSProcessId = () => ++calls === 1 ? 1210 : 1211;
+    const changing = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      listAllWindows: () => [window],
+    });
+    expect(() => changing.completeWorkbenchWindowInventory()).toThrow("WORKBENCH_WINDOW_INVENTORY_UNAVAILABLE");
+  });
+
+  it("marks an already-ready instance unready during its next navigation", async () => {
+    const window = new FakeWindow(211, "", 1211);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createWorkbenchWindow: () => window, listAllWindows: () => [window],
+    });
+    await provider.openOrFocusInstanceWorkbench({ instanceId: "branch", url: "http://127.0.0.1:8001/" });
+    expect(provider.completeWorkbenchWindowInventory()[0]?.ready).toBe(true);
+    let release!: () => void;
+    const blocked = new Promise<void>(resolve => { release = resolve; });
+    const original = window.loadURL.bind(window);
+    window.loadURL = async url => { await blocked; await original(url); };
+    const navigating = provider.openOrFocusInstanceWorkbench({ instanceId: "branch", url: "http://127.0.0.1:8002/" });
+    expect(provider.completeWorkbenchWindowInventory()[0]?.ready).toBe(false);
+    release(); await navigating;
+    expect(provider.completeWorkbenchWindowInventory()[0]?.ready).toBe(true);
+  });
+
+  it("rejects a window destroyed during the observation", () => {
+    const window = new FakeWindow(212, "", 1212);
+    window.webContents.getURL = () => { window.destroy(); return ""; };
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      listAllWindows: () => [window],
+    });
+    expect(() => provider.completeWorkbenchWindowInventory()).toThrow("WORKBENCH_WINDOW_INVENTORY_UNAVAILABLE");
+  });
+
+  it("rechecks instance admission after navigation without presenting or destroying the owned window", async () => {
+    const branch = new FakeWindow(43, "", 4343);
+    let unblock!: () => void;
+    let entered!: () => void;
+    const navigation = new Promise<void>(resolve => { unblock = resolve; });
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const original = branch.loadURL.bind(branch);
+    branch.loadURL = async url => { entered(); await navigation; await original(url); };
+    let blocked = false;
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createWorkbenchWindow: () => branch,
+      assertInstanceOpenAllowed: () => { if (blocked) throw new Error("sealed"); },
+    });
+    const opening = provider.openOrFocusInstanceWorkbench({ instanceId: "branch", url: "http://127.0.0.1:8001/" });
+    await started; blocked = true; unblock();
+    await expect(opening).rejects.toThrow("sealed");
+    expect(branch.showCount).toBe(0);
+    expect(branch.focusCount).toBe(0);
+    expect(branch.destroyCount).toBe(0);
+    expect(provider.instanceWindowStates()).toEqual([expect.objectContaining({ instanceId: "branch", open: true })]);
+  });
   it("never revives a notification target after A to B to A or a document refresh", async () => {
     const window = new FakeWindow(41, "", 4141);
     const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {

@@ -67,10 +67,14 @@ export type ElectronWindowProviderOptions = {
   launcherContentVersion?: () => string;
   listLauncherWindows?: (launcherOrigin: string) => ElectronWindowLike[];
   listWorkbenchWindows?: (workbenchOrigin: string) => ElectronWindowLike[];
+  /** Exact current-process BrowserWindow.getAllWindows, for conservative inventory only. */
+  listAllWindows?: () => ElectronWindowLike[];
   reportState?: (state: ManagedWindowState) => void | Promise<void>;
   shouldInterceptLauncherClose?: () => boolean;
   shouldInterceptWorkbenchClose?: () => boolean;
   shouldBlockWorkbenchOpen?: () => boolean;
+  /** Trusted main-owned check, re-evaluated after navigation. */
+  assertInstanceOpenAllowed?: (instanceId: string) => void;
   shouldInterceptInstanceClose?: (instanceId: string) => boolean;
   onWorkbenchCloseRequest?: () => void | Promise<void>;
   onWorkbenchClosed?: () => void | Promise<void>;
@@ -124,19 +128,38 @@ type InstanceWorkbenchEntry = {
   readyUrl: string | null;
 };
 
+export type CompleteWorkbenchWindowObservation = {
+  kind: "main" | "instance" | "unattributed";
+  instanceId: string | null;
+  windowId: number;
+  rendererProcessId: number;
+  ready: boolean;
+};
+
+/** Bound to one actual BrowserWindow object, never just a reusable ID. */
+export type CapturedWorkbenchWindowRetirement = {
+  readonly instanceId: string;
+  readonly windowId: number;
+  isClosed(): boolean;
+  close(): Promise<boolean>;
+};
+
 export class ElectronWindowProvider {
   private workbenchCloseGeneration = 0;
   private launcherWindow: ElectronWindowLike | null = null;
   private workbenchWindow: ElectronWindowLike | null = null;
   private petWindow: ElectronWindowLike | null = null;
   private readonly instanceWindows = new Map<string, InstanceWorkbenchEntry>();
+  private readonly instanceNavigations = new Map<ElectronWindowLike, number>();
   private readonly createLauncherWindow: ElectronWindowFactory;
   private readonly createWorkbenchWindow: ElectronWindowFactory;
   private readonly createPetWindow: ElectronWindowFactory;
+  private readonly listAllWindows?: () => ElectronWindowLike[];
   private readonly reportState: (state: ManagedWindowState) => void | Promise<void>;
   private readonly shouldInterceptLauncherClose: () => boolean;
   private readonly shouldInterceptWorkbenchClose: () => boolean;
   private readonly shouldBlockWorkbenchOpen: () => boolean;
+  private readonly assertInstanceOpenAllowed: (instanceId: string) => void;
   private readonly shouldInterceptInstanceClose: (instanceId: string) => boolean;
   private readonly onWorkbenchCloseRequest: () => void | Promise<void>;
   private readonly onWorkbenchClosed: () => void | Promise<void>;
@@ -153,6 +176,7 @@ export class ElectronWindowProvider {
   private workbenchCloseAuthorized = false;
   private workbenchCloseInFlight = false;
   private readonly instanceCloseAuthorized = new Map<string, ElectronWindowLike>();
+  private readonly capturedCloseAuthorized = new WeakSet<ElectronWindowLike>();
   private readonly instanceCloseInFlight = new Set<string>();
   private launcherOpen: Promise<ManagedWindowState> | null = null;
   private readonly launcherContentVersion?: () => string;
@@ -176,10 +200,12 @@ export class ElectronWindowProvider {
     this.createPetWindow = options.createPetWindow ?? missingWindowFactory("pet");
     this.listLauncherWindows = options.listLauncherWindows ?? (() => []);
     this.listWorkbenchWindows = options.listWorkbenchWindows ?? (() => []);
+    this.listAllWindows = options.listAllWindows;
     this.reportState = options.reportState ?? (() => undefined);
     this.shouldInterceptLauncherClose = options.shouldInterceptLauncherClose ?? (() => false);
     this.shouldInterceptWorkbenchClose = options.shouldInterceptWorkbenchClose ?? (() => false);
     this.shouldBlockWorkbenchOpen = options.shouldBlockWorkbenchOpen ?? (() => false);
+    this.assertInstanceOpenAllowed = options.assertInstanceOpenAllowed ?? (() => undefined);
     this.shouldInterceptInstanceClose = options.shouldInterceptInstanceClose
       ?? (options.onInstanceCloseRequest ? (() => true) : (() => false));
     this.onWorkbenchCloseRequest = options.onWorkbenchCloseRequest ?? (() => undefined);
@@ -412,6 +438,7 @@ export class ElectronWindowProvider {
     if (!instanceId) {
       throw new Error("instance workbench requires instanceId");
     }
+    this.assertInstanceOpenAllowed(instanceId);
     let entry = this.instanceWindows.get(instanceId);
     let window = entry?.window;
     if (!window || window.isDestroyed()) {
@@ -435,6 +462,7 @@ export class ElectronWindowProvider {
 
     if (entry.readyUrl !== safeUrl) {
       window.hide();
+      this.instanceNavigations.set(window, (this.instanceNavigations.get(window) ?? 0) + 1);
       try {
         this.invalidateWorkbenchDocument(window);
         await window.loadURL(safeUrl);
@@ -446,9 +474,16 @@ export class ElectronWindowProvider {
       } catch (error: unknown) {
         this.discardInstanceWindow(instanceId, window);
         throw navigationFailure(safeUrl, error);
+      } finally {
+        const remaining = (this.instanceNavigations.get(window) ?? 1) - 1;
+        if (remaining > 0) this.instanceNavigations.set(window, remaining);
+        else this.instanceNavigations.delete(window);
       }
     }
 
+    // Navigation can settle after admission closes. Keep the owned window
+    // observable for explicit retirement; do not present or destroy it here.
+    this.assertInstanceOpenAllowed(instanceId);
     if (input.present !== false) {
       presentElectronWindow(window);
     }
@@ -801,6 +836,113 @@ export class ElectronWindowProvider {
     return states;
   }
 
+  /**
+   * Main-process observation, including live windows whose navigation has not
+   * completed. The injected enumerator must return every current-process
+   * BrowserWindow, not an origin-filtered list. Unknown windows remain
+   * unattributed; callers must not infer they are unrelated to a source.
+   *
+   * This point-in-time observation is not a cross-process inventory or a
+   * closure proof. The caller must separately hold admission closed and
+   * recheck after all asynchronous work. Inspection changes fail closed.
+   */
+  completeWorkbenchWindowInventory(): CompleteWorkbenchWindowObservation[] {
+    const fail = (): never => { throw new Error("WORKBENCH_WINDOW_INVENTORY_UNAVAILABLE"); };
+    if (!this.listAllWindows) return fail();
+    type Captured = { window: ElectronWindowLike; row: CompleteWorkbenchWindowObservation; url: string; token: object | undefined };
+    const collect = (): Captured[] => {
+      const all = this.listAllWindows!();
+      if (!Array.isArray(all) || new Set(all).size !== all.length) return fail();
+      const instances = new Map<ElectronWindowLike, InstanceWorkbenchEntry>();
+      for (const [id, entry] of this.instanceWindows) {
+        if (!entry || id !== entry.instanceId || !id || id === "main" || instances.has(entry.window)
+            || entry.window === this.workbenchWindow) return fail();
+        instances.set(entry.window, entry);
+      }
+      const alive = new Set(all.filter(window => !window.isDestroyed()));
+      for (const window of [this.workbenchWindow, ...instances.keys()]) {
+        if (window && !window.isDestroyed() && !alive.has(window)) return fail();
+      }
+      const captured: Captured[] = [], ids = new Set<number>();
+      for (const window of alive) {
+        if (window === this.launcherWindow || window === this.petWindow) continue;
+        const id = window.id, pid = window.webContents.getOSProcessId(), url = window.webContents.getURL();
+        if (window.isDestroyed() || !Number.isSafeInteger(id) || id <= 0 || ids.has(id)
+            || !Number.isSafeInteger(pid) || pid < 0 || typeof url !== "string") return fail();
+        ids.add(id);
+        const instance = instances.get(window), main = window === this.workbenchWindow;
+        const readyUrl = main ? this.workbenchReadyUrl : instance?.readyUrl ?? null;
+        const row: CompleteWorkbenchWindowObservation = {
+          kind: main ? "main" : instance ? "instance" : "unattributed",
+          instanceId: main ? "main" : instance?.instanceId ?? null,
+          windowId: id, rendererProcessId: pid,
+          ready: Boolean(readyUrl && readyUrl === url && !this.instanceNavigations.has(window)
+            && (!main || !this.workbenchNavigation)),
+        };
+        captured.push({ window, row, url, token: this.documentTokens.get(window) });
+      }
+      return captured.sort((a, b) => a.row.windowId - b.row.windowId);
+    };
+    try {
+      const first = collect(), second = collect();
+      if (first.length !== second.length || first.some((value, index) => {
+        const other = second[index];
+        return !other || value.window !== other.window || value.url !== other.url || value.token !== other.token
+          || JSON.stringify(value.row) !== JSON.stringify(other.row);
+      })) return fail();
+      return first.map(value => value.row);
+    } catch { return fail(); }
+  }
+
+  /** Capture only an already attributed, live managed window. Main must hold
+   * its source-specific admission barrier until the retirement is complete. */
+  captureWorkbenchWindowRetirement(row: CompleteWorkbenchWindowObservation): CapturedWorkbenchWindowRetirement | null {
+    try {
+      if (!row || (row.kind !== "main" && row.kind !== "instance") || !row.instanceId
+          || (row.kind === "main") !== (row.instanceId === "main")) return null;
+      const found = this.completeWorkbenchWindowInventory().find(item => item.windowId === row.windowId);
+      if (!found || JSON.stringify(found) !== JSON.stringify(row)) return null;
+      const window = row.kind === "main" ? this.workbenchWindow : this.instanceWindows.get(row.instanceId)?.window;
+      if (!window || window.isDestroyed() || window.id !== row.windowId) return null;
+      const document = this.documentTokens.get(window), url = window.webContents.getURL(), pid = window.webContents.getOSProcessId();
+      const instanceId = row.instanceId;
+      const current = () => {
+        if (window.isDestroyed()) return false;
+        const owned = row.kind === "main" ? this.workbenchWindow : this.instanceWindows.get(instanceId)?.window;
+        if (owned !== window || this.documentTokens.get(window) !== document
+            || window.webContents.getURL() !== url || window.webContents.getOSProcessId() !== pid) return false;
+        return this.completeWorkbenchWindowInventory().some(item => JSON.stringify(item) === JSON.stringify(row));
+      };
+      let closing: Promise<boolean> | null = null;
+      const close = async (): Promise<boolean> => {
+        if (window.isDestroyed()) return true;
+        if (closing) return await closing;
+        const operation = (async () => {
+          try {
+            if (!current()) return false;
+            if (row.kind === "main") this.workbenchCloseGeneration += 1;
+            this.capturedCloseAuthorized.add(window);
+            try { window.close(); } catch { /* fall back to captured object only */ }
+            if (!window.isDestroyed()) {
+              await waitForWindowClosed(window, this.hungCloseDestroyAfterMs);
+              if (!window.isDestroyed()) {
+                if (!current()) return false;
+                try { window.destroy(); } catch { return false; }
+              }
+            }
+            return window.isDestroyed();
+          } catch { return false; }
+          finally {
+            this.capturedCloseAuthorized.delete(window);
+          }
+        })();
+        closing = operation;
+        try { return await operation; } finally { if (closing === operation) closing = null; }
+      };
+      return Object.freeze({ instanceId, windowId: row.windowId, isClosed: () => window.isDestroyed(), close });
+    } catch { return null; }
+  }
+
   workbenchDialogParent(): ElectronWindowLike | null {
     if (!this.workbenchWindow || this.workbenchWindow.isDestroyed()) {
       return null;
@@ -855,6 +997,7 @@ export class ElectronWindowProvider {
       if (
         entry?.window !== window
         || this.instanceCloseAuthorized.get(instanceId) === window
+        || this.capturedCloseAuthorized.has(window)
         || !this.shouldInterceptInstanceClose(instanceId)
       ) {
         return;
@@ -959,7 +1102,7 @@ export class ElectronWindowProvider {
       this.bindWorkbenchDocument(window);
       this.interceptWorkbenchWindowOpenRequests(window);
       window.on("close", (event) => {
-        if (this.workbenchCloseAuthorized || !this.shouldInterceptWorkbenchClose()) {
+        if (this.workbenchCloseAuthorized || this.capturedCloseAuthorized.has(window) || !this.shouldInterceptWorkbenchClose()) {
           return;
         }
         preventWindowClose(event);

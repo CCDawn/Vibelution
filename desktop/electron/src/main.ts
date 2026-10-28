@@ -6,7 +6,7 @@ import { NativeNotificationLifetime } from "./notifications/nativeNotificationLi
 import { handleHumanAttentionCapabilityIpc, handleHumanAttentionIpc } from "./notifications/humanAttentionIpc.js";
 import { LegacyReminderSourceFence } from "./notifications/legacyReminderSourceFence.js";
 import { createLegacyReminderSourceResolver } from "./notifications/resolveLegacyReminderSource.js";
-import { mkdirSync, statSync, watch, writeFileSync, type FSWatcher } from "node:fs";
+import { mkdirSync, realpathSync, statSync, watch, writeFileSync, type FSWatcher } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { deflateSync } from "node:zlib";
@@ -30,7 +30,7 @@ import { InitialMigrationResults } from "./assistant/initialMigrationResults.js"
 import { verifyInitialMigrationResult } from "./assistant/initialMigrationJob.js";
 import { recoverInitialMigrations } from "./assistant/initialMigrationStartup.js";
 import { unknownAffairsSyncResult, unknownEpisodicSyncResult } from "./assistant/mainControlTransport.js";
-import { startAssistantReminderPump } from "./assistant/reminderPump.js";
+import { startAssistantReminderPump, type AssistantReminderPump } from "./assistant/reminderPump.js";
 import { AssistantProjectRegistryConnection } from "./assistant/projectRegistryConnection.js";
 import { createAssistantAppearanceMainControl } from "./assistant/appearanceMainControl.js";
 import { createAssistantProjectMainControl } from "./assistant/projectMainControl.js";
@@ -49,6 +49,8 @@ import {
   type DesktopLaunchSettings
 } from "./launch/desktopLaunchSettings.js";
 import { RuntimeSceneBridge, type RuntimeSceneElectronEvent } from "./lifecycle/runtimeSceneBridge.js";
+import { ProjectAdmission, registeredInstancesForPhysicalRoot, type ProjectAdmissionTicket, type ProjectAdmissionSeal } from "./lifecycle/projectAdmission.js";
+import { existingMainLineCommandQueueForProject } from "./lifecycle/mainLine/commandQueue.js";
 import {
   startLauncherActiveReleaseWatcher,
   type LauncherActiveReleaseWatcherHandle
@@ -354,6 +356,62 @@ const launcherStateStatSignatures = new Map<string, string>();
 const inProcessDesktopSessionStore = new InProcessDesktopSessionStore();
 const mainWorkbenchCloseStore = new MainWorkbenchCloseTransactionStore();
 const launcherLifecycleSupervisor = new LauncherLifecycleSupervisor();
+const projectAdmission = process.env.VIBELUTION_PROJECT_ADMISSION_EXPERIMENT === "1" ? new ProjectAdmission() : null;
+let experimentalAdmissionSeal: ProjectAdmissionSeal | null = null;
+
+function registeredAdmissionRoot(root: string): string {
+  const registry = launcherAssistantProjects;
+  if (!registry) throw new Error("PROJECT_ADMISSION_UNKNOWN");
+  const physical = realpathSync.native(root);
+  const canonical = process.platform === "win32" ? physical.toLowerCase() : physical;
+  const matches = Object.values(registry.snapshot().projects).filter(value => value === canonical);
+  if (matches.length !== 1) throw new Error("PROJECT_ADMISSION_UNKNOWN");
+  return canonical;
+}
+
+function instanceAdmissionRoot(instanceId: string): string {
+  if (instanceId === "main") return registeredAdmissionRoot(createDesktopPathsForApp().workspaceRoot);
+  const target = resolveIsolatedClaimTarget(launcherStateStore.projectBranchInstances(), instanceId);
+  if (!target) throw new Error("PROJECT_ADMISSION_UNKNOWN");
+  return registeredAdmissionRoot(target.projectRoot);
+}
+
+/** Enrol synchronously; unresolved source stays visible to seal until settled. */
+async function withProjectAdmission<T>(root: () => string, work: (ticket?: ProjectAdmissionTicket) => Promise<T>): Promise<T> {
+  if (!projectAdmission) return await work();
+  return await projectAdmission.run(root, work);
+}
+
+function assertProjectOpen(root: string): void { if (projectAdmission) projectAdmission.assertOpen(registeredAdmissionRoot(root)); }
+
+/** Experimental main-only observation. External executables and full exit remain unknown. */
+async function observeExperimentalProjectAdmission(projectId: string): Promise<{ state: "unknown"; readyForCutover: false }> {
+  const result = { state: "unknown", readyForCutover: false } as const;
+  if (!projectAdmission || !launcherAssistantProjects || experimentalAdmissionSeal) return result;
+  let seal: ProjectAdmissionSeal | null = null;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const registration = launcherAssistantProjects.registration(projectId);
+    if (!registration || registeredAdmissionRoot(registration.root) !== registration.root) return result;
+    seal = projectAdmission.seal(registration.root);
+    experimentalAdmissionSeal = seal;
+    const held = seal;
+    await Promise.race([(async () => {
+      await held.drain();
+      const rows = await readRegistry(instancesRegistryPath());
+      const ids = registeredInstancesForPhysicalRoot(rows.instances, registration.root);
+      if (registeredAdmissionRoot(createDesktopPathsForApp().workspaceRoot) === registration.root) ids.push("main");
+      await Promise.all([...new Set(ids)].map(id => launcherLifecycleSupervisor.captureExecutionDrain(id)));
+      await existingMainLineCommandQueueForProject(registration.root)?.captureExecutionDrain?.();
+    })(), new Promise<never>((_resolve, reject) => { timeout = setTimeout(() => reject(new Error("PROJECT_ADMISSION_UNKNOWN")), 30000); })]);
+  } catch { /* Unknown is never evidence of retirement or permission to replay. */ }
+  finally {
+    if (timeout) clearTimeout(timeout);
+    seal?.release();
+    if (experimentalAdmissionSeal === seal) experimentalAdmissionSeal = null;
+  }
+  return result;
+}
 const launcherStateStore = new LauncherStateStore(
   async () => {
     const truth = currentLauncherWindowTruth();
@@ -532,11 +590,12 @@ let legacyReminderAdmission: {
   fence: LegacyReminderSourceFence;
   resolveSource: ReturnType<typeof createLegacyReminderSourceResolver>;
 } | null = null;
-let stopLauncherAssistantReminders: (() => Promise<void>) | null = null;
+let stopLauncherAssistantReminders: AssistantReminderPump | null = null;
 let assistantOnly = desktopCliArgs.assistant === true;
 let pendingAssistantOpen: { show: boolean } | null = null;
 let showAssistantStartupWait: (() => void) | null = null;
 let dismissAssistantStartupWait: (() => void) | null = null;
+let flushAssistantMigrationFeedback: (() => void) | null = null;
 let assistantMigrationPending = false;
 
 async function requestOpenAssistantFromSecondInstance(hiddenPresentation: boolean): Promise<void> {
@@ -544,6 +603,7 @@ async function requestOpenAssistantFromSecondInstance(hiddenPresentation: boolea
   const show = !hiddenPresentation;
   if (launcherAssistantWindow) {
     await launcherAssistantWindow.open({ show });
+    if (show) flushAssistantMigrationFeedback?.();
     return;
   }
   // Ready may precede resource verification/window creation. Only remember
@@ -589,9 +649,16 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
   launcherAssistantStarting = (async () => {
     const projectConnection = new AssistantProjectRegistryConnection(join(paths.userDataRoot, "assistant", "projects.json"));
     launcherAssistantProjects = projectConnection;
+    const experimentalProjectId = process.env.VIBELUTION_PROJECT_ADMISSION_PROJECT_ID;
+    if (projectAdmission && experimentalProjectId) {
+      void observeExperimentalProjectAdmission(experimentalProjectId).then(() => {
+        console.warn("PROJECT_ADMISSION_EXPERIMENT_OUTCOME_UNKNOWN");
+      });
+    }
     const initialMigrationStates = new Map<string, "queued" | "completed" | "partial" | "unknown">();
     let initialMigrationResults: InitialMigrationResults | null = null;
     let initialMigrationRecoveryUncertain = false;
+    let scheduleInitialMigration: () => void = () => undefined;
     try {
       const directory = join(paths.userDataRoot, "assistant", "legacy-reminder-admission");
       mkdirSync(directory, { recursive: true });
@@ -604,6 +671,7 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
       console.warn("LEGACY_REMINDER_ADMISSION_UNAVAILABLE");
     }
     const projectMainControl = createAssistantProjectMainControl({
+      ...(projectAdmission ? { admission: projectAdmission } : {}),
       directory: join(paths.userDataRoot, "assistant", "lifecycle-requests"), registry: projectConnection,
       operatorConfigPath: desktopLaunchSettings().configPath,
       launch: { env: process.env, cliArgs: desktopCliArgs, resourcesRoot: process.resourcesPath, userDataRoot: app.getPath("userData") },
@@ -653,6 +721,7 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
             return { ...base, state: "rejected", code: "busy" };
           }
           if (prepared === true || (previous !== "completed" && previous !== "partial")) initialMigrationStates.set(request.operationId, prepared === true ? "queued" : "unknown");
+          if (prepared === true) setTimeout(() => scheduleInitialMigration(), 0);
           return prepared === true ? { ...base, state: "queued", code: "queued" } : { ...base, state: "unknown", code: "unknown" };
         }).catch(() => {
           const previous = initialMigrationStates.get(request.operationId);
@@ -696,12 +765,18 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
     if (shutdownApproved) return;
     let migrationPending = false;
     const migrationDialog: { current: AbortController | null } = { current: null };
-    const showMigrationWait = () => {
-      if (!migrationPending || migrationDialog.current || shutdownApproved) return;
+    const canShowMigrationFeedback = () => {
+      if (!desktopCliArgs.hiddenPresentation || pendingAssistantOpen?.show === true) return true;
+      try { return BrowserWindow.getAllWindows().some(window => !window.isDestroyed() && window.isVisible()
+        && window.webContents.getURL() === "vibelution-launcher://launcher/launcher-assistant"); }
+      catch { return false; }
+    };
+    const showMigrationWait = (explicit = false) => {
+      if (!migrationPending || migrationDialog.current || shutdownApproved || (!explicit && !canShowMigrationFeedback())) return;
       const controller = new AbortController();
       migrationDialog.current = controller;
       void dialog.showMessageBox({ type: "info", title: "个人助理正在准备",
-        message: "正在处理首次迁移，个人助理将在处理完成后打开。",
+        message: "正在等待当前工作完成并处理迁移，个人助理会自动继续。",
         detail: "也可以打开 Launcher，或退出并安全停止迁移。",
         buttons: ["继续等待", "打开 Launcher", "退出"], cancelId: 0, noLink: true, signal: controller.signal,
       }).then(({ response }) => {
@@ -715,8 +790,8 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
     showAssistantStartupWait = showMigrationWait;
     dismissAssistantStartupWait = () => migrationDialog.current?.abort();
     desktopTray ??= createAssistantTray(resources.sourceRoot, {
-      open: () => { if (launcherAssistantWindow) void launcherAssistantWindow.open().catch(() => console.warn("ASSISTANT_WINDOW_FAILED"));
-        else showMigrationWait(); },
+      open: () => { if (launcherAssistantWindow) void launcherAssistantWindow.open().then(() => flushAssistantMigrationFeedback?.()).catch(() => console.warn("ASSISTANT_WINDOW_FAILED"));
+        else showMigrationWait(true); },
       openLauncher: () => { void requestOpenLauncherFromAssistant().catch(() => {
         void dialog.showMessageBox({ type: "error", title: "Launcher 暂不可用",
           message: "未能打开项目管理，请确认选择的是可用的 Vibelution 项目目录后重试。" });
@@ -724,17 +799,13 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
       quit: () => { if (!assistantOnly) { void requestDesktopShellExit().catch(() => console.warn("ASSISTANT_STOP_FAILED")); return; }
         shutdownApproved = true; app.quit(); },
     });
-    // Keep the new cold-start writer isolated while the complete packaged
-    // migration and retirement acceptance is still being completed.
-    const initialMigrationControl = process.env.VIBELUTION_INITIAL_MIGRATION_EXPERIMENT === "1";
-    if (initialMigrationControl) {
-      migrationPending = true;
-      assistantMigrationPending = true;
-      const waitTimer = setTimeout(() => { if (!desktopCliArgs.hiddenPresentation || pendingAssistantOpen?.show) showMigrationWait(); }, 1000);
-      const profileRoot = join(paths.userDataRoot, "assistant", "profile");
-      try {
-        initialMigrationResults = new InitialMigrationResults(join(paths.userDataRoot, "assistant", "initial-migration-results"));
-        const recovered = await recoverInitialMigrations({ registry: projectConnection,
+    // Existing deployments may explicitly disable the capability. Normal
+    // startup needs no separate setting for queued migrations to progress.
+    const initialMigrationControl = process.env.VIBELUTION_INITIAL_MIGRATION_EXPERIMENT !== "0";
+    const profileRoot = join(paths.userDataRoot, "assistant", "profile");
+    const recoverQueuedMigrations = async () => {
+      if (!initialMigrationResults) throw new Error("ASSISTANT_INITIAL_MIGRATION_RECOVERY_UNAVAILABLE");
+      return await recoverInitialMigrations({ registry: projectConnection,
         results: initialMigrationResults,
         targetProfile: profileRoot, sourceConfig: desktopLaunchSettings().configPath,
         targetConfig: async (operationId, registryDigest) => join(profileRoot, `.initial-migration-models-v1-${operationId}-${registryDigest}.toml`),
@@ -743,6 +814,14 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
           runtimeRoot: join(paths.userDataRoot, "assistant", "runtime"), env: resources.env, signal: launcherAssistantStartupAbort.signal }, operationId, state),
         sourceRoot: resources.sourceRoot, pythonPath: resources.pythonPath, pythonArguments: resources.pythonArguments,
         runtimeRoot: join(paths.userDataRoot, "assistant", "runtime"), env: resources.env, signal: launcherAssistantStartupAbort.signal });
+    };
+    if (initialMigrationControl) {
+      migrationPending = true;
+      assistantMigrationPending = true;
+      const waitTimer = setTimeout(() => { if (!desktopCliArgs.hiddenPresentation || pendingAssistantOpen?.show) showMigrationWait(); }, 1000);
+      try {
+        initialMigrationResults = new InitialMigrationResults(join(paths.userDataRoot, "assistant", "initial-migration-results"));
+        const recovered = await recoverQueuedMigrations();
         for (const item of recovered) initialMigrationStates.set(item.operationId, item.state);
       } catch {
         // Listing/receipt failures leave intents unknown; no writer is replayed.
@@ -757,6 +836,142 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
         migrationDialog.current?.abort();
       }
     }
+    let migrationTimer: ReturnType<typeof setTimeout> | undefined;
+    let migrationRunning = false;
+    let migrationWarningShown = false;
+    let migrationWarningPending = false;
+    const migrationReceiptDetails: string[] = [];
+    flushAssistantMigrationFeedback = () => {
+      if (shutdownApproved || !canShowMigrationFeedback()) return;
+      showMigrationWait();
+      if (migrationWarningPending && !migrationWarningShown) {
+        migrationWarningPending = false;
+        migrationWarningShown = true;
+        void dialog.showMessageBox({ type: "warning", title: "个人助理迁移等待中",
+          message: "暂时无法确认所有工作已安全结束，迁移仍在等待。",
+          detail: "已有任务不会因为这次等待被强制停止；可以继续使用原回执查询结果。",
+          buttons: ["确定"], noLink: true }).catch(() => console.warn("ASSISTANT_MIGRATION_WARNING_FAILED"));
+      }
+      for (const detail of migrationReceiptDetails.splice(0)) {
+        void dialog.showMessageBox({ type: "info", title: "个人助理迁移结果", message: "迁移处理结果",
+          detail, buttons: ["确定"], noLink: true }).catch(() => console.warn("ASSISTANT_MIGRATION_RECEIPT_DISPLAY_FAILED"));
+      }
+    };
+    const delayMigration = () => new Promise<void>(resolve => setTimeout(resolve, 1000));
+    scheduleInitialMigration = () => {
+      if (!initialMigrationControl || initialMigrationRecoveryUncertain || shutdownApproved || migrationRunning || migrationTimer
+        || ![...initialMigrationStates.values()].includes("queued")) return;
+      migrationTimer = setTimeout(() => { migrationTimer = undefined; void runQueuedMigration(); }, 1000);
+    };
+    const runQueuedMigration = async () => {
+      const host = launcherAssistantHost;
+      const reminders = stopLauncherAssistantReminders;
+      if (!host || !reminders || shutdownApproved || migrationRunning || !initialMigrationResults) return;
+      migrationRunning = true;
+      migrationPending = true;
+      assistantMigrationPending = true;
+      const waitTimer = setTimeout(() => showMigrationWait(), 1000);
+      let admission: ReturnType<AssistantHost["beginMigrationAdmission"]> | undefined;
+      let registryGate: ReturnType<AssistantProjectRegistryConnection["beginMigrationTransition"]> | undefined;
+      let barrierAttempted = false;
+      let retired = false;
+      let reopened = false;
+      let remindersDrained = false;
+      const queuedIds = [...initialMigrationStates].filter(([, state]) => state === "queued").map(([id]) => id);
+      try {
+        await reminders.drainForMigration();
+        remindersDrained = true;
+        if (shutdownApproved) return;
+        admission = host.beginMigrationAdmission();
+        await admission.drained;
+        registryGate = projectConnection.beginMigrationTransition();
+        await registryGate.drained;
+        if (shutdownApproved) return;
+        // A lifecycle delivery can return while its native queue executor is
+        // still running. The host gate excludes new assistant submissions;
+        // inspect each already-created canonical project queue separately.
+        const queueDrains = Object.values(projectConnection.snapshot().projects).map(root => {
+          const queue = existingMainLineCommandQueueForProject(root);
+          if (!queue) return Promise.resolve();
+          if (!queue.captureExecutionDrain) throw new Error("ASSISTANT_EXECUTION_DRAIN_UNKNOWN");
+          return queue.captureExecutionDrain();
+        });
+        const queuesDrained = await Promise.race([
+          Promise.all(queueDrains).then(() => true),
+          delayMigration().then(() => false),
+        ]);
+        if (!queuesDrained || shutdownApproved) return;
+        await admission.seal();
+        if (shutdownApproved) return;
+        barrierAttempted = true;
+        await host.migrationBarrier("prepare");
+        let state = await host.migrationBarrier("status");
+        while (state === "probing" && !shutdownApproved) {
+          await delayMigration();
+          state = await host.migrationBarrier("status");
+        }
+        if (state !== "ready" || shutdownApproved) return;
+        while (!shutdownApproved && !(retired = await projectConnection.retireHostForMigration())) {
+          // A still-ready host never accepted a retirement request. Release
+          // the proof and retry later; a stopping host retains the same Job.
+          if (host.snapshot().state === "ready") return;
+          await delayMigration();
+        }
+        if (!retired || shutdownApproved) return;
+        try {
+          const recovered = await recoverQueuedMigrations();
+          const seen = new Set(recovered.map(item => item.operationId));
+          for (const item of recovered) initialMigrationStates.set(item.operationId, item.state);
+          for (const [id, status] of initialMigrationStates) if (status === "queued" && !seen.has(id)) initialMigrationStates.set(id, "unknown");
+        } catch {
+          initialMigrationRecoveryUncertain = true;
+          for (const [id, status] of initialMigrationStates) if (status === "queued") initialMigrationStates.set(id, "unknown");
+        }
+        while (!shutdownApproved && !reopened) {
+          try {
+            await projectConnection.start((snapshot, suspended) => {
+              host.prepareForMigrationRestart(snapshot, suspended);
+              return host;
+            }, { migration: true });
+            reopened = true;
+          } catch {
+            // Never create a replacement while the registry still owns an
+            // uncertain host; keep the original admission gate in place.
+            await delayMigration();
+          }
+        }
+      } catch {
+        console.warn("ASSISTANT_INITIAL_MIGRATION_WAITING");
+        if (!migrationWarningShown && !shutdownApproved) { migrationWarningPending = true; flushAssistantMigrationFeedback?.(); }
+      } finally {
+        if (!retired && barrierAttempted && !shutdownApproved) {
+          // An unavailable response is not proof that the host fence opened.
+          // Keep all other gates held until the same owner confirms release.
+          while (!shutdownApproved) {
+            try { if (await host.migrationBarrier("release") === "idle") break; }
+            catch { /* Retain the original host and producer fences. */ }
+            await delayMigration();
+          }
+        }
+        if (!shutdownApproved && (!retired || reopened)) {
+          registryGate?.release();
+          admission?.release();
+          if (remindersDrained) reminders.resumeAfterMigration();
+        }
+        clearTimeout(waitTimer);
+        migrationDialog.current?.abort();
+        migrationPending = false;
+        assistantMigrationPending = false;
+        migrationRunning = false;
+        if (reopened && !shutdownApproved && queuedIds.length) {
+          const labels = { completed: "已完成", partial: "部分完成", unknown: "结果待确认", queued: "等待中" } as const;
+          const detail = queuedIds.map(id => `${id}：${labels[initialMigrationStates.get(id) ?? "unknown"]}`).join("\n");
+          migrationReceiptDetails.push(detail);
+          flushAssistantMigrationFeedback?.();
+        }
+        scheduleInitialMigration();
+      }
+    };
     if (shutdownApproved) return;
     await new Promise<void>((windowOpened, startupFailed) => {
       void projectConnection.start((snapshot, projectsSuspended) => {
@@ -816,7 +1031,7 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
               notification.show();
             } catch { fallback(); }
           }),
-          openAssistant: () => { void launcherAssistantWindow?.open({ show: true }).catch(() => console.warn("ASSISTANT_WINDOW_FAILED")); },
+          openAssistant: () => { void launcherAssistantWindow?.open({ show: true }).then(() => flushAssistantMigrationFeedback?.()).catch(() => console.warn("ASSISTANT_WINDOW_FAILED")); },
           onError: reason => {
             console.warn(reason === "notification" ? "ASSISTANT_REMINDER_NOTIFICATION_FAILED" : "ASSISTANT_REMINDER_TRANSPORT_FAILED");
             if (!shutdownApproved) void dialog.showMessageBox({
@@ -832,7 +1047,7 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
         // remains queued ahead of every authorization update.
         const show = !desktopCliArgs.hiddenPresentation || pendingAssistantOpen?.show === true;
         pendingAssistantOpen = null;
-        void launcherAssistantWindow.open({ show }).then(windowOpened, startupFailed);
+        void launcherAssistantWindow.open({ show }).then(() => { if (show) flushAssistantMigrationFeedback?.(); windowOpened(); }, startupFailed);
         return host;
       }).catch(error => {
         console.warn("ASSISTANT_START_FAILED");
@@ -1044,9 +1259,15 @@ function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapR
       },
       shouldInterceptLauncherClose: () => !shutdownApproved,
       shouldInterceptWorkbenchClose: () => !shutdownApproved,
-      shouldBlockWorkbenchOpen: () => workbenchFailedCloseHandling || isWorkbenchStartBlockedByClose(
+      shouldBlockWorkbenchOpen: () => {
+        try { assertProjectOpen(paths.workspaceRoot); } catch { return true; }
+        return workbenchFailedCloseHandling || isWorkbenchStartBlockedByClose(
         hasBackgroundWorkbenchRetirement(paths.workspaceRoot), mainWorkbenchCloseStore.currentTransaction(),
-        pendingWorkbenchCloseAck !== null),
+        pendingWorkbenchCloseAck !== null);
+      },
+      assertInstanceOpenAllowed: instanceId => {
+        if (projectAdmission) projectAdmission.assertOpen(instanceAdmissionRoot(instanceId));
+      },
       shouldInterceptInstanceClose: () => !shutdownApproved,
       onWorkbenchCloseRequest: () =>
         requestTransactionalWorkbenchClose(paths, bootstrap).catch((error: unknown) =>
@@ -1458,6 +1679,14 @@ async function openIsolatedInstanceWorkbench(
   payload: Record<string, unknown> = {}
 ): Promise<ManagedWindowState> {
   const instanceId = typeof payload.instanceId === "string" ? payload.instanceId.trim() : "";
+  return await withProjectAdmission(() => instanceAdmissionRoot(instanceId), () => openIsolatedInstanceWorkbenchImpl(provider, payload));
+}
+
+async function openIsolatedInstanceWorkbenchImpl(
+  provider: ElectronWindowProvider,
+  payload: Record<string, unknown> = {}
+): Promise<ManagedWindowState> {
+  const instanceId = typeof payload.instanceId === "string" ? payload.instanceId.trim() : "";
   const workbenchUrl = typeof payload.workbenchUrl === "string" ? payload.workbenchUrl.trim() : "";
   const windowTitle = typeof payload.windowTitle === "string" ? payload.windowTitle.trim() : "";
   if (!instanceId || !workbenchUrl) {
@@ -1476,11 +1705,23 @@ async function openWorkbenchAtCurrentLauncherUrl(
   provider: ElectronWindowProvider,
   payload: Record<string, unknown> = {}
 ): Promise<ManagedWindowState> {
+  return await withProjectAdmission(() => registeredAdmissionRoot(paths.workspaceRoot), ticket =>
+    openWorkbenchAtCurrentLauncherUrlImpl(paths, bootstrap, provider, payload, ticket));
+}
+
+async function openWorkbenchAtCurrentLauncherUrlImpl(
+  paths: DesktopPaths,
+  bootstrap: LauncherBootstrapResult,
+  provider: ElectronWindowProvider,
+  payload: Record<string, unknown>,
+  admission?: ProjectAdmissionTicket
+): Promise<ManagedWindowState> {
   let workbenchUrl = "";
   const openCloseGeneration = workbenchCloseGeneration;
   const openController = new AbortController();
   workbenchOpenControllers.add(openController);
   const assertCurrentOpen = (): void => {
+    admission?.check();
     if (openCloseGeneration !== workbenchCloseGeneration || workbenchFailedCloseHandling
         || isWorkbenchStartBlockedByClose(hasBackgroundWorkbenchRetirement(paths.workspaceRoot),
           mainWorkbenchCloseStore.currentTransaction(), pendingWorkbenchCloseAck !== null)) {
@@ -4120,6 +4361,8 @@ ipcMain.handle(IPC_CHANNELS.controlDesktopPet, async (event, open: unknown, mode
 });
 
 ipcMain.handle(IPC_CHANNELS.openConversationFromPet, async (event, rawSessionId: unknown) => {
+  let admission: ProjectAdmissionTicket | undefined;
+  try {
   assertDesktopPetIpcSender(event);
   const fromDesktopAssistant = new URL(String(event.senderFrame?.url)).pathname === "/desktop-assistant";
   const sessionId = String(rawSessionId || "").trim();
@@ -4135,6 +4378,16 @@ ipcMain.handle(IPC_CHANNELS.openConversationFromPet, async (event, rawSessionId:
     if (!pet.open || new URL(pet.url).pathname !== "/desktop-assistant") {
       return { schemaVersion: 1, opened: false };
     }
+    if (projectAdmission) {
+      const origin = new URL(pet.url).origin;
+      const main = provider.snapshot().workbench;
+      const candidates = [
+        ...(main.open && new URL(main.url).origin === origin ? ["main"] : []),
+        ...provider.instanceWindowStates().filter(item => item.open && new URL(item.url).origin === origin).map(item => item.instanceId),
+      ];
+      if (candidates.length !== 1) throw new Error("PROJECT_ADMISSION_UNKNOWN");
+      admission = projectAdmission.enter(instanceAdmissionRoot(candidates[0]));
+    }
     const delivered = provider.focusAndSendToWorkbenchOrigin(new URL(pet.url).origin, IPC_CHANNELS.conversationNotificationOpened, {
       schemaVersion: 1,
       sessionId,
@@ -4142,7 +4395,9 @@ ipcMain.handle(IPC_CHANNELS.openConversationFromPet, async (event, rawSessionId:
     });
     return { schemaVersion: 1, opened: delivered };
   }
+  if (projectAdmission) admission = projectAdmission.enter(registeredAdmissionRoot(createDesktopPathsForApp().workspaceRoot));
   let state = await provider.focusWorkbench();
+  admission?.check();
   if (!state.open) {
     const url = currentWorkbenchUrl || launcherBootstrap?.workbenchUrl;
     if (!url) {
@@ -4155,6 +4410,7 @@ ipcMain.handle(IPC_CHANNELS.openConversationFromPet, async (event, rawSessionId:
     sessionId,
   });
   return { schemaVersion: 1, opened: state.open && delivered };
+  } finally { admission?.finish(); }
 });
 
 let activeDesktopPetWindowDrag: { senderId: number; drag: DesktopPetWindowDrag } | null = null;
@@ -4303,6 +4559,24 @@ async function orchestrateLauncherLifecycle(
   nativeColdStart = false,
   lifecycleCurrent?: () => boolean
 ): Promise<OrchestratedLifecycleResult> {
+  const execute = (ticket?: ProjectAdmissionTicket) => launcherLifecycleSupervisor.trackObservation("main", () => orchestrateLauncherLifecycleImpl(
+    operation, payload, provenance, signal, fastCloseTiming, nativeColdStart, lifecycleCurrent, ticket
+  ));
+  return ["start", "restart", "rebuild-and-start"].includes(operation.trim().toLowerCase())
+    ? withProjectAdmission(() => registeredAdmissionRoot(createDesktopPathsForApp().workspaceRoot), execute)
+    : execute();
+}
+
+async function orchestrateLauncherLifecycleImpl(
+  operation: string,
+  payload: LauncherIpcInvokePayload,
+  provenance: LauncherLifecycleProvenance = "operator",
+  signal?: AbortSignal,
+  fastCloseTiming?: WorkbenchCloseTiming,
+  nativeColdStart = false,
+  lifecycleCurrent?: () => boolean,
+  admission?: ProjectAdmissionTicket
+): Promise<OrchestratedLifecycleResult> {
   if (launcherBootstrap === null) {
     throw new Error("Launcher backend is not available.");
   }
@@ -4373,6 +4647,7 @@ async function orchestrateLauncherLifecycle(
     return { schemaVersion: 1, accepted: false, operation, code: "backend_retiring",
       message: "后台进程仍在回收，请等待 Launcher 确认停止。" };
   }
+  admission?.check();
   const begunIntent = launcherLifecycleSupervisor.beginIntentWithOptions(
     { instanceId: "main", operation: lifecycleOperation, desiredState },
     { joinInFlightRestart: stopJoinDecision.joinInFlightRestart }
@@ -4559,18 +4834,20 @@ async function orchestrateLauncherLifecycle(
     : null;
   const mutation = await launcherLifecycleSupervisor.executeMutation({
     lease: intentLease,
-    mutate: async () => await runWorkbenchLifecycle({
+    mutate: async () => { admission?.check(); return await runWorkbenchLifecycle({
       workspaceRoot: paths.workspaceRoot,
       pythonPath,
       operatorConfigPath:
         launcherBootstrap?.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
       operation: lifecycleOperation,
+      ...(admission ? { beforeExecute: () => admission.check(), beforeSpawn: () => admission.check() } : {}),
       interruptActiveWork: provenance === "operator-restart" || (operation === "restart" && provenance === "operator"),
       ...(fastCloseTiming && preconfirmedCloseAuthorization("main", payload)
         ? { fastCloseTiming, controlToken: desktopActionContext?.controlToken } : {}),
       // Never cache the earlier reuse probe: queueing can overlap source
       // changes, and a rejected reuse must revalidate before spawning.
       ensureFrontend: async ({ signal: buildSignal }) => {
+        admission?.check();
         await runWithFrontendBuildGate(
           "main",
           { operation: supervisedOperation, notify: () => updateLauncherWindowTruth() },
@@ -4578,7 +4855,7 @@ async function orchestrateLauncherLifecycle(
         );
       },
       signal: lifecycleSignal
-    }),
+    }); },
     reconcile: async () => {
       scheduleLauncherStatusCliRefresh();
     }
@@ -4616,18 +4893,19 @@ async function orchestrateLauncherLifecycle(
     && (lifecycleOperation === "start" || lifecycleOperation === "restart" || lifecycleOperation === "rebuild-and-start")
   ) {
     const provider = windowProvider;
-    if (provider !== null && result.commandId) {
+    const bootstrap = launcherBootstrap;
+    if (provider !== null && bootstrap !== null && result.commandId) {
       const readyWaitMs = lifecycleOperation === "rebuild-and-start"
         ? WORKBENCH_REBUILD_READY_WAIT_MS
         : WORKBENCH_START_READY_WAIT_MS;
-      void openWorkbenchAfterLifecycleReady(
+      void launcherLifecycleSupervisor.trackObservation("main", () => openWorkbenchAfterLifecycleReady(
         paths,
-        launcherBootstrap,
+        bootstrap,
         provider,
         lease,
         readyWaitMs,
         preMutationBackendIdentity
-      ).catch((error: unknown) => {
+      )).catch((error: unknown) => {
         if (!lease.signal.aborted) {
           console.warn(error instanceof Error ? error.message : String(error));
         }
@@ -5094,6 +5372,7 @@ async function runIsolatedRegistryMutation(input: {
   signal?: AbortSignal;
   isCurrent?: () => boolean;
   interruptActiveWork?: boolean;
+  admission?: ProjectAdmissionTicket;
 }): Promise<OrchestratedBranchInstanceResult> {
   if (input.operation === "observe-error" || input.operation === "observe-ready") {
     throw new Error("isolated observe must use instanceRegistryStore, not the Python bridge");
@@ -5102,6 +5381,8 @@ async function runIsolatedRegistryMutation(input: {
   const target = resolveIsolatedClaimTarget(payload, input.instanceId);
 
   if (input.operation === "start" || input.operation === "restart") {
+    if (input.admission && !target) throw new Error("PROJECT_ADMISSION_UNKNOWN");
+    input.admission?.check(target?.projectRoot);
     if (input.operation === "start" && target) {
       const inspectReuse = () => inspectIsolatedStartReuse({
         target, pythonPath: input.pythonPath, signal: input.signal
@@ -5147,6 +5428,7 @@ async function runIsolatedRegistryMutation(input: {
         })
       );
       input.signal?.throwIfAborted();
+      input.admission?.check(target.projectRoot);
       const claimed = await prepareIsolatedStart({
         instanceId: input.instanceId,
         branchInstances: payload,
@@ -5171,6 +5453,15 @@ async function runIsolatedRegistryMutation(input: {
       const port = Number(claimed.entry.port || target.preferredBackend || 0);
       const controlPort = Number(claimed.entry.controlPort || target.preferredControl || 0);
       const dataHome = String(claimed.entry.dataHome || "").trim() || resolveDataHomeForProject(target.projectRoot);
+      try { input.admission?.check(target.projectRoot); }
+      catch (error) {
+        const failed = await upsert(instancesRegistryPath(), input.instanceId, {
+          status: "failed", phase: "failed", desiredState: "closed",
+          failureMessage: "Project admission closed before backend spawn."
+        }, Number(claimed.entry.generation || 0));
+        if (!failed.applied) throw new Error("PROJECT_ADMISSION_CLAIM_UNCERTAIN");
+        throw error;
+      }
       const spawned = spawnWorkbenchBackend({
         workspaceRoot: target.projectRoot,
         scriptRoot: target.projectRoot,
@@ -5372,6 +5663,22 @@ async function orchestrateBranchInstanceLifecycle(
   provenance: LauncherLifecycleProvenance = "operator",
   signal?: AbortSignal
 ): Promise<OrchestratedBranchInstanceResult> {
+  const body = payload.init?.body;
+  const instanceId = typeof body === "object" && body !== null ? String((body as Record<string, unknown>).instanceId ?? "").trim() : "";
+  if (!instanceId) return orchestrateBranchInstanceLifecycleImpl(operation, payload, provenance, signal);
+  const execute = (ticket?: ProjectAdmissionTicket) => launcherLifecycleSupervisor.trackObservation(instanceId,
+    () => orchestrateBranchInstanceLifecycleImpl(operation, payload, provenance, signal, ticket));
+  return ["start", "restart", "rebuild-and-start"].includes(operation.trim().toLowerCase())
+    ? withProjectAdmission(() => instanceAdmissionRoot(instanceId), execute) : execute();
+}
+
+async function orchestrateBranchInstanceLifecycleImpl(
+  operation: string,
+  payload: LauncherIpcInvokePayload,
+  provenance: LauncherLifecycleProvenance = "operator",
+  signal?: AbortSignal,
+  admission?: ProjectAdmissionTicket
+): Promise<OrchestratedBranchInstanceResult> {
   if (launcherBootstrap === null) {
     throw new Error("Launcher backend is not available.");
   }
@@ -5403,6 +5710,7 @@ async function orchestrateBranchInstanceLifecycle(
   signal?.throwIfAborted();
   const supervisedOperation = normalizeSupervisedLifecycleOperation(operation);
   const desiredState = desiredStateForLifecycleOperation(supervisedOperation);
+  admission?.check();
   const intentLease = launcherLifecycleSupervisor.beginIntent({
     instanceId,
     operation: supervisedOperation,
@@ -5424,6 +5732,7 @@ async function orchestrateBranchInstanceLifecycle(
       signal: lifecycleSignal,
       isCurrent: () => launcherLifecycleSupervisor.isCurrent(intentLease),
       interruptActiveWork: provenance === "operator-restart" || (operation === "restart" && provenance === "operator")
+      , admission
     }),
     reconcile: async () => {
       scheduleLauncherStatusCliRefresh();
@@ -5455,7 +5764,7 @@ async function orchestrateBranchInstanceLifecycle(
     if (result.port && result.port > 0 && result.commandId) {
       const url = workbenchLoopbackUrl(result.port);
       const provider = windowProvider;
-      void superviseIsolatedInstanceStart({
+      void launcherLifecycleSupervisor.trackObservation(instanceId, () => superviseIsolatedInstanceStart({
         instanceId,
         url,
         lease,
@@ -5554,7 +5863,7 @@ async function orchestrateBranchInstanceLifecycle(
             expectedGeneration: lease.generation
           });
         }
-      }).catch((error: unknown) => {
+      })).catch((error: unknown) => {
         console.warn(error instanceof Error ? error.message : String(error));
       });
     }
@@ -5966,6 +6275,20 @@ async function applyPendingProjectSlot(
   provenance: LauncherLifecycleProvenance = "operator",
   options: { hiddenPresentation?: boolean; launchRequestId?: string; workspaceRoot?: string } = {}
 ): Promise<void> {
+  const operation = lifecycleCommand.trim().toLowerCase();
+  if (["stop", "force-stop", "shutdown", "close"].includes(operation))
+    return await applyPendingProjectSlotImpl(projectRoot, lifecycleCommand, provenance, options);
+  return await withProjectAdmission(() => registeredAdmissionRoot(projectRoot.trim()), ticket =>
+    applyPendingProjectSlotImpl(projectRoot, lifecycleCommand, provenance, options, ticket));
+}
+
+async function applyPendingProjectSlotImpl(
+  projectRoot: string,
+  lifecycleCommand = "",
+  provenance: LauncherLifecycleProvenance = "operator",
+  options: { hiddenPresentation?: boolean; launchRequestId?: string; workspaceRoot?: string } = {},
+  admission?: ProjectAdmissionTicket
+): Promise<void> {
   const hiddenPresentation = options.hiddenPresentation === true;
   const wanted = projectRoot.trim();
   if (!wanted) {
@@ -6081,6 +6404,7 @@ async function applyPendingProjectSlot(
     if (!url) {
       throw new Error(`工作区已匹配但没有可打开的地址：${plan.instanceId}`);
     }
+    admission?.check();
     if (windowAction === "instance") {
       await provider.openOrFocusInstanceWorkbench({
         instanceId: plan.instanceId,
@@ -6216,7 +6540,7 @@ async function bootstrapProjectControlPlane(paths: DesktopPaths, allowShellRefre
   desktopTray?.destroy();
   desktopTray = createDesktopTray(paths, {
     openAssistant: () => {
-      if (launcherAssistantWindow) void launcherAssistantWindow.open().catch(() => console.warn("ASSISTANT_WINDOW_FAILED"));
+      if (launcherAssistantWindow) void launcherAssistantWindow.open().then(() => flushAssistantMigrationFeedback?.()).catch(() => console.warn("ASSISTANT_WINDOW_FAILED"));
       else showAssistantStartupWait?.();
     },
     openLauncher: () => {

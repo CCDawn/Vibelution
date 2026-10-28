@@ -27,7 +27,7 @@ def encode(rows):
     (encode([item(status="deleted")]), "affairs_row_invalid"),
     (encode([item(deleted=True)]), "affairs_row_invalid"),
     (b"\n" * 2049, "affairs_row_limit"),
-    (b"x" * (4 * 1024 * 1024 + 1), "affairs_byte_limit"),
+    (b"x" * (16 * 1024 * 1024 + 1), "affairs_byte_limit"),
     (encode([item(title="SECRET", dueAt="SECRET")]), "affairs_row_invalid"),
 ], ids=["malformed", "nonobject", "duplicate-id", "unsupported-status", "unknown-field",
         "too-many-lines", "too-many-bytes", "invalid-date"])
@@ -36,6 +36,14 @@ def test_strict_bounded_rows_reject_without_content(raw, code):
         _parse_rows(raw)
     assert str(caught.value) == code
     assert "SECRET" not in str(caught.value)
+
+
+def test_valid_unicode_native_ledger_above_four_mib_is_accepted():
+    # Native JSONL may escape non-BMP characters as two UTF-16 escapes.
+    rows = [item(itemId=f"task-{index}", note="😀" * 600) for index in range(650)]
+    raw = encode(rows)
+    assert 4 * 1024 * 1024 < len(raw) < 16 * 1024 * 1024
+    assert _parse_rows(raw) == rows
 
 
 def test_real_native_import_receipt_crash_recovery_and_conflicts(tmp_path):

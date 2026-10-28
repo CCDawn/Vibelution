@@ -13,10 +13,9 @@ from pathlib import Path
 
 from core.agent_plugins.personal_affairs.service import project_affairs
 
-from .migration_affairs import _check_lease, _parse_rows, _source_bytes, _token
+from .migration_affairs import _BYTE_CAP, _check_lease, _parse_rows, _source_bytes, _token
 from .migration_io import FileSnapshot, MigrationIOError, read_stable_file, verify_snapshot
 
-_BYTE_CAP = 4 * 1024 * 1024
 _NATIVE_GAPS = (
     "source_notification_fence_unavailable",
     "delivery_watermark_unavailable",

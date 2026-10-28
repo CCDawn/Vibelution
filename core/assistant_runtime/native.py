@@ -22,6 +22,8 @@ _SESSION_ID = ""
 _AGENT_ID = ""
 _OFFLINE_MIGRATION = False
 _OFFLINE_DIRECTORY_CLOSE_UNCONFIRMED = False
+_QUIESCING = False
+_QUIESCENCE_STATE_LOCK = threading.Lock()
 
 
 def _close_offline_directory(runtime, *, timeout: float) -> None:
@@ -240,6 +242,10 @@ def _session_command(*, fixed_identity_only: bool = False):
             raise AssistantSessionError("ASSISTANT_NOT_READY")
         if _OFFLINE_MIGRATION:
             raise AssistantSessionError("OFFLINE_MIGRATION_READ_ONLY")
+        if _QUIESCING and not fixed_identity_only:
+            # No Session admission or Journal write has occurred. The caller
+            # must retain the original request and retry it after the fence.
+            raise AssistantSessionError("ASSISTANT_QUIESCING")
         _, _, sessions, _ = _services()
         try:
             if fixed_identity_only:
@@ -259,6 +265,78 @@ def _session_command(*, fixed_identity_only: bool = False):
             raise AssistantSessionError("SESSION_CONFLICT") from None
         except sessions.SessionValidationError:
             raise AssistantSessionError("SESSION_INVALID") from None
+
+
+@contextmanager
+def session_quiescence():
+    """Fence assistant commands while observing the fixed native Session.
+
+    This is one component of a migration barrier, not proof that unrelated
+    producers or external dispatches are drained. The caller must fence and
+    drain those owners before entering, keep them fenced throughout, and avoid
+    lifecycle shutdown until this context exits. The context and its native
+    admission lock must be entered and exited by the same thread.
+    """
+    global _QUIESCING
+    from core.chat.turn_journal import latest_open_turn_id
+    from core.web.services.session import journal_bridge, tool_approvals
+    from core.web.services.session.admission_lock import SessionAdmissionLock, session_has_active_work_run
+    from core.web.services.session.queued_turns import QUEUED_TURN_STATE_KEY, session_queued_turn_rows
+
+    with _LOCK:
+        if _STOP_REQUESTED.is_set() or not _STARTED or _OFFLINE_MIGRATION or _QUIESCING:
+            raise AssistantSessionError("ASSISTANT_QUIESCENCE_UNAVAILABLE")
+        assistant = _projection()["assistant"]
+        if (not _SESSION_ID or not _AGENT_ID or assistant.get("directSessionId") != _SESSION_ID
+                or assistant.get("agentId") != _AGENT_ID):
+            raise AssistantSessionError("ASSISTANT_IDENTITY_INVALID")
+        _, _, sessions, _ = _services()
+        session_id = _SESSION_ID
+        with _QUIESCENCE_STATE_LOCK:
+            if _STOP_REQUESTED.is_set():
+                raise AssistantSessionError("ASSISTANT_QUIESCENCE_UNAVAILABLE")
+            _QUIESCING = True
+    try:
+        # Holding native admission closes the race with native Session submit
+        # producers. Producers waiting on it still need an owner-level fence.
+        lock = SessionAdmissionLock(sessions.PROJECT_ROOT, session_id)
+        try:
+            lock.acquire(timeout=0.1)
+        except sessions.SessionBusyError:
+            raise AssistantSessionError("ASSISTANT_QUIESCENCE_BUSY") from None
+        try:
+            conversation = sessions.load_session_chat_state(sessions.PROJECT_ROOT, session_id)
+            if not isinstance(conversation, dict):
+                raise AssistantSessionError("ASSISTANT_QUIESCENCE_UNKNOWN")
+            raw_queue = conversation.get(QUEUED_TURN_STATE_KEY, [])
+            if not isinstance(raw_queue, list) or len(raw_queue) != len(session_queued_turn_rows(conversation)):
+                raise AssistantSessionError("ASSISTANT_QUIESCENCE_UNKNOWN")
+            events = journal_bridge.load_session_conversation_events_snapshot(
+                session_id, project_root=sessions.PROJECT_ROOT,
+            )
+            approvals = tool_approvals.list_tool_approval_requests(session_id)
+            settled_approvals = {"accepted", "accepted_for_session", "accepted_for_session_tool",
+                                 "accepted_with_action_window", "accepted_always", "declined",
+                                 "cancelled", "expired"}
+            with sessions._RUNNING_SESSIONS_LOCK:
+                active_turn = bool(sessions._SESSION_ACTIVE_TURN_IDS.get(session_id))
+            if (sessions._is_session_running(session_id)
+                    or active_turn
+                    or latest_open_turn_id(events)
+                    or raw_queue
+                    or session_has_active_work_run(sessions, session_id)
+                    or any(not isinstance(row, dict) or row.get("status") not in settled_approvals
+                           for row in approvals)):
+                raise AssistantSessionError("ASSISTANT_QUIESCENCE_BUSY")
+            if _STOP_REQUESTED.is_set():
+                raise AssistantSessionError("ASSISTANT_QUIESCENCE_UNAVAILABLE")
+            yield
+        finally:
+            lock.release()
+    finally:
+        with _LOCK:
+            with _QUIESCENCE_STATE_LOCK:
+                _QUIESCING = False
 
 
 @contextmanager
@@ -368,7 +446,10 @@ def shutdown(*, timeout: float = 8.0) -> dict[str, Any]:
     """Stop owned native work and drain it before closing its directory store."""
     global _STARTED, _SESSION_ID, _AGENT_ID, _OFFLINE_MIGRATION
     deadline = time.monotonic() + max(0.0, timeout)
-    _STOP_REQUESTED.set()
+    with _QUIESCENCE_STATE_LOCK:
+        if _QUIESCING:
+            return {"closed": False, "code": "NATIVE_QUIESCENCE_ACTIVE"}
+        _STOP_REQUESTED.set()
     remaining = max(0.0, deadline - time.monotonic())
     admitted = _LOCK.acquire(timeout=remaining) if remaining > 0 else _LOCK.acquire(blocking=False)
     if not admitted:

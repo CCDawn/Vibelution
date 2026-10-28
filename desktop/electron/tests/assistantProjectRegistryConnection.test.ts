@@ -29,6 +29,65 @@ function fixture() {
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 describe("main-owned assistant registry connection", () => {
+  it("retries the same retained host after migration startup fails", async () => {
+    const f = fixture();
+    const host = { ...f.host, startForMigration: vi.fn().mockRejectedValueOnce(new Error("not ready")).mockResolvedValueOnce(undefined) };
+    await expect(f.connection.start(() => host, { migration: true })).rejects.toThrow("not ready");
+    await expect(f.connection.start(() => ({ ...host }), { migration: true })).rejects.toThrow("ASSISTANT_ALREADY_STARTED");
+    await expect(f.connection.start(() => host, { migration: true })).resolves.toBe(host);
+    expect(host.startForMigration).toHaveBeenCalledTimes(2);
+    expect(host.stop).not.toHaveBeenCalled();
+    await f.connection.stop();
+  });
+
+  it("fences reconciliation and waits for an admitted host writer during a migration transition", async () => {
+    const f = fixture(), project = f.directory("migration-gate"), entered = deferred(), release = deferred();
+    await f.connection.reconcile(f.payload([f.row(project)]));
+    const id = Object.keys(f.connection.snapshot().projects)[0];
+    await f.connection.start(() => f.host);
+    const writer = f.connection.withHistoryImport(id, async () => { entered.resolve(); await release.promise; });
+    await entered.promise;
+    const gate = f.connection.beginMigrationTransition();
+    let drained = false;
+    void gate.drained.then(() => { drained = true; });
+    const reconcile = f.connection.reconcile(f.payload([]));
+    await Promise.resolve();
+    expect(drained).toBe(false);
+    expect(f.host.updateProjects).not.toHaveBeenCalled();
+    release.resolve();
+    await writer;
+    await gate.drained;
+    expect(f.host.updateProjects).not.toHaveBeenCalled();
+    gate.release();
+    await reconcile;
+    expect(f.host.updateProjects).toHaveBeenCalledOnce();
+    await f.connection.stop();
+  });
+
+  it("keeps the host attached until retirement is confirmed and holds the source lease through the writer", async () => {
+    const f = fixture(), project = f.directory("migration"), entered = deferred(), release = deferred();
+    await f.connection.reconcile(f.payload([f.row(project)]));
+    const id = Object.keys(f.connection.snapshot().projects)[0];
+    const host = { ...f.host, retireForMigration: vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true) };
+    await f.connection.start(() => host);
+    expect(await f.connection.retireHostForMigration()).toBe(false);
+    await expect(f.connection.withPreHostSource(id, async () => undefined)).rejects.toThrow("ASSISTANT_PROJECT_UNAVAILABLE");
+    expect(await f.connection.retireHostForMigration()).toBe(true);
+    const writer = f.connection.withPreHostSource(id, async lease => {
+      entered.resolve();
+      await lease.commit(async () => { await release.promise; });
+    });
+    await entered.promise;
+    const restarted = f.connection.start(() => host);
+    await Promise.resolve();
+    expect(host.start).toHaveBeenCalledTimes(1);
+    release.resolve();
+    await writer;
+    await restarted;
+    expect(host.start).toHaveBeenCalledTimes(2);
+    await f.connection.stop();
+  });
+
   it("holds a pre-host source lease across identical observations and serializes startup", async () => {
     const f = fixture(), project = f.directory("pre-host"), entered = deferred(), release = deferred();
     await f.connection.reconcile(f.payload([f.row(project)]));

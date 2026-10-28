@@ -9,11 +9,13 @@ import { createAssistantProjectLifecycleRequests } from "./projectLifecycleReque
 import { AssistantProjectLifecycleRequestStore } from "./projectLifecycleRequestStore.js";
 import type { AssistantProjectRegistryConnection } from "./projectRegistryConnection.js";
 import { parseMainControlClaim, type MainControlRequest } from "./mainControlTransport.js";
+import type { ProjectAdmission } from "../lifecycle/projectAdmission.js";
 
 /** Production composition for the existing main-owned native lifecycle engine.
  * No assistant Python fallback, global environment switching, bootstrap or SDK.
  */
 export function createAssistantProjectMainControl(options: {
+  admission?: ProjectAdmission;
   directory: string;
   registry: Pick<AssistantProjectRegistryConnection, "snapshot" | "registration">;
   launch: DesktopLaunchSettingsInput;
@@ -29,6 +31,7 @@ export function createAssistantProjectMainControl(options: {
     return Boolean(registration && registration.root === root && registration.integrationRoot === root);
   };
   const facade = createAssistantProjectLifecycle({
+    admission: options.admission,
     getPermissionSnapshot: () => registry.snapshot(),
     resolveRuntimeContext: async target => {
       // Branch instances use their existing supervisor/instances owner. A

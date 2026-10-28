@@ -46,6 +46,43 @@ function fixture(mainControl?: AssistantHostOptions["mainControl"], capability =
 }
 
 describe("AssistantHost private main control pump", () => {
+  it("keeps the host alive when the control pump fails during a migration fence", async () => {
+    const f = fixture(vi.fn(async () => ({})));
+    const original = f.fetch.getMockImplementation()!;
+    let fail!: (error: Error) => void;
+    f.fetch.mockImplementation(async (url, init) => String(url).endsWith("/main-control/next")
+      ? await new Promise<Response>((_done, reject) => { fail = reject; }) : await original(url, init));
+    await f.host.start();
+    await vi.waitFor(() => expect(fail).toBeTypeOf("function"));
+    const fence = f.host.beginMigrationAdmission();
+    await fence.seal();
+    fail(new Error("lost control channel"));
+    await vi.waitFor(async () => await expect(f.host.migrationBarrier("prepare")).rejects.toThrow("ASSISTANT_NOT_READY"));
+    expect(f.native.terminate).not.toHaveBeenCalled();
+    expect(f.native.close).not.toHaveBeenCalled();
+    fence.release();
+    expect(() => f.host.beginMigrationAdmission()).toThrow("ASSISTANT_MIGRATION_BUSY");
+    await f.host.stop();
+  });
+
+  it("waits for the actual admitted delivery before migration admission drains", async () => {
+    let finish!: () => void;
+    const mainControl = vi.fn(async () => { await new Promise<void>(done => { finish = done; }); return {}; });
+    const f = fixture(mainControl);
+    await f.host.start();
+    await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+    const fence = f.host.beginMigrationAdmission();
+    let drained = false;
+    void fence.drained.then(() => { drained = true; });
+    await Promise.resolve();
+    expect(drained).toBe(false);
+    finish();
+    await fence.drained;
+    expect(drained).toBe(true);
+    fence.release();
+    await f.host.stop();
+  });
+
   it("starts only a negotiated private capability and never exposes it to renderer requests", async () => {
     const mainControl = vi.fn(async () => ({ schemaVersion: 1, projectId: "synthetic-project", operation: "start", requestId: "synthetic-request", state: "unknown", code: "receipt_unavailable" }));
     const f = fixture(mainControl);

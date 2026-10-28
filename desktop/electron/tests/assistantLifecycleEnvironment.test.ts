@@ -18,6 +18,7 @@ vi.mock("../src/process/workbenchJob.js", async (importOriginal) => ({
 }));
 
 import { createMainLineCommandQueue } from "../src/lifecycle/mainLine/commandQueue.js";
+import { ProjectAdmission } from "../src/lifecycle/projectAdmission.js";
 import {
   ensureFrontendRelease,
   executeMainLineWorkbench,
@@ -97,6 +98,24 @@ function lifecycleSeams(root: string) {
 }
 
 describe("native lifecycle target environment", () => {
+  it("does not spawn a backend when a project is sealed during frontend preparation", async () => {
+    const root = workspace(), admission = new ProjectAdmission(), ticket = admission.enter(root);
+    const seams = lifecycleSeams(root);
+    let release!: () => void, started!: () => void;
+    const blocked = new Promise<void>(resolve => { release = resolve; });
+    const entered = new Promise<void>(resolve => { started = resolve; });
+    const execution = runWorkbenchLifecycle({ ...seams, operation: "start",
+      operatorConfigPath: join(root, "config.toml"), queue: createMainLineCommandQueue(),
+      ensureFrontend: async () => { started(); await blocked; },
+      beforeExecute: () => ticket.check(), beforeSpawn: () => ticket.check(),
+    });
+    await entered;
+    const seal = admission.seal(root);
+    release();
+    await expect(execution).rejects.toThrow("PROJECT_ADMISSION_SEALED");
+    expect(seams.spawnImpl).not.toHaveBeenCalled();
+    ticket.finish(); await seal.drain(); seal.release();
+  });
   it("uses a private target snapshot for queued frontend, port and backend startup", async () => {
     setProjectAEnvironment();
     const root = workspace();

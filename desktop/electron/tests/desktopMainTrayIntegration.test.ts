@@ -6,7 +6,7 @@ const mainSource = readFileSync(fileURLToPath(new URL("../src/main.ts", import.m
 
 describe("Electron main tray integration", () => {
   it("skips shell inspection before stop and writes approved-exit events locally", () => {
-    const lifecycleStart = mainSource.indexOf("async function orchestrateLauncherLifecycle(");
+    const lifecycleStart = mainSource.indexOf("async function orchestrateLauncherLifecycleImpl(");
     const lifecycle = mainSource.slice(lifecycleStart, mainSource.indexOf("async function ", lifecycleStart + 1));
     expect(lifecycleStart).toBeGreaterThan(-1);
     expect(lifecycle).toContain("if (shouldInspectDesktopShellBeforeLifecycle(lifecycleOperation, app.isPackaged))");

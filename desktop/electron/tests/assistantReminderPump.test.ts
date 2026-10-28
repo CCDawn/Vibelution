@@ -19,6 +19,79 @@ function fixture(recoveredFallback = false) {
 }
 
 describe("Launcher assistant reminders", () => {
+  it("waits for the dialog and preserves a later click until migration resumes", async () => {
+    vi.useFakeTimers();
+    const { event, host } = fixture();
+    let resolveDialog!: (opened: boolean) => void;
+    let fallback!: (decision: Promise<boolean>) => void;
+    let click!: () => void;
+    const notify = vi.fn(async (_notice, _recovered, onClick: () => void, _failure, onFallback: (decision: Promise<boolean>) => void) => {
+      click = onClick; fallback = onFallback;
+      fallback(new Promise<boolean>(done => { resolveDialog = done; }));
+      return "attention_fallback" as const;
+    });
+    const openAssistant = vi.fn();
+    const pump = startAssistantReminderPump({ host, available: () => true, notify, openAssistant, onError: vi.fn() });
+    await vi.advanceTimersByTimeAsync(1);
+    let drained = false;
+    const drain = pump.drainForMigration().then(() => { drained = true; });
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(drained).toBe(false);
+    expect(() => pump.resumeAfterMigration()).toThrow("ASSISTANT_REMINDER_DRAIN_PENDING");
+    resolveDialog(true);
+    await drain;
+    expect(host.settleReminder).toHaveBeenCalledWith(event, "attention_fallback", true);
+    expect(openAssistant).toHaveBeenCalledOnce();
+    click();
+    expect(openAssistant).toHaveBeenCalledOnce();
+    pump.resumeAfterMigration();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(openAssistant).toHaveBeenCalledTimes(2);
+    await pump();
+  });
+
+  it("delays a late system failure until the resumed host can record its fallback", async () => {
+    vi.useFakeTimers();
+    const { event, host } = fixture();
+    let late!: (show: () => Promise<boolean>) => void;
+    const show = vi.fn(async () => true);
+    const notify = vi.fn(async (_notice, _recovered, _click, _failure, _fallback, callback: typeof late) => {
+      late = callback; return "system_notification" as const;
+    });
+    const pump = startAssistantReminderPump({ host, available: () => true, notify, openAssistant: vi.fn(), onError: vi.fn() });
+    await vi.advanceTimersByTimeAsync(1);
+    await pump.drainForMigration();
+    late(show);
+    expect(show).not.toHaveBeenCalled();
+    expect(host.fallbackReminder).not.toHaveBeenCalled();
+    pump.resumeAfterMigration();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(show).toHaveBeenCalledOnce();
+    expect(host.fallbackReminder).toHaveBeenCalledExactlyOnceWith(event);
+    expect(host.settleReminder).toHaveBeenCalledWith(event, "attention_fallback", true);
+    expect(notify).toHaveBeenCalledOnce();
+    await pump();
+  });
+
+  it("reports an unconfirmed post-migration click without resending the reminder", async () => {
+    vi.useFakeTimers();
+    const { event, host } = fixture();
+    host.settleReminder.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("unknown receipt"));
+    let click!: () => void;
+    const onError = vi.fn();
+    const notify = vi.fn(async (_notice, _recovered, callback: () => void) => { click = callback; return "system_notification" as const; });
+    const pump = startAssistantReminderPump({ host, available: () => true, notify, openAssistant: vi.fn(), onError });
+    await vi.advanceTimersByTimeAsync(1);
+    await pump.drainForMigration();
+    click();
+    pump.resumeAfterMigration();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(host.settleReminder).toHaveBeenCalledWith(event, "system_notification", true);
+    expect(onError).toHaveBeenCalledWith("transport");
+    expect(notify).toHaveBeenCalledOnce();
+    await pump();
+  });
+
   it("delivers a due system reminder and records a real click", async () => {
     vi.useFakeTimers();
     const { event, host } = fixture();

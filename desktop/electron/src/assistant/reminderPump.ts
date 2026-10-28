@@ -2,6 +2,12 @@ import type { AssistantHost, AssistantReminder, AssistantReminderChannel } from 
 
 type ReminderHost = Pick<AssistantHost, "snapshot" | "nextReminder" | "settleReminder" | "fallbackReminder">;
 type ReminderNotice = Pick<AssistantReminder, "title" | "body">;
+export type AssistantReminderPump = (() => Promise<void>) & {
+  /** Stop admission and wait without a deadline for all admitted callbacks. */
+  drainForMigration(): Promise<void>;
+  /** Resume only after the previous drain completed. */
+  resumeAfterMigration(): void;
+};
 
 /** One main-process sender. Unknown outcomes pause it rather than replaying. */
 export function startAssistantReminderPump(options: {
@@ -12,9 +18,17 @@ export function startAssistantReminderPump(options: {
   openAssistant(): void;
   onError(reason: "notification" | "transport"): void;
   intervalMs?: number;
-}): () => Promise<void> {
+}): AssistantReminderPump {
   let stopped = false;
   let retired = false;
+  let permanentStop = false;
+  let epoch = 0;
+  let migrationDrain: Promise<void> | undefined;
+  let migrationDrained = false;
+  const deferredCallbacks: Array<() => void> = [];
+  // A lost settlement is not authority to resend. Keep its original private
+  // attempt token for this process lifetime while the durable receipt remains.
+  const unconfirmed = new Map<string, AssistantReminder>();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let active: Promise<void> | undefined;
   let claiming: Promise<AssistantReminder | null> | undefined;
@@ -30,6 +44,8 @@ export function startAssistantReminderPump(options: {
   };
   async function tick(): Promise<void> {
     if (stopped) return;
+    const tickEpoch = epoch;
+    const current = () => !retired && tickEpoch === epoch;
     if (options.host.snapshot().state !== "ready") {
       schedule(delay);
       return;
@@ -44,7 +60,7 @@ export function startAssistantReminderPump(options: {
       let event: AssistantReminder | null;
       try { event = await claiming; }
       finally { claiming = undefined; }
-      if (retired) return;
+      if (!current()) return;
       failureReported = false;
       if (!event) { schedule(delay); return; }
       let clicked = false;
@@ -52,6 +68,8 @@ export function startAssistantReminderPump(options: {
       let channel: AssistantReminderChannel | undefined;
       let clickHandled = false;
       let lateFallbackHandled = false;
+      let deferredClick = false;
+      let deferredLate = false;
       const track = (recording: Promise<void>) => {
         pendingClicks.add(recording);
         void recording.finally(() => pendingClicks.delete(recording));
@@ -61,28 +79,19 @@ export function startAssistantReminderPump(options: {
         clickHandled = true;
         const confirmedChannel = channel;
         const recording = acknowledgement.then(() => options.host.settleReminder(event, confirmedChannel, true))
-          .catch(() => options.onError("transport"));
+          .then(() => { unconfirmed.delete(event.id); })
+          .catch(() => { unconfirmed.set(event.id, event); options.onError("transport"); });
         track(recording);
       };
-      channel = await options.notify({ title: event.title, body: event.body }, event.recoveredFallback, () => {
-        if (retired || lateFallbackHandled) return;
+      const clickedNow = () => {
+        if (!current() || lateFallbackHandled) return;
         clicked = true;
         options.openAssistant();
         recordClick();
-      }, () => options.onError("notification"), decision => {
-        pendingDialogs.add(decision);
-        void decision.then(opened => {
-          pendingDialogs.delete(decision);
-          if (retired) return;
-          clicked = true;
-          if (opened) options.openAssistant();
-          recordClick();
-        }).catch(() => { pendingDialogs.delete(decision); options.onError("notification"); });
-      }, show => {
-        if (retired || lateFallbackHandled) return;
+      };
+      const lateNow = (show: () => Promise<boolean>) => {
+        if (!current() || lateFallbackHandled) return;
         lateFallbackHandled = true;
-        // A previous toast can fail while a restarted host is answering the
-        // next claim. Let that claim finish before publishing the fallback.
         const claimDone = claiming?.then(() => undefined, () => undefined) ?? Promise.resolve();
         const decision = claimDone.then(show);
         pendingDialogs.add(decision);
@@ -90,17 +99,38 @@ export function startAssistantReminderPump(options: {
         const recording = claimDone.then(() => acknowledgement ?? Promise.resolve()).catch(() => undefined)
           .then(() => options.host.fallbackReminder(event))
           .then(() => { converted = true; })
-          .catch(() => options.onError("transport"));
+          .catch(() => { unconfirmed.set(event.id, event); options.onError("transport"); });
         track(recording);
         void decision.then(opened => {
           pendingDialogs.delete(decision);
-          if (retired) return;
+          if (!current()) return;
           if (opened) options.openAssistant();
           track(recording.then(() => converted ? options.host.settleReminder(event, "attention_fallback", true) : undefined)
-            .catch(() => options.onError("transport")));
-        }).catch(() => { pendingDialogs.delete(decision); options.onError("notification"); });
+            .catch(() => { unconfirmed.set(event.id, event); options.onError("transport"); }));
+        }).catch(() => { pendingDialogs.delete(decision); if (current()) options.onError("notification"); });
+      };
+      channel = await options.notify({ title: event.title, body: event.body }, event.recoveredFallback, () => {
+        if (permanentStop) return;
+        if (migrationDrained) {
+          if (!deferredClick) { deferredClick = true; deferredCallbacks.push(() => { deferredClick = false; clickedNow(); }); }
+        } else clickedNow();
+      }, () => { if (current()) options.onError("notification"); }, decision => {
+        if (!current()) return;
+        pendingDialogs.add(decision);
+        void decision.then(opened => {
+          pendingDialogs.delete(decision);
+          if (!current()) return;
+          clicked = true;
+          if (opened) options.openAssistant();
+          recordClick();
+        }).catch(() => { pendingDialogs.delete(decision); if (current()) options.onError("notification"); });
+      }, show => {
+        if (permanentStop) return;
+        if (migrationDrained) {
+          if (!deferredLate) { deferredLate = true; deferredCallbacks.push(() => { deferredLate = false; lateNow(show); }); }
+        } else lateNow(show);
       });
-      if (retired) return;
+      if (!current()) return;
       acknowledgement = options.host.settleReminder(event, channel, false);
       recordClick();
       await acknowledgement;
@@ -119,7 +149,8 @@ export function startAssistantReminderPump(options: {
     }
   }
   schedule(0);
-  return async () => {
+  const stop = async () => {
+    permanentStop = true;
     stopped = true;
     if (timer) clearTimeout(timer);
     if (active) await active;
@@ -129,6 +160,33 @@ export function startAssistantReminderPump(options: {
       if (timeout) clearTimeout(timeout);
     }
     retired = true;
+    epoch += 1;
     await Promise.all(pendingClicks);
   };
+  const drainForMigration = (): Promise<void> => {
+    if (migrationDrain) return migrationDrain;
+    stopped = true;
+    if (timer) clearTimeout(timer);
+    migrationDrained = false;
+    migrationDrain = (async () => {
+      if (active) await active;
+      // Future toast callbacks are held in memory until the same host owner
+      // reopens. They must not write through a retired generation.
+      while (pendingDialogs.size || pendingClicks.size)
+        await Promise.allSettled([...pendingDialogs, ...pendingClicks]);
+      retired = true;
+      migrationDrained = true;
+    })();
+    return migrationDrain;
+  };
+  const resumeAfterMigration = () => {
+    if (permanentStop || !migrationDrained) throw new Error("ASSISTANT_REMINDER_DRAIN_PENDING");
+    migrationDrain = undefined;
+    migrationDrained = false;
+    retired = false;
+    stopped = false;
+    for (const callback of deferredCallbacks.splice(0)) callback();
+    schedule(0);
+  };
+  return Object.assign(stop, { drainForMigration, resumeAfterMigration });
 }

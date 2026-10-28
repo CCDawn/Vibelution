@@ -9,6 +9,7 @@ import { writeMainLineQueueOwnerMarker } from "../lifecycle/mainLine/ownerMarker
 import { resolveRuntimeManagerDir } from "../lifecycle/projectStoragePaths.js";
 import { runWorkbenchLifecycle, type RunWorkbenchLifecycleInput, type WorkbenchLifecycleResult } from "../process/workbenchLifecycle.js";
 import type { AssistantProjectRegistrySnapshot } from "./projectRegistry.js";
+import type { ProjectAdmission, ProjectAdmissionTicket } from "../lifecycle/projectAdmission.js";
 
 export type AssistantProjectLifecycleOperation = "status" | "start" | "stop" | "restart";
 export type AssistantProjectLifecycleTarget = { projectId: string; workspaceRoot: string };
@@ -23,6 +24,8 @@ export type AssistantProjectRuntimeContext = {
   environment?: NodeJS.ProcessEnv;
 };
 export type AssistantProjectLifecycleOptions = {
+  /** Trusted main-owned gate; ordinary callers leave this unset. */
+  admission?: ProjectAdmission;
   /** Must read the current complete permission table, including registry disk validation. */
   getPermissionSnapshot: () => AssistantProjectRegistrySnapshot;
   /** No discovery, repair, bootstrap, backend connection, or assistant-Python fallback. */
@@ -177,19 +180,24 @@ export function createAssistantProjectLifecycle(options: AssistantProjectLifecyc
     checkStorageOwner(context);
     return context;
   }
-  function guardedQueue(context: Context, expected: Permission, execution: AssistantProjectLifecycleExecution): MainLineCommandQueue {
+  function guardedQueue(context: Context, expected: Permission, execution: AssistantProjectLifecycleExecution, admission?: ProjectAdmissionTicket): MainLineCommandQueue {
     const { signal, onCommand } = execution;
     return {
       snapshot: () => context.queue.snapshot(),
+      ...(context.queue.captureExecutionDrain ? { captureExecutionDrain: () => context.queue.captureExecutionDrain!() } : {}),
       submit(input) {
         checkSignal(signal); recheck(expected); checkStorageOwner(context);
+        admission?.check();
         return context.queue.submit({ ...input, signal,
           ...(onCommand ? { onCommand: async (command: MainLineQueuedCommand) => {
             checkSignal(signal); recheck(expected); checkStorageOwner(context);
+            admission?.check();
             await onCommand(bindingFor(expected), command);
             checkSignal(signal); recheck(expected); checkStorageOwner(context);
+            admission?.check();
           } } : {}), execute: async command => {
           checkSignal(signal); recheck(expected); checkStorageOwner(context);
+          admission?.check();
           return input.execute(command);
         } });
       },
@@ -202,9 +210,11 @@ export function createAssistantProjectLifecycle(options: AssistantProjectLifecyc
       try { captured = request(input); } catch { return { schemaVersion: 1, accepted: false, code: "invalid_request" }; }
       const base = { schemaVersion: 1 as const, ...captured };
       const signal = execution.signal;
+      let admission: ProjectAdmissionTicket | undefined;
       try {
         checkSignal(signal);
         const expected = permission(captured.projectId);
+        if ((captured.operation === "start" || captured.operation === "restart") && options.admission) admission = options.admission.enter(expected.workspaceRoot);
         if (captured.operation === "status") {
           let raw: unknown;
           try { raw = await readStatus({ projectId: expected.projectId, workspaceRoot: expected.workspaceRoot }); }
@@ -217,8 +227,10 @@ export function createAssistantProjectLifecycle(options: AssistantProjectLifecyc
         }
         const context = await contextFor(expected);
         checkSignal(signal); recheck(expected);
+        admission?.check();
         const result = await runner({ workspaceRoot: context.workspaceRoot, pythonPath: context.pythonPath, operatorConfigPath: context.operatorConfigPath,
-          operation: captured.operation, interruptActiveWork: false, targetEnvironment: context.environment, signal, queue: guardedQueue(context, expected, execution) });
+          ...(admission ? { beforeExecute: () => admission!.check(), beforeSpawn: () => admission!.check() } : {}),
+          operation: captured.operation, interruptActiveWork: false, targetEnvironment: context.environment, signal, queue: guardedQueue(context, expected, execution, admission) });
         checkSignal(signal);
         if (!result || result.schemaVersion !== 1 || typeof result.accepted !== "boolean") fail("lifecycle_failed");
         // Never forward native message, commandId, work rows, arbitrary codes,
@@ -227,6 +239,8 @@ export function createAssistantProjectLifecycle(options: AssistantProjectLifecyc
         return { ...base, accepted: result.accepted, code };
       } catch (error) {
         return { ...base, accepted: false, code: signal?.aborted ? "cancelled" : error instanceof FacadeFailure ? error.code : "lifecycle_failed" };
+      } finally {
+        admission?.finish();
       }
     },
   };
