@@ -2,12 +2,24 @@
 from __future__ import annotations
 
 import re
+import logging
 from contextlib import contextmanager, ExitStack
 from pathlib import Path
 from threading import Event, Lock, RLock
 
 from .migration_io import MigrationIOError
 from .online_history import AuthorizedHistorySource, OnlineHistoryOwner
+
+_LOGGER = logging.getLogger(__name__)
+_HISTORY_DIAGNOSTICS = frozenset({
+    "history_target_unavailable", "history_target_invalid", "history_generation_changed",
+    "history_cancelled", "history_authority_revoked", "history_profile_changed",
+    "history_preview_expired", "history_preview_changed", "history_outcome_unknown",
+    "history_discovery_incomplete", "history_archive_invalid", "history_source_unavailable",
+    "source_guard_unavailable", "source_changed", "migration_lock_unavailable",
+    "target_namespace_unavailable", "target_directory_unavailable", "target_publish_unavailable",
+    "target_pending_changed",
+})
 
 
 class InitialPrepareBusy(MigrationIOError):
@@ -711,9 +723,11 @@ class HistoryHost:
                                                           target_guard=self._history_target_guard)
                 return {**base, "state": "published", "code": "imported",
                         "historyCount": result["historyCount"]}
-            except Exception:
+            except Exception as error:
                 # The writer may have reserved or published before losing its
                 # final confirmation. Never replay or guess from an exception.
+                code = str(error) if type(error) is MigrationIOError and str(error) in _HISTORY_DIAGNOSTICS else "unclassified"
+                _LOGGER.warning("history_import_unconfirmed reason=%s", code)
                 self._preview.discard(preview_id)
                 return {**base, "state": "unknown", "code": "unknown"}
             finally:

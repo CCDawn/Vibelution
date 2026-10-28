@@ -133,6 +133,41 @@ def test_private_history_receipt_uses_original_preview_after_host_restart(tmp_pa
     assert not dispatch.history_preview._previews
 
 
+def test_real_history_target_guard_multi_session_import(tmp_path, setup_preview, monkeypatch):
+    import json
+    from core.assistant_runtime import native
+    from core.infrastructure import native_runtime
+    from tests.test_assistant_migration_history import journal, AGENT
+    dispatch, workspace, _ = setup_preview
+    rows = [{"id": sid, "agent_id": AGENT} for sid in ("direct", "second", "archived")]
+    (workspace / "chat/chat_state.json").write_text(json.dumps({"conversations": rows}), encoding="utf-8")
+    for row in rows:
+        journal(workspace, row["id"])
+        asset = workspace / "sessions" / row["id"] / "artifacts/images/pic.png"
+        asset.parent.mkdir(parents=True, exist_ok=True)
+        asset.write_bytes(b"temporary-image")
+    dispatch, profile, host, _ = make_host(tmp_path, setup_preview)
+    host._history_target_guard = HistoryHost._history_target_guard.__get__(host)
+    monkeypatch.setattr(native_runtime, "_ASSISTANT_NATIVE_ROOT", profile.resolve())
+    monkeypatch.setattr(native, "_STARTED", True)
+    monkeypatch.setattr(native, "_AGENT_ID", "target-agent")
+    monkeypatch.setattr(native, "_SESSION_ID", "target-session")
+    monkeypatch.setattr(native, "_STOP_REQUESTED", threading.Event())
+    errors = []
+    original = host._owner.import_bound_history
+    def capture(*args, **kwargs):
+        try:
+            return original(*args, **kwargs)
+        except Exception as error:
+            errors.append(error)
+            raise
+    monkeypatch.setattr(host._owner, "import_bound_history", capture)
+    request = body(dispatch)
+    result = host.import_history(request["projectId"], request["previewId"], 1,
+                                 request["turnId"], request["operationId"])
+    assert result["state"] == "published", errors
+
+
 def test_history_receipt_does_not_hold_host_guard_during_preview(tmp_path, setup_preview, monkeypatch):
     dispatch, _, host, _ = make_host(tmp_path, setup_preview)
     entered, proceed = threading.Event(), threading.Event()
@@ -168,15 +203,24 @@ def test_turn_mismatch_and_cancel_before_request_never_publish(tmp_path, setup_p
         assert not (profile / "history_archive").exists()
 
 
-def test_uncertain_history_failure_retires_other_preview_purposes(tmp_path, setup_preview, monkeypatch):
+def test_uncertain_history_failure_retires_other_preview_purposes(tmp_path, setup_preview, monkeypatch, caplog):
     dispatch, _, history_host, _ = make_host(tmp_path, setup_preview)
     request = body(dispatch)
     def fail(*args, **kwargs):
-        raise RuntimeError("publication outcome unknown")
+        raise RuntimeError("PRIVATE_SENTINEL")
     monkeypatch.setattr(history_host._owner, "import_history", fail)
     assert history_host.import_history(request["projectId"], request["previewId"], 1,
                                        request["turnId"], request["operationId"])["state"] == "unknown"
+    assert "history_import_unconfirmed reason=unclassified" in caplog.text
+    assert "PRIVATE_SENTINEL" not in caplog.text
     from core.assistant_runtime.migration_io import MigrationIOError
+    def unavailable(*args, **kwargs):
+        raise MigrationIOError("history_target_unavailable")
+    monkeypatch.setattr(history_host._owner, "import_bound_history", unavailable)
+    again = body(dispatch, operation="4" * 32)
+    assert history_host.import_history(again["projectId"], again["previewId"], 1,
+                                       again["turnId"], again["operationId"])["state"] == "unknown"
+    assert "history_import_unconfirmed reason=history_target_unavailable" in caplog.text
     with pytest.raises(MigrationIOError):
         dispatch.history_preview.consume_for_import(request["previewId"], request["projectId"], 1,
                                                     request["turnId"], purpose="personal")
