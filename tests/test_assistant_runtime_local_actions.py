@@ -14,7 +14,7 @@ def test_catalog_reuses_native_schema_and_governance_without_project_actions():
     expected = set(assistant.contracts()) | set(config.contracts()) | {
         "settings_catalog", "settings_update", "model_add", "model_options",
         "operator_image_options", "operator_image_select",
-        "history_list", "history_read", "history_search",
+        "history_list", "history_read", "history_search", "history_commentary_read",
         "affairs_conflict_sets", "affairs_conflict_list", "affairs_conflict_read", "affairs_sync_receipt",
         "episodic_conflict_review", "episodic_sync_receipt", "personal_memory_list",
         "legacy_memory_list", "legacy_memory_read",
@@ -35,6 +35,18 @@ def test_catalog_reuses_native_schema_and_governance_without_project_actions():
         assert contract["action"] == name
         assert contract["parameters"]["additionalProperties"] is False
         assert type(contract["governed"]) is bool
+
+
+def test_commentary_action_is_discoverable_by_index_and_describe(monkeypatch):
+    from core.assistant_runtime import actions
+    monkeypatch.setattr(actions, "_binding", (object(), object(), None))
+    page = actions.execute_action("index", {"query": "history_commentary_read"})
+    assert [row["action"] for row in page["actions"]] == ["history_commentary_read"]
+    detail = actions.execute_action("describe", {"action": "history_commentary_read"})
+    assert detail["action"] == "history_commentary_read" and detail["governed"] is False
+    assert detail["parameters"]["required"] == ["history_id"]
+    assert {"history_id", "journal_sha256", "commentary_index", "character_offset", "max_characters"} == set(detail["parameters"]["properties"])
+    assert detail["parameters"]["additionalProperties"] is False
 
 
 def test_legacy_memory_actions_reuse_reader_and_require_version_for_continuation(monkeypatch):
