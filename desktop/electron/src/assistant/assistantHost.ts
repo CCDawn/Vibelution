@@ -597,7 +597,7 @@ export class AssistantHost {
   }
 
   /** Main-only. The caller keeps the registry lease until this worker drains. */
-  async prepareInitialMigration(request: InitialMigrationMainControlRequest, revision: number, signal?: AbortSignal): Promise<boolean> {
+  async prepareInitialMigration(request: InitialMigrationMainControlRequest, revision: number, signal?: AbortSignal): Promise<boolean | "busy"> {
     if (!this.options.initialMigrationControl || !/^[a-f0-9]{32}$/.test(request.deliveryId)
       || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(request.projectId) || !/^[a-f0-9]{64}$/.test(request.previewId)
         || !/^\S{1,160}$/.test(request.turnId) || !/^(?:initial|ksync|krec)-[a-f0-9]{40}$/.test(request.operationId)
@@ -621,6 +621,9 @@ export class AssistantHost {
     try {
       const result = await this.rpc(generation, "/api/assistant/initial-migration/prepare", "POST", body, 120_000, false, 8192, signal);
       phase = "validation";
+      if (object(result) && Object.keys(result).length === 4 && result.schemaVersion === 1
+        && result.operationId === request.operationId && result.state === "rejected" && result.code === "busy"
+        && !signal?.aborted && !generation.abort.signal.aborted) return "busy";
       const keys = ["schemaVersion", "registeredProjectId", "sourceScope", "category", "turnId", "operationId", "revision",
         "sourceIdentityDigest", "registryDigest", "targetIdentityDigest", "projectDirectory", "workspaceDirectory", "targetDirectory",
         "targetAgentId", "targetSessionId", "authority", "readyForCutover"];

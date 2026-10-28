@@ -250,6 +250,7 @@ class _InitialPublication:
         self.delivery_id = delivery_id
         self.operation_id = operation_id
         self._published = False
+        self._busy = False
 
     def revoke(self):
         # The event loop must never wait for a filesystem commit.
@@ -271,6 +272,10 @@ class _InitialPublication:
         if self._revoked.is_set() or time.monotonic() >= self._deadline:
             raise ValueError("initial migration delivery unavailable")
 
+    def wait_retry(self, timeout):
+        self._revoked.wait(max(0, timeout))
+        self.check()
+
     def publish(self, writer):
         with self._lock:
             if self._revoked.is_set() or self._published or time.monotonic() >= self._deadline:
@@ -282,6 +287,17 @@ class _InitialPublication:
     def published(self):
         with self._lock:
             return self._published and not self._revoked.is_set() and time.monotonic() < self._deadline
+
+    def confirm_busy(self):
+        with self._lock:
+            if not self._done.is_set() or self._published or self._revoked.is_set() or time.monotonic() >= self._deadline:
+                return False
+            self._busy = True
+            return True
+
+    def busy_confirmed(self):
+        with self._lock:
+            return self._busy and self._done.is_set() and not self._published and not self._revoked.is_set() and time.monotonic() < self._deadline
 
 
 def _revoke_initial(entry):
@@ -316,6 +332,9 @@ class MainControlBroker:
         # Reserve capacity before admitting a request, so every issued ID can
         # later be drained even after the pending entry has expired.
         self._initial_issued_ids: dict[str, tuple[str, str]] = {}
+        # An issued operation remains fenced until a proven outcome settles.
+        # In particular a lost response must not admit the same ID.
+        self._initial_operation_uncertain: set[str] = set()
         self._retire_preview = None
 
     def bind_preview_retirement(self, callback):
@@ -412,12 +431,15 @@ class MainControlBroker:
             return self._unknown(entry, "control_busy")
         if action == "initial_migration_queue" and len(self._initial_issued_ids) >= 4096:
             return self._unknown(entry, "control_busy")
+        if action == "initial_migration_queue" and captured["operationId"] in self._initial_operation_uncertain:
+            return self._unknown(entry)
         delivery_id = secrets.token_hex(16)
         if (delivery_id in self._pending or delivery_id in self._initial_issued_ids
                 or any(token.delivery_id == delivery_id for token in self._initial_tokens)):
             return self._unknown(entry, "control_busy")
         if action == "initial_migration_queue":
             self._initial_issued_ids[delivery_id] = (captured["operationId"], captured["previewId"])
+            self._initial_operation_uncertain.add(captured["operationId"])
         self._pending[delivery_id] = entry
         self._queue.put_nowait(delivery_id)
         try:
@@ -551,7 +573,7 @@ class MainControlBroker:
         deadline = time.monotonic() + timeout
         return all(token.drain(deadline - time.monotonic()) for token in tokens)
 
-    def initial_delivery(self, delivery_id, request, *, admit=False, confirm=False):
+    def initial_delivery(self, delivery_id, request, *, admit=False, confirm=False, busy=False):
         """Check one claimed, live, exact native-policy-admitted delivery."""
         self._expire()
         entry = self._pending.get(delivery_id) if type(delivery_id) is str else None
@@ -576,6 +598,8 @@ class MainControlBroker:
             if entry.initial_token is None or not entry.initial_token.published():
                 return False
             entry.initial_prepared = True
+        if busy and (entry.initial_token is None or not entry.initial_token.confirm_busy()):
+            return False
         return entry.initial_token if admit else True
 
     def admit_image_import(self, delivery_id: str, kind: str) -> bool:
@@ -599,7 +623,14 @@ class MainControlBroker:
             return False
         if entry.action == "initial_migration_queue" and type(result) is dict and result.get("state") == "queued" and not entry.initial_prepared:
             raise ValueError("Initial migration source not prepared")
+        if (entry.action == "initial_migration_queue" and type(result) is dict and result.get("state") == "rejected"
+                and result.get("code") == "busy" and (entry.initial_token is None or not entry.initial_token.busy_confirmed()
+                    or None in self._initial_fences or entry.turn_id in self._initial_fences or not self._authorized_request(entry))):
+            raise ValueError("Initial migration busy unconfirmed")
         captured = _result(entry.action, entry.request, result)
+        if (entry.action == "initial_migration_queue" and (captured["state"], captured["code"])
+                in {("rejected", "busy"), ("queued", "queued")}):
+            self._initial_operation_uncertain.discard(entry.request["operationId"])
         if entry.action in {"history_import", "initial_migration_queue"} and captured.get("state") not in {"published", "queued"}:
             self._retire_entry(entry)
         _revoke_initial(entry)

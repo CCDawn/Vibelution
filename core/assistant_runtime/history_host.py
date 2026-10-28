@@ -11,6 +11,10 @@ from .migration_io import MigrationIOError
 from .online_history import AuthorizedHistorySource, OnlineHistoryOwner
 
 
+class InitialPrepareBusy(MigrationIOError):
+    """A local admission lock was unavailable before preview consumption."""
+
+
 class HistoryHost:
     def __init__(self, profile_root: Path, generation: str, dispatch, preview, *, initial_owner_check=None):
         self._lock = RLock()
@@ -114,7 +118,7 @@ class HistoryHost:
                 self._owner.suspend()
             return result
 
-    def prepare_initial_source(self, project_id, preview_id, revision, turn_id, operation_id, category, publication, original_sync_id=None):
+    def prepare_initial_source(self, project_id, preview_id, revision, turn_id, operation_id, category, publication, original_sync_id=None, *, retry_busy=False):
         """Publish one intent under the live native Turn and source guards."""
         from . import native
         from .initial_migration_binding import authority_identity, source_identity, target_identity, publish_initial_intent
@@ -135,23 +139,24 @@ class HistoryHost:
             self._preview.discard(preview_id)
             raise MigrationIOError("initial_migration_request_invalid")
         if not self._import_lock.acquire(blocking=False):
-            self._preview.discard(preview_id)
-            raise MigrationIOError("initial_migration_busy")
+            if not retry_busy:
+                self._preview.discard(preview_id)
+            raise InitialPrepareBusy("initial_migration_busy")
         running = locked = False
         try:
             if not self._lock.acquire(blocking=False):
-                raise MigrationIOError("initial_migration_busy")
+                raise InitialPrepareBusy("initial_migration_busy")
             locked = True
             if (not self._active or native._STOP_REQUESTED.is_set() or not native._STARTED or native._OFFLINE_MIGRATION):
                 raise MigrationIOError("initial_migration_unavailable")
             if not sessions._RUNNING_SESSIONS_LOCK.acquire(blocking=False):
-                raise MigrationIOError("initial_migration_busy")
+                raise InitialPrepareBusy("initial_migration_busy")
             running = True
             if (native._SESSION_ID not in sessions._RUNNING_SESSION_IDS
                     or sessions._SESSION_ACTIVE_TURN_IDS.get(native._SESSION_ID) != turn_id):
                 raise MigrationIOError("initial_migration_turn_invalid")
             if not native._LOCK.acquire(blocking=False):
-                raise MigrationIOError("initial_migration_busy")
+                raise InitialPrepareBusy("initial_migration_busy")
             try:
                 project, workspace, paths, source_agent, verify, snapshots = self._preview.consume_for_import(
                     preview_id, project_id, revision, turn_id, purpose="knowledge" if category in ("knowledge_sync", "knowledge_recovery") else category)
@@ -194,8 +199,9 @@ class HistoryHost:
                                                   owner_check=self._initial_owner_check)
             finally:
                 native._LOCK.release()
-        except BaseException:
-            self._preview.discard(preview_id)
+        except BaseException as error:
+            if not (retry_busy and type(error) is InitialPrepareBusy):
+                self._preview.discard(preview_id)
             raise
         finally:
             if running:

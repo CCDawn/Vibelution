@@ -32,7 +32,7 @@ async def run_case():
                'category': 'knowledge', 'operationId': initial_migration_id('registered:1', value['previewId'], 'knowledge')}
     task = asyncio.create_task(broker.invoke('initial_migration_queue', request, turn_id='turn-one'))
     wire = (await broker.claim())['request']
-    def failure(*args): raise MigrationIOError('C:/PRIVATE/path SECRET')
+    def failure(*args, **kwargs): raise MigrationIOError('C:/PRIVATE/path SECRET')
     history_host.prepare_initial_source = failure
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://127.0.0.1',

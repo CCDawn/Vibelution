@@ -648,8 +648,12 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
         return projectConnection.withHistoryImport(request.projectId, async revision => {
           const prepared = await host.prepareInitialMigration(request, revision, signal);
           const previous = initialMigrationStates.get(request.operationId);
-          if (prepared || (previous !== "completed" && previous !== "partial")) initialMigrationStates.set(request.operationId, prepared ? "queued" : "unknown");
-          return prepared ? { ...base, state: "queued", code: "queued" } : { ...base, state: "unknown", code: "unknown" };
+          if (prepared === "busy" && !signal?.aborted && !initialMigrationRecoveryUncertain && !previous
+              && initialMigrationResults && await initialMigrationResults.get(request.operationId) === null && !signal?.aborted) {
+            return { ...base, state: "rejected", code: "busy" };
+          }
+          if (prepared === true || (previous !== "completed" && previous !== "partial")) initialMigrationStates.set(request.operationId, prepared === true ? "queued" : "unknown");
+          return prepared === true ? { ...base, state: "queued", code: "queued" } : { ...base, state: "unknown", code: "unknown" };
         }).catch(() => {
           const previous = initialMigrationStates.get(request.operationId);
           if (previous !== "completed" && previous !== "partial") initialMigrationStates.set(request.operationId, "unknown");

@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import secrets
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, suppress
@@ -606,10 +607,21 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                     logging.getLogger(__name__).warning("assistant_initial_prepare category=%s phase=admission code=delivery_unavailable", payload.category)
                     raise HTTPException(409, detail="Initial migration delivery unavailable")
                 def prepare():
+                    from .history_host import InitialPrepareBusy
                     try:
-                        return history_control.prepare_initial_source(payload.projectId, payload.previewId,
-                            payload.revision, payload.turnId, payload.operationId, payload.category, publication,
-                            **({"original_sync_id": payload.originalSyncId} if payload.originalSyncId is not None else {}))
+                        deadline = time.monotonic() + 0.4
+                        while True:
+                            publication.check()
+                            try:
+                                return history_control.prepare_initial_source(payload.projectId, payload.previewId,
+                                    payload.revision, payload.turnId, payload.operationId, payload.category, publication,
+                                    retry_busy=True,
+                                    **({"original_sync_id": payload.originalSyncId} if payload.originalSyncId is not None else {}))
+                            except InitialPrepareBusy:
+                                remaining = deadline - time.monotonic()
+                                if remaining <= 0:
+                                    raise
+                                publication.wait_retry(min(0.025, remaining))
                     finally:
                         publication.finished()
                 phase = "prepare"
@@ -622,6 +634,12 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                     logging.getLogger(__name__).warning("assistant_initial_prepare category=%s phase=%s code=%s",
                         payload.category, phase, _initial_prepare_failure_code(error))
                     history_control.retire_preview(payload.previewId)
+                    from .history_host import InitialPrepareBusy
+                    if (phase == "prepare" and type(error) is InitialPrepareBusy
+                            and main_control.initial_delivery(payload.deliveryId, bound, busy=True)):
+                        return JSONResponse({"schemaVersion": 1, "operationId": payload.operationId,
+                                             "state": "rejected", "code": "busy"},
+                                            headers={"Cache-Control": "no-store"})
                     raise HTTPException(409, detail="Initial migration source unavailable") from None
                 return JSONResponse(result, headers={"Cache-Control": "no-store"})
 

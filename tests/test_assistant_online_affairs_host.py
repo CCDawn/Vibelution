@@ -406,10 +406,18 @@ async def run_case():
         original_bytes = original_file.read_bytes()
         config = Path(os.environ['VIBELUTION_CONFIG_PATH'])
         config.write_text(config.read_text().replace('context_window = 8192', 'context_window = 16384'))
-        history_host._initial_owner_check = None
-        assert (await prepare(preview.preview('registered:1', turn_id='turn-one'))).status_code == 409
+        from core.assistant_runtime.initial_migration_binding import publish_initial_intent
+        from core.assistant_runtime.migration_io import MigrationIOError
+        class NoOwnerToken:
+            def publish(self, writer): return writer()
+            def check(self): pass
+        try:
+            publish_initial_intent(target, {**old, 'turnId': 'turn-two'}, NoOwnerToken(), lambda: None)
+        except MigrationIOError as error:
+            assert str(error) == 'initial_profile_owner_unavailable'
+        else:
+            raise AssertionError('refresh without profile owner was accepted')
         assert read_initial_intent(target, op) == old
-        history_host._initial_owner_check = lambda: True
         newer = preview.preview('registered:1', turn_id='turn-one')
         second = await prepare(newer)
         assert second.status_code == 200, second.text

@@ -173,6 +173,19 @@ describe("AssistantHost", () => {
     vi.useRealTimers();
     await host.stop();
   });
+  it("accepts only the bound explicit busy acknowledgement and drains malformed acknowledgements", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true, initialMigrationControl: true });
+    await host.start();
+    const row = { deliveryId: "a".repeat(32), action: "initial_migration_queue" as const, projectId: "project",
+      previewId: "b".repeat(64), turnId: "turn-1", category: "knowledge" as const,
+      operationId: "initial-" + "c".repeat(40), timeoutMs: 10000 };
+    fetchImpl.mockResolvedValueOnce(Response.json({ schemaVersion: 1, operationId: row.operationId, state: "rejected", code: "busy" }));
+    expect(await host.prepareInitialMigration(row, 0)).toBe("busy");
+    fetchImpl.mockResolvedValueOnce(Response.json({ schemaVersion: 1, operationId: "initial-" + "d".repeat(40), state: "rejected", code: "busy" }))
+      .mockResolvedValueOnce(Response.json({ schemaVersion: 1, operationId: row.operationId, state: "unknown", drained: true }));
+    expect(await host.prepareInitialMigration(row, 0)).toBe(false);
+    await host.stop();
+  });
   it("sends affairs sync through the current project revision and validates the response binding", async () => {
     const { host, fetchImpl } = fixture({ graceful: true });
     await host.start();
