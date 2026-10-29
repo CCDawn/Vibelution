@@ -2252,6 +2252,7 @@ describe("IPC channels", () => {
     expect(IPC_CHANNELS.humanAttentionCapabilities).toBe("launcher:human-attention-capabilities");
     expect(Object.keys(IPC_CHANNELS).sort()).toEqual([
       "assistantInvoke",
+      "assistantThemeChanged",
       "assistantThemeResult",
       "beginDesktopPetWindowDrag",
       "controlDesktopPet",
@@ -2273,14 +2274,17 @@ describe("IPC channels", () => {
       "openConversationFromPet",
       "openExternalUrl",
       "openPath",
+      "readThemeAuthority",
       "refreshLauncherState",
       "requestDesktopShellExit",
       "requestWindowClose",
       "requestWorkbenchRestart",
       "requestWorkbenchShellUpdate",
       "setDesktopPetExpanded",
+      "setThemeAuthority",
       "showItemInFolder",
-      "showLauncherWindow"
+      "showLauncherWindow",
+      "themeProjectionResult"
     ]);
   });
 
