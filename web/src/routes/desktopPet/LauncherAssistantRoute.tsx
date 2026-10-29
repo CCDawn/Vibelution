@@ -1,7 +1,7 @@
 import "../../design/route-css/desktop-pet.tailwind.css";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { MessageCircle, RefreshCw, X } from "lucide-react";
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import {
   getLauncherAssistantDetail, getLauncherAssistantDispatches, getLauncherAssistantStatus,
   hideLauncherAssistant, sendLauncherAssistantMessage, setLauncherAssistantExpanded,
@@ -22,6 +22,10 @@ import { continuationSnapshotKey, resolveConversationContinuation } from "../cha
 import { resolveSessionStopTurnId } from "../chat/chatStopTurnModel";
 import { exactAcceptedSubmitTurnId, findSubmitAcceptanceEvidence } from "../chat/chatSubmitAcceptanceReadback";
 import { DesktopPetCharacter } from "./DesktopPetCharacter";
+import {
+  beginDesktopPetDrag, desktopPetWindowDragBridge, updateDesktopPetDrag,
+  type DesktopPetDragPoint, type DesktopPetDragState, type DesktopPetWindowDragBridge
+} from "./desktopPetWindowDrag";
 import { DEFAULT_PET_PREFERENCES } from "./desktopPetPreferences";
 import { ChatToolApprovalDialog } from "../chat/ChatToolApprovalDialog";
 import { toolApprovalRiskLabel } from "../chat/toolApprovalLabels";
@@ -99,6 +103,12 @@ export function LauncherAssistantRoute() {
   const attachmentsRef = useRef<ComposerImageAttachment[]>([]);
   const uploadGate = useRef(false);
   const draftRef = useRef("");
+  const dragStateRef = useRef<DesktopPetDragState | null>(null);
+  const dragBridgeRef = useRef<DesktopPetWindowDragBridge | null>(desktopPetWindowDragBridge());
+  const pendingDragPointRef = useRef<DesktopPetDragPoint | null>(null);
+  const dragFrameRef = useRef<number | null>(null);
+  const nativeDragActiveRef = useRef(false);
+  const suppressClickRef = useRef(false);
   const [sendPending, setSendPending] = useState(false);
   const [resizePending, setResizePending] = useState(false);
   const [sendUnconfirmed, setSendUnconfirmed] = useState(false);
@@ -325,9 +335,104 @@ export function LauncherAssistantRoute() {
       document.removeEventListener("visibilitychange", visibilityChanged);
       delete document.documentElement.dataset.vibelutionDesktopPet;
       delete document.body.dataset.vibelutionDesktopPet;
+      finishWindowDrag();
       // Window lifecycle never owns a native turn or a dispatched task.
     };
   }, []);
+
+  function flushWindowDrag() {
+    dragFrameRef.current = null;
+    const point = pendingDragPointRef.current;
+    pendingDragPointRef.current = null;
+    if (point !== null && nativeDragActiveRef.current) {
+      dragBridgeRef.current?.moveDesktopPetWindowDrag(point);
+    }
+  }
+
+  function queueWindowDrag(point: DesktopPetDragPoint) {
+    pendingDragPointRef.current = point;
+    if (dragFrameRef.current === null) {
+      dragFrameRef.current = window.requestAnimationFrame(flushWindowDrag);
+    }
+  }
+
+  function finishWindowDrag(finalPoint?: DesktopPetDragPoint) {
+    if (finalPoint) {
+      pendingDragPointRef.current = finalPoint;
+    }
+    if (dragFrameRef.current !== null) {
+      window.cancelAnimationFrame(dragFrameRef.current);
+      dragFrameRef.current = null;
+    }
+    flushWindowDrag();
+    if (nativeDragActiveRef.current) {
+      dragBridgeRef.current?.endDesktopPetWindowDrag();
+      nativeDragActiveRef.current = false;
+    }
+  }
+
+  function beginCharacterDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (event.button !== 0) {
+      return;
+    }
+    suppressClickRef.current = false;
+    dragStateRef.current = beginDesktopPetDrag(event.pointerId, {
+      screenX: event.screenX,
+      screenY: event.screenY,
+    });
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function moveCharacterDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    const current = dragStateRef.current;
+    if (current === null) {
+      return;
+    }
+    const update = updateDesktopPetDrag(current, event.pointerId, {
+      screenX: event.screenX,
+      screenY: event.screenY,
+    });
+    if (update === null) {
+      return;
+    }
+    dragStateRef.current = update.state;
+    if (!current.moved && update.state.moved) {
+      suppressClickRef.current = true;
+    }
+    if (update.delta !== null) {
+      event.preventDefault();
+      const bridge = dragBridgeRef.current;
+      if (!nativeDragActiveRef.current && bridge !== null) {
+        bridge.beginDesktopPetWindowDrag(current.start);
+        nativeDragActiveRef.current = true;
+      }
+      if (nativeDragActiveRef.current) {
+        queueWindowDrag({ screenX: event.screenX, screenY: event.screenY });
+      }
+    }
+  }
+
+  function endCharacterDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    const current = dragStateRef.current;
+    if (current === null || current.pointerId !== event.pointerId) {
+      return;
+    }
+    dragStateRef.current = null;
+    finishWindowDrag({ screenX: event.screenX, screenY: event.screenY });
+  }
+
+  function cancelCharacterDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    endCharacterDrag(event);
+    suppressClickRef.current = false;
+  }
+
+  function characterClicked() {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
+    void toggle();
+  }
 
   async function toggle() {
     if (resizing.current || !status.data) return;
@@ -607,7 +712,11 @@ export function LauncherAssistantRoute() {
         <VNativeButton className={petStyles.close} aria-label={copy.hide} onClick={() => void hide()}><X size={14} /></VNativeButton>
       </div>
       <VNativeButton className={petStyles.characterButton} aria-label={copy.expand}
-        disabled={!identity || resizePending} onClick={() => void toggle()}>
+        disabled={!identity || resizePending} onClick={characterClicked}
+        onPointerDown={beginCharacterDrag}
+        onPointerMove={moveCharacterDrag}
+        onPointerUp={endCharacterDrag}
+        onPointerCancel={cancelCharacterDrag}>
         <DesktopPetCharacter characterId={preferences.characterId} name={displayName} tone={tone} animationState={animationState} />
       </VNativeButton>
       <VNativeButton className={petStyles.chatCue} disabled={!identity || resizePending} onClick={() => void toggle()}>

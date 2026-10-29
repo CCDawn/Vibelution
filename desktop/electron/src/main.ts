@@ -4878,6 +4878,12 @@ function assertDesktopPetIpcSender(event: IpcMainInvokeEvent | IpcMainEvent): vo
   const pet = windowProvider?.snapshot().pet;
   const origins = pet?.open ? [...trustedIpcOrigins(), new URL(pet.url).origin] : trustedIpcOrigins();
   assertTrustedIpcSender(event as IpcMainInvokeEvent, origins);
+  // The resident launcher-assistant window reuses the desktop pet drag/expand
+  // IPC surface, but it is not tracked in the windowProvider pet slot. Admit
+  // its main frame through the same sender identity the theme channel uses.
+  if (launcherAssistantWindow?.isThemeSender(event)) {
+    return;
+  }
   const rawUrl = String(event.senderFrame?.url || "");
   const identity = identifyDebugWindow(event.sender.getOSProcessId(), windowProvider?.snapshot() ?? null, windowProvider?.instanceWindowStates() ?? []);
   if (event.senderFrame !== event.sender.mainFrame || identity.role !== "desktop-pet" || !isDesktopPetWindowUrl(rawUrl)) {

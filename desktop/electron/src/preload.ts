@@ -12,6 +12,21 @@ if (isLauncherAssistantWindow) {
   contextBridge.exposeInMainWorld("vibelutionLauncherAssistant", {
     invoke: (payload: unknown) => ipcRenderer.invoke(IPC_CHANNELS.assistantInvoke, payload),
   });
+  // The unified resident assistant surface reuses the desktop pet drag and
+  // expand IPC. Expose only that pet subset here; the full vibelutionLauncher
+  // bridge stays limited to workbench and launcher control windows.
+  contextBridge.exposeInMainWorld("vibelutionLauncher", {
+    setDesktopPetExpanded: (expanded: boolean) =>
+      ipcRenderer.invoke(IPC_CHANNELS.setDesktopPetExpanded, expanded),
+    openConversationFromPet: (sessionId: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.openConversationFromPet, sessionId),
+    beginDesktopPetWindowDrag: (point: unknown) =>
+      ipcRenderer.send(IPC_CHANNELS.beginDesktopPetWindowDrag, point),
+    moveDesktopPetWindowDrag: (point: unknown) =>
+      ipcRenderer.send(IPC_CHANNELS.moveDesktopPetWindowDrag, point),
+    endDesktopPetWindowDrag: () =>
+      ipcRenderer.send(IPC_CHANNELS.endDesktopPetWindowDrag)
+  });
 }
 
 if (!isLauncherAssistantWindow) {
