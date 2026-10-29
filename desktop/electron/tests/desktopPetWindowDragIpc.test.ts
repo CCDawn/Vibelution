@@ -14,7 +14,7 @@ const ipcSource = readFileSync(fileURLToPath(new URL("../src/ipc.ts", import.met
 const preloadSource = readFileSync(fileURLToPath(new URL("../src/preload.ts", import.meta.url)), "utf8");
 const mainSource = readFileSync(fileURLToPath(new URL("../src/main.ts", import.meta.url)), "utf8");
 
-function resizeHandler(ownerDelivery = true) {
+function resizeHandler(ownerDelivery = true, themeSender = false) {
   const guardStart = mainSource.indexOf("function assertDesktopPetIpcSender(");
   const guardEnd = mainSource.indexOf("\nipcMain.handle(IPC_CHANNELS.setDesktopPetExpanded", guardStart);
   const resizeEnd = mainSource.indexOf("\n});", guardEnd) + "\n});".length;
@@ -44,6 +44,7 @@ function resizeHandler(ownerDelivery = true) {
       else openHandler = callback as typeof openHandler;
     } },
     windowProvider: { snapshot: () => ({ pet, workbench: { open: true, url: pet.url } }), instanceWindowStates: () => [], focusWorkbench: async () => ({ open: true }), sendToWorkbench, focusAndSendToWorkbenchOrigin },
+    launcherAssistantWindow: { isThemeSender: () => themeSender },
     trustedIpcOrigins: () => ["http://127.0.0.1:8000"],
     assertTrustedIpcSender,
     identifyDebugWindow: (pid: number) => ({ role: pid === 9 ? "desktop-pet" : "main-workbench" }),
@@ -94,6 +95,14 @@ describe("desktop pet fixed-bounds drag IPC", () => {
     expect(() => handler({ ...event, senderFrame: { url: "https://evil.test/desktop-assistant" } }, false)).toThrow("origin");
     expect(setBounds).toHaveBeenCalledTimes(1);
   });
+  it("admits the unified launcher assistant main frame through the theme sender identity", () => {
+    const assistantFrame = { url: "http://127.0.0.1:8001/launcher-assistant" };
+    const assistantEvent = { senderFrame: assistantFrame, sender: { mainFrame: assistantFrame, getOSProcessId: () => 10 } };
+    const admitted = resizeHandler(true, true);
+    expect(admitted.handler(assistantEvent, true)).toEqual({ expanded: true, width: 400, height: 530 });
+    expect(admitted.setBounds).toHaveBeenCalledTimes(1);
+    expect(() => resizeHandler(true, false).handler(assistantEvent, true)).toThrow("blocked desktop pet ipc sender");
+  });
   it("exposes drag operations only through the desktop-pet preload branch", () => {
     expect(ipcSource).toContain('beginDesktopPetWindowDrag: "pet:window-drag-begin"');
     expect(ipcSource).toContain('moveDesktopPetWindowDrag: "pet:window-drag-move"');
@@ -112,8 +121,15 @@ describe("desktop pet fixed-bounds drag IPC", () => {
   });
   it("restricts resizing to boolean presets from the registered pet main frame", () => {
     expect(ipcSource).toContain('setDesktopPetExpanded: "pet:window-expanded"');
-    expect(preloadSource.slice(preloadSource.indexOf("...(isDesktopPetWindow"))).toContain("ipcRenderer.invoke(IPC_CHANNELS.setDesktopPetExpanded, expanded)");
-    expect(preloadSource.slice(0, preloadSource.indexOf("...(isDesktopPetWindow"))).not.toContain("setDesktopPetExpanded");
+    // The pet expand channel may only be exposed by the desktop-pet branch and
+    // the unified launcher-assistant branch that reuses the pet IPC surface.
+    const assistantBranchStart = preloadSource.indexOf("if (isLauncherAssistantWindow)");
+    const assistantBranchEnd = preloadSource.indexOf("if (!isLauncherAssistantWindow)");
+    const petBranchStart = preloadSource.indexOf("...(isDesktopPetWindow");
+    expect(preloadSource.slice(petBranchStart)).toContain("ipcRenderer.invoke(IPC_CHANNELS.setDesktopPetExpanded, expanded)");
+    expect(preloadSource.slice(assistantBranchStart, assistantBranchEnd)).toContain("ipcRenderer.invoke(IPC_CHANNELS.setDesktopPetExpanded, expanded)");
+    expect(preloadSource.slice(0, assistantBranchStart)).not.toContain("setDesktopPetExpanded");
+    expect(preloadSource.slice(assistantBranchEnd, petBranchStart)).not.toContain("setDesktopPetExpanded");
     expect(mainSource).toContain('identity.role !== "desktop-pet"');
     expect(mainSource).toContain("event.senderFrame !== event.sender.mainFrame");
     expect(mainSource).toContain('typeof expanded !== "boolean"');
