@@ -37,7 +37,12 @@ export function appearanceControlResult(request: AppearanceMainControlRequest,va
     } else if (value.verified !== false || Object.hasOwn(value,"selection")) return fail();
     return {...value};
   }
-  if (!closed(value,["schemaVersion","operation","code"],["theme"]) || value.schemaVersion !== 1 || value.operation !== request.operation || typeof value.code !== "string" || !["read","applied","unavailable","persistence_failed"].includes(value.code)) return fail();
+  if (!closed(value,["schemaVersion","operation","code"],["theme","workbenchSync","assistantSync","authorityStatus"]) || value.schemaVersion !== 1 || value.operation !== request.operation || typeof value.code !== "string" || !["read","applied","conflict","unknown","unavailable","persistence_failed"].includes(value.code)) return fail();
+  if (["conflict","unknown"].includes(value.code) && request.action !== "launcher_theme_set") return fail();
+  if (Object.hasOwn(value,"authorityStatus") && (request.action !== "launcher_theme_set" || !["committed","unknown"].includes(value.authorityStatus as string))) return fail();
+  if (Object.hasOwn(value,"assistantSync") && (request.action !== "launcher_theme_set" || !["applied","conflict","unavailable","unknown"].includes(value.assistantSync as string))) return fail();
+  if (Object.hasOwn(value,"workbenchSync") && (request.action !== "launcher_theme_set" || !["applied","conflict","unknown","unavailable"].includes(value.code)
+      || !["applied","conflict","unavailable","unknown"].includes(value.workbenchSync as string))) return fail();
   if (["read","applied"].includes(value.code)) {
     if (!["dark","light"].includes(value.theme as string) || value.code !== (request.action === "launcher_theme_get" ? "read" : "applied") || request.action === "launcher_theme_set" && value.theme !== request.theme) return fail();
   } else if (Object.hasOwn(value,"theme")) return fail();

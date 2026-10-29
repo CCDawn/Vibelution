@@ -117,7 +117,8 @@ import {
 import {
   readStoredWorkbenchTheme,
   subscribeStoredWorkbenchTheme,
-  writeStoredWorkbenchTheme,
+  requestWorkbenchTheme,
+  subscribeWorkbenchThemeSync,
   type WorkbenchTheme,
 } from "./themePreference";
 import {
@@ -1062,6 +1063,9 @@ export function AppShell() {
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
   const desktopShell = useMemo(() => isElectronDesktopShell(), []);
   const [theme, setTheme] = useState(() => readStoredWorkbenchTheme());
+  const [themeSyncState, setThemeSyncState] = useState<"applied" | "local" | "conflict" | "unknown" | "unavailable">("applied");
+  const [themePending, setThemePending] = useState(false);
+  const themeGate = useRef(false);
   const [frontendVisible, setFrontendVisible] = useState(
     () => (typeof document === "undefined" ? true : document.visibilityState === "visible"),
   );
@@ -1302,6 +1306,7 @@ export function AppShell() {
 
   useEffect(() => syncWorkbenchThemeRoot(theme), [theme]);
   useEffect(() => subscribeStoredWorkbenchTheme(setTheme), []);
+  useEffect(() => subscribeWorkbenchThemeSync(setThemeSyncState), []);
 
   // Interface font size base: the index.html bootstrap already painted it
   // pre-CSS; re-apply once on mount and track settings/storage changes live
@@ -2258,8 +2263,10 @@ export function AppShell() {
   }, []);
 
   const selectTheme = useCallback((next: WorkbenchTheme) => {
-    writeStoredWorkbenchTheme(next);
-    setTheme(next);
+    if (themeGate.current) return;
+    themeGate.current = true;
+    setThemePending(true);
+    void requestWorkbenchTheme(next).then(result => { if (result === "superseded") return; setThemeSyncState(result); if (result !== "unavailable") setTheme(readStoredWorkbenchTheme()); }).finally(() => { themeGate.current = false; setThemePending(false); });
   }, []);
 
   useEffect(() => {
@@ -3241,7 +3248,7 @@ export function AppShell() {
             </nav>
 
             <Suspense fallback={null}>
-              <LazyAppShellSettingsMenu lang={lang} theme={theme} onThemeChange={selectTheme}
+              <LazyAppShellSettingsMenu lang={lang} theme={theme} themeSyncState={themeSyncState} themePending={themePending} onThemeChange={selectTheme}
                 onClose={closeUtilityMenu} onRefresh={refreshFrontend}
                 refreshDisabled={restartRequested || shutdownRequested || (shutdownInFlight && !shutdownSettled)} />
             </Suspense>

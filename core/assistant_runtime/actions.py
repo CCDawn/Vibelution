@@ -90,7 +90,7 @@ _APPEARANCE_SCHEMAS = {"launcher_theme_get": Parameters, "launcher_theme_set": L
                        "operator_image_upload": OperatorImageImport}
 _APPEARANCE_HELP = {
     "launcher_theme_get": "读取Launcher当前持久化的明暗主题；仅Launcher同来源窗口，不代表各项目HTTP页面的独立主题。",
-    "launcher_theme_set": "设置Launcher为light或dark并等待页面核验持久化与自动生效，同来源窗口同步；沿用现有主题存储，不修改各项目HTTP页面的独立偏好。",
+    "launcher_theme_set": "设置Launcher为light或dark；authorityStatus说明权威记录已提交或未知，assistantSync和workbenchSync分别报告投影已应用、冲突、不可达或未知。离线或不可达时不保证同步，其他项目不变；未知时先读取状态，不自动重复写入。",
     "operator_image_upload": "经原生审批打开单张图片选择框，用户选择PNG/JPEG/WebP后自动上传并应用为头像avatar或壁纸background，无须进入设置页；取消不修改。模型不得传文件路径、URL或图片内容。等待最多120秒，unknown/unavailable时先读operator_image_options/当前外观，不自动重复打开选择框。重复人工导入可能新增资源。",
 }
 

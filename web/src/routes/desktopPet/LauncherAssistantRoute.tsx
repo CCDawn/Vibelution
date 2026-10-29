@@ -27,6 +27,7 @@ import { ChatToolApprovalDialog } from "../chat/ChatToolApprovalDialog";
 import { toolApprovalRiskLabel } from "../chat/toolApprovalLabels";
 import { authorizationUpgradePreviewIsValid, dispatchWritePreviewIsValid, launcherAgentCreatePreviewIsValid, projectLifecyclePreviewIsValid, managementApprovalActionIsKnown, toolApprovalActionPreview, toolApprovalDisplayName } from "../chat/toolApprovalPreview";
 import { useLauncherThemeControl } from "./useLauncherThemeControl";
+import { readStoredWorkbenchTheme, requestWorkbenchTheme, subscribeWorkbenchThemeSync, useAuthorityTheme } from "../../app/themePreference";
 import { PersonalAssistantComputerPanel } from "../personalAssistant/PersonalAssistantComputerPanel";
 import { launcherAssistantComputer } from "../../api/launcherAssistantComputer";
 import petStyles from "./DesktopAssistantRoute.styles";
@@ -80,6 +81,10 @@ export function LauncherAssistantRoute() {
   const { lang } = useShellI18n();
   const copy = COPY[lang];
   const [expanded, setExpanded] = useState(false);
+  const [themeSyncState, setThemeSyncState] = useState<"applied" | "local" | "conflict" | "unknown" | "unavailable">("applied");
+  const [themePending, setThemePending] = useState(false);
+  const themeGate = useRef(false);
+  useEffect(() => subscribeWorkbenchThemeSync(setThemeSyncState), []);
   const [computerOpen, setComputerOpen] = useState(false);
   const [visible, setVisible] = useState(() => document.visibilityState !== "hidden");
   const [epoch, setEpoch] = useState(0);
@@ -629,6 +634,9 @@ export function LauncherAssistantRoute() {
       <VNativeButton className={petStyles.close} aria-label={copy.refresh} onClick={() => { void status.refetch(); void detail.refetch(); void dispatches.refetch(); void approvals.refetch(); void client.invalidateQueries({ queryKey: assetQueryPrefix }); }}><RefreshCw size={14} /></VNativeButton>
       <VNativeButton className={petStyles.close} aria-label={copy.collapse} disabled={resizePending} onClick={() => void toggle()}><X size={14} /></VNativeButton>
     </header>}>
+    {themeSyncState !== "applied" ? <VStateSurface tone="error" title={themeSyncState === "unknown" ? (lang === "zh" ? "主题变更结果未确认" : "Theme change is unconfirmed") : themeSyncState === "conflict" ? (lang === "zh" ? "助理主题与全局主题不同" : "Assistant and global themes differ") : (lang === "zh" ? "主题尚未同步" : "Theme is not synchronized")}
+      actions={<><VButton isDisabled={themePending} onClick={() => { if (themeGate.current) return; themeGate.current = true; setThemePending(true); void requestWorkbenchTheme(readStoredWorkbenchTheme()).then(result => { if (result !== "superseded") setThemeSyncState(result); }).finally(() => { themeGate.current = false; setThemePending(false); }); }}>{lang === "zh" ? "使用助理主题" : "Use assistant theme"}</VButton>
+        <VButton isDisabled={themePending} onClick={() => { if (themeGate.current) return; themeGate.current = true; setThemePending(true); void useAuthorityTheme().then(result => { if (result !== "superseded") setThemeSyncState(result); }).finally(() => { themeGate.current = false; setThemePending(false); }); }}>{lang === "zh" ? "使用全局主题" : "Use global theme"}</VButton></>} /> : null}
     {computerOpen ? <PersonalAssistantComputerPanel active={reading} transport={launcherAssistantComputer}
       onCollapse={() => setComputerOpen(false)} /> : detail.data ? <LazyConversationView
       runtimeApi={launcherConversationApi}

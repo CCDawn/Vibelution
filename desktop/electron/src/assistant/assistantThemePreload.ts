@@ -13,5 +13,13 @@ export function createAssistantThemePreload(ipcRenderer: IpcRenderer) {
       return () => { ipcRenderer.removeListener("vibelution:assistant-theme-command", wrapped); };
     },
     respond: (payload: unknown): Promise<unknown> => ipcRenderer.invoke("vibelution:assistant-theme-result", payload),
+    readThemeAuthority: (): Promise<unknown> => ipcRenderer.invoke("workbench:read-theme-authority", null),
+    setThemeAuthority: (payload: unknown): Promise<unknown> => ipcRenderer.invoke("workbench:set-theme-authority", payload),
+    reportThemeProjection: (payload: unknown): Promise<unknown> => ipcRenderer.invoke("workbench:theme-projection-result", payload),
+    onAssistantThemeChanged(listener: (payload: unknown) => void): () => void {
+      const wrapped = (_event: unknown, payload: unknown) => listener(payload);
+      ipcRenderer.on("workbench:assistant-theme-changed", wrapped);
+      return () => { ipcRenderer.removeListener("workbench:assistant-theme-changed", wrapped); };
+    },
   };
 }

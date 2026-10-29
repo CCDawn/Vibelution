@@ -38,6 +38,8 @@ import { AssistantProjectRegistryConnection } from "./assistant/projectRegistryC
 import { createAssistantAppearanceMainControl } from "./assistant/appearanceMainControl.js";
 import { createAssistantProjectMainControl } from "./assistant/projectMainControl.js";
 import { AssistantWindow } from "./assistant/assistantWindow.js";
+import { publishAssistantTheme, ThemeProjectionTracker, workbenchThemeScope } from "./assistant/workbenchThemeSync.js";
+import { ThemeAuthority } from "./assistant/themeAuthority.js";
 import { resolveAssistantResources } from "./assistant/assistantResources.js";
 import { createAssistantTray } from "./assistant/assistantTray.js";
 import { createAssistantLauncherEntry } from "./assistant/launcherEntry.js";
@@ -586,6 +588,11 @@ if (lockDecision.action === "continue_as_primary") configureWindowsNotificationI
 
 let launcherAssistantHost: AssistantHost | null = null;
 let launcherAssistantWindow: AssistantWindow | null = null;
+const themeProjection = new ThemeProjectionTracker();
+const themeAuthority = new ThemeAuthority(join(app.getPath("userData"), "appearance", "theme.json"), (snapshot, source) => {
+  themeProjection.begin(snapshot, "workbench", () => publishAssistantTheme(snapshot, windowProvider, IPC_CHANNELS.assistantThemeChanged, source === "workbench"));
+  themeProjection.begin(snapshot, "assistant", () => launcherAssistantWindow?.publishTheme(snapshot, source !== "workbench") === true);
+});
 let launcherAssistantExitReady = false;
 let launcherAssistantStarting: Promise<void> | null = null;
 let launcherAssistantStopping: Promise<void> | null = null;
@@ -714,9 +721,27 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
         if (!launcherAssistantHost || shutdownApproved) throw new Error("ASSISTANT_NOT_READY");
         return launcherAssistantHost.importOperatorImage(input,deliveryId);
       },
-      theme: async (request,signal) => launcherAssistantWindow
-        ? launcherAssistantWindow.requestTheme(request,signal)
-        : {schemaVersion:1,operation:request.operation,code:"unavailable"},
+      theme: async (request,signal) => {
+        if (signal?.aborted) return { schemaVersion: 1, operation: request.operation, code: "unavailable" };
+        let result = request.operation === "read" ? await themeAuthority.read() : await themeAuthority.set(request.theme!, undefined, signal, undefined, "model", request.deliveryId);
+        if (request.operation === "set" && result.code === "unknown") {
+          const readback = await themeAuthority.read();
+          if (readback.code === "read" && readback.snapshot?.writeId === request.deliveryId) result = { code: "applied", snapshot: readback.snapshot };
+          else return { schemaVersion: 1, operation: "set", code: "unknown", authorityStatus: "unknown" };
+        }
+        if (request.operation === "read" && result.code === "uninitialized" && launcherAssistantWindow)
+          return await launcherAssistantWindow.requestTheme(request, signal);
+        if (!result.snapshot || (result.code !== "applied" && result.code !== "read"))
+          return { schemaVersion: 1, operation: request.operation, code: "unavailable" };
+        if (request.operation === "set") {
+          const assistantSync = await themeProjection.wait(result.snapshot, "assistant");
+          if (assistantSync !== "applied") return { schemaVersion: 1, operation: request.operation,
+            code: assistantSync === "conflict" ? "conflict" : assistantSync === "unknown" ? "unknown" : "unavailable",
+            authorityStatus: "committed", assistantSync, workbenchSync: await themeProjection.wait(result.snapshot, "workbench") };
+        }
+        return { schemaVersion: 1, operation: request.operation, code: result.code, theme: result.snapshot.theme,
+          ...(request.operation === "set" ? { authorityStatus: "committed", assistantSync: "applied", workbenchSync: await themeProjection.wait(result.snapshot, "workbench") } : {}) };
+      },
     });
     const mainControl: NonNullable<ConstructorParameters<typeof AssistantHost>[0]["mainControl"]> = (request,signal) => {
       if (request.action === "launcher_theme_get" || request.action === "launcher_theme_set" || request.action === "operator_image_upload")
@@ -6646,6 +6671,32 @@ ipcMain.handle(IPC_CHANNELS.requestWindowClose, (event) => {
   return requestRendererWindowClose(event,
     () => BrowserWindow.fromWebContents(event.sender),
     (windowId, senderUrl) => provider.requestRendererWorkbenchClose(windowId, senderUrl));
+});
+
+ipcMain.handle(IPC_CHANNELS.readThemeAuthority, async (event) => {
+  const scope = workbenchThemeScope(event, windowProvider);
+  if (scope !== "main" && !launcherAssistantWindow?.isThemeSender(event)) return { code: scope === "local" ? "local" : "unavailable" };
+  return await themeAuthority.read();
+});
+ipcMain.handle(IPC_CHANNELS.setThemeAuthority, async (event, value: unknown) => {
+  const isAuthorized = () => workbenchThemeScope(event, windowProvider) === "main" || launcherAssistantWindow?.isThemeSender(event) === true;
+  if (!isAuthorized() || !value || typeof value !== "object" || Array.isArray(value)) return { code: "unavailable" };
+  const data = value as Record<string, unknown>;
+  if (Object.keys(data).sort().join(",") !== "epoch,revision,theme,writeId" || (data.theme !== "light" && data.theme !== "dark")
+      || typeof data.epoch !== "string" || typeof data.writeId !== "string" || !/^[0-9a-f]{32}$/.test(data.writeId)
+      || !Number.isSafeInteger(data.revision) || Number(data.revision) < 0) return { code: "unavailable" };
+  const expected = data.epoch === "" && data.revision === 0 ? null : { epoch: data.epoch, revision: data.revision as number };
+  return await themeAuthority.set(data.theme, expected, undefined, isAuthorized,
+    launcherAssistantWindow?.isThemeSender(event) ? "assistant" : "workbench", data.writeId);
+});
+ipcMain.handle(IPC_CHANNELS.themeProjectionResult, (event, value: unknown) => {
+  const actor = workbenchThemeScope(event, windowProvider) === "main" ? "workbench"
+    : launcherAssistantWindow?.isThemeSender(event) ? "assistant" : null;
+  if (!actor || !value || typeof value !== "object" || Array.isArray(value)) return;
+  const data = value as Record<string, unknown>;
+  if (Object.keys(data).sort().join(",") !== "epoch,revision,state" || typeof data.epoch !== "string"
+      || !Number.isSafeInteger(data.revision) || !["applied", "conflict", "unavailable"].includes(String(data.state))) return;
+  themeProjection.acknowledge({ epoch: data.epoch, revision: data.revision as number }, actor, data.state as "applied" | "conflict" | "unavailable");
 });
 
 ipcMain.handle(IPC_CHANNELS.getLauncherFreshness, async (event) => {

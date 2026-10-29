@@ -3,7 +3,8 @@ import type { DesktopPaths } from "../paths.js";
 import { createPetWindow } from "../windows/petWindow.js";
 import { desktopPetWindowExpandedBounds } from "../windows/petWindowBounds.js";
 import type { AssistantHost } from "./assistantHost.js";
-import { invokeAssistant, LAUNCHER_ASSISTANT_URL } from "./assistantBridge.js";
+import { assertAssistantSender, invokeAssistant, LAUNCHER_ASSISTANT_URL } from "./assistantBridge.js";
+import type { ThemeSnapshot } from "./themeAuthority.js";
 import { AssistantThemeControl, type AssistantThemeInput, type AssistantThemeResult } from "./assistantThemeControl.js";
 
 /** Window visibility never owns the resident native runtime or remote tasks. */
@@ -58,6 +59,17 @@ export class AssistantWindow {
     const window = this.window;
     if (!window || window.isDestroyed()) return Promise.resolve({ schemaVersion: 1, operation: input.operation, code: "unavailable" });
     return this.themeControl.request(window.webContents, input, signal);
+  }
+
+  isThemeSender(event: Parameters<typeof invokeAssistant>[0]): boolean {
+    try { if (!this.window || this.window.isDestroyed()) return false; assertAssistantSender(event, this.window.webContents); return true; }
+    catch { return false; }
+  }
+
+  publishTheme(snapshot: ThemeSnapshot, explicit = false): boolean {
+    const window = this.window;
+    if (!window || window.isDestroyed() || window.webContents.getURL() !== LAUNCHER_ASSISTANT_URL) return false;
+    try { window.webContents.send("workbench:assistant-theme-changed", { snapshot, explicit }); return true; } catch { return false; }
   }
 
   /** Show a native fallback on the resident assistant, including when hidden. */

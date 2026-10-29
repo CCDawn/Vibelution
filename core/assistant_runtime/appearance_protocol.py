@@ -42,7 +42,15 @@ def validate_result(action, request, result):
             raise ValueError("Invalid appearance result")
     else:
         required = {"schemaVersion", "operation", "code"}
-        if not required <= result.keys() or result.keys() - required - {"theme"} or type(result.get("code")) is not str or result["code"] not in {"read", "applied", "unavailable", "persistence_failed"}:
+        if not required <= result.keys() or result.keys() - required - {"theme", "workbenchSync", "assistantSync", "authorityStatus"} or type(result.get("code")) is not str or result["code"] not in {"read", "applied", "conflict", "unknown", "unavailable", "persistence_failed"}:
+            raise ValueError("Invalid appearance result")
+        if result["code"] in {"conflict", "unknown"} and action != "launcher_theme_set":
+            raise ValueError("Invalid appearance result")
+        if "authorityStatus" in result and (action != "launcher_theme_set" or type(result["authorityStatus"]) is not str or result["authorityStatus"] not in {"committed", "unknown"}):
+            raise ValueError("Invalid appearance result")
+        if "assistantSync" in result and (action != "launcher_theme_set" or type(result["assistantSync"]) is not str or result["assistantSync"] not in {"applied", "conflict", "unavailable", "unknown"}):
+            raise ValueError("Invalid appearance result")
+        if "workbenchSync" in result and (action != "launcher_theme_set" or result["code"] not in {"applied", "conflict", "unknown", "unavailable"} or type(result["workbenchSync"]) is not str or result["workbenchSync"] not in {"applied", "conflict", "unavailable", "unknown"}):
             raise ValueError("Invalid appearance result")
         if result["code"] in {"read", "applied"}:
             if result["code"] != ("read" if action == "launcher_theme_get" else "applied") or type(result.get("theme")) is not str or result["theme"] not in {"dark", "light"} or action == "launcher_theme_set" and result["theme"] != request["theme"]:

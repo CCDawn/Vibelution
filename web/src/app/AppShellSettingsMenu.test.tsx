@@ -6,8 +6,8 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { AppShellSettingsMenu } from "./AppShellSettingsMenu";
 const control = vi.fn(), refresh = vi.fn(), close = vi.fn(), theme = vi.fn();
 let root: Root, host: HTMLDivElement;
-async function mount(disabled = false) {
-  await act(async () => root.render(<MemoryRouter><AppShellSettingsMenu lang="zh" theme="light" onThemeChange={theme} onClose={close} onRefresh={refresh} refreshDisabled={disabled} /></MemoryRouter>));
+async function mount(disabled = false, themePending = false) {
+  await act(async () => root.render(<MemoryRouter><AppShellSettingsMenu lang="zh" theme="light" themePending={themePending} onThemeChange={theme} onClose={close} onRefresh={refresh} refreshDisabled={disabled} /></MemoryRouter>));
 }
 function button(label: string) { return [...host.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent?.includes(label) || b.getAttribute("aria-label") === label)!; }
 beforeEach(async () => {
@@ -39,6 +39,12 @@ it("keeps lifecycle lock on reload", async () => {
 it("uses the existing theme action", async () => {
   await act(async () => button("外观").click());
   await act(async () => button("深色").click()); expect(theme).toHaveBeenCalledWith("dark");
+});
+it("disables both theme choices while a prior selection is pending", async () => {
+  await mount(false, true);
+  await act(async () => button("外观").click());
+  expect(button("浅色").disabled).toBe(true);
+  expect(button("深色").disabled).toBe(true);
 });
 it("drives the real bridge and does not fake success on rejection", async () => {
   const toggle = host.querySelector<HTMLInputElement>('input[role="switch"]')!;

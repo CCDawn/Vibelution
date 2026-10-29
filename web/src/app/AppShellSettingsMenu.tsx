@@ -7,6 +7,8 @@ import styles from "./AppShellSettingsMenu.styles";
 export type AppShellSettingsMenuProps = {
   lang: "zh" | "en";
   theme: "light" | "dark";
+  themeSyncState?: "applied" | "local" | "conflict" | "unknown" | "unavailable";
+  themePending?: boolean;
   onThemeChange: (theme: "light" | "dark") => void;
   onClose: () => void;
   onRefresh: () => void;
@@ -14,7 +16,7 @@ export type AppShellSettingsMenuProps = {
 };
 
 /** Navigation and maintenance are separate levels; lifecycle remains owned by AppShell. */
-export function AppShellSettingsMenu({ lang, theme, onThemeChange, onClose, onRefresh, refreshDisabled }: AppShellSettingsMenuProps) {
+export function AppShellSettingsMenu({ lang, theme, themeSyncState, themePending, onThemeChange, onClose, onRefresh, refreshDisabled }: AppShellSettingsMenuProps) {
   const [page, setPage] = useState<"home" | "appearance" | "advanced">("home");
   const zh = lang === "zh";
   return <div className={styles.body} data-testid="shell-settings-menu">
@@ -32,7 +34,8 @@ export function AppShellSettingsMenu({ lang, theme, onThemeChange, onClose, onRe
       <div className={styles.divider} />
       <VButton variant="ghost" contentLayout="plain" className={styles.row} onPress={() => setPage("advanced")}><Wrench size={16} /><span className={styles.label}>{zh ? "高级与诊断" : "Advanced and diagnostics"}</span><ChevronRight size={14} /></VButton>
     </> : page === "appearance" ? <>
-      {(["light", "dark"] as const).map((value) => <VButton key={value} variant="ghost" contentLayout="plain" className={styles.row} aria-pressed={theme === value} onPress={() => onThemeChange(value)}>{value === "light" ? <Sun size={16} /> : <Moon size={16} />}<span className={styles.label}>{value === "light" ? (zh ? "浅色" : "Light") : (zh ? "深色" : "Dark")}</span>{theme === value ? <Check size={15} /> : null}</VButton>)}
+      {themeSyncState && themeSyncState !== "applied" ? <p role="alert">{themeSyncState === "unknown" ? (zh ? "主题变更结果未确认。" : "The theme change is unconfirmed.") : themeSyncState === "conflict" ? (zh ? "当前主题与全局主题不同，请选择。" : "The local and global themes differ. Choose one.") : themeSyncState === "local" ? (zh ? "主题仅保存在当前窗口，尚未同步。" : "Theme is local and is not synchronized.") : (zh ? "主题未能保存。" : "The theme could not be saved.")}</p> : null}
+      {(["light", "dark"] as const).map((value) => <VButton key={value} variant="ghost" contentLayout="plain" className={styles.row} aria-pressed={theme === value} isDisabled={themePending} onPress={() => onThemeChange(value)}>{value === "light" ? <Sun size={16} /> : <Moon size={16} />}<span className={styles.label}>{value === "light" ? (zh ? "浅色" : "Light") : (zh ? "深色" : "Dark")}</span>{theme === value ? <Check size={15} /> : null}</VButton>)}
     </> : <>
       <VRouteLinkButton to="/kernel" variant="ghost" className={styles.row} onClick={onClose} icon={<Cpu size={16} />}><span className={styles.label}>{zh ? "运行内核" : "Runtime kernel"}</span><ChevronRight size={14} /></VRouteLinkButton>
       <VRouteLinkButton to="/logs" variant="ghost" className={styles.row} onClick={onClose} icon={<ScrollText size={16} />}><span className={styles.label}>{zh ? "查看日志" : "View logs"}</span><ChevronRight size={14} /></VRouteLinkButton>

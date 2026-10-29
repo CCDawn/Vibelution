@@ -15,6 +15,10 @@ def test_closed_appearance_contracts():
 def test_theme_results_are_observed_and_closed():
     req = {"operation": "set", "theme": "dark"}
     assert validate_result("launcher_theme_set", req, {"schemaVersion":1,"operation":"set","code":"applied","theme":"dark"})["theme"] == "dark"
+    for state in ("applied", "conflict", "unavailable", "unknown"):
+        assert validate_result("launcher_theme_set", req, {"schemaVersion":1,"operation":"set","code":"applied","theme":"dark","workbenchSync":state})["workbenchSync"] == state
+    with pytest.raises(ValueError):
+        validate_result("launcher_theme_set", req, {"schemaVersion":1,"operation":"set","code":"applied","theme":"dark","workbenchSync":[]})
     for row in ({"schemaVersion":1,"operation":"set","code":"applied","theme":"light"}, {"schemaVersion":1,"operation":"set","code":"applied"}, {"schemaVersion":1,"operation":"set","code":"applied","theme":"dark","path":"secret"}):
         with pytest.raises(ValueError): validate_result("launcher_theme_set", req, row)
 
@@ -112,3 +116,12 @@ def test_native_stop_cancels_only_its_unadmitted_image_and_prevents_late_write()
         assert not draining.done()
         broker.close();await draining
     asyncio.run(run())
+
+
+def test_launcher_theme_help_describes_best_effort_primary_workbench_sync():
+    from core.assistant_runtime.actions import _APPEARANCE_HELP
+
+    help_text = _APPEARANCE_HELP["launcher_theme_set"]
+    assert "authorityStatus" in help_text and "assistantSync" in help_text and "workbenchSync" in help_text
+    assert "离线或不可达时不保证同步" in help_text
+    assert "其他项目不变" in help_text

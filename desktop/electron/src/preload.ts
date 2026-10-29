@@ -20,6 +20,14 @@ contextBridge.exposeInMainWorld("vibelutionLauncher", {
   getDesktopShellSummary: () => ipcRenderer.invoke(IPC_CHANNELS.getDesktopShellSummary),
   ...(!isLauncherControlWindow && !isDesktopPetWindow ? {
     requestWindowClose: () => ipcRenderer.invoke(IPC_CHANNELS.requestWindowClose),
+    readThemeAuthority: () => ipcRenderer.invoke(IPC_CHANNELS.readThemeAuthority),
+    setThemeAuthority: (input: unknown) => ipcRenderer.invoke(IPC_CHANNELS.setThemeAuthority, input),
+    reportThemeProjection: (input: unknown) => ipcRenderer.invoke(IPC_CHANNELS.themeProjectionResult, input),
+    onAssistantThemeChanged: (listener: (theme: unknown) => void) => {
+      const wrapped = (_event: unknown, theme: unknown) => listener(theme);
+      ipcRenderer.on(IPC_CHANNELS.assistantThemeChanged, wrapped);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.assistantThemeChanged, wrapped);
+    },
     controlDesktopPet: (open?: boolean, mode?: "pet" | "assistant") => ipcRenderer.invoke(IPC_CHANNELS.controlDesktopPet, open, mode),
     requestWorkbenchRestart: (trigger?: string) => ipcRenderer.invoke(IPC_CHANNELS.requestWorkbenchRestart, trigger),
     requestWorkbenchShellUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.requestWorkbenchShellUpdate),
