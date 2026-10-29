@@ -16,7 +16,7 @@ import { runWorkbenchLifecycle } from "../src/process/workbenchLifecycle.js";
 import { CHILD } from "./fixtures/assistantPrivateHost.js";
 
 describe.skipIf(process.platform !== "win32")("real private main-control transport in Temp", () => {
-  it("rejects new lifecycle writes across a full host restart without dispatching", async () => {
+  it("preserves native guard/queued facts and recovers the same receipt after a full host restart", async () => {
     const root = realpathSync.native(mkdtempSync(join(tmpdir(), "assistant-main-native-")));
     const sourceRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
     const gitEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.toUpperCase().startsWith("GIT_")));
@@ -52,13 +52,17 @@ describe.skipIf(process.platform !== "win32")("real private main-control transpo
       const send = async (action: string, operation: string, requestId: string) => host!.request({ operation: "send", requestId: `message-${requestId}`,
         message: JSON.stringify({ action, parameters: { project_id: projectId, operation, request_id: requestId } }) });
       host = makeHost(); await host.start();
-      expect(await send("project_lifecycle", "stop", "native-stop")).toMatchObject({ state: "rejected", code: "prerequisite_required" });
-      expect(await send("project_lifecycle", "restart", "native-restart")).toMatchObject({ state: "rejected", code: "prerequisite_required" });
-      expect(nativeRun).not.toHaveBeenCalled();
+      await send("project_lifecycle", "stop", "native-stop");
+      await vi.waitFor(async () => expect(await send("project_lifecycle_receipt", "stop", "native-stop"))
+        .toMatchObject({ state: "rejected", code: "active_work_blocked", accepted: false }), { timeout: 5000 });
+      await send("project_lifecycle", "restart", "native-restart");
+      await vi.waitFor(async () => expect(await send("project_lifecycle_receipt", "restart", "native-restart"))
+        .toMatchObject({ state: "queued", code: "restart_queued", accepted: true }), { timeout: 5000 });
+      expect(nativeRun).toHaveBeenCalledTimes(2);
       await host.stop(); host = makeHost(); await host.start();
-      expect(await send("project_lifecycle_receipt", "restart", "native-restart")).toMatchObject({ state: "not_found", code: "request_not_found" });
-      expect(await send("project_lifecycle", "restart", "native-restart")).toMatchObject({ state: "rejected", code: "prerequisite_required" });
-      expect(nativeRun).not.toHaveBeenCalled();
+      expect(await send("project_lifecycle_receipt", "restart", "native-restart")).toMatchObject({ state: "queued", code: "restart_queued" });
+      expect(await send("project_lifecycle", "restart", "native-restart")).toMatchObject({ state: "queued", code: "restart_queued" });
+      expect(nativeRun).toHaveBeenCalledTimes(2);
       expect(readFileSync(config, "utf8")).toBe("");
     } catch (error) {
       // This synthetic child has no provider credentials or real profile. Keep

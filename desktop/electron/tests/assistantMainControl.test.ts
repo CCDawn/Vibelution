@@ -38,11 +38,69 @@ async function setup() {
 }
 
 describe("production main control composition", () => {
-  it.each(["start", "stop", "restart"] as const)("rejects new %s without reserving a request", async operation => {
+  it.each(["start", "stop", "restart"] as const)("reserves and dispatches new %s to the native runner", async operation => {
     const f = await setup(), control = f.create();
-    expect(await control({ ...f.request, operation })).toMatchObject({ state: "rejected", code: "prerequisite_required" });
-    expect(readdirSync(join(f.root, "requests"))).toEqual([]);
-    expect(f.execute).not.toHaveBeenCalled();
+    expect(await control({ ...f.request, operation })).toMatchObject({ state: "unknown", code: "receipt_unavailable" });
+    expect(readdirSync(join(f.root, "requests")).length).toBeGreaterThan(0);
+    expect(f.execute).toHaveBeenCalledTimes(1);
+  });
+  it("uses the current registered main target and explicit config/environment without changing global state", async () => {
+    const f = await setup(), control = f.create();
+    const before = process.env.VIBELUTION_WORKSPACE_ROOT;
+    expect(await control(f.request)).toMatchObject({ state: "unknown", code: "receipt_unavailable" });
+    const input = f.execute.mock.calls[0][0];
+    expect(input.workspaceRoot).toBe(f.project); expect(input.pythonPath).toBe(f.pythonPath);
+    expect(input.operatorConfigPath).toBe(f.configPath);
+    expect(input.targetEnvironment?.VIBELUTION_CONFIG_PATH).toBe(f.configPath);
+    expect(input.targetEnvironment?.VIBELUTION_DATA_HOME).toBe(join(f.root, "target-data"));
+    expect(input.targetEnvironment?.VIBELUTION_PORT).toBeUndefined();
+    expect(input.targetEnvironment?.VIBELUTION_WEB_CONTROL_TOKEN).toBeUndefined();
+    expect(process.env.VIBELUTION_WORKSPACE_ROOT).toBe(before);
+    expect(await f.create()(f.request)).toMatchObject({ state: "unknown" });
+    expect(f.execute).toHaveBeenCalledTimes(1);
+  });
+  it("exposes the native queue's actual execution drain through the assistant guard", async () => {
+    const f = await setup();
+    let entered!: () => void, release!: () => void;
+    let capture!: () => Promise<void>;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    f.execute.mockImplementationOnce(input => {
+      capture = input.queue!.captureExecutionDrain!;
+      return input.queue!.submit({ operation: input.operation, execute: async command => {
+        entered(); await gate;
+        return { schemaVersion: 1, accepted: true, operation: command.operation, commandId: command.commandId };
+      } });
+    });
+    const request = f.create()(f.request);
+    await started;
+    let drained = false;
+    const drain = capture().then(() => { drained = true; });
+    await Promise.resolve();
+    expect(drained).toBe(false);
+    release();
+    await request;
+    await drain;
+    expect(drained).toBe(true);
+  });
+  it("holds the main-line exclusive fence against ordinary Launcher controls during assistant restart", async () => {
+    const f = await setup();
+    let entered!: () => void, release!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    f.execute.mockImplementation(input => input.queue!.submit({ operation: input.operation, execute: async command => {
+      entered(); await gate;
+      return { schemaVersion: 1, accepted: true, operation: command.operation, commandId: command.commandId };
+    } }));
+    const assistant = f.create()({ ...f.request, operation: "restart" });
+    await started;
+    const spawn = vi.fn(() => { throw new Error("must not run while the assistant fence is held"); });
+    await expect(runWorkbenchLifecycle({ workspaceRoot: f.project, pythonPath: f.pythonPath, operatorConfigPath: f.configPath,
+      operation: "restart", spawnImpl: spawn })).rejects.toThrow("MAIN_LINE_EXCLUSIVE_BUSY");
+    expect(spawn).not.toHaveBeenCalled();
+    release();
+    expect(await assistant).toMatchObject({ state: "unknown", code: "receipt_unavailable" });
+    expect(f.execute).toHaveBeenCalledTimes(1);
   });
   it("reads a previous completed receipt after recreation without redispatch", async () => {
     const f = await setup();

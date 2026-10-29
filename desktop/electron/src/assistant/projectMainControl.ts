@@ -87,10 +87,6 @@ export function createAssistantProjectMainControl(options: {
       ...(request.action === "project_status" ? { accepted: false } : { requestId: request.requestId, state: "rejected" }) };
     if (request.action === "project_status") return facade.dispatch({ projectId: request.projectId, operation: "status" });
     const identity = { requestId: request.requestId, projectId: request.projectId, operation: request.operation };
-    const existing = await requests.receipt(identity);
-    if (request.action === "project_lifecycle" && existing.state === "not_found") {
-      return { schemaVersion: 1, ...identity, state: "rejected", code: "prerequisite_required" };
-    }
-    return existing;
+    return request.action === "project_lifecycle" ? requests.dispatch(identity) : requests.receipt(identity);
   };
 }

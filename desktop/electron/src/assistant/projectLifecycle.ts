@@ -2,7 +2,7 @@ import { realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { isAbsolute, resolve } from "node:path";
 
-import { getMainLineCommandQueueForProject, type MainLineCommandQueue, type MainLineQueuedCommand } from "../lifecycle/mainLine/commandQueue.js";
+import { getMainLineCommandQueueForProject, type MainLineCommandQueue, type MainLineLifecycleOperation, type MainLineQueuedCommand, type MainLineSubmitInput } from "../lifecycle/mainLine/commandQueue.js";
 import type { LifecycleRequestBinding } from "./projectLifecycleRequestStore.js";
 import { writeMainLineIntent } from "../lifecycle/mainLine/commandIntent.js";
 import { writeMainLineQueueOwnerMarker } from "../lifecycle/mainLine/ownerMarker.js";
@@ -180,6 +180,12 @@ export function createAssistantProjectLifecycle(options: AssistantProjectLifecyc
     checkStorageOwner(context);
     return context;
   }
+  // Stop and restart can retire a live backend, so their guarded admission must
+  // hold the main-line exclusive fence: it refuses concurrent queue work, drains
+  // outstanding settlement/marker evidence first, and never joins, supersedes or
+  // coalesces another command's intent. Start only opens and keeps the ordinary
+  // join path.
+  const fencedOperations = new Set<MainLineLifecycleOperation>(["stop", "restart"]);
   function guardedQueue(context: Context, expected: Permission, execution: AssistantProjectLifecycleExecution, admission?: ProjectAdmissionTicket): MainLineCommandQueue {
     const { signal, onCommand } = execution;
     return {
@@ -188,7 +194,7 @@ export function createAssistantProjectLifecycle(options: AssistantProjectLifecyc
       submit(input) {
         checkSignal(signal); recheck(expected); checkStorageOwner(context);
         admission?.check();
-        return context.queue.submit({ ...input, signal,
+        const guarded: MainLineSubmitInput = { ...input, signal,
           ...(onCommand ? { onCommand: async (command: MainLineQueuedCommand) => {
             checkSignal(signal); recheck(expected); checkStorageOwner(context);
             admission?.check();
@@ -196,10 +202,12 @@ export function createAssistantProjectLifecycle(options: AssistantProjectLifecyc
             checkSignal(signal); recheck(expected); checkStorageOwner(context);
             admission?.check();
           } } : {}), execute: async command => {
-          checkSignal(signal); recheck(expected); checkStorageOwner(context);
-          admission?.check();
-          return input.execute(command);
-        } });
+            checkSignal(signal); recheck(expected); checkStorageOwner(context);
+            admission?.check();
+            return input.execute(command);
+          } };
+        return fencedOperations.has(input.operation) && context.queue.submitExclusive
+          ? context.queue.submitExclusive(guarded) : context.queue.submit(guarded);
       },
     };
   }
@@ -214,12 +222,6 @@ export function createAssistantProjectLifecycle(options: AssistantProjectLifecyc
       try {
         checkSignal(signal);
         const expected = permission(captured.projectId);
-        // The native lifecycle can retire a live backend when active-work or
-        // graceful-shutdown evidence is unavailable. Keep existing commands
-        // and receipt lookup untouched while assistant writes are suspended.
-        if (["start", "stop", "restart"].includes(captured.operation)) {
-          return { ...base, accepted: false, code: "prerequisite_required" };
-        }
         if ((captured.operation === "start" || captured.operation === "restart") && options.admission) admission = options.admission.enter(expected.workspaceRoot);
         if (captured.operation === "status") {
           let raw: unknown;

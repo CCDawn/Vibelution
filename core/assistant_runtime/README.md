@@ -237,18 +237,19 @@ commands. A fresh host queries the original main request association.
 
 Only a main-provisioned capability exposes `project_status`, governed
 `project_lifecycle` and `project_lifecycle_receipt` through the existing native
-action/manage tools. New assistant start, stop and restart requests currently
-return `prerequisite_required` for main projects as well as branch instances;
-previous requests can still be queried using their original receipt. Main-project
-status reports state, not an active-work count, and cannot prove the project is
-idle. Branch instances remain owned by their existing instance supervisor.
+action/manage tools. Assistant start, stop and restart dispatch through the
+main-owned native lifecycle queue; stop and restart additionally hold the
+main-line exclusive fence, so they refuse to run while another lifecycle command
+or its settlement evidence is outstanding. Branch instances still return
+`prerequisite_required`. Main-project status reports state, not an active-work
+count, and cannot prove the project is idle. Branch instances remain owned by
+their existing instance supervisor.
 There is no force, interrupt, path, URL or generic command parameter.
 
 Earlier temporary verification covered an actual Python HTTP host, Node
 main-control modules, native active-work guard and queued-restart settlement,
 full host stop/start, and original receipt recovery without another native
-execution. These historical checks predate the current write suspension and do
-not show that new assistant lifecycle requests can now execute. The fixture uses
+execution. The fixture uses
 a synthetic native identity and explicit temporary-request authorization; it
 is not a real-model or packaged-Electron UI acceptance claim. Real-model joint
 acceptance remains incomplete. Platform PA retirement still requires the new
