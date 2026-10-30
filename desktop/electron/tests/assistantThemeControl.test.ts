@@ -162,6 +162,16 @@ describe("AssistantWindow native boundaries", () => {
     expect((await next).code).toBe("unavailable");
   });
 
+  it("settles pending deliveries when destruction makes the window contents getter unavailable", async () => {
+    const { owner, window, contentEvents } = await opened();
+    const pending = owner.requestTheme({ deliveryId: id(), operation: "read" });
+    window.isDestroyed.mockReturnValue(true);
+    Object.defineProperty(window, "webContents", { get() { throw new Error("Object has been destroyed"); } });
+
+    expect(() => contentEvents.get("destroyed")?.()).not.toThrow();
+    expect((await pending).code).toBe("unavailable");
+  });
+
   it("uses a fixed native image picker and discards cancellation, abort and destroyed-owner results", async () => {
     const { owner, window } = await opened();
     vi.mocked(dialog.showOpenDialog).mockResolvedValue({ canceled: false, filePaths: ["C:\\private-test\\avatar.png"] });

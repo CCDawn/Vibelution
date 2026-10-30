@@ -35,10 +35,14 @@ export class AssistantWindow {
   private async create(show: boolean): Promise<void> {
     const window = createPetWindow(LAUNCHER_ASSISTANT_URL, this.paths, undefined, "launcher-assistant");
     this.window = window;
-    window.webContents.on("did-start-navigation", (_event, _url, _isInPlace, isMainFrame) => {
-      if (isMainFrame) this.themeControl.invalidate(window.webContents);
+    // Hold the contents reference: once the window is destroyed, the
+    // `webContents` getter itself throws, so the destroyed handler must not
+    // reach back through the window.
+    const contents = window.webContents;
+    contents.on("did-start-navigation", (_event, _url, _isInPlace, isMainFrame) => {
+      if (isMainFrame) this.themeControl.invalidate(contents);
     });
-    window.webContents.on("destroyed", () => this.themeControl.invalidate(window.webContents));
+    contents.on("destroyed", () => this.themeControl.invalidate(contents));
     window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
     window.webContents.on("will-navigate", (event, url) => {
       if (url !== LAUNCHER_ASSISTANT_URL) event.preventDefault();
