@@ -23,9 +23,23 @@ export function readAssistantPayloadEvidence(payloadRoot: string, expectedManife
   const manifest: unknown = JSON.parse(bytes.toString("utf8"));
   if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) throw new Error("Assistant manifest must be an object.");
   const data = manifest as Record<string, unknown>;
+  // Contract drift guard: the packaged snapshot must still hash to the exact
+  // contracts identity its manifest sealed. A snapshot edited (or partially
+  // rebuilt) after its owned build fails packaging here instead of surfacing
+  // later as an opaque runtime identity mismatch.
+  let contractsBytes: Buffer;
+  try {
+    contractsBytes = readFileSync(join(root, "source", "core", "external_agent", "contracts.py"));
+  } catch {
+    throw new Error("Assistant payload is missing source/core/external_agent/contracts.py.");
+  }
+  if (data.contractsSha256 !== createHash("sha256").update(contractsBytes).digest("hex")) {
+    throw new Error("Assistant payload contracts module does not match its manifest record; rebuild the assistant payload.");
+  }
   const evidence = {
     manifestSha256, contentSha256: sha256DirectoryTree(root), sourceContentSha256: data.sourceContentSha256,
-    runtimeContentSha256: data.runtimeContentSha256, requirementsSha256: data.requirementsSha256, pythonVersion: data.pythonVersion,
+    runtimeContentSha256: data.runtimeContentSha256, requirementsSha256: data.requirementsSha256,
+    contractsSha256: data.contractsSha256, pythonVersion: data.pythonVersion,
   };
   assertAssistantPayloadEvidence(evidence);
   return evidence;

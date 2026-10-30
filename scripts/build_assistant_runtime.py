@@ -39,10 +39,16 @@ _ASSET_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg", ".ico", ".a
                    ".bmp", ".wav", ".mp3", ".ogg", ".json", ".md", ".zip"}
 _ROOT_SOURCE = ("agent.py", "vibelution_storage.py", "VERSION", "AGENTS.md", "requirements.txt")
 _REQUIRED_SOURCE = (*_ROOT_SOURCE, "scripts/assistant_host.py", "core/__init__.py",
+                    "core/external_agent/contracts.py",
                     "config/__init__.py", "tools/__init__.py", "core/core_prompt/COMMON.md",
                     "core/core_prompt/SOUL.md")
 _ENTRYPOINT = "source/scripts/assistant_host.py"
 _PYTHON_ENTRYPOINT = "python/pythonw.exe"
+# The snapshot's copy of the external-Agent wire contract. Its hash is sealed
+# into the manifest ("contractsSha256") so a packaged source tree whose
+# contracts module was modified without a rebuild is refused at every verify
+# step (build, managed-desktop seal, startup).
+_CONTRACTS_MODULE = "source/core/external_agent/contracts.py"
 _PTH_CONTENT = b"Lib\nDLLs\nLib/site-packages\n../source\nimport site\n"
 _MANIFEST_MAX_BYTES = 32 * 1024 * 1024
 _READ_CHUNK_BYTES = 1024 * 1024
@@ -539,6 +545,12 @@ def build_launcher_assistant_payload(
         for path in source_files
     ):
         raise ValueError("product source changed during payload construction")
+    # Drift guard: the packaged copy must carry the wire-contract identity so a
+    # snapshot whose contracts module was dropped or separately rewritten is
+    # refused here instead of failing later with an opaque runtime mismatch.
+    contracts_entry = entries.get(_CONTRACTS_MODULE)
+    if contracts_entry is None:
+        raise ValueError("assistant payload snapshot is missing the external-agent contracts module")
     manifest = {
         "schemaVersion": 1, "protocolVersion": 1, "platform": sys.platform, "machine": platform.machine(),
         "pythonVersion": version, "pythonAbi": abi, "entrypoint": _ENTRYPOINT,
@@ -547,7 +559,8 @@ def build_launcher_assistant_payload(
         "excludedFiles": sorted(excluded, key=lambda item: (item["distribution"], item["path"])),
         "sourceContentSha256": _content_hash(files, "source/"),
         "runtimeContentSha256": _content_hash(files, "python/"),
-        "payloadContentSha256": _content_hash(files), "files": files,
+        "payloadContentSha256": _content_hash(files),
+        "contractsSha256": contracts_entry["sha256"], "files": files,
     }
     _verify_files(output, manifest)
     content = _json_bytes(manifest)
@@ -622,6 +635,12 @@ def _verify_files(root: Path, manifest: dict) -> None:
     requirements = next(entry for entry in files if entry["path"] == "source/requirements.txt")
     if manifest.get("requirementsSha256") != requirements["sha256"]:
         raise ValueError("assistant requirements hash mismatch")
+    # Contract drift guard: the sealed contracts hash must match the exact
+    # packaged bytes, so a snapshot whose contracts module was edited without
+    # a rebuild is refused at verification (managed-desktop seal included).
+    contracts = next((entry for entry in files if entry["path"] == _CONTRACTS_MODULE), None)
+    if contracts is None or manifest.get("contractsSha256") != contracts["sha256"]:
+        raise ValueError("assistant contracts identity mismatch")
 
 
 def verify_launcher_assistant_payload(

@@ -147,6 +147,44 @@ def test_mcp_backend_business_error_is_structured_tool_error() -> None:
     assert "Traceback" not in result.content[0].text
 
 
+def test_mcp_runtime_identity_mismatch_reports_packaged_contract_and_remediation() -> None:
+    mcp_server = _mcp_server_module()
+    backend_client = importlib.import_module("core.external_agent.backend_client")
+    contracts = _contracts_module()
+
+    class IdentityMismatchedBackend:
+        async def list_agents(self, *, limit: int = 50) -> dict[str, object]:
+            del limit
+            raise backend_client.BackendClientError(
+                "managed backend server version mismatch",
+                code="RUNTIME_IDENTITY_MISMATCH",
+            )
+
+    async def call_tool():
+        server = mcp_server.build_server(PROJECT_ROOT, backend=IdentityMismatchedBackend())
+        return await server.call_tool("list_project_agents", {"limit": 1})
+
+    result = anyio.run(call_tool)
+
+    assert result.is_error is True
+    payload = result.structured_content
+    assert payload["code"] == "RUNTIME_IDENTITY_MISMATCH"
+    # The readable error carries this side's packaged contract constants and a
+    # remediation, instead of the bare "version mismatch" from the client.
+    assert contracts.SERVER_VERSION in payload["message"]
+    assert contracts.API_PROTOCOL_VERSION in payload["message"]
+    assert "Rebuild the managed-desktop package" in payload["message"]
+    # Other identity failures and other error codes keep their original message.
+    assert mcp_server._runtime_identity_message(
+        backend_client.BackendClientError(
+            "managed backend project root mismatch", code="RUNTIME_IDENTITY_MISMATCH",
+        )
+    ) == "managed backend project root mismatch"
+    assert mcp_server._runtime_identity_message(
+        backend_client.BackendClientError("boom", code="BACKEND_ERROR")
+    ) == "boom"
+
+
 def test_mcp_legacy_initialize_uses_newline_stdio_and_advertises_guide() -> None:
     request = {
         "jsonrpc": "2.0",

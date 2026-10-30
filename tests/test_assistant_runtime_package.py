@@ -46,7 +46,8 @@ def package_fixture(tmp_path):
     project, python, site = (tmp_path / name for name in ("project", "base-python", "site"))
     for name in ("agent.py", "vibelution_storage.py", "VERSION", "AGENTS.md",
                  "scripts/assistant_host.py", "scripts/windowless_subprocess.py",
-                 "core/__init__.py", "core/core_prompt/COMMON.md", "core/core_prompt/SOUL.md",
+                 "core/__init__.py", "core/external_agent/contracts.py",
+                 "core/core_prompt/COMMON.md", "core/core_prompt/SOUL.md",
                  "config/__init__.py", "tools/__init__.py", "schemas/example.json",
                  "assets/theme_backgrounds/default.png", "assets/agent-avatars/default.png"):
         _write(project, name)
@@ -82,6 +83,11 @@ def test_builds_offline_closure_and_complete_product_files(package_fixture):
     manifest = verify_launcher_assistant_payload(output, expected_manifest_sha256=result["manifestSha256"])
     assert manifest["schemaVersion"] == 1
     assert manifest["pythonAbi"] == "cp312"
+    # The wire-contract identity is sealed into the manifest against the exact
+    # packaged bytes of the snapshot's contracts module.
+    contracts = next(entry for entry in manifest["files"]
+                     if entry["path"] == "source/core/external_agent/contracts.py")
+    assert manifest["contractsSha256"] == contracts["sha256"]
     assert [d["name"] for d in manifest["dependencies"]] == ["child", "root"]
     assert manifest["excludedFiles"] == [{"distribution": "root", "path": "../../Scripts/root.exe",
                                           "reason": "console_entrypoint"}]
@@ -164,6 +170,37 @@ def test_verifier_rejects_corrupt_or_unbound_payload(package_fixture, fault):
         path.write_text(json.dumps(manifest))
         expected = hashlib.sha256(path.read_bytes()).hexdigest()
     with pytest.raises(ValueError):
+        verify_launcher_assistant_payload(output, expected_manifest_sha256=expected)
+
+
+def test_snapshot_without_contracts_module_fails_the_build(package_fixture):
+    project, python, site, output = package_fixture
+    (project / "core/external_agent/contracts.py").unlink()
+    # The contracts module is a required product file: a snapshot missing it
+    # never produces a manifest, let alone a sealed contract identity.
+    with pytest.raises(ValueError, match="required product file missing: core/external_agent/contracts.py"):
+        _build(package_fixture)
+
+
+def test_verifier_rejects_manifest_whose_contracts_identity_disagrees(package_fixture):
+    _build(package_fixture)
+    output = package_fixture[-1]
+    # Simulates a manifest rewritten (or a pre-guard manifest) whose sealed
+    # contracts identity no longer matches its own per-file hashes: the file
+    # checks pass, but the wire-contract identity is not the packaged bytes.
+    manifest_path = output / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    assert manifest["contractsSha256"] != "0" * 64
+    manifest["contractsSha256"] = "0" * 64
+    manifest_path.write_text(json.dumps(manifest))
+    expected = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    with pytest.raises(ValueError, match="contracts identity mismatch"):
+        verify_launcher_assistant_payload(output, expected_manifest_sha256=expected)
+    # An old manifest without the field fails closed the same way.
+    del manifest["contractsSha256"]
+    manifest_path.write_text(json.dumps(manifest))
+    expected = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    with pytest.raises(ValueError, match="contracts identity mismatch"):
         verify_launcher_assistant_payload(output, expected_manifest_sha256=expected)
 
 

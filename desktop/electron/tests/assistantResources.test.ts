@@ -31,19 +31,23 @@ function fixture() {
     pythonVersion: "3.12.9", pythonAbi: "cp312", entrypoint: "source/scripts/assistant_host.py",
     pythonEntrypoint: "python/pythonw.exe", sourceContentSha256: "a".repeat(64),
     runtimeContentSha256: "b".repeat(64), requirementsSha256: digest("fixture requirements\n"),
+    contractsSha256: digest("fixture contracts\n"),
   };
   mkdirSync(join(payloadRoot, "source/scripts"), { recursive: true });
+  mkdirSync(join(payloadRoot, "source/core/external_agent"), { recursive: true });
   mkdirSync(join(payloadRoot, "python"), { recursive: true });
   mkdirSync(dirname(provenancePath), { recursive: true });
   writeFileSync(join(payloadRoot, "source/scripts/assistant_host.py"), "# never executed\n");
   writeFileSync(join(payloadRoot, "source/requirements.txt"), "fixture requirements\n");
+  writeFileSync(join(payloadRoot, "source/core/external_agent/contracts.py"), "fixture contracts\n");
   writeFileSync(join(payloadRoot, "python/pythonw.exe"), "fixture bytes, never launched\n");
   let evidence: Record<string, unknown>;
   function publish() {
     writeFileSync(manifestPath, JSON.stringify(manifest));
     evidence = { manifestSha256: digest(readFileSync(manifestPath)), contentSha256: sha256DirectoryTree(payloadRoot),
       sourceContentSha256: manifest.sourceContentSha256, runtimeContentSha256: manifest.runtimeContentSha256,
-      requirementsSha256: manifest.requirementsSha256, pythonVersion: manifest.pythonVersion };
+      requirementsSha256: manifest.requirementsSha256, contractsSha256: manifest.contractsSha256,
+      pythonVersion: manifest.pythonVersion };
     writeFileSync(provenancePath, JSON.stringify({ schemaVersion: 1, assistant: evidence }));
     return evidence;
   }
@@ -122,7 +126,7 @@ describe.skipIf(process.platform !== "win32")("assistant packaged resources", ()
     expect(f.hashTree).not.toHaveBeenCalled();
   });
 
-  it.each(["sourceContentSha256", "runtimeContentSha256", "requirementsSha256", "pythonVersion"])(
+  it.each(["sourceContentSha256", "runtimeContentSha256", "requirementsSha256", "contractsSha256", "pythonVersion"])(
     "rejects a manifest whose %s disagrees with package provenance", async field => {
       const f = fixture();
       const evidence = { ...f.initialEvidence, [field]: field === "pythonVersion" ? "3.13.1" : "f".repeat(64) };

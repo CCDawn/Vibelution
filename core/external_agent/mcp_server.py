@@ -19,6 +19,7 @@ from mcp.types import CallToolResult, TextContent, ToolAnnotations
 
 from .backend_client import BackendClientError, ManagedAgentBackendClient
 from .contracts import (
+    API_PROTOCOL_VERSION,
     GUIDE_URI,
     GUIDE_VERSION,
     MCP_TOOL_NAMES,
@@ -67,6 +68,29 @@ def _tool_description(summary: str) -> str:
     return f"{summary} Read {GUIDE_URI} (guide version {GUIDE_VERSION}) before calling."
 
 
+def _runtime_identity_message(exc: BackendClientError) -> str:
+    """Translate an opaque version-mismatch error into an actionable one.
+
+    The equality checks live in ``backend_client`` (not editable here) and its
+    messages carry no values. This display layer can only state the packaged
+    copy's own contract constants (it runs this module's imports); the backend's
+    values are read inside the client and discarded on failure, so the
+    remediation names both escape hatches instead of asserting which side is
+    older.
+    """
+    detail = str(exc)
+    if exc.code != "RUNTIME_IDENTITY_MISMATCH" or "version mismatch" not in detail:
+        return detail
+    return (
+        f"{detail}: the desktop package's bundled assistant copy runs "
+        f"serverVersion={SERVER_VERSION}, apiProtocolVersion={API_PROTOCOL_VERSION}, "
+        "which differs from the managed backend serving this project (running "
+        "from the repository checkout). Rebuild the managed-desktop package so "
+        "its source snapshot matches the backend, or roll the backend back to "
+        "the packaged revision."
+    )
+
+
 async def _managed_call(
     call: Awaitable[dict[str, Any]],
 ) -> dict[str, Any] | CallToolResult:
@@ -76,7 +100,7 @@ async def _managed_call(
         payload = {
             "status": "error",
             "code": exc.code,
-            "message": str(exc),
+            "message": _runtime_identity_message(exc),
             "guideUri": GUIDE_URI,
             "guideVersion": GUIDE_VERSION,
         }

@@ -45,7 +45,8 @@ def _write_assistant_package(root: Path, package: Path) -> dict:
     manifest = result["manifest"]
     return {"manifestSha256": result["manifestSha256"],
             "contentSha256": desktop_shell._frontend_directory_content_sha256(Path(result["manifestPath"]).parent),
-            **{key: manifest[key] for key in ("sourceContentSha256", "runtimeContentSha256", "requirementsSha256", "pythonVersion")}}
+            **{key: manifest[key] for key in ("sourceContentSha256", "runtimeContentSha256", "requirementsSha256",
+                                             "contractsSha256", "pythonVersion")}}
 
 
 def test_assistant_payload_build_reuses_owned_deadline_and_unique_session(tmp_path, monkeypatch):

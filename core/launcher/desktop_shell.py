@@ -1047,7 +1047,8 @@ def _assistant_source_content_sha256(root: Path) -> str:
 
 def _assistant_package_block_reason(root: Path, package: Path, *, full: bool = False) -> str:
     evidence = _read_json(package / "resources/app.asar.unpacked/package-provenance.json").get("assistant")
-    hashes = ("manifestSha256", "contentSha256", "sourceContentSha256", "runtimeContentSha256", "requirementsSha256")
+    hashes = ("manifestSha256", "contentSha256", "sourceContentSha256", "runtimeContentSha256", "requirementsSha256",
+              "contractsSha256")
     if not isinstance(evidence, dict) or any(not re.fullmatch(r"[0-9a-f]{64}", str(evidence.get(key, ""))) for key in hashes):
         return "missing_assistant_provenance"
     try:

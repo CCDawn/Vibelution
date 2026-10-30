@@ -275,7 +275,8 @@ def _seal(root: Path, inventory: dict[str, tuple[int, ...]]) -> None:
     ):
         raise ValueError("Required desktop protocol capabilities missing")
     evidence = provenance.get("assistant")
-    hashes = ("manifestSha256", "contentSha256", "sourceContentSha256", "runtimeContentSha256", "requirementsSha256")
+    hashes = ("manifestSha256", "contentSha256", "sourceContentSha256", "runtimeContentSha256", "requirementsSha256",
+              "contractsSha256")
     if not isinstance(evidence, dict) or any(not isinstance(evidence.get(k), str) or not _HASH.fullmatch(evidence[k]) for k in hashes):
         raise ValueError("Missing assistant seal")
     if not isinstance(evidence.get("pythonVersion"), str) or not re.fullmatch(r"3\.[0-9]+\.[0-9]+", evidence["pythonVersion"]):

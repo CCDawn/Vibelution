@@ -52,7 +52,7 @@ export function createDesktopPackageProvenance(input: DesktopPackageProvenanceIn
 export function assertAssistantPayloadEvidence(value: unknown): asserts value is AssistantPayloadEvidence {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("assistant evidence must be an object");
   const evidence = value as Record<string, unknown>;
-  for (const field of ["manifestSha256", "contentSha256", "sourceContentSha256", "runtimeContentSha256", "requirementsSha256"]) {
+  for (const field of ["manifestSha256", "contentSha256", "sourceContentSha256", "runtimeContentSha256", "requirementsSha256", "contractsSha256"]) {
     if (typeof evidence[field] !== "string" || !/^[0-9a-f]{64}$/.test(evidence[field] as string)) {
       throw new Error(`assistant.${field} must be a SHA-256 hash`);
     }

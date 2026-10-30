@@ -6,7 +6,7 @@ import { Worker } from "node:worker_threads";
 const SHA256 = /^[0-9a-f]{64}$/;
 const PYTHON_VERSION = /^3\.\d+\.\d+$/;
 const HASH_TIMEOUT_MS = 120_000;
-const EVIDENCE_HASHES = ["manifestSha256", "contentSha256", "sourceContentSha256", "runtimeContentSha256", "requirementsSha256"] as const;
+const EVIDENCE_HASHES = ["manifestSha256", "contentSha256", "sourceContentSha256", "runtimeContentSha256", "requirementsSha256", "contractsSha256"] as const;
 
 export type AssistantPayloadEvidence = {
   manifestSha256: string;
@@ -14,6 +14,8 @@ export type AssistantPayloadEvidence = {
   sourceContentSha256: string;
   runtimeContentSha256: string;
   requirementsSha256: string;
+  /** Sealed hash of source/core/external_agent/contracts.py: the packaged wire-contract identity. */
+  contractsSha256: string;
   pythonVersion: string;
 };
 
@@ -89,7 +91,8 @@ function payloadEvidence(value: unknown): AssistantPayloadEvidence {
   return {
     manifestSha256: value.manifestSha256 as string, contentSha256: value.contentSha256 as string,
     sourceContentSha256: value.sourceContentSha256 as string, runtimeContentSha256: value.runtimeContentSha256 as string,
-    requirementsSha256: value.requirementsSha256 as string, pythonVersion: value.pythonVersion,
+    requirementsSha256: value.requirementsSha256 as string, contractsSha256: value.contractsSha256 as string,
+    pythonVersion: value.pythonVersion,
   };
 }
 
@@ -102,7 +105,7 @@ function validateManifest(manifest: Record<string, unknown>, evidence: Assistant
     || manifest.pythonVersion !== evidence.pythonVersion || manifest.pythonAbi !== `cp${major}${minor}`
     || manifest.entrypoint !== "source/scripts/assistant_host.py" || manifest.pythonEntrypoint !== "python/pythonw.exe"
     || manifest.sourceContentSha256 !== evidence.sourceContentSha256 || manifest.runtimeContentSha256 !== evidence.runtimeContentSha256
-    || manifest.requirementsSha256 !== evidence.requirementsSha256) {
+    || manifest.requirementsSha256 !== evidence.requirementsSha256 || manifest.contractsSha256 !== evidence.contractsSha256) {
     throw new AssistantResourceError("ASSISTANT_MANIFEST_INVALID");
   }
 }

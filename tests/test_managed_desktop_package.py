@@ -33,7 +33,8 @@ def package(tmp_path, package_fixture):
     evidence = {key: result[key] for key in ("manifestSha256",)}
     manifest = result["manifest"]
     evidence.update({key: manifest[key] for key in (
-        "sourceContentSha256", "runtimeContentSha256", "requirementsSha256", "pythonVersion")})
+        "sourceContentSha256", "runtimeContentSha256", "requirementsSha256", "contractsSha256",
+        "pythonVersion")})
     evidence["contentSha256"] = owner._directory_content_hash(payload)
     provenance.write_text(json.dumps({"schemaVersion": 1, "protocolVersion": 1,
         "sourceCommit": "a" * 40, "electronTreeHash": "b" * 40,
@@ -274,6 +275,22 @@ def test_bad_provenance_and_missing_required_file_are_refused(package):
     with pytest.raises(ValueError):
         owner.prepare_managed_desktop_package(package)
     (package / "resources/app.asar").unlink()
+    with pytest.raises(ValueError):
+        owner.prepare_managed_desktop_package(package)
+
+
+def test_provenance_contracts_drift_is_refused_by_the_seal(package):
+    """A sealed provenance naming a different contracts identity must not pass.
+
+    Well-formed but wrong: the evidence hash is valid SHA-256, so only the
+    provenance-vs-manifest contracts comparison can catch a package whose
+    recorded wire-contract identity was rewritten (or built from a different
+    source snapshot) without rebuilding the payload.
+    """
+    provenance = package / "resources/app.asar.unpacked/package-provenance.json"
+    data = json.loads(provenance.read_bytes())
+    data["assistant"]["contractsSha256"] = "c" * 64
+    provenance.write_text(json.dumps(data), encoding="utf-8")
     with pytest.raises(ValueError):
         owner.prepare_managed_desktop_package(package)
 
