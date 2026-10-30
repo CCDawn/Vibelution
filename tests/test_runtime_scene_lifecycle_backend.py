@@ -20,6 +20,7 @@ import pytest
 from core.web.services import runtime_scene_service
 from core.web.services.runtime_scene import lifecycle
 from core.web.services.runtime_scene import query as runtime_scene_query
+from core.web.services.runtime_scene import record as runtime_scene_record
 
 
 SCENE_ROOT_RELATIVE = Path("logs") / "runtime_scenes"
@@ -32,6 +33,11 @@ def _scene_root(tmp_path: Path) -> Path:
 
 def _pointer_path(tmp_path: Path) -> Path:
     return tmp_path / POINTER_RELATIVE
+
+
+def _clear_pointer_liveness_cache() -> None:
+    with runtime_scene_record._POINTER_LIVENESS_CACHE_LOCK:
+        runtime_scene_record._POINTER_LIVENESS_CACHE.clear()
 
 
 def _write_pointer(tmp_path: Path, reference: dict) -> None:
@@ -71,7 +77,11 @@ def _seed_scene(
     return scene_dir
 
 
-def test_start_seals_previous_scene_and_repoints_pointer(tmp_path) -> None:
+def test_start_seals_previous_scene_and_repoints_pointer(tmp_path, monkeypatch) -> None:
+    # Pin the predecessor probe to "alive" so this test keeps pinning the clean
+    # supersede path; the killed-predecessor reason has its own tests below.
+    monkeypatch.setattr(runtime_scene_record, "_pid_alive", lambda pid: True)
+    _clear_pointer_liveness_cache()
     old_dir = _seed_scene(tmp_path, 1, status="running", ended_at="")
     _write_pointer(
         tmp_path,
@@ -108,6 +118,87 @@ def test_start_seals_previous_scene_and_repoints_pointer(tmp_path) -> None:
 
     assert json.loads(_pointer_path(tmp_path).read_text(encoding="utf-8")) == reference
     assert runtime_scene_service._resolve_current_runtime_scene_dir() == new_dir.resolve()
+
+
+def test_start_seal_names_backend_killed_for_dead_predecessor(tmp_path, monkeypatch) -> None:
+    # The pointer survives a hard kill (no exit seal ran), so the successor
+    # start must record why the predecessor vanished instead of blaming the
+    # routine supersede.
+    monkeypatch.setattr(runtime_scene_record, "_pid_alive", lambda pid: False)
+    _clear_pointer_liveness_cache()
+    old_dir = _seed_scene(tmp_path, 1, status="running", ended_at="")
+    _write_pointer(
+        tmp_path,
+        {
+            "runtimeSceneId": "scene-01",
+            "runtimeSceneDir": str(old_dir.resolve()),
+            "startedAt": "2026-05-18T12:00:01Z",
+            "launcherPid": 1234,
+            "trigger": "backend_startup",
+        },
+    )
+
+    reference = lifecycle.start_runtime_scene("backend_startup")
+
+    old_manifest = json.loads((old_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert old_manifest["status"] == "stopped"
+    assert old_manifest["result"] == "backend_killed"
+    assert "killed" in old_manifest["stop_reason"]
+    assert old_manifest["ended_at"]
+    assert old_manifest["started_at"] == "2026-05-18T12:00:01Z"
+
+    # Rotation itself is unchanged: fresh scene, pointer repointed.
+    assert Path(reference["runtimeSceneDir"]).parent == _scene_root(tmp_path).resolve()
+    assert json.loads(_pointer_path(tmp_path).read_text(encoding="utf-8")) == reference
+
+
+def test_start_seal_keeps_orphan_reconciled_without_provable_kill(tmp_path, monkeypatch) -> None:
+    _clear_pointer_liveness_cache()
+    pointer = {
+        "runtimeSceneId": "scene-01",
+        "startedAt": "2026-05-18T12:00:01Z",
+        "trigger": "backend_startup",
+    }
+
+    def assert_orphan_reconciled(expected_scene_id: str) -> None:
+        manifest = json.loads(
+            (next(_scene_root(tmp_path).glob(f"*__{expected_scene_id}")) / "manifest.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert manifest["result"] == "orphan_reconciled"
+
+    # Live predecessor: probed alive -> routine supersede.
+    old_dir = _seed_scene(tmp_path, 1, status="running", ended_at="")
+    monkeypatch.setattr(runtime_scene_record, "_pid_alive", lambda pid: True)
+    _write_pointer(tmp_path, {**pointer, "runtimeSceneDir": str(old_dir.resolve()), "launcherPid": 1234})
+    lifecycle.start_runtime_scene("backend_startup")
+    assert_orphan_reconciled("scene-01")
+
+    # Probe failure (import or probe errors) conservatively counts as alive.
+    old_dir = _seed_scene(tmp_path, 2, status="running", ended_at="")
+
+    def failing_probe(pid):
+        raise RuntimeError("liveness probe unavailable")
+
+    monkeypatch.setattr(runtime_scene_record, "_pid_alive", failing_probe)
+    _write_pointer(tmp_path, {**pointer, "runtimeSceneDir": str(old_dir.resolve()), "launcherPid": 1234})
+    lifecycle.start_runtime_scene("backend_startup")
+    assert_orphan_reconciled("scene-02")
+
+    # Legacy pointer without a usable pid is never probed, never re-reasoned.
+    old_dir = _seed_scene(tmp_path, 3, status="running", ended_at="")
+    probed: list[int] = []
+
+    def record_probe(pid):
+        probed.append(pid)
+        return False
+
+    monkeypatch.setattr(runtime_scene_record, "_pid_alive", record_probe)
+    _write_pointer(tmp_path, {**pointer, "runtimeSceneDir": str(old_dir.resolve()), "launcherPid": 0})
+    lifecycle.start_runtime_scene("backend_startup")
+    assert_orphan_reconciled("scene-03")
+    assert probed == []
 
 
 def test_seal_is_idempotent_after_first_seal(tmp_path) -> None:

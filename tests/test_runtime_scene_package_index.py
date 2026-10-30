@@ -1,4 +1,5 @@
 import json
+import os
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -10,6 +11,27 @@ from tests.helpers.web_runtime_scene import _seed_runtime_scene_bundle
 def _local_index_key_prefix(iso_value: str) -> str:
     parsed = datetime.fromisoformat(iso_value.replace("Z", "+00:00")).astimezone()
     return parsed.strftime("%Y-%m-%d_%H-%M-%S")
+
+
+def _clear_pointer_liveness_cache() -> None:
+    with runtime_scene_record._POINTER_LIVENESS_CACHE_LOCK:
+        runtime_scene_record._POINTER_LIVENESS_CACHE.clear()
+
+
+def _write_active_pointer(tmp_path, scene_dir, *, scene_id: str, launcher_pid) -> dict:
+    reference = {
+        "runtimeSceneId": scene_id,
+        "runtimeSceneDir": str(scene_dir),
+        "startedAt": "2026-05-18T12:00:00Z",
+        "trigger": "backend_startup",
+    }
+    if launcher_pid is not None:
+        reference["launcherPid"] = launcher_pid
+    (tmp_path / "active-runtime-scene.json").write_text(
+        json.dumps(reference, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return reference
 
 
 def test_runtime_scene_jsonl_reader_reuses_cache_until_file_signature_changes(tmp_path, monkeypatch):
@@ -621,6 +643,102 @@ def test_runtime_scene_resolver_falls_back_after_active_reference_becomes_invali
     loads.clear()
     assert resolver() == fallback.resolve()
     assert loads == ["active", "state"]
+
+
+def test_runtime_scene_stale_pointer_without_seal_falls_back_to_no_active_pointer(tmp_path, monkeypatch):
+    # A hard-killed backend leaves its pointer behind (the exit seal never ran),
+    # so the dead-pid pointer over an unsealed manifest must read as "no active
+    # pointer" instead of routing fresh events into the dead scene directory.
+    scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="stale-active", status="running")
+    launcher_state_path = tmp_path / "state.json"
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+    _write_active_pointer(
+        tmp_path, scene_dir, scene_id="stale-active", launcher_pid=os.getpid() + 100000
+    )
+    _clear_pointer_liveness_cache()
+
+    assert runtime_scene_record._load_active_runtime_scene_reference() == {}
+    assert runtime_scene_service._resolve_current_runtime_scene_dir() is None
+    assert runtime_scene_service._resolve_pointer_runtime_scene_dir() is None
+    blocked = runtime_scene_service.record_runtime_scene_event(
+        "runtime_manager",
+        "command",
+        "command.failed",
+        fields={"commandId": "cmd-open"},
+    )
+    assert blocked["accepted"] is False
+    assert blocked["reason"] == "no_runtime_scene"
+
+    # Sealing the orphaned scene restores the pointer's post-seal historical-home
+    # reuse without rewriting the pointer: the verdict tracks the manifest, not
+    # just the memoized liveness probe.
+    manifest_path = scene_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.update(
+        {
+            "status": "stopped",
+            "ended_at": "2026-05-18T12:03:00Z",
+            "result": "backend_killed",
+        }
+    )
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+
+    assert runtime_scene_service._resolve_pointer_runtime_scene_dir() == scene_dir.resolve()
+
+
+def test_runtime_scene_pointer_without_usable_pid_keeps_legacy_behavior(tmp_path, monkeypatch):
+    # Legacy pointer formats (launcherPid missing or 0) are never probed and
+    # keep resolving exactly as before.
+    scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="legacy-pointer", status="stopped")
+    launcher_state_path = tmp_path / "state.json"
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+    probed: list[int] = []
+
+    def record_probe(pid):
+        probed.append(pid)
+        return False
+
+    monkeypatch.setattr(runtime_scene_record, "_pid_alive", record_probe)
+    _clear_pointer_liveness_cache()
+
+    for launcher_pid in (None, 0):
+        reference = _write_active_pointer(
+            tmp_path, scene_dir, scene_id="legacy-pointer", launcher_pid=launcher_pid
+        )
+
+        assert runtime_scene_record._load_active_runtime_scene_reference() == reference
+        assert runtime_scene_service._resolve_pointer_runtime_scene_dir() == scene_dir.resolve()
+
+    assert probed == []
+
+
+def test_runtime_scene_pointer_probe_failure_conservatively_keeps_pointer(tmp_path, monkeypatch):
+    # An import or probe error must never make a live owner look dead: the
+    # pointer stays readable until staleness is proven.
+    scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="probe-error", status="running")
+    launcher_state_path = tmp_path / "state.json"
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+    _clear_pointer_liveness_cache()
+
+    def failing_probe(pid):
+        raise RuntimeError("liveness probe unavailable")
+
+    from core.infrastructure import process_liveness
+
+    monkeypatch.setattr(process_liveness, "is_pid_alive", failing_probe)
+    reference = _write_active_pointer(
+        tmp_path, scene_dir, scene_id="probe-error", launcher_pid=os.getpid() + 100000
+    )
+    assert runtime_scene_record._load_active_runtime_scene_reference() == reference
+
+    # A probe wrapper that itself raises degrades the same way.
+    _clear_pointer_liveness_cache()
+    monkeypatch.setattr(runtime_scene_record, "_pid_alive", failing_probe)
+
+    assert runtime_scene_record._load_active_runtime_scene_reference() == reference
 
 
 def test_runtime_scene_list_sorts_by_package_timestamp_when_started_at_missing(tmp_path, monkeypatch):

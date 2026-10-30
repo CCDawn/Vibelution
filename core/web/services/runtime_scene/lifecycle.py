@@ -5,7 +5,9 @@ rotation, and idempotent sealing of the previous scene.
 
 Ported from the retired Python launcher path ``scripts/vibelution_launcher.py``
 (``_start_runtime_scene`` / ``_seal_active_runtime_scene``): every backend
-start first seals the still-active scene as ``orphan_reconciled``, then creates
+start first seals the still-active scene as ``orphan_reconciled`` (or
+``backend_killed`` when the predecessor was provably hard-killed, see
+``_superseded_scene_seal_reason``), then creates
 a fresh timestamped scene directory and atomically repoints
 ``active-runtime-scene.json``. Without this rotation the pointer froze on a
 single ever-growing scene and query-side retention never had a chance to prune.
@@ -26,6 +28,7 @@ Late-bound facade keeps monkeypatches stable (same pattern as record/query).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import uuid
@@ -51,6 +54,39 @@ def _active_runtime_scene_pointer_path() -> Path:
     return s.LAUNCHER_STATE_PATH.with_name("active-runtime-scene.json")
 
 
+def _superseded_scene_seal_reason() -> tuple[str, str]:
+    """Pick the rotation seal reason from the previous pointer's liveness.
+
+    ``orphan_reconciled`` historically covered every rotation. When the old
+    pointer carries a usable pid that provably has no live process and the
+    referenced manifest was never sealed, the predecessor was hard-killed
+    before its exit seal could run — name that ``backend_killed`` so scene
+    history distinguishes a crashed backend from a clean supersede. Probe
+    errors and legacy pointers without a usable pid keep the conservative
+    ``orphan_reconciled``. The raw pointer is read here (not via
+    ``record._load_active_runtime_scene_reference``) because a stale pointer
+    is exactly the evidence this decision needs.
+    """
+    from core.web.services.runtime_scene import record
+
+    superseded = ("orphan_reconciled", "Previous active scene was superseded by a fresh backend start.")
+    pointer_path = _active_runtime_scene_pointer_path()
+    try:
+        raw_text = pointer_path.read_text(encoding="utf-8-sig")
+        reference = json.loads(raw_text)
+    except (OSError, json.JSONDecodeError):
+        return superseded
+    if not isinstance(reference, dict):
+        return superseded
+    pointer_digest = hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
+    if record._pointer_reference_is_stale(reference, pointer_digest):
+        return (
+            "backend_killed",
+            "Previous backend was killed before its exit seal could run.",
+        )
+    return superseded
+
+
 def start_runtime_scene(trigger: str) -> dict[str, str]:
     """Seal any active scene, create a fresh one, and atomically repoint.
 
@@ -60,10 +96,8 @@ def start_runtime_scene(trigger: str) -> dict[str, str]:
     process pid.
     """
     s = _service()
-    seal_active_runtime_scene(
-        "orphan_reconciled",
-        "Previous active scene was superseded by a fresh backend start.",
-    )
+    result, stop_reason = _superseded_scene_seal_reason()
+    seal_active_runtime_scene(result, stop_reason)
     started_at = datetime.now(timezone.utc)
     scene_id = uuid.uuid4().hex[:12]
     directory_name = f"{started_at.strftime('%Y%m%dT%H%M%SZ')}__{scene_id}"

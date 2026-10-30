@@ -206,6 +206,34 @@ def _browser_manifest_key_for_telemetry(fields: dict[str, Any]) -> str:
     return "workbenchBrowser"
 
 
+_POINTER_LIVENESS_CACHE: dict[str, bool] = {}
+_POINTER_LIVENESS_CACHE_LOCK = threading.Lock()
+_POINTER_LIVENESS_CACHE_LIMIT = 16
+
+
+def _cached_pid_alive(pid: int, pointer_digest: str) -> bool:
+    """Memoize the liveness verdict per pointer content digest.
+
+    Per-event pointer reads must not syscall-probe the OS every time; the
+    digest key invalidates the verdict as soon as the pointer file is
+    rewritten (rotation or manual edit), so a recycled pid cannot pin a
+    stale decision.
+    """
+    with _POINTER_LIVENESS_CACHE_LOCK:
+        cached = _POINTER_LIVENESS_CACHE.get(pointer_digest)
+    if cached is not None:
+        return cached
+    try:
+        alive = _pid_alive(pid)
+    except Exception:
+        return True
+    with _POINTER_LIVENESS_CACHE_LOCK:
+        if len(_POINTER_LIVENESS_CACHE) > _POINTER_LIVENESS_CACHE_LIMIT:
+            _POINTER_LIVENESS_CACHE.clear()
+        _POINTER_LIVENESS_CACHE[pointer_digest] = alive
+    return alive
+
+
 def _camel_to_snake(value: str) -> str:
     s = _service()
     explicit = {
@@ -615,15 +643,29 @@ def _list_research_logs(scene_dir: Path) -> list[dict[str, Any]]:
 
 
 def _load_active_runtime_scene_reference() -> dict[str, Any]:
-    """Read the Launcher-owned runtime-scene reference beside its state projection."""
+    """Read the Launcher-owned runtime-scene reference beside its state projection.
+
+    A pointer orphaned by a hard-killed backend (``launcherPid`` provably dead
+    while the referenced manifest was never sealed) is demoted to "no active
+    pointer" so both resolvers fall through to the launcher-state fallback
+    instead of routing fresh events into the dead scene directory. Sealed
+    scenes keep their post-seal reuse semantics (see
+    ``_pointer_reference_is_stale``).
+    """
     s = _service()
 
     active_scene_path = s.LAUNCHER_STATE_PATH.with_name("active-runtime-scene.json")
     try:
-        payload = json.loads(active_scene_path.read_text(encoding="utf-8-sig"))
+        raw_text = active_scene_path.read_text(encoding="utf-8-sig")
+        payload = json.loads(raw_text)
     except (OSError, json.JSONDecodeError):
         return {}
-    return payload if isinstance(payload, dict) else {}
+    if not isinstance(payload, dict):
+        return {}
+    pointer_digest = hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
+    if _pointer_reference_is_stale(payload, pointer_digest):
+        return {}
+    return payload
 
 
 def _load_launcher_state() -> dict[str, Any]:
@@ -985,6 +1027,57 @@ def _jsonl_checkpoint_digest(path: Path, end_offset: int) -> str:
     except OSError:
         return ""
     return s._jsonl_region_digest(region)
+
+
+def _pid_alive(pid: int) -> bool:
+    """Conservative cross-platform liveness probe; inconclusive means alive.
+
+    ``core.infrastructure.process_liveness.is_pid_alive`` answers without
+    spawning subprocesses, but the import or the probe itself failing must
+    never make a live owner look dead — this module only drops a pointer on
+    definitive evidence, so any exception keeps the pointer.
+    """
+    try:
+        from core.infrastructure.process_liveness import is_pid_alive
+
+        return bool(is_pid_alive(int(pid)))
+    except Exception:
+        return True
+
+
+def _pointer_reference_is_stale(reference: dict[str, Any], pointer_digest: str) -> bool:
+    """Judge whether the active pointer was orphaned by a hard-killed backend.
+
+    The pointer is deliberately never cleared on seal (see
+    ``lifecycle.seal_active_runtime_scene``), so a backend killed without its
+    exit seal leaves a pointer whose ``launcherPid`` is dead while the scene
+    manifest still claims to be active — every consumer would keep routing
+    fresh events into the dead scene directory. Degradation therefore
+    requires positive evidence: ``launcherPid > 0`` (legacy pointers without
+    a usable pid keep today's behavior), a definitive dead probe (probe
+    errors conservatively count as alive), and a manifest that was never
+    sealed — sealed scenes keep ``_resolve_pointer_runtime_scene_dir``'s
+    historical-home reuse. The probe is memoized per pointer digest (see
+    ``_cached_pid_alive``).
+    """
+    s = _service()
+    try:
+        pid = int(reference.get("launcherPid") or 0)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    if _cached_pid_alive(pid, pointer_digest):
+        return False
+
+    scene_dir_text = str(reference.get("runtimeSceneDir") or "").strip()
+    if not scene_dir_text:
+        return False
+    manifest = s._load_scene_json(Path(scene_dir_text) / "manifest.json")
+    if str(manifest.get("ended_at") or "").strip():
+        return False
+    status = str(manifest.get("status") or "").strip().lower()
+    return status in {"", "running", "starting", "queued", "opening", "stopping", "closing"}
 
 
 def _read_jsonl_file_full(path: Path) -> tuple[list[dict], int, str]:
