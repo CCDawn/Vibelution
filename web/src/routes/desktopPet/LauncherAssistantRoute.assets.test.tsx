@@ -33,6 +33,7 @@ let assets: { avatar: Record<string, unknown>; background: Record<string, unknow
 let revisions: { avatar: string | null; background: string | null } | undefined;
 let invoke: ReturnType<typeof vi.fn>;
 let failingAvatar = false;
+let navigationOwned = true;
 let presentation: HTMLStyleElement | undefined;
 let fetch: ReturnType<typeof vi.fn>;
 const image = (dataBase64: string) => ({ contentType: "image/png", dataBase64, sha256: "a".repeat(64) });
@@ -49,17 +50,16 @@ afterEach(async () => {
 async function settle() {
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
 }
-async function click(label: string) {
-  await act(async () => {
-    const button = container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
-    expect(Boolean(button)).toBe(true); button?.click();
-  });
+async function showPage(show: boolean) {
+  await act(async () => root!.render(createElement(QueryClientProvider, { client },
+    show ? createElement(LauncherAssistantRoute, { embedded: true, navigationOwned, key: "page" }) : null)));
   await settle(); await settle();
 }
 function assetReads() { return invoke.mock.calls.filter(([request]) => request.operation === "operatorAsset").length; }
-async function renderAssistant(options: { capability?: boolean; failAvatar?: boolean; approval?: Record<string, unknown>; dispatches?: Array<Record<string, unknown>>; boundPreview?: Record<string, unknown>; declineFailure?: boolean; language?: "zh" | "en"; patrol?: { state: "ready" | "unavailable"; deliveryStates: Record<string, number> } } = {}) {
+async function renderAssistant(options: { capability?: boolean; failAvatar?: boolean; approval?: Record<string, unknown>; dispatches?: Array<Record<string, unknown>>; boundPreview?: Record<string, unknown>; declineFailure?: boolean; language?: "zh" | "en"; patrol?: { state: "ready" | "unavailable"; deliveryStates: Record<string, number> }; startHidden?: boolean; legacyToolbar?: boolean } = {}) {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   failingAvatar = Boolean(options.failAvatar);
+  navigationOwned = !options.legacyToolbar;
   detail = { id: "s", agentId: "a", status: "ready", messages: [] };
   revisions = undefined;
   assets = { avatar: asset("avatar", "AQI="), background: asset("background", "AwQ=", "soft") };
@@ -106,8 +106,7 @@ async function renderAssistant(options: { capability?: boolean; failAvatar?: boo
   vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
   client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 30_000 } } });
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
-  await act(async () => root!.render(createElement(QueryClientProvider, { client }, createElement(LauncherAssistantRoute))));
-  await settle(); await settle();
+  await showPage(!options.startHidden);
 }
 async function finishTurn(turnId: string) {
   detail = { ...detail, lastTurnTerminalTurnId: turnId, terminalReason: "success" };
@@ -122,7 +121,6 @@ describe("Launcher operator image consumption", () => {
       argumentSummary: { assistantAction: "agent_create", assistantTargets: { project_id: "registered:1", display_name: "Worker", model_id: "model-1" },
         assistantCreatePreset: "project_files_v1", assistantCreateTools: ["glob_tool", "grep_search_tool", "read_file_tool", "apply_diff_edit_tool", "write_file_tool"],
         assistantOperationDescription: "固定文件工具权限持续生效；写入按当前权限和协作模式审批，edit/yolo 等模式可能自动批准。目标派遣任务的审批只有在完整预览、版本和执行参数均可验证时才能批准。平台允许的动态目录包括项目、Agent 工作区、项目存储、工具目录、系统临时目录和用户配置允许目录，未来可能变化。不能执行命令或测试。" } } });
-    await click("展开个人助理聊天");
     const preview = container.querySelector("pre");
     for (const value of ["registered:1", "model-1", "project_files_v1", "glob_tool", "grep_search_tool", "read_file_tool", "apply_diff_edit_tool", "write_file_tool", "项目存储", "系统临时目录", "用户配置允许目录", "edit/yolo", "可能自动批准", "完整预览", "版本和执行参数"]) expect(preview?.textContent).toContain(value);
     expect(preview?.tabIndex).toBe(0);
@@ -135,7 +133,6 @@ describe("Launcher operator image consumption", () => {
       argumentSummary: { assistantAction: "agent_create", assistantTargets: { project_id: "registered:1", display_name: "Worker", model_id: "model-1" },
         assistantCreatePreset: "project_files_v1", assistantCreateTools: ["glob_tool"],
         assistantOperationDescription: "固定文件工具权限持续生效；写入按当前权限和协作模式审批，edit/yolo 等模式可能自动批准。目标派遣任务的审批只有在完整预览、版本和执行参数均可验证时才能批准。平台允许的动态目录包括项目、Agent 工作区、项目存储、工具目录、系统临时目录和用户配置允许目录，未来可能变化。不能执行命令或测试。" } } });
-    await click("展开个人助理聊天");
     expect(container.textContent).toContain("参数无法核对");
     expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"))?.disabled).toBe(true);
   });
@@ -145,7 +142,6 @@ describe("Launcher operator image consumption", () => {
     const row = { dispatchId: "dispatch-1", projectId: "registered:1", agentId: "worker-1", nativeTaskId: "task-1", receipt: { taskId: "task-1", status: "awaiting_approval", shouldPoll: true, pendingApprovals: [request] } };
     const boundPreview = { taskId: "task-1", sessionId: "session-1", agentId: "worker-1", requestId: "approval-1", turnId: "turn-1", callId: "call-1", toolName: "exec_command", revision: "a".repeat(64), approval: "always", risk: "write", permissionPreset: "request_approval", decisionFingerprint: "fp-1", configRevision: 1, configHash: "hash", argumentsJson: '{"cmd":"\\u4f60\\u597d", "large":9007199254740993}', executionArgumentsJson: '{"cmd":"\\u4f60\\u597d", "large":9007199254740993,"timeout":60}' };
     await renderAssistant({ dispatches: [row], boundPreview });
-    await click("展开个人助理聊天");
     const preview = container.querySelector("pre");
     for (const value of ["registered:1", "worker-1", "dispatch-1", "task-1", "approval-1", "你好", "9007199254740993", "timeout"]) expect(preview?.textContent).toContain(value);
     const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"));
@@ -162,7 +158,6 @@ describe("Launcher operator image consumption", () => {
     const approval = { requestId: "own", sessionId: "s", turnId: "t", agentId: "a", toolName: "exec_command", status: "pending", risk: "write", argumentSummary: { commandPreview: "own command" }, availableDecisions: ["accept", "decline"] };
     const target = { approvalId: "target", toolName: "unknown_tool", risk: "write", targetSummary: { argumentKeys: ["path"] }, revision: "fp", availableDecisions: ["decline"] };
     await renderAssistant({ approval, dispatches: [{ dispatchId: "d", nativeTaskId: "task", receipt: { taskId: "task", pendingApprovals: [target] } }] });
-    await click("展开个人助理聊天");
     expect(container.querySelectorAll('[data-chat-tool-approval-variant="inline"]')).toHaveLength(1);
     expect(container.textContent).toContain("own command");
     await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "n", bubbles: true }))); await settle();
@@ -174,7 +169,6 @@ describe("Launcher operator image consumption", () => {
     const target = { approvalId: "a", toolName: "write_file_tool", risk: "write", targetSummary: { pathPreview: "fixture" }, revision: "old", availableDecisions: ["accept", "decline"] };
     const preview = { taskId: "t", sessionId: "s2", agentId: "worker", requestId: "a", turnId: "turn", callId: "call", toolName: "write_file_tool", revision: "b".repeat(64), approval: "always", risk: "write", permissionPreset: "request_approval", decisionFingerprint: "policy", configRevision: 1, configHash: "hash", argumentsJson: '{"content":"PRIVATE-FIXTURE"}', executionArgumentsJson: '{"content":"PRIVATE-FIXTURE"}' };
     await renderAssistant({ declineFailure: true, boundPreview: preview, dispatches: [{ dispatchId: "d", agentId: "worker", nativeTaskId: "t", receipt: { taskId: "t", pendingApprovals: [target] } }] });
-    await click("展开个人助理聊天");
     expect(container.textContent).toContain("PRIVATE-FIXTURE");
     const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("否"));
     await act(async () => { reject?.click(); reject?.click(); }); await settle(); await settle();
@@ -184,21 +178,19 @@ describe("Launcher operator image consumption", () => {
     expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"))?.disabled).toBe(true);
   });
 
-  it("drops the private full preview when the assistant is collapsed", async () => {
+  it("drops the private full preview when leaving the assistant page", async () => {
     const target = { approvalId: "a", toolName: "write_file_tool", risk: "write", targetSummary: {}, revision: "old", availableDecisions: ["accept", "decline"] };
     const preview = { taskId: "t", sessionId: "s2", agentId: "worker", requestId: "a", turnId: "turn", callId: "call", toolName: "write_file_tool", revision: "b".repeat(64), approval: "always", risk: "write", permissionPreset: "request_approval", decisionFingerprint: "policy", configRevision: 1, configHash: "hash", argumentsJson: '{"content":"PRIVATE-FIXTURE"}', executionArgumentsJson: '{"content":"PRIVATE-FIXTURE"}' };
     await renderAssistant({ boundPreview: preview, dispatches: [{ dispatchId: "d", agentId: "worker", nativeTaskId: "t", receipt: { taskId: "t", pendingApprovals: [target] } }] });
-    await click("展开个人助理聊天");
     expect(container.textContent).toContain("PRIVATE-FIXTURE");
     expect(JSON.stringify(client.getQueryCache().getAll().map(query => query.state.data))).not.toContain("PRIVATE-FIXTURE");
-    await click("收起聊天");
+    await showPage(false);
     expect(container.textContent).not.toContain("PRIVATE-FIXTURE");
   });
 
   it("shows the target summary but disables all decisions and shortcuts when revision is empty", async () => {
     const target = { approvalId: "target", toolName: "exec_command", risk: "write", targetSummary: { commandPreview: "echo fixture" }, revision: "", availableDecisions: ["accept", "decline"] };
     await renderAssistant({ dispatches: [{ dispatchId: "d", nativeTaskId: "task", receipt: { taskId: "task", pendingApprovals: [target] } }] });
-    await click("展开个人助理聊天");
     expect(container.textContent).toContain("echo fixture");
     expect(container.textContent).toContain("完整操作暂不可核对");
     const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("否"));
@@ -210,7 +202,6 @@ describe("Launcher operator image consumption", () => {
   it("declines one bound summary when full preview cannot be read", async () => {
     const target = { approvalId: "target", toolName: "exec_command", risk: "write", targetSummary: { commandPreview: "partial", commandTruncated: true }, revision: "policy-1", availableDecisions: ["accept", "decline"] };
     await renderAssistant({ dispatches: [{ dispatchId: "d", agentId: "worker", nativeTaskId: "task", receipt: { taskId: "task", pendingApprovals: [target] } }] });
-    await click("展开个人助理聊天");
     expect(container.textContent).toContain("完整操作不可用，不能批准");
     expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"))?.disabled).toBe(true);
     const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("否"));
@@ -226,7 +217,6 @@ describe("Launcher operator image consumption", () => {
   ])("permits only a single decline when the full preview is unavailable", async ({ toolName, targetSummary }) => {
     const target = { approvalId: "target", toolName, risk: "write", targetSummary, revision: "fp", availableDecisions: ["accept", "decline"] };
     await renderAssistant({ declineFailure: true, dispatches: [{ dispatchId: "d", nativeTaskId: "task", receipt: { taskId: "task", pendingApprovals: [target] } }] });
-    await click("展开个人助理聊天");
     const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"));
     const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("否"));
     expect(approve?.disabled).toBe(true);
@@ -243,7 +233,6 @@ describe("Launcher operator image consumption", () => {
       toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
       argumentSummary: { assistantAction: "agent_create", assistantTargets: { project_id: "registered:1", display_name: "Worker", model_id: "model-1" },
         assistantOperationDescription: "新 Agent 默认没有工具和读写范围，不能保证读取或修改项目；派遣写任务不会自动增加工具权限。" } } });
-    await click("展开个人助理聊天");
     const preview = container.querySelector("pre");
     expect(preview?.textContent).toContain("registered:1");
     expect(preview?.textContent).toContain("模型: model-1");
@@ -257,7 +246,6 @@ describe("Launcher operator image consumption", () => {
     await renderAssistant({ approval: { requestId: "r", sessionId: "s", turnId: "t", agentId: "a",
       toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
       argumentSummary: { assistantAction: "agent_create", assistantTargets: { project_id: "registered:1", display_name: "Worker" } } } });
-    await click("展开个人助理聊天");
     expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"))?.disabled).toBe(true);
   });
 
@@ -267,7 +255,6 @@ describe("Launcher operator image consumption", () => {
       argumentSummary: { assistantAction: "project_lifecycle", assistantTargets: {
         project_id: "registered:1", operation: "restart", request_id: "lifecycle-1",
       } } } });
-    await click("展开个人助理聊天");
     expect(container.textContent).toContain("项目: registered:1");
     expect(container.textContent).toContain("操作: 重启");
     expect(container.textContent).toContain("请求 ID: lifecycle-1");
@@ -279,7 +266,6 @@ describe("Launcher operator image consumption", () => {
     await renderAssistant({ approval: { requestId: "r", sessionId: "s", turnId: "t", agentId: "a",
       toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
       argumentSummary: { assistantAction: "project_lifecycle", assistantTargets: { project_id: "registered:1", operation: "stop" } } } });
-    await click("展开个人助理聊天");
     expect(container.textContent).toContain("参数无法核对");
     const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"));
     expect(approve?.disabled).toBe(true);
@@ -293,7 +279,6 @@ describe("Launcher operator image consumption", () => {
       toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
       argumentSummary: { assistantAction: "authorization_upgrade", assistantTargets: { project_id: "registered:1" },
         assistantAddedScopes: ["source:read", "tasks:read"] } } });
-    await click("展开个人助理聊天");
     const preview = container.querySelector("pre");
     expect(preview?.textContent).toContain("registered:1");
     expect(preview?.textContent).toContain("source:read");
@@ -308,7 +293,6 @@ describe("Launcher operator image consumption", () => {
       toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
       argumentSummary: { assistantAction: "dispatch_write", assistantTargets: { project_id: "registered:1", agent_id: "agent-1", dispatch_id: "dispatch-1" },
         assistantRequestedPermission: "workspace_write", assistantTask: task } } });
-    await click("展开个人助理聊天");
     const preview = container.querySelector("pre");
     for (const value of ["registered:1", "agent-1", "dispatch-1", "workspace_write", task]) expect(preview?.textContent).toContain(value);
     expect(preview?.className).toContain("overflow-y-auto");
@@ -325,7 +309,6 @@ describe("Launcher operator image consumption", () => {
       toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
       argumentSummary: { assistantAction: "dispatch_write", assistantTargets: { project_id: "registered:1", agent_id: "agent-1", dispatch_id: "dispatch-1" },
         assistantRequestedPermission: "workspace_write" } } });
-    await click("展开个人助理聊天");
     expect(container.textContent).toContain("参数无法核对");
     const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"));
     const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("否"));
@@ -338,7 +321,6 @@ describe("Launcher operator image consumption", () => {
   it.each([null, {}, { assistantAction: "unknown_action" }])("fails closed for a missing or unknown management action while allowing rejection", async argumentSummary => {
     await renderAssistant({ approval: { requestId: "r", sessionId: "s", turnId: "t", agentId: "a",
       toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"], argumentSummary } });
-    await click("展开个人助理聊天");
     const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"));
     const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("否"));
     expect(approve?.disabled).toBe(true);
@@ -353,7 +335,6 @@ describe("Launcher operator image consumption", () => {
     await renderAssistant({ approval: { requestId: "r", sessionId: "s", turnId: "t", agentId: "a",
       toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
       argumentSummary: { assistantAction: action, assistantOperationDescription: "原生迁移说明" } } });
-    await click("展开个人助理聊天");
     expect(container.querySelector("pre")?.textContent).toContain("原生迁移说明");
     const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"));
     expect(approve?.disabled).toBe(false);
@@ -365,7 +346,6 @@ describe("Launcher operator image consumption", () => {
     await renderAssistant({ approval: { requestId: "r", sessionId: "s", turnId: "t", agentId: "a",
       toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
       argumentSummary: { assistantArgumentsInvalid: true } } });
-    await click("展开个人助理聊天");
     expect(container.textContent).toContain("参数无法核对");
     const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"));
     const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("否"));
@@ -377,12 +357,10 @@ describe("Launcher operator image consumption", () => {
 
   it("shows when task receipts cannot be reported automatically", async () => {
     await renderAssistant({ patrol: { state: "ready", deliveryStates: { unknown: 1 } } });
-    await click("展开个人助理聊天");
     expect(container.textContent).toContain("部分任务回执无法自动汇报，请查看派发回执");
   });
-  it("opens computer controls only on request and returns to the conversation", async () => {
-    await renderAssistant();
-    await click("展开个人助理聊天");
+  it("opens computer controls only on request and returns to the conversation in the standalone embedded page", async () => {
+    await renderAssistant({ legacyToolbar: true });
     expect(invoke.mock.calls.some(([request]) => request.operation === "computerWindows")).toBe(false);
     const button = [...container.querySelectorAll("button")].find(item => item.textContent?.includes("电脑操作"));
     expect(button).toBeTruthy();
@@ -397,11 +375,8 @@ describe("Launcher operator image consumption", () => {
     await settle(); await settle();
     expect(container.querySelector('[data-testid="native-conversation"]')).toBeTruthy();
   });
-  it("paints the expanded recipe in both themes, including below a transparent wallpaper, and keeps the avatar transparent", async () => {
+  it("paints the embedded recipe in both themes, including below a transparent wallpaper", async () => {
     await renderAssistant({ capability: false });
-    const collapsed = container.querySelector<HTMLElement>('[data-expanded="false"]')!;
-    expect(["", "transparent", "rgba(0, 0, 0, 0)"]).toContain(getComputedStyle(collapsed).backgroundColor);
-    await click("展开个人助理聊天");
     const expanded = container.querySelector<HTMLElement>('[data-expanded="true"]')!;
     // Compile the real component classes, including the VUI recipe defaults.
     // DOM style resolution catches both competing utilities and the wallpaper
@@ -419,8 +394,6 @@ describe("Launcher operator image consumption", () => {
       expanded.style.setProperty("--workbench-theme-background-image", "linear-gradient(transparent, transparent)");
       expect(getComputedStyle(expanded).backgroundColor, `${theme} wallpaper underlay`).toBe(color);
     }
-    await click("收起聊天");
-    expect(["", "transparent", "rgba(0, 0, 0, 0)"]).toContain(getComputedStyle(container.querySelector<HTMLElement>('[data-expanded="false"]')!).backgroundColor);
   });
 
   it("binds the canonical readable composite where the recipe-local overlay is defined", () => {
@@ -434,11 +407,11 @@ describe("Launcher operator image consumption", () => {
     expect(imageOwner).toContain("background-image: var(--vui-gradient-background-readable), var(--workbench-theme-background-image), var(--vui-gradient-route-soft)");
   });
 
-  it("shows current images on initial expansion and switches or clears once per native terminal", async () => {
-    await renderAssistant();
+  it("shows current images when the page opens and switches or clears once per native terminal", async () => {
+    await renderAssistant({ startHidden: true });
     expect(assetReads()).toBe(0);
     expect(container.querySelector("[data-theme-background]")).toBeNull();
-    await click("展开个人助理聊天");
+    await showPage(true);
     expect(assetReads()).toBe(2);
     expect(container.querySelector("img")?.getAttribute("src")).toBe("data:image/png;base64,AQI=");
     const expanded = () => container.querySelector<HTMLElement>('[data-expanded="true"]')!;
@@ -467,7 +440,7 @@ describe("Launcher operator image consumption", () => {
     await renderAssistant();
     revisions = { avatar: "a".repeat(64), background: "b".repeat(64) };
     await act(async () => { await client.invalidateQueries({ queryKey: ["launcher-assistant", "status"] }); });
-    await settle(); await click("展开个人助理聊天");
+    await settle();
     expect(assetReads()).toBe(2);
     await act(async () => { await client.invalidateQueries({ queryKey: ["launcher-assistant", "status"] }); });
     await settle(); expect(assetReads()).toBe(2);
@@ -486,16 +459,15 @@ describe("Launcher operator image consumption", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("does not read images while collapsed and reads the current choice on reopening", async () => {
-    await renderAssistant(); await click("展开个人助理聊天");
-    await click("收起聊天"); const reads = assetReads();
+  it("does not read images after leaving the page and reads the current choice on reopening", async () => {
+    await renderAssistant();
+    await showPage(false); const reads = assetReads();
     assets.background = asset("background", "CQo=");
-    await finishTurn("collapsed-settings-turn");
+    await act(async () => { await client.invalidateQueries({ queryKey: ["launcher-assistant", "operator-asset"] }); });
     expect(assetReads()).toBe(reads);
     expect(client.getQueryState(["launcher-assistant", "operator-asset", "background", "s"])?.isInvalidated).toBe(true);
-    expect(container.querySelector('[data-expanded="false"]')).toBeTruthy();
     expect(container.querySelector("[data-theme-background]")).toBeNull();
-    await click("展开个人助理聊天");
+    await showPage(true);
     expect(assetReads()).toBe(reads + 2);
     expect(container.querySelector<HTMLElement>('[data-expanded="true"]')?.style.getPropertyValue("--workbench-theme-background-image").includes("CQo=")).toBe(true);
     await settle(); expect(assetReads()).toBe(reads + 2);
@@ -503,15 +475,15 @@ describe("Launcher operator image consumption", () => {
   });
 
   it("keeps old hosts on the default native identity without any image IPC", async () => {
-    await renderAssistant({ capability: false }); await click("展开个人助理聊天");
-    await finishTurn("old-host-turn"); await click("收起聊天"); await click("展开个人助理聊天");
+    await renderAssistant({ capability: false });
+    await finishTurn("old-host-turn"); await showPage(false); await showPage(true);
     expect(assetReads()).toBe(0); expect(container.querySelector("img")).toBeNull();
     expect(conversation?.userDisplayName).toBe("当前用户"); expect(fetch).not.toHaveBeenCalled();
   });
 
   it("defers expanded image reads while the document is hidden", async () => {
     const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
-    await renderAssistant(); await click("展开个人助理聊天");
+    await renderAssistant();
     expect(assetReads()).toBe(0);
     await act(async () => {
       visibility.mockReturnValue("visible"); document.dispatchEvent(new Event("visibilitychange"));
@@ -523,7 +495,7 @@ describe("Launcher operator image consumption", () => {
   });
 
   it("keeps image errors local, allows sending, and retries only the failed resource", async () => {
-    await renderAssistant({ failAvatar: true }); await click("展开个人助理聊天");
+    await renderAssistant({ failAvatar: true });
     expect(container.textContent).toContain("部分外观图片暂不可用，聊天仍可使用");
     expect(container.querySelector('[data-testid="native-conversation"]')).toBeTruthy();
     expect(container.querySelector('[data-theme-background="custom"]')).toBeTruthy();

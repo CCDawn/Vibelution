@@ -34,7 +34,10 @@ vi.mock("../../api/desktopPet", () => ({
   controlDesktopAssistant: vi.fn(),
 }));
 vi.mock("../../api/pet", () => ({ fetchPetActivity: vi.fn() }));
-vi.mock("../../api/personalAffairs", () => ({ fetchPersonalAffairs: vi.fn() }));
+vi.mock("../../api/personalAffairs", () => ({
+  addPersonalAffair: vi.fn(), cancelPersonalAffair: vi.fn(), completePersonalAffair: vi.fn(),
+  fetchPersonalAffairs: vi.fn(), reopenPersonalAffair: vi.fn(), setPersonalAffairDue: vi.fn(),
+}));
 vi.mock("../../api/personalAssistantComputer", () => ({
   fetchPersonalAssistantComputer: vi.fn(async () => ({
     available: false, status: "idle", message: "", grantId: null, window: null, pending: null,

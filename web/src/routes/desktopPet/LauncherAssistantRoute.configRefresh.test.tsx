@@ -48,13 +48,6 @@ async function pollCycle() {
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 2_100)); });
   await settle();
 }
-async function click(label: string) {
-  await act(async () => {
-    const button = container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
-    expect(button).toBeTruthy(); button?.click();
-  });
-  await settle();
-}
 function calls(operation: string) {
   return invoke.mock.calls.filter(([request]) => request.operation === operation).length;
 }
@@ -78,11 +71,10 @@ async function renderAssistant() {
   vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
   client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 30_000 } } });
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
-  await act(async () => { root!.render(createElement(QueryClientProvider, { client }, createElement(LauncherAssistantRoute))); });
+  await act(async () => { root!.render(createElement(QueryClientProvider, { client }, createElement(LauncherAssistantRoute, { embedded: true, navigationOwned: true }))); });
   await settle(); await settle();
 }
 async function sendSettingsRequest() {
-  await click("展开个人助理聊天");
   await act(async () => conversation!.onComposerChange!("切换为英语并更新模型名称"));
   await act(async () => conversation!.onSubmit!());
   await settle();
@@ -93,62 +85,34 @@ function finishSettingsTurn() {
 }
 
 describe("Launcher config refresh through real query cycles", () => {
-  it("keeps the assistant default and opens Launcher by one explicit header action", async () => {
+  it("opens the native conversation inside Launcher without floating-window actions", async () => {
     await renderAssistant();
     expect(calls("openLauncher")).toBe(0);
-    await click("展开个人助理聊天");
-    const launcherButton = [...container.querySelectorAll("button")].find(button => button.textContent === "打开 Launcher");
-    expect(launcherButton).toBeTruthy();
-    await act(async () => { launcherButton!.click(); launcherButton!.click(); });
-    await settle();
-    expect(calls("openLauncher")).toBe(1);
+    expect(calls("setExpanded")).toBe(0);
     expect(calls("send")).toBe(0);
-    expect(container.querySelector('[data-expanded="true"]')).toBeTruthy();
+    expect(container.querySelector('[data-assistant-embedded="true"][data-assistant-navigation-owned="true"]')).toBeTruthy();
+    expect(container.querySelector('button[aria-label="收起聊天"]')).toBeNull();
+    expect(conversation).toBeDefined();
     expect(fetchJson).not.toHaveBeenCalled();
-    invoke.mockImplementationOnce(async () => { throw new Error("入口暂不可用"); });
-    await act(async () => launcherButton!.click()); await settle();
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain("入口暂不可用");
-    expect(launcherButton!.disabled).toBe(false);
   });
   it("bootstraps the real shell locale through native config without HTTP", async () => {
     await renderAssistant();
     expect(client.getQueryData(queryKeys.configPublic())).toEqual(nativeConfig);
-    expect(container.querySelector('button[aria-label="展开个人助理聊天"]')).toBeTruthy();
-    expect(calls("config")).toBe(1);
+    expect(container.querySelector("output")?.getAttribute("data-conversation-language")).toBe("zh");
+    expect(container.querySelector("output")?.textContent).toBe("旧模型名称");
+    expect(calls("config")).toBe(2);
     expect(fetchJson).not.toHaveBeenCalled();
   });
 
-  it("refreshes collapsed locale, marks inactive model config stale and reads labels on reopening", async () => {
+  it("refreshes both active config keys once and ignores the same terminal on subsequent polls", async () => {
     await renderAssistant(); await sendSettingsRequest();
-    expect(container.querySelector("output")?.textContent).toBe("旧模型名称");
-    await click("收起聊天");
     const configReads = calls("config");
     finishSettingsTurn(); await pollCycle();
-    expect(container.querySelector('[data-expanded="false"]')).toBeTruthy();
-    expect(container.querySelector('button[aria-label="Open assistant chat"]')).toBeTruthy();
+    expect(calls("config")).toBe(configReads + 2);
     expect(client.getQueryData(queryKeys.configPublic())).toEqual(nativeConfig);
-    expect(calls("config")).toBe(configReads + 1);
-    expect(client.getQueryState(modelConfigKey)?.isInvalidated).toBe(true);
-    expect(client.getQueryData(modelConfigKey)).toMatchObject({ modelLabels: { model: "旧模型名称" } });
-    await click("Open assistant chat");
+    expect(client.getQueryData(modelConfigKey)).toMatchObject({ modelLabels: { model: "New model label" } });
     expect(container.querySelector("output")?.textContent).toBe("New model label");
     expect(container.querySelector("output")?.getAttribute("data-conversation-language")).toBe("en");
-    expect(calls("config")).toBe(configReads + 2);
-    const settledReads = calls("config"); const detailReads = calls("detail");
-    await pollCycle();
-    expect(calls("config")).toBe(settledReads); expect(calls("detail")).toBe(detailReads);
-    expect(calls("send")).toBe(1); expect(fetchJson).not.toHaveBeenCalled();
-  }, 12_000);
-
-  it("refreshes both active config keys once and ignores the same terminal on collapse/reopen", async () => {
-    await renderAssistant(); await sendSettingsRequest();
-    const configReads = calls("config");
-    finishSettingsTurn(); await pollCycle();
-    expect(calls("config")).toBe(configReads + 2);
-    expect(container.querySelector("output")?.textContent).toBe("New model label");
-    expect(container.querySelector("output")?.getAttribute("data-conversation-language")).toBe("en");
-    await click("Collapse chat"); await click("Open assistant chat");
-    expect(calls("config")).toBe(configReads + 2);
     const detailReads = calls("detail"); await pollCycle();
     expect(calls("detail")).toBe(detailReads); expect(calls("config")).toBe(configReads + 2);
     expect(calls("send")).toBe(1); expect(fetchJson).not.toHaveBeenCalled();

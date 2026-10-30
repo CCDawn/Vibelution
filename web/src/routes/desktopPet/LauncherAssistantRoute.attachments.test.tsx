@@ -36,9 +36,7 @@ async function setup(enabled: boolean) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const container = document.createElement("div"); document.body.append(container);
   const root = createRoot(container); roots.push(root);
-  await act(async () => root.render(createElement(QueryClientProvider, { client }, createElement(LauncherAssistantRoute))));
-  await settle(); await settle();
-  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="展开个人助理聊天"]')!.click());
+  await act(async () => root.render(createElement(QueryClientProvider, { client }, createElement(LauncherAssistantRoute, { embedded: true, navigationOwned: true }))));
   await settle(); await settle();
   await act(async () => conversation.onVisibleTimelineMessageIds?.(["m"]));
   await settle();
