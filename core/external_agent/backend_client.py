@@ -45,6 +45,20 @@ class BackendClientError(RuntimeError):
         self.code = str(code or "BACKEND_ERROR")
 
 
+class _StaleControlTokenError(BackendClientError):
+    """Internal marker: the backend control-token guard rejected our token."""
+
+
+# Exact detail of the control-token guard rejection (core/web/control.py
+# validate_control_request). Capability, management-subject, and source
+# validation 403s carry different details and must never trigger a reconnect.
+_CONTROL_TOKEN_REJECTION_DETAIL = "missing or invalid web control token"
+
+
+def _is_control_token_rejection(message: str) -> bool:
+    return _CONTROL_TOKEN_REJECTION_DETAIL in str(message or "").strip().lower()
+
+
 def _default_state_path(project_root: Path) -> Path:
     app_data = Path(
         os.environ.get("LOCALAPPDATA")
@@ -1006,6 +1020,43 @@ class ManagedAgentBackendClient:
         timeout_seconds: float | None = None,
         max_response_bytes: int | None = None,
     ) -> dict[str, Any]:
+        async def attempt() -> dict[str, Any]:
+            return await self._request_json_attempt(
+                method,
+                path,
+                task_capability=task_capability,
+                management_auth=management_auth,
+                json_payload=json_payload,
+                timeout_seconds=timeout_seconds,
+                max_response_bytes=max_response_bytes,
+            )
+        try:
+            return await attempt()
+        except _StaleControlTokenError:
+            # A backend restart rotates the control token, and a long-lived
+            # stdio MCP session keeps this client (and its cached token)
+            # across the rotation. Drop the cached identity, reconnect once
+            # (fresh GET /api/control-token + handshake; _ensure_connected
+            # uses raw httpx, so this cannot recurse), and replay the
+            # original request a single time. A second rejection propagates
+            # as the ordinary error below.
+            self._verified = False
+            self._control_header = CONTROL_TOKEN_HEADER
+            self._control_token = ""
+            self._base_url = ""
+            return await attempt()
+
+    async def _request_json_attempt(
+        self,
+        method: str,
+        path: str,
+        *,
+        task_capability: str = "",
+        management_auth: tuple[str, str] | None = None,
+        json_payload: dict[str, Any] | None = None,
+        timeout_seconds: float | None = None,
+        max_response_bytes: int | None = None,
+    ) -> dict[str, Any]:
         await self._ensure_connected()
         headers = {
             self._control_header: self._control_token,
@@ -1052,6 +1103,8 @@ class ManagedAgentBackendClient:
             else:
                 code = "BACKEND_ERROR"
                 message = str(detail or response.reason_phrase or code)
+            if response.status_code == 403 and _is_control_token_rejection(message):
+                raise _StaleControlTokenError(message, code=code)
             raise BackendClientError(message, code=code)
         if not isinstance(payload, dict):
             raise BackendClientError(

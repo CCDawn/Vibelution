@@ -1114,3 +1114,151 @@ async def test_client_preserves_backend_stable_error_code(tmp_path) -> None:
         await client.list_agents()
 
     assert denied_error.value.code == "AGENT_NOT_FOUND"
+
+
+def _handshake_response(request: httpx.Request, root: Path) -> httpx.Response | None:
+    if request.url.path == "/api/control-token":
+        return httpx.Response(
+            200,
+            json={
+                "header": "X-Vibelution-Control-Token",
+                "controlToken": "control-1",
+            },
+        )
+    if request.url.path == "/api/v1/external-agent/info":
+        return httpx.Response(
+            200,
+            json={
+                "apiProtocolVersion": "1.0",
+                "serverVersion": "0.3.1",
+                "projectRoot": str(root.resolve()),
+                "runtimeSourceRevision": "rev-1",
+            },
+        )
+    return None
+
+
+@pytest.mark.anyio
+async def test_client_reconnects_and_replays_once_after_control_token_rotation(
+    tmp_path,
+) -> None:
+    _runtime_state(tmp_path)
+    state = {"tokenFetches": 0, "agentsCalls": 0, "rotated": False}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        handshake = _handshake_response(request, tmp_path)
+        if handshake is not None:
+            if request.url.path == "/api/control-token":
+                state["tokenFetches"] += 1
+                token = "control-2" if state["rotated"] else "control-1"
+                handshake = httpx.Response(
+                    200,
+                    json={
+                        "header": "X-Vibelution-Control-Token",
+                        "controlToken": token,
+                    },
+                )
+            return handshake
+        if request.url.path == "/api/v1/external-agent/agents":
+            state["agentsCalls"] += 1
+            submitted = request.headers.get("X-Vibelution-Control-Token")
+            if state["rotated"] and submitted != "control-2":
+                return httpx.Response(
+                    403,
+                    json={"detail": "Missing or invalid web control token"},
+                )
+            return httpx.Response(200, json={"status": "ok", "agents": []})
+        raise AssertionError(f"unexpected request: {request.method} {request.url}")
+
+    client = ManagedAgentBackendClient(
+        tmp_path,
+        state_path=tmp_path / "adapter-state.json",
+        transport=httpx.MockTransport(handler),
+    )
+
+    first = await client.list_agents()
+    assert first["agents"] == []
+
+    # Simulate a backend restart that rotates the control token.
+    state["rotated"] = True
+    second = await client.list_agents()
+
+    assert second["agents"] == []
+    # Initial fetch + one reconnect after the rejected replay.
+    assert state["tokenFetches"] == 2
+    assert state["agentsCalls"] == 3
+
+
+@pytest.mark.anyio
+async def test_client_persistent_control_token_403_retries_exactly_once(
+    tmp_path,
+) -> None:
+    _runtime_state(tmp_path)
+    state = {"tokenFetches": 0, "agentsCalls": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        handshake = _handshake_response(request, tmp_path)
+        if handshake is not None:
+            if request.url.path == "/api/control-token":
+                state["tokenFetches"] += 1
+            return handshake
+        if request.url.path == "/api/v1/external-agent/agents":
+            state["agentsCalls"] += 1
+            return httpx.Response(
+                403,
+                json={"detail": "Missing or invalid web control token"},
+            )
+        raise AssertionError(f"unexpected request: {request.method} {request.url}")
+
+    client = ManagedAgentBackendClient(
+        tmp_path,
+        state_path=tmp_path / "adapter-state.json",
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(
+        BackendClientError, match="Missing or invalid web control token"
+    ):
+        await client.list_agents()
+
+    # One initial call + exactly one replay; the token was fetched twice.
+    assert state["agentsCalls"] == 2
+    assert state["tokenFetches"] == 2
+
+
+@pytest.mark.anyio
+async def test_client_business_403_does_not_trigger_token_reconnect(tmp_path) -> None:
+    _runtime_state(tmp_path)
+    state = {"tokenFetches": 0, "agentsCalls": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        handshake = _handshake_response(request, tmp_path)
+        if handshake is not None:
+            if request.url.path == "/api/control-token":
+                state["tokenFetches"] += 1
+            return handshake
+        if request.url.path == "/api/v1/external-agent/agents":
+            state["agentsCalls"] += 1
+            return httpx.Response(
+                403,
+                json={
+                    "detail": {
+                        "code": "CAPABILITY_DENIED",
+                        "message": "Task capability is not valid.",
+                    }
+                },
+            )
+        raise AssertionError(f"unexpected request: {request.method} {request.url}")
+
+    client = ManagedAgentBackendClient(
+        tmp_path,
+        state_path=tmp_path / "adapter-state.json",
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(BackendClientError, match="Task capability is not valid"):
+        await client.list_agents()
+
+    # A business 403 must surface immediately, with no reconnect or replay.
+    assert state["agentsCalls"] == 1
+    assert state["tokenFetches"] == 1
