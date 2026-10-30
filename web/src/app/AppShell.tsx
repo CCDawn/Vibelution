@@ -3019,17 +3019,6 @@ export function AppShell() {
           >
             {t("navAgents")}
           </VRouteLinkButton>
-          {/* Standalone launcher assistant route: navigation leaves this shell
-              and renders the assistant conversation at full window size. */}
-          <VRouteLinkButton
-            chrome="shell-nav"
-            to="/launcher-assistant"
-            className={shellPrimaryNavClass(location.pathname, "/launcher-assistant")}
-            aria-current={isShellPrimaryNavActive(location.pathname, "/launcher-assistant") ? "page" : undefined}
-            onClick={(event) => handlePrimaryNavClick(event, "/launcher-assistant")}
-          >
-            {t("navPersonalAssistant")}
-          </VRouteLinkButton>
         </nav>
         <div className={styles.mobileNav} data-shell-group="mobile-navigation" aria-label={activePrimaryRouteLabel}>
           <span className={styles.mobileNavLabel}>{activePrimaryRouteLabel}</span>
@@ -3256,7 +3245,6 @@ export function AppShell() {
               ) : <span className={styles.mobileRouteLink} aria-disabled="true">{t("navEvolution")}</span>}
               <VRouteLinkButton chrome="shell-nav" to="/memory" className={shellMobileNavClass(location.pathname, "/memory")} aria-current={isShellPrimaryNavActive(location.pathname, "/memory") ? "page" : undefined} onClick={closeUtilityMenu}>{t("navMemory")}</VRouteLinkButton>
               <VRouteLinkButton chrome="shell-nav" to="/agents" className={shellMobileNavClass(location.pathname, "/agents")} aria-current={isShellPrimaryNavActive(location.pathname, "/agents") ? "page" : undefined} onClick={closeUtilityMenu}>{t("navAgents")}</VRouteLinkButton>
-              <VRouteLinkButton chrome="shell-nav" to="/launcher-assistant" className={shellMobileNavClass(location.pathname, "/launcher-assistant")} aria-current={isShellPrimaryNavActive(location.pathname, "/launcher-assistant") ? "page" : undefined} onClick={closeUtilityMenu}>{t("navPersonalAssistant")}</VRouteLinkButton>
             </nav>
 
             <Suspense fallback={null}>

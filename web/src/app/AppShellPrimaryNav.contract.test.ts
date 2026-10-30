@@ -5,14 +5,8 @@ import appShellSource from "./AppShell.tsx?raw";
 import menuSource from "./SpecialistAgentMenu.tsx?raw";
 import settingsMenuSource from "./AppShellSettingsMenu.tsx?raw";
 import paletteSource from "./GlobalCommandSurfaces.tsx?raw";
-import { shellDictionary } from "../i18n/shellDictionary";
 
-/**
- * Top bar primary slots: the P2 collapse kept six shell entries; the personal
- * assistant adds one slot that targets the standalone launcher route (it
- * leaves the shell and renders the conversation at full window size).
- * The companions slot is the specialist menu.
- */
+/** Top bar stays six slots. The companions slot is the specialist menu. */
 const PRIMARY_NAV_SLOTS = [
   'to="/chat"',
   "<SpecialistAgentMenu",
@@ -20,11 +14,10 @@ const PRIMARY_NAV_SLOTS = [
   'to="/evolution/workspace"',
   'to="/memory"',
   'to="/agents"',
-  'to="/launcher-assistant"',
 ];
 
-describe("AppShell primary nav collapse (P2: 8 -> 6 entries, + standalone personal assistant)", () => {
-  it("renders the primary entries in the approved order", () => {
+describe("AppShell primary nav collapse (P2: 8 -> 6 entries)", () => {
+  it("renders the six primary entries in the approved order", () => {
     let cursor = -1;
     for (const token of [...PRIMARY_NAV_SLOTS, ...PRIMARY_NAV_SLOTS]) {
       const found = appShellSource.indexOf(token, cursor + 1);
@@ -57,12 +50,6 @@ describe("AppShell primary nav collapse (P2: 8 -> 6 entries, + standalone person
   it("gates the aggregated Evolution entry on either evolution mode flag", () => {
     expect(appShellSource).toContain("supervisedEvolutionEnabled || selfEvolutionEnabled");
     expect(appShellSource).toContain('t("navEvolution")');
-  });
-
-  it("targets the personal assistant slot at the standalone launcher route with zh/en labels", () => {
-    expect(appShellSource).toContain('to="/launcher-assistant"');
-    expect(shellDictionary.zh.navPersonalAssistant).toBe("个人助理");
-    expect(shellDictionary.en.navPersonalAssistant).toBe("Personal Assistant");
   });
 
   it("keeps the legacy supervised/self deep links active under the Evolution entry", () => {

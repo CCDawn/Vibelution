@@ -34,15 +34,10 @@ let nativeConfig: { language: "zh" | "en"; modelLabels: Record<string, string> }
 let nativeDetail: Record<string, unknown>;
 let invoke: ReturnType<typeof vi.fn>;
 const modelConfigKey = [launcherConversationApi.cacheKey, "config"];
-// Tests simulate the native assistant floating window (400×530 DIP), not the
-// workbench main window, so the route starts in its collapsed pet stage.
-const floatingWindowInnerWidth = 400;
-const defaultInnerWidth = window.innerWidth;
 beforeAll(() => vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true));
 afterEach(async () => {
   await act(async () => root?.unmount()); root = undefined;
   client?.clear(); container?.remove(); conversation = undefined;
-  window.innerWidth = defaultInnerWidth;
   vi.clearAllMocks(); vi.unstubAllGlobals();
 });
 
@@ -81,7 +76,6 @@ async function renderAssistant() {
     }
   });
   vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
-  window.innerWidth = floatingWindowInnerWidth;
   client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 30_000 } } });
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
   await act(async () => { root!.render(createElement(QueryClientProvider, { client }, createElement(LauncherAssistantRoute))); });

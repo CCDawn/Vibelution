@@ -57,19 +57,6 @@
 [data-assistant-chat="compact"] .vui-components-conversationview.emptyState { font-size: 13px; }
 [data-assistant-chat="compact"] .vui-components-conversationview.userMessageBody { border: 0; background: var(--vui-selection-bg); border-radius: 12px 12px 3px 12px; padding: 10px 13px; }
 
-/* Full-size hosts (the workbench main window opening /launcher-assistant) keep
-   a centered reading column like a chat app: messages, composer, receipts and
-   approval cards share the capped body column while the window background and
-   header stay full-bleed. The native floating window is 400 DIP wide at most,
-   never enters this tier, and keeps its edge-to-edge compact body unchanged. */
-@media (min-width: 720px) {
-  [data-assistant-chat="compact"] .desktop-assistant-chat-body {
-    width: 100%;
-    max-width: 920px;
-    margin-inline: auto;
-  }
-}
-
 /* Restore the native user avatar rail only for the Launcher custom image. */
 .launcher-assistant-chat-window[data-operator-avatar="custom"] .vui-components-conversationview.userTurn {
   grid-template-columns: minmax(0, 1fr) 2rem;

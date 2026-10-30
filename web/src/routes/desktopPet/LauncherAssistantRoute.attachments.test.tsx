@@ -10,16 +10,7 @@ vi.mock("./DesktopPetCharacter", () => ({ DesktopPetCharacter: () => null }));
 let conversation: ConversationViewProps;
 vi.mock("../../components/conversation/LazyConversationView", () => ({ LazyConversationView: (props: ConversationViewProps) => { conversation = props; return null; } }));
 const roots: ReturnType<typeof createRoot>[] = [];
-// Tests simulate the native assistant floating window (400×530 DIP), not the
-// workbench main window, so the route starts in its collapsed pet stage.
-const floatingWindowInnerWidth = 400;
-const defaultInnerWidth = window.innerWidth;
-afterEach(async () => {
-  for (const root of roots.splice(0)) await act(async () => root.unmount());
-  document.body.innerHTML = "";
-  window.innerWidth = defaultInnerWidth;
-  vi.unstubAllGlobals();
-});
+afterEach(async () => { for (const root of roots.splice(0)) await act(async () => root.unmount()); document.body.innerHTML = ""; vi.unstubAllGlobals(); });
 async function settle() { await act(async () => { await new Promise(resolve => setTimeout(resolve, 25)); }); }
 async function setup(enabled: boolean) {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -42,7 +33,6 @@ async function setup(enabled: boolean) {
     }
   });
   vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
-  window.innerWidth = floatingWindowInnerWidth;
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const container = document.createElement("div"); document.body.append(container);
   const root = createRoot(container); roots.push(root);

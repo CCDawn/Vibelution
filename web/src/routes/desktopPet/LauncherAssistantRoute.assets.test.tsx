@@ -39,16 +39,11 @@ const image = (dataBase64: string) => ({ contentType: "image/png", dataBase64, s
 const asset = (kind: "avatar" | "background", dataBase64: string | null, readability = "standard") => ({
   schemaVersion: 1, kind, image: dataBase64 === null ? null : image(dataBase64), readability,
 });
-// Tests simulate the native assistant floating window (400×530 DIP), not the
-// workbench main window, so the route starts in its collapsed pet stage.
-const floatingWindowInnerWidth = 400;
-const defaultInnerWidth = window.innerWidth;
 afterEach(async () => {
   await act(async () => root?.unmount()); root = undefined;
   client?.clear(); container?.remove(); conversation = undefined;
   presentation?.remove(); presentation = undefined;
   delete document.documentElement.dataset.theme;
-  window.innerWidth = defaultInnerWidth;
   vi.unstubAllGlobals(); vi.clearAllMocks(); vi.restoreAllMocks();
 });
 async function settle() {
@@ -109,7 +104,6 @@ async function renderAssistant(options: { capability?: boolean; failAvatar?: boo
     }
   });
   vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
-  window.innerWidth = floatingWindowInnerWidth;
   client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 30_000 } } });
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
   await act(async () => root!.render(createElement(QueryClientProvider, { client }, createElement(LauncherAssistantRoute))));
