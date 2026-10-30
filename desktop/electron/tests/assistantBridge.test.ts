@@ -121,3 +121,51 @@ describe("Workbench main window sender admission", () => {
       .resolves.toEqual({});
   });
 });
+
+describe("Launcher control window sender admission", () => {
+  function launcherControlSetup() {
+    const mainFrame = { url: LAUNCHER_ASSISTANT_URL };
+    const contents = { mainFrame, isDestroyed: () => false };
+    const controlFrame = { url: "vibelution-launcher://launcher/launcher" };
+    const controlContents = { mainFrame: controlFrame, isDestroyed: () => false };
+    const owner = { contents, host: { start: vi.fn(async () => ({})), request: vi.fn(async (_payload: unknown) => ({ accepted: true })) },
+      hide: vi.fn(), setExpanded: vi.fn((expanded: boolean) => ({ expanded })),
+      // Mirrors the main-held WeakSet registry: exact identity, nothing else.
+      isLauncherControlSender: (sender: unknown) => sender === controlContents };
+    return { owner, controlContents, event: { sender: controlContents as unknown, senderFrame: controlFrame as { url: string } | null } };
+  }
+
+  it("admits the registered launcher control webContents by identity without URL matching", async () => {
+    const { owner, event } = launcherControlSetup();
+    await expect(invokeAssistant(event, { operation: "status" }, owner)).resolves.toEqual({ accepted: true });
+    expect(owner.host.start).toHaveBeenCalledTimes(1);
+    await expect(invokeAssistant(event, { operation: "hide" }, owner)).resolves.toEqual({ hidden: true });
+    expect(owner.hide).toHaveBeenCalledExactlyOnceWith();
+  });
+
+  it("reaches the host with no float contents once the pet float is gone", async () => {
+    // Host-direct registration shape: the owner carries no float webContents,
+    // so a closed float cannot turn a full-size session into ASSISTANT_NOT_READY.
+    const { owner, event } = launcherControlSetup();
+    delete (owner as { contents?: unknown }).contents;
+    await expect(invokeAssistant(event, { operation: "status" }, owner)).resolves.toEqual({ accepted: true });
+    expect(owner.host.request).toHaveBeenCalledExactlyOnceWith({ operation: "status" });
+    await expect(invokeAssistant(event, { operation: "hide" }, owner)).resolves.toEqual({ hidden: true });
+  });
+
+  it.each<[string, (s: ReturnType<typeof launcherControlSetup>) => void]>([
+    ["an unregistered sender identity", s => { s.event.sender = { mainFrame: s.event.senderFrame }; }],
+    ["a subframe of the launcher control window", s => { s.event.senderFrame = { url: (s.event.senderFrame as { url: string }).url }; }],
+    ["a missing sender frame", s => { s.event.senderFrame = null; }],
+    ["a gate that refuses the sender", s => { s.owner.isLauncherControlSender = () => false; }],
+    ["a gate that throws", s => { s.owner.isLauncherControlSender = () => { throw new Error("gate exploded"); }; }],
+    ["a missing launcher gate", s => { delete (s.owner as { isLauncherControlSender?: unknown }).isLauncherControlSender; }],
+    ["a non-object sender", s => { s.event.sender = null; }]
+  ])("fails closed for %s", async (_label, breakSetup) => {
+    const state = launcherControlSetup();
+    breakSetup(state);
+    await expect(invokeAssistant(state.event, { operation: "status" }, state.owner)).rejects.toThrow("ASSISTANT_SENDER_FORBIDDEN");
+    expect(state.owner.host.request).not.toHaveBeenCalled();
+    expect(state.owner.host.start).not.toHaveBeenCalled();
+  });
+});

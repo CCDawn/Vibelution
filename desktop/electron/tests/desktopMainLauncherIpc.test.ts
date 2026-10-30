@@ -158,6 +158,43 @@ describe("Electron main Launcher IPC facade", () => {
     expect(mainSource).toContain("launcherIpcTrustedOrigins");
   });
 
+  it("admits the registered launcher control window into the assistant bridge by main-held identity", () => {
+    // The launcher window registers its own webContents exactly once, and the
+    // registration site gates on that identity — never on a URL prefix.
+    expect(launcherWindowSource).toContain("const launcherControlSenders = new WeakSet<object>()");
+    expect(launcherWindowSource).toContain("export function isLauncherControlSender");
+    expect(launcherWindowSource).toContain("launcherControlSenders.add(window.webContents)");
+    expect(mainSource).toContain(
+      'import { createLauncherWindow, isLauncherControlSender } from "./windows/launcherWindow.js"'
+    );
+    // The launcher control preload branch carries the assistant bridge role.
+    expect(preloadSource).toContain(
+      "if (isLauncherAssistantWindow || isWorkbenchMainWindow || isLauncherControlWindow) {"
+    );
+  });
+
+  it("lands assistantInvoke for registered full-size windows on the host, not the pet float", () => {
+    const invokeStart = mainSource.indexOf("IPC_CHANNELS.assistantInvoke");
+    const invokeEnd = mainSource.indexOf("function createDesktopPathsForApp", invokeStart);
+    const handler = mainSource.slice(invokeStart, invokeEnd);
+    // The host-direct branch must come first: a closed pet float must not turn
+    // a launcher-control or workbench session into ASSISTANT_NOT_READY.
+    const hostDirectStart = handler.indexOf("isLauncherControlSender(sender) || isWorkbenchMainSender(sender)");
+    const floatGate = handler.indexOf("if (!launcherAssistantWindow)");
+    expect(hostDirectStart).toBeGreaterThan(0);
+    expect(floatGate).toBeGreaterThan(hostDirectStart);
+    const hostDirect = handler.slice(hostDirectStart, floatGate);
+    expect(hostDirect).toContain("const host = launcherAssistantHost");
+    expect(hostDirect).toContain('if (!host) throw new Error("ASSISTANT_NOT_READY")');
+    expect(hostDirect).toContain("invokeAssistant(event, payload");
+    expect(hostDirect).toContain("isWorkbenchSender: isWorkbenchMainSender");
+    expect(hostDirect).toContain("isLauncherControlSender,");
+    // Geometry verbs stay float-bound; the host verbs never touch the float.
+    expect(hostDirect).not.toContain("launcherAssistantWindow.invoke");
+    // The pet float keeps its window-coupled path behind the host-direct branch.
+    expect(handler).toContain("launcherAssistantWindow.invoke(event, payload, isWorkbenchMainSender)");
+  });
+
   it("does not require a workbench control token before serving launcher status", () => {
     const hostSource = readFileSync(fileURLToPath(new URL("../src/protocol/launcherIpcHost.ts", import.meta.url)), "utf8");
     const invokeStart = hostSource.indexOf("async invoke(");

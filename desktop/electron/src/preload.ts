@@ -8,11 +8,12 @@ const isDesktopPetWindow = process.argv.includes("--vibelution-window-role=deskt
 const isLauncherAssistantWindow = process.argv.includes("--vibelution-window-role=launcher-assistant");
 const isWorkbenchMainWindow = process.argv.includes("--vibelution-window-role=workbench-main");
 
-// Both assistant surfaces — the resident pet float and the workbench main
-// window — carry the identical assistant invoke and theme bridges. The
-// workbench window keeps its full vibelutionLauncher bridge below, so this
-// branch must never expose that name a second time.
-if (isLauncherAssistantWindow || isWorkbenchMainWindow) {
+// All assistant surfaces — the resident pet float, the workbench main window,
+// and the launcher control window — carry the identical assistant invoke and
+// theme bridges. The launcher control and workbench windows keep their full
+// vibelutionLauncher bridge below, so this branch must never expose that name
+// a second time.
+if (isLauncherAssistantWindow || isWorkbenchMainWindow || isLauncherControlWindow) {
   contextBridge.exposeInMainWorld("vibelutionLauncherTheme", createAssistantThemePreload(ipcRenderer));
   contextBridge.exposeInMainWorld("vibelutionLauncherAssistant", {
     invoke: (payload: unknown) => ipcRenderer.invoke(IPC_CHANNELS.assistantInvoke, payload),

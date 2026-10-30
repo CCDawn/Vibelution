@@ -101,6 +101,20 @@ export class AssistantWindow {
     } catch { return null; }
   }
 
+  /** Geometry verbs stay float-bound: a full-size surface hides the float, never itself. */
+  hideFloat(): void {
+    if (this.window && !this.window.isDestroyed()) this.window.hide();
+  }
+
+  setFloatExpanded(expanded: boolean): { expanded: boolean; width: number; height: number } {
+    const window = this.window;
+    if (!window || window.isDestroyed()) return { expanded, width: 0, height: 0 };
+    const current = window.getBounds();
+    const bounds = desktopPetWindowExpandedBounds(current, screen.getDisplayMatching(current).workArea, expanded);
+    window.setBounds(bounds, false);
+    return { expanded, width: bounds.width, height: bounds.height };
+  }
+
   /** isWorkbenchSender is the main-held identity gate for workbench main window callers. */
   invoke(event: Parameters<typeof invokeAssistant>[0], payload: unknown,
     isWorkbenchSender?: WorkbenchSenderGate): Promise<unknown> {
@@ -110,13 +124,8 @@ export class AssistantWindow {
       contents: window.webContents, host: this.host,
       openLauncher: this.openLauncher,
       isWorkbenchSender,
-      hide: () => window.hide(),
-      setExpanded: expanded => {
-        const current = window.getBounds();
-        const bounds = desktopPetWindowExpandedBounds(current, screen.getDisplayMatching(current).workArea, expanded);
-        window.setBounds(bounds, false);
-        return { expanded, width: bounds.width, height: bounds.height };
-      },
+      hide: () => this.hideFloat(),
+      setExpanded: expanded => this.setFloatExpanded(expanded),
     });
   }
 }

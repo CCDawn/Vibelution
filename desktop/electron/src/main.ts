@@ -38,6 +38,7 @@ import { AssistantProjectRegistryConnection } from "./assistant/projectRegistryC
 import { createAssistantAppearanceMainControl } from "./assistant/appearanceMainControl.js";
 import { createAssistantProjectMainControl } from "./assistant/projectMainControl.js";
 import { AssistantWindow } from "./assistant/assistantWindow.js";
+import { invokeAssistant } from "./assistant/assistantBridge.js";
 import { publishAssistantTheme, ThemeProjectionTracker, workbenchThemeScope } from "./assistant/workbenchThemeSync.js";
 import { ThemeAuthority } from "./assistant/themeAuthority.js";
 import { resolveAssistantResources } from "./assistant/assistantResources.js";
@@ -275,7 +276,7 @@ import {
 import { InProcessDesktopSessionStore } from "./windows/desktopSessionStore.js";
 import { ElectronWindowProvider } from "./windows/electronWindowProvider.js";
 import type { ManagedWindowState } from "./windows/windowProviderTypes.js";
-import { createLauncherWindow } from "./windows/launcherWindow.js";
+import { createLauncherWindow, isLauncherControlSender } from "./windows/launcherWindow.js";
 import { createWorkbenchWindow, isWorkbenchMainSender } from "./windows/workbenchWindow.js";
 import { createPetWindow, isDesktopPetWindowUrl } from "./windows/petWindow.js";
 import { createPetSettingsControl, petSettingsOrigin } from "./windows/petSettingsControl.js";
@@ -1569,9 +1570,28 @@ ipcMain.handle(IPC_CHANNELS.assistantThemeResult, (event,payload:unknown) => {
 });
 
 ipcMain.handle(IPC_CHANNELS.assistantInvoke, async (event, payload: unknown) => {
-  if (shutdownApproved || !launcherAssistantWindow) throw new Error("ASSISTANT_NOT_READY");
-  // Only the assistant float (URL-pinned) and the registered workbench main
-  // window (exact webContents identity) may invoke the assistant bridge.
+  if (shutdownApproved) throw new Error("ASSISTANT_NOT_READY");
+  const sender: unknown = event.sender;
+  // Full-size surfaces — the registered workbench main and launcher control
+  // windows (exact webContents identity) — land on the resident host directly,
+  // so a closed pet float cannot strand them with ASSISTANT_NOT_READY. Their
+  // geometry verbs stay float-bound and forward to the float when it exists.
+  if (isLauncherControlSender(sender) || isWorkbenchMainSender(sender)) {
+    const host = launcherAssistantHost;
+    if (!host) throw new Error("ASSISTANT_NOT_READY");
+    return await invokeAssistant(event, payload, {
+      host,
+      openLauncher: requestOpenLauncherFromAssistant,
+      isWorkbenchSender: isWorkbenchMainSender,
+      isLauncherControlSender,
+      hide: () => launcherAssistantWindow?.hideFloat(),
+      setExpanded: expanded => launcherAssistantWindow?.setFloatExpanded(expanded)
+        ?? { expanded, width: 0, height: 0 },
+    });
+  }
+  if (!launcherAssistantWindow) throw new Error("ASSISTANT_NOT_READY");
+  // The pet float keeps its window-coupled path: URL-pinned admission plus its
+  // own geometry verbs on the only window that owns them.
   return await launcherAssistantWindow.invoke(event, payload, isWorkbenchMainSender);
 });
 

@@ -63,7 +63,20 @@ describe("preload assistant bridge injection by window role", () => {
     expect(bridge.requestWindowClose).toBeUndefined();
   });
 
-  it.each(["desktop-pet", "launcher-control", undefined])("grants no assistant bridge to role %s", async role => {
+  it("grants the launcher control window the assistant and theme bridges beside its control bridge", async () => {
+    const { exposed, invoke } = await loadPreload("launcher-control");
+    expect([...exposed.keys()].sort()).toEqual(
+      ["vibelutionLauncher", "vibelutionLauncherAssistant", "vibelutionLauncherTheme"]);
+    await (exposed.get("vibelutionLauncherAssistant") as BridgeApi).invoke({ operation: "status" });
+    expect(invoke).toHaveBeenCalledWith(IPC_CHANNELS.assistantInvoke, { operation: "status" });
+    expect(typeof exposed.get("vibelutionLauncherTheme")!.readThemeAuthority).toBe("function");
+    const bridge = exposed.get("vibelutionLauncher")!;
+    expect(bridge.launcherInvoke).toBeTypeOf("function");
+    expect(bridge.refreshLauncherState).toBeTypeOf("function");
+    expect(bridge.requestWindowClose).toBeUndefined();
+  });
+
+  it.each(["desktop-pet", undefined])("grants no assistant bridge to role %s", async role => {
     const { exposed } = await loadPreload(role);
     expect(exposed.has("vibelutionLauncherAssistant")).toBe(false);
     expect(exposed.has("vibelutionLauncherTheme")).toBe(false);
