@@ -30,6 +30,7 @@ import os
 import subprocess
 import threading
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -311,9 +312,23 @@ def write_running_code_fingerprint(
         return payload
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = path.with_suffix(path.suffix + ".tmp")
-        tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp_path.replace(path)
+        # The fingerprint path is shared by every backend serving this project
+        # root, so the tmp name must be process-unique: a fixed ".tmp" name let
+        # two concurrent handover writes tear each other's snapshot inside the
+        # write->replace window (same hardening as desktop/electron
+        # workbenchBackend.ts). ``os.replace`` stays the single atomic publish
+        # step, so a successful write leaves no tmp behind; only a failed write
+        # or replace can leave one, and the cleanup below removes it.
+        tmp_path = path.with_name(f"{path.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")
+        try:
+            tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            tmp_path.replace(path)
+        except OSError:
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+            raise
         payload["written"] = True
         payload["path"] = str(path)
         lease_release = str(payload.get("servingFrontendRelease") or "").strip()

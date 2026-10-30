@@ -115,6 +115,61 @@ def test_write_running_fingerprint_publishes_identity_bound_serving_lease(tmp_pa
     assert json.loads(lease_path.read_text(encoding="utf-8"))["servingFrontendRelease"] == "release-build-key"
 
 
+def test_fingerprint_tmp_name_is_process_unique(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        code_freshness,
+        "_capture_git_text",
+        lambda root, args: "abc123def456" if args[:2] == ["rev-parse", "HEAD"] else "main",
+    )
+    seen: dict[str, str] = {}
+    real_replace = Path.replace
+
+    def spy_replace(self: Path, target: Path) -> Path:
+        seen["tmp_name"] = self.name
+        return real_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", spy_replace)
+    result = code_freshness.write_running_code_fingerprint(project_root=tmp_path, source="test")
+    assert result["written"] is True
+    # The tmp name carries the pid and a random suffix so two backends serving
+    # the same root never share one staging file.
+    assert f".{os.getpid()}." in seen["tmp_name"]
+    assert seen["tmp_name"].endswith(".tmp")
+    assert list(code_freshness.running_code_fingerprint_path(tmp_path).parent.glob("*.tmp")) == []
+
+
+def test_concurrent_fingerprint_writes_publish_intact_snapshots(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        code_freshness,
+        "_capture_git_text",
+        lambda root, args: f"head-{threading.get_ident()}" if args[:2] == ["rev-parse", "HEAD"] else "main",
+    )
+    barrier = threading.Barrier(2)
+    failures: list[BaseException] = []
+
+    def writer() -> None:
+        try:
+            barrier.wait(timeout=10)
+            result = code_freshness.write_running_code_fingerprint(project_root=tmp_path, source="concurrent")
+            if result["written"] is not True:
+                failures.append(AssertionError(f"write failed: {result}"))
+        except BaseException as exc:  # surfaced below so both threads always run
+            failures.append(exc)
+
+    threads = [threading.Thread(target=writer) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+    assert failures == []
+    parsed = code_freshness.read_running_code_fingerprint(tmp_path)
+    assert parsed is not None
+    assert parsed["schemaVersion"] == 1
+    assert parsed["runningHead"].startswith("head-")
+    # No torn or leftover staging files after the concurrent handover.
+    assert list(code_freshness.running_code_fingerprint_path(tmp_path).parent.glob("*.tmp")) == []
+
+
 def test_read_missing_fingerprint_returns_none(tmp_path: Path) -> None:
     assert code_freshness.read_running_code_fingerprint(tmp_path) is None
 
