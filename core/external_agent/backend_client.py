@@ -201,7 +201,16 @@ class ManagedAgentBackendClient:
             ):
                 raise BackendClientError("Invalid management binding.", code="BACKEND_PROTOCOL_ERROR")
             if saved.get("binding") and saved["binding"] != binding:
-                raise BackendClientError("Management instance changed.", code="RUNTIME_IDENTITY_MISMATCH")
+                # Same root, rotated logical identity (projectId from the tracked
+                # project.json, or instance identity). Never silent: the saved
+                # operator subject belongs to the previous identity, and the
+                # server-side store still holds its old-binding grant (a rebind
+                # with the same client_id would conflict). Recovery is explicit.
+                raise BackendClientError(
+                    "Management identity rotated: saved credentials belong to a previous project identity under this root. "
+                    "Recover by calling management_reset_credentials() once, then retry the action.",
+                    code="MANAGEMENT_IDENTITY_ROTATED",
+                )
             client_id = str(saved.get("clientId") or "client-" + secrets.token_urlsafe(32))
             if not re.fullmatch(r"[A-Za-z0-9_-]{20,128}", client_id):
                 raise BackendClientError("Invalid management credential state.", code="UNKNOWN_MANAGEMENT_SUBJECT")
@@ -222,8 +231,22 @@ class ManagedAgentBackendClient:
             if grant.get("protocolVersion") != 1 or grant.get("binding") != binding or not isinstance(scopes, list) or not all(isinstance(scope, str) for scope in scopes) or scopes != requested_scopes or not (
                 isinstance(subject, str) and re.fullmatch(r"ops-[A-Za-z0-9_-]{10,128}", subject)
                 and isinstance(capability, str) and re.fullmatch(r"[A-Za-z0-9_-]{32,256}", capability)
-            ) or (saved.get("subjectId") and saved["subjectId"] != subject):
-                raise BackendClientError("Management grant mismatch.", code="RUNTIME_IDENTITY_MISMATCH")
+            ):
+                # The live binding was fetched above and sent as expected_binding;
+                # a response contradicting it (or the requested scopes / subject
+                # format) is a server integrity failure and stays fail-closed.
+                # No reset can make a contradictory grant valid.
+                raise BackendClientError("Management grant response contradicts the current binding.", code="BACKEND_PROTOCOL_ERROR")
+            if saved.get("subjectId") and saved["subjectId"] != subject:
+                # The server store was rebuilt or migrated and re-minted the
+                # subject for our client_id. Continuity is broken; keep the
+                # original fail-closed decision but make it explicitly
+                # recoverable instead of permanent.
+                raise BackendClientError(
+                    "Management subject was re-minted server-side for this client (runtime store rebuilt or migrated). "
+                    "Recover by calling management_reset_credentials() once, then retry the action.",
+                    code="MANAGEMENT_IDENTITY_ROTATED",
+                )
             result = {"clientId": client_id, "binding": binding, "subjectId": subject, "capability": capability, "scopes": requested_scopes}
             self._state["management"] = result
             self._save_state_locked()
@@ -271,6 +294,28 @@ class ManagedAgentBackendClient:
             await self._sync_authorization_receipt(grant, public)
         return public
 
+    async def management_reset_credentials(self) -> dict[str, Any]:
+        """Explicit operator recovery after a confirmed same-root identity rotation.
+
+        ``_management_grant`` fails closed with MANAGEMENT_IDENTITY_ROTATED when
+        the saved binding no longer matches the server's current binding
+        (project identity rotated under the same root) or when the server
+        re-minted our subject (runtime store rebuilt or migrated). This method
+        clears the saved management entry - client id, binding, subject,
+        capability, scopes - so the next management call performs a fresh bind
+        against the server's current binding, with scopes still explicitly
+        requested and validated.
+
+        Local-only: nothing is sent to the backend, and in-flight request
+        receipts of the old subject stay unreadable (the server keys them by
+        subject). An unreadable state file is a different, deliberate
+        fail-closed case and still requires manual deletion.
+        """
+        async with self._state_lock:
+            self._state["management"] = {}
+            self._save_state_locked()
+        return {"reset": True}
+
     async def _original_management_grant(self, *, require_original, require_complete=False):
         """Keep original credentials when an explicit upgrade changed server scopes.
 
@@ -297,7 +342,11 @@ class ManagedAgentBackendClient:
             if info.get("protocolVersion") != 1 or Binding.model_validate(info.get("binding")).model_dump() != binding:
                 raise ValueError("Binding changed")
         except (ValidationError, ValueError, KeyError):
-            raise BackendClientError("Original subject binding changed.", code="RUNTIME_IDENTITY_MISMATCH") from None
+            raise BackendClientError(
+                "Original subject binding changed: saved credentials belong to a previous project identity under this root. "
+                "Recover by calling management_reset_credentials() once, then retry the action.",
+                code="MANAGEMENT_IDENTITY_ROTATED",
+            ) from None
         return saved
 
     async def _authorization_state(self, grant):
@@ -1165,14 +1214,20 @@ class ManagedAgentBackendClient:
                 "managed backend identity is unavailable",
                 code="BACKEND_UNAVAILABLE",
             )
-        if str(info.get("apiProtocolVersion") or "") != API_PROTOCOL_VERSION:
+        actual_protocol = str(info.get("apiProtocolVersion") or "")
+        if actual_protocol != API_PROTOCOL_VERSION:
             raise BackendClientError(
-                "managed backend API protocol version mismatch",
+                "managed backend API protocol version mismatch: expected "
+                f"{API_PROTOCOL_VERSION}, got {actual_protocol}; one side is "
+                "outdated, update this checkout (repo) or the installed desktop app and retry",
                 code="RUNTIME_IDENTITY_MISMATCH",
             )
-        if str(info.get("serverVersion") or "") != SERVER_VERSION:
+        actual_version = str(info.get("serverVersion") or "")
+        if actual_version != SERVER_VERSION:
             raise BackendClientError(
-                "managed backend server version mismatch",
+                "managed backend server version mismatch: expected "
+                f"{SERVER_VERSION}, got {actual_version}; one side is "
+                "outdated, update this checkout (repo) or the installed desktop app and retry",
                 code="RUNTIME_IDENTITY_MISMATCH",
             )
         actual_root = Path(str(info.get("projectRoot") or "")).expanduser().resolve()

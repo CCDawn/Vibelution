@@ -631,6 +631,108 @@ async def test_missing_management_credentials_cannot_mint_new_owner_for_a_retry(
     assert invalid.value.code == "UNKNOWN_MANAGEMENT_SUBJECT" and calls == []
 
 
+@pytest.mark.anyio
+async def test_management_binding_rotation_fails_closed_until_explicit_reset(tmp_path, monkeypatch):
+    _runtime_state(tmp_path)
+    path = tmp_path / "credentials.json"
+    old_binding = {"projectId": "project-old", "instanceId": "instance-1"}
+    new_binding = {"projectId": "project-new", "instanceId": "instance-1"}
+    saved_scopes = ["agents:read", "agents:update"]
+    client = ManagedAgentBackendClient(tmp_path, state_path=path)
+    client._state["management"] = {"clientId": "saved_client_1234567890", "binding": old_binding,
+        "subjectId": "ops-1234567890abcdef", "capability": "a" * 48, "scopes": saved_scopes}
+    binds = []
+    async def request(method, route, **kwargs):
+        if route.endswith("/binding"):
+            return {"protocolVersion": 1, "binding": new_binding}
+        binds.append(kwargs["json_payload"])
+        return {"protocolVersion": 1, "binding": new_binding, "scopes": kwargs["json_payload"]["scopes"],
+            "subject_id": "ops-fedcba0987654321", "subject_capability": "b" * 48}
+    monkeypatch.setattr(client, "_request_json", request)
+
+    with pytest.raises(BackendClientError) as rotated:
+        await client._management_grant(require_existing=True)
+    assert rotated.value.code == "MANAGEMENT_IDENTITY_ROTATED"
+    assert "management_reset_credentials" in str(rotated.value)
+    assert binds == []  # Refused before asking the server to bind anything.
+
+    await client.management_reset_credentials()
+    assert json.loads(path.read_text(encoding="utf-8"))["management"] == {}
+
+    grant = await client._management_grant(require_existing=False)
+    assert grant["subjectId"] == "ops-fedcba0987654321" and grant["binding"] == new_binding
+    assert binds[0]["expected_binding"] == new_binding
+    assert binds[0]["client_id"] != "saved_client_1234567890"
+    # A fresh client explicitly requests the full modern scope set (not the
+    # frozen legacy eight), and the server echo must match it exactly.
+    assert "sessions:pin" in binds[0]["scopes"] and "agents:archive" in binds[0]["scopes"]
+    assert binds[0]["scopes"] == sorted(set(binds[0]["scopes"]))
+    persisted = json.loads(path.read_text(encoding="utf-8"))["management"]
+    assert persisted["subjectId"] == "ops-fedcba0987654321" and persisted["binding"] == new_binding
+    assert persisted["clientId"] == binds[0]["client_id"]
+
+
+@pytest.mark.anyio
+async def test_management_reminted_subject_requires_explicit_reset_then_recovers(tmp_path, monkeypatch):
+    _runtime_state(tmp_path)
+    path = tmp_path / "credentials.json"
+    binding = {"projectId": "project-1", "instanceId": "instance-1"}
+    client = ManagedAgentBackendClient(tmp_path, state_path=path)
+    client._state["management"] = {"clientId": "saved_client_1234567890", "binding": binding,
+        "subjectId": "ops-1234567890abcdef", "capability": "a" * 48,
+        "scopes": ["agents:read", "agents:update"]}
+    binds = []
+    async def request(method, route, **kwargs):
+        if route.endswith("/binding"):
+            return {"protocolVersion": 1, "binding": binding}
+        binds.append(kwargs["json_payload"])
+        # Runtime store was rebuilt: the server re-mints a different subject
+        # for the (re-created) client record.
+        return {"protocolVersion": 1, "binding": binding, "scopes": kwargs["json_payload"]["scopes"],
+            "subject_id": "ops-fedcba0987654321", "subject_capability": "b" * 48}
+    monkeypatch.setattr(client, "_request_json", request)
+
+    with pytest.raises(BackendClientError) as rotated:
+        await client._management_grant(require_existing=True)
+    assert rotated.value.code == "MANAGEMENT_IDENTITY_ROTATED"
+    assert "management_reset_credentials" in str(rotated.value)
+    persisted = json.loads(path.read_text(encoding="utf-8"))["management"]
+    assert persisted["subjectId"] == "ops-1234567890abcdef"  # Old credentials stay untouched.
+
+    await client.management_reset_credentials()
+    grant = await client._management_grant(require_existing=False)
+    assert grant["subjectId"] == "ops-fedcba0987654321" and grant["binding"] == binding
+    assert grant["scopes"] == binds[-1]["scopes"] and grant["capability"] == "b" * 48
+    assert json.loads(path.read_text(encoding="utf-8"))["management"]["subjectId"] == "ops-fedcba0987654321"
+
+
+@pytest.mark.anyio
+async def test_management_rejects_bind_response_contradicting_current_binding(tmp_path, monkeypatch):
+    _runtime_state(tmp_path)
+    path = tmp_path / "credentials.json"
+    binding = {"projectId": "project-1", "instanceId": "instance-1"}
+    foreign_binding = {"projectId": "project-other", "instanceId": "instance-1"}
+    client = ManagedAgentBackendClient(tmp_path, state_path=path)
+    saved = {"clientId": "saved_client_1234567890", "binding": binding,
+        "subjectId": "ops-1234567890abcdef", "capability": "a" * 48,
+        "scopes": ["agents:read", "agents:update"]}
+    client._state["management"] = dict(saved)
+    async def request(method, route, **kwargs):
+        if route.endswith("/binding"):
+            return {"protocolVersion": 1, "binding": binding}
+        # Malicious/buggy server answers a bind bound to a different binding.
+        return {"protocolVersion": 1, "binding": foreign_binding, "scopes": kwargs["json_payload"]["scopes"],
+            "subject_id": "ops-fedcba0987654321", "subject_capability": "b" * 48}
+    monkeypatch.setattr(client, "_request_json", request)
+
+    with pytest.raises(BackendClientError) as rejected:
+        await client._management_grant(require_existing=False)
+    assert rejected.value.code == "BACKEND_PROTOCOL_ERROR"
+    assert "contradicts" in str(rejected.value)
+    persisted = json.loads(path.read_text(encoding="utf-8"))["management"]
+    assert persisted["subjectId"] == saved["subjectId"] and persisted["capability"] == saved["capability"]
+
+
 def test_team_receipt_preserves_native_progress_and_redacts_nested_private_data():
     receipt = ManagedAgentBackendClient._management_public_receipt({
         "action": "team_run", "requestId": "team-1", "status": "completed", "verified": True, "reused": True,
@@ -731,6 +833,7 @@ def _transport(
     *,
     get_status: str = "running",
     server_version: str = "0.3.1",
+    api_protocol_version: str = "1.0",
 ) -> httpx.MockTransport:
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append(request)
@@ -746,7 +849,7 @@ def _transport(
             return httpx.Response(
                 200,
                 json={
-                    "apiProtocolVersion": "1.0",
+                    "apiProtocolVersion": api_protocol_version,
                     "serverVersion": server_version,
                     "projectRoot": str(root.resolve()),
                     "runtimeSourceRevision": "rev-1",
@@ -994,6 +1097,27 @@ async def test_client_rejects_runtime_from_another_server_version(tmp_path) -> N
         await client.list_agents()
 
     assert mismatch.value.code == "RUNTIME_IDENTITY_MISMATCH"
+    message = str(mismatch.value)
+    assert "expected 0.3.1" in message and "got 0.2.0" in message
+    assert "outdated" in message and "desktop app" in message
+
+
+@pytest.mark.anyio
+async def test_client_rejects_runtime_from_another_api_protocol_version(tmp_path) -> None:
+    _runtime_state(tmp_path)
+    client = ManagedAgentBackendClient(
+        tmp_path,
+        state_path=tmp_path / "adapter-state.json",
+        transport=_transport(tmp_path, [], api_protocol_version="2.0"),
+    )
+
+    with pytest.raises(BackendClientError, match="protocol version") as mismatch:
+        await client.list_agents()
+
+    assert mismatch.value.code == "RUNTIME_IDENTITY_MISMATCH"
+    message = str(mismatch.value)
+    assert "expected 1.0" in message and "got 2.0" in message
+    assert "outdated" in message and "desktop app" in message
 
 
 @pytest.mark.anyio
