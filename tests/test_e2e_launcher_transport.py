@@ -104,11 +104,22 @@ def test_task_root_rejects_main_other_tree_and_non_task_branch(monkeypatch, tmp_
     assert launcher_ipc._task_root(tmp_path) == tmp_path
 
 
-@pytest.mark.parametrize("urls", [["http://127.0.0.1:8000/launcher"], [launcher_ipc.LAUNCHER_URL] * 2])
+@pytest.mark.parametrize("urls", [["http://127.0.0.1:8000/launcher"], ["vibelution-launcher://external/launcher/assistant"],
+                                [launcher_ipc.LAUNCHER_URL] * 2,
+                                [launcher_ipc.LAUNCHER_URL, "vibelution-launcher://launcher/launcher"]])
 def test_launcher_selection_rejects_wrong_or_ambiguous_window(urls):
     browser = SimpleNamespace(contexts=[SimpleNamespace(pages=[SimpleNamespace(url=url) for url in urls])])
     with pytest.raises(launcher.LauncherCommandError, match="唯一"):
         launcher_ipc._find_launcher_page(browser)
+
+
+@pytest.mark.parametrize("url", [launcher_ipc.LAUNCHER_URL, "vibelution-launcher://launcher/launcher",
+                                "vibelution-launcher://launcher/launcher/assistant?panel=affairs",
+                                "vibelution-launcher://launcher/launcher/updates/"])
+def test_launcher_selection_accepts_one_owned_navigation_destination(url):
+    page = SimpleNamespace(url=url)
+    browser = SimpleNamespace(contexts=[SimpleNamespace(pages=[page])])
+    assert launcher_ipc._find_launcher_page(browser) is page
 
 
 @pytest.mark.parametrize("result", [{"ok": True, "payload": {"accepted": True}}, {"ok": False, "payload": {"accepted": True}}, {"ok": True, "payload": {"accepted": False}}, None])

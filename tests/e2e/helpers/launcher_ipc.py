@@ -10,20 +10,24 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from tests.e2e.helpers.desktop_cdp import CREATION_FLAGS, discover_desktop_shell
 from tests.e2e.helpers.launcher import LauncherCommandError
 
 OWNER_ROOT = Path(__file__).resolve().parents[3]
-LAUNCHER_URL = "vibelution-launcher://launcher/launcher"
+LAUNCHER_URL = "vibelution-launcher://launcher/launcher/assistant"
+LAUNCHER_PATHS = frozenset({"/launcher", "/launcher/assistant", "/launcher/tools", "/launcher/updates"})
 IPC_TIMEOUT_MS = 30_000
 COMMAND_TIMEOUT_SECONDS = 130
 
 # 身份检查与请求在同一次 evaluate 中进行，防止定位后页面已被导航。
-_INVOKE = """async ({command, instanceId, hiddenPresentation, timeoutMs}) => {
+_INVOKE = r"""async ({command, instanceId, hiddenPresentation, timeoutMs}) => {
   let timedOut = false;
   const operation = async () => {
-    if (location.href !== 'vibelution-launcher://launcher/launcher')
+    const url = new URL(location.href);
+    if (url.protocol !== 'vibelution-launcher:' || url.host !== 'launcher'
+      || !['/launcher', '/launcher/assistant', '/launcher/tools', '/launcher/updates'].includes(url.pathname.replace(/\/+$/, '')))
       throw new Error('E2E requires the Launcher page');
     const bridge = window.vibelutionLauncher;
     const summary = bridge && await bridge.getDesktopShellSummary();
@@ -61,7 +65,11 @@ def _task_root(project_root: str | Path) -> Path:
 
 
 def _find_launcher_page(browser: Any) -> Any:
-    pages = [page for context in browser.contexts for page in context.pages if page.url == LAUNCHER_URL]
+    def trusted_url(raw: str) -> bool:
+        parsed = urlsplit(raw)
+        return parsed.scheme == "vibelution-launcher" and parsed.netloc == "launcher" and parsed.path.rstrip("/") in LAUNCHER_PATHS
+
+    pages = [page for context in browser.contexts for page in context.pages if trusted_url(page.url)]
     if len(pages) != 1:
         raise LauncherCommandError(f"CDP 必须有唯一 Launcher 页面，实际匹配 {len(pages)} 个")
     return pages[0]
