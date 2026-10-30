@@ -239,6 +239,7 @@ export const ConversationView = React.memo(function ConversationView({
   stats,
   headerActions,
   supplementalContent,
+  composerPrecedingContent,
   showHeader = true,
   showSessionOverview = true,
   showMentalSnapshots = true,
@@ -1790,6 +1791,7 @@ export const ConversationView = React.memo(function ConversationView({
         </div>
       ) : null}
 
+      {composerPrecedingContent}
       {composerSurface}
       {previewImage ? (
         <React.Suspense fallback={null}>

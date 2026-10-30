@@ -33,6 +33,13 @@ const styles = {
   chatBody: "desktop-assistant-chat-body flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
   receiptPanel: "max-h-28 shrink-0 overflow-auto border-t border-[var(--vui-border-subtle)] px-3 py-2 text-vui-micro-11",
   receiptBoundary: "text-[var(--fg-secondary)]",
+  // Embedded receipts: a light collapsible card above the composer, never a
+  // permanent strip under the input. Rows lead with the humanized status.
+  embeddedReceiptsPanel: "mx-4 mb-2 shrink-0 overflow-auto rounded-xl border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-3 py-2 text-vui-micro-13",
+  embeddedReceiptsRow: "flex min-w-0 items-center gap-2 py-0.5",
+  embeddedReceiptsLabel: "shrink-0 font-semibold text-[var(--fg-primary)]",
+  embeddedReceiptsSummary: "min-w-0 flex-1 truncate text-[var(--fg-secondary)]",
+  embeddedReceiptsId: "max-w-[40%] shrink truncate text-vui-micro-10 text-[var(--fg-tertiary)]",
 } as const;
 
 export default styles;

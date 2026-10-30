@@ -174,6 +174,9 @@ export type ConversationViewProps = {
   composerAttachmentInputDisabled?: boolean;
   /** Route-owned leading composer control, such as the formal Chat plus menu. */
   composerLeadingControl?: ReactNode;
+  /** Route-owned panel mounted directly above the composer surface (e.g. the
+   * embedded assistant page's collapsible dispatch receipts). */
+  composerPrecedingContent?: ReactNode;
   permissionControl?: ConversationPermissionControl;
   /** Pending tool approval shown under the matching running tool (Codex-style). */
   toolApproval?: ConversationToolApprovalSurface | null;

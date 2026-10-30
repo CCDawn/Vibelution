@@ -94,3 +94,20 @@ export function launcherDispatchLabel(row: LauncherAssistantDispatch, lang: "zh"
   return status ? `${lang === "zh" ? "原生任务状态" : "Native task status"}: ${status}`
     : lang === "zh" ? "等待原生任务回执" : "Waiting for native task receipt";
 }
+
+/** Humanized receipt lead for the embedded page rows. Same branch shape as
+ * launcherDispatchLabel (error → unavailable, known enum → word, else
+ * waiting), but terminal native statuses read as plain words and an unknown
+ * enum keeps the raw fallback instead of pretending success. The floating
+ * window keeps launcherDispatchLabel untouched. */
+export function launcherDispatchReceiptLabel(row: LauncherAssistantDispatch, lang: "zh" | "en"): string {
+  if (row.lastError) return lang === "zh" ? "回执暂不可用" : "Receipt unavailable";
+  const status = row.receipt?.status;
+  const words: Record<string, readonly [string, string]> = {
+    succeeded: ["成功", "Succeeded"], failed: ["失败", "Failed"],
+    cancelled: ["已取消", "Cancelled"], timed_out: ["已超时", "Timed out"],
+  };
+  if (status && words[status]) return words[status][lang === "zh" ? 0 : 1];
+  return status ? `${lang === "zh" ? "原生任务状态" : "Native task status"}: ${status}`
+    : lang === "zh" ? "待回执" : "Awaiting receipt";
+}

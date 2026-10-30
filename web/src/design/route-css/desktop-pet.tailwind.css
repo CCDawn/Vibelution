@@ -57,6 +57,16 @@
 [data-assistant-chat="compact"] .vui-components-conversationview.emptyState { font-size: 13px; }
 [data-assistant-chat="compact"] .vui-components-conversationview.userMessageBody { border: 0; background: var(--vui-selection-bg); border-radius: 12px 12px 3px 12px; padding: 10px 13px; }
 
+/* Embedded Launcher page (920px reading column): only the structural rules of
+   the compact set — the ones that make the conversation fill its pane — are
+   reused. Every size/density rule (13-14px fonts, 8px paddings, toolbar
+   wrapping, hidden avatars) is deliberately omitted so the transcript and
+   composer render at the standard workbench chat density inside the default
+   760px codex composer. */
+[data-assistant-chat="embedded"] .desktop-assistant-chat-body > .vui-routes-chatcodingroute.layout { flex: 1; height: 100%; max-height: 100%; min-height: 0; grid-template-rows: minmax(0, 1fr); }
+[data-assistant-chat="embedded"] .vui-routes-chatcodingroute.centerPane { margin: 0; border: 0; border-radius: 0; grid-template-rows: minmax(0, 1fr); }
+[data-assistant-chat="embedded"] .vui-routes-chatcodingroute.tabStrip { display: none; }
+
 /* Embedded Launcher control-surface page: messages, composer, receipts and
    approval cards share a centered reading column inside the launcher main
    pane while the page header and wallpaper stay full-bleed. The pane itself

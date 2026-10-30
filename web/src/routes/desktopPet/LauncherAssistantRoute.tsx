@@ -40,7 +40,7 @@ import { classifyComposerFiles, mergeComposerAttachmentsWithRejections, type Com
 import {
   launcherAssistantActivity, launcherAssistantPollInterval, launcherAssistantSubmission,
   launcherAssistantQueueReadback, launcherAssistantQueueLabel, launcherAssistantRequestReadback,
-  launcherDispatchLabel, type LauncherAssistantSubmission, type LauncherAssistantQueuedAcceptance,
+  launcherDispatchLabel, launcherDispatchReceiptLabel, type LauncherAssistantSubmission, type LauncherAssistantQueuedAcceptance,
 } from "./launcherAssistantModel";
 
 const COPY = {
@@ -49,14 +49,14 @@ const COPY = {
     collapse: "收起聊天", loading: "正在打开原生会话…", unavailable: "个人助理暂不可用",
     retry: "重试", refresh: "刷新", placeholder: "和个人助理聊一聊…", send: "发送", sending: "正在发送…",
     unknownSend: "尚未确认消息是否收到。输入已保留，重试会核对同一条消息。",
-    receipts: "派发回执", receiptBoundary: "任务状态来自原生回执，结果仍需验收。", checking: "正在连接 Launcher…",
+    receipts: "派发回执", receiptToggle: "任务回执", receiptBoundary: "任务状态来自原生回执，结果仍需验收。", checking: "正在连接 Launcher…",
   },
   en: {
     title: "Personal assistant", expand: "Open assistant chat", chat: "Chat", hide: "Hide assistant",
     collapse: "Collapse chat", loading: "Opening native conversation…", unavailable: "Assistant unavailable",
     retry: "Retry", refresh: "Refresh", placeholder: "Chat with your assistant…", send: "Send", sending: "Sending…",
     unknownSend: "Delivery is unconfirmed. Your input is retained; retry checks the same message.",
-    receipts: "Dispatch receipts", receiptBoundary: "Native task status; results still need acceptance.", checking: "Connecting to Launcher…",
+    receipts: "Dispatch receipts", receiptToggle: "Task receipts", receiptBoundary: "Native task status; results still need acceptance.", checking: "Connecting to Launcher…",
   },
 } as const;
 
@@ -93,6 +93,9 @@ export function LauncherAssistantRoute({ embedded = false }: { embedded?: boolea
   const themeGate = useRef(false);
   useEffect(() => subscribeWorkbenchThemeSync(setThemeSyncState), []);
   const [computerOpen, setComputerOpen] = useState(false);
+  // Embedded receipts stay folded behind the header toggle; the floating
+  // window keeps its always-on receipt strip below the composer.
+  const [receiptsOpen, setReceiptsOpen] = useState(false);
   const [visible, setVisible] = useState(() => document.visibilityState !== "hidden");
   const [epoch, setEpoch] = useState(0);
   const epochRef = useRef(0);
@@ -688,6 +691,7 @@ export function LauncherAssistantRoute({ embedded = false }: { embedded?: boolea
   }
 
   const identity = status.data?.assistant;
+  const dispatchTotal = dispatches.data?.length ?? 0;
   const avatarImage = readingAssets && !avatar.isError ? avatar.data?.image : null;
   const backgroundImage = readingAssets && !background.isError ? background.data?.image : null;
   const backgroundStyle = backgroundImage
@@ -745,7 +749,7 @@ export function LauncherAssistantRoute({ embedded = false }: { embedded?: boolea
 
   return <VDenseOpsPage hideHeader ariaLabel={displayName}
     className={embedded ? petStyles.launcherChatEmbedded : petStyles.launcherChatWindow} bodyClassName={petStyles.chatBody} style={backgroundStyle}
-    data-vui-domain-recipe="launcher-assistant" data-assistant-chat="compact" data-expanded="true" data-tone={tone}
+    data-vui-domain-recipe="launcher-assistant" data-assistant-chat={embedded ? "embedded" : "compact"} data-expanded="true" data-tone={tone}
     data-assistant-embedded={embedded ? "true" : undefined}
     data-operator-avatar={avatarImage ? "custom" : "default"}
     data-theme-background={backgroundImage ? "custom" : "default"}
@@ -757,7 +761,10 @@ export function LauncherAssistantRoute({ embedded = false }: { embedded?: boolea
       </div>
       <VButton density="compact" variant="ghost" aria-pressed={computerOpen}
         onClick={() => setComputerOpen(value => !value)}>{lang === "zh" ? "电脑操作" : "Computer"}</VButton>
-      <VNativeButton className={petStyles.close} aria-label={copy.refresh} onClick={refreshAll}><RefreshCw size={14} /></VNativeButton>
+      {dispatchTotal ? <VButton density="compact" variant="ghost" aria-pressed={receiptsOpen}
+        onClick={() => setReceiptsOpen(value => !value)}>{`${copy.receiptToggle} ${dispatchTotal}`}</VButton> : null}
+      <VButton density="compact" variant="ghost" icon={<RefreshCw size={14} aria-hidden="true" />}
+        onClick={refreshAll}>{copy.refresh}</VButton>
     </header> : <header className={petStyles.chatHeader}>
       <div className={petStyles.chatIdentity}>
         <h1 className={petStyles.chatTitle} hidden={!preferences.showTitles}>{displayName}</h1>
@@ -783,7 +790,10 @@ export function LauncherAssistantRoute({ embedded = false }: { embedded?: boolea
       defaultFileContext={detail.data.defaultFileContext} assistantDisplayName={displayName}
       userDisplayName={status.data?.operatorProfile?.displayName} userAvatarPreset={status.data?.operatorProfile?.avatarPreset}
       userAvatarImageUrl={avatarImage?.url}
-      showHeader={false} showSessionOverview={false} showMentalSnapshots={false} density="compact" composerVariant="codex"
+      showHeader={false} showSessionOverview={false} showMentalSnapshots={false}
+      // The embedded page reads at standard density; the compact surface
+      // paddings stay exclusive to the 400px floating window.
+      density={embedded ? "default" : "compact"} composerVariant="codex"
       composerValue={draft} composerPlaceholder={copy.placeholder} composerDisabled={sendPending || sendUnconfirmed || controlPending}
       composerPending={sendPending || controlPending || stopping} composerActionMode={actionMode}
       composerAttachmentInputDisabled={status.data?.attachmentVersion !== 1 || sendPending || sendUnconfirmed || controlPending}
@@ -795,6 +805,19 @@ export function LauncherAssistantRoute({ embedded = false }: { embedded?: boolea
       composerActionDisabled={sendPending || controlPending || (attachments.length > 0 && status.data?.attachmentVersion !== 1) || (actionMode === "stop" ? stopping || !resolveSessionStopTurnId(detail.data, acceptedTurnId) : actionMode === "send" && !sendUnconfirmed && !draft.trim() && !attachments.length)}
       onComposerChange={value => { draftRef.current = value; setDraft(value); saveComposer({ draft: value }); }} onSubmit={() => void submit()}
       onStop={() => void stopTurn()} onContinueTurn={() => void continueTurn()}
+      composerPrecedingContent={embedded && receiptsOpen && dispatches.data?.length ? <section className={petStyles.embeddedReceiptsPanel}
+        data-launcher-assistant-receipts aria-label={copy.receipts}>
+        <p className={petStyles.receiptBoundary}>{copy.receiptBoundary}</p>
+        {dispatches.data.map(row => {
+          const rawId = row.projectId || row.dispatchId;
+          const summary = row.receipt?.resultSummary?.trim() || (row.lastError?.message || "");
+          return <div key={row.dispatchId} className={petStyles.embeddedReceiptsRow}>
+            <strong className={petStyles.embeddedReceiptsLabel}>{launcherDispatchReceiptLabel(row, lang)}</strong>
+            {summary ? <span className={petStyles.embeddedReceiptsSummary}>{summary}</span> : null}
+            <span className={petStyles.embeddedReceiptsId} title={rawId}>{shortReceiptId(rawId)}</span>
+          </div>;
+        })}
+      </section> : undefined}
       fallback={<VStateSurface fill tone="loading" title={copy.loading} />}
     /> : <VStateSurface fill tone={detail.isError ? "error" : "loading"} title={detail.isError ? copy.unavailable : copy.loading}
       actions={detail.isError ? <VButton onClick={() => void detail.refetch()}>{copy.retry}</VButton> : undefined}>{detail.error?.message}</VStateSurface>}
@@ -860,7 +883,9 @@ export function LauncherAssistantRoute({ embedded = false }: { embedded?: boolea
       actions={<VButton onClick={() => void detail.refetch()}>{copy.retry}</VButton>}>{detail.error.message}</VStateSurface> : null}
     {dispatches.isError ? <VStateSurface tone="error" title={copy.receipts}
       actions={<VButton onClick={() => void dispatches.refetch()}>{copy.retry}</VButton>}>{dispatches.error.message}</VStateSurface> : null}
-    {dispatches.data?.length ? <section className={petStyles.receiptPanel} aria-label={copy.receipts}>
+    {/** Floating-window receipt strip only; the embedded page renders the
+     * collapsible panel above its composer instead. */}
+    {!embedded && dispatches.data?.length ? <section className={petStyles.receiptPanel} aria-label={copy.receipts}>
       <p className={petStyles.receiptBoundary}>{copy.receiptBoundary}</p>
       {dispatches.data.map(row => <p key={row.dispatchId}>{row.projectId || row.dispatchId} · {launcherDispatchLabel(row, lang)}</p>)}
     </section> : null}
@@ -869,6 +894,12 @@ export function LauncherAssistantRoute({ embedded = false }: { embedded?: boolea
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Embedded receipt rows show a fixed-length ID tail only; the full value
+ * stays on the title attribute. */
+function shortReceiptId(id: string): string {
+  return id.length > 20 ? `…${id.slice(-18)}` : id;
 }
 
 /** Launcher control-surface session page: the same assistant conversation
