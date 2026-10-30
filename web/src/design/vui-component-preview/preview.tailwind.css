@@ -1,6 +1,7 @@
 @import "../tailwind.css";
 
 @source "./**/*.{ts,tsx}";
+@source "../../routes/desktopPet/LauncherAssistantWelcome.styles.ts";
 
 /* The main product shell intentionally locks body scrolling. This standalone
    gallery owns its own document flow so every component group remains reachable. */

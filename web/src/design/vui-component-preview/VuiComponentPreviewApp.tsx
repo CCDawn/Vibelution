@@ -6,6 +6,7 @@ import { AgentCatalog } from "./catalog/AgentCatalog";
 import { FormsCatalog } from "./catalog/FormsCatalog";
 import { FoundationCatalog } from "./catalog/FoundationCatalog";
 import { InteractiveCatalog } from "./catalog/InteractiveCatalog";
+import { LauncherCatalog } from "./catalog/LauncherCatalog";
 import { MemoryGraphCatalog } from "./catalog/MemoryGraphCatalog";
 import { NativeFormsCatalog } from "./catalog/NativeFormsCatalog";
 import { RecipeCatalog } from "./catalog/RecipeCatalog";
@@ -39,6 +40,7 @@ export function VuiComponentPreviewApp() {
         <AestheticCatalog />
         <RecipeCatalog />
         <AgentCatalog />
+        <LauncherCatalog />
         <TeamCatalog />
         <TeamSourceCatalog />
         <MemoryGraphCatalog />

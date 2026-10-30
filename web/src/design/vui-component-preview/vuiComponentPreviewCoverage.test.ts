@@ -63,6 +63,19 @@ const previewExemptDesignSections = new Set([
   // state; real query-refresh and recovery-model tests cover it. It is not a
   // standalone VUI export. Packaged GUI acceptance remains a separate check.
   "LauncherAssistantRoute",
+  // Workspace route depends on the selected native assistant/session, project
+  // queries and router search state; its panels and routing have interaction tests.
+  "LauncherAssistantWorkspaceRoute",
+  // Shell subscribes to native Launcher state, queries project/update status,
+  // changes document settings and hosts router outlets. Navigation additionally
+  // acts on the real desktop bridge and router location; shell/navigation tests
+  // exercise these integrations without making a gallery action control a window.
+  "LauncherShell",
+  "LauncherNavigation",
+  // Project selection opens the native project picker and depends on branch
+  // queries; update state and its restart action are owned by Launcher IPC.
+  "LauncherProjectRoute",
+  "LauncherUpdatesRoute",
   "PersonalAssistantOverview",
   // Route-owned operator control: window choices and one-shot confirmations
   // require live consent state, not a static standalone VUI export. Covered
