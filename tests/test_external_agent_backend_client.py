@@ -542,14 +542,20 @@ async def test_lost_start_response_can_be_recovered_without_resubmitting_prompt(
 
 
 def _runtime_state(
-    root: Path, *, url: str = "http://127.0.0.1:8123", source_commit: str | None = "rev-1"
+    root: Path,
+    *,
+    url: str = "http://127.0.0.1:8123",
+    source_commit: str | None = "rev-1",
+    include_project_root: bool = True,
 ) -> None:
     git_dir = root / ".git"
     git_dir.mkdir(parents=True, exist_ok=True)
     (git_dir / "HEAD").write_text("rev-1\n", encoding="utf-8")
     path = root / ".runtime" / "launcher" / "state.json"
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload: dict[str, object] = {"url": url, "runtimeProjectRoot": str(root.resolve())}
+    payload: dict[str, object] = {"url": url}
+    if include_project_root:
+        payload["runtimeProjectRoot"] = str(root.resolve())
     if source_commit is not None:
         payload["runtimeSourceCommit"] = source_commit
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -1029,6 +1035,35 @@ async def test_client_rejects_running_code_fingerprint_from_another_project(tmp_
     )
 
     with pytest.raises(BackendClientError, match="source revision") as mismatch:
+        await client.list_agents()
+
+    assert mismatch.value.code == "RUNTIME_IDENTITY_MISMATCH"
+
+
+@pytest.mark.anyio
+async def test_client_accepts_minimal_state_root_from_running_code_fingerprint(tmp_path) -> None:
+    _runtime_state(tmp_path, source_commit=None, include_project_root=False)
+    _running_code_fingerprint(tmp_path)
+    client = ManagedAgentBackendClient(
+        tmp_path,
+        state_path=tmp_path / "adapter-state.json",
+        transport=_transport(tmp_path, []),
+    )
+
+    assert await client.list_agents() == {"status": "ok", "agents": []}
+
+
+@pytest.mark.anyio
+async def test_client_rejects_minimal_state_with_foreign_fingerprint_root(tmp_path) -> None:
+    _runtime_state(tmp_path, source_commit=None, include_project_root=False)
+    _running_code_fingerprint(tmp_path, project_root=tmp_path / "elsewhere")
+    client = ManagedAgentBackendClient(
+        tmp_path,
+        state_path=tmp_path / "adapter-state.json",
+        transport=_transport(tmp_path, []),
+    )
+
+    with pytest.raises(BackendClientError, match="project root") as mismatch:
         await client.list_agents()
 
     assert mismatch.value.code == "RUNTIME_IDENTITY_MISMATCH"

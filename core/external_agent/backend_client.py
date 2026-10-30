@@ -109,21 +109,29 @@ def _checkout_revision(project_root: Path) -> str:
     return ""
 
 
-def _running_head_from_fingerprint(project_root: Path) -> str:
+def _running_code_fingerprint_payload(project_root: Path) -> dict[str, Any]:
     # Inlined instead of importing core.web.services.code_freshness so the
-    # host-side client process keeps no web-service dependencies.
+    # host-side client process keeps no web-service dependencies. Only a
+    # fingerprint that declares schemaVersion 1 and this exact project root
+    # counts; anything else falls back to an empty payload.
     try:
         path = resolve_project_runtime_home(project_root) / "running-code-fingerprint.json"
         parsed = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(parsed, dict) or int(parsed.get("schemaVersion") or 0) != 1:
-            return ""
+            return {}
         if os.path.normcase(str(parsed.get("projectRoot") or "")) != os.path.normcase(
             str(project_root.resolve())
         ):
-            return ""
-        return str(parsed.get("runningHead") or "").strip()
+            return {}
+        return parsed
     except Exception:  # noqa: BLE001 - identity fallback is best effort
-        return ""
+        return {}
+
+
+def _running_head_from_fingerprint(project_root: Path) -> str:
+    return str(
+        _running_code_fingerprint_payload(project_root).get("runningHead") or ""
+    ).strip()
 
 
 class ManagedAgentBackendClient:
@@ -1159,17 +1167,24 @@ class ManagedAgentBackendClient:
                 "managed backend URL must use loopback",
                 code="RUNTIME_IDENTITY_MISMATCH",
             )
-        declared_root = (
-            Path(
-                str(
-                    launcher_state.get("runtimeProjectRoot")
-                    or launcher_state.get("projectRoot")
-                    or ""
+        declared_raw = str(
+            launcher_state.get("runtimeProjectRoot")
+            or launcher_state.get("projectRoot")
+            or ""
+        ).strip()
+        if not declared_raw:
+            # An electron-main relaunch rebuilds launcher state with lifecycle
+            # fields only; the backend-owned running-code fingerprint is the
+            # one surviving record of which checkout is being served. It only
+            # feeds the declaration below - the normcase equality check that
+            # follows still runs on whatever root is declared here.
+            declared_raw = str(
+                _running_code_fingerprint_payload(self.project_root).get(
+                    "projectRoot"
                 )
-            )
-            .expanduser()
-            .resolve()
-        )
+                or ""
+            ).strip()
+        declared_root = Path(declared_raw).expanduser().resolve()
         if os.path.normcase(str(declared_root)) != os.path.normcase(
             str(self.project_root)
         ):
