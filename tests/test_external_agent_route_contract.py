@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import ast
+import json
 from pathlib import Path
 
+from core.web.routes import external_agent as external_agent_routes
 from core.web.routes.external_agent_models import (
     ExternalAgentAgentListResponse,
     ExternalAgentApprovalResponse,
@@ -127,3 +129,33 @@ def test_external_agent_models_keep_unknown_fields_without_injecting_defaults() 
         {"status": "ok", "decision": "accept", "taskId": "eat-1"}
     ).model_dump(exclude_unset=True)
     assert approval == {"status": "ok", "decision": "accept", "taskId": "eat-1"}
+
+
+def test_runtime_revision_falls_back_to_running_code_fingerprint(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(external_agent_routes, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        external_agent_routes,
+        "resolve_project_runtime_home",
+        lambda _root: tmp_path / ".runtime",
+    )
+    runtime_dir = tmp_path / ".runtime"
+    runtime_dir.mkdir(exist_ok=True)
+    (runtime_dir / "running-code-fingerprint.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "projectRoot": str(tmp_path.resolve()),
+                "runningHead": "rev-x",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert external_agent_routes._runtime_revision() == "rev-x"
+
+    launcher_dir = runtime_dir / "launcher"
+    launcher_dir.mkdir()
+    (launcher_dir / "state.json").write_text(
+        json.dumps({"runtimeSourceCommit": "rev-state"}), encoding="utf-8"
+    )
+    assert external_agent_routes._runtime_revision() == "rev-state"

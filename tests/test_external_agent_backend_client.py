@@ -541,18 +541,29 @@ async def test_lost_start_response_can_be_recovered_without_resubmitting_prompt(
     assert absent.value.code == "UNKNOWN_REQUEST"
 
 
-def _runtime_state(root: Path, *, url: str = "http://127.0.0.1:8123") -> None:
+def _runtime_state(
+    root: Path, *, url: str = "http://127.0.0.1:8123", source_commit: str | None = "rev-1"
+) -> None:
     git_dir = root / ".git"
     git_dir.mkdir(parents=True, exist_ok=True)
     (git_dir / "HEAD").write_text("rev-1\n", encoding="utf-8")
     path = root / ".runtime" / "launcher" / "state.json"
     path.parent.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, object] = {"url": url, "runtimeProjectRoot": str(root.resolve())}
+    if source_commit is not None:
+        payload["runtimeSourceCommit"] = source_commit
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _running_code_fingerprint(root: Path, *, project_root: Path | None = None) -> None:
+    path = root / ".runtime" / "running-code-fingerprint.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(
             {
-                "url": url,
-                "runtimeProjectRoot": str(root.resolve()),
-                "runtimeSourceCommit": "rev-1",
+                "schemaVersion": 1,
+                "projectRoot": str((project_root or root).resolve()),
+                "runningHead": "rev-1",
             }
         ),
         encoding="utf-8",
@@ -974,6 +985,50 @@ async def test_client_rejects_runtime_from_another_server_version(tmp_path) -> N
     )
 
     with pytest.raises(BackendClientError, match="server version") as mismatch:
+        await client.list_agents()
+
+    assert mismatch.value.code == "RUNTIME_IDENTITY_MISMATCH"
+
+
+@pytest.mark.anyio
+async def test_client_accepts_runtime_identity_from_running_code_fingerprint(tmp_path) -> None:
+    _runtime_state(tmp_path, source_commit=None)
+    _running_code_fingerprint(tmp_path)
+    client = ManagedAgentBackendClient(
+        tmp_path,
+        state_path=tmp_path / "adapter-state.json",
+        transport=_transport(tmp_path, []),
+    )
+
+    assert await client.list_agents() == {"status": "ok", "agents": []}
+
+
+@pytest.mark.anyio
+async def test_client_rejects_runtime_without_running_code_fingerprint(tmp_path) -> None:
+    _runtime_state(tmp_path, source_commit=None)
+    client = ManagedAgentBackendClient(
+        tmp_path,
+        state_path=tmp_path / "adapter-state.json",
+        transport=_transport(tmp_path, []),
+    )
+
+    with pytest.raises(BackendClientError, match="source revision") as mismatch:
+        await client.list_agents()
+
+    assert mismatch.value.code == "RUNTIME_IDENTITY_MISMATCH"
+
+
+@pytest.mark.anyio
+async def test_client_rejects_running_code_fingerprint_from_another_project(tmp_path) -> None:
+    _runtime_state(tmp_path, source_commit=None)
+    _running_code_fingerprint(tmp_path, project_root=tmp_path / "elsewhere")
+    client = ManagedAgentBackendClient(
+        tmp_path,
+        state_path=tmp_path / "adapter-state.json",
+        transport=_transport(tmp_path, []),
+    )
+
+    with pytest.raises(BackendClientError, match="source revision") as mismatch:
         await client.list_agents()
 
     assert mismatch.value.code == "RUNTIME_IDENTITY_MISMATCH"

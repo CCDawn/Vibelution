@@ -109,6 +109,23 @@ def _checkout_revision(project_root: Path) -> str:
     return ""
 
 
+def _running_head_from_fingerprint(project_root: Path) -> str:
+    # Inlined instead of importing core.web.services.code_freshness so the
+    # host-side client process keeps no web-service dependencies.
+    try:
+        path = resolve_project_runtime_home(project_root) / "running-code-fingerprint.json"
+        parsed = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(parsed, dict) or int(parsed.get("schemaVersion") or 0) != 1:
+            return ""
+        if os.path.normcase(str(parsed.get("projectRoot") or "")) != os.path.normcase(
+            str(project_root.resolve())
+        ):
+            return ""
+        return str(parsed.get("runningHead") or "").strip()
+    except Exception:  # noqa: BLE001 - identity fallback is best effort
+        return ""
+
+
 class ManagedAgentBackendClient:
     """Official adapter's only bridge to backend-owned task writes."""
 
@@ -1160,13 +1177,16 @@ class ManagedAgentBackendClient:
                 "Launcher runtime project root mismatch",
                 code="RUNTIME_IDENTITY_MISMATCH",
             )
+        revision = str(
+            launcher_state.get("runtimeSourceCommit")
+            or launcher_state.get("sourceCommit")
+            or ""
+        ).strip()
+        if not revision:
+            revision = _running_head_from_fingerprint(self.project_root)
         return {
             "baseUrl": url,
-            "runtimeSourceRevision": str(
-                launcher_state.get("runtimeSourceCommit")
-                or launcher_state.get("sourceCommit")
-                or ""
-            ).strip(),
+            "runtimeSourceRevision": revision,
         }
 
     def _load_state(self) -> dict[str, Any]:

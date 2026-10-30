@@ -67,24 +67,30 @@ def _operator_capabilities() -> set[str]:
 
 
 def _runtime_revision() -> str:
-    for path in (
-        resolve_project_runtime_home(PROJECT_ROOT) / "launcher" / "state.json",
-        developer_sandbox.formal_workspace_path(PROJECT_ROOT, "ui_runtime_state.json"),
-    ):
-        if not path.is_file():
-            continue
-        try:
-            import json
+    from core.web.services.code_freshness import read_running_code_fingerprint
 
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        if not isinstance(payload, dict):
-            continue
+    fingerprint = read_running_code_fingerprint(PROJECT_ROOT)
+    for path, payload in (
+        (resolve_project_runtime_home(PROJECT_ROOT) / "launcher" / "state.json", None),
+        (None, fingerprint),
+        (developer_sandbox.formal_workspace_path(PROJECT_ROOT, "ui_runtime_state.json"), None),
+    ):
+        if payload is None:
+            if path is None or not path.is_file():
+                continue
+            try:
+                import json
+
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if not isinstance(payload, dict):
+                continue
         revision = str(
             payload.get("runtimeSourceCommit")
             or payload.get("sourceCommit")
             or payload.get("runningCodeCommit")
+            or payload.get("runningHead")
             or ""
         ).strip()
         if revision:
