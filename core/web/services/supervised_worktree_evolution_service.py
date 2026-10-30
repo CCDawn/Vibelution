@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import queue
 import shutil
 import tempfile
@@ -44,6 +45,7 @@ from scripts.evolution_harness import (
 from scripts.git_claim_guard import coordination_call
 from vibelution_storage import resolve_project_workspace_home
 
+from .code_freshness import read_running_code_fingerprint
 from .i18n import get_web_language, text_for
 from .runtime_scene_service import record_runtime_scene_event
 from .session_service import list_active_session_work_runs
@@ -4042,6 +4044,21 @@ def _reconcile_runtime_activation(
     return updated
 
 
+def _identity_running_code_fingerprint() -> dict[str, Any]:
+    """Project-root-guarded fingerprint read used for activation identity."""
+    try:
+        fingerprint = read_running_code_fingerprint(PROJECT_ROOT)
+    except Exception:  # noqa: BLE001 - identity fallback is best effort
+        return {}
+    if not isinstance(fingerprint, dict):
+        return {}
+    if os.path.normcase(
+        str(fingerprint.get("projectRoot") or "")
+    ) != os.path.normcase(str(PROJECT_ROOT.resolve())):
+        return {}
+    return fingerprint
+
+
 def _runtime_activation_proof(target_commit: str) -> dict[str, Any]:
     expected = str(target_commit or "").strip()
     try:
@@ -4073,12 +4090,27 @@ def _runtime_activation_proof(target_commit: str) -> dict[str, Any]:
     frontend_commit = str(
         launcher_state.get("frontendBuiltFromCommit") or ""
     ).strip()
+    tracked_clean = launcher_state.get("runtimeSourceTrackedClean")
+    if not runtime_commit or not frontend_commit or tracked_clean is None:
+        # An electron-main relaunch rebuilds launcher state with lifecycle
+        # fields only, which used to make every proof fail closed. Fall back
+        # per field to the backend-owned running-code fingerprint; explicit
+        # state values still win, and a dirty tree never counts as clean.
+        fingerprint = _identity_running_code_fingerprint()
+        if not runtime_commit:
+            runtime_commit = str(fingerprint.get("runningHead") or "").strip()
+        if not frontend_commit:
+            frontend_commit = str(
+                fingerprint.get("servingFrontendBuiltFromCommit") or ""
+            ).strip()
+        if tracked_clean is None:
+            tracked_clean = not bool(fingerprint.get("dirty"))
     backend = bundle.get("backend") if isinstance(bundle.get("backend"), dict) else {}
     verified = bool(
         expected
         and runtime_commit == expected
         and frontend_commit == expected
-        and bool(launcher_state.get("runtimeSourceTrackedClean"))
+        and bool(tracked_clean)
         and str(bundle.get("phase") or "").strip().lower() == "steady"
         and bool(backend.get("healthy"))
         and int(active.get("count") or 0) == 0
@@ -4088,9 +4120,7 @@ def _runtime_activation_proof(target_commit: str) -> dict[str, Any]:
         "targetCommit": expected,
         "runtimeSourceCommit": runtime_commit,
         "frontendBuiltFromCommit": frontend_commit,
-        "runtimeSourceTrackedClean": bool(
-            launcher_state.get("runtimeSourceTrackedClean")
-        ),
+        "runtimeSourceTrackedClean": bool(tracked_clean),
         "phase": str(bundle.get("phase") or ""),
         "backendHealthy": bool(backend.get("healthy")),
         "activeWorkCount": int(active.get("count") or 0),

@@ -2409,6 +2409,111 @@ def test_runtime_activation_proof_requires_exact_runtime_and_frontend_commit(
     assert proof["frontendBuiltFromCommit"] == "stale-frontend"
 
 
+def _patch_steady_launcher(monkeypatch) -> None:
+    monkeypatch.setattr(
+        service.launcher_service,
+        "get_launcher_status",
+        lambda: {
+            "projectBundle": {
+                "phase": "steady",
+                "backend": {"healthy": True},
+            },
+            "lifecycleProof": {"activeWorkRuns": {"count": 0}},
+        },
+    )
+
+
+def test_runtime_activation_proof_falls_back_to_running_code_fingerprint(
+    tmp_path,
+    monkeypatch,
+):
+    state_path = tmp_path / "launcher-state.json"
+    state_path.write_text(
+        json.dumps({"url": "http://127.0.0.1:8123"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(service, "LAUNCHER_STATE_PATH", state_path)
+    monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
+    _patch_steady_launcher(monkeypatch)
+    monkeypatch.setattr(
+        service,
+        "read_running_code_fingerprint",
+        lambda _root: {
+            "schemaVersion": 1,
+            "projectRoot": str(tmp_path.resolve()),
+            "runningHead": "commit-123",
+            "servingFrontendBuiltFromCommit": "commit-123",
+            "dirty": False,
+        },
+    )
+
+    proof = service._runtime_activation_proof("commit-123")
+
+    assert proof["verified"] is True
+    assert proof["runtimeSourceCommit"] == "commit-123"
+    assert proof["frontendBuiltFromCommit"] == "commit-123"
+    assert proof["runtimeSourceTrackedClean"] is True
+
+
+def test_runtime_activation_proof_keeps_failing_on_conflicting_fingerprint(
+    tmp_path,
+    monkeypatch,
+):
+    state_path = tmp_path / "launcher-state.json"
+    state_path.write_text(
+        json.dumps({"url": "http://127.0.0.1:8123"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(service, "LAUNCHER_STATE_PATH", state_path)
+    monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
+    _patch_steady_launcher(monkeypatch)
+
+    monkeypatch.setattr(
+        service,
+        "read_running_code_fingerprint",
+        lambda _root: {
+            "schemaVersion": 1,
+            "projectRoot": str(tmp_path.resolve()),
+            "runningHead": "commit-other",
+            "servingFrontendBuiltFromCommit": "commit-123",
+            "dirty": False,
+        },
+    )
+    foreign_head = service._runtime_activation_proof("commit-123")
+    assert foreign_head["verified"] is False
+    assert foreign_head["runtimeSourceCommit"] == "commit-other"
+
+    monkeypatch.setattr(
+        service,
+        "read_running_code_fingerprint",
+        lambda _root: {
+            "schemaVersion": 1,
+            "projectRoot": str(tmp_path.resolve()),
+            "runningHead": "commit-123",
+            "servingFrontendBuiltFromCommit": "commit-123",
+            "dirty": True,
+        },
+    )
+    dirty_tree = service._runtime_activation_proof("commit-123")
+    assert dirty_tree["verified"] is False
+    assert dirty_tree["runtimeSourceTrackedClean"] is False
+
+    monkeypatch.setattr(
+        service,
+        "read_running_code_fingerprint",
+        lambda _root: {
+            "schemaVersion": 1,
+            "projectRoot": str((tmp_path / "elsewhere").resolve()),
+            "runningHead": "commit-123",
+            "servingFrontendBuiltFromCommit": "commit-123",
+            "dirty": False,
+        },
+    )
+    foreign_root = service._runtime_activation_proof("commit-123")
+    assert foreign_root["verified"] is False
+    assert foreign_root["runtimeSourceCommit"] == ""
+
+
 def test_merge_rejects_candidate_mutated_after_judge_variant_binding(tmp_path):
     project_root = tmp_path / "project"
     _init_repo(project_root)
