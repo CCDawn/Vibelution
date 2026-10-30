@@ -52,7 +52,7 @@ describe("launcher app protocol URLs", () => {
 
   it("defaults the launcher window to the app protocol instead of a production port", () => {
     expect(resolveLauncherWindowUrl({ NODE_ENV: "production" } as NodeJS.ProcessEnv)).toBe(
-      `${LAUNCHER_APP_ORIGIN}/launcher`
+      `${LAUNCHER_APP_ORIGIN}/launcher/assistant`
     );
   });
 

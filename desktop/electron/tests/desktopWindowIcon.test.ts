@@ -13,7 +13,7 @@ vi.mock("electron", () => ({
   BrowserWindow: vi.fn().mockImplementation((options: Record<string, unknown>) => {
     browserWindowOptions.push(options);
     return {
-      webContents: {},
+      webContents: { on: vi.fn(), setWindowOpenHandler: vi.fn() },
       loadURL: vi.fn((url: string) => {
         loadedUrls.push(url);
         return Promise.resolve();
