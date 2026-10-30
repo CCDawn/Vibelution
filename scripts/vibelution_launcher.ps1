@@ -2286,7 +2286,10 @@ function Repair-LauncherShortcut {
     $shortcutMode = "electron_package"
     try {
         $shortcutTargetPath = Resolve-PackagedElectronDesktopEntryPath
-        $shortcutArguments = ('--workspace "{0}"' -f $projectDir)
+        # The bare --workspace cold start intentionally stays assistant-only; the
+        # launcher window only opens from the focus deep link, so shortcuts must
+        # carry it or a cold start shows just the pet float.
+        $shortcutArguments = ('--workspace "{0}" "vibelution://launcher/focus"' -f $projectDir)
     } catch {
         $wrapperScript = Join-Path $projectDir "scripts\launch_vibelution_shortcut.ps1"
         if (-not (Test-Path -LiteralPath $wrapperScript)) {
