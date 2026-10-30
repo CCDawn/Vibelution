@@ -17,7 +17,12 @@ const styles = {
   chatCue: "desktop-assistant-chat-cue",
   chatWindow: "flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-xl border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] text-[var(--fg-primary)] shadow-xl",
   launcherChatWindow: "launcher-assistant-chat-window flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-xl border border-[var(--vui-border-subtle)] text-[var(--fg-primary)] shadow-xl",
+  // Embedded Launcher control-surface host: fills the launcher main pane
+  // edge-to-edge (no floating-window card chrome), same CSS hooks.
+  launcherChatEmbedded: "launcher-assistant-chat-window flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden text-[var(--fg-primary)]",
   chatHeader: "flex h-14 min-w-0 shrink-0 items-center gap-2 border-b border-[var(--vui-border-subtle)] bg-[var(--vui-surface-toolbar)] px-3 [-webkit-app-region:drag] [&_button]:[-webkit-app-region:no-drag]",
+  // Embedded page header: no window-drag region inside the launcher window.
+  chatHeaderStatic: "flex h-14 min-w-0 shrink-0 items-center gap-2 border-b border-[var(--vui-border-subtle)] bg-[var(--vui-surface-toolbar)] px-3",
   chatAvatar: "grid size-[30px] shrink-0 place-items-center rounded-lg bg-[var(--vui-selection-bg)] text-[var(--fg-secondary)]",
   chatIdentity: "flex min-w-0 flex-1 flex-col gap-0.5",
   chatTitle: "truncate text-vui-micro-13 font-medium",

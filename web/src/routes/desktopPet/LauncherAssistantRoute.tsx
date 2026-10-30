@@ -79,12 +79,15 @@ function readableApprovalJson(source: string): string {
 type ContinueAttempt = { requestId: string; expected: SessionContinuationExpectation; accepted: boolean };
 type ComposerSnapshot = { draft: string; outstanding: LauncherAssistantSubmission | null; acceptedTurnId: string; queuedAcceptance: LauncherAssistantQueuedAcceptance | null; continuation?: ContinueAttempt; attachments?: ComposerImageAttachment[] };
 
-export function LauncherAssistantRoute() {
+export function LauncherAssistantRoute({ embedded = false }: { embedded?: boolean }) {
   useLauncherThemeControl();
   const client = useQueryClient();
   const { lang } = useShellI18n();
   const copy = COPY[lang];
-  const [expanded, setExpanded] = useState(false);
+  // The Launcher control surface embeds the assistant page fully expanded; the
+  // native floating window keeps its collapsed pet stage until the operator
+  // explicitly expands it.
+  const [expanded, setExpanded] = useState(embedded);
   const [themeSyncState, setThemeSyncState] = useState<"applied" | "local" | "conflict" | "unknown" | "unavailable">("applied");
   const [themePending, setThemePending] = useState(false);
   const themeGate = useRef(false);
@@ -318,8 +321,12 @@ export function LauncherAssistantRoute() {
 
   useEffect(() => {
     mounted.current = true;
-    document.documentElement.dataset.vibelutionDesktopPet = "true";
-    document.body.dataset.vibelutionDesktopPet = "true";
+    // The transparent pet root belongs to the floating window only; the
+    // Launcher control surface owns its own document chrome.
+    if (!embedded) {
+      document.documentElement.dataset.vibelutionDesktopPet = "true";
+      document.body.dataset.vibelutionDesktopPet = "true";
+    }
     function visibilityChanged() {
       const next = document.visibilityState !== "hidden";
       setVisible(next);
@@ -333,12 +340,15 @@ export function LauncherAssistantRoute() {
       mounted.current = false;
       epochRef.current += 1;
       document.removeEventListener("visibilitychange", visibilityChanged);
-      delete document.documentElement.dataset.vibelutionDesktopPet;
-      delete document.body.dataset.vibelutionDesktopPet;
+      if (!embedded) {
+        delete document.documentElement.dataset.vibelutionDesktopPet;
+        delete document.body.dataset.vibelutionDesktopPet;
+      }
       finishWindowDrag();
       // Window lifecycle never owns a native turn or a dispatched task.
     };
-  }, []);
+    // embedded is a mount-time host constant (floating window vs Launcher page).
+  }, [embedded]);
 
   function flushWindowDrag() {
     dragFrameRef.current = null;
@@ -435,7 +445,8 @@ export function LauncherAssistantRoute() {
   }
 
   async function toggle() {
-    if (resizing.current || !status.data) return;
+    // The embedded Launcher page never resizes a host window and never collapses.
+    if (embedded || resizing.current || !status.data) return;
     resizing.current = true;
     setResizePending(true);
     setFeedback("");
@@ -463,6 +474,8 @@ export function LauncherAssistantRoute() {
   }
 
   async function hide() {
+    // The embedded Launcher page has no window to hide.
+    if (embedded) return;
     try { await hideLauncherAssistant(); }
     catch (error) { if (mounted.current) setFeedback(errorMessage(error)); }
   }
@@ -702,6 +715,11 @@ export function LauncherAssistantRoute() {
   if (status.isError) return <VStateSurface fill tone="error" title={copy.unavailable}
     actions={<VButton onClick={() => void status.refetch()}>{copy.retry}</VButton>}>{status.error.message}</VStateSurface>;
 
+  const refreshAll = () => {
+    void status.refetch(); void detail.refetch(); void dispatches.refetch(); void approvals.refetch();
+    void client.invalidateQueries({ queryKey: assetQueryPrefix });
+  };
+
   if (!expanded) return <main className={petStyles.root} data-vui-domain-recipe="launcher-assistant"
     data-expanded="false" data-tone={tone} aria-label={displayName}>
     <div className={petStyles.stage}>
@@ -726,12 +744,21 @@ export function LauncherAssistantRoute() {
   </main>;
 
   return <VDenseOpsPage hideHeader ariaLabel={displayName}
-    className={petStyles.launcherChatWindow} bodyClassName={petStyles.chatBody} style={backgroundStyle}
+    className={embedded ? petStyles.launcherChatEmbedded : petStyles.launcherChatWindow} bodyClassName={petStyles.chatBody} style={backgroundStyle}
     data-vui-domain-recipe="launcher-assistant" data-assistant-chat="compact" data-expanded="true" data-tone={tone}
+    data-assistant-embedded={embedded ? "true" : undefined}
     data-operator-avatar={avatarImage ? "custom" : "default"}
     data-theme-background={backgroundImage ? "custom" : "default"}
     data-theme-background-readability={backgroundImage ? background.data?.readability : undefined}
-    toolbarSlot={<header className={petStyles.chatHeader}>
+    toolbarSlot={embedded ? <header className={petStyles.chatHeaderStatic}>
+      <div className={petStyles.chatIdentity}>
+        <h1 className={petStyles.chatTitle}>{lang === "zh" ? "个人助理" : "Personal assistant"}</h1>
+        <span className={petStyles.chatStatus} role={feedback ? "alert" : "status"}>{statusText}</span>
+      </div>
+      <VButton density="compact" variant="ghost" aria-pressed={computerOpen}
+        onClick={() => setComputerOpen(value => !value)}>{lang === "zh" ? "电脑操作" : "Computer"}</VButton>
+      <VNativeButton className={petStyles.close} aria-label={copy.refresh} onClick={refreshAll}><RefreshCw size={14} /></VNativeButton>
+    </header> : <header className={petStyles.chatHeader}>
       <div className={petStyles.chatIdentity}>
         <h1 className={petStyles.chatTitle} hidden={!preferences.showTitles}>{displayName}</h1>
         <span className={petStyles.chatStatus} hidden={!preferences.showStatus && !feedback} role={feedback ? "alert" : "status"}>{statusText}</span>
@@ -740,7 +767,7 @@ export function LauncherAssistantRoute() {
         onClick={() => setComputerOpen(value => !value)}>{lang === "zh" ? "电脑操作" : "Computer"}</VButton>
       <VButton density="compact" variant="ghost" isPending={launcherPending} isDisabled={launcherPending}
         onClick={() => void openLauncher()}>{lang === "zh" ? "打开 Launcher" : "Open Launcher"}</VButton>
-      <VNativeButton className={petStyles.close} aria-label={copy.refresh} onClick={() => { void status.refetch(); void detail.refetch(); void dispatches.refetch(); void approvals.refetch(); void client.invalidateQueries({ queryKey: assetQueryPrefix }); }}><RefreshCw size={14} /></VNativeButton>
+      <VNativeButton className={petStyles.close} aria-label={copy.refresh} onClick={refreshAll}><RefreshCw size={14} /></VNativeButton>
       <VNativeButton className={petStyles.close} aria-label={copy.collapse} disabled={resizePending} onClick={() => void toggle()}><X size={14} /></VNativeButton>
     </header>}>
     {themeSyncState !== "applied" ? <VStateSurface tone="error" title={themeSyncState === "unknown" ? (lang === "zh" ? "主题变更结果未确认" : "Theme change is unconfirmed") : themeSyncState === "conflict" ? (lang === "zh" ? "助理主题与全局主题不同" : "Assistant and global themes differ") : (lang === "zh" ? "主题尚未同步" : "Theme is not synchronized")}
@@ -842,4 +869,11 @@ export function LauncherAssistantRoute() {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Launcher control-surface session page: the same assistant conversation
+ * embedded full-size in the launcher main pane, without the floating window's
+ * pet stage, drag, hide, or expand/collapse resize IPC. */
+export function LauncherAssistantEmbeddedRoute() {
+  return <LauncherAssistantRoute embedded />;
 }

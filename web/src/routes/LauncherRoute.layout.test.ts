@@ -123,6 +123,8 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("<Suspense");
     expect(routerSource).toContain("const LauncherToolsRoute = lazyRoute");
     expect(routerSource).toContain('{ path: "tools", ...guardedLazyElement(<LauncherToolsRoute />, "launcher", "launcher-tools") }');
+    expect(routerSource).toContain("const LauncherAssistantEmbeddedRoute = lazyRoute");
+    expect(routerSource).toContain('{ path: "assistant", ...guardedLazyElement(<LauncherAssistantEmbeddedRoute />, "launcher", "launcher") }');
   });
 
   it("mounts the Launcher as an independent top-level control surface", () => {
@@ -811,6 +813,9 @@ describe("LauncherRoute layout contract", () => {
     expect(launcherShellSource).toContain("<LauncherNavigation");
     expect(launcherShellSource).toContain("<VSplitWorkspace");
     expect(navigationSource).toContain('to: "/launcher?view=settings"');
+    expect(navigationSource).toContain('to: "/launcher/assistant"');
+    expect(navigationSource).toContain('"个人助理"');
+    expect(navigationSource).toContain("Icon: Bot");
     expect(homeRouteSource).toContain("hidden={!settingsVisible}");
     expect(homeRouteSource).toContain("hidden={settingsVisible}");
     expect(homeRouteSource).toContain("useBlocker");

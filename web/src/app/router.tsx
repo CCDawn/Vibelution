@@ -68,6 +68,7 @@ const MemoryRoute = lazyRoute(loadMemoryRouteChunk);
 const PetRoute = lazyRoute(() => import("../routes/PetRoute").then((module) => ({ default: module.PetRoute })));
 const DesktopAssistantRoute = lazyRoute(() => import("../routes/desktopPet/DesktopAssistantRoute").then((module) => ({ default: module.DesktopAssistantRoute })));
 const LauncherAssistantRoute = lazyRoute(() => import("../routes/desktopPet/LauncherAssistantRoute").then((module) => ({ default: module.LauncherAssistantRoute })));
+const LauncherAssistantEmbeddedRoute = lazyRoute(() => import("../routes/desktopPet/LauncherAssistantRoute").then((module) => ({ default: module.LauncherAssistantEmbeddedRoute })));
 const PersonalAssistantRoute = lazyRoute(() => import("../routes/PersonalAssistantRoute").then((module) => ({ default: module.PersonalAssistantRoute })));
 const PromptTemplatesRoute = lazyRoute(() => import("../routes/PromptTemplatesRoute").then((module) => ({ default: module.PromptTemplatesRoute })));
 const ResetRoute = lazyRoute(() => import("../routes/ResetRoute").then((module) => ({ default: module.ResetRoute })));
@@ -197,6 +198,7 @@ export const router = createBrowserRouter([
     children: [
       { index: true, ...guardedLazyElement(<LauncherRoute />, "launcher", "launcher") },
       { path: "tools", ...guardedLazyElement(<LauncherToolsRoute />, "launcher", "launcher-tools") },
+      { path: "assistant", ...guardedLazyElement(<LauncherAssistantEmbeddedRoute />, "launcher", "launcher") },
     ],
   },
   {

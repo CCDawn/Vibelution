@@ -1,5 +1,5 @@
 import styles from "./LauncherNavigation.styles";
-import { Activity, Box, GitBranch, Settings2, Wrench } from "lucide-react";
+import { Activity, Bot, Box, GitBranch, Settings2, Wrench } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import type { LauncherBranchInstance } from "../api/launcher";
 import { VRouteLinkButton } from "../components/vui";
@@ -9,9 +9,10 @@ import { instanceRuntimeState } from "../routes/LauncherBranchInstancesPanel.mod
 export function LauncherNavigation({ lang, items }: { lang: "zh" | "en"; items: LauncherBranchInstance[] }) {
   const location = useLocation();
   const view = new URLSearchParams(location.search).get("view");
-  const selected = location.pathname.endsWith("/tools") ? (view === "maintenance" ? "maintenance" : "diagnostics") : view === "settings" ? "settings" : "branches";
+  const selected = location.pathname.endsWith("/tools") ? (view === "maintenance" ? "maintenance" : "diagnostics") : location.pathname.endsWith("/assistant") ? "assistant" : view === "settings" ? "settings" : "branches";
   const links = [
     { id: "branches", label: lang === "zh" ? "分支" : "Branches", to: "/launcher", Icon: Box },
+    { id: "assistant", label: lang === "zh" ? "个人助理" : "Assistant", to: "/launcher/assistant", Icon: Bot },
     { id: "diagnostics", label: lang === "zh" ? "诊断" : "Diagnostics", to: "/launcher/tools?view=diagnostics", Icon: Activity },
     { id: "maintenance", label: lang === "zh" ? "维护" : "Maintenance", to: "/launcher/tools?view=maintenance", Icon: Wrench },
     { id: "settings", label: lang === "zh" ? "设置" : "Settings", to: "/launcher?view=settings", Icon: Settings2 },
