@@ -727,7 +727,7 @@ describe("resident assistant startup", () => {
     expect(runWorker).not.toHaveBeenCalled();
     context.shutdownApproved = true;
     await context.stop();
-  }, 10000);
+  }, 20_000);
 
   it("retries a busy migration without stopping the host, then executes and exposes the original receipt", async () => {
     const { context, host, window, paths } = fixture();

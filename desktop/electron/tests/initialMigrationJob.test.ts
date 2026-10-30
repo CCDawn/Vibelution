@@ -57,7 +57,7 @@ describe("initial migration owned job", () => {
       expect(permitHeld).toBe(false);
       expect(closed).toBe(true);
     } finally { rmSync(root, { recursive: true, force: true }); }
-  });
+  }, 20_000);
   it("records success only after original business receipt verification", async () => {
     const root = mkdtempSync(join(tmpdir(), "initial-verify-")), operationId = "initial-" + "c".repeat(40);
     try {

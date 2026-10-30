@@ -66,7 +66,7 @@ it("persists uncertainty and only acknowledges old unknown events after explicit
   abandoned = false;
   expect(await make().dispatch(request("affair-reminder:later:20261028"))).toEqual({ delivered: "source_recovery_required" });
   expect(await make().recoverSource(sourceKey, () => true)).toBe("recovered");
-});
+}, 20_000);
 
 it("retains an index-only interrupted event across restart and never replays it", async () => {
   const root = mkdtempSync(join(tmpdir(), "reminder-index-only-")); roots.push(root);

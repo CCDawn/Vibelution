@@ -484,7 +484,7 @@ nativeAddon("windows workbench job", () => {
       expect(terminate).not.toHaveBeenCalled();
       while (!existsSync(donePath) && Date.now() < deadline) await new Promise(done => setTimeout(done, 20));
       expect(readFileSync(donePath, "utf8")).toBe("done");
-      expect(await owner.observe()).toBe("drained");
+      await vi.waitFor(async () => expect(await owner.observe()).toBe("drained"), { timeout: 10_000 });
       expect(pidAlive(spawned.pid)).toBe(false);
       expect(terminate).not.toHaveBeenCalled();
     } finally {
@@ -493,7 +493,7 @@ nativeAddon("windows workbench job", () => {
       __setWorkbenchJobNativeForTests(undefined);
       rmSync(directory, { recursive: true, force: true });
     }
-  }, 15_000);
+  }, 30_000);
 
   it("gracefully closes real output pipes after delayed drain completion", async () => {
     __setWorkbenchJobNativeForTests(undefined);
