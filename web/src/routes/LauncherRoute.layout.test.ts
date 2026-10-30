@@ -123,16 +123,16 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("<Suspense");
     expect(routerSource).toContain("const LauncherToolsRoute = lazyRoute");
     expect(routerSource).toContain('{ path: "tools", ...guardedLazyElement(<LauncherToolsRoute />, "launcher", "launcher-tools") }');
-    expect(routerSource).toContain("const LauncherAssistantEmbeddedRoute = lazyRoute");
-    expect(routerSource).toContain('{ path: "assistant", ...guardedLazyElement(<LauncherAssistantEmbeddedRoute />, "launcher", "launcher") }');
+    expect(routerSource).toContain("const LauncherAssistantWorkspaceRoute = lazyRoute");
+    expect(routerSource).toContain('{ path: "assistant", ...guardedLazyElement(<LauncherAssistantWorkspaceRoute />, "launcher", "launcher") }');
   });
 
   it("mounts the Launcher as an independent top-level control surface", () => {
     expect(homeRouteSource).toContain('import "../design/route-css/workbench-secondary.tailwind.css"');
-    expect(routerSource).toContain("const LauncherRoute = lazyRoute");
+    expect(routerSource).toContain("const LauncherProjectRoute = lazyRoute");
     expect(routerSource).toContain('path: "/launcher"');
     expect(routerSource).toContain("element: <LauncherShell />");
-    expect(routerSource).toContain('guardedLazyElement(<LauncherRoute />, "launcher", "launcher")');
+    expect(routerSource).toContain('guardedLazyElement(<LauncherProjectRoute />, "launcher", "launcher")');
     expect(routerSource).not.toContain('{ path: "launcher", element: lazyElement(<LauncherRoute />) }');
     expect(shellSource).toContain("LazyAppShellSettingsMenu");
     // The launcher hand-off lives in the settings gear menu (the retired
@@ -144,6 +144,8 @@ describe("LauncherRoute layout contract", () => {
     expect(launcherShellSource).toContain('data-browser-role="launcher_control_surface"');
     expect(launcherShellSource).toContain('reason: "launcher_shell_mounted"');
     expect(launcherShellSource).toContain("<Outlet />");
+    expect(launcherShellSource).toContain("<LauncherNavigation");
+    expect(launcherShellSource).toContain("<VSplitWorkspace");
     expect(launcherShellSource).not.toContain("<nav");
     expect(launcherShellSource).not.toContain("NavLink");
     expect(launcherShellSource).toContain('data-vui-app="launcher"');
@@ -358,7 +360,7 @@ describe("LauncherRoute layout contract", () => {
     const diagnosticsIndex = routeSource.indexOf("<LauncherDiagnosticsPanel");
     expect(branchIndex).toBeGreaterThan(0);
     expect(settingsIndex).toBeGreaterThan(0);
-    expect(navigationSource).toContain('to: "/launcher/tools?view=diagnostics"');
+    expect(navigationSource).toContain('"/launcher/tools?view=diagnostics"');
     expect(homeRouteSource).toContain("headerAction={(");
     expect(homeRouteSource).not.toContain("toolsLinkRow");
     expect(branchInstancesPanelSource).toContain("headerAction?: ReactNode");
@@ -367,7 +369,7 @@ describe("LauncherRoute layout contract", () => {
     expect(homeRouteSource).not.toContain("LauncherProjectMaintenancePanel");
     expect(homeRouteSource).not.toContain("LauncherDeveloperModePanel");
     expect(homeRouteSource).not.toContain("LauncherDiagnosticsPanel");
-    expect(navigationSource).toContain('to: "/launcher"');
+    expect(navigationSource).toContain('"/launcher"');
     expect(processIndex).toBeGreaterThan(0);
     expect(maintenanceIndex).toBeGreaterThan(0);
     expect(developerIndex).toBeGreaterThan(maintenanceIndex);
@@ -478,7 +480,7 @@ describe("LauncherRoute layout contract", () => {
     expect(routeStylesSource).toContain("whitespace-nowrap");
     expect(launcherShellStylesSource).toContain("bg-vui-surface-workspace");
     expect(launcherShellSource).toContain('<VSurface as="div" tone="panel"');
-    expect(launcherShellStylesSource).toContain("!rounded-[12px]");
+    expect(launcherShellStylesSource).toContain("!rounded-none");
     expect(launcherShellStylesSource).toContain("text-vui-fg-primary");
   });
 
@@ -812,10 +814,10 @@ describe("LauncherRoute layout contract", () => {
   it("separates branches and settings with a persistent navigation rail and draft guard", () => {
     expect(launcherShellSource).toContain("<LauncherNavigation");
     expect(launcherShellSource).toContain("<VSplitWorkspace");
-    expect(navigationSource).toContain('to: "/launcher?view=settings"');
-    expect(navigationSource).toContain('to: "/launcher/assistant"');
+    expect(navigationSource).toContain('"/launcher?view=settings"');
+    expect(navigationSource).toContain("launcherAssistantPanelPath");
     expect(navigationSource).toContain('"个人助理"');
-    expect(navigationSource).toContain("Icon: Bot");
+    expect(navigationSource).toContain('["dialogue", MessageCircle]');
     expect(homeRouteSource).toContain("hidden={!settingsVisible}");
     expect(homeRouteSource).toContain("hidden={settingsVisible}");
     expect(homeRouteSource).toContain("useBlocker");

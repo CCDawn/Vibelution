@@ -2085,7 +2085,10 @@ def _desktop_shell_electron_args(
     hidden_presentation: bool = False,
 ) -> list[str]:
     args = [executable, *prefix, "--workspace", str(shell_root), "--local-debugging"]
-    if slot_root is not None:
+    # A bare Launcher/shortcut request opens the resident assistant only. A
+    # slot without an explicit action otherwise makes Electron start or focus
+    # that project's workbench, even though open_workbench is false.
+    if slot_root is not None and (open_workbench or lifecycle):
         args.extend(["--project", str(slot_root)])
     if open_workbench:
         args.append("--open-workbench")
@@ -2138,7 +2141,7 @@ def resolve_desktop_shell_launch(
     # A live main owns freshness and guarded relaunch. Every supported lifecycle
     # command must reach it before a build; even stop/status can otherwise block
     # on stale artifacts. Rebuilding here also consumes its `rebuilt` signal.
-    if lifecycle in {
+    if (not lifecycle and not open_workbench) or lifecycle in {
         "start", "stop", "force-stop", "restart", "rebuild-and-start",
         "toggle", "status", "open", "close-window",
     }:

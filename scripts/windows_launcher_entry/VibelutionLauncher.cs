@@ -46,7 +46,7 @@ internal static class VibelutionLauncher
                 }
                 if (!created || ElectronOwnsDesktopTray(projectDir))
                 {
-                    if (!created && !waitForRestart && !ElectronOwnsDesktopTray(projectDir) && parsed.FromShortcut)
+                    if (!waitForRestart)
                     {
                         return HandleSecondaryTrayLaunch(projectDir);
                     }
@@ -158,7 +158,7 @@ internal static class VibelutionLauncher
         {
             try
             {
-                LaunchCurrentElectronMain(projectDir, "open", false, false);
+                LaunchResidentAssistant(projectDir);
                 if (!fromShortcut)
                 {
                     ShowInfo("Launcher 已在托盘后台运行。");
@@ -711,7 +711,7 @@ internal static class VibelutionLauncher
     {
         try
         {
-            LaunchCurrentElectronMain(projectDir, "open", false, false);
+            LaunchResidentAssistant(projectDir);
         }
         catch (Exception ex)
         {
@@ -804,8 +804,8 @@ internal static class VibelutionLauncher
     {
         try
         {
-            LaunchCurrentElectronMain(projectDir, "open", false, false);
-            WriteNativeEntryLog(projectDir, "native_action.secondary_launch", "action=open_console");
+            LaunchResidentAssistant(projectDir);
+            WriteNativeEntryLog(projectDir, "native_action.secondary_launch", "action=show_assistant");
         }
         catch (Exception ex)
         {
@@ -1203,6 +1203,11 @@ internal static class VibelutionLauncher
             }
         }
         return path;
+    }
+
+    private static void LaunchResidentAssistant(string projectDir)
+    {
+        LaunchCurrentElectronMain(projectDir, "", false, false);
     }
 
     private static void LaunchCurrentElectronMain(string projectDir, string thenLifecycle, bool openWorkbench, bool hiddenPresentation)

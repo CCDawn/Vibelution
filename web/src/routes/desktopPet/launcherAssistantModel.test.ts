@@ -11,6 +11,7 @@ import { LauncherAssistantRoute } from "./LauncherAssistantRoute";
 const bridge = vi.hoisted(() => ({
   getLauncherAssistantStatus: vi.fn(), getLauncherAssistantDetail: vi.fn(), getLauncherAssistantDispatches: vi.fn(),
   hideLauncherAssistant: vi.fn(), sendLauncherAssistantMessage: vi.fn(), setLauncherAssistantExpanded: vi.fn(),
+  openLauncherFromAssistant: vi.fn(),
   launcherConversationApi: { cacheKey: "launcher-test" },
   getLauncherAssistantApprovals: vi.fn(), resolveLauncherAssistantApproval: vi.fn(),
   stopLauncherAssistantTurn: vi.fn(), continueLauncherAssistantTurn: vi.fn(),
@@ -37,19 +38,21 @@ afterEach(async () => {
   vi.clearAllMocks();
 });
 
-async function renderAssistant(initialDetail?: Record<string, unknown>, initialStatus?: Record<string, unknown>) {
-  bridge.getLauncherAssistantStatus.mockResolvedValue(initialStatus ?? { assistant: { agentId: "a", directSessionId: "s", displayName: "助理" } });
+async function renderAssistant(initialDetail?: Record<string, unknown>, initialStatus?: Record<string, unknown>, statusRequest?: () => Promise<unknown>) {
+  if (statusRequest) bridge.getLauncherAssistantStatus.mockImplementation(statusRequest);
+  else bridge.getLauncherAssistantStatus.mockResolvedValue(initialStatus ?? { assistant: { agentId: "a", directSessionId: "s", displayName: "助理" } });
   bridge.getLauncherAssistantDetail.mockResolvedValue(initialDetail ?? { id: "s", status: "ready", messages: [], defaultFileContext: "" });
   bridge.getLauncherAssistantDispatches.mockResolvedValue([]);
   bridge.getLauncherAssistantApprovals.mockResolvedValue([]);
   bridge.setLauncherAssistantExpanded.mockResolvedValue(undefined);
   bridge.hideLauncherAssistant.mockResolvedValue(undefined);
+  bridge.openLauncherFromAssistant.mockResolvedValue({ opened: true });
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   await act(async () => {
-    root?.render(createElement(QueryClientProvider, { client }, createElement(LauncherAssistantRoute)));
+    root?.render(createElement(QueryClientProvider, { client }, createElement(LauncherAssistantRoute, { key: "pet" })));
     await new Promise(resolve => setTimeout(resolve, 10));
   });
   await settle();
@@ -59,11 +62,21 @@ async function settle() {
 }
 async function click(label: string) {
   await act(async () => {
-    const button = container?.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+    const button = container?.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)
+      ?? [...(container?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(node => node.textContent === label);
     expect(button).toBeTruthy();
     button?.click();
   });
   await settle();
+}
+async function showConversation() {
+  await act(async () => root?.render(createElement(QueryClientProvider, { client: client! }, createElement(LauncherAssistantRoute, { embedded: true, key: "conversation" }))));
+  await settle(); await settle();
+}
+async function showPet() {
+  conversation = undefined;
+  await act(async () => root?.render(createElement(QueryClientProvider, { client: client! }, createElement(LauncherAssistantRoute, { key: "pet" }))));
+  await settle(); await settle();
 }
 async function pollCycle() {
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 2100)); });
@@ -83,7 +96,7 @@ describe("Launcher assistant state", () => {
       provider: "deepseek", recoverable: false, timestamp: "2026-10-25T13:32:21Z", turnId: "failed-turn",
     };
     await renderAssistant({ id: "s", status: "ready", messages: [], lastTurnError });
-    await click("展开个人助理聊天");
+    await showConversation();
     expect(conversation?.turnError).toEqual(lastTurnError);
     expect(bridge.sendLauncherAssistantMessage).not.toHaveBeenCalled();
     bridge.getLauncherAssistantDetail.mockResolvedValue({ id: "s", status: "ready", messages: [], lastTurnError: null });
@@ -118,11 +131,11 @@ describe("Launcher assistant state", () => {
   }, 10_000);
 
   it("keeps an accepted turn observed after natural collapse and refreshes appearance at terminal", async () => {
-    await renderAssistant(); await click("展开个人助理聊天");
+    await renderAssistant(); await showConversation();
     bridge.sendLauncherAssistantMessage.mockResolvedValueOnce({ turnId: "settings-turn" });
     await act(async () => conversation?.onComposerChange("改成小洛"));
     await act(async () => conversation?.onSubmit());
-    await click("收起聊天");
+    await showPet();
     const statusReads = bridge.getLauncherAssistantStatus.mock.calls.length;
     const approvalReads = bridge.getLauncherAssistantApprovals.mock.calls.length;
     const dispatchReads = bridge.getLauncherAssistantDispatches.mock.calls.length;
@@ -138,14 +151,14 @@ describe("Launcher assistant state", () => {
   });
 
   it.each(["", "新的 B"])("observes an ACK arriving after collapse through its original request and preserves draft %s", async newDraft => {
-    await renderAssistant(); await click("展开个人助理聊天");
+    await renderAssistant(); await showConversation();
     let acknowledge!: (value: unknown) => void;
     bridge.sendLauncherAssistantMessage.mockImplementationOnce(() => new Promise(done => { acknowledge = done; }));
     await act(async () => conversation?.onComposerChange("请求 A"));
     await act(async () => conversation?.onSubmit());
     const requestId = bridge.sendLauncherAssistantMessage.mock.calls[0][1];
     if (newDraft) await act(async () => conversation?.onComposerChange(newDraft));
-    await click("收起聊天");
+    await showPet();
     await act(async () => acknowledge({ turnId: "late-ack" }));
     changedAppearance();
     bridge.getLauncherAssistantDetail.mockResolvedValue({ id: "s", status: "ready", lastTurnTerminalTurnId: "late-ack", terminalReason: "success",
@@ -157,7 +170,7 @@ describe("Launcher assistant state", () => {
   });
 
   it("keeps exact same-epoch native acceptance authoritative when the original send later rejects", async () => {
-    await renderAssistant(); await click("展开个人助理聊天");
+    await renderAssistant(); await showConversation();
     let rejectSend!: (error: Error) => void;
     bridge.sendLauncherAssistantMessage.mockImplementationOnce(() => new Promise((_done, reject) => { rejectSend = reject; }));
     await act(async () => conversation?.onComposerChange("请求 A"));
@@ -178,7 +191,7 @@ describe("Launcher assistant state", () => {
   });
 
   it.each(["reject", "stale queued ACK"])("does not let old %s clear or overwrite a newer pending send after native readback", async lateResult => {
-    await renderAssistant(); await click("展开个人助理聊天");
+    await renderAssistant(); await showConversation();
     let finishA!: (value: unknown) => void, rejectA!: (error: Error) => void, finishB!: (value: unknown) => void;
     bridge.sendLauncherAssistantMessage.mockImplementationOnce(() => new Promise((done, reject) => { finishA = done; rejectA = reject; }))
       .mockImplementationOnce(() => new Promise(done => { finishB = done; }));
@@ -215,12 +228,12 @@ describe("Launcher assistant state", () => {
     await renderAssistant();
     bridge.getLauncherAssistantDetail.mockResolvedValue({ id: "s", agentId: "a", activeLeafId: "head-a", ledgerSeq: 12, lastTurnTerminalTurnId: "turn-a",
       lastTurnStatus: "stopped_by_user", terminalReason: "stopped_by_user", currentPhase: "ready", activeTurnId: "", messages: [] });
-    await click("展开个人助理聊天");
+    await showConversation();
     bridge.continueLauncherAssistantTurn.mockRejectedValueOnce(new Error("ACK unknown"));
     await act(async () => conversation?.onContinueTurn?.());
     const requestId = bridge.continueLauncherAssistantTurn.mock.calls[0][1];
     await act(async () => conversation?.onComposerChange("新的 B"));
-    await click("收起聊天");
+    await showPet();
     changedAppearance();
     bridge.getLauncherAssistantDetail.mockResolvedValue({ id: "s", status: "ready", lastTurnTerminalTurnId: "continued-turn", terminalReason: "success",
       messages: [{ role: "user", metadata: { clientSubmissionId: requestId, turnId: "continued-turn" } }] });
@@ -244,12 +257,12 @@ describe("Launcher assistant state", () => {
   });
 
   it("follows an accepted queue through collapsed admission and terminal without using its queue ID as a Turn", async () => {
-    await renderAssistant(); await click("展开个人助理聊天");
+    await renderAssistant(); await showConversation();
     bridge.sendLauncherAssistantMessage.mockImplementationOnce(async (_message: string, clientSubmissionId: string) => ({ turnId: "", queuedTurnId: "queue-only", clientSubmissionId }));
     await act(async () => conversation?.onComposerChange("排队修改外观"));
     await act(async () => conversation?.onSubmit());
     const requestId = bridge.sendLauncherAssistantMessage.mock.calls[0][1];
-    await click("收起聊天");
+    await showPet();
     bridge.getLauncherAssistantDetail.mockResolvedValue({ id: "s", status: "ready", messages: [], queuedTurns: [{ id: "queue-only", clientSubmissionId: requestId, status: "starting" }] });
     await pollCycle();
     expect(client?.getQueryData(["launcher-assistant", "composer", "s"])).toMatchObject({ acceptedTurnId: "", queuedAcceptance: { id: "queue-only", observed: true } });
@@ -346,7 +359,7 @@ describe("Launcher native turn controls", () => {
     bridge.getLauncherAssistantDetail.mockResolvedValue({ id: "s", agentId: "a", currentPhase: "thinking", activeTurnId: "running", messages: [] });
     let resolve!: (value: unknown) => void;
     bridge.sendLauncherAssistantMessage.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
-    await click("展开个人助理聊天");
+    await showConversation();
     await act(async () => conversation?.onComposerChange("排队的 A"));
     await act(async () => conversation?.onSubmit());
     await act(async () => conversation?.onComposerChange("稍后发送的 B"));
@@ -362,7 +375,7 @@ describe("Launcher native turn controls", () => {
       lastTurnStatus: "stopped_by_user", terminalReason: "stopped_by_user", currentPhase: "ready", activeTurnId: "", messages: [] };
     bridge.getLauncherAssistantDetail.mockResolvedValue(stopped);
     bridge.continueLauncherAssistantTurn.mockRejectedValueOnce(new Error("ack lost")).mockResolvedValueOnce({ turnId: "native-confirmed" });
-    await click("展开个人助理聊天");
+    await showConversation();
     await act(async () => conversation?.onContinueTurn?.());
     bridge.getLauncherAssistantDetail.mockResolvedValue({ ...stopped, activeLeafId: "head-b", ledgerSeq: 20, lastTurnTerminalTurnId: "turn-b" });
     await click("刷新");
@@ -377,7 +390,7 @@ describe("Launcher native turn controls", () => {
       lastTurnStatus: "stopped_by_user", terminalReason: "stopped_by_user", currentPhase: "ready", activeTurnId: "", messages: [] };
     bridge.getLauncherAssistantDetail.mockResolvedValue(stopped);
     bridge.continueLauncherAssistantTurn.mockRejectedValueOnce(new Error("ack lost"));
-    await click("展开个人助理聊天");
+    await showConversation();
     await act(async () => conversation?.onContinueTurn?.());
     const requestId = bridge.continueLauncherAssistantTurn.mock.calls[0][1];
     bridge.getLauncherAssistantDetail.mockResolvedValue({ ...stopped, activeLeafId: "head-b", ledgerSeq: 20,
@@ -395,7 +408,7 @@ describe("Launcher native turn controls", () => {
     bridge.sendLauncherAssistantMessage.mockRejectedValueOnce(new Error("ack lost"));
     let resolve!: (value: unknown) => void;
     bridge.stopLauncherAssistantTurn.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
-    await click("展开个人助理聊天");
+    await showConversation();
     await act(async () => conversation?.onComposerChange("A"));
     await act(async () => conversation?.onSubmit());
     await act(async () => conversation?.onStop?.());
@@ -410,7 +423,7 @@ describe("Launcher native turn controls", () => {
     const active = { id: "s", agentId: "a", status: "running", currentPhase: "thinking", activeTurnId: "native-running", messages: [] };
     bridge.getLauncherAssistantDetail.mockResolvedValue(active);
     bridge.stopLauncherAssistantTurn.mockResolvedValue({ id: "s", stopRequested: true });
-    await click("展开个人助理聊天");
+    await showConversation();
     expect(conversation?.composerActionMode).toBe("stop");
     await act(async () => conversation?.onStop?.());
     expect(bridge.stopLauncherAssistantTurn).toHaveBeenCalledExactlyOnceWith("s", "native-running");
@@ -425,7 +438,7 @@ describe("Launcher native turn controls", () => {
     bridge.getLauncherAssistantDetail.mockResolvedValue(stopped);
     bridge.continueLauncherAssistantTurn.mockRejectedValueOnce(new Error("ack lost"))
       .mockResolvedValueOnce({ turnId: "new-turn" });
-    await click("展开个人助理聊天");
+    await showConversation();
     expect(conversation?.composerActionMode).toBe("continue");
     await act(async () => conversation?.onContinueTurn?.());
     await act(async () => conversation?.onContinueTurn?.());
@@ -441,24 +454,102 @@ describe("Launcher native turn controls", () => {
 });
 
 describe("Launcher assistant route lifecycle", () => {
-  it("mounts the native transcript only after expansion and hides without cancelling its initial recovery read", async () => {
+  it("shows a status read error despite a cached preference hiding ordinary pet status", async () => {
+    await renderAssistant(undefined, { assistant: { agentId: "a", directSessionId: "s", displayName: "助理" },
+      settings: { ok: true, displayName: "助理", modelId: "m", preferences: {
+        characterId: "dafeiyu", showStatus: false, showTitles: true, showCompletion: true, idleMessage: "",
+      } } });
+    expect(container?.querySelector('[role="status"]')?.hasAttribute("hidden")).toBe(true);
+    bridge.getLauncherAssistantStatus.mockRejectedValueOnce(new Error("status unavailable"));
+    await act(async () => { await client?.refetchQueries({ queryKey: ["launcher-assistant", "status"], exact: true }); });
+    await settle();
+    const status = container?.querySelector('[role="status"]');
+    expect(status?.hasAttribute("hidden")).toBe(false);
+    expect(status?.textContent).toContain("个人助理暂不可用");
+    await click("打开 Launcher");
+    expect(bridge.openLauncherFromAssistant).toHaveBeenCalledOnce();
+    expect(bridge.setLauncherAssistantExpanded).not.toHaveBeenCalled();
+  });
+
+  it.each(["pending", "error"] as const)("keeps the pet Launcher entry usable while native identity is %s", async state => {
+    let resolveStatus!: (value: unknown) => void;
+    const pending = new Promise(resolve => { resolveStatus = resolve; });
+    await renderAssistant(undefined, undefined, () => state === "pending" ? pending : Promise.reject(new Error("native unavailable")));
+    const pet = container!.querySelector<HTMLButtonElement>('button[aria-label="打开 Launcher"]');
+    expect(pet).toBeTruthy();
+    expect(pet?.disabled).toBe(false);
+    expect(bridge.getLauncherAssistantDetail).not.toHaveBeenCalled();
+    await act(async () => pet?.click());
+    expect(bridge.openLauncherFromAssistant).toHaveBeenCalledOnce();
+    expect(bridge.setLauncherAssistantExpanded).not.toHaveBeenCalled();
+    if (state === "pending") await act(async () => resolveStatus({ assistant: { agentId: "a", directSessionId: "s", displayName: "助理" } }));
+  });
+
+  it("opens the native transcript in the Launcher and keeps the pet independently hideable", async () => {
     await renderAssistant();
     expect(bridge.getLauncherAssistantDetail).toHaveBeenCalledTimes(1);
     expect(conversation).toBeUndefined();
-    await click("展开个人助理聊天");
-    expect(bridge.setLauncherAssistantExpanded).toHaveBeenCalledWith(true);
+    await showConversation();
+    expect(bridge.setLauncherAssistantExpanded).not.toHaveBeenCalled();
     expect(conversation?.messages).toEqual([]);
     expect(conversation?.runtimeApi).toBe(bridge.launcherConversationApi);
     expect(bridge.stopLauncherAssistantTurn).not.toHaveBeenCalled();
-    await click("收起聊天");
+    await showPet();
     await click("隐藏个人助理");
     expect(bridge.hideLauncherAssistant).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens Launcher directly, coalesces clicks and remains usable after a failed or cancelled request", async () => {
+    await renderAssistant();
+    let rejectOpen!: (error: Error) => void;
+    bridge.openLauncherFromAssistant.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectOpen = reject; }));
+    const pet = container!.querySelector<HTMLButtonElement>('button[aria-label="打开 Launcher"]')!;
+    await act(async () => { pet.click(); pet.click(); });
+    expect(bridge.openLauncherFromAssistant).toHaveBeenCalledTimes(1);
+    expect(bridge.setLauncherAssistantExpanded).not.toHaveBeenCalled();
+    expect(conversation).toBeUndefined();
+    await act(async () => rejectOpen(new Error("无法打开 Launcher")));
+    await settle();
+    expect(container?.textContent).toContain("无法打开 Launcher");
+    bridge.openLauncherFromAssistant.mockResolvedValueOnce({ opened: false });
+    await act(async () => pet.click()); await settle();
+    expect(bridge.openLauncherFromAssistant).toHaveBeenCalledTimes(2);
+    expect(container?.textContent).not.toContain("无法打开 Launcher");
+    await act(async () => pet.click()); await settle();
+    expect(bridge.openLauncherFromAssistant).toHaveBeenCalledTimes(3);
+    expect(bridge.setLauncherAssistantExpanded).not.toHaveBeenCalled();
+    expect(conversation).toBeUndefined();
+  });
+
+  it("moves the pet on drag without interpreting the release as a Launcher click", async () => {
+    const native = { beginDesktopPetWindowDrag: vi.fn(), moveDesktopPetWindowDrag: vi.fn(), endDesktopPetWindowDrag: vi.fn() };
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, "vibelutionLauncher");
+    Object.defineProperty(globalThis, "vibelutionLauncher", { value: native, configurable: true });
+    try {
+      await renderAssistant();
+      const pet = container!.querySelector<HTMLButtonElement>('button[aria-label="打开 Launcher"]')!;
+      pet.setPointerCapture = vi.fn();
+      await act(async () => {
+        pet.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerId: 1, screenX: 10, screenY: 10 }));
+        pet.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 1, screenX: 20, screenY: 10 }));
+        pet.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 1, screenX: 20, screenY: 10 }));
+        pet.click();
+      });
+      expect(native.beginDesktopPetWindowDrag).toHaveBeenCalledWith({ screenX: 10, screenY: 10 });
+      expect(native.moveDesktopPetWindowDrag).toHaveBeenCalledWith({ screenX: 20, screenY: 10 });
+      expect(native.endDesktopPetWindowDrag).toHaveBeenCalledOnce();
+      expect(bridge.openLauncherFromAssistant).not.toHaveBeenCalled();
+      expect(bridge.setLauncherAssistantExpanded).not.toHaveBeenCalled();
+    } finally {
+      if (descriptor) Object.defineProperty(globalThis, "vibelutionLauncher", descriptor);
+      else delete (globalThis as { vibelutionLauncher?: unknown }).vibelutionLauncher;
+    }
   });
 
   it("keeps a failed draft and retries exactly the same request", async () => {
     bridge.sendLauncherAssistantMessage.mockRejectedValueOnce(new Error("unknown delivery")).mockResolvedValueOnce({ turnId: "t" });
     await renderAssistant();
-    await click("展开个人助理聊天");
+    await showConversation();
     await act(async () => conversation?.onComposerChange("hello"));
     await act(async () => conversation?.onSubmit());
     expect(conversation?.composerValue).toBe("hello");
@@ -473,13 +564,13 @@ describe("Launcher assistant route lifecycle", () => {
     let resolveSend!: () => void;
     bridge.sendLauncherAssistantMessage.mockImplementationOnce(() => new Promise<void>(resolve => { resolveSend = resolve; }));
     await renderAssistant();
-    await click("展开个人助理聊天");
+    await showConversation();
     await act(async () => conversation?.onComposerChange("hello"));
     await act(async () => conversation?.onSubmit());
     const first = bridge.sendLauncherAssistantMessage.mock.calls[0];
-    await click("收起聊天");
+    await showPet();
     await act(async () => resolveSend());
-    await click("展开个人助理聊天");
+    await showConversation();
     expect(conversation?.composerValue).toBe("hello");
     expect(conversation?.composerError).toContain("尚未确认");
     await act(async () => conversation?.onSubmit());
@@ -489,7 +580,7 @@ describe("Launcher assistant route lifecycle", () => {
   it("keeps reading an accepted turn after an immediately stale ready response, then stops at its terminal", async () => {
     bridge.sendLauncherAssistantMessage.mockResolvedValueOnce({ turnId: "turn-new" });
     await renderAssistant();
-    await click("展开个人助理聊天");
+    await showConversation();
     await act(async () => conversation?.onComposerChange("hello"));
     await act(async () => conversation?.onSubmit());
     await settle();
@@ -508,15 +599,15 @@ describe("Launcher assistant route lifecycle", () => {
   it("restores an unconfirmed draft after route unmount using the same window cache", async () => {
     bridge.sendLauncherAssistantMessage.mockRejectedValue(new Error("unknown"));
     await renderAssistant();
-    await click("展开个人助理聊天");
+    await showConversation();
     await act(async () => conversation?.onComposerChange("keep me"));
     await act(async () => conversation?.onSubmit());
     const first = bridge.sendLauncherAssistantMessage.mock.calls[0];
     await act(async () => root?.unmount());
     root = createRoot(container!);
-    await act(async () => root?.render(createElement(QueryClientProvider, { client: client! }, createElement(LauncherAssistantRoute))));
+    await act(async () => root?.render(createElement(QueryClientProvider, { client: client! }, createElement(LauncherAssistantRoute, { key: "pet" }))));
     await settle();
-    await click("展开个人助理聊天");
+    await showConversation();
     expect(conversation?.composerValue).toBe("keep me");
     await act(async () => conversation?.onSubmit());
     expect(bridge.sendLauncherAssistantMessage.mock.calls[1]).toEqual(first);
@@ -525,7 +616,7 @@ describe("Launcher assistant route lifecycle", () => {
   it("hands polling back to native activity after the accepted activeTurnId is visible", async () => {
     bridge.sendLauncherAssistantMessage.mockResolvedValueOnce({ turnId: "turn-visible" });
     await renderAssistant();
-    await click("展开个人助理聊天");
+    await showConversation();
     bridge.getLauncherAssistantDetail.mockResolvedValue({ id: "s", status: "running", activeTurnId: "turn-visible", messages: [] });
     await act(async () => conversation?.onComposerChange("hello"));
     await act(async () => conversation?.onSubmit());
@@ -542,7 +633,7 @@ describe("Launcher assistant route lifecycle", () => {
   it("accepts a busy-session queue receipt once, reads through stale ready and follows native admission to terminal", async () => {
     await renderAssistant();
     bridge.getLauncherAssistantDetail.mockResolvedValue({ id: "s", status: "running", activeTurnId: "previous", messages: [], queuedTurns: [] });
-    await click("展开个人助理聊天");
+    await showConversation();
     bridge.sendLauncherAssistantMessage.mockImplementationOnce(async (_message: string, requestId: string) => ({ turnId: "", queuedTurnId: "queue-1", clientSubmissionId: requestId }));
     bridge.getLauncherAssistantDetail.mockResolvedValue({ id: "s", status: "ready", messages: [], queuedTurns: [] });
     await act(async () => conversation?.onComposerChange("queued hello"));
@@ -577,7 +668,7 @@ describe("Launcher assistant route lifecycle", () => {
   it.each(["paused", "blocked"])("shows a native %s queue row without idle polling or treating removal as success", async queueStatus => {
     await renderAssistant();
     bridge.sendLauncherAssistantMessage.mockImplementationOnce(async (_message: string, requestId: string) => ({ turnId: "", queuedTurnId: "queue-held", clientSubmissionId: requestId }));
-    await click("展开个人助理聊天");
+    await showConversation();
     await act(async () => conversation?.onComposerChange("held hello"));
     await act(async () => conversation?.onSubmit());
     const requestId = bridge.sendLauncherAssistantMessage.mock.calls[0][1];
@@ -600,10 +691,10 @@ describe("Launcher assistant route lifecycle", () => {
     bridge.getLauncherAssistantStatus.mockResolvedValue({ assistant: { agentId: "a", directSessionId: "s", displayName: "old" }, settings: {
       ok: true, displayName: "小洛", modelId: "m", preferences: { characterId: "xiaoluo", showStatus: false, showTitles: false, showCompletion: false, idleMessage: "休息中" },
     } });
-    await click("展开个人助理聊天");
-    expect(container?.querySelector("h1")?.hidden).toBe(true);
+    await showConversation();
+    expect(conversation?.assistantDisplayName).toBe("小洛");
+    await showPet();
     expect(container?.querySelector('[role="status"]')?.hasAttribute("hidden")).toBe(true);
-    await click("收起聊天");
     expect(character).toMatchObject({ characterId: "xiaoluo", name: "小洛" });
   });
 
@@ -656,7 +747,7 @@ describe("Launcher assistant route lifecycle", () => {
     });
     bridge.getLauncherAssistantApprovals.mockResolvedValue([{ requestId: "r", sessionId: "s", turnId: "t", agentId: "a",
       toolName: "command_tool", status: "pending", risk: "high", argumentSummary: {}, availableDecisions: ["accept", "decline"] }]);
-    await click("展开个人助理聊天");
+    await showConversation();
     expect(container?.querySelector("header [role='status']")?.textContent).toBe("已完成");
     expect(container?.querySelector('[role="dialog"]')).toBeTruthy();
   });
@@ -664,7 +755,7 @@ describe("Launcher assistant route lifecycle", () => {
   it.each(["success", "needs_continue", "error", "stopped_by_user"])("refreshes own name and appearance once after native %s turn readback", async terminalReason => {
     await renderAssistant();
     bridge.getLauncherAssistantDetail.mockResolvedValue({ id: "s", status: "running", activeTurnId: "settings-turn", messages: [] });
-    await click("展开个人助理聊天");
+    await showConversation();
     const statusReads = bridge.getLauncherAssistantStatus.mock.calls.length;
     bridge.getLauncherAssistantStatus.mockResolvedValue({ assistant: { agentId: "a", directSessionId: "s", displayName: "独立助理验收" }, settings: {
       ok: true, displayName: "独立助理验收", modelId: "m", preferences: { characterId: "xiaoluo", showStatus: false, showTitles: true, showCompletion: false, idleMessage: "休息中" },
@@ -674,9 +765,7 @@ describe("Launcher assistant route lifecycle", () => {
     await act(async () => { await client?.refetchQueries({ queryKey: ["launcher-assistant", "detail", "s"] }); });
     await settle();
     await settle();
-    expect(container?.querySelector("h1")?.textContent).toBe("独立助理验收");
     expect(conversation?.assistantDisplayName).toBe("独立助理验收");
-    expect(container?.querySelector('header [role="status"]')?.hasAttribute("hidden")).toBe(true);
     expect(bridge.getLauncherAssistantStatus).toHaveBeenCalledTimes(statusReads + 1);
 
     // Detail can change while the terminal identity remains the same.
@@ -684,14 +773,15 @@ describe("Launcher assistant route lifecycle", () => {
     await act(async () => { await client?.refetchQueries({ queryKey: ["launcher-assistant", "detail", "s"] }); });
     await settle();
     expect(bridge.getLauncherAssistantStatus).toHaveBeenCalledTimes(statusReads + 1);
-    await click("收起聊天");
+    await showPet();
+    expect(container?.querySelector('[role="status"]')?.hasAttribute("hidden")).toBe(true);
     expect(character).toMatchObject({ characterId: "xiaoluo", name: "独立助理验收" });
   });
 
   it("passes the initial operator profile only to user presentation props", async () => {
     await renderAssistant(undefined, { assistant: { agentId: "a", directSessionId: "s", displayName: "Assistant" },
       operatorProfile: { displayName: "Initial operator", avatarPreset: "codex" } });
-    await click("\u5c55\u5f00\u4e2a\u4eba\u52a9\u7406\u804a\u5929");
+    await showConversation();
     expect(conversation?.userDisplayName).toBe("Initial operator");
     expect(conversation?.userAvatarPreset).toBe("codex");
     expect(conversation?.assistantDisplayName).toBe("Assistant");
@@ -700,7 +790,7 @@ describe("Launcher assistant route lifecycle", () => {
   it.each(["success", "needs_continue", "error", "stopped_by_user"])("refreshes only operator display props once after %s without changing the assistant", async terminalReason => {
     await renderAssistant();
     bridge.getLauncherAssistantDetail.mockResolvedValue({ id: "s", status: "running", activeTurnId: "profile-turn", messages: [] });
-    await click("\u5c55\u5f00\u4e2a\u4eba\u52a9\u7406\u804a\u5929");
+    await showConversation();
     expect(conversation?.userDisplayName).toBeUndefined();
     expect(conversation?.userAvatarPreset).toBeUndefined();
     const assistantName = conversation?.assistantDisplayName;
@@ -726,7 +816,7 @@ describe("Launcher assistant route lifecycle", () => {
     await renderAssistant();
     bridge.getLauncherAssistantApprovals.mockResolvedValue([request]);
     bridge.resolveLauncherAssistantApproval.mockRejectedValueOnce(new Error("decision unavailable"));
-    await click("展开个人助理聊天");
+    await showConversation();
     expect(container?.textContent).toContain("pwd");
     expect(container?.textContent).not.toContain("始终");
     const approve = container?.querySelector<HTMLButtonElement>('button[title="仅批准本次（Y）"]');

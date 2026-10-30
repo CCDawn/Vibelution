@@ -15,6 +15,7 @@ import type { SessionContinuationExpectation } from "../../api/chat";
 import { queryKeys } from "../../api/queryKeys";
 import type { SessionToolApprovalRequest } from "../../api/types";
 import { LazyConversationView } from "../../components/conversation/LazyConversationView";
+import { LauncherAssistantWelcome } from "./LauncherAssistantWelcome";
 import { VButton, VDenseOpsPage, VNativeButton, VStateSurface } from "../../components/vui";
 import { useShellI18n } from "../../i18n/useShellI18n";
 import { hasExecutionOwnership, resolveSessionActivity, sessionActivityStatusLabel } from "../sessionActivityState";
@@ -79,7 +80,7 @@ function readableApprovalJson(source: string): string {
 type ContinueAttempt = { requestId: string; expected: SessionContinuationExpectation; accepted: boolean };
 type ComposerSnapshot = { draft: string; outstanding: LauncherAssistantSubmission | null; acceptedTurnId: string; queuedAcceptance: LauncherAssistantQueuedAcceptance | null; continuation?: ContinueAttempt; attachments?: ComposerImageAttachment[] };
 
-export function LauncherAssistantRoute({ embedded = false }: { embedded?: boolean }) {
+export function LauncherAssistantRoute({ embedded = false, navigationOwned = false }: { embedded?: boolean; navigationOwned?: boolean }) {
   useLauncherThemeControl();
   const client = useQueryClient();
   const { lang } = useShellI18n();
@@ -444,7 +445,7 @@ export function LauncherAssistantRoute({ embedded = false }: { embedded?: boolea
       suppressClickRef.current = false;
       return;
     }
-    void toggle();
+    void openLauncher();
   }
 
   async function toggle() {
@@ -710,13 +711,13 @@ export function LauncherAssistantRoute({ embedded = false }: { embedded?: boolea
   const removedQueueText = lang === "zh" ? "排队消息已移除" : "Queued message removed";
   const queueStatusText = queueReadback.removed ? removedQueueText : queueRow ? launcherAssistantQueueLabel(queueRow.status, lang)
     : queuedAcceptance && !queuedAcceptance.observed ? waitingQueueText : "";
-  const statusText = feedback || queueStatusText || (status.isPending ? copy.checking
+  const statusText = feedback || queueStatusText || (status.isError ? copy.unavailable : status.isPending ? copy.checking
     : detail.data ? !detail.isError && !approval && !stopping && !acceptedTurnId && !sendPending && !sendUnconfirmed && preferences.idleMessage
         && (activity.execution === "idle" || (activity.execution === "settled" && activity.outcome === "completed"))
       ? preferences.idleMessage : sessionActivityStatusLabel(activity, lang)
       : copy.title);
 
-  if (status.isError) return <VStateSurface fill tone="error" title={copy.unavailable}
+  if (status.isError && expanded) return <VStateSurface fill tone="error" title={copy.unavailable}
     actions={<VButton onClick={() => void status.refetch()}>{copy.retry}</VButton>}>{status.error.message}</VStateSurface>;
 
   const refreshAll = () => {
@@ -728,43 +729,48 @@ export function LauncherAssistantRoute({ embedded = false }: { embedded?: boolea
     data-expanded="false" data-tone={tone} aria-label={displayName}>
     <div className={petStyles.stage}>
       <div className={petStyles.toolbar}>
-        <span className={petStyles.status} role="status" aria-live="polite" hidden={!preferences.showStatus && !feedback}>
+        <span className={petStyles.status} role="status" aria-live="polite" hidden={!preferences.showStatus && !feedback && !status.isError}>
           <span className={petStyles.statusDot} aria-hidden="true" />{statusText}
         </span>
         <VNativeButton className={petStyles.close} aria-label={copy.hide} onClick={() => void hide()}><X size={14} /></VNativeButton>
       </div>
-      <VNativeButton className={petStyles.characterButton} aria-label={copy.expand}
-        disabled={!identity || resizePending} onClick={characterClicked}
+      <VNativeButton className={petStyles.characterButton} aria-label={lang === "zh" ? "打开 Launcher" : "Open Launcher"}
+        disabled={launcherPending} onClick={characterClicked}
         onPointerDown={beginCharacterDrag}
         onPointerMove={moveCharacterDrag}
         onPointerUp={endCharacterDrag}
         onPointerCancel={cancelCharacterDrag}>
         <DesktopPetCharacter characterId={preferences.characterId} name={displayName} tone={tone} animationState={animationState} />
       </VNativeButton>
-      <VNativeButton className={petStyles.chatCue} disabled={!identity || resizePending} onClick={() => void toggle()}>
+      <VNativeButton className={petStyles.chatCue} disabled={launcherPending} onClick={() => void openLauncher()}>
         <MessageCircle size={13} aria-hidden="true" />{copy.chat}
       </VNativeButton>
     </div>
   </main>;
 
+  const showWelcome = navigationOwned && Boolean(detail.data && !detail.isError && !detail.data.messages.length
+    && !detail.data.activeTurnId && !detail.data.queuedTurns?.length && !approval && !dispatchApproval && !sendUnconfirmed);
+  function changeDraft(value: string) { draftRef.current = value; setDraft(value); saveComposer({ draft: value }); }
   return <VDenseOpsPage hideHeader ariaLabel={displayName}
-    className={embedded ? petStyles.launcherChatEmbedded : petStyles.launcherChatWindow} bodyClassName={petStyles.chatBody} style={backgroundStyle}
+    className={embedded ? petStyles.launcherChatEmbedded : petStyles.launcherChatWindow} bodyClassName={`${petStyles.chatBody} ${navigationOwned ? petStyles.unifiedChatBody : ""}`} style={backgroundStyle}
     data-vui-domain-recipe="launcher-assistant" data-assistant-chat={embedded ? "embedded" : "compact"} data-expanded="true" data-tone={tone}
     data-assistant-embedded={embedded ? "true" : undefined}
+    data-assistant-navigation-owned={navigationOwned ? "true" : undefined}
+    data-assistant-empty={showWelcome ? "true" : undefined}
     data-operator-avatar={avatarImage ? "custom" : "default"}
     data-theme-background={backgroundImage ? "custom" : "default"}
     data-theme-background-readability={backgroundImage ? background.data?.readability : undefined}
-    toolbarSlot={embedded ? <header className={petStyles.chatHeaderStatic}>
+    toolbarSlot={embedded ? <header className={navigationOwned ? petStyles.chatHeaderUnified : petStyles.chatHeaderStatic}>
       <div className={petStyles.chatIdentity}>
-        <h1 className={petStyles.chatTitle}>{lang === "zh" ? "个人助理" : "Personal assistant"}</h1>
+        <h1 className={petStyles.chatTitle}>{navigationOwned ? (lang === "zh" ? "对话" : "Chat") : (lang === "zh" ? "个人助理" : "Personal assistant")}</h1>
         <span className={petStyles.chatStatus} role={feedback ? "alert" : "status"}>{statusText}</span>
       </div>
-      <VButton density="compact" variant="ghost" aria-pressed={computerOpen}
+      {!navigationOwned ? <><VButton density="compact" variant="ghost" aria-pressed={computerOpen}
         onClick={() => setComputerOpen(value => !value)}>{lang === "zh" ? "电脑操作" : "Computer"}</VButton>
       {dispatchTotal ? <VButton density="compact" variant="ghost" aria-pressed={receiptsOpen}
         onClick={() => setReceiptsOpen(value => !value)}>{`${copy.receiptToggle} ${dispatchTotal}`}</VButton> : null}
       <VButton density="compact" variant="ghost" icon={<RefreshCw size={14} aria-hidden="true" />}
-        onClick={refreshAll}>{copy.refresh}</VButton>
+        onClick={refreshAll}>{copy.refresh}</VButton></> : null}
     </header> : <header className={petStyles.chatHeader}>
       <div className={petStyles.chatIdentity}>
         <h1 className={petStyles.chatTitle} hidden={!preferences.showTitles}>{displayName}</h1>
@@ -780,6 +786,7 @@ export function LauncherAssistantRoute({ embedded = false }: { embedded?: boolea
     {themeSyncState !== "applied" ? <VStateSurface tone="error" title={themeSyncState === "unknown" ? (lang === "zh" ? "主题变更结果未确认" : "Theme change is unconfirmed") : themeSyncState === "conflict" ? (lang === "zh" ? "助理主题与全局主题不同" : "Assistant and global themes differ") : (lang === "zh" ? "主题尚未同步" : "Theme is not synchronized")}
       actions={<><VButton isDisabled={themePending} onClick={() => { if (themeGate.current) return; themeGate.current = true; setThemePending(true); void requestWorkbenchTheme(readStoredWorkbenchTheme()).then(result => { if (result !== "superseded") setThemeSyncState(result); }).finally(() => { themeGate.current = false; setThemePending(false); }); }}>{lang === "zh" ? "使用助理主题" : "Use assistant theme"}</VButton>
         <VButton isDisabled={themePending} onClick={() => { if (themeGate.current) return; themeGate.current = true; setThemePending(true); void useAuthorityTheme().then(result => { if (result !== "superseded") setThemeSyncState(result); }).finally(() => { themeGate.current = false; setThemePending(false); }); }}>{lang === "zh" ? "使用全局主题" : "Use global theme"}</VButton></>} /> : null}
+    {showWelcome ? <LauncherAssistantWelcome lang={lang} onPrompt={changeDraft}/> : null}
     {computerOpen ? <PersonalAssistantComputerPanel active={reading} transport={launcherAssistantComputer}
       onCollapse={() => setComputerOpen(false)} /> : detail.data ? <LazyConversationView
       runtimeApi={launcherConversationApi}
@@ -803,7 +810,7 @@ export function LauncherAssistantRoute({ embedded = false }: { embedded?: boolea
       composerError={sendUnconfirmed ? copy.unknownSend : attachments.some(item => item.uploadStatus === "failed") ? (lang === "zh" ? "附件上传失败，请重试。" : "Attachment upload failed; retry.") : ""}
       submitLabel={sendUnconfirmed ? copy.retry : copy.send} submitPendingLabel={copy.sending}
       composerActionDisabled={sendPending || controlPending || (attachments.length > 0 && status.data?.attachmentVersion !== 1) || (actionMode === "stop" ? stopping || !resolveSessionStopTurnId(detail.data, acceptedTurnId) : actionMode === "send" && !sendUnconfirmed && !draft.trim() && !attachments.length)}
-      onComposerChange={value => { draftRef.current = value; setDraft(value); saveComposer({ draft: value }); }} onSubmit={() => void submit()}
+      onComposerChange={changeDraft} onSubmit={() => void submit()}
       onStop={() => void stopTurn()} onContinueTurn={() => void continueTurn()}
       composerPrecedingContent={embedded && receiptsOpen && dispatches.data?.length ? <section className={petStyles.embeddedReceiptsPanel}
         data-launcher-assistant-receipts aria-label={copy.receipts}>

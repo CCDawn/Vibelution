@@ -1,4 +1,5 @@
 const styles = {
+  page: "w-full max-w-2xl min-w-0",
   form: "flex flex-col gap-4",
   field: "flex flex-col gap-1.5",
   nameRow: "flex items-center gap-2",

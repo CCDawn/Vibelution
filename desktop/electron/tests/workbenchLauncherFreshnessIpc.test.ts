@@ -93,7 +93,7 @@ describe("workbench Launcher awareness IPC", () => {
       expect(extractIpcHandler(channel)).toContain("assertTrustedIpcSender(event, trustedIpcOrigins(event))");
     }
     for (const channel of ["launcherInvoke", "getLauncherState", "refreshLauncherState"]) {
-      expect(extractIpcHandler(channel)).toContain("assertTrustedIpcSender(event, launcherIpcTrustedOrigins())");
+      expect(extractIpcHandler(channel)).toContain("isTrustedLauncherControlFrame(event)");
     }
   });
   it("exposes only the two narrow Launcher awareness methods on main workbench preload", () => {

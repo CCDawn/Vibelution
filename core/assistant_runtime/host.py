@@ -637,6 +637,8 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                     unbind_actions(dispatch)
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+    from .panels import panel_router
+    app.include_router(panel_router(native))
 
     from .native import AssistantSessionError
 

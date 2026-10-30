@@ -3,8 +3,10 @@ const root =
 
 const styles = {
   workspace: "!gap-0",
-  columns: "grid-cols-[208px_minmax(0,1fr)] max-[1100px]:grid-cols-[184px_minmax(0,1fr)] max-[700px]:grid-cols-1 max-[700px]:grid-rows-[auto_minmax(0,1fr)]",
-  main: "mr-1.5 mb-1.5 h-[calc(100%_-_6px)] min-h-0 min-w-0 overflow-hidden !rounded-[12px] border-[color-mix(in_srgb,var(--fg-primary)_5%,transparent)] shadow-[0_1px_3px_color-mix(in_srgb,var(--fg-primary)_3%,transparent)] max-[700px]:mx-1 max-[700px]:mb-1 max-[700px]:h-[calc(100%_-_4px)]",
+  columns: "grid-cols-[224px_minmax(0,1fr)] max-[1100px]:grid-cols-[208px_minmax(0,1fr)] max-[700px]:grid-cols-1 [&>[data-vui=split-sidebar]]:max-[700px]:hidden",
+  main: "h-full min-h-0 min-w-0 overflow-hidden !rounded-none !border-0 !bg-vui-surface-panel !shadow-none",
+  navigation:"h-full border-r border-vui-border-subtle max-[700px]:hidden",
+  mobileNavigation:"h-[min(720px,70dvh)] min-h-0 overflow-hidden",
   root,
 } as const;
 

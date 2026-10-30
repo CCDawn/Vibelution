@@ -1,44 +1,28 @@
 import { describe, expect, it, vi } from "vitest";
 import { createAssistantLauncherEntry } from "../src/assistant/launcherEntry.js";
 
-function fixture() {
-  const actions = {
-    isQuitting: vi.fn(() => false), openExisting: vi.fn(async () => false),
-    chooseProject: vi.fn(async (): Promise<string | null> => "human-project"),
-    connect: vi.fn(async (_root: string) => true), openConnected: vi.fn(async () => undefined),
-  };
-  return { actions, open: createAssistantLauncherEntry(actions) };
-}
-
 describe("Resident assistant Launcher entry", () => {
-  it("focuses the connected project manager without another selection or connection", async () => {
-    const { actions, open } = fixture(); actions.openExisting.mockResolvedValue(true);
+  it("opens directly without selecting or connecting a project", async () => {
+    const present = vi.fn(async () => undefined);
+    const open = createAssistantLauncherEntry({ isQuitting: () => false, present });
     await expect(open()).resolves.toEqual({ opened: true });
-    expect(actions.chooseProject).not.toHaveBeenCalled(); expect(actions.connect).not.toHaveBeenCalled();
+    expect(present).toHaveBeenCalledOnce();
   });
-  it("selects context explicitly and opens management without a runtime start action", async () => {
-    const { actions, open } = fixture();
+  it("coalesces concurrent clicks and retries after failure", async () => {
+    let finish!: () => void;
+    const present = vi.fn().mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }))
+      .mockRejectedValueOnce(new Error("unavailable")).mockResolvedValue(undefined);
+    const open = createAssistantLauncherEntry({ isQuitting: () => false, present });
+    const first = open(); expect(open()).toBe(first); finish();
+    await expect(first).resolves.toEqual({ opened: true });
+    await expect(open()).rejects.toThrow("unavailable");
     await expect(open()).resolves.toEqual({ opened: true });
-    expect(actions.connect).toHaveBeenCalledExactlyOnceWith("human-project");
-    expect(actions.openConnected).toHaveBeenCalledTimes(1);
+    expect(present).toHaveBeenCalledTimes(3);
   });
-  it("deduplicates simultaneous header and tray requests and allows retry after cancellation", async () => {
-    const { actions, open } = fixture();
-    let finish!: (root: string | null) => void;
-    actions.chooseProject.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
-    const first = open(); expect(open()).toBe(first);
-    await Promise.resolve(); finish(null);
-    await expect(first).resolves.toEqual({ opened: false });
-    expect(actions.connect).not.toHaveBeenCalled();
-    await expect(open()).resolves.toEqual({ opened: true });
-    expect(actions.chooseProject).toHaveBeenCalledTimes(2);
-  });
-  it("does not open after shutdown or an unconfirmed connection", async () => {
-    const { actions, open } = fixture(); actions.connect.mockResolvedValueOnce(false);
-    await expect(open()).rejects.toThrow("ASSISTANT_LAUNCHER_UNAVAILABLE");
-    expect(actions.openConnected).not.toHaveBeenCalled();
-    actions.isQuitting.mockReturnValue(true);
+  it("does not present during shutdown", async () => {
+    const present = vi.fn(async () => undefined);
+    const open = createAssistantLauncherEntry({ isQuitting: () => true, present });
     await expect(open()).resolves.toEqual({ opened: false });
-    expect(actions.chooseProject).toHaveBeenCalledTimes(1);
+    expect(present).not.toHaveBeenCalled();
   });
 });

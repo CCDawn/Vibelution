@@ -66,6 +66,22 @@ function fixture(options: { stale?: boolean; noReadyFirst?: boolean; graceful?: 
 }
 
 describe("AssistantHost", () => {
+  it("binds panel operations to the pinned resident and rejects foreign identities", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    fetchImpl.mockImplementationOnce(async (url, options) => {
+      expect(String(url)).toContain("/api/assistant/panels");
+      expect(JSON.parse(String(options?.body))).toEqual({ operation: "panelAffairs", kind: "todo", status: "open" });
+      return Response.json({ agentId: "a", items: [] });
+    });
+    await expect(host.request({ operation: "panelAffairs", kind: "todo", status: "open" })).resolves.toMatchObject({ agentId: "a" });
+    await expect(host.request({ operation: "panelAffairs", kind: "todo", status: "open", agentId: "other" } as unknown as AssistantHostRequest)).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    fetchImpl.mockResolvedValueOnce(Response.json({ agentId: "other", items: [] }));
+    await expect(host.request({ operation: "panelAffairs", kind: "", status: "" })).rejects.toThrow("ASSISTANT_IDENTITY_INVALID");
+    fetchImpl.mockResolvedValueOnce(Response.json({ agentId: "a", proposals: [{ agentId: "other" }] }));
+    await expect(host.request({ operation: "panelProposals" })).rejects.toThrow("ASSISTANT_IDENTITY_INVALID");
+    await host.stop();
+  });
   it("only transports bound dispatch decisions with exact identities", async () => {
     const { host, fetchImpl } = fixture({ graceful: true });
     await host.start();

@@ -29,6 +29,29 @@ import type {
 
 export const LAUNCHER_ENDPOINT = "/api/launcher";
 export const LAUNCHER_IPC_HOST_NOT_READY = "LAUNCHER_IPC_HOST_NOT_READY";
+export class LauncherProjectNotSelectedError extends Error {
+  readonly code = "LAUNCHER_PROJECT_NOT_SELECTED";
+  constructor() { super("尚未选择本地项目。"); this.name = "LauncherProjectNotSelectedError"; }
+}
+export function isLauncherProjectNotSelected(error: unknown): boolean {
+  return error instanceof LauncherProjectNotSelectedError || (error instanceof Error && error.message === "LAUNCHER_PROJECT_NOT_SELECTED");
+}
+type LauncherWindowActions = { returnToDesktop?: () => Promise<void>; selectProject?: () => Promise<{ connected: boolean }> };
+function launcherWindowActions(): LauncherWindowActions {
+  const bridge = (globalThis as { vibelutionLauncher?: LauncherWindowActions }).vibelutionLauncher;
+  if (!bridge) throw new Error("请在桌面 Launcher 中使用此操作。");
+  return bridge;
+}
+export function returnLauncherToDesktop(): Promise<void> {
+  const bridge = launcherWindowActions();
+  if (!bridge.returnToDesktop) return Promise.reject(new Error("当前 Launcher 需要更新后才能返回桌宠。"));
+  return bridge.returnToDesktop();
+}
+export function selectLauncherProject(): Promise<{ connected: boolean }> {
+  const bridge = launcherWindowActions();
+  if (!bridge.selectProject) return Promise.reject(new Error("当前 Launcher 需要更新后才能选择项目。"));
+  return bridge.selectProject();
+}
 
 /**
  * Client-synthesized start-block code, stamped onto legacy branch-instance
@@ -233,6 +256,7 @@ function unwrapLauncherIpcInvokeResult<T>(result: LauncherIpcInvokeResult): T {
   if (result.error.code === LAUNCHER_IPC_HOST_NOT_READY) {
     throw new LauncherControlPlaneNotReadyError(result.error.message);
   }
+  if (result.error.code === "LAUNCHER_PROJECT_NOT_SELECTED") throw new LauncherProjectNotSelectedError();
   throw new Error(result.error.message || `Launcher IPC request failed: ${result.error.code}`);
 }
 

@@ -115,8 +115,13 @@ function toIsoInputValue(value: string): string {
   return date.toISOString();
 }
 
+export type PersonalAssistantAffairsTransport = { cacheKey: readonly unknown[] } & Pick<typeof import("../../api/personalAffairs"),
+  "fetchPersonalAffairs" | "addPersonalAffair" | "completePersonalAffair" | "cancelPersonalAffair" | "reopenPersonalAffair" | "setPersonalAffairDue">;
+const workbenchAffairs = { fetchPersonalAffairs, addPersonalAffair, completePersonalAffair, cancelPersonalAffair, reopenPersonalAffair, setPersonalAffairDue };
+
 type PersonalAssistantAffairsProps = {
   agentId: string;
+  transport?: PersonalAssistantAffairsTransport;
   headerAction?: ReactNode;
   focusItemId?: string;
   focusRequestKey?: string;
@@ -126,14 +131,16 @@ type PersonalAssistantAffairsProps = {
 
 export function PersonalAssistantAffairs(props: PersonalAssistantAffairsProps) {
   // Agent identity owns drafts, errors and pending requests, including A → B → A.
-  return <PersonalAssistantAffairsContent key={props.agentId} {...props} />;
+  return <PersonalAssistantAffairsContent key={`${JSON.stringify(props.transport?.cacheKey ?? ["workbench"])}:${props.agentId}`} {...props} />;
 }
 
-function PersonalAssistantAffairsContent({ agentId, headerAction, focusItemId, focusRequestKey,
+function PersonalAssistantAffairsContent({ agentId, transport, headerAction, focusItemId, focusRequestKey,
   focusRequestResult, onFocusRequestHandled }: PersonalAssistantAffairsProps) {
   const { lang } = useShellI18n();
   const copy = COPY[lang];
   const queryClient = useQueryClient();
+  const api = transport ?? workbenchAffairs;
+  const queryPrefix = transport ? [...transport.cacheKey, "personal-affairs", agentId] : ["agents", agentId, "plugins", "personal-affairs"];
   const [kindFilter, setKindFilter] = useState<PersonalAffairKind | "">("");
   const [statusFilter, setStatusFilter] = useState<PersonalAffairStatus | "">("");
   const itemRefs = useRef(new Map<string, HTMLLIElement>());
@@ -152,9 +159,9 @@ function PersonalAssistantAffairsContent({ agentId, headerAction, focusItemId, f
   const [itemErrors, setItemErrors] = useState<Record<string, string>>({});
   const [dueEditor, setDueEditor] = useState<{ itemId: string; value: string } | null>(null);
   const affairs = useQuery({
-    queryKey: queryKeys.personalAffairs(agentId, kindFilter, statusFilter),
+    queryKey: transport ? [...queryPrefix, kindFilter, statusFilter] : queryKeys.personalAffairs(agentId, kindFilter, statusFilter),
     queryFn: ({ signal }) =>
-      fetchPersonalAffairs(agentId, { kind: kindFilter, status: statusFilter, signal }),
+      api.fetchPersonalAffairs(agentId, { kind: kindFilter, status: statusFilter, signal }),
     enabled: Boolean(agentId),
     retry: 1,
     refetchInterval: 5000,
@@ -191,7 +198,7 @@ function PersonalAssistantAffairsContent({ agentId, headerAction, focusItemId, f
     agentId, kindFilter, statusFilter, affairs.isSuccess, affairs.isFetching, data]);
 
   async function refresh() {
-    await queryClient.invalidateQueries({ queryKey: ["agents", agentId, "plugins", "personal-affairs"] });
+    await queryClient.invalidateQueries({ queryKey: queryPrefix });
   }
 
   async function addItem() {
@@ -202,7 +209,7 @@ function PersonalAssistantAffairsContent({ agentId, headerAction, focusItemId, f
     setAdding(true);
     setActionError(null);
     try {
-      await addPersonalAffair(agentId, {
+      await api.addPersonalAffair(agentId, {
         kind: newKind,
         title,
         dueAt: toIsoInputValue(newDue),
@@ -225,12 +232,12 @@ function PersonalAssistantAffairsContent({ agentId, headerAction, focusItemId, f
     setItemActions(current => ({ ...current, [itemId]: action }));
     setItemErrors(current => ({ ...current, [itemId]: "" }));
     try {
-      if (action === "complete") await completePersonalAffair(agentId, itemId);
-      else if (action === "cancel") await cancelPersonalAffair(agentId, itemId);
+      if (action === "complete") await api.completePersonalAffair(agentId, itemId);
+      else if (action === "cancel") await api.cancelPersonalAffair(agentId, itemId);
       else if (action === "due") {
-        await setPersonalAffairDue(agentId, itemId, toIsoInputValue(value));
+        await api.setPersonalAffairDue(agentId, itemId, toIsoInputValue(value));
         setDueEditor(current => current?.itemId === itemId ? null : current);
-      } else await reopenPersonalAffair(agentId, itemId);
+      } else await api.reopenPersonalAffair(agentId, itemId);
       await refresh();
     } catch (error) {
       const message = error instanceof Error ? error.message : copy.saveFailed;

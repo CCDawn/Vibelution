@@ -3,6 +3,18 @@
 
 @source "../../routes/desktopPet/DesktopAssistantRoute.tsx";
 @source "../../routes/desktopPet/LauncherAssistantRoute.tsx";
+@source "../../routes/desktopPet/LauncherAssistantWorkspaceRoute.tsx";
+@source "../../routes/desktopPet/LauncherAssistantWorkspaceRoute.styles.ts";
+@source "../../routes/desktopPet/LauncherAssistantWelcome.tsx";
+@source "../../routes/desktopPet/LauncherAssistantWelcome.styles.ts";
+@source "../../routes/personalAssistant/PersonalAssistantAffairs.tsx";
+@source "../../routes/personalAssistant/PersonalAssistantAffairs.styles.ts";
+@source "../../routes/personalAssistant/PersonalAssistantDialoguePreferences.tsx";
+@source "../../routes/personalAssistant/PersonalAssistantDialoguePreferences.styles.ts";
+@source "../../routes/personalAssistant/PersonalAssistantSettings.tsx";
+@source "../../routes/personalAssistant/PersonalAssistantSettings.styles.ts";
+@source "../../routes/personalAssistant/PersonalAssistantComputerPanel.tsx";
+@source "../../routes/personalAssistant/PersonalAssistantComputerPanel.styles.ts";
 @source "../../routes/desktopPet/DesktopAssistantRoute.styles.ts";
 @source "../../routes/desktopPet/HumanAttentionNoticeStack.tsx";
 @source "../../routes/desktopPet/HumanAttentionNoticeStack.styles.ts";
@@ -66,6 +78,12 @@
 [data-assistant-chat="embedded"] .desktop-assistant-chat-body > .vui-routes-chatcodingroute.layout { flex: 1; height: 100%; max-height: 100%; min-height: 0; grid-template-rows: minmax(0, 1fr); }
 [data-assistant-chat="embedded"] .vui-routes-chatcodingroute.centerPane { margin: 0; border: 0; border-radius: 0; grid-template-rows: minmax(0, 1fr); }
 [data-assistant-chat="embedded"] .vui-routes-chatcodingroute.tabStrip { display: none; }
+
+/* The unified Launcher owns the only surrounding surface. Native transcript
+   and composer semantics remain shared with the ordinary conversation. */
+[data-assistant-navigation-owned="true"] .vui-components-conversationview.surface { border: 0; border-radius: 0; background: var(--vui-surface-chat); }
+[data-assistant-navigation-owned="true"] > [data-vui="dense-ops-chrome"] { background: var(--vui-surface-chat); }
+[data-assistant-navigation-owned="true"][data-assistant-empty="true"] .vui-components-conversationview.emptyStateHost { visibility: hidden; }
 
 /* Embedded Launcher control-surface page: messages, composer, receipts and
    approval cards share a centered reading column inside the launcher main

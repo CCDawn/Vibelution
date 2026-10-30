@@ -133,16 +133,12 @@ describe("Electron main Launcher IPC facade", () => {
     expect(mainSource).toContain("resolveLauncherIpcHost()");
   });
 
-  it("validates the launcher invoke sender against the Launcher control origin only", () => {
+  it("validates the launcher invoke sender against the pinned Launcher main frame", () => {
     const invokeStart = mainSource.indexOf("IPC_CHANNELS.launcherInvoke");
     const invokeEnd = mainSource.indexOf("});", invokeStart);
     const handlerSource = mainSource.slice(invokeStart, invokeEnd);
-    expect(handlerSource).toContain("assertTrustedIpcSender");
+    expect(handlerSource).toContain("isTrustedLauncherControlFrame(event)");
     expect(handlerSource).not.toContain("trustedIpcOrigins()");
-    expect(mainSource).toContain("launcherIpcTrustedOrigins()");
-    const trustedStart = mainSource.indexOf("function launcherIpcTrustedOrigins");
-    const trustedEnd = mainSource.indexOf("}", trustedStart);
-    expect(mainSource.slice(trustedStart, trustedEnd)).toContain("resolveLauncherWindowUrl");
   });
 
   it("keeps the workbench sender away from Launcher control IPC", () => {
@@ -155,7 +151,7 @@ describe("Electron main Launcher IPC facade", () => {
     expect(preloadSource).toContain("onLauncherStateChanged");
     expect(preloadSource).toContain("removeListener(IPC_CHANNELS.launcherStateChanged, wrapped)");
     expect(launcherWindowSource).toContain('additionalArguments: ["--vibelution-window-role=launcher-control"]');
-    expect(mainSource).toContain("launcherIpcTrustedOrigins");
+    expect(mainSource).toContain("isTrustedLauncherControlFrame");
   });
 
   it("admits the registered launcher control window into the assistant bridge by main-held identity", () => {
@@ -165,7 +161,7 @@ describe("Electron main Launcher IPC facade", () => {
     expect(launcherWindowSource).toContain("export function isLauncherControlSender");
     expect(launcherWindowSource).toContain("launcherControlSenders.add(window.webContents)");
     expect(mainSource).toContain(
-      'import { createLauncherWindow, isLauncherControlSender } from "./windows/launcherWindow.js"'
+      'import { createLauncherWindow, isLauncherControlSender, isTrustedLauncherControlFrame } from "./windows/launcherWindow.js"'
     );
     // The launcher control preload branch carries the assistant bridge role.
     expect(preloadSource).toContain(
@@ -188,7 +184,7 @@ describe("Electron main Launcher IPC facade", () => {
     expect(hostDirect).toContain('if (!host) throw new Error("ASSISTANT_NOT_READY")');
     expect(hostDirect).toContain("invokeAssistant(event, payload");
     expect(hostDirect).toContain("isWorkbenchSender: isWorkbenchMainSender");
-    expect(hostDirect).toContain("isLauncherControlSender,");
+    expect(hostDirect).toContain("isTrustedLauncherControlFrame(event)");
     // Geometry verbs stay float-bound; the host verbs never touch the float.
     expect(hostDirect).not.toContain("launcherAssistantWindow.invoke");
     // The pet float keeps its window-coupled path behind the host-direct branch.
@@ -334,7 +330,7 @@ describe("Electron main Launcher IPC facade", () => {
   it("waits for the Electron control plane before dispatching startup and second-instance lifecycle commands", () => {
     // The independent assistant has no project control plane to bootstrap.
     // It must not publish project readiness until a real project attaches.
-    const assistantOnlyBranch = /if \(assistantOnly\) \{\s*await assistantStartup;\s*return;\s*\}/;
+    const assistantOnlyBranch = /if \(assistantOnly\) \{\s*await completeAssistantOnlyStartup\(assistantStartup, process\.argv\.slice\(1\)\);\s*return;\s*\}/;
     expect(assistantOnlyBranch.test(mainSource)).toBe(true);
     const projectSource = mainSource.replace(assistantOnlyBranch, "");
     const bootstrapIndex = projectSource.indexOf("launcherBootstrap = await bootstrapMainOwnedLauncher(paths, initialWorkbenchUrl);");

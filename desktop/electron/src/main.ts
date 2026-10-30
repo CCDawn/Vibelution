@@ -276,7 +276,7 @@ import {
 import { InProcessDesktopSessionStore } from "./windows/desktopSessionStore.js";
 import { ElectronWindowProvider } from "./windows/electronWindowProvider.js";
 import type { ManagedWindowState } from "./windows/windowProviderTypes.js";
-import { createLauncherWindow, isLauncherControlSender } from "./windows/launcherWindow.js";
+import { createLauncherWindow, isLauncherControlSender, isTrustedLauncherControlFrame } from "./windows/launcherWindow.js";
 import { createWorkbenchWindow, isWorkbenchMainSender } from "./windows/workbenchWindow.js";
 import { createPetWindow, isDesktopPetWindowUrl } from "./windows/petWindow.js";
 import { createPetSettingsControl, petSettingsOrigin } from "./windows/petSettingsControl.js";
@@ -606,6 +606,7 @@ let legacyReminderAdmission: {
 } | null = null;
 let stopLauncherAssistantReminders: AssistantReminderPump | null = null;
 let assistantOnly = desktopCliArgs.assistant === true;
+let residentDeepLinksReady = false;
 let pendingAssistantOpen: { show: boolean } | null = null;
 let showAssistantStartupWait: (() => void) | null = null;
 let dismissAssistantStartupWait: (() => void) | null = null;
@@ -627,32 +628,34 @@ async function requestOpenAssistantFromSecondInstance(hiddenPresentation: boolea
 }
 
 let assistantLauncherEntry: ReturnType<typeof createAssistantLauncherEntry> | null = null;
+let assistantLauncherWindowProvider: ElectronWindowProvider | null = null;
+
+function standaloneAssistantLauncherProvider(): ElectronWindowProvider {
+  if (assistantLauncherWindowProvider) return assistantLauncherWindowProvider;
+  const workspaceRoot = String(desktopEnvironment().VIBELUTION_WORKSPACE_ROOT || "").trim();
+  const paths: DesktopPaths = workspaceRoot ? createDesktopPathsForApp() : {
+    schemaVersion: 1, desktopBundleRoot: resolveDesktopBundleRoot(import.meta.url), resourcesRoot: process.resourcesPath,
+    userDataRoot: app.getPath("userData"), workspaceRoot: "",
+  };
+  assistantLauncherWindowProvider = new ElectronWindowProvider(paths, resolveLauncherWindowUrl(desktopEnvironment()),
+    "http://127.0.0.1:8000/", {
+      createLauncherWindow,
+      listLauncherWindows: origin => BrowserWindow.getAllWindows().filter(window => {
+        try { return isLauncherControlSender(window.webContents) || launcherAppOriginFor(window.webContents.getURL()) === origin; } catch { return false; }
+      }),
+      isLauncherControlWindow: window => isLauncherControlSender(window.webContents),
+      shouldInterceptLauncherClose: () => !shutdownApproved,
+      onLauncherHidden: () => launcherAssistantWindow?.open({ show: true }),
+    });
+  return assistantLauncherWindowProvider;
+}
 
 function requestOpenLauncherFromAssistant(): Promise<{ opened: boolean }> {
   assistantLauncherEntry ??= createAssistantLauncherEntry({
     isQuitting: () => shutdownApproved,
-    openExisting: async () => {
-      if (!windowProvider || !launcherBootstrap) return false;
-      await windowProvider.openLauncher();
-      return true;
-    },
-    chooseProject: async () => {
-      const selection = await dialog.showOpenDialog({ title: "选择要管理的 Vibelution 项目", properties: ["openDirectory"] });
-      if (selection.canceled || selection.filePaths.length !== 1) return null;
-      const root = selection.filePaths[0];
-      // A fresh human selection supplies context, never a renderer/model path
-      // or an automatic migration of the old registry's grants.
-      try {
-        if (!statSync(root).isDirectory() || !statSync(join(root, "core", "launcher")).isDirectory()
-          || !statSync(join(root, "web", "package.json")).isFile()) throw new Error();
-      } catch { throw new Error("ASSISTANT_LAUNCHER_UNAVAILABLE"); }
-      return root;
-    },
-    connect: root => ensureProjectControlPlane(root, true),
-    openConnected: async () => {
-      if (!windowProvider) throw new Error("ASSISTANT_LAUNCHER_UNAVAILABLE");
-      await windowProvider.openLauncher();
-      startProjectControlPlaneObservers();
+    present: async () => {
+      await (windowProvider ?? standaloneAssistantLauncherProvider()).openLauncher();
+      launcherAssistantWindow?.hideFloat();
     },
   });
   return assistantLauncherEntry();
@@ -1583,7 +1586,7 @@ ipcMain.handle(IPC_CHANNELS.assistantInvoke, async (event, payload: unknown) => 
       host,
       openLauncher: requestOpenLauncherFromAssistant,
       isWorkbenchSender: isWorkbenchMainSender,
-      isLauncherControlSender,
+      isLauncherControlSender: candidate => candidate === sender && isTrustedLauncherControlFrame(event),
       hide: () => launcherAssistantWindow?.hideFloat(),
       setExpanded: expanded => launcherAssistantWindow?.setFloatExpanded(expanded)
         ?? { expanded, width: 0, height: 0 },
@@ -1721,11 +1724,12 @@ function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapR
       listLauncherWindows: (launcherOrigin) =>
         BrowserWindow.getAllWindows().filter((window) => {
           try {
-            return launcherAppOriginFor(window.webContents.getURL()) === launcherOrigin;
+            return isLauncherControlSender(window.webContents) || launcherAppOriginFor(window.webContents.getURL()) === launcherOrigin;
           } catch {
             return false;
           }
         }),
+      isLauncherControlWindow: window => isLauncherControlSender(window.webContents),
       listWorkbenchWindows: (workbenchOrigin) =>
         BrowserWindow.getAllWindows().filter((window) => {
           try {
@@ -1740,6 +1744,7 @@ function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapR
         updateLauncherWindowTruth();
       },
       shouldInterceptLauncherClose: () => !shutdownApproved,
+      onLauncherHidden: () => launcherAssistantWindow?.open({ show: true }),
       shouldInterceptWorkbenchClose: () => !shutdownApproved,
       shouldBlockWorkbenchOpen: () => {
         try { assertProjectOpen(paths.workspaceRoot); } catch { return true; }
@@ -2606,7 +2611,7 @@ function focusExistingDesktopShell(): void {
 }
 
 async function handlePublicDeepLinkUrl(rawUrl: string, source: PublicDeepLinkSource): Promise<void> {
-  if (windowProvider === null) {
+  if (windowProvider === null && !residentDeepLinksReady) {
     pendingPublicDeepLinks.push({ rawUrl, source });
     return;
   }
@@ -2614,7 +2619,8 @@ async function handlePublicDeepLinkUrl(rawUrl: string, source: PublicDeepLinkSou
   try {
     const link = parsePublicVibelutionDeepLink(rawUrl);
     if (link.kind === "focus_launcher") {
-      await windowProvider.openLauncher();
+      if (windowProvider) await windowProvider.openLauncher();
+      else await requestOpenLauncherFromAssistant();
     }
     await recordElectronSupervisorEvent(launcherBootstrap, {
       eventCode: "electron.deep_link.accepted",
@@ -2622,7 +2628,8 @@ async function handlePublicDeepLinkUrl(rawUrl: string, source: PublicDeepLinkSou
       fields: { source, action: link.kind }
     });
   } catch (error: unknown) {
-    await windowProvider.openLauncher();
+    if (windowProvider) await windowProvider.openLauncher();
+    else await requestOpenLauncherFromAssistant();
     await recordElectronSupervisorEvent(launcherBootstrap, {
       eventCode: "electron.deep_link.rejected",
       message: "Electron public deep link rejected.",
@@ -2639,6 +2646,14 @@ async function flushPendingPublicDeepLinks(): Promise<void> {
   for (const item of pending) {
     await handlePublicDeepLinkUrl(item.rawUrl, item.source);
   }
+}
+
+async function completeAssistantOnlyStartup(startup: Promise<void>, argv: readonly string[]): Promise<void> {
+  await startup;
+  residentDeepLinksReady = true;
+  const rawUrl = findVibelutionDeepLinkArg(argv);
+  if (rawUrl) await handlePublicDeepLinkUrl(rawUrl, "startup");
+  await flushPendingPublicDeepLinks();
 }
 
 function currentDesktopSessionId(
@@ -5032,11 +5047,6 @@ ipcMain.handle(IPC_CHANNELS.showItemInFolder, (event, rawPath: unknown) => {
   return true;
 });
 
-function launcherIpcTrustedOrigins(): string[] {
-  const desktopEnv = desktopEnvironment();
-  return [launcherAppOriginFor(resolveLauncherWindowUrl(desktopEnv))];
-}
-
 async function orchestrateLauncherLifecycle(
   operation: string,
   payload: LauncherIpcInvokePayload,
@@ -6660,7 +6670,12 @@ function resolveLauncherIpcHost() {
 }
 
 ipcMain.handle(IPC_CHANNELS.launcherInvoke, async (event, payload: LauncherIpcInvokePayload) => {
-  assertTrustedIpcSender(event, launcherIpcTrustedOrigins());
+  if (!isTrustedLauncherControlFrame(event)) throw new Error("blocked launcher window sender");
+  if ((!launcherBootstrap || !windowProvider) && payload?.schemaVersion === 1 && typeof payload.path === "string"
+      && payload.path.split(/[?#]/, 1)[0] === "branch-instances"
+      && (!payload.init?.method || payload.init.method === "GET")) {
+    return { ok: false, error: { code: "LAUNCHER_PROJECT_NOT_SELECTED", message: "LAUNCHER_PROJECT_NOT_SELECTED" } };
+  }
   return await resolveLauncherIpcHost().invoke(payload);
 });
 
@@ -6740,13 +6755,49 @@ ipcMain.handle(IPC_CHANNELS.showLauncherWindow, async (event) => {
   return await windowProvider.openLauncher();
 });
 
+ipcMain.handle(IPC_CHANNELS.returnToDesktop, (event) => {
+  if (!isTrustedLauncherControlFrame(event)) {
+    throw new Error("blocked launcher window sender");
+  }
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (!window || window.isDestroyed()) throw new Error("Launcher window is unavailable.");
+  window.close();
+});
+
+let assistantProjectSelection: Promise<{ connected: boolean }> | null = null;
+ipcMain.handle(IPC_CHANNELS.selectProject, (event) => {
+  if (!isTrustedLauncherControlFrame(event)) {
+    throw new Error("blocked launcher window sender");
+  }
+  if (assistantProjectSelection) return assistantProjectSelection;
+  const operation = (async () => {
+    if (shutdownApproved) return { connected: false };
+    if (windowProvider && launcherBootstrap) return { connected: true };
+    const selection = await dialog.showOpenDialog({ title: "选择要管理的 Vibelution 项目", properties: ["openDirectory"] });
+    if (selection.canceled || selection.filePaths.length !== 1 || shutdownApproved) return { connected: false };
+    const root = selection.filePaths[0];
+    try {
+      if (!statSync(root).isDirectory() || !statSync(join(root, "core", "launcher")).isDirectory()
+        || !statSync(join(root, "web", "package.json")).isFile()) throw new Error();
+    } catch { throw new Error("ASSISTANT_LAUNCHER_UNAVAILABLE"); }
+    if (!await ensureProjectControlPlane(root, true) || shutdownApproved) throw new Error("ASSISTANT_LAUNCHER_UNAVAILABLE");
+    await windowProvider!.openLauncher();
+    await flushPendingPublicDeepLinks();
+    startProjectControlPlaneObservers();
+    return { connected: true };
+  })();
+  assistantProjectSelection = operation;
+  void operation.finally(() => { if (assistantProjectSelection === operation) assistantProjectSelection = null; }).catch(() => undefined);
+  return operation;
+});
+
 ipcMain.handle(IPC_CHANNELS.getLauncherState, (event) => {
-  assertTrustedIpcSender(event, launcherIpcTrustedOrigins());
+  if (!isTrustedLauncherControlFrame(event)) throw new Error("blocked launcher window sender");
   return launcherStateStore.snapshot();
 });
 
 ipcMain.handle(IPC_CHANNELS.refreshLauncherState, async (event) => {
-  assertTrustedIpcSender(event, launcherIpcTrustedOrigins());
+  if (!isTrustedLauncherControlFrame(event)) throw new Error("blocked launcher window sender");
   await reclaimExpiredIsolatedStops();
   return await launcherStateStore.refresh("user_recheck");
 });
@@ -7188,7 +7239,7 @@ app.whenReady()
     if (!desktopCliArgs.smoke) {
       const assistantStartup = startLauncherAssistant(paths);
       if (assistantOnly) {
-        await assistantStartup;
+        await completeAssistantOnlyStartup(assistantStartup, process.argv.slice(1));
         return;
       }
       void assistantStartup.catch(() => console.warn("ASSISTANT_START_FAILED"));
@@ -7314,7 +7365,7 @@ app.on("second-instance", (_event, argv, _workingDirectory, additionalData) => {
       return;
     }
     if (intent.action === "focus_existing_shell") {
-      focusExistingDesktopShell();
+      void requestOpenAssistantFromSecondInstance(false).catch(() => console.warn("ASSISTANT_WINDOW_FAILED"));
     }
   } catch {
     console.warn("ASSISTANT_MODE_CONFLICT");

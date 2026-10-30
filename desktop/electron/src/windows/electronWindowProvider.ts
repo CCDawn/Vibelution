@@ -67,11 +67,13 @@ export type ElectronWindowProviderOptions = {
   createPetWindow?: ElectronWindowFactory;
   launcherContentVersion?: () => string;
   listLauncherWindows?: (launcherOrigin: string) => ElectronWindowLike[];
+  isLauncherControlWindow?: (window: ElectronWindowLike) => boolean;
   listWorkbenchWindows?: (workbenchOrigin: string) => ElectronWindowLike[];
   /** Exact current-process BrowserWindow.getAllWindows, for conservative inventory only. */
   listAllWindows?: () => ElectronWindowLike[];
   reportState?: (state: ManagedWindowState) => void | Promise<void>;
   shouldInterceptLauncherClose?: () => boolean;
+  onLauncherHidden?: () => void | Promise<void>;
   shouldInterceptWorkbenchClose?: () => boolean;
   shouldBlockWorkbenchOpen?: () => boolean;
   /** Trusted main-owned check, re-evaluated after navigation. */
@@ -157,6 +159,7 @@ export class ElectronWindowProvider {
   private readonly listAllWindows?: () => ElectronWindowLike[];
   private readonly reportState: (state: ManagedWindowState) => void | Promise<void>;
   private readonly shouldInterceptLauncherClose: () => boolean;
+  private readonly onLauncherHidden: () => void | Promise<void>;
   private readonly shouldInterceptWorkbenchClose: () => boolean;
   private readonly shouldBlockWorkbenchOpen: () => boolean;
   private readonly assertInstanceOpenAllowed: (instanceId: string) => void;
@@ -187,6 +190,7 @@ export class ElectronWindowProvider {
   private readonly documentTokens = new WeakMap<ElectronWindowLike, object>();
   private readonly documentListeners = new WeakSet<ElectronWindowLike>();
   private readonly listLauncherWindows: (launcherOrigin: string) => ElectronWindowLike[];
+  private readonly isLauncherControlWindow: (window: ElectronWindowLike) => boolean;
   private readonly listWorkbenchWindows: (workbenchOrigin: string) => ElectronWindowLike[];
   private readonly hungCloseDestroyAfterMs: number;
 
@@ -201,10 +205,12 @@ export class ElectronWindowProvider {
     this.createWorkbenchWindow = options.createWorkbenchWindow ?? missingWindowFactory("workbench");
     this.createPetWindow = options.createPetWindow ?? missingWindowFactory("pet");
     this.listLauncherWindows = options.listLauncherWindows ?? (() => []);
+    this.isLauncherControlWindow = options.isLauncherControlWindow ?? (() => false);
     this.listWorkbenchWindows = options.listWorkbenchWindows ?? (() => []);
     this.listAllWindows = options.listAllWindows;
     this.reportState = options.reportState ?? (() => undefined);
     this.shouldInterceptLauncherClose = options.shouldInterceptLauncherClose ?? (() => false);
+    this.onLauncherHidden = options.onLauncherHidden ?? (() => undefined);
     this.shouldInterceptWorkbenchClose = options.shouldInterceptWorkbenchClose ?? (() => false);
     this.shouldBlockWorkbenchOpen = options.shouldBlockWorkbenchOpen ?? (() => false);
     this.assertInstanceOpenAllowed = options.assertInstanceOpenAllowed ?? (() => undefined);
@@ -266,7 +272,8 @@ export class ElectronWindowProvider {
     // Origin discovery also returns the resident assistant. Only the actual
     // control route may be adopted or discarded as a duplicate Launcher.
     const existing = this.listLauncherWindows(launcherOrigin).filter((window) =>
-      !window.isDestroyed() && isLauncherControlWindowUrl(window.webContents.getURL(), safeUrl));
+      !window.isDestroyed() && (isLauncherControlWindowUrl(window.webContents.getURL(), safeUrl)
+        || (!window.webContents.getURL() && this.isLauncherControlWindow(window))));
     const contentVersion = this.currentLauncherContentVersion();
     if (this.launcherWindow && !this.launcherWindow.isDestroyed()) {
       this.reloadLauncherIfStale(this.launcherWindow, contentVersion);
@@ -1111,6 +1118,7 @@ export class ElectronWindowProvider {
         }
         preventWindowClose(event);
         window.hide();
+        void Promise.resolve(this.onLauncherHidden()).catch(() => undefined);
         void this.reportState(this.stateFor("launcher"));
       });
     }
@@ -1607,7 +1615,9 @@ function isLauncherControlWindowUrl(candidate: string, expected: string): boolea
     const route = (path: string) => path.replace(/\/+$/, "") || "/";
     return !url.username && !url.password
       && launcherAppOriginFor(candidate) === launcherAppOriginFor(expected)
-      && route(url.pathname) === route(target.pathname);
+      && (route(target.pathname).startsWith("/launcher/") || route(target.pathname) === "/launcher"
+        ? route(url.pathname) === "/launcher" || route(url.pathname).startsWith("/launcher/")
+        : route(url.pathname) === route(target.pathname));
   } catch { return false; }
 }
 

@@ -23,6 +23,7 @@ const styles = {
   chatHeader: "flex h-14 min-w-0 shrink-0 items-center gap-2 border-b border-[var(--vui-border-subtle)] bg-[var(--vui-surface-toolbar)] px-3 [-webkit-app-region:drag] [&_button]:[-webkit-app-region:no-drag]",
   // Embedded page header: no window-drag region inside the launcher window.
   chatHeaderStatic: "flex h-14 min-w-0 shrink-0 items-center gap-2 border-b border-[var(--vui-border-subtle)] bg-[var(--vui-surface-toolbar)] px-3",
+  chatHeaderUnified: "flex h-16 min-w-0 shrink-0 items-center gap-2 bg-[var(--vui-surface-chat)] px-7 max-[700px]:px-3",
   chatAvatar: "grid size-[30px] shrink-0 place-items-center rounded-lg bg-[var(--vui-selection-bg)] text-[var(--fg-secondary)]",
   chatIdentity: "flex min-w-0 flex-1 flex-col gap-0.5",
   chatTitle: "truncate text-vui-micro-13 font-medium",
@@ -31,6 +32,7 @@ const styles = {
   chatStatusDot: "size-1.5 shrink-0 rounded-full bg-[var(--fg-secondary)] [[data-tone=running]_&]:bg-[var(--vui-pet-accent)] [[data-tone=approval]_&]:bg-[var(--vui-pet-tone-approval)] [[data-tone=error]_&]:bg-[var(--vui-pet-tone-error)] [[data-tone=completed]_&]:bg-[var(--vui-pet-tone-completed)]",
   chatActions: "flex shrink-0 items-center gap-0.5",
   chatBody: "desktop-assistant-chat-body flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
+  unifiedChatBody: "relative",
   receiptPanel: "max-h-28 shrink-0 overflow-auto border-t border-[var(--vui-border-subtle)] px-3 py-2 text-vui-micro-11",
   receiptBoundary: "text-[var(--fg-secondary)]",
   // Embedded receipts: a light collapsible card above the composer, never a

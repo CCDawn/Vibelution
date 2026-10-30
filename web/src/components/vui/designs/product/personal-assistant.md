@@ -1,5 +1,33 @@
 # Personal assistant
 
+## LauncherShell / LauncherNavigation
+
+### 功能
+统一左栏承载个人助理与 Launcher 功能。普通启动先显示桌宠，点击直接打开或聚焦唯一的完整 Launcher；关闭或“回到桌面”隐藏主窗口并恢复桌宠，会话和任务继续由原生 runtime 持有。
+### 适用范围
+Launcher 控制窗口。显式工作区 start/open 和深链仍执行对应动作；普通工作台、分支工作台和 Companion Session 核心不受导航改动影响。
+### 使用方式
+`LauncherShell` 组合 `LauncherTitlebar`、`VSplitWorkspace` 和同一份 `LauncherNavigation`。左栏分为个人助理（对话、平台概览、事务、派遣与回执、电脑操作、对话偏好、助理设置）及 Launcher（项目与分支、诊断、维护、启动设置、版本更新）。右侧只渲染选中内容，无常驻右功能栏。窄屏通过 `VDialog` 展开同一目录，切换后关闭。标题栏只承担身份和原生窗口拖动，版本入口在左栏。
+
+`LauncherProjectRoute` 保留原项目/分支与启动设置的服务和操作保护；未选择项目有独立原生目录选择入口，取消不创建项目、不启动工作区。失败显示错误，不能将所有错误解释为没有项目。`LauncherUpdatesRoute` 复用原 Launcher 更新、确认、保存与序列化重启组件。
+
+### 视觉与边界
+浅色 rail、白色工作面与细分隔线；不再将完整主区域包在重复圆角卡片里。左栏固定两列 recipe，不引入额外宽高持久化。窗口 IPC 只接受已登记 Launcher 主框架及可信 URL，顶层外域导航和重定向拒绝。选择项目不再是打开助理的前置步骤。
+
+## LauncherAssistantWorkspaceRoute
+
+### 功能
+在统一左栏选中的右侧内容中展示真实常驻助理的概览、事务、原生派遣回执、电脑操作、对话偏好与设置；对话复用既有原生 `LauncherAssistantRoute`。
+### 适用范围
+仅 Launcher 控制面；必须先取得常驻助理固定身份。概览边界为“当前助理与已连接项目”，分支/实例计为条目，不伪称全平台扫描或项目总数。
+### 使用方式
+`?panel=` 在封闭列表内选择功能，缺省和未知值进入对话。事务与偏好面板注入同签名 native transport，query、失效边界和跨卸载的偏好保存队列均按宿主隔离。助理设置使用 `presentation="page"`，不再以弹窗替代内容页；默认 Workbench 调用仍使用原 HTTP 与对话框展示。Launcher 外观更新只失效 native 设置，不改写 Workbench 的本地桌宠缓存。
+
+派遣回执保留 Launcher 原生 DTO，不将其强转成 Workbench message/receipt。待审批记录通过对话中的已有完整预览与授权流程处理，不复制第二套审批 writer。电脑面板沿用 Launcher-scoped transport。所有服务写入经固定 native identity、封闭 IPC verbs 与迁移写入保护，不接收任意 URL、端口或 renderer 自报 Agent/Session。
+
+### LauncherAssistantWelcome
+仅在原生会话确认为空、无活动轮次/排队/授权/未知发送时显示欢迎内容。复用 `VButton` 的建议卡只填充既有草稿，不自动发送，不创建新会话，不替换 transcript。普通会话、工具执行中、已发送历史和未知状态不覆盖。桌面与窄屏为输入框保留底部空间，长标题可换行。
+
 ## LauncherAssistantRoute
 
 ### 功能

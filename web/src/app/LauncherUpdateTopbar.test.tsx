@@ -5,6 +5,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import shellSource from "./LauncherShell.tsx?raw";
 import homeSource from "../routes/LauncherRoute.tsx?raw";
+import updatesSource from "../routes/LauncherUpdatesRoute.tsx?raw";
+import navigationSource from "./LauncherNavigation.tsx?raw";
 import { LauncherUpdateTopbar } from "./LauncherUpdateTopbar";
 import { queryKeys } from "../api/queryKeys";
 
@@ -188,8 +190,10 @@ describe("shared Launcher update topbar", () => {
     expect(api.restartLatestLauncher).not.toHaveBeenCalled();
   });
 
-  it("uses one shared shell entry for home and tools instead of a dismissible home-only dialog", () => {
-    expect(shellSource).toContain("<LauncherUpdateTopbar");
+  it("keeps updates at a stable sidebar destination and preserves the shared update workflow", () => {
+    expect(updatesSource).toContain("<LauncherUpdateTopbar");
+    expect(navigationSource).toContain("/launcher/updates");
+    expect(shellSource).toContain("<LauncherTitlebar");
     expect(shellSource).toContain("<Outlet />");
     expect(homeSource).not.toContain("updateDismissed");
     expect(homeSource).not.toContain("restartLatestLauncher");

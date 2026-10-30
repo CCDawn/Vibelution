@@ -15,6 +15,9 @@ import { enqueuePetPreferenceOperation } from "../desktopPet/usePetPreferences";
 
 /** Local settings key shares the personal-assistant query prefix for prefix invalidation. */
 export const assistantSettingsKey = ["personal-assistant", "settings"] as const;
+export type PersonalAssistantSettingsTransport = { cacheKey: readonly unknown[]; invalidationKey?: readonly unknown[] } & Pick<typeof import("../../api/personalAssistant"),
+  "fetchPersonalAssistantSettings" | "updatePersonalAssistantSettings" | "updatePersonalAssistantModel">;
+const workbenchSettings = { fetchPersonalAssistantSettings, updatePersonalAssistantSettings, updatePersonalAssistantModel };
 
 const COPY = {
   zh: {
@@ -71,17 +74,22 @@ export function assistantModelChoiceLabel(choice: PersonalAssistantModelChoice, 
  Luo Live2D — the same assistant, appearance only), and the whitelisted
  * dialogue model. Backend owns every value; nothing is provisioned here.
  */
-export function PersonalAssistantSettings({ open, onOpenChange, children }: {
+export function PersonalAssistantSettings({ open, onOpenChange, children, transport, presentation = "dialog" }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   children?: ReactNode;
+  transport?: PersonalAssistantSettingsTransport;
+  presentation?: "dialog" | "page";
 }) {
   const { lang } = useShellI18n();
   const copy = COPY[lang];
   const queryClient = useQueryClient();
+  const api = transport ?? workbenchSettings;
+  const settingsKey = transport ? [...transport.cacheKey, "settings"] : assistantSettingsKey;
+  const identityKey = transport?.invalidationKey ?? transport?.cacheKey ?? queryKeys.personalAssistant();
   const settings = useQuery({
-    queryKey: assistantSettingsKey,
-    queryFn: ({ signal }) => fetchPersonalAssistantSettings({ signal }),
+    queryKey: settingsKey,
+    queryFn: ({ signal }) => api.fetchPersonalAssistantSettings({ signal }),
     enabled: open, staleTime: 0, retry: false,
   });
   const [nameDraft, setNameDraft] = useState("");
@@ -104,9 +112,9 @@ export function PersonalAssistantSettings({ open, onOpenChange, children }: {
     setNamePending(true);
     setFeedback("");
     try {
-      await updatePersonalAssistantSettings({ displayName: next });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.personalAssistant() });
-      await queryClient.invalidateQueries({ queryKey: assistantSettingsKey });
+      await api.updatePersonalAssistantSettings({ displayName: next });
+      await queryClient.invalidateQueries({ queryKey: identityKey });
+      await queryClient.invalidateQueries({ queryKey: settingsKey });
       setFeedback(copy.saved);
     } catch (error) {
       setFeedback(copy.saveFailed + (error instanceof Error ? error.message : ""));
@@ -120,12 +128,14 @@ export function PersonalAssistantSettings({ open, onOpenChange, children }: {
     setAppearancePending(true);
     setFeedback("");
     try {
-      await enqueuePetPreferenceOperation(async () => {
-        const response = await updatePersonalAssistantSettings({ preferences: { characterId } });
-        if (response.settings) savePetPreferences({ ...readPetPreferences(), characterId: response.settings.preferences.characterId });
-      });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.personalAssistant() });
-      await queryClient.invalidateQueries({ queryKey: assistantSettingsKey });
+      const update = async () => {
+        const response = await api.updatePersonalAssistantSettings({ preferences: { characterId } });
+        // Workbench's fallback cache belongs to that host; Launcher reads its native settings.
+        if (!transport && response.settings) savePetPreferences({ ...readPetPreferences(), characterId: response.settings.preferences.characterId });
+      };
+      if (transport) await update(); else await enqueuePetPreferenceOperation(update);
+      await queryClient.invalidateQueries({ queryKey: identityKey });
+      await queryClient.invalidateQueries({ queryKey: settingsKey });
       setFeedback(copy.saved);
     } catch (error) {
       setFeedback(copy.saveFailed + (error instanceof Error ? error.message : ""));
@@ -139,8 +149,8 @@ export function PersonalAssistantSettings({ open, onOpenChange, children }: {
     setModelPending(true);
     setFeedback("");
     try {
-      await updatePersonalAssistantModel(modelId);
-      await queryClient.invalidateQueries({ queryKey: assistantSettingsKey });
+      await api.updatePersonalAssistantModel(modelId);
+      await queryClient.invalidateQueries({ queryKey: settingsKey });
       setFeedback(copy.saved);
     } catch (error) {
       setFeedback(copy.saveFailed + (error instanceof Error ? error.message : ""));
@@ -149,7 +159,7 @@ export function PersonalAssistantSettings({ open, onOpenChange, children }: {
     }
   }
 
-  return <VDialog open={open} onOpenChange={onOpenChange} title={copy.title} size="sm">
+  const content = <>
     {settings.isError ? <VStateSurface density="compact" tone="error" title={copy.readFailed}
       actions={<VButton variant="secondary" onClick={() => void settings.refetch()}>{copy.retry}</VButton>}>
       {settings.error instanceof Error ? settings.error.message : ""}
@@ -191,5 +201,7 @@ export function PersonalAssistantSettings({ open, onOpenChange, children }: {
           {children}
           {feedback ? <p role="status" className={styles.caption}>{feedback}</p> : null}
         </div>}
-  </VDialog>;
+  </>;
+  return presentation === "page" ? <div className={styles.page}>{content}</div>
+    : <VDialog open={open} onOpenChange={onOpenChange} title={copy.title} size="sm">{content}</VDialog>;
 }

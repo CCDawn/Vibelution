@@ -1453,6 +1453,32 @@ def test_branch_launch_does_not_consume_live_shell_rebuild_signal(tmp_path, monk
     assert spec["args"][-1] == "start"
 
 
+def test_bare_branch_launch_forwards_to_live_shell_without_slot_or_workbench(tmp_path, monkeypatch):
+    from core.launcher import desktop_shell_owner
+
+    branch = tmp_path / ".worktrees" / "task"
+    exe = _write_unpackaged_electron(tmp_path, tree_hash="a" * 40, main_mtime=2_000_000_000)
+    monkeypatch.setattr(desktop_shell, "resolve_desktop_shell_launch_roots", lambda root: (tmp_path, branch))
+    monkeypatch.setattr(desktop_shell_owner, "read_desktop_shell_owner", lambda root: {
+        "owner": "electron", "pid": 123, "executable": str(exe),
+    })
+    monkeypatch.setattr(desktop_shell_owner, "_identity_status", lambda owner: "match")
+    monkeypatch.setattr(desktop_shell, "ensure_unpackaged_electron", lambda root: (_ for _ in ()).throw(AssertionError("must not rebuild live shell")))
+    spec = desktop_shell.resolve_desktop_shell_launch(branch)
+    assert spec["reason"] == "forward_to_live_shell"
+    assert "--project" not in spec["args"] and "--open-workbench" not in spec["args"]
+    assert spec["args"][-1] == "--local-debugging"
+
+
+@pytest.mark.parametrize("operation", ["open", "start", "restart"])
+def test_explicit_branch_launch_keeps_project_and_lifecycle(tmp_path, operation):
+    branch = tmp_path / ".worktrees" / "task"
+    args = desktop_shell._desktop_shell_electron_args("electron", [], shell_root=tmp_path,
+        slot_root=branch, open_workbench=True, lifecycle=operation)
+    assert args[args.index("--project") + 1] == str(branch)
+    assert "--open-workbench" in args and args[-1] == operation
+
+
 def test_ensure_unpackaged_electron_dirty_source_is_current_after_rebuild(tmp_path, monkeypatch):
     tree = "a" * 40
     _write_unpackaged_electron(tmp_path, tree_hash=tree, main_mtime=1_000)

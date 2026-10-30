@@ -395,13 +395,13 @@ describe("resident assistant startup", () => {
       fileExists: () => { throw new Error("project Python probe"); } });
     Object.assign(context, { desktopCliArgs: cliArgs,
       desktopEnvironment: () => applyDesktopLaunchSettingsToEnvironment(inherited, settings),
-      process: { env: {}, resourcesPath: "resources" }, resolveDesktopBundleRoot: vi.fn(() => "sealed-bundle"),
+      process: { env: {}, resourcesPath: "resources", argv: ["app"] }, resolveDesktopBundleRoot: vi.fn(() => "sealed-bundle"),
       createDesktopPathsForApp: vi.fn(() => { throw new Error("project paths must not be created"); }),
       claimElectronDesktopShellOwner: vi.fn(), localDebuggingEnabled: false,
       registerLauncherAppProtocolHandle: vi.fn(), resolveLauncherDistRoot: vi.fn(),
-      resolveLauncherControlPlaneReady: vi.fn(),
+      resolveLauncherControlPlaneReady: vi.fn(), completeAssistantOnlyStartup: vi.fn(async (startup: Promise<void>) => await startup),
     });
-    const begin = source.indexOf("const workspaceRoot = String(desktopEnvironment()");
+    const begin = source.indexOf("const workspaceRoot = String(desktopEnvironment()", source.indexOf("if (runPrimaryWhenReady)"));
     const end = source.indexOf("    if (!await ensureProjectControlPlane(workspaceRoot)) return;", begin);
     expect(begin).toBeGreaterThan(-1); expect(end).toBeGreaterThan(begin);
     const startup = source.slice(begin, end).replaceAll("import.meta.url", '"file:///sealed/main.js"');
@@ -413,6 +413,7 @@ describe("resident assistant startup", () => {
     expect(context.claimElectronDesktopShellOwner).not.toHaveBeenCalled();
     expect(context.desktopPythonPath).not.toHaveBeenCalled();
     expect(host.start).toHaveBeenCalledTimes(1);
+    expect(context.completeAssistantOnlyStartup).toHaveBeenCalledOnce();
   });
 
   it("carries the explicit assistant intent in main's actual lock envelope", () => {
@@ -445,6 +446,20 @@ describe("resident assistant startup", () => {
     await context.start({ ...paths, workspaceRoot: "existing-project" });
     const handler = context.app.on.mock.calls.find(([name]: [string]) => name === "second-instance")[1];
     handler(undefined, ["--assistant"], "", createSingleInstanceEnvelope({ assistant: true }));
+    await vi.waitFor(() => expect(window.open).toHaveBeenCalledTimes(2));
+    expect(window.open).toHaveBeenLastCalledWith({ show: true });
+    expect(host.start).toHaveBeenCalledTimes(1);
+    expect(context.focusExistingDesktopShell).not.toHaveBeenCalled();
+    expect(context.applyPendingProjectSlot).not.toHaveBeenCalled();
+    expect(context.requestOpenWorkbenchFromSecondInstance).not.toHaveBeenCalled();
+  });
+
+  it("opens the resident character on a bare second launch without opening a project or Launcher", async () => {
+    const { context, host, window, paths } = fixture();
+    context.assistantOnly = false;
+    await context.start({ ...paths, workspaceRoot: "existing-project" });
+    const handler = context.app.on.mock.calls.find(([name]: [string]) => name === "second-instance")[1];
+    handler(undefined, [], "", createSingleInstanceEnvelope({}));
     await vi.waitFor(() => expect(window.open).toHaveBeenCalledTimes(2));
     expect(window.open).toHaveBeenLastCalledWith({ show: true });
     expect(host.start).toHaveBeenCalledTimes(1);

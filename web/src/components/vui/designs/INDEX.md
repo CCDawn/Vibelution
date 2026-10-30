@@ -3,6 +3,8 @@
 | Component | Design |
 | --- | --- |
 | `LauncherAssistantRoute` | [product/personal-assistant.md](./product/personal-assistant.md#launcherassistantroute) |
+| `LauncherAssistantWorkspaceRoute` / `LauncherAssistantWelcome` | [product/personal-assistant.md](./product/personal-assistant.md#launcherassistantworkspaceroute) |
+| `LauncherShell` / `LauncherNavigation` / `LauncherTitlebar` / `LauncherProjectRoute` / `LauncherUpdatesRoute` | [product/personal-assistant.md](./product/personal-assistant.md#launchershell--launchernavigation) |
 | `PersonalAssistantRoute` | [product/personal-assistant.md](./product/personal-assistant.md#personalassistantroute) |
 | `PersonalAssistantComputerPanel` | [product/personal-assistant.md](./product/personal-assistant.md#personalassistantcomputerpanel) |
 | `DesktopAssistantRoute` | [product/personal-assistant.md](./product/personal-assistant.md#desktopassistantroute) |

@@ -6,9 +6,9 @@ type Contents = { mainFrame: unknown; isDestroyed(): boolean };
 type Sender = { sender: unknown; senderFrame?: { url: string } | null };
 /**
  * Main-process identity gates held by the assistantInvoke registration site;
- * admission is by exact object identity, never by URL matching. `contents` is
- * the pet float's pinned webContents (absent for host-direct callers whose
- * admission rests on the registered-window gates alone).
+ * admission includes exact object identity. The Launcher gate additionally
+ * checks its pinned frame URL. `contents` is the pet float's pinned
+ * webContents (absent for host-direct callers).
  */
 export type WorkbenchSenderGate = (sender: unknown) => boolean;
 export type AssistantBridgeOwner = {
@@ -33,8 +33,8 @@ export function assertAssistantSender(event: Sender, contents: Contents | undefi
 
 /**
  * Registered main windows (workbench main, launcher control) are admitted by
- * exact webContents identity on their own main frame, with no frame URL
- * requirement. A missing or misbehaving gate fails closed.
+ * exact webContents identity on their own main frame. The registration-site
+ * gate may impose further URL checks. A missing or misbehaving gate fails closed.
  */
 function acceptsRegisteredWindowSender(event: Sender, gate?: WorkbenchSenderGate): boolean {
   if (!gate) return false;
@@ -64,7 +64,7 @@ export async function invokeAssistant(event: Sender, payload: unknown, owner: As
     if (Object.keys(request).length !== 2 || typeof request.expanded !== "boolean") throw new Error("ASSISTANT_REQUEST_INVALID");
     return owner.setExpanded(request.expanded);
   }
-  if (!["status", "detail", "dispatches", "config", "send", "uploadAttachment", "readAttachment", "stop", "continue", "curation", "curate", "approvals", "resolveApproval", "previewDispatchApproval", "decideDispatchApproval", "declineDispatchApproval", "operatorAsset", "computerState", "computerWindows", "computerGrant", "computerControl", "computerConfirm"].includes(String(request.operation))) {
+  if (!["status", "detail", "dispatches", "config", "send", "uploadAttachment", "readAttachment", "stop", "continue", "curation", "curate", "approvals", "resolveApproval", "previewDispatchApproval", "decideDispatchApproval", "declineDispatchApproval", "operatorAsset", "computerState", "computerWindows", "computerGrant", "computerControl", "computerConfirm", "panelSettings", "panelSettingsUpdate", "panelModelUpdate", "panelDialogue", "panelDialogueUpdate", "panelProposals", "panelProposalAccept", "panelProposalReject", "panelAffairs", "panelAffairAdd", "panelAffairComplete", "panelAffairCancel", "panelAffairReopen", "panelAffairDue"].includes(String(request.operation))) {
     throw new Error("ASSISTANT_REQUEST_INVALID");
   }
   try {

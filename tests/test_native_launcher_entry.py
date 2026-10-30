@@ -70,9 +70,7 @@ def test_native_launcher_default_action_runs_as_tray_app():
     assert "Global\\\\Vibelution.Launcher.Tray" in source
     assert "HandleSecondaryTrayLaunch(projectDir)" in source
     assert "EnsureFreshLauncherBackend(projectDir)" in source
-    # Tray default action still launches Electron open through the shared shim;
-    # the trailing false is hiddenPresentation (opt-in e2e flag, user opens show).
-    assert "LaunchCurrentElectronMain(projectDir, \"open\", false, false)" in source
+    assert 'LaunchCurrentElectronMain(projectDir, "", false, false)' in source
     assert "TryLaunchElectronAndWaitForTrayOwner(projectDir)" in source
     assert "RunPythonBridge(projectDir, \"bootstrap\", true, true)" in source
 
@@ -93,13 +91,15 @@ def test_native_launcher_starts_electron_before_last_resort_winforms_tray():
     assert "> 2.0" not in owns
 
 
-def test_native_launcher_secondary_shortcut_launch_refreshes_stale_backend_and_opens_console():
+def test_native_launcher_secondary_shortcut_launch_shows_assistant_without_workbench():
     source = _source()
 
     assert "native_action.secondary_launch" in source
-    # Secondary shortcut still refreshes the backend via an Electron open launch
-    # (HandleSecondaryTrayLaunch); trailing false = hiddenPresentation, user-initiated.
-    assert "LaunchCurrentElectronMain(projectDir, \"open\", false, false)" in source
+    block = source.split("private static int HandleSecondaryTrayLaunch", 1)[1].split(
+        "private static void EnsureFreshLauncherBackend", 1
+    )[0]
+    assert "LaunchResidentAssistant(projectDir)" in block
+    assert "action=show_assistant" in block
     assert "/api/launcher/freshness" in source
     assert "RunPythonBridge(projectDir, \"stop-launcher\", true, false)" in source
     assert "--from-shortcut" in source
@@ -145,9 +145,12 @@ def test_native_launcher_last_resort_tray_bootstraps_electron_without_lifecycle_
     )[0]
 
     assert "ThreadPool.QueueUserWorkItem(delegate { BootstrapLauncherBackend(); });" in source
-    # Last-resort tray bootstrap still launches Electron open (openWorkbench
-    # false = no lifecycle post); trailing false = hiddenPresentation.
-    assert 'LaunchCurrentElectronMain(projectDir, "open", false, false)' in bootstrap_block
+    assert "LaunchResidentAssistant(projectDir)" in bootstrap_block
+    owner_block = source.split("private static bool TryLaunchElectronAndWaitForTrayOwner", 1)[1].split(
+        "private static bool ElectronOwnsDesktopTray", 1
+    )[0]
+    assert "LaunchResidentAssistant(projectDir)" in owner_block
+    assert 'LaunchCurrentElectronMain(projectDir, "open", false, false)' in source.split("private void QueueOpenConsole", 1)[1]
 
 
 def test_native_launcher_non_default_actions_use_console_free_control_api():
@@ -322,6 +325,67 @@ def test_native_launcher_source_compiles_as_windows_executable(tmp_path: Path):
 
     assert result.returncode == 0, result.stderr or result.stdout
     assert output_path.is_file()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native Launcher argument capture")
+@pytest.mark.parametrize("action", ["resident", "open", "start"])
+def test_native_launcher_forwards_real_bridge_arguments_without_implicit_open(tmp_path, action):
+    compiler = Path(os.environ["SystemRoot"]) / "Microsoft.NET/Framework64/v4.0.30319/csc.exe"
+    harness = tmp_path / "Harness.cs"
+    harness.write_text(r'''
+using System;
+using System.Reflection;
+internal static class EntryArgsHarness {
+ public static int Main(string[] args) {
+  var type=typeof(VibelutionLauncher);
+  var flags=BindingFlags.Static|BindingFlags.NonPublic;
+  if(args[1]=="resident") type.GetMethod("LaunchResidentAssistant",flags).Invoke(null,new object[]{args[0]});
+  else type.GetMethod("LaunchCurrentElectronMain",flags).Invoke(null,new object[]{args[0],args[1],true,false});
+  return 0;
+ }
+}
+''', encoding="utf-8")
+    fake = tmp_path / "FakePython.cs"
+    fake.write_text(r'''
+using System;
+using System.IO;
+using System.Web.Script.Serialization;
+internal static class FakePython {
+ public static int Main(string[] args) {
+  File.WriteAllText(Environment.GetEnvironmentVariable("VIBELUTION_TEST_ARGS_FILE"),new JavaScriptSerializer().Serialize(args));
+  return 0;
+ }
+}
+''', encoding="utf-8")
+    fixture_project = tmp_path / "project"
+    scripts = fixture_project / "scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "vibelution_desktop_entry.py").write_text("# fixture", encoding="utf-8")
+    venv = fixture_project / ".venv" / "Scripts"
+    venv.mkdir(parents=True)
+    pythonw = venv / "pythonw.exe"
+    exe = tmp_path / "harness.exe"
+    common = [str(compiler), "/nologo", "/utf8output", "/target:exe", "/reference:System.Web.Extensions.dll"]
+    flags = subprocess.CREATE_NO_WINDOW
+    for command in (
+        common + [f"/out:{pythonw}", str(fake)],
+        common + ["/main:EntryArgsHarness", "/reference:System.Windows.Forms.dll", "/reference:System.Drawing.dll",
+                  f"/out:{exe}", str(NATIVE_ENTRY_SOURCE), str(NATIVE_ENTRY_SOURCE.with_name("ManagedDesktopAssistant.cs")), str(harness)],
+    ):
+        built = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace", creationflags=flags, timeout=30)
+        assert built.returncode == 0, built.stdout + built.stderr
+    captured = tmp_path / "args.json"
+    run = subprocess.run([str(exe), str(fixture_project), action], capture_output=True, text=True,
+        env={**os.environ, "VIBELUTION_TEST_ARGS_FILE": str(captured)}, creationflags=flags, timeout=15)
+    assert run.returncode == 0, run.stdout + run.stderr
+    args = json.loads(captured.read_text(encoding="utf-8-sig"))
+    assert args[args.index("--action") + 1] == "launch-desktop-shell"
+    assert args[args.index("--workspace") + 1] == str(fixture_project)
+    if action == "resident":
+        assert "--then-lifecycle" not in args and "--open-workbench" not in args
+    else:
+        assert args[args.index("--then-lifecycle") + 1] == action
+        assert "--open-workbench" in args
 
 
 @pytest.fixture(scope="module")

@@ -9,7 +9,7 @@ export function resolveLauncherWindowUrl(env: NodeJS.ProcessEnv): string {
     }
     return assertLocalHttpUrl(explicit, new URL(explicit).origin);
   }
-  return resolveLauncherAppUrl();
+  return `${resolveLauncherAppUrl()}/assistant`;
 }
 
 /**

@@ -12,6 +12,7 @@ import {
 } from "../../api/virtualHumanLife";
 import type {
   VirtualHumanDialogueSettings,
+  VirtualHumanDialogueSettingsUpdate,
   VirtualHumanPreferenceProposalList,
 } from "../../api/types/virtualHumanLife";
 import { PersonalAssistantDialoguePreferences } from "./PersonalAssistantDialoguePreferences";
@@ -98,6 +99,48 @@ async function chooseOption(ariaLabel: string, optionText: string) {
 }
 
 describe("PersonalAssistantDialoguePreferences", () => {
+  it("keeps same-agent host caches and save queues independent while Workbench save is pending", async () => {
+    const pending = deferred<VirtualHumanDialogueSettings>();
+    vi.mocked(updateVirtualHumanDialogueSettings).mockReturnValueOnce(pending.promise);
+    const nativeSettings = { ...settings, speakingInitiative: "restrained" as const };
+    const updateNative = vi.fn(async (_agentId: string, payload: VirtualHumanDialogueSettingsUpdate) => ({ ...nativeSettings, ...payload }));
+    const transport = { cacheKey: ["launcher-assistant"], fetchVirtualHumanDialogueSettings: vi.fn(async () => nativeSettings),
+      updateVirtualHumanDialogueSettings: updateNative, fetchVirtualHumanPreferenceProposals: vi.fn(async () => ({ ...proposals, proposals: [] })),
+      acceptVirtualHumanPreferenceProposal, rejectVirtualHumanPreferenceProposal };
+    await act(async () => root.render(<QueryClientProvider client={client}>
+      <section data-host="workbench"><PersonalAssistantDialoguePreferences agentId={settings.agentId} /></section>
+      <section data-host="launcher"><PersonalAssistantDialoguePreferences agentId={settings.agentId} transport={transport} /></section>
+    </QueryClientProvider>));
+    await settle(); await settle();
+    const workbench = container.querySelector('[data-host="workbench"]')!;
+    const launcher = container.querySelector('[data-host="launcher"]')!;
+    expect(workbench.querySelector('[aria-label="说话主动性"]')?.textContent).toContain("自然");
+    expect(launcher.querySelector('[aria-label="说话主动性"]')?.textContent).toContain("克制");
+    const choose = async (host: Element, label: string, option: string) => {
+      await act(async () => (host.querySelector(`button[aria-label="${label}"]`) as HTMLButtonElement).click());
+      const item = await vi.waitFor(() => {
+        const found = [...document.body.querySelectorAll('[role="option"]')].find(node => node.textContent === option);
+        if (!found) throw new Error(`${option} option not rendered`);
+        return found as HTMLElement;
+      });
+      await act(async () => item.click()); await settle();
+    };
+    try {
+      await choose(workbench, "说话主动性", "健谈");
+      await choose(launcher, "提问主动性", "主动");
+      expect(updateVirtualHumanDialogueSettings).toHaveBeenCalledTimes(1);
+      expect(updateNative).toHaveBeenCalledExactlyOnceWith(settings.agentId, expect.objectContaining({ speakingInitiative: "restrained", questionInitiative: "proactive" }));
+      expect(launcher.querySelector('[aria-label="说话主动性"]')?.textContent).toContain("克制");
+      expect(launcher.querySelector('[aria-label="提问主动性"]')?.textContent).toContain("主动");
+      await act(async () => pending.resolve({ ...settings, speakingInitiative: "talkative" }));
+      await settle();
+      expect(workbench.querySelector('[aria-label="说话主动性"]')?.textContent).toContain("健谈");
+      expect(launcher.querySelector('[aria-label="说话主动性"]')?.textContent).toContain("克制");
+    } finally {
+      pending.resolve({ ...settings, speakingInitiative: "talkative" });
+    }
+  });
+
   it("renders the three dialogue settings from the backend with mapped labels", async () => {
     await render();
     expect(fetchVirtualHumanDialogueSettings).toHaveBeenCalledWith("agent-companion", expect.anything());

@@ -139,15 +139,25 @@ type DialogueSaveQueue = {
   save: <K extends VirtualHumanDialogueSettingsField>(field: K, value: VirtualHumanDialogueSettings[K], fallback: VirtualHumanDialogueSettings) => Promise<void>;
 };
 const dialogueSaveQueues = new WeakMap<QueryClient, Map<string, DialogueSaveQueue>>();
+export type PersonalAssistantDialogueTransport = { cacheKey: readonly unknown[] } & Pick<typeof import("../../api/virtualHumanLife"),
+  "fetchVirtualHumanDialogueSettings" | "updateVirtualHumanDialogueSettings" | "fetchVirtualHumanPreferenceProposals" | "acceptVirtualHumanPreferenceProposal" | "rejectVirtualHumanPreferenceProposal">;
+const workbenchDialogue = { fetchVirtualHumanDialogueSettings, updateVirtualHumanDialogueSettings, fetchVirtualHumanPreferenceProposals, acceptVirtualHumanPreferenceProposal, rejectVirtualHumanPreferenceProposal };
+function dialogueSettingsKey(agentId: string, transport?: PersonalAssistantDialogueTransport) {
+  return transport ? [...transport.cacheKey, "dialogue-settings", agentId] : queryKeys.virtualHumanDialogueSettings(agentId);
+}
+function dialogueProposalsKey(agentId: string, transport?: PersonalAssistantDialogueTransport) {
+  return transport ? [...transport.cacheKey, "preference-proposals", agentId] : queryKeys.virtualHumanPreferenceProposals(agentId);
+}
 
 /** Accepted changes outlive the panel. At most one pending value per field. */
-function dialogueSaveQueue(queryClient: QueryClient, agentId: string): DialogueSaveQueue {
+function dialogueSaveQueue(queryClient: QueryClient, agentId: string, transport?: PersonalAssistantDialogueTransport): DialogueSaveQueue {
+  const queueId = `${JSON.stringify(transport?.cacheKey ?? ["workbench"])}:${agentId}`;
   let queues = dialogueSaveQueues.get(queryClient);
   if (!queues) { queues = new Map(); dialogueSaveQueues.set(queryClient, queues); }
-  const existing = queues.get(agentId);
+  const existing = queues.get(queueId);
   if (existing) return existing;
   const registry = queues;
-  const queryKey = queryKeys.virtualHumanDialogueSettings(agentId);
+  const queryKey = dialogueSettingsKey(agentId, transport);
   const pending = new Map<VirtualHumanDialogueSettingsField, VirtualHumanDialogueSettings[VirtualHumanDialogueSettingsField]>();
   const listeners = new Set<() => void>();
   let unseenFailure = false;
@@ -159,7 +169,7 @@ function dialogueSaveQueue(queryClient: QueryClient, agentId: string): DialogueS
   const release = () => {
     // Keep StrictMode's immediate unsubscribe/resubscribe on the same queue.
     queueMicrotask(() => {
-      if (!pending.size && !listeners.size && !unseenFailure && registry.get(agentId) === queue) registry.delete(agentId);
+      if (!pending.size && !listeners.size && !unseenFailure && registry.get(queueId) === queue) registry.delete(queueId);
     });
   };
   const queue: DialogueSaveQueue = {
@@ -167,7 +177,7 @@ function dialogueSaveQueue(queryClient: QueryClient, agentId: string): DialogueS
     subscribe: listener => {
       listeners.add(listener);
       unseenFailure = false;
-      registry.set(agentId, queue);
+      registry.set(queueId, queue);
       return () => { listeners.delete(listener); release(); };
     },
     async save(field, value, fallback) {
@@ -189,7 +199,7 @@ function dialogueSaveQueue(queryClient: QueryClient, agentId: string): DialogueS
           [nextField]: nextValue,
         };
         try {
-          confirmed = await updateVirtualHumanDialogueSettings(agentId, payload);
+          confirmed = await (transport ?? workbenchDialogue).updateVirtualHumanDialogueSettings(agentId, payload);
           await queryClient.cancelQueries({ queryKey, exact: true });
           queryClient.setQueryData(queryKey, confirmed);
           publish({ saveStatuses: { ...snapshot.saveStatuses, [nextField]: "saved" } });
@@ -206,37 +216,40 @@ function dialogueSaveQueue(queryClient: QueryClient, agentId: string): DialogueS
       release();
     },
   };
-  registry.set(agentId, queue);
+  registry.set(queueId, queue);
   return queue;
 }
 
-export function PersonalAssistantDialoguePreferences({ agentId, headerAction }: {
+export function PersonalAssistantDialoguePreferences({ agentId, headerAction, transport }: {
   agentId: string;
   headerAction?: ReactNode;
+  transport?: PersonalAssistantDialogueTransport;
 }) {
-  return <DialoguePreferencesForAgent key={agentId} agentId={agentId} headerAction={headerAction} />;
+  return <DialoguePreferencesForAgent key={`${JSON.stringify(transport?.cacheKey ?? ["workbench"])}:${agentId}`} agentId={agentId} headerAction={headerAction} transport={transport} />;
 }
 
-function DialoguePreferencesForAgent({ agentId, headerAction }: {
+function DialoguePreferencesForAgent({ agentId, headerAction, transport }: {
   agentId: string;
   headerAction?: ReactNode;
+  transport?: PersonalAssistantDialogueTransport;
 }) {
   const { lang } = useShellI18n();
   const copy = COPY[lang];
   const queryClient = useQueryClient();
-  const [saves] = useState(() => dialogueSaveQueue(queryClient, agentId));
+  const api = transport ?? workbenchDialogue;
+  const [saves] = useState(() => dialogueSaveQueue(queryClient, agentId, transport));
   const { savingField, pendingValues, saveStatuses, error: saveError } = useSyncExternalStore(saves.subscribe, saves.getSnapshot);
   const [actionError, setActionError] = useState<string | null>(null);
   const [decidingKey, setDecidingKey] = useState<string | null>(null);
   const settings = useQuery({
-    queryKey: queryKeys.virtualHumanDialogueSettings(agentId),
-    queryFn: ({ signal }) => fetchVirtualHumanDialogueSettings(agentId, { signal }),
+    queryKey: dialogueSettingsKey(agentId, transport),
+    queryFn: ({ signal }) => api.fetchVirtualHumanDialogueSettings(agentId, { signal }),
     enabled: Boolean(agentId),
     retry: 1,
   });
   const proposals = useQuery({
-    queryKey: queryKeys.virtualHumanPreferenceProposals(agentId),
-    queryFn: ({ signal }) => fetchVirtualHumanPreferenceProposals(agentId, { signal }),
+    queryKey: dialogueProposalsKey(agentId, transport),
+    queryFn: ({ signal }) => api.fetchVirtualHumanPreferenceProposals(agentId, { signal }),
     enabled: Boolean(agentId),
     retry: 1,
     refetchInterval: 5000,
@@ -259,12 +272,12 @@ function DialoguePreferencesForAgent({ agentId, headerAction }: {
     setActionError(null);
     try {
       if (decision === "accept") {
-        await acceptVirtualHumanPreferenceProposal(agentId, proposalId);
+        await api.acceptVirtualHumanPreferenceProposal(agentId, proposalId);
       } else {
-        await rejectVirtualHumanPreferenceProposal(agentId, proposalId);
+        await api.rejectVirtualHumanPreferenceProposal(agentId, proposalId);
       }
-      await queryClient.invalidateQueries({ queryKey: queryKeys.virtualHumanPreferenceProposals(agentId) });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.virtualHumanDialogueSettings(agentId) });
+      await queryClient.invalidateQueries({ queryKey: dialogueProposalsKey(agentId, transport) });
+      await queryClient.invalidateQueries({ queryKey: dialogueSettingsKey(agentId, transport) });
     } catch (error) {
       setActionError(error instanceof Error ? error.message : copy.saveFailed);
     } finally {

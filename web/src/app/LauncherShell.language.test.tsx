@@ -13,8 +13,8 @@ import { LauncherShell } from "./LauncherShell";
 vi.mock("./LauncherNavigation", () => ({
   LauncherNavigation: ({ lang }: { lang: string }) => <nav data-testid="language-navigation">{lang}</nav>,
 }));
-vi.mock("./LauncherUpdateTopbar", () => ({
-  LauncherUpdateTopbar: ({ lang }: { lang: string }) => <output data-testid="language-topbar">{lang}</output>,
+vi.mock("./LauncherTitlebar", () => ({
+  LauncherTitlebar: ({ lang }: { lang: string }) => <output data-testid="language-topbar">{lang}</output>,
 }));
 vi.mock("./browserTelemetry", () => ({ collectBrowserPageSnapshot: () => ({}), postBrowserTelemetry: vi.fn() }));
 vi.mock("./useWorkbenchLifecycleActions", () => ({ useWorkbenchLifecycleActions: () => ({ request: vi.fn() }) }));

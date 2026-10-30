@@ -11,6 +11,7 @@ import {
 import type { PersonalAssistantSettings } from "../../api/types/personalAssistant";
 import { PersonalAssistantSettings as SettingsDialog, assistantModelChoiceLabel } from "./PersonalAssistantSettings";
 import { enqueuePetPreferenceOperation } from "../desktopPet/usePetPreferences";
+import { readPetPreferences, savePetPreferences } from "../desktopPet/desktopPetPreferences";
 
 vi.mock("../../api/personalAssistant", () => ({
   fetchPersonalAssistantSettings: vi.fn(),
@@ -55,6 +56,44 @@ async function render(open: boolean) {
 }
 
 describe("assistant settings dialog", () => {
+  it("renders Launcher settings as a page and saves its appearance without changing or waiting on Workbench pet cache", async () => {
+    const cacheKey = "vibelution.desktop-pet.preferences.v1";
+    const previousCache = localStorage.getItem(cacheKey);
+    const initialPet = { ...readPetPreferences(), characterId: "dafeiyu" as const };
+    savePetPreferences(initialPet);
+    let release!: () => void;
+    const migration = enqueuePetPreferenceOperation(() => new Promise<void>(resolve => { release = resolve; }));
+    const updateNative = vi.fn(async () => ({ settings: { ...settings, preferences: { ...settings.preferences, characterId: "xiaoluo" as const } } }));
+    const transport = { cacheKey: ["launcher-assistant"], invalidationKey: ["launcher-assistant", "identity"],
+      fetchPersonalAssistantSettings: vi.fn(async () => ({ settings })), updatePersonalAssistantSettings: updateNative,
+      updatePersonalAssistantModel };
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    try {
+      await act(async () => root.render(<QueryClientProvider client={client}>
+        <SettingsDialog open onOpenChange={() => {}} transport={transport} presentation="page" />
+      </QueryClientProvider>));
+      await settle(); await settle();
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+      await act(async () => (container.querySelector('button[role="combobox"][aria-label="默认外观"]') as HTMLButtonElement).click());
+      const option = await vi.waitFor(() => {
+        const found = [...document.body.querySelectorAll('[role="option"]')].find(node => node.textContent === "小洛");
+        if (!found) throw new Error("appearance option not rendered");
+        return found as HTMLElement;
+      });
+      await act(async () => option.click()); await settle();
+      expect(updateNative).toHaveBeenCalledExactlyOnceWith({ preferences: { characterId: "xiaoluo" } });
+      expect(updatePersonalAssistantSettings).not.toHaveBeenCalled();
+      expect(readPetPreferences()).toEqual(initialPet);
+      expect(invalidate.mock.calls.map(([filters]) => filters?.queryKey)).toEqual([
+        ["launcher-assistant", "identity"], ["launcher-assistant", "settings"],
+      ]);
+    } finally {
+      await act(async () => { release(); await migration; });
+      if (previousCache === null) localStorage.removeItem(cacheKey);
+      else localStorage.setItem(cacheKey, previousCache);
+    }
+  });
+
   it("does not read settings while closed and shows the surface once opened", async () => {
     await render(false);
     expect(fetchPersonalAssistantSettings).not.toHaveBeenCalled();

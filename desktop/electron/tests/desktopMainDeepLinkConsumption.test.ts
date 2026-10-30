@@ -46,7 +46,8 @@ describe("Electron main public deep-link consumption", () => {
     expect(source).toContain("createSingleInstanceEnvelope");
     expect(source).toContain("resolveSingleInstanceProvenance(additionalData)");
     expect(source).toContain('intent.action === "focus_existing_shell"');
-    expect(source).toContain("focusExistingDesktopShell()");
+    const bareStart = source.indexOf('if (intent.action === "focus_existing_shell")');
+    expect(source.slice(bareStart, source.indexOf("return;", bareStart))).toContain("requestOpenAssistantFromSecondInstance(false)");
   });
 
   it("recovers the desktop session before a second-instance Workbench open", () => {

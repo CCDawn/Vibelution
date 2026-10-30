@@ -1638,6 +1638,41 @@ describe("Electron window provider state", () => {
     expect(reports).toEqual([{ role: "launcher", open: true, focused: false }]);
   });
 
+  it("restores the pet when the Launcher is hidden without closing the runtime", async () => {
+    const launcherWindow = new FakeWindow(7, "vibelution-launcher://launcher/launcher/assistant", 7070);
+    const onLauncherHidden = vi.fn();
+    const provider = new ElectronWindowProvider(desktopPaths, "vibelution-launcher://launcher/launcher/assistant", "http://127.0.0.1:8000", {
+      createLauncherWindow: () => launcherWindow, shouldInterceptLauncherClose: () => true, onLauncherHidden,
+    });
+    await provider.openLauncher();
+    launcherWindow.emit("close", { preventDefault: vi.fn() });
+    expect(launcherWindow.hideCount).toBe(1);
+    expect(launcherWindow.isDestroyed()).toBe(false);
+    expect(onLauncherHidden).toHaveBeenCalledOnce();
+  });
+
+  it("adopts a Launcher navigated to another section while excluding the pet", async () => {
+    const pet = new FakeWindow(7, "vibelution-launcher://launcher/launcher-assistant", 7070);
+    const launcher = new FakeWindow(8, "vibelution-launcher://launcher/launcher/projects", 8080);
+    const create = vi.fn((url: string) => new FakeWindow(9, url, 9090));
+    const provider = new ElectronWindowProvider(desktopPaths, "vibelution-launcher://launcher/launcher/assistant", "http://127.0.0.1:8000", {
+      createLauncherWindow: create, listLauncherWindows: () => [pet, launcher],
+    });
+    expect((await provider.openLauncher()).windowId).toBe(8);
+    expect(create).not.toHaveBeenCalled();
+    expect(pet.destroyCount).toBe(0);
+  });
+
+  it("adopts a registered Launcher that has not finished its initial navigation", async () => {
+    const launcher = new FakeWindow(8, "", 8080);
+    const create = vi.fn((url: string) => new FakeWindow(9, url, 9090));
+    const provider = new ElectronWindowProvider(desktopPaths, "vibelution-launcher://launcher/launcher/assistant", "http://127.0.0.1:8000", {
+      createLauncherWindow: create, listLauncherWindows: () => [launcher], isLauncherControlWindow: window => window === launcher,
+    });
+    expect((await provider.openLauncher()).windowId).toBe(8);
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it("adopts one existing launcher window and destroys extras", async () => {
     const first = new FakeWindow(7, "http://127.0.0.1:8765/launcher", 7070);
     const extra = new FakeWindow(8, "http://127.0.0.1:8765/launcher", 8080);
@@ -2203,7 +2238,7 @@ describe("Electron URL policy", () => {
 describe("resolveLauncherWindowUrl", () => {
   it("defaults the launcher window to the packaged app protocol", () => {
     expect(resolveLauncherWindowUrl({ NODE_ENV: "production" } as NodeJS.ProcessEnv)).toBe(
-      "vibelution-launcher://launcher/launcher"
+      "vibelution-launcher://launcher/launcher/assistant"
     );
   });
 
@@ -2280,6 +2315,8 @@ describe("IPC channels", () => {
       "requestWindowClose",
       "requestWorkbenchRestart",
       "requestWorkbenchShellUpdate",
+      "returnToDesktop",
+      "selectProject",
       "setDesktopPetExpanded",
       "setThemeAuthority",
       "showItemInFolder",

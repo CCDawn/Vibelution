@@ -73,6 +73,10 @@ describe("preload assistant bridge injection by window role", () => {
     const bridge = exposed.get("vibelutionLauncher")!;
     expect(bridge.launcherInvoke).toBeTypeOf("function");
     expect(bridge.refreshLauncherState).toBeTypeOf("function");
+    await bridge.returnToDesktop();
+    await bridge.selectProject();
+    expect(invoke).toHaveBeenCalledWith(IPC_CHANNELS.returnToDesktop);
+    expect(invoke).toHaveBeenCalledWith(IPC_CHANNELS.selectProject);
     expect(bridge.requestWindowClose).toBeUndefined();
   });
 
@@ -81,5 +85,7 @@ describe("preload assistant bridge injection by window role", () => {
     expect(exposed.has("vibelutionLauncherAssistant")).toBe(false);
     expect(exposed.has("vibelutionLauncherTheme")).toBe(false);
     expect(exposed.has("vibelutionLauncher")).toBe(true);
+    expect(exposed.get("vibelutionLauncher")!.returnToDesktop).toBeUndefined();
+    expect(exposed.get("vibelutionLauncher")!.selectProject).toBeUndefined();
   });
 });

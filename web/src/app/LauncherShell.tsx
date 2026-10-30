@@ -1,9 +1,10 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import { Outlet } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
 
 import {
   getLauncherBranchInstances,
+  getLauncherFreshness,
   getLauncherState,
   hasLauncherStateBridge,
   onLauncherStateChanged,
@@ -13,18 +14,27 @@ import { useLauncherLanguage } from "../i18n/useLauncherLanguage";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "./browserTelemetry";
 import { applyWorkbenchDocumentLanguage } from "./documentLanguage";
 import { currentInstanceWindowTitle } from "./instanceWindowTitle";
-import { LauncherUpdateTopbar } from "./LauncherUpdateTopbar";
+import { LauncherTitlebar } from "./LauncherTitlebar";
 import { LauncherNavigation } from "./LauncherNavigation";
-import { VSplitWorkspace, VSurface, VWorkbenchFrame } from "../components/vui";
+import { VDialog, VSplitWorkspace, VSurface } from "../components/vui";
 import styles from "./LauncherShell.styles";
 import { applyWorkbenchDocumentTheme, readStoredWorkbenchTheme, subscribeStoredWorkbenchTheme } from "./themePreference";
 import { applyUiFontBasePx, readStoredUiFontBasePx } from "./uiFontPreference";
+import { isLauncherUpdateAvailable } from "./updateBanner";
+import { UPDATE_FRESHNESS_INTERVAL_MS, UPDATE_FRESHNESS_QUERY_OPTIONS, useUpdateFreshnessFocus } from "./updateFreshness";
 
 export function LauncherShell() {
   const routeContent = useMemo(() => <Outlet />, []);
   const lang = useLauncherLanguage();
   const [theme, setTheme] = useState(() => readStoredWorkbenchTheme());
+  const [navigationOpen,setNavigationOpen] = useState(false);
   const queryClient = useQueryClient();
+  const location = useLocation();
+  const watchUpdates = !location.pathname.replace(/\/+$/, "").endsWith("/updates");
+  useUpdateFreshnessFocus(queryClient, watchUpdates);
+  const freshnessQuery = useQuery({ ...UPDATE_FRESHNESS_QUERY_OPTIONS, queryKey:queryKeys.launcherFreshness(), queryFn:getLauncherFreshness,
+    enabled:watchUpdates, refetchInterval:watchUpdates ? UPDATE_FRESHNESS_INTERVAL_MS : false, refetchOnWindowFocus:watchUpdates ? "always" : false, retry:false });
+  const updateAvailable = isLauncherUpdateAvailable(freshnessQuery.data);
   const stateBridgeAvailable = hasLauncherStateBridge();
   const branchInstancesQuery = useQuery({
     queryKey: queryKeys.launcherBranchInstances(),
@@ -90,13 +100,16 @@ export function LauncherShell() {
       data-shell="launcher"
       data-browser-role="launcher_control_surface"
     >
-      <LauncherUpdateTopbar lang={lang} branchName={branchInstancesQuery.data?.currentShortName} desktop={stateBridgeAvailable} />
+      <LauncherTitlebar lang={lang} desktop={stateBridgeAvailable} onOpenNavigation={() => setNavigationOpen(true)} />
       <VSplitWorkspace
         className={styles.workspace}
         columnsClassName={styles.columns}
-        sidebar={<LauncherNavigation lang={lang} items={branchInstancesQuery.data?.items ?? []} />}
-        main={<VSurface as="div" tone="panel" padding="none" className={styles.main}><VWorkbenchFrame>{routeContent}</VWorkbenchFrame></VSurface>}
+        sidebar={<div className={styles.navigation}><LauncherNavigation lang={lang} items={branchInstancesQuery.data?.items ?? []} updateAvailable={updateAvailable}/></div>}
+        main={<VSurface as="div" tone="panel" padding="none" className={styles.main}>{routeContent}</VSurface>}
       />
+      <VDialog open={navigationOpen} onOpenChange={setNavigationOpen} title={lang === "zh" ? "功能导航" : "Navigation"} size="sm">
+        <div className={styles.mobileNavigation}><LauncherNavigation lang={lang} items={branchInstancesQuery.data?.items ?? []} onNavigate={() => setNavigationOpen(false)} updateAvailable={updateAvailable}/></div>
+      </VDialog>
     </div>
   );
 }

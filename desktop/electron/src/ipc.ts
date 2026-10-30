@@ -21,6 +21,8 @@ export const IPC_CHANNELS = {
   requestWindowClose: "workbench:request-window-close",
   getLauncherFreshness: "launcher:get-freshness",
   showLauncherWindow: "launcher:show-window",
+  returnToDesktop: "launcher:return-to-desktop",
+  selectProject: "launcher:select-project",
   notifyConversationCompleted: "launcher:notify-conversation-completed",
   conversationNotificationOpened: "launcher:conversation-notification-opened",
   notifyHumanAttention: "launcher:notify-human-attention",

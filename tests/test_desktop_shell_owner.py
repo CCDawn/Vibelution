@@ -117,7 +117,16 @@ def test_winforms_and_electron_sources_share_one_resolver() -> None:
     assert "resolveDesktopShellOwnerPaths" in paths
     assert "claimElectronDesktopShellOwner" in main
     assert "releaseElectronDesktopShellOwner" in main
-    assert main.index("claimElectronDesktopShellOwner(paths.workspaceRoot)") < main.index(
-        "desktopTray = createDesktopTray(paths,"
+    # The tray factory lives in a function defined earlier; check runtime order
+    # at each admission site instead of comparing unrelated source offsets.
+    startup = main.split("if (runPrimaryWhenReady) {", 1)[1]
+    assert startup.index("claimElectronDesktopShellOwner(paths.workspaceRoot)") < startup.index(
+        "await ensureProjectControlPlane(workspaceRoot)"
+    )
+    admission = main.split("async function ensureProjectControlPlane", 1)[1].split(
+        "async function bootstrapProjectControlPlane", 1
+    )[0]
+    assert admission.index("claimElectronDesktopShellOwner(deferredWorkspace)") < admission.index(
+        "await bootstrapProjectControlPlane(paths"
     )
     assert 'File.WriteAllText(canonical' not in cs

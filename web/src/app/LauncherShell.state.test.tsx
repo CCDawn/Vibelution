@@ -19,6 +19,7 @@ const launcherBridge = vi.hoisted(() => {
     listeners,
     getLauncherBranchInstances: vi.fn(),
     getLauncherStatus: vi.fn(),
+    getLauncherFreshness: vi.fn().mockResolvedValue({}),
     getLauncherState: vi.fn(),
     hasLauncherStateBridge: vi.fn(),
     onLauncherStateChanged: vi.fn((listener: Listener) => {
@@ -29,7 +30,7 @@ const launcherBridge = vi.hoisted(() => {
 });
 
 vi.mock("../api/launcher", () => launcherBridge);
-vi.mock("react-router-dom", () => ({ Outlet: () => null }));
+vi.mock("react-router-dom", () => ({ Outlet: () => null, useLocation: () => ({pathname:"/launcher/assistant"}) }));
 vi.mock("./LauncherUpdateTopbar", () => ({ LauncherUpdateTopbar: () => null }));
 vi.mock("./LauncherNavigation", () => ({ LauncherNavigation: () => null }));
 vi.mock("./browserTelemetry", () => ({

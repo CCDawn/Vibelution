@@ -111,6 +111,32 @@ async function clickButton(text: string) {
 }
 
 describe("PersonalAssistantAffairs", () => {
+  it("keeps Launcher affairs and refresh isolated from Workbench for the same agent", async () => {
+    const nativeList = { ...list, items: [{ ...list.items[0], title: "Launcher 事务" }] };
+    const fetchNative = vi.fn(async () => nativeList);
+    const completeNative = vi.fn(async () => ({ agentId: list.agentId, item: nativeList.items[0] }));
+    const transport = { cacheKey: ["launcher-assistant"], fetchPersonalAffairs: fetchNative,
+      addPersonalAffair, completePersonalAffair: completeNative, cancelPersonalAffair, reopenPersonalAffair, setPersonalAffairDue };
+    await act(async () => root.render(<QueryClientProvider client={client}>
+      <section data-host="workbench"><PersonalAssistantAffairs agentId={list.agentId} /></section>
+      <section data-host="launcher"><PersonalAssistantAffairs agentId={list.agentId} transport={transport} /></section>
+    </QueryClientProvider>));
+    await settle(); await settle();
+    const workbench = container.querySelector('[data-host="workbench"]')!;
+    const launcher = container.querySelector('[data-host="launcher"]')!;
+    expect(workbench.textContent).toContain("整理周报");
+    expect(workbench.textContent).not.toContain("Launcher 事务");
+    expect(launcher.textContent).toContain("Launcher 事务");
+    expect(launcher.textContent).not.toContain("整理周报");
+    const workbenchReads = vi.mocked(fetchPersonalAffairs).mock.calls.length;
+    await act(async () => ([...launcher.querySelectorAll("button")].find(button => button.textContent === "完成") as HTMLButtonElement).click());
+    await settle();
+    expect(completeNative).toHaveBeenCalledExactlyOnceWith(list.agentId, "affair-1");
+    expect(completePersonalAffair).not.toHaveBeenCalled();
+    expect(fetchNative).toHaveBeenCalledTimes(2);
+    expect(fetchPersonalAffairs).toHaveBeenCalledTimes(workbenchReads);
+  });
+
   it("keeps other items available while one item is slow and blocks same-tick duplicate/sibling actions", async () => {
     const slow = deferred<Awaited<ReturnType<typeof completePersonalAffair>>>();
     vi.mocked(fetchPersonalAffairs).mockResolvedValue({ ...list, items: list.items.map(item => ({ ...item, status: "open" })) });
