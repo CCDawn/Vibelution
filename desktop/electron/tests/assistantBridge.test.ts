@@ -71,3 +71,53 @@ describe("Launcher assistant private bridge", () => {
     expect(owner.host.request).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("Workbench main window sender admission", () => {
+  function workbenchSenderSetup() {
+    const mainFrame = { url: LAUNCHER_ASSISTANT_URL };
+    const contents = { mainFrame, isDestroyed: () => false };
+    const workbenchFrame = { url: "http://127.0.0.1:8642/launcher-assistant" };
+    const workbenchContents = { mainFrame: workbenchFrame, isDestroyed: () => false };
+    const owner = { contents, host: { start: vi.fn(async () => ({})), request: vi.fn(async (_payload: unknown) => ({ accepted: true })) },
+      hide: vi.fn(), setExpanded: vi.fn((expanded: boolean) => ({ expanded })),
+      // Mirrors the main-held WeakSet registry: exact identity, nothing else.
+      isWorkbenchSender: (sender: unknown) => sender === workbenchContents };
+    return { owner, workbenchContents, event: { sender: workbenchContents as unknown, senderFrame: workbenchFrame as { url: string } | null } };
+  }
+
+  it("admits the registered workbench main webContents by identity without URL matching", async () => {
+    const { owner, event } = workbenchSenderSetup();
+    await expect(invokeAssistant(event, { operation: "status" }, owner)).resolves.toEqual({ accepted: true });
+    expect(owner.host.start).toHaveBeenCalledTimes(1);
+    await expect(invokeAssistant(event, { operation: "hide" }, owner)).resolves.toEqual({ hidden: true });
+    expect(owner.hide).toHaveBeenCalledExactlyOnceWith();
+  });
+
+  it.each<[string, (s: ReturnType<typeof workbenchSenderSetup>) => void]>([
+    ["an unregistered sender identity", s => { s.event.sender = { mainFrame: s.event.senderFrame }; }],
+    ["a subframe of the workbench window", s => { s.event.senderFrame = { url: (s.event.senderFrame as { url: string }).url }; }],
+    ["a missing sender frame", s => { s.event.senderFrame = null; }],
+    ["a gate that refuses the sender", s => { s.owner.isWorkbenchSender = () => false; }],
+    ["a non-object sender", s => { s.event.sender = null; }]
+  ])("fails closed for %s", async (_label, breakSetup) => {
+    const state = workbenchSenderSetup();
+    breakSetup(state);
+    await expect(invokeAssistant(state.event, { operation: "status" }, state.owner)).rejects.toThrow("ASSISTANT_SENDER_FORBIDDEN");
+    expect(state.owner.host.request).not.toHaveBeenCalled();
+    expect(state.owner.host.start).not.toHaveBeenCalled();
+  });
+
+  it("keeps the pet float assertion pet-only when no workbench gate is provided", async () => {
+    const mainFrame = { url: LAUNCHER_ASSISTANT_URL };
+    const contents = { mainFrame, isDestroyed: () => false };
+    const owner = { contents, host: { start: vi.fn(async () => ({})), request: vi.fn(async () => ({})) },
+      hide: vi.fn(), setExpanded: vi.fn() };
+    const workbenchFrame = { url: "http://127.0.0.1:8642/launcher-assistant" };
+    const workbenchContents = { mainFrame: workbenchFrame, isDestroyed: () => false };
+    await expect(invokeAssistant({ sender: workbenchContents, senderFrame: workbenchFrame }, { operation: "status" }, owner))
+      .rejects.toThrow("ASSISTANT_SENDER_FORBIDDEN");
+    expect(owner.host.request).not.toHaveBeenCalled();
+    await expect(invokeAssistant({ sender: contents, senderFrame: mainFrame }, { operation: "status" }, owner))
+      .resolves.toEqual({});
+  });
+});

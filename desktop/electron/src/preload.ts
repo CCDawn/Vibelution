@@ -6,12 +6,20 @@ import { installRendererWindowClose } from "./windows/rendererWindowClose.js";
 const isLauncherControlWindow = process.argv.includes("--vibelution-window-role=launcher-control");
 const isDesktopPetWindow = process.argv.includes("--vibelution-window-role=desktop-pet");
 const isLauncherAssistantWindow = process.argv.includes("--vibelution-window-role=launcher-assistant");
+const isWorkbenchMainWindow = process.argv.includes("--vibelution-window-role=workbench-main");
 
-if (isLauncherAssistantWindow) {
-  contextBridge.exposeInMainWorld("vibelutionLauncherTheme",createAssistantThemePreload(ipcRenderer));
+// Both assistant surfaces — the resident pet float and the workbench main
+// window — carry the identical assistant invoke and theme bridges. The
+// workbench window keeps its full vibelutionLauncher bridge below, so this
+// branch must never expose that name a second time.
+if (isLauncherAssistantWindow || isWorkbenchMainWindow) {
+  contextBridge.exposeInMainWorld("vibelutionLauncherTheme", createAssistantThemePreload(ipcRenderer));
   contextBridge.exposeInMainWorld("vibelutionLauncherAssistant", {
     invoke: (payload: unknown) => ipcRenderer.invoke(IPC_CHANNELS.assistantInvoke, payload),
   });
+}
+
+if (isLauncherAssistantWindow) {
   // The unified resident assistant surface reuses the desktop pet drag and
   // expand IPC. Expose only that pet subset here; the full vibelutionLauncher
   // bridge stays limited to workbench and launcher control windows.

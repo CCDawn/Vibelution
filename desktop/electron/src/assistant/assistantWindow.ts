@@ -3,7 +3,7 @@ import type { DesktopPaths } from "../paths.js";
 import { createPetWindow } from "../windows/petWindow.js";
 import { desktopPetWindowExpandedBounds } from "../windows/petWindowBounds.js";
 import type { AssistantHost } from "./assistantHost.js";
-import { assertAssistantSender, invokeAssistant, LAUNCHER_ASSISTANT_URL } from "./assistantBridge.js";
+import { assertAssistantSender, invokeAssistant, LAUNCHER_ASSISTANT_URL, type WorkbenchSenderGate } from "./assistantBridge.js";
 import type { ThemeSnapshot } from "./themeAuthority.js";
 import { AssistantThemeControl, type AssistantThemeInput, type AssistantThemeResult } from "./assistantThemeControl.js";
 
@@ -101,12 +101,15 @@ export class AssistantWindow {
     } catch { return null; }
   }
 
-  invoke(event: Parameters<typeof invokeAssistant>[0], payload: unknown): Promise<unknown> {
+  /** isWorkbenchSender is the main-held identity gate for workbench main window callers. */
+  invoke(event: Parameters<typeof invokeAssistant>[0], payload: unknown,
+    isWorkbenchSender?: WorkbenchSenderGate): Promise<unknown> {
     const window = this.window;
     if (!window || window.isDestroyed()) return Promise.reject(new Error("ASSISTANT_WINDOW_UNAVAILABLE"));
     return invokeAssistant(event, payload, {
       contents: window.webContents, host: this.host,
       openLauncher: this.openLauncher,
+      isWorkbenchSender,
       hide: () => window.hide(),
       setExpanded: expanded => {
         const current = window.getBounds();

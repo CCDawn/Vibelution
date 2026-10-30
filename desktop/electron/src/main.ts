@@ -276,7 +276,7 @@ import { InProcessDesktopSessionStore } from "./windows/desktopSessionStore.js";
 import { ElectronWindowProvider } from "./windows/electronWindowProvider.js";
 import type { ManagedWindowState } from "./windows/windowProviderTypes.js";
 import { createLauncherWindow } from "./windows/launcherWindow.js";
-import { createWorkbenchWindow } from "./windows/workbenchWindow.js";
+import { createWorkbenchWindow, isWorkbenchMainSender } from "./windows/workbenchWindow.js";
 import { createPetWindow, isDesktopPetWindowUrl } from "./windows/petWindow.js";
 import { createPetSettingsControl, petSettingsOrigin } from "./windows/petSettingsControl.js";
 import { desktopPetWindowExpandedBounds } from "./windows/petWindowBounds.js";
@@ -1570,7 +1570,9 @@ ipcMain.handle(IPC_CHANNELS.assistantThemeResult, (event,payload:unknown) => {
 
 ipcMain.handle(IPC_CHANNELS.assistantInvoke, async (event, payload: unknown) => {
   if (shutdownApproved || !launcherAssistantWindow) throw new Error("ASSISTANT_NOT_READY");
-  return await launcherAssistantWindow.invoke(event, payload);
+  // Only the assistant float (URL-pinned) and the registered workbench main
+  // window (exact webContents identity) may invoke the assistant bridge.
+  return await launcherAssistantWindow.invoke(event, payload, isWorkbenchMainSender);
 });
 
 function createDesktopPathsForApp(): DesktopPaths {
