@@ -5,7 +5,7 @@ import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as R
 import {
   getLauncherAssistantDetail, getLauncherAssistantDispatches, getLauncherAssistantStatus,
   hideLauncherAssistant, sendLauncherAssistantMessage, setLauncherAssistantExpanded,
-  launcherConversationApi,
+  launcherAssistantBridge, launcherConversationApi,
   getLauncherAssistantApprovals, resolveLauncherAssistantApproval,
   previewLauncherDispatchApproval, decideLauncherDispatchApproval, declineLauncherDispatchSummary, launcherDispatchDeclineRevisionIsValid, type LauncherDispatchApprovalPreview,
   stopLauncherAssistantTurn, continueLauncherAssistantTurn,
@@ -40,7 +40,7 @@ import { classifyComposerFiles, mergeComposerAttachmentsWithRejections, type Com
 import {
   launcherAssistantActivity, launcherAssistantPollInterval, launcherAssistantSubmission,
   launcherAssistantQueueReadback, launcherAssistantQueueLabel, launcherAssistantRequestReadback,
-  launcherDispatchLabel, type LauncherAssistantSubmission, type LauncherAssistantQueuedAcceptance,
+  launcherAssistantWideViewport, launcherDispatchLabel, type LauncherAssistantSubmission, type LauncherAssistantQueuedAcceptance,
 } from "./launcherAssistantModel";
 
 const COPY = {
@@ -50,6 +50,7 @@ const COPY = {
     retry: "重试", refresh: "刷新", placeholder: "和个人助理聊一聊…", send: "发送", sending: "正在发送…",
     unknownSend: "尚未确认消息是否收到。输入已保留，重试会核对同一条消息。",
     receipts: "派发回执", receiptBoundary: "任务状态来自原生回执，结果仍需验收。", checking: "正在连接 Launcher…",
+    bridgeMissing: "当前窗口未启用个人助理桥",
   },
   en: {
     title: "Personal assistant", expand: "Open assistant chat", chat: "Chat", hide: "Hide assistant",
@@ -57,6 +58,7 @@ const COPY = {
     retry: "Retry", refresh: "Refresh", placeholder: "Chat with your assistant…", send: "Send", sending: "Sending…",
     unknownSend: "Delivery is unconfirmed. Your input is retained; retry checks the same message.",
     receipts: "Dispatch receipts", receiptBoundary: "Native task status; results still need acceptance.", checking: "Connecting to Launcher…",
+    bridgeMissing: "The personal assistant bridge is not enabled in this window",
   },
 } as const;
 
@@ -84,7 +86,10 @@ export function LauncherAssistantRoute() {
   const client = useQueryClient();
   const { lang } = useShellI18n();
   const copy = COPY[lang];
-  const [expanded, setExpanded] = useState(false);
+  // A full-size host (the workbench main window opening this route directly)
+  // starts in the expanded chat column; the native floating window keeps its
+  // collapsed pet stage until the operator explicitly expands it.
+  const [expanded, setExpanded] = useState(() => launcherAssistantWideViewport(window.innerWidth));
   const [themeSyncState, setThemeSyncState] = useState<"applied" | "local" | "conflict" | "unknown" | "unavailable">("applied");
   const [themePending, setThemePending] = useState(false);
   const themeGate = useRef(false);
@@ -127,9 +132,13 @@ export function LauncherAssistantRoute() {
   const controlGate = useRef(false);
   const refreshedTerminal = useRef<{ sessionId: string; turnId: string } | null>(null);
   const [controlPending, setControlPending] = useState(false);
+  // Bridge presence is a synchronous preload contract: a missing bridge never
+  // recovers through refetch, so the status query stays parked instead of
+  // erroring on every poll while the readable fallback surface is shown.
+  const bridgeReady = launcherAssistantBridgeReady();
   const status = useQuery({
     queryKey: ["launcher-assistant", "status"], queryFn: getLauncherAssistantStatus,
-    retry: false, staleTime: 0, refetchInterval: expanded && visible ? 10_000 : false,
+    enabled: bridgeReady, retry: false, staleTime: 0, refetchInterval: expanded && visible ? 10_000 : false,
   });
   const sessionId = status.data?.assistant.directSessionId || "";
   const sessionIdRef = useRef(sessionId);
@@ -699,6 +708,8 @@ export function LauncherAssistantRoute() {
       ? preferences.idleMessage : sessionActivityStatusLabel(activity, lang)
       : copy.title);
 
+  if (!bridgeReady) return <VStateSurface fill tone="error" title={copy.bridgeMissing} />;
+
   if (status.isError) return <VStateSurface fill tone="error" title={copy.unavailable}
     actions={<VButton onClick={() => void status.refetch()}>{copy.retry}</VButton>}>{status.error.message}</VStateSurface>;
 
@@ -842,4 +853,14 @@ export function LauncherAssistantRoute() {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Same readiness contract as the transport layer; never throws from render. */
+function launcherAssistantBridgeReady(): boolean {
+  try {
+    launcherAssistantBridge();
+    return true;
+  } catch {
+    return false;
+  }
 }

@@ -94,3 +94,16 @@ export function launcherDispatchLabel(row: LauncherAssistantDispatch, lang: "zh"
   return status ? `${lang === "zh" ? "原生任务状态" : "Native task status"}: ${status}`
     : lang === "zh" ? "等待原生任务回执" : "Waiting for native task receipt";
 }
+
+/**
+ * Host tiers for /launcher-assistant. The native assistant floating window is
+ * 300×330 collapsed and 400×530 expanded DIP; a host at or above this width is
+ * a full-size window (the workbench main window opening the route directly)
+ * and starts in the expanded chat instead of the collapsed pet stage. Mirrors
+ * the `min-width: 720px` wide tier in design/route-css/desktop-pet.tailwind.css.
+ */
+export const LAUNCHER_ASSISTANT_WIDE_MIN_WIDTH = 720;
+
+export function launcherAssistantWideViewport(width: number): boolean {
+  return Number.isFinite(width) && width >= LAUNCHER_ASSISTANT_WIDE_MIN_WIDTH;
+}

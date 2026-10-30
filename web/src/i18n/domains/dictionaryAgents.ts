@@ -7,6 +7,7 @@ export const dictionaryAgents = {
   zh: {
     navAgents: "Agent 管理",
     navMemory: "记忆库",
+    navPersonalAssistant: "个人助理",
     navConfig: "配置",
     contextCompression: "压缩阈值",
     compressionDisabled: "已关闭",
@@ -104,6 +105,7 @@ export const dictionaryAgents = {
   en: {
     navAgents: "Agent Management",
     navMemory: "Memory Library",
+    navPersonalAssistant: "Personal Assistant",
     navConfig: "Config",
     contextCompression: "Compression threshold",
     compressionDisabled: "disabled",

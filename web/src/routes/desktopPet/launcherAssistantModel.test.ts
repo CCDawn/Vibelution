@@ -5,12 +5,13 @@ import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ConversationViewProps } from "../../components/conversation/conversationViewTypes";
 import type { SessionDetail, SessionToolApprovalRequest } from "../../api/types";
-import { launcherAssistantActivity, launcherAssistantPollInterval, launcherAssistantSubmission, launcherDispatchLabel, launcherAssistantQueueReadback, launcherAssistantQueueLabel, launcherAssistantRequestReadback } from "./launcherAssistantModel";
+import { launcherAssistantActivity, launcherAssistantPollInterval, launcherAssistantSubmission, launcherDispatchLabel, launcherAssistantQueueReadback, launcherAssistantQueueLabel, launcherAssistantRequestReadback, LAUNCHER_ASSISTANT_WIDE_MIN_WIDTH, launcherAssistantWideViewport } from "./launcherAssistantModel";
 import { LauncherAssistantRoute } from "./LauncherAssistantRoute";
 
 const bridge = vi.hoisted(() => ({
   getLauncherAssistantStatus: vi.fn(), getLauncherAssistantDetail: vi.fn(), getLauncherAssistantDispatches: vi.fn(),
   hideLauncherAssistant: vi.fn(), sendLauncherAssistantMessage: vi.fn(), setLauncherAssistantExpanded: vi.fn(),
+  launcherAssistantBridge: vi.fn(() => ({ invoke: vi.fn(async () => ({})) })),
   launcherConversationApi: { cacheKey: "launcher-test" },
   getLauncherAssistantApprovals: vi.fn(), resolveLauncherAssistantApproval: vi.fn(),
   stopLauncherAssistantTurn: vi.fn(), continueLauncherAssistantTurn: vi.fn(),
@@ -26,6 +27,10 @@ vi.mock("../../components/conversation/LazyConversationView", () => ({
 let root: Root | undefined;
 let container: HTMLDivElement | undefined;
 let client: QueryClient | undefined;
+// Tests simulate the native assistant floating window (400×530 DIP), not the
+// workbench main window, so the route starts in its collapsed pet stage.
+const floatingWindowInnerWidth = 400;
+const defaultInnerWidth = window.innerWidth;
 beforeAll(() => vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true));
 afterAll(() => vi.unstubAllGlobals());
 afterEach(async () => {
@@ -34,10 +39,12 @@ afterEach(async () => {
   container?.remove();
   client?.clear();
   conversation = undefined;
+  window.innerWidth = defaultInnerWidth;
   vi.clearAllMocks();
 });
 
 async function renderAssistant(initialDetail?: Record<string, unknown>, initialStatus?: Record<string, unknown>) {
+  window.innerWidth = floatingWindowInnerWidth;
   bridge.getLauncherAssistantStatus.mockResolvedValue(initialStatus ?? { assistant: { agentId: "a", directSessionId: "s", displayName: "助理" } });
   bridge.getLauncherAssistantDetail.mockResolvedValue(initialDetail ?? { id: "s", status: "ready", messages: [], defaultFileContext: "" });
   bridge.getLauncherAssistantDispatches.mockResolvedValue([]);
@@ -74,6 +81,18 @@ function changedAppearance() {
     ok: true, displayName: "自动生效", modelId: "m", preferences: { characterId: "xiaoluo", showStatus: false, showTitles: true, showCompletion: false, idleMessage: "休息中" },
   } });
 }
+
+describe("Launcher assistant wide-host tier", () => {
+  it("treats the 400 DIP floating window as compact and full-size hosts as wide", () => {
+    expect(LAUNCHER_ASSISTANT_WIDE_MIN_WIDTH).toBe(720);
+    expect(launcherAssistantWideViewport(300)).toBe(false);
+    expect(launcherAssistantWideViewport(400)).toBe(false);
+    expect(launcherAssistantWideViewport(719)).toBe(false);
+    expect(launcherAssistantWideViewport(720)).toBe(true);
+    expect(launcherAssistantWideViewport(2543)).toBe(true);
+    expect(launcherAssistantWideViewport(Number.NaN)).toBe(false);
+  });
+});
 
 describe("Launcher assistant state", () => {
   it("passes persisted provider failures to the shared conversation error panel", async () => {
