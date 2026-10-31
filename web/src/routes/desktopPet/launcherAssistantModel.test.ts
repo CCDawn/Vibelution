@@ -22,7 +22,7 @@ let character: { characterId: string; name: string } | undefined;
 vi.mock("./DesktopPetCharacter", () => ({ DesktopPetCharacter: (props: typeof character) => { character = props; return null; } }));
 let conversation: ConversationViewProps | undefined;
 vi.mock("../../components/conversation/LazyConversationView", () => ({
-  LazyConversationView: (props: ConversationViewProps) => { conversation = props; return null; },
+  LazyConversationView: (props: ConversationViewProps) => { conversation = props; return createElement("div", { "data-testid": "assistant-conversation" }, props.composerPrecedingContent); },
 }));
 let root: Root | undefined;
 let container: HTMLDivElement | undefined;
@@ -819,7 +819,7 @@ describe("Launcher assistant route lifecycle", () => {
     await showConversation();
     expect(container?.textContent).toContain("pwd");
     expect(container?.textContent).not.toContain("始终");
-    const approve = container?.querySelector<HTMLButtonElement>('button[title="仅批准本次（Y）"]');
+    const approve = [...(container?.querySelectorAll<HTMLButtonElement>('[role="dialog"] button') ?? [])].find(button => button.textContent?.endsWith("允许本次"));
     expect(approve).toBeTruthy();
     await act(async () => approve?.click());
     await settle();
@@ -828,7 +828,7 @@ describe("Launcher assistant route lifecycle", () => {
     expect(container?.querySelector('[role="dialog"]')).toBeTruthy();
     bridge.resolveLauncherAssistantApproval.mockResolvedValueOnce({ ...request, status: "declined" });
     bridge.getLauncherAssistantApprovals.mockResolvedValue([]);
-    await act(async () => container?.querySelector<HTMLButtonElement>('button[title="拒绝本次（N）"]')?.click());
+    await act(async () => [...(container?.querySelectorAll<HTMLButtonElement>('[role="dialog"] button') ?? [])].find(button => button.textContent?.endsWith("拒绝"))?.click());
     await settle();
     expect(bridge.resolveLauncherAssistantApproval).toHaveBeenLastCalledWith(request, "decline");
     expect(container?.querySelector('[role="dialog"]')).toBeNull();
