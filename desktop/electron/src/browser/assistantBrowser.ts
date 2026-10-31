@@ -187,7 +187,7 @@ export class AssistantBrowser {
     catch { if (this.pages.get(id) === p && p.generation === generation) this.invalidate(p); return fail("BROWSER_SNAPSHOT_FAILED"); }
     if (!this.pages.has(id) || p.generation !== generation) return fail("BROWSER_SNAPSHOT_STALE");
     if (!data || typeof data !== "object") return fail("BROWSER_SNAPSHOT_FAILED");
-    const raw = data as { text?: unknown; elements?: unknown }; if (!Array.isArray(raw.elements)) return fail("BROWSER_SNAPSHOT_FAILED");
+    const raw = data as { text?: unknown; elements?: unknown; viewportUnavailable?: unknown }; if (raw.viewportUnavailable === true) return fail("BROWSER_PAGE_NOT_VISIBLE"); if (!Array.isArray(raw.elements)) return fail("BROWSER_SNAPSHOT_FAILED");
     const elements = raw.elements.slice(0, 80).map((item: unknown) => { const e = item && typeof item === "object" ? item as Record<string, unknown> : {}; return { ref: bounded(e.ref, 3), role: bounded(e.role, 40), name: bounded(e.name, 160) }; }).filter(e => /^[1-9]\d{0,2}$/.test(e.ref));
     const result: BrowserSnapshot = { pageId: id, snapshotId, url: publicUrl(p.view.webContents.getURL()), title: bounded(p.view.webContents.getTitle(), 200), untrusted: true, text: bounded(raw.text, 8000), elements };
     // JSON encoding can expand control characters substantially. Leave room for the caller envelope.

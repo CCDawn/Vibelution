@@ -21,9 +21,18 @@ function fixture() {
   const context = createContext({ Event: class { constructor(..._args: unknown[]) {} }, document: doc, innerWidth: 600, innerHeight: 400, HTMLElement: Element, HTMLAnchorElement: Anchor, HTMLInputElement: Input, HTMLTextAreaElement: Textarea,
     getComputedStyle: () => ({ visibility: "visible", display: "block", opacity: "1" }) });
   const run = (script: string) => runInNewContext(script, context);
-  return { password, field, button, doc, run, nodes, Anchor };
+  return { password, field, button, doc, run, nodes, Anchor, setViewport: (width: number, height: number) => { context.innerWidth = width; context.innerHeight = height; } };
 }
 describe("isolated browser page scripts", () => {
+  it.each([[0, 400], [600, 0]])("rejects an unlaid-out viewport %i x %i and clears old targets", (width, height) => {
+    const f = fixture(); f.run(snapshotScript("old")); f.setViewport(width, height);
+    expect(f.run(snapshotScript("new"))).toEqual({ viewportUnavailable: true });
+    expect(f.run(targetScript("2", "preview", "", "old"))).toBeNull();
+  });
+  it("allows an empty element list when the viewport has size", () => {
+    const f = fixture(); f.nodes.length = 0;
+    expect(f.run(snapshotScript("empty"))).toEqual({ text: "Visible page text", elements: [] });
+  });
   it("omits password controls and all text input values", () => {
     const f = fixture(); const snap = f.run(SNAPSHOT_SCRIPT);
     expect(JSON.stringify(snap)).not.toContain("secret"); expect(JSON.stringify(snap)).not.toContain("private input value");

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Globe, Maximize2, MessageCircle, Plus, RotateCw, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Globe, Maximize2, MessageCircle, PanelRightClose, PanelRightOpen, Plus, RotateCw, X } from "lucide-react";
 import { browserState, launcherBrowserBridge, safeBrowserUrl, type BrowserOperation, type BrowserState } from "../../api/launcherAssistantBrowser";
 import { WORKBENCH_LAYOUT_IDS } from "../../components/layout/workbenchLayoutIds";
-import { VButton, VInput, VSplitWorkspace } from "../../components/vui";
+import { VButton, VIconButton, VInput, VSplitWorkspace } from "../../components/vui";
 import { LauncherAssistantRoute } from "./LauncherAssistantRoute";
 import styles from "./LauncherAssistantBrowserWorkspace.styles";
 
@@ -15,13 +15,14 @@ export function LauncherAssistantBrowserWorkspace() {
   const [draft, setDraft] = useState(false);
   const [pending, setPending] = useState(false);
   const [full, setFull] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const [narrow, setNarrow] = useState(() => window.innerWidth <= 760);
   const [mobilePage, setMobilePage] = useState<"chat" | "web">("web");
   const viewRef = useRef<HTMLDivElement>(null);
   const stateRevision = useRef(0);
   const ownerPending = useRef(false);
   const active = state.pages.find(page => page.id === state.activePageId);
-  const webVisible = !narrow || mobilePage === "web";
+  const webVisible = !collapsed && (!narrow || mobilePage === "web");
   const canShowPage = webVisible && !draft && Boolean(active);
 
   const run = useCallback(async (operation: BrowserOperation) => {
@@ -43,7 +44,7 @@ export function LauncherAssistantBrowserWorkspace() {
   useEffect(() => {
     const bridge = window.vibelutionLauncherBrowser;
     if (typeof bridge?.onShow !== "function") return;
-    return bridge.onShow(() => { setDraft(false); setMobilePage("web"); });
+    return bridge.onShow(() => { setDraft(false); setCollapsed(false); setMobilePage("web"); });
   }, []);
   useEffect(() => { if (!draft) setAddress(active?.url ?? ""); }, [active?.id, active?.url, draft]);
   useEffect(() => { const resize = () => setNarrow(window.innerWidth <= 760); window.addEventListener("resize", resize); return () => window.removeEventListener("resize", resize); }, []);
@@ -55,7 +56,7 @@ export function LauncherAssistantBrowserWorkspace() {
         const node = viewRef.current;
         const rect = node?.getBoundingClientRect();
         const overlay = document.querySelector('[data-vui="dialog-overlay"], [role="alertdialog"], [role="menu"], [role="listbox"]');
-        const visible = canShowPage && !overlay && document.visibilityState !== "hidden" && node && rect && rect.width > 0 && rect.height > 0
+        const visible = canShowPage && !overlay && node && rect && rect.width > 0 && rect.height > 0
           && getComputedStyle(node).visibility !== "hidden" && getComputedStyle(node).display !== "none";
         const left = rect ? Math.max(0, Math.ceil(rect.left)) : 0;
         const top = rect ? Math.max(0, Math.ceil(rect.top)) : 0;
@@ -91,7 +92,8 @@ export function LauncherAssistantBrowserWorkspace() {
       <div className={styles.controls}><span className={styles.ownership}>{state.takeover ? "你正在操作" : "助理可操作"}</span>
         <VButton isPending={pending} onClick={() => void changeOwner()}>{state.takeover ? "交给助理" : pending ? "等待当前操作" : "接手"}</VButton>
         <VButton variant="ghost" isIconOnly className={styles.icon} aria-label={full ? "回到对话" : "展开网页"} onClick={() => { setFull(!full); if (full && narrow) setMobilePage("chat"); }}>
-          {full ? <MessageCircle size={16} /> : <Maximize2 size={16} />}</VButton></div>
+          {full ? <MessageCircle size={16} /> : <Maximize2 size={16} />}</VButton>
+        <VIconButton variant="ghost" className={styles.icon} label="收起网页" title="收起网页" icon={<PanelRightClose size={16} />} onClick={() => { setFull(false); setCollapsed(true); setMobilePage("chat"); }} /></div>
     </header>
     <div className={styles.tabs} aria-label="网页标签">
       {state.pages.map(page => <div key={page.id} className={`${styles.pageTab} ${page.id === state.activePageId && !draft ? styles.pageTabActive : ""}`}>
@@ -115,9 +117,10 @@ export function LauncherAssistantBrowserWorkspace() {
     </div>
   </section>;
   return <div className={styles.root} data-vui-domain-recipe="launcher-assistant-browser">
-    {narrow ? <div className={styles.mobileSwitch}><VButton variant={mobilePage === "chat" ? "secondary" : "ghost"} aria-pressed={mobilePage === "chat"} onClick={() => { setFull(false); setMobilePage("chat"); }}>对话</VButton><VButton variant={mobilePage === "web" ? "secondary" : "ghost"} aria-pressed={mobilePage === "web"} onClick={() => setMobilePage("web")}>网页</VButton></div> : null}
-    <VSplitWorkspace className={styles.split} resize={{ layoutId: WORKBENCH_LAYOUT_IDS.launcherAssistantBrowser, sidebar: { defaultWidth: 360, minWidth: 280, maxWidth: 520 } }}
-      sidebar={(!narrow && !full) ? <LauncherAssistantRoute embedded navigationOwned /> : undefined}
-      main={narrow && mobilePage === "chat" ? <LauncherAssistantRoute embedded navigationOwned /> : browser} />
+    {narrow ? <div className={styles.mobileSwitch}><VButton variant={!webVisible ? "secondary" : "ghost"} aria-pressed={!webVisible} onClick={() => { setFull(false); setMobilePage("chat"); }}>对话</VButton><VButton variant={webVisible ? "secondary" : "ghost"} aria-pressed={webVisible} onClick={() => { setCollapsed(false); setMobilePage("web"); }}>网页</VButton></div> : null}
+    {collapsed && !narrow ? <VIconButton variant="ghost" className={styles.restore} label="打开网页" title="打开网页" icon={<PanelRightOpen size={16} />} onClick={() => { setCollapsed(false); setMobilePage("web"); }} /> : null}
+    <VSplitWorkspace className={`${styles.split} ${!webVisible ? styles.chatOnly : narrow || full ? styles.webOnly : ""}`} resize={{ layoutId: WORKBENCH_LAYOUT_IDS.launcherAssistantBrowser, sidebar: { defaultWidth: 360, minWidth: 280, maxWidth: 520 } }}
+      sidebar={<LauncherAssistantRoute embedded navigationOwned />}
+      main={browser} />
   </div>;
 }

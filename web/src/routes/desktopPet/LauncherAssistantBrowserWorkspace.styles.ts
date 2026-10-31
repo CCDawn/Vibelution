@@ -17,9 +17,12 @@ const styles = {
   empty: "m-auto flex flex-col items-center gap-3 p-6 text-center text-sm text-[var(--fg-secondary)]",
   viewport: "absolute inset-0",
   viewportHidden: "hidden",
-  root: "flex h-full min-h-0 min-w-0 flex-col",
+  root: "relative flex h-full min-h-0 min-w-0 flex-col",
   mobileSwitch: "flex shrink-0 justify-center gap-2 border-b border-vui-border-subtle p-1",
   split: "min-h-0 flex-1",
+  chatOnly: "[&>[data-vui=split-sidebar]]:!w-full [&>[data-vui=split-sidebar]]:!max-w-none [&>[data-vui=split-sidebar]]:!basis-auto [&>[data-vui=split-sidebar]]:flex-1 [&>[data-vui=split-main]]:!hidden [&>[role=separator]]:!hidden",
+  webOnly: "[&>[data-vui=split-sidebar]]:!hidden [&>[role=separator]]:!hidden",
+  restore: "absolute right-4 top-2 z-10 h-8 w-8 min-w-8 p-0",
 } as const;
 
 export default styles;

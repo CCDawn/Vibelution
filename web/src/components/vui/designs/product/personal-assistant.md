@@ -297,7 +297,7 @@ Launcher 助理的浏览器工作区以原生会话对话和网页并列；网�
 统一导航的「浏览器」进入 `?panel=browser`。
 
 ### 使用方式
-复用 `VSplitWorkspace` 和 `WORKBENCH_LAYOUT_IDS.launcherAssistantBrowser` 保存对话宽度，窄屏在网页和对话之间切换。网页提供最多四个标签、地址导航、历史、刷新、接手与交还；接手等待宿主确认期间显示 pending。空页提供地址输入及哔哩哔哩入口。加载、失败和不可用均有可见状态；网页展开后可回到对话。
+复用 `VSplitWorkspace` 和 `WORKBENCH_LAYOUT_IDS.launcherAssistantBrowser` 保存对话宽度，窄屏在网页和对话之间切换。网页提供最多四个标签、地址导航、历史、刷新、接手与交还；接手等待宿主确认期间显示 pending。空页提供地址输入及哔哩哔哩入口。加载、失败和不可用均有可见状态；网页展开后可回到对话，也可收起网页让对话占满宽度，再通过打开网页恢复，标签及网页状态保持不变。
 
 ### 边界与实现
 网页仅由 `window.vibelutionLauncherBrowser` 所属原生视图呈现；占位元素按内容区坐标报告边界，隐藏、滚动、调整尺寸和卸载时同步更新。地址仅接受不含凭据且不超过 8192 字符的 http(s)，地址栏保留完整查询与片段。`routes/desktopPet/LauncherAssistantBrowserWorkspace.tsx` 组合 `LauncherAssistantRoute`、`VButton`、`VInput` 与布局 recipe；`api/launcherAssistantBrowser.ts` 校验宿主状态。

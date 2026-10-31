@@ -74,6 +74,14 @@ describe("Assistant embedded browser isolation", () => {
     await browser.navigate(id, "https://example.org", "assistant"); await expect(browser.click(id, b.snapshotId, "1", "assistant")).rejects.toMatchObject({ code: "BROWSER_SNAPSHOT_STALE" });
     browser.close(id, "operator"); await expect(browser.snapshot(id)).rejects.toMatchObject({ code: "BROWSER_PAGE_NOT_FOUND" });
   });
+  it("reports an unlaid-out viewport and invalidates the previous snapshot", async () => {
+    const { browser } = setup(); const id = (await browser.open("https://example.com", "operator")).activePageId!; const w = mocks.views[0].webContents;
+    const previous = await browser.snapshot(id); w.execute.mockResolvedValueOnce({ viewportUnavailable: true });
+    await expect(browser.snapshot(id)).rejects.toMatchObject({ code: "BROWSER_PAGE_NOT_VISIBLE" });
+    await expect(browser.click(id, previous.snapshotId, "1", "assistant")).rejects.toMatchObject({ code: "BROWSER_SNAPSHOT_STALE" });
+    w.execute.mockResolvedValueOnce({ text: "empty", elements: [] });
+    expect(await browser.snapshot(id)).toMatchObject({ text: "empty", elements: [] });
+  });
   it("bounds worst-case JSON escaping and provides a validated read-only approval preview", async () => {
     const { browser } = setup(); const id = (await browser.open("https://example.com/?token=secret", "assistant")).activePageId!; const w = mocks.views[0].webContents;
     w.execute.mockResolvedValueOnce({ text: "\u0001".repeat(8000), elements: Array.from({ length: 80 }, (_, i) => ({ ref: String(i + 1), name: "\u0001".repeat(160), role: "\u0001".repeat(40) })) });

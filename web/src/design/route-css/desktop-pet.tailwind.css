@@ -5,6 +5,8 @@
 @source "../../routes/desktopPet/LauncherAssistantRoute.tsx";
 @source "../../routes/desktopPet/LauncherAssistantWorkspaceRoute.tsx";
 @source "../../routes/desktopPet/LauncherAssistantWorkspaceRoute.styles.ts";
+@source "../../routes/desktopPet/LauncherAssistantBrowserWorkspace.tsx";
+@source "../../routes/desktopPet/LauncherAssistantBrowserWorkspace.styles.ts";
 @source "../../routes/desktopPet/LauncherAssistantWelcome.tsx";
 @source "../../routes/desktopPet/LauncherAssistantWelcome.styles.ts";
 @source "../../routes/personalAssistant/PersonalAssistantAffairs.tsx";
