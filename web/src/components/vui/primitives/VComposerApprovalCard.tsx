@@ -1,4 +1,4 @@
-import { ShadcnComposerApprovalCard } from "../../renderers/shadcn/ShadcnComposerApprovalCard";
+import { ShadcnComposerApprovalCard } from "../renderers/shadcn/ShadcnComposerApprovalCard";
 
 export type VComposerApprovalCardProps = {
   lang: "zh" | "en";

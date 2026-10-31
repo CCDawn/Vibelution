@@ -185,4 +185,4 @@ export {
   type VSessionSearchDialogProps,
 } from "./product/workbench-shell";
 export { VMemoryGraphCanvas, type VMemoryGraphCanvasProps } from "./product/memory/VMemoryGraphCanvas";
-export { VComposerApprovalCard, type VComposerApprovalCardProps } from "./product/conversation/VComposerApprovalCard";
+export { VComposerApprovalCard, type VComposerApprovalCardProps } from "./primitives/VComposerApprovalCard";

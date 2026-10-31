@@ -2,7 +2,7 @@ import { Fragment, useEffect, useId, type KeyboardEvent } from "react";
 import { ShieldQuestion, X } from "lucide-react";
 import { ShadcnButton } from "./ShadcnButton";
 
-import type { VComposerApprovalCardProps } from "../../product/conversation/VComposerApprovalCard";
+import type { VComposerApprovalCardProps } from "../../primitives/VComposerApprovalCard";
 
 function isEditableTarget(target: EventTarget | null) {
   return target instanceof Element && Boolean(target.closest("input, textarea, select, [contenteditable]:not([contenteditable='false'])"));
