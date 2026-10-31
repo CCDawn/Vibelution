@@ -421,6 +421,9 @@ class MainControlBroker:
     @staticmethod
     def _unavailable(entry, code="control_unavailable"):
         if entry.action in browser.BROWSER_ACTIONS:
+            if entry.claimed:
+                return {"schemaVersion": 1, "operation": entry.action.removeprefix("browser_"),
+                        "code": "BROWSER_ACTION_OUTCOME_UNKNOWN"}
             return browser.unavailable(entry.action, entry.request)
         if entry.action in appearance.APPEARANCE_ACTIONS:
             return appearance.unavailable(entry.action, entry.request)

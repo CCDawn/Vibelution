@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { EventEmitter } from "node:events";
 import { WebContentsView, session, type BrowserWindow } from "electron";
-import { SNAPSHOT_SCRIPT, targetScript } from "./pageScripts.js";
+import { snapshotScript, targetScript } from "./pageScripts.js";
 
 export type BrowserSource = "operator" | "assistant";
 export type BrowserBounds = { x: number; y: number; width: number; height: number };
@@ -19,6 +19,13 @@ function validUrl(input: unknown): string {
 function publicUrl(input: string): string {
   if (!input || input === "about:blank") return "";
   validUrl(input); return input;
+}
+const EXECUTION_TIMEOUT = Symbol("browser renderer timeout");
+async function withExecutionDeadline<T>(task: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([task, new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(EXECUTION_TIMEOUT), 8_000); })]);
+  } finally { if (timer !== undefined) clearTimeout(timer); }
 }
 function bounded(value: unknown, limit: number): string {
   if (typeof value !== "string") return "";
@@ -70,6 +77,25 @@ export class AssistantBrowser {
   }
   private getPage(id: string): Page { const p = this.pages.get(id); if (!p || p.view.webContents.isDestroyed()) return fail("BROWSER_PAGE_NOT_FOUND"); return p; }
   private invalidate(p: Page): void { p.generation++; p.snapshotId = null; p.snapshotUrl = null; p.refs.clear(); }
+  private forgetDestroyedPage(p: Page): void {
+    if (this.pages.get(p.id) !== p) return;
+    this.invalidate(p); this.pages.delete(p.id);
+    if (this.activePageId === p.id) this.activePageId = this.pages.keys().next().value ?? null;
+    try { this.layout(); } catch { if (this.attached === p) this.attached = null; }
+    this.changed();
+  }
+  private async closeTimedOutPage(p: Page): Promise<void> {
+    const contents = p.view.webContents;
+    if (!contents.isDestroyed()) {
+      await new Promise<void>(resolve => {
+        const destroyed = () => { if (contents.isDestroyed()) { contents.removeListener("destroyed", destroyed); resolve(); } };
+        contents.on("destroyed", destroyed);
+        try { contents.close({ waitForBeforeUnload: false }); } catch { /* Wait for actual destruction; do not release takeover early. */ }
+        destroyed();
+      });
+    }
+    this.forgetDestroyedPage(p);
+  }
   private changed(): void { if (!this.disposed) { try { this.options.onChanged(this.getState()); } catch { /* UI observers cannot own browser lifetime. */ } } }
   getState(): BrowserState {
     return { pages: [...this.pages.values()].filter(p => !p.view.webContents.isDestroyed()).map(p => {
@@ -88,7 +114,7 @@ export class AssistantBrowser {
     w.on("did-fail-load", (_event, code, _description, _url, mainFrame) => { if (mainFrame && code !== -3) { p.loadError = true; this.changed(); } });
     w.on("did-finish-load", () => { p.loadError = false; this.changed(); });
     for (const event of ["did-navigate", "did-navigate-in-page", "did-start-loading", "did-stop-loading", "page-title-updated"] as const) (w as EventEmitter).on(event, () => this.changed());
-    w.on("destroyed", () => { if (this.pages.has(p.id)) { this.invalidate(p); this.pages.delete(p.id); if (this.activePageId === p.id) this.activePageId = this.pages.keys().next().value ?? null; this.layout(); this.changed(); } });
+    w.on("destroyed", () => this.forgetDestroyedPage(p));
     this.pages.set(p.id, p); this.activePageId = p.id; this.layout(); this.changed();
     try { await this.load(p, target); } catch { return fail("BROWSER_NAVIGATION_FAILED"); }
     return this.getState(); } finally { done(); }
@@ -119,13 +145,13 @@ export class AssistantBrowser {
   }
   async snapshot(id: string): Promise<BrowserSnapshot> {
     const done = this.beginAction("assistant"); try {
-    const p = this.getPage(id); if (!publicUrl(p.view.webContents.getURL())) return fail("BROWSER_URL_INVALID"); this.invalidate(p); const generation = p.generation;
-    let data: unknown; try { data = await p.view.webContents.executeJavaScriptInIsolatedWorld(947, [{ code: SNAPSHOT_SCRIPT }]); } catch { return fail("BROWSER_SNAPSHOT_FAILED"); }
+    const p = this.getPage(id); if (!publicUrl(p.view.webContents.getURL())) return fail("BROWSER_URL_INVALID"); this.invalidate(p); const generation = p.generation, snapshotId = randomUUID();
+    let data: unknown; try { data = await withExecutionDeadline(p.view.webContents.executeJavaScriptInIsolatedWorld(947, [{ code: snapshotScript(snapshotId) }])); }
+    catch { if (this.pages.get(id) === p && p.generation === generation) this.invalidate(p); return fail("BROWSER_SNAPSHOT_FAILED"); }
     if (!this.pages.has(id) || p.generation !== generation) return fail("BROWSER_SNAPSHOT_STALE");
     if (!data || typeof data !== "object") return fail("BROWSER_SNAPSHOT_FAILED");
     const raw = data as { text?: unknown; elements?: unknown }; if (!Array.isArray(raw.elements)) return fail("BROWSER_SNAPSHOT_FAILED");
     const elements = raw.elements.slice(0, 80).map((item: unknown) => { const e = item && typeof item === "object" ? item as Record<string, unknown> : {}; return { ref: bounded(e.ref, 3), role: bounded(e.role, 40), name: bounded(e.name, 160) }; }).filter(e => /^[1-9]\d{0,2}$/.test(e.ref));
-    const snapshotId = randomUUID();
     const result: BrowserSnapshot = { pageId: id, snapshotId, url: publicUrl(p.view.webContents.getURL()), title: bounded(p.view.webContents.getTitle(), 200), untrusted: true, text: bounded(raw.text, 8000), elements };
     // JSON encoding can expand control characters substantially. Leave room for the caller envelope.
     while (Buffer.byteLength(JSON.stringify(result), "utf8") > 120 * 1024 && result.elements.length) result.elements.pop();
@@ -138,7 +164,12 @@ export class AssistantBrowser {
     const currentUrl = publicUrl(p.view.webContents.getURL()); if (!currentUrl) return fail("BROWSER_URL_INVALID");
     if (currentUrl !== p.snapshotUrl) return fail("BROWSER_SNAPSHOT_STALE");
     const generation = p.generation; let result: unknown;
-    try { result = await p.view.webContents.executeJavaScriptInIsolatedWorld(947, [{ code: targetScript(ref, operation, value) }]); } catch { return fail(operation === "preview" ? "BROWSER_TARGET_UNAVAILABLE" : "BROWSER_ACTION_OUTCOME_UNKNOWN"); }
+    try { result = await withExecutionDeadline(p.view.webContents.executeJavaScriptInIsolatedWorld(947, [{ code: targetScript(ref, operation, value, snapshotId) }])); }
+    catch (error) {
+      if (this.pages.get(id) === p && p.generation === generation) this.invalidate(p);
+      if (error === EXECUTION_TIMEOUT && operation !== "preview") await this.closeTimedOutPage(p);
+      return fail(operation === "preview" ? "BROWSER_TARGET_UNAVAILABLE" : "BROWSER_ACTION_OUTCOME_UNKNOWN");
+    }
     if (!this.pages.has(id) || p.generation !== generation || p.snapshotId !== snapshotId || this.activePageId !== id || this.attached !== p || p.view.webContents.getURL() !== currentUrl) return fail(operation === "preview" ? "BROWSER_SNAPSHOT_STALE" : "BROWSER_ACTION_OUTCOME_UNKNOWN");
     if (!result || typeof result !== "object") return fail("BROWSER_TARGET_UNAVAILABLE");
     return { p, result: result as Record<string, unknown> };

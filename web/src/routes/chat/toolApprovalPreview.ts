@@ -183,7 +183,7 @@ export function toolApprovalActionPreview(
       const fields = targets as Record<string, string>;
       const quote = (value: string) => JSON.stringify(value).replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g, char => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`);
       return [title,
-        `${lang === "zh" ? "网页" : "Webpage"}: ${fields.url}`,
+        `${lang === "zh" ? "网页" : "Webpage"}: ${quote(fields.url)}`,
         `${lang === "zh" ? "动作" : "Action"}: ${fields.operation === "fill" ? (lang === "zh" ? "填写" : "Fill") : (lang === "zh" ? "点击" : "Click")}`,
         `${lang === "zh" ? "元素" : "Element"}: ${quote(fields.element_name)}`,
         ...(fields.operation === "fill" ? [`${lang === "zh" ? "填写内容" : "Value"}: ${quote(fields.value)}`] : []),

@@ -18,11 +18,15 @@ export const SNAPSHOT_SCRIPT = `(() => {
   return { text, elements };
 })()`;
 
-export function targetScript(ref: string, operation: "click" | "fill" | "preview", value = ""): string {
+export function snapshotScript(snapshotId: string): string {
+  return `(() => { const result = ${SNAPSHOT_SCRIPT}; globalThis.__vibelutionBrowserSnapshot.token = ${JSON.stringify(snapshotId)}; return result; })()`;
+}
+
+export function targetScript(ref: string, operation: "click" | "fill" | "preview", value = "", snapshotId = ""): string {
   // ref is checked as a numeric index by the main process before reaching here.
   return `(() => {
     const s = globalThis.__vibelutionBrowserSnapshot, item = s?.refs.get(${JSON.stringify(ref)}), e = item?.e;
-    if (!e || !s.visible(e) || e.disabled || e.getAttribute('aria-disabled') === 'true' || s.role(e) !== item.r || s.name(e) !== item.n) return null;
+    if ((${JSON.stringify(snapshotId)} && s?.token !== ${JSON.stringify(snapshotId)}) || !e || !s.visible(e) || e.disabled || e.getAttribute('aria-disabled') === 'true' || s.role(e) !== item.r || s.name(e) !== item.n) return null;
     if (e.tagName === 'INPUT' && ['password','hidden','file'].includes(e.type)) return null;
     const r = e.getBoundingClientRect(), x = Math.max(0, Math.min(innerWidth - 1, r.left + r.width / 2)), y = Math.max(0, Math.min(innerHeight - 1, r.top + r.height / 2));
     const top = document.elementFromPoint(x, y);

@@ -267,7 +267,7 @@ export async function runMainControlPump(options: {
           let value: unknown;
           try {
             if (request.action === "operator_image_upload" || request.action === "history_import" || request.action === "affairs_sync" || request.action === "episodic_sync" || request.action === "initial_migration_queue") value = await options.onRequest(request, AbortSignal.any([options.signal,AbortSignal.timeout(request.timeoutMs)]));
-            else if (request.action === "launcher_theme_get" || request.action === "launcher_theme_set") value = await options.onRequest(request,options.signal);
+            else if (isBrowserRequest(request) || request.action === "launcher_theme_get" || request.action === "launcher_theme_set") value = await options.onRequest(request,options.signal);
             else value = await options.onRequest(request);
           }
           catch { /* Unknown result is queried by the same request ID, never re-executed here. */ }

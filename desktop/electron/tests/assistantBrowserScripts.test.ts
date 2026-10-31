@@ -1,6 +1,6 @@
 import { runInNewContext, createContext } from "node:vm";
 import { describe, expect, it } from "vitest";
-import { SNAPSHOT_SCRIPT, targetScript } from "../src/browser/pageScripts.js";
+import { SNAPSHOT_SCRIPT, snapshotScript, targetScript } from "../src/browser/pageScripts.js";
 function fixture() {
   class Element {
     clickCount = 0; isConnected = true; disabled = false; readOnly = false; innerText = ""; type = ""; labels: Array<{ innerText: string }> = []; attrs: Record<string, string> = {};
@@ -48,6 +48,11 @@ describe("isolated browser page scripts", () => {
     const f = fixture(), link = new f.Anchor(); f.nodes.push(link); f.doc.elementFromPoint = () => link; f.run(SNAPSHOT_SCRIPT);
     expect(f.run(targetScript("3", "click"))).toEqual({ navigateUrl: "https://example.com/path?q=1#part" }); expect(link.clickCount).toBe(0);
     link.attrs.href = "https://example.com/\nsecret"; expect(f.run(targetScript("3", "click"))).toEqual({ invalidUrl: true });
+  });
+  it("rejects a stale renderer snapshot token even when the element reference is reused", () => {
+    const f = fixture(); f.run(snapshotScript("old")); f.run(snapshotScript("new"));
+    expect(f.run(targetScript("2", "click", "", "old"))).toBeNull(); expect(f.button.clickCount).toBe(0);
+    expect(f.run(targetScript("2", "click", "", "new"))).toEqual({ clicked: true });
   });
   it("rejects detached, renamed, replaced or obscured elements", () => {
     const f = fixture(); f.run(SNAPSHOT_SCRIPT); expect(f.run(targetScript("2", "preview"))).toMatchObject({ name: "Search now", role: "button" });

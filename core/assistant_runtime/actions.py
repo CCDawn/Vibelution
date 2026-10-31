@@ -199,7 +199,8 @@ def _browser_model_result(value: dict) -> dict:
     if size(result) > limit:
         # A partial address or missing page binding could make a later action
         # target the wrong page. Return a bounded error instead of false success.
-        return {"schemaVersion": 1, "operation": value["operation"], "code": "BROWSER_UNAVAILABLE",
+        code = "BROWSER_UNAVAILABLE" if value["operation"] in {"read", "state"} else "BROWSER_ACTION_OUTCOME_UNKNOWN"
+        return {"schemaVersion": 1, "operation": value["operation"], "code": code,
                 "source": "launcher-browser", "untrustedContent": True}
     return result
 

@@ -90,6 +90,43 @@ describe("Assistant embedded browser isolation", () => {
     w.url = "https://example.com/" + "a".repeat(8192); expect(() => browser.getState()).toThrow("BROWSER_URL_INVALID"); await expect(browser.snapshot(id)).rejects.toMatchObject({ code: "BROWSER_URL_INVALID" });
     w.url = "https://name:password@example.com/"; expect(() => browser.getState()).toThrow("BROWSER_URL_INVALID");
   });
+  it("times out a hung snapshot, releases takeover, and ignores the late result", async () => {
+    const { browser } = setup(); const id = (await browser.open("https://example.com", "operator")).activePageId!; const w = mocks.views[0].webContents;
+    const previous = await browser.snapshot(id); let resolve!: (value: unknown) => void; w.execute.mockImplementationOnce(() => new Promise(r => { resolve = r; }));
+    vi.useFakeTimers(); try {
+      const hung = browser.snapshot(id); const failed = expect(hung).rejects.toMatchObject({ code: "BROWSER_SNAPSHOT_FAILED" }); const takeover = browser.requestTakeover("operator");
+      await vi.advanceTimersByTimeAsync(8_000); await failed; expect((await takeover).takeover).toBe(true); browser.resume("operator");
+      const current = await browser.snapshot(id); resolve({ text: "late", elements: [{ ref: "2", role: "button", name: "old" }] }); await Promise.resolve(); await Promise.resolve();
+      await expect(browser.click(id, previous.snapshotId, "1", "assistant")).rejects.toMatchObject({ code: "BROWSER_SNAPSHOT_STALE" });
+      w.execute.mockResolvedValueOnce({ clicked: true }); await expect(browser.click(id, current.snapshotId, "1", "assistant")).resolves.toBeUndefined();
+    } finally { vi.useRealTimers(); }
+  });
+  it("destroys a timed-out action page before takeover and ignores its late result", async () => {
+    const { browser } = setup(); const id = (await browser.open("https://example.com", "operator")).activePageId!;
+    const otherId = (await browser.open("https://other.example", "operator")).activePageId!; browser.select(id, "operator");
+    const w = mocks.views[0].webContents, other = mocks.views[1].webContents, snap = await browser.snapshot(id);
+    let resolve!: (value: unknown) => void; w.execute.mockImplementationOnce(() => new Promise(r => { resolve = r; }));
+    const close = vi.spyOn(w, "close").mockImplementationOnce(() => { throw new Error("close did not complete"); }); const calls = w.execute.mock.calls.length; vi.useFakeTimers(); try {
+      const click = browser.click(id, snap.snapshotId, "1", "assistant"); const failed = expect(click).rejects.toMatchObject({ code: "BROWSER_ACTION_OUTCOME_UNKNOWN" });
+      let takeoverSettled = false; const takeover = browser.requestTakeover("operator").then(state => { takeoverSettled = true; return state; });
+      await vi.advanceTimersByTimeAsync(8_000); expect(close).toHaveBeenCalledExactlyOnceWith({ waitForBeforeUnload: false });
+      await Promise.resolve(); expect(takeoverSettled).toBe(false); expect(w.destroyed).toBe(false);
+      w.destroyed = true; w.emit("destroyed"); await failed; const state = await takeover;
+      expect(state.takeover).toBe(true); expect(state.pages.map(p => p.id)).toEqual([otherId]); expect(other.destroyed).toBe(false);
+      resolve({ clicked: true }); await Promise.resolve(); await Promise.resolve(); expect(w.execute.mock.calls.length).toBe(calls + 1);
+      expect(browser.getState().pages.map(p => p.id)).toEqual([otherId]);
+    } finally { close.mockRestore(); vi.useRealTimers(); }
+  });
+  it("bounds preview and fill execution with operation-specific error codes", async () => {
+    const { browser } = setup(); const id = (await browser.open("https://example.com", "operator")).activePageId!; const w = mocks.views[0].webContents;
+    const first = await browser.snapshot(id); w.execute.mockImplementationOnce(() => new Promise(() => {})); vi.useFakeTimers(); try {
+      const preview = browser.previewInteraction(id, first.snapshotId, "1"); const failPreview = expect(preview).rejects.toMatchObject({ code: "BROWSER_TARGET_UNAVAILABLE" });
+      await vi.advanceTimersByTimeAsync(8_000); await failPreview;
+      const second = await browser.snapshot(id); w.execute.mockImplementationOnce(() => new Promise(() => {}));
+      const fill = browser.fill(id, second.snapshotId, "1", "text", "assistant"); const failFill = expect(fill).rejects.toMatchObject({ code: "BROWSER_ACTION_OUTCOME_UNKNOWN" });
+      const takeover = browser.requestTakeover("operator"); await vi.advanceTimersByTimeAsync(8_000); await failFill; expect((await takeover).takeover).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
   it("waits for an already-started read before takeover and blocks new reads immediately", async () => {
     const { browser } = setup(); const id = (await browser.open("https://example.com", "operator")).activePageId!; const w = mocks.views[0].webContents;
     let resolve!: (value: unknown) => void; w.execute.mockImplementationOnce(() => new Promise(r => { resolve = r; }));

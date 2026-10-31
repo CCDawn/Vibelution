@@ -86,6 +86,22 @@ def test_broker_explicit_capability_result_validation_and_timeout():
     asyncio.run(run())
 
 
+def test_claimed_browser_timeout_and_close_are_unknown_without_replay():
+    async def run():
+        for close in (False, True):
+            broker = MainControlBroker(lambda: (), browser_enabled=True, timeout_seconds=.05)
+            pending = asyncio.create_task(broker.invoke('browser_interact', REQ))
+            claimed = (await broker.claim())['request']
+            if close:
+                broker.close()
+            output = await pending
+            assert output == {'schemaVersion': 1, 'operation': 'interact', 'code': 'BROWSER_ACTION_OUTCOME_UNKNOWN'}
+            assert not broker.settle(claimed['deliveryId'], result('interact', state=STATE))
+            assert broker._queue.empty()
+            broker.close()
+    asyncio.run(run())
+
+
 def test_native_identity_governance_and_camel_case_request():
     async def run():
         broker = MainControlBroker(lambda: (), browser_enabled=True)
@@ -165,6 +181,8 @@ def test_long_tab_state_returns_error_instead_of_dropping_page_bindings():
     model = _browser_model_result(result('state', state=state))
     assert model['code'] == 'BROWSER_UNAVAILABLE' and 'state' not in model
     assert len(json.dumps(model, ensure_ascii=False)) <= 3400
+    after_navigation = _browser_model_result(result('navigate', state=state))
+    assert after_navigation['code'] == 'BROWSER_ACTION_OUTCOME_UNKNOWN' and 'state' not in after_navigation
 
 
 def test_full_url_contract_preserves_query_fragment_and_utf16_limit():
@@ -200,7 +218,8 @@ def test_oversized_essential_urls_return_bounded_json_error():
     for value in values:
         model = _browser_model_result(value)
         raw, _, facts, rendered = _through_native_model_budget(model)
-        assert model['code'] == 'BROWSER_UNAVAILABLE' and model['operation'] == value['operation']
+        expected = 'BROWSER_UNAVAILABLE' if value['operation'] == 'read' else 'BROWSER_ACTION_OUTCOME_UNKNOWN'
+        assert model['code'] == expected and model['operation'] == value['operation']
         assert 'snapshot' not in model and 'state' not in model
         assert len(raw) <= 3400 and not facts.truncated
         assert json.loads(rendered.split('\nResult:\n', 1)[1]) == json.loads(raw)
