@@ -231,10 +231,11 @@ class HistoryPreview:
         This metadata does not itself authorize publication. Only prepare's
         live native delivery may consume it, once, under the profile owner.
         """
+        from types import SimpleNamespace
         from . import native
-        from .initial_migration_binding import authority_identity, source_identity, target_identity
+        from .initial_migration_binding import authority_identity
         from .reminder_handoff_intent import read_handoff_authorization
-        from .reminder_offline_worker import _registry_digest_matches
+        from .reminder_offline_worker import _matches_origin, _registry_digest_matches
         from core.infrastructure.native_runtime import assistant_native_root
 
         with self._lock:
@@ -247,20 +248,17 @@ class HistoryPreview:
             if prior is None:
                 raise MigrationIOError("reminder_handoff_approval_unavailable")
             scope = {"projectId": row[5].project_id, "instanceId": row[5].instance_id, "agentId": public["assistantAgentId"]}
-            source, project, workspace = source_identity(scope, row[3], row[4])
-            target, directory = target_identity(root, native._AGENT_ID, native._SESSION_ID)
             current_authority = authority_identity(row[7])
-            if (prior["sourceScope"] != scope or prior["sourceIdentityDigest"] != source
-                    or prior["projectDirectory"] != project or prior["workspaceDirectory"] != workspace
-                    or prior["targetIdentityDigest"] != target or prior["targetDirectory"] != directory
-                    or prior["targetAgentId"] != native._AGENT_ID or prior["targetSessionId"] != native._SESSION_ID
+            target = SimpleNamespace(root=root, agent_id=native._AGENT_ID, session_id=native._SESSION_ID)
+            if (not _matches_origin(prior, target, scope, row[3], row[4], category="reminder_handoff")
                     or _registry_digest_matches(row[7], prior["registryDigest"])):
                 raise MigrationIOError("reminder_handoff_approval_unavailable")
             shown = {key: public[key] for key in ("sourceProjectId", "instanceId", "assistantAgentId")}
             shown.update(operationId=prior["operationId"], syncId=prior["syncId"],
                          sourceSnapshotDigest=current_authority, previousAuthorizationHead=head)
             captured = {"projectId": project_id, "turnId": row[6], "revision": self._dispatch._registry_revision,
-                        "head": head, "authorityDigest": current_authority, "shown": shown}
+                        "head": head, "authorityDigest": current_authority,
+                        "sourceIdentityDigest": prior["sourceIdentityDigest"], "shown": shown}
             previous = self._reminder_approvals.setdefault(preview_id, captured)
             if {key: previous[key] for key in captured} != captured:
                 raise MigrationIOError("reminder_handoff_approval_changed")

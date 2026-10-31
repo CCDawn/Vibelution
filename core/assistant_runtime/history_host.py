@@ -277,7 +277,8 @@ class HistoryHost:
                     verify()
                     binding = {"schemaVersion": 1, "registeredProjectId": project_id, "sourceScope": scope,
                                "category": category, "turnId": turn_id, "operationId": operation_id, "revision": revision,
-                               "sourceIdentityDigest": source_digest, "registryDigest": registry_digest,
+                               "sourceIdentityDigest": (recovery_approval["sourceIdentityDigest"]
+                                   if recovery_approval is not None else source_digest), "registryDigest": registry_digest,
                                "targetIdentityDigest": target_digest, "projectDirectory": project_identity,
                                "workspaceDirectory": workspace_identity, "targetDirectory": target_directory,
                                "targetAgentId": native._AGENT_ID, "targetSessionId": native._SESSION_ID,

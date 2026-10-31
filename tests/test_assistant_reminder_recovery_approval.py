@@ -31,8 +31,12 @@ def test_reminder_recovery_wire_is_additive_and_reminder_only():
                 _request("initial_migration_queue", {**request, "reauthorize": True})
 
 
-@pytest.mark.parametrize("case", ["success", "missing_approval", "source_changed", "cancelled", "declined_then_retry", "head_changed"])
+@pytest.mark.parametrize("case", ["success", "windows_alias", "replaced_origin", "missing_approval", "source_changed", "cancelled", "declined_then_retry", "head_changed"])
 def test_native_original_id_recovery_needs_same_displayed_approval(tmp_path, case):
+    if case == "windows_alias":
+        import os
+        if os.name != "nt":
+            pytest.skip("Windows path spelling compatibility")
     _run(tmp_path, _HOST_SETUP + "\ncase = " + repr(case) + r'''
 import asyncio, httpx
 from core.assistant_runtime.actions import bind_actions, unbind_actions, execute_action
@@ -45,14 +49,27 @@ class Token:
     def check(self): pass
     def publish(self, write): write()
 history_host._initial_owner_check = lambda: True  # Explicit synthetic owner; production uses the OS lease.
+if case == 'windows_alias':
+    row = preview._previews[value['previewId']]
+    preview._previews[value['previewId']] = (*row[:3], Path(str(row[3]).lower()), Path(str(row[4]).lower()), *row[5:])
 original = history_host.prepare_initial_source('registered:1', value['previewId'], 1, 'turn-one',
     handoff_id('registered:1'), 'reminder_handoff', Token())
 base_path = next((target / 'reminder_handoff_intents').glob('*/intent.json'))
 base_bytes = base_path.read_bytes()
+if case == 'replaced_origin':
+    import shutil
+    old_workspace = preview._previews[value['previewId']][4]
+    retained = old_workspace.with_name(old_workspace.name + '-original')
+    old_workspace.rename(retained)
+    shutil.copytree(retained, old_workspace)
 old_registry = json.loads(registry.read_text())
 old_registry['agents'][0]['displayName'] = 'current registered source'
 registry.write_text(json.dumps(old_registry))
 fresh = preview.preview('registered:1', turn_id='turn-one')
+if case == 'windows_alias':
+    from core.assistant_runtime.initial_migration_binding import source_identity
+    row = preview._previews[fresh['previewId']]
+    assert source_identity(original['sourceScope'], row[3], row[4])[0] != original['sourceIdentityDigest']
 dispatch.history_preview = preview  # Same composition as scripts/assistant_host.py.
 async def run_case():
     broker = MainControlBroker(dispatch.project_ids, initial_migration_enabled=True)
@@ -67,6 +84,11 @@ async def run_case():
         assert denied['status'] == 'approval_required'
         summary = _assistant_management_summary({'action': 'reminder_handoff_recover',
                                                 'arguments_json': json.dumps(args)})
+        if case == 'replaced_origin':
+            assert summary.get('assistantArgumentsInvalid') is True, summary
+            assert read_handoff_intent(target, 'registered:1') == original
+            assert base_path.read_bytes() == base_bytes
+            return
         assert summary.get('assistantArgumentsInvalid') is not True, summary
         assert summary['assistantTargets']['operationId'] == original['operationId']
         assert summary['assistantTargets']['syncId'] == original['syncId']
@@ -76,7 +98,7 @@ async def run_case():
         if case != 'missing_approval':
             # Even full_access must create a real native card for this one action.
             def authorized_call():
-                if case == 'success':
+                if case in {'success', 'windows_alias'}:
                     from types import SimpleNamespace
                     from core.authorization import tool_authorization_service as authorization
                     from core.infrastructure.tool_executor import ToolExecutor
@@ -156,11 +178,12 @@ async def run_case():
                                     headers={'Authorization':'Bearer private-test-token'}) as client:
             response = await client.post('/api/assistant/initial-migration/prepare',
                 json={**payload, 'deliveryId':wire['deliveryId'], 'revision':1})
-        if case == 'success':
+        if case in {'success', 'windows_alias'}:
             assert response.status_code == 200, response.text
             renewed = read_handoff_intent(target, 'registered:1')
             assert renewed['registryDigest'] != original['registryDigest']
             assert renewed['operationId'] == original['operationId'] and renewed['syncId'] == original['syncId']
+            assert renewed['sourceIdentityDigest'] == original['sourceIdentityDigest']
             assert renewed['readyForCutover'] is False
             queued = {'schemaVersion':1,**{key:wire[key] for key in ('projectId','previewId','category','operationId')},
                       'state':'queued','code':'queued','readyForCutover':False}
