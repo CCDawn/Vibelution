@@ -4,10 +4,12 @@ import { AssistantThemeControl } from "../src/assistant/assistantThemeControl.js
 import { createAssistantThemePreload } from "../src/assistant/assistantThemePreload.js";
 import { AssistantWindow } from "../src/assistant/assistantWindow.js";
 import { createPetWindow } from "../src/windows/petWindow.js";
-import { dialog } from "electron";
+import { BrowserWindow, dialog } from "electron";
+import { isTrustedLauncherControlFrame } from "../src/windows/launcherWindow.js";
 
-vi.mock("electron", () => ({ dialog: { showOpenDialog: vi.fn() }, screen: {} }));
+vi.mock("electron", () => ({ BrowserWindow: { getAllWindows: vi.fn(() => []) }, dialog: { showOpenDialog: vi.fn() }, screen: {} }));
 vi.mock("../src/windows/petWindow.js", () => ({ createPetWindow: vi.fn() }));
+vi.mock("../src/windows/launcherWindow.js", () => ({ isTrustedLauncherControlFrame: vi.fn(() => false) }));
 
 const id = (value = 1) => value.toString(16).padStart(32, "0");
 function setup() {
@@ -138,13 +140,15 @@ describe("theme preload boundary", () => {
 
 describe("AssistantWindow native boundaries", () => {
   async function opened() {
+    vi.mocked(BrowserWindow.getAllWindows).mockReturnValue([]);
     const { contents, event } = setup();
     const contentEvents = new Map<string, (...args: unknown[]) => void>();
     const windowEvents = new Map<string, (...args: unknown[]) => void>();
     const webContents = { ...contents, setWindowOpenHandler: vi.fn(),
       on: vi.fn((name: string, callback: (...args: unknown[]) => void) => contentEvents.set(name, callback)) };
     const window = { webContents, isDestroyed: vi.fn(() => false), loadURL: vi.fn(async () => undefined),
-      showInactive: vi.fn(), on: vi.fn((name: string, callback: (...args: unknown[]) => void) => windowEvents.set(name, callback)) };
+      isVisible: vi.fn(() => false), isMinimized: vi.fn(() => false), restore: vi.fn(), show: vi.fn(), showInactive: vi.fn(),
+      on: vi.fn((name: string, callback: (...args: unknown[]) => void) => windowEvents.set(name, callback)) };
     vi.mocked(createPetWindow).mockReturnValue(window as never);
     const owner = new AssistantWindow({ desktopBundleRoot: "unused", userDataRoot: "unused" }, {} as never);
     await owner.open({ show: false });
@@ -176,6 +180,7 @@ describe("AssistantWindow native boundaries", () => {
     const { owner, window } = await opened();
     vi.mocked(dialog.showOpenDialog).mockResolvedValue({ canceled: false, filePaths: ["C:\\private-test\\avatar.png"] });
     expect(await owner.chooseOperatorImage("avatar")).toBe("C:\\private-test\\avatar.png");
+    expect(window.show).toHaveBeenCalledOnce();
     expect(dialog.showOpenDialog).toHaveBeenLastCalledWith(window, {
       title: "选择头像", properties: ["openFile"], filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp"] }],
     });
@@ -192,5 +197,24 @@ describe("AssistantWindow native boundaries", () => {
     window.isDestroyed.mockReturnValue(true);
     expect(await owner.chooseOperatorImage("avatar")).toBeNull();
     expect(dialog.showOpenDialog).toHaveBeenCalledTimes(calls);
+  });
+
+  it("owns the chooser with the visible trusted Launcher while the float is hidden", async () => {
+    const { owner, window } = await opened();
+    const launcher = { isDestroyed: vi.fn(() => false), isVisible: () => true, isMinimized: () => true, restore: vi.fn(),
+      webContents: { mainFrame: {} } };
+    const unrelated = { ...launcher, webContents: { mainFrame: {} } };
+    vi.mocked(BrowserWindow.getAllWindows).mockReturnValue([unrelated, launcher] as never);
+    vi.mocked(isTrustedLauncherControlFrame).mockImplementation(event => event.sender === launcher.webContents);
+    vi.mocked(dialog.showOpenDialog).mockResolvedValue({ canceled: true, filePaths: [] });
+    expect(await owner.chooseOperatorImage("avatar")).toBeNull();
+    expect(dialog.showOpenDialog).toHaveBeenLastCalledWith(launcher, expect.objectContaining({ title: "选择头像" }));
+    expect(launcher.restore).toHaveBeenCalledOnce();
+    expect(window.show).not.toHaveBeenCalled();
+    vi.mocked(dialog.showOpenDialog).mockImplementationOnce(async () => {
+      launcher.isDestroyed.mockReturnValue(true);
+      return { canceled: false, filePaths: ["C:\\private-test\\late.png"] };
+    });
+    expect(await owner.chooseOperatorImage("avatar")).toBeNull();
   });
 });

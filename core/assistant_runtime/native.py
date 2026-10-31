@@ -87,6 +87,19 @@ def bootstrap_for_offline_migration(root: Path | str) -> dict[str, Any]:
     return _bootstrap(root, offline_migration=True)
 
 
+def _configure_tool_budgets() -> None:
+    """The isolated Launcher process must outlive its 120s native chooser.
+
+    Register the canonical wrapper with the existing executor API. Ordinary
+    project processes retain their own default budgets and tool functions.
+    """
+    from core.infrastructure.tool_executor import get_tool_executor
+    from tools.Key_Tools import create_key_tools
+
+    tool = next(tool for tool in create_key_tools() if tool.name == "personal_assistant_manage_tool")
+    get_tool_executor().register_tool(tool.name, tool.func, timeout=130)
+
+
 def _bootstrap(root: Path | str, *, offline_migration: bool) -> dict[str, Any]:
     global _STARTED, _SESSION_ID, _AGENT_ID, _OFFLINE_MIGRATION
     expected = assistant_native_root()
@@ -98,6 +111,8 @@ def _bootstrap(root: Path | str, *, offline_migration: bool) -> dict[str, Any]:
             if _OFFLINE_MIGRATION != offline_migration:
                 raise RuntimeError("native lifecycle mode differs from the active owner")
             return _projection()
+        if not offline_migration:
+            _configure_tool_budgets()
         _STOP_REQUESTED.clear()
         directory, personal, sessions, runtime = _services()
         if sessions.PROJECT_ROOT != expected or directory.PROJECT_ROOT != expected:

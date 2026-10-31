@@ -221,6 +221,9 @@ def test_native_bootstrap_uses_real_directory_and_keeps_custom_policy(tmp_path, 
         from core.assistant_runtime import native
         from core.web.services import session_service, agent_directory_service as directory
         from core.web.services.session import directory_runtime
+        from core.infrastructure.tool_executor import get_tool_executor
+        executor = get_tool_executor()
+        assert executor._resolve_timeout('personal_assistant_manage_tool', {}) == 30
         root = Path(os.environ['VIBELUTION_ASSISTANT_NATIVE_ROOT'])
         expected_tools = ['personal_assistant_action_tool', 'personal_assistant_manage_tool',
             'personal_affairs_tool', 'append_personal_memory_tool', 'supersede_personal_memory_tool',
@@ -234,6 +237,8 @@ def test_native_bootstrap_uses_real_directory_and_keeps_custom_policy(tmp_path, 
         directory.create_agent_instance = checked_create
         try:
             first = native.bootstrap(root)['assistant']
+            assert executor._resolve_timeout('personal_assistant_manage_tool', {}) == 130
+            assert executor._resolve_timeout('exec_command', {}) == 60
             assert directory_runtime.is_directory_store_open()
             assert directory_runtime.directory_store_project_root() == root
             assert directory_runtime.conversation_store_path(root).exists()

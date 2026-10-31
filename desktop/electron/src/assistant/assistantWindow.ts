@@ -1,7 +1,8 @@
-import { type BrowserWindow, dialog, screen } from "electron";
+import { BrowserWindow, dialog, screen } from "electron";
 import type { DesktopPaths } from "../paths.js";
 import { createPetWindow } from "../windows/petWindow.js";
 import { desktopPetWindowExpandedBounds } from "../windows/petWindowBounds.js";
+import { isTrustedLauncherControlFrame } from "../windows/launcherWindow.js";
 import type { AssistantHost } from "./assistantHost.js";
 import { assertAssistantSender, invokeAssistant, LAUNCHER_ASSISTANT_URL, type WorkbenchSenderGate } from "./assistantBridge.js";
 import type { ThemeSnapshot } from "./themeAuthority.js";
@@ -96,11 +97,18 @@ export class AssistantWindow {
     const window = this.window;
     if (!window || window.isDestroyed() || signal?.aborted || !["avatar", "background"].includes(kind)) return null;
     try {
-      const result = await dialog.showOpenDialog(window, {
+      // Opening Launcher hides the float. A dialog owned by that hidden,
+      // transparent window is also hidden on Windows. Prefer the visible
+      // main-owned control window; otherwise present the float before opening.
+      const parent = BrowserWindow.getAllWindows().find(candidate => !candidate.isDestroyed() && candidate.isVisible()
+        && isTrustedLauncherControlFrame({ sender: candidate.webContents, senderFrame: candidate.webContents.mainFrame })) ?? window;
+      if (parent.isMinimized()) parent.restore();
+      if (!parent.isVisible()) parent.show();
+      const result = await dialog.showOpenDialog(parent, {
         title: kind === "avatar" ? "选择头像" : "选择背景图片",
         properties: ["openFile"], filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp"] }],
       });
-      if (signal?.aborted || window.isDestroyed() || this.window !== window || result.canceled || result.filePaths.length !== 1) return null;
+      if (signal?.aborted || parent.isDestroyed() || window.isDestroyed() || this.window !== window || result.canceled || result.filePaths.length !== 1) return null;
       return result.filePaths[0] || null;
     } catch { return null; }
   }
