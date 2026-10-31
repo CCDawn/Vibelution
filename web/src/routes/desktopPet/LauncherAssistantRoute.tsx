@@ -50,14 +50,14 @@ const COPY = {
     collapse: "收起聊天", loading: "正在打开原生会话…", unavailable: "个人助理暂不可用",
     retry: "重试", refresh: "刷新", placeholder: "和个人助理聊一聊…", send: "发送", sending: "正在发送…",
     unknownSend: "尚未确认消息是否收到。输入已保留，重试会核对同一条消息。",
-    receipts: "派发回执", receiptToggle: "任务回执", receiptBoundary: "任务状态来自原生回执，结果仍需验收。", checking: "正在连接 Launcher…",
+    receipts: "任务结果", receiptToggle: "任务结果", receiptBoundary: "任务状态由执行结果更新，完成后请核对结果。", checking: "正在连接 Launcher…",
   },
   en: {
     title: "Personal assistant", expand: "Open assistant chat", chat: "Chat", hide: "Hide assistant",
     collapse: "Collapse chat", loading: "Opening native conversation…", unavailable: "Assistant unavailable",
     retry: "Retry", refresh: "Refresh", placeholder: "Chat with your assistant…", send: "Send", sending: "Sending…",
     unknownSend: "Delivery is unconfirmed. Your input is retained; retry checks the same message.",
-    receipts: "Dispatch receipts", receiptToggle: "Task receipts", receiptBoundary: "Native task status; results still need acceptance.", checking: "Connecting to Launcher…",
+    receipts: "Task results", receiptToggle: "Task results", receiptBoundary: "Task status comes from execution results; check the result when complete.", checking: "Connecting to Launcher…",
   },
 } as const;
 
@@ -807,12 +807,12 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
         <h1 className={petStyles.chatTitle}>{navigationOwned ? (lang === "zh" ? "对话" : "Chat") : (lang === "zh" ? "个人助理" : "Personal assistant")}</h1>
         <span className={petStyles.chatStatus} role={feedback ? "alert" : "status"}>{statusText}</span>
       </div>
-      {!navigationOwned ? <><VButton density="compact" variant="ghost" aria-pressed={computerOpen}
-        onClick={() => setComputerOpen(value => !value)}>{lang === "zh" ? "电脑操作" : "Computer"}</VButton>
+      {!navigationOwned ? <VButton density="compact" variant="ghost" aria-pressed={computerOpen}
+        onClick={() => setComputerOpen(value => !value)}>{lang === "zh" ? "电脑操作" : "Computer"}</VButton> : null}
       {dispatchTotal ? <VButton density="compact" variant="ghost" aria-pressed={receiptsOpen}
         onClick={() => setReceiptsOpen(value => !value)}>{`${copy.receiptToggle} ${dispatchTotal}`}</VButton> : null}
-      <VButton density="compact" variant="ghost" icon={<RefreshCw size={14} aria-hidden="true" />}
-        onClick={refreshAll}>{copy.refresh}</VButton></> : null}
+      {!navigationOwned ? <VButton density="compact" variant="ghost" icon={<RefreshCw size={14} aria-hidden="true" />}
+        onClick={refreshAll}>{copy.refresh}</VButton> : null}
     </header> : <header className={petStyles.chatHeader}>
       <div className={petStyles.chatIdentity}>
         <h1 className={petStyles.chatTitle} hidden={!preferences.showTitles}>{displayName}</h1>
@@ -879,7 +879,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       title={lang === "zh" ? "部分外观图片暂不可用，聊天仍可使用" : "Some appearance images are unavailable; chat is ready"}
       actions={<VButton onClick={() => { if (avatar.isError) void avatar.refetch(); if (background.isError) void background.refetch(); }}>{copy.retry}</VButton>} /> : null}
     {status.data?.patrol?.state === "unavailable" || ["unknown", "failed", "interrupted"].some(key => (status.data?.patrol?.deliveryStates[key] || 0) > 0)
-      ? <VStateSurface tone="error" title={lang === "zh" ? "部分任务回执无法自动汇报，请查看派发回执" : "Some task receipts could not be reported automatically; check dispatch receipts"} /> : null}
+      ? <VStateSurface tone="error" title={lang === "zh" ? "部分任务结果无法自动汇报，请查看任务结果" : "Some task results could not be reported automatically; check task results"} /> : null}
     {dispatchApproval && activePreviewError ? <VStateSurface tone="error" title={activePreviewError}
       actions={<VButton onClick={() => { setPreviewAttempt(value => value + 1); void dispatches.refetch(); }}>{copy.retry}</VButton>} /> : null}
     {approvalError || approvals.isError ? <VStateSurface tone="error" title={approvalError || (lang === "zh" ? "待授权查询暂不可用" : "Pending approvals unavailable")}

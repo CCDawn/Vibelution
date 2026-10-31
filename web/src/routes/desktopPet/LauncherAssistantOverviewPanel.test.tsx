@@ -18,7 +18,7 @@ vi.mock("../../api/launcherAssistantComputer", () => ({ launcherAssistantCompute
 vi.mock("../../api/launcherAssistantPanels", () => ({ createLauncherAssistantPanelTransport: (agentId: string) => ({
   cacheKey: ["launcher-assistant", agentId], affairs: {}, preferences: {}, settings: {},
 }) }));
-vi.mock("../personalAssistant/PersonalAssistantAffairs", () => ({ PersonalAssistantAffairs: (props: any) => <div>native affairs {props.agentId} {props.transport.cacheKey.join(":")}</div> }));
+vi.mock("../personalAssistant/PersonalAssistantAffairs", () => ({ PersonalAssistantAffairs: (props: any) => <div>{props.showHeading !== false ? <h2>待办与提醒</h2> : null}native affairs {props.agentId} {props.transport.cacheKey.join(":")}</div> }));
 vi.mock("../personalAssistant/PersonalAssistantComputerPanel", () => ({ PersonalAssistantComputerPanel: (props: any) => <div>native computer {props.transport.scope}</div> }));
 vi.mock("../personalAssistant/PersonalAssistantDialoguePreferences", () => ({ PersonalAssistantDialoguePreferences: (props: any) => <div>native preferences {props.agentId} {props.transport.cacheKey.join(":")}</div> }));
 vi.mock("../personalAssistant/PersonalAssistantSettings", () => ({ PersonalAssistantSettings: (props: any) => <div>native settings {props.presentation} {props.transport.cacheKey.join(":")}</div> }));
@@ -45,36 +45,14 @@ async function render(panel: string) {
 }
 
 describe("Launcher assistant workspace", () => {
-  it("shows only current assistant and connected project facts, with an actionable unselected state", async () => {
-    vi.mocked(getLauncherBranchInstances).mockRejectedValueOnce(new Error("not-selected"))
-      .mockResolvedValueOnce({ items: [{ id: "one" }] } as Awaited<ReturnType<typeof getLauncherBranchInstances>>);
-    await render("overview");
-    expect(container.textContent).toContain("当前助理与已连接项目");
-    expect(container.textContent).toContain("小鲸");
-    expect(container.textContent).toContain("会话消息");
-    expect(container.textContent).toContain("尚未选择项目");
-    const select = [...container.querySelectorAll("button")].find(button => button.textContent === "选择项目")!;
-    await act(async () => select.click());
-    await vi.waitFor(() => { expect(selectLauncherProject).toHaveBeenCalledOnce(); expect(getLauncherBranchInstances).toHaveBeenCalledTimes(2); });
-    await act(async () => new Promise(resolve => setTimeout(resolve, 25)));
-    expect(container.textContent).not.toContain("尚未选择项目");
-    expect(getLauncherAssistantDetail).toHaveBeenCalledWith("session");
-  });
-  it("distinguishes a project error from no project", async () => {
-    vi.mocked(getLauncherBranchInstances).mockRejectedValue(new Error("read failed"));
-    await render("overview");
-    expect(container.textContent).toContain("项目状态暂不可用");
-    expect(container.textContent).toContain("read failed");
-    expect(container.textContent).not.toContain("尚未选择项目");
-  });
-  it("shows real dispatch receipts and returns to dialogue to handle approvals", async () => {
-    vi.mocked(getLauncherAssistantDispatches).mockResolvedValue([{ dispatchId: "dispatch-a", projectId: "project-a",
-      receipt: { status: "running", resultSummary: "处理中", pendingApprovals: [{ approvalId: "a", toolName: "tool", risk: "high", targetSummary: {}, revision: "1", availableDecisions: ["accept"] }] } }]);
-    await render("dispatches");
-    expect(container.textContent).toContain("project-a");
-    expect(container.textContent).toContain("处理中");
-    await act(async () => ([...container.querySelectorAll("button")].find(button => button.textContent === "回到对话处理授权") as HTMLButtonElement).click());
+  it.each(["overview", "dispatches"])("falls back to dialogue for the removed %s page without its queries", async panel => {
+    await render(panel);
     expect(container.textContent).toContain("native dialogue");
+    expect(getLauncherAssistantStatus).not.toHaveBeenCalled();
+    expect(getLauncherAssistantDetail).not.toHaveBeenCalled();
+    expect(getLauncherAssistantDispatches).not.toHaveBeenCalled();
+    expect(getLauncherBranchInstances).not.toHaveBeenCalled();
+    expect(selectLauncherProject).not.toHaveBeenCalled();
   });
   it.each([
     ["affairs", "native affairs agent launcher-assistant:agent"],
@@ -86,5 +64,6 @@ describe("Launcher assistant workspace", () => {
     expect(container.textContent).toContain(expected);
     expect(getLauncherAssistantStatus).toHaveBeenCalled();
     expect(getLauncherBranchInstances).not.toHaveBeenCalled();
+    if (panel === "affairs") expect([...container.querySelectorAll("h1,h2,h3")].filter(heading => heading.textContent === "待办与提醒")).toHaveLength(1);
   });
 });

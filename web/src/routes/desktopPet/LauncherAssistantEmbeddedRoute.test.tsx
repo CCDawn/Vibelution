@@ -4,7 +4,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConversationViewProps } from "../../components/conversation/conversationViewTypes";
-import { LauncherAssistantEmbeddedRoute } from "./LauncherAssistantRoute";
+import { LauncherAssistantEmbeddedRoute, LauncherAssistantRoute } from "./LauncherAssistantRoute";
 
 vi.mock("./DesktopPetCharacter", () => ({ DesktopPetCharacter: () => null }));
 // Retain the real embedded route and transport validators; replace only the
@@ -31,7 +31,7 @@ afterEach(async () => {
 async function settle() {
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
 }
-async function renderEmbedded(options: { dispatches?: Array<Record<string, unknown>> } = {}) {
+async function renderEmbedded(options: { dispatches?: Array<Record<string, unknown>>; navigationOwned?: boolean } = {}) {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   vi.stubGlobal("fetch", vi.fn(() => { throw new Error("HTTP is forbidden in this window"); }));
   invoke = vi.fn(async request => {
@@ -53,7 +53,9 @@ async function renderEmbedded(options: { dispatches?: Array<Record<string, unkno
   vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 30_000 } } });
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
-  await act(async () => root!.render(createElement(QueryClientProvider, { client }, createElement(LauncherAssistantEmbeddedRoute))));
+  await act(async () => root!.render(createElement(QueryClientProvider, { client }, options.navigationOwned
+    ? createElement(LauncherAssistantRoute, { embedded: true, navigationOwned: true })
+    : createElement(LauncherAssistantEmbeddedRoute))));
   await settle(); await settle();
 }
 
@@ -75,7 +77,7 @@ describe("Launcher embedded assistant page", () => {
       .map(button => button.textContent || button.getAttribute("aria-label"));
     expect(labels.some(label => label?.includes("电脑操作"))).toBe(true);
     // Without dispatches the receipts toggle stays hidden.
-    expect(labels.some(label => label?.includes("任务回执"))).toBe(false);
+    expect(labels.some(label => label?.includes("任务结果"))).toBe(false);
     expect(labels.some(label => label?.includes("打开 Launcher"))).toBe(false);
     expect(labels).not.toContain("展开个人助理聊天");
     expect(labels).not.toContain("收起聊天");
@@ -105,13 +107,13 @@ describe("Launcher embedded assistant page", () => {
     expect(body).toBeTruthy();
   });
 
-  it("keeps dispatch receipts collapsed until the header toggle opens them", async () => {
-    await renderEmbedded({ dispatches: [{
+  it.each([false, true])("keeps task results accessible and collapsed (navigationOwned=%s)", async navigationOwned => {
+    await renderEmbedded({ navigationOwned, dispatches: [{
       dispatchId: "dispatch-1", projectId: "ccdawn-vibelution:main:0d6e4079e367:d9ccbfb82c3ec3",
       agentId: "worker", nativeTaskId: "task-1",
       receipt: { taskId: "task-1", status: "succeeded", resultSummary: "周报已生成", shouldPoll: false },
     }] });
-    const toggle = [...container.querySelectorAll("button")].find(button => button.textContent === "任务回执 1");
+    const toggle = [...container.querySelectorAll("button")].find(button => button.textContent === "任务结果 1");
     expect(toggle).toBeTruthy();
     // Folded by default: no receipt rows are visible anywhere on the page.
     expect(container.querySelector("[data-launcher-assistant-receipts]")).toBeNull();
@@ -131,5 +133,9 @@ describe("Launcher embedded assistant page", () => {
     expect(panel!.querySelector("[title]")?.getAttribute("title")).toBe("ccdawn-vibelution:main:0d6e4079e367:d9ccbfb82c3ec3");
     await act(async () => toggle?.click()); await settle();
     expect(container.querySelector("[data-launcher-assistant-receipts]")).toBeNull();
+  });
+  it("hides the task results button in unified navigation when there are no records", async () => {
+    await renderEmbedded({ navigationOwned: true });
+    expect([...container.querySelectorAll("button")].some(button => button.textContent?.includes("任务结果"))).toBe(false);
   });
 });

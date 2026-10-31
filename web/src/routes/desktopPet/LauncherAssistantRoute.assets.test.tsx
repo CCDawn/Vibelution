@@ -426,7 +426,7 @@ describe("Launcher operator image consumption", () => {
 
   it("shows when task receipts cannot be reported automatically", async () => {
     await renderAssistant({ patrol: { state: "ready", deliveryStates: { unknown: 1 } } });
-    expect(container.textContent).toContain("部分任务回执无法自动汇报，请查看派发回执");
+    expect(container.textContent).toContain("部分任务结果无法自动汇报，请查看任务结果");
   });
   it("opens computer controls only on request and returns to the conversation in the standalone embedded page", async () => {
     await renderAssistant({ legacyToolbar: true });

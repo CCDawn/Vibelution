@@ -119,7 +119,7 @@ describe("PersonalAssistantAffairs", () => {
       addPersonalAffair, completePersonalAffair: completeNative, cancelPersonalAffair, reopenPersonalAffair, setPersonalAffairDue };
     await act(async () => root.render(<QueryClientProvider client={client}>
       <section data-host="workbench"><PersonalAssistantAffairs agentId={list.agentId} /></section>
-      <section data-host="launcher"><PersonalAssistantAffairs agentId={list.agentId} transport={transport} /></section>
+      <section data-host="launcher"><PersonalAssistantAffairs agentId={list.agentId} transport={transport} showHeading={false} /></section>
     </QueryClientProvider>));
     await settle(); await settle();
     const workbench = container.querySelector('[data-host="workbench"]')!;
@@ -128,6 +128,9 @@ describe("PersonalAssistantAffairs", () => {
     expect(workbench.textContent).not.toContain("Launcher 事务");
     expect(launcher.textContent).toContain("Launcher 事务");
     expect(launcher.textContent).not.toContain("整理周报");
+    expect(container.querySelector('[data-host="workbench"] h2')?.textContent).toBe("待办与提醒");
+    expect(container.querySelector('[data-host="launcher"] h2')).toBeNull();
+    expect(container.querySelector('[data-host="launcher"]')?.textContent).toContain("查看和管理助理记下的待办、日程与目标。");
     const workbenchReads = vi.mocked(fetchPersonalAffairs).mock.calls.length;
     await act(async () => ([...launcher.querySelectorAll("button")].find(button => button.textContent === "完成") as HTMLButtonElement).click());
     await settle();
@@ -342,7 +345,7 @@ describe("PersonalAssistantAffairs", () => {
 
   it("shows visible feedback for a missing reminder item", async () => {
     await render("deleted-affair", "notice-1");
-    expect(container.querySelector('[role="status"]')?.textContent).toContain("提醒对应的事务已不存在");
+    expect(container.querySelector('[role="status"]')?.textContent).toContain("提醒对应的记录已不存在");
     expect(container.textContent).toContain("整理周报");
   });
 
@@ -429,7 +432,7 @@ describe("PersonalAssistantAffairs", () => {
   it("shows a load-failure state with retry", async () => {
     vi.mocked(fetchPersonalAffairs).mockRejectedValue(new Error("后端未就绪"));
     await render();
-    expect(container.textContent).toContain("事务读取失败");
+    expect(container.textContent).toContain("待办与提醒读取失败");
     vi.mocked(fetchPersonalAffairs).mockResolvedValue({ ...list, items: [], counts: { open: 0, overdue: 0, done: 0 } });
     await clickButton("重试");
     // one initial attempt plus its retry:1 re-attempt, then the manual refetch
@@ -439,6 +442,6 @@ describe("PersonalAssistantAffairs", () => {
   it("distinguishes the empty and filtered-empty states", async () => {
     vi.mocked(fetchPersonalAffairs).mockResolvedValue({ ...list, items: [], counts: { open: 0, overdue: 0, done: 0 } });
     await render();
-    expect(container.textContent).toContain("还没有事务");
+    expect(container.textContent).toContain("还没有待办或提醒");
   });
 });

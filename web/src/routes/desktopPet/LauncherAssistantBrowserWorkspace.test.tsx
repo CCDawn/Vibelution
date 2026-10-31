@@ -12,13 +12,37 @@ let root: Root, host: HTMLDivElement, invoke: ReturnType<typeof vi.fn>, onChange
 function button(label: string) { const found = [...host.querySelectorAll("button")].find(node => node.getAttribute("aria-label") === label || node.textContent?.trim() === label); if (!found) throw new Error(`Missing ${label}`); return found; }
 beforeEach(() => {
   Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 1000 });
+  window.localStorage.clear();
   invoke = vi.fn(async () => initial); onChanged = vi.fn(() => () => {});
   window.vibelutionLauncherBrowser = { invoke, onChanged };
   host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
 });
-afterEach(async () => { await act(async () => root.unmount()); host.remove(); delete window.vibelutionLauncherBrowser; vi.restoreAllMocks(); });
+afterEach(async () => { await act(async () => root.unmount()); host.remove(); delete window.vibelutionLauncherBrowser; vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 async function render() { await act(async () => { root.render(<LauncherAssistantBrowserWorkspace />); }); }
 describe("Launcher browser workspace", () => {
+  it("drags beyond 520px and keeps browser space when the workspace shrinks", async () => {
+    let width = 1200;
+    const observers = new Set<ResizeObserverCallback>();
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(private callback: ResizeObserverCallback) { observers.add(callback); }
+      observe() {} disconnect() { observers.delete(this.callback); } unobserve() {}
+    });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(() => ({ x: 0, y: 0, left: 0, top: 0, right: width, bottom: 800, width, height: 800, toJSON: () => ({}) }));
+    const pointer = (type: string, x: number) => { const event = new Event(type, { bubbles: true }); Object.defineProperties(event, { button: { value: 0 }, clientX: { value: x } }); return event; };
+    await render();
+    const split = host.querySelector<HTMLElement>('[data-vui="split-workspace"]')!;
+    const handle = host.querySelector<HTMLElement>('[role="separator"]')!;
+    await act(async () => { handle.dispatchEvent(pointer("pointerdown", 0)); window.dispatchEvent(pointer("pointermove", 400)); await new Promise(resolve => setTimeout(resolve, 40)); window.dispatchEvent(pointer("pointerup", 400)); });
+    expect(split.style.getPropertyValue("--pane-w-sidebar")).toBe("760px");
+    expect(handle.getAttribute("aria-valuemax")).toBe("834");
+    await act(async () => { handle.dispatchEvent(pointer("pointerdown", 0)); window.dispatchEvent(pointer("pointermove", 400)); await new Promise(resolve => setTimeout(resolve, 40)); window.dispatchEvent(pointer("pointerup", 400)); });
+    expect(split.style.getPropertyValue("--pane-w-sidebar")).toBe("834px");
+    width = 900;
+    await act(async () => { for (const callback of [...observers]) callback([], {} as ResizeObserver); });
+    expect(handle.getAttribute("aria-valuemax")).toBe("534");
+    expect(split.style.getPropertyValue("--pane-w-sidebar")).toBe("534px");
+    expect(JSON.parse(window.localStorage.getItem("vibelution.pane-layouts.v1") ?? "{}")["launcher-assistant-browser"].sidebar).toBe(534);
+  });
   it("preserves complete addresses and rejects invalid or oversized URLs", () => {
     expect(safeBrowserUrl(page.url)).toBe(page.url);
     expect(browserState(initial).pages[0].url).toBe(page.url);

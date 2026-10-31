@@ -24,10 +24,10 @@ import styles from "./PersonalAssistantAffairs.styles";
 /** Interface copy only; affair values arrive from the backend closed enums. */
 const COPY = {
   zh: {
-    title: "事务",
+    title: "待办与提醒",
     subtitle: "查看和管理助理记下的待办、日程与目标。",
     counts: { open: "进行中", overdue: "已逾期", done: "已完成" },
-    addTitle: "新增事务",
+    addTitle: "添加待办或提醒",
     addKind: "类型",
     addTitleField: "标题",
     addDue: "截止时间",
@@ -45,19 +45,19 @@ const COPY = {
     saveDue: "保存",
     cancelEdit: "取消",
     dueEditorHint: "留空保存会清除截止时间。",
-    empty: "还没有事务",
-    emptyFiltered: "没有符合筛选的事务",
-    loadFailed: "事务读取失败",
+    empty: "还没有待办或提醒",
+    emptyFiltered: "没有符合筛选的待办或提醒",
+    loadFailed: "待办与提醒读取失败",
     retry: "重试",
-    loading: "正在读取事务…",
+    loading: "正在读取待办与提醒…",
     saveFailed: "操作失败，请稍后重试。",
-    missingTarget: "提醒对应的事务已不存在，可能已被删除。",
+    missingTarget: "提醒对应的记录已不存在，可能已被删除。",
   },
   en: {
-    title: "Affairs",
+    title: "To-dos & reminders",
     subtitle: "Track the todos, schedules and goals the assistant keeps for you.",
     counts: { open: "Open", overdue: "Overdue", done: "Done" },
-    addTitle: "Add an affair",
+    addTitle: "Add a to-do or reminder",
     addKind: "Kind",
     addTitleField: "Title",
     addDue: "Due",
@@ -75,13 +75,13 @@ const COPY = {
     saveDue: "Save",
     cancelEdit: "Cancel",
     dueEditorHint: "Saving an empty value clears the due time.",
-    empty: "No affairs yet",
-    emptyFiltered: "No affairs match the filters",
-    loadFailed: "Failed to load affairs",
+    empty: "No to-dos or reminders yet",
+    emptyFiltered: "No to-dos or reminders match the filters",
+    loadFailed: "Failed to load to-dos and reminders",
     retry: "Retry",
-    loading: "Loading affairs…",
+    loading: "Loading to-dos and reminders…",
     saveFailed: "Failed to apply; please retry later.",
-    missingTarget: "The affair for this reminder no longer exists; it may have been deleted.",
+    missingTarget: "The record for this reminder no longer exists; it may have been deleted.",
   },
 } as const;
 
@@ -122,6 +122,7 @@ const workbenchAffairs = { fetchPersonalAffairs, addPersonalAffair, completePers
 type PersonalAssistantAffairsProps = {
   agentId: string;
   transport?: PersonalAssistantAffairsTransport;
+  showHeading?: boolean;
   headerAction?: ReactNode;
   focusItemId?: string;
   focusRequestKey?: string;
@@ -134,7 +135,7 @@ export function PersonalAssistantAffairs(props: PersonalAssistantAffairsProps) {
   return <PersonalAssistantAffairsContent key={`${JSON.stringify(props.transport?.cacheKey ?? ["workbench"])}:${props.agentId}`} {...props} />;
 }
 
-function PersonalAssistantAffairsContent({ agentId, transport, headerAction, focusItemId, focusRequestKey,
+function PersonalAssistantAffairsContent({ agentId, transport, showHeading = true, headerAction, focusItemId, focusRequestKey,
   focusRequestResult, onFocusRequestHandled }: PersonalAssistantAffairsProps) {
   const { lang } = useShellI18n();
   const copy = COPY[lang];
@@ -265,7 +266,7 @@ function PersonalAssistantAffairsContent({ agentId, transport, headerAction, foc
     <div className={styles.pinned}>
       <header className={styles.header}>
         <div>
-          <h2>{copy.title}</h2>
+          {showHeading ? <h2>{copy.title}</h2> : null}
           <p className={styles.subtitle}>{copy.subtitle}</p>
         </div>
         <div className={styles.headerActions}>{headerAction}</div>

@@ -140,7 +140,7 @@ async function render(path: string, innerWidth: number) {
 describe("personal assistant dispatch deep link for completion notices", () => {
   it("retains missing-target feedback after consumption and panel remount", async () => {
     await render("/personal-assistant?panel=affairs&item=deleted-item", 1200);
-    expect(container.querySelector('[data-affairs-panel="true"] [role="status"]')?.textContent).toContain("提醒对应的事务已不存在");
+    expect(container.querySelector('[data-affairs-panel="true"] [role="status"]')?.textContent).toContain("提醒对应的记录已不存在");
     await act(async () => container.querySelector('[role="tab"][id$="overview"]')!
       .dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })));
     await settle();
@@ -148,7 +148,7 @@ describe("personal assistant dispatch deep link for completion notices", () => {
     await act(async () => container.querySelector('[role="tab"][id$="affairs"]')!
       .dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })));
     await settle();
-    expect(container.querySelector('[data-affairs-panel="true"] [role="status"]')?.textContent).toContain("提醒对应的事务已不存在");
+    expect(container.querySelector('[data-affairs-panel="true"] [role="status"]')?.textContent).toContain("提醒对应的记录已不存在");
   });
 
   it.each([1200, 640])("consumes an affair navigation across real panel remounts at %ipx", async width => {

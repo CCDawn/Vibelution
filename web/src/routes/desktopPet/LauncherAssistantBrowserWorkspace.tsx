@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Globe, Maximize2, MessageCircle, PanelRightClose, PanelRightOpen, Plus, RotateCw, X } from "lucide-react";
 import { browserState, launcherBrowserBridge, safeBrowserUrl, type BrowserOperation, type BrowserState } from "../../api/launcherAssistantBrowser";
+import { PANE_RESIZE_HANDLE_WIDTH } from "../../components/layout/paneLayoutPersistence";
 import { WORKBENCH_LAYOUT_IDS } from "../../components/layout/workbenchLayoutIds";
 import { VButton, VIconButton, VInput, VSplitWorkspace } from "../../components/vui";
 import { LauncherAssistantRoute } from "./LauncherAssistantRoute";
 import styles from "./LauncherAssistantBrowserWorkspace.styles";
 
 const empty: BrowserState = { pages: [], activePageId: null, takeover: false };
+const chatMinWidth = 280;
+const browserMinWidth = 360;
 
 export function LauncherAssistantBrowserWorkspace() {
   const [state, setState] = useState<BrowserState>(empty);
@@ -17,8 +20,10 @@ export function LauncherAssistantBrowserWorkspace() {
   const [full, setFull] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [narrow, setNarrow] = useState(() => window.innerWidth <= 760);
+  const [workspaceWidth, setWorkspaceWidth] = useState(() => window.innerWidth);
   const [mobilePage, setMobilePage] = useState<"chat" | "web">("web");
   const viewRef = useRef<HTMLDivElement>(null);
+  const workspaceRef = useRef<HTMLDivElement>(null);
   const stateRevision = useRef(0);
   const ownerPending = useRef(false);
   const active = state.pages.find(page => page.id === state.activePageId);
@@ -48,6 +53,16 @@ export function LauncherAssistantBrowserWorkspace() {
   }, []);
   useEffect(() => { if (!draft) setAddress(active?.url ?? ""); }, [active?.id, active?.url, draft]);
   useEffect(() => { const resize = () => setNarrow(window.innerWidth <= 760); window.addEventListener("resize", resize); return () => window.removeEventListener("resize", resize); }, []);
+  useEffect(() => {
+    const node = workspaceRef.current;
+    if (!node) return;
+    const updateWidth = () => { const width = node.getBoundingClientRect().width; if (width > 0) setWorkspaceWidth(width); };
+    updateWidth();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateWidth);
+    observer?.observe(node);
+    window.addEventListener("resize", updateWidth);
+    return () => { observer?.disconnect(); window.removeEventListener("resize", updateWidth); };
+  }, []);
   useEffect(() => {
     let frame = 0;
     const publish = () => {
@@ -118,10 +133,10 @@ export function LauncherAssistantBrowserWorkspace() {
       <div ref={viewRef} data-launcher-browser-viewport="true" className={canShowPage ? styles.viewport : styles.viewportHidden} />
     </div>
   </section>;
-  return <div className={styles.root} data-vui-domain-recipe="launcher-assistant-browser">
+  return <div ref={workspaceRef} className={styles.root} data-vui-domain-recipe="launcher-assistant-browser">
     {narrow ? <div className={styles.mobileSwitch}><VButton variant={!webVisible ? "secondary" : "ghost"} aria-pressed={!webVisible} onClick={() => { setFull(false); setMobilePage("chat"); }}>对话</VButton><VButton variant={webVisible ? "secondary" : "ghost"} aria-pressed={webVisible} onClick={() => { setCollapsed(false); setMobilePage("web"); }}>网页</VButton></div> : null}
     {collapsed && !narrow ? <VIconButton variant="ghost" className={styles.restore} label="打开网页" title="打开网页" icon={<PanelRightOpen size={16} />} onClick={() => { setCollapsed(false); setMobilePage("web"); }} /> : null}
-    <VSplitWorkspace className={`${styles.split} ${!webVisible ? styles.chatOnly : narrow || full ? styles.webOnly : ""}`} resize={{ layoutId: WORKBENCH_LAYOUT_IDS.launcherAssistantBrowser, sidebar: { defaultWidth: 360, minWidth: 280, maxWidth: 520 } }}
+    <VSplitWorkspace className={`${styles.split} ${!webVisible ? styles.chatOnly : narrow || full ? styles.webOnly : ""}`} resize={{ layoutId: WORKBENCH_LAYOUT_IDS.launcherAssistantBrowser, sidebar: { defaultWidth: 360, minWidth: chatMinWidth, maxWidth: Math.max(chatMinWidth, Math.floor(workspaceWidth - browserMinWidth - PANE_RESIZE_HANDLE_WIDTH)) } }}
       sidebar={<LauncherAssistantRoute embedded navigationOwned />}
       main={browser} />
   </div>;
