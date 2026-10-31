@@ -42,6 +42,6 @@ export function useLauncherComputerAccess(options: Options) {
     setNotice(lang === "zh" ? "已授权。你可以在对话中让助理继续；结束后可随时取消授权。" : "Access granted. Ask the assistant to continue in chat; you can end access at any time.");
   };
   return { request, state: query.data,
-    show: reading && (manualOpen || Boolean(!query.isError && query.data?.grantId) || Boolean(request && !dismissed.includes(request.id))),
-    onGranted, onDismiss, notice };
+    show: reading && (manualOpen || Boolean(query.data?.grantId) || Boolean(request && !dismissed.includes(request.id))),
+    onGranted, onDismiss, notice: query.data?.grantId ? notice : "" };
 }

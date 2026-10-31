@@ -870,7 +870,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
         }}>{entryIntent.label}</VButton><VButton variant="ghost" onClick={() => setDismissedEntry(entryIntent.key)}>{lang === "zh" ? "暂不处理" : "Dismiss"}</VButton></>} /> : null}
       {computerAccess.show ? <PersonalAssistantComputerPanel key={computerAccess.request?.id || "computer-grant"} active={reading} transport={launcherAssistantComputer}
         authorizationRequestId={computerAccess.request?.id} presentation="conversation" onGranted={computerAccess.onGranted} onCollapse={computerAccess.onDismiss} /> : null}
-      {computerAccess.notice ? <p className="shrink-0 px-4 py-2 text-xs text-[var(--fg-secondary)]" role="status">{computerAccess.notice}</p> : null}
+      {computerAccess.notice ? <p className={petStyles.computerNotice} role="status">{computerAccess.notice}</p> : null}
       {approvalPrompt}</>}
       fallback={<VStateSurface fill tone="loading" title={copy.loading} />}
     /> : <VStateSurface fill tone={detail.isError ? "error" : "loading"} title={detail.isError ? copy.unavailable : copy.loading}

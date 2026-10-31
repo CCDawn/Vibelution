@@ -76,4 +76,11 @@ describe("native computer authorization", () => {
     props.reading = false; props.epoch++; await render();
     expect(state.show).toBe(false); expect(launcherAssistantComputer.state).toHaveBeenCalledTimes(count);
   });
+  it("keeps existing grant controls visible during a state read failure", async () => {
+    vi.mocked(launcherAssistantComputer.state).mockResolvedValue(granted);
+    await render(); await act(async () => { await vi.waitFor(() => expect(state.show).toBe(true)); });
+    vi.mocked(launcherAssistantComputer.state).mockRejectedValue(new Error("temporary read failure"));
+    await act(async () => { await client.refetchQueries({ queryKey: ["launcher-assistant", "computer-access"] }); });
+    expect(state.request).toBeNull(); expect(state.show).toBe(true);
+  });
 });
