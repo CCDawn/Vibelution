@@ -18,8 +18,29 @@ beforeEach(()=>{
   vi.clearAllMocks();api.getLauncherBranchInstances.mockResolvedValue({items:[]});api.getLauncherFreshness.mockResolvedValue({updateAvailable:true,current:false});
   host=document.createElement("div");document.body.appendChild(host);root=createRoot(host);client=new QueryClient({defaultOptions:{queries:{retry:false,gcTime:Infinity}}});
 });
-afterEach(async()=>{await act(async()=>root.unmount());host.remove();client.clear();});
+afterEach(async()=>{await act(async()=>root.unmount());host.remove();client.clear();delete window.vibelutionLauncherBrowser;});
 async function settle(){await act(async()=>new Promise(resolve=>setTimeout(resolve,25)));}
+describe("Launcher browser show navigation", () => {
+  it("navigates only on explicit show and removes its subscription on unmount", async () => {
+    let show: (() => void) | undefined;
+    const unsubscribe = vi.fn();
+    const invoke = vi.fn().mockResolvedValue({ pages: [{ id: "existing" }], activePageId: "existing", takeover: false });
+    const onChanged = vi.fn(() => () => {});
+    window.vibelutionLauncherBrowser = { invoke, onChanged, onShow: listener => { show = listener; return unsubscribe; } };
+    const router = createMemoryRouter([{ path: "/launcher", element: <LauncherShell />, children: [
+      { path: "assistant", element: <div>assistant</div> }, { path: "updates", element: <div>updates</div> },
+    ] }], { initialEntries: ["/launcher/updates"] });
+    await act(async () => root.render(<QueryClientProvider client={client}><RouterProvider router={router}/></QueryClientProvider>));
+    expect(router.state.location.pathname).toBe("/launcher/updates");
+    expect(invoke).not.toHaveBeenCalled();
+    expect(onChanged).not.toHaveBeenCalled();
+    await act(async () => show?.());
+    expect(router.state.location.pathname + router.state.location.search).toBe("/launcher/assistant?panel=browser");
+    await act(async () => root.unmount());
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    root = createRoot(host);
+  });
+});
 describe("Launcher sidebar update watcher",()=>{
   it.each(["/launcher/updates","/launcher/updates/"])("keeps update reminders on ordinary pages and yields polling to %s",async updatePath=>{
     const router=createMemoryRouter([{path:"/launcher",element:<LauncherShell/>,children:[{path:"assistant",element:<div>chat</div>},{path:"updates",element:<div>updates</div>}]}],{initialEntries:["/launcher/assistant"]});

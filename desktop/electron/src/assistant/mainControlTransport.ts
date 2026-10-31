@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { isAppearanceAction, parseAppearanceClaim, appearanceControlResult, type AppearanceMainControlRequest } from "./appearanceControlProtocol.js";
+import { isBrowserAction, parseBrowserClaim, browserControlResult, type BrowserMainControlRequest } from "../browser/browserControlProtocol.js";
 /** Closed, generation-scoped transport over the existing private host connection.
  * It has no credentials, paths, scheduler, transcript or business-state writer.
  */
@@ -20,8 +21,9 @@ export type InitialMigrationMainControlRequest = Omit<HistoryMainControlRequest,
 };
 export type InitialMigrationReceiptRequest = { deliveryId: string; action: "initial_migration_receipt"; projectId: string;
   category: "personal" | "knowledge" | "reminder_handoff"; operationId: string };
-export type MainControlRequest = ProjectMainControlRequest | AppearanceMainControlRequest | HistoryMainControlRequest | HistoryReceiptRequest | AffairsSyncMainControlRequest | EpisodicSyncMainControlRequest | InitialMigrationMainControlRequest | InitialMigrationReceiptRequest;
+export type MainControlRequest = ProjectMainControlRequest | AppearanceMainControlRequest | BrowserMainControlRequest | HistoryMainControlRequest | HistoryReceiptRequest | AffairsSyncMainControlRequest | EpisodicSyncMainControlRequest | InitialMigrationMainControlRequest | InitialMigrationReceiptRequest;
 type PublicResult = Record<string, unknown>;
+function isBrowserRequest(request: MainControlRequest): request is BrowserMainControlRequest { return isBrowserAction(request.action); }
 const ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/;
 const forbiddenScheme = /^(?:https?|file|data|javascript|mailto|ftp|wss?):/i;
 const opaque = (value: unknown, max: number): value is string => typeof value === "string"
@@ -39,6 +41,7 @@ export function parseMainControlClaim(value: unknown): MainControlRequest | null
   if (!closed(value, ["schemaVersion", "request"]) || value.schemaVersion !== 1) return invalid();
   if (value.request === null) return null;
   const row = value.request;
+  if (row && typeof row === "object" && isBrowserAction(Object.getOwnPropertyDescriptor(row, "action")?.value)) return parseBrowserClaim(row);
   if (row && typeof row === "object" && isAppearanceAction(Object.getOwnPropertyDescriptor(row,"action")?.value)) return parseAppearanceClaim(row);
   if (row && typeof row === "object" && Object.getOwnPropertyDescriptor(row, "action")?.value === "history_import_receipt") {
     if (!closed(row, ["deliveryId", "action", "projectId", "previewId"])
@@ -143,6 +146,7 @@ export function parseEpisodicSyncResult(input: { projectId: string; previewId: s
 }
 /** Fail closed rather than relay arbitrary errors, native rows, paths or messages. */
 export function projectMainControlResult(request: MainControlRequest, value: unknown): PublicResult {
+  if (isBrowserRequest(request)) return browserControlResult(request, value);
   if (request.action === "launcher_theme_get" || request.action === "launcher_theme_set" || request.action === "operator_image_upload") return appearanceControlResult(request,value);
   if (request.action === "initial_migration_receipt") {
     const base = { schemaVersion: 1, projectId: request.projectId, category: request.category,

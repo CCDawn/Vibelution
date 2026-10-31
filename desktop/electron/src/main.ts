@@ -1,6 +1,9 @@
 import { BrowserWindow, Notification, app, dialog, ipcMain, nativeImage, nativeTheme, protocol, screen, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
 import { randomUUID } from "node:crypto";
 import { requestRendererWindowClose } from "./windows/rendererWindowClose.js";
+import { AssistantBrowser } from "./browser/assistantBrowser.js";
+import { createBrowserMainControl, invokeOperatorBrowser } from "./browser/browserMainControl.js";
+import type { BrowserMainControlRequest } from "./browser/browserControlProtocol.js";
 import { configureWindowsNotificationIdentity } from "./notifications/windowsNotificationIdentity.js";
 import { NativeNotificationLifetime } from "./notifications/nativeNotificationLifetime.js";
 import { handleHumanAttentionCapabilityIpc, handleHumanAttentionIpc } from "./notifications/humanAttentionIpc.js";
@@ -589,6 +592,7 @@ if (lockDecision.action === "continue_as_primary") configureWindowsNotificationI
 
 let launcherAssistantHost: AssistantHost | null = null;
 let launcherAssistantWindow: AssistantWindow | null = null;
+let launcherAssistantBrowser: AssistantBrowser | null = null;
 const themeProjection = new ThemeProjectionTracker();
 const themeAuthority = new ThemeAuthority(join(app.getPath("userData"), "appearance", "theme.json"), (snapshot, source) => {
   themeProjection.begin(snapshot, "workbench", () => publishAssistantTheme(snapshot, windowProvider, IPC_CHANNELS.assistantThemeChanged, source === "workbench"));
@@ -659,6 +663,35 @@ function requestOpenLauncherFromAssistant(): Promise<{ opened: boolean }> {
     },
   });
   return assistantLauncherEntry();
+}
+
+function assistantBrowserWindow(): BrowserWindow | null {
+  const id = (windowProvider ?? assistantLauncherWindowProvider)?.snapshot().launcher.windowId;
+  const window = id ? BrowserWindow.fromId(id) : null;
+  return window && !window.isDestroyed() && isLauncherControlSender(window.webContents) ? window : null;
+}
+
+function assistantBrowserOwner(): AssistantBrowser {
+  launcherAssistantBrowser ??= new AssistantBrowser({
+    getHost: assistantBrowserWindow,
+    onChanged: state => assistantBrowserWindow()?.webContents.send(IPC_CHANNELS.browserChanged, state),
+  });
+  return launcherAssistantBrowser;
+}
+
+async function requestOpenAssistantBrowserWorkspace(): Promise<void> {
+  await requestOpenLauncherFromAssistant();
+  const window = assistantBrowserWindow();
+  if (!window) throw new Error("BROWSER_UNAVAILABLE");
+  if (window.webContents.isLoadingMainFrame()) {
+    await new Promise<void>((resolveReady, reject) => {
+      const ready = () => { clearTimeout(timer); resolveReady(); };
+      const timer = setTimeout(() => { window.webContents.removeListener("did-finish-load", ready); reject(new Error("BROWSER_UNAVAILABLE")); }, 8_000);
+      window.webContents.once("did-finish-load", ready);
+    });
+  }
+  if (window.isDestroyed() || !isLauncherControlSender(window.webContents)) throw new Error("BROWSER_UNAVAILABLE");
+  window.webContents.send(IPC_CHANNELS.browserShow);
 }
 
 function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
@@ -754,6 +787,8 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
       },
     });
     const mainControl: NonNullable<ConstructorParameters<typeof AssistantHost>[0]["mainControl"]> = (request,signal) => {
+      if (request.action.startsWith("browser_"))
+        return createBrowserMainControl({ browser: assistantBrowserOwner, ensureWorkspace: requestOpenAssistantBrowserWorkspace })(request as BrowserMainControlRequest, signal);
       if (request.action === "launcher_theme_get" || request.action === "launcher_theme_set" || request.action === "operator_image_upload")
         return appearanceMainControl(request,signal);
       if (request.action === "initial_migration_receipt") {
@@ -1471,7 +1506,7 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
           runtimeRoot: join(paths.userDataRoot, "assistant", "runtime"),
           sourceRoot: resources.sourceRoot, pythonPath: resources.pythonPath, pythonArguments: resources.pythonArguments,
           env: resources.env, projects: snapshot.projects, projectSnapshot: snapshot, projectsSuspended,
-          mainControl, appearanceControl: true, initialMigrationControl,
+          mainControl, appearanceControl: true, browserControl: true, initialMigrationControl,
         });
         launcherAssistantHost = host;
         launcherAssistantWindow = new AssistantWindow(paths, host, () => shutdownApproved, requestOpenLauncherFromAssistant);
@@ -1578,6 +1613,8 @@ async function stopLauncherAssistant(): Promise<void> {
         await launcherAssistantProjects?.stop();
       }
       stopLauncherAssistantReminders = null;
+      launcherAssistantBrowser?.dispose();
+      launcherAssistantBrowser = null;
       launcherAssistantExitReady = true;
     } finally {
       if (waitTimer) clearTimeout(waitTimer);
@@ -1601,6 +1638,11 @@ async function exitDesktopShellProcess(): Promise<void> {
 ipcMain.handle(IPC_CHANNELS.assistantThemeResult, (event,payload:unknown) => {
   if (shutdownApproved || !launcherAssistantWindow) return false;
   return launcherAssistantWindow.acceptThemeResult(event,payload);
+});
+
+ipcMain.handle(IPC_CHANNELS.browserInvoke, async (event, payload: unknown) => {
+  if (shutdownApproved || !isTrustedLauncherControlFrame(event)) throw new Error("BROWSER_UNAVAILABLE");
+  return invokeOperatorBrowser(assistantBrowserOwner(), payload);
 });
 
 ipcMain.handle(IPC_CHANNELS.assistantInvoke, async (event, payload: unknown) => {

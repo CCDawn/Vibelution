@@ -8,6 +8,28 @@ const isDesktopPetWindow = process.argv.includes("--vibelution-window-role=deskt
 const isLauncherAssistantWindow = process.argv.includes("--vibelution-window-role=launcher-assistant");
 const isWorkbenchMainWindow = process.argv.includes("--vibelution-window-role=workbench-main");
 
+if (isLauncherControlWindow) {
+  let pendingShow = false;
+  const showListeners = new Set<() => void>();
+  ipcRenderer.on(IPC_CHANNELS.browserShow, () => {
+    if (!showListeners.size) pendingShow = true;
+    for (const listener of showListeners) listener();
+  });
+  contextBridge.exposeInMainWorld("vibelutionLauncherBrowser", {
+    invoke: (payload: unknown) => ipcRenderer.invoke(IPC_CHANNELS.browserInvoke, payload),
+    onChanged: (listener: (state: unknown) => void) => {
+      const wrapped = (_event: unknown, state: unknown) => listener(state);
+      ipcRenderer.on(IPC_CHANNELS.browserChanged, wrapped);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.browserChanged, wrapped);
+    },
+    onShow: (listener: () => void) => {
+      showListeners.add(listener);
+      if (pendingShow) { pendingShow = false; queueMicrotask(listener); }
+      return () => showListeners.delete(listener);
+    },
+  });
+}
+
 // All assistant surfaces — the resident pet float, the workbench main window,
 // and the launcher control window — carry the identical assistant invoke and
 // theme bridges. The launcher control and workbench windows keep their full

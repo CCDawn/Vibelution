@@ -2,6 +2,7 @@
 
 | Component | Design |
 | --- | --- |
+| `LauncherAssistantBrowserWorkspace` | [product/personal-assistant.md](./product/personal-assistant.md#launcherassistantbrowserworkspace) |
 | `LauncherAssistantRoute` | [product/personal-assistant.md](./product/personal-assistant.md#launcherassistantroute) |
 | `LauncherAssistantWorkspaceRoute` / `LauncherAssistantWelcome` | [product/personal-assistant.md](./product/personal-assistant.md#launcherassistantworkspaceroute) |
 | `LauncherShell` / `LauncherNavigation` / `LauncherTitlebar` / `LauncherProjectRoute` / `LauncherUpdatesRoute` | [product/personal-assistant.md](./product/personal-assistant.md#launchershell--launchernavigation) |

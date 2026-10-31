@@ -68,6 +68,23 @@ export function operatorImageUploadPreviewIsValid(summary: Record<string, unknow
   return Object.keys(values).length === 1 && (values.kind === "avatar" || values.kind === "background");
 }
 
+export function browserInteractPreviewIsValid(summary: Record<string, unknown> | null | undefined): boolean {
+  if (!summary || summary.assistantAction !== "browser_interact" || summary.assistantArgumentsInvalid || summary.assistantDetailsOmitted) return false;
+  const targets = summary.assistantTargets;
+  if (!targets || typeof targets !== "object" || Array.isArray(targets)) return false;
+  const values = targets as Record<string, unknown>;
+  const keys = ["page_id", "snapshot_id", "element_ref", "url", "element_name", "operation", ...(values.operation === "fill" ? ["value"] : [])];
+  const uuid = (value: unknown) => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
+  if (Object.keys(values).length !== keys.length || !keys.every(key => Object.hasOwn(values, key))
+    || !uuid(values.page_id) || !uuid(values.snapshot_id) || typeof values.element_ref !== "string" || !/^[1-9][0-9]{0,2}$/.test(values.element_ref)
+    || typeof values.element_name !== "string" || values.element_name.length > 160 || /\p{Cs}/u.test(values.element_name)
+    || typeof values.url !== "string" || values.url.length > 8192 || /[\u0000-\u0020\u007f]/.test(values.url)) return false;
+  try { const url = new URL(values.url); if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) return false; } catch { return false; }
+  if (values.operation === "fill") return typeof values.value === "string" && Array.from(values.value).length <= 2000 && !/\p{Cs}/u.test(values.value)
+    && summary.assistantOperationDescription === "向网页上的所选元素填写所示内容。";
+  return values.operation === "click" && summary.assistantOperationDescription === "点击网页上的所选元素。";
+}
+
 /** A write dispatch must show the same complete request that approval binds. */
 export function dispatchWritePreviewIsValid(summary: Record<string, unknown> | null | undefined): boolean {
   if (!summary || summary.assistantAction !== "dispatch_write" || summary.assistantArgumentsInvalid
@@ -141,6 +158,7 @@ const MANAGE_ACTIONS: Record<string, [string, string]> = {
       knowledge_sync_recover: ["恢复知识同步", "Recover knowledge sync"],
       reminder_handoff_queue: ["交接旧助理提醒", "Transfer previous assistant reminders"],
       reminder_handoff_recover: ["重新授权旧提醒交接", "Reauthorize previous reminder handoff"],
+      browser_interact: ["操作网页元素", "Interact with webpage element"],
 };
 
 export function managementApprovalActionIsKnown(value: unknown): boolean {
@@ -160,6 +178,21 @@ export function toolApprovalActionPreview(
       return `${title}\n${lang === "zh" ? "参数无法核对，请拒绝并重新发起。" : "Arguments cannot be verified. Decline and request again."}`;
     }
     const targets = summary.assistantTargets;
+    if (action === "browser_interact") {
+      if (!browserInteractPreviewIsValid(summary)) return `${title}\n${lang === "zh" ? "参数无法核对，请拒绝并重新读取页面。" : "Arguments cannot be verified. Decline and read the page again."}`;
+      const fields = targets as Record<string, string>;
+      const quote = (value: string) => JSON.stringify(value).replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g, char => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`);
+      return [title,
+        `${lang === "zh" ? "网页" : "Webpage"}: ${fields.url}`,
+        `${lang === "zh" ? "动作" : "Action"}: ${fields.operation === "fill" ? (lang === "zh" ? "填写" : "Fill") : (lang === "zh" ? "点击" : "Click")}`,
+        `${lang === "zh" ? "元素" : "Element"}: ${quote(fields.element_name)}`,
+        ...(fields.operation === "fill" ? [`${lang === "zh" ? "填写内容" : "Value"}: ${quote(fields.value)}`] : []),
+        `${lang === "zh" ? "页面 ID" : "Page ID"}: ${fields.page_id}`,
+        `${lang === "zh" ? "快照 ID" : "Snapshot ID"}: ${fields.snapshot_id}`,
+        `${lang === "zh" ? "元素引用" : "Element reference"}: ${fields.element_ref}`,
+        lang === "zh" ? "仅允许这一次网页操作；操作后仍需读取页面核对结果。" : "Allow only this webpage action; read the page again to verify its result.",
+      ].join("\n");
+    }
     if (action === "reminder_handoff_recover") {
       if (!recoveryPreviewIsValid(summary)) {
         return `${title}\n${lang === "zh" ? "参数无法核对，请拒绝并重新发起。" : "Arguments cannot be verified. Decline and request again."}`;

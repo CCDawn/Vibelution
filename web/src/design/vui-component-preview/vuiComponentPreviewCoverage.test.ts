@@ -66,6 +66,9 @@ const previewExemptDesignSections = new Set([
   // Workspace route depends on the selected native assistant/session, project
   // queries and router search state; its panels and routing have interaction tests.
   "LauncherAssistantWorkspaceRoute",
+  // Route composition uses the live Launcher browser bridge and native view;
+  // interaction tests and the approved isolated preview cover its UI.
+  "LauncherAssistantBrowserWorkspace",
   // Shell subscribes to native Launcher state, queries project/update status,
   // changes document settings and hosts router outlets. Navigation additionally
   // acts on the real desktop bridge and router location; shell/navigation tests

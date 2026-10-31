@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Activity, ArrowDownRight, ArrowUpCircle, CalendarDays, Folder, LayoutDashboard, ListTodo, MessageCircle, Monitor, Palette, Settings2, ShieldCheck, SlidersHorizontal, Wrench } from "lucide-react";
+import { Activity, ArrowDownRight, ArrowUpCircle, CalendarDays, Folder, Globe, LayoutDashboard, ListTodo, MessageCircle, Monitor, Palette, Settings2, ShieldCheck, SlidersHorizontal, Wrench } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import type { LauncherBranchInstance } from "../api/launcher";
 import { returnLauncherToDesktop } from "../api/launcher";
@@ -8,7 +8,7 @@ import { launcherAssistantPanelLabel, launcherAssistantPanelPath, resolveLaunche
 import styles from "./LauncherNavigation.styles";
 
 const assistantEntries = [
-  ["dialogue", MessageCircle], ["overview", LayoutDashboard], ["affairs", CalendarDays], ["dispatches", ListTodo],
+  ["dialogue", MessageCircle], ["browser", Globe], ["overview", LayoutDashboard], ["affairs", CalendarDays], ["dispatches", ListTodo],
   ["computer", Monitor], ["preferences", SlidersHorizontal], ["assistant-settings", Palette],
 ] as const;
 const launcherEntries = [

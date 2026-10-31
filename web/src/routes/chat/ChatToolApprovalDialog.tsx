@@ -144,7 +144,7 @@ export function ChatToolApprovalDialog({
     const title = approveDisabled ? (lang === "zh" ? "本次操作暂不能批准" : "This action cannot be approved yet")
       : lang === "zh" ? `允许${actionTitle}吗？` : `Allow ${actionTitle}?`;
     // Keep machine identifiers and dispatch argument blocks in the frozen details.
-    const technicalFact = /^(?:原操作 ID|原同步 ID|当前来源快照摘要|原授权 head|Original operation ID|Original sync ID|Current source snapshot digest|Previous authorization head|请求 ID|派遣 ID|任务 ID|审批 ID|轮次|调用|Request ID|Dispatch ID|Task ID|Approval ID|Turn|Call):/;
+    const technicalFact = /^(?:页面 ID|快照 ID|元素引用|Page ID|Snapshot ID|Element reference|原操作 ID|原同步 ID|当前来源快照摘要|原授权 head|Original operation ID|Original sync ID|Current source snapshot digest|Previous authorization head|请求 ID|派遣 ID|任务 ID|审批 ID|轮次|调用|Request ID|Dispatch ID|Task ID|Approval ID|Turn|Call):/;
     let bodyLines = lines;
     if (firstLineIsFact) {
       const detailsStart = lines.findIndex((line) => /^(?:完整原始参数|Complete original arguments|目标动作摘要（不完整）|Target action summary \(incomplete\))[:：]/.test(line));

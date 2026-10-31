@@ -19,15 +19,16 @@ async function loadPreload(role?: string) {
     executeInMainWorld: vi.fn()
   };
   const invoke = vi.fn(async () => ({}));
+  const listeners = new Map<string, (...args: unknown[]) => void>();
   process.argv = originalArgv.filter(arg => !arg.startsWith("--vibelution-window-role="));
   if (role) process.argv.push(`--vibelution-window-role=${role}`);
   vi.doMock("electron", () => ({
     contextBridge,
-    ipcRenderer: { invoke, on: vi.fn(), removeListener: vi.fn(), send: vi.fn() },
+    ipcRenderer: { invoke, on: vi.fn((name, listener) => listeners.set(name, listener)), removeListener: vi.fn((name, listener) => { if (listeners.get(name) === listener) listeners.delete(name); }), send: vi.fn() },
     webUtils: { getPathForFile: vi.fn() }
   }));
   await import("../src/preload.js");
-  return { exposed, invoke };
+  return { exposed, invoke, listeners };
 }
 
 type BridgeApi = Record<string, (payload?: unknown) => Promise<unknown>>;
@@ -66,7 +67,7 @@ describe("preload assistant bridge injection by window role", () => {
   it("grants the launcher control window the assistant and theme bridges beside its control bridge", async () => {
     const { exposed, invoke } = await loadPreload("launcher-control");
     expect([...exposed.keys()].sort()).toEqual(
-      ["vibelutionLauncher", "vibelutionLauncherAssistant", "vibelutionLauncherTheme"]);
+      ["vibelutionLauncher", "vibelutionLauncherAssistant", "vibelutionLauncherBrowser", "vibelutionLauncherTheme"]);
     await (exposed.get("vibelutionLauncherAssistant") as BridgeApi).invoke({ operation: "status" });
     expect(invoke).toHaveBeenCalledWith(IPC_CHANNELS.assistantInvoke, { operation: "status" });
     expect(typeof exposed.get("vibelutionLauncherTheme")!.readThemeAuthority).toBe("function");
@@ -84,8 +85,26 @@ describe("preload assistant bridge injection by window role", () => {
     const { exposed } = await loadPreload(role);
     expect(exposed.has("vibelutionLauncherAssistant")).toBe(false);
     expect(exposed.has("vibelutionLauncherTheme")).toBe(false);
+    expect(exposed.has("vibelutionLauncherBrowser")).toBe(false);
     expect(exposed.has("vibelutionLauncher")).toBe(true);
     expect(exposed.get("vibelutionLauncher")!.returnToDesktop).toBeUndefined();
     expect(exposed.get("vibelutionLauncher")!.selectProject).toBeUndefined();
+  });
+
+  it("retains explicit browser-open intent until the Launcher UI subscribes", async () => {
+    const { exposed, invoke, listeners } = await loadPreload("launcher-control");
+    const bridge = exposed.get("vibelutionLauncherBrowser") as unknown as { invoke: (input: unknown) => Promise<unknown>; onShow: (listener: () => void) => () => void };
+    listeners.get(IPC_CHANNELS.browserShow)!();
+    const shown = vi.fn();
+    const stop = bridge.onShow(shown);
+    await Promise.resolve();
+    expect(shown).toHaveBeenCalledTimes(1);
+    listeners.get(IPC_CHANNELS.browserShow)!();
+    expect(shown).toHaveBeenCalledTimes(2);
+    stop();
+    listeners.get(IPC_CHANNELS.browserShow)!();
+    expect(shown).toHaveBeenCalledTimes(2);
+    await bridge.invoke({ operation: "state" });
+    expect(invoke).toHaveBeenCalledWith(IPC_CHANNELS.browserInvoke, { operation: "state" });
   });
 });

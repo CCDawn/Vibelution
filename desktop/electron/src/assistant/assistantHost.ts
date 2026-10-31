@@ -74,6 +74,7 @@ export type AssistantHostOptions = {
   /** Main-only native lifecycle capability; deliberately absent from renderer IPC. */
   mainControl?: (request: MainControlRequest, signal?: AbortSignal) => Promise<unknown>;
   appearanceControl?: boolean;
+  browserControl?: boolean;
   initialMigrationControl?: boolean;
 };
 
@@ -975,6 +976,7 @@ export class AssistantHost {
             if (!object(health) || health.status !== "ok" || health.role !== "launcher_assistant" || health.protocolVersion !== 1) throw new HostError("ASSISTANT_HEALTH_INVALID");
             if (this.options.mainControl && health.mainControlVersion !== 1) throw new HostError("ASSISTANT_MAIN_CONTROL_UNAVAILABLE");
             if (this.options.appearanceControl && health.appearanceControlVersion !== 1) throw new HostError("ASSISTANT_APPEARANCE_CONTROL_UNAVAILABLE");
+            if (this.options.browserControl && health.browserControlVersion !== 1) throw new HostError("ASSISTANT_BROWSER_CONTROL_UNAVAILABLE");
             if (this.options.initialMigrationControl && health.initialMigrationControlVersion !== 1) throw new HostError("ASSISTANT_INITIAL_MIGRATION_UNAVAILABLE");
             const status = await this.rpc(generation, "/api/assistant", "GET", undefined, Math.max(1, deadline - Date.now()));
             generation.sessionId = identity(status);

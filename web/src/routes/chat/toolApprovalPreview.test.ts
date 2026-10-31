@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   authorizationUpgradePreviewIsValid,
+  browserInteractPreviewIsValid,
   dispatchWritePreviewIsValid,
   launcherAgentCreatePreviewIsValid,
   projectLifecyclePreviewIsValid,
@@ -14,6 +15,25 @@ import {
 } from "./toolApprovalPreview";
 
 describe("toolApprovalPreview", () => {
+  it("preserves the complete browser target and quotes untrusted page text", () => {
+    const targets = { page_id: "8e2731f7-06a2-41db-bfa2-cbe76a099811", snapshot_id: "8e2731f7-06a2-41db-bfa2-cbe76a099812", element_ref: "1", url: "https://www.bilibili.com/", element_name: "搜索\u202e", operation: "fill", value: "机器学习\n第二行" };
+    const summary = { assistantAction: "browser_interact", assistantTargets: targets, assistantOperationDescription: "向网页上的所选元素填写所示内容。" };
+    expect(browserInteractPreviewIsValid(summary)).toBe(true);
+    const preview = toolApprovalActionPreview(summary, "personal_assistant_manage_tool", "zh");
+    expect(preview).toContain(targets.page_id);
+    expect(preview).toContain(targets.snapshot_id);
+    expect(preview).toContain('"机器学习\\n第二行"');
+    expect(preview).toContain('"搜索\\u202e"');
+    expect(preview).not.toContain("\u202e");
+    const fullUrl = "https://www.bilibili.com/?keyword=a%26b#results";
+    expect(browserInteractPreviewIsValid({ ...summary, assistantTargets: { ...targets, url: fullUrl } })).toBe(true);
+    expect(toolApprovalActionPreview({ ...summary, assistantTargets: { ...targets, url: fullUrl } }, "personal_assistant_manage_tool", "zh")).toContain(fullUrl);
+    expect(browserInteractPreviewIsValid({ ...summary, assistantTargets: { ...targets, url: "https://example.com/?" + "x".repeat(8192) } })).toBe(false);
+    expect(browserInteractPreviewIsValid({ ...summary, assistantTargets: { ...targets, operation: "click" } })).toBe(false);
+    expect(browserInteractPreviewIsValid({ ...summary, assistantTargets: { ...targets, approved: true } })).toBe(false);
+    expect(browserInteractPreviewIsValid({ ...summary, assistantTargets: { ...targets, url: "file:///private" } })).toBe(false);
+    expect(browserInteractPreviewIsValid({ ...summary, assistantTargets: { ...targets, snapshot_id: "forged" } })).toBe(false);
+  });
   it("binds and displays all recovery details without truncation", () => {
     const suffix = "a".repeat(40);
     const summary = { assistantAction: "reminder_handoff_recover", assistantOperationDescription: "重新审批当前来源快照并继续原编号交接；原记录保留。旧进程实际权限与发送者停止尚未证明；不重放已开始或未知的写入。",

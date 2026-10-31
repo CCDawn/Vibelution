@@ -317,6 +317,26 @@ An offline host cannot guarantee work survives beyond its native lease.
 
 ## Verification boundary
 
+The native Launcher assistant exposes a closed browser action family through
+`browser_protocol.py` and the existing main-control delivery. Electron owns an
+isolated, sandboxed `WebContentsView` partition with no product preload. The
+Launcher browser workspace shares the native assistant Session and contains up
+to four HTTP(S) pages; ordinary project Sessions gain no browser authority.
+Page text and element names are untrusted data. Reads return bounded snapshots;
+click/fill approval binds page ID, snapshot ID, element reference, element name,
+and the complete address (including query and fragment). Password/file inputs,
+arbitrary scripts, selectors, coordinates, downloads and system popups are not
+browser tools. Verified new-window anchors may navigate the same owned view.
+
+Operator takeover blocks new assistant actions and waits for already-started
+reads and navigation. Returning control requires an explicit operator action.
+Navigation invalidates snapshots; uncertain event effects are reported as
+`BROWSER_ACTION_OUTCOME_UNKNOWN`, requiring another read rather than replay.
+Synthetic page events can be ignored by a website; event dispatch alone is not
+evidence that a search, submission or business action succeeded. If essential
+bindings cannot fit the tool output budget, the tool returns a bounded error
+instead of truncating an address or returning a partial success.
+
 `tests/test_assistant_runtime_{native,host,actions,dispatch}.py` cover storage
 identity, crash recovery, transport auth and task associations. Frontend uses
 the existing `ConversationView` with an injected data source and separate cache

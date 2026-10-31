@@ -32,7 +32,7 @@ describe("Launcher navigation", () => {
     expect(nav.querySelector('[aria-label="个人助理功能"]')).toBeTruthy();
     expect(nav.textContent).toContain("个人助理");
     expect(nav.textContent).toContain("Launcher");
-    for (const [label, path] of [["电脑操作", "/launcher/assistant?panel=computer"], ["助理设置", "/launcher/assistant?panel=assistant-settings"],
+    for (const [label, path] of [["浏览器", "/launcher/assistant?panel=browser"], ["电脑操作", "/launcher/assistant?panel=computer"], ["助理设置", "/launcher/assistant?panel=assistant-settings"],
       ["项目与分支", "/launcher"], ["启动设置", "/launcher?view=settings"], ["版本更新", "/launcher/updates"]]) {
       await act(async () => link(label).dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })));
       expect(router.state.location.pathname + router.state.location.search).toBe(path);

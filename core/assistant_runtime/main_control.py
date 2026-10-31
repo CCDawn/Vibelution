@@ -20,6 +20,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from . import appearance_protocol as appearance
+from . import browser_protocol as browser
 
 
 _OPERATIONS = {"start", "stop", "restart"}
@@ -81,6 +82,8 @@ def initial_model_env_unavailable():
 def _request(action, request):
     if type(action) is str and action in appearance.APPEARANCE_ACTIONS:
         return appearance.validate_request(action, request)
+    if type(action) is str and action in browser.BROWSER_ACTIONS:
+        return browser.validate_request(action, request)
     if type(action) is not str or action not in _ACTIONS or type(request) is not dict:
         raise ValueError("Invalid main control request")
     if action == "initial_migration_receipt":
@@ -142,6 +145,8 @@ def _result(action, request, result):
     """Reject unknown fields rather than copying errors, paths or credentials."""
     if action in appearance.APPEARANCE_ACTIONS:
         return appearance.validate_result(action, request, result)
+    if action in browser.BROWSER_ACTIONS:
+        return browser.validate_result(action, request, result)
     if action == "initial_migration_receipt":
         required = {"schemaVersion", "projectId", "category", "operationId", "state", "code", "readyForCutover"}
         if request["category"] == "reminder_handoff" and type(result) is dict and result.get("state") == "pending":
@@ -353,7 +358,7 @@ def _revoke_initial(entry):
 
 
 class MainControlBroker:
-    def __init__(self, project_ids: Callable, *, timeout_seconds=20, claim_seconds=10, max_pending=32, appearance_enabled=False, image_timeout_seconds=appearance.IMAGE_SELECTION_SECONDS, initial_migration_enabled=False):
+    def __init__(self, project_ids: Callable, *, timeout_seconds=20, claim_seconds=10, max_pending=32, appearance_enabled=False, browser_enabled=False, image_timeout_seconds=appearance.IMAGE_SELECTION_SECONDS, initial_migration_enabled=False):
         if (not callable(project_ids) or type(max_pending) is not int or not 1 <= max_pending <= 128
                 or any(type(value) not in {int, float} or not math.isfinite(value) or value <= 0
                        for value in (timeout_seconds, claim_seconds))
@@ -362,6 +367,9 @@ class MainControlBroker:
         if type(appearance_enabled) is not bool or type(image_timeout_seconds) not in {int, float} or not math.isfinite(image_timeout_seconds) or not 0 < image_timeout_seconds <= appearance.IMAGE_SELECTION_SECONDS:
             raise ValueError("Invalid appearance transport limits")
         self.appearance_enabled = appearance_enabled
+        if type(browser_enabled) is not bool:
+            raise ValueError("Invalid browser capability")
+        self.browser_enabled = browser_enabled
         if type(initial_migration_enabled) is not bool:
             raise ValueError("Invalid initial migration capability")
         self.initial_migration_enabled = initial_migration_enabled
@@ -406,10 +414,14 @@ class MainControlBroker:
             return False
 
     def _authorized_request(self, entry):
+        if entry.action in browser.BROWSER_ACTIONS:
+            return self.browser_enabled
         return self.appearance_enabled if entry.action in appearance.APPEARANCE_ACTIONS else self._authorized(entry.request["projectId"])
 
     @staticmethod
     def _unavailable(entry, code="control_unavailable"):
+        if entry.action in browser.BROWSER_ACTIONS:
+            return browser.unavailable(entry.action, entry.request)
         if entry.action in appearance.APPEARANCE_ACTIONS:
             return appearance.unavailable(entry.action, entry.request)
         if entry.action == "initial_migration_queue":
@@ -462,7 +474,10 @@ class MainControlBroker:
             raise ValueError("Initial migration capability is unavailable")
         if action == "initial_migration_queue" and initial_model_env_unavailable():
             raise ValueError("Initial migration source model configuration unavailable")
-        if action in appearance.APPEARANCE_ACTIONS:
+        if action in browser.BROWSER_ACTIONS:
+            if not self.browser_enabled:
+                raise ValueError("Browser control is not enabled by Launcher")
+        elif action in appearance.APPEARANCE_ACTIONS:
             if not self.appearance_enabled:
                 raise ValueError("Appearance control is not enabled by Launcher")
         elif not self._authorized(captured["projectId"]):

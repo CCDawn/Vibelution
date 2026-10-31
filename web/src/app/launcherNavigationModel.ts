@@ -1,7 +1,7 @@
-export type LauncherAssistantPanel = "dialogue" | "overview" | "affairs" | "dispatches" | "computer" | "preferences" | "assistant-settings";
-export const LAUNCHER_ASSISTANT_PANELS: readonly LauncherAssistantPanel[] = ["dialogue", "overview", "affairs", "dispatches", "computer", "preferences", "assistant-settings"];
+export type LauncherAssistantPanel = "dialogue" | "browser" | "overview" | "affairs" | "dispatches" | "computer" | "preferences" | "assistant-settings";
+export const LAUNCHER_ASSISTANT_PANELS: readonly LauncherAssistantPanel[] = ["dialogue", "browser", "overview", "affairs", "dispatches", "computer", "preferences", "assistant-settings"];
 const panelLabels: Record<LauncherAssistantPanel, readonly [string, string]> = {
-  dialogue: ["对话", "Chat"], overview: ["平台概览", "Overview"], affairs: ["事务", "Affairs"], dispatches: ["派遣与回执", "Dispatches & receipts"],
+  dialogue: ["对话", "Chat"], browser: ["浏览器", "Browser"], overview: ["平台概览", "Overview"], affairs: ["事务", "Affairs"], dispatches: ["派遣与回执", "Dispatches & receipts"],
   computer: ["电脑操作", "Computer"], preferences: ["对话偏好", "Dialogue preferences"], "assistant-settings": ["助理设置", "Assistant settings"],
 };
 export function resolveLauncherAssistantPanel(search: string): LauncherAssistantPanel {

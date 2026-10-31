@@ -691,7 +691,8 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
         return {"status": "ok", "role": "launcher_assistant", "protocolVersion": 1,
                 **({"mainControlVersion": 1} if main_control is not None else {}),
                 **({"initialMigrationControlVersion": 1} if main_control is not None and getattr(main_control, "initial_migration_enabled", False) else {}),
-                **({"appearanceControlVersion": 1} if main_control is not None and getattr(main_control, "appearance_enabled", False) else {})}
+                **({"appearanceControlVersion": 1} if main_control is not None and getattr(main_control, "appearance_enabled", False) else {}),
+                **({"browserControlVersion": 1} if main_control is not None and getattr(main_control, "browser_enabled", False) else {})}
 
     async def reminder_call(method, *args, **kwargs):
         from .reminder_receipts import ReminderReceiptError
@@ -778,7 +779,7 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                 raise HTTPException(422, detail="Invalid main control protocol")
             body = bytearray()
             async for chunk in request.stream():
-                if len(body) + len(chunk) > 4096:
+                if len(body) + len(chunk) > (128 * 1024 if getattr(main_control, "browser_enabled", False) else 4096):
                     raise HTTPException(413, detail="Main control payload is too large")
                 body.extend(chunk)
             return body

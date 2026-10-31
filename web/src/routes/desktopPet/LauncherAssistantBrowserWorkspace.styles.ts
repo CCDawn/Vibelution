@@ -1,0 +1,25 @@
+const styles = {
+  browser: "flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--vui-surface-panel)]",
+  header: "flex h-13 shrink-0 items-center justify-between gap-2 border-b border-vui-border-subtle px-4",
+  heading: "flex items-center gap-2 text-sm font-semibold",
+  controls: "flex items-center gap-2",
+  ownership: "text-xs text-[var(--fg-secondary)]",
+  icon: "h-8 w-8 min-w-8 p-0",
+  tabs: "flex min-h-9 shrink-0 items-center gap-1 overflow-x-auto border-b border-vui-border-subtle bg-[var(--vui-surface-muted)] px-2",
+  pageTab: "flex max-w-52 shrink-0 items-center rounded-t-md",
+  pageTabActive: "bg-[var(--vui-surface-panel)]",
+  pageTabButton: "max-w-40 truncate",
+  addressBar: "flex shrink-0 items-center gap-1 border-b border-vui-border-subtle px-2 py-2",
+  addressInput: "min-w-0 flex-1",
+  error: "shrink-0 border-b border-vui-border-subtle px-4 py-2 text-xs text-[var(--vui-danger)]",
+  progress: "h-0.5 shrink-0 animate-pulse bg-[var(--accent-cool)]",
+  viewportContainer: "relative flex min-h-0 flex-1 flex-col",
+  empty: "m-auto flex flex-col items-center gap-3 p-6 text-center text-sm text-[var(--fg-secondary)]",
+  viewport: "absolute inset-0",
+  viewportHidden: "hidden",
+  root: "flex h-full min-h-0 min-w-0 flex-col",
+  mobileSwitch: "flex shrink-0 justify-center gap-2 border-b border-vui-border-subtle p-1",
+  split: "min-h-0 flex-1",
+} as const;
+
+export default styles;

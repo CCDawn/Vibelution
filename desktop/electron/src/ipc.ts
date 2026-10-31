@@ -1,5 +1,8 @@
 export const IPC_CHANNELS = {
   assistantInvoke: "assistant:invoke",
+  browserInvoke: "assistant-browser:invoke",
+  browserChanged: "assistant-browser:changed",
+  browserShow: "assistant-browser:show",
   assistantThemeResult: "vibelution:assistant-theme-result",
   readThemeAuthority: "workbench:read-theme-authority",
   setThemeAuthority: "workbench:set-theme-authority",

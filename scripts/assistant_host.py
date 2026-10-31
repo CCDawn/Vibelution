@@ -127,7 +127,7 @@ def main():
     main_control = None
     if main_control_enabled:
         from core.assistant_runtime.main_control import MainControlBroker
-        main_control = MainControlBroker(dispatch.project_ids, appearance_enabled=appearance_enabled,
+        main_control = MainControlBroker(dispatch.project_ids, appearance_enabled=appearance_enabled, browser_enabled=True,
                                          initial_migration_enabled=initial_migration_enabled)
 
     ready = args.runtime_dir / "ready.json"

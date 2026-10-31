@@ -61,7 +61,7 @@ function fixture() {
   };
   const context: Record<string, any> = {
     launcherAssistantStarting: null, launcherAssistantStopping: null, initialMigrationReceiptFence: null, launcherAssistantStartupAbort: new AbortController(),
-    launcherAssistantHost: null, launcherAssistantWindow: null, showAssistantStartupWait: null, dismissAssistantStartupWait: null, flushAssistantMigrationFeedback: null, assistantMigrationPending: false,
+    launcherAssistantHost: null, launcherAssistantWindow: null, launcherAssistantBrowser: null, showAssistantStartupWait: null, dismissAssistantStartupWait: null, flushAssistantMigrationFeedback: null, assistantMigrationPending: false,
     launcherAssistantProjects: null, stopLauncherAssistantReminders: null, pendingAssistantOpen: null,
     projectAdmissionExperiment: false,
     projectAdmission: null, legacyReminderAdmission: null,

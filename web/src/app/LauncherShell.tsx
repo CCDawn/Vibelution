@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import { Outlet, useLocation } from "react-router-dom";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import {
   getLauncherBranchInstances,
@@ -30,6 +30,7 @@ export function LauncherShell() {
   const [navigationOpen,setNavigationOpen] = useState(false);
   const queryClient = useQueryClient();
   const location = useLocation();
+  const navigate = useNavigate();
   const watchUpdates = !location.pathname.replace(/\/+$/, "").endsWith("/updates");
   useUpdateFreshnessFocus(queryClient, watchUpdates);
   const freshnessQuery = useQuery({ ...UPDATE_FRESHNESS_QUERY_OPTIONS, queryKey:queryKeys.launcherFreshness(), queryFn:getLauncherFreshness,
@@ -42,6 +43,12 @@ export function LauncherShell() {
     staleTime: 15_000,
   });
   const launcherWindowTitle = currentInstanceWindowTitle("launcher", branchInstancesQuery.data);
+
+  useEffect(() => {
+    const bridge = window.vibelutionLauncherBrowser;
+    if (typeof bridge?.onShow !== "function") return;
+    return bridge.onShow(() => { setNavigationOpen(false); void navigate("/launcher/assistant?panel=browser"); });
+  }, [navigate]);
 
   useEffect(() => {
     const unsubscribe = subscribeStoredWorkbenchTheme(setTheme);

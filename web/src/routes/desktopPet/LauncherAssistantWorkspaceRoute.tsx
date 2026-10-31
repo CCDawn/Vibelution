@@ -13,6 +13,7 @@ import { PersonalAssistantAffairs } from "../personalAssistant/PersonalAssistant
 import { PersonalAssistantComputerPanel } from "../personalAssistant/PersonalAssistantComputerPanel";
 import { PersonalAssistantDialoguePreferences } from "../personalAssistant/PersonalAssistantDialoguePreferences";
 import { PersonalAssistantSettings } from "../personalAssistant/PersonalAssistantSettings";
+import { LauncherAssistantBrowserWorkspace } from "./LauncherAssistantBrowserWorkspace";
 import { LauncherAssistantRoute } from "./LauncherAssistantRoute";
 import { launcherDispatchLabel, launcherDispatchReceiptLabel } from "./launcherAssistantModel";
 import styles from "./LauncherAssistantWorkspaceRoute.styles";
@@ -41,7 +42,7 @@ export function LauncherAssistantWorkspaceRoute() {
   const [selectionError, setSelectionError] = useState("");
   const [selecting, setSelecting] = useState(false);
   const status = useQuery({ queryKey: ["launcher-assistant", "status"], queryFn: getLauncherAssistantStatus,
-    enabled: panel !== "dialogue", retry: false });
+    enabled: panel !== "dialogue" && panel !== "browser", retry: false });
   const agentId = status.data?.assistant.agentId ?? "";
   const sessionId = status.data?.assistant.directSessionId ?? "";
   const transport = useMemo(() => agentId ? createLauncherAssistantPanelTransport(agentId) : null, [agentId]);
@@ -65,6 +66,7 @@ export function LauncherAssistantWorkspaceRoute() {
     finally { setSelecting(false); }
   }
   if (panel === "dialogue") return <LauncherAssistantRoute embedded navigationOwned />;
+  if (panel === "browser") return <LauncherAssistantBrowserWorkspace />;
   const waiting = status.isPending;
   return <VDenseOpsPage className={styles.page} bodyClassName={styles.body} title={launcherAssistantPanelLabel(panel, lang)}>
     <div className={styles.content}>

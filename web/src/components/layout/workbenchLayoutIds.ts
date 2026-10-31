@@ -20,6 +20,7 @@ export const WORKBENCH_LAYOUT_IDS = {
   git: "git",
   kernelTaskCenter: "kernel-task-center",
   launcher: "launcher",
+  launcherAssistantBrowser: "launcher-assistant-browser",
   logs: "logs",
   /** Nested runtime-scenes sidebar inside Logs (separate from package-index rails). */
   logsRuntimeScenes: "logs-runtime-scenes",

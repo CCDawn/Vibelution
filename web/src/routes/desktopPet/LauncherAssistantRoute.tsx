@@ -30,7 +30,7 @@ import {
 import { DEFAULT_PET_PREFERENCES } from "./desktopPetPreferences";
 import { ChatToolApprovalDialog } from "../chat/ChatToolApprovalDialog";
 import { toolApprovalRiskLabel } from "../chat/toolApprovalLabels";
-import { authorizationUpgradePreviewIsValid, dispatchWritePreviewIsValid, launcherAgentCreatePreviewIsValid, operatorImageUploadPreviewIsValid, projectLifecyclePreviewIsValid, recoveryPreviewIsValid, managementApprovalActionIsKnown, toolApprovalActionPreview, toolApprovalDisplayName } from "../chat/toolApprovalPreview";
+import { authorizationUpgradePreviewIsValid, browserInteractPreviewIsValid, dispatchWritePreviewIsValid, launcherAgentCreatePreviewIsValid, operatorImageUploadPreviewIsValid, projectLifecyclePreviewIsValid, recoveryPreviewIsValid, managementApprovalActionIsKnown, toolApprovalActionPreview, toolApprovalDisplayName } from "../chat/toolApprovalPreview";
 import { useLauncherThemeControl } from "./useLauncherThemeControl";
 import { readStoredWorkbenchTheme, requestWorkbenchTheme, subscribeWorkbenchThemeSync, useAuthorityTheme } from "../../app/themePreference";
 import { PersonalAssistantComputerPanel } from "../personalAssistant/PersonalAssistantComputerPanel";
@@ -69,6 +69,7 @@ function approvalAcceptDisabled(request: SessionToolApprovalRequest): boolean {
     || summary?.assistantAction === "dispatch_write" && !dispatchWritePreviewIsValid(summary)
     || summary?.assistantAction === "project_lifecycle" && !projectLifecyclePreviewIsValid(summary)
     || summary?.assistantAction === "operator_image_upload" && !operatorImageUploadPreviewIsValid(summary)
+    || summary?.assistantAction === "browser_interact" && !browserInteractPreviewIsValid(summary)
     || summary?.assistantAction === "reminder_handoff_recover" && !recoveryPreviewIsValid(summary));
 }
 
@@ -753,11 +754,11 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   const approvalPrompt = approval || dispatchApproval ? <div className={petStyles.approvalDock} data-launcher-assistant-approval-dock>
     {approval ? <ChatToolApprovalDialog lang={lang} variant="composer"
       pending={approvalPending || !approval.availableDecisions.includes("accept") || !approval.availableDecisions.includes("decline")}
-      argumentSummary={approval.argumentSummary} rawTitle={approval.toolName} riskLabel={toolApprovalRiskLabel(approval.risk, lang)}
+      argumentSummary={approval.argumentSummary} rawTitle={approval.toolName} riskLabel={approval.argumentSummary?.assistantAction === "browser_interact" ? (lang === "zh" ? "网页操作" : "Webpage action") : toolApprovalRiskLabel(approval.risk, lang)}
       scopeLabel={lang === "zh" ? "仅本次调用" : "This call only"}
       toolLabels={[{ id: approval.toolName, label: toolApprovalDisplayName(approval.toolName, lang) }]}
       toolName={approval.toolName} actionPreview={toolApprovalActionPreview(approval.argumentSummary, approval.toolName, lang)}
-      fullActionPreview={approval.toolName === "personal_assistant_manage_tool" && ["agent_create", "authorization_upgrade", "dispatch_write", "project_lifecycle", "operator_image_upload", "reminder_handoff_recover"].includes(String(approval.argumentSummary?.assistantAction))}
+      fullActionPreview={approval.toolName === "personal_assistant_manage_tool" && ["agent_create", "authorization_upgrade", "dispatch_write", "project_lifecycle", "operator_image_upload", "reminder_handoff_recover", "browser_interact"].includes(String(approval.argumentSummary?.assistantAction))}
       approveDisabled={approvalAcceptDisabled(approval)}
       onApprove={() => void decide(approval, "accept")} onReject={() => void decide(approval, "decline")} /> : null}
     {dispatchApproval ? <ChatToolApprovalDialog lang={lang} variant="composer"
