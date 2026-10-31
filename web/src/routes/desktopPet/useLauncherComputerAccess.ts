@@ -6,17 +6,19 @@ import type { ComputerState } from "../../api/types/personalAssistantComputer";
 import { computerAccessMatches, latestComputerTurn } from "./launcherComputerAccess";
 
 type Options = {
-  detail: SessionDetail | undefined; agentId: string; reading: boolean; epoch: number;
+  detail: SessionDetail | undefined; agentId: string; reading: boolean;
   manualOpen: boolean; onCloseManual: () => void; lang: "zh" | "en";
 };
 
 /** Operator state only. A grant never submits a synthetic message or replays a tool. */
 export function useLauncherComputerAccess(options: Options) {
-  const { detail, agentId, reading, epoch, manualOpen, lang } = options;
+  const { detail, agentId, reading, manualOpen, lang } = options;
   const client = useQueryClient();
   const sessionId = detail?.id || "";
   const turnId = latestComputerTurn(detail);
-  const key = ["launcher-assistant", "computer-access", epoch, agentId, sessionId, turnId] as const;
+  // A grant belongs to the native identity, not an individual tool call. Keep
+  // its controls available through new turns and temporary read failures.
+  const key = ["launcher-assistant", "computer-access", agentId, sessionId] as const;
   const [dismissed, setDismissed] = useState<string[]>([]);
   const [notice, setNotice] = useState("");
   const query = useQuery({

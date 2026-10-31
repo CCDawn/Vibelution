@@ -612,7 +612,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   }
 
   const computerAccess = useLauncherComputerAccess({
-    detail: detail.data, agentId: status.data?.assistant.agentId || "", reading, epoch,
+    detail: detail.data, agentId: status.data?.assistant.agentId || "", reading,
     manualOpen: computerOpen, onCloseManual: () => setComputerOpen(false),
     lang,
   });

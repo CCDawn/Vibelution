@@ -29,7 +29,7 @@ beforeEach(() => {
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   container = document.createElement("div"); document.body.appendChild(container); root = createRoot(container);
   vi.spyOn(launcherAssistantComputer, "state").mockResolvedValue(waiting);
-  props = { detail: detail(), agentId: "assistant", reading: true, epoch: 0, manualOpen: false, onCloseManual: vi.fn(), lang: "zh" };
+  props = { detail: detail(), agentId: "assistant", reading: true, manualOpen: false, onCloseManual: vi.fn(), lang: "zh" };
 });
 afterEach(async () => { await act(async () => root.unmount()); client.clear(); container.remove(); vi.restoreAllMocks(); });
 describe("native computer authorization", () => {
@@ -52,7 +52,7 @@ describe("native computer authorization", () => {
     const windows = vi.spyOn(launcherAssistantComputer, "windows");
     await render(); await ready(); expect(state.show).toBe(true);
     await act(async () => state.onDismiss()); expect(state.show).toBe(false);
-    props.epoch++; await render(); await ready(); expect(state.show).toBe(false);
+    props.reading = false; await render(); props.reading = true; await render(); await ready(); expect(state.show).toBe(false);
     expect(windows).not.toHaveBeenCalled();
   });
   it("restores existing grant controls even when the latest turn has no computer tool", async () => {
@@ -73,14 +73,24 @@ describe("native computer authorization", () => {
     props.detail = { ...detail(), terminalReason: "cancelled" }; await render();
     expect(state.request).toBeNull(); expect(state.show).toBe(false);
     const count = vi.mocked(launcherAssistantComputer.state).mock.calls.length;
-    props.reading = false; props.epoch++; await render();
+    props.reading = false; await render();
     expect(state.show).toBe(false); expect(launcherAssistantComputer.state).toHaveBeenCalledTimes(count);
   });
   it("keeps existing grant controls visible during a state read failure", async () => {
     vi.mocked(launcherAssistantComputer.state).mockResolvedValue(granted);
     await render(); await act(async () => { await vi.waitFor(() => expect(state.show).toBe(true)); });
     vi.mocked(launcherAssistantComputer.state).mockRejectedValue(new Error("temporary read failure"));
+    props.detail = { ...detail(), activeTurnId: "new-turn", status: "running", messages: [...detail().messages, { id: "new", role: "user" } as never] };
+    await render();
     await act(async () => { await client.refetchQueries({ queryKey: ["launcher-assistant", "computer-access"] }); });
     expect(state.request).toBeNull(); expect(state.show).toBe(true);
+  });
+  it("does not carry a grant into another native identity", async () => {
+    vi.mocked(launcherAssistantComputer.state).mockResolvedValue(granted);
+    await render(); await act(async () => { await vi.waitFor(() => expect(state.show).toBe(true)); });
+    vi.mocked(launcherAssistantComputer.state).mockRejectedValue(new Error("read failure"));
+    props.agentId = "other"; props.detail = { ...detail(), agentId: "other", id: "other-session" };
+    await render();
+    expect(state.show).toBe(false);
   });
 });
