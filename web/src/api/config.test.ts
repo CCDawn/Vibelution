@@ -24,8 +24,28 @@ const bootstrap: ConfigBootstrap = {
 };
 
 describe("Config bootstrap transport", () => {
-  beforeEach(() => vi.mocked(fetchJson).mockReset());
+  beforeEach(() => {
+    vi.mocked(fetchJson).mockReset();
+    vi.stubGlobal("window", { location: new URL("vibelution-launcher://launcher/launcher-assistant") });
+  });
   afterEach(() => vi.unstubAllGlobals());
+
+  it("uses the workbench HTTP endpoint even when the assistant bridge is present but not ready", async () => {
+    vi.stubGlobal("window", { location: new URL("http://127.0.0.1:8000/") });
+    const invoke = vi.fn().mockRejectedValue(new Error("ASSISTANT_NOT_READY"));
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    vi.mocked(fetchJson).mockResolvedValue(bootstrap);
+
+    await expect(fetchConfigBootstrap()).resolves.toBe(bootstrap);
+    expect(fetchJson).toHaveBeenCalledWith("/api/config/bootstrap", { signal: undefined });
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("does not fall back to HTTP when the launcher window has no assistant bridge", async () => {
+    vi.stubGlobal("vibelutionLauncherAssistant", undefined);
+    await expect(fetchConfigBootstrap()).rejects.toThrow("Launcher");
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
 
   it("uses the dedicated assistant bridge and preserves future bootstrap fields without HTTP", async () => {
     const native = { ...bootstrap, language: "en", futureField: { enabled: true } };
@@ -74,6 +94,7 @@ describe("Config bootstrap transport", () => {
   });
 
   it("reads bootstrap data without requiring diagnostics and forwards cancellation", async () => {
+    vi.stubGlobal("window", { location: new URL("http://127.0.0.1:8000/") });
     const signal = new AbortController().signal;
     vi.mocked(fetchJson).mockResolvedValue(bootstrap);
 

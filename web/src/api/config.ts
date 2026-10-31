@@ -57,9 +57,9 @@ export function fetchPublicConfig(options?: {
 export function fetchConfigBootstrap(options?: {
   signal?: AbortSignal;
 }): Promise<ConfigBootstrap> {
-  // This window has no HTTP API origin. A present but unusable dedicated
-  // bridge must fail on its own transport rather than try ordinary HTTP.
-  if ("vibelutionLauncherAssistant" in globalThis) {
+  // Launcher pages have no workbench HTTP origin. Workbench pages may also
+  // expose the assistant bridge, but their config belongs to the workbench.
+  if (typeof window !== "undefined" && window.location.protocol === "vibelution-launcher:") {
     return launcherConversationApi.fetchConfigBootstrap(options);
   }
   return fetchJson<ConfigBootstrap>("/api/config/bootstrap", {
