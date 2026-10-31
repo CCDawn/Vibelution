@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   VButton,
   VCommandPalette,
+  VComposerApprovalCard,
   VConfirmDialog,
   VContextualHint,
   VDialog,
@@ -47,10 +48,18 @@ export function InteractiveCatalog() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [approvalDecision, setApprovalDecision] = useState("");
   const [modelParameters, setModelParameters] = useState({ contextWindow: 64000, reasoningEffort: "medium" });
 
   return (
     <VuiPreviewSection title="Interactive">
+      <VuiPreviewCard name="VComposerApprovalCard" className="col-span-full">
+        {approvalDecision ? <><p role="status">{approvalDecision}（仅预览）</p><VButton onClick={() => setApprovalDecision("")}>重新预览</VButton></> :
+          <VComposerApprovalCard lang="zh" title="允许更新助理设置吗？" description="将本次选择保存为助理设置。"
+            fullPreview="更新助理设置\n仅本次调用；此示例不会写入真实设置。" risk="设置变更" scope="仅本次调用"
+            pending={false} approveDisabled={false} rejectDisabled={false}
+            onApprove={() => setApprovalDecision("已允许本次")} onReject={() => setApprovalDecision("已拒绝")} />}
+      </VuiPreviewCard>
       <VuiPreviewCard name="ConversationTurnNavigator" className="col-span-full">
         <div className="@container/conversation relative h-64 w-full">
           <ConversationTurnNavigator

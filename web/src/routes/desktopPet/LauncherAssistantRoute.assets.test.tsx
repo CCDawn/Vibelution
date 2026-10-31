@@ -167,7 +167,7 @@ describe("Launcher operator image consumption", () => {
     expect(dock.closest('[data-testid="native-conversation"]')).not.toBeNull();
     expect(dock.compareDocumentPosition(container.querySelector('[data-testid="native-composer"]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(container.textContent).toContain("own command");
-    await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "n", bubbles: true }))); await settle();
+    await act(async () => container.querySelector('[role="dialog"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "n", bubbles: true }))); await settle();
     expect(invoke.mock.calls.filter(([payload]) => payload.operation === "resolveApproval")).toHaveLength(1);
     expect(invoke.mock.calls.some(([payload]) => payload.operation === "decideDispatchApproval")).toBe(false);
   });
@@ -202,7 +202,7 @@ describe("Launcher operator image consumption", () => {
     expect(container.textContent).toContain("完整操作暂不可核对");
     const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("拒绝"));
     expect(reject?.disabled).toBe(true);
-    await act(async () => { reject?.click(); window.dispatchEvent(new KeyboardEvent("keydown", { key: "n" })); window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
+    await act(async () => { reject?.click(); container.querySelector('[role="dialog"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "n" })); container.querySelector('[role="dialog"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
     expect(invoke.mock.calls.some(([payload]) => payload.operation === "decideDispatchApproval")).toBe(false);
   });
 
@@ -264,7 +264,7 @@ describe("Launcher operator image consumption", () => {
     expect(container.textContent).toContain("上传并应用");
     expect(container.textContent).toContain("取消不修改");
     expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("允许本次"))?.disabled).toBe(false);
-    await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true })));
+    await act(async () => container.querySelector('[role="dialog"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true })));
     await settle();
     expect(invoke.mock.calls.some(([request]) => request.operation === "resolveApproval" && request.decision === "accept")).toBe(true);
   });
@@ -277,7 +277,7 @@ describe("Launcher operator image consumption", () => {
     const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("允许本次"));
     const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("拒绝"));
     expect(approve?.disabled).toBe(true); expect(reject?.disabled).toBe(false);
-    await act(async () => { approve?.click(); window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true })); });
+    await act(async () => { approve?.click(); container.querySelector('[role="dialog"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true })); });
     expect(invoke.mock.calls.some(([request]) => request.operation === "resolveApproval" && request.decision === "accept")).toBe(false);
   });
 
@@ -301,7 +301,7 @@ describe("Launcher operator image consumption", () => {
     expect(container.textContent).toContain("参数无法核对");
     const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("允许本次"));
     expect(approve?.disabled).toBe(true);
-    await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true })));
+    await act(async () => container.querySelector('[role="dialog"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true })));
     await settle();
     expect(invoke.mock.calls.some(([request]) => request.operation === "resolveApproval")).toBe(false);
   });
@@ -331,7 +331,7 @@ describe("Launcher operator image consumption", () => {
     expect(preview?.tabIndex).toBe(0);
     const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("允许本次"));
     expect(approve?.disabled).toBe(false);
-    await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true })));
+    await act(async () => container.querySelector('[role="dialog"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true })));
     await settle();
     expect(invoke.mock.calls.some(([request]) => request.operation === "resolveApproval" && request.decision === "accept")).toBe(true);
   });
@@ -349,7 +349,7 @@ describe("Launcher operator image consumption", () => {
     expect(preview?.textContent).toContain("不重放已开始或未知的写入");
     expect(preview?.tabIndex).toBe(0);
     expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("允许本次"))?.disabled).toBe(false);
-    await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true }))); await settle();
+    await act(async () => container.querySelector('[role="dialog"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true }))); await settle();
     expect(invoke.mock.calls.some(([request]) => request.operation === "resolveApproval" && request.decision === "accept")).toBe(true);
   });
 
@@ -369,7 +369,7 @@ describe("Launcher operator image consumption", () => {
     const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("拒绝"));
     expect(approve?.disabled).toBe(true);
     expect(reject?.disabled).toBe(false);
-    await act(async () => { approve?.click(); window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true })); });
+    await act(async () => { approve?.click(); container.querySelector('[role="dialog"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true })); });
     expect(invoke.mock.calls.some(([request]) => request.operation === "resolveApproval" && request.decision === "accept")).toBe(false);
   });
 
@@ -383,7 +383,7 @@ describe("Launcher operator image consumption", () => {
     const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("拒绝"));
     expect(approve?.disabled).toBe(true);
     expect(reject?.disabled).toBe(false);
-    await act(async () => { approve?.click(); window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true })); });
+    await act(async () => { approve?.click(); container.querySelector('[role="dialog"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true })); });
     expect(invoke.mock.calls.some(([request]) => request.operation === "resolveApproval" && request.decision === "accept")).toBe(false);
   });
 
@@ -394,7 +394,7 @@ describe("Launcher operator image consumption", () => {
     const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("拒绝"));
     expect(approve?.disabled).toBe(true);
     expect(reject?.disabled).toBe(false);
-    await act(async () => { approve?.click(); window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true })); });
+    await act(async () => { approve?.click(); container.querySelector('[role="dialog"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true })); });
     expect(invoke.mock.calls.some(([request]) => request.operation === "resolveApproval" && request.decision === "accept")).toBe(false);
     await act(async () => reject?.click()); await settle();
     expect(invoke.mock.calls.some(([request]) => request.operation === "resolveApproval" && request.decision === "decline")).toBe(true);
@@ -420,7 +420,7 @@ describe("Launcher operator image consumption", () => {
     const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("拒绝"));
     expect(approve?.disabled).toBe(true);
     expect(reject?.disabled).toBe(false);
-    await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true })));
+    await act(async () => container.querySelector('[role="dialog"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true })));
     expect(invoke.mock.calls.some(([request]) => request.operation === "resolveApproval" && request.decision === "accept")).toBe(false);
   });
 

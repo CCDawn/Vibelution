@@ -75,7 +75,7 @@ describe("ChatToolApprovalDialog interactions", () => {
     expect(onReject).toHaveBeenCalledTimes(1);
   });
 
-  it("restores guarded global Y/N/Escape without doubling card shortcuts", async () => {
+  it("ignores shortcuts outside the composer card and guards decisions inside it", async () => {
     const onApprove = vi.fn();
     const onReject = vi.fn();
     const props = { lang: "zh" as const, variant: "composer" as const, rawTitle: "run", riskLabel: "审批", scopeLabel: "本次", toolLabels: [], onApprove, onReject };
@@ -97,15 +97,21 @@ describe("ChatToolApprovalDialog interactions", () => {
     });
     expect(onApprove).not.toHaveBeenCalled();
     expect(onReject).not.toHaveBeenCalled();
-    await act(async () => { dispatch(window, "y"); dispatch(window, "n"); dispatch(window, "Escape"); dispatch(dialog, "y"); dispatch(dialog, "n"); });
-    expect(onApprove).toHaveBeenCalledTimes(2);
-    expect(onReject).toHaveBeenCalledTimes(3);
+    const outsideButton = document.createElement("button");
+    document.body.appendChild(outsideButton);
+    await act(async () => { dispatch(window, "y"); dispatch(window, "n"); dispatch(window, "Escape"); dispatch(outsideButton, "y"); dispatch(outsideButton, "n"); dispatch(outsideButton, "Escape"); });
+    expect(onApprove).not.toHaveBeenCalled();
+    expect(onReject).not.toHaveBeenCalled();
+    await act(async () => { dispatch(dialog, "y"); dispatch(dialog, "n"); dispatch(dialog, "Escape"); });
+    expect(onApprove).toHaveBeenCalledTimes(1);
+    expect(onReject).toHaveBeenCalledTimes(2);
     await act(async () => root!.render(<ChatToolApprovalDialog {...props} pending={false} approveDisabled rejectDisabled />));
-    await act(async () => { dispatch(window, "y"); dispatch(window, "n"); dispatch(window, "Escape"); });
+    await act(async () => { dispatch(dialog, "y"); dispatch(dialog, "n"); dispatch(dialog, "Escape"); });
     await act(async () => root!.render(<ChatToolApprovalDialog {...props} pending />));
-    await act(async () => { dispatch(window, "y"); dispatch(window, "n"); });
-    expect(onApprove).toHaveBeenCalledTimes(2);
-    expect(onReject).toHaveBeenCalledTimes(3);
+    await act(async () => { dispatch(dialog, "y"); dispatch(dialog, "n"); });
+    expect(onApprove).toHaveBeenCalledTimes(1);
+    expect(onReject).toHaveBeenCalledTimes(2);
+    outsideButton.remove();
     editable.forEach((element) => element.parentNode?.removeChild(element));
     expect(dialog.querySelector("[data-approval-full-preview]")?.closest("[data-approval-scroll-body]")).not.toBeNull();
   });

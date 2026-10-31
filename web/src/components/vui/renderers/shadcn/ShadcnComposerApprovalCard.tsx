@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useId, type KeyboardEvent } from "react";
+import { Fragment, useId, type KeyboardEvent } from "react";
 import { ShieldQuestion, X } from "lucide-react";
 import { ShadcnButton } from "./ShadcnButton";
 
@@ -15,21 +15,6 @@ export function ShadcnComposerApprovalCard({
   const zh = lang === "zh";
   const blockedApprove = pending || approveDisabled;
   const blockedReject = pending || rejectDisabled;
-  useEffect(() => {
-    const onWindowKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || event.repeat || isEditableTarget(event.target)) return;
-      const key = event.key.toLowerCase();
-      if (key === "y" && !blockedApprove) {
-        event.preventDefault();
-        onApprove();
-      } else if ((key === "n" || key === "escape") && !blockedReject) {
-        event.preventDefault();
-        onReject();
-      }
-    };
-    window.addEventListener("keydown", onWindowKeyDown);
-    return () => window.removeEventListener("keydown", onWindowKeyDown);
-  }, [blockedApprove, blockedReject, onApprove, onReject]);
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || event.repeat) return;
     if (isEditableTarget(event.target)) return;
