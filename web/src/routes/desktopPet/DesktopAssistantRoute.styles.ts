@@ -33,6 +33,7 @@ const styles = {
   chatActions: "flex shrink-0 items-center gap-0.5",
   chatBody: "desktop-assistant-chat-body flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
   unifiedChatBody: "relative",
+  approvalDock: "mb-3 min-w-0 shrink-0",
   receiptPanel: "max-h-28 shrink-0 overflow-auto border-t border-[var(--vui-border-subtle)] px-3 py-2 text-vui-micro-11",
   receiptBoundary: "text-[var(--fg-secondary)]",
   // Embedded receipts: a light collapsible card above the composer, never a

@@ -71,6 +71,8 @@ describe("Live2D desktop pet", () => {
     expect(frame?.getAttribute("src")).toBe("/desktop-pet/whale-rig/index.html?embed=1");
     expect(frame?.getAttribute("title")).toBe("大肥鲸 2.5D 个人助理");
     expect(host.textContent).toContain("正在加载大肥鲸");
+    expect(host.textContent).not.toContain("Hello-Lv-tu");
+    expect(host.querySelector("[data-character=dafeiyu]")?.getAttribute("data-asset-credit")).toContain("Hello-Lv-tu");
     expect(mock.load).not.toHaveBeenCalled();
   });
 });

@@ -750,6 +750,45 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     </div>
   </main>;
 
+  const approvalPrompt = approval || dispatchApproval ? <div className={petStyles.approvalDock} data-launcher-assistant-approval-dock>
+    {approval ? <ChatToolApprovalDialog lang={lang} variant="composer"
+      pending={approvalPending || !approval.availableDecisions.includes("accept") || !approval.availableDecisions.includes("decline")}
+      argumentSummary={approval.argumentSummary} rawTitle={approval.toolName} riskLabel={toolApprovalRiskLabel(approval.risk, lang)}
+      scopeLabel={lang === "zh" ? "仅本次调用" : "This call only"}
+      toolLabels={[{ id: approval.toolName, label: toolApprovalDisplayName(approval.toolName, lang) }]}
+      toolName={approval.toolName} actionPreview={toolApprovalActionPreview(approval.argumentSummary, approval.toolName, lang)}
+      fullActionPreview={approval.toolName === "personal_assistant_manage_tool" && ["agent_create", "authorization_upgrade", "dispatch_write", "project_lifecycle", "operator_image_upload", "reminder_handoff_recover"].includes(String(approval.argumentSummary?.assistantAction))}
+      approveDisabled={approvalAcceptDisabled(approval)}
+      onApprove={() => void decide(approval, "accept")} onReject={() => void decide(approval, "decline")} /> : null}
+    {dispatchApproval ? <ChatToolApprovalDialog lang={lang} variant="composer"
+      pending={approvalPending}
+      approveDisabled={!activeDispatchPreview || decidedDispatchKey === dispatchPreviewKey || !dispatchApproval.request.availableDecisions.includes("accept")}
+      rejectDisabled={(!activeDispatchPreview && !canDeclineSummary) || decidedDispatchKey === dispatchPreviewKey || !dispatchApproval.request.availableDecisions.includes("decline")} rawTitle={dispatchApproval.request.toolName}
+      riskLabel={toolApprovalRiskLabel(activeDispatchPreview?.risk || dispatchApproval.request.risk, lang)}
+      scopeLabel={lang === "zh" ? "目标任务 · 仅本次" : "Target task · this call"}
+      toolLabels={[{ id: dispatchApproval.request.toolName, label: toolApprovalDisplayName(dispatchApproval.request.toolName, lang) }]}
+      toolName={dispatchApproval.request.toolName} fullActionPreview
+      actionPreview={[
+        `${lang === "zh" ? "项目" : "Project"}: ${dispatchApproval.row.projectId || "—"}`,
+        `Agent: ${dispatchApproval.row.agentId || "—"}`,
+        `${lang === "zh" ? "派遣 ID" : "Dispatch ID"}: ${dispatchApproval.row.dispatchId}`,
+        `${lang === "zh" ? "任务 ID" : "Task ID"}: ${dispatchApproval.row.nativeTaskId}`,
+        `${lang === "zh" ? "审批 ID" : "Approval ID"}: ${dispatchApproval.request.approvalId}`,
+        ...(activeDispatchPreview ? [
+          `${lang === "zh" ? "轮次" : "Turn"}: ${activeDispatchPreview.turnId}`,
+          `${lang === "zh" ? "调用" : "Call"}: ${activeDispatchPreview.callId}`,
+          `${lang === "zh" ? "权限模式" : "Permission preset"}: ${activeDispatchPreview.permissionPreset}`,
+          `${lang === "zh" ? "审批要求" : "Approval requirement"}: ${activeDispatchPreview.approval}`,
+          lang === "zh" ? "完整原始参数:" : "Complete original arguments:", readableApprovalJson(activeDispatchPreview.argumentsJson),
+          lang === "zh" ? "完整执行参数（含默认值）:" : "Complete execution arguments (including defaults):", readableApprovalJson(activeDispatchPreview.executionArgumentsJson),
+        ] : [lang === "zh" ? "目标动作摘要（不完整）:" : "Target action summary (incomplete):",
+          JSON.stringify(dispatchApproval.request.targetSummary, null, 2),
+          activePreviewError || (lang === "zh" ? "正在读取完整操作，暂不能决定。" : "Reading complete action; decisions are unavailable."),
+          ...(canDeclineSummary ? [lang === "zh" ? "完整操作不可用，不能批准；你仍可拒绝本次请求。" : "Complete action unavailable. Approval is disabled; you may decline this request."] : [])]),
+      ].join("\n")}
+      onApprove={() => void decideDispatch("accept")} onReject={() => void decideDispatch("decline")} /> : null}
+  </div> : null;
+
   const showWelcome = navigationOwned && Boolean(detail.data && !detail.isError && !detail.data.messages.length
     && !detail.data.activeTurnId && !detail.data.queuedTurns?.length && !approval && !dispatchApproval && !sendUnconfirmed);
   function changeDraft(value: string) { draftRef.current = value; setDraft(value); saveComposer({ draft: value }); }
@@ -814,7 +853,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       composerActionDisabled={sendPending || controlPending || (attachments.length > 0 && status.data?.attachmentVersion !== 1) || (actionMode === "stop" ? stopping || !resolveSessionStopTurnId(detail.data, acceptedTurnId) : actionMode === "send" && !sendUnconfirmed && !draft.trim() && !attachments.length)}
       onComposerChange={changeDraft} onSubmit={() => void submit()}
       onStop={() => void stopTurn()} onContinueTurn={() => void continueTurn()}
-      composerPrecedingContent={embedded && receiptsOpen && dispatches.data?.length ? <section className={petStyles.embeddedReceiptsPanel}
+      composerPrecedingContent={<>{embedded && receiptsOpen && dispatches.data?.length ? <section className={petStyles.embeddedReceiptsPanel}
         data-launcher-assistant-receipts aria-label={copy.receipts}>
         <p className={petStyles.receiptBoundary}>{copy.receiptBoundary}</p>
         {dispatches.data.map(row => {
@@ -826,10 +865,11 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
             <span className={petStyles.embeddedReceiptsId} title={rawId}>{shortReceiptId(rawId)}</span>
           </div>;
         })}
-      </section> : undefined}
+      </section> : null}{approvalPrompt}</>}
       fallback={<VStateSurface fill tone="loading" title={copy.loading} />}
     /> : <VStateSurface fill tone={detail.isError ? "error" : "loading"} title={detail.isError ? copy.unavailable : copy.loading}
       actions={detail.isError ? <VButton onClick={() => void detail.refetch()}>{copy.retry}</VButton> : undefined}>{detail.error?.message}</VStateSurface>}
+    {computerOpen || !detail.data ? approvalPrompt : null}
     {historyAttachments.missingGenerated ? <VStateSurface tone="error" title={lang === "zh" ? "历史图片缺少附件标识，暂不可查看" : "Historical image has no artifact ID"}
       actions={<VButton onClick={() => void detail.refetch()}>{copy.retry}</VButton>} /> : null}
     {historyAttachments.failed ? <VStateSurface tone="error" title={lang === "zh" ? "历史附件暂不可用（单个文件上限 8 MiB）" : "Historical attachment unavailable (8 MiB per file limit)"}
@@ -839,42 +879,6 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       actions={<VButton onClick={() => { if (avatar.isError) void avatar.refetch(); if (background.isError) void background.refetch(); }}>{copy.retry}</VButton>} /> : null}
     {status.data?.patrol?.state === "unavailable" || ["unknown", "failed", "interrupted"].some(key => (status.data?.patrol?.deliveryStates[key] || 0) > 0)
       ? <VStateSurface tone="error" title={lang === "zh" ? "部分任务回执无法自动汇报，请查看派发回执" : "Some task receipts could not be reported automatically; check dispatch receipts"} /> : null}
-    {approval ? <ChatToolApprovalDialog lang={lang} variant="inline"
-      pending={approvalPending || !approval.availableDecisions.includes("accept") || !approval.availableDecisions.includes("decline")}
-      rawTitle={approval.toolName} riskLabel={toolApprovalRiskLabel(approval.risk, lang)}
-      scopeLabel={lang === "zh" ? "仅本次调用" : "This call only"}
-      toolLabels={[{ id: approval.toolName, label: toolApprovalDisplayName(approval.toolName, lang) }]}
-      toolName={approval.toolName} actionPreview={toolApprovalActionPreview(approval.argumentSummary, approval.toolName, lang)}
-      fullActionPreview={approval.toolName === "personal_assistant_manage_tool" && ["agent_create", "authorization_upgrade", "dispatch_write", "project_lifecycle", "operator_image_upload", "reminder_handoff_recover"].includes(String(approval.argumentSummary?.assistantAction))}
-      approveDisabled={approvalAcceptDisabled(approval)}
-      onApprove={() => void decide(approval, "accept")} onReject={() => void decide(approval, "decline")} /> : null}
-    {dispatchApproval ? <ChatToolApprovalDialog lang={lang} variant="inline"
-      pending={approvalPending}
-      approveDisabled={!activeDispatchPreview || decidedDispatchKey === dispatchPreviewKey || !dispatchApproval.request.availableDecisions.includes("accept")}
-      rejectDisabled={(!activeDispatchPreview && !canDeclineSummary) || decidedDispatchKey === dispatchPreviewKey || !dispatchApproval.request.availableDecisions.includes("decline")} rawTitle={dispatchApproval.request.toolName}
-      riskLabel={toolApprovalRiskLabel(activeDispatchPreview?.risk || dispatchApproval.request.risk, lang)}
-      scopeLabel={lang === "zh" ? "目标任务 · 仅本次" : "Target task · this call"}
-      toolLabels={[{ id: dispatchApproval.request.toolName, label: toolApprovalDisplayName(dispatchApproval.request.toolName, lang) }]}
-      toolName={dispatchApproval.request.toolName} fullActionPreview
-      actionPreview={[
-        `${lang === "zh" ? "项目" : "Project"}: ${dispatchApproval.row.projectId || "—"}`,
-        `Agent: ${dispatchApproval.row.agentId || "—"}`,
-        `${lang === "zh" ? "派遣 ID" : "Dispatch ID"}: ${dispatchApproval.row.dispatchId}`,
-        `${lang === "zh" ? "任务 ID" : "Task ID"}: ${dispatchApproval.row.nativeTaskId}`,
-        `${lang === "zh" ? "审批 ID" : "Approval ID"}: ${dispatchApproval.request.approvalId}`,
-        ...(activeDispatchPreview ? [
-          `${lang === "zh" ? "轮次" : "Turn"}: ${activeDispatchPreview.turnId}`,
-          `${lang === "zh" ? "调用" : "Call"}: ${activeDispatchPreview.callId}`,
-          `${lang === "zh" ? "权限模式" : "Permission preset"}: ${activeDispatchPreview.permissionPreset}`,
-          `${lang === "zh" ? "审批要求" : "Approval requirement"}: ${activeDispatchPreview.approval}`,
-          lang === "zh" ? "完整原始参数:" : "Complete original arguments:", readableApprovalJson(activeDispatchPreview.argumentsJson),
-          lang === "zh" ? "完整执行参数（含默认值）:" : "Complete execution arguments (including defaults):", readableApprovalJson(activeDispatchPreview.executionArgumentsJson),
-        ] : [lang === "zh" ? "目标动作摘要（不完整）:" : "Target action summary (incomplete):",
-          JSON.stringify(dispatchApproval.request.targetSummary, null, 2),
-          activePreviewError || (lang === "zh" ? "正在读取完整操作，暂不能决定。" : "Reading complete action; decisions are unavailable."),
-          ...(canDeclineSummary ? [lang === "zh" ? "完整操作不可用，不能批准；你仍可拒绝本次请求。" : "Complete action unavailable. Approval is disabled; you may decline this request."] : [])]),
-      ].join("\n")}
-      onApprove={() => void decideDispatch("accept")} onReject={() => void decideDispatch("decline")} /> : null}
     {dispatchApproval && activePreviewError ? <VStateSurface tone="error" title={activePreviewError}
       actions={<VButton onClick={() => { setPreviewAttempt(value => value + 1); void dispatches.refetch(); }}>{copy.retry}</VButton>} /> : null}
     {approvalError || approvals.isError ? <VStateSurface tone="error" title={approvalError || (lang === "zh" ? "待授权查询暂不可用" : "Pending approvals unavailable")}

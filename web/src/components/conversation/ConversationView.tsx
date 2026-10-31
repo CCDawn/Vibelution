@@ -1791,7 +1791,7 @@ export const ConversationView = React.memo(function ConversationView({
         </div>
       ) : null}
 
-      {composerPrecedingContent}
+      {composerPrecedingContent != null ? <div className={styles.composerPrecedingContent} data-conversation-composer-preceding>{composerPrecedingContent}</div> : null}
       {composerSurface}
       {previewImage ? (
         <React.Suspense fallback={null}>

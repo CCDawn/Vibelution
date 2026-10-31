@@ -116,6 +116,7 @@ export function WhaleRigCharacter({ animationState, name, tone }: WhaleRigCharac
       data-tone={tone}
       data-renderer="anime-2-5d-rig"
       data-renderer-status={status}
+      data-asset-credit="大肥鱼分层模型与 Anime2.5DRig：Hello-Lv-tu / hakoniwa；本地授权原型。"
       onPointerMove={followPointer}
       onPointerLeave={stopFollowingPointer}
     >
@@ -129,7 +130,6 @@ export function WhaleRigCharacter({ animationState, name, tone }: WhaleRigCharac
         tabIndex={-1}
       />
       {status !== "ready" ? <span className={styles.message} role="status">{message}</span> : null}
-      <span className={styles.credit} title="大肥鱼分层模型与 Anime2.5DRig：Hello-Lv-tu / hakoniwa；本地授权原型。">大肥鲸 · Hello-Lv-tu</span>
     </span>
   );
 }

@@ -196,6 +196,18 @@ body[data-vibelution-desktop-pet="true"] #root {
   height: min(320px, 100%);
 }
 
+/* Keep the character unobstructed until a mouse or keyboard enters its stage.
+   Touch-only devices retain visible controls because they cannot hover. */
+@media (hover: hover) and (pointer: fine) {
+  [data-vui-domain-recipe="launcher-assistant"][data-expanded="false"] .desktop-pet-stage:not(:hover):not(:focus-within) :is(.desktop-pet-toolbar, .desktop-assistant-chat-cue) {
+    opacity: 0;
+  }
+
+  [data-vui-domain-recipe="launcher-assistant"][data-expanded="false"] .desktop-pet-stage:not(:hover):not(:focus-within) :is(.desktop-pet-status, .desktop-pet-close, .desktop-assistant-chat-cue) {
+    pointer-events: none;
+  }
+}
+
 .desktop-pet-toolbar {
   position: absolute;
   top: 8px;

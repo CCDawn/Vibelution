@@ -282,3 +282,7 @@ while current avatar/background consumers and native ConversationView remain
 the only image presentation. Cancel/timeout is not success; image content and
 source paths are not model results. Source-page acceptance covers settled light/
 dark views, persistence, same-origin synchronization and existing image states.
+
+### 桌宠悬停提示
+
+浮动桌宠的状态、关闭与聊天提示默认隐藏；鼠标进入桌宠区域或键盘焦点进入时显示，无悬停的触屏保持可操作。脚下不显示角色署名小字，署名保留为非显示元数据；点击桌宠打开 Launcher 的行为不变。

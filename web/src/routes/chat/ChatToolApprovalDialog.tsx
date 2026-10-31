@@ -1,7 +1,7 @@
 import { useEffect, useId } from "react";
 import { ShieldAlert } from "lucide-react";
 
-import { VButton } from "../../components/vui";
+import { VButton, VComposerApprovalCard } from "../../components/vui";
 import type { SessionToolApprovalRequest } from "../../api/types";
 import styles from "./ChatToolApprovalDialog.styles";
 import {
@@ -31,6 +31,7 @@ type ChatToolApprovalDialogProps = {
   toolLabels: ChatToolApprovalLabel[];
   /** Codex-style action body (command/path preview). */
   actionPreview?: string;
+  argumentSummary?: SessionToolApprovalRequest["argumentSummary"];
   /** Show the complete preview in a keyboard-scrollable area. */
   fullActionPreview?: boolean;
   sessionGrantScope?: Record<string, unknown>;
@@ -38,7 +39,7 @@ type ChatToolApprovalDialogProps = {
   /** b3: assistant manage action-window projection (remaining delegation time). */
   assistantActionWindow?: SessionToolApprovalRequest["assistantActionWindow"];
   /** banner: composer-adjacent bar; inline: under tool activity in transcript. */
-  variant?: "banner" | "inline";
+  variant?: "banner" | "inline" | "composer";
   onApprove: () => void;
   onApproveForSession?: () => void;
   /** b1: coarser opt-in tier — this tool for the rest of the session. */
@@ -102,7 +103,7 @@ export function ChatToolApprovalDialog({
   const actionWindowText = assistantActionWindowSummary(assistantActionWindow, lang).trim();
 
   useEffect(() => {
-    if (pending) {
+    if (pending || variant === "composer") {
       return;
     }
     const onKeyDown = (event: KeyboardEvent) => {
@@ -134,7 +135,29 @@ export function ChatToolApprovalDialog({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [approveDisabled, rejectDisabled, onApprove, onApproveForSession, onReject, pending]);
+  }, [approveDisabled, rejectDisabled, onApprove, onApproveForSession, onReject, pending, variant]);
+
+  if (variant === "composer") {
+    const lines = preview.split("\n");
+    const firstLineIsFact = /^(?:项目|Project|Agent|来源项目|Source project):/i.test(lines[0] || "");
+    const actionTitle = firstLineIsFact ? displayName : (lines.shift()?.trim() || displayName);
+    const title = approveDisabled ? (lang === "zh" ? "本次操作暂不能批准" : "This action cannot be approved yet")
+      : lang === "zh" ? `允许${actionTitle}吗？` : `Allow ${actionTitle}?`;
+    // Keep machine identifiers and dispatch argument blocks in the frozen details.
+    const technicalFact = /^(?:原操作 ID|原同步 ID|当前来源快照摘要|原授权 head|Original operation ID|Original sync ID|Current source snapshot digest|Previous authorization head|请求 ID|派遣 ID|任务 ID|审批 ID|轮次|调用|Request ID|Dispatch ID|Task ID|Approval ID|Turn|Call):/;
+    let bodyLines = lines;
+    if (firstLineIsFact) {
+      const detailsStart = lines.findIndex((line) => /^(?:完整原始参数|Complete original arguments|目标动作摘要（不完整）|Target action summary \(incomplete\))[:：]/.test(line));
+      if (detailsStart >= 0) {
+        bodyLines = [...lines.slice(0, detailsStart), ...lines.slice(detailsStart).filter((line) => /^(?:正在读取完整操作|完整操作不可用|Reading complete action|Complete action unavailable)/.test(line))];
+      }
+    }
+    bodyLines = bodyLines.filter((line) => !technicalFact.test(line));
+    const description = bodyLines.join("\n").trim() || (approveDisabled ? preview : "");
+    return <VComposerApprovalCard lang={lang} title={title} description={description} fullPreview={preview}
+      risk={riskText} scope={scopeText} pending={pending} approveDisabled={approveDisabled} rejectDisabled={rejectDisabled}
+      onApprove={onApprove} onReject={onReject} />;
+  }
 
   return (
     <div

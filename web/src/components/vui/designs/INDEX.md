@@ -166,6 +166,7 @@
 
 | 组件 | 设计说明 |
 | --- | --- |
+| `VComposerApprovalCard` | [product/conversation.md](./product/conversation.md#vcomposerapprovalcard) |
 | `ConversationToolActivity` | [product/conversation-process.md](./product/conversation-process.md#conversationtoolactivity) |
 | `ConversationActiveTurnStatusNote` | [product/conversation.md](./product/conversation.md#conversationactiveturnstatusnote) |
 | `ChatGroupArtifactDialog` | [product/conversation.md](./product/conversation.md#chatgroupartifactdialog) |

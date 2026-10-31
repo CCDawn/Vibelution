@@ -1154,6 +1154,7 @@ backToBottomButton:
     "vui-components-conversationview sectionToggle min-w-0",
   sendButton: composerSendActionButton,
   composerCodex: conversationComposerCodexShell,
+  composerPrecedingContent: cv("composerPrecedingContent", "mx-auto w-full min-w-0 flex-none", transcriptMeasure),
   composerToolbar: composerToolbarShell,
   composerToolbarCodex: composerToolbarCodexShell,
   composerToolbarStart: "vui-components-conversationview composerToolbarStart flex min-w-0 items-center gap-1.5",

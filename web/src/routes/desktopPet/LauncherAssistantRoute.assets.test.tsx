@@ -21,7 +21,8 @@ vi.mock("../../components/conversation/LazyConversationView", () => ({
     conversation = props;
     return createElement("div", { "data-testid": "native-conversation" },
       props.userAvatarImageUrl ? createElement("img", { alt: "user avatar", src: props.userAvatarImageUrl }) : null,
-      createElement("span", null, props.userDisplayName || "default user"));
+      createElement("span", null, props.userDisplayName || "default user"),
+      props.composerPrecedingContent, createElement("textarea", { "data-testid": "native-composer" }));
   },
 }));
 
@@ -124,10 +125,10 @@ describe("Launcher operator image consumption", () => {
       argumentSummary: { assistantAction: "agent_create", assistantTargets: { project_id: "registered:1", display_name: "Worker", model_id: "model-1" },
         assistantCreatePreset: "project_files_v1", assistantCreateTools: ["glob_tool", "grep_search_tool", "read_file_tool", "apply_diff_edit_tool", "write_file_tool"],
         assistantOperationDescription: "固定文件工具权限持续生效；写入按当前权限和协作模式审批，edit/yolo 等模式可能自动批准。目标派遣任务的审批只有在完整预览、版本和执行参数均可验证时才能批准。平台允许的动态目录包括项目、Agent 工作区、项目存储、工具目录、系统临时目录和用户配置允许目录，未来可能变化。不能执行命令或测试。" } } });
-    const preview = container.querySelector("pre");
+    const preview = container.querySelector<HTMLElement>("[data-approval-full-preview]");
     for (const value of ["registered:1", "model-1", "project_files_v1", "glob_tool", "grep_search_tool", "read_file_tool", "apply_diff_edit_tool", "write_file_tool", "项目存储", "系统临时目录", "用户配置允许目录", "edit/yolo", "可能自动批准", "完整预览", "版本和执行参数"]) expect(preview?.textContent).toContain(value);
     expect(preview?.tabIndex).toBe(0);
-    expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"))?.disabled).toBe(false);
+    expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("允许本次"))?.disabled).toBe(false);
   });
 
   it("blocks creation approval when the file-tool preset disclosure is incomplete", async () => {
@@ -137,7 +138,7 @@ describe("Launcher operator image consumption", () => {
         assistantCreatePreset: "project_files_v1", assistantCreateTools: ["glob_tool"],
         assistantOperationDescription: "固定文件工具权限持续生效；写入按当前权限和协作模式审批，edit/yolo 等模式可能自动批准。目标派遣任务的审批只有在完整预览、版本和执行参数均可验证时才能批准。平台允许的动态目录包括项目、Agent 工作区、项目存储、工具目录、系统临时目录和用户配置允许目录，未来可能变化。不能执行命令或测试。" } } });
     expect(container.textContent).toContain("参数无法核对");
-    expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"))?.disabled).toBe(true);
+    expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("允许本次"))?.disabled).toBe(true);
   });
 
   it("shows complete bound arguments before allowing a single native approval", async () => {
@@ -145,10 +146,10 @@ describe("Launcher operator image consumption", () => {
     const row = { dispatchId: "dispatch-1", projectId: "registered:1", agentId: "worker-1", nativeTaskId: "task-1", receipt: { taskId: "task-1", status: "awaiting_approval", shouldPoll: true, pendingApprovals: [request] } };
     const boundPreview = { taskId: "task-1", sessionId: "session-1", agentId: "worker-1", requestId: "approval-1", turnId: "turn-1", callId: "call-1", toolName: "exec_command", revision: "a".repeat(64), approval: "always", risk: "write", permissionPreset: "request_approval", decisionFingerprint: "fp-1", configRevision: 1, configHash: "hash", argumentsJson: '{"cmd":"\\u4f60\\u597d", "large":9007199254740993}', executionArgumentsJson: '{"cmd":"\\u4f60\\u597d", "large":9007199254740993,"timeout":60}' };
     await renderAssistant({ dispatches: [row], boundPreview });
-    const preview = container.querySelector("pre");
+    const preview = container.querySelector<HTMLElement>("[data-approval-full-preview]");
     for (const value of ["registered:1", "worker-1", "dispatch-1", "task-1", "approval-1", "你好", "9007199254740993", "timeout"]) expect(preview?.textContent).toContain(value);
-    const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"));
-    const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("否"));
+    const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("允许本次"));
+    const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("拒绝"));
     expect(approve?.disabled).toBe(false);
     expect(reject?.disabled).toBe(false);
     await act(async () => { approve?.click(); approve?.click(); }); await settle(); await settle();
@@ -161,7 +162,10 @@ describe("Launcher operator image consumption", () => {
     const approval = { requestId: "own", sessionId: "s", turnId: "t", agentId: "a", toolName: "exec_command", status: "pending", risk: "write", argumentSummary: { commandPreview: "own command" }, availableDecisions: ["accept", "decline"] };
     const target = { approvalId: "target", toolName: "unknown_tool", risk: "write", targetSummary: { argumentKeys: ["path"] }, revision: "fp", availableDecisions: ["decline"] };
     await renderAssistant({ approval, dispatches: [{ dispatchId: "d", nativeTaskId: "task", receipt: { taskId: "task", pendingApprovals: [target] } }] });
-    expect(container.querySelectorAll('[data-chat-tool-approval-variant="inline"]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-chat-tool-approval-variant="composer"]')).toHaveLength(1);
+    const dock = container.querySelector("[data-launcher-assistant-approval-dock]")!;
+    expect(dock.closest('[data-testid="native-conversation"]')).not.toBeNull();
+    expect(dock.compareDocumentPosition(container.querySelector('[data-testid="native-composer"]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(container.textContent).toContain("own command");
     await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "n", bubbles: true }))); await settle();
     expect(invoke.mock.calls.filter(([payload]) => payload.operation === "resolveApproval")).toHaveLength(1);
@@ -173,12 +177,12 @@ describe("Launcher operator image consumption", () => {
     const preview = { taskId: "t", sessionId: "s2", agentId: "worker", requestId: "a", turnId: "turn", callId: "call", toolName: "write_file_tool", revision: "b".repeat(64), approval: "always", risk: "write", permissionPreset: "request_approval", decisionFingerprint: "policy", configRevision: 1, configHash: "hash", argumentsJson: '{"content":"PRIVATE-FIXTURE"}', executionArgumentsJson: '{"content":"PRIVATE-FIXTURE"}' };
     await renderAssistant({ declineFailure: true, boundPreview: preview, dispatches: [{ dispatchId: "d", agentId: "worker", nativeTaskId: "t", receipt: { taskId: "t", pendingApprovals: [target] } }] });
     expect(container.textContent).toContain("PRIVATE-FIXTURE");
-    const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("否"));
+    const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("拒绝"));
     await act(async () => { reject?.click(); reject?.click(); }); await settle(); await settle();
     expect(invoke.mock.calls.filter(([payload]) => payload.operation === "decideDispatchApproval")).toHaveLength(1);
     expect(container.textContent).toContain("审批结果未确认");
     expect(container.textContent).not.toContain("PRIVATE-FIXTURE");
-    expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"))?.disabled).toBe(true);
+    expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("允许本次"))?.disabled).toBe(true);
   });
 
   it("drops the private full preview when leaving the assistant page", async () => {
@@ -196,7 +200,7 @@ describe("Launcher operator image consumption", () => {
     await renderAssistant({ dispatches: [{ dispatchId: "d", nativeTaskId: "task", receipt: { taskId: "task", pendingApprovals: [target] } }] });
     expect(container.textContent).toContain("echo fixture");
     expect(container.textContent).toContain("完整操作暂不可核对");
-    const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("否"));
+    const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("拒绝"));
     expect(reject?.disabled).toBe(true);
     await act(async () => { reject?.click(); window.dispatchEvent(new KeyboardEvent("keydown", { key: "n" })); window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
     expect(invoke.mock.calls.some(([payload]) => payload.operation === "decideDispatchApproval")).toBe(false);
@@ -206,8 +210,8 @@ describe("Launcher operator image consumption", () => {
     const target = { approvalId: "target", toolName: "exec_command", risk: "write", targetSummary: { commandPreview: "partial", commandTruncated: true }, revision: "policy-1", availableDecisions: ["accept", "decline"] };
     await renderAssistant({ dispatches: [{ dispatchId: "d", agentId: "worker", nativeTaskId: "task", receipt: { taskId: "task", pendingApprovals: [target] } }] });
     expect(container.textContent).toContain("完整操作不可用，不能批准");
-    expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"))?.disabled).toBe(true);
-    const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("否"));
+    expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("允许本次"))?.disabled).toBe(true);
+    const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("拒绝"));
     await act(async () => { reject?.click(); reject?.click(); }); await settle(); await settle();
     expect(invoke.mock.calls.filter(([payload]) => payload.operation === "declineDispatchApproval")).toEqual([[{ operation: "declineDispatchApproval", dispatchId: "d", taskId: "task", approvalId: "target", revision: "policy-1" }]]);
     expect(invoke.mock.calls.some(([payload]) => payload.operation === "decideDispatchApproval")).toBe(false);
@@ -220,8 +224,8 @@ describe("Launcher operator image consumption", () => {
   ])("permits only a single decline when the full preview is unavailable", async ({ toolName, targetSummary }) => {
     const target = { approvalId: "target", toolName, risk: "write", targetSummary, revision: "fp", availableDecisions: ["accept", "decline"] };
     await renderAssistant({ declineFailure: true, dispatches: [{ dispatchId: "d", nativeTaskId: "task", receipt: { taskId: "task", pendingApprovals: [target] } }] });
-    const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"));
-    const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("否"));
+    const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("允许本次"));
+    const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("拒绝"));
     expect(approve?.disabled).toBe(true);
     expect(reject?.disabled).toBe(false);
     await act(async () => { reject?.click(); reject?.click(); }); await settle();
@@ -236,20 +240,20 @@ describe("Launcher operator image consumption", () => {
       toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
       argumentSummary: { assistantAction: "agent_create", assistantTargets: { project_id: "registered:1", display_name: "Worker", model_id: "model-1" },
         assistantOperationDescription: "新 Agent 默认没有工具和读写范围，不能保证读取或修改项目；派遣写任务不会自动增加工具权限。" } } });
-    const preview = container.querySelector("pre");
+    const preview = container.querySelector<HTMLElement>("[data-approval-full-preview]");
     expect(preview?.textContent).toContain("registered:1");
     expect(preview?.textContent).toContain("模型: model-1");
     expect(preview?.textContent).toContain("没有工具和读写范围");
     expect(preview?.textContent).toContain("派遣写任务不会自动增加工具权限");
     expect(preview?.tabIndex).toBe(0);
-    expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"))?.disabled).toBe(false);
+    expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("允许本次"))?.disabled).toBe(false);
   });
 
   it("refuses Launcher agent creation approval without the zero-tool limitation", async () => {
     await renderAssistant({ approval: { requestId: "r", sessionId: "s", turnId: "t", agentId: "a",
       toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
       argumentSummary: { assistantAction: "agent_create", assistantTargets: { project_id: "registered:1", display_name: "Worker" } } } });
-    expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"))?.disabled).toBe(true);
+    expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("允许本次"))?.disabled).toBe(true);
   });
 
   it.each([["avatar", "头像"], ["background", "壁纸"]])("approves a verified %s image upload", async (kind, label) => {
@@ -259,7 +263,7 @@ describe("Launcher operator image consumption", () => {
     expect(container.textContent).toContain(label);
     expect(container.textContent).toContain("上传并应用");
     expect(container.textContent).toContain("取消不修改");
-    expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"))?.disabled).toBe(false);
+    expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("允许本次"))?.disabled).toBe(false);
     await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true })));
     await settle();
     expect(invoke.mock.calls.some(([request]) => request.operation === "resolveApproval" && request.decision === "accept")).toBe(true);
@@ -270,8 +274,8 @@ describe("Launcher operator image consumption", () => {
       toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
       argumentSummary: { assistantAction: "operator_image_upload", assistantTargets } } });
     expect(container.textContent).toContain("参数无法核对");
-    const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"));
-    const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("否"));
+    const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("允许本次"));
+    const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("拒绝"));
     expect(approve?.disabled).toBe(true); expect(reject?.disabled).toBe(false);
     await act(async () => { approve?.click(); window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true })); });
     expect(invoke.mock.calls.some(([request]) => request.operation === "resolveApproval" && request.decision === "accept")).toBe(false);
@@ -286,7 +290,7 @@ describe("Launcher operator image consumption", () => {
     expect(container.textContent).toContain("项目: registered:1");
     expect(container.textContent).toContain("操作: 重启");
     expect(container.textContent).toContain("请求 ID: lifecycle-1");
-    const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"));
+    const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("允许本次"));
     expect(approve?.disabled).toBe(false);
   });
 
@@ -295,7 +299,7 @@ describe("Launcher operator image consumption", () => {
       toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
       argumentSummary: { assistantAction: "project_lifecycle", assistantTargets: { project_id: "registered:1", operation: "stop" } } } });
     expect(container.textContent).toContain("参数无法核对");
-    const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"));
+    const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("允许本次"));
     expect(approve?.disabled).toBe(true);
     await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true })));
     await settle();
@@ -307,11 +311,11 @@ describe("Launcher operator image consumption", () => {
       toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
       argumentSummary: { assistantAction: "authorization_upgrade", assistantTargets: { project_id: "registered:1" },
         assistantAddedScopes: ["source:read", "tasks:read"] } } });
-    const preview = container.querySelector("pre");
+    const preview = container.querySelector<HTMLElement>("[data-approval-full-preview]");
     expect(preview?.textContent).toContain("registered:1");
     expect(preview?.textContent).toContain("source:read");
     expect(preview?.textContent).toContain("tasks:read");
-    expect(preview?.className).toContain("overflow-y-auto");
+    expect(preview?.closest("[data-approval-scroll-body]")?.className).toContain("overflow-y-auto");
     expect(preview?.tabIndex).toBe(0);
   });
 
@@ -321,11 +325,11 @@ describe("Launcher operator image consumption", () => {
       toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
       argumentSummary: { assistantAction: "dispatch_write", assistantTargets: { project_id: "registered:1", agent_id: "agent-1", dispatch_id: "dispatch-1" },
         assistantRequestedPermission: "workspace_write", assistantTask: task } } });
-    const preview = container.querySelector("pre");
+    const preview = container.querySelector<HTMLElement>("[data-approval-full-preview]");
     for (const value of ["registered:1", "agent-1", "dispatch-1", "workspace_write", task]) expect(preview?.textContent).toContain(value);
-    expect(preview?.className).toContain("overflow-y-auto");
+    expect(preview?.closest("[data-approval-scroll-body]")?.className).toContain("overflow-y-auto");
     expect(preview?.tabIndex).toBe(0);
-    const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"));
+    const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("允许本次"));
     expect(approve?.disabled).toBe(false);
     await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true })));
     await settle();
@@ -339,12 +343,12 @@ describe("Launcher operator image consumption", () => {
     await renderAssistant({ approval: { requestId: "r", sessionId: "s", turnId: "t", agentId: "a", toolName: "personal_assistant_manage_tool",
       status: "pending", risk: "high", availableDecisions: ["accept", "decline"], argumentSummary: { assistantAction: "reminder_handoff_recover",
         assistantOperationDescription: "重新审批当前来源快照并继续原编号交接；原记录保留。旧进程实际权限与发送者停止尚未证明；不重放已开始或未知的写入。", assistantTargets: targets } } });
-    const preview = container.querySelector("pre");
+    const preview = container.querySelector<HTMLElement>("[data-approval-full-preview]");
     for (const value of Object.values(targets)) expect(preview?.textContent).toContain(value);
     expect(preview?.textContent).toContain("旧进程实际权限与发送者停止尚未证明");
     expect(preview?.textContent).toContain("不重放已开始或未知的写入");
     expect(preview?.tabIndex).toBe(0);
-    expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"))?.disabled).toBe(false);
+    expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("允许本次"))?.disabled).toBe(false);
     await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true }))); await settle();
     expect(invoke.mock.calls.some(([request]) => request.operation === "resolveApproval" && request.decision === "accept")).toBe(true);
   });
@@ -361,8 +365,8 @@ describe("Launcher operator image consumption", () => {
       status: "pending", risk: "high", availableDecisions: ["accept", "decline"], argumentSummary: { assistantAction: "reminder_handoff_recover",
         assistantOperationDescription: invalid === "description" ? undefined : "重新审批当前来源快照并继续原编号交接；原记录保留。旧进程实际权限与发送者停止尚未证明；不重放已开始或未知的写入。", assistantTargets: targets } } });
     expect(container.textContent).toContain("参数无法核对");
-    const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"));
-    const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("否"));
+    const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("允许本次"));
+    const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("拒绝"));
     expect(approve?.disabled).toBe(true);
     expect(reject?.disabled).toBe(false);
     await act(async () => { approve?.click(); window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true })); });
@@ -375,8 +379,8 @@ describe("Launcher operator image consumption", () => {
       argumentSummary: { assistantAction: "dispatch_write", assistantTargets: { project_id: "registered:1", agent_id: "agent-1", dispatch_id: "dispatch-1" },
         assistantRequestedPermission: "workspace_write" } } });
     expect(container.textContent).toContain("参数无法核对");
-    const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"));
-    const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("否"));
+    const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("允许本次"));
+    const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("拒绝"));
     expect(approve?.disabled).toBe(true);
     expect(reject?.disabled).toBe(false);
     await act(async () => { approve?.click(); window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true })); });
@@ -386,8 +390,8 @@ describe("Launcher operator image consumption", () => {
   it.each([null, {}, { assistantAction: "unknown_action" }])("fails closed for a missing or unknown management action while allowing rejection", async argumentSummary => {
     await renderAssistant({ approval: { requestId: "r", sessionId: "s", turnId: "t", agentId: "a",
       toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"], argumentSummary } });
-    const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"));
-    const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("否"));
+    const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("允许本次"));
+    const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("拒绝"));
     expect(approve?.disabled).toBe(true);
     expect(reject?.disabled).toBe(false);
     await act(async () => { approve?.click(); window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true })); });
@@ -400,8 +404,8 @@ describe("Launcher operator image consumption", () => {
     await renderAssistant({ approval: { requestId: "r", sessionId: "s", turnId: "t", agentId: "a",
       toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
       argumentSummary: { assistantAction: action, assistantOperationDescription: "原生迁移说明" } } });
-    expect(container.querySelector("pre")?.textContent).toContain("原生迁移说明");
-    const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"));
+    expect(container.querySelector<HTMLElement>("[data-approval-full-preview]")?.textContent).toContain("原生迁移说明");
+    const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("允许本次"));
     expect(approve?.disabled).toBe(false);
     await act(async () => approve?.click()); await settle();
     expect(invoke.mock.calls.some(([request]) => request.operation === "resolveApproval" && request.decision === "accept")).toBe(true);
@@ -412,8 +416,8 @@ describe("Launcher operator image consumption", () => {
       toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
       argumentSummary: { assistantArgumentsInvalid: true } } });
     expect(container.textContent).toContain("参数无法核对");
-    const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"));
-    const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("否"));
+    const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("允许本次"));
+    const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("拒绝"));
     expect(approve?.disabled).toBe(true);
     expect(reject?.disabled).toBe(false);
     await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true })));

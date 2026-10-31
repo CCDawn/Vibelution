@@ -31,6 +31,98 @@ function findButtonByText(text: string): HTMLButtonElement | null {
 }
 
 describe("ChatToolApprovalDialog interactions", () => {
+  it("renders the composer decision once, retaining the complete recovery preview in details", async () => {
+    const onApprove = vi.fn();
+    const onReject = vi.fn();
+    const onApproveForSession = vi.fn();
+    const preview = "重新授权旧提醒交接\n原记录保留。\n来源项目: project-a\n来源实例: instance-a\n来源助理: agent-a\n原操作 ID: initial-123\n当前来源快照摘要: deadbeef\n旧进程状态尚未证明。";
+    await act(async () => root!.render(<ChatToolApprovalDialog lang="zh" variant="composer" pending={false}
+      rawTitle="manage" riskLabel="需审批" scopeLabel="仅本次" toolLabels={[]} actionPreview={preview}
+      argumentSummary={{ assistantAction: "reminder_handoff_recover" }} onApprove={onApprove} onApproveForSession={onApproveForSession} onReject={onReject} />));
+    const dialog = container!.querySelector('[role="dialog"]')!;
+    expect(dialog.querySelector("h2")?.textContent).toBe("允许重新授权旧提醒交接吗？");
+    expect(dialog.querySelector("p")?.textContent).toContain("来源项目: project-a");
+    expect(dialog.querySelector("p")?.textContent).not.toContain("deadbeef");
+    expect(dialog.querySelector("details")?.textContent).toContain(preview);
+    expect(container?.textContent).not.toContain("始终");
+    await act(async () => findButtonByText("允许本次")!.click());
+    await act(async () => (container!.querySelector('button[aria-label="拒绝并关闭"]') as HTMLButtonElement).click());
+    expect(onApprove).toHaveBeenCalledTimes(1);
+    expect(onReject).toHaveBeenCalledTimes(1);
+    expect(onApproveForSession).not.toHaveBeenCalled();
+  });
+
+  it("keeps composer shortcuts scoped and honors pending and disabled decisions", async () => {
+    const onApprove = vi.fn();
+    const onReject = vi.fn();
+    const props = { lang: "zh" as const, variant: "composer" as const, rawTitle: "run", riskLabel: "审批", scopeLabel: "本次", toolLabels: [], onApprove, onReject };
+    await act(async () => root!.render(<ChatToolApprovalDialog {...props} pending={false} approveDisabled rejectDisabled />));
+    const dialog = container!.querySelector('[role="dialog"]')!;
+    const dispatch = (target: Element | Window, key: string, init: KeyboardEventInit = {}) => target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, ...init }));
+    await act(async () => { dispatch(dialog, "1"); dispatch(dialog, "2"); (container!.querySelector('button[aria-label="拒绝并关闭"]') as HTMLButtonElement).click(); });
+    expect(onApprove).not.toHaveBeenCalled();
+    expect(onReject).not.toHaveBeenCalled();
+    await act(async () => root!.render(<ChatToolApprovalDialog {...props} pending />));
+    expect(Array.from(container!.querySelectorAll("button")).every((button) => button.disabled)).toBe(true);
+    await act(async () => dispatch(dialog, "y"));
+    expect(onApprove).not.toHaveBeenCalled();
+    await act(async () => root!.render(<ChatToolApprovalDialog {...props} pending={false} />));
+    const input = document.createElement("textarea");
+    dialog.appendChild(input);
+    await act(async () => { dispatch(window, "1"); dispatch(dialog, "1", { ctrlKey: true }); dispatch(input, "1"); dispatch(dialog, "1"); dispatch(dialog, "2"); });
+    input.remove();
+    expect(onApprove).toHaveBeenCalledTimes(1);
+    expect(onReject).toHaveBeenCalledTimes(1);
+  });
+
+  it("restores guarded global Y/N/Escape without doubling card shortcuts", async () => {
+    const onApprove = vi.fn();
+    const onReject = vi.fn();
+    const props = { lang: "zh" as const, variant: "composer" as const, rawTitle: "run", riskLabel: "审批", scopeLabel: "本次", toolLabels: [], onApprove, onReject };
+    await act(async () => root!.render(<ChatToolApprovalDialog {...props} pending={false} />));
+    const dialog = container!.querySelector('[role="dialog"]')!;
+    const dispatch = (target: Element | Window, key: string, init: KeyboardEventInit = {}) => target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init }));
+    const editable = ["input", "textarea", "select", "div"].map((tag) => {
+      const element = document.createElement(tag);
+      if (tag === "div") element.setAttribute("contenteditable", "true");
+      document.body.appendChild(element);
+      return element;
+    });
+    await act(async () => {
+      for (const element of editable) { dispatch(element, "y"); dispatch(element, "n"); }
+      dispatch(window, "y", { ctrlKey: true }); dispatch(window, "n", { shiftKey: true });
+      dispatch(window, "y", { repeat: true });
+      const prevented = new KeyboardEvent("keydown", { key: "y", cancelable: true });
+      prevented.preventDefault(); window.dispatchEvent(prevented);
+    });
+    expect(onApprove).not.toHaveBeenCalled();
+    expect(onReject).not.toHaveBeenCalled();
+    await act(async () => { dispatch(window, "y"); dispatch(window, "n"); dispatch(window, "Escape"); dispatch(dialog, "y"); dispatch(dialog, "n"); });
+    expect(onApprove).toHaveBeenCalledTimes(2);
+    expect(onReject).toHaveBeenCalledTimes(3);
+    await act(async () => root!.render(<ChatToolApprovalDialog {...props} pending={false} approveDisabled rejectDisabled />));
+    await act(async () => { dispatch(window, "y"); dispatch(window, "n"); dispatch(window, "Escape"); });
+    await act(async () => root!.render(<ChatToolApprovalDialog {...props} pending />));
+    await act(async () => { dispatch(window, "y"); dispatch(window, "n"); });
+    expect(onApprove).toHaveBeenCalledTimes(2);
+    expect(onReject).toHaveBeenCalledTimes(3);
+    editable.forEach((element) => element.parentNode?.removeChild(element));
+    expect(dialog.querySelector("[data-approval-full-preview]")?.closest("[data-approval-scroll-body]")).not.toBeNull();
+  });
+
+  it("keeps dispatch arguments in details while showing the target and blocked explanation", async () => {
+    const preview = "项目: project-a\nAgent: agent-a\n派遣 ID: dispatch-a\n目标动作摘要（不完整）:\n{\"path\":\"x\"}\n完整操作不可用，不能批准；你仍可拒绝本次请求。";
+    await act(async () => root!.render(<ChatToolApprovalDialog lang="zh" variant="composer" pending={false} approveDisabled
+      rawTitle="read_file_tool" riskLabel="审批" scopeLabel="目标任务 · 仅本次" toolLabels={[{ id: "read_file_tool", label: "读取文件" }]}
+      actionPreview={preview} onApprove={() => {}} onReject={() => {}} />));
+    const dialog = container!.querySelector('[role="dialog"]')!;
+    expect(dialog.querySelector("h2")?.textContent).toBe("本次操作暂不能批准");
+    expect(dialog.querySelector("p")?.textContent).toContain("项目: project-a");
+    expect(dialog.querySelector("p")?.textContent).toContain("完整操作不可用");
+    expect(dialog.querySelector("p")?.textContent).not.toContain("dispatch-a");
+    expect(dialog.querySelector("details")?.textContent).toContain(preview);
+  });
+
   it("disables rejection button and shortcuts when its identity cannot be bound", async () => {
     const onReject = vi.fn();
     await act(async () => root!.render(<ChatToolApprovalDialog lang="zh" pending={false} approveDisabled rejectDisabled
