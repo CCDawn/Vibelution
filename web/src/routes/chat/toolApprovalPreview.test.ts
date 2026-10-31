@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  preferenceProposalPreviewIsValid,
+  managementApprovalActionIsKnown,
   authorizationUpgradePreviewIsValid,
   browserInteractPreviewIsValid,
   dispatchWritePreviewIsValid,
@@ -15,6 +17,27 @@ import {
 } from "./toolApprovalPreview";
 
 describe("toolApprovalPreview", () => {
+  it("binds preference decisions to complete pending native values", () => {
+    const summary = { assistantAction: "preference_proposal_accept", assistantTargets: { proposal_id: "companion-preference-proposal:123", expected_fingerprint: "a".repeat(64) },
+      assistantPreference: { preferenceType: "address", candidateValue: "小明\u202e", status: "pending" } };
+    expect(preferenceProposalPreviewIsValid(summary)).toBe(true);
+    expect(managementApprovalActionIsKnown(summary.assistantAction)).toBe(true);
+    const preview = toolApprovalActionPreview(summary, "personal_assistant_manage_tool", "zh");
+    expect(preview).toContain("接受偏好建议"); expect(preview).toContain("称呼"); expect(preview).toContain("\\u202e");
+    expect(preview).not.toContain("\u202e"); expect(preview).toContain(summary.assistantTargets.expected_fingerprint);
+    expect(toolApprovalActionPreview({ ...summary, assistantAction: "preference_proposal_reject" }, "personal_assistant_manage_tool", "zh")).toContain("拒绝偏好建议");
+    for (const invalid of [{ ...summary, assistantArgumentsInvalid: true }, { ...summary, assistantPreference: undefined },
+      { ...summary, assistantTargets: { ...summary.assistantTargets, extra: "x" } },
+      { ...summary, assistantTargets: { ...summary.assistantTargets, expected_fingerprint: "x".repeat(64) } },
+      { ...summary, assistantPreference: { ...summary.assistantPreference, extra: "x" } },
+      { ...summary, assistantPreference: { ...summary.assistantPreference, status: "accepted" } },
+      { ...summary, assistantPreference: { ...summary.assistantPreference, candidateValue: "x".repeat(41) } },
+      { ...summary, assistantPreference: { ...summary.assistantPreference, preferenceType: "humor", candidateValue: "unapproved" } }]) {
+      expect(preferenceProposalPreviewIsValid(invalid)).toBe(false);
+      expect(toolApprovalActionPreview(invalid, "personal_assistant_manage_tool", "zh")).toMatch(/无法核对/);
+    }
+    expect(managementApprovalActionIsKnown("arbitrary_action")).toBe(false);
+  });
   it("preserves the complete browser target and quotes untrusted page text", () => {
     const targets = { page_id: "8e2731f7-06a2-41db-bfa2-cbe76a099811", snapshot_id: "8e2731f7-06a2-41db-bfa2-cbe76a099812", element_ref: "1", url: "https://www.bilibili.com/", element_name: "搜索\u202e", operation: "fill", value: "机器学习\n第二行" };
     const summary = { assistantAction: "browser_interact", assistantTargets: targets, assistantOperationDescription: "向网页上的所选元素填写所示内容。" };

@@ -16,7 +16,9 @@ function windowValue(value: unknown): value is ComputerWindow {
     && bounded(value.title, 240) && bounded(value.appName, 80);
 }
 function stateValue(value: unknown): ComputerState {
-  if (!exact(value, ["available", "status", "message", "grantId", "window", "pending"])
+  const keys = ["available", "status", "message", "grantId", "window", "pending"];
+  if (value && typeof value === "object" && Object.prototype.hasOwnProperty.call(value, "authorizationRequest")) keys.push("authorizationRequest");
+  if (!exact(value, keys)
     || typeof value.available !== "boolean" || typeof value.status !== "string" || !statuses.includes(value.status)
     || !bounded(value.message, 2000) || !(value.grantId === null || token(value.grantId))
     || !(value.window === null || windowValue(value.window))
@@ -25,6 +27,10 @@ function stateValue(value: unknown): ComputerState {
     || !token(value.pending.id) || typeof value.pending.action !== "string" || !actions.includes(value.pending.action)
     || !bounded(value.pending.targetLabel, 400) || !(value.pending.text === null || bounded(value.pending.text, 2000))
     || value.grantId === null || value.status !== "waiting_confirmation")) throw invalid();
+  if (value.authorizationRequest !== undefined && value.authorizationRequest !== null
+    && (!exact(value.authorizationRequest, ["id", "agentId", "sessionId", "turnId"])
+      || !Object.values(value.authorizationRequest).every(token) || value.grantId !== null || value.pending !== null
+      || !value.available || !["idle", "ended"].includes(value.status))) throw invalid();
   return value as ComputerState;
 }
 
@@ -46,8 +52,9 @@ export const launcherAssistantComputer: ComputerTransport = {
     return { windows: result.windows as ComputerWindow[] };
   },
   async grant(payload) {
-    if (!token(payload.selectionId) || payload.allowVision !== true) throw invalid();
-    return stateValue(await launcherAssistantBridge().invoke({ operation: "computerGrant", selectionId: payload.selectionId, allowVision: true }));
+    if (!token(payload.selectionId) || payload.allowVision !== true || payload.authorizationRequestId !== undefined && !token(payload.authorizationRequestId)) throw invalid();
+    return stateValue(await launcherAssistantBridge().invoke({ operation: "computerGrant", selectionId: payload.selectionId, allowVision: true,
+      ...(payload.authorizationRequestId !== undefined ? { authorizationRequestId: payload.authorizationRequestId } : {}) }));
   },
   async control(payload) {
     if (!token(payload.grantId) || !controls.includes(payload.action)) throw invalid();

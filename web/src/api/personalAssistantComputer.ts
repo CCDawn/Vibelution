@@ -19,7 +19,7 @@ export function fetchPersonalAssistantComputerWindows(options?: { signal?: Abort
   return fetchJson("/api/personal-assistant/computer/windows", { signal: options?.signal });
 }
 
-export function grantPersonalAssistantComputer(payload: { selectionId: string; allowVision: true }): Promise<ComputerState> {
+export function grantPersonalAssistantComputer(payload: { selectionId: string; allowVision: true; authorizationRequestId?: string }): Promise<ComputerState> {
   return fetchJson("/api/personal-assistant/computer/grant", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
   });

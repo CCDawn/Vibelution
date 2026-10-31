@@ -15,6 +15,21 @@ with project transport decided by [ADR 0013](../../docs/adr/0013-launcher-assist
 | `dispatch.py` | Native task associations and bounded receipts; separate native credentials per project |
 | `external_management` | Project-bound neutral operator grants, native Agent/Team intents and untrusted API documentation |
 
+## Assistant discovery actions
+
+The local catalog exposes `preference_proposals`, `preference_proposal_accept`,
+`preference_proposal_reject`, and `dispatch_list` through index/describe/execute.
+They bind to the running assistant and its direct Session, never a model-provided
+Agent ID. Proposal candidates are untrusted data; accepting or rejecting a
+proposal follows the existing native manage approval policy and the native
+preference service. The approval preview and decision bind the pending suggestion
+ID, type and value with a fingerprint; changed suggestions fail closed. Lists
+return at most 20 items per page. Dispatch
+rows expose references and status only, so `dispatchId` can be used with the
+existing `receipt` action; task text, result summaries and credentials are not
+included. Discovery reuses the dispatch owner's reference scan and does not
+reconcile or submit work.
+
 ## Private protocol 1
 
 Main creates a random `VIBELUTION_ASSISTANT_TOKEN` environment value and a new

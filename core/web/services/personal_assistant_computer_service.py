@@ -31,9 +31,15 @@ _epoch = 0
 _status = "idle"
 _message = ("请选择单个窗口并授权，助理才可以读取和操作。", "Select and authorize a single window before the assistant can read or control it.")
 _pending: dict | None = None
+_authorization_request: dict | None = None
+AUTHORIZATION_REQUEST_SECONDS = 120
 GRANT_SECONDS = 1200
 OBSERVATION_SECONDS = 90
 CONFIRM_SECONDS = 60
+
+
+class _AuthorizationRequired(adapter.ComputerBlocked):
+    """Only a verified no-grant state requests operator authorization."""
 
 
 def _text(zh: str, en: str) -> str:
@@ -74,7 +80,8 @@ def _public_window(window: dict) -> dict:
 
 
 def _invalidate(status: str, message: tuple[str, str], *, end: bool = False) -> None:
-    global _status, _message, _epoch, _pending, _grant
+    global _status, _message, _epoch, _pending, _grant, _authorization_request
+    _authorization_request = None
     _epoch += 1
     _status, _message = status, message
     _observations.clear()
@@ -112,9 +119,51 @@ def _check_grant() -> None:
             _invalidate("ended", ("窗口、助理配置或授权期限已变化，请重新选择。", "The window, assistant configuration, or authorization period has changed. Select the window again."), end=True)
 
 
+def _check_authorization_request() -> None:
+    """Retire an operator hint when its identity, configuration or TTL changes."""
+    global _authorization_request
+    request = _authorization_request
+    if not request:
+        return
+    try:
+        row = _canonical()
+        adapter.driver_binary()
+        invalid = (time.monotonic() >= request["expires"] or request["cancelChecker"]() or _grant is not None
+                   or _quarantine is not None or _status not in {"idle", "ended"}
+                   or (row["agentId"], row["directSessionId"]) != (request["agentId"], request["sessionId"])
+                   or _configuration(request["agentId"]) != request["configuration"])
+    except Exception:
+        invalid = True
+    if invalid:
+        _authorization_request = None
+
+
+def _record_authorization_request(owner: tuple[str, str, str], cancel_checker) -> None:
+    """Publish no window data; same live turn keeps its id and original expiry."""
+    global _authorization_request
+    _check_authorization_request()
+    if any(len(value) > 100 for value in owner):
+        return
+    try:
+        row = _canonical()
+        if (row["agentId"], row["directSessionId"]) != owner[:2]:
+            return
+        configuration = _configuration(owner[0])
+        adapter.driver_binary()
+    except Exception:
+        return  # Keep the existing blocked result if identity or readiness is uncertain.
+    current = _authorization_request
+    if current and (current["agentId"], current["sessionId"], current["turnId"]) == owner:
+        return
+    _authorization_request = {"id": secrets.token_urlsafe(24), "agentId": owner[0], "sessionId": owner[1],
+                              "turnId": owner[2], "configuration": configuration, "cancelChecker": cancel_checker,
+                              "expires": time.monotonic() + AUTHORIZATION_REQUEST_SECONDS}
+
+
 def get_state() -> dict:
     with _lock:
         _check_grant()
+        _check_authorization_request()
         try:
             adapter.driver_binary()
             available, reason = True, _text(*_message)
@@ -123,7 +172,8 @@ def get_state() -> dict:
         return {"available": available, "status": _status, "message": reason,
                 "grantId": _grant["id"] if _grant else None,
                 "window": _public_window(_grant["window"]) if _grant else None,
-                "pending": {key: _pending[key] for key in ("id", "action", "targetLabel", "text")} if _pending else None}
+                "pending": {key: _pending[key] for key in ("id", "action", "targetLabel", "text")} if _pending else None,
+                "authorizationRequest": {key: _authorization_request[key] for key in ("id", "agentId", "sessionId", "turnId")} if _authorization_request else None}
 
 
 def list_windows() -> dict:
@@ -161,16 +211,26 @@ def list_windows() -> dict:
     return {"windows": [_public_window(window) for window in choices.values()]}
 
 
-def grant_window(selection_id: str, allow_vision: bool) -> dict:
+def grant_window(selection_id: str, allow_vision: bool, authorization_request_id: str | None = None) -> dict:
     global _grant
     row = _canonical()
     with _lock:
+        def require_current_request() -> None:
+            if authorization_request_id is None:
+                return  # Existing manual authorization is independent of a request hint.
+            _check_authorization_request()
+            if (not _authorization_request or _authorization_request["id"] != authorization_request_id
+                    or (_authorization_request["agentId"], _authorization_request["sessionId"])
+                    != (row["agentId"], row["directSessionId"])):
+                raise adapter.ComputerBlocked("授权请求已失效，请让助理重新请求。", "The authorization request has expired. Ask the assistant to request it again.")
+        require_current_request()
         window = _selection.get(selection_id)
         if (allow_vision is not True or not window or time.monotonic() - window["created"] > 120
                 or not _window_alive(window) or _execution.locked() or _active is not None or _quarantine is not None):
             raise adapter.ComputerBlocked("授权未生效：请重新选择仍打开的窗口，并同意读取窗口画面。", "Authorization was not granted. Select an open window again and consent to reading its image.")
         adapter.driver_binary()
         configuration = _configuration(row["agentId"])
+        require_current_request()  # Recheck after driver and window validation, before granting.
         _invalidate("ready", ("已授权此窗口，收到任务后开始；所有输入前都会显示具体操作供你确认。", "This window is authorized. The assistant will start when given a task; each input action will be shown for your confirmation."))
         _grant = {"id": secrets.token_urlsafe(24), "window": window, "agentId": row["agentId"],
                   "sessionId": row["directSessionId"], "expires": time.monotonic() + GRANT_SECONDS,
@@ -295,7 +355,16 @@ def execute(owner, *, action="observe", observation_id="", element_id="", text="
             _check_grant()
             if (not _grant or (_grant["agentId"], _grant["sessionId"]) != owner[:2]
                     or _status != "ready" or _quarantine is not None):
-                raise adapter.ComputerBlocked("请先授权窗口，或等待你交回控制。", "Authorize a window first, or return control to the assistant.")
+                authorization_required = False
+                if not _grant and _status in {"idle", "ended"} and _quarantine is None:
+                    try:
+                        authorization_required = not cancel_checker()
+                    except Exception:
+                        pass  # An unverifiable turn must not request authorization.
+                if authorization_required and action == "observe":
+                    _record_authorization_request(owner, cancel_checker)
+                blocked = _AuthorizationRequired if authorization_required else adapter.ComputerBlocked
+                raise blocked("请先授权窗口，或等待你交回控制。", "Authorize a window first, or return control to the assistant.")
             epoch, window = _epoch, dict(_grant["window"])
             grant_ref = _grant
             old = None
@@ -385,7 +454,10 @@ def execute(owner, *, action="observe", observation_id="", element_id="", text="
             if _status in {"working", "waiting_confirmation"}:
                 _invalidate("paused", message)
         _event(action, "blocked")
-        return {"ok": False, "status": "blocked", "message": _text(*message)}
+        result = {"ok": False, "status": "blocked", "message": _text(*message)}
+        if isinstance(exc, _AuthorizationRequired):
+            result["reason"] = "authorization_required"
+        return result
     finally:
         retirement_failed = False
         with _lock:

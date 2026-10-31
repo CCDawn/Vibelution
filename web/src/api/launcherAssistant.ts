@@ -66,7 +66,7 @@ export type LauncherAssistantRequest =
   | { operation: "panelAffairDue"; itemId: string; payload: Record<string, unknown> }
   | { operation: "panelProposalAccept" | "panelProposalReject"; proposalId: string }
   | { operation: "computerState" | "computerWindows" }
-  | { operation: "computerGrant"; selectionId: string; allowVision: true }
+  | { operation: "computerGrant"; selectionId: string; allowVision: true; authorizationRequestId?: string }
   | { operation: "computerControl"; grantId: string; action: "pause" | "resume" | "takeover" | "return" | "end" }
   | { operation: "computerConfirm"; grantId: string; pendingId: string; approved: boolean }
   | { operation: "curation"; sessionId: string }

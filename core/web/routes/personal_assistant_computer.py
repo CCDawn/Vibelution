@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field, StrictBool
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 
 from core.web.control import ensure_control_source
 from core.web.services import personal_assistant_computer_service as service
@@ -28,6 +28,14 @@ class Pending(BaseModel):
     text: str | None
 
 
+class AuthorizationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(min_length=1, max_length=100)
+    agentId: str = Field(min_length=1, max_length=100)
+    sessionId: str = Field(min_length=1, max_length=100)
+    turnId: str = Field(min_length=1, max_length=100)
+
+
 class State(BaseModel):
     available: StrictBool
     status: Literal["idle", "ready", "working", "waiting_confirmation", "paused", "manual", "ended", "error"]
@@ -35,6 +43,7 @@ class State(BaseModel):
     grantId: str | None
     window: Window | None
     pending: Pending | None
+    authorizationRequest: AuthorizationRequest | None = None
 
 
 class Windows(BaseModel):
@@ -45,6 +54,14 @@ class Grant(BaseModel):
     model_config = ConfigDict(extra="forbid")
     selectionId: str = Field(min_length=1, max_length=100)
     allowVision: StrictBool
+    authorizationRequestId: str | None = Field(default=None, min_length=1, max_length=100)
+
+    @model_validator(mode="before")
+    @classmethod
+    def request_id_must_be_present_or_valid(cls, value):
+        if isinstance(value, dict) and "authorizationRequestId" in value and value["authorizationRequestId"] is None:
+            raise ValueError("authorizationRequestId must be a nonempty string when supplied")
+        return value
 
 
 class Control(BaseModel):
@@ -91,7 +108,7 @@ def list_windows(request: Request) -> dict:
 @router.post("/grant", response_model=State)
 def grant(payload: Grant, request: Request) -> dict:
     with _operator(request):
-        return service.grant_window(payload.selectionId, payload.allowVision)
+        return service.grant_window(payload.selectionId, payload.allowVision, payload.authorizationRequestId) if payload.authorizationRequestId is not None else service.grant_window(payload.selectionId, payload.allowVision)
 
 
 @router.post("/control", response_model=State)

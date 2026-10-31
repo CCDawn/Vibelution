@@ -8,7 +8,7 @@ from core.assistant_runtime import computer_control
 
 TOKEN = "test-launcher-token-0123456789"
 HEADERS = {"Authorization": "Bearer " + TOKEN}
-STATE = {"available": True, "status": "idle", "message": "", "grantId": None, "window": None, "pending": None}
+STATE = {"available": True, "status": "idle", "message": "", "grantId": None, "window": None, "pending": None, "authorizationRequest": None}
 
 
 @pytest.fixture
@@ -52,6 +52,37 @@ def test_operator_commands_are_closed_and_strict(client):
     assert http.post(base + "/control", json={"grantId": "g", "action": "pause"}, headers=HEADERS).status_code == 200
     assert http.post(base + "/confirm", json={"grantId": "g", "pendingId": "p", "approved": False}, headers=HEADERS).status_code == 200
     assert calls == [("grant", ("fake-selection", True)), ("control", ("g", "pause")), ("confirm", ("g", "p", False))]
+
+
+def test_authorization_request_is_available_only_to_launcher_operator(client, monkeypatch):
+    http, _ = client
+    request = {"id": "request", "agentId": "assistant", "sessionId": "session", "turnId": "turn"}
+    monkeypatch.setattr(computer_control.service, "get_state", lambda: {**STATE, "authorizationRequest": request})
+    path = "/api/assistant/computer"
+    assert http.get(path).status_code == 401
+    assert http.get(path, headers={**HEADERS, "Origin": "https://example.test"}).status_code == 403
+    assert http.get(path, headers=HEADERS).json()["authorizationRequest"] == request
+
+
+def test_launcher_grant_passes_exact_request_binding_and_rejects_null(client):
+    http, calls = client
+    path = "/api/assistant/computer/grant"
+    assert http.post(path, json={"selectionId": "fake-selection", "allowVision": True, "authorizationRequestId": "req"}, headers=HEADERS).status_code == 200
+    assert calls == [("grant", ("fake-selection", True, "req"))]
+    assert http.post(path, json={"selectionId": "fake-selection", "allowVision": True, "authorizationRequestId": None}, headers=HEADERS).status_code == 422
+
+
+def test_launcher_never_retries_a_rejected_bound_grant(client, monkeypatch):
+    http, _ = client
+    calls = []
+    def fail(*args):
+        calls.append(args)
+        raise ValueError("expired request")
+    monkeypatch.setattr(computer_control.service, "grant_window", fail)
+    result = http.post("/api/assistant/computer/grant", json={"selectionId": "fake-selection", "allowVision": True,
+                       "authorizationRequestId": "expired"}, headers=HEADERS)
+    assert result.status_code == 409 and calls == [("fake-selection", True, "expired")]
+    assert "expired request" not in result.text
 
 
 def test_native_error_does_not_leak_detail(client, monkeypatch):

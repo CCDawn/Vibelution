@@ -4,7 +4,7 @@ import type { SessionDetail, SessionQueuedTurn } from "../../api/types";
 import { exactAcceptedSubmitTurnId, findSubmitAcceptanceEvidence } from "../chat/chatSubmitAcceptanceReadback";
 import { hasExecutionOwnership, resolveSessionActivity, type SessionActivitySource } from "../sessionActivityState";
 
-export type LauncherAssistantSubmission = { message: string; requestId: string; draftSnapshot?: string; attachmentIds?: string[]; attachmentSnapshotIds?: string[] };
+export type LauncherAssistantSubmission = { message: string; requestId: string; draftSnapshot?: string; attachmentIds?: string[]; attachmentSnapshotIds?: string[]; preserveDraft?: true };
 export type LauncherAssistantQueuedAcceptance = { id: string; clientSubmissionId: string; observed: boolean };
 type LauncherAssistantActivitySource = SessionActivitySource & Partial<Pick<SessionDetail, "messages" | "activeTask">>
   & { queuedTurns?: Array<Pick<SessionQueuedTurn, "id" | "status" | "clientSubmissionId">> };

@@ -20,7 +20,11 @@ def _invoke(action, observation_id="", element_id="", text="", _cancel_checker=N
 
 
 def personal_assistant_computer_observe_tool(_cancel_checker=None) -> str:
-    """Read the operator-selected window's screenshot and UIA; no window selection."""
+    """用户请求电脑操作时可先观察操作者授权的单个窗口。
+
+    缺少授权时 Launcher 对话会提示用户在本机选择并授权窗口；等待用户明确同意后再重新观察。
+    不自动反复调用或重放；只能读取所授权窗口，输入操作仍须逐次确认。
+    """
     return _invoke("observe", _cancel_checker=_cancel_checker)
 
 

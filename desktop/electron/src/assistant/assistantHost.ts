@@ -39,7 +39,7 @@ export type AssistantHostRequest =
   | { operation: "panelProposalAccept" | "panelProposalReject"; proposalId: string }
   | { operation: "computerState" }
   | { operation: "computerWindows" }
-  | { operation: "computerGrant"; selectionId: string; allowVision: true }
+  | { operation: "computerGrant"; selectionId: string; allowVision: true; authorizationRequestId?: string }
   | { operation: "computerControl"; grantId: string; action: "pause" | "resume" | "takeover" | "return" | "end" }
   | { operation: "computerConfirm"; grantId: string; pendingId: string; approved: boolean };
 
@@ -779,9 +779,13 @@ export class AssistantHost {
           if (payload.operation === "computerState") method = "GET";
           else { path += "/windows"; body = {}; }
         } else if (payload.operation === "computerGrant") {
-          if (!exact(payload, ["operation", "selectionId", "allowVision"]) || !token(payload.selectionId) || payload.allowVision !== true)
+          if (!(exact(payload, ["operation", "selectionId", "allowVision"])
+              || exact(payload, ["operation", "selectionId", "allowVision", "authorizationRequestId"]))
+            || !token(payload.selectionId) || payload.allowVision !== true
+            || ("authorizationRequestId" in payload && !token(payload.authorizationRequestId)))
             throw new HostError("ASSISTANT_REQUEST_INVALID");
-          path += "/grant"; body = { selectionId: payload.selectionId, allowVision: true };
+          path += "/grant"; body = { selectionId: payload.selectionId, allowVision: true,
+            ...("authorizationRequestId" in payload ? { authorizationRequestId: payload.authorizationRequestId } : {}) };
         } else if (payload.operation === "computerControl") {
           if (!exact(payload, ["operation", "grantId", "action"]) || !token(payload.grantId)
             || !["pause", "resume", "takeover", "return", "end"].includes(payload.action)) throw new HostError("ASSISTANT_REQUEST_INVALID");
@@ -800,11 +804,18 @@ export class AssistantHost {
             || result.windows.length > 256 || !result.windows.every(validWindow)) throw new HostError("ASSISTANT_RESPONSE_INVALID");
           return result;
         }
-        if (!object(result) || !exact(result, ["available", "status", "message", "grantId", "window", "pending"])
+        if (!object(result) || !(exact(result, ["available", "status", "message", "grantId", "window", "pending"])
+          || exact(result, ["available", "status", "message", "grantId", "window", "pending", "authorizationRequest"]))
           || typeof result.available !== "boolean" || typeof result.status !== "string"
           || !["idle", "ready", "working", "waiting_confirmation", "paused", "manual", "ended", "error"].includes(result.status)
           || !bounded(result.message, 2000) || !(result.grantId === null || token(result.grantId))
           || !(result.window === null || validWindow(result.window)) || (result.grantId === null) !== (result.window === null))
+          throw new HostError("ASSISTANT_RESPONSE_INVALID");
+        if (result.authorizationRequest !== undefined && result.authorizationRequest !== null
+          && (!object(result.authorizationRequest) || !exact(result.authorizationRequest, ["id", "agentId", "sessionId", "turnId"])
+            || !token(result.authorizationRequest.id) || !token(result.authorizationRequest.agentId)
+            || !token(result.authorizationRequest.sessionId) || !token(result.authorizationRequest.turnId)
+            || result.grantId !== null || result.pending !== null || !["idle", "ended"].includes(result.status)))
           throw new HostError("ASSISTANT_RESPONSE_INVALID");
         if (result.pending !== null && (!object(result.pending) || !exact(result.pending, ["id", "action", "targetLabel", "text"])
           || !token(result.pending.id) || typeof result.pending.action !== "string"

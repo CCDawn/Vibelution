@@ -1,6 +1,12 @@
 const COMPUTER_COPY = {
   zh: {
     section: "电脑操作",
+    requestTitle: "选择要操作的窗口",
+    authorizeWindow: (title: string) => `允许助理读取并操作「${title}」。窗口画面将提供给当前助理模型，提交、发送或删除前仍需你确认。`,
+    changeWindow: "更换窗口",
+    grantConversation: "允许读取并操作",
+    notNow: "暂不允许",
+    end: "结束",
     statuses: { idle: "未授权", ready: "已授权", working: "操作中", waiting_confirmation: "待确认", paused: "已暂停", manual: "你正在操作", ended: "授权已结束", error: "操作已停止" },
     loading: "读取中",
     resume: "继续电脑操作",
@@ -44,6 +50,12 @@ const COMPUTER_COPY = {
   },
   en: {
     section: "Computer controls",
+    requestTitle: "Choose a window to control",
+    authorizeWindow: (title: string) => `Allow the assistant to read and control “${title}”. The window image will be sent to the current assistant model; submitting, sending or deleting still requires your confirmation.`,
+    changeWindow: "Change window",
+    grantConversation: "Allow reading and control",
+    notNow: "Not now",
+    end: "End",
     statuses: { idle: "Not authorized", ready: "Authorized", working: "In progress", waiting_confirmation: "Awaiting confirmation", paused: "Paused", manual: "You are in control", ended: "Authorization ended", error: "Operation stopped" },
     loading: "Loading",
     resume: "Resume computer control",

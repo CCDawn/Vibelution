@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { act, createElement } from "react";
+import { act, createElement, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ConversationViewProps } from "../../components/conversation/conversationViewTypes";
@@ -38,7 +38,7 @@ afterEach(async () => {
   vi.clearAllMocks();
 });
 
-async function renderAssistant(initialDetail?: Record<string, unknown>, initialStatus?: Record<string, unknown>, statusRequest?: () => Promise<unknown>) {
+async function renderAssistant(initialDetail?: Record<string, unknown>, initialStatus?: Record<string, unknown>, statusRequest?: () => Promise<unknown>, routeProps: Partial<ComponentProps<typeof LauncherAssistantRoute>> = {}) {
   if (statusRequest) bridge.getLauncherAssistantStatus.mockImplementation(statusRequest);
   else bridge.getLauncherAssistantStatus.mockResolvedValue(initialStatus ?? { assistant: { agentId: "a", directSessionId: "s", displayName: "助理" } });
   bridge.getLauncherAssistantDetail.mockResolvedValue(initialDetail ?? { id: "s", status: "ready", messages: [], defaultFileContext: "" });
@@ -52,7 +52,7 @@ async function renderAssistant(initialDetail?: Record<string, unknown>, initialS
   root = createRoot(container);
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   await act(async () => {
-    root?.render(createElement(QueryClientProvider, { client }, createElement(LauncherAssistantRoute, { key: "pet" })));
+    root?.render(createElement(QueryClientProvider, { client }, createElement(LauncherAssistantRoute, { key: "pet", ...routeProps })));
     await new Promise(resolve => setTimeout(resolve, 10));
   });
   await settle();
@@ -89,6 +89,30 @@ function changedAppearance() {
 }
 
 describe("Launcher assistant state", () => {
+  it("sends an explicit contextual request without consuming the user's draft", async () => {
+    const entryIntent = { key: "affairs", title: "在对话里管理待办与提醒", label: "查看我的待办与提醒", message: "请查看我的待办与提醒，先不要修改。" };
+    bridge.sendLauncherAssistantMessage.mockResolvedValue({ turnId: "accepted-context" });
+    await renderAssistant(undefined, undefined, undefined, { embedded: true, entryIntent });
+    expect(bridge.sendLauncherAssistantMessage).not.toHaveBeenCalled();
+    await act(async () => conversation?.onComposerChange?.("还没发送的草稿"));
+    await click(entryIntent.label);
+    expect(bridge.sendLauncherAssistantMessage).toHaveBeenCalledTimes(1);
+    expect(bridge.sendLauncherAssistantMessage.mock.calls[0][0]).toBe(entryIntent.message);
+    expect(conversation?.composerValue).toBe("还没发送的草稿");
+  });
+  it("retries the original contextual UUID after a lost ACK and keeps the draft", async () => {
+    const entryIntent = { key: "preferences", title: "调整回答方式", label: "查看偏好", message: "请读取当前对话偏好。" };
+    bridge.sendLauncherAssistantMessage.mockRejectedValueOnce(new Error("lost ACK")).mockResolvedValue({ turnId: "accepted-context" });
+    await renderAssistant(undefined, undefined, undefined, { embedded: true, entryIntent });
+    await act(async () => conversation?.onComposerChange?.("保留这段草稿"));
+    await click(entryIntent.label);
+    const originalId = bridge.sendLauncherAssistantMessage.mock.calls[0][1];
+    await act(async () => { await conversation?.onSubmit?.(); });
+    expect(bridge.sendLauncherAssistantMessage).toHaveBeenCalledTimes(2);
+    expect(bridge.sendLauncherAssistantMessage.mock.calls[1]).toEqual(bridge.sendLauncherAssistantMessage.mock.calls[0]);
+    expect(originalId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(conversation?.composerValue).toBe("保留这段草稿");
+  });
   it("passes persisted provider failures to the shared conversation error panel", async () => {
     const lastTurnError = {
       message: "模型服务请求失败", errorType: "provider_protocol_error",

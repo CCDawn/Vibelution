@@ -17,7 +17,7 @@ def client(monkeypatch):
 
 def state():
     return {"available": True, "status": "ready", "message": "ready", "grantId": "grant",
-            "window": {"selectionId": "selection", "title": "Test", "appName": "Test"}, "pending": None}
+            "window": {"selectionId": "selection", "title": "Test", "appName": "Test"}, "pending": None, "authorizationRequest": None}
 
 
 def test_operator_can_only_grant_returned_selection_and_exact_confirmation(client, monkeypatch):
@@ -31,6 +31,32 @@ def test_operator_can_only_grant_returned_selection_and_exact_confirmation(clien
     assert client.post("/api/personal-assistant/computer/grant", json={"selectionId": "selection", "allowVision": True}).status_code == 200
     assert client.post("/api/personal-assistant/computer/confirm", json={"grantId": "grant", "pendingId": "decision", "approved": False}).status_code == 200
     assert calls == [("selection", True), ("grant", "decision", False)]
+
+
+def test_grant_accepts_bound_request_id_and_rejects_invalid_ids(client, monkeypatch):
+    calls = []
+    monkeypatch.setattr(route.service, "grant_window", lambda *args: calls.append(args) or state())
+    base = "/api/personal-assistant/computer/grant"
+    assert client.post(base, json={"selectionId": "selection", "allowVision": True, "authorizationRequestId": "req"}).status_code == 200
+    assert calls == [("selection", True, "req")]
+    for value in (None, "", "x" * 101, 123):
+        assert client.post(base, json={"selectionId": "selection", "allowVision": True, "authorizationRequestId": value}).status_code == 422
+    assert len(calls) == 1
+
+
+def test_state_dto_accepts_an_older_response_without_authorization_request():
+    data = state()
+    data.pop("authorizationRequest")
+    assert route.State.model_validate(data).authorizationRequest is None
+
+
+def test_authorization_request_is_projected_only_through_operator_state(client, monkeypatch):
+    request = {"id": "request", "agentId": "assistant", "sessionId": "session", "turnId": "turn"}
+    monkeypatch.setattr(route.service, "get_state", lambda: {
+        "available": True, "status": "idle", "message": "", "grantId": None, "window": None,
+        "pending": None, "authorizationRequest": request})
+    assert client.get("/api/personal-assistant/computer").json()["authorizationRequest"] == request
+    assert client.get("/api/personal-assistant/computer", headers={"X-OpenCode-Session": "agent"}).status_code == 403
 
 
 @pytest.mark.parametrize("path", ["", "/windows", "/grant", "/control", "/confirm"])

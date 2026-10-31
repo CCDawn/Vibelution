@@ -7,7 +7,7 @@
 ### 适用范围
 Launcher 控制窗口。显式工作区 start/open 和深链仍执行对应动作；普通工作台、分支工作台和 Companion Session 核心不受导航改动影响。
 ### 使用方式
-`LauncherShell` 组合 `LauncherTitlebar`、`VSplitWorkspace` 和同一份 `LauncherNavigation`。左栏分为个人助理（对话、浏览器、待办与提醒、电脑操作、对话偏好、助理设置）及 Launcher（项目与分支、诊断、维护、启动设置、版本更新）。右侧只渲染选中内容，无常驻右功能栏。窄屏通过 `VDialog` 展开同一目录，切换后关闭。标题栏只承担身份和原生窗口拖动，版本入口在左栏。
+`LauncherShell` 组合 `LauncherTitlebar`、`VSplitWorkspace` 和同一份 `LauncherNavigation`。左栏主入口为对话、浏览器、项目与分支；底部设置菜单提供诊断、维护、启动设置和版本更新，有新版时在设置入口提示。旧的助理功能深链仍可访问，待办、电脑操作与偏好由助理按需处理。右侧只渲染选中内容，无常驻右功能栏。窄屏通过 `VDialog` 展开同一目录，切换后关闭。标题栏只承担身份和原生窗口拖动。
 
 `LauncherProjectRoute` 保留原项目/分支与启动设置的服务和操作保护；未选择项目有独立原生目录选择入口，取消不创建项目、不启动工作区。失败显示错误，不能将所有错误解释为没有项目。`LauncherUpdatesRoute` 复用原 Launcher 更新、确认、保存与序列化重启组件。
 
@@ -17,13 +17,13 @@ Launcher 控制窗口。显式工作区 start/open 和深链仍执行对应动�
 ## LauncherAssistantWorkspaceRoute
 
 ### 功能
-在统一左栏选中的右侧内容中展示真实常驻助理的待办与提醒、电脑操作、对话偏好与设置；对话复用既有原生 `LauncherAssistantRoute`。
+默认展示常驻助理的原生对话；待办与提醒、任务进度、偏好和外观由 Agent 工具处理，浏览器保留并排工作区。
 ### 适用范围
-仅 Launcher 控制面；必须先取得常驻助理固定身份。概览边界为“当前助理与已连接项目”，分支/实例计为条目，不伪称全平台扫描或项目总数。
+仅 Launcher 控制面，固定常驻助理身份。模型连接、启动、更新、诊断和维护保留设置入口，以便 Agent 不可用时恢复。
 ### 使用方式
-`?panel=` 在封闭列表内选择功能，缺省、未知值以及旧的 `overview`、`dispatches` 值进入对话。待办与提醒和偏好面板注入同签名 native transport，query、失效边界和跨卸载的偏好保存队列均按宿主隔离。助理设置使用 `presentation="page"`，不再以弹窗替代内容页；默认 Workbench 调用仍使用原 HTTP 与对话框展示。Launcher 外观更新只失效 native 设置，不改写 Workbench 的本地桌宠缓存。
+`?panel=` 的缺省、未知值以及旧的 `overview`、`dispatches` 值进入对话。旧待办、偏好、设置链接给出一次可关闭的只读查询按钮，由用户明确点击后发送；访问 URL 不自动发送。发送沿用原请求 UUID 与未知结果读回，保留当前草稿和附件。旧电脑链接打开同一对话内的授权卡，不替换 transcript。默认 Workbench 的原 HTTP 面板保留，不受 Launcher 收敛影响。
 
-派遣回执保留 Launcher 原生 DTO，不将其强转成 Workbench message/receipt。待审批记录通过对话中的已有完整预览与授权流程处理，不复制第二套审批 writer。电脑面板沿用 Launcher-scoped transport。所有服务写入经固定 native identity、封闭 IPC verbs 与迁移写入保护，不接收任意 URL、端口或 renderer 自报 Agent/Session。
+任务进度通过 Agent 的有界派遣查询和原回执工具读取，不在标题栏或输入框旁展示任务编号列表。待审批记录继续通过对话中的完整预览处理。电脑卡沿用 Launcher-scoped transport，只有当前原生 observe 请求且轮次未停止时自动出现。窗口列表只在本机选择；请求 id 随本次明确授权提交，过期、取消或身份变化拒绝授权。授权只建立窗口许可，不自动生成聊天消息或重新执行工具；后续由用户在原生对话中继续。恢复现有授权时显示暂停、接手和结束控件，不重复列举窗口。所有写入经固定 native identity 和封闭 IPC verbs，不接收 renderer 自报 Agent/Session。
 
 ### LauncherAssistantWelcome
 仅在原生会话确认为空、无活动轮次/排队/授权/未知发送时显示欢迎内容。复用 `VButton` 的建议卡只填充既有草稿，不自动发送，不创建新会话，不替换 transcript。普通会话、工具执行中、已发送历史和未知状态不覆盖。桌面与窄屏为输入框保留底部空间，长标题可换行。
@@ -215,6 +215,8 @@ severity 用 `--state-error`/`--state-warning` 与 `--vui-border-subtle`/`--vui-
 个人助理工作台右栏、窄屏电脑操作 VDialog 和 Launcher 个人助理的电脑操作入口可复用。普通聊天和 Companion 不挂载。
 ### 使用方式
 `<PersonalAssistantComputerPanel active onCollapse={...} />` 默认使用工作台传输；Launcher 注入其专用 transport，缓存按宿主隔离。组合 VButton、VIconButton、VCheckbox、VSurface 与 VStateSurface。打开页或手动刷新才读取窗口列表，普通状态一秒轮询且隐藏时停止。用户选定窗口、勾选画面许可后提交授权。顶部保留收起、暂停或继续、交给我或交回助理；结束撤销授权后重新选择。
+
+对话中的 `presentation="conversation"` 使用紧凑授权卡：本机列出窗口供用户明确选择，可更换或暂不允许；确认文字包含选中窗口、画面交给当前助理模型以及敏感动作仍需确认，点击一次“允许读取并操作”才授权。仅该次用户授权成功触发 `onGranted`，被动查询不会触发。授权后显示窗口状态和暂停、继续、接管、交回、结束；结束成功关闭该卡，失败保留错误。待确认操作仍展示原目标和完整文本，沿用原确认服务。
 ### 非职责
 不读取截图、不发送鼠标键盘输入、不持有消息或执行历史；不修改原生聊天语义，不以 UI 状态替代服务端授权与确认。
 ### 视觉与状态

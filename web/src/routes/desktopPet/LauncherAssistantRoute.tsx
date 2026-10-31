@@ -30,18 +30,19 @@ import {
 import { DEFAULT_PET_PREFERENCES } from "./desktopPetPreferences";
 import { ChatToolApprovalDialog } from "../chat/ChatToolApprovalDialog";
 import { toolApprovalRiskLabel } from "../chat/toolApprovalLabels";
-import { authorizationUpgradePreviewIsValid, browserInteractPreviewIsValid, dispatchWritePreviewIsValid, launcherAgentCreatePreviewIsValid, operatorImageUploadPreviewIsValid, projectLifecyclePreviewIsValid, recoveryPreviewIsValid, managementApprovalActionIsKnown, toolApprovalActionPreview, toolApprovalDisplayName } from "../chat/toolApprovalPreview";
+import { authorizationUpgradePreviewIsValid, browserInteractPreviewIsValid, dispatchWritePreviewIsValid, launcherAgentCreatePreviewIsValid, operatorImageUploadPreviewIsValid, preferenceProposalPreviewIsValid, projectLifecyclePreviewIsValid, recoveryPreviewIsValid, managementApprovalActionIsKnown, toolApprovalActionPreview, toolApprovalDisplayName } from "../chat/toolApprovalPreview";
 import { useLauncherThemeControl } from "./useLauncherThemeControl";
 import { readStoredWorkbenchTheme, requestWorkbenchTheme, subscribeWorkbenchThemeSync, useAuthorityTheme } from "../../app/themePreference";
 import { PersonalAssistantComputerPanel } from "../personalAssistant/PersonalAssistantComputerPanel";
 import { launcherAssistantComputer } from "../../api/launcherAssistantComputer";
+import { useLauncherComputerAccess } from "./useLauncherComputerAccess";
 import petStyles from "./DesktopAssistantRoute.styles";
 import { useLauncherAttachmentHistory } from "./useLauncherAttachmentHistory";
 import { classifyComposerFiles, mergeComposerAttachmentsWithRejections, type ComposerImageAttachment } from "../chat/chatComposerSubmitModel";
 import {
   launcherAssistantActivity, launcherAssistantPollInterval, launcherAssistantSubmission,
   launcherAssistantQueueReadback, launcherAssistantQueueLabel, launcherAssistantRequestReadback,
-  launcherDispatchLabel, launcherDispatchReceiptLabel, type LauncherAssistantSubmission, type LauncherAssistantQueuedAcceptance,
+  type LauncherAssistantSubmission, type LauncherAssistantQueuedAcceptance,
 } from "./launcherAssistantModel";
 
 const COPY = {
@@ -50,14 +51,14 @@ const COPY = {
     collapse: "收起聊天", loading: "正在打开原生会话…", unavailable: "个人助理暂不可用",
     retry: "重试", refresh: "刷新", placeholder: "和个人助理聊一聊…", send: "发送", sending: "正在发送…",
     unknownSend: "尚未确认消息是否收到。输入已保留，重试会核对同一条消息。",
-    receipts: "任务结果", receiptToggle: "任务结果", receiptBoundary: "任务状态由执行结果更新，完成后请核对结果。", checking: "正在连接 Launcher…",
+    receipts: "任务状态暂不可用", checking: "正在连接 Launcher…",
   },
   en: {
     title: "Personal assistant", expand: "Open assistant chat", chat: "Chat", hide: "Hide assistant",
     collapse: "Collapse chat", loading: "Opening native conversation…", unavailable: "Assistant unavailable",
     retry: "Retry", refresh: "Refresh", placeholder: "Chat with your assistant…", send: "Send", sending: "Sending…",
     unknownSend: "Delivery is unconfirmed. Your input is retained; retry checks the same message.",
-    receipts: "Task results", receiptToggle: "Task results", receiptBoundary: "Task status comes from execution results; check the result when complete.", checking: "Connecting to Launcher…",
+    receipts: "Task status unavailable", checking: "Connecting to Launcher…",
   },
 } as const;
 
@@ -70,6 +71,7 @@ function approvalAcceptDisabled(request: SessionToolApprovalRequest): boolean {
     || summary?.assistantAction === "project_lifecycle" && !projectLifecyclePreviewIsValid(summary)
     || summary?.assistantAction === "operator_image_upload" && !operatorImageUploadPreviewIsValid(summary)
     || summary?.assistantAction === "browser_interact" && !browserInteractPreviewIsValid(summary)
+    || ["preference_proposal_accept", "preference_proposal_reject"].includes(String(summary?.assistantAction)) && !preferenceProposalPreviewIsValid(summary)
     || summary?.assistantAction === "reminder_handoff_recover" && !recoveryPreviewIsValid(summary));
 }
 
@@ -83,7 +85,10 @@ function readableApprovalJson(source: string): string {
 type ContinueAttempt = { requestId: string; expected: SessionContinuationExpectation; accepted: boolean };
 type ComposerSnapshot = { draft: string; outstanding: LauncherAssistantSubmission | null; acceptedTurnId: string; queuedAcceptance: LauncherAssistantQueuedAcceptance | null; continuation?: ContinueAttempt; attachments?: ComposerImageAttachment[] };
 
-export function LauncherAssistantRoute({ embedded = false, navigationOwned = false }: { embedded?: boolean; navigationOwned?: boolean }) {
+export function LauncherAssistantRoute({ embedded = false, navigationOwned = false, computerRequested = false, entryIntent }: {
+  embedded?: boolean; navigationOwned?: boolean; computerRequested?: boolean;
+  entryIntent?: { key: string; title: string; label: string; message: string };
+}) {
   useLauncherThemeControl();
   const client = useQueryClient();
   const { lang } = useShellI18n();
@@ -96,10 +101,9 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   const [themePending, setThemePending] = useState(false);
   const themeGate = useRef(false);
   useEffect(() => subscribeWorkbenchThemeSync(setThemeSyncState), []);
-  const [computerOpen, setComputerOpen] = useState(false);
-  // Embedded receipts stay folded behind the header toggle; the floating
-  // window keeps its always-on receipt strip below the composer.
-  const [receiptsOpen, setReceiptsOpen] = useState(false);
+  const [computerOpen, setComputerOpen] = useState(computerRequested);
+  const [dismissedEntry, setDismissedEntry] = useState("");
+  useEffect(() => { if (computerRequested) setComputerOpen(true); }, [computerRequested]);
   const [visible, setVisible] = useState(() => document.visibilityState !== "hidden");
   const [epoch, setEpoch] = useState(0);
   const epochRef = useRef(0);
@@ -225,7 +229,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       setSendPending(false);
     }
     clearAcceptedAttachments(submission);
-    const remainingDraft = draftRef.current === (submission.draftSnapshot ?? submission.message) ? "" : draftRef.current;
+    const remainingDraft = !submission.preserveDraft && draftRef.current === (submission.draftSnapshot ?? submission.message) ? "" : draftRef.current;
     draftRef.current = remainingDraft;
     saveComposer({ draft: remainingDraft, outstanding: null, acceptedTurnId: recovered.turnId, queuedAcceptance: recovered.queuedAcceptance });
     setDraft(remainingDraft);
@@ -561,14 +565,15 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     return !failed;
   }
 
-  async function submit() {
+  async function submit(prepared?: LauncherAssistantSubmission): Promise<boolean> {
     if (sending.current || uploadGate.current || controlGate.current || !sessionId
-      || (attachmentsRef.current.length > 0 && status.data?.attachmentVersion !== 1)) return;
-    if (!outstanding.current && attachmentsRef.current.length && !(await uploadAttachments())) return;
+      || (prepared && outstanding.current)
+      || (!prepared && attachmentsRef.current.length > 0 && status.data?.attachmentVersion !== 1)) return false;
+    if (!prepared && !outstanding.current && attachmentsRef.current.length && !(await uploadAttachments())) return false;
     const snapshot = attachmentsRef.current;
-    const submission = launcherAssistantSubmission(outstanding.current, draftRef.current, undefined,
+    const submission = prepared ?? launcherAssistantSubmission(outstanding.current, draftRef.current, undefined,
       snapshot.map(item => item.artifactId || "").filter(Boolean), snapshot.map(item => item.id));
-    if (!submission) return;
+    if (!submission) return false;
     outstanding.current = submission;
     saveComposer({ draft: draftRef.current, outstanding: submission });
     const flight = { submission };
@@ -579,11 +584,11 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     const requestEpoch = epochRef.current;
     try {
       const acceptance = await sendLauncherAssistantMessage(submission.message, submission.requestId, submission.attachmentIds);
-      if (!mounted.current || requestEpoch !== epochRef.current || sending.current !== flight || outstanding.current !== submission) return;
+      if (!mounted.current || requestEpoch !== epochRef.current || sending.current !== flight || outstanding.current !== submission) return true;
       outstanding.current = null;
       clearAcceptedAttachments(submission);
       const queueReceipt = acceptance.queuedTurnId ? { id: acceptance.queuedTurnId, clientSubmissionId: acceptance.clientSubmissionId, observed: false } : null;
-      const remainingDraft = draftRef.current === (submission.draftSnapshot ?? submission.message) ? "" : draftRef.current;
+      const remainingDraft = !submission.preserveDraft && draftRef.current === (submission.draftSnapshot ?? submission.message) ? "" : draftRef.current;
       draftRef.current = remainingDraft;
       saveComposer({ draft: remainingDraft, outstanding: null, acceptedTurnId: acceptance.turnId, queuedAcceptance: queueReceipt });
       setAcceptedTurnId(acceptance.turnId);
@@ -603,7 +608,14 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
         if (mounted.current) setSendPending(false);
       }
     }
+    return true;
   }
+
+  const computerAccess = useLauncherComputerAccess({
+    detail: detail.data, agentId: status.data?.assistant.agentId || "", reading, epoch,
+    manualOpen: computerOpen, onCloseManual: () => setComputerOpen(false),
+    lang,
+  });
 
   async function decide(request: SessionToolApprovalRequest, decision: "accept" | "decline") {
     if (approvalGate.current || request.requestId !== approval?.requestId || !request.availableDecisions.includes(decision)
@@ -695,7 +707,6 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   }
 
   const identity = status.data?.assistant;
-  const dispatchTotal = dispatches.data?.length ?? 0;
   const avatarImage = readingAssets && !avatar.isError ? avatar.data?.image : null;
   const backgroundImage = readingAssets && !background.isError ? background.data?.image : null;
   const backgroundStyle = backgroundImage
@@ -809,8 +820,6 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       </div>
       {!navigationOwned ? <VButton density="compact" variant="ghost" aria-pressed={computerOpen}
         onClick={() => setComputerOpen(value => !value)}>{lang === "zh" ? "电脑操作" : "Computer"}</VButton> : null}
-      {dispatchTotal ? <VButton density="compact" variant="ghost" aria-pressed={receiptsOpen}
-        onClick={() => setReceiptsOpen(value => !value)}>{`${copy.receiptToggle} ${dispatchTotal}`}</VButton> : null}
       {!navigationOwned ? <VButton density="compact" variant="ghost" icon={<RefreshCw size={14} aria-hidden="true" />}
         onClick={refreshAll}>{copy.refresh}</VButton> : null}
     </header> : <header className={petStyles.chatHeader}>
@@ -829,8 +838,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       actions={<><VButton isDisabled={themePending} onClick={() => { if (themeGate.current) return; themeGate.current = true; setThemePending(true); void requestWorkbenchTheme(readStoredWorkbenchTheme()).then(result => { if (result !== "superseded") setThemeSyncState(result); }).finally(() => { themeGate.current = false; setThemePending(false); }); }}>{lang === "zh" ? "使用助理主题" : "Use assistant theme"}</VButton>
         <VButton isDisabled={themePending} onClick={() => { if (themeGate.current) return; themeGate.current = true; setThemePending(true); void useAuthorityTheme().then(result => { if (result !== "superseded") setThemeSyncState(result); }).finally(() => { themeGate.current = false; setThemePending(false); }); }}>{lang === "zh" ? "使用全局主题" : "Use global theme"}</VButton></>} /> : null}
     {showWelcome ? <LauncherAssistantWelcome lang={lang} onPrompt={changeDraft}/> : null}
-    {computerOpen ? <PersonalAssistantComputerPanel active={reading} transport={launcherAssistantComputer}
-      onCollapse={() => setComputerOpen(false)} /> : detail.data ? <LazyConversationView
+    {detail.data ? <LazyConversationView
       runtimeApi={launcherConversationApi}
       sessionId={detail.data.id} title={detail.data.title || identity?.displayName || copy.title}
       phase={resolveSessionActivity(detail.data).execution} messages={historyAttachments.messages}
@@ -854,23 +862,20 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       composerActionDisabled={sendPending || controlPending || (attachments.length > 0 && status.data?.attachmentVersion !== 1) || (actionMode === "stop" ? stopping || !resolveSessionStopTurnId(detail.data, acceptedTurnId) : actionMode === "send" && !sendUnconfirmed && !draft.trim() && !attachments.length)}
       onComposerChange={changeDraft} onSubmit={() => void submit()}
       onStop={() => void stopTurn()} onContinueTurn={() => void continueTurn()}
-      composerPrecedingContent={<>{embedded && receiptsOpen && dispatches.data?.length ? <section className={petStyles.embeddedReceiptsPanel}
-        data-launcher-assistant-receipts aria-label={copy.receipts}>
-        <p className={petStyles.receiptBoundary}>{copy.receiptBoundary}</p>
-        {dispatches.data.map(row => {
-          const rawId = row.projectId || row.dispatchId;
-          const summary = row.receipt?.resultSummary?.trim() || (row.lastError?.message || "");
-          return <div key={row.dispatchId} className={petStyles.embeddedReceiptsRow}>
-            <strong className={petStyles.embeddedReceiptsLabel}>{launcherDispatchReceiptLabel(row, lang)}</strong>
-            {summary ? <span className={petStyles.embeddedReceiptsSummary}>{summary}</span> : null}
-            <span className={petStyles.embeddedReceiptsId} title={rawId}>{shortReceiptId(rawId)}</span>
-          </div>;
-        })}
-      </section> : null}{approvalPrompt}</>}
+      composerPrecedingContent={<>{entryIntent && dismissedEntry !== entryIntent.key ? <VStateSurface density="compact" tone="empty" title={entryIntent.title}
+        actions={<><VButton isDisabled={sendPending || controlPending || sendUnconfirmed} onClick={() => {
+          void submit({ message: entryIntent.message, requestId: crypto.randomUUID(), preserveDraft: true }).then(attempted => {
+            if (attempted) setDismissedEntry(entryIntent.key);
+          });
+        }}>{entryIntent.label}</VButton><VButton variant="ghost" onClick={() => setDismissedEntry(entryIntent.key)}>{lang === "zh" ? "暂不处理" : "Dismiss"}</VButton></>} /> : null}
+      {computerAccess.show ? <PersonalAssistantComputerPanel key={computerAccess.request?.id || "computer-grant"} active={reading} transport={launcherAssistantComputer}
+        authorizationRequestId={computerAccess.request?.id} presentation="conversation" onGranted={computerAccess.onGranted} onCollapse={computerAccess.onDismiss} /> : null}
+      {computerAccess.notice ? <p className="shrink-0 px-4 py-2 text-xs text-[var(--fg-secondary)]" role="status">{computerAccess.notice}</p> : null}
+      {approvalPrompt}</>}
       fallback={<VStateSurface fill tone="loading" title={copy.loading} />}
     /> : <VStateSurface fill tone={detail.isError ? "error" : "loading"} title={detail.isError ? copy.unavailable : copy.loading}
       actions={detail.isError ? <VButton onClick={() => void detail.refetch()}>{copy.retry}</VButton> : undefined}>{detail.error?.message}</VStateSurface>}
-    {computerOpen || !detail.data ? approvalPrompt : null}
+    {!detail.data ? approvalPrompt : null}
     {historyAttachments.missingGenerated ? <VStateSurface tone="error" title={lang === "zh" ? "历史图片缺少附件标识，暂不可查看" : "Historical image has no artifact ID"}
       actions={<VButton onClick={() => void detail.refetch()}>{copy.retry}</VButton>} /> : null}
     {historyAttachments.failed ? <VStateSurface tone="error" title={lang === "zh" ? "历史附件暂不可用（单个文件上限 8 MiB）" : "Historical attachment unavailable (8 MiB per file limit)"}
@@ -879,7 +884,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       title={lang === "zh" ? "部分外观图片暂不可用，聊天仍可使用" : "Some appearance images are unavailable; chat is ready"}
       actions={<VButton onClick={() => { if (avatar.isError) void avatar.refetch(); if (background.isError) void background.refetch(); }}>{copy.retry}</VButton>} /> : null}
     {status.data?.patrol?.state === "unavailable" || ["unknown", "failed", "interrupted"].some(key => (status.data?.patrol?.deliveryStates[key] || 0) > 0)
-      ? <VStateSurface tone="error" title={lang === "zh" ? "部分任务结果无法自动汇报，请查看任务结果" : "Some task results could not be reported automatically; check task results"} /> : null}
+      ? <VStateSurface tone="error" title={lang === "zh" ? "部分任务结果暂未汇报，可在对话中让助理查询" : "Some task results have not been reported. Ask the assistant to check in chat."} /> : null}
     {dispatchApproval && activePreviewError ? <VStateSurface tone="error" title={activePreviewError}
       actions={<VButton onClick={() => { setPreviewAttempt(value => value + 1); void dispatches.refetch(); }}>{copy.retry}</VButton>} /> : null}
     {approvalError || approvals.isError ? <VStateSurface tone="error" title={approvalError || (lang === "zh" ? "待授权查询暂不可用" : "Pending approvals unavailable")}
@@ -897,23 +902,11 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       actions={<VButton onClick={() => void detail.refetch()}>{copy.retry}</VButton>}>{detail.error.message}</VStateSurface> : null}
     {dispatches.isError ? <VStateSurface tone="error" title={copy.receipts}
       actions={<VButton onClick={() => void dispatches.refetch()}>{copy.retry}</VButton>}>{dispatches.error.message}</VStateSurface> : null}
-    {/** Floating-window receipt strip only; the embedded page renders the
-     * collapsible panel above its composer instead. */}
-    {!embedded && dispatches.data?.length ? <section className={petStyles.receiptPanel} aria-label={copy.receipts}>
-      <p className={petStyles.receiptBoundary}>{copy.receiptBoundary}</p>
-      {dispatches.data.map(row => <p key={row.dispatchId}>{row.projectId || row.dispatchId} · {launcherDispatchLabel(row, lang)}</p>)}
-    </section> : null}
   </VDenseOpsPage>;
 }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-/** Embedded receipt rows show a fixed-length ID tail only; the full value
- * stays on the title attribute. */
-function shortReceiptId(id: string): string {
-  return id.length > 20 ? `…${id.slice(-18)}` : id;
 }
 
 /** Launcher control-surface session page: the same assistant conversation

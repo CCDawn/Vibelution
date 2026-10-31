@@ -39,4 +39,30 @@ describe("Launcher computer operator transport", () => {
     abort.abort(); resolve(idle);
     await expect(pending).rejects.toBeDefined();
   });
+  it("binds an explicit grant to the displayed authorization request", async () => {
+    const invoke = vi.fn().mockResolvedValue(idle);
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    await computer.grant({ selectionId: target.selectionId, allowVision: true, authorizationRequestId: "request-1" });
+    expect(invoke).toHaveBeenCalledWith({ operation: "computerGrant", selectionId: target.selectionId, allowVision: true, authorizationRequestId: "request-1" });
+    for (const id of ["", "x".repeat(101), null]) {
+      await expect(computer.grant({ selectionId: target.selectionId, allowVision: true, authorizationRequestId: id as never })).rejects.toThrow();
+    }
+    expect(invoke).toHaveBeenCalledOnce();
+  });
+  it("accepts a bounded operator request and rejects metadata or grant ambiguity", async () => {
+    const request = { id: "request", agentId: "agent", sessionId: "session", turnId: "turn" };
+    const invoke = vi.fn().mockResolvedValue({ ...idle, authorizationRequest: request });
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    expect((await computer.state()).authorizationRequest).toEqual(request);
+    for (const response of [
+      { ...idle, authorizationRequest: { ...request, title: "private title" } },
+      { ...idle, authorizationRequest: { ...request, turnId: "x".repeat(101) } },
+      { ...idle, status: "manual", authorizationRequest: request },
+      { ...idle, available: false, authorizationRequest: request },
+      { ...idle, grantId: "grant", window: target, authorizationRequest: request },
+    ]) {
+      invoke.mockResolvedValue(response);
+      await expect(computer.state()).rejects.toThrow();
+    }
+  });
 });

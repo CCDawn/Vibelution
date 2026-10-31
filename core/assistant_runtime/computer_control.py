@@ -45,7 +45,7 @@ def create_router(token: str) -> APIRouter:
 
     @router.post("/grant", response_model=State)
     def grant(payload: Grant):
-        return call(service.grant_window, payload.selectionId, payload.allowVision)
+        return call(service.grant_window, payload.selectionId, payload.allowVision, payload.authorizationRequestId) if payload.authorizationRequestId is not None else call(service.grant_window, payload.selectionId, payload.allowVision)
 
     @router.post("/control", response_model=State)
     def control(payload: Control):

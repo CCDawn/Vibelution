@@ -1338,6 +1338,18 @@ def _argument_summary(tool_name: str, tool_args: Mapping[str, Any]) -> dict[str,
 def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
     """Approval-only projection; never expose nested prompt/policy values."""
     action = args.get("action")
+    if isinstance(action, str) and action in {"preference_proposal_accept", "preference_proposal_reject"}:
+        from core.infrastructure.native_runtime import is_launcher_assistant_process
+        if is_launcher_assistant_process():
+            try:
+                raw = args.get("arguments_json")
+                values = json.loads(raw) if isinstance(raw, str) and len(raw) <= 16000 else None
+                if not isinstance(values, dict):
+                    raise ValueError("Invalid preference decision arguments")
+                from core.assistant_runtime.discovery_actions import preference_approval_summary
+                return preference_approval_summary(action, values)
+            except (ValueError, TypeError, KeyError, RuntimeError, RecursionError):
+                return {"assistantAction": action, "assistantArgumentsInvalid": True}
     if action == "browser_interact":
         from core.infrastructure.native_runtime import is_launcher_assistant_process
         if is_launcher_assistant_process():

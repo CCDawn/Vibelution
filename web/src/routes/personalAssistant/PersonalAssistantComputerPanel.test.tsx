@@ -33,9 +33,108 @@ async function render(active = true) {
   await act(async () => root.render(<QueryClientProvider client={client}><PersonalAssistantComputerPanel active={active} onCollapse={collapse} /></QueryClientProvider>));
   await settle();
 }
+async function renderConversation(onGranted = vi.fn(), authorizationRequestId?: string) {
+  await act(async () => root.render(<QueryClientProvider client={client}><PersonalAssistantComputerPanel active onCollapse={collapse} presentation="conversation" onGranted={onGranted} authorizationRequestId={authorizationRequestId} /></QueryClientProvider>));
+  await settle();
+  return onGranted;
+}
 function button(label: string) { const found = [...container.querySelectorAll("button")].find(row => row.textContent === label || row.getAttribute("aria-label") === label); if (!found) throw new Error(`Missing button ${label}`); return found; }
 async function click(label: string) { await act(async () => button(label).click()); await settle(); }
 describe("single-window personal assistant controls", () => {
+  it("requires an explicit window and grants once from the conversation card", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const onGranted = await renderConversation();
+    expect(button("允许读取并操作").disabled).toBe(true);
+    expect(container.querySelector('input[type="checkbox"]')).toBeNull();
+    expect(onGranted).not.toHaveBeenCalled();
+    await act(async () => (container.querySelector('[aria-pressed="false"]') as HTMLButtonElement).click());
+    expect(container.textContent).toContain("允许助理读取并操作「今天的计划.txt」");
+    expect(container.textContent).toContain("窗口画面将提供给当前助理模型");
+    await click("更换窗口");
+    expect(button("允许读取并操作").disabled).toBe(true);
+    await act(async () => (container.querySelector('[aria-pressed="false"]') as HTMLButtonElement).click());
+    vi.mocked(grantPersonalAssistantComputer).mockResolvedValue(ready);
+    vi.mocked(fetchPersonalAssistantComputer).mockResolvedValue(ready);
+    await act(async () => { button("允许读取并操作").click(); button("允许读取并操作").click(); });
+    await settle();
+    expect(grantPersonalAssistantComputer).toHaveBeenCalledOnce();
+    expect(grantPersonalAssistantComputer).toHaveBeenCalledWith({ selectionId: "selection", allowVision: true });
+    expect(onGranted).toHaveBeenCalledOnce();
+    expect(onGranted).toHaveBeenCalledWith(ready);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("今天的计划.txt");
+  });
+  it("does not grant when declined or call onGranted from passive state reads", async () => {
+    const onGranted = await renderConversation();
+    await click("暂不允许");
+    expect(collapse).toHaveBeenCalledOnce();
+    expect(grantPersonalAssistantComputer).not.toHaveBeenCalled();
+    await act(async () => client.setQueryData(queryKeys.personalAssistantComputer(), ready));
+    expect(onGranted).not.toHaveBeenCalled();
+  });
+  it("forwards the card's request identity and does not enumerate windows with an existing grant", async () => {
+    await renderConversation(vi.fn(), "request-1");
+    await act(async () => (container.querySelector('[aria-pressed="false"]') as HTMLButtonElement).click());
+    vi.mocked(grantPersonalAssistantComputer).mockResolvedValue(ready);
+    vi.mocked(fetchPersonalAssistantComputer).mockResolvedValue(ready);
+    await click("允许读取并操作");
+    expect(grantPersonalAssistantComputer).toHaveBeenCalledWith({ selectionId: "selection", allowVision: true, authorizationRequestId: "request-1" });
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    vi.mocked(fetchPersonalAssistantComputerWindows).mockClear();
+    await renderConversation();
+    expect(fetchPersonalAssistantComputerWindows).not.toHaveBeenCalled();
+  });
+  it("clears a window selection before refreshing and requires a fresh selection", async () => {
+    await renderConversation();
+    await act(async () => (container.querySelector('[aria-pressed="false"]') as HTMLButtonElement).click());
+    await click("更换窗口");
+    vi.mocked(fetchPersonalAssistantComputerWindows).mockResolvedValue({ windows: [{ ...target, selectionId: "fresh" }] });
+    await click("刷新可选窗口");
+    expect(button("允许读取并操作").disabled).toBe(true);
+    await act(async () => (container.querySelector('[aria-pressed="false"]') as HTMLButtonElement).click());
+    vi.mocked(grantPersonalAssistantComputer).mockResolvedValue(ready);
+    vi.mocked(fetchPersonalAssistantComputer).mockResolvedValue(ready);
+    await click("允许读取并操作");
+    expect(grantPersonalAssistantComputer).toHaveBeenCalledWith({ selectionId: "fresh", allowVision: true });
+  });
+  it("clears an expired selection after a failed grant and refreshes local choices", async () => {
+    const onGranted = await renderConversation();
+    await act(async () => (container.querySelector('[aria-pressed="false"]') as HTMLButtonElement).click());
+    vi.mocked(fetchPersonalAssistantComputerWindows).mockResolvedValue({ windows: [{ ...target, selectionId: "fresh" }] });
+    vi.mocked(grantPersonalAssistantComputer).mockRejectedValueOnce(new Error("窗口已过期"));
+    await click("允许读取并操作");
+    expect(container.textContent).toContain("窗口已过期");
+    expect(button("允许读取并操作").disabled).toBe(true);
+    expect(fetchPersonalAssistantComputerWindows).toHaveBeenCalledTimes(2);
+    expect(onGranted).not.toHaveBeenCalled();
+  });
+  it.each([["ready", "暂停电脑操作", "pause"], ["paused", "继续电脑操作", "resume"], ["ready", "交给我", "takeover"],
+    ["manual", "交回助理", "return"]] as const)("keeps conversation control %s %s on the existing grant", async (status, label, action) => {
+    vi.mocked(fetchPersonalAssistantComputer).mockResolvedValue({ ...ready, status });
+    vi.mocked(controlPersonalAssistantComputer).mockResolvedValue({ ...ready, status });
+    await renderConversation(); await click(label);
+    expect(controlPersonalAssistantComputer).toHaveBeenCalledWith({ grantId: "grant", action });
+  });
+  it("keeps the exact pending target and text before conversation confirmation", async () => {
+    vi.mocked(fetchPersonalAssistantComputer).mockResolvedValue({ ...ready, status: "waiting_confirmation", pending: { id: "pending", action: "type_text", targetLabel: "收件人 小王", text: "完整内容" } });
+    vi.mocked(confirmPersonalAssistantComputer).mockResolvedValue({ ...ready, status: "paused" });
+    await renderConversation();
+    expect(container.querySelector("dl")?.textContent).toContain("收件人 小王");
+    expect(container.querySelector("pre")?.textContent).toBe("完整内容");
+    await click("确认执行");
+    expect(confirmPersonalAssistantComputer).toHaveBeenCalledWith({ grantId: "grant", pendingId: "pending", approved: true });
+  });
+  it("only closes after end succeeds and retains errors on failure", async () => {
+    vi.mocked(fetchPersonalAssistantComputer).mockResolvedValue(ready);
+    vi.mocked(controlPersonalAssistantComputer).mockRejectedValueOnce(new Error("结束失败")).mockResolvedValueOnce({ ...idle, status: "ended" });
+    await renderConversation(); await click("结束");
+    expect(container.textContent).toContain("结束失败");
+    expect(collapse).not.toHaveBeenCalled();
+    await click("结束");
+    expect(controlPersonalAssistantComputer).toHaveBeenLastCalledWith({ grantId: "grant", action: "end" });
+    expect(collapse).toHaveBeenCalledOnce();
+  });
   it("uses an injected Launcher transport without sharing the Workbench cache", async () => {
     const launcher = { scope: "launcher" as const, state: vi.fn().mockResolvedValue(idle),
       windows: vi.fn().mockResolvedValue({ windows: [target] }), grant: vi.fn().mockResolvedValue(ready),

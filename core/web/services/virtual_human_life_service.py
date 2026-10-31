@@ -2082,11 +2082,13 @@ def accept_virtual_human_preference_proposal(
     agent_id: str,
     *,
     proposal_id: str,
+    expected_fingerprint: str | None = None,
 ) -> dict[str, Any]:
     service = get_virtual_human_life_service()
     result = service.accept_companion_preference_proposal(
         agent_id,
         proposal_id=proposal_id,
+        **({"expected_fingerprint": expected_fingerprint} if expected_fingerprint is not None else {}),
     )
     return {
         "agentId": str(agent_id or "").strip(),
@@ -2099,11 +2101,13 @@ def reject_virtual_human_preference_proposal(
     agent_id: str,
     *,
     proposal_id: str,
+    expected_fingerprint: str | None = None,
 ) -> dict[str, Any]:
     service = get_virtual_human_life_service()
     result = service.reject_companion_preference_proposal(
         agent_id,
         proposal_id=proposal_id,
+        **({"expected_fingerprint": expected_fingerprint} if expected_fingerprint is not None else {}),
     )
     return {
         "agentId": str(agent_id or "").strip(),

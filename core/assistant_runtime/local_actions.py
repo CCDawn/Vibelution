@@ -35,6 +35,8 @@ def contracts() -> dict:
             result[name] = source[name]
     for name in _PLATFORM_ACTIONS:
         result[name] = {**pa_platform_actions.action_catalog(name), "governed": False}
+    from . import discovery_actions
+    result.update(discovery_actions.contracts())
     from . import operator_image_actions
     result.update(operator_image_actions.contracts())
     from . import history_actions
@@ -65,6 +67,9 @@ def execute(action: str, parameters: dict, runtime: dict, *, governed: bool = Fa
     contract = contracts().get(action)
     if contract is None:
         raise ValueError("未知的 Launcher 本地操作，请先 index/describe 查询。")
+    if action in {"preference_proposals", "preference_proposal_accept", "preference_proposal_reject", "dispatch_list"}:
+        from .discovery_actions import execute as execute_discovery
+        return execute_discovery(action, parameters, runtime, governed=governed)
     if action in {"history_list", "history_read", "history_search", "history_commentary_read"}:
         from .history_actions import execute as execute_history
         return execute_history(action, parameters)

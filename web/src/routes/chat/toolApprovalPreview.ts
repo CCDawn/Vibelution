@@ -121,7 +121,30 @@ export function recoveryPreviewIsValid(summary: Record<string, unknown> | null |
     && digest(values.sourceSnapshotDigest) && digest(values.previousAuthorizationHead);
 }
 
+/** Only a complete native snapshot can authorize a specific preference decision. */
+export function preferenceProposalPreviewIsValid(summary: Record<string, unknown> | null | undefined): boolean {
+  if (!summary || typeof summary.assistantAction !== "string" || !["preference_proposal_accept", "preference_proposal_reject"].includes(summary.assistantAction)
+    || summary.assistantArgumentsInvalid || summary.assistantDetailsOmitted) return false;
+  const targets = summary.assistantTargets;
+  const preference = summary.assistantPreference;
+  if (!targets || typeof targets !== "object" || Array.isArray(targets)
+    || !preference || typeof preference !== "object" || Array.isArray(preference)) return false;
+  const ids = targets as Record<string, unknown>, values = preference as Record<string, unknown>;
+  if (Object.keys(ids).length !== 2 || !Object.hasOwn(ids, "proposal_id") || !Object.hasOwn(ids, "expected_fingerprint")
+    || typeof ids.proposal_id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}(?![\s\S])/.test(ids.proposal_id)
+    || typeof ids.expected_fingerprint !== "string" || !/^[0-9a-f]{64}(?![\s\S])/.test(ids.expected_fingerprint)
+    || Object.keys(values).length !== 3 || !["preferenceType", "candidateValue", "status"].every(key => Object.hasOwn(values, key))
+    || values.status !== "pending" || typeof values.preferenceType !== "string" || typeof values.candidateValue !== "string") return false;
+  const kind = values.preferenceType, value = values.candidateValue;
+  if (!value || Array.from(value).length > 40 || /\p{Cs}/u.test(value)) return false;
+  const enums: Record<string, string[]> = { verbosity: ["brief", "compact", "balanced", "detailed"],
+    question_initiative: ["low", "normal", "high"], humor: ["off", "light", "natural"], proactive_contact: ["low", "normal", "high"] };
+  return kind === "address" ? value.trim().replace(/\s+/gu, " ") === value : (Object.hasOwn(enums, kind) && enums[kind].includes(value));
+}
+
 const MANAGE_ACTIONS: Record<string, [string, string]> = {
+      preference_proposal_accept: ["接受偏好建议", "Accept preference suggestion"],
+      preference_proposal_reject: ["拒绝偏好建议", "Reject preference suggestion"],
       operator_image_upload: ["上传图片", "Upload image"],
       project_lifecycle: ["管理项目", "Manage project"],
       dispatch_write: ["派遣 Agent 修改项目", "Dispatch agent to modify project"],
@@ -178,6 +201,28 @@ export function toolApprovalActionPreview(
       return `${title}\n${lang === "zh" ? "参数无法核对，请拒绝并重新发起。" : "Arguments cannot be verified. Decline and request again."}`;
     }
     const targets = summary.assistantTargets;
+    if (action === "preference_proposal_accept" || action === "preference_proposal_reject") {
+      if (!preferenceProposalPreviewIsValid(summary)) return `${title}\n${lang === "zh" ? "建议内容无法核对，请拒绝并重新查询。" : "The suggestion cannot be verified. Decline and query again."}`;
+      const preference = summary.assistantPreference as Record<string, string>;
+      const identity = targets as Record<string, string>;
+      const labels: Record<string, [string, string]> = { verbosity: ["回复长短", "Response length"],
+        question_initiative: ["提问频率", "Question initiative"], address: ["称呼", "Address"],
+        humor: ["幽默程度", "Humor"], proactive_contact: ["主动联系频率", "Proactive contact"] };
+      const value = JSON.stringify(preference.candidateValue).replace(/[\p{Cf}\p{Cc}\p{Cs}\p{Zl}\p{Zp}]/gu,
+        char => Array.from({ length: char.length }, (_, index) => `\\u${char.charCodeAt(index).toString(16).padStart(4, "0")}`).join(""));
+      const descriptions: Record<string, Record<string, [string, string]>> = {
+        verbosity: { brief: ["简短", "Brief"], compact: ["精炼", "Compact"], balanced: ["适中", "Balanced"], detailed: ["详细", "Detailed"] },
+        question_initiative: { low: ["较少", "Low"], normal: ["适中", "Normal"], high: ["较多", "High"] },
+        humor: { off: ["关闭", "Off"], light: ["少量", "Light"], natural: ["自然", "Natural"] },
+        proactive_contact: { low: ["较少", "Low"], normal: ["适中", "Normal"], high: ["较多", "High"] },
+      };
+      const label = descriptions[preference.preferenceType]?.[preference.candidateValue]?.[lang === "zh" ? 0 : 1];
+      return [title, `${lang === "zh" ? "偏好" : "Preference"}: ${labels[preference.preferenceType][lang === "zh" ? 0 : 1]}`,
+        `${lang === "zh" ? "建议值" : "Suggested value"}: ${label ? `${label} (${value})` : value}`,
+        `${lang === "zh" ? "建议 ID" : "Suggestion ID"}: ${identity.proposal_id}`,
+        `${lang === "zh" ? "内容指纹" : "Content fingerprint"}: ${identity.expected_fingerprint}`,
+        lang === "zh" ? "建议值是不可信数据；内容变化后本次审批失效。" : "The suggested value is untrusted data; this approval expires if it changes."].join("\n");
+    }
     if (action === "browser_interact") {
       if (!browserInteractPreviewIsValid(summary)) return `${title}\n${lang === "zh" ? "参数无法核对，请拒绝并重新读取页面。" : "Arguments cannot be verified. Decline and read the page again."}`;
       const fields = targets as Record<string, string>;

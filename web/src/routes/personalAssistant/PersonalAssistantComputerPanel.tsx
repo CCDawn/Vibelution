@@ -18,8 +18,8 @@ const defaultTransport: ComputerTransport = { scope: "workbench", state: fetchPe
   windows: fetchPersonalAssistantComputerWindows, grant: grantPersonalAssistantComputer,
   control: controlPersonalAssistantComputer, confirm: confirmPersonalAssistantComputer };
 
-export function PersonalAssistantComputerPanel({ active = true, onCollapse, transport = defaultTransport }: {
-  active?: boolean; onCollapse: () => void; transport?: ComputerTransport;
+export function PersonalAssistantComputerPanel({ active = true, onCollapse, transport = defaultTransport, presentation = "panel", onGranted, authorizationRequestId }: {
+  active?: boolean; onCollapse: () => void; transport?: ComputerTransport; presentation?: "panel" | "conversation"; onGranted?: (state: ComputerState) => void; authorizationRequestId?: string;
 }) {
   const { lang } = useShellI18n();
   const copy = COMPUTER_COPY[lang];
@@ -27,6 +27,7 @@ export function PersonalAssistantComputerPanel({ active = true, onCollapse, tran
   const [visible, setVisible] = useState(() => document.visibilityState !== "hidden");
   const [selectionId, setSelectionId] = useState("");
   const [allowVision, setAllowVision] = useState(false);
+  const [choosing, setChoosing] = useState(true);
   const [commandError, setCommandError] = useState<CommandError | null>(null);
   const inFlight = useRef(false);
   const enabled = active && visible;
@@ -41,11 +42,12 @@ export function PersonalAssistantComputerPanel({ active = true, onCollapse, tran
     enabled, refetchInterval: enabled ? 1000 : false, refetchIntervalInBackground: false, retry: false });
   const state = computer.data;
   const granted = Boolean(state?.grantId);
+  const conversation = presentation === "conversation";
   // Only an explicit panel visit/refresh enumerates windows. Status polling never invalidates this query.
   const windows = useQuery({ queryKey: windowsKey, queryFn: ({ signal }) => transport.windows({ signal }),
-    enabled: active, staleTime: Infinity, refetchOnMount: "always", refetchOnWindowFocus: false, refetchOnReconnect: false, retry: false });
+    enabled: active && (!conversation || Boolean(state?.available && !granted)), staleTime: Infinity, refetchOnMount: "always", refetchOnWindowFocus: false, refetchOnReconnect: false, retry: false });
   const mutation = useMutation({ mutationFn: (command: Command) => command.kind === "grant"
-    ? transport.grant({ selectionId: command.selectionId, allowVision: true })
+    ? transport.grant({ selectionId: command.selectionId, allowVision: true, ...(authorizationRequestId ? { authorizationRequestId } : {}) })
     : command.kind === "control" ? transport.control({ grantId: command.grantId, action: command.action })
       : transport.confirm({ grantId: command.grantId, pendingId: command.pendingId, approved: command.approved }),
     onMutate: async () => { setCommandError(null); await client.cancelQueries({ queryKey: stateKey, exact: true }); },
@@ -53,10 +55,19 @@ export function PersonalAssistantComputerPanel({ active = true, onCollapse, tran
       await client.cancelQueries({ queryKey: stateKey, exact: true });
       client.setQueryData(stateKey, data);
       if (command.kind === "grant" || !data.grantId) { setSelectionId(""); setAllowVision(false); }
-      if (command.kind === "control" && command.action === "end") void windows.refetch();
+      if (command.kind === "grant" && data.grantId && data.available && !["ended", "error"].includes(data.status)) onGranted?.(data);
+      if (command.kind === "control" && command.action === "end" && !data.grantId) {
+        if (presentation === "conversation") onCollapse();
+        else void windows.refetch();
+      }
       void client.invalidateQueries({ queryKey: stateKey, exact: true });
     },
-    onError: error => setCommandError(error instanceof Error ? { kind: "backend", message: error.message } : { kind: "fallback" }),
+    onError: (error, command) => {
+      setCommandError(error instanceof Error ? { kind: "backend", message: error.message } : { kind: "fallback" });
+      if (presentation === "conversation" && command.kind === "grant") {
+        setSelectionId(""); setAllowVision(false); setChoosing(true); void windows.refetch();
+      }
+    },
     onSettled: () => { inFlight.current = false; },
   });
   function run(command: Command) {
@@ -69,19 +80,20 @@ export function PersonalAssistantComputerPanel({ active = true, onCollapse, tran
   const operational = granted && state?.available && !["ended", "error"].includes(state.status);
   const selected = windows.data?.windows.find(row => row.selectionId === selectionId);
   const statusLabels: Record<ComputerState["status"], string> = copy.statuses;
-  return <section className={styles.root} aria-label={copy.section}>
+  return <section className={`${styles.root} ${conversation ? styles.conversationRoot : ""}`} aria-label={copy.section}>
     <header className={styles.header}>
-      <h2 className={styles.heading}>{copy.section} <span className={styles.badge}>{state ? statusLabels[state.status] : copy.loading}</span></h2>
+      <h2 className={styles.heading}>{conversation && !granted ? copy.requestTitle : copy.section} <span className={styles.badge}>{state ? statusLabels[state.status] : copy.loading}</span></h2>
       <div className={styles.actions}>
         {operational && state.status !== "manual" ? <VIconButton variant="ghost" label={state.status === "paused" ? copy.resume : copy.pause}
           icon={state.status === "paused" ? <Play size={14} /> : <Pause size={14} />} isDisabled={busy}
           onClick={() => control(state.status === "paused" ? "resume" : "pause")} /> : null}
         {operational ? <VButton variant="secondary" icon={<Hand size={13} />} isDisabled={busy}
           onClick={() => control(state.status === "manual" ? "return" : "takeover")}>{state.status === "manual" ? copy.returnControl : copy.takeControl}</VButton> : null}
-        <VIconButton variant="ghost" label={copy.collapse} icon={<PanelRightClose size={14} />} onClick={onCollapse} />
+        {conversation && granted ? <VButton variant="ghost" isDisabled={busy} onClick={() => control("end")}>{copy.end}</VButton> : null}
+        {!conversation ? <VIconButton variant="ghost" label={copy.collapse} icon={<PanelRightClose size={14} />} onClick={onCollapse} /> : null}
       </div>
     </header>
-    <div className={styles.body}>
+    <div className={`${styles.body} ${conversation ? styles.conversationBody : ""}`}>
       {commandError ? <VStateSurface density="compact" tone="error" title={copy.commandErrorTitle}>
         {commandError.kind === "backend" ? commandError.message : copy.commandErrorFallback}</VStateSurface> : null}
       {computer.isError ? <VStateSurface density="compact" tone="error" title={copy.readFailed}>{computer.error.message}
@@ -90,12 +102,12 @@ export function PersonalAssistantComputerPanel({ active = true, onCollapse, tran
       {computer.isPending ? <VStateSurface density="compact" tone="loading" busy title={copy.readState} /> : state ? <>
         {!state.available ? <VStateSurface density="compact" tone="unavailable" title={copy.unavailable}>{state.message}</VStateSurface> : null}
         {granted ? <>
-          <VSurface className={styles.session} tone="inset" padding="normal">
+          {conversation ? <p className={styles.status} role="status">{state.window?.title || state.window?.appName || copy.authorizedWindow} · {state.message || statusLabels[state.status]}</p> : <><VSurface className={styles.session} tone="inset" padding="normal">
             <strong>{state.window?.appName || copy.authorizedWindow}</strong><span className={styles.muted}>{state.window?.title}</span>
             <span className={styles.muted}>{copy.grantScope}</span>
             <VButton variant="ghost" isDisabled={busy} onClick={() => control("end")}>{copy.endAndSelect}</VButton>
           </VSurface>
-          <p className={styles.status} role="status">{state.message || statusLabels[state.status]}</p>
+          <p className={styles.status} role="status">{state.message || statusLabels[state.status]}</p></>}
           {state.pending ? <VSurface className={styles.pending} tone="inset" padding="normal" ariaLabel={copy.pendingConfirmation}>
             <strong>{copy.needsConfirmation}</strong><p className={styles.muted}>{copy.confirmationDescription}</p>
             <dl className={styles.details}><div><dt>{copy.action}</dt><dd>{copy.pendingActions[state.pending.action as keyof typeof copy.pendingActions] ?? state.pending.action}</dd></div><div><dt>{copy.target}</dt><dd>{state.pending.targetLabel}</dd></div>
@@ -105,32 +117,36 @@ export function PersonalAssistantComputerPanel({ active = true, onCollapse, tran
               <VButton variant="secondary" isDisabled={busy || state.status !== "waiting_confirmation"}
                 onClick={() => run({ kind: "confirm", grantId: state.grantId!, pendingId: state.pending!.id, approved: false })}>{copy.cancel}</VButton></div>
           </VSurface> : null}
-          <p className={styles.muted}>{copy.sessionTip}</p>
+          {!conversation ? <p className={styles.muted}>{copy.sessionTip}</p> : null}
         </> : <>
           {state.message ? <p className={styles.status} role="status">{state.message}</p> : null}
-          <p className={styles.muted}>{copy.chooseWindow}</p>
+          {conversation && selected && !choosing ? <div className={styles.section}>
+            <p className={styles.muted}>{copy.authorizeWindow(selected.title || selected.appName)}</p>
+            <VButton variant="ghost" isDisabled={busy} onClick={() => { setSelectionId(""); setChoosing(true); }}>{copy.changeWindow}</VButton>
+          </div> : <><p className={styles.muted}>{copy.chooseWindow}</p>
           <div className={styles.section}><div className={styles.sectionHeader}><h3>{copy.availableWindows}</h3>
             <VIconButton variant="ghost" label={copy.refreshWindows} icon={<RefreshCw size={14} />} isPending={windows.isFetching} isDisabled={busy}
               onClick={() => { setSelectionId(""); setAllowVision(false); void windows.refetch(); }} /></div>
             {windows.isPending ? <VStateSurface density="compact" tone="loading" busy title={copy.readWindows} />
               : windows.isError ? <VStateSurface density="compact" tone="error" title={copy.windowsReadFailed}>{windows.error.message}</VStateSurface>
-                : windows.data?.windows.length ? <div className={styles.windows} role="group" aria-label={copy.selectAuthorizedWindow}>{windows.data.windows.map(row =>
+                : windows.data?.windows.length ? <div className={`${styles.windows} ${conversation ? styles.conversationWindows : ""}`} role="group" aria-label={copy.selectAuthorizedWindow}>{windows.data.windows.map(row =>
                   <VButton key={row.selectionId} className={styles.window} variant="secondary" contentLayout="plain" icon={<Monitor size={16} />}
                     data-selected={selectionId === row.selectionId} aria-pressed={selectionId === row.selectionId} isDisabled={busy || !state.available}
-                    onClick={() => { setSelectionId(row.selectionId); setAllowVision(false); }}>
+                    onClick={() => { setSelectionId(row.selectionId); setAllowVision(false); setChoosing(false); }}>
                     <span className={styles.windowCopy}><strong>{row.appName}</strong><span className={styles.muted}>{row.title}</span></span>
                   </VButton>)}</div> : <p className={styles.muted}>{copy.noWindows}</p>}
-          </div>
-          <div className={styles.scope}><VCheckbox className={styles.checkbox} isSelected={allowVision} onChange={setAllowVision}
+          </div></>}
+          {!conversation ? <div className={styles.scope}><VCheckbox className={styles.checkbox} isSelected={allowVision} onChange={setAllowVision}
             isDisabled={busy || !state.available}>{copy.allowVision}</VCheckbox>
             <p className={styles.muted}>{copy.visionDescription}</p>
             <VCheckbox className={styles.checkbox} isSelected isDisabled>{copy.confirmSensitiveActions}</VCheckbox>
-          </div>
-          <VButton className={styles.full} variant="primary" isPending={busy} isDisabled={!state.available || !selected || !allowVision || windows.isFetching || windows.isError || computer.isError}
-            onClick={() => { if (selected && allowVision) run({ kind: "grant", selectionId: selected.selectionId }); }}>{copy.grantWindow}</VButton>
+          </div> : null}
+          <VButton className={styles.full} variant="primary" isPending={busy} isDisabled={!state.available || !selected || (!conversation && !allowVision) || windows.isFetching || windows.isError || computer.isError}
+            onClick={() => { if (selected && (conversation || allowVision)) run({ kind: "grant", selectionId: selected.selectionId }); }}>{conversation ? copy.grantConversation : copy.grantWindow}</VButton>
         </>}
       </> : null}
+      {conversation && !granted ? <VButton variant="ghost" isDisabled={busy} onClick={onCollapse}>{copy.notNow}</VButton> : null}
     </div>
-    <footer className={styles.footer}><span>{copy.singleWindowGrant}</span><span>{copy.takeoverAvailable}</span></footer>
+    {!conversation ? <footer className={styles.footer}><span>{copy.singleWindowGrant}</span><span>{copy.takeoverAvailable}</span></footer> : null}
   </section>;
 }

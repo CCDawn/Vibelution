@@ -1,53 +1,31 @@
-import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
-import { getLauncherAssistantStatus } from "../../api/launcherAssistant";
-import { launcherAssistantComputer } from "../../api/launcherAssistantComputer";
-import { createLauncherAssistantPanelTransport } from "../../api/launcherAssistantPanels";
-import { launcherAssistantPanelLabel, resolveLauncherAssistantPanel, type LauncherAssistantPanel } from "../../app/launcherNavigationModel";
-import { VButton, VDenseOpsPage, VStateSurface } from "../../components/vui";
+import { resolveLauncherAssistantPanel, type LauncherAssistantPanel } from "../../app/launcherNavigationModel";
 import { useShellI18n } from "../../i18n/useShellI18n";
-import { PersonalAssistantAffairs } from "../personalAssistant/PersonalAssistantAffairs";
-import { PersonalAssistantComputerPanel } from "../personalAssistant/PersonalAssistantComputerPanel";
-import { PersonalAssistantDialoguePreferences } from "../personalAssistant/PersonalAssistantDialoguePreferences";
-import { PersonalAssistantSettings } from "../personalAssistant/PersonalAssistantSettings";
 import { LauncherAssistantBrowserWorkspace } from "./LauncherAssistantBrowserWorkspace";
 import { LauncherAssistantRoute } from "./LauncherAssistantRoute";
-import styles from "./LauncherAssistantWorkspaceRoute.styles";
 
-const copy = {
-  zh: { loading: "正在读取个人助理…", failed: "个人助理暂不可用", retry: "重试" },
-  en: { loading: "Loading the assistant…", failed: "Assistant unavailable", retry: "Retry" },
-} as const;
+/** Old bookmarks offer an explicit conversation request, never an automatic write. */
+export function launcherAgentEntry(panel: LauncherAssistantPanel, lang: "zh" | "en") {
+  const entries = {
+    affairs: ["在对话里管理待办与提醒", "查看我的待办与提醒", "请查看我的待办与提醒，先不要修改。",
+      "Manage to-dos and reminders in chat", "Show my to-dos and reminders", "Show my to-dos and reminders without changing them."],
+    preferences: ["直接告诉助理你喜欢的回答方式", "查看当前对话偏好", "请读取我的当前对话偏好，先不要修改。",
+      "Tell the assistant how you like to work", "Show conversation preferences", "Read my current conversation preferences without changing them."],
+    "assistant-settings": ["在对话中调整助理", "查看助理设置", "请读取你的当前设置和可用外观选项，先不要修改。",
+      "Adjust your assistant in chat", "Show assistant settings", "Read your current assistant settings and available appearance options without changing them."],
+  } as const;
+  if (!(panel in entries)) return undefined;
+  const values = entries[panel as keyof typeof entries];
+  const start = lang === "zh" ? 0 : 3;
+  return { key: panel, title: values[start], label: values[start + 1], message: values[start + 2] };
+}
 
 export function LauncherAssistantWorkspaceRoute() {
-  const [params, setParams] = useSearchParams();
+  const [params] = useSearchParams();
   const panel = resolveLauncherAssistantPanel(params.toString());
   const { lang } = useShellI18n();
-  const text = copy[lang];
-  const status = useQuery({ queryKey: ["launcher-assistant", "status"], queryFn: getLauncherAssistantStatus,
-    enabled: panel !== "dialogue" && panel !== "browser", retry: false });
-  const agentId = status.data?.assistant.agentId ?? "";
-  const transport = useMemo(() => agentId ? createLauncherAssistantPanelTransport(agentId) : null, [agentId]);
-
-  function go(next: LauncherAssistantPanel) {
-    setParams(previous => { const updated = new URLSearchParams(previous); updated.set("panel", next); return updated; });
-  }
-  if (panel === "dialogue") return <LauncherAssistantRoute embedded navigationOwned />;
   if (panel === "browser") return <LauncherAssistantBrowserWorkspace />;
-  return <VDenseOpsPage className={styles.page} bodyClassName={styles.body} title={launcherAssistantPanelLabel(panel, lang)}>
-    <div className={styles.content}>
-      {status.isPending ? <VStateSurface tone="loading" title={text.loading} /> : status.isError
-        ? <VStateSurface tone="error" title={text.failed} actions={<VButton onClick={() => void status.refetch()}>{text.retry}</VButton>}>
-          {status.error instanceof Error ? status.error.message : ""}
-        </VStateSurface> : null}
-      {status.data && transport && panel === "affairs" ? <PersonalAssistantAffairs agentId={agentId} showHeading={false} transport={{ cacheKey: transport.cacheKey, ...transport.affairs }} /> : null}
-      {status.data && transport && panel === "preferences" ? <PersonalAssistantDialoguePreferences agentId={agentId} transport={{ cacheKey: transport.cacheKey, ...transport.preferences }} /> : null}
-      {status.data && transport && panel === "assistant-settings" ? <PersonalAssistantSettings open onOpenChange={() => {}} presentation="page"
-        transport={{ cacheKey: transport.cacheKey, invalidationKey: ["launcher-assistant"], ...transport.settings }} /> : null}
-      {status.data && panel === "computer" ? <PersonalAssistantComputerPanel active transport={launcherAssistantComputer} onCollapse={() => go("dialogue")} /> : null}
-    </div>
-  </VDenseOpsPage>;
+  return <LauncherAssistantRoute embedded navigationOwned computerRequested={panel === "computer"} entryIntent={launcherAgentEntry(panel, lang)} />;
 }
 
 export default LauncherAssistantWorkspaceRoute;

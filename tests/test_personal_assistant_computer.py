@@ -20,6 +20,7 @@ def chinese_language(monkeypatch):
 @pytest.fixture
 def computer(monkeypatch):
     monkeypatch.setattr(service, "_grant", None)
+    monkeypatch.setattr(service, "_authorization_request", None, raising=False)
     monkeypatch.setattr(service, "_pending", None)
     monkeypatch.setattr(service, "_active", None)
     monkeypatch.setattr(service, "_quarantine", None)
@@ -70,6 +71,187 @@ def computer(monkeypatch):
     windows = service.list_windows()["windows"]
     state = service.grant_window(windows[0]["selectionId"], True)
     return state["grantId"], snapshot, calls, tick
+
+
+@pytest.mark.parametrize("action", ["observe", "click"])
+@pytest.mark.parametrize("status", ["idle", "ended"])
+def test_missing_grant_reports_authorization_required_without_opening_window(computer, monkeypatch, action, status):
+    monkeypatch.setattr(service, "_grant", None)
+    monkeypatch.setattr(service, "_status", status)
+    monkeypatch.setattr(service.adapter, "Connection", lambda *_: pytest.fail("ungranted access opened a connection"))
+    result = service.execute(OWNER, action=action, cancel_checker=lambda: "")
+    assert result == {"ok": False, "status": "blocked", "message": "请先授权窗口，或等待你交回控制。", "reason": "authorization_required"}
+
+
+@pytest.mark.parametrize("control", ["pause", "takeover"])
+def test_paused_or_manual_control_does_not_request_new_authorization(computer, control):
+    grant_id, *_ = computer
+    service.control(grant_id, control)
+    result = service.execute(OWNER, cancel_checker=lambda: "")
+    assert result["status"] == "blocked" and "reason" not in result
+
+
+def test_no_grant_does_not_mask_invalid_context(computer, monkeypatch):
+    monkeypatch.setattr(service, "_grant", None)
+    monkeypatch.setattr(service, "_status", "idle")
+    for owner, kwargs in [(("foreign", "session", "turn"), {"cancel_checker": lambda: ""}),
+                          (OWNER, {}), (OWNER, {"cancel_checker": lambda: "", "action": "launch"}),
+                          (OWNER, {"cancel_checker": lambda: "stopped"})]:
+        result = service.execute(owner, **kwargs)
+        assert not result["ok"] and "reason" not in result
+        assert service.get_state()["authorizationRequest"] is None
+    monkeypatch.setattr(service, "_quarantine", object())
+    assert "reason" not in service.execute(OWNER, cancel_checker=lambda: "")
+    assert service.get_state()["authorizationRequest"] is None
+
+
+@pytest.mark.parametrize("action", ["click", "set_value", "type_text", "scroll"])
+def test_non_observe_tool_never_creates_authorization_request(computer, monkeypatch, action):
+    monkeypatch.setattr(service, "_grant", None)
+    monkeypatch.setattr(service, "_status", "idle")
+    result = service.execute(OWNER, action=action, text="down" if action == "scroll" else "", cancel_checker=lambda: "")
+    assert not result["ok"] and service.get_state()["authorizationRequest"] is None
+
+
+@pytest.mark.parametrize("cancellation", ["cancelled", "exception"])
+def test_request_is_retired_if_originating_turn_cancels_or_checker_fails(computer, monkeypatch, cancellation):
+    monkeypatch.setattr(service, "_grant", None)
+    monkeypatch.setattr(service, "_status", "idle")
+    state = {"cancelled": False}
+    def check():
+        if state["cancelled"] and cancellation == "exception":
+            raise RuntimeError("cancel check unavailable")
+        return "stopped" if state["cancelled"] else ""
+    service.execute(OWNER, cancel_checker=check)
+    assert service.get_state()["authorizationRequest"] is not None
+    state["cancelled"] = True
+    assert service.get_state()["authorizationRequest"] is None
+
+
+def test_request_bound_grant_accepts_live_exact_id_and_rejects_replay(computer, monkeypatch):
+    monkeypatch.setattr(service, "_grant", None)
+    monkeypatch.setattr(service, "_status", "idle")
+    choice = service.list_windows()["windows"][0]["selectionId"]
+    service.execute(OWNER, cancel_checker=lambda: "")
+    request = service.get_state()["authorizationRequest"]
+    with pytest.raises(ValueError):
+        service.grant_window(choice, True, "incorrect-id")
+    assert service.get_state()["authorizationRequest"] == request
+    state = service.grant_window(choice, True, request["id"])
+    assert state["grantId"] and state["authorizationRequest"] is None
+    with pytest.raises(ValueError):
+        service.grant_window(choice, True, request["id"])
+
+
+def test_request_bound_grant_rechecks_cancellation_after_window_validation(computer, monkeypatch):
+    monkeypatch.setattr(service, "_grant", None)
+    monkeypatch.setattr(service, "_status", "idle")
+    choice = service.list_windows()["windows"][0]["selectionId"]
+    state = {"cancelled": False}
+    service.execute(OWNER, cancel_checker=lambda: "stopped" if state["cancelled"] else "")
+    request_id = service.get_state()["authorizationRequest"]["id"]
+    def window_alive(_window):
+        state["cancelled"] = True
+        return True
+    monkeypatch.setattr(service, "_window_alive", window_alive)
+    with pytest.raises(ValueError):
+        service.grant_window(choice, True, request_id)
+    assert service.get_state()["grantId"] is None
+
+
+@pytest.mark.parametrize("invalid", ["expired", "cancelled", "checker_error", "identity", "configuration", "superseded"])
+def test_request_bound_grant_rejects_stale_or_wrong_context(computer, monkeypatch, invalid):
+    monkeypatch.setattr(service, "_grant", None)
+    monkeypatch.setattr(service, "_status", "idle")
+    now = [100.0]
+    monkeypatch.setattr(service.time, "monotonic", lambda: now[0])
+    choice = service.list_windows()["windows"][0]["selectionId"]
+    state = {"cancelled": False}
+    def check():
+        if state["cancelled"] and invalid == "checker_error":
+            raise RuntimeError("checker failed")
+        return "stopped" if state["cancelled"] else ""
+    service.execute(OWNER, cancel_checker=check)
+    request_id = service.get_state()["authorizationRequest"]["id"]
+    if invalid == "expired": now[0] += 120
+    elif invalid in {"cancelled", "checker_error"}: state["cancelled"] = True
+    elif invalid == "identity": monkeypatch.setattr(service, "_canonical", lambda: {"agentId": "other", "directSessionId": OWNER[1]})
+    elif invalid == "configuration": monkeypatch.setattr(service, "_configuration", lambda _: (2, "changed"))
+    else: service.execute((OWNER[0], OWNER[1], "new-turn"), cancel_checker=lambda: "")
+    with pytest.raises(ValueError):
+        service.grant_window(choice, True, request_id)
+    assert service.get_state()["grantId"] is None
+
+
+def test_authorization_request_is_operator_state_only_reused_and_expires(computer, monkeypatch):
+    monkeypatch.setattr(service, "_grant", None)
+    monkeypatch.setattr(service, "_status", "idle")
+    now = [100.0]
+    monkeypatch.setattr(service.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(service.adapter, "Connection", lambda *_: pytest.fail("ungranted connection"))
+    result = service.execute(OWNER, cancel_checker=lambda: "")
+    assert result["reason"] == "authorization_required" and "authorizationRequest" not in result
+    request = service.get_state()["authorizationRequest"]
+    assert request == {"id": request["id"], "agentId": OWNER[0], "sessionId": OWNER[1], "turnId": OWNER[2]}
+    assert request["id"]
+    now[0] += 119
+    service.execute(OWNER, cancel_checker=lambda: "")
+    assert service.get_state()["authorizationRequest"] == request
+    now[0] += 1
+    assert service.get_state()["authorizationRequest"] is None
+    service.execute(OWNER, cancel_checker=lambda: "")
+    assert service.get_state()["authorizationRequest"]["id"] != request["id"]
+
+
+def test_authorization_request_clears_on_identity_configuration_and_new_turn(computer, monkeypatch):
+    monkeypatch.setattr(service, "_grant", None)
+    monkeypatch.setattr(service, "_status", "idle")
+    service.execute(OWNER, cancel_checker=lambda: "")
+    first = service.get_state()["authorizationRequest"]
+    service.execute((OWNER[0], OWNER[1], "turn-2"), cancel_checker=lambda: "")
+    second = service.get_state()["authorizationRequest"]
+    assert second["turnId"] == "turn-2" and second["id"] != first["id"]
+    monkeypatch.setattr(service, "_configuration", lambda _: (2, "changed"))
+    assert service.get_state()["authorizationRequest"] is None
+    service.execute(OWNER, cancel_checker=lambda: "")
+    assert service.get_state()["authorizationRequest"] is not None
+    monkeypatch.setattr(service, "_canonical", lambda: {"agentId": "other", "directSessionId": OWNER[1]})
+    assert service.get_state()["authorizationRequest"] is None
+
+
+@pytest.mark.parametrize("status", ["paused", "manual", "working", "waiting_confirmation", "error"])
+def test_no_grant_with_incompatible_control_state_never_requests_authorization(computer, monkeypatch, status):
+    monkeypatch.setattr(service, "_grant", None)
+    monkeypatch.setattr(service, "_status", status)
+    result = service.execute(OWNER, cancel_checker=lambda: "")
+    assert "reason" not in result
+    assert service.get_state()["authorizationRequest"] is None
+
+
+def test_authorization_request_requires_driver_and_retires_if_driver_disappears(computer, monkeypatch):
+    monkeypatch.setattr(service, "_grant", None)
+    monkeypatch.setattr(service, "_status", "idle")
+    def unavailable():
+        raise OSError("driver unavailable")
+    monkeypatch.setattr(service.adapter, "driver_binary", unavailable)
+    service.execute(OWNER, cancel_checker=lambda: "")
+    assert service.get_state()["authorizationRequest"] is None
+    monkeypatch.setattr(service.adapter, "driver_binary", lambda: "pinned-driver")
+    service.execute(OWNER, cancel_checker=lambda: "")
+    assert service.get_state()["authorizationRequest"] is not None
+    monkeypatch.setattr(service.adapter, "driver_binary", unavailable)
+    assert service.get_state()["authorizationRequest"] is None
+
+
+def test_authorization_request_cleared_by_successful_grant_and_end(computer, monkeypatch):
+    monkeypatch.setattr(service, "_grant", None)
+    monkeypatch.setattr(service, "_status", "idle")
+    service.execute(OWNER, cancel_checker=lambda: "")
+    assert service.get_state()["authorizationRequest"] is not None
+    choice = service.list_windows()["windows"][0]
+    state = service.grant_window(choice["selectionId"], True)
+    assert state["authorizationRequest"] is None
+    assert service.control(state["grantId"], "end")["authorizationRequest"] is None
 
 
 def observe():

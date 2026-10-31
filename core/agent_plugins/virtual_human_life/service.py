@@ -4030,6 +4030,7 @@ class VirtualHumanLifeService:
         *,
         proposal_id: str,
         decision: str,
+        expected_fingerprint: str | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         normalized_agent_id = str(agent_id or "").strip()
         normalized_proposal_id = str(proposal_id or "").strip()
@@ -4053,6 +4054,15 @@ class VirtualHumanLifeService:
                 raise VirtualHumanLifeError(
                     "Companion preference proposal does not exist."
                 )
+            if expected_fingerprint is not None:
+                from .companion_preferences import preference_proposal_fingerprint
+                import hmac
+                try:
+                    actual_fingerprint = preference_proposal_fingerprint(proposal)
+                except (ValueError, TypeError):
+                    raise VirtualHumanLifeError("Preference proposal changed or is unavailable.") from None
+                if not isinstance(expected_fingerprint, str) or not hmac.compare_digest(actual_fingerprint, expected_fingerprint):
+                    raise VirtualHumanLifeError("Preference proposal changed or is unavailable.")
             # Validate the state transition BEFORE any native write so a
             # decided/expired proposal can never leave an orphan episode.
             transition_reason = (
@@ -4106,6 +4116,7 @@ class VirtualHumanLifeService:
         agent_id: str,
         *,
         proposal_id: str,
+        expected_fingerprint: str | None = None,
     ) -> dict[str, Any]:
         """Accept one pending proposal and write the native preference."""
 
@@ -4113,6 +4124,7 @@ class VirtualHumanLifeService:
             agent_id,
             proposal_id=proposal_id,
             decision="accepted",
+            expected_fingerprint=expected_fingerprint,
         )
         return {"proposal": transition, "receipt": receipt}
 
@@ -4121,6 +4133,7 @@ class VirtualHumanLifeService:
         agent_id: str,
         *,
         proposal_id: str,
+        expected_fingerprint: str | None = None,
     ) -> dict[str, Any]:
         """Reject one pending proposal without touching native memory."""
 
@@ -4128,6 +4141,7 @@ class VirtualHumanLifeService:
             agent_id,
             proposal_id=proposal_id,
             decision="rejected",
+            expected_fingerprint=expected_fingerprint,
         )
         return {"proposal": transition}
 

@@ -397,6 +397,39 @@ describe("AssistantHost", () => {
     await host.stop();
   });
 
+  it("forwards only valid optional computer authorization request IDs", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true }); await host.start();
+    const idle = { available: true, status: "idle", message: "", grantId: null, window: null, pending: null };
+    fetchImpl.mockImplementationOnce(async (_url, options) => {
+      expect(JSON.parse(String(options?.body))).toEqual({ selectionId: "sel", allowVision: true, authorizationRequestId: "req" });
+      return Response.json(idle);
+    });
+    await host.request({ operation: "computerGrant", selectionId: "sel", allowVision: true, authorizationRequestId: "req" });
+    for (const authorizationRequestId of [null, "", "x".repeat(101)]) {
+      await expect(host.request({ operation: "computerGrant", selectionId: "sel", allowVision: true, authorizationRequestId } as AssistantHostRequest)).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    }
+    await host.stop();
+  });
+
+  it("accepts only the bounded operator authorization hint and rejects extra metadata", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true }); await host.start();
+    const idle = { available: true, status: "idle", message: "", grantId: null, window: null, pending: null };
+    const request = { id: "request", agentId: "assistant", sessionId: "session", turnId: "turn" };
+    for (const authorizationRequest of [null, request]) {
+      fetchImpl.mockResolvedValueOnce(Response.json({ ...idle, authorizationRequest }));
+      expect(await host.request({ operation: "computerState" })).toEqual({ ...idle, authorizationRequest });
+    }
+    for (const authorizationRequest of [{ ...request, title: "private" }, { ...request, turnId: "" }, { ...request, id: "x".repeat(101) }]) {
+      fetchImpl.mockResolvedValueOnce(Response.json({ ...idle, authorizationRequest }));
+      await expect(host.request({ operation: "computerState" })).rejects.toThrow("ASSISTANT_RESPONSE_INVALID");
+    }
+    fetchImpl.mockResolvedValueOnce(Response.json({ ...idle, grantId: "grant", window: { selectionId: "s", title: "t", appName: "a" }, authorizationRequest: request }));
+    await expect(host.request({ operation: "computerState" })).rejects.toThrow("ASSISTANT_RESPONSE_INVALID");
+    fetchImpl.mockResolvedValueOnce(Response.json({ ...idle, status: "manual", authorizationRequest: request }));
+    await expect(host.request({ operation: "computerState" })).rejects.toThrow("ASSISTANT_RESPONSE_INVALID");
+    await host.stop();
+  });
+
   it("lets the assistant view and confirm an existing computer action while a sealed migration waits", async () => {
     const { host, fetchImpl } = fixture({ graceful: true });
     await host.start();

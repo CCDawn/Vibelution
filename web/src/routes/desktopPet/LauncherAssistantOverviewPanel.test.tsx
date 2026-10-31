@@ -22,7 +22,7 @@ vi.mock("../personalAssistant/PersonalAssistantAffairs", () => ({ PersonalAssist
 vi.mock("../personalAssistant/PersonalAssistantComputerPanel", () => ({ PersonalAssistantComputerPanel: (props: any) => <div>native computer {props.transport.scope}</div> }));
 vi.mock("../personalAssistant/PersonalAssistantDialoguePreferences", () => ({ PersonalAssistantDialoguePreferences: (props: any) => <div>native preferences {props.agentId} {props.transport.cacheKey.join(":")}</div> }));
 vi.mock("../personalAssistant/PersonalAssistantSettings", () => ({ PersonalAssistantSettings: (props: any) => <div>native settings {props.presentation} {props.transport.cacheKey.join(":")}</div> }));
-vi.mock("./LauncherAssistantRoute", () => ({ LauncherAssistantRoute: () => <div>native dialogue</div> }));
+vi.mock("./LauncherAssistantRoute", () => ({ LauncherAssistantRoute: (props: any) => <div data-computer-requested={String(Boolean(props.computerRequested))}>native dialogue{props.entryIntent ? <button>{props.entryIntent.label}</button> : null}</div> }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let root: Root, container: HTMLDivElement, client: QueryClient;
@@ -55,15 +55,17 @@ describe("Launcher assistant workspace", () => {
     expect(selectLauncherProject).not.toHaveBeenCalled();
   });
   it.each([
-    ["affairs", "native affairs agent launcher-assistant:agent"],
-    ["preferences", "native preferences agent launcher-assistant:agent"],
-    ["assistant-settings", "native settings page launcher-assistant:agent"],
-    ["computer", "native computer launcher"],
-  ])("binds %s to the native assistant surface", async (panel, expected) => {
+    ["affairs", "查看我的待办与提醒"],
+    ["preferences", "查看当前对话偏好"],
+    ["assistant-settings", "查看助理设置"],
+    ["computer", "native dialogue"],
+  ])("moves the legacy %s link into the conversation without loading its old page", async (panel, expected) => {
     await render(panel);
     expect(container.textContent).toContain(expected);
-    expect(getLauncherAssistantStatus).toHaveBeenCalled();
+    expect(container.textContent).toContain("native dialogue");
+    expect(getLauncherAssistantStatus).not.toHaveBeenCalled();
+    expect(getLauncherAssistantDispatches).not.toHaveBeenCalled();
     expect(getLauncherBranchInstances).not.toHaveBeenCalled();
-    if (panel === "affairs") expect([...container.querySelectorAll("h1,h2,h3")].filter(heading => heading.textContent === "待办与提醒")).toHaveLength(1);
+    expect(container.querySelector('[data-computer-requested="true"]') !== null).toBe(panel === "computer");
   });
 });

@@ -242,6 +242,28 @@ def normalize_companion_preference_proposal(
     return normalized_type, value
 
 
+def preference_proposal_fingerprint(proposal: Mapping[str, Any]) -> str:
+    """Bind a pending, displayable native proposal to its agent and exact value."""
+    import hashlib
+    import re
+    import unicodedata
+    agent = proposal.get("agentId")
+    proposal_id = proposal.get("proposalId")
+    kind = proposal.get("preferenceType")
+    value = proposal.get("candidateValue")
+    if (not isinstance(agent, str) or not agent or len(agent) > 160
+            or not isinstance(proposal_id, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}", proposal_id) is None
+            or not isinstance(value, str) or len(value) > 40
+            or any(unicodedata.category(char) == "Cs" for char in value)
+            or proposal.get("status") != "pending"):
+        raise CompanionPreferenceError("Invalid pending preference proposal.")
+    normalized_kind, normalized_value = normalize_companion_preference_proposal(kind, value)
+    if kind != normalized_kind or value != normalized_value:
+        raise CompanionPreferenceError("Invalid pending preference proposal.")
+    payload = [1, agent, proposal_id, kind, value, "pending"]
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=True, separators=(",", ":")).encode("ascii")).hexdigest()
+
+
 def _proposal_row(row: Mapping[str, Any]) -> dict[str, Any] | None:
     if not isinstance(row, Mapping):
         return None

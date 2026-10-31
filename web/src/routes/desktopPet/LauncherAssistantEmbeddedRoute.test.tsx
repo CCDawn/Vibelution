@@ -107,32 +107,18 @@ describe("Launcher embedded assistant page", () => {
     expect(body).toBeTruthy();
   });
 
-  it.each([false, true])("keeps task results accessible and collapsed (navigationOwned=%s)", async navigationOwned => {
+  it.each([false, true])("leaves task status reporting to the Agent (navigationOwned=%s)", async navigationOwned => {
     await renderEmbedded({ navigationOwned, dispatches: [{
       dispatchId: "dispatch-1", projectId: "ccdawn-vibelution:main:0d6e4079e367:d9ccbfb82c3ec3",
       agentId: "worker", nativeTaskId: "task-1",
       receipt: { taskId: "task-1", status: "succeeded", resultSummary: "周报已生成", shouldPoll: false },
     }] });
     const toggle = [...container.querySelectorAll("button")].find(button => button.textContent === "任务结果 1");
-    expect(toggle).toBeTruthy();
-    // Folded by default: no receipt rows are visible anywhere on the page.
+    expect(toggle).toBeUndefined();
     expect(container.querySelector("[data-launcher-assistant-receipts]")).toBeNull();
     expect(container.textContent).not.toContain("成功");
     expect(container.textContent).not.toContain("周报已生成");
     expect(container.textContent).not.toContain("ccdawn-vibelution");
-    await act(async () => toggle?.click()); await settle();
-    const panel = container.querySelector<HTMLElement>("[data-launcher-assistant-receipts]");
-    expect(panel).toBeTruthy();
-    expect(panel!.textContent).toContain("成功");
-    expect(panel!.textContent).toContain("周报已生成");
-    // Humanized rows keep the raw project ID out of the visible text; only the
-    // title attribute may carry the full value.
-    const visible = panel!.cloneNode(true) as HTMLElement;
-    visible.querySelectorAll("[title]").forEach(element => element.removeAttribute("title"));
-    expect(visible.textContent).not.toContain("ccdawn-vibelution");
-    expect(panel!.querySelector("[title]")?.getAttribute("title")).toBe("ccdawn-vibelution:main:0d6e4079e367:d9ccbfb82c3ec3");
-    await act(async () => toggle?.click()); await settle();
-    expect(container.querySelector("[data-launcher-assistant-receipts]")).toBeNull();
   });
   it("hides the task results button in unified navigation when there are no records", async () => {
     await renderEmbedded({ navigationOwned: true });
