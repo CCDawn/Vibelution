@@ -8,7 +8,8 @@ export type BrowserBounds = { x: number; y: number; width: number; height: numbe
 export type BrowserState = { pages: Array<{ id: string; url: string; title: string; loading: boolean; loadError?: boolean; canGoBack: boolean; canGoForward: boolean }>; activePageId: string | null; takeover: boolean };
 export type BrowserSnapshot = { pageId: string; snapshotId: string; url: string; title: string; untrusted: true; text: string; elements: Array<{ ref: string; role: string; name: string }> };
 export class AssistantBrowserError extends Error { constructor(public readonly code: string) { super(code); this.name = "AssistantBrowserError"; } }
-type Page = { id: string; view: WebContentsView; generation: number; snapshotId: string | null; snapshotUrl: string | null; refs: Set<string>; loadError: boolean; activeLoad: object | null };
+type NavigationTask = { cancel: () => void };
+type Page = { id: string; view: WebContentsView; generation: number; snapshotId: string | null; snapshotUrl: string | null; refs: Set<string>; loadError: boolean; lastNavigationUrl: string | null; activeLoad: NavigationTask | null };
 const PARTITION = "persist:vibelution-assistant-browser";
 const securedSessions = new WeakSet<object>();
 const fail = (code: string): never => { throw new AssistantBrowserError(code); };
@@ -79,7 +80,7 @@ export class AssistantBrowser {
   private invalidate(p: Page): void { p.generation++; p.snapshotId = null; p.snapshotUrl = null; p.refs.clear(); }
   private forgetDestroyedPage(p: Page): void {
     if (this.pages.get(p.id) !== p) return;
-    this.invalidate(p); this.pages.delete(p.id);
+    p.activeLoad?.cancel(); this.invalidate(p); this.pages.delete(p.id);
     if (this.activePageId === p.id) this.activePageId = this.pages.keys().next().value ?? null;
     try { this.layout(); } catch { if (this.attached === p) this.attached = null; }
     this.changed();
@@ -105,14 +106,14 @@ export class AssistantBrowser {
   async open(url: string, source: BrowserSource): Promise<BrowserState> {
     const done = this.beginAction(source); try { const target = validUrl(url); if (this.pages.size >= 4) fail("BROWSER_PAGE_LIMIT");
     const view = new WebContentsView({ webPreferences: { partition: PARTITION, nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, webviewTag: false } });
-    const p: Page = { id: randomUUID(), view, generation: 0, snapshotId: null, snapshotUrl: null, refs: new Set(), loadError: false, activeLoad: null }; const w = view.webContents;
+    const p: Page = { id: randomUUID(), view, generation: 0, snapshotId: null, snapshotUrl: null, refs: new Set(), loadError: false, lastNavigationUrl: null, activeLoad: null }; const w = view.webContents;
     w.setWindowOpenHandler(() => ({ action: "deny" }));
     w.on("will-attach-webview", event => event.preventDefault());
-    w.on("will-frame-navigate", event => { try { validUrl(event.url); if (event.isMainFrame) p.activeLoad = null; } catch { event.preventDefault(); } });
+    w.on("will-frame-navigate", event => { try { validUrl(event.url); if (event.isMainFrame) p.activeLoad?.cancel(); } catch { event.preventDefault(); } });
     w.on("will-redirect", event => { try { validUrl(event.url); } catch { event.preventDefault(); } });
-    w.on("did-start-navigation", (_event, _url, _inPlace, mainFrame) => { if (mainFrame) { this.invalidate(p); p.loadError = false; this.changed(); } });
-    w.on("did-fail-load", (_event, code, _description, _url, mainFrame) => { if (mainFrame && code !== -3) { p.loadError = true; this.changed(); } });
-    w.on("did-finish-load", () => { p.loadError = false; this.changed(); });
+    w.on("did-start-navigation", (_event, url, _inPlace, mainFrame) => { if (mainFrame) { this.invalidate(p); p.lastNavigationUrl = url; p.loadError = false; this.changed(); } });
+    w.on("did-redirect-navigation", (_event, url, _inPlace, mainFrame) => { if (mainFrame) p.lastNavigationUrl = url; });
+    w.on("did-fail-load", (_event, code, _description, url, mainFrame) => { if (mainFrame && code !== -3 && (!p.lastNavigationUrl || p.lastNavigationUrl === url)) { p.loadError = true; this.changed(); } });
     for (const event of ["did-navigate", "did-navigate-in-page", "did-start-loading", "did-stop-loading", "page-title-updated"] as const) (w as EventEmitter).on(event, () => this.changed());
     w.on("destroyed", () => this.forgetDestroyedPage(p));
     this.pages.set(p.id, p); this.activePageId = p.id; this.layout(); this.changed();
@@ -121,27 +122,63 @@ export class AssistantBrowser {
   }
   select(id: string, source: BrowserSource): BrowserState { this.requireSource(source); this.getPage(id); this.activePageId = id; this.layout(); this.changed(); return this.getState(); }
   async navigate(id: string, url: string, source: BrowserSource): Promise<BrowserState> { const done = this.beginAction(source); try { const p = this.getPage(id), target = validUrl(url); this.invalidate(p); try { await this.load(p, target); } catch { return fail("BROWSER_NAVIGATION_FAILED"); } return this.getState(); } finally { done(); } }
-  private async load(p: Page, target: string): Promise<void> {
-    const token = {}; p.activeLoad = token; let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      await Promise.race([
-        p.view.webContents.loadURL(target),
-        new Promise<never>((_resolve, reject) => {
-          timer = setTimeout(() => {
-            if (p.activeLoad === token && !p.view.webContents.isDestroyed()) {
-              p.activeLoad = null; p.loadError = true; try { p.view.webContents.stop(); } catch { /* The view may have closed during the timeout. */ } this.changed();
-            }
-            reject(new AssistantBrowserError("BROWSER_NAVIGATION_FAILED"));
-          }, 15_000);
-        }),
-      ]);
-    } catch (error) {
-      if (p.activeLoad === token) {
-        const code = error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : undefined;
-        if (code !== "ERR_ABORTED" && code !== -3) { p.loadError = true; this.changed(); }
-      }
-      throw new AssistantBrowserError("BROWSER_NAVIGATION_FAILED");
-    } finally { if (timer) clearTimeout(timer); if (p.activeLoad === token) p.activeLoad = null; }
+  private navigateUntilReady(p: Page, startNavigation: () => void | Promise<void>): Promise<void> {
+    p.activeLoad?.cancel();
+    const token: NavigationTask = { cancel: () => {} }; p.activeLoad = token;
+    const w = p.view.webContents, emitter = w as EventEmitter;
+    return new Promise<void>((resolve, reject) => {
+      let started = false, sameDocument = false, committedUrl: string | null = null, completed = false;
+      const finish = (ok: boolean) => {
+        if (completed) return; completed = true; clearTimeout(timer);
+        emitter.removeListener("did-start-navigation", onStart); emitter.removeListener("did-navigate", onCommit);
+        emitter.removeListener("did-navigate-in-page", onInPage); emitter.removeListener("dom-ready", onDomReady);
+        emitter.removeListener("did-fail-load", onFailure); emitter.removeListener("destroyed", onDestroyed);
+        if (p.activeLoad === token) p.activeLoad = null;
+        if (ok) resolve(); else reject(new AssistantBrowserError("BROWSER_NAVIGATION_FAILED"));
+      };
+      const ready = () => {
+        if (p.activeLoad !== token || w.isDestroyed()) return false;
+        try { return !!publicUrl(w.getURL()); } catch { return false; }
+      };
+      const onStart = (_event: unknown, _url: string, same: boolean, main: boolean) => {
+        if (!main) return;
+        if (p.activeLoad !== token) { finish(false); return; }
+        if (!started) { started = true; sameDocument = same; return; }
+        if (!same || sameDocument) finish(false);
+      };
+      const onCommit = (_event: unknown, url: string) => { if (started && p.activeLoad === token) committedUrl = url; };
+      const onInPage = (_event: unknown, url: string, main: boolean) => {
+        if (!started || !main || w.getURL() !== url) return;
+        if (sameDocument) finish(ready()); else if (committedUrl !== null) committedUrl = url;
+      };
+      const onDomReady = () => { try { if (started && committedUrl !== null && w.getURL() === committedUrl) finish(ready()); } catch { finish(false); } };
+      const onFailure = (_event: unknown, _code: number, _description: string, url: string, main: boolean) => { if (started && main && (!p.lastNavigationUrl || p.lastNavigationUrl === url)) finish(false); };
+      const onDestroyed = () => finish(false);
+      const timer = setTimeout(() => {
+        const ownsLoad = p.activeLoad === token && !w.isDestroyed();
+        if (ownsLoad) p.loadError = true;
+        finish(false);
+        if (ownsLoad) { try { w.stop(); } catch { /* already closed */ } this.changed(); }
+      }, 15_000);
+      token.cancel = () => finish(false);
+      emitter.on("did-start-navigation", onStart); emitter.on("did-navigate", onCommit);
+      emitter.on("did-navigate-in-page", onInPage); emitter.on("dom-ready", onDomReady);
+      emitter.on("did-fail-load", onFailure); emitter.on("destroyed", onDestroyed);
+      try {
+        const completion = startNavigation();
+        // Electron may reject after DOM-ready or after another navigation supersedes it.
+        // Always consume that outcome, and ignore it after this operation has settled.
+        if (completion) void completion.then(() => finish(ready()), error => {
+          if (completed) return;
+          const code = error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : undefined;
+          if (p.activeLoad === token && code !== "ERR_ABORTED" && code !== -3) { p.loadError = true; this.changed(); }
+          finish(false);
+        });
+      } catch { finish(false); }
+    });
+  }
+  private load(p: Page, target: string): Promise<void> {
+    return this.navigateUntilReady(p, () => p.view.webContents.loadURL(target));
   }
   async snapshot(id: string): Promise<BrowserSnapshot> {
     const done = this.beginAction("assistant"); try {
@@ -208,40 +245,16 @@ export class AssistantBrowser {
     try {
       const p = this.getPage(id), w = p.view.webContents;
       if ((operation === "back" && !w.navigationHistory.canGoBack()) || (operation === "forward" && !w.navigationHistory.canGoForward())) return;
-      this.invalidate(p); const token = {}; p.activeLoad = token;
-      await new Promise<void>((resolve, reject) => {
-        const emitter = w as EventEmitter; let started = false; let completed = false;
-        const finish = (ok: boolean) => {
-          if (completed) return; completed = true; clearTimeout(timer);
-          emitter.removeListener("did-start-navigation", start); emitter.removeListener("did-navigate-in-page", inPage);
-          emitter.removeListener("did-stop-loading", stop); emitter.removeListener("did-fail-load", failed); emitter.removeListener("destroyed", destroyed);
-          if (p.activeLoad === token) p.activeLoad = null;
-          if (ok) resolve(); else reject(new AssistantBrowserError("BROWSER_NAVIGATION_FAILED"));
-        };
-        const start = (_event: unknown, _url: string, _same: boolean, main: boolean) => {
-          if (!main) return; if (started || p.activeLoad !== token) { finish(false); return; } started = true;
-        };
-        const inPage = (_event: unknown, _url: string, main: boolean) => { if (started && main) finish(p.activeLoad === token); };
-        const stop = () => { if (started) finish(p.activeLoad === token); };
-        const failed = (_event: unknown, _code: number, _description: string, _url: string, main: boolean) => { if (started && main) finish(false); };
-        const destroyed = () => finish(false);
-        const timer = setTimeout(() => {
-          const ownsLoad = p.activeLoad === token && !w.isDestroyed();
-          if (ownsLoad) p.loadError = true;
-          finish(false);
-          if (ownsLoad) { try { w.stop(); } catch { /* already closed */ } this.changed(); }
-        }, 15_000);
-        emitter.on("did-start-navigation", start); emitter.on("did-navigate-in-page", inPage);
-        emitter.on("did-stop-loading", stop); emitter.on("did-fail-load", failed); emitter.on("destroyed", destroyed);
-        try { if (operation === "back") w.navigationHistory.goBack(); else if (operation === "forward") w.navigationHistory.goForward(); else w.reload(); }
-        catch { finish(false); }
+      this.invalidate(p);
+      await this.navigateUntilReady(p, () => {
+        if (operation === "back") w.navigationHistory.goBack(); else if (operation === "forward") w.navigationHistory.goForward(); else w.reload();
       });
     } finally { done(); }
   }
   back(id: string, source: BrowserSource): Promise<void> { return this.history(id, source, "back"); }
   forward(id: string, source: BrowserSource): Promise<void> { return this.history(id, source, "forward"); }
   reload(id: string, source: BrowserSource): Promise<void> { return this.history(id, source, "reload"); }
-  close(id: string, source: BrowserSource): BrowserState { this.requireSource(source); const p = this.getPage(id); this.invalidate(p); this.pages.delete(id); if (this.activePageId === id) this.activePageId = this.pages.keys().next().value ?? null; this.layout(); p.view.webContents.close(); this.changed(); return this.getState(); }
+  close(id: string, source: BrowserSource): BrowserState { this.requireSource(source); const p = this.getPage(id); p.activeLoad?.cancel(); this.invalidate(p); this.pages.delete(id); if (this.activePageId === id) this.activePageId = this.pages.keys().next().value ?? null; this.layout(); p.view.webContents.close(); this.changed(); return this.getState(); }
   requestTakeover(source: BrowserSource): Promise<BrowserState> {
     if (source !== "operator") return Promise.reject(new AssistantBrowserError("BROWSER_SOURCE_FORBIDDEN"));
     try { this.requireSource(source); } catch (error) { return Promise.reject(error); }

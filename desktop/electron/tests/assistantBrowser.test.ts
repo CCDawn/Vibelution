@@ -140,7 +140,8 @@ describe("Assistant embedded browser isolation", () => {
     const order: string[] = []; const navigation = browser[operation](id, "assistant").then(() => order.push("navigation"));
     const takeover = browser.requestTakeover("operator").then(() => order.push("takeover"));
     w.emit("did-start-navigation", {}, "https://example.com/next", false, true); await Promise.resolve(); expect(order).toEqual([]);
-    w.emit("did-stop-loading"); await navigation; await takeover; expect(order).toEqual(["navigation", "takeover"]);
+    w.url = "https://example.com/next"; w.isLoading = () => true; w.emit("did-navigate", {}, w.url, 200, "OK"); w.emit("dom-ready");
+    await navigation; await takeover; expect(order).toEqual(["navigation", "takeover"]);
   });
   it("fails and releases takeover on history timeout even when stop emits did-stop-loading", async () => {
     const { browser } = setup(); const id = (await browser.open("https://example.com", "operator")).activePageId!; const w = mocks.views[0].webContents;
@@ -155,7 +156,7 @@ describe("Assistant embedded browser isolation", () => {
     const { browser } = setup(); const id = (await browser.open("https://example.com", "operator")).activePageId!; const w = mocks.views[0].webContents;
     w.navigationHistory.canGoBack = () => true; const action = browser.back(id, "assistant");
     w.emit("did-start-navigation", {}, "https://example.com/#part", true, true);
-    w.emit("did-navigate-in-page", {}, "https://example.com/#part", true); await expect(action).resolves.toBeUndefined();
+    w.url = "https://example.com/#part"; w.emit("did-navigate-in-page", {}, w.url, true); await expect(action).resolves.toBeUndefined();
   });
   it("reports uncertain fill after dispatch without retrying", async () => {
     const { browser } = setup(); const id = (await browser.open("https://example.com", "operator")).activePageId!; const w = mocks.views[0].webContents, snap = await browser.snapshot(id);
@@ -166,11 +167,13 @@ describe("Assistant embedded browser isolation", () => {
   it("publishes only main-frame failures, ignores aborts, and clears failure on navigation and success", async () => {
     const { browser } = setup(); const id = (await browser.open("https://example.com", "operator")).activePageId!; const w = mocks.views[0].webContents;
     const error = () => browser.getState().pages.find(p => p.id === id)?.loadError;
-    w.emit("did-fail-load", {}, -105, "failure", "https://example.com", false); expect(error()).toBe(false);
-    w.emit("did-fail-load", {}, -3, "aborted", "https://example.com", true); expect(error()).toBe(false);
-    w.emit("did-fail-load", {}, -105, "failure", "https://example.com", true); expect(error()).toBe(true);
+    w.emit("did-fail-load", {}, -105, "failure", "https://example.com/", false); expect(error()).toBe(false);
+    w.emit("did-fail-load", {}, -3, "aborted", "https://example.com/", true); expect(error()).toBe(false);
+    w.emit("did-fail-load", {}, -105, "failure", "https://example.com/", true); expect(error()).toBe(true);
     w.emit("did-start-navigation", {}, "https://example.com/new", false, true); expect(error()).toBe(false);
-    w.emit("did-fail-load", {}, -105, "failure", "https://example.com", true); w.emit("did-finish-load"); expect(error()).toBe(false);
+    w.emit("did-fail-load", {}, -105, "failure", "https://example.com/new", true); expect(error()).toBe(true);
+    w.emit("did-finish-load"); expect(error()).toBe(true); // An old finish event cannot erase a newer failure.
+    w.emit("did-start-navigation", {}, "https://example.com/retry", false, true); expect(error()).toBe(false);
   });
   it("returns well-formed bounded strings at surrogate boundaries", async () => {
     const { browser } = setup(); const id = (await browser.open("https://example.com", "operator")).activePageId!; const w = mocks.views[0].webContents;
@@ -179,6 +182,54 @@ describe("Assistant embedded browser isolation", () => {
     const snap = await browser.snapshot(id); expect(snap.title.isWellFormed()).toBe(true); expect(snap.title.length).toBeLessThanOrEqual(200);
     expect(snap.text.isWellFormed()).toBe(true); expect(snap.elements[0].name.isWellFormed()).toBe(true); expect(snap.elements[0].name.length).toBeLessThanOrEqual(160);
     expect(browser.getState().pages[0].title.isWellFormed()).toBe(true);
+  });
+  it("accepts main-frame DOM readiness while resources still load and ignores a late abort", async () => {
+    const { browser } = setup(); await browser.open("https://example.com", "operator");
+    const prototype = Object.getPrototypeOf(mocks.views[0].webContents); let rejectOld!: (error: unknown) => void;
+    const spy = vi.spyOn(prototype, "loadURL").mockImplementation(function(this: any, url: string) {
+      this.emit("did-start-navigation", {}, url, false, true); this.url = url; return new Promise<void>((_resolve, reject) => { rejectOld = reject; });
+    });
+    try {
+      const opening = browser.open("https://video.example/search?q=term", "assistant"); const w = mocks.views[1].webContents;
+      w.isLoading = () => true; w.emit("did-navigate", {}, w.url, 200, "OK"); w.emit("dom-ready");
+      const state = await opening; expect(state.pages.find(p => p.id === state.activePageId)).toMatchObject({ url: "https://video.example/search?q=term", loading: true, loadError: false });
+      rejectOld(Object.assign(new Error("late aborted"), { code: "ERR_ABORTED" })); await Promise.resolve(); await Promise.resolve();
+      expect(browser.getState().pages.find(p => p.id === state.activePageId)?.loadError).toBe(false); expect(w.stop).not.toHaveBeenCalled();
+    } finally { spy.mockRestore(); }
+  });
+  it("waits for DOM readiness if a loading page changes its fragment after commit", async () => {
+    const { browser } = setup(); const id = (await browser.open("https://example.com", "operator")).activePageId!; const w = mocks.views[0].webContents;
+    w.loadURL = vi.fn((url: string) => { w.emit("did-start-navigation", {}, url, false, true); return new Promise(() => {}); });
+    let settled = false; const navigation = browser.navigate(id, "https://example.com/new", "assistant").then(state => { settled = true; return state; });
+    w.url = "https://example.com/new"; w.emit("did-navigate", {}, w.url, 200, "OK");
+    w.url = "https://example.com/new#fragment"; w.emit("did-start-navigation", {}, w.url, true, true); w.emit("did-navigate-in-page", {}, w.url, true);
+    await Promise.resolve(); expect(settled).toBe(false); w.emit("dom-ready"); expect((await navigation).pages[0].url).toBe(w.url);
+  });
+  it("rejects a superseded load promptly and ignores its late failure while the replacement proceeds", async () => {
+    const { browser } = setup(); const id = (await browser.open("https://example.com", "operator")).activePageId!; const w = mocks.views[0].webContents;
+    let rejectOld!: (error: unknown) => void;
+    w.loadURL = vi.fn().mockImplementationOnce((url: string) => { w.emit("did-start-navigation", {}, url, false, true); return new Promise<void>((_r, reject) => { rejectOld = reject; }); })
+      .mockImplementationOnce((url: string) => { w.emit("did-start-navigation", {}, url, false, true); return new Promise<void>(() => {}); });
+    const old = browser.navigate(id, "https://example.com/old", "assistant"); const failed = expect(old).rejects.toMatchObject({ code: "BROWSER_NAVIGATION_FAILED" });
+    const current = browser.navigate(id, "https://example.com/new", "assistant"); await failed;
+    rejectOld(Object.assign(new Error("late failure"), { code: "ERR_FAILED" }));
+    w.emit("did-fail-load", {}, -2, "old failure", "https://example.com/old", true); await Promise.resolve();
+    expect(browser.getState().pages[0].loadError).toBe(false);
+    w.url = "https://example.com/new"; w.emit("did-navigate", {}, w.url, 200, "OK"); w.emit("dom-ready");
+    expect((await current).pages[0].url).toBe("https://example.com/new"); expect(w.stop).not.toHaveBeenCalled();
+  });
+  it("fails a main-frame load error before DOM readiness without waiting for resources", async () => {
+    const { browser } = setup(); const id = (await browser.open("https://example.com", "operator")).activePageId!; const w = mocks.views[0].webContents;
+    w.loadURL = vi.fn((url: string) => { w.emit("did-start-navigation", {}, url, false, true); return new Promise(() => {}); });
+    const action = browser.navigate(id, "https://example.org/failed", "assistant");
+    const result = expect(action).rejects.toMatchObject({ code: "BROWSER_NAVIGATION_FAILED" });
+    w.emit("did-fail-load", {}, -105, "name not resolved", "https://example.org/failed", true); await result;
+    expect(browser.getState().pages[0].loadError).toBe(true); expect(w.stop).not.toHaveBeenCalled();
+  });
+  it("rejects navigation promptly if the page is destroyed before DOM readiness", async () => {
+    const { browser } = setup(); const id = (await browser.open("https://example.com", "operator")).activePageId!; const w = mocks.views[0].webContents;
+    w.loadURL = vi.fn(() => new Promise(() => {})); const action = browser.navigate(id, "https://example.org", "assistant");
+    const failed = expect(action).rejects.toMatchObject({ code: "BROWSER_NAVIGATION_FAILED" }); browser.close(id, "operator"); await failed;
   });
   it("times out a pending navigation, stops that load, and releases takeover", async () => {
     const { browser } = setup(); const id = (await browser.open("https://example.com", "operator")).activePageId!; const w = mocks.views[0].webContents;
