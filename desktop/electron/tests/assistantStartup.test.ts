@@ -67,7 +67,7 @@ function fixture() {
     projectAdmission: null, legacyReminderAdmission: null,
     launcherAssistantExitReady: false, desktopTray: null, assistantOnly: true, shutdownApproved: false,
     app: { isPackaged: true, quit: vi.fn(), on: vi.fn(), getPath: vi.fn(() => "private") }, join, console,
-    AbortController, PrehostRecoveryDrainedUnknown, setTimeout, clearTimeout, dialog: { showMessageBox: vi.fn(async () => ({ response: 0 })) },
+    AbortController, createHash, PrehostRecoveryDrainedUnknown, setTimeout, clearTimeout, dialog: { showMessageBox: vi.fn(async () => ({ response: 0 })) },
     BrowserWindow: { getAllWindows: vi.fn(() => []) },
     desktopCliArgs: { hiddenPresentation: true }, desktopPythonPath: vi.fn(() => ""),
     desktopEnvironment: () => ({ VIBELUTION_CONFIG_PATH: "private-config" }),
@@ -684,6 +684,68 @@ describe("resident assistant startup", () => {
     await context.stop();
   });
 
+  it.each([
+    ["source_unavailable", "source_unavailable"],
+    ["unknown_row", "instances_unattributable"],
+    ["other_root", "instances_unavailable"],
+    ["no_job", "job_untracked"],
+    ["wrong_pid", "registry_pid_mismatch"],
+    ["no_capture", "job_capture_unavailable"],
+  ])("reports %s without starting a worker or closing a window", async (kind, reason) => {
+    const { context, host, paths, projectSnapshot } = fixture();
+    const root = mkdtempSync(join(tmpdir(), "handoff-wait-")); ownedRoots.push(root);
+    const other = mkdtempSync(join(tmpdir(), "handoff-other-")); ownedRoots.push(other);
+    const physical = process.platform === "win32" ? realpathSync.native(root).toLowerCase() : realpathSync.native(root);
+    const id = "project:one", digest = createHash("sha256").update(`${id}:reminder_handoff`).digest("hex").slice(0, 40);
+    const operationId = `initial-${digest}`, syncId = `affairs-${digest}`;
+    projectSnapshot.projects = { [id]: physical }; paths.userDataRoot = root;
+    const registration = { root: physical, baseProjectId: "project", registrationUuid: "fixture" };
+    const registryData = { instances: { source: { projectRoot: kind === "unknown_row" ? null : kind === "other_root" ? other : physical,
+      spawnPid: kind === "wrong_pid" ? 9999 : 4242 } } };
+    const warning = vi.fn(), windowClose = vi.fn(), runWorker = vi.fn();
+    const readRegistry = vi.fn(async () => registryData), admission = new ProjectAdmission();
+    Object.assign(context, { console: { warn: warning }, windowProvider: { close: windowClose }, projectAdmission: admission, mkdirSync,
+      LegacyReminderSourceFence: vi.fn(function () { return {}; }), createLegacyReminderSourceResolver: () => () => null,
+      instancesRegistryPath: () => join(root, "instances.json"), readRegistry, registeredInstancesForPhysicalRoot,
+      registeredAdmissionRoot: () => physical, getTrackedWorkbenchJobPid: () => kind === "no_job" ? null : 4242,
+      captureTrackedWorkbenchJobNaturalRetirement: () => null, runReminderOfflineJob: runWorker,
+      AssistantProjectLifecycleRequestStore: vi.fn(function () { return { get: vi.fn(async () => null) }; }),
+      InitialMigrationResults: vi.fn(function () { return { get: vi.fn(async () => null) }; }),
+      recoverInitialMigrations: vi.fn(async () => []), verifyInitialMigrationResult: vi.fn() });
+    Object.assign(host, { prepareInitialMigration: vi.fn(async () => true), reminderHandoffReceipt: vi.fn(async () => "pending"),
+      reminderHandoffSource: vi.fn(async () => kind === "source_unavailable" ? null : { operationId, syncId, registryDigest: "d".repeat(64) }) });
+    await context.start(paths);
+    const registry = context.launcherAssistantProjects;
+    registry.registration = vi.fn(() => registration);
+    registry.withHistoryImport = vi.fn(async (_id: string, work: (revision: number) => Promise<unknown>) => work(0));
+    const control = context.AssistantHost.mock.calls[0][0].mainControl;
+    const request = { action: "initial_migration_queue", projectId: id, previewId: "b".repeat(64), turnId: "turn",
+      category: "reminder_handoff", operationId, deliveryId: "d".repeat(32), timeoutMs: 10000 };
+    expect((await control(request)).state).toBe("queued");
+    await vi.waitFor(() => expect(warning).toHaveBeenCalledWith("REMINDER_HANDOFF_WAIT", JSON.stringify({ operationId, reason })));
+    await vi.waitFor(() => expect(admission.hasSeals()).toBe(false));
+    expect((await control(request)).state).toBe("queued");
+    await vi.waitFor(() => expect(host.reminderHandoffSource.mock.calls.length).toBeGreaterThanOrEqual(kind === "source_unavailable" ? 2 : 4));
+    await vi.waitFor(() => expect(admission.hasSeals()).toBe(false));
+    expect(warning.mock.calls.filter(([message]: [string]) => message === "REMINDER_HANDOFF_WAIT")).toEqual([
+      ["REMINDER_HANDOFF_WAIT", JSON.stringify({ operationId, reason })],
+    ]);
+    if (kind === "no_job") {
+      context.getTrackedWorkbenchJobPid = () => 7777;
+      expect((await control(request)).state).toBe("queued");
+      await vi.waitFor(() => expect(warning).toHaveBeenCalledWith("REMINDER_HANDOFF_WAIT",
+        JSON.stringify({ operationId, reason: "registry_pid_mismatch" })));
+      await vi.waitFor(() => expect(admission.hasSeals()).toBe(false));
+    }
+    expect(await control({ action: "initial_migration_receipt", projectId: id, category: "reminder_handoff", operationId }))
+      .toMatchObject({ state: "queued", waitingFor: "unknown", readyForCutover: false });
+    expect(runWorker).not.toHaveBeenCalled();
+    expect(windowClose).not.toHaveBeenCalled();
+    expect(host.stop).not.toHaveBeenCalled();
+    context.shutdownApproved = true;
+    await context.stop();
+  });
+
   it.each(["conflict", "unknown", "revoked", "slow", "busy", "failed_reopen", "barrier_crash", "retirement_crash"])("runs one %s handoff only after the original window and Job drain", async kind => {
     const { context, host, paths, projectSnapshot } = fixture();
     const root = mkdtempSync(join(tmpdir(), "handoff-main-")); ownedRoots.push(root);
@@ -696,6 +758,7 @@ describe("resident assistant startup", () => {
     const registration = { root: physical, baseProjectId: "project", registrationUuid: "fixture" };
     const row = { kind: "instance", instanceId: "source", windowId: 1, rendererProcessId: 11, ready: true };
     let closed = false, jobExited = false, closePending = false;
+    const warning = vi.fn();
     const windowClose = vi.fn(async () => { throw new Error("must not automatically close"); });
     const provider = { completeWorkbenchWindowInventory: () => closed ? [] : [row],
       captureWorkbenchWindowRetirement: () => ({ isClosed: () => closed, close: windowClose }),
@@ -713,7 +776,7 @@ describe("resident assistant startup", () => {
     const runWorker = vi.fn(async () => kind === "revoked" ? await heldWorker : ["conflict", "slow", "busy"].includes(kind)
       ? { state: "pending", code: "affairs_conflicts", conflictCount: 2, syncId, readyForCutover: false }
       : { state: "unknown", syncId, readyForCutover: false });
-    Object.assign(context, { windowProvider: provider, projectAdmission: admission, mkdirSync, readFileSync,
+    Object.assign(context, { console: { warn: warning }, windowProvider: provider, projectAdmission: admission, mkdirSync, readFileSync,
       LegacyReminderSourceFence: vi.fn(function () { return { drainIngress: async () => {} }; }),
       createLegacyReminderSourceResolver: () => () => null, instancesRegistryPath: () => registryPath,
       readRegistry: async () => registryData, registeredInstancesForPhysicalRoot,
@@ -769,6 +832,7 @@ describe("resident assistant startup", () => {
       operationId: request.operationId, readyForCutover: false }));
     expect(windowClose).not.toHaveBeenCalled();
     expect(jobExited).toBe(false);
+    expect(warning.mock.calls.filter(([message]: [string]) => message === "REMINDER_HANDOFF_WAIT")).toEqual([]);
     expect(runWorker).not.toHaveBeenCalled();
     expect(host.stop).not.toHaveBeenCalled();
     closePending = true; closed = true; // The existing user close, not migration.

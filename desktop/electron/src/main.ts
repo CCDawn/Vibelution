@@ -1,5 +1,5 @@
 import { BrowserWindow, Notification, app, dialog, ipcMain, nativeImage, nativeTheme, protocol, screen, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { requestRendererWindowClose } from "./windows/rendererWindowClose.js";
 import { configureWindowsNotificationIdentity } from "./notifications/windowsNotificationIdentity.js";
 import { NativeNotificationLifetime } from "./notifications/nativeNotificationLifetime.js";
@@ -1035,6 +1035,12 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
     if (migrationWarningPending) flushAssistantMigrationFeedback();
     const activeReminderHandoffs = new Set<string>();
     const reminderHandoffStages = new Map<string, string>();
+    const reminderHandoffWaitReasons = new Map<string, string>();
+    const logReminderHandoffWait = (operationId: string, reason: string) => {
+      if (reminderHandoffWaitReasons.get(operationId) === reason) return;
+      reminderHandoffWaitReasons.set(operationId, reason);
+      console.warn("REMINDER_HANDOFF_WAIT", JSON.stringify({ operationId, reason }));
+    };
     const showReminderHandoffStage = (operationId: string, stage: string) => {
       if (reminderHandoffStages.get(operationId) === stage) return;
       reminderHandoffStages.set(operationId, stage);
@@ -1052,8 +1058,10 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
         let seal: ProjectAdmissionSeal | undefined;
         let captured: WorkbenchNaturalJobRetirement[] = [];
         let owner: ReturnType<typeof startManagedLegacyReminderRetirement> | undefined;
+        let operationId: string | undefined;
         const generation = reminderHandoffGenerations.get(projectId) ?? 0;
         const current = () => (reminderHandoffGenerations.get(projectId) ?? 0) === generation;
+        const wait = (reason: string) => { if (operationId && current() && !shutdownApproved) logReminderHandoffWait(operationId, reason); };
         const checkGeneration = () => { if (!current()) throw new Error("REMINDER_HANDOFF_REVOKED"); };
         const cancel = () => { owner?.dispose(); seal?.release(); };
         reminderHandoffCancels.set(projectId, cancel);
@@ -1061,14 +1069,25 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
         try {
           const source = await projectConnection.withHistoryImport(projectId, async revision => {
             try { return await host.reminderHandoffSource(projectId, revision); } catch { return null; }
-          });
+          }).catch(() => null);
           checkGeneration();
-          if (!source || shutdownApproved || launcherAssistantHost !== host || windowProvider !== provider) return;
+          if (!source) {
+            // The registered project supplies only the original diagnostic ID.
+            try {
+              if (typeof projectConnection.snapshot().projects[projectId] === "string")
+                operationId = `initial-${createHash("sha256").update(`${projectId}:reminder_handoff`).digest("hex").slice(0, 40)}`;
+            } catch { /* No authoritative project ID is available for logging. */ }
+            wait("source_unavailable"); return;
+          }
+          operationId = source.operationId;
+          if (shutdownApproved || launcherAssistantHost !== host || windowProvider !== provider) return;
           if (await reminderAttemptResult(projectId, source.syncId)) return;
           checkGeneration();
           showReminderHandoffStage(source.operationId, "unknown");
-          const snapshot = projectConnection.snapshot(), registration = projectConnection.registration(projectId);
-          if (!registration || snapshot.projects[projectId] !== registration.root) return;
+          let snapshot: ReturnType<typeof projectConnection.snapshot>, registration: ReturnType<typeof projectConnection.registration>;
+          try { snapshot = projectConnection.snapshot(); registration = projectConnection.registration(projectId); }
+          catch { wait("registration_unavailable"); return; }
+          if (!registration || snapshot.projects[projectId] !== registration.root) { wait("registration_unavailable"); return; }
           // Only a launched offline writer delays a revoked, unbound request.
           // The original Workbench Job retains its own natural protection.
           let workerDrain: Promise<Record<string, unknown>> | undefined;
@@ -1081,21 +1100,33 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
           });
           checkGeneration();
           seal.check();
-          if (!currentSource || JSON.stringify(currentSource) !== JSON.stringify(source)) return;
-          const registry = await readRegistry(instancesRegistryPath());
+          if (!currentSource || JSON.stringify(currentSource) !== JSON.stringify(source)) { wait("source_changed"); return; }
+          let registry: Awaited<ReturnType<typeof readRegistry>>;
+          try { registry = await readRegistry(instancesRegistryPath()); }
+          catch { wait("instances_unavailable"); return; }
           checkGeneration();
           seal.check();
-          const instanceIds = registeredInstancesForPhysicalRoot(registry.instances, registration.root);
+          let instanceIds: string[];
+          try { instanceIds = registeredInstancesForPhysicalRoot(registry.instances, registration.root); }
+          catch { wait("instances_unattributable"); return; }
           try {
             if (paths.workspaceRoot && registeredAdmissionRoot(paths.workspaceRoot) === registration.root && !instanceIds.includes("main")) instanceIds.push("main");
           } catch { /* A separately registered source need not be the main workspace. */ }
-          if (!instanceIds.length) return;
-          const pid = getTrackedWorkbenchJobPid(registration.root);
-          const matchingRows = Object.values(registry.instances).filter(row => typeof row.projectRoot === "string"
-            && registeredInstancesForPhysicalRoot({ row }, registration.root).length === 1);
-          if (!pid || !matchingRows.length || matchingRows.some(row => row.spawnPid !== pid)) return;
-          const job = captureTrackedWorkbenchJobNaturalRetirement(registration.root, pid);
-          if (!job) return;
+          if (!instanceIds.length) { wait("instances_unavailable"); return; }
+          let pid: ReturnType<typeof getTrackedWorkbenchJobPid>;
+          try { pid = getTrackedWorkbenchJobPid(registration.root); }
+          catch { wait("job_untracked"); return; }
+          let matchingRows: typeof registry.instances[string][];
+          try { matchingRows = Object.values(registry.instances).filter(row => typeof row.projectRoot === "string"
+            && registeredInstancesForPhysicalRoot({ row }, registration.root).length === 1); }
+          catch { wait("instances_unattributable"); return; }
+          if (!pid) { wait("job_untracked"); return; }
+          if (!matchingRows.length) { wait("instances_unavailable"); return; }
+          if (matchingRows.some(row => row.spawnPid !== pid)) { wait("registry_pid_mismatch"); return; }
+          let job: ReturnType<typeof captureTrackedWorkbenchJobNaturalRetirement>;
+          try { job = captureTrackedWorkbenchJobNaturalRetirement(registration.root, pid); }
+          catch { wait("job_capture_unavailable"); return; }
+          if (!job) { wait("job_capture_unavailable"); return; }
           captured = [job];
           const verifyBinding = () => {
             checkGeneration();
@@ -1128,6 +1159,7 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
           seal.signal.addEventListener("abort", onAbort, { once: true });
           while (!shutdownApproved && !seal.signal.aborted && owner.state === "pending") {
             showReminderHandoffStage(source.operationId, owner.waitingFor ?? "unknown");
+            if (owner.waitingFor === "unknown") wait("retirement_proof_unavailable");
             await delay();
           }
           if (shutdownApproved) owner.dispose();
@@ -1255,7 +1287,7 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
             await attemptOffline();
             if (retryOffline && !shutdownApproved && !seal.signal.aborted) await delayMigration();
           } while (retryOffline && !shutdownApproved && !seal.signal.aborted);
-        } catch { /* Missing identity, ownership, or a changed source stays pending. */ }
+        } catch { if (!shutdownApproved && current()) wait("handoff_validation_failed"); }
         finally {
           owner?.dispose();
           seal?.release();
