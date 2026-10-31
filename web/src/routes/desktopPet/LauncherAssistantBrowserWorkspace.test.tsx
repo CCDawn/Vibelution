@@ -103,6 +103,25 @@ describe("Launcher browser workspace", () => {
     await act(async () => { document.dispatchEvent(new Event("visibilitychange")); await new Promise(resolve => setTimeout(resolve, 40)); });
     expect(invoke.mock.calls.at(-1)?.[0]).toMatchObject({ operation: "bounds", bounds: { x: 40, y: 50, width: 400, height: 300 } });
   });
+  it("publishes hidden document bounds and clears them without animation frames", async () => {
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 123);
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ x: 40, y: 50, left: 40, top: 50, right: 440, bottom: 350, width: 400, height: 300, toJSON: () => ({}) });
+    await render();
+    expect(invoke.mock.calls.at(-1)?.[0]).toEqual({ operation: "bounds", bounds: { x: 40, y: 50, width: 400, height: 300 } });
+    const dialog = document.createElement("div"); dialog.setAttribute("data-vui", "dialog-overlay");
+    await act(async () => { document.body.appendChild(dialog); await new Promise(resolve => setTimeout(resolve, 0)); });
+    expect(invoke.mock.calls.at(-1)?.[0]).toEqual({ operation: "bounds", bounds: null });
+    await act(async () => { dialog.remove(); await new Promise(resolve => setTimeout(resolve, 0)); });
+    expect(invoke.mock.calls.at(-1)?.[0]).toEqual({ operation: "bounds", bounds: { x: 40, y: 50, width: 400, height: 300 } });
+    await act(async () => button("收起网页").click());
+    expect(invoke.mock.calls.at(-1)?.[0]).toEqual({ operation: "bounds", bounds: null });
+    invoke.mockClear();
+    await act(async () => root.unmount());
+    expect(invoke.mock.calls.at(-1)?.[0]).toEqual({ operation: "bounds", bounds: null });
+    root = createRoot(host);
+  });
   it("hides the native page behind a dialog and restores its bounds after closing", async () => {
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ x: 40, y: 50, left: 40, top: 50, right: 440, bottom: 350, width: 400, height: 300, toJSON: () => ({}) });
     await render();

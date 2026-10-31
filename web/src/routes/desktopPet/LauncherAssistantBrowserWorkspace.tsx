@@ -50,21 +50,23 @@ export function LauncherAssistantBrowserWorkspace() {
   useEffect(() => { const resize = () => setNarrow(window.innerWidth <= 760); window.addEventListener("resize", resize); return () => window.removeEventListener("resize", resize); }, []);
   useEffect(() => {
     let frame = 0;
+    const publish = () => {
+      const node = viewRef.current;
+      const rect = node?.getBoundingClientRect();
+      const overlay = document.querySelector('[data-vui="dialog-overlay"], [role="alertdialog"], [role="menu"], [role="listbox"]');
+      const visible = canShowPage && !overlay && node && rect && rect.width > 0 && rect.height > 0
+        && getComputedStyle(node).visibility !== "hidden" && getComputedStyle(node).display !== "none";
+      const left = rect ? Math.max(0, Math.ceil(rect.left)) : 0;
+      const top = rect ? Math.max(0, Math.ceil(rect.top)) : 0;
+      const right = rect ? Math.min(window.innerWidth, Math.floor(rect.right)) : 0;
+      const bottom = rect ? Math.min(window.innerHeight, Math.floor(rect.bottom)) : 0;
+      const bounds = visible && right > left && bottom > top ? { x: left, y: top, width: right - left, height: bottom - top } : null;
+      try { void launcherBrowserBridge().invoke({ operation: "bounds", bounds }).catch(() => {}); } catch { /* unavailable host */ }
+    };
     const update = () => {
       cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        const node = viewRef.current;
-        const rect = node?.getBoundingClientRect();
-        const overlay = document.querySelector('[data-vui="dialog-overlay"], [role="alertdialog"], [role="menu"], [role="listbox"]');
-        const visible = canShowPage && !overlay && node && rect && rect.width > 0 && rect.height > 0
-          && getComputedStyle(node).visibility !== "hidden" && getComputedStyle(node).display !== "none";
-        const left = rect ? Math.max(0, Math.ceil(rect.left)) : 0;
-        const top = rect ? Math.max(0, Math.ceil(rect.top)) : 0;
-        const right = rect ? Math.min(window.innerWidth, Math.floor(rect.right)) : 0;
-        const bottom = rect ? Math.min(window.innerHeight, Math.floor(rect.bottom)) : 0;
-        const bounds = visible && right > left && bottom > top ? { x: left, y: top, width: right - left, height: bottom - top } : null;
-        try { void launcherBrowserBridge().invoke({ operation: "bounds", bounds }).catch(() => {}); } catch { /* unavailable host */ }
-      });
+      if (document.visibilityState === "hidden") publish();
+      else frame = requestAnimationFrame(publish);
     };
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
     // Native views sit above the DOM. Hide them while VUI portal overlays are open.
