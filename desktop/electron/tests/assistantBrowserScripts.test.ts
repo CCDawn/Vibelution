@@ -17,7 +17,7 @@ function fixture() {
   const field = new Input("text"); field.value = "private input value"; field.attrs["aria-label"] = "Search";
   const button = new Element("BUTTON"); button.innerText = "Search now";
   const nodes = [password, field, button];
-  const doc: any = { body: { innerText: "Visible page text" }, activeElement: null, querySelectorAll: () => nodes, elementFromPoint: () => button };
+  const doc: any = { documentElement: { clientWidth: 600, clientHeight: 400 }, body: { innerText: "Visible page text" }, activeElement: null, querySelectorAll: () => nodes, elementFromPoint: () => button };
   const context = createContext({ Event: class { constructor(..._args: unknown[]) {} }, document: doc, innerWidth: 600, innerHeight: 400, HTMLElement: Element, HTMLAnchorElement: Anchor, HTMLInputElement: Input, HTMLTextAreaElement: Textarea,
     getComputedStyle: () => ({ visibility: "visible", display: "block", opacity: "1" }) });
   const run = (script: string) => runInNewContext(script, context);
@@ -28,6 +28,37 @@ describe("isolated browser page scripts", () => {
     const f = fixture(); f.run(snapshotScript("old")); f.setViewport(width, height);
     expect(f.run(snapshotScript("new"))).toEqual({ viewportUnavailable: true });
     expect(f.run(targetScript("2", "preview", "", "old"))).toBeNull();
+  });
+  it("uses the visible part of a partially clipped input and still rejects an obscuring overlay", () => {
+    const f = fixture(); f.setViewport(430, 576); f.doc.documentElement = { clientWidth: 415, clientHeight: 561 };
+    f.field.getBoundingClientRect = () => ({ left: 360.57, right: 669.43, top: 93, bottom: 129, width: 308.86, height: 36 });
+    let hit: number[] = [];
+    f.doc.elementFromPoint = (x: number, y: number) => { hit = [x, y]; return x >= 360.57 && x < 415 && y >= 93 && y < 129 ? f.field : null; };
+    f.run(snapshotScript("partial"));
+    expect(f.run(targetScript("1", "preview", "", "partial"))).toEqual({ role: "textbox", name: "Search" });
+    expect(hit[0]).toBeCloseTo((360.57 + 415) / 2); expect(hit[1]).toBe(111);
+    f.doc.elementFromPoint = () => ({});
+    expect(f.run(targetScript("1", "preview", "", "partial"))).toBeNull();
+  });
+  it("uses the vertical intersection and rechecks visibility if the viewport shrinks", () => {
+    const f = fixture(); f.setViewport(430, 576); f.doc.documentElement = { clientWidth: 415, clientHeight: 561 };
+    f.field.getBoundingClientRect = () => ({ left: 20, right: 120, top: 550, bottom: 700, width: 100, height: 150 });
+    let hit: number[] = [];
+    f.doc.elementFromPoint = (x: number, y: number) => { hit = [x, y]; return y >= 550 && y < 561 ? f.field : null; };
+    f.run(snapshotScript("vertical"));
+    expect(f.run(targetScript("1", "preview", "", "vertical"))).toEqual({ role: "textbox", name: "Search" });
+    expect(hit).toEqual([70, 555.5]);
+    f.doc.documentElement.clientHeight = 540;
+    expect(f.run(targetScript("1", "preview", "", "vertical"))).toBeNull();
+  });
+  it("excludes controls in the scrollbar region and rejects an empty content viewport", () => {
+    const f = fixture(); f.setViewport(430, 576); f.doc.documentElement = { clientWidth: 415, clientHeight: 561 };
+    f.field.getBoundingClientRect = () => ({ left: 420, right: 429, top: 93, bottom: 129, width: 9, height: 36 });
+    const snap = f.run(snapshotScript("scrollbar"));
+    expect(snap.elements.map((e: { name: string }) => e.name)).not.toContain("Search");
+    f.doc.documentElement.clientWidth = 0;
+    expect(f.run(snapshotScript("empty-content"))).toEqual({ viewportUnavailable: true });
+    expect(f.run(targetScript("1", "preview", "", "scrollbar"))).toBeNull();
   });
   it("allows an empty element list when the viewport has size", () => {
     const f = fixture(); f.nodes.length = 0;
