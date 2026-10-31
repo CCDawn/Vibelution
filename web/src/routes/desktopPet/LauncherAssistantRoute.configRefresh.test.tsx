@@ -34,10 +34,12 @@ let nativeConfig: { language: "zh" | "en"; modelLabels: Record<string, string> }
 let nativeDetail: Record<string, unknown>;
 let invoke: ReturnType<typeof vi.fn>;
 const modelConfigKey = [launcherConversationApi.cacheKey, "config"];
+const originalUrl = window.location.href;
 beforeAll(() => vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true));
 afterEach(async () => {
   await act(async () => root?.unmount()); root = undefined;
   client?.clear(); container?.remove(); conversation = undefined;
+  window.location.href = originalUrl;
   vi.clearAllMocks(); vi.unstubAllGlobals();
 });
 
@@ -52,6 +54,7 @@ function calls(operation: string) {
   return invoke.mock.calls.filter(([request]) => request.operation === operation).length;
 }
 async function renderAssistant() {
+  window.location.href = "vibelution-launcher://launcher/launcher/assistant";
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   nativeConfig = { language: "zh", modelLabels: { model: "旧模型名称" } };
   nativeDetail = { id: "s", agentId: "a", status: "ready", messages: [] };

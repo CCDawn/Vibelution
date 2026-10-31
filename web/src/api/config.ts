@@ -57,9 +57,13 @@ export function fetchPublicConfig(options?: {
 export function fetchConfigBootstrap(options?: {
   signal?: AbortSignal;
 }): Promise<ConfigBootstrap> {
-  // Launcher pages have no workbench HTTP origin. Workbench pages may also
-  // expose the assistant bridge, but their config belongs to the workbench.
-  if (typeof window !== "undefined" && window.location.protocol === "vibelution-launcher:") {
+  // The packaged Launcher has no workbench HTTP origin. Its development URL
+  // can use HTTP, where only Launcher routes with a bridge use native config.
+  const location = typeof window === "undefined" ? undefined : window.location;
+  const launcherHttpRoute = (location?.protocol === "http:" || location?.protocol === "https:")
+    && (location.pathname === "/launcher" || location.pathname.startsWith("/launcher/"))
+    && "vibelutionLauncherAssistant" in globalThis;
+  if (location?.protocol === "vibelution-launcher:" || launcherHttpRoute) {
     return launcherConversationApi.fetchConfigBootstrap(options);
   }
   return fetchJson<ConfigBootstrap>("/api/config/bootstrap", {

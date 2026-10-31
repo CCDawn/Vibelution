@@ -36,6 +36,7 @@ let failingAvatar = false;
 let navigationOwned = true;
 let presentation: HTMLStyleElement | undefined;
 let fetch: ReturnType<typeof vi.fn>;
+const originalUrl = window.location.href;
 const image = (dataBase64: string) => ({ contentType: "image/png", dataBase64, sha256: "a".repeat(64) });
 const asset = (kind: "avatar" | "background", dataBase64: string | null, readability = "standard") => ({
   schemaVersion: 1, kind, image: dataBase64 === null ? null : image(dataBase64), readability,
@@ -45,6 +46,7 @@ afterEach(async () => {
   client?.clear(); container?.remove(); conversation = undefined;
   presentation?.remove(); presentation = undefined;
   delete document.documentElement.dataset.theme;
+  window.location.href = originalUrl;
   vi.unstubAllGlobals(); vi.clearAllMocks(); vi.restoreAllMocks();
 });
 async function settle() {
@@ -57,6 +59,7 @@ async function showPage(show: boolean) {
 }
 function assetReads() { return invoke.mock.calls.filter(([request]) => request.operation === "operatorAsset").length; }
 async function renderAssistant(options: { capability?: boolean; failAvatar?: boolean; approval?: Record<string, unknown>; dispatches?: Array<Record<string, unknown>>; boundPreview?: Record<string, unknown>; declineFailure?: boolean; language?: "zh" | "en"; patrol?: { state: "ready" | "unavailable"; deliveryStates: Record<string, number> }; startHidden?: boolean; legacyToolbar?: boolean } = {}) {
+  window.location.href = "vibelution-launcher://launcher/launcher/assistant";
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   failingAvatar = Boolean(options.failAvatar);
   navigationOwned = !options.legacyToolbar;
