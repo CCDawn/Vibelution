@@ -329,6 +329,43 @@ describe("Launcher operator image consumption", () => {
     expect(invoke.mock.calls.some(([request]) => request.operation === "resolveApproval" && request.decision === "accept")).toBe(true);
   });
 
+  it("shows the complete recovery request and allows its native approval", async () => {
+    const suffix = "a".repeat(40);
+    const targets = { sourceProjectId: "source-1", instanceId: "instance-1", assistantAgentId: "agent-1", operationId: `initial-${suffix}`,
+      syncId: `affairs-${suffix}`, sourceSnapshotDigest: "b".repeat(64), previousAuthorizationHead: "c".repeat(64) };
+    await renderAssistant({ approval: { requestId: "r", sessionId: "s", turnId: "t", agentId: "a", toolName: "personal_assistant_manage_tool",
+      status: "pending", risk: "high", availableDecisions: ["accept", "decline"], argumentSummary: { assistantAction: "reminder_handoff_recover",
+        assistantOperationDescription: "重新审批当前来源快照并继续原编号交接；原记录保留。旧进程实际权限与发送者停止尚未证明；不重放已开始或未知的写入。", assistantTargets: targets } } });
+    const preview = container.querySelector("pre");
+    for (const value of Object.values(targets)) expect(preview?.textContent).toContain(value);
+    expect(preview?.textContent).toContain("旧进程实际权限与发送者停止尚未证明");
+    expect(preview?.textContent).toContain("不重放已开始或未知的写入");
+    expect(preview?.tabIndex).toBe(0);
+    expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"))?.disabled).toBe(false);
+    await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true }))); await settle();
+    expect(invoke.mock.calls.some(([request]) => request.operation === "resolveApproval" && request.decision === "accept")).toBe(true);
+  });
+
+  it.each(["missing", "extra", "forged", "truncated", "description"])("blocks recovery approval and Y for %s details", async invalid => {
+    const suffix = "a".repeat(40);
+    const targets: Record<string, unknown> = { sourceProjectId: "source-1", instanceId: "instance-1", assistantAgentId: "agent-1", operationId: `initial-${suffix}`,
+      syncId: `affairs-${suffix}`, sourceSnapshotDigest: "b".repeat(64), previousAuthorizationHead: "c".repeat(64) };
+    if (invalid === "missing") delete targets.instanceId;
+    if (invalid === "extra") targets.extra = "forged";
+    if (invalid === "forged") targets.syncId = `affairs-${"d".repeat(40)}`;
+    if (invalid === "truncated") targets.sourceSnapshotDigest = "b".repeat(63);
+    await renderAssistant({ approval: { requestId: "r", sessionId: "s", turnId: "t", agentId: "a", toolName: "personal_assistant_manage_tool",
+      status: "pending", risk: "high", availableDecisions: ["accept", "decline"], argumentSummary: { assistantAction: "reminder_handoff_recover",
+        assistantOperationDescription: invalid === "description" ? undefined : "重新审批当前来源快照并继续原编号交接；原记录保留。旧进程实际权限与发送者停止尚未证明；不重放已开始或未知的写入。", assistantTargets: targets } } });
+    expect(container.textContent).toContain("参数无法核对");
+    const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"));
+    const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("否"));
+    expect(approve?.disabled).toBe(true);
+    expect(reject?.disabled).toBe(false);
+    await act(async () => { approve?.click(); window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true })); });
+    expect(invoke.mock.calls.some(([request]) => request.operation === "resolveApproval" && request.decision === "accept")).toBe(false);
+  });
+
   it("blocks button and keyboard approval when the write dispatch task is missing", async () => {
     await renderAssistant({ approval: { requestId: "r", sessionId: "s", turnId: "t", agentId: "a",
       toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],

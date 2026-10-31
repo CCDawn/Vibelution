@@ -30,7 +30,7 @@ import {
 import { DEFAULT_PET_PREFERENCES } from "./desktopPetPreferences";
 import { ChatToolApprovalDialog } from "../chat/ChatToolApprovalDialog";
 import { toolApprovalRiskLabel } from "../chat/toolApprovalLabels";
-import { authorizationUpgradePreviewIsValid, dispatchWritePreviewIsValid, launcherAgentCreatePreviewIsValid, operatorImageUploadPreviewIsValid, projectLifecyclePreviewIsValid, managementApprovalActionIsKnown, toolApprovalActionPreview, toolApprovalDisplayName } from "../chat/toolApprovalPreview";
+import { authorizationUpgradePreviewIsValid, dispatchWritePreviewIsValid, launcherAgentCreatePreviewIsValid, operatorImageUploadPreviewIsValid, projectLifecyclePreviewIsValid, recoveryPreviewIsValid, managementApprovalActionIsKnown, toolApprovalActionPreview, toolApprovalDisplayName } from "../chat/toolApprovalPreview";
 import { useLauncherThemeControl } from "./useLauncherThemeControl";
 import { readStoredWorkbenchTheme, requestWorkbenchTheme, subscribeWorkbenchThemeSync, useAuthorityTheme } from "../../app/themePreference";
 import { PersonalAssistantComputerPanel } from "../personalAssistant/PersonalAssistantComputerPanel";
@@ -68,7 +68,8 @@ function approvalAcceptDisabled(request: SessionToolApprovalRequest): boolean {
     || summary?.assistantAction === "authorization_upgrade" && !authorizationUpgradePreviewIsValid(summary)
     || summary?.assistantAction === "dispatch_write" && !dispatchWritePreviewIsValid(summary)
     || summary?.assistantAction === "project_lifecycle" && !projectLifecyclePreviewIsValid(summary)
-    || summary?.assistantAction === "operator_image_upload" && !operatorImageUploadPreviewIsValid(summary));
+    || summary?.assistantAction === "operator_image_upload" && !operatorImageUploadPreviewIsValid(summary)
+    || summary?.assistantAction === "reminder_handoff_recover" && !recoveryPreviewIsValid(summary));
 }
 
 // Decode only JSON string tokens: parsing and reserializing the whole object
@@ -844,7 +845,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       scopeLabel={lang === "zh" ? "仅本次调用" : "This call only"}
       toolLabels={[{ id: approval.toolName, label: toolApprovalDisplayName(approval.toolName, lang) }]}
       toolName={approval.toolName} actionPreview={toolApprovalActionPreview(approval.argumentSummary, approval.toolName, lang)}
-      fullActionPreview={approval.toolName === "personal_assistant_manage_tool" && ["agent_create", "authorization_upgrade", "dispatch_write", "project_lifecycle", "operator_image_upload"].includes(String(approval.argumentSummary?.assistantAction))}
+      fullActionPreview={approval.toolName === "personal_assistant_manage_tool" && ["agent_create", "authorization_upgrade", "dispatch_write", "project_lifecycle", "operator_image_upload", "reminder_handoff_recover"].includes(String(approval.argumentSummary?.assistantAction))}
       approveDisabled={approvalAcceptDisabled(approval)}
       onApprove={() => void decide(approval, "accept")} onReject={() => void decide(approval, "decline")} /> : null}
     {dispatchApproval ? <ChatToolApprovalDialog lang={lang} variant="inline"

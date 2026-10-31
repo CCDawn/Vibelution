@@ -211,7 +211,7 @@ class HistoryHost:
                 self._owner.suspend()
             return result
 
-    def prepare_initial_source(self, project_id, preview_id, revision, turn_id, operation_id, category, publication, original_sync_id=None, *, retry_busy=False):
+    def prepare_initial_source(self, project_id, preview_id, revision, turn_id, operation_id, category, publication, original_sync_id=None, *, retry_busy=False, reauthorize=False):
         """Publish one intent under the live native Turn and source guards."""
         from . import native
         from .initial_migration_binding import authority_identity, source_identity, target_identity, publish_initial_intent
@@ -222,7 +222,8 @@ class HistoryHost:
         from core.web.services.session import directory_runtime
         from core.web.services.personal_assistant_project.windows_read import lock_source_directory
 
-        if (category not in ("personal", "knowledge", "knowledge_sync", "knowledge_recovery", "reminder_handoff")
+        if (type(reauthorize) is not bool or reauthorize and category != "reminder_handoff"
+                or category not in ("personal", "knowledge", "knowledge_sync", "knowledge_recovery", "reminder_handoff")
                 or category == "knowledge_recovery" and (type(original_sync_id) is not str
                     or re.fullmatch(r"ksync-[a-f0-9]{40}", original_sync_id) is None)
                 or category != "knowledge_recovery" and original_sync_id is not None
@@ -252,6 +253,8 @@ class HistoryHost:
             if not native._LOCK.acquire(blocking=False):
                 raise InitialPrepareBusy("initial_migration_busy")
             try:
+                recovery_approval = (self._preview.consume_reminder_recovery_approval(
+                    project_id, preview_id, revision, turn_id) if reauthorize else None)
                 project, workspace, paths, source_agent, verify, snapshots = self._preview.consume_for_import(
                     preview_id, project_id, revision, turn_id, purpose="knowledge" if category in ("knowledge_sync", "knowledge_recovery") else "personal" if category == "reminder_handoff" else category)
                 root = check_path(self._owner._profile).resolve()
@@ -268,6 +271,8 @@ class HistoryHost:
                     verify()
                     source_digest, project_identity, workspace_identity = source_identity(scope, project, workspace)
                     registry_digest = authority_identity(snapshots)
+                    if recovery_approval is not None and recovery_approval["authorityDigest"] != registry_digest:
+                        raise MigrationIOError("reminder_handoff_approval_changed")
                     target_digest, target_directory = target_identity(root, native._AGENT_ID, native._SESSION_ID)
                     verify()
                     binding = {"schemaVersion": 1, "registeredProjectId": project_id, "sourceScope": scope,
@@ -292,7 +297,9 @@ class HistoryHost:
                     if category == "reminder_handoff":
                         from .reminder_handoff_intent import publish_handoff_intent, sync_id
                         binding.update(syncId=sync_id(project_id), baselineId=None, baselineState="unknown")
-                        return publish_handoff_intent(root, binding, publication, recheck)
+                        return publish_handoff_intent(root, binding, publication, recheck,
+                            **({"expected_head": recovery_approval["head"], "owner_check": self._initial_owner_check}
+                               if recovery_approval is not None else {}))
                     return publish_initial_intent(root, binding, publication, recheck,
                                                   owner_check=self._initial_owner_check)
             finally:

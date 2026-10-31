@@ -800,6 +800,13 @@ def authorize_tool_execution(
         )
     runtime_turn_id = _coerce_text(runtime.get("turnId") or runtime.get("runId")).strip()
     normalized_tool = _coerce_text(tool_name).strip()
+    reminder_recovery = False
+    if normalized_tool == "personal_assistant_manage_tool" and (tool_args or {}).get("action") == "reminder_handoff_recover":
+        from core.infrastructure.native_runtime import is_launcher_assistant_process
+        reminder_recovery = is_launcher_assistant_process()
+        if reminder_recovery:
+            from core.assistant_runtime.actions import reset_reminder_recovery_call
+            reset_reminder_recovery_call()
     external_task_id = ""
     from core.web.services.external_agent.approval_binding import (
         ApprovalBindingError, external_session_task, freeze_arguments, registered_external_task,
@@ -1008,6 +1015,10 @@ def authorize_tool_execution(
         approval_requirement = None
     elif collaboration is not None and collaboration.decision == "ask" and approval_requirement is None:
         approval_requirement = ("always", "low")
+    if reminder_recovery:
+        # Collaboration may permit ordinary calls automatically; source
+        # reauthorization still requires this exact native operator decision.
+        approval_requirement = ("always", "destructive")
     if approval_requirement is not None:
         from core.web.services.session.tool_approvals import (
             ToolApprovalError,

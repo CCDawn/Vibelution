@@ -86,6 +86,24 @@ export function dispatchWritePreviewIsValid(summary: Record<string, unknown> | n
     && !/[\p{Cc}\p{Cf}\p{Cs}]/u.test(task.replace(/[\n\t]/g, ""));
 }
 
+/** Recovery approval binds the complete source and original authorization. */
+export function recoveryPreviewIsValid(summary: Record<string, unknown> | null | undefined): boolean {
+  if (!summary || summary.assistantAction !== "reminder_handoff_recover" || summary.assistantArgumentsInvalid || summary.assistantDetailsOmitted
+    || summary.assistantOperationDescription !== "重新审批当前来源快照并继续原编号交接；原记录保留。旧进程实际权限与发送者停止尚未证明；不重放已开始或未知的写入。") return false;
+  const targets = summary.assistantTargets;
+  if (!targets || typeof targets !== "object" || Array.isArray(targets)) return false;
+  const values = targets as Record<string, unknown>;
+  const keys = ["sourceProjectId", "instanceId", "assistantAgentId", "operationId", "syncId", "sourceSnapshotDigest", "previousAuthorizationHead"];
+  if (Object.keys(values).length !== keys.length || !keys.every(key => Object.hasOwn(values, key))) return false;
+  const opaque = (value: unknown) => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}(?![\s\S])/.test(value);
+  const digest = (value: unknown) => typeof value === "string" && /^[0-9a-f]{64}(?![\s\S])/.test(value);
+  const operation = values.operationId;
+  return opaque(values.sourceProjectId) && opaque(values.instanceId) && opaque(values.assistantAgentId)
+    && typeof operation === "string" && /^initial-[0-9a-f]{40}(?![\s\S])/.test(operation)
+    && values.syncId === `affairs-${operation.slice("initial-".length)}`
+    && digest(values.sourceSnapshotDigest) && digest(values.previousAuthorizationHead);
+}
+
 const MANAGE_ACTIONS: Record<string, [string, string]> = {
       operator_image_upload: ["上传图片", "Upload image"],
       project_lifecycle: ["管理项目", "Manage project"],
@@ -122,6 +140,7 @@ const MANAGE_ACTIONS: Record<string, [string, string]> = {
       knowledge_sync_queue: ["同步旧助理知识", "Sync previous assistant knowledge"],
       knowledge_sync_recover: ["恢复知识同步", "Recover knowledge sync"],
       reminder_handoff_queue: ["交接旧助理提醒", "Transfer previous assistant reminders"],
+      reminder_handoff_recover: ["重新授权旧提醒交接", "Reauthorize previous reminder handoff"],
 };
 
 export function managementApprovalActionIsKnown(value: unknown): boolean {
@@ -141,6 +160,23 @@ export function toolApprovalActionPreview(
       return `${title}\n${lang === "zh" ? "参数无法核对，请拒绝并重新发起。" : "Arguments cannot be verified. Decline and request again."}`;
     }
     const targets = summary.assistantTargets;
+    if (action === "reminder_handoff_recover") {
+      if (!recoveryPreviewIsValid(summary)) {
+        return `${title}\n${lang === "zh" ? "参数无法核对，请拒绝并重新发起。" : "Arguments cannot be verified. Decline and request again."}`;
+      }
+      const identity = targets as Record<string, string>;
+      return [title,
+        lang === "zh" ? "重新审批当前来源快照并继续原编号交接；原记录保留。" : "Reapprove the current source snapshot and continue the original handoff; the original record is retained.",
+        `${lang === "zh" ? "来源项目" : "Source project"}: ${identity.sourceProjectId}`,
+        `${lang === "zh" ? "来源实例" : "Source instance"}: ${identity.instanceId}`,
+        `${lang === "zh" ? "来源助理" : "Source assistant"}: ${identity.assistantAgentId}`,
+        `${lang === "zh" ? "原操作 ID" : "Original operation ID"}: ${identity.operationId}`,
+        `${lang === "zh" ? "原同步 ID" : "Original sync ID"}: ${identity.syncId}`,
+        `${lang === "zh" ? "当前来源快照摘要" : "Current source snapshot digest"}: ${identity.sourceSnapshotDigest}`,
+        `${lang === "zh" ? "原授权 head" : "Previous authorization head"}: ${identity.previousAuthorizationHead}`,
+        lang === "zh" ? "旧进程实际权限与发送者停止尚未证明；不重放已开始或未知的写入。"
+          : "The old process's effective permissions and sender shutdown have not been proven; started or unknown writes will not be replayed."].join("\n");
+    }
     if (action === "agent_create" && (summary.assistantCreatePreset !== undefined || summary.assistantOperationDescription === "新 Agent 默认没有工具和读写范围，不能保证读取或修改项目；派遣写任务不会自动增加工具权限。")) {
       if (!launcherAgentCreatePreviewIsValid(summary)) {
         return `${title}\n${lang === "zh" ? "参数无法核对，请拒绝并重新发起。" : "Arguments cannot be verified. Decline and request again."}`;

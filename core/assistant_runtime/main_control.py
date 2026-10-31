@@ -91,8 +91,10 @@ def _request(action, request):
         return dict(request)
     if action == "initial_migration_queue":
         recovery = request.get("category") == "knowledge_recovery"
-        if (set(request) != ({"projectId", "previewId", "turnId", "category", "operationId", "originalSyncId"} if recovery
-                             else {"projectId", "previewId", "turnId", "category", "operationId"})
+        reminder_recovery = "reauthorize" in request
+        if (set(request) != (({"projectId", "previewId", "turnId", "category", "operationId", "originalSyncId"} if recovery
+                             else {"projectId", "previewId", "turnId", "category", "operationId"}) | ({"reauthorize"} if reminder_recovery else set()))
+                or reminder_recovery and (request["reauthorize"] is not True or request.get("category") != "reminder_handoff")
                 or not _opaque(request.get("projectId"), 160) or not _opaque(request.get("turnId"), 160)
                 or type(request.get("previewId")) is not str or re.fullmatch(r"[0-9a-f]{64}", request["previewId"]) is None
                 or type(request.get("category")) is not str or request["category"] not in {"personal", "knowledge", "knowledge_sync", "knowledge_recovery", "reminder_handoff"}

@@ -15,6 +15,13 @@ describe("generation-scoped main control transport", () => {
     const row = { deliveryId: "a".repeat(32), action: "initial_migration_queue", projectId,
       previewId: "b".repeat(64), turnId: "turn-1", category: "reminder_handoff", operationId, timeoutMs: 10000 };
     const parsed = parseMainControlClaim({ schemaVersion: 1, request: row })!;
+    expect(parseMainControlClaim({ schemaVersion: 1, request: { ...row, reauthorize: true } }))
+      .toEqual({ ...row, reauthorize: true });
+    for (const reauthorize of [false, null, "true", 1])
+      expect(() => parseMainControlClaim({ schemaVersion: 1, request: { ...row, reauthorize } })).toThrow();
+    const personal = { ...row, category: "personal", reauthorize: true,
+      operationId: `initial-${createHash("sha256").update(`${projectId}:personal`).digest("hex").slice(0, 40)}` };
+    expect(() => parseMainControlClaim({ schemaVersion: 1, request: personal })).toThrow();
     const queued = { schemaVersion: 1, projectId, previewId: row.previewId, category: row.category, operationId,
       state: "queued", code: "queued", readyForCutover: false };
     expect(projectMainControlResult(parsed, queued)).toEqual(queued);

@@ -3,9 +3,10 @@ import hashlib
 import json
 import re
 import secrets
+from itertools import islice
 from pathlib import Path
 
-from .migration_io import MigrationIOError, migration_target_lock, path_identity, pinned_target_directory, publish_directory, read_stable_file, strict_json
+from .migration_io import MigrationIOError, check_path, migration_target_lock, path_identity, pinned_target_directory, publish_directory, read_stable_file, strict_json
 from .migration_history import _write_new
 
 
@@ -96,25 +97,148 @@ def _validate(value):
     return value
 
 
-def read_handoff_intent(root, project_id):
+def _digest(value):
+    return hashlib.sha256(json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("ascii")).hexdigest()
+
+
+def _head(root, name, original, *, owned_pending=None):
+    """Read one complete, unambiguous immutable authorization chain under the intent lock."""
+    refreshes = Path(root) / "reminder_handoff_intent_refreshes"
+    chain = refreshes / name
+    head = _digest(original)
+    if refreshes.exists() or refreshes.is_symlink():
+        check_path(refreshes)
+        if not refreshes.is_dir():
+            raise MigrationIOError("reminder_handoff_invalid")
+    if not chain.exists() and not chain.is_symlink():
+        return original, head
+    links = {}
+    with pinned_target_directory(chain):
+        for index, entry in enumerate(chain.iterdir()):
+            if owned_pending is not None and entry == owned_pending[0]:
+                _, directory_identity, file_identity, raw = owned_pending
+                with pinned_target_directory(entry):
+                    if (path_identity(entry) != directory_identity
+                            or {p.name for p in islice(entry.iterdir(), 2)} != {"intent.json"}
+                            or path_identity(entry / "intent.json") != file_identity
+                            or read_stable_file(entry / "intent.json", 32768).raw != raw):
+                        raise MigrationIOError("reminder_handoff_invalid")
+                continue
+            if index >= 128 or re.fullmatch(r"[a-f0-9]{64}", entry.name) is None:
+                raise MigrationIOError("reminder_handoff_invalid")
+            with pinned_target_directory(entry):
+                if {p.name for p in islice(entry.iterdir(), 2)} != {"intent.json"}:
+                    raise MigrationIOError("reminder_handoff_invalid")
+                record = strict_json(read_stable_file(entry / "intent.json", 32768).raw)
+            if (type(record) is not dict or set(record) != {"schemaVersion", "parentSha256", "binding"}
+                    or type(record["schemaVersion"]) is not int or record["schemaVersion"] != 1
+                    or type(record["parentSha256"]) is not str
+                    or re.fullmatch(r"[a-f0-9]{64}", record["parentSha256"]) is None
+                    or _digest(record) != entry.name):
+                raise MigrationIOError("reminder_handoff_invalid")
+            binding = _validate(record["binding"])
+            fixed = set(original) - {"turnId", "revision", "registryDigest"}
+            if (any(binding[key] != original[key] for key in fixed)
+                    or record["parentSha256"] in links):
+                raise MigrationIOError("reminder_handoff_invalid")
+            links[record["parentSha256"]] = (entry.name, binding)
+    seen = set()
+    current = original
+    while head in links:
+        if head in seen:
+            raise MigrationIOError("reminder_handoff_invalid")
+        seen.add(head)
+        next_head, successor = links[head]
+        if successor["registryDigest"] == current["registryDigest"]:
+            raise MigrationIOError("reminder_handoff_invalid")
+        head, current = next_head, successor
+    if len(seen) != len(links):
+        raise MigrationIOError("reminder_handoff_invalid")
+    return current, head
+
+
+def _read_authorization(root, directory, project_id, *, owned_pending=None):
+    name = hashlib.sha256(handoff_id(project_id).encode()).hexdigest()
+    entry = directory / name
+    if not entry.exists() and not entry.is_symlink():
+        refreshes = Path(root) / "reminder_handoff_intent_refreshes"
+        if refreshes.exists() or refreshes.is_symlink():
+            check_path(refreshes)
+            if not refreshes.is_dir():
+                raise MigrationIOError("reminder_handoff_invalid")
+        chain = refreshes / name
+        if chain.exists() or chain.is_symlink():
+            raise MigrationIOError("reminder_handoff_invalid")
+        return None, None
+    with pinned_target_directory(entry):
+        if {p.name for p in islice(entry.iterdir(), 2)} != {"intent.json"}:
+            raise MigrationIOError("reminder_handoff_invalid")
+        row = _validate(strict_json(read_stable_file(entry / "intent.json", 16384).raw))
+        if row["registeredProjectId"] != project_id:
+            raise MigrationIOError("reminder_handoff_invalid")
+    return _head(root, name, row, owned_pending=owned_pending)
+
+
+def read_handoff_authorization(root, project_id):
+    """Return the effective authorization and its chain digest, or (None, None)."""
     directory = Path(root) / "reminder_handoff_intents"
     if not directory.exists() and not directory.is_symlink():
-        return None
-    name = hashlib.sha256(handoff_id(project_id).encode()).hexdigest()
+        refreshes = Path(root) / "reminder_handoff_intent_refreshes"
+        if refreshes.exists() or refreshes.is_symlink():
+            raise MigrationIOError("reminder_handoff_invalid")
+        return None, None
     with pinned_target_directory(directory), migration_target_lock(directory):
-        entry = directory / name
-        if not entry.exists() and not entry.is_symlink():
-            return None
-        with pinned_target_directory(entry):
-            if {p.name for p in entry.iterdir()} != {"intent.json"}:
-                raise MigrationIOError("reminder_handoff_invalid")
-            row = _validate(strict_json(read_stable_file(entry / "intent.json", 16384).raw))
-            if row["registeredProjectId"] != project_id:
-                raise MigrationIOError("reminder_handoff_invalid")
-            return row
+        for index, entry in enumerate(directory.iterdir()):
+            if index >= 512 or entry.name.startswith(".pending-"):
+                raise MigrationIOError("reminder_handoff_publication_unknown")
+        return _read_authorization(root, directory, project_id)
 
 
-def publish_handoff_intent(root, binding, token, verify):
+def read_handoff_intent(root, project_id):
+    return read_handoff_authorization(root, project_id)[0]
+
+
+def _unstarted(root, binding, owner_check):
+    """Fail closed on any known old execution artifact while profile ownership is held."""
+    if not callable(owner_check) or owner_check() is not True:
+        raise MigrationIOError("reminder_handoff_owner_unavailable")
+    root = Path(root)
+    digest = hashlib.sha256(binding["syncId"].encode()).hexdigest()
+    artifacts = (root / "reminder_offline_operations" / (digest + ".intent.json"),
+                 root / "reminder_offline_operations" / (digest + ".sync-intent.json"),
+                 root / "initial_migration_claims" / binding["operationId"],
+                 root / "history_sources" / "migrations" / binding["syncId"],
+                 root / "history_sources" / "migrations" / (".pending-" + binding["syncId"]),
+                 root / "affairs_conflicts" / (digest + ".json"),
+                 root / "affairs_migrations" / (digest + ".json"),
+                 root / "affairs_sync_receipts" / (digest + ".json"))
+    for path in artifacts:
+        parent = path.parent
+        # Even a broken/replaced intermediate directory must not look absent.
+        while parent != root and not parent.exists() and not parent.is_symlink():
+            parent = parent.parent
+        check_path(parent)
+        if not parent.is_dir():
+            raise MigrationIOError("reminder_handoff_started_unknown")
+        if path.exists() or path.is_symlink():
+            raise MigrationIOError("reminder_handoff_started_unknown")
+    preparations = root / "reminder_handoff_preparations"
+    if preparations.exists() or preparations.is_symlink():
+        with pinned_target_directory(preparations):
+            if next(preparations.iterdir(), None) is not None:
+                raise MigrationIOError("reminder_handoff_started_unknown")
+    # The everyday reminder receipt database is shared and cannot be attributed
+    # to this sync by itself. It never proves sender quiescence or cutover.
+    prefix = ".initial-migration-models-v1-" + binding["operationId"] + "-"
+    with pinned_target_directory(root):
+        for index, entry in enumerate(root.iterdir()):
+            if index >= 4096 or entry.name.casefold().startswith(prefix.casefold()):
+                raise MigrationIOError("reminder_handoff_started_unknown")
+    if owner_check() is not True:
+        raise MigrationIOError("reminder_handoff_owner_unavailable")
+
+
+def publish_handoff_intent(root, binding, token, verify, *, expected_head=None, owner_check=None):
     binding = _validate(binding)
     if not callable(getattr(token, "publish", None)) or not callable(verify):
         raise MigrationIOError("reminder_handoff_invalid")
@@ -130,23 +254,52 @@ def publish_handoff_intent(root, binding, token, verify):
                 raise MigrationIOError("reminder_handoff_publication_unknown")
         final = directory / name
         if final.exists() or final.is_symlink():
-            raise MigrationIOError("reminder_handoff_already_registered")
+            previous, head = _read_authorization(root, directory, binding["registeredProjectId"])
+            fixed = set(previous) - {"turnId", "revision", "registryDigest"}
+            if (type(expected_head) is not str or expected_head != head
+                    or any(binding[key] != previous[key] for key in fixed)
+                    or binding["registryDigest"] == previous["registryDigest"]):
+                raise MigrationIOError("reminder_handoff_already_registered")
+            _unstarted(root, binding, owner_check)
+            record = {"schemaVersion": 1, "parentSha256": head, "binding": binding}
+            raw = json.dumps(record, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("ascii")
+            chain = Path(root) / "reminder_handoff_intent_refreshes" / name
+            with pinned_target_directory(chain, create=True):
+                if len(list(islice(chain.iterdir(), 128))) >= 128:
+                    raise MigrationIOError("reminder_handoff_invalid")
+                pending = chain / (".pending-" + secrets.token_hex(16))
+                def recheck(owned_pending):
+                    _unstarted(root, binding, owner_check)
+                    if _read_authorization(root, directory, binding["registeredProjectId"],
+                                           owned_pending=owned_pending) != (previous, head):
+                        raise MigrationIOError("reminder_handoff_invalid")
+                return _publish(pending, chain / _digest(record), raw, token, verify,
+                                recheck, binding)
+        if expected_head is not None:
+            raise MigrationIOError("reminder_handoff_invalid")
+        # An orphaned chain must never become authority for a newly created base.
+        _read_authorization(root, directory, binding["registeredProjectId"])
         pending = directory / (".pending-" + secrets.token_hex(16))
-        with pinned_target_directory(pending, create=True):
-            _write_new(pending / "intent.json", raw)
-            identity = path_identity(pending)
-            file_identity = path_identity(pending / "intent.json")
-        publication_started = False
-        def commit():
-            nonlocal publication_started
-            verify()
-            token.check()
-            publication_started = True
-            publish_directory(pending, final, identity)
-        try:
-            token.publish(commit)
-        except BaseException:
-            if not publication_started:
-                _remove_owned_pending(pending, identity, file_identity, raw)
-            raise
+        return _publish(pending, final, raw, token, verify, lambda _: None, binding)
+
+
+def _publish(pending, final, raw, token, verify, recheck, binding):
+    with pinned_target_directory(pending, create=True):
+        _write_new(pending / "intent.json", raw)
+        identity = path_identity(pending)
+        file_identity = path_identity(pending / "intent.json")
+    publication_started = False
+    def commit():
+        nonlocal publication_started
+        verify()
+        recheck((pending, identity, file_identity, raw))
+        token.check()
+        publication_started = True
+        publish_directory(pending, final, identity)
+    try:
+        token.publish(commit)
+    except BaseException:
+        if not publication_started:
+            _remove_owned_pending(pending, identity, file_identity, raw)
+        raise
     return binding

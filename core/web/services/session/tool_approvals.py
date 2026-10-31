@@ -388,6 +388,16 @@ def authorize_or_wait(
             raise ToolApprovalConflictError("external approval context is invalid") from exc
     normalized_approval = str(approval or "never").strip()
     normalized_risk = str(risk or "read").strip()
+    # This native-only source reauthorization requires an actual per-call
+    # operator decision. Other sessions and management actions retain policy.
+    reminder_recovery = False
+    if normalized_tool == "personal_assistant_manage_tool" and tool_args.get("action") == "reminder_handoff_recover":
+        from core.infrastructure.native_runtime import is_launcher_assistant_process
+        reminder_recovery = is_launcher_assistant_process()
+    if reminder_recovery:
+        from core.assistant_runtime.actions import reset_reminder_recovery_call
+        reset_reminder_recovery_call()
+        normalized_approval = "always"
     if normalized_approval == "never":
         return ToolApprovalOutcome(True, "approval_not_required")
     normalized_permission_preset = str(permission_preset or "").strip()
@@ -402,7 +412,7 @@ def authorize_or_wait(
     normalized_config_hash = _required_identity(config_hash, "configHash")
     if normalized_config_revision < 1:
         raise ToolApprovalError("Agent configRevision is required")
-    if normalized_permission_preset == "full_access":
+    if normalized_permission_preset == "full_access" and not reminder_recovery:
         return ToolApprovalOutcome(True, "full_access_auto_approved")
 
     args_hash = _arguments_hash(tool_args)
@@ -420,7 +430,7 @@ def authorize_or_wait(
     with _LOCK:
         # Assistant manage low-risk actions with an active delegation window
         # are executed directly; the tier table stays server-owned.
-        if _assistant_action_window_remaining_seconds(normalized_agent, normalized_tool, tool_args) > 0:
+        if not reminder_recovery and _assistant_action_window_remaining_seconds(normalized_agent, normalized_tool, tool_args) > 0:
             return ToolApprovalOutcome(True, "approved_for_action_window")
         if normalized_approval != "always":
             if grant_key in _SESSION_GRANTS:
@@ -460,7 +470,7 @@ def authorize_or_wait(
             ):
                 return ToolApprovalOutcome(True, "approved_for_agent")
 
-    if _can_auto_approve(
+    if not reminder_recovery and _can_auto_approve(
         permission_preset=normalized_permission_preset,
         tool_name=normalized_tool,
         tool_args=tool_args,
@@ -490,6 +500,15 @@ def authorize_or_wait(
         external_arguments_json=external_arguments_json or "",
         external_execution_arguments_json=external_execution_arguments_json or "",
     )
+    if reminder_recovery:
+        from core.assistant_runtime.actions import bind_reminder_recovery_request
+        try:
+            bind_reminder_recovery_request(request.public_projection(), dict(tool_args))
+        except (ValueError, TypeError, KeyError, RuntimeError):
+            with _LOCK:
+                if request.status == "pending":
+                    _resolve_request_locked(request, "cancel")
+            raise ToolApprovalConflictError("Reminder recovery approval binding unavailable") from None
     while not request.event.wait(0.05):
         if callable(cancel_checker):
             try:
@@ -543,6 +562,11 @@ def authorize_or_wait(
             )
 
     if request.status == "accepted":
+        if reminder_recovery:
+            try:
+                bind_reminder_recovery_request(request.public_projection(), dict(tool_args), accepted=True)
+            except (ValueError, TypeError, KeyError, RuntimeError):
+                raise ToolApprovalConflictError("Reminder recovery accepted preview changed") from None
         return ToolApprovalOutcome(True, "approved", request_id=request.request_id)
     if request.status == "accepted_for_session":
         return ToolApprovalOutcome(True, "approved_for_session", request_id=request.request_id)
@@ -1395,7 +1419,7 @@ def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
             return authorization_upgrade_approval_summary(values)
         except (ValueError, TypeError, KeyError, RuntimeError, RecursionError):
             return {"assistantAction": action, "assistantArgumentsInvalid": True}
-    if isinstance(action, str) and action in {"history_import", "affairs_sync", "episodic_sync", "initial_migration_queue", "knowledge_sync_queue", "knowledge_sync_recover", "reminder_handoff_queue"}:
+    if isinstance(action, str) and action in {"history_import", "affairs_sync", "episodic_sync", "initial_migration_queue", "knowledge_sync_queue", "knowledge_sync_recover", "reminder_handoff_queue", "reminder_handoff_recover"}:
         from core.infrastructure.native_runtime import is_launcher_assistant_process
         if not is_launcher_assistant_process():
             return {"assistantArgumentsInvalid": True}
@@ -1424,7 +1448,11 @@ def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
                         or re.fullmatch(r"[0-9a-f]{64}", values["review_token"]) is None)):
                 raise ValueError("invalid history import parameters")
             from core.assistant_runtime.actions import history_import_approval_summary
-            target = history_import_approval_summary(values["project_id"], values["preview_id"])
+            if action == "reminder_handoff_recover":
+                from core.assistant_runtime.actions import reminder_recovery_approval_summary
+                target = reminder_recovery_approval_summary(values["project_id"], values["preview_id"])
+            else:
+                target = history_import_approval_summary(values["project_id"], values["preview_id"])
             if action == "initial_migration_queue":
                 target["category"] = values["category"]
             if action == "knowledge_sync_recover":
@@ -1434,7 +1462,8 @@ def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
             if values.get("resolve_sync_id") is not None:
                 target["syncId"] = values["resolve_sync_id"]
             return {"assistantAction": action, "assistantTargets": target,
-                    "assistantOperationDescription": ("登记所选旧助理的提醒交接请求；等待来源、窗口和发送者安全证明，不会立即停止旧工作台或切换提醒。" if action == "reminder_handoff_queue"
+                    "assistantOperationDescription": ("重新审批当前来源快照并继续原编号交接；原记录保留。旧进程实际权限与发送者停止尚未证明；不重放已开始或未知的写入。" if action == "reminder_handoff_recover"
+                        else "登记所选旧助理的提醒交接请求；等待来源、窗口和发送者安全证明，不会立即停止旧工作台或切换提醒。" if action == "reminder_handoff_queue"
                         else "排队恢复原知识同步；只续做可证明未开始的项，不重放未知写入。" if action == "knowledge_sync_recover"
                         else "排队在下次启动时同步所选旧助理的私有知识；保留目标编辑，不冻结旧来源。" if action == "knowledge_sync_queue"
                         else "排队首次导入所选旧助理的事务和情景记忆。" if action == "initial_migration_queue" and values["category"] == "personal"
@@ -1754,6 +1783,11 @@ def grant_assistant_action_window(*, agent_id: str, action: str) -> float:
 
 
 def _available_decisions(request: _ApprovalRequest) -> list[str]:
+    if (request.tool_name == "personal_assistant_manage_tool"
+            and request.argument_summary.get("assistantAction") == "reminder_handoff_recover"):
+        from core.infrastructure.native_runtime import is_launcher_assistant_process
+        if is_launcher_assistant_process():
+            return ["accept", "decline", "cancel"]
     decisions = ["accept", "acceptForSession"]
     if not _tool_level_session_grant_ineligibility(request):
         decisions.append("acceptForSessionTool")

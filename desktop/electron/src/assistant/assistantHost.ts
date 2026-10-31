@@ -1096,6 +1096,7 @@ export class AssistantHost {
         || (request.category === "knowledge_sync") !== request.operationId.startsWith("ksync-")
         || (request.category === "knowledge_recovery") !== request.operationId.startsWith("krec-")
         || (request.category === "knowledge_recovery" ? typeof request.originalSyncId !== "string" || !/^ksync-[a-f0-9]{40}$/.test(request.originalSyncId) : request.originalSyncId !== undefined)
+        || request.reauthorize !== undefined && (request.reauthorize !== true || request.category !== "reminder_handoff")
         || !["personal", "knowledge", "knowledge_sync", "knowledge_recovery", "reminder_handoff"].includes(request.category) || !Number.isSafeInteger(revision) || revision < 0) {
       console.warn("ASSISTANT_INITIAL_PREPARE phase=admission code=request_invalid");
       throw new HostError("ASSISTANT_REQUEST_INVALID");
@@ -1108,6 +1109,7 @@ export class AssistantHost {
     }
     const body = { deliveryId: request.deliveryId, projectId: request.projectId, previewId: request.previewId,
       turnId: request.turnId, category: request.category, operationId: request.operationId, revision,
+      ...(request.reauthorize === true ? { reauthorize: true } : {}),
       ...(request.category === "knowledge_recovery" ? { originalSyncId: request.originalSyncId } : {}) };
     let phase: "rpc" | "validation" = "rpc";
     try {

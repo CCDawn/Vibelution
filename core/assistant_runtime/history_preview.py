@@ -61,6 +61,7 @@ class HistoryPreview:
         self._retirement_lock = Lock()
         self._retirements = {}
         self._previews = {}
+        self._reminder_approvals = {}
         self._stopped_turns = set()
         self._stop_capacity_exhausted = False
 
@@ -146,6 +147,7 @@ class HistoryPreview:
                     raise MigrationIOError("history_turn_stopped")
                 now = self._clock()
                 self._previews = {key: row for key, row in self._previews.items() if row[0] > now}
+                self._reminder_approvals = {key: value for key, value in self._reminder_approvals.items() if key in self._previews}
                 with self._retirement_lock:
                     for key, (expiry, flag) in list(self._retirements.items()):
                         if expiry <= now:
@@ -223,10 +225,98 @@ class HistoryPreview:
                 raise MigrationIOError("history_preview_changed") from None
             return row[3], row[4], row[5], row[2]["assistantAgentId"], row[1], row[7]
 
+    def reminder_recovery_approval(self, project_id, preview_id):
+        """Freeze the original head and current source shown by native approval.
+
+        This metadata does not itself authorize publication. Only prepare's
+        live native delivery may consume it, once, under the profile owner.
+        """
+        from . import native
+        from .initial_migration_binding import authority_identity, source_identity, target_identity
+        from .reminder_handoff_intent import read_handoff_authorization
+        from .reminder_offline_worker import _registry_digest_matches
+        from core.infrastructure.native_runtime import assistant_native_root
+
+        with self._lock:
+            public = self.verify_preview(preview_id)
+            row = self._previews[preview_id]
+            if public["projectId"] != project_id or not row[6] or not native._STARTED or native._OFFLINE_MIGRATION:
+                raise MigrationIOError("reminder_handoff_approval_unavailable")
+            root = assistant_native_root()
+            prior, head = read_handoff_authorization(root, project_id)
+            if prior is None:
+                raise MigrationIOError("reminder_handoff_approval_unavailable")
+            scope = {"projectId": row[5].project_id, "instanceId": row[5].instance_id, "agentId": public["assistantAgentId"]}
+            source, project, workspace = source_identity(scope, row[3], row[4])
+            target, directory = target_identity(root, native._AGENT_ID, native._SESSION_ID)
+            current_authority = authority_identity(row[7])
+            if (prior["sourceScope"] != scope or prior["sourceIdentityDigest"] != source
+                    or prior["projectDirectory"] != project or prior["workspaceDirectory"] != workspace
+                    or prior["targetIdentityDigest"] != target or prior["targetDirectory"] != directory
+                    or prior["targetAgentId"] != native._AGENT_ID or prior["targetSessionId"] != native._SESSION_ID
+                    or _registry_digest_matches(row[7], prior["registryDigest"])):
+                raise MigrationIOError("reminder_handoff_approval_unavailable")
+            shown = {key: public[key] for key in ("sourceProjectId", "instanceId", "assistantAgentId")}
+            shown.update(operationId=prior["operationId"], syncId=prior["syncId"],
+                         sourceSnapshotDigest=current_authority, previousAuthorizationHead=head)
+            captured = {"projectId": project_id, "turnId": row[6], "revision": self._dispatch._registry_revision,
+                        "head": head, "authorityDigest": current_authority, "shown": shown}
+            previous = self._reminder_approvals.setdefault(preview_id, captured)
+            if {key: previous[key] for key in captured} != captured:
+                raise MigrationIOError("reminder_handoff_approval_changed")
+            return dict(shown)
+
+    def consume_reminder_recovery_approval(self, project_id, preview_id, revision, turn_id):
+        with self._lock:
+            self.verify_preview(preview_id)
+            captured = self._reminder_approvals.pop(preview_id, None)
+            if (captured is None or captured["projectId"] != project_id or captured["turnId"] != turn_id
+                    or captured["revision"] != revision or not captured.get("acceptedRequestId")
+                    or captured.get("executingRequestId") != captured["acceptedRequestId"]
+                    or captured["acceptedRequestId"] != captured.get("request", {}).get("requestId")):
+                raise MigrationIOError("reminder_handoff_approval_unavailable")
+            return captured
+
+    def bind_reminder_recovery_request(self, preview_id, request):
+        """Called only by native authorization, after it creates the real card."""
+        from . import native
+        with self._lock:
+            self.verify_preview(preview_id)
+            captured = self._reminder_approvals.get(preview_id)
+            if (captured is None or request["sessionId"] != native._SESSION_ID
+                    or request["agentId"] != native._AGENT_ID or request["turnId"] != captured["turnId"]
+                    or request["toolName"] != "personal_assistant_manage_tool"
+                    or request["argumentSummary"].get("assistantAction") != "reminder_handoff_recover"
+                    or request["argumentSummary"].get("assistantTargets") != captured["shown"]):
+                raise MigrationIOError("reminder_handoff_approval_unavailable")
+            identity = {key: request[key] for key in ("requestId", "callId", "argumentsHash", "sessionId", "agentId", "turnId")}
+            if captured.setdefault("request", identity) != identity:
+                raise MigrationIOError("reminder_handoff_approval_changed")
+
+    def accept_reminder_recovery_request(self, preview_id, request):
+        """A native accepted decision, never just an approval summary."""
+        with self._lock:
+            self.bind_reminder_recovery_request(preview_id, request)
+            if request["status"] != "accepted" or request.get("decision") != "accept":
+                raise MigrationIOError("reminder_handoff_approval_unavailable")
+            self._reminder_approvals[preview_id]["acceptedRequestId"] = request["requestId"]
+
+    def arm_reminder_recovery_call(self, preview_id, proof):
+        """Match the executor's copied per-call authorization context, once."""
+        with self._lock:
+            self.verify_preview(preview_id)
+            captured = self._reminder_approvals.get(preview_id)
+            if (captured is None or captured.get("request") != proof
+                    or captured.get("acceptedRequestId") != proof.get("requestId")
+                    or captured.get("executingRequestId")):
+                raise MigrationIOError("reminder_handoff_approval_unavailable")
+            captured["executingRequestId"] = proof["requestId"]
+
     def discard(self, preview_id):
         self.retire(preview_id)
         with self._lock:
             self._previews.pop(preview_id, None)
+            self._reminder_approvals.pop(preview_id, None)
 
     def retire(self, preview_id):
         """Fence later uses without waiting for source verification to finish."""
@@ -245,9 +335,11 @@ class HistoryPreview:
                     for row in self._previews.values():
                         row[9].set()
                     self._previews.clear()
+                    self._reminder_approvals.clear()
                     return
                 self._stopped_turns.add(turn_id)
             for row in self._previews.values():
                 if row[6] == turn_id:
                     row[9].set()
             self._previews = {key: row for key, row in self._previews.items() if row[6] != turn_id}
+            self._reminder_approvals = {key: value for key, value in self._reminder_approvals.items() if key in self._previews}

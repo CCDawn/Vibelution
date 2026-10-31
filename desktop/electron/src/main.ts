@@ -699,6 +699,12 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
     let initialMigrationRecoveryUncertain = false;
     let scheduleInitialMigration: () => void = () => undefined;
     let scheduleReminderHandoff: (projectId: string) => void = () => undefined;
+    const reminderHandoffGenerations = new Map<string, number>();
+    const reminderHandoffCancels = new Map<string, () => void>();
+    const invalidateReminderHandoff = (projectId: string) => {
+      reminderHandoffGenerations.set(projectId, (reminderHandoffGenerations.get(projectId) ?? 0) + 1);
+      reminderHandoffCancels.get(projectId)?.();
+    };
     try {
       const directory = join(paths.userDataRoot, "assistant", "legacy-reminder-admission");
       mkdirSync(directory, { recursive: true });
@@ -796,6 +802,14 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
         return projectConnection.withHistoryImport(request.projectId, async revision => {
           if (request.category !== "reminder_handoff" && initialMigrationRecoveryUncertain)
             return { ...base, state: "unknown", code: "unknown" };
+          if (request.category === "reminder_handoff" && request.reauthorize === true) {
+            const syncId = `affairs-${request.operationId.slice("initial-".length)}`;
+            if (await reminderAttemptResult(request.projectId, syncId)) return { ...base, state: "unknown", code: "unknown" };
+            invalidateReminderHandoff(request.projectId);
+            // A previous scheduler may have reserved while the first read was
+            // pending. Its epoch is now revoked, so check that race again.
+            if (await reminderAttemptResult(request.projectId, syncId)) return { ...base, state: "unknown", code: "unknown" };
+          }
           const prepared = await host.prepareInitialMigration(request, revision, signal);
           // A reminder handoff is a separate durable intent, never an initial
           // import job or evidence that old notification senders have stopped.
@@ -1038,13 +1052,20 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
         let seal: ProjectAdmissionSeal | undefined;
         let captured: WorkbenchNaturalJobRetirement[] = [];
         let owner: ReturnType<typeof startManagedLegacyReminderRetirement> | undefined;
+        const generation = reminderHandoffGenerations.get(projectId) ?? 0;
+        const current = () => (reminderHandoffGenerations.get(projectId) ?? 0) === generation;
+        const checkGeneration = () => { if (!current()) throw new Error("REMINDER_HANDOFF_REVOKED"); };
+        const cancel = () => { owner?.dispose(); seal?.release(); };
+        reminderHandoffCancels.set(projectId, cancel);
         const delay = () => new Promise<void>(resolveDelay => setTimeout(resolveDelay, 250));
         try {
           const source = await projectConnection.withHistoryImport(projectId, async revision => {
             try { return await host.reminderHandoffSource(projectId, revision); } catch { return null; }
           });
+          checkGeneration();
           if (!source || shutdownApproved || launcherAssistantHost !== host || windowProvider !== provider) return;
           if (await reminderAttemptResult(projectId, source.syncId)) return;
+          checkGeneration();
           showReminderHandoffStage(source.operationId, "unknown");
           const snapshot = projectConnection.snapshot(), registration = projectConnection.registration(projectId);
           if (!registration || snapshot.projects[projectId] !== registration.root) return;
@@ -1053,8 +1074,16 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
           let workerDrain: Promise<Record<string, unknown>> | undefined;
           seal = projectAdmission.seal(registration.root, { drainOnRevoke: () => workerDrain?.then(() => undefined, () => undefined) ?? Promise.resolve() });
           await seal.drain();
+          checkGeneration();
           seal.check();
+          const currentSource = await projectConnection.withHistoryImport(projectId, async revision => {
+            try { return await host.reminderHandoffSource(projectId, revision); } catch { return null; }
+          });
+          checkGeneration();
+          seal.check();
+          if (!currentSource || JSON.stringify(currentSource) !== JSON.stringify(source)) return;
           const registry = await readRegistry(instancesRegistryPath());
+          checkGeneration();
           seal.check();
           const instanceIds = registeredInstancesForPhysicalRoot(registry.instances, registration.root);
           try {
@@ -1069,6 +1098,7 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
           if (!job) return;
           captured = [job];
           const verifyBinding = () => {
+            checkGeneration();
             seal!.check();
             const current = projectConnection.snapshot(), row = projectConnection.registration(projectId);
             if (launcherAssistantHost !== host || windowProvider !== provider || current.revision !== snapshot.revision
@@ -1235,6 +1265,7 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
             while (!(await Promise.all(captured.map(job => job()))).every(Boolean)) await delay();
             captured.forEach(job => job.release());
           }
+          if (reminderHandoffCancels.get(projectId) === cancel) reminderHandoffCancels.delete(projectId);
           activeReminderHandoffs.delete(projectId);
         }
       })();

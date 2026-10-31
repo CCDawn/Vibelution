@@ -591,13 +591,13 @@ describe("AssistantHost", () => {
     expect(native.close).not.toHaveBeenCalled();
     await host.stop();
   });
-  it("accepts only an unknown-baseline reminder handoff binding", async () => {
+  it.each([false, true])("accepts only an unknown-baseline reminder handoff binding (recovery=%s)", async (reauthorize) => {
     const { host, fetchImpl } = fixture({ graceful: true, initialMigrationControl: true });
     await host.start();
     const projectId = "project", digest = createHash("sha256").update(`${projectId}:reminder_handoff`).digest("hex").slice(0, 40);
     const row = { deliveryId: "a".repeat(32), action: "initial_migration_queue" as const, projectId,
       previewId: "b".repeat(64), turnId: "turn-1", category: "reminder_handoff" as const,
-      operationId: `initial-${digest}`, timeoutMs: 10000 };
+      operationId: `initial-${digest}`, timeoutMs: 10000, ...(reauthorize ? { reauthorize: true as const } : {}) };
     const directory = { device: "1", inode: "2", birthtimeNs: "3" };
     const binding = { schemaVersion: 1, registeredProjectId: projectId,
       sourceScope: { projectId: "source", instanceId: "instance", agentId: "agent" }, category: row.category,
@@ -608,6 +608,8 @@ describe("AssistantHost", () => {
       baselineId: null, baselineState: "unknown", readyForCutover: false };
     fetchImpl.mockResolvedValueOnce(Response.json(binding));
     await expect(host.prepareInitialMigration(row, 0)).resolves.toBe(true);
+    const sent = JSON.parse(String(fetchImpl.mock.calls.at(-1)?.[1]?.body));
+    expect(sent.reauthorize).toBe(reauthorize ? true : undefined);
     fetchImpl.mockResolvedValueOnce(Response.json({ ...binding, baselineState: "verified" }))
       .mockResolvedValueOnce(Response.json({ schemaVersion: 1, operationId: row.operationId, state: "unknown", drained: true }));
     await expect(host.prepareInitialMigration(row, 0)).resolves.toBe(false);

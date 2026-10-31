@@ -6,6 +6,7 @@ import asyncio
 import re
 from copy import deepcopy
 from concurrent.futures import TimeoutError
+from contextvars import ContextVar
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model, model_validator
@@ -13,6 +14,12 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 from .dispatch import DispatchError
 from .dispatch_approval import DispatchWrite, MAX_WRITE_TASK_CHARS
 from .task_source import TaskSelector
+
+_REMINDER_CALL_APPROVAL: ContextVar[dict | None] = ContextVar("launcher_reminder_call_approval", default=None)
+
+
+def reset_reminder_recovery_call() -> None:
+    _REMINDER_CALL_APPROVAL.set(None)
 
 class Parameters(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -108,6 +115,7 @@ _MAIN_HELP = {
     "initial_migration_queue": "按本轮 history_source_preview，经原生策略准入申请排队首次导入 personal（事务和情景记忆）或 knowledge（可验证的私有知识）。不得提供路径、旧助理ID或批准标志。queued 仅表示已排队；Launcher 会在当前工作安全结束后自动执行，必要时在下次启动继续，不表示已导入；rejected/busy 表示本次未发布，可重新预览并经审批重试；unknown 保留原 operationId 对账，不得换 ID 重派；旧源未冻结。",
     "initial_migration_receipt": "只读查询已登记项目和类别对应的首次导入原回执，无需重复审批。queued 表示等待，partial 表示部分完成，unknown 表示无法确认；不得换 ID 重派，查询不表示旧源已冻结。",
     "reminder_handoff_queue": "经原生审批登记旧提醒交接请求，使用本轮来源预览；只返回原 operationId，不关闭工作台或停止旧来源。等待来源、窗口和发送者安全证明，不代表交接完成。",
+    "reminder_handoff_recover": "使用本轮 history_source_preview 重新审批当前来源，恢复尚未开始的原旧提醒交接。原 operationId/syncId 不变；审批卡展示当前来源快照和原编号。任何原尝试或业务产物存在都拒绝重放；queued 仍需来源、窗口和发送者安全证明，不代表切换。unknown 查询原回执，不换 ID 重派。",
     "reminder_handoff_receipt": "查询已登记项目的旧提醒交接原回执；queued 表示仍等待，waitingFor 为 window（等待窗口自行关闭）、close_transaction（等待关闭事务）、drain（等待后台排空）或 unknown（来源证明不全）。pending 的 affairs_conflicts 表示最终事务存在冲突：用返回的 syncId 作为 sync_id 调用 affairs_conflict_list 查看 unresolved，再用同一 sync_id 和 conflict_id 调用 affairs_conflict_read 查看详情；先读取当前事务并与用户核对，不自动覆盖。sender_proof_unavailable 表示尚无发送者安全证明；unknown 表示结果未确认。保留原 operationId 和 syncId，不换 ID 重派；均不代表切换完成。",
     "knowledge_sync_queue": "经原生审批，按本轮 history_source_preview 排队同步已完成首次导入的旧私有知识。返回独立 operationId；queued 表示已排队；Launcher 会在当前工作安全结束后自动执行，必要时在下次启动继续，不表示已经同步；rejected/busy 表示本次未发布，可重新预览并经审批重试；排队后停止当前对话不会撤销已保存的任务。unknown 保留原 ID 查询，不换 ID 重派；不冻结旧来源。",
     "knowledge_sync_receipt": "只读查询原 project_id 和 operation_id 的知识同步任务，不会续写未开始项。queued 表示等待安全执行；not_started 表示已确认本次没有取得写入许可，可在用户同意后使用新预览发起新的同步；unknown 不代表未执行，不得换 ID 重派。partial 中 skippedCount 是未处理项，pendingCount 包含它们；excludedCount 是未纳入的项。不表示旧来源已冻结。",
@@ -343,6 +351,30 @@ def history_import_approval_summary(project_id: str, preview_id: str) -> dict:
     return {key: value[key] for key in ("sourceProjectId", "instanceId", "assistantAgentId")}
 
 
+def reminder_recovery_approval_summary(project_id: str, preview_id: str) -> dict:
+    if _binding is None or getattr(_binding[0], "history_preview", None) is None:
+        raise ValueError("History preview unavailable")
+    return _binding[0].history_preview.reminder_recovery_approval(project_id, preview_id)
+
+
+def bind_reminder_recovery_request(request: dict, args: dict, *, accepted=False) -> None:
+    """Native approval adapter: no HTTP/model entry point accepts this proof."""
+    import json
+
+    if _binding is None or getattr(_binding[0], "history_preview", None) is None:
+        raise ValueError("History preview unavailable")
+    values = json.loads(args["arguments_json"])
+    if set(values) != {"project_id", "preview_id"}:
+        raise ValueError("Invalid reminder recovery arguments")
+    preview = _binding[0].history_preview
+    if accepted:
+        preview.accept_reminder_recovery_request(values["preview_id"], request)
+        _REMINDER_CALL_APPROVAL.set({key: request[key] for key in
+            ("requestId", "callId", "argumentsHash", "sessionId", "agentId", "turnId")})
+    else:
+        preview.bind_reminder_recovery_request(values["preview_id"], request)
+
+
 def _reminder_handoff_receipt(service, project_id):
     from core.infrastructure.native_runtime import assistant_native_root
     from . import native
@@ -466,6 +498,8 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
             "description": _MAIN_HELP["knowledge_sync_recover"], "parameters": KnowledgeSyncRecover.model_json_schema(), "governed": True}
         main_contracts["reminder_handoff_queue"] = {"action": "reminder_handoff_queue",
             "description": _MAIN_HELP["reminder_handoff_queue"], "parameters": HistoryImport.model_json_schema(), "governed": True}
+        main_contracts["reminder_handoff_recover"] = {"action": "reminder_handoff_recover",
+            "description": _MAIN_HELP["reminder_handoff_recover"], "parameters": HistoryImport.model_json_schema(), "governed": True}
         main_contracts["reminder_handoff_receipt"] = {"action": "reminder_handoff_receipt",
             "description": _MAIN_HELP["reminder_handoff_receipt"], "parameters": MainControlProject.model_json_schema(), "governed": False}
     if main_control is not None and getattr(main_control, "appearance_enabled", False):
@@ -501,7 +535,8 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
         schema = {**_MAIN_SCHEMAS, **_APPEARANCE_SCHEMAS, "initial_migration_queue": InitialMigrationQueue,
                   "initial_migration_receipt": InitialMigrationReceipt, "knowledge_sync_queue": HistoryImport,
                   "knowledge_sync_receipt": KnowledgeSyncReceipt, "knowledge_sync_recover": KnowledgeSyncRecover,
-                  "reminder_handoff_queue": HistoryImport, "reminder_handoff_receipt": MainControlProject}[action] if action in main_contracts else managed[action][0] if action in managed else schemas[action]
+                  "reminder_handoff_queue": HistoryImport, "reminder_handoff_recover": HistoryImport,
+                  "reminder_handoff_receipt": MainControlProject}[action] if action in main_contracts else managed[action][0] if action in managed else schemas[action]
         args = schema.model_validate(parameters).model_dump(exclude_unset=action == "agent_update")
     except ValidationError as exc:
         raise ValueError("Action parameters do not match describe schema") from exc
@@ -513,7 +548,7 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
     if "project_id" in args and args["project_id"] not in projects:
         raise ValueError("Project is not authorized by Launcher")
     if action in main_contracts:
-        if action in {"project_lifecycle", "operator_image_upload", "history_import", "affairs_sync", "episodic_sync", "initial_migration_queue", "knowledge_sync_queue", "knowledge_sync_recover", "reminder_handoff_queue"} and governed is not True:
+        if action in {"project_lifecycle", "operator_image_upload", "history_import", "affairs_sync", "episodic_sync", "initial_migration_queue", "knowledge_sync_queue", "knowledge_sync_recover", "reminder_handoff_queue", "reminder_handoff_recover"} and governed is not True:
             return {"ok": False, "status": "approval_required", "action": action, "tool": "personal_assistant_manage_tool"}
         if action in {"initial_migration_queue", "knowledge_sync_queue", "knowledge_sync_recover"}:
             from .main_control import initial_model_env_unavailable
@@ -523,7 +558,7 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
             if not runtime:
                 raise ValueError("Launcher native tool identity is required")
             request = {"operation": "read"} if action == "launcher_theme_get" else {"operation": "set", "theme": args["theme"]} if action == "launcher_theme_set" else {"operation": "import", "kind": args["kind"]}
-        elif action in {"history_import", "affairs_sync", "episodic_sync", "initial_migration_queue", "knowledge_sync_queue", "knowledge_sync_recover", "reminder_handoff_queue"}:
+        elif action in {"history_import", "affairs_sync", "episodic_sync", "initial_migration_queue", "knowledge_sync_queue", "knowledge_sync_recover", "reminder_handoff_queue", "reminder_handoff_recover"}:
             turn_id = runtime.get("turnId") if isinstance(runtime, dict) else None
             if not isinstance(turn_id, str) or not turn_id.strip():
                 raise ValueError("Launcher native Turn identity is required")
@@ -538,9 +573,18 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
                 from .main_control import knowledge_recovery_id
                 request.update(category="knowledge_recovery", originalSyncId=args["operation_id"],
                     operationId=knowledge_recovery_id(args["project_id"], args["preview_id"], args["operation_id"]))
-            if action == "reminder_handoff_queue":
+            if action in {"reminder_handoff_queue", "reminder_handoff_recover"}:
                 from .reminder_handoff_intent import handoff_id
                 request.update(category="reminder_handoff", operationId=handoff_id(args["project_id"]))
+                if action == "reminder_handoff_recover":
+                    proof = _REMINDER_CALL_APPROVAL.get()
+                    _REMINDER_CALL_APPROVAL.set(None)
+                    if (not proof or proof["agentId"] != runtime.get("agentId")
+                            or proof["sessionId"] != runtime.get("sessionId") or proof["turnId"] != turn_id):
+                        return {"ok": False, "status": "approval_required", "action": action,
+                                "tool": "personal_assistant_manage_tool"}
+                    service.history_preview.arm_reminder_recovery_call(args["preview_id"], proof)
+                    request["reauthorize"] = True
             if action in {"affairs_sync", "episodic_sync"} and args.get("recover_sync_id") is not None:
                 request["recoverSyncId"] = args["recover_sync_id"]
             if action == "episodic_sync" and args.get("resolve_sync_id") is not None:
@@ -560,11 +604,11 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
             request = {"projectId": args["project_id"], "operation": args.get("operation", "status")}
             if "request_id" in args:
                 request["requestId"] = args["request_id"]
-        if action in {"operator_image_upload", "history_import", "affairs_sync", "episodic_sync", "initial_migration_queue", "knowledge_sync_queue", "knowledge_sync_recover", "reminder_handoff_queue"}:
+        if action in {"operator_image_upload", "history_import", "affairs_sync", "episodic_sync", "initial_migration_queue", "knowledge_sync_queue", "knowledge_sync_recover", "reminder_handoff_queue", "reminder_handoff_recover"}:
             turn_id = runtime.get("turnId")
             if not isinstance(turn_id, str) or not turn_id.strip():
                 raise ValueError("Launcher native Turn identity is required")
-            coroutine = main_control.invoke("initial_migration_queue" if action in {"knowledge_sync_queue", "knowledge_sync_recover", "reminder_handoff_queue"} else action, request, turn_id=turn_id)
+            coroutine = main_control.invoke("initial_migration_queue" if action in {"knowledge_sync_queue", "knowledge_sync_recover", "reminder_handoff_queue", "reminder_handoff_recover"} else action, request, turn_id=turn_id)
         else:
             coroutine = main_control.invoke("initial_migration_receipt" if action == "reminder_handoff_receipt" else action, request)
     elif action == "dispatch_write":
@@ -643,7 +687,7 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
     elif action == "receipt":
         coroutine = service.reconcile(args["dispatch_id"])
     try:
-        value = asyncio.run_coroutine_threadsafe(coroutine, loop).result(timeout=125 if action in {"operator_image_upload", "history_import", "affairs_sync", "episodic_sync", "initial_migration_queue", "knowledge_sync_queue", "knowledge_sync_recover", "reminder_handoff_queue"} else 25)
+        value = asyncio.run_coroutine_threadsafe(coroutine, loop).result(timeout=125 if action in {"operator_image_upload", "history_import", "affairs_sync", "episodic_sync", "initial_migration_queue", "knowledge_sync_queue", "knowledge_sync_recover", "reminder_handoff_queue", "reminder_handoff_recover"} else 25)
         if action == "dispatch_write" and isinstance(value.get("receipt"), dict):
             if value["receipt"].get("effectivePermissionProfile") == "read_only":
                 return {**value, "permissionNotice": "目标项目将实际权限限制为只读，不能据此认为已执行修改。"}

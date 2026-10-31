@@ -290,11 +290,14 @@ class InitialMigrationPrepare(BaseModel):
     operationId: str = Field(pattern=r"^(?:initial|ksync|krec)-[a-f0-9]{40}$")
     category: Literal["personal", "knowledge", "knowledge_sync", "knowledge_recovery", "reminder_handoff"]
     originalSyncId: str | None = Field(default=None, pattern=r"^ksync-[a-f0-9]{40}$")
+    reauthorize: bool | None = None
 
     @model_validator(mode="after")
     def recovery_binding(self):
         if (self.category == "knowledge_recovery") != (self.originalSyncId is not None):
             raise ValueError("Invalid knowledge recovery binding")
+        if "reauthorize" in self.model_fields_set and (self.reauthorize is not True or self.category != "reminder_handoff"):
+            raise ValueError("Invalid reminder recovery binding")
         return self
 
 
@@ -988,6 +991,8 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                 bound = {key: getattr(payload, key) for key in ("projectId", "previewId", "turnId", "category", "operationId")}
                 if payload.originalSyncId is not None:
                     bound["originalSyncId"] = payload.originalSyncId
+                if payload.reauthorize is not None:
+                    bound["reauthorize"] = payload.reauthorize
                 publication = main_control.initial_delivery(payload.deliveryId, bound, admit=True)
                 if not publication:
                     logging.getLogger(__name__).warning("assistant_initial_prepare category=%s phase=admission code=delivery_unavailable", payload.category)
@@ -1002,6 +1007,7 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                                 return history_control.prepare_initial_source(payload.projectId, payload.previewId,
                                     payload.revision, payload.turnId, payload.operationId, payload.category, publication,
                                     retry_busy=True,
+                                    **({"reauthorize": True} if payload.reauthorize is True else {}),
                                     **({"original_sync_id": payload.originalSyncId} if payload.originalSyncId is not None else {}))
                             except InitialPrepareBusy:
                                 remaining = deadline - time.monotonic()

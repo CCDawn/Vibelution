@@ -16,7 +16,7 @@ export type EpisodicSyncMainControlRequest = Omit<HistoryMainControlRequest, "ac
   | { recoverSyncId?: never; resolveSyncId: string; reviewToken: string });
 export type InitialMigrationMainControlRequest = Omit<HistoryMainControlRequest, "action"> & {
   action: "initial_migration_queue"; category: "personal" | "knowledge" | "knowledge_sync" | "knowledge_recovery" | "reminder_handoff";
-  operationId: string; originalSyncId?: string;
+  operationId: string; originalSyncId?: string; reauthorize?: true;
 };
 export type InitialMigrationReceiptRequest = { deliveryId: string; action: "initial_migration_receipt"; projectId: string;
   category: "personal" | "knowledge" | "reminder_handoff"; operationId: string };
@@ -55,11 +55,12 @@ export function parseMainControlClaim(value: unknown): MainControlRequest | null
       category: row.category, operationId: row.operationId as string };
   }
   if (row && typeof row === "object" && Object.getOwnPropertyDescriptor(row, "action")?.value === "initial_migration_queue") {
-    if (!closed(row, ["deliveryId", "action", "projectId", "previewId", "turnId", "category", "operationId", "timeoutMs"], ["originalSyncId"])
+    if (!closed(row, ["deliveryId", "action", "projectId", "previewId", "turnId", "category", "operationId", "timeoutMs"], ["originalSyncId", "reauthorize"])
       || typeof row.deliveryId !== "string" || !/^[a-f0-9]{32}$/.test(row.deliveryId) || !opaque(row.projectId, 160)
       || typeof row.previewId !== "string" || !/^[a-f0-9]{64}$/.test(row.previewId) || !opaque(row.turnId, 160)
       || (row.category !== "personal" && row.category !== "knowledge" && row.category !== "knowledge_sync" && row.category !== "knowledge_recovery" && row.category !== "reminder_handoff")
       || (row.category === "knowledge_recovery" ? typeof row.originalSyncId !== "string" || !/^ksync-[a-f0-9]{40}$/.test(row.originalSyncId) : Object.hasOwn(row, "originalSyncId"))
+      || Object.hasOwn(row, "reauthorize") && (row.reauthorize !== true || row.category !== "reminder_handoff")
       || row.operationId !== (row.category === "knowledge_recovery"
         ? `krec-${createHash("sha256").update(`${row.projectId}:${row.previewId}:${row.originalSyncId}`).digest("hex").slice(0, 40)}`
         : row.category === "knowledge_sync"
@@ -68,7 +69,8 @@ export function parseMainControlClaim(value: unknown): MainControlRequest | null
       || typeof row.timeoutMs !== "number" || !Number.isSafeInteger(row.timeoutMs) || row.timeoutMs < 1 || row.timeoutMs > 120000) return invalid();
     return { deliveryId: row.deliveryId, action: "initial_migration_queue", projectId: row.projectId,
       previewId: row.previewId, turnId: row.turnId, category: row.category, operationId: row.operationId as string, timeoutMs: row.timeoutMs,
-      ...(typeof row.originalSyncId === "string" ? { originalSyncId: row.originalSyncId } : {}) };
+      ...(typeof row.originalSyncId === "string" ? { originalSyncId: row.originalSyncId } : {}),
+      ...(row.reauthorize === true ? { reauthorize: true as const } : {}) };
   }
   if (row && typeof row === "object" && ["history_import", "affairs_sync", "episodic_sync"].includes(Object.getOwnPropertyDescriptor(row, "action")?.value)) {
     if (!closed(row, ["deliveryId", "action", "projectId", "previewId", "turnId", "timeoutMs"],

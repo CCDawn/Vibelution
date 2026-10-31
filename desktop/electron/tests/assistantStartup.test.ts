@@ -551,6 +551,139 @@ describe("resident assistant startup", () => {
     await context.stop();
   });
 
+  it.each(["attempt", "result", "result_only", "read_error", "raced_attempt"])("does not reauthorize when the original %s is present or uncertain", async kind => {
+    const { context, host, paths } = fixture();
+    const operationId = "initial-" + "c".repeat(40), syncId = "affairs-" + "c".repeat(40);
+    const attempt = { request: { requestId: `${syncId}.attempt`, projectId: "project:one", operation: "start" }, binding: null, command: null };
+    const result = { request: { requestId: `${syncId}.result`, projectId: "conflicts-2", operation: "start" }, binding: null, command: null };
+    let reads = 0;
+    const reserve = vi.fn();
+    context.AssistantProjectLifecycleRequestStore = vi.fn(function () { return {
+      get: vi.fn(async (id: string) => {
+        reads++;
+        if (kind === "read_error") throw new Error("unavailable");
+        if (id.endsWith(".attempt") && (kind === "attempt" || kind === "result" || kind === "raced_attempt" && reads > 2)) return attempt;
+        if (id.endsWith(".result") && (kind === "result" || kind === "result_only")) return result;
+        return null;
+      }), reserve,
+    }; });
+    Object.assign(context, { InitialMigrationResults: vi.fn(function () { return { get: vi.fn(async () => null) }; }),
+      recoverInitialMigrations: vi.fn(async () => []), verifyInitialMigrationResult: vi.fn() });
+    Object.assign(host, { prepareInitialMigration: vi.fn(async () => true), reminderHandoffReceipt: vi.fn(async () => "pending") });
+    await context.start(paths);
+    context.launcherAssistantProjects.withHistoryImport = vi.fn(async (_id: string, work: (revision: number) => Promise<unknown>) => work(0));
+    const control = context.AssistantHost.mock.calls[0][0].mainControl;
+    const request = { action: "initial_migration_queue", projectId: "project:one", previewId: "b".repeat(64), turnId: "turn",
+      category: "reminder_handoff", operationId, deliveryId: "d".repeat(32), timeoutMs: 10000, reauthorize: true };
+    expect(await control(request)).toMatchObject({ operationId, state: "unknown", readyForCutover: false });
+    expect(host.prepareInitialMigration).not.toHaveBeenCalled();
+    expect(reserve).not.toHaveBeenCalled();
+    await context.stop();
+  });
+
+  it("queues reauthorization without awaiting the old scheduler and rejects its late registry read", async () => {
+    const { context, host, paths, projectSnapshot } = fixture();
+    const root = mkdtempSync(join(tmpdir(), "handoff-reauthorize-")); ownedRoots.push(root);
+    const physical = process.platform === "win32" ? realpathSync.native(root).toLowerCase() : realpathSync.native(root);
+    const id = "project:one", operationId = "initial-" + "c".repeat(40), syncId = "affairs-" + "c".repeat(40);
+    paths.userDataRoot = root;
+    projectSnapshot.projects = { [id]: physical };
+    const registration = { root: physical, baseProjectId: "project", registrationUuid: "fixture" };
+    const admission = new ProjectAdmission(), reserve = vi.fn(), runWorker = vi.fn();
+    let finishRegistry!: (value: object) => void;
+    const pendingRegistry = new Promise<object>(resolve => { finishRegistry = resolve; });
+    const readRegistry = vi.fn(() => pendingRegistry);
+    Object.assign(context, { windowProvider: {}, projectAdmission: admission, mkdirSync, readFileSync,
+      LegacyReminderSourceFence: vi.fn(function () { return { drainIngress: async () => {} }; }),
+      createLegacyReminderSourceResolver: () => () => null, instancesRegistryPath: () => join(root, "instances.json"),
+      readRegistry, registeredInstancesForPhysicalRoot, registeredAdmissionRoot: () => physical,
+      AssistantProjectLifecycleRequestStore: vi.fn(function () { return { get: vi.fn(async () => null), reserve }; }),
+      runReminderOfflineJob: runWorker,
+      InitialMigrationResults: vi.fn(function () { return { get: vi.fn(async () => null) }; }),
+      recoverInitialMigrations: vi.fn(async () => []), verifyInitialMigrationResult: vi.fn() });
+    Object.assign(host, { prepareInitialMigration: vi.fn(async () => true), reminderHandoffReceipt: vi.fn(async () => "pending"),
+      reminderHandoffSource: vi.fn(async () => ({ operationId, syncId, registryDigest: "d".repeat(64) })) });
+    await context.start(paths);
+    const registry = context.launcherAssistantProjects;
+    registry.registration = vi.fn(() => registration);
+    registry.withHistoryImport = vi.fn(async (_id: string, work: (revision: number) => Promise<unknown>) => work(0));
+    const control = context.AssistantHost.mock.calls[0][0].mainControl;
+    const request = { action: "initial_migration_queue", projectId: id, previewId: "b".repeat(64), turnId: "turn",
+      category: "reminder_handoff", operationId, deliveryId: "d".repeat(32), timeoutMs: 10000 };
+    expect((await control(request)).state).toBe("queued");
+    await vi.waitFor(() => expect(readRegistry).toHaveBeenCalledOnce());
+    expect(host.reminderHandoffSource).toHaveBeenCalledTimes(2);
+    expect(admission.hasSeals()).toBe(true);
+    host.reminderHandoffSource.mockResolvedValue(null);
+    const recovery = await control({ ...request, reauthorize: true });
+    expect(recovery).toMatchObject({ operationId, state: "queued", readyForCutover: false });
+    expect(host.prepareInitialMigration).toHaveBeenCalledTimes(2);
+    expect(reserve).not.toHaveBeenCalled();
+    expect(runWorker).not.toHaveBeenCalled();
+    finishRegistry({ instances: {} });
+    await vi.waitFor(() => expect(admission.hasSeals()).toBe(false));
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(reserve).not.toHaveBeenCalled();
+    expect(runWorker).not.toHaveBeenCalled();
+    context.shutdownApproved = true;
+    await context.stop();
+  });
+
+  it("stops the handoff if its source changes after admission drains", async () => {
+    const { context, host, paths, projectSnapshot } = fixture();
+    const root = mkdtempSync(join(tmpdir(), "handoff-source-recheck-")); ownedRoots.push(root);
+    const physical = process.platform === "win32" ? realpathSync.native(root).toLowerCase() : realpathSync.native(root);
+    paths.userDataRoot = root;
+    projectSnapshot.projects = { "project:one": physical };
+    const admission = new ProjectAdmission(), reserve = vi.fn(), readRegistry = vi.fn();
+    Object.assign(context, { windowProvider: {}, projectAdmission: admission, mkdirSync, readRegistry,
+      LegacyReminderSourceFence: vi.fn(function () { return {}; }), createLegacyReminderSourceResolver: () => () => null,
+      AssistantProjectLifecycleRequestStore: vi.fn(function () { return { get: vi.fn(async () => null), reserve }; }),
+      InitialMigrationResults: vi.fn(function () { return { get: vi.fn(async () => null) }; }),
+      recoverInitialMigrations: vi.fn(async () => []), verifyInitialMigrationResult: vi.fn() });
+    const operationId = "initial-" + "c".repeat(40), syncId = "affairs-" + "c".repeat(40);
+    Object.assign(host, { prepareInitialMigration: vi.fn(async () => true), reminderHandoffSource: vi.fn()
+      .mockResolvedValueOnce({ operationId, syncId, registryDigest: "a".repeat(64) })
+      .mockResolvedValueOnce({ operationId, syncId, registryDigest: "b".repeat(64) }) });
+    await context.start(paths);
+    const registry = context.launcherAssistantProjects;
+    registry.registration = vi.fn(() => ({ root: physical, baseProjectId: "project", registrationUuid: "fixture" }));
+    registry.withHistoryImport = vi.fn(async (_id: string, work: (revision: number) => Promise<unknown>) => work(0));
+    const control = context.AssistantHost.mock.calls[0][0].mainControl;
+    expect((await control({ action: "initial_migration_queue", projectId: "project:one", previewId: "b".repeat(64), turnId: "turn",
+      category: "reminder_handoff", operationId, deliveryId: "d".repeat(32), timeoutMs: 10000 })).state).toBe("queued");
+    await vi.waitFor(() => expect(host.reminderHandoffSource).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(admission.hasSeals()).toBe(false));
+    expect(readRegistry).not.toHaveBeenCalled();
+    expect(reserve).not.toHaveBeenCalled();
+    context.shutdownApproved = true;
+    await context.stop();
+  });
+
+  it("schedules the fresh source after returning the reauthorization receipt", async () => {
+    const { context, host, paths } = fixture();
+    const root = mkdtempSync(join(tmpdir(), "handoff-reauthorize-schedule-")); ownedRoots.push(root);
+    paths.userDataRoot = root;
+    const reserve = vi.fn();
+    Object.assign(context, { windowProvider: {}, mkdirSync,
+      LegacyReminderSourceFence: vi.fn(function () { return {}; }), createLegacyReminderSourceResolver: () => () => null,
+      AssistantProjectLifecycleRequestStore: vi.fn(function () { return { get: vi.fn(async () => null), reserve }; }),
+      InitialMigrationResults: vi.fn(function () { return { get: vi.fn(async () => null) }; }),
+      recoverInitialMigrations: vi.fn(async () => []), verifyInitialMigrationResult: vi.fn() });
+    Object.assign(host, { prepareInitialMigration: vi.fn(async () => true), reminderHandoffSource: vi.fn(async () => null) });
+    await context.start(paths);
+    context.launcherAssistantProjects.withHistoryImport = vi.fn(async (_id: string, work: (revision: number) => Promise<unknown>) => work(0));
+    const control = context.AssistantHost.mock.calls[0][0].mainControl;
+    const request = { action: "initial_migration_queue", projectId: "project:one", previewId: "b".repeat(64), turnId: "turn",
+      category: "reminder_handoff", operationId: "initial-" + "c".repeat(40), deliveryId: "d".repeat(32), timeoutMs: 10000, reauthorize: true };
+    expect((await control(request)).state).toBe("queued");
+    expect(host.reminderHandoffSource).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(host.reminderHandoffSource).toHaveBeenCalledOnce());
+    expect(reserve).not.toHaveBeenCalled();
+    context.shutdownApproved = true;
+    await context.stop();
+  });
+
   it.each(["conflict", "unknown", "revoked", "slow", "busy", "failed_reopen", "barrier_crash", "retirement_crash"])("runs one %s handoff only after the original window and Job drain", async kind => {
     const { context, host, paths, projectSnapshot } = fixture();
     const root = mkdtempSync(join(tmpdir(), "handoff-main-")); ownedRoots.push(root);

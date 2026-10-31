@@ -5,6 +5,7 @@ import {
   dispatchWritePreviewIsValid,
   launcherAgentCreatePreviewIsValid,
   projectLifecyclePreviewIsValid,
+  recoveryPreviewIsValid,
   toolApprovalActionPreview,
   toolApprovalCodexButtonLabels,
   toolApprovalCodexTitle,
@@ -13,6 +14,42 @@ import {
 } from "./toolApprovalPreview";
 
 describe("toolApprovalPreview", () => {
+  it("binds and displays all recovery details without truncation", () => {
+    const suffix = "a".repeat(40);
+    const summary = { assistantAction: "reminder_handoff_recover", assistantOperationDescription: "重新审批当前来源快照并继续原编号交接；原记录保留。旧进程实际权限与发送者停止尚未证明；不重放已开始或未知的写入。",
+      assistantTargets: { sourceProjectId: "p".repeat(160), instanceId: "instance:1", assistantAgentId: "agent-1",
+        operationId: `initial-${suffix}`, syncId: `affairs-${suffix}`, sourceSnapshotDigest: "b".repeat(64), previousAuthorizationHead: "c".repeat(64) } };
+    expect(recoveryPreviewIsValid(summary)).toBe(true);
+    const zh = toolApprovalActionPreview(summary, "personal_assistant_manage_tool", "zh");
+    for (const value of Object.values(summary.assistantTargets)) expect(zh).toContain(value);
+    for (const value of ["重新授权旧提醒交接", "来源项目", "来源实例", "来源助理", "原操作 ID", "原同步 ID", "当前来源快照摘要", "原授权 head", "旧进程实际权限与发送者停止尚未证明", "不重放已开始或未知的写入"]) expect(zh).toContain(value);
+    expect(toolApprovalActionPreview(summary, "personal_assistant_manage_tool", "en")).toContain("sender shutdown have not been proven");
+    const invalid = [
+      { ...summary, assistantTargets: undefined },
+      ...Object.keys(summary.assistantTargets).map(key => ({ ...summary, assistantTargets: Object.fromEntries(Object.entries(summary.assistantTargets).filter(([name]) => name !== key)) })),
+      { ...summary, assistantTargets: { ...summary.assistantTargets, extra: "forged" } },
+      { ...summary, assistantTargets: { ...summary.assistantTargets, sourceProjectId: "p".repeat(161) } },
+      { ...summary, assistantTargets: { ...summary.assistantTargets, instanceId: "instance\nforged" } },
+      { ...summary, assistantTargets: { ...summary.assistantTargets, assistantAgentId: "agent\n" } },
+      { ...summary, assistantTargets: { ...summary.assistantTargets, operationId: `initial-${"A".repeat(40)}` } },
+      { ...summary, assistantTargets: { ...summary.assistantTargets, operationId: `initial-${suffix.slice(1)}` } },
+      { ...summary, assistantTargets: { ...summary.assistantTargets, syncId: `affairs-${"d".repeat(40)}` } },
+      { ...summary, assistantTargets: { ...summary.assistantTargets, sourceSnapshotDigest: "b".repeat(63) } },
+      { ...summary, assistantTargets: { ...summary.assistantTargets, previousAuthorizationHead: `${"c".repeat(64)}\n` } },
+      { ...summary, assistantTargets: { ...summary.assistantTargets, previousAuthorizationHead: 42 } },
+      { ...summary, assistantOperationDescription: undefined },
+      { ...summary, assistantOperationDescription: "重新审批当前来源快照并继续原编号交接；原记录保留。" },
+      { ...summary, assistantOperationDescription: `${summary.assistantOperationDescription}\nforged` },
+      { ...summary, assistantArgumentsInvalid: true }, { ...summary, assistantDetailsOmitted: true },
+    ];
+    expect(recoveryPreviewIsValid(null)).toBe(false);
+    for (const value of invalid) {
+      expect(recoveryPreviewIsValid(value)).toBe(false);
+      const preview = toolApprovalActionPreview(value, "personal_assistant_manage_tool", "zh");
+      expect(preview).toContain("参数无法核对");
+      expect(preview).not.toContain(suffix);
+    }
+  });
   it("requires and displays every fixed file-tool permission and the dynamic directory boundary", () => {
     const summary = { assistantAction: "agent_create", assistantTargets: { project_id: "project:1", display_name: "Worker", model_id: "model-1" },
       assistantCreatePreset: "project_files_v1", assistantCreateTools: ["glob_tool", "grep_search_tool", "read_file_tool", "apply_diff_edit_tool", "write_file_tool"],
