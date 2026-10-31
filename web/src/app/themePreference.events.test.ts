@@ -5,6 +5,44 @@ import { requestWorkbenchTheme, subscribeStoredWorkbenchTheme, WORKBENCH_THEME_S
 afterEach(() => { localStorage.clear(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("shared workbench appearance preferences", () => {
+  it("uses the assistant theme bridge when the pet bridge has no theme methods", async () => {
+    vi.resetModules();
+    const preferences = await import("./themePreference");
+    const initial = { epoch: "pet", revision: 1, theme: "light" as const, writeId: "a".repeat(32) };
+    const next = { ...initial, revision: 2, theme: "dark" as const };
+    let incoming!: (value: unknown) => void;
+    const acknowledge = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("vibelutionLauncher", { setDesktopPetExpanded: vi.fn() });
+    vi.stubGlobal("vibelutionLauncherTheme", {
+      readThemeAuthority: async () => ({ code: "read", snapshot: initial }),
+      onAssistantThemeChanged: (handler: (value: unknown) => void) => { incoming = handler; return () => undefined; },
+      reportThemeProjection: acknowledge,
+    });
+    const listener = vi.fn();
+    const stop = preferences.subscribeStoredWorkbenchTheme(listener);
+    await vi.waitFor(() => expect(localStorage.getItem(WORKBENCH_THEME_STORAGE_KEY)).toBe("light"));
+    incoming({ snapshot: next, explicit: true });
+    expect(localStorage.getItem(WORKBENCH_THEME_STORAGE_KEY)).toBe("dark");
+    expect(listener).toHaveBeenCalledWith("dark");
+    expect(acknowledge).toHaveBeenCalledWith({ epoch: "pet", revision: 2, state: "applied" });
+    stop();
+  });
+
+  it("does not poll an unauthorized theme bridge from a launcher control window", async () => {
+    vi.resetModules();
+    const preferences = await import("./themePreference");
+    const read = vi.fn().mockResolvedValue({ code: "unavailable" });
+    vi.stubGlobal("vibelutionLauncher", { getDesktopShellSummary: vi.fn() });
+    vi.stubGlobal("vibelutionLauncherTheme", { readThemeAuthority: read, onAssistantThemeChanged: vi.fn() });
+    vi.useFakeTimers();
+    const stop = preferences.subscribeStoredWorkbenchTheme(() => undefined);
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(read).not.toHaveBeenCalled();
+    expect(await preferences.requestWorkbenchTheme("dark")).toBe("applied");
+    expect(localStorage.getItem(WORKBENCH_THEME_STORAGE_KEY)).toBe("dark");
+    stop();
+  });
+
   it("updates same-window settings and shell subscribers, then unsubscribes", () => {
     const listener = vi.fn();
     const stop = subscribeStoredWorkbenchTheme(listener);

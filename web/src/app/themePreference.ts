@@ -11,6 +11,7 @@ type ThemeSyncState = "applied" | "local" | "conflict" | "unknown" | "unavailabl
 type ThemeSnapshot = { epoch: string; revision: number; theme: WorkbenchTheme; writeId: string };
 type ThemeOutcome = { code: string; snapshot?: ThemeSnapshot };
 type ThemeBridge = {
+  getDesktopShellSummary?: () => Promise<unknown>;
   readThemeAuthority?: () => Promise<ThemeOutcome>;
   setThemeAuthority?: (input: ThemeSnapshot) => Promise<ThemeOutcome>;
   onAssistantThemeChanged?: (handler: (value: unknown) => void) => () => void;
@@ -38,7 +39,13 @@ function announceThemeSync(state: ThemeSyncState): void {
 
 function themeBridge(): ThemeBridge | undefined {
   const source = globalThis as { vibelutionLauncher?: ThemeBridge; vibelutionLauncherTheme?: ThemeBridge };
-  return source.vibelutionLauncher ?? source.vibelutionLauncherTheme;
+  const launcher = source.vibelutionLauncher;
+  // The pet exposes a minimal launcher bridge alongside its theme bridge.
+  // A control window also has a partial launcher bridge, but is not a theme
+  // authority sender; it must remain on its existing local-storage path.
+  if (launcher?.readThemeAuthority && launcher.onAssistantThemeChanged) return launcher;
+  if (launcher?.getDesktopShellSummary) return launcher;
+  return source.vibelutionLauncherTheme ?? launcher;
 }
 
 function validSnapshot(value: unknown): value is ThemeSnapshot {

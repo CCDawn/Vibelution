@@ -249,6 +249,31 @@ describe("Launcher operator image consumption", () => {
     expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"))?.disabled).toBe(true);
   });
 
+  it.each([["avatar", "头像"], ["background", "壁纸"]])("approves a verified %s image upload", async (kind, label) => {
+    await renderAssistant({ approval: { requestId: "r", sessionId: "s", turnId: "t", agentId: "a",
+      toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
+      argumentSummary: { assistantAction: "operator_image_upload", assistantTargets: { kind } } } });
+    expect(container.textContent).toContain(label);
+    expect(container.textContent).toContain("上传并应用");
+    expect(container.textContent).toContain("取消不修改");
+    expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"))?.disabled).toBe(false);
+    await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true })));
+    await settle();
+    expect(invoke.mock.calls.some(([request]) => request.operation === "resolveApproval" && request.decision === "accept")).toBe(true);
+  });
+
+  it.each([undefined, {}, {kind: "other"}, {kind: "avatar", path: "secret"}])("blocks both approval paths for an unverifiable image target %j", async assistantTargets => {
+    await renderAssistant({ approval: { requestId: "r", sessionId: "s", turnId: "t", agentId: "a",
+      toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
+      argumentSummary: { assistantAction: "operator_image_upload", assistantTargets } } });
+    expect(container.textContent).toContain("参数无法核对");
+    const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("是"));
+    const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("否"));
+    expect(approve?.disabled).toBe(true); expect(reject?.disabled).toBe(false);
+    await act(async () => { approve?.click(); window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true })); });
+    expect(invoke.mock.calls.some(([request]) => request.operation === "resolveApproval" && request.decision === "accept")).toBe(false);
+  });
+
   it("shows the complete project lifecycle request before approval", async () => {
     await renderAssistant({ approval: { requestId: "r", sessionId: "s", turnId: "t", agentId: "a",
       toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],

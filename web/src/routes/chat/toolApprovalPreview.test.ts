@@ -237,3 +237,17 @@ it("shows the verified previous assistant for an affairs sync", () => {
     assistantOperationDescription: "核对原事务同步回执，不会重新写入事务。" }, "personal_assistant_manage_tool", "zh");
   expect(recovery).toContain("原回执: affairs-");
 });
+
+it.each([["avatar", "头像", "avatar"], ["background", "壁纸", "background"]])("shows the reviewed %s upload and cancellation effects", (kind, zhTarget, enTarget) => {
+  const summary = { assistantAction: "operator_image_upload", assistantTargets: { kind } };
+  const zh = toolApprovalActionPreview(summary, "personal_assistant_manage_tool", "zh");
+  const en = toolApprovalActionPreview(summary, "personal_assistant_manage_tool", "en");
+  expect(zh).toContain(zhTarget); expect(zh).toContain("上传并应用"); expect(zh).toContain("取消不修改");
+  expect(en).toContain(enTarget); expect(en).toContain("upload and apply"); expect(en).toContain("Cancel");
+});
+
+it.each([undefined, {}, {kind: "other"}, {kind: "avatar", path: "secret"}, {kind: null}])("rejects unverifiable image upload target %j", assistantTargets => {
+  const preview = toolApprovalActionPreview({assistantAction: "operator_image_upload", assistantTargets}, "personal_assistant_manage_tool", "zh");
+  expect(preview).toContain("参数无法核对");
+  expect(preview).not.toContain("secret");
+});

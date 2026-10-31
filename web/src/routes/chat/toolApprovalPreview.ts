@@ -59,6 +59,15 @@ export function projectLifecyclePreviewIsValid(summary: Record<string, unknown> 
     && (values.operation === "start" || values.operation === "stop" || values.operation === "restart");
 }
 
+/** Image approval must identify exactly the reviewed destination. */
+export function operatorImageUploadPreviewIsValid(summary: Record<string, unknown> | null | undefined): boolean {
+  if (!summary || summary.assistantAction !== "operator_image_upload" || summary.assistantArgumentsInvalid) return false;
+  const targets = summary.assistantTargets;
+  if (!targets || typeof targets !== "object" || Array.isArray(targets)) return false;
+  const values = targets as Record<string, unknown>;
+  return Object.keys(values).length === 1 && (values.kind === "avatar" || values.kind === "background");
+}
+
 /** A write dispatch must show the same complete request that approval binds. */
 export function dispatchWritePreviewIsValid(summary: Record<string, unknown> | null | undefined): boolean {
   if (!summary || summary.assistantAction !== "dispatch_write" || summary.assistantArgumentsInvalid
@@ -78,6 +87,7 @@ export function dispatchWritePreviewIsValid(summary: Record<string, unknown> | n
 }
 
 const MANAGE_ACTIONS: Record<string, [string, string]> = {
+      operator_image_upload: ["上传图片", "Upload image"],
       project_lifecycle: ["管理项目", "Manage project"],
       dispatch_write: ["派遣 Agent 修改项目", "Dispatch agent to modify project"],
       authorization_upgrade: ["新增项目权限", "Add project permissions"],
@@ -147,6 +157,15 @@ export function toolApprovalActionPreview(
       return [...lines,
         lang === "zh" ? "新 Agent 默认没有工具和读写范围，不能保证读取或修改项目；派遣写任务不会自动增加工具权限。"
           : "The new agent has no tools or read/write scopes by default, so it cannot be assumed to read or modify the project. Dispatching a write task does not grant tools."].join("\n");
+    }
+    if (action === "operator_image_upload") {
+      if (!operatorImageUploadPreviewIsValid(summary)) {
+        return `${title}\n${lang === "zh" ? "参数无法核对，请拒绝并重新发起。" : "Arguments cannot be verified. Decline and request again."}`;
+      }
+      const kind = (targets as Record<string, unknown>).kind;
+      return lang === "zh"
+        ? `${title}\n选择图片后上传并应用为${kind === "avatar" ? "头像" : "壁纸"}；取消不修改。`
+        : `${title}\nChoose an image to upload and apply as your ${kind === "avatar" ? "avatar" : "background"}. Cancel to leave it unchanged.`;
     }
     if (action === "project_lifecycle") {
       if (!projectLifecyclePreviewIsValid(summary)) {

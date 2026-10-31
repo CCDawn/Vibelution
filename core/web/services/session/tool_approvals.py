@@ -1341,6 +1341,20 @@ def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
                     "assistantOperationDescription": "新 Agent 默认没有工具和读写范围，不能保证读取或修改项目；派遣写任务不会自动增加工具权限。"}
             except (ValueError, TypeError, KeyError, RuntimeError, RecursionError):
                 return {"assistantAction": action, "assistantArgumentsInvalid": True}
+    if action == "operator_image_upload":
+        from core.infrastructure.native_runtime import is_launcher_assistant_process
+        if not is_launcher_assistant_process():
+            return {"assistantArgumentsInvalid": True}
+        try:
+            raw = args.get("arguments_json")
+            values = json.loads(raw) if isinstance(raw, str) and len(raw) <= 16000 else None
+            if not isinstance(values, dict):
+                raise ValueError("Invalid image upload arguments")
+            from core.assistant_runtime.actions import OperatorImageImport
+            validated = OperatorImageImport.model_validate(values)
+            return {"assistantAction": action, "assistantTargets": {"kind": validated.kind}}
+        except (ValueError, TypeError, KeyError, RuntimeError, RecursionError):
+            return {"assistantAction": action, "assistantArgumentsInvalid": True}
     if action == "project_lifecycle":
         from core.infrastructure.native_runtime import is_launcher_assistant_process
         if not is_launcher_assistant_process():
