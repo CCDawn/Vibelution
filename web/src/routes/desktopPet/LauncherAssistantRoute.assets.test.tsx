@@ -426,23 +426,25 @@ describe("Launcher operator image consumption", () => {
 
   it("shows when task receipts cannot be reported automatically", async () => {
     await renderAssistant({ patrol: { state: "ready", deliveryStates: { unknown: 1 } } });
-    expect(container.textContent).toContain("部分任务结果无法自动汇报，请查看任务结果");
+    expect(container.textContent).toContain("部分任务结果暂未汇报，可在对话中让助理查询");
   });
-  it("opens computer controls only on request and returns to the conversation in the standalone embedded page", async () => {
+  it("keeps the conversation mounted while opening and dismissing unavailable computer controls", async () => {
     await renderAssistant({ legacyToolbar: true });
+    const transcript = container.querySelector('[data-testid="native-conversation"]');
     expect(invoke.mock.calls.some(([request]) => request.operation === "computerWindows")).toBe(false);
     const button = [...container.querySelectorAll("button")].find(item => item.textContent?.includes("电脑操作"));
     expect(button).toBeTruthy();
     await act(async () => { button?.click(); });
     await settle(); await settle();
-    expect(invoke.mock.calls.some(([request]) => request.operation === "computerWindows")).toBe(true);
+    expect(invoke.mock.calls.some(([request]) => request.operation === "computerWindows")).toBe(false);
     expect(container.textContent).toContain("测试驱动未连接");
-    expect(container.querySelector('[data-testid="native-conversation"]')).toBeNull();
-    const collapse = container.querySelector<HTMLButtonElement>('button[aria-label="收起电脑操作栏"]');
+    expect(container.querySelector('[data-testid="native-conversation"]')).toBe(transcript);
+    const collapse = [...container.querySelectorAll("button")].find(item => item.textContent === "暂不允许");
     expect(collapse).toBeTruthy();
     await act(async () => { collapse?.click(); });
     await settle(); await settle();
-    expect(container.querySelector('[data-testid="native-conversation"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="native-conversation"]')).toBe(transcript);
+    expect(container.textContent).not.toContain("测试驱动未连接");
   });
   it("paints the embedded recipe in both themes, including below a transparent wallpaper", async () => {
     await renderAssistant({ capability: false });
