@@ -164,9 +164,11 @@ class HistoryHost:
 
     def legacy_reminder_handoff(self, project_id, revision):
         """Revalidate one published handoff against the live source and target."""
+        from types import SimpleNamespace
         from . import native
         from .initial_migration_binding import target_identity
         from .reminder_handoff_intent import read_handoff_intent
+        from .reminder_offline_worker import _matches_origin, _registry_digest_matches
         from core.infrastructure.native_runtime import assistant_native_root
         with self.guard():
             if self._dispatch._registry_revision != revision:
@@ -179,12 +181,22 @@ class HistoryHost:
                 if (intent is None or (native._AGENT_ID, native._SESSION_ID) != (intent["targetAgentId"], intent["targetSessionId"])
                         or target_identity(root, native._AGENT_ID, native._SESSION_ID) != (intent["targetIdentityDigest"], intent["targetDirectory"])):
                     raise MigrationIOError("reminder_handoff_source_unavailable")
-                source = self.legacy_reminder_source(project_id, revision)
-                if (source["sourceScope"] != intent["sourceScope"] or source["sourceIdentityDigest"] != intent["sourceIdentityDigest"]
-                        or source["authorityDigest"] != intent["registryDigest"] or source["projectDirectory"] != intent["projectDirectory"]
-                        or self._dispatch._registry_revision != revision):
-                    raise MigrationIOError("reminder_handoff_source_unavailable")
-                return intent
+                preview_id = self._preview.preview(project_id)["previewId"]
+                try:
+                    with self._preview._lock:
+                        public = self._preview.verify_preview(preview_id)
+                        row = self._preview._previews[preview_id]
+                        scope = {"projectId": row[5].project_id, "instanceId": row[5].instance_id,
+                                 "agentId": public["assistantAgentId"]}
+                        target = SimpleNamespace(root=root, agent_id=native._AGENT_ID, session_id=native._SESSION_ID)
+                        if (not _matches_origin(intent, target, scope, row[3], row[4], category="reminder_handoff")
+                                or not _registry_digest_matches(row[7], intent["registryDigest"])
+                                or self._dispatch._registry_revision != revision):
+                            raise MigrationIOError("reminder_handoff_source_unavailable")
+                        self._preview.verify_preview(preview_id)
+                        return intent
+                finally:
+                    self._preview.discard(preview_id)
 
     def _signal_sync(self, *, turn_id=None, operation_id=None, preview_id=None):
         with self._sync_signal_lock:

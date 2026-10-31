@@ -181,6 +181,7 @@ async def run_case():
         if case in {'success', 'windows_alias'}:
             assert response.status_code == 200, response.text
             renewed = read_handoff_intent(target, 'registered:1')
+            assert history_host.legacy_reminder_handoff('registered:1', 1) == renewed
             assert renewed['registryDigest'] != original['registryDigest']
             assert renewed['operationId'] == original['operationId'] and renewed['syncId'] == original['syncId']
             assert renewed['sourceIdentityDigest'] == original['sourceIdentityDigest']
