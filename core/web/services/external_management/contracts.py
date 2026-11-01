@@ -7,8 +7,8 @@ import unicodedata
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
-Scope = Literal["agents:read", "agents:create", "agents:create:files", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:results:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read", "source:read", "knowledge:catalog:read"]
-SCOPES = ("agents:read", "agents:create", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read", "source:read", "knowledge:catalog:read", "agents:create:files", "teams:results:read")
+Scope = Literal["agents:read", "agents:directory:read", "agents:create", "agents:create:files", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:results:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read", "source:read", "knowledge:catalog:read"]
+SCOPES = ("agents:read", "agents:directory:read", "agents:create", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read", "source:read", "knowledge:catalog:read", "agents:create:files", "teams:results:read")
 _AVATAR_EXTENSION = r"(?:[pP][nN][gG]|[jJ][pP][gG]|[jJ][pP][eE][gG]|[wW][eE][bB][pP]|svg)"
 _AVATAR_PATH_PATTERN = r"^workspace/avatars/[A-Za-z0-9_.-]+\." + _AVATAR_EXTENSION + "$"
 
@@ -525,6 +525,103 @@ class SourceSearchResponse(UntrustedResponse):
         if self.continuationUnavailable and (self.nextOffset is not None or not self.truncated):
             raise ValueError("Unavailable continuation must be explicit")
         return self
+
+class AgentDirectoryQuery(Closed):
+    query: str = Field(default="", max_length=64)
+    offset: int = Field(default=0, ge=0, le=100_000)
+    limit: int = Field(default=6, ge=1, le=6)
+    expected_revision: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("query")
+    @classmethod
+    def single_line_query(cls, value):
+        if any(unicodedata.category(char) in {"Cc", "Cf", "Zl", "Zp"} for char in value):
+            raise ValueError("Single-line query required")
+        return value.strip()
+
+    @model_validator(mode="after")
+    def pinned_continuation(self):
+        if self.offset and self.expected_revision is None:
+            raise ValueError("Continuation requires a directory revision")
+        return self
+
+
+class AgentDirectoryTeam(Closed):
+    teamId: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+    name: str = Field(max_length=120)
+    status: Literal["active", "archived"]
+
+
+class AgentDirectoryRecordedTeam(AgentDirectoryTeam):
+    status: Literal["active", "archived", "unavailable"]
+
+
+class AgentDirectoryOwnership(Closed):
+    kind: Literal["personal", "team", "system", "companion", "unknown"]
+    mode: str = Field(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_]*$")
+    teams: list[AgentDirectoryTeam] = Field(max_length=100_000)
+    recordedTeams: list[AgentDirectoryRecordedTeam] = Field(max_length=6)
+    createdBy: str = Field(max_length=160)
+    templateId: str = Field(max_length=160)
+    ownerAgentId: str = Field(max_length=160, pattern=r"^(?:[A-Za-z0-9][A-Za-z0-9_.:-]*)?$")
+    ownerAgentName: str = Field(max_length=120)
+
+    @model_validator(mode="after")
+    def unique_sorted_teams(self):
+        ids = [team.teamId for team in self.teams]
+        recorded_ids = [team.teamId for team in self.recordedTeams]
+        if (ids != sorted(set(ids)) or self.kind == "team" and not ids
+                or recorded_ids != sorted(set(recorded_ids)) or set(ids) & set(recorded_ids)
+                or any(team.status == "unavailable" and team.name for team in self.recordedTeams)
+                or self.ownerAgentName and not self.ownerAgentId):
+            raise ValueError("Inconsistent Agent ownership")
+        return self
+
+
+class AgentDirectoryItem(Closed):
+    agentId: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+    agentCode: str = Field(max_length=64)
+    displayName: str = Field(max_length=120)
+    status: str = Field(min_length=1, max_length=32, pattern=r"^[a-z][a-z0-9_-]*$")
+    ownership: AgentDirectoryOwnership
+    dispatchable: StrictBool
+    dispatchReason: Literal["agent_not_found", "agent_inactive", "team_dedicated_agent", "active_team_member", "operator_disabled", "unsupported_agent_class", "eligible"]
+
+    @model_validator(mode="after")
+    def consistent_dispatch(self):
+        if self.dispatchable != (self.dispatchReason == "eligible"):
+            raise ValueError("Inconsistent dispatch eligibility")
+        return self
+
+
+class AgentDirectoryCounts(Closed):
+    active: int = Field(ge=0, le=100_000)
+    archived: int = Field(ge=0, le=100_000)
+    dispatchable: int = Field(ge=0, le=100_000)
+
+
+class AgentDirectoryResponse(UntrustedResponse):
+    scope: Literal["all_registered_agents"]
+    agents: list[AgentDirectoryItem] = Field(max_length=6)
+    total: int = Field(ge=0, le=100_000)
+    registryTotal: int = Field(ge=0, le=100_000)
+    counts: AgentDirectoryCounts
+    offset: int = Field(ge=0, le=100_000)
+    nextOffset: int | None = Field(ge=0, le=100_000)
+    revision: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @model_validator(mode="after")
+    def coherent_page(self):
+        ids = [agent.agentId for agent in self.agents]
+        end = self.offset + len(ids)
+        if (ids != sorted(set(ids)) or self.total > self.registryTotal
+                or self.counts.active + self.counts.archived > self.registryTotal
+                or self.counts.dispatchable > self.counts.active
+                or ids and end > self.total or self.offset < self.total and not ids
+                or self.nextOffset != (end if end < self.total else None)):
+            raise ValueError("Inconsistent Agent directory page")
+        return self
+
 
 class TeamReadQuery(Closed):
     team_id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")

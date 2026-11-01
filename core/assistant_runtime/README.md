@@ -29,6 +29,24 @@ starts a native task. Local missing-descriptor and source-revision failures
 have fixed, actionable messages; backend response text stays private. The
 top-level message summarizes skipped reasons for the existing tool-result UI.
 
+`agent_list` reads the complete registered Agent directory for an authorized
+project, including active, archived, hidden, system and team identities. It
+returns names, status, public ownership and independently evaluated dispatch
+eligibility; it never grants dispatch rights or reads private configuration,
+memory or transcripts. Ownership distinguishes roster-backed `teams` from
+metadata-only `recordedTeams`; a historical reference is not current membership.
+Creation/template provenance and explicit owner-Agent references are public
+directory facts; owner names come from this same registry, never its Sessions.
+The separate `agents:directory:read` grant is added only
+through explicit native authorization upgrade. Existing grants do not widen.
+Continue with `nextOffset` and `expected_revision=revision` until `nextOffset`
+is null; a changed source snapshot rejects the continuation. `registryTotal`
+counts the full registry, while `total` counts query matches. The existing
+`agents` action remains the externally dispatchable candidate list and cannot
+establish a project's Agent total. Directory labels stay quoted untrusted data
+through the fixed action tool's closed result projection, so names that resemble
+instructions are preserved without becoming workflow fields.
+
 The local catalog exposes `preference_proposals`, `preference_proposal_accept`,
 `preference_proposal_reject`, and `dispatch_list` through index/describe/execute.
 They bind to the running assistant and its direct Session, never a model-provided

@@ -221,7 +221,7 @@ class ManagedAgentBackendClient:
             # grant; only a fresh client may explicitly request the new scope.
             requested_scopes = saved.get("scopes", _LEGACY_MANAGEMENT_SCOPES if saved.get("clientId") else _MANAGEMENT_SCOPES)
             if (not isinstance(requested_scopes, list) or not requested_scopes
-                or any(not isinstance(scope, str) or scope not in (*_MANAGEMENT_SCOPES, "tasks:read", "source:read", "knowledge:catalog:read", "agents:create:files", "teams:results:read") for scope in requested_scopes)
+                or any(not isinstance(scope, str) or scope not in (*_MANAGEMENT_SCOPES, "agents:directory:read", "tasks:read", "source:read", "knowledge:catalog:read", "agents:create:files", "teams:results:read") for scope in requested_scopes)
                 or requested_scopes != sorted(set(requested_scopes))):
                 raise BackendClientError("Invalid management scopes.", code="UNKNOWN_MANAGEMENT_SUBJECT")
             self._state["management"] = {**saved, "clientId": client_id, "binding": binding, "scopes": requested_scopes}
@@ -559,6 +559,23 @@ class ManagedAgentBackendClient:
 
     async def management_team_list(self, **parameters):
         return await self._management_directory_list("teams", parameters)
+
+    async def management_agent_list(self, **parameters) -> dict[str, Any]:
+        from pydantic import ValidationError
+        from core.web.services.external_management.contracts import AgentDirectoryQuery, AgentDirectoryResponse
+
+        try:
+            query = AgentDirectoryQuery.model_validate(parameters)
+        except ValidationError:
+            raise BackendClientError("Invalid Agent directory query.", code="INVALID_MANAGEMENT_REQUEST") from None
+        public = await self._management_directory_read("/directory/agents?" +
+            urlencode(query.model_dump(exclude_none=True)), AgentDirectoryResponse)
+        end = public["offset"] + len(public["agents"])
+        if (public["offset"] != query.offset or len(public["agents"]) > query.limit
+                or public["nextOffset"] != (end if end < public["total"] else None)
+                or query.expected_revision and public["revision"] != query.expected_revision):
+            raise BackendClientError("Agent directory query binding changed.", code="BACKEND_PROTOCOL_ERROR")
+        return public
 
     async def management_team_result(self, *, request_id: str):
         from pydantic import ValidationError
@@ -1140,6 +1157,9 @@ class ManagedAgentBackendClient:
                     f"managed backend is unreachable: {type(exc).__name__}",
                     code="BACKEND_UNAVAILABLE",
                 ) from exc
+        if (response.status_code == 404 and method == "GET"
+                and path.split("?", 1)[0] == _MANAGEMENT_PREFIX + "/directory/agents"):
+            raise BackendClientError("Target backend does not support the Agent directory.", code="AGENT_DIRECTORY_UNAVAILABLE")
         try:
             payload = response.json()
         except ValueError as exc:

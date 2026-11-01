@@ -298,6 +298,27 @@ class ManagementAdapter:
         result = await self._call(project_id, lambda client: client.management_avatar_options(**query))
         return {**result, "projectId": project_id}
 
+    async def agent_list(self, project_id: str, **parameters):
+        if self._read_binding is None:
+            raise DispatchError("Project authorization cannot be checked.", code="AGENT_DIRECTORY_UNAVAILABLE")
+        binding = self._read_binding(project_id)
+        if project_id not in self._projects:
+            raise DispatchError("Project is not authorized.", code="PROJECT_NOT_AUTHORIZED")
+        result = await self._call(project_id, lambda client: client.management_agent_list(**parameters))
+        page = {**result, "projectId": project_id, "agents": []}
+        for row in result["agents"]:
+            candidate = {**page, "agents": [*page["agents"], row]}
+            end = result["offset"] + len(candidate["agents"])
+            candidate["nextOffset"] = end if end < result["total"] else None
+            if _documentation_wrapper_size(project_id, {**candidate, "directoryVersion": 1}) > 3400:
+                if not page["agents"]:
+                    raise DispatchError("Agent directory row exceeds the model budget.", code="AGENT_DIRECTORY_UNAVAILABLE")
+                break
+            page = candidate
+        if self._read_binding(project_id) != binding:
+            raise DispatchError("Project authorization changed during the directory read.", code="PROJECT_REGISTRY_RECONCILE_REQUIRED")
+        return page
+
     async def session_list(self, project_id: str, **parameters):
         if project_id not in self._projects:
             raise DispatchError("Project is not authorized.", code="PROJECT_NOT_AUTHORIZED")
