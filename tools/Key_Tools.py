@@ -3137,7 +3137,10 @@ def _build_key_tools() -> List[BaseTool]:
         停止回执只表示请求受理，需再次概览确认终态。重启 accepted 不等于 completed；
         unknown 表示结果未确认，须先核对平台状态，不得盲目重复提交。
         session_delete: session_id。knowledge_acl_grant: knowledge_base_id、target_agent_id、permissions_json。
-        不支持 purge、任意命令或任意 API。重启、删除及权限变更先说明对象和影响。
+        Launcher 永久删除使用 agent_purge：先 agent_purge_preview 读取已归档对象及 configRevision，
+        再沿用 project_id、agent_id、expected_config_revision、稳定 request_id 执行；需独立 agents:purge。
+        cleanupPending=true 时仍有后续清理，不能称已全部清干净；未知结果只查原 management_receipt，不重复删除。
+        普通项目入口不支持 purge；任意命令和任意 API 不开放。重启、删除及权限变更说明对象和影响。
         """
         return _personal_assistant_manage_impl(action, arguments_json)
 

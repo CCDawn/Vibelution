@@ -292,6 +292,12 @@ class ManagementAdapter:
         result = await self._call(project_id, lambda client: client.management_agent(agent_id=agent_id))
         return {**result, "projectId": project_id}
 
+    async def agent_purge_preview(self, project_id: str, *, agent_id: str):
+        if project_id not in self._projects:
+            raise DispatchError("Project is not authorized.", code="PROJECT_NOT_AUTHORIZED")
+        result = await self._call(project_id, lambda client: client.management_agent_purge_preview(agent_id=agent_id))
+        return {**result, "projectId": project_id}
+
     async def avatar_options(self, project_id: str, **query):
         if project_id not in self._projects:
             raise DispatchError("Project is not authorized.", code="PROJECT_NOT_AUTHORIZED")

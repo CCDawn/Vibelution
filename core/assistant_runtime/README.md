@@ -528,8 +528,21 @@ existing Agent archive transaction; the adapter delegates the actual archive
 and associated Session sealing to the canonical lifecycle owner. Protected,
 private, damaged or busy objects are refused before mutation. Existing durable
 intent and receipt owners handle unknown results by readback only; no archive
-replay, purge, reset, restore or force is exposed. A completed receipt freezes
+replay, reset, restore or force is exposed. A completed receipt freezes
 the first verified archived observation.
+
+`agent_purge_preview` reads an existing archived Agent's public identity,
+configuration revision and fixed deletion effects without creating or repairing
+records. `agent_purge` delegates permanent deletion to the same native owner as
+the operator UI, including Sessions, private workspaces and reference cleanup.
+It uses a separate, explicitly upgraded `agents:purge` grant and the current
+native management approval policy; `full_access` retains its existing automatic
+approval behavior. Native protected-Agent and busy-Session rules still apply.
+The exact preview revision is checked before any effect. A successful native
+acknowledgement and raw registry readback produce a durable `purge` receipt;
+absence alone does not prove this request succeeded. Lost acknowledgements stay
+unknown and the same request is never replayed. `cleanupPending=true` means
+deletion committed with outstanding cleanup and must be reported that way.
 
 Fresh SDK subjects explicitly request fourteen scopes, including the separate
 `legacy:receipts:read` scope. Persisted eight-, nine-, ten- and thirteen-scope

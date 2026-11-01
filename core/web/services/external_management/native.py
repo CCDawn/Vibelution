@@ -35,6 +35,14 @@ class NativeAgentGateway:
             # Receipt fields are persisted facts, not a hydrated UI/default logo.
             return {**raw, "avatarImagePath": directory._agent_avatar_path_from_metadata(metadata)}
 
+    def read_purge_preview(self, agent_id: str):
+        from .agent_purge import preview
+        return preview(self, agent_id)
+
+    def purge(self, parameters: dict, marker: dict):
+        from .agent_purge import purge
+        return purge(self, parameters)
+
     def avatar_options(self):
         # Avatar discovery only reads the directory's existing library. Importing
         # session_service here can initialize a developer sandbox on a cold read.

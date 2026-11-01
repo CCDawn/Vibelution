@@ -124,7 +124,7 @@ def personal_assistant_action_tool(action: str = "index", parameters: dict | Non
             result = execute_action(action, parameters or {}, runtime=runtime)
             required_scopes = {
                 "task_list": ["tasks:read"], "source_read": ["source:read"], "source_search": ["source:read"],
-                "agent_get": ["agents:read"], "avatar_options": ["agents:read"],
+                "agent_get": ["agents:read"], "agent_purge_preview": ["agents:read"], "avatar_options": ["agents:read"],
                 "agent_list": ["agents:directory:read"],
                 "session_list": ["sessions:read"], "session_get": ["sessions:read"],
                 "session_config_get": ["sessions:read"], "session_config_compare": ["sessions:read"],
@@ -226,7 +226,9 @@ def personal_assistant_manage_tool(action: str, arguments_json: str) -> str:
     workflow_recovery_bind, workflow_recovery_revoke, workflow_start,
     team_create, knowledge_ingest, config_update.
     Arguments use the corresponding canonical tool's named parameters.
-    No arbitrary API, command, purge, restore, or private data read is accepted.
+    Launcher also supports agent_purge after agent_purge_preview for archived
+    targets. Other adapters accept no purge, arbitrary API, command, restore,
+    or private data read.
     """
     try:
         runtime = _identity()
@@ -238,8 +240,14 @@ def personal_assistant_manage_tool(action: str, arguments_json: str) -> str:
         from core.infrastructure.native_runtime import is_launcher_assistant_process
         if is_launcher_assistant_process():
             from core.assistant_runtime.actions import execute_action
+            result = execute_action(action, args, runtime=runtime, governed=True)
+            if action == "agent_purge" and result.get("code") == "SCOPE_DENIED":
+                result = {**result, "requiredScopes": ["agents:purge"], "nextStep": (
+                    "先用 authorization_status 查询，再通过 personal_assistant_manage_tool 的 "
+                    "authorization_upgrade 仅增加缺失的 agents:purge；沿用原请求继续，不修改其他权限。"
+                )}
             return json.dumps({"source": "launcher-assistant", "untrustedContent": True,
-                **execute_action(action, args, runtime=runtime, governed=True)}, ensure_ascii=False)
+                **result}, ensure_ascii=False)
         if action in {"workflow_recovery_bind", "workflow_recovery_revoke", "workflow_start"}:
             return _workflow_action(action, args, runtime)
         from tools.pa_platform_actions import extension_contracts, execute_extension

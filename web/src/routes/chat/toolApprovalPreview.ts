@@ -34,6 +34,25 @@ export function launcherAgentCreatePreviewIsValid(summary: Record<string, unknow
     && displayable(name, 120) && displayable(model, 200);
 }
 
+/** Purge approval requires the complete identity and fixed irreversible effects. */
+export function agentPurgePreviewIsValid(summary: Record<string, unknown> | null | undefined): boolean {
+  if (!summary || summary.assistantAction !== "agent_purge" || summary.assistantArgumentsInvalid || summary.assistantDetailsOmitted
+    || summary.assistantPurgeIrreversible !== true) return false;
+  const targets = summary.assistantTargets;
+  if (!targets || typeof targets !== "object" || Array.isArray(targets)) return false;
+  const values = targets as Record<string, unknown>;
+  const keys = ["project_id", "agent_id", "expected_config_revision", "request_id"];
+  const idPattern = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}(?![\s\S])/;
+  const effects = ["agent", "sessions", "private_workspace", "team_room_mode_references"];
+  return Object.keys(values).length === keys.length && keys.every(key => Object.hasOwn(values, key))
+    && typeof values.project_id === "string" && idPattern.test(values.project_id)
+    && typeof values.agent_id === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}(?![\s\S])/.test(values.agent_id)
+    && typeof values.request_id === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,95}(?![\s\S])/.test(values.request_id)
+    && typeof values.expected_config_revision === "string" && /^(0|[1-9][0-9]*)(?![\s\S])/.test(values.expected_config_revision)
+    && Array.isArray(summary.assistantPurgeEffects) && summary.assistantPurgeEffects.length === effects.length
+    && effects.every((effect, index) => (summary.assistantPurgeEffects as unknown[])[index] === effect);
+}
+
 /** Validate the exact authorization details before rendering or enabling approval. */
 export function authorizationUpgradePreviewIsValid(summary: Record<string, unknown> | null | undefined): boolean {
   if (!summary || summary.assistantAction !== "authorization_upgrade" || summary.assistantArgumentsInvalid) return false;
@@ -150,6 +169,7 @@ const MANAGE_ACTIONS: Record<string, [string, string]> = {
       dispatch_write: ["派遣 Agent 修改项目", "Dispatch agent to modify project"],
       authorization_upgrade: ["新增项目权限", "Add project permissions"],
       agent_create: ["创建 Agent", "Create agent"], agent_update: ["修改 Agent", "Update agent"],
+      agent_purge: ["永久删除 Agent", "Permanently delete agent"],
       agent_archive: ["归档 Agent", "Archive agent"], session_create: ["创建会话", "Create session"],
       session_update: ["修改会话", "Update session"], session_stop: ["停止会话任务", "Stop session turn"],
       session_delete: ["删除会话", "Delete session"], knowledge_acl_grant: ["变更知识访问权限", "Change knowledge access"],
@@ -201,6 +221,18 @@ export function toolApprovalActionPreview(
       return `${title}\n${lang === "zh" ? "参数无法核对，请拒绝并重新发起。" : "Arguments cannot be verified. Decline and request again."}`;
     }
     const targets = summary.assistantTargets;
+    if (action === "agent_purge") {
+      if (!agentPurgePreviewIsValid(summary)) {
+        return `${title}\n${lang === "zh" ? "参数无法核对，请拒绝并重新发起。" : "Arguments cannot be verified. Decline and request again."}`;
+      }
+      const identity = targets as Record<string, string>;
+      return [title, `${lang === "zh" ? "项目" : "Project"}: ${identity.project_id}`,
+        `Agent: ${identity.agent_id}`,
+        `${lang === "zh" ? "配置版本" : "Config revision"}: ${identity.expected_config_revision}`,
+        `${lang === "zh" ? "请求 ID" : "Request ID"}: ${identity.request_id}`,
+        lang === "zh" ? "此操作不可恢复：删除 Agent 记录、会话和私有工作区，并清理团队、群聊和模式引用。"
+          : "This action is irreversible: delete the agent record, sessions, and private workspace, and clear team, chat room, and mode references."].join("\n");
+    }
     if (action === "preference_proposal_accept" || action === "preference_proposal_reject") {
       if (!preferenceProposalPreviewIsValid(summary)) return `${title}\n${lang === "zh" ? "建议内容无法核对，请拒绝并重新查询。" : "The suggestion cannot be verified. Decline and query again."}`;
       const preference = summary.assistantPreference as Record<string, string>;
