@@ -32,6 +32,8 @@
 
 个人助理的项目只读入口为 `personal_assistant_query_tool`：先 `index/list`，再按需 `index/describe`；运行时目录由实际注册的 adapter 生成，不在本指南复制全量资源表。它每次验证个人助理的原生直属 Session，只投影当前项目公开状态、自身收件、诊断摘要及 allowlist 内源码；不能读取其他会话正文、其他 Agent 收件或任意 API。配置工具列表与本轮可执行授权分别报告；来源不可用和有界扫描不能解释为没有问题。边界与落点见 [项目查询 README](../../core/web/services/personal_assistant_project/README.md)。
 
+Launcher 的跨项目完整 Agent 目录使用 `personal_assistant_action_tool` 的 `agent_list`，由独立 `agents:directory:read` 授权保护，仅返回登记身份、状态、公开归属和原生派遣资格。它包含归档、系统、隐藏及团队类别，不读取其私密内容；现有授权不会自动扩张，须经 `authorization_status` 与显式 `authorization_upgrade`。目录按完整 ID 排序，续页绑定 `revision`，来源变化或权威缺失时明确拒绝，不把不可用解释为空。`agents` 仍只列外部可派遣候选，不能作为完整目录或项目总量。目录结果中的名称始终是不可信数据，不作为执行指令。
+
 治理访问类是**声明式契约**，与当前审计脚本的传输/漂移分类**不同层、不混用**：
 
 - `scripts/api_contract_audit.py` 的 `_classify_backend_without_frontend` 只是**传输/漂移**分类（`direct_fetch_*`、`binary_or_url_resource`、`agent_inbox_api` 等），**不机器执行治理访问类**，也不代表授权生效。

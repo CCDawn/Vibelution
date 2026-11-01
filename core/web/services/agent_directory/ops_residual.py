@@ -1121,6 +1121,7 @@ def consume_agent_inbox_message(
             item["consumedByTurnId"] = str(consumed_by_turn_id or "").strip()
             s._write_jsonl(path, messages)
             s._record_memory_event("agent_inbox.message_consumed", item, agent_id=str(agent.get("agentId") or ""), lifecycle=True)
+            _mirror_ledger_status_change(str(agent.get("agentId") or ""), [normalized_message_id], "consumed")
         return item
     raise s.AgentMessageNotFoundError(f"Agent inbox message not found: {message_id}")
 
@@ -1149,6 +1150,7 @@ def consume_all_agent_inbox_messages(
         consumed_ids.append(str(item.get("messageId") or item.get("eventId") or "").strip())
     if consumed_ids:
         s._write_jsonl(path, messages)
+        _mirror_ledger_status_change(str(agent.get("agentId") or ""), consumed_ids, "consumed")
         s._record_memory_event(
             "agent_inbox.messages_consumed",
             {
@@ -1168,6 +1170,82 @@ def consume_all_agent_inbox_messages(
         "consumedCount": len(consumed_ids),
         "consumedMessageIds": [item for item in consumed_ids if item],
         "remainingPendingCount": s.count_agent_inbox_messages_for_agent(agent_id, status="pending"),
+    }
+
+
+def mark_agent_inbox_messages_read(
+    agent_id: str,
+    message_ids: list[str] | None = None,
+    *,
+    read_by_session_id: str = "",
+    read_by_turn_id: str = "",
+) -> dict[str, Any]:
+    """Write the ``readAt`` receipt on inbox rows without touching consume.
+
+    Three-state timeline per row: ``createdAt`` (sent) -> ``readAt`` (read,
+    written by the session worker right after context assembly) ->
+    ``consumedAt`` (consumed, written optimistically at submit). Missing or
+    empty ``readAt`` — including on legacy rows written before the field —
+    means unread. ``message_ids`` targets explicit rows; without it the sweep
+    falls back to rows consumed by the given session+turn. Reuses the consume
+    mechanism's read/rewrite helpers as a sibling function; no new lock
+    semantics (write races are a tracked separate concern).
+    """
+
+    s = _service()
+    agent = s.get_agent(agent_id, include_archived=True)
+    if not agent:
+        raise s.AgentNotFoundError(f"Agent not found: {agent_id}")
+    wanted_ids = {
+        str(item or "").strip()
+        for item in (message_ids or [])
+        if str(item or "").strip()
+    }
+    session_key = str(read_by_session_id or "").strip()
+    turn_key = str(read_by_turn_id or "").strip()
+    path = s._agent_workspace_event_path(agent, "agent_inbox_messages.jsonl")
+    messages = s._read_jsonl(path)
+    now = s.utc_now_iso()
+    read_ids: list[str] = []
+    for item in messages:
+        if str(item.get("readAt") or "").strip():
+            continue
+        row_id = str(item.get("messageId") or item.get("eventId") or "").strip()
+        if wanted_ids:
+            if row_id not in wanted_ids:
+                continue
+        elif (
+            str(item.get("consumedBySessionId") or "").strip() != session_key
+            or str(item.get("consumedByTurnId") or "").strip() != turn_key
+        ):
+            continue
+        item["readAt"] = now
+        if row_id:
+            read_ids.append(row_id)
+    if not read_ids:
+        return {
+            "agentId": str(agent.get("agentId") or "").strip(),
+            "readCount": 0,
+            "readMessageIds": [],
+        }
+    s._write_jsonl(path, messages)
+    s._record_memory_event(
+        "agent_inbox.messages_read",
+        {
+            "eventId": s._new_event_id("agentinbox"),
+            "messageId": "",
+            "targetAgentId": str(agent.get("agentId") or "").strip(),
+            "status": str(messages[0].get("status") or "pending") if messages else "pending",
+            "createdAt": now,
+            "metadata": {"readCount": len(read_ids)},
+        },
+        agent_id=str(agent.get("agentId") or ""),
+        lifecycle=True,
+    )
+    return {
+        "agentId": str(agent.get("agentId") or "").strip(),
+        "readCount": len(read_ids),
+        "readMessageIds": read_ids,
     }
 
 
@@ -2028,8 +2106,20 @@ def revoke_agent_inbox_message(
             item["revokeReason"] = s.trim_lines(str(reason or ""), max_lines=2)
             s._write_jsonl(path, messages)
             s._record_memory_event("agent_inbox.message_revoked", item, agent_id=str(agent.get("agentId") or ""), lifecycle=True)
+            _mirror_ledger_status_change(str(agent.get("agentId") or ""), [normalized_message_id], "revoked")
         return item
     raise s.AgentMessageNotFoundError(f"Agent inbox message not found: {message_id}")
+
+
+def _mirror_ledger_status_change(agent_id: str, message_ids: list[str], status: str) -> None:
+    """Best-effort ledger mirror for inbox status transitions; never raises."""
+
+    try:
+        from core.web.services import personal_assistant_dispatch_ledger as dispatch_ledger
+
+        dispatch_ledger.record_inbox_status_change(agent_id, message_ids, status)
+    except Exception:
+        pass
 
 
 def utc_now_iso() -> str:
@@ -2105,6 +2195,7 @@ def write_agent_inbox_message(
         "promptEligible": bool(prompt_eligible),
         "createdBy": str(created_by or "agent").strip() or "agent",
         "createdAt": now,
+        "readAt": "",
         "consumedAt": "",
         "consumedBySessionId": "",
         "consumedByTurnId": "",
@@ -2114,6 +2205,16 @@ def write_agent_inbox_message(
     s._append_jsonl(path, event_payload)
     s._record_memory_event("memory.event_written", event_payload, agent_id=str(target_agent.get("agentId") or ""))
     s._record_memory_event("agent_inbox.message_written", event_payload, agent_id=str(target_agent.get("agentId") or ""), lifecycle=True)
+    # Delivery-side observer for the PA dispatch ledger (批三地基): records
+    # PA-involving rows with their pairing envelope while it is still in
+    # memory, before the JSONL read path's 8192-char survival rule. The
+    # observer never raises, so inbox writes keep their authoritative path.
+    try:
+        from core.web.services import personal_assistant_dispatch_ledger as dispatch_ledger
+
+        dispatch_ledger.record_inbox_message(event_payload)
+    except Exception:
+        pass
     return event_payload
 
 

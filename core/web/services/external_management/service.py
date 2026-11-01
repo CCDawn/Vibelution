@@ -70,7 +70,7 @@ class ManagementService:
     def binding(self) -> dict:
         current = self.identity()
         Binding.model_validate(current.binding)
-        return {"protocolVersion": 1, "binding": current.binding, "scopes": [scope for scope in SCOPES if scope not in {"tasks:read", "source:read", "knowledge:catalog:read", "agents:create:files", "teams:results:read"}], "actions": contracts()}
+        return {"protocolVersion": 1, "binding": current.binding, "scopes": [scope for scope in SCOPES if scope not in {"tasks:read", "source:read", "knowledge:catalog:read", "agents:create:files", "teams:results:read", "agents:directory:read"}], "actions": contracts()}
 
     def _expected(self, expected: dict):
         current = self.identity()
@@ -96,7 +96,7 @@ class ManagementService:
                     or grant.get("scopes") != scopes):
                     raise ManagementError("SUBJECT_GRANT_CONFLICT", 409)
             else:
-                if {"agents:create:files", "teams:results:read"} & set(scopes):
+                if {"agents:create:files", "teams:results:read", "agents:directory:read"} & set(scopes):
                     raise ManagementError("SCOPE_DENIED", 403)
                 grant = {"subject_id": "ops-" + uuid4().hex, "subject_capability": secrets.token_urlsafe(48),
                          "binding": current.binding, "authority": current.signature, "scopes": scopes}
@@ -242,6 +242,21 @@ class ManagementService:
             return response_model.model_validate(raw).model_dump()
         except ValidationError:
             raise ManagementError("DIRECTORY_UNAVAILABLE", 503) from None
+
+    def read_agents(self, subject, capability, **parameters):
+        from .contracts import AgentDirectoryQuery, AgentDirectoryResponse
+        grant = self._authorize(subject, capability, "agents:directory:read")
+        try:
+            query = AgentDirectoryQuery.model_validate(parameters)
+        except ValidationError:
+            raise ManagementError("INVALID_INPUT", 422) from None
+        try:
+            result = AgentDirectoryResponse.model_validate(self.native.read_agents(query)).model_dump()
+        except ValidationError:
+            raise ManagementError("AGENT_DIRECTORY_UNAVAILABLE", 503) from None
+        if self._authorize(subject, capability, "agents:directory:read") != grant:
+            raise ManagementError("AUTHORIZATION_CONFLICT", 409)
+        return result
 
     def read_teams(self, subject, capability, **parameters):
         return self._directory_read(subject, capability, "team_list", parameters)

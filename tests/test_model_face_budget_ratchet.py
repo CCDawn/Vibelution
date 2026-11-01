@@ -274,3 +274,43 @@ def test_knowledge_steward_tool_surface_within_budget() -> None:
         "measured baseline 28844). Raise KNOWLEDGE_STEWARD_TOOL_SCHEMA_CHARS_CAP "
         "in the same PR with the new measurement."
     )
+
+
+# --- 反噬守卫（anti-misuse guard）---------------------------------------
+# 本文件的预算常量是 CI 层的测量基准，不是运行时限制。若有产品代码引用
+# 这些常量（或 import tests 包）去截断/砍除/门控模型可见内容，就是
+# 「预算把 agent 卡死」的失败形态——此守卫必须变红阻止。
+
+_BUDGET_CAP_NAMES = (
+    "DEFAULT_ROLE_PROMPT_TOKEN_CAP",
+    "KNOWLEDGE_STEWARD_ROLE_PROMPT_TOKEN_CAP",
+    "DEFAULT_ROLE_TOTAL_TOKEN_CAP",
+    "KNOWLEDGE_STEWARD_ROLE_TOTAL_TOKEN_CAP",
+    "DEFAULT_SESSION_AGENT_TOOL_SCHEMA_CHARS_CAP",
+    "KNOWLEDGE_STEWARD_TOOL_SCHEMA_CHARS_CAP",
+)
+
+
+def test_budget_caps_stay_test_only() -> None:
+    """反噬守卫：预算常量只允许存在于测试层，产品代码零引用。"""
+    offenders: list[str] = []
+    for root in (PROJECT_ROOT / "core", PROJECT_ROOT / "tools"):
+        for path in sorted(root.rglob("*.py")):
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            referenced = [name for name in _BUDGET_CAP_NAMES if name in text]
+            imports_tests = any(
+                line.startswith(("import tests", "from tests"))
+                for line in text.splitlines()
+            )
+            if referenced or imports_tests:
+                why = referenced or ["imports tests package"]
+                offenders.append(f"{path.relative_to(PROJECT_ROOT)}: {', '.join(why)}")
+    assert not offenders, (
+        "Product code must not reference the model-face budget caps or import "
+        "the tests package — these are CI measurements, never runtime limits. "
+        f"Offenders: {offenders}. If a runtime need exists, it needs its own "
+        "explicitly designed mechanism, not this ratchet's constants."
+    )

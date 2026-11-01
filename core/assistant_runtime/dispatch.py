@@ -39,6 +39,7 @@ _BACKEND_ERROR_MESSAGES = {
     "runtime_descriptor_missing": "未发现该项目的后端运行信息，已跳过。需要操作该项目时，请先通过 Launcher 启动；已有任务引用已保留。",
 }
 _BACKEND_CODE_MESSAGES = {
+    "AGENT_DIRECTORY_UNAVAILABLE": "目标项目暂不支持完整 Agent 目录，请通过 Launcher 更新并重启后再查；这不表示目录为空。",
     "BACKEND_UNAVAILABLE": "无法连接该项目后端。请检查 Launcher 中该项目的运行状态；已有任务引用已保留。",
     "RUNTIME_IDENTITY_MISMATCH": "项目后端的版本或项目身份校验失败。请通过 Launcher 更新并重启该项目后再试；已有任务引用已保留。",
 }
@@ -489,7 +490,7 @@ class DispatchService:
     async def discover(self, project_id: str, *, limit: int = 50) -> dict[str, Any]:
         """Discover through the native non-team eligibility policy."""
         payload = await self._call(project_id, lambda client: client.list_agents(limit=limit))
-        return {**payload, "projectId": project_id}
+        return {**payload, "projectId": project_id, "scope": "externally_dispatchable", "catalogComplete": False}
 
     async def available_projects(self, *, offset: int = 0, limit: int = 8,
                                  expected_revision: int | None = None) -> dict[str, Any]:

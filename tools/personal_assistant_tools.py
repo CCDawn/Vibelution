@@ -125,6 +125,7 @@ def personal_assistant_action_tool(action: str = "index", parameters: dict | Non
             required_scopes = {
                 "task_list": ["tasks:read"], "source_read": ["source:read"], "source_search": ["source:read"],
                 "agent_get": ["agents:read"], "avatar_options": ["agents:read"],
+                "agent_list": ["agents:directory:read"],
                 "session_list": ["sessions:read"], "session_get": ["sessions:read"],
                 "session_config_get": ["sessions:read"], "session_config_compare": ["sessions:read"],
                 "session_parameters_get": ["sessions:parameters:read", "sessions:read"],
@@ -141,6 +142,8 @@ def personal_assistant_action_tool(action: str = "index", parameters: dict | Non
                     "再通过 personal_assistant_manage_tool 的 authorization_upgrade 仅申请 requiredScopes 中缺失的权限；"
                     "使用原生审批，不自行宣称已授权。成功后继续原查询；拒绝或结果未知时保留原请求并说明。"
                 )}
+            if action == "agent_list" and result.get("scope") == "all_registered_agents":
+                result = {**result, "directoryVersion": 1}
             return json.dumps({"source": "launcher-assistant", "untrustedContent": True,
                                **result}, ensure_ascii=False)
         from tools.pa_platform_actions import execute_action

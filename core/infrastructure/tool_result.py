@@ -1333,9 +1333,14 @@ def package_tool_result_facts(
 ) -> ToolResultFacts:
     """将工具原始返回值封装为模型可见的事实载荷。"""
     packaged = package_tool_result(result, tool_name=tool_name, max_chars=max_chars)
+    directory_content = None
+    if tool_name == "personal_assistant_action_tool":
+        from core.assistant_runtime.agent_directory_projection import project_directory_labels
+
+        directory_content = project_directory_labels(packaged.content, tool_name=tool_name)
     return ToolResultFacts(
         tool_name=str(tool_name or "").strip(),
-        content=project_tool_result_for_model(packaged.content),
+        content=directory_content if directory_content is not None else project_tool_result_for_model(packaged.content),
         truncated=packaged.truncated,
         original_length=packaged.original_length,
         result_kind=packaged.result_kind,

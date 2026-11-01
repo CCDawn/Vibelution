@@ -25,7 +25,7 @@ from core.web.services.external_management.contracts import (
     SessionConfigComparisonResponse,
     DirectoryQuery, TeamListResponse, TeamReadResponse, RoomListResponse, RoomReadResponse, SessionParametersResponse, AuthorizationStateResponse,
     LegacyObserverView, LegacyObserversResponse, LegacyReceiptsResponse, ActiveTasksResponse, SourceReadResponse, SourceSearchResponse,
-    TeamKnowledgeResponse, TeamResultResponse,
+    TeamKnowledgeResponse, TeamResultResponse, AgentDirectoryQuery, AgentDirectoryResponse,
 )
 from core.web.services.external_management.service import (
     ManagementError,
@@ -159,6 +159,18 @@ def _directory_query(request, *, detail=False):
         or any(not re.fullmatch(r"[0-9]{1,6}", values[key]) for key in ("offset", "member_offset", "limit") if key in values)
         or "archived" in values and values["archived"].casefold() not in {"true", "false"}):
         raise HTTPException(status_code=422, detail={"code": "INVALID_INPUT"})
+
+
+@router.get("/directory/agents", response_model=AgentDirectoryResponse)
+async def list_agents(request: Request, query: str = "", offset: int = 0, limit: int = 6,
+                      expected_revision: str | None = None):
+    _require_control(request)
+    values = request.query_params
+    if (set(values) - AgentDirectoryQuery.model_fields.keys() or len(values.multi_items()) != len(values)
+            or any(not re.fullmatch(r"[0-9]{1,6}", values[key]) for key in ("offset", "limit") if key in values)):
+        raise HTTPException(status_code=422, detail={"code": "INVALID_INPUT"})
+    return await _call(lambda: _service().read_agents(*_credentials(request), query=query, offset=offset,
+        limit=limit, expected_revision=expected_revision))
 
 
 @router.get("/directory/teams", response_model=TeamListResponse)

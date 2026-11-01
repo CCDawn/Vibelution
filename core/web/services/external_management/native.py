@@ -209,6 +209,17 @@ class NativeAgentGateway:
         except (OSError, ValueError, TypeError, KeyError):
             raise ManagementError("SOURCE_UNAVAILABLE", 503) from None
 
+    def read_agents(self, query):
+        from .agent_directory import read_agents
+        # Metadata reads need only the directory binding, not Session owners.
+        # Avoid importing a Session composition root on this existing-only path.
+        from core.web.services import agent_directory_service as directory
+        from .service import ManagementError
+        if (Path(directory.PROJECT_ROOT).resolve() != self.project_root
+                or Path(directory._active_project_root()).resolve() != self.project_root):
+            raise ManagementError("TARGET_BINDING_CHANGED", 409)
+        return read_agents(self.project_root, directory, query)
+
     def read_teams(self, query):
         from .workspace_queries import read_teams
         return read_teams(self.project_root, self._owners(), query)

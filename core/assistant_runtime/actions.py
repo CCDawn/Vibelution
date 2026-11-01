@@ -351,11 +351,11 @@ def _documentation_contracts():
 
 def _project_read_contracts():
     from core.web.services.external_management.contracts import (AvatarOptionsQuery, SessionMetadataQuery, SessionListQuery,
-        DirectoryQuery, TeamReadQuery, TeamKnowledgeQuery, RoomReadQuery, ActiveTasksQuery, SourceReadQuery, SourceSearchQuery)
+        DirectoryQuery, AgentDirectoryQuery, TeamReadQuery, TeamKnowledgeQuery, RoomReadQuery, ActiveTasksQuery, SourceReadQuery, SourceSearchQuery)
 
     return {name: create_model(f"Launcher_{model.__name__}", __base__=model,
         project_id=(str, Field(min_length=1, max_length=160))) for name, model in (
-            ("task_list", ActiveTasksQuery), ("source_read", SourceReadQuery), ("source_search", SourceSearchQuery), ("session_list", SessionListQuery), ("session_get", SessionMetadataQuery), ("session_config_get", SessionMetadataQuery),
+            ("agent_list", AgentDirectoryQuery), ("task_list", ActiveTasksQuery), ("source_read", SourceReadQuery), ("source_search", SourceSearchQuery), ("session_list", SessionListQuery), ("session_get", SessionMetadataQuery), ("session_config_get", SessionMetadataQuery),
             ("session_config_compare", SessionMetadataQuery),
             ("session_parameters_get", SessionMetadataQuery), ("team_list", DirectoryQuery), ("team_get", TeamReadQuery),
             ("team_knowledge_list", TeamKnowledgeQuery),
@@ -372,7 +372,8 @@ _HELP = {
     "legacy_observers": "分页只读本主体已明确交接的旧任务观察授权；不创建授权，不继承旧临时控制权限。新legacy:receipts:read须明确授予，旧授权不会自动扩大。",
     "legacy_receipts": "按observer_id分页查询白名单旧任务及迟到回执。businessTaskStatus是显式业务报告，nativeTurnStatus只是执行轮状态；unknown/unresolved不是完成。不得重派或将旧消息ID当external task ID；取消、继续、审批必须重新走原生授权。",
     "projects": "分页检查 Launcher 已授权项目，每页最多8项；续页传 offset=nextOffset、expected_revision=registryRevision，授权变化则从首页重新查询。projects 仅列出当前可调用后端的 projectId；skippedProjects 说明未发现运行实例、版本不匹配或检查超时的项目。只对 projects 调用 agents 等项目动作，不逐个重试 skippedProjects，不自动启动分支。",
-    "agents": "查询项目当前允许派遣的普通 Agent；不会创建项目内个人助理。",
+    "agents": "查询项目当前允许外部派遣的普通 Agent 候选，scope=externally_dispatchable、catalogComplete=false；不是完整目录，返回1项不能推断项目只有1个Agent。查询全部登记项用agent_list；不会创建项目内个人助理。",
+    "agent_list": "分页只读全部登记Agent目录，含活跃、归档、系统、团队及hidden Agent，仅公开名称、状态、归属等目录元数据。ownership.teams仅含当前roster实证成员关系；recordedTeams是Agent元数据保留但未确认当前成员的团队引用，不证明当前归属，也不改变派遣。createdBy是公开创建来源，templateId是登记模板，未知为空；ownerAgentId/ownerAgentName仅展示显式宿主Agent引用及同一目录公开名称，不读取对方Session或配置；kind=unknown不表示丢失Agent。dispatchable单独表示能否派遣，不扩大执行权限。total是本次query匹配总量，registryTotal是登记总量，当前页行数不能称总量。默认及最多6项，单行query最多64字符且无控制字符。保持query，用offset=nextOffset、expected_revision=revision续页，直到nextOffset为空才查全；revision变化则从首页重查。需独立agents:directory:read，缺scope先查authorization_status，再用authorization_upgrade只显式增加所需scope。旧目标不支持时明确不可用，不能把不可用说成空目录。",
     "dispatch": "以稳定 dispatch_id 派遣只读任务。优先用 task_source 的 start_after/end_before 唯一短锚点提取当前用户原文（都为空表示整条消息）；不得改写任务、ID或引号文字。task 仅允许用户消息的精确原文子串。未知时保留原参数与 ID，查询回执或由原生引用恢复，不能换 ID 重派。",
     "receipt": "查询原生任务回执；离线/超时/等待审批都不代表目标完成。",
     "agent_get": "读取目标项目普通 Agent 当前 configRevision、updatedAt、模型与头像，用于配置 CAS。",
@@ -762,6 +763,8 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
         coroutine = service.management.invoke(project_id, action=action, request_id=request_id, parameters=args)
     elif action == "agent_get":
         coroutine = service.management.agent(args.pop("project_id"), **args)
+    elif action == "agent_list":
+        coroutine = service.management.agent_list(args.pop("project_id"), **args)
     elif action == "session_list":
         coroutine = service.management.session_list(args.pop("project_id"), **args)
     elif action == "task_list":
