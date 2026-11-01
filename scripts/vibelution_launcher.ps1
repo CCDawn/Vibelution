@@ -41,7 +41,6 @@ $managedBackendMarkerArg = "--managed-by-launcher"
 $managedLauncherMarkerArg = "--managed-launcher-control"
 $runtimeManagerInternalLauncherEnv = "VIBELUTION_RUNTIME_MANAGER_INTERNAL_LAUNCHER"
 $launcherShortcutName = "Vibelution.lnk"
-$launcherDesktopShortcutName = "Vibelution Launcher.lnk"
 $launcherIconPath = Join-Path $projectDir "assets\icons\vibelution.ico"
 $launcherDesktopEntryVbsPath = Join-Path $projectDir "scripts\vibelution_desktop_entry.vbs"
 $desktopEntryCatalogScriptPath = Join-Path $projectDir "scripts\desktop_entry_catalog.ps1"
@@ -2262,6 +2261,7 @@ function Set-LauncherShellShortcut {
 }
 
 function Repair-LauncherShortcut {
+    . $desktopEntryCatalogScriptPath
     $startMenuRoot = [Environment]::GetFolderPath("StartMenu")
     if (-not $startMenuRoot -and $env:APPDATA) {
         $startMenuRoot = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu"
@@ -2303,12 +2303,7 @@ function Repair-LauncherShortcut {
     $shell = New-Object -ComObject WScript.Shell
     Set-LauncherShellShortcut -Shell $shell -ShortcutPath $shortcutPath -TargetPath $shortcutTargetPath -Arguments $shortcutArguments -IconPath $iconPath
 
-    $desktopDir = [Environment]::GetFolderPath("Desktop")
-    $desktopShortcutPath = ""
-    if ($desktopDir) {
-        $desktopShortcutPath = Join-Path $desktopDir $launcherDesktopShortcutName
-        Set-LauncherShellShortcut -Shell $shell -ShortcutPath $desktopShortcutPath -TargetPath $shortcutTargetPath -Arguments $shortcutArguments -IconPath $iconPath
-    }
+    $desktopShortcutPath = Set-VibelutionDesktopLauncherShortcut -Shell $shell -ProjectDir $projectDir -TargetPath $shortcutTargetPath -Arguments $shortcutArguments -IconPath $iconPath
 
     Write-LauncherControlLog `
         -Event "launcher.shortcut.repaired" `

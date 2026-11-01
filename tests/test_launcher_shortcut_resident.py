@@ -28,15 +28,23 @@ Invoke-Expression $fn.Extent.Text
 $script:mode = $Mode
 $script:calls = @()
 $projectDir = 'C:\fixture\Project With Spaces'
+$desktopEntryCatalogScriptPath = Join-Path (Split-Path -Parent $LauncherPath) 'desktop_entry_catalog.ps1'
 $launcherIconPath = 'C:\fixture\icon.ico'
 $launcherShortcutName = 'Vibelution.lnk'
 $launcherDesktopShortcutName = 'Vibelution Launcher.lnk'
-function Test-Path { param($LiteralPath) return $true }
+function Test-Path { param($LiteralPath, $PathType) return (Split-Path -Leaf $LiteralPath) -ne 'Vibelution.lnk' }
 function Resolve-PackagedElectronDesktopEntryPath {
     if ($script:mode -eq 'fallback') { throw 'fixture unavailable' }
     return 'C:\fixture\Vibelution.exe'
 }
-function New-Object { param($ComObject) return 'fixture-shell' }
+$script:fakeShell = [pscustomobject]@{}
+$script:fakeShell | Add-Member ScriptMethod CreateShortcut {
+    param($path)
+    $link = [pscustomobject]@{ TargetPath = ''; Arguments = ''; WorkingDirectory = ''; IconLocation = ''; Description = ''; WindowStyle = 0 }
+    $link | Add-Member ScriptMethod Save { $script:calls += [pscustomobject]@{ target = $this.TargetPath; arguments = $this.Arguments } }
+    return $link
+}
+function New-Object { param($ComObject) return $script:fakeShell }
 function Set-LauncherShellShortcut {
     param($Shell, $ShortcutPath, $TargetPath, $Arguments, $IconPath)
     $script:calls += [pscustomobject]@{ target = $TargetPath; arguments = $Arguments }

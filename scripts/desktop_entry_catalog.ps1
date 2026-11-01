@@ -106,3 +106,50 @@ function Resolve-DesktopPublicEntryPath {
     }
     return Join-Path $ProjectDir ([string]$publicEntries[0].path)
 }
+
+function Set-VibelutionDesktopLauncherShortcut {
+    param(
+        [Parameter(Mandatory = $true)][object]$Shell,
+        [Parameter(Mandatory = $true)][string]$ProjectDir,
+        [Parameter(Mandatory = $true)][string]$TargetPath,
+        [Parameter(Mandatory = $true)][string]$Arguments,
+        [Parameter(Mandatory = $true)][string]$IconPath,
+        [string]$DesktopDirectory = [Environment]::GetFolderPath("Desktop")
+    )
+
+    if (-not $DesktopDirectory) {
+        return ""
+    }
+    $shortcutPath = Join-Path $DesktopDirectory "Vibelution Launcher.lnk"
+    $shortcut = $Shell.CreateShortcut($shortcutPath)
+    $shortcut.TargetPath = $TargetPath
+    $shortcut.Arguments = $Arguments
+    $shortcut.WorkingDirectory = $ProjectDir
+    $shortcut.IconLocation = ('{0},0' -f $IconPath)
+    $shortcut.Description = "Vibelution Launcher"
+    $shortcut.WindowStyle = 7
+    $shortcut.Save()
+
+    # Save the canonical entry before retiring a positively identified alias.
+    # A same-named shortcut for another project or program is not ours to remove.
+    $legacyPath = Join-Path $DesktopDirectory "Vibelution.lnk"
+    if (Test-Path -LiteralPath $legacyPath -PathType Leaf) {
+        $legacyItem = Get-Item -LiteralPath $legacyPath -Force
+        if (($legacyItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) {
+            $legacy = $Shell.CreateShortcut($legacyPath)
+            $packagedEntry = Join-Path $ProjectDir "dist\desktop\win-unpacked\Vibelution.exe"
+            $projectArguments = '--workspace "{0}"' -f $ProjectDir
+            $knownLegacyArguments = @(
+                $projectArguments,
+                ($projectArguments + ' "vibelution://launcher/focus"'),
+                ($projectArguments + ' vibelution://launcher/focus')
+            )
+            $sameEntry = $legacy.TargetPath -eq $TargetPath -and $legacy.Arguments -eq $Arguments
+            $projectEntry = $legacy.TargetPath -eq $packagedEntry -and $knownLegacyArguments -contains $legacy.Arguments.Trim()
+            if ($sameEntry -or $projectEntry) {
+                Remove-Item -LiteralPath $legacyPath -ErrorAction Stop
+            }
+        }
+    }
+    return $shortcutPath
+}

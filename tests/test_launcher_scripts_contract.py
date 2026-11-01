@@ -21,7 +21,9 @@ def test_launcher_script_repairs_start_menu_shortcut_entry():
     assert "function Set-LauncherShellShortcut" in source
     assert "launch_vibelution_shortcut.ps1" in source
     assert "Vibelution.lnk" in source
-    assert "Vibelution Launcher.lnk" in source
+    catalog = (PROJECT_ROOT / "scripts" / "desktop_entry_catalog.ps1").read_text(encoding="utf-8")
+    assert "Vibelution Launcher.lnk" in catalog
+    assert "Set-VibelutionDesktopLauncherShortcut" in source
     assert "scripts\\desktop_entry_catalog.ps1" in source
     assert "Resolve-DesktopPublicEntryPath" in source
     assert "Run scripts\\build_desktop_package.ps1" in source

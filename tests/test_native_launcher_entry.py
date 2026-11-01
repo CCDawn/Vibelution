@@ -114,9 +114,12 @@ def test_launch_vibelution_shortcut_script_builds_content_addressed_entry():
     assert "build_vibelution_launcher_entry.ps1" in source
     assert "Start-Process" in source
     assert "WindowStyle Hidden" in source
-    assert "Vibelution Launcher.lnk" in source
+    helper = (PROJECT_ROOT / "scripts" / "desktop_entry_catalog.ps1").read_text(encoding="utf-8")
+    assert "Vibelution Launcher.lnk" in helper
+    assert "Set-VibelutionDesktopLauncherShortcut" in source
+    assert "CreateShortcut" not in source
     assert "WScript.Shell" in source
-    assert "WindowStyle = 7" in source
+    assert "WindowStyle = 7" in helper
     assert "Repair-DesktopLauncherShortcut" in source
 
 
