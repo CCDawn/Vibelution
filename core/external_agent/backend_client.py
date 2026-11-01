@@ -40,9 +40,11 @@ _LEGACY_MANAGEMENT_SCOPES = ["agents:avatar", "agents:create", "agents:read", "a
 class BackendClientError(RuntimeError):
     """Fail-closed runtime discovery, identity, auth, or API error."""
 
-    def __init__(self, message: str, *, code: str = "BACKEND_ERROR") -> None:
+    def __init__(self, message: str, *, code: str = "BACKEND_ERROR", reason: str = "") -> None:
         super().__init__(str(message or code))
         self.code = str(code or "BACKEND_ERROR")
+        # Only local discovery sets this marker; backend response text is untrusted.
+        self.reason = reason
 
 
 class _StaleControlTokenError(BackendClientError):
@@ -1250,6 +1252,7 @@ class ManagedAgentBackendClient:
             raise BackendClientError(
                 "managed backend runtime source revision mismatch",
                 code="RUNTIME_IDENTITY_MISMATCH",
+                reason="runtime_revision_mismatch",
             )
         self._runtime_info = dict(info)
         self._verified = True
@@ -1263,6 +1266,7 @@ class ManagedAgentBackendClient:
             raise BackendClientError(
                 "managed Launcher runtime descriptor is missing",
                 code="BACKEND_UNAVAILABLE",
+                reason="runtime_descriptor_missing",
             )
         parsed = urlparse(url)
         hostname = str(parsed.hostname or "").lower()

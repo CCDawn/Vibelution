@@ -33,6 +33,21 @@ from core.external_agent.backend_client import (
 from core.external_agent.contracts import TASK_TERMINAL_STATUSES
 from core.infrastructure.atomic_io import atomic_write_json
 
+_PROJECT_DISCOVERY_SECONDS = 4.0
+_BACKEND_ERROR_MESSAGES = {
+    "runtime_revision_mismatch": "项目代码已更新，但后台仍在运行其他版本。请通过 Launcher 更新并重启该项目后再试；已有任务引用已保留。",
+    "runtime_descriptor_missing": "未发现该项目的后端运行信息，已跳过。需要操作该项目时，请先通过 Launcher 启动；已有任务引用已保留。",
+}
+_BACKEND_CODE_MESSAGES = {
+    "BACKEND_UNAVAILABLE": "无法连接该项目后端。请检查 Launcher 中该项目的运行状态；已有任务引用已保留。",
+    "RUNTIME_IDENTITY_MISMATCH": "项目后端的版本或项目身份校验失败。请通过 Launcher 更新并重启该项目后再试；已有任务引用已保留。",
+}
+
+
+def _backend_error_message(exc: BackendClientError) -> str:
+    return (_BACKEND_ERROR_MESSAGES.get(exc.reason) or _BACKEND_CODE_MESSAGES.get(exc.code)
+            or "项目后端操作失败；已有任务引用已保留。")
+
 _DISPATCH_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,119}\Z")
 _DRAIN_ADMISSION_TIMEOUT = 5.0
 _DRAIN_RECORD_TIMEOUT = 20.0
@@ -475,6 +490,54 @@ class DispatchService:
         """Discover through the native non-team eligibility policy."""
         payload = await self._call(project_id, lambda client: client.list_agents(limit=limit))
         return {**payload, "projectId": project_id}
+
+    async def available_projects(self, *, offset: int = 0, limit: int = 8,
+                                 expected_revision: int | None = None) -> dict[str, Any]:
+        """List callable projects without starting offline worktrees or tasks."""
+        revision = self._registry_revision
+        if (offset or expected_revision is not None) and expected_revision != revision:
+            raise DispatchError("项目授权列表已变化或续页缺少版本，请从 projects 首页重新查询。", code="PROJECT_REGISTRY_CHANGED")
+        registered = self.project_ids()
+        project_ids = registered[offset:offset + limit]
+        bindings = dict(self._projects)
+        available: set[str] = set()
+        skipped = {key: {"projectId": key, "code": "PROJECT_CHECK_TIMEOUT",
+                         "message": "项目可用性检查超时，本轮已跳过；不要自动重试。"} for key in project_ids}
+        limiter = anyio.CapacityLimiter(8)
+
+        async def check(key):
+            async with limiter:
+                try:
+                    root = self._project(key)
+                    # Diagnostics only reads identity. Do not rotate the shared
+                    # task client or wait for its shielded heartbeat borrowers.
+                    client = self._client_factory(root, state_path=self._root / "credentials" / f"{_digest(key + self._binding(root))}.json")
+                    await client.diagnostics()
+                except BackendClientError as exc:
+                    code = exc.code if exc.code in {*_BACKEND_CODE_MESSAGES, "BACKEND_PROTOCOL_ERROR"} else "BACKEND_ERROR"
+                    skipped[key] = {"projectId": key, "code": code, "message": _backend_error_message(exc)}
+                except DispatchError as exc:
+                    skipped[key] = {"projectId": key, "code": exc.code, "message": str(exc)}
+                else:
+                    available.add(key)
+                    skipped.pop(key, None)
+
+        with anyio.move_on_after(_PROJECT_DISCOVERY_SECONDS):
+            async with anyio.create_task_group() as tasks:
+                for key in project_ids:
+                    tasks.start_soon(check, key)
+        current = self._admitted_projects()
+        for key in tuple(available):
+            if current.get(key) != bindings[key]:
+                available.remove(key)
+                skipped[key] = {"projectId": key, "code": "PROJECT_BINDING_CHANGED",
+                                "message": "检查期间项目授权发生变化，本轮已跳过。"}
+        reasons = list(dict.fromkeys(row["message"] for row in skipped.values()))
+        return {"projects": [{"projectId": key} for key in project_ids if key in available],
+                "skippedProjects": list(skipped.values()), "total": len(registered), "offset": offset,
+                "registryRevision": revision,
+                "nextOffset": offset + limit if offset + limit < len(registered) else None,
+                "message": f"本页可调用 {len(available)} 个项目，跳过 {len(skipped)} 个。" + " ".join(reasons)}
 
     async def dispatch(
         self, project_id: str, *, agent_id: str, task: str, dispatch_id: str,
@@ -990,7 +1053,7 @@ class DispatchService:
             except BackendClientError as exc:
                 code = re.sub(r"[^A-Z0-9_]", "_", str(exc.code).upper())[:80] or "BACKEND_ERROR"
                 raise DispatchError(
-                    "Native task operation failed; existing references were retained.", code=code,
+                    _backend_error_message(exc), code=code,
                 ) from None
 
     async def _update(self, record: dict[str, Any], action: Callable[[Any], Awaitable[dict[str, Any]]]) -> dict[str, Any]:

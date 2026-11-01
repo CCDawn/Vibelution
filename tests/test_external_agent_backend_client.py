@@ -1083,6 +1083,17 @@ async def test_client_rejects_runtime_from_another_source_revision(tmp_path) -> 
 
     assert mismatch.value.code == "RUNTIME_IDENTITY_MISMATCH"
 
+    assert mismatch.value.reason == "runtime_revision_mismatch"
+
+
+@pytest.mark.anyio
+async def test_missing_runtime_descriptor_has_a_local_diagnostic_reason(tmp_path):
+    client = ManagedAgentBackendClient(tmp_path, state_path=tmp_path / "adapter-state.json")
+    with pytest.raises(BackendClientError) as missing:
+        await client.diagnostics()
+    assert missing.value.code == "BACKEND_UNAVAILABLE"
+    assert missing.value.reason == "runtime_descriptor_missing"
+
 
 @pytest.mark.anyio
 async def test_client_rejects_runtime_from_another_server_version(tmp_path) -> None:
