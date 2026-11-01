@@ -30,7 +30,7 @@ describe("guarded local Launcher update", () => {
     const restart = main.slice(main.indexOf("async function restartLauncherToLatestBuild("), main.indexOf("async function resolveLauncherUpdateActiveWork("));
     const sandbox = {
       app: { isPackaged: true, exit: vi.fn() },
-      desktopCliArgs: {}, shellRefreshInFlight: false, shutdownApproved: false,
+      desktopCliArgs: {}, shellRefreshInFlight: false, shellRefreshRequest: null, shutdownApproved: false,
       decidePackagedDesktopShellRefresh,
       inspectCurrentDesktopShellLaunchReadiness: vi.fn().mockResolvedValue({ launchBlocking: true }),
       inspectCurrentDesktopShell: vi.fn().mockResolvedValue({ stale: true, launchBlocking: true }),
@@ -46,7 +46,7 @@ describe("guarded local Launcher update", () => {
       // Exiting is simulated; no real windows or child processes are touched.
       setTimeout: (callback: () => void) => { callback(); },
       refresh: undefined as unknown as (operation: string) => Promise<boolean>,
-      restartLatest: undefined as unknown as () => Promise<unknown>,
+      restartLatest: undefined as unknown as (interrupt?: boolean, operation?: string, options?: { shellKind?: "packaged" | "unpackaged" }) => Promise<unknown>,
       exitDesktop: undefined as unknown as () => Promise<void>,
     };
     Object.assign(sandbox, {
@@ -214,6 +214,66 @@ describe("guarded local Launcher update", () => {
     expect(input.stopMainRuntimeForApprovedShutdown).toHaveBeenCalledWith(true);
     expect(input.stopLauncherAssistant).toHaveBeenCalledOnce();
     await vi.waitFor(() => expect(input.app.exit).toHaveBeenCalledOnce());
+  });
+
+  it("shares a live automatic refresh with a concurrent operator click without caching acceptance", async () => {
+    const input = automaticRefreshHarness();
+    let finishPreparation!: () => void;
+    input.ensureLatestLauncher.mockImplementation(() => new Promise<void>(resolve => { finishPreparation = resolve; }));
+    input.setTimeout = vi.fn(); // Keep the shell alive in the accepted handoff gap.
+    const automatic = input.refresh("start");
+    await vi.waitFor(() => expect(input.ensureLatestLauncher).toHaveBeenCalledOnce());
+    const operator = input.restartLatest();
+    finishPreparation();
+    expect(await automatic).toBe(true);
+    expect(await operator).toMatchObject({ accepted: true });
+    expect(await input.restartLatest()).toMatchObject({ accepted: false });
+    expect(input.ensureLatestLauncher).toHaveBeenCalledOnce();
+    expect(input.stopMainRuntimeForApprovedShutdown).toHaveBeenCalledOnce();
+    expect(input.scheduleCurrentDesktopShellRefresh).toHaveBeenCalledOnce();
+    expect(input.setTimeout).toHaveBeenCalledOnce();
+  });
+
+  it("shares preparation failures and permits a fresh operator retry", async () => {
+    const input = automaticRefreshHarness();
+    let failPreparation!: (reason: Error) => void;
+    input.ensureLatestLauncher.mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { failPreparation = reject; }));
+    const automatic = input.refresh("start");
+    await vi.waitFor(() => expect(input.ensureLatestLauncher).toHaveBeenCalledOnce());
+    const operator = expect(input.restartLatest()).rejects.toThrow("package failed");
+    failPreparation(new Error("package failed"));
+    expect(await automatic).toBe(false);
+    await operator;
+    expect(input.scheduleCurrentDesktopShellRefresh).not.toHaveBeenCalled();
+    expect(await input.restartLatest()).toMatchObject({ accepted: true });
+    expect(input.ensureLatestLauncher).toHaveBeenCalledTimes(2);
+    expect(input.scheduleCurrentDesktopShellRefresh).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["start", { shellKind: "packaged" as const }],
+    ["rebuild-and-start", { shellKind: "packaged" as const }],
+    ["open", { shellKind: "unpackaged" as const }],
+  ])("does not acknowledge a different lifecycle or shell intent: %s", async (operation, options) => {
+    const input = automaticRefreshHarness();
+    let finishPreparation!: () => void;
+    input.ensureLatestLauncher.mockImplementation(() => new Promise<void>(resolve => { finishPreparation = resolve; }));
+    const first = input.restartLatest(true, "open", { shellKind: "packaged" });
+    await vi.waitFor(() => expect(input.ensureLatestLauncher).toHaveBeenCalledOnce());
+    expect(await input.restartLatest(true, operation, options)).toMatchObject({ accepted: false });
+    finishPreparation();
+    expect(await first).toMatchObject({ accepted: true });
+    expect(input.scheduleCurrentDesktopShellRefresh).toHaveBeenCalledExactlyOnceWith("open", { force: true, shellKind: "packaged" });
+  });
+
+  it("does not replay old acceptance if the scheduled exit cannot drain the assistant", async () => {
+    const input = automaticRefreshHarness();
+    input.stopLauncherAssistant.mockRejectedValue(new Error("ASSISTANT_DRAIN_TIMEOUT"));
+    expect(await input.restartLatest()).toMatchObject({ accepted: true });
+    await vi.waitFor(() => expect(input.stopLauncherAssistant).toHaveBeenCalledOnce());
+    expect(await input.restartLatest()).toMatchObject({ accepted: false });
+    expect(input.scheduleCurrentDesktopShellRefresh).toHaveBeenCalledOnce();
+    expect(input.app.exit).not.toHaveBeenCalled();
   });
 
   it.each(["active", "unknown"] as const)("does not build, stop or schedule when tasks are %s", async (state) => {
