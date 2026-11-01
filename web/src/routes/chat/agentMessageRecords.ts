@@ -176,7 +176,10 @@ export function mergeAgentMessageRecords(inputs: AgentMessageRecord[]): AgentMes
     // A linked reply attempt is not a reply receipt until it reaches the sender.
     if (!origin.sender.agentId || !reply.recipients.some((row) => row.agentId === origin.sender.agentId && row.delivery === "delivered")) continue;
     for (const recipient of origin.recipients) {
-      if (recipient.delivery !== "revoked" && recipient.agentId && recipient.agentId === reply.sender.agentId) recipient.handling = "replied";
+      if (recipient.delivery !== "revoked" && recipient.agentId && recipient.agentId === reply.sender.agentId) {
+        recipient.handling = "replied";
+        recipient.error = undefined;
+      }
     }
   }
   return records.sort((a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0));

@@ -72,6 +72,12 @@ describe("cross-Agent message source projection", () => {
     const reply = record("reply-one", { sender: { agentId: "reviewer", name: "审查助手" }, type: "reply", replyToId: "one" });
     expect(mergeAgentMessageRecords([record("one"), reply]).find((item) => item.id === "one")!.recipients[0].handling).toBe("unknown");
   });
+  it("clears an old wake error after a confirmed reply even without a receiver journal window", () => {
+    const origin = record("one", { recipients: [{ agentId: "reviewer", name: "审查助手", delivery: "delivered", handling: "wake_failed", error: "old wake failure" }] });
+    const reply = record("reply-one", { sender: { agentId: "reviewer", name: "审查助手" }, type: "reply", replyToId: "one",
+      recipients: [{ agentId: "sender", name: "发送助手", delivery: "delivered", handling: "unknown" }] });
+    expect(mergeAgentMessageRecords([origin, reply]).find((item) => item.id === "one")!.recipients[0]).toMatchObject({ handling: "replied", error: undefined });
+  });
   it("reads native automatic replies without inventing missing kind/messageId fields", () => {
     const detail = session([{ id: "native-row", nodeId: "journal-node-1", role: "user", timestamp: "2026-11-01T12:01:00Z", content: "检查完成", metadata: { sourceSurface: "agent_inbox_reply", sourceAgentId: "reviewer", sourceSessionId: "review-session", sourceTurnId: "review-turn", replyToMessageId: "inbox-one" } }]);
     const reply = sessionMessageRecords(detail, agents, new Map())[0];
