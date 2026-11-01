@@ -310,17 +310,53 @@ def get_existing_tool_registry(snapshot) -> dict[str, Any]:
     """Build native descriptors from pinned existing authorities, without seeding.
 
     No cache-signature paths, Agent hydration or dependency refresh is entered.
-    Missing generated-tool authority is unavailable, not an empty full catalog.
+    A missing optional generated-tool file means no generated tools, matching
+    the native loader. Malformed or ambiguous existing authority stays closed.
     """
+    from core.assistant_runtime.migration_io import check_path, path_identity
+
     try:
         if Path(PROJECT_ROOT).resolve() != Path(snapshot.project_root).resolve():
             raise ValueError("Registry project binding changed")
-        path = snapshot.path("tool_registry", "generated_tools.json")
+        # Preserve lexical components until link checks; snapshot.path(parts)
+        # resolves them, which could otherwise hide a dangling leaf or parent.
+        path = snapshot.path() / "tool_registry" / "generated_tools.json"
         configured = Path(GENERATED_TOOLS_PATH).resolve()
-        formal = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "tool_registry", "generated_tools.json").resolve()
+        formal_path = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "tool_registry", "generated_tools.json")
+        formal = formal_path.resolve()
         if configured not in {_DEFAULT_GENERATED_TOOLS_PATH.resolve(), formal, path.resolve()}:
             raise ValueError("Existing registry authority differs from the configured native source")
-        payload = snapshot.read_json(path, strict=True, max_bytes=8_000_000)
+        absent = []
+        try:
+            initial = path.lstat()
+        except FileNotFoundError:
+            # _load_generated_tools defines absence as an empty custom catalog.
+            # An unseeded sandbox may have an existing formal source instead;
+            # do not invent its effective contents or initialize either path.
+            for candidate in (path,) if path.resolve() == formal else (path, formal_path):
+                try:
+                    candidate.lstat()
+                except FileNotFoundError:
+                    parent = candidate.parent
+                    while True:
+                        try:
+                            parent.lstat()
+                            break
+                        except FileNotFoundError:
+                            if parent.parent == parent:
+                                raise ValueError("Generated catalog source root is unavailable") from None
+                            parent = parent.parent
+                    check_path(parent)
+                    absent.append((candidate, parent, path_identity(parent)))
+                else:
+                    raise ValueError("Missing catalog has a linked or existing formal source") from None
+            payload = {"schemaVersion": 1, "tools": []}
+        else:
+            check_path(path)
+            if initial.st_nlink != 1:
+                raise ValueError("Linked generated tool authority")
+            # Once observed present, a lost read is unavailable, never empty.
+            payload = snapshot.read_json(path, strict=True, max_bytes=8_000_000)
         records = payload.get("tools")
         if (type(payload.get("schemaVersion")) is not int or payload["schemaVersion"] != 1
                 or not isinstance(records, list) or len(records) > 10000
@@ -336,6 +372,15 @@ def get_existing_tool_registry(snapshot) -> dict[str, Any]:
         if len(names) != len(set(names)):
             raise ValueError("Ambiguous existing generated tool authority")
         result = _build_tool_registry(existing_snapshot=snapshot, generated_records=records)
+        for candidate, parent, identity in absent:
+            try:
+                candidate.lstat()
+            except FileNotFoundError:
+                check_path(parent)
+                if path_identity(parent) != identity:
+                    raise ValueError("Missing catalog authority changed during read") from None
+            else:
+                raise ValueError("Generated catalog appeared during read") from None
         snapshot.verify_workspace()
         return result
     except (OSError, ValueError, TypeError) as exc:

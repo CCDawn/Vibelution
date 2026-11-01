@@ -2,6 +2,9 @@
 from concurrent.futures import Future
 from copy import deepcopy
 import json
+import os
+from pathlib import Path
+import stat
 from types import SimpleNamespace
 
 import pytest
@@ -370,7 +373,9 @@ def test_operator_acl_grant_revoke_is_versioned_audited_and_preserves_agent_gate
 @pytest.mark.parametrize("resource,condition", [
     (resource, condition) for resource in ("team", "policy", "acl_scoped", "acl_alias")
     for condition in ("existing", "missing", "bad_json", "bad_shape", "developer_no_active", "developer_missing_workspace", "developer_missing_authority")
-] + [("policy", condition) for condition in ("missing_registry", "bad_registry", "registry_source_changed")])
+] + [("policy", condition) for condition in (
+    "missing_registry", "bad_registry", "registry_source_changed", "missing_registry_source_changed",
+    "broken_registry_leaf_symlink", "linked_registry_parent_missing_file", "registry_deleted_during_read")])
 def test_operator_asset_reads_never_initialize_repair_or_seed(tmp_path, monkeypatch, resource, condition):
     from core.infrastructure import developer_sandbox
     from core.web.services import team_service, tool_registry_service as registry
@@ -422,10 +427,27 @@ def test_operator_asset_reads_never_initialize_repair_or_seed(tmp_path, monkeypa
         else:
             value["knowledgeBases"][0]["acl"] = "invalid"
         authority.write_text(json.dumps(value), encoding="utf-8")
-    if condition == "missing_registry":
-        (workspace / "tool_registry/generated_tools.json").unlink()
+    generated = workspace / "tool_registry/generated_tools.json"
+    if condition in {"missing_registry", "missing_registry_source_changed"}:
+        generated.unlink()
     elif condition == "bad_registry":
-        (workspace / "tool_registry/generated_tools.json").write_text("{broken", encoding="utf-8")
+        generated.write_text("{broken", encoding="utf-8")
+    elif condition in {"broken_registry_leaf_symlink", "linked_registry_parent_missing_file"}:
+        generated.unlink()
+        try:
+            if condition == "broken_registry_leaf_symlink":
+                generated.symlink_to(generated.parent / "missing-manifest.json")
+                assert generated.is_symlink() and not generated.exists()
+            else:
+                generated.parent.rmdir()
+                target = workspace / "registry-link-target"
+                target.mkdir()
+                generated.parent.symlink_to(target, target_is_directory=True)
+                assert generated.parent.is_symlink() and not generated.exists()
+        except OSError as exc:
+            if getattr(exc, "winerror", None) == 1314:
+                pytest.skip("Windows symbolic-link creation requires an unavailable privilege")
+            raise
     native = SimpleNamespace(project_root=root, _owners=lambda: directory,
         _editable=lambda agent: NativeAgentGateway._editable(None, agent),
         _control_store=lambda: SimpleNamespace(repository=SimpleNamespace(
@@ -445,33 +467,65 @@ def test_operator_asset_reads_never_initialize_repair_or_seed(tmp_path, monkeypa
     import tools.web_search_tool as web_search
     monkeypatch.setattr(web_search, "autoglm_search_tool_availability", forbidden)
     def inventory():
-        return {str(path.relative_to(tmp_path)): (path.is_dir(), path.stat().st_mtime_ns,
-                                                None if path.is_dir() else path.read_bytes())
-                for path in tmp_path.rglob("*")}
+        result = {}
+        for path in tmp_path.rglob("*"):
+            info = path.lstat()
+            content = (os.readlink(path) if stat.S_ISLNK(info.st_mode)
+                       else path.read_bytes() if stat.S_ISREG(info.st_mode) else None)
+            result[str(path.relative_to(tmp_path))] = (info.st_mode, info.st_mtime_ns, content)
+        return result
+    def after_manifest_mutation(previous):
+        current = inventory()
+        allowed = {str(path.relative_to(tmp_path)) for path in (generated, generated.parent)}
+        assert {key: value for key, value in current.items() if key not in allowed} == {
+            key: value for key, value in previous.items() if key not in allowed}
+        return current
     before = inventory()
+    deleted = []
+    if condition == "registry_deleted_during_read":
+        original_open = Path.open
+        def delete_manifest_on_open(path, *args, **kwargs):
+            nonlocal before
+            mode = args[0] if args else kwargs.get("mode", "r")
+            # Match the lexical file; resolving would erase precisely the alias
+            # boundary exercised by the other optional-catalog cases.
+            if path == generated and mode == "rb" and not deleted:
+                assert path.is_file()
+                path.unlink()
+                deleted.append(path)
+                before = after_manifest_mutation(before)
+            return original_open(path, *args, **kwargs)
+        monkeypatch.setattr(Path, "open", delete_manifest_on_open)
     operation = {"team": lambda: control.read_team("team-a"),
         "policy": lambda: control.read_tool_policy("agent-a"),
         "acl_scoped": lambda: control.read_knowledge_acl("team:team-a:kb-a"),
         "acl_alias": lambda: control.read_knowledge_acl("kb-a")}[resource]
     with server_operator_scope("operator-test", roles=("operator",)):
-        if condition == "registry_source_changed":
+        if condition in {"registry_source_changed", "missing_registry_source_changed"}:
             first = operation()
-            generated = workspace / "tool_registry/generated_tools.json"
+            assert inventory() == before
+            assert "cli_tool" in first["visibleTools"]
             generated.write_text(json.dumps({"schemaVersion": 1, "tools": [{"id": "dynamic_tool",
                 "name": "dynamic_tool", "status": "validated", "validated": True, "enabled": True,
                 "argsSchema": {"type": "object", "properties": {}}}]}), encoding="utf-8")
+            before = after_manifest_mutation(before)
             second = operation()
+            assert inventory() == before
             assert second["registryVersion"] == first["registryVersion"]
             assert second["registryFingerprint"] != first["registryFingerprint"]
-            before = inventory()
             with pytest.raises(ManagementError) as stale:
                 control.update_tool_policy(_policy_parameters(first, maxCallsPerTurn=27))
             assert stale.value.code == "STATE_CONFLICT"
-        elif condition == "existing":
+        elif condition in {"existing", "missing_registry"}:
             result = operation()
             assert result["untrustedContent"] is True
+            if condition == "missing_registry":
+                assert "cli_tool" in result["visibleTools"]
+                assert not generated.exists()
         else:
             with pytest.raises(ManagementError) as unavailable:
                 operation()
             assert unavailable.value.code.endswith("UNAVAILABLE")
+    if condition == "registry_deleted_during_read":
+        assert deleted == [generated]
     assert inventory() == before
