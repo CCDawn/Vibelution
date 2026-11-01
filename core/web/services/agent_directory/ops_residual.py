@@ -1401,22 +1401,24 @@ def disable_group_context_events_for_room(
         if target_agent_ids and agent_id not in target_agent_ids:
             continue
         path = s._agent_workspace_event_path(agent, "group_context_events.jsonl")
-        events = s._read_jsonl(path)
         changed = False
         agent_disabled_count = 0
-        for event in events:
-            if str(event.get("sourceRoomId") or "").strip() != normalized_room_id:
-                continue
-            if not bool(event.get("promptEligible", True)):
-                continue
-            event["promptEligible"] = False
-            event["disabledAt"] = now
-            event["disabledReason"] = s.trim_lines(str(reason or "chat_room_reset"), max_lines=1) or "chat_room_reset"
-            changed = True
-            agent_disabled_count += 1
+        with _jsonl_write_lock(path):
+            events = s._read_jsonl(path)
+            for event in events:
+                if str(event.get("sourceRoomId") or "").strip() != normalized_room_id:
+                    continue
+                if not bool(event.get("promptEligible", True)):
+                    continue
+                event["promptEligible"] = False
+                event["disabledAt"] = now
+                event["disabledReason"] = s.trim_lines(str(reason or "chat_room_reset"), max_lines=1) or "chat_room_reset"
+                changed = True
+                agent_disabled_count += 1
+            if changed:
+                s._write_jsonl(path, events)
         if not changed:
             continue
-        s._write_jsonl(path, events)
         changed_agent_count += 1
         disabled_event_count += agent_disabled_count
         s._record_memory_event(
@@ -2116,28 +2118,33 @@ def resolve_project_memory_update_proposal(
     if normalized_status not in {"pending", "applied", "rejected", "conflict", "superseded"}:
         raise s.AgentDirectoryError("Unsupported project memory update proposal status.")
     path = s._agent_workspace_event_path(agent, "project_memory_updates.jsonl")
-    proposals = s._read_jsonl(path)
-    for item in proposals:
-        if str(item.get("proposalId") or item.get("eventId") or "").strip() != normalized_proposal_id:
-            continue
-        item["status"] = normalized_status
-        if normalized_status == "pending":
-            item["resolvedAt"] = ""
-            item["resolvedBy"] = ""
-            item["resolutionNote"] = ""
-        else:
-            item["resolvedAt"] = s.utc_now_iso()
-            item["resolvedBy"] = s.trim_lines(str(resolved_by or "coordinator"), max_lines=1) or "coordinator"
-            item["resolutionNote"] = s.trim_lines(str(resolution_note or ""), max_lines=4)
-        s._write_jsonl(path, proposals)
-        s._record_memory_event(
-            "project_memory_update.resolved",
-            item,
-            agent_id=str(agent.get("agentId") or ""),
-            lifecycle=True,
-        )
-        return item
-    raise s.AgentMemoryProposalNotFoundError(f"Project memory update proposal not found: {proposal_id}")
+    matched: dict[str, Any] | None = None
+    with _jsonl_write_lock(path):
+        proposals = s._read_jsonl(path)
+        for item in proposals:
+            if str(item.get("proposalId") or item.get("eventId") or "").strip() != normalized_proposal_id:
+                continue
+            matched = item
+            item["status"] = normalized_status
+            if normalized_status == "pending":
+                item["resolvedAt"] = ""
+                item["resolvedBy"] = ""
+                item["resolutionNote"] = ""
+            else:
+                item["resolvedAt"] = s.utc_now_iso()
+                item["resolvedBy"] = s.trim_lines(str(resolved_by or "coordinator"), max_lines=1) or "coordinator"
+                item["resolutionNote"] = s.trim_lines(str(resolution_note or ""), max_lines=4)
+            s._write_jsonl(path, proposals)
+            break
+    if matched is None:
+        raise s.AgentMemoryProposalNotFoundError(f"Project memory update proposal not found: {proposal_id}")
+    s._record_memory_event(
+        "project_memory_update.resolved",
+        matched,
+        agent_id=str(agent.get("agentId") or ""),
+        lifecycle=True,
+    )
+    return matched
 
 
 def revoke_agent_inbox_message(

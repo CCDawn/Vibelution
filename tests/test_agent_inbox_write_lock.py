@@ -340,6 +340,46 @@ def test_rewrite_absorbs_a_transient_reader_handle_on_windows(inbox_env):
     assert not list(path.parent.glob(f".{path.name}.*.tmp")), "temp file leaked after retry"
 
 
+def test_reverse_scan_closes_the_iterator_on_an_early_cap_stop(inbox_env, monkeypatch):
+    """``_scan_inbox_reverse`` must close the reverse iterator explicitly.
+
+    Under the old ``nullcontext`` wrap, a scan that stopped at ``cap`` left a
+    suspended generator whose ``with path.open("rb")`` frame was still alive;
+    only CPython refcounting released the inbox handle (and an exception
+    traceback holding the frame would keep it open for good). ``closing``
+    closes it the moment the scan exits its ``with`` block, so a concurrent
+    inbox rewrite's ``os.replace`` is never blocked by a leftover handle.
+    """
+
+    from core.web.services import agent_directory_service as directory
+    from core.web.services import personal_assistant_dispatches_service as dispatches_service
+
+    path = inbox_env.path
+    for index in range(20):
+        ops_residual._append_jsonl(path, {"messageId": f"m{index}", "sourceAgentId": "pa"})
+
+    real_iter = directory._iter_text_lines_reverse
+    closed = {"value": False}
+
+    def spy(target: Path):
+        inner = real_iter(target)
+
+        class _SpyLines:
+            def __iter__(self):
+                return iter(inner)
+
+            def close(self):
+                closed["value"] = True
+                inner.close()
+
+        return _SpyLines()
+
+    monkeypatch.setattr(directory, "_iter_text_lines_reverse", spy)
+    matches = dispatches_service._scan_inbox_reverse(path, predicate=lambda row: True, cap=1)
+    assert len(matches) == 1, "sanity: cap=1 scan should stop at the newest row"
+    assert closed["value"] is True, "reverse iterator was not closed when the scan stopped early"
+
+
 @pytest.mark.skipif(not _IS_WINDOWS, reason="os.replace sharing violation is Windows-specific")
 def test_rewrite_reraises_permission_error_after_bounded_retry(inbox_env, monkeypatch):
     """Past the retry budget the original ``PermissionError`` must surface.

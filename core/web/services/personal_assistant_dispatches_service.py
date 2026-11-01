@@ -10,7 +10,7 @@ authoritative inbox JSONL the kernel already writes.
 from __future__ import annotations
 
 import json
-from contextlib import nullcontext
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -82,7 +82,15 @@ def _scan_inbox_reverse(
     try:
         # The shared reverse iterator tolerates I/O failures. A uniqueness
         # proof must instead reach EOF or a second distinct candidate.
-        with (path.open("r", encoding="utf-8") if strict else nullcontext(directory._iter_text_lines_reverse(path))) as lines:
+        # ``closing`` (not ``nullcontext``): exiting early via ``break`` must
+        # close the reverse iterator's file handle right away, or the still
+        # open target blocks a concurrent inbox rewrite's ``os.replace`` with
+        # PermissionError until GC gets around to the suspended generator.
+        with (
+            path.open("r", encoding="utf-8")
+            if strict
+            else closing(directory._iter_text_lines_reverse(path))
+        ) as lines:
             for line in lines:
                 if not line.strip():
                     continue
