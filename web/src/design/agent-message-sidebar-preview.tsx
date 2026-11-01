@@ -85,6 +85,7 @@ function Preview() {
   const [previewToolsOpen, setPreviewToolsOpen] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const messageListRef = useRef<HTMLElement>(null);
+  const previewToolsRef = useRef<HTMLDivElement>(null);
   const selected = messages.find((m) => m.id === selectedId) ?? messages[0];
   const linkedReplies = messages.filter((m) => m.replyTo === selected.id);
   const visible = messages.filter((m) => {
@@ -153,8 +154,11 @@ function Preview() {
       {visible.length === 0 ? <div className={styles.empty}>没有匹配的消息<VButton onPress={() => { setFilter("all"); setQuery(""); }}>查看全部消息</VButton></div> : null}
     </nav>
     <footer className={styles.listFooter}>
-      <div className={styles.footerSummary}><span>显示 {visible.length} / {messages.length} 条</span><VButton className={styles.toolsToggle} aria-expanded={previewToolsOpen} aria-controls="preview-tools" onPress={() => setPreviewToolsOpen((open) => !open)}>预览操作 <ChevronDown size={13} aria-hidden="true" /></VButton></div>
-      {previewToolsOpen ? <div id="preview-tools" className={styles.previewTools} aria-label="预览操作">
+      <div className={styles.footerSummary}><span>显示 {visible.length} / {messages.length} 条</span><VButton className={styles.toolsToggle} aria-expanded={previewToolsOpen} aria-controls="preview-tools" onPress={() => {
+        setPreviewToolsOpen((open) => !open);
+        if (!previewToolsOpen) requestAnimationFrame(() => previewToolsRef.current?.scrollIntoView({ block: "nearest" }));
+      }}>预览操作 <ChevronDown size={13} aria-hidden="true" /></VButton></div>
+      {previewToolsOpen ? <div ref={previewToolsRef} id="preview-tools" className={styles.previewTools} aria-label="预览操作">
         <VButton onPress={simulateSend}>模拟发送一条</VButton>
         <VButton onPress={simulateProgress}>模拟回执更新</VButton>
         <VButton onPress={() => { document.documentElement.dataset.theme = dark ? "light" : "dark"; setDark(!dark); }}>{dark ? "浅色" : "深色"}</VButton>

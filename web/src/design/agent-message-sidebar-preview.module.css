@@ -44,7 +44,7 @@
 .toolsToggle { height: 32px; padding: 4px 6px; font-size: 11px; background: transparent; border: 0; box-shadow: none; color: var(--fg-tertiary); }
 .toolsToggle[aria-expanded="true"] svg { transform: rotate(180deg); }
 .previewTools { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding-top: 8px; }
-.previewTools button { min-height: 36px; font-size: 12px; box-shadow: none; }
+.sidebar .previewTools button[data-vui] { min-height: 36px; font-size: 12px; box-shadow: none; }
 .previewTools p { grid-column: 1 / -1; margin: 2px 0; line-height: 1.6; }
 .empty { display: grid; gap: 16px; padding: 32px 16px; color: var(--fg-tertiary); font-size: 13px; }
 .detail { height: 100%; overflow: auto; padding: 40px 44px; background: var(--vui-surface-chat); scrollbar-width: thin; }
@@ -88,7 +88,7 @@
   .sidebar { overflow: auto; border-right: 0; border-bottom: 1px solid var(--vui-border-subtle); }
   .messageList { min-height: 120px; }
   .viewSwitch { padding-bottom: 8px; }
-  .viewSwitch button, .filters .filter, .toolsToggle, .previewTools button { min-height: 44px; }
+  .sidebar button[data-vui]:not([data-message-id]) { min-height: 44px; }
   .listHeader { padding: 12px 16px 8px; }
   .search { padding-bottom: 8px; }
   .filters { padding-bottom: 8px; }
