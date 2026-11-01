@@ -92,7 +92,9 @@ def test_manage_dispatch_binds_signatures_and_rejects_extra_fields(
         pa_tools.personal_assistant_manage_tool("config_write", "{}")
     )
     assert unknown["ok"] is False
-    assert "不支持的管理操作" in unknown["message"]
+    # 4275f9de8 reworded the closed-dispatch rejection (fail-closed path itself
+    # unchanged) from "不支持的管理操作" to "尚未登记此操作".
+    assert "尚未登记此操作" in unknown["message"]
 
 
 def test_manage_dispatch_runs_team_create_end_to_end(finance_env, assistant_runtime):

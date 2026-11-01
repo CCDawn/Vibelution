@@ -3790,6 +3790,7 @@ def stop_chat_room_admission() -> dict[str, Any]:
 def shutdown_chat_room_executors(*, deadline: float) -> dict[str, Any]:
     """Drain both chat-room pools against the shared server deadline."""
 
+    global _CHAT_ROOM_LIFECYCLE_STOPPING
     stop_result = stop_chat_room_admission()
     with _CHAT_ROOM_LIFECYCLE_LOCK:
         executors = [_CHAT_ROOM_EXECUTOR]
@@ -3809,9 +3810,21 @@ def shutdown_chat_room_executors(*, deadline: float) -> dict[str, Any]:
         | _CHAT_ROOM_LIFECYCLE_FAILURES
     )
     closed = all(bool(result.get("closed")) for result in results) and not failed
-    if closed:
-        with _CHAT_ROOM_LIFECYCLE_LOCK:
+    with _CHAT_ROOM_LIFECYCLE_LOCK:
+        if closed:
             _CHAT_ROOM_LIFECYCLE_FAILURES.clear()
+            # A fully drained terminal shutdown ends this lifecycle epoch, so
+            # the stopping fence must not outlive it. The pools above stay
+            # closed (their submit paths remain fail-closed) and the next
+            # lifespan's begin re-opens them; but in a process that hosts more
+            # than one lifespan (pytest runs several per interpreter) a leaked
+            # fence would reject every later epoch's lazy speaker pool even
+            # though nothing from the old epoch is alive. ``closed`` already
+            # proves physical retirement (no pending futures, no live worker
+            # threads, no failures), so nothing from the old epoch can still
+            # be writing when the fence drops. An incomplete drain keeps the
+            # fence up on purpose until a begin succeeds.
+            _CHAT_ROOM_LIFECYCLE_STOPPING = False
     return {
         "closed": closed,
         "pendingCount": sum(int(result.get("pendingCount") or 0) for result in results),
