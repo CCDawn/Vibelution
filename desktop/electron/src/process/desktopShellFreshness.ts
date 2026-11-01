@@ -4,7 +4,6 @@ import {
   invalidPythonJsonBridgePayload,
   parsePythonJsonBridgePayload,
   PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS,
-  PYTHON_JSON_BRIDGE_MAINTENANCE_TIMEOUT_MS,
   PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS,
   runPythonJsonBridge,
   type PythonJsonBridgeSpawn
@@ -12,6 +11,8 @@ import {
 
 const REFRESH_BEFORE_LIFECYCLE = new Set(["start", "restart", "rebuild-and-start"]);
 const FIRST_INSTANCE_LIFECYCLE = new Set(["start", "stop", "force-stop", "restart", "rebuild-and-start", "open"]);
+// Frontend (540s), native/package (900s), then owner cleanup and bridge overhead.
+const LATEST_LAUNCHER_PREPARATION_TIMEOUT_MS = 1_560_000;
 
 export type DesktopShellStatus = {
   schemaVersion: 1;
@@ -386,7 +387,7 @@ export async function ensureLatestLauncher(input: {
     cwd: input.workspaceRoot,
     spawnImpl: input.spawnImpl,
     failureLabel: "latest launcher ensure",
-    timeoutMs: PYTHON_JSON_BRIDGE_MAINTENANCE_TIMEOUT_MS,
+    timeoutMs: LATEST_LAUNCHER_PREPARATION_TIMEOUT_MS,
     signal: input.signal,
     killPolicy: "child",
     mutation: true

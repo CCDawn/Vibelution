@@ -412,6 +412,27 @@ describe("desktop shell freshness", () => {
     expect(args[args.indexOf("--shell-kind") + 1]).toBe("packaged");
   });
 
+  it("lets the Python frontend and package owners finish within their combined deadlines", async () => {
+    vi.useFakeTimers();
+    try {
+      const spawnImpl = fakeSpawnWithOutput(JSON.stringify({ schemaVersion: 1, ok: true }));
+      const spawn = spawnImpl.getMockImplementation()!;
+      spawnImpl.mockImplementation((...args: unknown[]) => {
+        const child = spawn(...args) as SpawnChild;
+        child.once = (event, listener) => {
+          if (event === "close") setTimeout(() => listener(0), 1_440_000);
+          return undefined;
+        };
+        return child;
+      });
+      const pending = ensureLatestLauncher({ workspaceRoot: "C:/repo", pythonPath: "python.exe", shellKind: "packaged", spawnImpl });
+      await vi.advanceTimersByTimeAsync(1_440_000);
+      expect((await pending).ok).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("formats tray launcher version from desktop shell status, not workbench HTTP", () => {
     expect(
       formatTrayLauncherFreshness({

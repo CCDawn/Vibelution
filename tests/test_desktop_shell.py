@@ -1797,6 +1797,21 @@ def test_packaged_update_prepares_the_actual_package_before_reporting_ready(tmp_
     assert result["electron"]["prepared"] is True
 
 
+def test_packaged_update_current_retry_does_not_rebuild_after_exit(tmp_path, monkeypatch):
+    events = []
+    monkeypatch.setattr("core.runtime_manager.daemon._preflight_frontend_build_for_restart", lambda *_args, **_kwargs: {"ok": True})
+    monkeypatch.setattr(desktop_shell, "run_desktop_shell_prebuild", lambda _root: {"ok": True, "skipped": "current"})
+    assert desktop_shell.ensure_latest_launcher(tmp_path, shell_kind="packaged")["ok"] is True
+    monkeypatch.setattr(desktop_shell, "_wait_for_pid_exit", lambda *_args, **_kwargs: events.append("old-exited"))
+    monkeypatch.setattr(desktop_shell, "inspect_desktop_shell", lambda _root: events.append("inspect") or {"stale": False, "reason": "current"})
+    monkeypatch.setattr(desktop_shell, "rebuild_desktop_shell", lambda **_kwargs: pytest.fail("current package must not rebuild after exit"))
+    monkeypatch.setattr(desktop_shell, "launch_packaged_desktop_shell", lambda **_kwargs: events.append("launch") or {"pid": 55})
+    result = desktop_shell.run_desktop_shell_refresh(wait_pid=44, project_root=tmp_path, shell_kind="packaged")
+    assert result["refreshed"] is True
+    assert result["rebuild"]["rebuilt"] is False
+    assert events == ["old-exited", "inspect", "launch"]
+
+
 @pytest.mark.parametrize("result", [
     {"ok": False, "message": "compiler unavailable"},
     {"ok": True, "skipped": "refresh_in_progress"},

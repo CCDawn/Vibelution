@@ -1368,7 +1368,13 @@ def run_desktop_shell_refresh(
                     "rebuild": rebuilt,
                     "launch": launched,
                 }
-            rebuilt = rebuild_desktop_shell(project_root=root)
+            current = inspect_desktop_shell(root) if kind == "packaged" else None
+            if current is not None and not current["stale"]:
+                # Preparation can legitimately find an already-current package
+                # (for example on retry). Do not compile again after exit.
+                rebuilt = {"rebuilt": False, "reason": current["reason"]}
+            else:
+                rebuilt = rebuild_desktop_shell(project_root=root)
         except Exception as exc:
             detail = str(exc)
             record_desktop_shell_refresh_failure(root, reason="rebuild_failed", detail=detail)
