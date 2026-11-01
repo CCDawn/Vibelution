@@ -7,7 +7,7 @@
 ### 适用范围
 Launcher 控制窗口。显式工作区 start/open 和深链仍执行对应动作；普通工作台、分支工作台和 Companion Session 核心不受导航改动影响。
 ### 使用方式
-`LauncherShell` 组合 `LauncherTitlebar`、`VSplitWorkspace` 和同一份 `LauncherNavigation`。左栏主入口为对话、浏览器、项目与分支；底部设置菜单提供诊断、维护、启动设置和版本更新，有新版时在设置入口提示。旧的助理功能深链仍可访问，待办、电脑操作与偏好由助理按需处理。右侧只渲染选中内容，无常驻右功能栏。窄屏通过 `VDialog` 展开同一目录，切换后关闭。标题栏只承担身份和原生窗口拖动。
+`LauncherShell` 组合 `LauncherTitlebar`、`VSplitWorkspace` 和同一份 `LauncherNavigation`。左栏主入口为对话、项目与分支；网页属于对话右侧按需面板，不单列导航页。底部设置菜单提供诊断、维护、启动设置和版本更新，有新版时在设置入口提示。旧的助理功能深链仍可访问，待办、电脑操作与偏好由助理按需处理。右侧只渲染选中内容，无常驻右功能栏。窄屏通过 `VDialog` 展开同一目录，切换后关闭。标题栏只承担身份和原生窗口拖动。
 
 `LauncherProjectRoute` 保留原项目/分支与启动设置的服务和操作保护；未选择项目有独立原生目录选择入口，取消不创建项目、不启动工作区。失败显示错误，不能将所有错误解释为没有项目。`LauncherUpdatesRoute` 复用原 Launcher 更新、确认、保存与序列化重启组件。
 
@@ -293,13 +293,13 @@ dark views, persistence, same-origin synchronization and existing image states.
 ## LauncherAssistantBrowserWorkspace
 
 ### 功能
-Launcher 助理的浏览器工作区以原生会话对话和网页并列；网页只显示 Launcher 原生视图，不创建第二份对话记录。
+Launcher 的单一助理工作区默认完整显示原生对话，需要网页时在右侧展开原生视图；会话始终只挂载一次。
 
 ### 适用范围
-统一导航的「浏览器」进入 `?panel=browser`。
+统一导航的「对话」使用同一工作区。旧 `?panel=browser` 深链仅作为展开网页面板的兼容请求，左栏仍选中对话。
 
 ### 使用方式
-复用 `VSplitWorkspace` 和 `WORKBENCH_LAYOUT_IDS.launcherAssistantBrowser` 保存对话宽度，窄屏在网页和对话之间切换。网页提供最多四个标签、地址导航、历史、刷新、接手与交还；接手等待宿主确认期间显示 pending。空页提供地址输入及哔哩哔哩入口。加载、失败和不可用均有可见状态；网页展开后可回到对话，也可收起网页让对话占满宽度，再通过打开网页恢复，标签及网页状态保持不变。
+复用 `VSplitWorkspace` 和 `WORKBENCH_LAYOUT_IDS.launcherAssistantBrowser` 保存对话宽度。桌面和窄屏初始均收起网页；点击对话右上「打开网页」或收到原生 Agent 的展示事件时展开。窄屏仅在网页已展开后提供对话/网页切换。网页提供最多四个标签、地址导航、历史、刷新、接手与交还；接手等待宿主确认期间显示 pending。空页提供地址输入及哔哩哔哩入口。加载、失败和不可用均有可见状态；收起后对话占满宽度，恢复时保留标签、网页状态、原会话和输入草稿。深链与原生事件只展开同一个面板，不导航到第二个会话页面。
 
 ### 边界与实现
 网页仅由 `window.vibelutionLauncherBrowser` 所属原生视图呈现；占位元素按内容区坐标报告边界，隐藏、滚动、调整尺寸和卸载时同步更新。地址仅接受不含凭据且不超过 8192 字符的 http(s)，地址栏保留完整查询与片段。`routes/desktopPet/LauncherAssistantBrowserWorkspace.tsx` 组合 `LauncherAssistantRoute`、`VButton`、`VInput` 与布局 recipe；`api/launcherAssistantBrowser.ts` 校验宿主状态。

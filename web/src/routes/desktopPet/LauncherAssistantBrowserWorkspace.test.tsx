@@ -18,8 +18,36 @@ beforeEach(() => {
   host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); delete window.vibelutionLauncherBrowser; vi.restoreAllMocks(); vi.unstubAllGlobals(); });
-async function render() { await act(async () => { root.render(<LauncherAssistantBrowserWorkspace />); }); }
+async function render(revealRequested = true) { await act(async () => { root.render(<LauncherAssistantBrowserWorkspace revealRequested={revealRequested} />); }); }
 describe("Launcher browser workspace", () => {
+  it.each([1000, 600])("starts in conversation at %spx and reveals the same pane on a native request", async width => {
+    window.innerWidth = width;
+    let show: (() => void) | undefined;
+    window.vibelutionLauncherBrowser!.onShow = listener => { show = listener; return () => {}; };
+    await render(false);
+    const draft = host.querySelector<HTMLInputElement>('input[aria-label="对话草稿"]')!;
+    draft.value = "保留草稿";
+    expect(button("打开网页")).toBeTruthy();
+    expect(host.querySelector('[data-vui="split-workspace"]')?.className).toContain('[&>[data-vui=split-main]]:!hidden');
+    expect([...host.querySelectorAll("button")].some(node => node.textContent === "网页")).toBe(false);
+    await act(async () => show?.());
+    expect(host.querySelector('button[aria-label="打开网页"]')).toBeNull();
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="对话草稿"]')).toBe(draft);
+    expect(draft.value).toBe("保留草稿");
+    expect(invoke.mock.calls.some(([payload]) => payload.operation === "close")).toBe(false);
+  });
+  it("reveals a legacy request without replacing the conversation and stays closed after the user folds it", async () => {
+    await render(false);
+    const draft = host.querySelector<HTMLInputElement>('input[aria-label="对话草稿"]')!;
+    draft.value = "同一会话";
+    await render(true);
+    expect(host.querySelector('button[aria-label="打开网页"]')).toBeNull();
+    expect(host.querySelector('input[aria-label="对话草稿"]')).toBe(draft);
+    await act(async () => button("收起网页").click());
+    await render(true);
+    expect(button("打开网页")).toBeTruthy();
+    expect(draft.value).toBe("同一会话");
+  });
   it("drags beyond 520px and keeps browser space when the workspace shrinks", async () => {
     let width = 1200;
     const observers = new Set<ResizeObserverCallback>();

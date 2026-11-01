@@ -13,9 +13,9 @@ let root: Root, host: HTMLDivElement;
 beforeEach(() => { vi.resetAllMocks(); host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host); });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
 
-async function render(options: { onNavigate?: () => void; updateAvailable?: boolean } = {}) {
+async function render(options: { onNavigate?: () => void; updateAvailable?: boolean } = {}, entry = "/launcher/assistant") {
   const router = createMemoryRouter([{ path: "*", element: <LauncherNavigation lang="zh" items={[]} {...options} /> }],
-    { initialEntries: ["/launcher/assistant"] });
+    { initialEntries: [entry] });
   await act(async () => root.render(<RouterProvider router={router} />));
   return router;
 }
@@ -34,14 +34,19 @@ describe("Launcher navigation", () => {
     expect(nav.textContent).toContain("Launcher");
     expect(nav.textContent).not.toContain("平台概览");
     expect(nav.textContent).not.toContain("派遣与回执");
-    for (const label of ["事务", "待办与提醒", "电脑操作", "对话偏好", "助理设置", "诊断", "维护", "启动设置", "版本更新"]) expect(nav.textContent).not.toContain(label);
-    expect([...nav.querySelectorAll("a")].map(node => node.textContent?.trim())).toEqual(["对话", "浏览器", "项目与分支"]);
-    for (const [label, path] of [["浏览器", "/launcher/assistant?panel=browser"], ["项目与分支", "/launcher"], ["对话", "/launcher/assistant"]]) {
+    for (const label of ["浏览器", "事务", "待办与提醒", "电脑操作", "对话偏好", "助理设置", "诊断", "维护", "启动设置", "版本更新"]) expect(nav.textContent).not.toContain(label);
+    expect([...nav.querySelectorAll("a")].map(node => node.textContent?.trim())).toEqual(["对话", "项目与分支"]);
+    for (const [label, path] of [["项目与分支", "/launcher"], ["对话", "/launcher/assistant"]]) {
       await act(async () => link(label).dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })));
       expect(router.state.location.pathname + router.state.location.search).toBe(path);
       expect(link(label).getAttribute("aria-current")).toBe("page");
       expect(nav.querySelectorAll('a[aria-current="page"]')).toHaveLength(1);
     }
+  });
+  it("selects the single conversation entry for legacy browser URLs", async () => {
+    await render({}, "/launcher/assistant?panel=browser");
+    expect(link("对话").getAttribute("aria-current")).toBe("page");
+    expect([...host.querySelectorAll("a")].map(node => node.textContent?.trim())).toEqual(["对话", "项目与分支"]);
   });
 
   it("opens settings from the keyboard and keeps every destination reachable", async () => {

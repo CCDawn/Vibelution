@@ -2,7 +2,6 @@ import { useSearchParams } from "react-router-dom";
 import { resolveLauncherAssistantPanel, type LauncherAssistantPanel } from "../../app/launcherNavigationModel";
 import { useShellI18n } from "../../i18n/useShellI18n";
 import { LauncherAssistantBrowserWorkspace } from "./LauncherAssistantBrowserWorkspace";
-import { LauncherAssistantRoute } from "./LauncherAssistantRoute";
 
 /** Old bookmarks offer an explicit conversation request, never an automatic write. */
 export function launcherAgentEntry(panel: LauncherAssistantPanel, lang: "zh" | "en") {
@@ -24,8 +23,8 @@ export function LauncherAssistantWorkspaceRoute() {
   const [params] = useSearchParams();
   const panel = resolveLauncherAssistantPanel(params.toString());
   const { lang } = useShellI18n();
-  if (panel === "browser") return <LauncherAssistantBrowserWorkspace />;
-  return <LauncherAssistantRoute embedded navigationOwned computerRequested={panel === "computer"} entryIntent={launcherAgentEntry(panel, lang)} />;
+  return <LauncherAssistantBrowserWorkspace revealRequested={panel === "browser"}
+    assistantProps={{ computerRequested: panel === "computer", entryIntent: launcherAgentEntry(panel, lang) }} />;
 }
 
 export default LauncherAssistantWorkspaceRoute;

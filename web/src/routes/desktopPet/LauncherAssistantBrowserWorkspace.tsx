@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ComponentProps } from "react";
 import { ArrowLeft, ArrowRight, Globe, Maximize2, MessageCircle, PanelRightClose, PanelRightOpen, Plus, RotateCw, X } from "lucide-react";
 import { browserState, launcherBrowserBridge, safeBrowserUrl, type BrowserOperation, type BrowserState } from "../../api/launcherAssistantBrowser";
 import { PANE_RESIZE_HANDLE_WIDTH } from "../../components/layout/paneLayoutPersistence";
@@ -11,14 +11,17 @@ const empty: BrowserState = { pages: [], activePageId: null, takeover: false };
 const chatMinWidth = 280;
 const browserMinWidth = 360;
 
-export function LauncherAssistantBrowserWorkspace() {
+export function LauncherAssistantBrowserWorkspace({ revealRequested = false, assistantProps }: {
+  revealRequested?: boolean;
+  assistantProps?: Pick<ComponentProps<typeof LauncherAssistantRoute>, "computerRequested" | "entryIntent">;
+}) {
   const [state, setState] = useState<BrowserState>(empty);
   const [error, setError] = useState("");
   const [address, setAddress] = useState("");
   const [draft, setDraft] = useState(false);
   const [pending, setPending] = useState(false);
   const [full, setFull] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(!revealRequested);
   const [narrow, setNarrow] = useState(() => window.innerWidth <= 760);
   const [workspaceWidth, setWorkspaceWidth] = useState(() => window.innerWidth);
   const [mobilePage, setMobilePage] = useState<"chat" | "web">("web");
@@ -29,6 +32,12 @@ export function LauncherAssistantBrowserWorkspace() {
   const active = state.pages.find(page => page.id === state.activePageId);
   const webVisible = !collapsed && (!narrow || mobilePage === "web");
   const canShowPage = webVisible && !draft && Boolean(active);
+
+  // Legacy browser URLs and native Agent requests reveal the same pane. The
+  // conversation stays mounted as the location/search changes.
+  useEffect(() => {
+    if (revealRequested) { setDraft(false); setCollapsed(false); setMobilePage("web"); }
+  }, [revealRequested]);
 
   const run = useCallback(async (operation: BrowserOperation) => {
     setError("");
@@ -134,10 +143,10 @@ export function LauncherAssistantBrowserWorkspace() {
     </div>
   </section>;
   return <div ref={workspaceRef} className={styles.root} data-vui-domain-recipe="launcher-assistant-browser">
-    {narrow ? <div className={styles.mobileSwitch}><VButton variant={!webVisible ? "secondary" : "ghost"} aria-pressed={!webVisible} onClick={() => { setFull(false); setMobilePage("chat"); }}>对话</VButton><VButton variant={webVisible ? "secondary" : "ghost"} aria-pressed={webVisible} onClick={() => { setCollapsed(false); setMobilePage("web"); }}>网页</VButton></div> : null}
-    {collapsed && !narrow ? <VIconButton variant="ghost" className={styles.restore} label="打开网页" title="打开网页" icon={<PanelRightOpen size={16} />} onClick={() => { setCollapsed(false); setMobilePage("web"); }} /> : null}
+    {narrow && !collapsed ? <div className={styles.mobileSwitch}><VButton variant={!webVisible ? "secondary" : "ghost"} aria-pressed={!webVisible} onClick={() => { setFull(false); setMobilePage("chat"); }}>对话</VButton><VButton variant={webVisible ? "secondary" : "ghost"} aria-pressed={webVisible} onClick={() => { setCollapsed(false); setMobilePage("web"); }}>网页</VButton></div> : null}
+    {collapsed ? <VIconButton variant="ghost" className={styles.restore} label="打开网页" title="打开网页" icon={<PanelRightOpen size={16} />} onClick={() => { setCollapsed(false); setMobilePage("web"); }} /> : null}
     <VSplitWorkspace className={`${styles.split} ${!webVisible ? styles.chatOnly : narrow || full ? styles.webOnly : ""}`} resize={{ layoutId: WORKBENCH_LAYOUT_IDS.launcherAssistantBrowser, sidebar: { defaultWidth: 360, minWidth: chatMinWidth, maxWidth: Math.max(chatMinWidth, Math.floor(workspaceWidth - browserMinWidth - PANE_RESIZE_HANDLE_WIDTH)) } }}
-      sidebar={<LauncherAssistantRoute embedded navigationOwned />}
+      sidebar={<LauncherAssistantRoute embedded navigationOwned {...assistantProps} />}
       main={browser} />
   </div>;
 }

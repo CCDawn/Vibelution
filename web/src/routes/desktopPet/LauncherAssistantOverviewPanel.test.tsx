@@ -2,7 +2,7 @@
 import React, { act } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useNavigate, type NavigateFunction } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getLauncherBranchInstances, selectLauncherProject } from "../../api/launcher";
 import { getLauncherAssistantDetail, getLauncherAssistantDispatches, getLauncherAssistantStatus } from "../../api/launcherAssistant";
@@ -22,10 +22,12 @@ vi.mock("../personalAssistant/PersonalAssistantAffairs", () => ({ PersonalAssist
 vi.mock("../personalAssistant/PersonalAssistantComputerPanel", () => ({ PersonalAssistantComputerPanel: (props: any) => <div>native computer {props.transport.scope}</div> }));
 vi.mock("../personalAssistant/PersonalAssistantDialoguePreferences", () => ({ PersonalAssistantDialoguePreferences: (props: any) => <div>native preferences {props.agentId} {props.transport.cacheKey.join(":")}</div> }));
 vi.mock("../personalAssistant/PersonalAssistantSettings", () => ({ PersonalAssistantSettings: (props: any) => <div>native settings {props.presentation} {props.transport.cacheKey.join(":")}</div> }));
-vi.mock("./LauncherAssistantRoute", () => ({ LauncherAssistantRoute: (props: any) => <div data-computer-requested={String(Boolean(props.computerRequested))}>native dialogue{props.entryIntent ? <button>{props.entryIntent.label}</button> : null}</div> }));
+vi.mock("./LauncherAssistantRoute", () => ({ LauncherAssistantRoute: (props: any) => <div data-computer-requested={String(Boolean(props.computerRequested))}>native dialogue<input aria-label="对话草稿" />{props.entryIntent ? <button>{props.entryIntent.label}</button> : null}</div> }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let root: Root, container: HTMLDivElement, client: QueryClient;
+let navigate: NavigateFunction;
+function Workspace() { navigate = useNavigate(); return <LauncherAssistantWorkspaceRoute />; }
 beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(getLauncherAssistantStatus).mockResolvedValue({ assistant: { agentId: "agent", directSessionId: "session", displayName: "小鲸" } });
@@ -34,17 +36,32 @@ beforeEach(() => {
   vi.mocked(getLauncherBranchInstances).mockResolvedValue({ items: [] } as Awaited<ReturnType<typeof getLauncherBranchInstances>>);
   vi.mocked(selectLauncherProject).mockResolvedValue({ connected: true });
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+  window.vibelutionLauncherBrowser = { invoke: vi.fn(async () => ({ pages: [], activePageId: null, takeover: false })), onChanged: () => () => {} };
   container = document.createElement("div"); document.body.appendChild(container); root = createRoot(container);
 });
-afterEach(async () => { await act(async () => root.unmount()); container.remove(); client.clear(); });
+afterEach(async () => { await act(async () => root.unmount()); container.remove(); client.clear(); delete window.vibelutionLauncherBrowser; });
 async function render(panel: string) {
   await act(async () => root.render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[`/launcher/assistant?panel=${panel}`]}>
-    <LauncherAssistantWorkspaceRoute />
+    <Workspace />
   </MemoryRouter></QueryClientProvider>));
   await act(async () => new Promise(resolve => setTimeout(resolve, 50)));
 }
 
 describe("Launcher assistant workspace", () => {
+  it("uses one mounted conversation across dialogue and legacy browser URLs", async () => {
+    await render("dialogue");
+    const draft = container.querySelector<HTMLInputElement>('input[aria-label="对话草稿"]')!;
+    draft.value = "未发出的内容";
+    expect(container.querySelector('button[aria-label="打开网页"]')).toBeTruthy();
+    await act(async () => { await navigate("/launcher/assistant?panel=browser"); });
+    expect(container.querySelector('input[aria-label="对话草稿"]')).toBe(draft);
+    expect(container.querySelector('button[aria-label="打开网页"]')).toBeNull();
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="收起网页"]')!.click());
+    await act(async () => { await navigate("/launcher/assistant"); });
+    expect(container.querySelector('input[aria-label="对话草稿"]')).toBe(draft);
+    expect(draft.value).toBe("未发出的内容");
+    expect(container.querySelector('button[aria-label="打开网页"]')).toBeTruthy();
+  });
   it.each(["overview", "dispatches"])("falls back to dialogue for the removed %s page without its queries", async panel => {
     await render(panel);
     expect(container.textContent).toContain("native dialogue");
