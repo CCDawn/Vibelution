@@ -140,6 +140,11 @@ class ToolExecutionAuthorizationContext:
     call_count_lock: Lock = field(default_factory=Lock, repr=False)
     terminal_wait_counts: dict[str, int] = field(default_factory=dict, repr=False)
     terminal_wait_count: int = 0
+    # 影子审批（批四 Lane S）注入面：policy id 与「审批必选工具 → descriptor
+    # 原生 approval」映射（override 折叠前口径）。影子评估器据此对 override
+    # 假设做对照；两字段均为观察输入，不参与任何真实判定。
+    policy_id: str = ""
+    descriptor_approvals: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,6 +193,10 @@ class AuthorizationReport:
     # TTFT 批六：本次解析内注册表加载段（peek/get）耗时（毫秒）。绑定层用它
     # 把整段 resolve 拆成 registryMs 与决策段（cache key + 评估/命中重水化）。
     registry_ms: int = 0
+    # 影子审批（批四 Lane S）：审批必选工具的 descriptor 原生 approval 快照
+    # （(toolName, descriptorApproval)，override 折叠前口径）。由 descriptors
+    # 现算（模板命中分支同样现算），不进模板缓存、不写缓存。
+    shadow_descriptor_approvals: tuple[tuple[str, str], ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -435,6 +444,18 @@ def _resolve_authorization(
         )
         _store_turn_decision_template(turn_cache_key, decision, policy.public_projection())
     deny_counts = Counter(reason.code.value for _, reason in decision.denied)
+    # 影子审批注入面（批四 Lane S）：审批必选工具的 descriptor 原生 approval。
+    # 两个分支（模板命中/全量评估）都从当前 descriptors+policy 现算；不写
+    # _TURN_DECISION_TEMPLATES 缓存，也不改变缓存键与命中行为。
+    approval_names = {
+        _coerce_text(name).strip()
+        for name, _approval, _risk in tuple(getattr(decision, "approval_requirements", ()) or ())
+    }
+    shadow_descriptor_approvals = tuple(
+        (descriptor.name, _coerce_text(getattr(descriptor, "approval", "")).strip() or "never")
+        for descriptor in descriptors
+        if descriptor.name in approval_names
+    )
     return AuthorizationReport(
         decision=decision,
         deny_code_counts=tuple(sorted(deny_counts.items())),
@@ -443,6 +464,7 @@ def _resolve_authorization(
         decision_cache_key=turn_cache_key,
         decision_cache_hit=cached_template is not None,
         registry_ms=max(0, int(registry_ms)),
+        shadow_descriptor_approvals=shadow_descriptor_approvals,
     )
 
 
@@ -735,6 +757,8 @@ def install_execution_authorization(
         model_family=budget_profile,
         model=model,
         provider=provider,
+        policy_id=_coerce_text(getattr(decision, "policy_id", "")).strip(),
+        descriptor_approvals=tuple(getattr(report, "shadow_descriptor_approvals", ()) or ()),
     )
     if (
         not context.agent_id
@@ -1057,6 +1081,20 @@ def authorize_tool_execution(
                 context,
                 tool_name=normalized_tool,
             )
+        # 影子审批观察点（批四 Lane S）：authorize_or_wait 同步返回，真实
+        # 终态此刻权威可得——在此事后回填（四假设 + 真实 outcome 一次落账）。
+        # 纯观察：整段 never-raise，不触碰额度/计数/预算，不改任何返回值。
+        _observe_shadow_approval(
+            context=context,
+            runtime=runtime,
+            tool_name=normalized_tool,
+            tool_args=tool_args or {},
+            approval=approval,
+            risk=risk,
+            reminder_recovery=reminder_recovery,
+            outcome_code=approval_outcome.code,
+            call_id=_coerce_text(tool_call_id).strip(),
+        )
         if not approval_outcome.allowed:
             # 额度在审批等待前已预扣（见上方 call_count_lock 段），但被拒/超时/
             # 取消的调用没有执行任何工具：退还这一格，否则零执行也能撞熔断。
@@ -1096,6 +1134,109 @@ def authorize_tool_execution(
         turn_id=context.turn_id,
         decision_fingerprint=context.decision_fingerprint,
     )
+
+
+def _observe_shadow_approval(
+    *,
+    context: ToolExecutionAuthorizationContext,
+    runtime: Mapping[str, Any],
+    tool_name: str,
+    tool_args: Mapping[str, Any],
+    approval: str,
+    risk: str,
+    reminder_recovery: bool,
+    outcome_code: str,
+    call_id: str,
+) -> None:
+    """Shadow-observe one approval decision point (批四 Lane S, observe-only).
+
+    纯观察铁律：本函数整段 never-raise——任何异常被吞掉，真实授权链的行为、
+    返回值与事件序列零差异；不写 _TURN_DECISION_TEMPLATES 缓存、不进入额度/
+    计数/预算路径。输入全部注入：policy/descriptor approval 来自安装期快照
+    （context），grant/协作命中来自真实链已算出的 outcome code 揭示，绝不
+    在影子侧重读存储。
+    """
+
+    try:
+        from core.authorization import shadow_approval_evaluator as evaluator
+
+        if not evaluator.shadow_approvals_enabled():
+            return
+        evaluator.bump_shadow_telemetry(engaged=1)
+        snapshot = evaluator.ShadowApprovalSnapshot(
+            tool_name=tool_name,
+            risk=_coerce_text(risk).strip() or "read",
+            decision_arguments=_shadow_decision_argument_projection(tool_args),
+            permission_preset=_coerce_text(getattr(context, "permission_preset", "")).strip(),
+            reminder_recovery=bool(reminder_recovery),
+            policy_id=_coerce_text(getattr(context, "policy_id", "")).strip(),
+            approval_baseline=_coerce_text(approval).strip() or "never",
+            approval_descriptor=_descriptor_approval_for(context, tool_name),
+        )
+        evaluation = evaluator.evaluate_shadow_approvals(snapshot, real_outcome_code=outcome_code)
+        if not evaluation.replica_baseline_agrees:
+            evaluator.bump_shadow_telemetry(baseline_replica_mismatches=1)
+        record = {
+            "agentId": context.agent_id,
+            "turnId": context.turn_id,
+            "callId": call_id,
+            "sessionId": _coerce_text(runtime.get("sessionId")).strip(),
+            "toolName": tool_name,
+            "risk": snapshot.risk,
+            "permissionPreset": snapshot.permission_preset,
+            "approvalBaseline": snapshot.approval_baseline,
+            "approvalDescriptor": snapshot.approval_descriptor,
+            "baselineOutcome": evaluation.baseline.outcome,
+            "baselineRuleId": evaluation.baseline.rule_id,
+            "hypNoPaMessageOverride": evaluation.no_pa_message_override.outcome,
+            "hypNoPaMessageOverrideRuleId": evaluation.no_pa_message_override.rule_id,
+            "hypNoExternalWriteOverride": evaluation.no_external_write_override.outcome,
+            "hypNoExternalWriteOverrideRuleId": evaluation.no_external_write_override.rule_id,
+            "hypNoActionWindow": evaluation.no_action_window.outcome,
+            "hypNoActionWindowRuleId": evaluation.no_action_window.rule_id,
+            "realOutcome": outcome_code,
+            "baselineReplicaAgrees": evaluation.replica_baseline_agrees,
+        }
+        from core.web.services import shadow_approval_ledger
+
+        shadow_approval_ledger.record_shadow_approval(record)
+        evaluator.bump_shadow_telemetry(recorded=1)
+    except Exception:  # noqa: BLE001 - observation must never touch the real chain
+        try:
+            from core.authorization import shadow_approval_evaluator as evaluator
+
+            evaluator.bump_shadow_telemetry(evaluation_failures=1)
+        except Exception:  # noqa: BLE001 - telemetry sink itself must never raise
+            return
+        return
+
+
+def _shadow_decision_argument_projection(tool_args: Mapping[str, Any]) -> dict[str, str]:
+    """Bounded read-only argument projection for the replica predicates.
+
+    只投影免批链谓词实际读取的键（action / cmd / command / cwd / file_path /
+    patch_text）；patch_text 不截断——截断会翻转 apply_patch 的路径包含性
+    判定。投影仅在本次观察调用栈内存活，不落盘。
+    """
+
+    if not isinstance(tool_args, Mapping):
+        return {}
+    projection: dict[str, str] = {}
+    for key in ("action", "cmd", "command", "cwd", "file_path", "patch_text"):
+        value = tool_args.get(key)
+        if value is None:
+            continue
+        projection[key] = value if isinstance(value, str) else _coerce_text(value)
+    return projection
+
+
+def _descriptor_approval_for(context: ToolExecutionAuthorizationContext, tool_name: str) -> str:
+    """Descriptor-native approval (pre-override) for one tool; "" when unknown."""
+
+    for name, approval in tuple(getattr(context, "descriptor_approvals", ()) or ()):
+        if name == tool_name:
+            return _coerce_text(approval).strip()
+    return ""
 
 
 def _collaboration_decision(runtime: Mapping[str, Any], tool_name: str, tool_args: Mapping[str, Any]):
