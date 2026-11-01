@@ -815,7 +815,7 @@ describe("Launcher assistant route lifecycle", () => {
     await renderAssistant();
     bridge.getLauncherAssistantDetail.mockResolvedValue({ id: "s", status: "running", activeTurnId: "profile-turn", messages: [] });
     await showConversation();
-    expect(conversation?.userDisplayName).toBeUndefined();
+    expect(conversation?.userDisplayName).toBe("操作者");
     expect(conversation?.userAvatarPreset).toBeUndefined();
     const assistantName = conversation?.assistantDisplayName;
     const statusReads = bridge.getLauncherAssistantStatus.mock.calls.length;
