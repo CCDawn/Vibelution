@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { queryKeys } from "../api/queryKeys";
 import { LauncherShell } from "./LauncherShell";
+import { LAUNCHER_UPDATE_MUTATION_KEY } from "./updateBanner";
 
 type BranchInstancesPayload = {
   currentId: string;
@@ -32,7 +33,7 @@ const launcherBridge = vi.hoisted(() => {
 vi.mock("../api/launcher", () => launcherBridge);
 vi.mock("react-router-dom", () => ({ Outlet: () => null, useNavigate: () => vi.fn(), useLocation: () => ({pathname:"/launcher/assistant"}) }));
 vi.mock("./LauncherUpdateTopbar", () => ({ LauncherUpdateTopbar: () => null }));
-vi.mock("./LauncherNavigation", () => ({ LauncherNavigation: () => null }));
+vi.mock("./LauncherNavigation", () => ({ LauncherNavigation: ({ updateFailed }: { updateFailed: boolean }) => <output data-testid="update-failed">{String(updateFailed)}</output> }));
 vi.mock("./browserTelemetry", () => ({
   collectBrowserPageSnapshot: () => ({}),
   postBrowserTelemetry: vi.fn(),
@@ -73,6 +74,28 @@ describe("LauncherShell launcher state synchronization", () => {
     root = null;
     container = null;
     launcherBridge.listeners.clear();
+  });
+
+  it("projects the latest failed update into navigation and clears it when retry starts", async () => {
+    launcherBridge.getLauncherBranchInstances.mockResolvedValue({ currentId: "main", items: [] });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(<QueryClientProvider client={queryClient}><LauncherShell /></QueryClientProvider>);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    await act(async () => {
+      const failure = queryClient.getMutationCache().build(queryClient, { mutationKey: LAUNCHER_UPDATE_MUTATION_KEY, mutationFn: async () => { throw new Error("build failed"); } });
+      await failure.execute(undefined).catch(() => undefined);
+    });
+    await act(async () => { await vi.waitFor(() => expect(container?.querySelector('[data-testid="update-failed"]')?.textContent).toBe("true")); });
+    await act(async () => {
+      const retry = queryClient.getMutationCache().build(queryClient, { mutationKey: LAUNCHER_UPDATE_MUTATION_KEY, mutationFn: () => new Promise(() => {}) });
+      void retry.execute(undefined);
+    });
+    await act(async () => { await vi.waitFor(() => expect(container?.querySelector('[data-testid="update-failed"]')?.textContent).toBe("false")); });
   });
 
   it("refetches the shared branch query when a launcher state event arrives", async () => {

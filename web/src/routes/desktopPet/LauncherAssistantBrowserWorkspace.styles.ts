@@ -22,7 +22,7 @@ const styles = {
   split: "min-h-0 flex-1",
   chatOnly: "[&>[data-vui=split-sidebar]]:!w-full [&>[data-vui=split-sidebar]]:!max-w-none [&>[data-vui=split-sidebar]]:!basis-auto [&>[data-vui=split-sidebar]]:flex-1 [&>[data-vui=split-main]]:!hidden [&>[role=separator]]:!hidden",
   webOnly: "[&>[data-vui=split-sidebar]]:!hidden [&>[role=separator]]:!hidden",
-  restore: "absolute right-4 top-2 z-10 h-8 w-8 min-w-8 p-0",
+  restore: "absolute right-6 top-5 z-10 h-8 gap-2 px-2.5 max-[640px]:right-4",
 } as const;
 
 export default styles;

@@ -1,5 +1,6 @@
 import type { LauncherBranchInstance } from "../api/launcher";
 import type { LauncherProcessRow } from "./LauncherProcessMonitorPanel";
+import { instanceRuntimeState, instanceRuntimeStateLabel } from "./LauncherBranchInstancesPanel.model";
 
 export function listMonitoredInstances(items: readonly LauncherBranchInstance[]): LauncherBranchInstance[] {
   return items.filter((item) => item.kind === "main" || (item.kind === "worktree" && item.checkedOut));
@@ -7,39 +8,37 @@ export function listMonitoredInstances(items: readonly LauncherBranchInstance[])
 
 export function buildAllInstanceMonitorRows(
   items: readonly LauncherBranchInstance[],
-  live: {
-    currentId: string;
-    backendPid?: number;
-    windowPid?: number;
-    port?: number;
-    alive?: boolean;
-  },
-  labels: {
-    running: string;
-    stopped: string;
-    owned: string;
-    windowRunning: string;
-    windowStopped: string;
-  },
+  options: { isZh: boolean; queryFailed?: boolean },
 ): LauncherProcessRow[] {
   return listMonitoredInstances(items).map((item) => {
-    const isCurrent = Boolean(item.current || item.id === live.currentId);
-    const backendPid = isCurrent && (live.backendPid || 0) > 0 ? Number(live.backendPid) : Number(item.pids?.backend || 0);
-    const windowPid = isCurrent && (live.windowPid || 0) > 0 ? Number(live.windowPid) : Number(item.pids?.window || 0);
-    const port = isCurrent && (live.port || 0) > 0 ? Number(live.port) : Number(item.port || 0);
-    const alive = isCurrent && live.alive !== undefined ? Boolean(live.alive) : Boolean(item.alive);
-    const name = item.shortName || item.branch || item.id;
+    const state = instanceRuntimeState(item);
+    const backend = item.runtime.backend;
+    const window = item.runtime.window;
+    const backendPid = Number(backend.pid || item.pids?.backend || 0);
+    const windowPid = Number(window.pid || item.pids?.window || 0);
+    const port = Number(backend.port || item.port || 0);
+    const backendState = backend.alive || backend.listening
+      ? (options.isZh ? "后台运行中" : "Backend running")
+      : (options.isZh ? "后台未运行" : "Backend stopped");
+    const windowState = window.open
+      ? (options.isZh ? "窗口已打开" : "Window open")
+      : (options.isZh ? "窗口未打开" : "Window closed");
+    const observation = `${backendState} · ${windowState}`;
     return {
       id: item.id,
-      label: name,
-      status: alive ? labels.running : labels.stopped,
+      label: item.shortName || item.branch || item.id,
+      status: options.queryFailed
+        ? (options.isZh ? "状态未知" : "Status unknown")
+        : instanceRuntimeStateLabel(state, options.isZh),
       pid: backendPid > 0 ? String(backendPid) : "-",
       port: port > 0 ? String(port) : "-",
-      ownership: labels.owned,
-      detail: `${windowPid > 0 ? labels.windowRunning : labels.windowStopped} · ${item.displayPath || item.path || item.id}`,
-      technical: `${item.id} · ${item.path || item.displayPath || "-"} · backend ${backendPid || "-"} · window ${windowPid || "-"} · port ${port || "-"}`,
-      ok: alive,
-      tone: alive ? "success" : "neutral",
+      ownership: options.isZh ? "托管" : "Owned",
+      detail: options.queryFailed
+        ? `${options.isZh ? "上次记录" : "Last observation"}: ${observation}`
+        : observation,
+      technical: `${item.id} · ${item.path || item.displayPath || "-"} · ${observation} · backend ${backendPid || "-"} · window ${windowPid || "-"} · port ${port || "-"}`,
+      ok: !options.queryFailed && state === "running",
+      tone: options.queryFailed ? "warning" : state === "running" ? "success" : "neutral",
     };
   });
 }

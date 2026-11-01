@@ -5,6 +5,7 @@ import {
   isUpdateBannerVerdict,
   isLauncherUpdateAvailable,
   updateRestartTarget,
+  resolveUpdateRestartTarget,
   launcherUpdateBannerCopy,
   frontendUpdateBannerCopy,
   readStoredUpdateBannerDismissedHead,
@@ -17,6 +18,35 @@ import {
   updateBannerRestartReloadsDocument,
 } from "./updateBanner";
 
+describe("resolveUpdateRestartTarget", () => {
+  it("waits for a fresh version before choosing the restart target", async () => {
+    let resolve!: (value: { current: boolean; label: string }) => void;
+    const readFreshness = vi.fn(() => new Promise<{ current: boolean; label: string }>((done) => { resolve = done; }));
+    let settled = false;
+    const result = resolveUpdateRestartTarget({ hasBridge: true, readFreshness }).then((target) => { settled = true; return target; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    resolve({ current: false, label: "stale" });
+    expect(await result).toBe("shell");
+  });
+
+  it("uses the workbench only with a current version or no bridge", async () => {
+    const readFreshness = vi.fn().mockResolvedValue({ current: true, label: "current" });
+    await expect(resolveUpdateRestartTarget({ hasBridge: true, readFreshness })).resolves.toBe("workbench");
+    readFreshness.mockClear();
+    await expect(resolveUpdateRestartTarget({ hasBridge: false, readFreshness })).resolves.toBe("workbench");
+    expect(readFreshness).not.toHaveBeenCalled();
+  });
+
+  it("rejects unknown or missing versions and preserves read failures", async () => {
+    for (const value of [undefined, { current: null, label: "unknown" }]) {
+      await expect(resolveUpdateRestartTarget({ hasBridge: true, readFreshness: async () => value as never })).rejects.toThrow("UPDATE_VERSION_UNAVAILABLE");
+    }
+    const error = new Error("offline");
+    await expect(resolveUpdateRestartTarget({ hasBridge: true, readFreshness: async () => { throw error; } })).rejects.toBe(error);
+  });
+});
+
 describe("updateBanner verdict gate", () => {
   it("updates the desktop shell and project in one operation whenever the shell is behind", () => {
     for (const verdict of ["current", "backend_behind", "frontend_behind", "backend_and_frontend_behind"] as const) {
@@ -25,7 +55,8 @@ describe("updateBanner verdict gate", () => {
       expect(updateRestartTarget(launcherFreshness)).toBe("shell");
     }
     expect(updateRestartTarget({ current: true, label: "current" })).toBe("workbench");
-    expect(updateRestartTarget({ current: null, label: "unknown" })).toBe("workbench");
+    expect(updateRestartTarget({ current: null, label: "unknown" })).toBe("unknown");
+    expect(updateRestartTarget(undefined)).toBe("unknown");
   });
   it("prompts for stale backend or frontend code", () => {
     expect(isUpdateBannerVerdict("backend_behind")).toBe(true);

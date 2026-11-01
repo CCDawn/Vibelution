@@ -166,6 +166,12 @@ describe("LauncherStartupSettingsPanel", () => {
     expect(body?.className).not.toMatch(/(?:^|\s)px-(?:7|4)(?:\s|$)/);
     expect(page?.querySelector('[data-vui="settings-form-footer"]')?.className).not.toMatch(/(?:^|\s)px-(?:7|4)(?:\s|$)/);
     expect(host.querySelectorAll('[data-testid^="row-"]')).toHaveLength(6);
+    const advanced = host.querySelector<HTMLDetailsElement>("details");
+    expect(advanced?.open).toBe(false);
+    expect(advanced?.querySelector("summary")?.textContent).toBe("高级设置");
+    expect(advanced?.querySelectorAll('[data-testid^="row-"]')).toHaveLength(3);
+    expect(host.querySelector('[data-testid="row-window-mode"]')?.closest("details")).toBeNull();
+    expect(host.textContent).not.toContain("没有未保存的更改");
     expect(host.textContent).toContain("要求 .venv");
     expect(host.textContent).toContain("启动前自检");
   });
@@ -203,6 +209,9 @@ describe("LauncherStartupSettingsPanel", () => {
   it("preserves a dirty draft when refreshed settings arrive and can restore the latest version", async () => {
     const dirtyCallback = vi.fn();
     await renderPanel({ onDirtyChange: dirtyCallback });
+    const advanced = host.querySelector<HTMLDetailsElement>("details")!;
+    await act(async () => advanced.querySelector("summary")!.click());
+    expect(advanced.open).toBe(true);
     await act(async () => checkbox("启动前自检").click());
     expect(checkbox("启动前自检").checked).toBe(false);
     expect(dirtyCallback).toHaveBeenLastCalledWith(true);
@@ -238,7 +247,7 @@ describe("LauncherStartupSettingsPanel", () => {
     expect(onSave).toHaveBeenCalledTimes(2);
     expect(onSave.mock.calls[1][0].runtime.preflightDoctor).toBe(false);
     expect(onSave.mock.calls[1][0].configHash).toBe("hash-1");
-    expect(host.textContent).toContain("没有未保存的更改");
+    expect(host.textContent).not.toContain("没有未保存的更改");
     expect(dirtyCallback).toHaveBeenLastCalledWith(false);
   });
 

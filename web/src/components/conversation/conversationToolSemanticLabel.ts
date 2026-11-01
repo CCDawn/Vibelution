@@ -1,3 +1,5 @@
+import { conversationToolPresentationLabel } from "./conversationToolPresentation";
+
 export type ConversationToolSemanticLabelInput = {
   toolName?: string;
   summary?: string;
@@ -40,6 +42,9 @@ export function conversationToolSemanticLabel(
 ): string {
   const normalizedName = String(input.toolName ?? "").trim();
   const lowerName = normalizedName.toLowerCase();
+  if (lowerName.startsWith("personal_assistant_")) {
+    return conversationToolPresentationLabel(normalizedName, "zh");
+  }
   if (lowerName === "cli_tool") {
     return cliToolSemanticLabel(input.summary, input.commandSource);
   }

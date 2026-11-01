@@ -606,11 +606,11 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("工作台窗口");
   });
 
-  it("keeps command streams and guardian details collapsed by default", () => {
+  it("keeps advanced diagnostics behind its tab without a second disclosure", () => {
     expect(routeSource).toContain("LauncherDiagnosticsPanel");
     expect(routeSource).toContain("className={styles.toolsWorkspace}");
     expect(routeSource).not.toContain("className={styles.advancedFold}");
-    expect(diagnosticsPanelSource).toContain("<details className={`${styles.panel} ${styles.diagnosticsPanel}`}>");
+    expect(diagnosticsPanelSource).toContain("<section className={`${styles.panel} ${styles.diagnosticsPanel}`} aria-label={copy.advancedDiagnostics}>");
     expect(diagnosticsPanelSource).not.toContain("<details open");
     expect(routeSource).toContain("queueAndEvents");
     expect(routeSource).toContain("diagnosticsCollapsedHint");

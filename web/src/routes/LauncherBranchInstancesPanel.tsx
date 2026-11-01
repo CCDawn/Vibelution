@@ -236,6 +236,7 @@ export function LauncherBranchInstancesPanel({
       };
 
   const [activeTab, setActiveTab] = useState<BranchTableTab>("all");
+  const [showMore, setShowMore] = useState(false);
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<InstanceListFilters>({});
   const [detailId, setDetailId] = useState<string | null>(null);
@@ -294,7 +295,15 @@ export function LauncherBranchInstancesPanel({
     [grouped],
   );
   const eligibleItems = useMemo(() => visibleItems.filter(isCleanupEligible), [visibleItems]);
-  const activeRows = activeTab === "all" ? allItems : activeTab === "running" ? grouped.running : activeTab === "attention" ? grouped.attention : activeTab === "retired" ? visibleItems.filter((item) => item.kind === "retired") : grouped.startable;
+  const priorityItems = allItems.filter((item) => item.current || item.kind === "main" || instanceRuntimeState(item, pendingOperation) !== "stopped");
+  const defaultItems = priorityItems.length ? priorityItems : allItems.slice(0, 1);
+  const activeRows = activeTab === "all" ? (query.trim() ? [...allItems, ...visibleItems.filter((item) => item.kind === "retired")] : showMore ? allItems : defaultItems) : activeTab === "running" ? grouped.running : activeTab === "attention" ? grouped.attention : activeTab === "retired" ? visibleItems.filter((item) => item.kind === "retired") : grouped.startable;
+  const hiddenCount = allItems.length - defaultItems.length;
+  const displayName = (item: LauncherBranchInstance) => {
+    const full = launcherBranchDisplayName(item);
+    const short = full.replace(/^codex\//, "");
+    return short !== full && !items.some((other) => other.id !== item.id && launcherBranchDisplayName(other).replace(/^codex\//, "") === short) ? short : full;
+  };
   useEffect(() => {
     const guards = openClickGuardsRef.current;
     for (const id of [...guards]) {
@@ -554,7 +563,7 @@ export function LauncherBranchInstancesPanel({
       fill: true,
       render: (item: LauncherBranchInstance) => (
         <VTooltip content={`${launcherBranchDisplayName(item)} · ${item.path || item.displayPath || item.id}`} width="wide">
-          <span className={styles.branchName}>{launcherBranchDisplayName(item)}{item.current ? <small className={styles.currentMarker}>{zh ? "当前" : "Current"}</small> : null}</span>
+          <span className={styles.branchName}>{displayName(item)}{item.current ? <small className={styles.currentMarker}>{zh ? "当前" : "Current"}</small> : null}</span>
         </VTooltip>
       ),
     },
@@ -584,6 +593,7 @@ export function LauncherBranchInstancesPanel({
       minWidth: 92,
       render: (item: LauncherBranchInstance) => {
         const state = instanceRuntimeState(item, pendingOperation);
+        if (!item.dirty && item.mergedToMain !== false) return null;
         return (
           <LauncherBranchStatusHelp item={item} state={state} isZh={zh} kind="git">
             <span>{formatGitStatus(item, zh)}</span>
@@ -635,18 +645,20 @@ export function LauncherBranchInstancesPanel({
     <section className={styles.panel} data-vui-region="launcher-branch-instances" aria-label={copy.branchInstances}>
       {detailItem ? <LauncherBranchDetailPanel item={detailItem} zh={zh} pending={pendingOperation} actions={renderLifecycleActions(detailItem)} onBack={() => setDetailId(null)} /> : <>
       <header className={styles.panelHeader}>
-        <div><h1 className={styles.heading}>{zh ? "分支" : "Branches"}</h1><p className={styles.description}>{zh ? "管理工作区，打开窗口，继续工作。" : "Manage workspaces and continue your work."}</p></div>
+        <h1 className={styles.heading}>{zh ? "项目与分支" : "Projects and branches"}</h1>
         <div className={styles.panelHeaderActions}>{launcherReading || !launcherOnline ? <span role="status" className={styles.connectionStatus}>{launcherReading ? labels.reading : labels.offline}</span> : null}{headerAction}</div>
       </header>
       <div className={styles.filterRow}>
         <div className={styles.searchField}><Search size={15} aria-hidden="true" className={styles.searchIcon} /><VNativeInput aria-label={labels.search} className={styles.searchInput} placeholder={labels.searchPlaceholder} value={query} onChange={(event) => setQuery(event.target.value)} /></div>
-        <VStringSelect ariaLabel={zh ? "分支筛选" : "Branch filter"} value={activeTab} className={styles.filterSelect} onValueChange={(value) => setActiveTab(value as BranchTableTab)}
+        {showMore ? <VStringSelect ariaLabel={zh ? "分支筛选" : "Branch filter"} value={activeTab} className={styles.filterSelect} onValueChange={(value) => setActiveTab(value as BranchTableTab)}
           options={[{value:"all",label:zh ? "可用工作区" : "Available"},{value:"running",label:labels.running},{value:"attention",label:labels.attention},{value:"startable",label:labels.startable},{value:"retired",label:zh ? "已退役" : "Retired"}]} />
-        <VDropdownMenu aria-label={zh ? "更多筛选" : "More filters"} align="end" trigger={<VButton variant="ghost">{zh ? "筛选" : "Filters"}{filters.dirty || filters.unmerged ? " •" : ""}</VButton>} items={[
+        : null}
+        {showMore ? <VDropdownMenu aria-label={zh ? "更多筛选" : "More filters"} align="end" trigger={<VButton variant="ghost">{zh ? "筛选" : "Filters"}{filters.dirty || filters.unmerged ? " •" : ""}</VButton>} items={[
           { id: "dirty", label: `${filters.dirty ? "✓ " : ""}${labels.filterDirty}`, onSelect: () => setFilters((current) => ({...current, dirty: !current.dirty})) },
           { id: "unmerged", label: `${filters.unmerged ? "✓ " : ""}${labels.filterUnmerged}`, onSelect: () => setFilters((current) => ({...current, unmerged: !current.unmerged})) },
           { id: "clear", label: labels.clearSearch, onSelect: clearSearch },
-        ]} />
+        ]} /> : null}
+        {(hiddenCount > 0 || showMore || items.some((item) => item.kind === "retired")) ? <VButton variant="ghost" onPress={() => { setShowMore(!showMore); if (showMore) { setActiveTab("all"); setFilters({}); } }}>{showMore ? (zh ? "收起工作区" : "Show fewer") : (zh ? "更多工作区" : "More workspaces")}</VButton> : null}
         {cleanupSelected.length > 0 ? <VButton variant="danger" isDisabled={cleanupMutation.isPending} onPress={() => askCleanup(cleanupSelected)}>{labels.cleanupSelected} ({cleanupSelected.length})</VButton> : null}
         {activeTab === "running" || activeTab === "attention" ? <VButton variant="secondary" isDisabled={activeRows.every((item) => !canStopInstance(item, pendingOperation))} onPress={() => askBatchStop(activeRows.map((item) => item.id), activeTab === "running" ? "stop" : "close")}>{activeTab === "running" ? labels.stopAll : labels.closeAll}</VButton> : null}
       </div>
@@ -667,14 +679,14 @@ export function LauncherBranchInstancesPanel({
           <div className={styles.desktopList}><VDenseTable ariaLabel={activeHint} className={styles.statusTable} resizable rows={activeRows} emptyText={tabEmptyText} getRowKey={(item) => item.id}
             onRowClick={(item) => { onSelect(item.id); setDetailId(item.id); }}
             getRowState={(item) => ({selected: cleanupSelected.includes(item.id)})}
-            columns={[selectColumn, ...primaryColumns]} /></div>
+            columns={[...(activeRows.some(isCleanupEligible) ? [selectColumn] : []), ...primaryColumns.filter(column => column.id !== "git" || activeRows.some(item => item.dirty || item.mergedToMain === false))]} /></div>
           <div className={styles.mobileList} role="list" aria-label={activeHint}>{activeRows.map((item) => <div key={item.id} role="listitem" className={styles.mobileRow}>
-            <VButton variant="ghost" className={styles.mobileBranchButton} onPress={() => { onSelect(item.id); setDetailId(item.id); }}><span className={styles.mobileBranchName}>{launcherBranchDisplayName(item)}{item.current ? (zh ? " · 当前" : " · Current") : ""}</span></VButton>
+            <VButton variant="ghost" className={styles.mobileBranchButton} title={launcherBranchDisplayName(item)} onPress={() => { onSelect(item.id); setDetailId(item.id); }}><span className={styles.mobileBranchName}>{displayName(item)}{item.current ? (zh ? " · 当前" : " · Current") : ""}</span></VButton>
             <div className={styles.mobileActions}>{primaryColumns[1].render(item)}{renderLifecycleActions(item)}</div>
           </div>)}</div>
         </div>
       )}
-      <div className={styles.listFooter}><span>{(!hasAnyItems && listError) || showListLoading ? "—" : activeRows.length} {zh ? "个工作区" : "workspaces"}</span><span>{zh ? "退役记录保留在筛选中" : "Retired workspaces remain in filters"}</span></div>
+      <div className={styles.listFooter}><span>{zh ? "显示 " : "Showing "}{(!hasAnyItems && listError) || showListLoading ? "—" : activeRows.length} {zh ? "个工作区" : "workspaces"}</span></div>
       </>}
       <VConfirmDialog open={forceStopId !== null} onOpenChange={(open) => { if (!open) setForceStopId(null); }} title={labels.forceStop} description={`${forceStopItem ? launcherBranchDisplayName(forceStopItem) : ""} · ${labels.forceStopHint}`} tone="danger" confirmLabel={labels.forceStop} cancelLabel={zh ? "取消" : "Cancel"} confirmDisabled={lifecyclePending || !items.some((item) => item.id === forceStopId && canForceStopInstance(item))} onConfirm={() => { if (lifecyclePending) return; const item = items.find((entry) => entry.id === forceStopId); if (item && canForceStopInstance(item)) onLifecycle?.(item.id, "force-stop"); setForceStopId(null); }} />
       <VConfirmDialog

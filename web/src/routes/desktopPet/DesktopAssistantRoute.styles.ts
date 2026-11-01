@@ -23,7 +23,7 @@ const styles = {
   chatHeader: "flex h-14 min-w-0 shrink-0 items-center gap-2 border-b border-[var(--vui-border-subtle)] bg-[var(--vui-surface-toolbar)] px-3 [-webkit-app-region:drag] [&_button]:[-webkit-app-region:no-drag]",
   // Embedded page header: no window-drag region inside the launcher window.
   chatHeaderStatic: "flex h-14 min-w-0 shrink-0 items-center gap-2 border-b border-[var(--vui-border-subtle)] bg-[var(--vui-surface-toolbar)] px-3",
-  chatHeaderUnified: "flex h-16 min-w-0 shrink-0 items-center gap-2 bg-[var(--vui-surface-chat)] px-7 max-[700px]:px-3",
+  chatHeaderUnified: "flex min-h-20 min-w-0 shrink-0 items-center gap-2 bg-[var(--vui-surface-chat)] px-6 py-5 pr-28 max-[640px]:px-4 max-[640px]:pr-24 [&_h1]:text-vui-title [&_h1]:font-semibold",
   chatAvatar: "grid size-[30px] shrink-0 place-items-center rounded-lg bg-[var(--vui-selection-bg)] text-[var(--fg-secondary)]",
   chatIdentity: "flex min-w-0 flex-1 flex-col gap-0.5",
   chatTitle: "truncate text-vui-micro-13 font-medium",

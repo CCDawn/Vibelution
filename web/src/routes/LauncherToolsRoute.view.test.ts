@@ -54,15 +54,15 @@ describe("Launcher tools navigation and density", () => {
   it("uses a branch-sized maintenance heading and avoids a false profile when summary data is empty", () => {
     expect(routeSource).toContain("<h1 className={styles.toolsPageTitle}>{routeHeading}</h1>");
     expect(routeSource).not.toContain("className={styles.panelEyebrow}>{copy.eyebrow}");
-    expect(routeStyles.toolsPageHeader).toContain("px-7");
-    expect(routeStyles.toolsPageHeader).toContain("pt-4");
-    expect(routeStyles.toolsPageTitle).toContain("text-xl");
+    expect(routeStyles.toolsPageHeader).toContain("px-6");
+    expect(routeStyles.toolsPageHeader).toContain("py-5");
+    expect(routeStyles.toolsPageTitle).toContain("text-vui-title");
     expect(maintenancePanelSource).not.toContain("Launcher 维护中心");
     expect(maintenancePanelSource).not.toContain("selectedProfile?.label || copy.maintenanceFactoryRuntime");
     expect(maintenancePanelSource).toContain("copy.maintenanceActiveWorkPolicy");
-    expect(maintenancePanelSource).toContain("const summaryMissing = !loading && !summary");
+    expect(maintenancePanelSource).toContain("if (loading || !summaryAvailable)");
     expect(maintenancePanelSource).toContain("copy.maintenanceSummaryUnavailable");
-    expect(maintenancePanelSource).toContain("{loading ? copy.maintenanceLoading : planGapCopy}");
+    expect(maintenancePanelSource).toContain("{planGapCopy}");
     expect(routeSource).toContain('maintenanceSummaryUnavailable: "维护清单没有读到，暂时不能生成预览。"');
     expect(routeSource).toContain('maintenanceActiveWorkPolicy: "有进行中的任务时不会执行。"');
     expect(routeSource).toContain('savePortSettings: "保存端口设置"');

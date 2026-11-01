@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ComponentProps } from "react";
-import { ArrowLeft, ArrowRight, Globe, Maximize2, MessageCircle, PanelRightClose, PanelRightOpen, Plus, RotateCw, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Globe, Maximize2, MessageCircle, PanelRightClose, Plus, RotateCw, X } from "lucide-react";
 import { browserState, launcherBrowserBridge, safeBrowserUrl, type BrowserOperation, type BrowserState } from "../../api/launcherAssistantBrowser";
 import { PANE_RESIZE_HANDLE_WIDTH } from "../../components/layout/paneLayoutPersistence";
 import { WORKBENCH_LAYOUT_IDS } from "../../components/layout/workbenchLayoutIds";
@@ -132,19 +132,19 @@ export function LauncherAssistantBrowserWorkspace({ revealRequested = false, ass
       <VButton type="button" variant="ghost" isIconOnly className={styles.icon} aria-label="后退" isDisabled={!active || draft || !active.canGoBack} onClick={() => active && void run({ operation: "back", pageId: active.id })}><ArrowLeft size={16} /></VButton>
       <VButton type="button" variant="ghost" isIconOnly className={styles.icon} aria-label="前进" isDisabled={!active || draft || !active.canGoForward} onClick={() => active && void run({ operation: "forward", pageId: active.id })}><ArrowRight size={16} /></VButton>
       <VButton type="button" variant="ghost" isIconOnly className={styles.icon} aria-label="刷新" isDisabled={!active || draft} onClick={() => active && void run({ operation: "reload", pageId: active.id })}><RotateCw size={16} /></VButton>
-      <VInput className={styles.addressInput} aria-label="网页地址" value={address} placeholder="输入 http 或 https 网页地址" onChange={event => setAddress(event.target.value)} />
+      <VInput className={styles.addressInput} aria-label="网页地址" value={address} placeholder="输入网址" onChange={event => setAddress(event.target.value)} />
       <VButton type="submit">打开</VButton>
     </form>
     {error || active?.loadError ? <p role="alert" className={styles.error}>{error || "网页加载失败，请检查地址后重试。"}</p> : null}
     {active?.loading && !draft ? <div role="progressbar" aria-label="网页加载中" className={styles.progress} /> : null}
     <div className={styles.viewportContainer}>
-      {(!active || draft) ? <div className={styles.empty}><Globe size={28} /><p>输入网页地址，或从这里开始浏览。</p><VButton onClick={() => void go("https://www.bilibili.com/")}>打开哔哩哔哩</VButton></div> : null}
+      {(!active || draft) ? <div className={styles.empty}><Globe size={28} /><p>打开网页</p><VButton onClick={() => void go("https://www.bilibili.com/")}>哔哩哔哩</VButton></div> : null}
       <div ref={viewRef} data-launcher-browser-viewport="true" className={canShowPage ? styles.viewport : styles.viewportHidden} />
     </div>
   </section>;
   return <div ref={workspaceRef} className={styles.root} data-vui-domain-recipe="launcher-assistant-browser">
     {narrow && !collapsed ? <div className={styles.mobileSwitch}><VButton variant={!webVisible ? "secondary" : "ghost"} aria-pressed={!webVisible} onClick={() => { setFull(false); setMobilePage("chat"); }}>对话</VButton><VButton variant={webVisible ? "secondary" : "ghost"} aria-pressed={webVisible} onClick={() => { setCollapsed(false); setMobilePage("web"); }}>网页</VButton></div> : null}
-    {collapsed ? <VIconButton variant="ghost" className={styles.restore} label="打开网页" title="打开网页" icon={<PanelRightOpen size={16} />} onClick={() => { setCollapsed(false); setMobilePage("web"); }} /> : null}
+    {collapsed ? <VButton variant="ghost" className={styles.restore} aria-label="打开网页" icon={<Globe size={16} />} onClick={() => { setCollapsed(false); setMobilePage("web"); }}>网页</VButton> : null}
     <VSplitWorkspace className={`${styles.split} ${!webVisible ? styles.chatOnly : narrow || full ? styles.webOnly : ""}`} resize={{ layoutId: WORKBENCH_LAYOUT_IDS.launcherAssistantBrowser, sidebar: { defaultWidth: 360, minWidth: chatMinWidth, maxWidth: Math.max(chatMinWidth, Math.floor(workspaceWidth - browserMinWidth - PANE_RESIZE_HANDLE_WIDTH)) } }}
       sidebar={<LauncherAssistantRoute embedded navigationOwned {...assistantProps} />}
       main={browser} />

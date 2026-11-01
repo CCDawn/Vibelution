@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Activity, ArrowDownRight, ArrowUpCircle, Folder, MessageCircle, Settings2, ShieldCheck, Wrench } from "lucide-react";
+import { Activity, ArrowDownRight, ArrowUpCircle, Folder, MessageCircle, Settings2, Wrench } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import type { LauncherBranchInstance } from "../api/launcher";
 import { returnLauncherToDesktop } from "../api/launcher";
@@ -16,7 +16,7 @@ const settingsEntries = [
   { id:"settings", zh:"启动设置", en:"Startup settings", to:"/launcher?view=settings", Icon:Settings2 },
   { id:"updates", zh:"版本更新", en:"Updates", to:"/launcher/updates", Icon:ArrowUpCircle },
 ] as const;
-export function LauncherNavigation({ lang, onNavigate, updateAvailable = false }: { lang:"zh"|"en"; items:LauncherBranchInstance[]; onNavigate?:()=>void; updateAvailable?:boolean }) {
+export function LauncherNavigation({ lang, onNavigate, updateAvailable = false, updateFailed = false }: { lang:"zh"|"en"; items:LauncherBranchInstance[]; onNavigate?:()=>void; updateAvailable?:boolean; updateFailed?:boolean }) {
   const location = useLocation();
   const navigate = useNavigate();
   const pathname = location.pathname.replace(/\/+$/, "");
@@ -39,11 +39,13 @@ export function LauncherNavigation({ lang, onNavigate, updateAvailable = false }
       </div>
       <div className={styles.group}><p className={styles.groupLabel}>Launcher</p><VRouteLinkButton to="/launcher" chrome="shell-nav" aria-current={!assistant && selected === "branches" ? "page" : undefined} className={`${styles.link} ${!assistant && selected === "branches" ? styles.selectedLink : styles.idleLink}`} icon={<Folder size={17} aria-hidden="true"/>} onClick={onNavigate}>{lang === "zh" ? "项目与分支" : "Projects & branches"}</VRouteLinkButton></div>
     </div>
-    <div className={styles.footer}><VDropdownMenu side="top" align="start" aria-label={lang === "zh" ? "设置" : "Settings"}
-      trigger={<VButton variant="ghost" className={styles.returnButton} aria-current={!assistant && selected !== "branches" ? "page" : undefined} icon={<Settings2 size={16} aria-hidden="true" />}>{lang === "zh" ? "设置" : "Settings"}{updateAvailable ? <span className={styles.updateBadge} role="status">{lang === "zh" ? "有新版" : "New"}</span> : null}</VButton>}
+    <div className={styles.footer}>
+      {updateAvailable || updateFailed ? <VRouteLinkButton to="/launcher/updates" chrome="shell-nav" aria-current={selected === "updates" ? "page" : undefined} className={`${styles.link} ${styles.updateLink} ${selected === "updates" ? styles.selectedLink : styles.idleLink}`} icon={<ArrowUpCircle size={17} aria-hidden="true"/>} trailingIcon={<span className={styles.updateBadge}>{updateFailed ? (lang === "zh" ? "失败" : "Failed") : (lang === "zh" ? "有新版" : "New")}</span>} onClick={onNavigate}>{lang === "zh" ? "更新" : "Update"}</VRouteLinkButton> : null}
+      <VDropdownMenu side="top" align="start" aria-label={lang === "zh" ? "设置" : "Settings"}
+      trigger={<VButton variant="ghost" className={styles.returnButton} aria-current={!assistant && selected !== "branches" && !(selected === "updates" && (updateAvailable || updateFailed)) ? "page" : undefined} icon={<Settings2 size={16} aria-hidden="true" />}>{lang === "zh" ? "设置" : "Settings"}</VButton>}
       items={settingsEntries.map(({ id, zh, en, to, Icon }) => ({ id, label: lang === "zh" ? zh : en, icon: <Icon size={16} />, onSelect: () => { navigate(to); onNavigate?.(); } }))} />
       <VButton variant="ghost" className={styles.returnButton} icon={<ArrowDownRight size={16}/>} isPending={returning} onClick={() => void returnToDesktop()}>{lang === "zh" ? "回到桌面" : "Return to desktop"}</VButton>
-      {error ? <p className={styles.error} role="alert">{error}</p> : null}<span className={styles.resident}><ShieldCheck size={13}/>{lang === "zh" ? "关闭窗口不会停止任务" : "Closing this window keeps tasks running"}</span>
+      {error ? <p className={styles.error} role="alert">{error}</p> : null}
     </div>
   </nav>;
 }

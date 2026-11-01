@@ -1,117 +1,15 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowUpCircle, Check, ChevronDown, GitBranch, LoaderCircle, Monitor, RefreshCw } from "lucide-react";
+import { useMutation, useMutationState, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 
 import { getLauncherFreshness, restartLatestLauncher } from "../api/launcher";
 import { queryKeys } from "../api/queryKeys";
-import type { LauncherFreshness } from "../api/types";
-import { VButton, VPopover, VToolbar } from "../components/vui";
+import { VButton, VConfirmDialog } from "../components/vui";
 import styles from "./LauncherUpdateTopbar.styles";
-import { isLauncherUpdateAvailable } from "./updateBanner";
+import { isLauncherUpdateAvailable, LAUNCHER_UPDATE_MUTATION_KEY } from "./updateBanner";
 import { refreshUpdateFreshness, UPDATE_FRESHNESS_INTERVAL_MS, UPDATE_FRESHNESS_QUERY_OPTIONS, useUpdateFreshnessFocus } from "./updateFreshness";
 
-export type LauncherUpdateTopbarViewProps = {
-  lang: "zh" | "en";
-  branchName?: string;
-  desktop?: boolean;
-  freshness?: LauncherFreshness;
-  checking: boolean;
-  rechecking?: boolean;
-  checkFailed: boolean;
-  updating: boolean;
-  error?: string;
-  onCheck: () => void;
-  onUpdate: () => void;
-  onDetailsChange?: (open: boolean) => void;
-  onConfirmationChange?: (confirming: boolean) => void;
-};
-
-/** Shared chrome for both Launcher routes; closing details never dismisses the reminder. */
-export function LauncherUpdateTopbarView({
-  lang, branchName, desktop = false, freshness, checking, rechecking = false, checkFailed, updating, error,
-  onCheck, onUpdate, onDetailsChange, onConfirmationChange,
-}: LauncherUpdateTopbarViewProps) {
+export function LauncherUpdateTopbar({ lang }: { lang: "zh" | "en" }) {
   const zh = lang === "zh";
-  const [open, setOpen] = useState(false);
-  const [confirm, setConfirm] = useState(false);
-  const hasUpdate = isLauncherUpdateAvailable(freshness);
-  const busy = updating || freshness?.updateInProgress === true;
-  const failure = error || freshness?.refreshError || "";
-  const unknown = !hasUpdate && (!freshness || freshness.current === null);
-  const active = freshness?.activeWorkState === "active";
-  const taskUnknown = freshness?.activeWorkState !== "idle" && !active;
-  const disabled = checkFailed && !freshness;
-  const label = busy ? (zh ? "正在更新…" : "Updating…")
-    : failure ? (zh ? "更新失败 · 重试" : "Update failed · Retry")
-      : hasUpdate ? (zh ? "有新版本 · 请更新" : "Update available")
-        : checking ? (zh ? "正在检测版本…" : "Checking version…")
-          : unknown ? (zh ? "版本检测失败" : "Version unavailable")
-            : (zh ? "已是最新版本" : "Up to date");
-  const title = busy ? (zh ? "正在准备新版 Launcher" : "Preparing the latest Launcher")
-    : failure ? (zh ? "更新未完成，当前版本仍可使用" : "Update incomplete; the current version is still available")
-      : hasUpdate ? (zh ? "新版 Launcher 已就绪" : "A newer Launcher is available")
-        : unknown ? (zh ? "暂时无法确认版本" : "Unable to confirm the version")
-          : (zh ? "Launcher 已是最新版本" : "Launcher is up to date");
-  const changeOpen = (value: boolean) => {
-    setOpen(value);
-    if (!value) changeConfirm(false);
-    onDetailsChange?.(value);
-  };
-  const changeConfirm = (value: boolean) => {
-    setConfirm(value);
-    onConfirmationChange?.(value);
-  };
-
-  return (
-    <VToolbar ariaLabel={zh ? "Launcher 顶栏" : "Launcher top bar"} wrap={false} className={`${styles.toolbar} ${desktop ? styles.desktopToolbar : ""}`} data-testid="launcher-topbar">
-      <Monitor size={16} className={styles.appIcon} aria-hidden="true" />
-      <strong className={styles.title}>Vibelution <span className={styles.launcherName}>Launcher</span></strong>
-      {branchName ? <span className={styles.branch}><GitBranch size={13} aria-hidden="true" />{branchName}</span> : null}
-      <div className={`${styles.spacer} ${desktop ? styles.windowDragRegion : ""}`} aria-hidden="true" />
-      <VPopover open={open} onOpenChange={changeOpen} side="bottom" align="end" sideOffset={8}
-        aria-label={zh ? "Launcher 更新详情" : "Launcher update details"} contentClassName={styles.popover}
-        trigger={<VButton variant="ghost" contentLayout="plain" className={`${styles.button} ${styles.trigger} ${hasUpdate || failure ? styles.updateTone : styles.mutedTone}`} aria-label={label} data-testid="launcher-update-trigger">
-          {busy || checking ? <LoaderCircle size={14} className={styles.spinner} aria-hidden="true" />
-            : hasUpdate || failure ? <ArrowUpCircle size={14} aria-hidden="true" />
-              : unknown ? <RefreshCw size={14} aria-hidden="true" /> : <Check size={14} aria-hidden="true" />}
-          <span>{label}</span><ChevronDown size={12} aria-hidden="true" />
-        </VButton>}>
-        <div className={styles.content} role="status" aria-live="polite">
-          <div className={styles.heading}>
-            <strong className={styles.headingTitle}>{title}</strong>
-            <p className={styles.description}>{unknown && !hasUpdate
-              ? (zh ? "检测失败不代表已经是最新版本，请稍后重新检测。" : "A failed check does not mean you are up to date. Please check again.")
-              : (zh ? "桌面壳和启动器前端一起检查，与本地最新代码比较。工作区配置不会改变。" : "The desktop shell and Launcher frontend are compared with local code. Workspace settings are preserved.")}</p>
-          </div>
-          {freshness && (hasUpdate || freshness.runningShort || freshness.headShort) ? <dl className={styles.versions}>
-            <dt className={styles.metadata}>{zh ? "当前版本" : "Running"}</dt><dd className={styles.version}>{freshness.runningShort ? `@${freshness.runningShort}` : (zh ? "未知" : "Unknown")}</dd>
-            <dt className={styles.metadata}>{zh ? "本地最新" : "Local code"}</dt><dd className={styles.version}>{freshness.headShort ? `@${freshness.headShort}` : (zh ? "未知" : "Unknown")}</dd>
-          </dl> : null}
-          {active ? <p className={`${styles.description} ${styles.warning}`}>{zh ? `有 ${freshness?.activeWorkCount || 1} 个进行中的任务。更新会中断任务并保存已有记录，启动后可回到会话继续。` : "Updating will interrupt active tasks and save existing records. You can return to the conversation after restart."}</p> : null}
-          {hasUpdate && taskUnknown && !busy ? <p className={`${styles.description} ${styles.warning}`}>{zh ? "暂时无法确认任务状态。确认后仍会保存已有记录，然后关闭并重新打开。" : "Task status is unavailable. Confirming still saves existing records, then closes and reopens."}</p> : null}
-          {busy ? <p className={`${styles.description} ${styles.busyDescription}`}><LoaderCircle size={14} className={styles.busyIcon} aria-hidden="true" />{zh ? "正在构建前端和桌面壳。准备完成后关闭窗口，在后台完成换版并重新打开。" : "Building the frontend and desktop shell. The windows will close for final replacement and reopen afterwards."}</p> : null}
-          {failure ? <p className={`${styles.description} ${styles.failure}`}>{failure}</p> : null}
-          {confirm && !busy ? <div className={styles.confirmation}>
-            <p className={styles.description}>{zh ? "更新会保存已有任务记录，关闭 Launcher 和工作区窗口后重新打开。" : "Updating saves existing task records, then closes and reopens Launcher and workbench windows."}</p>
-            <div className={styles.actions}>
-              <VButton className={styles.button} variant="ghost" onPress={() => changeConfirm(false)}>{zh ? "取消" : "Cancel"}</VButton>
-              <VButton className={styles.button} variant="primary" isDisabled={disabled} onPress={() => { changeConfirm(false); onUpdate(); }}>{zh ? "确认更新" : "Confirm update"}</VButton>
-            </div>
-          </div> : <div className={styles.actions}>
-            <VButton className={styles.button} variant="ghost" onPress={() => changeOpen(false)}>{zh ? "关闭详情" : "Close details"}</VButton>
-            {!busy ? <VButton className={styles.button} variant="ghost" isPending={checking || rechecking} onPress={onCheck}>{zh ? "重新检测" : "Check again"}</VButton> : null}
-            {hasUpdate || failure ? <VButton className={styles.button} variant="primary" isPending={busy} isDisabled={disabled || unknown} onPress={() => changeConfirm(true)}>
-              {busy ? (zh ? "正在更新…" : "Updating…") : failure ? (zh ? "重试更新" : "Retry update") : (zh ? "更新并重启" : "Update and restart")}
-            </VButton> : null}
-          </div>}
-          <span className={styles.metadata}>{zh ? "关闭详情后，顶栏更新提示仍保留。" : "Closing details keeps the top bar reminder visible."}</span>
-        </div>
-      </VPopover>
-    </VToolbar>
-  );
-}
-
-export function LauncherUpdateTopbar({ lang, branchName, desktop }: Pick<LauncherUpdateTopbarViewProps, "lang" | "branchName" | "desktop">) {
   const [accepted, setAccepted] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const updateLock = useRef(false);
@@ -125,25 +23,55 @@ export function LauncherUpdateTopbar({ lang, branchName, desktop }: Pick<Launche
     refetchOnWindowFocus: confirming || accepted ? false : "always",
     retry: false,
   });
+  const updateAttempts = useMutationState({ filters: { mutationKey: LAUNCHER_UPDATE_MUTATION_KEY }, select: (mutation) => mutation.state });
+  const lastAttempt = updateAttempts.at(-1);
   const updateMutation = useMutation({
+    mutationKey: LAUNCHER_UPDATE_MUTATION_KEY,
     mutationFn: async () => {
       const result = await restartLatestLauncher();
-      if (!result.accepted) throw new Error(result.message || (lang === "zh" ? "更新未被接受，请重新检测。" : "Update was not accepted. Check again."));
+      if (!result.accepted) throw new Error(result.message || (zh ? "更新未被接受，请重新检测。" : "Update was not accepted. Check again."));
       return result;
     },
     onSuccess: () => setAccepted(true),
     onSettled: () => { updateLock.current = false; void refreshUpdateFreshness(queryClient); },
   });
-  return <LauncherUpdateTopbarView lang={lang} branchName={branchName} desktop={desktop} freshness={freshnessQuery.data}
-    checking={freshnessQuery.isPending} rechecking={freshnessQuery.isFetching && !freshnessQuery.isPending} checkFailed={freshnessQuery.isError}
-    updating={updateMutation.isPending || accepted}
-    error={updateMutation.error instanceof Error ? updateMutation.error.message : undefined}
-    onCheck={() => { updateMutation.reset(); void refreshUpdateFreshness(queryClient); }}
-    onUpdate={() => {
-      if (updateLock.current || accepted) return;
+
+  const freshness = freshnessQuery.data;
+  const hasUpdate = isLauncherUpdateAvailable(freshness);
+  const busy = updateMutation.isPending || accepted || lastAttempt?.status === "pending" || lastAttempt?.status === "success" || freshness?.updateInProgress === true;
+  const failure = (lastAttempt?.status === "error" && lastAttempt.error instanceof Error ? lastAttempt.error.message : "") || freshness?.refreshError || "";
+  const unknown = freshnessQuery.isError || (!hasUpdate && freshness?.current !== true);
+  const checking = freshnessQuery.isFetching && unknown;
+  const active = freshness?.activeWorkState === "active";
+  const taskUnknown = freshness?.activeWorkState !== "idle" && !active;
+  const status = busy ? (zh ? "准备中" : "Preparing")
+    : checking ? (zh ? "正在检测" : "Checking")
+      : unknown ? (zh ? "无法确认版本" : "Version unavailable")
+        : failure ? (zh ? "更新失败" : "Update failed")
+          : hasUpdate ? (zh ? "发现更新" : "Update available")
+            : (zh ? "已是最新版本" : "Up to date");
+  const notice = active
+    ? (zh ? `有 ${freshness?.activeWorkCount || 1} 个进行中的任务。更新会中断任务并保存已有记录，启动后可回到会话继续。` : "Updating will interrupt active tasks and save existing records. You can return to the conversation after restart.")
+    : taskUnknown ? (zh ? "暂时无法确认任务状态。更新会中断任务并保存已有记录。" : "Task status is unavailable. Updating interrupts tasks and saves existing records.")
+      : (zh ? "更新会保存已有任务记录并重启。" : "Updating saves existing task records and restarts.");
+
+  return <div className={styles.pageContent}>
+    <div role="status" aria-live="polite" className={styles.pageStatus}>{status}</div>
+    <dl className={styles.versions}>
+      <dt className={styles.metadata}>{zh ? "当前版本" : "Current version"}</dt><dd className={styles.version}>{freshness?.runningShort ? `@${freshness.runningShort}` : (zh ? "未知" : "Unknown")}</dd>
+      <dt className={styles.metadata}>{zh ? "可用版本" : "Available version"}</dt><dd className={styles.version}>{freshness?.headShort ? `@${freshness.headShort}` : (zh ? "未知" : "Unknown")}</dd>
+    </dl>
+    {failure ? <p className={styles.failure} role="alert">{failure}</p> : null}
+    <div className={styles.pageActions}>
+      {busy || (!unknown && (hasUpdate || failure))
+        ? <VButton variant="primary" isPending={busy} isDisabled={busy} onPress={() => setConfirming(true)}>{busy ? (zh ? "准备中…" : "Preparing…") : failure ? (zh ? "重试更新" : "Retry update") : (zh ? "更新并重启" : "Update and restart")}</VButton>
+        : <VButton variant="primary" isPending={freshnessQuery.isFetching} onPress={() => { void refreshUpdateFreshness(queryClient); }}>{zh ? "重新检测" : "Check again"}</VButton>}
+    </div>
+    <VConfirmDialog open={confirming} onOpenChange={setConfirming} title={zh ? "更新并重启？" : "Update and restart?"} description={notice} confirmLabel={zh ? "确认更新" : "Confirm update"} cancelLabel={zh ? "取消" : "Cancel"} onConfirm={() => {
+      setConfirming(false);
+      if (updateLock.current || accepted || lastAttempt?.status === "pending" || lastAttempt?.status === "success") return;
       updateLock.current = true;
       updateMutation.mutate();
-    }}
-    onConfirmationChange={setConfirming}
-    onDetailsChange={(open) => { if (open) void refreshUpdateFreshness(queryClient); }} />;
+    }} />
+  </div>;
 }

@@ -310,8 +310,7 @@ export function LauncherRoute() {
     >
       <div className={styles.workspaceRail} data-vui-region="launcher-primary-rail">
         <div hidden={!settingsVisible} className={styles.settingsWorkspace} data-vui-region="launcher-settings-rail" aria-label={copy.startupSettings}>
-          <h1 className={styles.settingsHeading}>{lang === "zh" ? "设置" : "Settings"}</h1>
-          <p className={styles.settingsDescription}>{lang === "zh" ? "管理启动行为和窗口偏好。" : "Manage startup behavior and window preferences."}</p>
+          <h1 className={styles.settingsHeading}>{lang === "zh" ? "启动设置" : "Startup settings"}</h1>
           <LauncherStartupSettingsPanel
             key={settingsResetKey}
             standalone

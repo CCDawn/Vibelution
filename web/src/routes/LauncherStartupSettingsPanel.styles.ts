@@ -19,6 +19,7 @@ const styles = {
   settingsPageBody: "gap-4 pb-6",
   settingsPageContent: "grid w-full max-w-3xl content-start gap-4",
   settingsGroup: "w-full",
+  advancedSettings: "grid min-w-0 gap-3 [&>summary]:cursor-pointer [&>summary]:py-2 [&>summary]:text-vui-sm [&>summary]:font-medium",
   settingsSelect: "w-full",
   settingsConflict:
     "flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-vui-panel border border-[color-mix(in_srgb,var(--state-warning)_35%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-warning)_7%,var(--vui-surface-card))] px-4 py-3 text-vui-sm text-vui-fg-primary",

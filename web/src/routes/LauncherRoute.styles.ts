@@ -20,8 +20,8 @@ const panelHeaderText =
 
 export const launcherRouteStyles = {
   workspaceRail: "flex min-h-0 flex-1 flex-col",
-  settingsWorkspace: "flex h-full min-h-0 flex-col overflow-hidden px-7 py-4 max-[640px]:px-4",
-  settingsHeading: "mb-1 mt-0 shrink-0 text-xl font-semibold",
+  settingsWorkspace: "flex h-full min-h-0 flex-col overflow-hidden px-6 py-5 max-[640px]:px-4",
+  settingsHeading: "mb-5 mt-0 shrink-0 text-vui-title font-semibold",
   settingsDescription: "mb-5 mt-1 shrink-0 text-vui-xs text-vui-fg-secondary",
   primary: "h-full min-h-0",
   route:

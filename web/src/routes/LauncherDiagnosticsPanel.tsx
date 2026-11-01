@@ -152,11 +152,7 @@ export function LauncherDiagnosticsPanel({
   } as CSSProperties;
 
   return (
-    <details className={`${styles.panel} ${styles.diagnosticsPanel}`}>
-      <summary>
-        <span>{copy.advancedDiagnostics}</span>
-        <strong>{copy.diagnosticsCollapsedHint}</strong>
-      </summary>
+    <section className={`${styles.panel} ${styles.diagnosticsPanel}`} aria-label={copy.advancedDiagnostics}>
       <div
         ref={registerDiagnosticsContainer}
         className={styles.diagnosticsBody}
@@ -267,6 +263,6 @@ export function LauncherDiagnosticsPanel({
           <Spec key={item.label} {...item} />
         ))}
       </dl>
-    </details>
+    </section>
   );
 }

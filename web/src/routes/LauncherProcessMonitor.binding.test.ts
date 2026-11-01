@@ -118,19 +118,34 @@ describe("process monitor auto-bind", () => {
     expect(listMonitoredInstances(items).map((item) => item.shortName)).toEqual(["主", "composer", "apply"]);
     const rows = buildAllInstanceMonitorRows(
       items,
-      { currentId: "main", backendPid: 44100, port: 8002, alive: true },
-      {
-        running: "运行中",
-        stopped: "已停止",
-        owned: "托管",
-        windowRunning: "窗口运行中",
-        windowStopped: "窗口已停止",
-      },
+      { isZh: true },
     );
     expect(rows.map((row) => `${row.label}:${row.pid}:${row.port}`)).toEqual([
-      "主:44100:8002",
+      "主:-:8002",
       "composer:29300:8000",
       "apply:-:-",
     ]);
   });
+  it("uses the same lifecycle facts as the project list and separates backend and window", () => {
+    const active = instance({
+      id: "main", kind: "main", current: true, alive: true,
+      pids: { backend: 12, window: 34, manager: 0 },
+      runtime: { ...main.runtime, lifecycleState: "running", backend: { ...main.runtime.backend, alive: true, listening: true, pid: 12 }, window: { ...main.runtime.window, open: true, pid: 34 } },
+    });
+    const [row] = buildAllInstanceMonitorRows([active], { isZh: true });
+    expect(row.status).toBe("正常运行");
+    expect(row.detail).toBe("后台运行中 · 窗口已打开");
+    expect(row.technical).toContain("window 34");
+    const [failed] = buildAllInstanceMonitorRows([active], { isZh: true, queryFailed: true });
+    expect(failed.status).toBe("状态未知");
+    expect(failed.detail).toContain("上次记录: 后台运行中 · 窗口已打开");
+    expect(failed.technical).toContain("window 34");
+  });
+
+  it("does not infer an open window from a pid", () => {
+    const row = buildAllInstanceMonitorRows([instance({ pids: { backend: 0, window: 34, manager: 0 } })], { isZh: true })[0];
+    expect(row.detail).toContain("窗口未打开");
+    expect(row.technical).toContain("window 34");
+  });
+
 });

@@ -1216,6 +1216,15 @@ export function conversationToolPresentationLabel(
     computer_use: { zh: "浏览器操作", en: "Computer use" },
     image2_generate_tool: { zh: "生成图片", en: "Generate image" },
     spawn_agent_tool: { zh: "派生代理", en: "Spawn agent" },
+    personal_assistant_query_tool: { zh: "查询助理记录", en: "Check assistant records" },
+    personal_assistant_platform_api_tool: { zh: "查询项目", en: "Check projects" },
+    personal_assistant_action_tool: { zh: "查询项目与任务", en: "Check projects and tasks" },
+    personal_assistant_overview_tool: { zh: "查看项目概况", en: "Check project overview" },
+    personal_assistant_manage_tool: { zh: "执行助理操作", en: "Run assistant action" },
+    personal_assistant_computer_observe_tool: { zh: "查看授权窗口", en: "Read authorized window" },
+    personal_assistant_computer_action_tool: { zh: "操作授权窗口", en: "Use authorized window" },
+    personal_assistant_desktop_observe_tool: { zh: "查看桌面", en: "Read desktop" },
+    personal_assistant_desktop_action_tool: { zh: "执行桌面操作", en: "Run desktop action" },
   };
   if (labels[lower]) {
     return labels[lower][language];

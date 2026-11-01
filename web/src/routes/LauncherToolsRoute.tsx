@@ -1175,7 +1175,7 @@ export function LauncherToolsRoute() {
         developerModeUpdated: "开发者沙盒已更新",
         maintenanceTitle: "恢复初始化",
         maintenancePanelTitle: "项目维护",
-        maintenanceEmptyItems: "当前档位没有匹配的清理项。",
+        maintenanceEmptyItems: "无须清理",
         maintenanceOwnerLauncher: "启动器管理",
         maintenanceHint: "清理与恢复初始化由 Launcher 生成计划、校验档位和 planHash，有进行中的任务时不会执行；默认保留用户会话和 Agent/Team 结构。",
         maintenanceProfile: "维护档位",
@@ -1188,11 +1188,11 @@ export function LauncherToolsRoute() {
         maintenancePlanEmpty: "当前计划没有可执行目标。",
         maintenancePlanMissingForProfile: "当前档位尚未生成预览，请先生成预览。",
         maintenancePlanProfileMismatch: "当前档位与预览计划不一致，请重新生成预览。",
-        maintenanceSummaryUnavailable: "维护清单没有读到，暂时不能生成预览。",
+        maintenanceSummaryUnavailable: "维护清单读取失败",
         maintenanceTargets: "目标",
         maintenanceEstimated: "预计释放",
         maintenanceActiveWorkPolicy: "有进行中的任务时不会执行。",
-        maintenanceRequiresConfirm: "确认执行当前 Launcher 维护计划？执行前会再次校验档位、planId、planHash，以及是否有进行中的任务。",
+        maintenanceRequiresConfirm: "确认执行当前维护预览？执行前会再次检查清理范围和进行中的任务。",
         maintenanceApplied: "Launcher 维护计划已执行",
         maintenanceLoading: "正在读取维护盘点",
         developerModeNoiseOverview: "噪声概览",
@@ -1455,7 +1455,7 @@ export function LauncherToolsRoute() {
         developerModeUpdated: "Developer sandbox updated",
         maintenanceTitle: "Restore initialization",
         maintenancePanelTitle: "Project maintenance",
-        maintenanceEmptyItems: "No cleanup items match this profile.",
+        maintenanceEmptyItems: "Nothing to clean",
         maintenanceOwnerLauncher: "Managed by Launcher",
         maintenanceHint: "Cleanup and restore initialization are planned by Launcher, validated with profile and planHash, and do not run while a task is in progress. The default keeps user sessions and Agent/Team structure.",
         maintenanceProfile: "Maintenance profile",
@@ -1468,11 +1468,11 @@ export function LauncherToolsRoute() {
         maintenancePlanEmpty: "This profile has no executable targets.",
         maintenancePlanMissingForProfile: "Generate a preview for the selected profile first.",
         maintenancePlanProfileMismatch: "The selected profile does not match this preview plan. Generate a new preview.",
-        maintenanceSummaryUnavailable: "The maintenance list did not load, so a preview cannot be generated yet.",
+        maintenanceSummaryUnavailable: "Could not load cleanup inventory",
         maintenanceTargets: "targets",
         maintenanceEstimated: "Estimated",
         maintenanceActiveWorkPolicy: "Does not run while a task is in progress.",
-        maintenanceRequiresConfirm: "Apply this Launcher maintenance plan? Vibelution will re-check profile, planId, planHash, and active work before executing.",
+        maintenanceRequiresConfirm: "Apply this maintenance preview? The cleanup scope and active work will be checked again before execution.",
         maintenanceApplied: "Launcher maintenance plan applied",
         maintenanceLoading: "Reading maintenance inventory",
         developerModeNoiseOverview: "Noise overview",
@@ -1506,7 +1506,6 @@ export function LauncherToolsRoute() {
 
   const routeSection = searchParams.get("view") === "maintenance" ? "maintenance" : "diagnostics";
   const routeHeading = routeSection === "maintenance" ? copy.maintenanceViewTitle : copy.diagnosticsViewTitle;
-  const routeHint = routeSection === "maintenance" ? copy.maintenanceViewHint : copy.diagnosticsViewHint;
   const requestedInstanceId = searchParams.get("instance")?.trim() ?? "";
   const [notice, setNotice] = useState<LauncherNotice>({ tone: "neutral", text: "" });
   const [lastControlOperation, setLastControlOperation] = useState<LauncherOperation | null>(null);
@@ -2310,26 +2309,19 @@ export function LauncherToolsRoute() {
     return [...ownedRows, ...leftoverRows];
   }, [bundle, componentRows, copy, evidence?.state.updatedAt, lang, launcherStatusDisconnected, locale, residualItems, startupSettings, status, uiLang]);
 
-  const instanceProcessRows = buildAllInstanceMonitorRows(
-    branchItems,
-    {
-      currentId: currentInstanceId,
-      backendPid: bundle?.backend.pid,
-      windowPid: bundle?.browser.windowPid,
-      port: bundle?.backend.port,
-      alive: Boolean(bundle?.backend.alive || bundle?.backend.healthy),
-    },
-    {
-      running: humanState("running", uiLang),
-      stopped: humanState("stopped", uiLang),
-      owned: copy.ownedProcess,
-      windowRunning: uiLang === "zh" ? "窗口运行中" : "Window running",
-      windowStopped: uiLang === "zh" ? "窗口已停止" : "Window stopped",
-    },
-  );
+  const instanceProcessRows = buildAllInstanceMonitorRows(branchItems, {
+    isZh: uiLang === "zh",
+    queryFailed: branchInstancesQuery.isError,
+  });
   const sharedProcessRows = statusRows.filter((row) => (
     row.id === "launcher_control" || row.id === "runtime_manager" || row.id === "frontend" || row.id.startsWith("residual-")
-  ));
+  )).map((row) => statusQuery.isError || !status ? {
+    ...row,
+    status: uiLang === "zh" ? "状态未知" : "Status unknown",
+    detail: uiLang === "zh" ? "状态未确认，详情保留已有数据" : "Status unconfirmed; details retain available data",
+    ok: false,
+    tone: "warning" as const,
+  } : row);
   const selectedProcessRows = [...instanceProcessRows, ...sharedProcessRows];
   const selectedProcessHint = uiLang === "zh"
     ? "各分支的运行状态（含已停止实例）"
@@ -2590,7 +2582,6 @@ export function LauncherToolsRoute() {
       <header className={styles.toolsPageHeader} data-vui-region="launcher-tools-header">
         <div>
           <h1 className={styles.toolsPageTitle}>{routeHeading}</h1>
-          <p className={styles.toolsPageHint}>{routeHint}</p>
         </div>
       </header>
 
@@ -2665,6 +2656,13 @@ export function LauncherToolsRoute() {
                     rows={selectedProcessRows}
                     residualCount={selectedResidualCount}
                     selectedId={selectedBranchId}
+                    queryFailed={branchInstancesQuery.isError}
+                    queryErrorLabel={uiLang === "zh" ? "实例状态读取失败，当前状态未知。" : "Could not load instance status; current status is unknown."}
+                    retryLabel={uiLang === "zh" ? "重试" : "Retry"}
+                    onRetry={() => { void branchInstancesQuery.refetch(); }}
+                    statusQueryFailed={statusQuery.isError}
+                    statusQueryErrorLabel={uiLang === "zh" ? "服务状态读取失败，当前状态未知。" : "Could not load service status; current status is unknown."}
+                    onStatusRetry={() => { void statusQuery.refetch(); }}
                   />
                 </div>
                 <div
@@ -2757,10 +2755,13 @@ export function LauncherToolsRoute() {
                   <Suspense fallback={<VStateSurface className={styles.notice} tone="loading" title={copy.loading} skeletonLines={2} />}>
                     <LauncherProjectMaintenancePanel
                       copy={copy}
-                      summary={maintenanceSummaryQuery.data}
+                      summary={maintenanceSummaryQuery.isError || statusQuery.isError ? undefined : maintenanceSummaryQuery.data}
                       maintenanceProfile={maintenanceProfile}
                       plan={maintenancePlan}
                       loading={maintenanceSummaryQuery.isLoading || maintenanceSummaryQuery.isFetching}
+                      error={maintenanceSummaryQuery.isError || statusQuery.isError}
+                      retryLabel={uiLang === "zh" ? "重试" : "Retry"}
+                      onRetry={() => { void statusQuery.refetch(); void maintenanceSummaryQuery.refetch(); }}
                       previewPending={maintenancePreviewMutation.isPending}
                       applyPending={maintenanceApplyMutation.isPending}
                       onProfileChange={(profile) => {

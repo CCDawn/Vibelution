@@ -8,6 +8,8 @@ import { shellDictionary } from "../i18n/shellDictionary";
  */
 export const UPDATE_BANNER_DISMISSED_STORAGE_KEY = "vibelution.workbench.update-banner-dismissed.v1";
 
+export const LAUNCHER_UPDATE_MUTATION_KEY = ["launcher", "restart-latest"] as const;
+
 const UPDATE_BANNER_HEAD_TOKEN_LENGTH = 7;
 const UPDATE_BANNER_COMMIT_KEY_LENGTH = 12;
 
@@ -20,8 +22,22 @@ export function isLauncherUpdateAvailable(freshness: LauncherFreshness | undefin
 }
 
 /** Shell replacement also reloads the project; prefer it when both owners are behind. */
-export function updateRestartTarget(freshness: LauncherFreshness | undefined | null): "shell" | "workbench" {
-  return isLauncherUpdateAvailable(freshness) ? "shell" : "workbench";
+export function updateRestartTarget(freshness: LauncherFreshness | undefined | null): "shell" | "workbench" | "unknown" {
+  if (isLauncherUpdateAvailable(freshness)) return "shell";
+  return freshness?.current === true ? "workbench" : "unknown";
+}
+
+export async function resolveUpdateRestartTarget({
+  hasBridge,
+  readFreshness,
+}: {
+  hasBridge: boolean;
+  readFreshness: () => Promise<LauncherFreshness>;
+}): Promise<"shell" | "workbench"> {
+  if (!hasBridge) return "workbench";
+  const target = updateRestartTarget(await readFreshness());
+  if (target === "unknown") throw new Error("UPDATE_VERSION_UNAVAILABLE");
+  return target;
 }
 
 export function shouldShowUpdateBanner({

@@ -5,7 +5,10 @@
 | `LauncherAssistantBrowserWorkspace` | [product/personal-assistant.md](./product/personal-assistant.md#launcherassistantbrowserworkspace) |
 | `LauncherAssistantRoute` | [product/personal-assistant.md](./product/personal-assistant.md#launcherassistantroute) |
 | `LauncherAssistantWorkspaceRoute` / `LauncherAssistantWelcome` | [product/personal-assistant.md](./product/personal-assistant.md#launcherassistantworkspaceroute) |
-| `LauncherShell` / `LauncherNavigation` / `LauncherTitlebar` / `LauncherProjectRoute` / `LauncherUpdatesRoute` | [product/personal-assistant.md](./product/personal-assistant.md#launchershell--launchernavigation) |
+| `LauncherShell` / `LauncherNavigation` / `LauncherTitlebar` / `LauncherProjectRoute` | [product/personal-assistant.md](./product/personal-assistant.md#launchershell--launchernavigation) |
+| `LauncherUpdatesRoute` / `LauncherUpdateTopbar` | [product/personal-assistant.md](./product/personal-assistant.md#launcherupdatesroute--launcherupdatetopbar) |
+| `LauncherStartupSettingsPanel` / `LauncherBranchInstancesPanel` | [product/personal-assistant.md](./product/personal-assistant.md#launcherstartupsettingspanel--launcherbranchinstancespanel) |
+| `LauncherToolsRoute` / `LauncherProcessMonitorPanel` / `LauncherProjectMaintenancePanel` | [product/personal-assistant.md](./product/personal-assistant.md#launchertoolsroute--launcherprocessmonitorpanel--launcherprojectmaintenancepanel) |
 | `PersonalAssistantRoute` | [product/personal-assistant.md](./product/personal-assistant.md#personalassistantroute) |
 | `PersonalAssistantComputerPanel` | [product/personal-assistant.md](./product/personal-assistant.md#personalassistantcomputerpanel) |
 | `DesktopAssistantRoute` | [product/personal-assistant.md](./product/personal-assistant.md#desktopassistantroute) |

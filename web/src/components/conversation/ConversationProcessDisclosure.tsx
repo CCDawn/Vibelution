@@ -10,6 +10,7 @@ import React, {
 } from "react";
 
 import type { CodexTranscriptCell } from "./codexTranscriptCells";
+import { conversationToolPresentationLabel } from "./conversationToolPresentation";
 import { activeTurnElapsedSeconds } from "./conversationActiveTurnStatusPresentation";
 import {
   codexTranscriptToolDurationSeconds,
@@ -200,7 +201,10 @@ export function processLabel(
   if (state === "failed") {
     const toolIdentity = firstFailedToolIdentity(retryFreeCells, messageOrder);
     if (toolIdentity) {
-      parts.push(language === "zh" ? `· ${toolIdentity}` : `· ${toolIdentity}`);
+      const label = toolIdentity.startsWith("personal_assistant_")
+        ? conversationToolPresentationLabel(toolIdentity, language)
+        : toolIdentity;
+      parts.push(`· ${label}`);
     } else {
       parts.push(language === "zh" ? "· 展开查看原因" : "· expand for details");
     }

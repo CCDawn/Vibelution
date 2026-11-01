@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutationState, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 
@@ -20,7 +20,7 @@ import { VDialog, VSplitWorkspace, VSurface } from "../components/vui";
 import styles from "./LauncherShell.styles";
 import { applyWorkbenchDocumentTheme, readStoredWorkbenchTheme, subscribeStoredWorkbenchTheme } from "./themePreference";
 import { applyUiFontBasePx, readStoredUiFontBasePx } from "./uiFontPreference";
-import { isLauncherUpdateAvailable } from "./updateBanner";
+import { isLauncherUpdateAvailable, LAUNCHER_UPDATE_MUTATION_KEY } from "./updateBanner";
 import { UPDATE_FRESHNESS_INTERVAL_MS, UPDATE_FRESHNESS_QUERY_OPTIONS, useUpdateFreshnessFocus } from "./updateFreshness";
 
 export function LauncherShell() {
@@ -36,6 +36,8 @@ export function LauncherShell() {
   const freshnessQuery = useQuery({ ...UPDATE_FRESHNESS_QUERY_OPTIONS, queryKey:queryKeys.launcherFreshness(), queryFn:getLauncherFreshness,
     enabled:watchUpdates, refetchInterval:watchUpdates ? UPDATE_FRESHNESS_INTERVAL_MS : false, refetchOnWindowFocus:watchUpdates ? "always" : false, retry:false });
   const updateAvailable = isLauncherUpdateAvailable(freshnessQuery.data);
+  const updateAttempts = useMutationState({ filters: { mutationKey: LAUNCHER_UPDATE_MUTATION_KEY }, select: (mutation) => mutation.state });
+  const updateFailed = Boolean(freshnessQuery.data?.refreshError || updateAttempts.at(-1)?.status === "error");
   const stateBridgeAvailable = hasLauncherStateBridge();
   const branchInstancesQuery = useQuery({
     queryKey: queryKeys.launcherBranchInstances(),
@@ -111,11 +113,11 @@ export function LauncherShell() {
       <VSplitWorkspace
         className={styles.workspace}
         columnsClassName={styles.columns}
-        sidebar={<div className={styles.navigation}><LauncherNavigation lang={lang} items={branchInstancesQuery.data?.items ?? []} updateAvailable={updateAvailable}/></div>}
+        sidebar={<div className={styles.navigation}><LauncherNavigation lang={lang} items={branchInstancesQuery.data?.items ?? []} updateAvailable={updateAvailable} updateFailed={updateFailed}/></div>}
         main={<VSurface as="div" tone="panel" padding="none" className={styles.main}>{routeContent}</VSurface>}
       />
       <VDialog open={navigationOpen} onOpenChange={setNavigationOpen} title={lang === "zh" ? "功能导航" : "Navigation"} size="sm">
-        <div className={styles.mobileNavigation}><LauncherNavigation lang={lang} items={branchInstancesQuery.data?.items ?? []} onNavigate={() => setNavigationOpen(false)} updateAvailable={updateAvailable}/></div>
+        <div className={styles.mobileNavigation}><LauncherNavigation lang={lang} items={branchInstancesQuery.data?.items ?? []} onNavigate={() => setNavigationOpen(false)} updateAvailable={updateAvailable} updateFailed={updateFailed}/></div>
       </VDialog>
     </div>
   );

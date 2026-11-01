@@ -13,7 +13,7 @@ let root: Root, host: HTMLDivElement;
 beforeEach(() => { vi.resetAllMocks(); host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host); });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
 
-async function render(options: { onNavigate?: () => void; updateAvailable?: boolean } = {}, entry = "/launcher/assistant") {
+async function render(options: { onNavigate?: () => void; updateAvailable?: boolean; updateFailed?: boolean } = {}, entry = "/launcher/assistant") {
   const router = createMemoryRouter([{ path: "*", element: <LauncherNavigation lang="zh" items={[]} {...options} /> }],
     { initialEntries: [entry] });
   await act(async () => root.render(<RouterProvider router={router} />));
@@ -53,7 +53,8 @@ describe("Launcher navigation", () => {
     const onNavigate = vi.fn();
     const router = await render({ onNavigate, updateAvailable: true });
     const trigger = [...host.querySelectorAll("button")].find(node => node.textContent?.includes("设置"))!;
-    expect(trigger.textContent).toContain("有新版");
+    expect(trigger.textContent).not.toContain("有新版");
+    expect(link("更新有新版").getAttribute("href")).toBe("/launcher/updates");
     for (const [label, path] of [["诊断", "/launcher/tools?view=diagnostics"], ["维护", "/launcher/tools?view=maintenance"], ["启动设置", "/launcher?view=settings"], ["版本更新", "/launcher/updates"]]) {
       await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
       const item = await vi.waitFor(() => {
@@ -63,9 +64,17 @@ describe("Launcher navigation", () => {
       });
       await act(async () => item.click());
       expect(router.state.location.pathname + router.state.location.search).toBe(path);
-      expect(trigger.getAttribute("aria-current")).toBe("page");
+      if (label !== "版本更新") expect(trigger.getAttribute("aria-current")).toBe("page");
     }
     expect(onNavigate).toHaveBeenCalledTimes(4);
+  });
+
+  it("provides a direct update link for failed updates", async () => {
+    const router = await render({ updateFailed: true });
+    expect(host.textContent).not.toContain("关闭窗口不会停止任务");
+    await act(async () => link("更新失败").click());
+    expect(router.state.location.pathname).toBe("/launcher/updates");
+    expect(link("更新失败").getAttribute("aria-current")).toBe("page");
   });
 
   it("supports keyboard selection and Escape in the settings menu", async () => {

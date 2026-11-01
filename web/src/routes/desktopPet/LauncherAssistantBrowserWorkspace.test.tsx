@@ -29,7 +29,8 @@ describe("Launcher browser workspace", () => {
     draft.value = "保留草稿";
     expect(button("打开网页")).toBeTruthy();
     expect(host.querySelector('[data-vui="split-workspace"]')?.className).toContain('[&>[data-vui=split-main]]:!hidden');
-    expect([...host.querySelectorAll("button")].some(node => node.textContent === "网页")).toBe(false);
+    expect(button("打开网页").textContent).toBe("网页");
+    expect([...host.querySelectorAll("button[aria-pressed]")].some(node => node.textContent === "网页")).toBe(false);
     await act(async () => show?.());
     expect(host.querySelector('button[aria-label="打开网页"]')).toBeNull();
     expect(host.querySelector<HTMLInputElement>('input[aria-label="对话草稿"]')).toBe(draft);

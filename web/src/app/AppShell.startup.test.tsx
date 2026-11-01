@@ -257,4 +257,51 @@ describe("Workbench initial route priority", () => {
     expect(container.textContent).toContain("teams homepage");
     router.dispose();
   });
+
+  it("ignores a cancelled update check after a newer update attempt starts", async () => {
+    seedControlTokenForTests();
+    const freshness = { current: false, updateAvailable: true, headShort: "bbbb", activeWorkState: "idle" };
+    const checks: Array<{ resolve: (value: typeof freshness) => void; reject: (error: Error) => void }> = [];
+    let deferChecks = false;
+    const replaceShell = vi.fn(async () => ({ ok: true, payload: { accepted: true, operation: "restart-latest-shell" } }));
+    vi.stubGlobal("vibelutionLauncher", {
+      showLauncherWindow: vi.fn(async () => {}),
+      getLauncherFreshness: vi.fn(() => deferChecks
+        ? new Promise<typeof freshness>((resolve, reject) => checks.push({ resolve, reject }))
+        : Promise.resolve(freshness)),
+      requestWorkbenchShellUpdate: replaceShell,
+    });
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request) => {
+      const path = new URL(String(url), window.location.origin).pathname;
+      const payload = path === "/api/health" ? { status: "ok", routesReady: true }
+        : path.includes("companion-activity") ? []
+          : path === "/api/runtime-tasks" ? { running: [], ended: [] } : {};
+      return new Response(JSON.stringify(payload), { headers: { "Content-Type": "application/json" } });
+    }));
+    const router = createMemoryRouter([{ element: <AppShell />, children: [{ path: "/teams", element: <div>teams homepage</div> }] }], { initialEntries: ["/teams"] });
+    client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 30_000, gcTime: 0 } } });
+    client.setQueryData(queryKeys.launcherFreshness(), freshness);
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => root!.render(<VuiProvider><QueryClientProvider client={client!}><RouterProvider router={router} /></QueryClientProvider></VuiProvider>));
+    const button = (label: string) => [...document.querySelectorAll("button")].find(node => node.textContent?.trim() === label)!;
+    await waitForRouteCommit(() => expect(container!.querySelector('button[aria-label="更新通知"]')).not.toBeNull());
+    await act(async () => (container!.querySelector('button[aria-label="更新通知"]') as HTMLButtonElement).click());
+    await waitForRouteCommit(() => expect(button("重启更新")).toBeTruthy());
+    deferChecks = true;
+    await act(async () => button("重启更新").click());
+    expect(checks).toHaveLength(1);
+    expect(replaceShell).not.toHaveBeenCalled();
+    await act(async () => button("取消重启").click());
+    await act(async () => button("重启更新").click());
+    expect(checks).toHaveLength(2);
+    await act(async () => checks[0].reject(new Error("late cancelled check")));
+    expect(replaceShell).not.toHaveBeenCalled();
+    expect(button("取消重启")).toBeTruthy();
+    expect(button("重启更新").disabled).toBe(true);
+    await act(async () => checks[1].resolve(freshness));
+    expect(replaceShell).toHaveBeenCalledOnce();
+    router.dispose();
+  });
 });

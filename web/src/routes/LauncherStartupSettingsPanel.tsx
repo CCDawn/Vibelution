@@ -164,17 +164,14 @@ function errorMessage(error: unknown, lang: "zh" | "en"): string {
 function startupSettingsText(lang: "zh" | "en") {
   return lang === "zh"
     ? {
-        pageTitle: "启动与窗口",
+        pageTitle: "启动设置",
+        advanced: "高级设置",
         runtimeProfileDescription: "选择工作区启动时使用的运行配置。",
-        windowModeDescription: "应用于之后打开或重启的工作区。",
         windowModeOverride: "环境变量覆盖了此设置，当前生效：",
-        windowSizeDescription: "设置之后打开的工作区窗口初始尺寸。",
         windowSizeOverride: "环境变量覆盖了此设置，当前生效：",
-        interfaceLanguageDescription: "控制 Launcher 和工作区界面的显示语言。",
         preflightDescription: "启动前检查运行环境与依赖，提前发现问题。",
         requireVenvDescription: "要求工作区使用项目自己的 .venv 环境。",
         unsaved: "有未保存的更改",
-        clean: "没有未保存的更改",
         discard: "撤销更改",
         loadLatest: "加载最新设置",
         waitingForLatest: "正在读取最新设置…",
@@ -184,17 +181,14 @@ function startupSettingsText(lang: "zh" | "en") {
         notLoaded: "正在读取设置；加载完成后即可编辑。",
       }
     : {
-        pageTitle: "Startup and window",
+        pageTitle: "Startup settings",
+        advanced: "Advanced settings",
         runtimeProfileDescription: "Choose the runtime configuration for workbench launches.",
-        windowModeDescription: "Applies to workbenches opened or restarted later.",
         windowModeOverride: "Overridden by an environment variable. Effective value:",
-        windowSizeDescription: "Set the initial size for workbench windows opened later.",
         windowSizeOverride: "Overridden by an environment variable. Effective value:",
-        interfaceLanguageDescription: "Controls the display language in Launcher and workbenches.",
         preflightDescription: "Check the runtime environment and dependencies before launch.",
         requireVenvDescription: "Require workbenches to use the project's own .venv environment.",
         unsaved: "You have unsaved changes",
-        clean: "No unsaved changes",
         discard: "Discard changes",
         loadLatest: "Load latest settings",
         waitingForLatest: "Waiting for the latest settings…",
@@ -344,28 +338,10 @@ export function LauncherStartupSettingsPanel({
   const windowModeOverride = current.workbench.windowModeEnvOverride;
 
   const settingsRows = (
+    <>
     <VSettingsGroupCard className={styles.settingsGroup}>
       <VSettingsRow
-        label={copy.runtimeProfile}
-        description={text.runtimeProfileDescription}
-        testId="row-runtime-profile"
-        control={(
-          <VStringSelect
-            ariaLabel={copy.runtimeProfile}
-            className={styles.settingsSelect}
-            value={draft.runtime.profile}
-            isDisabled={controlsDisabled}
-            onValueChange={(profile) => patchDraft({ runtime: { ...draft.runtime, profile } })}
-            options={profileOptions.map((profile) => ({
-              value: profile,
-              label: runtimeProfileLabel(profile, uiLang),
-            }))}
-          />
-        )}
-      />
-      <VSettingsRow
         label={copy.windowMode}
-        description={text.windowModeDescription}
         testId="row-window-mode"
         detail={windowModeOverride
           ? `${text.windowModeOverride} ${effectiveWindowModeLabel}`
@@ -391,7 +367,6 @@ export function LauncherStartupSettingsPanel({
       />
       <VSettingsRow
         label={copy.windowSize}
-        description={text.windowSizeDescription}
         testId="row-window-size"
         detail={windowSizeOverride
           ? `${text.windowSizeOverride} ${current.workbench.effectiveWindowSize}`
@@ -412,7 +387,6 @@ export function LauncherStartupSettingsPanel({
       />
       <VSettingsRow
         label={copy.interfaceLanguage}
-        description={text.interfaceLanguageDescription}
         testId="row-interface-language"
         control={(
           <VStringSelect
@@ -424,6 +398,28 @@ export function LauncherStartupSettingsPanel({
             options={languageOptions.map((language) => ({
               value: language,
               label: language === "zh" ? copy.languageZh : language === "en" ? copy.languageEn : language,
+            }))}
+          />
+        )}
+      />
+    </VSettingsGroupCard>
+    <details className={styles.advancedSettings}>
+      <summary>{text.advanced}</summary>
+      <VSettingsGroupCard className={styles.settingsGroup}>
+      <VSettingsRow
+        label={copy.runtimeProfile}
+        description={text.runtimeProfileDescription}
+        testId="row-runtime-profile"
+        control={(
+          <VStringSelect
+            ariaLabel={copy.runtimeProfile}
+            className={styles.settingsSelect}
+            value={draft.runtime.profile}
+            isDisabled={controlsDisabled}
+            onValueChange={(profile) => patchDraft({ runtime: { ...draft.runtime, profile } })}
+            options={profileOptions.map((profile) => ({
+              value: profile,
+              label: runtimeProfileLabel(profile, uiLang),
             }))}
           />
         )}
@@ -454,7 +450,9 @@ export function LauncherStartupSettingsPanel({
           />
         )}
       />
-    </VSettingsGroupCard>
+      </VSettingsGroupCard>
+    </details>
+    </>
   );
 
   const conflictMessage = (
@@ -473,15 +471,9 @@ export function LauncherStartupSettingsPanel({
 
   const footer = (
     <>
-      <span className={styles.settingsFooterStatus} role="status">
-        {!setting
-          ? text.notLoaded
-          : conflicted
-            ? text.conflict
-            : dirty
-              ? text.unsaved
-              : text.clean}
-      </span>
+      {!setting || (dirty && !conflicted) ? <span className={styles.settingsFooterStatus} role="status">
+        {!setting ? text.notLoaded : text.unsaved}
+      </span> : null}
       {saveError && !conflicted ? <span className={styles.settingsSaveError} role="alert">{saveError}</span> : null}
       {dirty && !conflicted ? (
         <VButton type="button" variant="secondary" isDisabled={saving || pending} onPress={discardDraft}>

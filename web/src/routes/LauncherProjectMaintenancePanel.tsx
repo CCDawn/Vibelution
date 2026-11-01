@@ -6,7 +6,7 @@ import type {
   LauncherMaintenanceSummary,
 } from "../api/types";
 import { PersistedHeightListShell } from "../components/layout/PersistedHeightListShell";
-import { VButton, VTabs } from "../components/vui";
+import { VButton, VStateSurface, VTabs } from "../components/vui";
 import styles from "./LauncherProjectMaintenancePanel.styles";
 import {
   LAUNCHER_CLEANUP_CONSOLE_HEIGHT_PANE,
@@ -42,6 +42,9 @@ type LauncherProjectMaintenancePanelProps = {
   maintenanceProfile: LauncherMaintenanceProfileId;
   plan: LauncherMaintenancePlan | null;
   loading: boolean;
+  error: boolean;
+  retryLabel: string;
+  onRetry: () => void;
   previewPending: boolean;
   applyPending: boolean;
   onProfileChange: (profile: LauncherMaintenanceProfileId) => void;
@@ -78,6 +81,9 @@ export function LauncherProjectMaintenancePanel({
   maintenanceProfile,
   plan,
   loading,
+  error,
+  retryLabel,
+  onRetry,
   previewPending,
   applyPending,
   onProfileChange,
@@ -90,30 +96,39 @@ export function LauncherProjectMaintenancePanel({
   const estimatedBytes = selectedItems.reduce((total, item) => total + Number(item.sizeBytes || 0), 0);
   const targetCount = selectedItems.reduce((total, item) => total + Number(item.candidateCount || 0), 0);
   const planProfileMatches = !plan || normalizeMaintenanceProfileId(plan.profileId) === maintenanceProfile;
-  const visiblePlan = planProfileMatches ? plan : null;
+  const summaryAvailable = Boolean(summary && selectedProfile) && selectedItems.length === selectedItemIds.length && !error;
+  const nothingToClean = summaryAvailable && selectedItems.length === 0;
+  const visiblePlan = summaryAvailable && !nothingToClean && !loading && planProfileMatches ? plan : null;
   const planRows = visiblePlan?.preview.items.slice(0, 5) ?? [];
-  const canPreview = Boolean(summary) && !loading && !previewPending && !applyPending;
-  const canApply = Boolean(visiblePlan) && !loading && !previewPending && !applyPending;
-  const summaryMissing = !loading && !summary;
-  const nothingToClean = Boolean(summary) && selectedItems.length === 0;
-  const planGapCopy = summaryMissing
-    ? copy.maintenanceSummaryUnavailable
-    : nothingToClean
-      ? copy.maintenanceEmptyItems
-      : plan && !planProfileMatches
+  const canPreview = summaryAvailable && !nothingToClean && !loading && !previewPending && !applyPending;
+  const canApply = summaryAvailable && !nothingToClean && Boolean(visiblePlan && visiblePlan.targetCount > 0) && !loading && !previewPending && !applyPending;
+  if (loading || !summaryAvailable) {
+    return (
+      <VStateSurface
+        className={styles.developerPanel}
+        density="compact"
+        tone={loading ? "loading" : "error"}
+        title={loading ? copy.maintenanceLoading : copy.maintenanceSummaryUnavailable}
+      >
+        {!loading ? <VButton type="button" variant="secondary" onPress={onRetry}>{retryLabel}</VButton> : null}
+      </VStateSurface>
+    );
+  }
+
+  const planGapCopy = nothingToClean
+    ? copy.maintenanceEmptyItems
+    : plan && !planProfileMatches
+      ? copy.maintenancePlanProfileMismatch
+      : copy.maintenancePlanMissingForProfile;
+  const applyTitle = nothingToClean
+    ? copy.maintenanceEmptyItems
+    : !plan
+      ? copy.maintenancePlanMissingForProfile
+      : !planProfileMatches
         ? copy.maintenancePlanProfileMismatch
-        : copy.maintenancePlanMissingForProfile;
-  const applyTitle = loading
-    ? copy.maintenanceLoading
-    : summaryMissing
-      ? copy.maintenanceSummaryUnavailable
-      : nothingToClean
-        ? copy.maintenanceEmptyItems
-        : !plan
-          ? copy.maintenancePlanMissingForProfile
-          : !planProfileMatches
-            ? copy.maintenancePlanProfileMismatch
-            : copy.maintenanceApply;
+        : visiblePlan && visiblePlan.targetCount <= 0
+          ? copy.maintenancePlanEmpty
+          : copy.maintenanceApply;
 
   return (
     <section
@@ -124,7 +139,7 @@ export function LauncherProjectMaintenancePanel({
       data-endpoint-apply="maintenance/reset/apply"
     >
       <div className={styles.maintenanceActions}>
-        <VButton type="button" variant="secondary" className={styles.iconButton} onPress={onPreview} isDisabled={!canPreview} disabledReason={loading ? copy.maintenanceLoading : summaryMissing ? copy.maintenanceSummaryUnavailable : copy.maintenanceHint} tooltip={copy.maintenancePreview} icon={previewPending ? <LoaderCircle size={15} className={styles.spin} /> : <Trash2 size={15} />}>
+        <VButton type="button" variant="secondary" className={styles.iconButton} onPress={onPreview} isDisabled={!canPreview} disabledReason={copy.maintenanceHint} tooltip={copy.maintenancePreview} icon={previewPending ? <LoaderCircle size={15} className={styles.spin} /> : <Trash2 size={15} />}>
           <span>{copy.maintenancePreview}</span>
         </VButton>
         <VButton type="button" variant="primary" className={styles.primaryButton} onPress={onApply} isDisabled={!canApply} disabledReason={applyTitle} tooltip={copy.maintenanceApply} icon={applyPending ? <LoaderCircle size={15} className={styles.spin} /> : <ShieldCheck size={15} />}>
@@ -138,7 +153,7 @@ export function LauncherProjectMaintenancePanel({
               <span>{copy.maintenanceProfile}</span>
               <small>{copy.maintenanceActiveWorkPolicy}</small>
             </div>
-            {loading ? <small>{copy.maintenanceLoading}</small> : summary?.executionOwner ? <small>{summary.executionOwner === "launcher" ? copy.maintenanceOwnerLauncher : summary.executionOwner}</small> : null}
+            {summary?.executionOwner ? <small>{summary.executionOwner === "launcher" ? copy.maintenanceOwnerLauncher : summary.executionOwner}</small> : null}
           </div>
           <VTabs
             aria-label={copy.maintenanceProfile}
@@ -155,12 +170,12 @@ export function LauncherProjectMaintenancePanel({
               {
                 id: "clean_start",
                 label: copy.maintenanceCleanStart,
-                disabled: previewPending || applyPending,
+                disabled: loading || !summaryAvailable || previewPending || applyPending,
               },
               {
                 id: "factory_runtime",
                 label: copy.maintenanceFactoryRuntime,
-                disabled: previewPending || applyPending,
+                disabled: loading || !summaryAvailable || previewPending || applyPending,
               },
             ]}
           />
@@ -172,14 +187,14 @@ export function LauncherProjectMaintenancePanel({
             resizeHandleClassName={styles.noiseItemGridResizeHandle}
             expandToContent
           >
-            {selectedItems.length ? selectedItems.slice(0, 4).map((item) => (
+            {summaryAvailable && selectedItems.length ? selectedItems.slice(0, 4).map((item) => (
                 <div key={item.id} className={styles.noiseItem} data-protected="false">
                   <span>{item.name}</span>
                   <strong>{item.size}</strong>
                   <small>{item.candidateCount} {copy.maintenanceTargets}</small>
                 </div>
               )) : (
-                <small className={styles.emptyList}>{loading ? copy.maintenanceLoading : copy.maintenanceEmptyItems}</small>
+                <small className={styles.emptyList}>{copy.maintenanceEmptyItems}</small>
               )}
           </PersistedHeightListShell>
         </div>
@@ -191,14 +206,13 @@ export function LauncherProjectMaintenancePanel({
           resizeHandleClassName={styles.cleanupConsoleResizeHandle}
           expandToContent
         >
-          <div className={styles.cleanupMetrics}>
+          {summaryAvailable && !loading ? <div className={styles.cleanupMetrics}>
             <span>{copy.maintenanceEstimated}: <strong>{formatBytes(visiblePlan?.estimatedBytes ?? estimatedBytes)}</strong></span>
             <span>{copy.maintenanceTargets}: <strong>{visiblePlan?.targetCount ?? targetCount}</strong></span>
-          </div>
+          </div> : null}
           {visiblePlan ? (
             <div className={styles.cleanupPlan}>
               <strong>{copy.maintenancePlanReady}</strong>
-              <small>{visiblePlan.planId} · {visiblePlan.planHash.slice(0, 10)}</small>
               {planRows.length ? (
                 <ul>
                   {planRows.map((item) => (
@@ -210,7 +224,7 @@ export function LauncherProjectMaintenancePanel({
               )}
             </div>
           ) : (
-            <small>{loading ? copy.maintenanceLoading : planGapCopy}</small>
+            <small>{planGapCopy}</small>
           )}
         </PersistedHeightListShell>
       </div>

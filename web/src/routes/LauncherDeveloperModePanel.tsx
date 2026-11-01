@@ -248,7 +248,7 @@ export function LauncherDeveloperModePanel({
           {plan ? (
             <div className={styles.cleanupPlan}>
               <strong>{copy.cleanupPlanReady}</strong>
-              <small>{plan.planId} · {copy.cleanupEstimated}: {formatBytes(plan.estimatedBytes)}</small>
+              <small>{copy.cleanupEstimated}: {formatBytes(plan.estimatedBytes)}</small>
               {targetRows.length ? (
                 <ul>
                   {targetRows.map((target) => (

@@ -1,4 +1,4 @@
-import { VTooltip } from "../components/vui";
+import { VButton, VTooltip } from "../components/vui";
 import styles from "./LauncherProcessMonitorPanel.styles";
 
 export type LauncherProcessRow = {
@@ -31,6 +31,13 @@ type LauncherProcessMonitorPanelProps = {
   rows: LauncherProcessRow[];
   residualCount: number;
   selectedId?: string;
+  queryFailed?: boolean;
+  statusQueryFailed?: boolean;
+  statusQueryErrorLabel: string;
+  onStatusRetry: () => void;
+  queryErrorLabel: string;
+  retryLabel: string;
+  onRetry: () => void;
 };
 
 export function LauncherProcessMonitorPanel({
@@ -38,6 +45,13 @@ export function LauncherProcessMonitorPanel({
   rows,
   residualCount,
   selectedId = "",
+  queryFailed = false,
+  statusQueryFailed = false,
+  statusQueryErrorLabel,
+  onStatusRetry,
+  queryErrorLabel,
+  retryLabel,
+  onRetry,
 }: LauncherProcessMonitorPanelProps) {
   return (
     <section className={styles.panel} data-vui-region="launcher-process-monitor" aria-label={copy.processMonitor}>
@@ -45,6 +59,8 @@ export function LauncherProcessMonitorPanel({
         <p className={styles.panelEyebrow}>{copy.processMonitor}</p>
         <strong>{residualCount > 0 ? `${copy.residualCount}: ${residualCount}` : copy.processMonitorHint}</strong>
       </div>
+      {queryFailed ? <div role="alert" className={styles.queryError}><span>{queryErrorLabel}</span><VButton variant="secondary" onPress={onRetry}>{retryLabel}</VButton></div> : null}
+      {statusQueryFailed ? <div role="alert" className={styles.queryError}><span>{statusQueryErrorLabel}</span><VButton variant="secondary" onPress={onStatusRetry}>{retryLabel}</VButton></div> : null}
       <div className={styles.statusTable} role="table" aria-label={copy.processMonitor}>
         <div className={styles.statusHead} role="row">
           <span role="columnheader">{copy.unit}</span>

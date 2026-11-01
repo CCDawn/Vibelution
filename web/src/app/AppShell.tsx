@@ -65,6 +65,7 @@ import {
 import { useWorkbenchLifecycleActions } from "./useWorkbenchLifecycleActions";
 import {
   updateRestartTarget,
+  resolveUpdateRestartTarget,
   launcherUpdateBannerCopy,
   frontendUpdateBannerCopy,
   readStoredUpdateBannerDismissedHead,
@@ -1914,7 +1915,7 @@ export function AppShell() {
     shutdownErrorBody,
   ]);
 
-  const beginRestart = useCallback((mode: "shell" | "workbench" = "workbench") => {
+  const beginRestart = useCallback((mode: "shell" | "workbench" | "update" = "workbench") => {
     if (shutdownPromiseRef.current || shutdownRequested) {
       return shutdownPromiseRef.current ?? Promise.resolve();
     }
@@ -1924,6 +1925,7 @@ export function AppShell() {
 
     lifecycleRequestSeqRef.current += 1;
     const requestSeq = lifecycleRequestSeqRef.current;
+    let updateVersionConfirmed = mode !== "update";
     const task = (async () => {
       clearRestartCompletionDismissTimer();
       lifecycleOverlayDismissedRef.current = false;
@@ -1939,11 +1941,18 @@ export function AppShell() {
       setShutdownDetail(restartDetailWithActiveWorkNotice(restartBody, activeWorkRestartNotice));
       emitBrowserTelemetry(buildRestartRequestedTelemetry(), { preferBeacon: true });
 
-      const payload = mode === "shell"
+      // Resolve the update owner inside the serialized action. The initial
+      // background queries may arrive in either order; never restart a
+      // workbench before knowing whether the desktop app needs replacement.
+      const target = mode === "update"
+        ? await resolveUpdateRestartTarget({ hasBridge: hasLauncherFreshnessBridge(), readFreshness: getLauncherFreshness })
+        : mode;
+      updateVersionConfirmed = true;
+      if (requestSeq !== lifecycleRequestSeqRef.current) return;
+      const payload = target === "shell"
         ? await requestWorkbenchShellUpdate()
         : await requestLifecycle("restart");
       if (requestSeq !== lifecycleRequestSeqRef.current) {
-        restartWaitsForDocumentReloadRef.current = false;
         if (payload.commandId) {
           cancelSupersededLifecycleCommand(payload.commandId, "restart");
         }
@@ -1984,10 +1993,10 @@ export function AppShell() {
       allowNextWorkbenchWindowUnload();
       window.location.reload();
     })().catch((error) => {
-      restartWaitsForDocumentReloadRef.current = false;
       if (requestSeq !== lifecycleRequestSeqRef.current) {
         return;
       }
+      restartWaitsForDocumentReloadRef.current = false;
       const blocked = parseRuntimeControlBlockedDetail(error);
       if (isActiveWorkRestartBlocked(blocked)) {
         lifecycleOverlayDismissedRef.current = false;
@@ -2018,6 +2027,7 @@ export function AppShell() {
         return;
       }
       const errorMessage = error instanceof Error ? error.message : String(error || "");
+      const updateCheckFailed = mode === "update" && !updateVersionConfirmed;
       // A control-plane-not-ready failure is deterministic: the request never
       // reached the desktop control channel, so the honest overlay says the
       // restart did not start instead of claiming it may already be running.
@@ -2029,7 +2039,9 @@ export function AppShell() {
       setLifecycleAction("restart");
       setShutdownTitle(restartHeading);
       const taskCleanupFailed = /explicit user restart.*not confirmed|user_restart_pause_failed/i.test(errorMessage);
-      setShutdownDetail(taskCleanupFailed
+      setShutdownDetail(updateCheckFailed
+        ? (lang === "en" ? "The update version could not be confirmed. Nothing was restarted; close this notice and retry." : "暂时无法确认更新版本，尚未重启。关闭提示后重试。")
+        : taskCleanupFailed
         ? (lang === "en"
           ? "Task state could not be saved before restart. Existing records are retained; close this notice and retry."
           : "重启前未能保存任务状态，已有记录仍保留。关闭此提示后可以重试。")
@@ -2044,7 +2056,7 @@ export function AppShell() {
         { preferBeacon: true },
       );
     }).finally(() => {
-      restartPromiseRef.current = null;
+      if (restartPromiseRef.current === task) restartPromiseRef.current = null;
     });
 
     restartPromiseRef.current = task;
@@ -3055,7 +3067,7 @@ export function AppShell() {
               <div className={styles.updateBannerActions}>
                 <VButton type="button" variant="secondary"
                   className={styles.updateBannerRestartButton}
-                  onPress={() => { void beginRestart(launcherShellUpdate ? "shell" : "workbench"); }} isDisabled={updateBannerRestartDisabled}
+                  onPress={() => { void beginRestart("update"); }} isDisabled={updateBannerRestartDisabled}
                   title={updateBannerRestartNotice || updateBannerRestartActionLabel}>
                   {updateBannerRestartActionLabel}
                 </VButton>

@@ -48,14 +48,14 @@ import {
 const COPY = {
   zh: {
     title: "个人助理", expand: "展开个人助理聊天", chat: "聊一聊", hide: "隐藏个人助理",
-    collapse: "收起聊天", loading: "正在打开原生会话…", unavailable: "个人助理暂不可用",
+    collapse: "收起聊天", loading: "正在打开对话…", unavailable: "个人助理暂不可用",
     retry: "重试", refresh: "刷新", placeholder: "和个人助理聊一聊…", send: "发送", sending: "正在发送…",
     unknownSend: "尚未确认消息是否收到。输入已保留，重试会核对同一条消息。",
     receipts: "任务状态暂不可用", checking: "正在连接 Launcher…",
   },
   en: {
     title: "Personal assistant", expand: "Open assistant chat", chat: "Chat", hide: "Hide assistant",
-    collapse: "Collapse chat", loading: "Opening native conversation…", unavailable: "Assistant unavailable",
+    collapse: "Collapse chat", loading: "Opening conversation…", unavailable: "Assistant unavailable",
     retry: "Retry", refresh: "Refresh", placeholder: "Chat with your assistant…", send: "Send", sending: "Sending…",
     unknownSend: "Delivery is unconfirmed. Your input is retained; retry checks the same message.",
     receipts: "Task status unavailable", checking: "Connecting to Launcher…",

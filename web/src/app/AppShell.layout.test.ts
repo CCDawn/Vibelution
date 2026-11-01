@@ -686,13 +686,14 @@ describe("AppShell layout contract", () => {
     expect(shellSource).not.toContain("lifecycleMenuRef");
     // Code staleness still restarts the workbench. A stale desktop shell uses
     // the narrow shell-replacement verb instead of reloading the same window.
-    expect(shellSource).toContain('beginRestart(launcherShellUpdate ? "shell" : "workbench")');
+    expect(shellSource).toContain('beginRestart("update")');
     const restartRegion = shellSource.slice(
       shellSource.indexOf("const beginRestart"),
       shellSource.indexOf("const cancelLifecycleWait"),
     );
     expect(restartRegion).toContain("restartWaitsForDocumentReloadRef.current = true");
-    expect(restartRegion).toContain('mode === "shell"');
+    expect(restartRegion).toContain('target === "shell"');
+    expect(restartRegion).toContain("await resolveUpdateRestartTarget");
     expect(restartRegion).toContain("requestWorkbenchShellUpdate()");
     expect(restartRegion).toContain('requestLifecycle("restart")');
     expect(restartRegion).toContain("updateBannerRestartHoldsForShellExit(payload.operation, payload.accepted)");
@@ -729,7 +730,7 @@ describe("AppShell layout contract", () => {
     expect(bannerRegion).not.toContain("defaultOpen");
     expect(bannerRegion).toContain('role="status"');
     expect(bannerRegion).toContain("updateBannerVisible ?");
-    expect(bannerRegion).toContain('beginRestart(launcherShellUpdate ? "shell" : "workbench")');
+    expect(bannerRegion).toContain('beginRestart("update")');
     expect(bannerRegion).toContain("isDisabled={updateBannerRestartDisabled}");
     expect(bannerRegion).toContain("{updateBannerRestartNotice}");
     expect(bannerRegion).toContain("title={updateBannerRestartNotice || updateBannerRestartActionLabel}");

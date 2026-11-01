@@ -176,11 +176,47 @@ afterEach(async () => {
 });
 
 describe("Launcher branch workspace interactions", () => {
+  it("prioritizes active workspaces, expands the rest and searches retired entries", async () => {
+    const current = { ...instance({ id: "main", branch: "main", current: true, state: "closed" }), kind: "main" };
+    const running = instance({ id: "running", branch: "codex/running", state: "running" });
+    const stopped = instance({ id: "stopped", branch: "codex/stopped", state: "closed" });
+    const retired = { ...instance({ id: "retired", branch: "codex/archived", state: "closed" }), kind: "retired" };
+    await renderPanel([stopped, retired, running, current]);
+
+    expect(host.textContent).toContain("main");
+    expect(host.textContent).toContain("running");
+    expect(host.textContent).not.toContain("stopped");
+    expect(host.textContent).not.toContain("干净");
+    await click(button("更多工作区", host));
+    expect(host.textContent).toContain("stopped");
+    expect(host.textContent).not.toContain("archived");
+
+    await click(button("收起工作区", host));
+    const search = host.querySelector<HTMLInputElement>('input[aria-label="搜索分支"]')!;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+      setter.call(search, "archived");
+      search.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(host.textContent).toContain("archived");
+    expect(host.textContent).not.toContain("stopped");
+  });
+
+  it("keeps full branch names when shortening would make them ambiguous", async () => {
+    await renderPanel([
+      instance({ id: "prefixed", branch: "codex/shared" }),
+      instance({ id: "plain", branch: "shared" }),
+    ]);
+    const rows = [...host.querySelectorAll('[role="row"]')].map((row) => row.textContent || "");
+    expect(rows.some((row) => row.includes("codex/shared"))).toBe(true);
+    expect(rows.some((row) => row.includes("shared") && !row.includes("codex/shared"))).toBe(true);
+  });
+
   it("keeps cached workspaces and their actions visible when a background refresh fails", async () => {
     await renderPanel([instance({ branch: "codex/cached", state: "closed", alive: false })], false, "工作区刷新失败");
     expect(host.textContent).toContain("工作区刷新失败");
     expect(host.querySelector('[role="table"]')).not.toBeNull();
-    expect(host.textContent).toContain("codex/cached");
+    expect(host.textContent).toContain("cached");
     expect(button("启动工作台").disabled).toBe(false);
   });
 
@@ -201,9 +237,10 @@ describe("Launcher branch workspace interactions", () => {
       instance({ id: "worktree:retry", branch: "codex/retry", state: "error", alive: false }),
     ];
     await renderPanel(items);
+    await click(button("更多工作区", host));
 
     const rowFor = (id: string) => [...host.querySelectorAll<HTMLElement>('[role="row"]')]
-      .find((row) => row.textContent?.includes(id));
+      .find((row) => row.textContent?.includes(id.replace(/^codex\//, "")));
     const action = (id: string, label: string) => {
       const row = rowFor(id);
       if (!row) throw new Error(`row not found: ${id}`);
@@ -245,9 +282,10 @@ describe("Launcher branch workspace interactions", () => {
       instance({ id: "worktree:headless", branch: "codex/headless" }),
       instance({ id: "worktree:closed", branch: "codex/closed", state: "closed", alive: false }),
     ]);
+    await click(button("更多工作区", host));
 
     const rows = [...host.querySelectorAll('[role="row"]')];
-    const rowOf = (branch: string) => rows.find((row) => row.textContent?.includes(branch));
+    const rowOf = (branch: string) => rows.find((row) => row.textContent?.includes(branch.replace(/^codex\//, "")));
     expect(rowOf("codex/headless")?.textContent).toContain("窗口未打开");
     expect(rowOf("codex/open")?.textContent).not.toContain("窗口未打开");
     expect(rowOf("codex/closed")?.textContent).not.toContain("窗口未打开");
