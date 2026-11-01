@@ -15,7 +15,7 @@ import "./vui-native-controls.css";
 type AgentId = "assistant" | "reviewer" | "tester" | "researcher";
 type Delivery = "sending" | "delivered" | "failed" | "unknown";
 type Handling = "waiting" | "queued" | "processing" | "received" | "replied" | "wake_failed";
-type Receipt = { agentId: AgentId; delivery: Delivery; handling: Handling; error?: string; reply?: string };
+type Receipt = { agentId: AgentId; delivery: Delivery; handling: Handling; error?: string };
 type Message = { id: string; senderId: AgentId; type: "request" | "notification"; time: string; title: string; body: string; recipients: Receipt[]; replyTo?: string };
 type Filter = "all" | "pending" | "replied" | "exception";
 
@@ -29,16 +29,17 @@ const initialMessages: Message[] = [
   { id: "m1", senderId: "assistant", type: "request", time: "15:28", title: "核对消息左栏和状态展示", body: "请核对这次跨 Agent 消息的左栏展示。重点检查：每次发送都保留独立记录，头像和姓名能区分收发双方，处理状态与投递状态分别显示。完成后请回复检查结果。", recipients: [{ agentId: "reviewer", delivery: "delivered", handling: "processing" }] },
   { id: "m2", senderId: "assistant", type: "notification", time: "15:24", title: "新的构建资源已经准备就绪", body: "本轮构建资源已准备就绪，后续验证请使用新版本。此消息仅作同步，确认接收后即可结束，无需回复。", recipients: [{ agentId: "tester", delivery: "delivered", handling: "received" }] },
   { id: "m3", senderId: "assistant", type: "request", time: "15:21", title: "分别检查交互、回归与参考资料", body: "请代码审查员核对交互逻辑，测试工程师检查消息状态回归，资料研究员补充参考资料。每位 Agent 的结果分别记录，不用等待其他人一起完成。", recipients: [
-    { agentId: "reviewer", delivery: "delivered", handling: "replied", reply: "交互逻辑已核对：每条发送记录独立显示，原消息与回复通过关联记录连接。" },
+    { agentId: "reviewer", delivery: "delivered", handling: "replied" },
     { agentId: "tester", delivery: "delivered", handling: "processing" },
     { agentId: "researcher", delivery: "failed", handling: "waiting", error: "目标 Agent 当前不可用，消息尚未写入其收件箱。" },
   ] },
-  { id: "m4", senderId: "assistant", type: "request", time: "15:18", title: "检查历史消息和关联回复", body: "请检查历史消息的身份和回复关系，确认重新打开后仍能定位到原消息。", recipients: [{ agentId: "reviewer", delivery: "delivered", handling: "replied", reply: "已核对。原消息和回复身份独立，回复保留与原消息的关联，可以分别定位。" }] },
+  { id: "m4", senderId: "assistant", type: "request", time: "15:18", title: "检查历史消息和关联回复", body: "请检查历史消息的身份和回复关系，确认重新打开后仍能定位到原消息。", recipients: [{ agentId: "reviewer", delivery: "delivered", handling: "replied" }] },
   { id: "m5", senderId: "assistant", type: "request", time: "15:14", title: "补充窄屏下的回归检查", body: "请补充窄屏情况下的列表、详情与长文本检查。", recipients: [{ agentId: "tester", delivery: "delivered", handling: "wake_failed", error: "消息已经送达，但目标会话启动失败。可以重试唤醒，无需重复发送消息。" }] },
   { id: "m6", senderId: "assistant", type: "notification", time: "15:10", title: "参考资料已更新", body: "参考资料已更新到项目资料库，请在下一次研究时使用。", recipients: [{ agentId: "researcher", delivery: "delivered", handling: "waiting" }] },
   { id: "m7", senderId: "assistant", type: "request", time: "15:06", title: "核对每个接收方的状态回执", body: "请核对多接收方消息的投递与处理回执，不要将部分成功显示成全部成功。", recipients: [{ agentId: "tester", delivery: "delivered", handling: "queued" }] },
-  { id: "m8", senderId: "reviewer", type: "request", time: "15:02", title: "消息状态核对结果", body: "已经完成消息状态核对。投递成功与处理完成分别展示，失败原因能在对应接收方下查看。", recipients: [{ agentId: "assistant", delivery: "delivered", handling: "received" }], replyTo: "m4" },
+  { id: "m8", senderId: "reviewer", type: "request", time: "15:19", title: "历史消息与回复关系已核对", body: "已核对。原消息和回复身份独立，回复保留与原消息的关联，可以分别定位。", recipients: [{ agentId: "assistant", delivery: "delivered", handling: "received" }], replyTo: "m4" },
   { id: "m9", senderId: "assistant", type: "request", time: "14:58", title: "确认长时间未收到回执的消息", body: "请确认这条消息是否已被接收。当前没有足够的回执，保留待确认，不直接判为失败。", recipients: [{ agentId: "researcher", delivery: "unknown", handling: "waiting" }] },
+  { id: "m10", senderId: "reviewer", type: "request", time: "15:25", title: "交互检查结果已回复", body: "交互逻辑已核对：每条发送记录独立显示，原消息与回复通过关联记录连接。", recipients: [{ agentId: "assistant", delivery: "delivered", handling: "received" }], replyTo: "m3" },
 ];
 const deliveryLabels: Record<Delivery, string> = { sending: "发送中", delivered: "已送达", failed: "投递失败", unknown: "待确认" };
 const handlingLabels: Record<Handling, string> = { waiting: "待接收", queued: "排队中", processing: "处理中", received: "已接收", replied: "已回复", wake_failed: "唤醒失败" };
@@ -74,7 +75,7 @@ function State({ value, danger = false }: { value: string; danger?: boolean }) {
 }
 
 function Preview() {
-  const [messages, setMessages] = useState(initialMessages);
+  const [messages, setMessages] = useState(() => [...initialMessages].sort((a, b) => b.time.localeCompare(a.time)));
   const [selectedId, setSelectedId] = useState("m1");
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
@@ -83,6 +84,7 @@ function Preview() {
   const [expanded, setExpanded] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const selected = messages.find((m) => m.id === selectedId) ?? messages[0];
+  const linkedReplies = messages.filter((m) => m.replyTo === selected.id);
   const visible = messages.filter((m) => {
     const text = [m.title, m.body, agents[m.senderId].name, ...m.recipients.map((r) => agents[r.agentId].name)].join(" ");
     if (query && !text.includes(query)) return false;
@@ -94,19 +96,29 @@ function Preview() {
   const choose = (id: string) => { setSelectedId(id); setExpanded(false); };
   function simulateSend() {
     const id = `demo-${messages.length + 1}`;
-    setMessages((current) => [{ id, senderId: "assistant", type: "request", time: "15:32", title: "新增的消息已出现在左栏", body: "这条示例用于确认每次发送都会新增一条独立记录。当前选中的消息保持不变。", recipients: [{ agentId: "tester", delivery: "sending", handling: "waiting" }] }, ...current]);
+    setMessages((current) => [{ id, senderId: "assistant", type: "request", time: "刚刚", title: "新增的消息已出现在左栏", body: "这条示例用于确认每次发送都会新增一条独立记录。当前选中的消息保持不变。", recipients: [{ agentId: "tester", delivery: "sending", handling: "waiting" }] }, ...current]);
     setFilter("all"); setQuery(""); setAnnouncement("新消息已加入左栏，当前查看内容保持不变。");
   }
   function simulateProgress() {
-    setMessages((current) => current.map((m): Message => m.id !== selectedId ? m : {
-      ...m, recipients: m.recipients.map((r): Receipt => r.delivery === "failed" || r.handling === "wake_failed"
-        ? { ...r, delivery: "delivered", handling: "queued", error: undefined }
-        : r.delivery !== "delivered" ? { ...r, delivery: "delivered" }
-        : r.handling === "waiting" ? { ...r, handling: m.type === "notification" ? "received" : "queued" }
-        : r.handling === "queued" ? { ...r, handling: "processing" }
-        : r.handling === "processing" ? { ...r, handling: "replied", reply: "已完成这条协作请求，检查结果已回复。" } : r),
-    }));
-    setAnnouncement("示例回执已更新，左栏和详情同步变化。");
+    setMessages((current) => {
+      const replies: Message[] = [];
+      const updated = current.map((m): Message => m.id !== selectedId ? m : {
+        ...m, recipients: m.recipients.map((r): Receipt => {
+          if (r.delivery === "failed" || r.handling === "wake_failed") return { ...r, delivery: "delivered", handling: "queued", error: undefined };
+          if (r.delivery !== "delivered") return { ...r, delivery: "delivered" };
+          if (r.handling === "waiting") return { ...r, handling: m.type === "notification" || m.replyTo ? "received" : "queued" };
+          if (r.handling === "queued") return { ...r, handling: "processing" };
+          if (r.handling === "processing") {
+            const id = `reply-${m.id}-${r.agentId}`;
+            if (!current.some((record) => record.id === id)) replies.push({ id, senderId: r.agentId, type: "request", time: "刚刚", title: `回复：${m.title}`, body: "已完成这条协作请求，检查结果已回复。", recipients: [{ agentId: m.senderId, delivery: "delivered", handling: "received" }], replyTo: m.id });
+            return { ...r, handling: "replied" };
+          }
+          return r;
+        }),
+      });
+      return [...replies, ...updated];
+    });
+    setAnnouncement("示例回执已更新；新回复会作为独立消息加入左栏。");
   }
   function retryRecipient(agentId: AgentId) {
     setMessages((current) => current.map((m): Message => m.id !== selectedId ? m : {
@@ -148,7 +160,7 @@ function Preview() {
           {r.error ? <div className={styles.error}><AlertCircle size={14} aria-hidden="true" /><span>{r.error}</span><VButton onPress={() => retryRecipient(r.agentId)}>{r.handling === "wake_failed" ? "重试唤醒" : "重试投递"}</VButton></div> : null}
         </div>)}
       </section>
-      {selected.recipients.some((r) => r.reply) ? <section className={styles.replies} aria-label="关联回复"><h2>关联回复</h2>{selected.recipients.filter((r) => r.reply).map((r) => <div className={styles.replyBody} key={r.agentId}><Actor id={r.agentId} /><p>{r.reply}</p></div>)}</section> : null}
+      {linkedReplies.length > 0 ? <section className={styles.replies} aria-label="关联回复"><h2>关联回复</h2>{linkedReplies.map((reply) => <div className={styles.replyBody} key={reply.id}><Actor id={reply.senderId} /><p>{reply.body}</p><VButton className={styles.originLink} onPress={() => choose(reply.id)}>在左栏定位这条回复 <ArrowRight size={13} /></VButton></div>)}</section> : null}
       <section className={styles.records}><VButton aria-expanded={expanded} onPress={() => setExpanded((value) => !value)}>{expanded ? "收起状态明细" : "展开状态明细"}</VButton>{expanded ? <div className={styles.recordBody}>
         <p>消息记录 {selected.id} · 今天 {selected.time}</p>
         {selected.recipients.map((r) => <p key={r.agentId}>{agents[r.agentId].name}：{deliveryLabels[r.delivery]}{r.delivery === "delivered" ? ` · ${handlingLabels[r.handling]}` : ""}</p>)}
