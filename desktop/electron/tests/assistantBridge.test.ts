@@ -10,6 +10,16 @@ function setup() {
 }
 
 describe("Launcher assistant private bridge", () => {
+  it("admits only the fixed assistant avatar operation from the owned frame", async () => {
+    const { owner, event } = setup();
+    await expect(invokeAssistant({ ...event, sender: {} }, { operation: "assistantAvatar" }, owner)).rejects.toThrow("SENDER_FORBIDDEN");
+    for (const extra of [{ path: "private" }, { url: "http://example.test" }, { agentId: "other" }]) {
+      await expect(invokeAssistant(event, { operation: "assistantAvatar", ...extra }, owner)).rejects.toThrow("REQUEST_INVALID");
+    }
+    expect(owner.host.start).not.toHaveBeenCalled();
+    await invokeAssistant(event, { operation: "assistantAvatar" }, owner);
+    expect(owner.host.request).toHaveBeenCalledExactlyOnceWith({ operation: "assistantAvatar" });
+  });
   it("opens the existing Launcher through a closed human action without starting a model host", async () => {
     const { owner, event } = setup();
     await expect(invokeAssistant(event, { operation: "openLauncher" }, owner)).resolves.toEqual({ opened: true });

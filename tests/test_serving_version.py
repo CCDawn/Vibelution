@@ -2,12 +2,35 @@ from __future__ import annotations
 
 import importlib
 import json
+import subprocess
 from pathlib import Path
+
+import pytest
 
 from fastapi.testclient import TestClient
 
 from core.launcher import frontend_build
 from core.web.services import serving_version
+
+
+@pytest.mark.parametrize("failure", ["error", "timeout"])
+def test_failed_status_is_not_a_clean_startup_proof(tmp_path, monkeypatch, failure):
+    def failed(*_args, **_kwargs):
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired("git", 1)
+        return subprocess.CompletedProcess([], 128, "", "unavailable")
+    monkeypatch.setattr(serving_version, "run_git", failed)
+    summary = serving_version.git_dirty_tree_summary(tmp_path)
+    assert summary["dirtyStateVerified"] is False
+    assert serving_version.build_backend_code_fingerprint(tmp_path)["dirtyStateVerified"] is False
+
+
+def test_head_change_during_startup_cannot_prove_clean_sources(tmp_path, monkeypatch):
+    heads = iter(["a" * 40, "b" * 40])
+    monkeypatch.setattr(serving_version, "_git_text", lambda _root, args: next(heads) if args == ["rev-parse", "HEAD"] else "")
+    result = serving_version.build_backend_code_fingerprint(tmp_path)
+    assert result["head"] == "a" * 40
+    assert result["dirtyStateVerified"] is False
 
 
 def _write_release(root: Path, name: str, build_key: str) -> Path:

@@ -6,7 +6,7 @@ import {
   getLauncherAssistantApprovals, resolveLauncherAssistantApproval,
   previewLauncherDispatchApproval, decideLauncherDispatchApproval, declineLauncherDispatchSummary,
   stopLauncherAssistantTurn, continueLauncherAssistantTurn,
-  getLauncherOperatorAsset, openLauncherFromAssistant,
+  getLauncherOperatorAsset, getLauncherAssistantAvatar, openLauncherFromAssistant,
 } from "./launcherAssistant";
 import type { SessionToolApprovalRequest } from "./types";
 
@@ -101,6 +101,50 @@ describe("Launcher operator assets", () => {
     expect((await getLauncherAssistantStatus()).operatorAssetsVersion).toBe(1);
     for (const operatorAssetsVersion of [undefined, null, "1", 0, 2]) {
       invoke.mockResolvedValue({ assistant, operatorAssetsVersion });
+      await expect(getLauncherAssistantStatus()).rejects.toThrow("版本");
+    }
+  });
+});
+
+describe("Launcher assistant avatar", () => {
+  const image = { contentType: "image/svg+xml", dataBase64: "AQI=", sha256: "a".repeat(64) };
+  const response = { schemaVersion: 1, agentId: "a", image };
+  it("reads a fixed private operation and never sends identity, URL or HTTP", async () => {
+    const invoke = vi.fn().mockResolvedValue(response), fetch = vi.fn();
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke }); vi.stubGlobal("fetch", fetch);
+    expect((await getLauncherAssistantAvatar("a")).image?.url).toBe("data:image/svg+xml;base64,AQI=");
+    expect(invoke).toHaveBeenCalledExactlyOnceWith({ operation: "assistantAvatar" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it.each([
+    { ...response, agentId: "other" }, { ...response, path: "private" }, { ...response, schemaVersion: 2 },
+    { ...response, image: { ...image, url: "https://example.test" } },
+    { ...response, image: { ...image, contentType: "text/html" } },
+    { ...response, image: { ...image, dataBase64: "AR==" } },
+    { ...response, image: { ...image, sha256: "bad" } },
+  ])("rejects untrusted image responses", async value => {
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke: vi.fn().mockResolvedValue(value) });
+    await expect(getLauncherAssistantAvatar("a")).rejects.toThrow("图片资源不可用");
+  });
+  it("enforces 5 MiB and accepts a cleared image", async () => {
+    const encode = (length: number) => "AAAA".repeat(Math.floor(length / 3)) + (length % 3 === 1 ? "AA==" : length % 3 === 2 ? "AAA=" : "");
+    const invoke = vi.fn().mockResolvedValue({ ...response, image: { ...image, dataBase64: encode(5 * 1024 * 1024) } });
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    expect((await getLauncherAssistantAvatar("a")).image).toBeTruthy();
+    invoke.mockResolvedValue({ ...response, image: { ...image, dataBase64: encode(5 * 1024 * 1024 + 1) } });
+    await expect(getLauncherAssistantAvatar("a")).rejects.toThrow("图片资源不可用");
+    invoke.mockResolvedValue({ ...response, image: null });
+    expect((await getLauncherAssistantAvatar("a")).image).toBeNull();
+  });
+  it("supports old hosts and validates the optional capability and revision", async () => {
+    const assistant = { agentId: "a", directSessionId: "s", displayName: "Assistant" };
+    const invoke = vi.fn().mockResolvedValue({ assistant });
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    expect((await getLauncherAssistantStatus()).assistantAvatarVersion).toBeUndefined();
+    invoke.mockResolvedValue({ assistant, assistantAvatarVersion: 1, assistantAvatarRevision: null });
+    expect((await getLauncherAssistantStatus()).assistantAvatarRevision).toBeNull();
+    for (const invalid of [{ assistantAvatarVersion: 2 }, { assistantAvatarVersion: undefined }, { assistantAvatarRevision: "broken" }, { assistantAvatarRevision: undefined }]) {
+      invoke.mockResolvedValue({ assistant, ...invalid });
       await expect(getLauncherAssistantStatus()).rejects.toThrow("版本");
     }
   });

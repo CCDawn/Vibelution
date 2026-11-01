@@ -251,6 +251,43 @@ def identity() -> dict[str, Any]:
         return _projection()
 
 
+def _assistant_avatar_agent() -> dict[str, Any]:
+    from .assistant_avatar import _config_path
+    _config_path()  # Missing config must not trigger any owner initialization.
+    if not _STARTED or not _AGENT_ID or not _SESSION_ID:
+        raise ValueError("assistant_avatar_unavailable")
+    assistant = _projection().get("assistant") or {}
+    if assistant.get("agentId") != _AGENT_ID or assistant.get("directSessionId") != _SESSION_ID:
+        raise ValueError("assistant_avatar_unavailable")
+    directory, _, _, _ = _services()
+    agent = directory.get_agent_parameter_snapshot(_AGENT_ID, include_archived=False)
+    if not agent or agent.get("agentId") != _AGENT_ID or agent.get("directSessionId") != _SESSION_ID:
+        raise ValueError("assistant_avatar_unavailable")
+    return agent
+
+
+def assistant_avatar_revision() -> str | None:
+    try:
+        from .assistant_avatar import revision
+        with _LOCK:
+            return revision(_assistant_avatar_agent())
+    except Exception:  # noqa: BLE001 - asset failures must not break lightweight status.
+        return None
+
+
+def read_assistant_avatar() -> dict[str, Any]:
+    try:
+        from .assistant_avatar import read
+        with _LOCK:
+            agent = _assistant_avatar_agent()
+            result = read(agent)
+            if agent != _assistant_avatar_agent():
+                raise ValueError("assistant_avatar_unavailable")
+            return result
+    except Exception:  # noqa: BLE001 - never disclose paths or native owner errors.
+        raise ValueError("assistant_avatar_unavailable") from None
+
+
 def submit(message: str, request_id: str, attachment_ids: list[str] | None = None) -> dict[str, Any]:
     """Use native acceptance and journal idempotency, without a second queue."""
     if not isinstance(message, str):

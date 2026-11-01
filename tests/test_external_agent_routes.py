@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -53,6 +55,24 @@ def _client(monkeypatch) -> tuple[TestClient, FakeService]:
     app = FastAPI()
     app.include_router(external_agent.router, prefix="/api")
     return TestClient(app), service
+
+
+def test_info_uses_this_process_pinned_startup_even_if_shared_version_changes(monkeypatch):
+    client, _ = _client(monkeypatch)
+    client.app.state.serving_metadata = {"backend": {"head": "a" * 40, "dirty": False,
+        "dirtyStateVerified": True, "pid": os.getpid(), "createTime": 123.5}}
+    monkeypatch.setattr(external_agent, "_runtime_revision", lambda: "b" * 40)
+    headers = {CONTROL_TOKEN_HEADER: get_control_token()}
+    data = client.get("/api/v1/external-agent/info", headers=headers).json()
+    assert data["runtimeSourceRevision"] == "a" * 40
+    assert data["runtimeSourceIdentity"] == {"schemaVersion": 1, "revision": "a" * 40,
+        "clean": True, "pid": os.getpid(), "createTime": 123.5}
+    client.app.state.serving_metadata["backend"]["dirtyStateVerified"] = False
+    data = client.get("/api/v1/external-agent/info", headers=headers).json()
+    assert data["runtimeSourceIdentity"]["clean"] is False
+    client.app.state.serving_metadata["backend"]["pid"] = os.getpid() + 1
+    data = client.get("/api/v1/external-agent/info", headers=headers).json()
+    assert "runtimeSourceIdentity" not in data
 
 
 def _headers(

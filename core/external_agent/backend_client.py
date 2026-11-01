@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import secrets
@@ -1243,11 +1244,27 @@ class ManagedAgentBackendClient:
         expected_revision = descriptor["runtimeSourceRevision"]
         actual_revision = str(info.get("runtimeSourceRevision") or "").strip()
         checkout_revision = _checkout_revision(self.project_root)
+        equivalent_runtime = False
+        if actual_revision and expected_revision == actual_revision and checkout_revision and actual_revision != checkout_revision:
+            from .runtime_source_identity import runtime_sources_match
+
+            proof = info.get("runtimeSourceIdentity")
+            equivalent_runtime = (
+                isinstance(proof, dict)
+                and set(proof) == {"schemaVersion", "revision", "clean", "pid", "createTime"}
+                and type(proof.get("schemaVersion")) is int and proof["schemaVersion"] == 1
+                and proof.get("revision") == actual_revision and proof.get("clean") is True
+                and type(proof.get("pid")) is int and proof["pid"] > 0
+                and type(proof.get("createTime")) in {int, float}
+                and math.isfinite(proof["createTime"]) and proof["createTime"] > 0
+                and await anyio.to_thread.run_sync(runtime_sources_match, self.project_root, actual_revision, checkout_revision)
+                and _checkout_revision(self.project_root) == checkout_revision
+            )
         if (
             not checkout_revision
             or not expected_revision
             or actual_revision != expected_revision
-            or actual_revision != checkout_revision
+            or (actual_revision != checkout_revision and not equivalent_runtime)
         ):
             raise BackendClientError(
                 "managed backend runtime source revision mismatch",

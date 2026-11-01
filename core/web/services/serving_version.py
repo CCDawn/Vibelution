@@ -28,13 +28,13 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _git_text(project_root: Path, args: list[str]) -> str:
+def _git_text(project_root: Path, args: list[str]) -> str | None:
     try:
         result = run_git(args, cwd=str(project_root), timeout=GIT_TIMEOUT_SECONDS)
     except (OSError, subprocess.SubprocessError):
-        return ""
+        return None
     if int(result.returncode or 0) != 0:
-        return ""
+        return None
     return str(result.stdout or "")
 
 
@@ -43,10 +43,11 @@ def git_dirty_tree_summary(project_root: Path | str) -> dict[str, Any]:
 
     root = Path(project_root).resolve()
     raw = _git_text(root, ["status", "--porcelain=v1", "--untracked-files=all"])
-    normalized = raw.replace("\r\n", "\n").replace("\r", "\n").rstrip("\n")
+    normalized = (raw or "").replace("\r\n", "\n").replace("\r", "\n").rstrip("\n")
     return {
         "dirty": bool(normalized),
         "dirtyTreeDigest": hashlib.sha256(normalized.encode("utf-8")).hexdigest(),
+        "dirtyStateVerified": raw is not None,
     }
 
 
@@ -104,12 +105,15 @@ def build_backend_code_fingerprint(
     root = Path(project_root).resolve()
     normalized_pid = int(pid if pid is not None else os.getpid())
     identity = capture_process_identity(normalized_pid)
+    head = (_git_text(root, ["rev-parse", "HEAD"]) or "").strip()
     dirty = git_dirty_tree_summary(root)
+    stable_head = head == (_git_text(root, ["rev-parse", "HEAD"]) or "").strip()
     return {
         "schemaVersion": SERVING_VERSION_SCHEMA_VERSION,
-        "head": _git_text(root, ["rev-parse", "HEAD"]).strip(),
+        "head": head,
         "dirty": bool(dirty["dirty"]),
         "dirtyTreeDigest": str(dirty["dirtyTreeDigest"]),
+        "dirtyStateVerified": bool(head) and stable_head and dirty.get("dirtyStateVerified") is True,
         "pid": normalized_pid,
         "createTime": identity.get("createTime"),
         "executable": str(identity.get("executable") or ""),

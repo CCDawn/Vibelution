@@ -946,6 +946,23 @@ describe("AssistantHost", () => {
     await expect(host.request({ operation: "config" })).rejects.toThrow("ASSISTANT_RESPONSE_TOO_LARGE");
     await host.stop();
   });
+  it("restricts assistant avatar to the pinned identity, fixed path and ordinary response budget", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    fetchImpl.mockResolvedValueOnce(Response.json({ schemaVersion: 1, agentId: "a", image: null }));
+    await expect(host.request({ operation: "assistantAvatar" })).resolves.toEqual({ schemaVersion: 1, agentId: "a", image: null });
+    expect(String(fetchImpl.mock.calls.at(-1)?.[0])).toBe("http://127.0.0.1:12345/api/assistant/avatar");
+    const calls = fetchImpl.mock.calls.length;
+    for (const extra of [{ path: "/api/private" }, { url: "http://example.test" }, { agentId: "other" }]) {
+      await expect(host.request({ operation: "assistantAvatar", ...extra } as AssistantHostRequest)).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    }
+    expect(fetchImpl).toHaveBeenCalledTimes(calls);
+    fetchImpl.mockResolvedValueOnce(Response.json({ schemaVersion: 1, agentId: "other", image: null }));
+    await expect(host.request({ operation: "assistantAvatar" })).rejects.toThrow("ASSISTANT_IDENTITY_INVALID");
+    fetchImpl.mockResolvedValueOnce(new Response("{}", { headers: { "content-length": String(9 * 1024 * 1024) } }));
+    await expect(host.request({ operation: "assistantAvatar" })).rejects.toThrow("ASSISTANT_RESPONSE_TOO_LARGE");
+    await host.stop();
+  });
   it("does not acknowledge a queued revocation before its native apply completes", async () => {
     const { host, fetchImpl, root } = fixture({ graceful: true });
     await host.start();

@@ -329,9 +329,15 @@ def _operator_profile() -> dict[str, str] | None:
     name = profile.get("display_name", "")
     preset = profile.get("avatar_preset", "default")
     if (not isinstance(name, str) or len(name) > 120
-            or any(ord(char) < 32 or 127 <= ord(char) <= 159 for char in name)
+            or (name.strip() and any(ord(char) < 32 or 127 <= ord(char) <= 159 for char in name))
             or not isinstance(preset, str) or preset not in USER_AVATAR_PRESET_OPTIONS):
         return None
+    name = name.strip()
+    if not name:
+        from core.web.services.runtime_service import _local_user_name
+        name = _local_user_name()
+        if (len(name) > 120 or any(ord(char) < 32 or 127 <= ord(char) <= 159 for char in name)):
+            return None
     return {"displayName": name, "avatarPreset": preset}
 
 
@@ -359,12 +365,18 @@ class NativeFacade:
         result = native.identity()
         result["operatorAssetsVersion"] = 1
         result["operatorAssetRevisions"] = operator_assets.operator_asset_revisions()
+        result["assistantAvatarVersion"] = 1
+        result["assistantAvatarRevision"] = native.assistant_avatar_revision()
         result["attachmentVersion"] = 1
         result["settings"] = pa_assistant_actions.execute("assistant_settings", {}, {}, governed=False)
         profile = _operator_profile()
         if profile is not None:
             result["operatorProfile"] = profile
         return result
+
+    def avatar(self):
+        from . import native
+        return native.read_assistant_avatar()
 
     def approvals(self):
         from core.web.services.session.tool_approvals import list_tool_approval_requests
@@ -1143,6 +1155,18 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
     @app.get("/api/assistant/config")
     def config():
         return native.config()
+
+    @app.get("/api/assistant/avatar")
+    async def assistant_avatar(request: Request):
+        if request.query_params:
+            raise HTTPException(422, detail="Invalid assistant avatar request")
+        async for chunk in request.stream():
+            if chunk:
+                raise HTTPException(422, detail="Invalid assistant avatar request")
+        try:
+            return await asyncio.to_thread(native.avatar)
+        except Exception:  # noqa: BLE001 - private asset errors must not disclose paths or configuration.
+            raise HTTPException(503, detail={"code": "assistant_avatar_unavailable"}) from None
 
     @app.get("/api/assistant/operator-assets/{kind}")
     async def operator_asset(kind: Literal["avatar", "background"], request: Request):

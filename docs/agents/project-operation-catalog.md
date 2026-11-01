@@ -28,6 +28,8 @@
 
 ## 2. 治理访问类（Governance Access Classes）
 
+项目连接仍须验证 loopback、控制权限、项目根、接口协议和后台启动记录。Git 提交不一致时，`external-agent/info` 的可选 `runtimeSourceIdentity` 必须证明当前响应进程的固定启动快照干净（Git 状态采样成功，采样前后 HEAD 一致），且 Git 证据确认变化全部属于文档、测试、Web 界面或明确列举的 Windows 安装入口，才继续连接。共享状态文件不能代替此证明；旧后台缺少证明时维持严格提交比对。后端源码、配置、工具、依赖、未知文件、本地未提交的运行代码，以及无法核验的历史仍拒绝连接。该可选响应字段不改变既有权限或协议版本，也不改写后台运行版本。具体边界由 `core/external_agent/runtime_source_identity.py` 与客户端测试约束。
+
 个人助理的项目只读入口为 `personal_assistant_query_tool`：先 `index/list`，再按需 `index/describe`；运行时目录由实际注册的 adapter 生成，不在本指南复制全量资源表。它每次验证个人助理的原生直属 Session，只投影当前项目公开状态、自身收件、诊断摘要及 allowlist 内源码；不能读取其他会话正文、其他 Agent 收件或任意 API。配置工具列表与本轮可执行授权分别报告；来源不可用和有界扫描不能解释为没有问题。边界与落点见 [项目查询 README](../../core/web/services/personal_assistant_project/README.md)。
 
 治理访问类是**声明式契约**，与当前审计脚本的传输/漂移分类**不同层、不混用**：
