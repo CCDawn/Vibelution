@@ -63,7 +63,7 @@ describe("Launcher tools navigation and density", () => {
     expect(maintenancePanelSource).toContain("if (loading || !summaryAvailable)");
     expect(maintenancePanelSource).toContain("copy.maintenanceSummaryUnavailable");
     expect(maintenancePanelSource).toContain("{planGapCopy}");
-    expect(routeSource).toContain('maintenanceSummaryUnavailable: "维护清单没有读到，暂时不能生成预览。"');
+    expect(routeSource).toContain('maintenanceSummaryUnavailable: "维护清单读取失败"');
     expect(routeSource).toContain('maintenanceActiveWorkPolicy: "有进行中的任务时不会执行。"');
     expect(routeSource).toContain('savePortSettings: "保存端口设置"');
     expect(routeSource).toContain('saveStartupSettings: "保存启动设置"');

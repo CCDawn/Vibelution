@@ -243,7 +243,8 @@ describe("LauncherBranchInstancesPanel contracts", () => {
 
   it("keeps cleanup selection in the active branch list without pagination", () => {
     expect(panelSource).toContain("...grouped.maintenance]");
-    expect(panelSource).toContain("columns={[selectColumn, ...primaryColumns]}");
+    expect(panelSource).toContain("activeRows.some(isCleanupEligible) ? [selectColumn] : []");
+    expect(panelSource).toContain("...primaryColumns.filter");
     expect(panelSource).toContain("isCleanupEligible(item) ? (");
     expect(panelSource).toContain("labels.cleanupSelected");
     expect(panelSource).toContain("pageEligible = activeRows.filter(isCleanupEligible)");
