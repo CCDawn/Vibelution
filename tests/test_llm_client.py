@@ -6582,6 +6582,45 @@ def test_llm_provider_proxy_env_disables_environment_proxy_when_project_proxy_of
     assert os.environ.get("ALL_PROXY") == "socks5://127.0.0.1:7890"
 
 
+@pytest.mark.parametrize("existing_bypass", [None, "localhost"])
+def test_disabled_proxy_ignores_system_registry_and_restores_bypass(monkeypatch, existing_bypass):
+    import httpx
+    import httpx._utils
+    from urllib.request import getproxies_environment
+    from types import SimpleNamespace
+    from core.llm.client import _PROXY_ENV_NAMES, _NO_PROXY_ENV_NAMES
+
+    for name in (*_PROXY_ENV_NAMES, *_NO_PROXY_ENV_NAMES):
+        monkeypatch.delenv(name, raising=False)
+    if existing_bypass is not None:
+        monkeypatch.setenv("NO_PROXY", existing_bypass)
+        monkeypatch.setenv("no_proxy", "operator.invalid")
+    before = {name: os.environ.get(name) for name in _NO_PROXY_ENV_NAMES}
+    # urllib falls back to the Windows registry when no proxy env is present.
+    monkeypatch.setattr(httpx._utils, "getproxies", lambda: getproxies_environment() or {
+        "https": "socks4://127.0.0.1:1080"})
+    config = SimpleNamespace(network=SimpleNamespace(proxy_enabled=False, proxy_url=""))
+    with pytest.raises(RuntimeError, match="provider failed"):
+        with _llm_provider_proxy_env(config, "https://provider.invalid/v1"):
+            with httpx.Client() as client:
+                assert client._transport_for_url(httpx.URL("https://provider.invalid")) is client._transport
+            raise RuntimeError("provider failed")
+    assert {name: os.environ.get(name) for name in _NO_PROXY_ENV_NAMES} == before
+
+
+def test_direct_proxy_lease_preserves_local_host_exclusions(monkeypatch):
+    from types import SimpleNamespace
+    from core.llm.client import _NO_PROXY_ENV_NAMES, _ensure_no_proxy_for_local_base_url
+
+    for name in _NO_PROXY_ENV_NAMES:
+        monkeypatch.setenv(name, "operator.invalid")
+    config = SimpleNamespace(network=SimpleNamespace(proxy_enabled=False, proxy_url=""))
+    with _llm_provider_proxy_env(config, "https://provider.invalid/v1"):
+        _ensure_no_proxy_for_local_base_url("http://192.168.1.50:8000/v1")
+    for name in _NO_PROXY_ENV_NAMES:
+        assert os.environ[name] == "operator.invalid,192.168.1.50"
+
+
 def test_llm_provider_proxy_env_uses_configured_project_proxy(monkeypatch):
     config = make_config(
         **{
