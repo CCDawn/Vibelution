@@ -1056,6 +1056,51 @@ def test_ledger_wake_skipped_is_retryable_without_quota(monkeypatch, personal_en
     assert _receipt_digested_at("r-1") is not None
 
 
+def test_ledger_wake_skipped_waiting_for_person_keeps_receipts_undigested(monkeypatch, personal_env):
+    """批四语义变更：patrol 例外唤醒撞上等人会话 → skipped_waiting_for_person。
+
+    批三行为变更点：批三的例外唤醒（ignore_delegation_wake_policy=True）不
+    检查等人状态；批四起真实 wake API 的 waitsForPerson 闸同样落在 patrol
+    路径上（见 test_multi_agent_conversations 的 patrol 例外直测）。此处钉
+    patrol 侧后果：被闸的回执留在台账 digested_at IS NULL、摘要卡照常可
+    见，skipped 可证未起 turn——不吃配额、可重试，等人结束后下一轮 patrol
+    再醒。
+    """
+
+    _seed_ledger_agents(personal_env)
+    _seed_dispatch_and_receipts(personal_env, ["r-1"])
+    harness = _LedgerHarness(monkeypatch)
+
+    def _waiting_wake(message):
+        harness.wake_calls.append({"message": message})
+        return {"wakeStatus": "skipped_waiting_for_person", "reason": "session_waiting_for_person"}
+
+    monkeypatch.setattr(patrol, "_wake_pa", _waiting_wake)
+    assert (
+        patrol.patrol_once(now=NOW)["wake"]["delivery"]["wakeStatus"]
+        == "skipped_waiting_for_person"
+    )
+    assert _receipt_digested_at("r-1") is None  # 未消化，摘要卡照常可见
+
+    from core.web.services import personal_assistant_dispatch_ledger as ledger
+
+    assert ledger.recent_wake_submissions(
+        window_ms=int(patrol.WAKE_HOUR_WINDOW_SECONDS * 1000), now_ms=int(NOW * 1000)
+    ) == []  # skipped 不吃配额
+    assert [
+        patrol.patrol_once(now=NOW + 60.0)["wake"]["attempted"],
+        patrol.patrol_once(now=NOW + 120.0)["wake"]["attempted"],
+    ] == [True, True]  # 可重试：等人结束后的下一轮 patrol 再醒
+
+    def _started(message):
+        harness.wake_calls.append({"message": message})
+        return {"wakeStatus": "started", "turnId": "turn-1", "targetSessionId": ""}
+
+    monkeypatch.setattr(patrol, "_wake_pa", _started)
+    assert patrol.patrol_once(now=NOW + 180.0)["wake"]["attempted"] is True
+    assert _receipt_digested_at("r-1") is not None
+
+
 def test_ledger_wake_throttle_survives_restart(monkeypatch, personal_env):
     """节流持久化：accepted 戳在台账，进程重启（内存清零）不风暴。"""
 

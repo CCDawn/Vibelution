@@ -12,17 +12,20 @@ from core.runtime_manager.constants import PROJECT_ROOT
 _started: dict[str, str] | None = None
 
 
-def capture_launcher_start_identity() -> dict[str, str]:
+def capture_launcher_start_identity(captured_head: dict[str, str] | None = None) -> dict[str, str]:
     """Record the Git identity of this process once, at startup.
 
     An empty first capture (git unavailable) must not freeze the process as
-    unknown forever; retry until a commit is known.
+    unknown forever; retry until a commit is known. Callers that already hold
+    a fresh HEAD identity may pass it via ``captured_head`` so the first read
+    costs one capture instead of two duplicate ``git`` pairs (short-lived CLI
+    bridges paid 4 git children per state refresh otherwise).
     """
 
     global _started
     if _started is not None and str(_started.get("commit") or "").strip():
         return dict(_started)
-    identity = _git_identity()
+    identity = dict(captured_head) if captured_head is not None else _git_identity()
     identity["startedAt"] = str((_started or {}).get("startedAt") or "") or _now_iso()
     _started = identity
     return dict(_started)
@@ -34,8 +37,11 @@ def reset_launcher_start_identity_for_tests() -> None:
 
 
 def get_launcher_freshness() -> dict[str, Any]:
-    started = capture_launcher_start_identity()
+    # One HEAD capture serves both sides. The start identity is cached from
+    # the process's first read, so the shared capture only changes the very
+    # first call — where the process start commit and HEAD are the same fact.
     head = _git_identity()
+    started = capture_launcher_start_identity(captured_head=dict(head))
     running_commit = started.get("commit") or ""
     head_commit = head.get("commit") or ""
     known = bool(running_commit and head_commit)

@@ -348,6 +348,13 @@ export type LauncherBranchInstance = {
   current: boolean;
   legacy: boolean;
   dirty: boolean;
+  /**
+   * True when the backend never scanned this worktree's dirty state (a
+   * pool-external registration such as a PA flow or an external dev lane).
+   * ``dirty`` stays false for these rows; the UI must show an unknown state,
+   * never clean/dirty.
+   */
+  dirtyUnknown?: boolean;
   checkedOut: boolean;
   alive: boolean;
   observedState: string;
