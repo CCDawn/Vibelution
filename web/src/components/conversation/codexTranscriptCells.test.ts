@@ -400,7 +400,20 @@ describe("codexTranscriptCells", () => {
     expect(cells.map((cell) => cell.tone)).toEqual(["neutral", "neutral", "running"]);
   });
 
-  it("force-settles running thought/tool rows when the turn is no longer streaming", () => {
+  it("preserves every parallel tool lifecycle while settling superseded narration", () => {
+    const cells = settleCodexTranscriptActiveStatuses([
+      { id: "thought", kind: "reasoning_summary", messageId: "m1", status: "running", tone: "running", text: "先并行检查" },
+      { id: "read", kind: "tool_call", messageId: "m1", status: "running", tone: "running", title: "read_file" },
+      { id: "approval", kind: "tool_call", messageId: "m1", status: "pending", tone: "running", title: "write_file" },
+      { id: "search", kind: "tool_call", messageId: "m1", status: "running", tone: "running", title: "search_code" },
+      { id: "failed", kind: "tool_call", messageId: "m1", status: "failed", tone: "error", title: "cli_tool" },
+    ], { turnStreaming: true });
+
+    expect(cells.map((cell) => cell.status)).toEqual(["completed", "running", "pending", "running", "failed"]);
+    expect(cells.filter((cell) => cell.kind === "tool_call").map((cell) => cell.tone)).toEqual(["running", "running", "running", "error"]);
+  });
+
+  it("closes dangling tools as stopped without inventing success when the turn ends", () => {
     const cells = settleCodexTranscriptActiveStatuses([
       {
         id: "c1",
@@ -440,7 +453,8 @@ describe("codexTranscriptCells", () => {
       },
     ], { turnStreaming: false });
 
-    expect(cells.filter((cell) => cell.id !== "t-pending").every((cell) => cell.status === "completed")).toBe(true);
+    expect(cells.filter((cell) => cell.kind !== "tool_call").every((cell) => cell.status === "completed")).toBe(true);
+    expect(cells.find((cell) => cell.id === "t1")).toMatchObject({ status: "cancelled", tone: "neutral" });
     expect(cells.find((cell) => cell.id === "t-pending")?.status).toBe("pending");
   });
 

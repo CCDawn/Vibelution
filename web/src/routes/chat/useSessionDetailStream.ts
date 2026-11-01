@@ -30,6 +30,7 @@ import {
 } from "../chatStreamApplyController";
 import { createSessionAssistantDeltaScheduler } from "../sessionAssistantDeltaScheduler";
 import { chatStreamPerformanceNowMs } from "./chatCodingRouteViewModel";
+import { sessionStreamAppendBaseline } from "./sessionStreamAppendBaseline";
 import { supersededEditDelta } from "./chatEditResubmitState";
 import {
   createAssistantDeltaSeqGate,
@@ -85,7 +86,8 @@ function normalizedTurnId(value: unknown): string {
 }
 
 function sessionTurnIdForMessage(message: SessionDetail["messages"][number]): string {
-  return normalizedTurnId(message.metadata?.turnId || message.metadata?.turn_id);
+  return normalizedTurnId(message.metadata?.turnId || message.metadata?.turn_id
+    || (message.role === "assistant" ? message.turnId : ""));
 }
 
 function sessionTurnItemsForDetail(detail: SessionDetail, turnId: string): SessionTurnItem[] {
@@ -369,15 +371,18 @@ export function useSessionDetailStream({
     let appendGapLogged = false;
     let journalReplayLogged = false;
     const sessionStreamAppendReassembler = createSessionStreamAppendReassembler();
-    const initialTurnId = String(initialCachedDetail?.activeTurnId || "").trim()
+    const initialTurnId = normalizedTurnId(initialCachedDetail?.activeTurnId)
       || (sessionOwnsExecution(initialCachedDetail) ? latestUserTurnId(initialCachedDetail) : "");
     const initialLayer = committedAssistantDeltaLayer;
-    const initialTurnItems = initialLayer?.turnId === initialTurnId
-      && initialLayer.ledgerSeq >= normalizedLedgerSeq(initialCachedDetail?.ledgerSeq)
-      ? initialLayer.turnItems
-      : initialCachedDetail
-        ? sessionTurnItemsForDetail(initialCachedDetail, initialTurnId)
-        : [];
+    const initialTurnItems = sessionStreamAppendBaseline(
+      streamSessionId,
+      initialTurnId,
+      initialCachedDetail ? sessionTurnItemsForDetail(initialCachedDetail, initialTurnId) : [],
+      initialLayer?.sessionId === streamSessionId && initialLayer.turnId === initialTurnId
+        && initialLayer.ledgerSeq >= normalizedLedgerSeq(initialCachedDetail?.ledgerSeq)
+        ? initialLayer.turnItems
+        : undefined,
+    );
     sessionStreamAppendReassembler.rebase(streamSessionId, initialTurnId, initialTurnItems);
     const assistantDeltaScheduler = createSessionAssistantDeltaScheduler({
       nowMs: chatStreamPerformanceNowMs,
@@ -605,6 +610,7 @@ export function useSessionDetailStream({
       syncSessionDetail(mergeOutcome.detail);
       const detail = queryClient.getQueryData<SessionDetail>(queryKeys.session(streamSessionId))
         ?? mergeOutcome.detail;
+      syncEditResubmitGuard();
       noteAuthorityState(detail);
       const authoritativeLedgerSeq = normalizedLedgerSeq(detail.ledgerSeq);
       sessionProjectionGate.noteAuthoritative(authoritativeLedgerSeq);
@@ -612,7 +618,19 @@ export function useSessionDetailStream({
         sessionStreamRecovery.noteAuthoritative(authoritativeLedgerSeq);
       }
       lastAppliedAt = Date.now();
-      const activeLayer = activeTurnLayersBySessionRef.current[streamSessionId];
+      const authoritativeTurnId = normalizedTurnId(detail.activeTurnId)
+        || (sessionOwnsExecution(detail) ? latestUserTurnId(detail) : "");
+      const renderedLayer = activeTurnLayersBySessionRef.current[streamSessionId];
+      const previouslyCommittedLayer = committedAssistantDeltaLayer;
+      // The stream accumulator advances synchronously before React publishes
+      // its layer. Prefer it only for the same turn and a non-older ledger.
+      const activeLayer = previouslyCommittedLayer?.sessionId === streamSessionId
+        && previouslyCommittedLayer.turnId === authoritativeTurnId
+        && (!renderedLayer || (renderedLayer.sessionId === previouslyCommittedLayer.sessionId
+          && renderedLayer.turnId === previouslyCommittedLayer.turnId
+          && previouslyCommittedLayer.ledgerSeq >= renderedLayer.ledgerSeq))
+        ? previouslyCommittedLayer
+        : renderedLayer;
       const decision = planAppliedSessionDetail({
         streamSessionId,
         reason,
@@ -653,8 +671,6 @@ export function useSessionDetailStream({
       // Per-item overlay reconciliation (projection invariant c): overlay turn
       // items the canonical transcript already commits are dropped at item
       // granularity; whole-turn settlement above stays the coarse path.
-      const authoritativeTurnId = normalizedTurnId(detail.activeTurnId)
-        || (sessionOwnsExecution(detail) ? latestUserTurnId(detail) : "");
       let rebasedLayer = activeLayer;
       if (activeLayer && authoritativeTurnId && activeLayer.turnId !== authoritativeTurnId) {
         const boundLayer = bindActiveTurnLayerToTurnId(activeLayer, authoritativeTurnId);
@@ -686,10 +702,17 @@ export function useSessionDetailStream({
       } else {
         committedAssistantDeltaLayer = reconciledLayer;
       }
-      const baselineTurnItems = reconciledLayer?.turnId === authoritativeTurnId
-        ? reconciledLayer.turnItems
-        : sessionTurnItemsForDetail(detail, authoritativeTurnId);
-      sessionStreamAppendReassembler.rebase(streamSessionId, authoritativeTurnId, baselineTurnItems);
+      const baselineTurnItems = sessionStreamAppendBaseline(
+        streamSessionId,
+        authoritativeTurnId,
+        sessionTurnItemsForDetail(detail, authoritativeTurnId),
+        reconciledLayer?.sessionId === streamSessionId && reconciledLayer.turnId === authoritativeTurnId
+          ? reconciledLayer.turnItems
+          : undefined,
+      );
+      sessionStreamAppendReassembler.rebase(
+        streamSessionId, authoritativeTurnId, baselineTurnItems, assistantDeltaScheduler.pendingCount > 0,
+      );
     }
 
     function queueSessionDetail(detail: SessionDetail, trace: SessionStreamProtocolTrace) {

@@ -1,0 +1,30 @@
+.page {
+  display: flex;
+  height: 100dvh;
+  min-height: 0;
+  flex-direction: column;
+  background: var(--vui-surface-chat);
+  color: var(--fg-primary);
+}
+
+.controls {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+}
+
+.caption {
+  font-size: var(--font-size-xs);
+  color: var(--fg-tertiary);
+}
+
+.proof {
+  display: flex;
+  min-height: 0;
+  width: 100%;
+  flex: 1;
+  flex-direction: column;
+}

@@ -348,6 +348,23 @@ describe("chat active turn layer", () => {
     expect(activeTurnTerminalRefreshKey(undefined)).toBe("");
   });
 
+  it.each(["reasoning", "agent_message"] as const)("only retires same-revision %s once detail covers its text", (type) => {
+    const item = {
+      id: "text:1", itemId: "text", version: 3 as const, sessionId: "session-1", turnId: "turn-1",
+      type, status: "running" as const, revision: 1, sequence: 1, text: "abcd",
+      ...(type === "agent_message" ? { phase: "final_answer" as const } : {}),
+    } satisfies SessionTurnItem;
+    const layer = mergeAssistantDeltaIntoActiveTurnLayer(undefined, assistantDelta({ turnItems: [item] }))!;
+    const message = {
+      id: "live", role: "assistant" as const, status: "running" as const, turnId: "turn-1",
+      timestamp: "2026-01-01T00:00:00Z", turnItems: [{ ...item, text: "abc" }],
+    };
+    expect(reconcileActiveTurnLayerItemsWithMessages(layer, [message])?.turnItems).toEqual([item]);
+    expect(reconcileActiveTurnLayerItemsWithMessages(layer, [{ ...message, turnItems: [item] }])?.turnItems).toEqual([]);
+    expect(reconcileActiveTurnLayerItemsWithMessages(layer, [{ ...message, turnItems: [{ ...item, text: "abcdef" }] }])?.turnItems).toEqual([]);
+    expect(reconcileActiveTurnLayerItemsWithMessages(layer, [{ ...message, turnItems: [{ ...item, revision: 2, text: "rewrite" }] }])?.turnItems).toEqual([]);
+  });
+
   it("clears the layer when done arrives with no visible turnItems", () => {
     expect(mergeAssistantDeltaIntoActiveTurnLayer(
       undefined,

@@ -221,6 +221,79 @@ describe("session stream append reassembler", () => {
     expect((expanded.payload.turnItems[0] as { text: string }).text).toBe("hello world");
   });
 
+  it("keeps decoded pending progress through a lagging same-turn detail rebase", () => {
+    const decoder = createSessionStreamAppendReassembler();
+    const event = {
+      type: "assistant_delta" as const, sessionId: "session-1", turnId: "turn-1", ledgerSeq: 9,
+      stage: "responding", turnItems: [], updatedAt: "2026-07-09T08:00:01Z", done: false,
+      turnItemAppends: [appendEntry({ baseLength: 3, appendedLength: 1, appendedText: "d" })],
+    };
+    decoder.rebase("session-1", "turn-1", [messageItem("abc")]);
+    expect(decoder.expand(event).payload.turnItems[0]).toMatchObject({ text: "abcd" });
+    decoder.rebase("session-1", "turn-1", [messageItem("abc")], true);
+    const next = decoder.expand({
+      ...event, turnItemAppends: [appendEntry({ baseLength: 4, appendedLength: 1, appendedText: "e" })],
+    });
+    expect(next.gaps).toEqual([]);
+    expect(next.payload.turnItems[0]).toMatchObject({ text: "abcde" });
+  });
+
+  it("uses newer detail revisions and resets pending cache on turn change or a real gap", () => {
+    const decoder = createSessionStreamAppendReassembler();
+    const event = {
+      type: "assistant_delta" as const, sessionId: "session-1", turnId: "turn-1", ledgerSeq: 9,
+      stage: "responding", turnItems: [], updatedAt: "2026-07-09T08:00:01Z", done: false,
+      turnItemAppends: [appendEntry({ baseLength: 3, appendedLength: 1, appendedText: "d" })],
+    };
+    decoder.rebase("session-1", "turn-1", [messageItem("abc")]);
+    decoder.expand(event);
+    decoder.rebase("session-1", "turn-1", [{ ...messageItem("rewrite"), revision: 2 }], true);
+    const afterRewrite = decoder.expand({
+      ...event, turnItemAppends: [appendEntry({ baseLength: 7, appendedLength: 1, appendedText: "!" })],
+    });
+    expect(afterRewrite.gaps).toEqual([]);
+    expect(afterRewrite.payload.turnItems[0]).toMatchObject({ text: "rewrite!", revision: 2 });
+    expect(decoder.expand(event).gaps[0]?.reason).toBe("length_mismatch");
+    decoder.rebase("session-1", "turn-1", [messageItem("abc")], true);
+    expect(decoder.expand(event).payload.turnItems[0]).toMatchObject({ text: "abcd" });
+    decoder.rebase("session-1", "turn-2", [], true);
+    const otherTurn = decoder.expand({ ...event, turnId: "turn-2" });
+    expect(otherTurn.gaps[0]?.reason).toBe("unknown_item");
+  });
+
+  it("uses rewritten or settled detail and isolates sessions even with the same turn id", () => {
+    const decoder = createSessionStreamAppendReassembler();
+    const event = {
+      type: "assistant_delta" as const, sessionId: "session-1", turnId: "turn-1", ledgerSeq: 9,
+      stage: "responding", turnItems: [], updatedAt: "2026-07-09T08:00:01Z", done: false,
+      turnItemAppends: [appendEntry({ baseLength: 3, appendedLength: 1, appendedText: "d" })],
+    };
+    decoder.rebase("session-1", "turn-1", [messageItem("abc")]);
+    decoder.expand(event);
+    decoder.rebase("session-1", "turn-1", [messageItem("xyz")], true);
+    expect(decoder.expand(event).payload.turnItems[0]).toMatchObject({ text: "xyzd" });
+    decoder.rebase("session-1", "turn-1", [messageItem("abc")]);
+    expect(decoder.expand(event).payload.turnItems[0]).toMatchObject({ text: "abcd" });
+    decoder.rebase("session-2", "turn-1", [], true);
+    expect(decoder.expand({ ...event, sessionId: "session-2" }).gaps[0]?.reason).toBe("unknown_item");
+  });
+
+  it("retains a pending new item missing from an older same-turn detail", () => {
+    const decoder = createSessionStreamAppendReassembler();
+    const event = {
+      type: "assistant_delta" as const, sessionId: "session-1", turnId: "turn-1", ledgerSeq: 9,
+      stage: "responding", turnItems: [messageItem("abc")], updatedAt: "2026-07-09T08:00:01Z", done: false,
+    };
+    decoder.expand(event);
+    decoder.rebase("session-1", "turn-1", [], true);
+    const expanded = decoder.expand({
+      ...event, turnItems: [],
+      turnItemAppends: [appendEntry({ baseLength: 3, appendedLength: 1, appendedText: "d" })],
+    });
+    expect(expanded.gaps).toEqual([]);
+    expect(expanded.payload.turnItems[0]).toMatchObject({ text: "abcd" });
+  });
+
   it("reports a gap instead of guessing when the itemId is unknown", () => {
     const reassembler = createSessionStreamAppendReassembler();
     const expanded = reassembler.expand({

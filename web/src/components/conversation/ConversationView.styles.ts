@@ -456,7 +456,7 @@ backToBottomButton:
   codexTranscriptCellTitleRow:
     "vui-components-conversationview codexTranscriptCellTitleRow min-w-0 inline-flex max-w-full flex-wrap items-baseline gap-x-2 gap-y-0.5",
   codexTranscriptErrorCell:
-    "vui-components-conversationview codexTranscriptErrorCell border-0 border-l-2 border-l-[var(--state-error)] bg-[color-mix(in_srgb,var(--state-error)_5%,transparent)] px-3 py-2",
+    "vui-components-conversationview codexTranscriptErrorCell border-0 bg-[color-mix(in_srgb,var(--state-error)_5%,transparent)] px-3 py-2",
   codexTranscriptFinalCell:
     "vui-components-conversationview codexTranscriptFinalCell border-0 bg-transparent py-2 text-[var(--fg-primary)] leading-[var(--vui-line-readable)] [&_.markdownBody]:max-w-[min(100%,128ch)] [&_.markdownBody]:text-[var(--fg-primary)] [&_p]:text-[var(--fg-primary)] [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_table]:max-w-full [&_img]:max-w-full [&_a]:break-words",
   codexTranscriptCell_error:
@@ -720,7 +720,7 @@ backToBottomButton:
     "vui-components-conversationview operationDetailRow min-w-0 border-0 bg-transparent p-0 shadow-none",
   operationDetailToggle: `vui-components-conversationview operationDetailToggle min-w-0 ${vuiGlassPanelClass} p-2`,
   operationDetailValue:
-    "vui-components-conversationview operationDetailValue m-0 min-w-0 max-w-full overflow-auto whitespace-pre-wrap border-0 border-l-2 border-[var(--vui-border-subtle)] bg-transparent py-1.5 pl-3 pr-0 font-mono text-vui-sm leading-[1.65] text-[var(--fg-secondary)] shadow-none [overflow-wrap:anywhere]",
+    "vui-components-conversationview operationDetailValue m-0 min-w-0 max-w-full overflow-auto whitespace-pre-wrap border-0 bg-transparent py-1.5 px-0 font-mono text-vui-sm leading-[1.65] text-[var(--fg-secondary)] shadow-none [overflow-wrap:anywhere]",
   operationDetails:
     "vui-components-conversationview operationDetails grid min-w-0 gap-1 border-0 bg-transparent",
   operationDetailsChevronButton:
@@ -1139,7 +1139,7 @@ backToBottomButton:
   rolloutTraceItem_running:
     "vui-components-conversationview rolloutTraceItem_running min-w-0 text-[var(--fg-secondary)]",
   rolloutTraceList:
-    "vui-components-conversationview rolloutTraceList mt-2 grid min-w-0 gap-1 border-l border-[color-mix(in_srgb,var(--fg-tertiary)_var(--vui-alpha-tint),transparent)] bg-transparent pl-2 shadow-none",
+    "vui-components-conversationview rolloutTraceList mt-2 grid min-w-0 gap-1 bg-transparent shadow-none",
   rolloutTraceMeta:
     "vui-components-conversationview rolloutTraceMeta min-w-0 text-[var(--fg-tertiary)] [overflow-wrap:anywhere]",
   rolloutTraceText:
@@ -1395,7 +1395,7 @@ timeline:
   turnStatusLabel:
     "vui-components-conversationview turnStatusLabel min-w-0 shrink-0 text-vui-xs font-semibold leading-tight text-[var(--fg-tertiary)]",
   turnStatusNote:
-    "vui-components-conversationview turnStatusNote min-w-0 inline-grid w-[min(100%,920px)] grid-cols-[auto_minmax(0,1fr)] items-start gap-2 border-l border-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-border-subtle))] bg-transparent py-1 pl-2.5 text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+    "vui-components-conversationview turnStatusNote min-w-0 inline-grid w-[min(100%,920px)] grid-cols-[auto_minmax(0,1fr)] items-start gap-2 bg-transparent py-1 text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   turnStatusText:
     "vui-components-conversationview turnStatusText min-w-0 max-w-[min(100%,128ch)] whitespace-normal [overflow-wrap:anywhere]",
   // Settled-turn work header (ZCode AssistantHistoryStatus alignment): a thin

@@ -1,6 +1,6 @@
 const styles = {
   operationDetails:
-    "vui-components-conversationview operationDetails m-0 min-w-0 grid gap-1 border-0 border-l border-[color-mix(in_srgb,var(--accent-warm)_18%,var(--vui-border-subtle))] bg-transparent pl-2",
+    "vui-components-conversationview operationDetails m-0 min-w-0 grid gap-1 border-0 bg-transparent",
   operationDetailsThought:
     "vui-components-conversationview operationDetails_thought min-w-0",
   operationDetailRow:

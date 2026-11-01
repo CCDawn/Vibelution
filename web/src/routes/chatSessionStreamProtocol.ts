@@ -261,19 +261,43 @@ export type SessionStreamAppendExpansion = {
  */
 export function createSessionStreamAppendReassembler() {
   let turnKey = "";
+  let broken = false;
   const itemsByTextId = new Map<string, SessionTurnItem>();
 
   function reset(): void {
     itemsByTextId.clear();
+    broken = false;
   }
 
-  function rebase(sessionId: string, turnId: string, turnItems: SessionTurnItem[]): void {
-    turnKey = `${String(sessionId || "").trim()}\u001f${String(turnId || "").trim()}`;
+  function rebase(
+    sessionId: string,
+    turnId: string,
+    turnItems: SessionTurnItem[],
+    preservePending = false,
+  ): void {
+    const nextTurnKey = `${String(sessionId || "").trim()}\u001f${String(turnId || "").trim()}`;
+    // Queued frames have advanced the decoder before their layer is applied.
+    const pending = preservePending && !broken && nextTurnKey === turnKey
+      ? new Map(itemsByTextId)
+      : new Map<string, SessionTurnItem>();
+    turnKey = nextTurnKey;
     reset();
     for (const item of turnItems) {
       if (APPENDABLE_STREAM_ITEM_TYPES.has(item.type)) {
-        itemsByTextId.set(item.itemId, item);
+        const cached = pending.get(item.itemId);
+        const sameItem = cached && cached.sessionId === item.sessionId && cached.turnId === item.turnId
+          && cached.type === item.type;
+        const cachedText = cached ? itemText(cached) : "";
+        const detailText = itemText(item);
+        const keepCached = sameItem && (cached.revision > item.revision
+          || (cached.revision === item.revision && cached.id === item.id
+            && cachedText.length > detailText.length && cachedText.startsWith(detailText)));
+        itemsByTextId.set(item.itemId, keepCached ? cached : item);
+        pending.delete(item.itemId);
       }
+    }
+    for (const [itemId, item] of pending) {
+      itemsByTextId.set(itemId, item);
     }
   }
 
@@ -322,6 +346,7 @@ export function createSessionStreamAppendReassembler() {
       spliced.set(entry.itemId, nextItem);
     }
     if (gaps.length) {
+      broken = true;
       // Broken chain: hand the payload back untouched so nothing partial is
       // applied; the consumer resnapshots and reconnects to reset the cursor.
       return { payload, gaps };

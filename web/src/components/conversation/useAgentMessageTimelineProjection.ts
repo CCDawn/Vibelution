@@ -5,6 +5,7 @@ import {
   assistantFinalAnswerText,
   assistantTurnIsInFlight,
   assistantTurnIsStreaming,
+  consolidateSessionTurnItemsV2,
   hasCommittedAssistantProtocolAnswer,
   hasTerminalCanonicalTurnOutcome,
   projectConversationMessageFromTurnItemsV2,
@@ -150,8 +151,8 @@ function suppressSupersededCompanionInFlightMessages(messages: ConversationMessa
  * frontend active turn layer (`<sessionId>-message-active-<turnId>`, kind
  * `session_active_turn_layer`). Their ids never collide and each one retires on
  * its own rule, so concatenating both paints the same in-flight answer twice
- * until the turn settles. Select one overlay, leaving all durable segments for
- * projectTimelineProcessMessages to fold by revisioned item identity.
+ * until the turn settles. Keep the chosen row identity, but merge its items
+ * with the other overlays before folding durable segments.
  */
 function assistantOverlayHasText(message: ConversationMessage): boolean {
   if (message.role !== "assistant") {
@@ -244,6 +245,7 @@ function dedupeAssistantTurnOverlays(
   );
   const winnerByTurnId = new Map<string, ConversationMessage>();
   const settledTurnIds = new Set<string>();
+  const overlaysByTurnId = new Map<string, Extract<ConversationMessage, { role: "assistant" }>[]>();
   for (const message of messages) {
     if (message.role !== "assistant") {
       continue;
@@ -260,6 +262,9 @@ function dedupeAssistantTurnOverlays(
       }
       continue;
     }
+    const overlays = overlaysByTurnId.get(turnId) ?? [];
+    overlays.push(message);
+    overlaysByTurnId.set(turnId, overlays);
     const current = winnerByTurnId.get(turnId);
     // Strictly greater keeps the first message on a tie, so an already painted
     // row never swaps identity mid-stream.
@@ -270,15 +275,21 @@ function dedupeAssistantTurnOverlays(
   if (winnerByTurnId.size === 0) {
     return messages;
   }
-  return messages.filter((message) => {
+  return messages.flatMap((message) => {
     if (message.role !== "assistant" || !isOverlay(message)) {
-      return true;
+      return [message];
     }
     const turnId = messageTurnId(message);
     if (!turnId) {
-      return true;
+      return [message];
     }
-    return !settledTurnIds.has(turnId) && winnerByTurnId.get(turnId) === message;
+    if (settledTurnIds.has(turnId) || winnerByTurnId.get(turnId) !== message) {
+      return [];
+    }
+    const overlays = overlaysByTurnId.get(turnId) ?? [];
+    return overlays.length > 1
+      ? [{ ...message, turnItems: consolidateSessionTurnItemsV2(...overlays.map((overlay) => overlay.turnItems)) }]
+      : [message];
   });
 }
 

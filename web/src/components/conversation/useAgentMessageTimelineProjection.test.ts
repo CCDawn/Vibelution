@@ -410,7 +410,41 @@ describe("projectAgentMessageTimelineMessages", () => {
     expect(projection.messages).toHaveLength(1);
     expect(projection.messages[0]?.id).toBe("session-1-message-active-turn-dupe");
     expect(projection.messages[0]?.role === "assistant" && projection.messages[0].turnItems.map((item) => item.itemId))
-      .toEqual(["persisted-tool", "active"]);
+      .toEqual(["persisted-tool", "live", "active"]);
+  });
+
+  it.each([0, 1, 2])("merges backend-only process items with active answers at revision %s", (revision) => {
+    const base = {
+      version: 3 as const, sessionId: "session-1", turnId: "turn-merge",
+      status: "running" as const, terminal: false,
+    };
+    const reasoning: SessionTurnItem = {
+      ...base, id: "r:1", itemId: "r", type: "reasoning", revision: 1, sequence: 1, text: "abc",
+    };
+    const tool: SessionTurnItem = {
+      ...base, id: "tool:1", itemId: "tool", type: "tool_call", callId: "call-1",
+      revision: 1, sequence: 2, toolName: "read_file",
+    };
+    const answer: SessionTurnItem = {
+      ...base, id: "a:1", itemId: "a", type: "agent_message", phase: "final_answer",
+      revision: 1, sequence: 3, text: "answer",
+    };
+    const backend = assistantMessage("session-1-message-live-turn-merge", {
+      turnId: "turn-merge", status: "running", turnItems: [reasoning, tool],
+      metadata: { kind: "session_live_overlay", turnId: "turn-merge" },
+    });
+    const active = assistantMessage("session-1-message-active-turn-merge", {
+      turnId: "turn-merge", status: "running",
+      turnItems: [...(revision ? [{ ...reasoning, revision, text: revision === 2 ? "abcd" : "abc" }] : []), answer],
+      metadata: { kind: "session_active_turn_layer", turnId: "turn-merge" },
+    });
+    const result = projectAgentMessageTimelineMessages({ timelineMessages: [backend], activeTurnMessage: active });
+    expect(result.messages).toHaveLength(1);
+    const row = result.messages[0];
+    if (row?.role !== "assistant") throw new Error("Expected an assistant row");
+    expect(row.id).toBe(active.id);
+    expect(row.turnItems.map((item) => item.itemId)).toEqual(["r", "tool", "a"]);
+    expect(row.turnItems[0]).toMatchObject({ revision: revision || 1, text: revision === 2 ? "abcd" : "abc" });
   });
 
   it("keeps the streaming backend overlay when the active turn layer is an empty shell", () => {

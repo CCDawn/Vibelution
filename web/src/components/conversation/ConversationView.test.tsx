@@ -1377,7 +1377,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(styles.operationDetails).toContain("border-0");
     expect(styles.operationDetailRow).toContain("bg-transparent");
     expect(styles.operationDetailRow).not.toContain("rounded-[var(--radius-control)]");
-    expect(styles.operationDetailValue).toContain("border-l-2");
+    expect(styles.operationDetailValue).not.toContain("border-l");
     expect(styles.operationDetailValue).toContain("bg-transparent");
     expect(styles.operationDetailValue).toContain("font-mono");
     expect(styles.operationItem).toContain("w-[min(100%,72ch)]");

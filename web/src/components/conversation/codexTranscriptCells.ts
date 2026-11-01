@@ -1111,9 +1111,8 @@ function settleActiveCellToCompleted(cell: CodexTranscriptCell): CodexTranscript
 }
 
 /**
- * Keep only the latest in-flight process row as running/pending while the turn
- * streams. When the turn has stopped (user cancel / terminal result), force every
- * active process/thought row closed so the rail cannot stay "处理中" with spinners.
+ * Close superseded narration while preserving each tool's independent lifecycle.
+ * A terminal turn stops orphaned running tools; it does not prove they succeeded.
  */
 export function settleCodexTranscriptActiveStatuses(
   cells: CodexTranscriptCell[],
@@ -1135,6 +1134,9 @@ export function settleCodexTranscriptActiveStatuses(
         return cell;
       }
       changed = true;
+      if (cell.kind === "tool_call") {
+        return { ...cell, status: "cancelled" as const, tone: "neutral" as const };
+      }
       return settleActiveCellToCompleted(cell);
     });
     return changed ? next : cells;
@@ -1174,6 +1176,10 @@ export function settleCodexTranscriptActiveStatuses(
   }
   let changed = false;
   const next = cells.map((cell, index) => {
+    // Parallel tools and pending approvals cannot be ended by a newer sibling.
+    if (cell.kind === "tool_call") {
+      return cell;
+    }
     if (index === latestActiveIndex && !(isThoughtLikeTranscriptCell(cell) && index < latestSegmentIndex)) {
       return cell;
     }

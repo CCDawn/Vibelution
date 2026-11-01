@@ -6,13 +6,13 @@ function cv(key: string, ...classNames: string[]) {
 
 /**
  * In-timeline strip for background runtime tasks owned by the current session.
- * Visual vocabulary mirrors ConversationActiveTurnStatusNote (left rule, muted
- * meta line, compact spinner) so tail-of-timeline status rows read as one family.
+ * Visual vocabulary mirrors ConversationActiveTurnStatusNote (muted meta line
+ * and compact spinner) so tail-of-timeline status rows read as one family.
  */
 const styles = {
   root: cv(
     "root",
-    "min-w-0 max-w-[min(100%,920px)] border-l border-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-border-subtle))] bg-transparent py-1 pl-2.5 text-vui-sm leading-tight text-[var(--fg-secondary)]",
+    "min-w-0 max-w-[min(100%,920px)] bg-transparent py-1 text-vui-sm leading-tight text-[var(--fg-secondary)]",
   ),
   list: cv("list", "min-w-0 flex flex-col gap-0.5"),
   row: cv("row", "min-w-0 flex flex-wrap items-center gap-x-2 gap-y-1"),

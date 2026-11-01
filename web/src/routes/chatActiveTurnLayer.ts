@@ -452,8 +452,9 @@ function overlayItemSortKey(item: OverlayReconcileItem) {
  *
  * An overlay turn item is dropped once the canonical transcript carries an
  * item with the same identity (type + call/item id) at an equal or newer
- * revision: the authoritative copy paints instead of a duplicated overlay
- * copy, while items the authority has not committed yet keep rendering from
+ * revision (and, for text items at equal revision, covers its text): the
+ * authoritative copy paints instead of a duplicated overlay copy, while items
+ * the authority has not committed yet keep rendering from
  * the overlay. An overlay with nothing left to show is cleared entirely
  * (same contract as the whole-turn settle path).
  */
@@ -464,7 +465,7 @@ export function reconcileActiveTurnLayerItemsWithMessages(
   if (!layer || !layer.turnId || !messages?.length || !layer.turnItems.length) {
     return layer;
   }
-  const authoritative = new Map<string, number>();
+  const authoritative = new Map<string, SessionTurnItem[]>();
   for (const message of messages) {
     if (message.role !== "assistant") continue;
     if (message.metadata?.kind === "session_active_turn_layer") continue;
@@ -473,7 +474,9 @@ export function reconcileActiveTurnLayerItemsWithMessages(
       const identity = overlayItemIdentity(item);
       if (!identity.itemKey) continue;
       const sortKey = overlayItemSortKey(identity);
-      authoritative.set(sortKey, Math.max(authoritative.get(sortKey) ?? 0, identity.revision));
+      const items = authoritative.get(sortKey) ?? [];
+      items.push(item);
+      authoritative.set(sortKey, items);
     }
   }
   if (authoritative.size === 0) {
@@ -485,17 +488,22 @@ export function reconcileActiveTurnLayerItemsWithMessages(
     if (!identity.itemKey) {
       return true;
     }
-    const authoritativeRevision = authoritative.get(overlayItemSortKey(identity));
-    if (authoritativeRevision === undefined) {
+    const candidates = authoritative.get(overlayItemSortKey(identity));
+    if (!candidates) return true;
+    const covered = candidates.some((candidate) => {
+      const candidateRevision = overlayItemIdentity(candidate).revision;
+      if (candidateRevision > identity.revision) return true;
+      if (candidateRevision < identity.revision) return false;
+      if (item.type === "agent_message" || item.type === "reasoning") {
+        return (candidate.type === "agent_message" || candidate.type === "reasoning")
+          && typeof candidate.text === "string" && typeof item.text === "string"
+          && candidate.text.startsWith(item.text);
+      }
       return true;
-    }
-    // Equal revision means the authority committed exactly this item; a newer
-    // authority revision supersedes the overlay copy outright.
-    if (identity.revision <= authoritativeRevision) {
-      removed += 1;
-      return false;
-    }
-    return true;
+    });
+    if (!covered) return true;
+    removed += 1;
+    return false;
   });
   if (removed === 0) {
     return layer;
