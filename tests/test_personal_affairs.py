@@ -387,16 +387,3 @@ class TestCatalogRegistration:
 
         names = {getattr(tool, "name", "") for tool in create_key_tools()}
         assert "personal_affairs_tool" in names
-
-
-class TestRoutes:
-    def test_affair_routes_are_mounted_and_shaped(self) -> None:
-        from core.web.routes.personal_assistant_affairs import router
-
-        paths = {route.path for route in router.routes}
-        assert "/agents/{agent_id}/plugins/personal-affairs/affairs" in paths
-        assert (
-            "/agents/{agent_id}/plugins/personal-affairs/affairs/{item_id}/complete"
-            in paths
-        )
-        assert "/agents/{agent_id}/plugins/personal-affairs/affairs/{item_id}/due" in paths
