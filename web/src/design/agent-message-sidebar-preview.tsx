@@ -1,7 +1,7 @@
 /** Isolated interaction design. All identities, messages and receipts are synthetic. */
 import { useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { AlertCircle, ArrowRight, CheckCheck, Clock3, LoaderCircle, Reply, Send, Users } from "lucide-react";
+import { AlertCircle, ArrowRight, CheckCheck, ChevronDown, Clock3, LoaderCircle, Reply, Send, Users } from "lucide-react";
 
 import { VButton, VChip, VInput, VListDetailPage, VuiProvider } from "../components/vui";
 import { ConversationTurnAvatarContent } from "../components/conversation/ConversationTurnAvatarContent";
@@ -82,6 +82,7 @@ function Preview() {
   const [view, setView] = useState("当前对话");
   const [dark, setDark] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [previewToolsOpen, setPreviewToolsOpen] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const messageListRef = useRef<HTMLElement>(null);
   const selected = messages.find((m) => m.id === selectedId) ?? messages[0];
@@ -136,10 +137,12 @@ function Preview() {
     }));
     setAnnouncement(`${agents[agentId].name} 的示例重试已记录，其他接收方状态保持不变。`);
   }
-  const list = <div className={styles.sidebar}>
-    <header className={styles.listHeader}><div><h2>已发送消息 <span data-testid="message-count">{messages.length}</span></h2><p>每条发送独立记录</p></div><Send size={18} aria-hidden="true" /></header>
+  const list = <aside className={styles.sidebar} aria-label="跨 Agent 消息左栏" data-testid="message-sidebar">
+    <header className={styles.listHeader}><div><h2>跨 Agent 消息</h2><p>隔离设计预览 · 示例数据</p></div><Send size={18} aria-hidden="true" /></header>
+    <div className={styles.viewSwitch} aria-label="消息展示位置">{["当前对话", "消息中心"].map((label) => <VButton key={label} aria-pressed={view === label} onPress={() => setView(label)}>{label}</VButton>)}</div>
     <div className={styles.search}><VInput aria-label="搜索消息或 Agent" placeholder="搜索消息或 Agent" value={query} onChange={(event) => setQuery(event.target.value)} /></div>
     <div className={styles.filters} aria-label="消息状态筛选">{filters.map((item) => <VButton key={item.id} className={styles.filter} aria-pressed={filter === item.id} onPress={() => setFilter(item.id)}>{item.label}</VButton>)}</div>
+    <div className={styles.listSectionLabel}>已发送消息 <span data-testid="message-count">{messages.length}</span></div>
     <nav ref={messageListRef} className={styles.messageList} aria-label="已发送跨 Agent 消息" data-testid="sent-message-list">
       {visible.map((m) => <VButton key={m.id} contentLayout="plain" className={styles.messageRow} aria-pressed={selected.id === m.id} data-message-id={m.id} onPress={() => choose(m.id)}>
         <span className={styles.identityLine}><Actor id={m.senderId} compact /><ArrowRight size={12} className={styles.arrow} aria-hidden="true" />{m.recipients.length === 1 ? <Actor id={m.recipients[0].agentId} compact /> : <span className={styles.recipientGroup} title={m.recipients.map((r) => agents[r.agentId].name).join("、")}><span className={styles.avatarStack} aria-hidden="true">{m.recipients.slice(0, 2).map((r) => <span key={r.agentId} className={styles.avatar} data-agent={r.agentId}><ConversationTurnAvatarContent content={{ fallback: agents[r.agentId].initials }} /></span>)}</span><span>{agents[m.recipients[0].agentId].name}等 {m.recipients.length} 位</span></span>}</span>
@@ -149,8 +152,16 @@ function Preview() {
       </VButton>)}
       {visible.length === 0 ? <div className={styles.empty}>没有匹配的消息<VButton onPress={() => { setFilter("all"); setQuery(""); }}>查看全部消息</VButton></div> : null}
     </nav>
-    <footer className={styles.listFooter}>显示 {visible.length} / {messages.length} 条 · 最新发送在前</footer>
-  </div>;
+    <footer className={styles.listFooter}>
+      <div className={styles.footerSummary}><span>显示 {visible.length} / {messages.length} 条</span><VButton className={styles.toolsToggle} aria-expanded={previewToolsOpen} aria-controls="preview-tools" onPress={() => setPreviewToolsOpen((open) => !open)}>预览操作 <ChevronDown size={13} aria-hidden="true" /></VButton></div>
+      {previewToolsOpen ? <div id="preview-tools" className={styles.previewTools} aria-label="预览操作">
+        <VButton onPress={simulateSend}>模拟发送一条</VButton>
+        <VButton onPress={simulateProgress}>模拟回执更新</VButton>
+        <VButton onPress={() => { document.documentElement.dataset.theme = dark ? "light" : "dark"; setDark(!dark); }}>{dark ? "浅色" : "深色"}</VButton>
+        <p>仅演示状态，不发送真实消息。</p>
+      </div> : null}
+    </footer>
+  </aside>;
   const detail = <article className={styles.detail} data-testid="message-detail" data-selected-message-id={selected.id}>
     <div className={styles.detailMeasure}>
       <header className={styles.detailHeader}>
@@ -178,8 +189,7 @@ function Preview() {
     </div>
   </article>;
   return <div className={styles.preview}>
-    <header className={styles.previewBar}><span>隔离设计预览 · 示例数据</span><div><VButton onPress={simulateSend}>模拟发送一条</VButton><VButton onPress={simulateProgress}>模拟回执更新</VButton><VButton onPress={() => { document.documentElement.dataset.theme = dark ? "light" : "dark"; setDark(!dark); }}>{dark ? "浅色" : "深色"}</VButton></div></header>
-    <VListDetailPage title="跨 Agent 消息" meta="已发送记录" className={styles.page} workspaceClassName={styles.workspace} columnsClassName="" actions={<div className={styles.viewSwitch}>{["当前对话", "消息中心"].map((label) => <VButton key={label} aria-pressed={view === label} onPress={() => setView(label)}>{label}</VButton>)}</div>} list={list} detail={detail} />
+    <VListDetailPage title="跨 Agent 消息" hideHeader className={styles.page} workspaceClassName={styles.workspace} columnsClassName="" list={list} detail={detail} />
     <div className={styles.announcement} role="status" aria-live="polite">{announcement || "当前对话与消息中心共用这份记录。"}</div>
   </div>;
 }
