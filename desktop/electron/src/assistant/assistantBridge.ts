@@ -65,7 +65,7 @@ export async function invokeAssistant(event: Sender, payload: unknown, owner: As
     return owner.setExpanded(request.expanded);
   }
   if (request.operation === "assistantAvatar" && Object.keys(request).length !== 1) throw new Error("ASSISTANT_REQUEST_INVALID");
-  if (!["status", "detail", "dispatches", "config", "send", "uploadAttachment", "readAttachment", "stop", "continue", "curation", "curate", "approvals", "resolveApproval", "previewDispatchApproval", "decideDispatchApproval", "declineDispatchApproval", "operatorAsset", "assistantAvatar", "computerState", "computerWindows", "computerGrant", "computerControl", "computerConfirm", "panelSettings", "panelSettingsUpdate", "panelModelUpdate", "panelDialogue", "panelDialogueUpdate", "panelProposals", "panelProposalAccept", "panelProposalReject", "panelAffairs", "panelAffairAdd", "panelAffairComplete", "panelAffairCancel", "panelAffairReopen", "panelAffairDue"].includes(String(request.operation))) {
+  if (!["status", "detail", "dispatches", "config", "send", "uploadAttachment", "readAttachment", "stop", "continue", "curation", "curate", "approvals", "resolveApproval", "previewDispatchApproval", "decideDispatchApproval", "declineDispatchApproval", "operatorAsset", "assistantAvatar", "computerState", "computerWindows", "computerGrant", "computerControl", "computerConfirm"].includes(String(request.operation))) {
     throw new Error("ASSISTANT_REQUEST_INVALID");
   }
   try {

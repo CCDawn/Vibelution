@@ -31,12 +31,6 @@ export type AssistantHostRequest =
   | { operation: "curation"; sessionId: string }
   | { operation: "curate"; sessionId: string; messageId: string; action: "include" | "exclude" }
   | { operation: "operatorAsset"; kind: "avatar" | "background" }
-  | { operation: "panelSettings" | "panelDialogue" | "panelProposals" }
-  | { operation: "panelSettingsUpdate" | "panelModelUpdate" | "panelDialogueUpdate" | "panelAffairAdd"; payload: Record<string, unknown> }
-  | { operation: "panelAffairs"; kind: string; status: string }
-  | { operation: "panelAffairComplete" | "panelAffairCancel" | "panelAffairReopen"; itemId: string }
-  | { operation: "panelAffairDue"; itemId: string; payload: Record<string, unknown> }
-  | { operation: "panelProposalAccept" | "panelProposalReject"; proposalId: string }
   | { operation: "computerState" }
   | { operation: "computerWindows" }
   | { operation: "computerGrant"; selectionId: string; allowVision: true; authorizationRequestId?: string }
@@ -727,39 +721,6 @@ export class AssistantHost {
         const body = preview ? { dispatchId: payload.dispatchId, taskId: payload.taskId, approvalId: payload.approvalId }
           : { dispatchId: payload.dispatchId, taskId: payload.taskId, approvalId: payload.approvalId, revision: payload.revision, decision: payload.decision };
         return await this.rpc(generation, `/api/assistant/dispatches/approval/${preview ? "preview" : "decision"}`, "POST", body, REQUEST_MS, false, preview ? 4 * 1024 * 1024 : 8192);
-      }
-      case "panelSettings": case "panelSettingsUpdate": case "panelModelUpdate":
-      case "panelDialogue": case "panelDialogueUpdate": case "panelProposals":
-      case "panelProposalAccept": case "panelProposalReject": case "panelAffairs":
-      case "panelAffairAdd": case "panelAffairComplete": case "panelAffairCancel":
-      case "panelAffairReopen": case "panelAffairDue": {
-        const op = payload.operation;
-        const expected = op === "panelAffairs" ? ["operation", "kind", "status"]
-          : ["panelProposalAccept", "panelProposalReject"].includes(op) ? ["operation", "proposalId"]
-          : ["panelAffairComplete", "panelAffairCancel", "panelAffairReopen"].includes(op) ? ["operation", "itemId"]
-          : op === "panelAffairDue" ? ["operation", "itemId", "payload"]
-          : ["panelSettingsUpdate", "panelModelUpdate", "panelDialogueUpdate", "panelAffairAdd"].includes(op) ? ["operation", "payload"] : ["operation"];
-        if (Object.keys(payload).length !== expected.length || !ownKeys(payload, expected)) throw new HostError("ASSISTANT_REQUEST_INVALID");
-        const row = payload as unknown as Record<string, unknown>;
-        if ("itemId" in row && (typeof row.itemId !== "string" || !row.itemId.trim() || row.itemId.length > 160)) throw new HostError("ASSISTANT_REQUEST_INVALID");
-        if ("proposalId" in row && (typeof row.proposalId !== "string" || !row.proposalId.trim() || row.proposalId.length > 160)) throw new HostError("ASSISTANT_REQUEST_INVALID");
-        if (op === "panelAffairs" && (!['', 'todo', 'schedule', 'goal'].includes(String(row.kind)) || !['', 'open', 'done', 'cancelled'].includes(String(row.status)))) throw new HostError("ASSISTANT_REQUEST_INVALID");
-        if ("payload" in row && (!object(row.payload) || JSON.stringify(row.payload).length > 4096)) throw new HostError("ASSISTANT_REQUEST_INVALID");
-        const result = await this.rpc(generation, "/api/assistant/panels", "POST", payload, REQUEST_MS, false, 4 * 1024 * 1024);
-        if (!object(result)) throw new HostError("ASSISTANT_RESPONSE_INVALID");
-        const scoped = op.startsWith("panelAffair") || op.startsWith("panelDialogue") || op.startsWith("panelProposal");
-        if (scoped && result.agentId !== generation.agentId) throw new HostError("ASSISTANT_IDENTITY_INVALID");
-        if (op === "panelAffairs" && !Array.isArray(result.items)) throw new HostError("ASSISTANT_RESPONSE_INVALID");
-        if (op.startsWith("panelAffair") && op !== "panelAffairs" && !object(result.item)) throw new HostError("ASSISTANT_RESPONSE_INVALID");
-        if ((op === "panelDialogue" || op === "panelDialogueUpdate") &&
-          (!['restrained', 'natural', 'talkative'].includes(String(result.speakingInitiative)) ||
-           !['few', 'natural', 'proactive'].includes(String(result.questionInitiative)) ||
-           !['ask_first', 'manual_only'].includes(String(result.preferenceProposalMode)))) throw new HostError("ASSISTANT_RESPONSE_INVALID");
-        if (op === "panelProposals" && (!Array.isArray(result.proposals) || result.proposals.some(item => !object(item) || item.agentId !== generation.agentId))) throw new HostError("ASSISTANT_IDENTITY_INVALID");
-        if ((op === "panelProposalAccept" || op === "panelProposalReject") && (!object(result.proposal) || result.proposal.agentId !== generation.agentId)) throw new HostError("ASSISTANT_IDENTITY_INVALID");
-        if ((op === "panelSettings" || op === "panelSettingsUpdate") && !(result.settings === null || object(result.settings))) throw new HostError("ASSISTANT_RESPONSE_INVALID");
-        if (op === "panelModelUpdate" && !object(result.model)) throw new HostError("ASSISTANT_RESPONSE_INVALID");
-        return result;
       }
       case "assistantAvatar": {
         if (Object.keys(payload).length !== 1 || !ownKeys(payload, ["operation"])) throw new HostError("ASSISTANT_REQUEST_INVALID");

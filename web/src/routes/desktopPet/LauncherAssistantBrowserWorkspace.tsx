@@ -3,9 +3,39 @@ import { ArrowLeft, ArrowRight, Globe, Maximize2, MessageCircle, PanelRightClose
 import { browserState, launcherBrowserBridge, safeBrowserUrl, type BrowserOperation, type BrowserState } from "../../api/launcherAssistantBrowser";
 import { PANE_RESIZE_HANDLE_WIDTH } from "../../components/layout/paneLayoutPersistence";
 import { WORKBENCH_LAYOUT_IDS } from "../../components/layout/workbenchLayoutIds";
+import { useShellI18n } from "../../i18n/useShellI18n";
 import { VButton, VIconButton, VInput, VSplitWorkspace } from "../../components/vui";
 import { LauncherAssistantRoute } from "./LauncherAssistantRoute";
 import styles from "./LauncherAssistantBrowserWorkspace.styles";
+
+const COPY = {
+  zh: {
+    browser: "浏览器", web: "网页", webPage: "网页", tabs: "网页标签", closeTab: "关闭",
+    ownedByUser: "你正在操作", ownedByAssistant: "助理可操作",
+    takeOver: "接手", handOff: "交给助理", waiting: "等待当前操作",
+    backToChat: "回到对话", expandWeb: "展开网页", collapseWeb: "收起网页",
+    newPage: "新建网页", back: "后退", forward: "前进", reload: "刷新",
+    address: "网页地址", addressPlaceholder: "输入网址", open: "打开",
+    emptyHint: "打开网页", openPage: "打开网页", bilibili: "哔哩哔哩", chat: "对话",
+    loading: "网页加载中", loadFailed: "网页加载失败，请检查地址后重试。",
+    invalidAddress: "请输入不含用户名和密码、长度不超过 8192 的完整 http 或 https 网页地址。",
+    operationFailed: "操作未完成，请检查网页地址或稍后重试。",
+    stateUnavailable: "浏览器状态暂不可用，请重试。", browserUnavailable: "浏览器暂不可用，请稍后重试。",
+  },
+  en: {
+    browser: "Browser", web: "Web", webPage: "Web page", tabs: "Web tabs", closeTab: "Close",
+    ownedByUser: "You're in control", ownedByAssistant: "Assistant is in control",
+    takeOver: "Take over", handOff: "Hand off to assistant", waiting: "Waiting for the current action",
+    backToChat: "Back to conversation", expandWeb: "Expand web page", collapseWeb: "Collapse web page",
+    newPage: "New web page", back: "Back", forward: "Forward", reload: "Reload",
+    address: "Web address", addressPlaceholder: "Enter a URL", open: "Open",
+    emptyHint: "Open a web page", openPage: "Open web page", bilibili: "Bilibili", chat: "Chat",
+    loading: "Page loading", loadFailed: "The page failed to load. Check the address and try again.",
+    invalidAddress: "Enter a complete http or https address without a username or password, at most 8192 characters long.",
+    operationFailed: "The action didn't finish. Check the web address or try again later.",
+    stateUnavailable: "Browser state is unavailable. Try again.", browserUnavailable: "The browser is unavailable. Try again later.",
+  },
+} as const;
 
 const empty: BrowserState = { pages: [], activePageId: null, takeover: false };
 const chatMinWidth = 280;
@@ -15,6 +45,8 @@ export function LauncherAssistantBrowserWorkspace({ revealRequested = false, ass
   revealRequested?: boolean;
   assistantProps?: Pick<ComponentProps<typeof LauncherAssistantRoute>, "computerRequested" | "entryIntent">;
 }) {
+  const { lang } = useShellI18n();
+  const copy = COPY[lang];
   const [state, setState] = useState<BrowserState>(empty);
   const [error, setError] = useState("");
   const [address, setAddress] = useState("");
@@ -43,18 +75,18 @@ export function LauncherAssistantBrowserWorkspace({ revealRequested = false, ass
     setError("");
     const revision = stateRevision.current;
     try { const result = browserState(await launcherBrowserBridge().invoke(operation)); if (revision === stateRevision.current) setState(result); return result; }
-    catch { setError("操作未完成，请检查网页地址或稍后重试。"); return null; }
-  }, []);
+    catch { setError(copy.operationFailed); return null; }
+  }, [copy]);
   useEffect(() => {
     let live = true;
     try {
       const bridge = launcherBrowserBridge();
-      const unsubscribe = bridge.onChanged(value => { if (!live) return; try { const next = browserState(value); stateRevision.current += 1; setState(next); } catch { setError("浏览器状态暂不可用，请重试。"); } });
+      const unsubscribe = bridge.onChanged(value => { if (!live) return; try { const next = browserState(value); stateRevision.current += 1; setState(next); } catch { setError(copy.stateUnavailable); } });
       const revision = stateRevision.current;
-      void bridge.invoke({ operation: "state" }).then(value => { if (live && revision === stateRevision.current) setState(browserState(value)); }).catch(() => { if (live) setError("浏览器状态暂不可用，请重试。"); });
+      void bridge.invoke({ operation: "state" }).then(value => { if (live && revision === stateRevision.current) setState(browserState(value)); }).catch(() => { if (live) setError(copy.stateUnavailable); });
       return () => { live = false; unsubscribe(); };
-    } catch { setError("浏览器暂不可用，请稍后重试。"); }
-  }, []);
+    } catch { setError(copy.browserUnavailable); }
+  }, [copy]);
   useEffect(() => {
     const bridge = window.vibelutionLauncherBrowser;
     if (typeof bridge?.onShow !== "function") return;
@@ -103,7 +135,7 @@ export function LauncherAssistantBrowserWorkspace({ revealRequested = false, ass
   }, [canShowPage]);
   async function go(value = address) {
     let url: string;
-    try { url = safeBrowserUrl(value); } catch { setError("请输入不含用户名和密码、长度不超过 8192 的完整 http 或 https 网页地址。"); return; }
+    try { url = safeBrowserUrl(value); } catch { setError(copy.invalidAddress); return; }
     const result = await run(draft || !active ? { operation: "open", url } : { operation: "navigate", pageId: active.id, url });
     if (result) { setDraft(false); setMobilePage("web"); }
   }
@@ -112,39 +144,39 @@ export function LauncherAssistantBrowserWorkspace({ revealRequested = false, ass
     ownerPending.current = true; setPending(true);
     try { await run({ operation: state.takeover ? "resume" : "takeover" }); } finally { ownerPending.current = false; setPending(false); }
   }
-  const browser = <section className={styles.browser} aria-label="浏览器">
+  const browser = <section className={styles.browser} aria-label={copy.browser}>
     <header className={styles.header}>
-      <span className={styles.heading}><Globe size={16} />网页</span>
-      <div className={styles.controls}><span className={styles.ownership}>{state.takeover ? "你正在操作" : "助理可操作"}</span>
-        <VButton isPending={pending} onClick={() => void changeOwner()}>{state.takeover ? "交给助理" : pending ? "等待当前操作" : "接手"}</VButton>
-        <VButton variant="ghost" isIconOnly className={styles.icon} aria-label={full ? "回到对话" : "展开网页"} onClick={() => { setFull(!full); if (full && narrow) setMobilePage("chat"); }}>
+      <span className={styles.heading}><Globe size={16} />{copy.web}</span>
+      <div className={styles.controls}><span className={styles.ownership}>{state.takeover ? copy.ownedByUser : copy.ownedByAssistant}</span>
+        <VButton isPending={pending} onClick={() => void changeOwner()}>{state.takeover ? copy.handOff : pending ? copy.waiting : copy.takeOver}</VButton>
+        <VButton variant="ghost" isIconOnly className={styles.icon} aria-label={full ? copy.backToChat : copy.expandWeb} onClick={() => { setFull(!full); if (full && narrow) setMobilePage("chat"); }}>
           {full ? <MessageCircle size={16} /> : <Maximize2 size={16} />}</VButton>
-        <VIconButton variant="ghost" className={styles.icon} label="收起网页" title="收起网页" icon={<PanelRightClose size={16} />} onClick={() => { setFull(false); setCollapsed(true); setMobilePage("chat"); }} /></div>
+        <VIconButton variant="ghost" className={styles.icon} label={copy.collapseWeb} title={copy.collapseWeb} icon={<PanelRightClose size={16} />} onClick={() => { setFull(false); setCollapsed(true); setMobilePage("chat"); }} /></div>
     </header>
-    <div className={styles.tabs} aria-label="网页标签">
+    <div className={styles.tabs} aria-label={copy.tabs}>
       {state.pages.map(page => <div key={page.id} className={`${styles.pageTab} ${page.id === state.activePageId && !draft ? styles.pageTabActive : ""}`}>
-        <VButton variant="ghost" className={styles.pageTabButton} aria-pressed={page.id === state.activePageId && !draft} onClick={() => { setDraft(false); void run({ operation: "select", pageId: page.id }); }}>{page.title || page.url || "网页"}</VButton>
-        <VButton variant="ghost" isIconOnly className={styles.icon} aria-label={`关闭 ${page.title || "网页"}`} onClick={() => void run({ operation: "close", pageId: page.id })}><X size={13} /></VButton>
+        <VButton variant="ghost" className={styles.pageTabButton} aria-pressed={page.id === state.activePageId && !draft} onClick={() => { setDraft(false); void run({ operation: "select", pageId: page.id }); }}>{page.title || page.url || copy.webPage}</VButton>
+        <VButton variant="ghost" isIconOnly className={styles.icon} aria-label={`${copy.closeTab} ${page.title || copy.webPage}`} onClick={() => void run({ operation: "close", pageId: page.id })}><X size={13} /></VButton>
       </div>)}
-      <VButton variant="ghost" isIconOnly className={styles.icon} aria-label="新建网页" isDisabled={state.pages.length >= 4} onClick={() => { setDraft(true); setAddress(""); setError(""); }}><Plus size={16} /></VButton>
+      <VButton variant="ghost" isIconOnly className={styles.icon} aria-label={copy.newPage} isDisabled={state.pages.length >= 4} onClick={() => { setDraft(true); setAddress(""); setError(""); }}><Plus size={16} /></VButton>
     </div>
     <form className={styles.addressBar} onSubmit={event => { event.preventDefault(); void go(); }}>
-      <VButton type="button" variant="ghost" isIconOnly className={styles.icon} aria-label="后退" isDisabled={!active || draft || !active.canGoBack} onClick={() => active && void run({ operation: "back", pageId: active.id })}><ArrowLeft size={16} /></VButton>
-      <VButton type="button" variant="ghost" isIconOnly className={styles.icon} aria-label="前进" isDisabled={!active || draft || !active.canGoForward} onClick={() => active && void run({ operation: "forward", pageId: active.id })}><ArrowRight size={16} /></VButton>
-      <VButton type="button" variant="ghost" isIconOnly className={styles.icon} aria-label="刷新" isDisabled={!active || draft} onClick={() => active && void run({ operation: "reload", pageId: active.id })}><RotateCw size={16} /></VButton>
-      <VInput className={styles.addressInput} aria-label="网页地址" value={address} placeholder="输入网址" onChange={event => setAddress(event.target.value)} />
-      <VButton type="submit">打开</VButton>
+      <VButton type="button" variant="ghost" isIconOnly className={styles.icon} aria-label={copy.back} isDisabled={!active || draft || !active.canGoBack} onClick={() => active && void run({ operation: "back", pageId: active.id })}><ArrowLeft size={16} /></VButton>
+      <VButton type="button" variant="ghost" isIconOnly className={styles.icon} aria-label={copy.forward} isDisabled={!active || draft || !active.canGoForward} onClick={() => active && void run({ operation: "forward", pageId: active.id })}><ArrowRight size={16} /></VButton>
+      <VButton type="button" variant="ghost" isIconOnly className={styles.icon} aria-label={copy.reload} isDisabled={!active || draft} onClick={() => active && void run({ operation: "reload", pageId: active.id })}><RotateCw size={16} /></VButton>
+      <VInput className={styles.addressInput} aria-label={copy.address} value={address} placeholder={copy.addressPlaceholder} onChange={event => setAddress(event.target.value)} />
+      <VButton type="submit">{copy.open}</VButton>
     </form>
-    {error || active?.loadError ? <p role="alert" className={styles.error}>{error || "网页加载失败，请检查地址后重试。"}</p> : null}
-    {active?.loading && !draft ? <div role="progressbar" aria-label="网页加载中" className={styles.progress} /> : null}
+    {error || active?.loadError ? <p role="alert" className={styles.error}>{error || copy.loadFailed}</p> : null}
+    {active?.loading && !draft ? <div role="progressbar" aria-label={copy.loading} className={styles.progress} /> : null}
     <div className={styles.viewportContainer}>
-      {(!active || draft) ? <div className={styles.empty}><Globe size={28} /><p>打开网页</p><VButton onClick={() => void go("https://www.bilibili.com/")}>哔哩哔哩</VButton></div> : null}
+      {(!active || draft) ? <div className={styles.empty}><Globe size={28} /><p>{copy.emptyHint}</p><VButton onClick={() => void go("https://www.bilibili.com/")}>{copy.bilibili}</VButton></div> : null}
       <div ref={viewRef} data-launcher-browser-viewport="true" className={canShowPage ? styles.viewport : styles.viewportHidden} />
     </div>
   </section>;
   return <div ref={workspaceRef} className={styles.root} data-vui-domain-recipe="launcher-assistant-browser">
-    {narrow && !collapsed ? <div className={styles.mobileSwitch}><VButton variant={!webVisible ? "secondary" : "ghost"} aria-pressed={!webVisible} onClick={() => { setFull(false); setMobilePage("chat"); }}>对话</VButton><VButton variant={webVisible ? "secondary" : "ghost"} aria-pressed={webVisible} onClick={() => { setCollapsed(false); setMobilePage("web"); }}>网页</VButton></div> : null}
-    {collapsed ? <VButton variant="ghost" className={styles.restore} aria-label="打开网页" icon={<Globe size={16} />} onClick={() => { setCollapsed(false); setMobilePage("web"); }}>网页</VButton> : null}
+    {narrow && !collapsed ? <div className={styles.mobileSwitch}><VButton variant={!webVisible ? "secondary" : "ghost"} aria-pressed={!webVisible} onClick={() => { setFull(false); setMobilePage("chat"); }}>{copy.chat}</VButton><VButton variant={webVisible ? "secondary" : "ghost"} aria-pressed={webVisible} onClick={() => { setCollapsed(false); setMobilePage("web"); }}>{copy.web}</VButton></div> : null}
+    {collapsed ? <VButton variant="ghost" className={styles.restore} aria-label={copy.openPage} icon={<Globe size={16} />} onClick={() => { setCollapsed(false); setMobilePage("web"); }}>{copy.web}</VButton> : null}
     <VSplitWorkspace className={`${styles.split} ${!webVisible ? styles.chatOnly : narrow || full ? styles.webOnly : ""}`} resize={{ layoutId: WORKBENCH_LAYOUT_IDS.launcherAssistantBrowser, sidebar: { defaultWidth: 360, minWidth: chatMinWidth, maxWidth: Math.max(chatMinWidth, Math.floor(workspaceWidth - browserMinWidth - PANE_RESIZE_HANDLE_WIDTH)) } }}
       sidebar={<LauncherAssistantRoute embedded navigationOwned {...assistantProps} />}
       main={browser} />

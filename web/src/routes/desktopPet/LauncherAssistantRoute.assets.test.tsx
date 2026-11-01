@@ -230,17 +230,25 @@ describe("Launcher operator image consumption", () => {
     expect(invoke.mock.calls.some(([payload]) => payload.operation === "decideDispatchApproval")).toBe(false);
   });
 
-  it("does not retry an unconfirmed bound decline and discards the complete preview", async () => {
+  it("re-reads a fresh bound preview after an unconfirmed decline and retries only on explicit clicks", async () => {
     const target = { approvalId: "a", toolName: "write_file_tool", risk: "write", targetSummary: { pathPreview: "fixture" }, revision: "old", availableDecisions: ["accept", "decline"] };
     const preview = { taskId: "t", sessionId: "s2", agentId: "worker", requestId: "a", turnId: "turn", callId: "call", toolName: "write_file_tool", revision: "b".repeat(64), approval: "always", risk: "write", permissionPreset: "request_approval", decisionFingerprint: "policy", configRevision: 1, configHash: "hash", argumentsJson: '{"content":"PRIVATE-FIXTURE"}', executionArgumentsJson: '{"content":"PRIVATE-FIXTURE"}' };
     await renderAssistant({ declineFailure: true, boundPreview: preview, dispatches: [{ dispatchId: "d", agentId: "worker", nativeTaskId: "t", receipt: { taskId: "t", pendingApprovals: [target] } }] });
     expect(container.textContent).toContain("PRIVATE-FIXTURE");
     const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("拒绝"));
-    await act(async () => { reject?.click(); reject?.click(); }); await settle(); await settle();
+    await act(async () => { reject?.click(); }); await settle(); await settle();
+    // The route itself never re-sends the unconfirmed decision without a click.
     expect(invoke.mock.calls.filter(([payload]) => payload.operation === "decideDispatchApproval")).toHaveLength(1);
     expect(container.textContent).toContain("审批结果未确认");
-    expect(container.textContent).not.toContain("PRIVATE-FIXTURE");
-    expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("允许本次"))?.disabled).toBe(true);
+    // The failed decision re-reads the host-validated bound preview, so both
+    // decisions re-arm instead of deadlocking behind the error card.
+    expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("拒绝"))?.hasAttribute("disabled")).toBe(false);
+    expect([...container.querySelectorAll("button")].find(button => button.textContent?.includes("允许本次"))?.hasAttribute("disabled")).toBe(false);
+    // An explicit second click re-sends the same bound decision, and the route
+    // adds no further attempt on its own.
+    const retryReject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("拒绝"));
+    await act(async () => { retryReject?.click(); }); await settle(); await settle();
+    expect(invoke.mock.calls.filter(([payload]) => payload.operation === "decideDispatchApproval")).toHaveLength(2);
   });
 
   it("drops the private full preview when leaving the assistant page", async () => {

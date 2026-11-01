@@ -49,6 +49,16 @@ def test_launcher_script_repairs_start_menu_shortcut_entry():
     launcher_action = source[launcher_action_start:launcher_action_end]
     assert "Repair-LauncherShortcut" not in launcher_action
 
+def test_windows_installer_uses_the_shared_desktop_shortcut_owner_after_publication():
+    source = (PROJECT_ROOT / "scripts" / "install_windows.ps1").read_text(encoding="utf-8")
+    published = source.index('-Label "Build and publish managed desktop package"')
+    shortcut = source.index("$null = Set-VibelutionDesktopLauncherShortcut")
+    assert shortcut > published
+    assert "Resolve-DesktopPublicEntryPath -Catalog $catalog -ProjectDir $ProjectDir" in source
+    assert '-Arguments (\'--workspace "{0}"\' -f $ProjectDir)' in source
+    assert "CreateShortcut" not in source
+
+
 def test_workbench_close_canary_quiesces_managed_workbench_before_packaged_run():
     source = WORKBENCH_CLOSE_CANARY_SCRIPT.read_text(encoding="utf-8")
 

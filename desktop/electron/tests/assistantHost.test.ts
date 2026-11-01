@@ -66,20 +66,20 @@ function fixture(options: { stale?: boolean; noReadyFirst?: boolean; graceful?: 
 }
 
 describe("AssistantHost", () => {
-  it("binds panel operations to the pinned resident and rejects foreign identities", async () => {
+  it("rejects the retired panel operations without reaching the panels endpoint", async () => {
     const { host, fetchImpl } = fixture({ graceful: true });
     await host.start();
-    fetchImpl.mockImplementationOnce(async (url, options) => {
-      expect(String(url)).toContain("/api/assistant/panels");
-      expect(JSON.parse(String(options?.body))).toEqual({ operation: "panelAffairs", kind: "todo", status: "open" });
-      return Response.json({ agentId: "a", items: [] });
-    });
-    await expect(host.request({ operation: "panelAffairs", kind: "todo", status: "open" })).resolves.toMatchObject({ agentId: "a" });
-    await expect(host.request({ operation: "panelAffairs", kind: "todo", status: "open", agentId: "other" } as unknown as AssistantHostRequest)).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
-    fetchImpl.mockResolvedValueOnce(Response.json({ agentId: "other", items: [] }));
-    await expect(host.request({ operation: "panelAffairs", kind: "", status: "" })).rejects.toThrow("ASSISTANT_IDENTITY_INVALID");
-    fetchImpl.mockResolvedValueOnce(Response.json({ agentId: "a", proposals: [{ agentId: "other" }] }));
-    await expect(host.request({ operation: "panelProposals" })).rejects.toThrow("ASSISTANT_IDENTITY_INVALID");
+    // Well-formed requests in the shapes the removed branch used to accept.
+    for (const request of [
+      { operation: "panelSettings" }, { operation: "panelDialogue" }, { operation: "panelProposals" },
+      { operation: "panelSettingsUpdate", payload: {} }, { operation: "panelModelUpdate", payload: { modelId: "m" } },
+      { operation: "panelDialogueUpdate", payload: {} }, { operation: "panelAffairAdd", payload: { title: "x" } },
+      { operation: "panelAffairs", kind: "todo", status: "open" },
+      { operation: "panelAffairComplete", itemId: "i" }, { operation: "panelAffairCancel", itemId: "i" },
+      { operation: "panelAffairReopen", itemId: "i" }, { operation: "panelAffairDue", itemId: "i", payload: { dueAt: null } },
+      { operation: "panelProposalAccept", proposalId: "p" }, { operation: "panelProposalReject", proposalId: "p" },
+    ]) await expect(host.request(request as unknown as AssistantHostRequest)).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    expect(fetchImpl.mock.calls.some(([url]) => String(url).includes("/api/assistant/panels"))).toBe(false);
     await host.stop();
   });
   it("only transports bound dispatch decisions with exact identities", async () => {

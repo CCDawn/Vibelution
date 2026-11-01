@@ -61,6 +61,16 @@ describe("Launcher assistant private bridge", () => {
     expect(owner.host.start).toHaveBeenCalledTimes(3);
     await expect(invokeAssistant(event, { operation: "computerExecute" }, owner)).rejects.toThrow("REQUEST_INVALID");
   });
+  it("rejects the retired panel operations before starting or reaching the host", async () => {
+    const { owner, event } = setup();
+    for (const operation of ["panelSettings", "panelSettingsUpdate", "panelModelUpdate", "panelDialogue", "panelDialogueUpdate",
+      "panelProposals", "panelProposalAccept", "panelProposalReject", "panelAffairs", "panelAffairAdd",
+      "panelAffairComplete", "panelAffairCancel", "panelAffairReopen", "panelAffairDue"]) {
+      await expect(invokeAssistant(event, { operation }, owner)).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    }
+    expect(owner.host.start).not.toHaveBeenCalled();
+    expect(owner.host.request).not.toHaveBeenCalled();
+  });
   it("hides or resizes without changing native owner lifecycle", async () => {
     const { owner, event } = setup();
     expect(await invokeAssistant(event, { operation: "hide" }, owner)).toEqual({ hidden: true });

@@ -258,6 +258,15 @@ Invoke-Native `
     -ArgumentList @($ManagedDesktopInstaller, "--project", $ProjectDir, "--apply") `
     -Label "Build and publish managed desktop package"
 
+Write-Step "Refresh the canonical desktop Launcher shortcut"
+. (Join-Path $ProjectDir "scripts\desktop_entry_catalog.ps1")
+$catalog = Assert-DesktopEntryCatalog -ProjectDir $ProjectDir
+$desktopEntry = Resolve-DesktopPublicEntryPath -Catalog $catalog -ProjectDir $ProjectDir
+$shortcutShell = New-Object -ComObject WScript.Shell
+$null = Set-VibelutionDesktopLauncherShortcut -Shell $shortcutShell -ProjectDir $ProjectDir `
+    -TargetPath $desktopEntry -Arguments ('--workspace "{0}"' -f $ProjectDir) `
+    -IconPath (Join-Path $ProjectDir "assets\icons\vibelution.ico")
+
 $configHome = Join-Path ([Environment]::GetFolderPath("MyDocuments")) "Vibelution\config"
 Write-Host ""
 Write-Host "Install finished." -ForegroundColor Green

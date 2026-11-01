@@ -53,6 +53,7 @@ const COPY = {
     retry: "重试", refresh: "刷新", placeholder: "和个人助理聊一聊…", send: "发送", sending: "正在发送…",
     unknownSend: "尚未确认消息是否收到。输入已保留，重试会核对同一条消息。",
     receipts: "任务状态暂不可用", checking: "正在连接 Launcher…",
+    statusStale: "个人助理状态轮询暂不可用，会话内容可能未更新",
   },
   en: {
     title: "Personal assistant", expand: "Open assistant chat", chat: "Chat", hide: "Hide assistant",
@@ -60,8 +61,13 @@ const COPY = {
     retry: "Retry", refresh: "Refresh", placeholder: "Chat with your assistant…", send: "Send", sending: "Sending…",
     unknownSend: "Delivery is unconfirmed. Your input is retained; retry checks the same message.",
     receipts: "Task status unavailable", checking: "Connecting to Launcher…",
+    statusStale: "Assistant status polling is unavailable; conversation content may be stale",
   },
 } as const;
+
+/** Aligns with PERSONAL_ASSISTANT_DISPATCH_LIMIT: bound the receipt history the
+ * route keeps and scans for pending approvals. */
+const LAUNCHER_ASSISTANT_DISPATCH_LIMIT = 50;
 
 function approvalAcceptDisabled(request: SessionToolApprovalRequest): boolean {
   const summary = request.argumentSummary;
@@ -317,7 +323,9 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     queryFn: async ({ signal }) => {
       const result = await getLauncherAssistantDispatches();
       signal.throwIfAborted();
-      return result;
+      // Same 50-row ceiling as the personal-assistant dispatch feed; the host
+      // request shape owns no limit field, so the route bounds what it retains.
+      return result.slice(0, LAUNCHER_ASSISTANT_DISPATCH_LIMIT);
     },
     enabled: reading, retry: false,
     refetchInterval: query => reading && query.state.data?.some(row => row.receipt?.shouldPoll)
@@ -670,7 +678,14 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       if (preview) await decideLauncherDispatchApproval(selected.row, selected.request, preview, decision);
       else await declineLauncherDispatchSummary(selected.row, selected.request);
     } catch {
-      if (mounted.current) setApprovalError(lang === "zh" ? "审批结果未确认，请刷新回执核对。" : "Approval outcome is unconfirmed; refresh the receipt.");
+      // A failed decision releases the dialog lock immediately: both buttons
+      // recover for a direct retry while the error card keeps explaining the
+      // failure, and the preview is re-read for a possibly renewed revision.
+      if (mounted.current) {
+        setApprovalError(lang === "zh" ? "审批结果未确认，请刷新回执核对。" : "Approval outcome is unconfirmed; refresh the receipt.");
+        setDecidedDispatchKey("");
+        setPreviewAttempt(value => value + 1);
+      }
     } finally {
       approvalGate.current = false;
       if (mounted.current) {
@@ -750,7 +765,11 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       ? preferences.idleMessage : sessionActivityStatusLabel(activity, lang)
       : copy.title);
 
-  if (status.isError && expanded) return <VStateSurface fill tone="error" title={copy.unavailable}
+  // A status refresh failure no longer discards the mounted conversation.
+  // While any session content exists (detail data), the page stays mounted
+  // behind one compact recovery banner; only a first-load failure with no
+  // content keeps the full-page error. Collapsed keeps its status line.
+  if (status.isError && expanded && !detail.data) return <VStateSurface fill tone="error" title={copy.unavailable}
     actions={<VButton onClick={() => void status.refetch()}>{copy.retry}</VButton>}>{status.error.message}</VStateSurface>;
 
   const refreshAll = () => {
@@ -857,6 +876,8 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     {themeSyncState !== "applied" ? <VStateSurface tone="error" title={themeSyncState === "unknown" ? (lang === "zh" ? "主题变更结果未确认" : "Theme change is unconfirmed") : themeSyncState === "conflict" ? (lang === "zh" ? "助理主题与全局主题不同" : "Assistant and global themes differ") : (lang === "zh" ? "主题尚未同步" : "Theme is not synchronized")}
       actions={<><VButton isDisabled={themePending} onClick={() => { if (themeGate.current) return; themeGate.current = true; setThemePending(true); void requestWorkbenchTheme(readStoredWorkbenchTheme()).then(result => { if (result !== "superseded") setThemeSyncState(result); }).finally(() => { themeGate.current = false; setThemePending(false); }); }}>{lang === "zh" ? "使用助理主题" : "Use assistant theme"}</VButton>
         <VButton isDisabled={themePending} onClick={() => { if (themeGate.current) return; themeGate.current = true; setThemePending(true); void useAuthorityTheme().then(result => { if (result !== "superseded") setThemeSyncState(result); }).finally(() => { themeGate.current = false; setThemePending(false); }); }}>{lang === "zh" ? "使用全局主题" : "Use global theme"}</VButton></>} /> : null}
+    {status.isError ? <VStateSurface density="compact" tone="error" title={copy.statusStale}
+      actions={<VButton onClick={() => void status.refetch()}>{copy.retry}</VButton>}>{status.error.message}</VStateSurface> : null}
     {showWelcome ? <LauncherAssistantWelcome lang={lang} onPrompt={changeDraft}/> : null}
     {detail.data ? <LazyConversationView
       runtimeApi={launcherConversationApi}
