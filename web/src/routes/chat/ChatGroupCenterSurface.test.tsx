@@ -2,9 +2,12 @@
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChatGroupCenterSurface, type ChatGroupCenterSurfaceProps } from "./ChatGroupCenterSurface";
+const messageModel = vi.hoisted(() => ({ records: [], loading: false, error: "" }));
+vi.mock("./useAgentMessageRecords", () => ({ useAgentMessageRecords: () => messageModel }));
+beforeEach(() => { messageModel.loading = false; messageModel.error = ""; });
 vi.mock("../../components/conversation/LazyConversationMarkdownRenderer", async () => {
   const { ConversationMarkdownRenderer } = await import("../../components/conversation/ConversationMarkdownRenderer");
   return { LazyConversationMarkdownRenderer: ConversationMarkdownRenderer };
@@ -307,7 +310,7 @@ describe("ChatGroupCenterSurface hand-test substitutes", () => {
     expect(html.indexOf("更多操作")).toBeLessThan(html.indexOf("启动一轮"));
   });
 
-  it("renders project-bus empty notice stream and broadcast composer", () => {
+  it("renders the shared message selection placeholder and broadcast composer", () => {
     const html = renderToStaticMarkup(
       <ChatGroupCenterSurface
         {...baseProps({
@@ -317,13 +320,14 @@ describe("ChatGroupCenterSurface hand-test substitutes", () => {
         })}
       />,
     );
-    expect(html).toContain("助手通知流");
-    expect(html).toContain("暂无通知。");
+    expect(html).toContain('data-testid="agent-message-center"');
+    expect(html).toContain("选择一条消息查看详情");
     expect(html).toContain("发送广播");
     expect(html).toContain("打断目标助手");
   });
 
-  it("shows the notice-stream skeleton during the initial project-bus load", () => {
+  it("shows the shared record skeleton while its initial reads are pending", () => {
+    messageModel.loading = true;
     const html = renderToStaticMarkup(
       <ChatGroupCenterSurface
         {...baseProps({
@@ -335,12 +339,20 @@ describe("ChatGroupCenterSurface hand-test substitutes", () => {
       />,
     );
 
-    expect(html).toContain("正在加载助手通知流");
+    expect(html).toContain("正在加载跨 Agent 消息");
     expect(html).toContain('data-testid="progressive-region-skeleton"');
     expect(html).not.toContain("暂无通知。");
   });
 
-  it("labels the project-bus view as a broadcast instead of borrowing room metadata", () => {
+  it("keeps message source failures visible beside the broadcast composer", () => {
+    messageModel.error = "消息来源读取失败";
+    const html = renderToStaticMarkup(<ChatGroupCenterSurface {...baseProps({ projectBusActive: true, standardGroupRoomActive: false })} />);
+    expect(html).toContain('role="alert"');
+    expect(html).toContain("消息来源读取失败");
+    expect(html).toContain('aria-label="发送项目广播"');
+  });
+
+  it("keeps the shared message center independent of room metadata", () => {
     const html = renderToStaticMarkup(
       <ChatGroupCenterSurface
         {...baseProps({
@@ -351,8 +363,8 @@ describe("ChatGroupCenterSurface hand-test substitutes", () => {
       />,
     );
 
-    expect(html).toContain("全局广播");
-    expect(html).toContain("3 位 active Agent");
+    expect(html).toContain('data-testid="agent-message-center"');
+    expect(html).toContain('aria-label="发送项目广播"');
     expect(html).not.toContain("round_robin");
     expect(html).not.toContain("discussion");
   });
@@ -369,7 +381,7 @@ describe("ChatGroupCenterSurface hand-test substitutes", () => {
       />,
     );
 
-    expect(html).toContain("正在统计 active Agent");
+    expect(html).toContain("选择一条消息查看详情");
     expect(html).not.toContain("7 位 active Agent");
   });
 
@@ -400,7 +412,7 @@ describe("ChatGroupCenterSurface hand-test substitutes", () => {
       />,
     );
 
-    expect(html).toContain("暂无通知。");
+    expect(html).toContain("选择一条消息查看详情");
     expect(html).not.toContain("群聊议题不应出现在广播流");
     expect(html).not.toContain("第 1 轮");
   });
