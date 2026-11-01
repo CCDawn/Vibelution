@@ -279,8 +279,16 @@ it("invalidates a preview when its form changes", async () => {
   vi.mocked(api.previewAIBacktest).mockResolvedValue(preview);
   await render(); await act(async () => button("检查数据与预算").click());
   expect([...node.querySelectorAll("button")].some(item => item.textContent?.trim() === "开始AI回测")).toBe(true);
-  await act(async () => setInputValue("AI回测样本外起点", "2026-08-02"));
+  const holdoutInput = node.querySelector<HTMLInputElement>('input[aria-label="AI回测样本外起点"]')!;
+  // The default date range rolls forward, so choose a holdout within that range.
+  const holdoutDate = holdoutInput.max;
+  expect(holdoutDate).not.toBe("");
+  await act(async () => setInputValue("AI回测样本外起点", holdoutDate));
+  expect(holdoutInput.value).toBe(holdoutDate);
   expect([...node.querySelectorAll("button")].some(item => item.textContent?.trim() === "开始AI回测")).toBe(false);
+  await act(async () => button("检查数据与预算").click());
+  expect(api.previewAIBacktest).toHaveBeenLastCalledWith("a", expect.objectContaining({ outOfSampleStartDate: holdoutDate }));
+  expect(api.startAIBacktest).not.toHaveBeenCalled();
 });
 
 it("loads a persisted single-stock run and stops that exact run", async () => {
