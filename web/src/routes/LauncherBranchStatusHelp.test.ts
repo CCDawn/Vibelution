@@ -108,6 +108,16 @@ describe("Launcher branch status help", () => {
     expect(gitStatusExplanation(instance({ cleanupRisks: ["delete_unmerged"] }), true)).toContain("尚未合入 main");
   });
 
+  it("explains unknown-dirty foreign worktrees as unscanned, not clean", () => {
+    const foreign = instance({ dirtyUnknown: true, mergedToMain: true });
+    expect(gitStatusExplanation(foreign, true)).toContain("状态未知");
+    expect(gitStatusExplanation(foreign, false)).toContain("unknown");
+    // Unknown dirtiness blocks a cleanup recommendation instead of reading clean.
+    const recommendation = cleanupRecommendation(foreign, "stopped", true);
+    expect(recommendation.level).toBe("avoid");
+    expect(recommendation.reason).toContain("外部工作区");
+  });
+
   it("keeps the tooltip trigger on a local style map", () => {
     expect(helpSource).toContain("styles.trigger");
     expect(helpSource).not.toContain('className="inline-flex');

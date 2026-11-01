@@ -52,6 +52,11 @@ export function runtimeProgressExplanation(
 
 export function gitStatusExplanation(item: LauncherBranchInstance, isZh: boolean): string {
   const risks = new Set(item.cleanupRisks || []);
+  if (item.dirtyUnknown === true) {
+    return isZh
+      ? "这是登记在本仓库之外的其它工具工作区，Launcher 不扫描它的未提交改动，状态未知。"
+      : "This worktree belongs to an external tool; Launcher does not scan it, so its uncommitted-change state is unknown.";
+  }
   if (item.dirty || risks.has("discard_dirty")) {
     return isZh
       ? "工作区有尚未提交的文件；强制清理会丢弃这些改动。"
@@ -99,7 +104,9 @@ export function cleanupRecommendation(
   } else if (state === "failed" || state === "partial") {
     blockingReasons.push(isZh ? "先关闭失败记录，不要用清理代替关闭" : "close the failed record first; do not use cleanup as a substitute");
   }
-  if (item.dirty || risks.has("discard_dirty")) {
+  if (item.dirtyUnknown === true) {
+    blockingReasons.push(isZh ? "先自行确认该外部工作区没有需要保留的未提交改动" : "confirm this external worktree has no uncommitted changes you need first");
+  } else if (item.dirty || risks.has("discard_dirty")) {
     blockingReasons.push(isZh ? "先提交、暂存或备份未提交改动" : "commit, stash, or back up the uncommitted changes");
   }
   if (item.mergedToMain === false || risks.has("delete_unmerged")) {

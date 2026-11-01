@@ -259,8 +259,8 @@ def list_branch_instances(checkout: Path | str, *, identity_only: bool = False) 
             continue
         seen_paths.add(_norm(path))
         unique_worktrees.append((entry, path))
-    dirty_by_path = {} if identity_only else _worktree_dirty_map([path for _, path in unique_worktrees])
-
+    roles: list[tuple[CheckoutRole, str]] = []
+    dirty_scan_paths: list[Path] = []
     for entry, path in unique_worktrees:
         role, slug = _classify_checkout(
             path,
@@ -269,6 +269,17 @@ def list_branch_instances(checkout: Path | str, *, identity_only: bool = False) 
             retired_pool=layout.retired_pool,
             legacy_siblings=layout.legacy_siblings,
         )
+        roles.append((role, slug))
+        # Only Git-governed checkouts (main/task/legacy_task/retired) pay for a
+        # ``git status`` scan. Pool-external registrations (role=unknown: PA
+        # flows, external development lanes) are never scanned here — every
+        # skipped scan is one fewer chained Launcher state refresh. Their dirty
+        # fact is reported as unknown via ``dirtyUnknown`` instead.
+        if role != "unknown" and not identity_only:
+            dirty_scan_paths.append(path)
+    dirty_by_path = {} if identity_only else _worktree_dirty_map(dirty_scan_paths)
+
+    for (entry, path), (role, slug) in zip(unique_worktrees, roles):
         branch = _display_branch(str(entry.get("branch") or ""))
         if str(entry.get("detached") or "") == "true" or not branch:
             branch = "detached"
@@ -282,6 +293,7 @@ def list_branch_instances(checkout: Path | str, *, identity_only: bool = False) 
         # unrelated branches into one registry key.
         instance_id = _instance_id(kind, slug=slug or _norm(path), branch=branch)
         dirty = dirty_by_path.get(_norm(path), False)
+        dirty_unknown = role == "unknown" and not identity_only
         observation = {} if identity_only else _runtime_observation(path)
         item = _instance_payload(
             instance_id=instance_id,
@@ -293,6 +305,7 @@ def list_branch_instances(checkout: Path | str, *, identity_only: bool = False) 
             current=_same_path(path, current_root),
             legacy=role == "legacy_task",
             dirty=dirty,
+            dirty_unknown=dirty_unknown,
             checked_out=True,
             observation=observation,
         )
@@ -753,6 +766,7 @@ def _instance_payload(
     dirty: bool,
     checked_out: bool,
     observation: dict[str, Any],
+    dirty_unknown: bool = False,
 ) -> dict[str, Any]:
     pids = observation.get("pids") if isinstance(observation.get("pids"), dict) else {}
     alive = bool(observation.get("alive"))
@@ -765,7 +779,12 @@ def _instance_payload(
         "head": head,
         "current": current,
         "legacy": legacy,
+        # ``dirty`` stays a plain boolean (native bridge consumers do bool
+        # extraction and must never see null). When the worktree was not
+        # scanned (foreign role=unknown checkout), ``dirtyUnknown`` carries
+        # the real semantics: the dirty fact is unknown, not clean.
         "dirty": dirty,
+        "dirtyUnknown": bool(dirty_unknown),
         "checkedOut": checked_out,
         "alive": alive,
         "observedState": str(observation.get("observedState") or ""),
@@ -775,7 +794,8 @@ def _instance_payload(
             "window": int(pids.get("window") or 0),
             "manager": int(pids.get("manager") or 0),
         },
-        "promotable": kind == "worktree" and checked_out and bool(head) and not dirty,
+        # An unscanned foreign worktree must never look promotable.
+        "promotable": kind == "worktree" and checked_out and bool(head) and not dirty and not dirty_unknown,
     }
 
 

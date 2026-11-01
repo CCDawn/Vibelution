@@ -23,6 +23,7 @@ import {
   instanceWindowOpen,
   isAdmissionBlocked,
   isCleanupEligible,
+  isDirtyUnknown,
   overlayCleanupMergeStatus,
   lifecycleIntentRejectMessage,
   summarizeLifecycleFeedback,
@@ -593,7 +594,7 @@ export function LauncherBranchInstancesPanel({
       minWidth: 92,
       render: (item: LauncherBranchInstance) => {
         const state = instanceRuntimeState(item, pendingOperation);
-        if (!item.dirty && item.mergedToMain !== false) return null;
+        if (!item.dirty && !isDirtyUnknown(item) && item.mergedToMain !== false) return null;
         return (
           <LauncherBranchStatusHelp item={item} state={state} isZh={zh} kind="git">
             <span>{formatGitStatus(item, zh)}</span>
@@ -679,7 +680,7 @@ export function LauncherBranchInstancesPanel({
           <div className={styles.desktopList}><VDenseTable ariaLabel={activeHint} className={styles.statusTable} resizable rows={activeRows} emptyText={tabEmptyText} getRowKey={(item) => item.id}
             onRowClick={(item) => { onSelect(item.id); setDetailId(item.id); }}
             getRowState={(item) => ({selected: cleanupSelected.includes(item.id)})}
-            columns={[...(activeRows.some(isCleanupEligible) ? [selectColumn] : []), ...primaryColumns.filter(column => column.id !== "git" || activeRows.some(item => item.dirty || item.mergedToMain === false))]} /></div>
+            columns={[...(activeRows.some(isCleanupEligible) ? [selectColumn] : []), ...primaryColumns.filter(column => column.id !== "git" || activeRows.some(item => item.dirty || isDirtyUnknown(item) || item.mergedToMain === false))]} /></div>
           <div className={styles.mobileList} role="list" aria-label={activeHint}>{activeRows.map((item) => <div key={item.id} role="listitem" className={styles.mobileRow}>
             <VButton variant="ghost" className={styles.mobileBranchButton} title={launcherBranchDisplayName(item)} onPress={() => { onSelect(item.id); setDetailId(item.id); }}><span className={styles.mobileBranchName}>{displayName(item)}{item.current ? (zh ? " · 当前" : " · Current") : ""}</span></VButton>
             <div className={styles.mobileActions}>{primaryColumns[1].render(item)}{renderLifecycleActions(item)}</div>
