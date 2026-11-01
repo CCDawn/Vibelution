@@ -2093,6 +2093,15 @@ class AgentRuntime:
         retention 链）；``stop_reason`` 透出非预算类的收轮理由（迭代上限、
         非对话模式紧急压缩），由主循环分诊文案与诊断码。
         """
+        self._last_context_compression_failure_fields = {}
+
+        def record_compression_event(phase: str, event_code: str, **kwargs: Any) -> None:
+            if event_code == "agent.context_budget_exhausted":
+                self._last_context_compression_failure_fields = self._safe_context_budget_diagnostic_fields(
+                    kwargs.get("fields")
+                )
+            _record_agent_scene_event(phase, event_code, **kwargs)
+
         (
             compressed,
             should_break,
@@ -2120,7 +2129,7 @@ class AgentRuntime:
             estimate_tokens_fn=self._estimate_context_input_tokens,
             get_ui_fn=get_ui,
             get_state_manager_fn=get_state_manager,
-            scene_recorder_fn=_record_agent_scene_event,
+            scene_recorder_fn=record_compression_event,
             context_input_hard_limit=int(getattr(self, "_context_input_hard_limit", 0) or 0),
             post_compression_target_tokens=int(getattr(self, "_post_compression_target_tokens", 0) or 0),
             retention_contract=self._context_budget_retention_contract(),
@@ -2922,6 +2931,8 @@ class AgentRuntime:
         self._runtime_context_seeded_by_host = False
         self._core_prompt_snapshot_seeded_by_host = False
         self._last_turn_metadata = {}
+        self._last_turn_failed = False
+        self._last_context_compression_failure_fields = {}
         self._last_visible_response_text = ""
         self._stream_recovery_retry_count = 0
         self._last_response_tool_calls = 0
@@ -3730,6 +3741,7 @@ class AgentRuntime:
                                 retryable=False,
                                 recovery_action="compress_context_or_new_session",
                                 fields={
+                                    **dict(getattr(self, "_last_context_compression_failure_fields", {}) or {}),
                                     "iteration": iteration,
                                     "compressedTokens": after_tokens,
                                     "beforeTokens": current_tokens,
@@ -4563,6 +4575,25 @@ class AgentRuntime:
         except Exception:
             pass
 
+    @staticmethod
+    def _safe_context_budget_diagnostic_fields(fields: Any) -> Dict[str, Any]:
+        """Keep only bounded context guard codes and integer budget facts."""
+        if not isinstance(fields, dict):
+            return {}
+        safe: Dict[str, Any] = {}
+        guard = fields.get("guardReason")
+        if isinstance(guard, str) and re.fullmatch(r"[a-z][a-z0-9_]{0,80}", guard):
+            safe["guardReason"] = guard
+        for key in (
+            "estimatedTokens", "afterTokens", "contextInputHardLimit", "hardLimit",
+            "postCompressionTargetTokens", "summaryMaxChars", "iteration", "messageCount",
+            "beforeTokens", "compressedTokens",
+        ):
+            value = fields.get(key)
+            if type(value) is int and 0 <= value <= 1_000_000_000:
+                safe[key] = value
+        return safe
+
     def _record_turn_failure_diagnostic(
         self,
         *,
@@ -4587,6 +4618,11 @@ class AgentRuntime:
         reason_code_value = _bounded(reason_code, 120) or category_value
         reason_summary_value = _bounded(reason_summary, 240) or "当前轮执行失败"
         reason_detail_value = _bounded(reason_detail, 500) or reason_summary_value
+        if category_value == "context_error":
+            fields = self._safe_context_budget_diagnostic_fields(fields)
+            if fields:
+                suffix = " [" + ";".join(f"{key}={value}" for key, value in fields.items()) + "]"
+                reason_detail_value = reason_detail_value[:500 - len(suffix)] + suffix
         chain_stage_value = _bounded(chain_stage, 120) or "agent_turn"
         event_code_value = _bounded(event_code, 160) or "agent.turn.failed"
         exception_type_value = _bounded(exception_type, 160)
