@@ -79,6 +79,16 @@ const previewExemptDesignSections = new Set([
   // queries; update state and its restart action are owned by Launcher IPC.
   "LauncherProjectRoute",
   "LauncherUpdatesRoute",
+  // Launcher-owned route compositions, not standalone VUI exports. Native
+  // version/update state, settings drafts, instance lifecycles and maintenance
+  // plans are covered by their interaction tests and the isolated real-route
+  // browser checks (including failed update retry and inventory read failures).
+  "LauncherUpdateTopbar",
+  "LauncherStartupSettingsPanel",
+  "LauncherBranchInstancesPanel",
+  "LauncherToolsRoute",
+  "LauncherProcessMonitorPanel",
+  "LauncherProjectMaintenancePanel",
   "PersonalAssistantOverview",
   // Route-owned operator control: window choices and one-shot confirmations
   // require live consent state, not a static standalone VUI export. Covered
