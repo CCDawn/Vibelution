@@ -61,6 +61,39 @@ def _sources(checkpoint, by_id, events):
     return sorted(sources.values(), key=lambda e: e.sequence)
 
 
+def _ordered_subsequence(values: list[str], source: list[str]) -> bool:
+    remaining = iter(source)
+    return all(any(value == candidate for candidate in remaining) for value in values)
+
+
+def _summary_has_source_bound_extra_facts(checkpoint, summary_facts, covered_facts, sources, by_id, events, filtered):
+    """Authenticate extras against surviving ordinary user sources, in order."""
+    if not _ordered_subsequence(covered_facts, summary_facts):
+        return False
+    canonical_checkpoint = by_id.get(checkpoint.event_id)
+    if canonical_checkpoint is None:
+        return False
+    domain = {source.event_id: source for source in sources}
+    for item in filtered:
+        # filtered can contain derived replacements. Its identity marks the
+        # surviving domain; only the canonical journal owns source content.
+        event = by_id.get(item.event_id)
+        if (event is None or event.session_id != canonical_checkpoint.session_id or not event.visible_in_model
+                or not (0 < event.sequence < canonical_checkpoint.sequence) or not _ordinary_source(event)):
+            continue
+        if event.event_type == EVENT_USER_MESSAGE and event.provider_role in {"", "user"}:
+            domain[event.event_id] = event
+        elif event.event_type == EVENT_COMPACTION_CHECKPOINT:
+            for source in _sources(event, by_id, events):
+                domain[source.event_id] = source
+    trusted_facts = []
+    for source in sorted(domain.values(), key=lambda event: event.sequence):
+        content = source.payload.get("content")
+        if isinstance(content, str):
+            trusted_facts.extend(recoverable_user_statements(content))
+    return _ordered_subsequence(summary_facts, list(dict.fromkeys(trusted_facts)))
+
+
 def recover_legacy_checkpoint_facts(events: list[TurnJournalEvent], filtered: list[TurnJournalEvent]) -> list[TurnJournalEvent]:
     """Backfill surviving checkpoints using only active, covered user sources.
 
@@ -86,7 +119,12 @@ def recover_legacy_checkpoint_facts(events: list[TurnJournalEvent], filtered: li
                 facts.extend(recovered)
                 source_ids.append(source.event_id)
         facts = list(dict.fromkeys(facts))
-        if not facts or retained_user_facts([], [original]) == facts:
+        summary_facts = retained_user_facts([], [original])
+        if not facts or summary_facts == facts:
+            continue
+        if _summary_has_source_bound_extra_facts(
+            checkpoint, summary_facts, facts, sources, by_id, events, filtered,
+        ):
             continue
         # Candidate text cannot supply the protected block: its contents are
         # escaped by compose_retained_summary. Only source-derived facts can.

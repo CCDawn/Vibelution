@@ -50,6 +50,18 @@ from core.infrastructure.runtime_input import (
 )
 
 
+@pytest.mark.parametrize("cap", [True, False, 0, -1, 1.5, "400", float("inf"), 1_000_001])
+def test_retained_summary_cap_rejects_invalid_resource_bounds(cap):
+    with pytest.raises(ValueError, match="max_retained_summary_chars"):
+        EnhancedTokenCompressor().compress([], max_retained_summary_chars=cap)
+
+
+@pytest.mark.parametrize("base,cap", [(200, 100), (100, 99)])
+def test_retained_summary_cap_cannot_be_smaller_than_narrative_budget(base, cap):
+    with pytest.raises(ValueError, match="max_retained_summary_chars"):
+        EnhancedTokenCompressor().compress([], max_chars=base, max_retained_summary_chars=cap)
+
+
 # ============================================================================
 # 测试辅助函数和数据
 # ============================================================================

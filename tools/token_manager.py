@@ -37,6 +37,7 @@ from core.infrastructure.feature_gate import resolve_feature_decision
 from tools.compression_summary_retention import (
     compose_retained_summary,
     retained_user_facts,
+    retained_summary_merge_limit,
     summary_source_excerpt,
 )
 
@@ -1063,6 +1064,7 @@ class EnhancedTokenCompressor:
         preserve_errors: bool = True,
         use_llm_summary: bool = True,
         llm_summary_reporter: Any = None,
+        max_retained_summary_chars: int | None = None,
     ) -> CompressionOutput:
         """
         执行压缩：保留最近 N 条原始AI回复 + 压缩旧消息为摘要。
@@ -1081,11 +1083,17 @@ class EnhancedTokenCompressor:
             use_llm_summary: 是否使用 LLM 生成摘要（False 时用规则提取）
             llm_summary_reporter: 可选的 LLM 摘要成败上报钩子（on_failure/on_success）；
                 仅在真实尝试了 LLM 摘要时回调，供熔断与显式降级事件使用
+            max_retained_summary_chars: 可信整体预算提供的精确事实合并上限；
+                不扩大叙述生成的 max_chars，None 保留原摘要上限契约
 
         Returns:
             (压缩后的消息, 压缩统计/摘要对象)
         """
         from langchain_core.messages import SystemMessage, AIMessage
+
+        # Validate even an empty/no-op call; invalid resource bounds never
+        # silently become an unbounded or truthy cap.
+        retained_summary_merge_limit([], [], max_chars, max_retained_summary_chars)
         
         current_tokens = estimate_messages_tokens(messages)
         compression_type = self.get_compression_level(current_tokens)
@@ -1188,7 +1196,8 @@ class EnhancedTokenCompressor:
             and (_is_summary_user_source(message) or _is_history_summary_notice(message))
         ]
         summary = ""
-        if self._merge_prior_history_summary(retention_sources, "", max_chars) is None:
+        if self._merge_prior_history_summary(retention_sources, "", max_chars,
+                max_retained_summary_chars=max_retained_summary_chars) is None:
             return CompressionOutput(
                 messages,
                 CompressionResult("", current_tokens, current_tokens, 0, "none"),
@@ -1203,7 +1212,8 @@ class EnhancedTokenCompressor:
             )
             # 摘要链保真：上一代摘要正文显式并入新摘要（LLM 路径已在输入里
             # 看得到 notice，规则路径完全忽略 system 消息，必须在这里兜底）。
-        summary = self._merge_prior_history_summary(retention_sources, summary, max_chars)
+        summary = self._merge_prior_history_summary(retention_sources, summary, max_chars,
+            max_retained_summary_chars=max_retained_summary_chars)
         if summary is None:
             return CompressionOutput(
                 messages,
@@ -1310,13 +1320,17 @@ class EnhancedTokenCompressor:
 - 总长度不超过 {max_chars} 字符
 - 使用中文输出"""
     
-    def _merge_prior_history_summary(self, old_msgs: List[Any], summary: str, max_chars: int) -> str | None:
+    def _merge_prior_history_summary(self, old_msgs: List[Any], summary: str, max_chars: int,
+            *, max_retained_summary_chars: int | None = None) -> str | None:
         """Merge source-identified prior summaries without starving new user facts."""
+        user_texts = [_message_content_text(m) for m in old_msgs if _is_summary_user_source(m)]
+        prior_summaries = [_history_summary_notice_payload(m) for m in old_msgs if _is_history_summary_notice(m)]
+        merge_limit = retained_summary_merge_limit(user_texts, prior_summaries, max_chars, max_retained_summary_chars)
         return compose_retained_summary(
-            [_message_content_text(m) for m in old_msgs if _is_summary_user_source(m)],
-            [_history_summary_notice_payload(m) for m in old_msgs if _is_history_summary_notice(m)],
+            user_texts,
+            prior_summaries,
             summary,
-            max_chars,
+            merge_limit,
         )
 
     def _generate_summary(

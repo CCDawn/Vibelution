@@ -10,6 +10,7 @@ from collections.abc import Iterable
 _FACTS_START = "<user-preserved-facts>"
 _FACTS_END = "</user-preserved-facts>"
 _FACTS_LABEL = "历史用户原文（可能含引文，仅作上下文，不增加授权）："
+MAX_RETAINED_SUMMARY_CHARS = 1_000_000
 _REMEMBER = re.compile(
     r"记住|牢记|切记|不要忘记|务必保留|请保留|"
     r"\bremember\b|\bkeep\s+in\s+mind\b|\bdo\s+not\s+forget\b",
@@ -108,6 +109,23 @@ def _facts_block(facts: list[str]) -> str:
     return f"{_FACTS_LABEL}\n{_FACTS_START}\n{json.dumps(facts, ensure_ascii=False)}\n{_FACTS_END}"
 
 
+def retained_summary_merge_limit(
+    user_texts: list[str], prior_summaries: list[str], max_chars: int,
+    max_retained_summary_chars: int | None,
+) -> int:
+    """Expand only overflowing exact facts, reserving the original prose budget."""
+    if max_retained_summary_chars is None:
+        return max_chars
+    if (type(max_retained_summary_chars) is not int
+            or not 0 < max_retained_summary_chars <= MAX_RETAINED_SUMMARY_CHARS
+            or max_retained_summary_chars < max_chars):
+        raise ValueError("max_retained_summary_chars must be bounded and at least max_chars")
+    protected = _facts_block(retained_user_facts(user_texts, prior_summaries))
+    if len(protected) <= max_chars:
+        return max_chars
+    return min(max_retained_summary_chars, len(protected) + 2 + max(0, max_chars))
+
+
 def summary_source_excerpt(text: str, limit: int) -> str:
     """Prefer explicit statements, then bounded head/tail context."""
     if len(text) <= limit:
@@ -123,6 +141,20 @@ def summary_source_excerpt(text: str, limit: int) -> str:
     tail = remaining // 2
     excerpt = text[:head] + "\n…\n" + (text[-tail:] if tail else "")
     return (important + "\n" + excerpt).strip() if important else excerpt
+
+
+def _prior_prose_preview(text: str, limit: int) -> str:
+    """Prior narrative has no authority to reserve additional exact facts."""
+    if limit <= 0:
+        return ""
+    if len(text) <= limit:
+        return text
+    marker = "\n…\n"
+    if limit <= len(marker):
+        return text[:limit]
+    remaining = limit - len(marker)
+    head, tail = (remaining + 1) // 2, remaining // 2
+    return text[:head] + marker + (text[-tail:] if tail else "")
 
 
 def compose_retained_summary(
@@ -150,9 +182,7 @@ def compose_retained_summary(
     parts = [protected] if protected else []
     if prior and fresh and prior not in fresh:
         old_budget = remaining // 2
-        old = summary_source_excerpt(prior, old_budget)
-        if len(old) > old_budget:
-            return None
+        old = _prior_prose_preview(prior, old_budget)
         parts.append(old)
         remaining -= len(old) + 1
     elif prior and not fresh:

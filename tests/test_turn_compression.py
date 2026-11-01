@@ -111,7 +111,7 @@ def _run(*, messages, compressor, config, extra=None, **kwargs):
         compression_strategy=kwargs.pop("compression_strategy", _FakeStrategy()),
         prompt_manager=None,
         turn_runtime_fn=kwargs.pop("turn_runtime_fn", lambda: {"sessionId": "s1", "runId": "t1"}),
-        estimate_tokens_fn=_estimate,
+        estimate_tokens_fn=kwargs.pop("estimate_tokens_fn", _estimate),
         get_ui_fn=lambda: ui,
         get_state_manager_fn=lambda: SimpleNamespace(set_state=lambda *a, **k: None),
         scene_recorder_fn=lambda *a, **k: events.append({"args": a, "kwargs": k}),
@@ -121,6 +121,61 @@ def _run(*, messages, compressor, config, extra=None, **kwargs):
         extra["ui"] = ui
         extra["events"] = events
     return result
+
+
+@pytest.mark.parametrize("hard,target,expected", [(1000, 600, 2400), (400_000, 300_000, 1_000_000),
+    (1000, 0, None), (0, 600, None), (True, 600, None), (1000, "600", None),
+    (1, 1, None), (20, 20, None), (30, 30, 120)])
+def test_only_valid_native_budget_supplies_fact_retention_cap(hard, target, expected):
+    compressor = _FakeCompressor([HumanMessage(content="current")])
+    _run(messages=[AIMessage(content="old" * 100), HumanMessage(content="current")],
+         compressor=compressor, config=_feature_config(),
+         context_input_hard_limit=hard, post_compression_target_tokens=target)
+    assert compressor.calls[0].get("max_retained_summary_chars") == expected
+
+
+def test_expanded_fact_summary_still_fails_when_notice_exceeds_whole_token_budget(monkeypatch):
+    from tests.test_compression_summary_retention import _compressor
+    from tools.compression_summary_retention import retained_user_facts
+    fact = "Remember exact identifier: " + "QZ" * 80 + "."
+    messages = [SystemMessage(content="policy"), HumanMessage(content=fact),
+                AIMessage(content="old history " * 600), HumanMessage(content="Continue.")]
+    extras = {}
+    result = _run(messages=messages, compressor=_compressor(monkeypatch, llm=True),
+        config=_feature_config(), extra=extras, context_input_hard_limit=320,
+        post_compression_target_tokens=240)
+    assert result[0] == messages and result[1] is True
+    guard = next(event["kwargs"]["fields"]["guardReason"] for event in extras["events"]
+                 if event["args"][1] == "agent.context_budget_exhausted")
+    assert guard == "post_compression_over_hard_limit"
+    assert retained_user_facts([fact], []) == [fact]
+
+
+@pytest.mark.parametrize("window_required", [True, False])
+def test_expanded_fact_summary_checkpoint_failure_keeps_existing_retirement_contract(monkeypatch, tmp_path, window_required):
+    from tests.test_compression_summary_retention import _compressor
+    from tools.compression_strategy import CompressionConfig
+    attempts, extras = [], {}
+    monkeypatch.setattr("core.chat.conversation_ledger.append_context_compression_checkpoint",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("checkpoint unavailable")))
+    monkeypatch.setattr("core.chat.conversation_ledger.append_context_compression_attempt",
+                        lambda *a, **k: attempts.append(k) or SimpleNamespace(event_id="failed-attempt"))
+    strategy = SimpleNamespace(determine_level_with_iteration=lambda *a: CompressionLevel.STANDARD,
+        get_config=lambda *a: CompressionConfig(level=CompressionLevel.STANDARD, summary_max_chars=100,
+            keep_ai_messages=1, preserve_errors=False))
+    messages = [SystemMessage(content="policy"), HumanMessage(content="Remember exact code: " + "QZ" * 80 + "."),
+        AIMessage(content="old " * 1600), AIMessage(content="kept " * 200), HumanMessage(content="Continue.")]
+    result = _run(messages=messages, compressor=_compressor(monkeypatch, llm=True),
+        config=_feature_config(), project_root=str(tmp_path), extra=extras, compression_strategy=strategy,
+        context_input_hard_limit=1000 if window_required else 10_000,
+        post_compression_target_tokens=650 if window_required else 9000, threshold_tokens=8000)
+    assert attempts and attempts[0]["status"] == "failed_preserved"
+    assert attempts[0]["summary"] == ""
+    assert result[1] is window_required
+    if window_required:
+        assert result[0] == messages
+        assert any(event["kwargs"]["fields"].get("guardReason") == "budget_window_checkpoint_not_written"
+                   for event in extras["events"])
 
 
 def test_compression_uses_current_session_for_checkpoint_and_tool_references(monkeypatch, tmp_path):

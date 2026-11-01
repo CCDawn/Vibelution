@@ -27,6 +27,7 @@ from core.orchestration.agent_runtime_bindings import (
 )
 from core.ui.cli_ui import get_ui
 from tools.compression_strategy import CompressionLevel, get_compression_strategy
+from tools.compression_summary_retention import MAX_RETAINED_SUMMARY_CHARS
 from tools.token_manager import estimate_messages_tokens
 
 
@@ -686,6 +687,14 @@ def compress_turn_messages(
             trigger_source=resolved_trigger_source,
             recorder=recorder,
         )
+    retention_budget = {}
+    if (type(context_input_hard_limit) is int and context_input_hard_limit > 0
+            and type(post_compression_target_tokens) is int and post_compression_target_tokens > 0):
+        retained_summary_cap = min(
+            MAX_RETAINED_SUMMARY_CHARS, min(context_input_hard_limit, post_compression_target_tokens) * 4,
+        )
+        if retained_summary_cap > comp_config.summary_max_chars:
+            retention_budget["max_retained_summary_chars"] = retained_summary_cap
     compression_output = token_compressor.compress(
         messages_for_compression,
         max_chars=comp_config.summary_max_chars,
@@ -694,6 +703,7 @@ def compress_turn_messages(
         preserve_errors=comp_config.preserve_errors,
         use_llm_summary=use_llm,
         llm_summary_reporter=summary_reporter,
+        **retention_budget,
     )
     compressed, summary = compression_output[0], compression_output[1]
     # The exact set of messages the summary folded (None for compressors that
