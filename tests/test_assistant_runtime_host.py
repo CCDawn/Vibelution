@@ -249,6 +249,8 @@ def test_startup_recovery_can_use_the_bound_action_owner():
     class Dispatch:
         def project_ids(self):
             return ("authorized-project",)
+        async def available_projects(self, **kwargs):
+            return {"projects": [{"projectId": "authorized-project"}]}
         async def heartbeat(self):
             pass
     class Recovering(Native):
@@ -379,7 +381,8 @@ def test_main_only_project_snapshot_updates_same_owner_and_rejects_browser_origi
 
 
 @pytest.mark.parametrize(("document", "expected"), [
-    ("", {"displayName": "", "avatarPreset": "default"}),
+    ("", {"displayName": "ENV_NAME_SENTINEL", "avatarPreset": "default"}),
+    ('[user_profile]\ndisplay_name = "   "\n', {"displayName": "ENV_NAME_SENTINEL", "avatarPreset": "default"}),
     ('[user_profile]\ndisplay_name = "' + "🙂" * 120 + '"\navatar_preset = "initial"\n',
      {"displayName": "🙂" * 120, "avatarPreset": "initial"}),
     ('[user_profile]\ndisplay_name = "Temp operator"\navatar_preset = "spark"\nbio = "BIO_SENTINEL"\npreferences = ["PREFERENCE_SENTINEL"]\navatar_image_path = "PATH_SENTINEL"\n[llm]\nsecret = "SECRET_SENTINEL"\n',
@@ -437,8 +440,11 @@ def test_native_status_rereads_operator_profile_and_keeps_identity_on_read_failu
     assert result["assistant"] == assistant
     assert result["operatorProfile"] == {"displayName": "Second", "avatarPreset": "codex"}
     assert result["operatorAssetsVersion"] == 1
+    assert result["assistantAvatarVersion"] == 1
+    assert result["assistantAvatarRevision"] is None
     def unavailable(*args):
         raise ValueError("PRIVATE_PATH_OR_CONFIG_SENTINEL")
     monkeypatch.setattr(public_config, "read_existing_config_snapshot", unavailable)
     assert facade.identity() == {"assistant": assistant, "settings": {"ok": True}, "operatorAssetsVersion": 1,
-                                 "operatorAssetRevisions": {"avatar": None, "background": None}, "attachmentVersion": 1}
+                                 "operatorAssetRevisions": {"avatar": None, "background": None}, "attachmentVersion": 1,
+                                 "assistantAvatarVersion": 1, "assistantAvatarRevision": None}

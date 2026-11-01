@@ -834,6 +834,7 @@ def _transport(
     get_status: str = "running",
     server_version: str = "0.3.1",
     api_protocol_version: str = "1.0",
+    source_identity: dict | None = None,
 ) -> httpx.MockTransport:
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append(request)
@@ -848,12 +849,14 @@ def _transport(
         if request.url.path == "/api/v1/external-agent/info":
             return httpx.Response(
                 200,
-                json={
+                content=json.dumps({
                     "apiProtocolVersion": api_protocol_version,
                     "serverVersion": server_version,
                     "projectRoot": str(root.resolve()),
                     "runtimeSourceRevision": "rev-1",
-                },
+                    **({"runtimeSourceIdentity": source_identity} if source_identity is not None else {}),
+                }),
+                headers={"Content-Type": "application/json"},
             )
         if request.url.path == "/api/v1/external-agent/agents":
             return httpx.Response(200, json={"status": "ok", "agents": []})
@@ -1093,6 +1096,60 @@ async def test_missing_runtime_descriptor_has_a_local_diagnostic_reason(tmp_path
         await client.diagnostics()
     assert missing.value.code == "BACKEND_UNAVAILABLE"
     assert missing.value.reason == "runtime_descriptor_missing"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("dirty,head,expected,admitted", [
+    (False, "rev-1", "rev-1", True),
+    (True, "rev-1", "rev-1", False),
+    (None, "rev-1", "rev-1", False),
+    (False, "other", "rev-1", False),
+    (False, "rev-1", "other", False),
+])
+async def test_equivalent_sources_require_the_original_clean_runtime_identity(tmp_path, monkeypatch, dirty, head, expected, admitted):
+    from core.external_agent import runtime_source_identity
+    _runtime_state(tmp_path, source_commit=expected)
+    (tmp_path / ".git" / "HEAD").write_text("checkout-new\n", encoding="utf-8")
+    fingerprint = {"schemaVersion": 1, "projectRoot": str(tmp_path.resolve()), "runningHead": head, "dirty": dirty}
+    (tmp_path / ".runtime" / "running-code-fingerprint.json").write_text(json.dumps(fingerprint), encoding="utf-8")
+    probes = []
+    def equivalent(*args):
+        probes.append(args)
+        return True
+    monkeypatch.setattr(runtime_source_identity, "runtime_sources_match", equivalent)
+    calls = []
+    proof = {"schemaVersion": 1, "revision": head, "clean": dirty is False, "pid": 1234, "createTime": 123.5}
+    client = ManagedAgentBackendClient(tmp_path, state_path=tmp_path / "adapter-state.json", transport=_transport(tmp_path, calls, source_identity=proof))
+    if admitted:
+        assert await client.list_agents() == {"status": "ok", "agents": []}
+        assert len(probes) == 1
+    else:
+        with pytest.raises(BackendClientError) as mismatch:
+            await client.list_agents()
+        assert mismatch.value.code == "RUNTIME_IDENTITY_MISMATCH"
+        assert not probes
+        assert not any(request.url.path.endswith("/agents") for request in calls)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("patch", [None, {"createTime": True}, {"createTime": float("nan")}, {"createTime": float("inf")}, {"pid": True}, {"clean": False}])
+async def test_shared_files_or_invalid_process_proof_cannot_admit_other_revisions(tmp_path, monkeypatch, patch):
+    from core.external_agent import runtime_source_identity
+    _runtime_state(tmp_path)
+    (tmp_path / ".git" / "HEAD").write_text("other-checkout\n", encoding="utf-8")
+    _running_code_fingerprint(tmp_path)
+    path = tmp_path / ".runtime" / "running-code-fingerprint.json"
+    fingerprint = json.loads(path.read_text())
+    fingerprint["dirty"] = False
+    path.write_text(json.dumps(fingerprint))
+    def forbidden(*_args):
+        raise AssertionError("invalid or absent live-process proof must not compare source trees")
+    monkeypatch.setattr(runtime_source_identity, "runtime_sources_match", forbidden)
+    proof = None if patch is None else {"schemaVersion": 1, "revision": "rev-1", "clean": True, "pid": 1234, "createTime": 123.5, **patch}
+    client = ManagedAgentBackendClient(tmp_path, state_path=tmp_path / "adapter-state.json", transport=_transport(tmp_path, [], source_identity=proof))
+    with pytest.raises(BackendClientError) as mismatch:
+        await client.list_agents()
+    assert mismatch.value.code == "RUNTIME_IDENTITY_MISMATCH"
 
 
 @pytest.mark.anyio

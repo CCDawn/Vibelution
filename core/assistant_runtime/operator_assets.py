@@ -140,7 +140,7 @@ def operator_asset_revisions() -> dict[str, str | None]:
     return result
 
 
-def _read_image(path: Path, limit: int) -> dict[str, str]:
+def _read_image(path: Path, limit: int, *, trusted_svg: bool = False) -> dict[str, str]:
     chain = _path_identity(path)
     before = path.stat()
     if not 0 < before.st_size <= limit:
@@ -154,11 +154,12 @@ def _read_image(path: Path, limit: int) -> dict[str, str]:
             or not (_file_stamp(before) == _file_stamp(opened) == _file_stamp(finished) == _file_stamp(after))
             or before.st_ctime_ns != after.st_ctime_ns or opened.st_ctime_ns != finished.st_ctime_ns):
         raise ValueError(_UNAVAILABLE)
-    content_type = _CONTENT_TYPES[path.suffix.lower()]
+    content_type = "image/svg+xml" if trusted_svg and path.suffix.lower() == ".svg" else _CONTENT_TYPES[path.suffix.lower()]
     valid = (
         content_type == "image/png" and payload.startswith(b"\x89PNG\r\n\x1a\n")
         or content_type == "image/jpeg" and payload.startswith(b"\xff\xd8\xff")
         or content_type == "image/webp" and payload.startswith(b"RIFF") and payload[8:12] == b"WEBP"
+        or content_type == "image/svg+xml"
     )
     if not valid:
         raise ValueError(_UNAVAILABLE)

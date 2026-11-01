@@ -7,7 +7,7 @@ through. Routes must use response_model_exclude_unset=True.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -49,6 +49,15 @@ class ExternalAgentHeartbeatPayload(BaseModel):
     lease_id: str = Field(..., min_length=1, max_length=200)
 
 
+class RuntimeSourceIdentityResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    schemaVersion: Literal[1]
+    revision: str
+    pid: int
+    createTime: float
+    clean: bool
+
+
 class ExternalAgentInfoResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -56,6 +65,7 @@ class ExternalAgentInfoResponse(BaseModel):
     serverVersion: str = ""
     projectRoot: str = ""
     runtimeSourceRevision: str = ""
+    runtimeSourceIdentity: RuntimeSourceIdentityResponse | None = None
     enabled: bool = False
 
 

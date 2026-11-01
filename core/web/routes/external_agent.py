@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+import os
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -39,6 +41,22 @@ ADAPTER_CONNECTION_HEADER = "X-Vibelution-External-Agent-Connection"
 
 
 _SERVICE: ExternalAgentTaskService | Any | None = None
+
+
+def _runtime_source_identity(request: Request) -> dict[str, Any] | None:
+    """Project the response process's pinned startup, never a shared file."""
+    serving = getattr(request.app.state, "serving_metadata", None)
+    backend = serving.get("backend") if isinstance(serving, dict) else None
+    if not isinstance(backend, dict) or type(backend.get("pid")) is not int or backend["pid"] != os.getpid():
+        return None
+    created = backend.get("createTime")
+    head = backend.get("head")
+    if (type(created) not in {int, float} or not math.isfinite(created) or created <= 0
+            or not isinstance(head, str) or len(head) not in {40, 64}
+            or any(char not in "0123456789abcdef" for char in head)):
+        return None
+    return {"schemaVersion": 1, "revision": head, "pid": backend["pid"], "createTime": created,
+            "clean": backend.get("dirty") is False and backend.get("dirtyStateVerified") is True}
 
 
 def _service() -> ExternalAgentTaskService | Any:
@@ -135,11 +153,13 @@ def external_agent_gateway_info(
             "external_agent.adapter.connected",
             adapter_connection_id=adapter_connection_id,
         )
+    source_identity = _runtime_source_identity(request)
     return {
         "apiProtocolVersion": API_PROTOCOL_VERSION,
         "serverVersion": SERVER_VERSION,
         "projectRoot": str(PROJECT_ROOT.resolve()),
-        "runtimeSourceRevision": _runtime_revision(),
+        "runtimeSourceRevision": source_identity["revision"] if source_identity is not None else _runtime_revision(),
+        **({"runtimeSourceIdentity": source_identity} if source_identity is not None else {}),
         "enabled": bool(getattr(service, "enabled", False)),
     }
 

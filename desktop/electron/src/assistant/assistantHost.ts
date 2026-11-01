@@ -18,7 +18,7 @@ export type AssistantHostSnapshot = {
   errorCode: string | null;
 };
 export type AssistantHostRequest =
-  | { operation: "status" | "detail" | "dispatches" | "config" | "approvals" }
+  | { operation: "status" | "detail" | "dispatches" | "config" | "approvals" | "assistantAvatar" }
   | { operation: "resolveApproval"; requestId: string; decision: "accept" | "decline" }
   | { operation: "previewDispatchApproval"; dispatchId: string; taskId: string; approvalId: string }
   | { operation: "declineDispatchApproval"; dispatchId: string; taskId: string; approvalId: string; revision: string }
@@ -654,7 +654,7 @@ export class AssistantHost {
     const captured = structuredClone(payload);
     while (this.migrationAdmission) {
       const admission = this.migrationAdmission;
-      const safeWhileWaiting = ["status", "detail", "dispatches", "config", "approvals", "curation", "operatorAsset", "resolveApproval", "previewDispatchApproval", "decideDispatchApproval", "declineDispatchApproval", "stop", "computerState"]
+      const safeWhileWaiting = ["status", "detail", "dispatches", "config", "approvals", "curation", "operatorAsset", "assistantAvatar", "resolveApproval", "previewDispatchApproval", "decideDispatchApproval", "declineDispatchApproval", "stop", "computerState"]
         .includes(captured.operation);
       // Confirmation only settles an existing native waiter; it remains a
       // counted writer in the host barrier even after admission is sealed.
@@ -721,6 +721,12 @@ export class AssistantHost {
         const body = preview ? { dispatchId: payload.dispatchId, taskId: payload.taskId, approvalId: payload.approvalId }
           : { dispatchId: payload.dispatchId, taskId: payload.taskId, approvalId: payload.approvalId, revision: payload.revision, decision: payload.decision };
         return await this.rpc(generation, `/api/assistant/dispatches/approval/${preview ? "preview" : "decision"}`, "POST", body, REQUEST_MS, false, preview ? 4 * 1024 * 1024 : 8192);
+      }
+      case "assistantAvatar": {
+        if (Object.keys(payload).length !== 1 || !ownKeys(payload, ["operation"])) throw new HostError("ASSISTANT_REQUEST_INVALID");
+        const result = await this.rpc(generation, "/api/assistant/avatar", "GET");
+        if (!object(result) || result.agentId !== generation.agentId) throw new HostError("ASSISTANT_IDENTITY_INVALID");
+        return result;
       }
       case "operatorAsset":
         if (!ownKeys(payload, ["operation", "kind"]) || !["avatar", "background"].includes(payload.kind)) throw new HostError("ASSISTANT_REQUEST_INVALID");

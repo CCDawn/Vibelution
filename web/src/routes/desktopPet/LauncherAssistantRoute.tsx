@@ -9,7 +9,7 @@ import {
   getLauncherAssistantApprovals, resolveLauncherAssistantApproval,
   previewLauncherDispatchApproval, decideLauncherDispatchApproval, declineLauncherDispatchSummary, launcherDispatchDeclineRevisionIsValid, type LauncherDispatchApprovalPreview,
   stopLauncherAssistantTurn, continueLauncherAssistantTurn,
-  getLauncherOperatorAsset, openLauncherFromAssistant, uploadLauncherAttachment,
+  getLauncherOperatorAsset, getLauncherAssistantAvatar, openLauncherFromAssistant, uploadLauncherAttachment,
 } from "../../api/launcherAssistant";
 import type { SessionContinuationExpectation } from "../../api/chat";
 import { queryKeys } from "../../api/queryKeys";
@@ -21,6 +21,7 @@ import { useShellI18n } from "../../i18n/useShellI18n";
 import { hasExecutionOwnership, resolveSessionActivity, sessionActivityStatusLabel } from "../sessionActivityState";
 import { continuationSnapshotKey, resolveConversationContinuation } from "../chat/conversationContinuationModel";
 import { resolveSessionStopTurnId } from "../chat/chatStopTurnModel";
+import { resolveChatUserDisplayName } from "../chatCompactPanel";
 import { exactAcceptedSubmitTurnId, findSubmitAcceptanceEvidence } from "../chat/chatSubmitAcceptanceReadback";
 import { DesktopPetCharacter } from "./DesktopPetCharacter";
 import {
@@ -185,6 +186,23 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     queryFn: ({ signal }) => getLauncherOperatorAsset("background", { signal }),
     enabled: readingAssets, retry: false, staleTime: Infinity,
   });
+  const assistantAvatarPrefix = ["launcher-assistant", "assistant-avatar"];
+  const assistantAgentId = status.data?.assistant.agentId || "";
+  const readingAssistantAvatar = reading && status.data?.assistantAvatarVersion === 1 && Boolean(assistantAgentId);
+  const assistantAvatar = useQuery({
+    queryKey: [...assistantAvatarPrefix, sessionId, assistantAgentId, status.data?.assistantAvatarRevision],
+    queryFn: ({ signal }) => getLauncherAssistantAvatar(assistantAgentId, { signal }),
+    enabled: readingAssistantAvatar, retry: false, staleTime: 0,
+  });
+  useEffect(() => {
+    if (readingAssistantAvatar) return;
+    void client.cancelQueries({ queryKey: ["launcher-assistant", "assistant-avatar"] });
+    void client.invalidateQueries({ queryKey: ["launcher-assistant", "assistant-avatar"], refetchType: "none" });
+  }, [client, readingAssistantAvatar]);
+  useEffect(() => () => {
+    void client.cancelQueries({ queryKey: ["launcher-assistant", "assistant-avatar"] });
+    void client.invalidateQueries({ queryKey: ["launcher-assistant", "assistant-avatar"], refetchType: "none" });
+  }, [client]);
   const composerKey = ["launcher-assistant", "composer", sessionId];
   function saveComposer(patch: Partial<ComposerSnapshot>) {
     client.setQueryDefaults(composerKey, { gcTime: Infinity });
@@ -723,6 +741,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
 
   const identity = status.data?.assistant;
   const avatarImage = readingAssets && !avatar.isError ? avatar.data?.image : null;
+  const assistantAvatarImage = readingAssistantAvatar && !assistantAvatar.isError && !assistantAvatar.isFetching ? assistantAvatar.data?.image : null;
   const backgroundImage = readingAssets && !background.isError ? background.data?.image : null;
   const backgroundStyle = backgroundImage
     ? { "--workbench-theme-background-image": `url(${JSON.stringify(backgroundImage.url)})` } as CSSProperties
@@ -756,6 +775,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   const refreshAll = () => {
     void status.refetch(); void detail.refetch(); void dispatches.refetch(); void approvals.refetch();
     void client.invalidateQueries({ queryKey: assetQueryPrefix });
+    void client.invalidateQueries({ queryKey: assistantAvatarPrefix });
   };
 
   if (!expanded) return <main className={petStyles.root} data-vui-domain-recipe="launcher-assistant"
@@ -866,7 +886,8 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       onVisibleTimelineMessageIds={setVisibleMessageIds}
       turnError={detail.data.lastTurnError}
       defaultFileContext={detail.data.defaultFileContext} assistantDisplayName={displayName}
-      userDisplayName={status.data?.operatorProfile?.displayName} userAvatarPreset={status.data?.operatorProfile?.avatarPreset}
+      assistantAvatarImageUrl={assistantAvatarImage?.url}
+      userDisplayName={resolveChatUserDisplayName(status.data?.operatorProfile?.displayName)} userAvatarPreset={status.data?.operatorProfile?.avatarPreset}
       userAvatarImageUrl={avatarImage?.url}
       showHeader={false} showSessionOverview={false} showMentalSnapshots={false}
       // The embedded page reads at standard density; the compact surface
@@ -901,9 +922,9 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       actions={<VButton onClick={() => void detail.refetch()}>{copy.retry}</VButton>} /> : null}
     {historyAttachments.failed ? <VStateSurface tone="error" title={lang === "zh" ? "历史附件暂不可用（单个文件上限 8 MiB）" : "Historical attachment unavailable (8 MiB per file limit)"}
       actions={<VButton onClick={historyAttachments.retry}>{copy.retry}</VButton>} /> : null}
-    {readingAssets && (avatar.isError || background.isError) ? <VStateSurface tone="error"
+    {(readingAssets && (avatar.isError || background.isError) || readingAssistantAvatar && assistantAvatar.isError) ? <VStateSurface tone="error"
       title={lang === "zh" ? "部分外观图片暂不可用，聊天仍可使用" : "Some appearance images are unavailable; chat is ready"}
-      actions={<VButton onClick={() => { if (avatar.isError) void avatar.refetch(); if (background.isError) void background.refetch(); }}>{copy.retry}</VButton>} /> : null}
+      actions={<VButton onClick={() => { if (readingAssets && avatar.isError) void avatar.refetch(); if (readingAssets && background.isError) void background.refetch(); if (readingAssistantAvatar && assistantAvatar.isError) void assistantAvatar.refetch(); }}>{copy.retry}</VButton>} /> : null}
     {status.data?.patrol?.state === "unavailable" || ["unknown", "failed", "interrupted"].some(key => (status.data?.patrol?.deliveryStates[key] || 0) > 0)
       ? <VStateSurface tone="error" title={lang === "zh" ? "部分任务结果暂未汇报，可在对话中让助理查询" : "Some task results have not been reported. Ask the assistant to check in chat."} /> : null}
     {dispatchApproval && activePreviewError ? <VStateSurface tone="error" title={activePreviewError}

@@ -297,6 +297,13 @@ cross that projection. Current uploaded avatars and background images have a
 separate UI-only `operatorAsset` read over the same private IPC. It accepts only
 `avatar` or `background`, resolves the current operator selection through the
 canonical image owners, and returns bounded PNG/JPEG/WebP data without paths.
+The separate `GET /api/assistant/avatar` accepts no parameters or body and reads
+only the bound native assistant's current Agent avatar. It projects bounded
+PNG/JPEG/WebP or an allowlisted bundled model SVG as base64, content type and
+SHA-256; no file paths cross the channel. `assistantAvatarVersion` and the opaque
+`assistantAvatarRevision` in status allow refresh without transferring image
+bytes. Unavailable data yields a null revision and a bounded read error without
+interrupting status or Session work. Missing config is never initialized here.
 The dedicated 16 MiB JSON envelope covers the native 10 MiB wallpaper limit;
 ordinary JSON stays at 8 MiB and main control at 8 KiB. Images never enter model
 actions or results. A fresh headless Edge page using the actual route/ConversationView and

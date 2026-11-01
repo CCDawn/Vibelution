@@ -21,6 +21,7 @@ vi.mock("../../components/conversation/LazyConversationView", () => ({
     conversation = props;
     return createElement("div", { "data-testid": "native-conversation" },
       props.userAvatarImageUrl ? createElement("img", { alt: "user avatar", src: props.userAvatarImageUrl }) : null,
+      props.assistantAvatarImageUrl ? createElement("img", { alt: "assistant avatar", src: props.assistantAvatarImageUrl }) : null,
       createElement("span", null, props.userDisplayName || "default user"),
       props.composerPrecedingContent, createElement("textarea", { "data-testid": "native-composer" }));
   },
@@ -32,6 +33,9 @@ let client: QueryClient;
 let detail: Record<string, unknown>;
 let assets: { avatar: Record<string, unknown>; background: Record<string, unknown> };
 let revisions: { avatar: string | null; background: string | null } | undefined;
+let assistantRevision: string | null;
+let assistantImage: Record<string, unknown> | null;
+let assistantRead: (() => Promise<unknown>) | undefined;
 let invoke: ReturnType<typeof vi.fn>;
 let failingAvatar = false;
 let navigationOwned = true;
@@ -59,13 +63,14 @@ async function showPage(show: boolean) {
   await settle(); await settle();
 }
 function assetReads() { return invoke.mock.calls.filter(([request]) => request.operation === "operatorAsset").length; }
-async function renderAssistant(options: { capability?: boolean; failAvatar?: boolean; approval?: Record<string, unknown>; dispatches?: Array<Record<string, unknown>>; boundPreview?: Record<string, unknown>; declineFailure?: boolean; language?: "zh" | "en"; patrol?: { state: "ready" | "unavailable"; deliveryStates: Record<string, number> }; startHidden?: boolean; legacyToolbar?: boolean } = {}) {
+async function renderAssistant(options: { capability?: boolean; assistantCapability?: boolean; operatorName?: string; failAvatar?: boolean; approval?: Record<string, unknown>; dispatches?: Array<Record<string, unknown>>; boundPreview?: Record<string, unknown>; declineFailure?: boolean; language?: "zh" | "en"; patrol?: { state: "ready" | "unavailable"; deliveryStates: Record<string, number> }; startHidden?: boolean; legacyToolbar?: boolean } = {}) {
   window.location.href = "vibelution-launcher://launcher/launcher/assistant";
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   failingAvatar = Boolean(options.failAvatar);
   navigationOwned = !options.legacyToolbar;
   detail = { id: "s", agentId: "a", status: "ready", messages: [] };
   revisions = undefined;
+  assistantRevision = "a".repeat(64); assistantImage = image("Bwg="); assistantRead = undefined;
   assets = { avatar: asset("avatar", "AQI="), background: asset("background", "AwQ=", "soft") };
   fetch = vi.fn(() => { throw new Error("HTTP is forbidden in this window"); }); vi.stubGlobal("fetch", fetch);
   let dispatchRows = options.dispatches ?? [];
@@ -73,7 +78,8 @@ async function renderAssistant(options: { capability?: boolean; failAvatar?: boo
     switch (request.operation) {
       case "status": return {
         assistant: { agentId: "a", directSessionId: "s", displayName: "助理" },
-        operatorProfile: { displayName: "当前用户", avatarPreset: "initial" },
+        operatorProfile: { displayName: options.operatorName ?? "当前用户", avatarPreset: "initial" },
+        ...(options.assistantCapability ? { assistantAvatarVersion: 1, assistantAvatarRevision: assistantRevision } : {}),
         ...(revisions ? { operatorAssetRevisions: revisions } : {}),
         ...(options.patrol ? { patrol: options.patrol } : {}),
         ...(options.capability === false ? {} : { operatorAssetsVersion: 1 }),
@@ -103,6 +109,9 @@ async function renderAssistant(options: { capability?: boolean; failAvatar?: boo
         if (Object.keys(request).sort().join(",") !== "kind,operation" || !["avatar", "background"].includes(request.kind)) throw new Error("invalid_asset_request");
         if (failingAvatar && request.kind === "avatar") throw new Error("image unavailable");
         return assets[request.kind as keyof typeof assets];
+      case "assistantAvatar":
+        if (Object.keys(request).join(",") !== "operation") throw new Error("invalid_avatar_request");
+        return assistantRead ? assistantRead() : { schemaVersion: 1, agentId: "a", image: assistantImage };
       case "send": return { accepted: true, turnId: "sent-turn" };
       default: throw new Error("unexpected_operation");
     }
@@ -119,6 +128,55 @@ async function finishTurn(turnId: string) {
 }
 
 describe("Launcher operator image consumption", () => {
+  it("shows the fixed assistant image, refreshes revisions without retaining old content, and stops reading when hidden", async () => {
+    await renderAssistant({ assistantCapability: true, startHidden: true, operatorName: "  " });
+    const reads = () => invoke.mock.calls.filter(([request]) => request.operation === "assistantAvatar").length;
+    expect(reads()).toBe(0);
+    await showPage(true);
+    expect(reads()).toBe(1);
+    expect(conversation?.userDisplayName).toBe("操作者");
+    expect(container.querySelector('img[alt="assistant avatar"]')?.getAttribute("src")).toBe("data:image/png;base64,Bwg=");
+    let finish!: (value: unknown) => void;
+    assistantRead = () => new Promise(resolve => { finish = resolve; });
+    assistantRevision = "b".repeat(64);
+    await act(async () => { await client.invalidateQueries({ queryKey: ["launcher-assistant", "status"] }); });
+    await settle();
+    expect(reads()).toBe(2);
+    expect(container.querySelector('img[alt="assistant avatar"]')).toBeNull();
+    await act(async () => finish({ schemaVersion: 1, agentId: "a", image: image("CQo=") }));
+    await settle();
+    expect(container.querySelector('img[alt="assistant avatar"]')?.getAttribute("src")).toBe("data:image/png;base64,CQo=");
+    await showPage(false);
+    const before = reads();
+    await act(async () => { await client.invalidateQueries({ queryKey: ["launcher-assistant", "assistant-avatar"] }); });
+    expect(reads()).toBe(before);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("does not read an assistant image while the document is hidden", async () => {
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    await renderAssistant({ assistantCapability: true });
+    expect(invoke.mock.calls.some(([request]) => request.operation === "assistantAvatar")).toBe(false);
+    await act(async () => { visibility.mockReturnValue("visible"); document.dispatchEvent(new Event("visibilitychange")); });
+    await settle();
+    expect(invoke.mock.calls.filter(([request]) => request.operation === "assistantAvatar")).toHaveLength(1);
+  });
+
+  it("clears an identity-mismatched avatar and retries the failed resource", async () => {
+    await renderAssistant({ assistantCapability: true });
+    assistantRead = async () => ({ schemaVersion: 1, agentId: "other", image: image("CQo=") });
+    assistantRevision = "b".repeat(64);
+    await act(async () => { await client.invalidateQueries({ queryKey: ["launcher-assistant", "status"] }); });
+    await settle(); await settle();
+    expect(container.querySelector('img[alt="assistant avatar"]')).toBeNull();
+    expect(container.textContent).toContain("部分外观图片暂不可用");
+    assistantRead = undefined; assistantImage = image("Cww=");
+    await act(async () => Array.from(container.querySelectorAll("button")).find(button => button.textContent === "重试")?.click());
+    await settle(); await settle();
+    expect(container.querySelector('img[alt="assistant avatar"]')?.getAttribute("src")).toBe("data:image/png;base64,Cww=");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("displays the complete fixed tool preset and dynamic directories before creation approval", async () => {
     await renderAssistant({ approval: { requestId: "r", sessionId: "s", turnId: "t", agentId: "a",
       toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
@@ -557,6 +615,7 @@ describe("Launcher operator image consumption", () => {
     await renderAssistant({ capability: false });
     await finishTurn("old-host-turn"); await showPage(false); await showPage(true);
     expect(assetReads()).toBe(0); expect(container.querySelector("img")).toBeNull();
+    expect(invoke.mock.calls.some(([request]) => request.operation === "assistantAvatar")).toBe(false);
     expect(conversation?.userDisplayName).toBe("当前用户"); expect(fetch).not.toHaveBeenCalled();
   });
 

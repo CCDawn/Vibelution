@@ -8,6 +8,8 @@ export type LauncherOperatorProfile = {
 };
 
 export type LauncherAssistantStatus = {
+  assistantAvatarVersion?: 1;
+  assistantAvatarRevision?: string | null;
   operatorAssetsVersion?: 1;
   operatorAssetRevisions?: { avatar: string | null; background: string | null };
   attachmentVersion?: 1;
@@ -47,7 +49,7 @@ export type LauncherDispatchApprovalPreview = {
 };
 
 export type LauncherAssistantRequest =
-  | { operation: "status" | "detail" | "dispatches" | "hide" | "approvals" | "openLauncher" }
+  | { operation: "status" | "detail" | "dispatches" | "hide" | "approvals" | "openLauncher" | "assistantAvatar" }
   | { operation: "resolveApproval"; requestId: string; decision: "accept" | "decline" }
   | { operation: "previewDispatchApproval"; dispatchId: string; taskId: string; approvalId: string }
   | { operation: "declineDispatchApproval"; dispatchId: string; taskId: string; approvalId: string; revision: string }
@@ -92,6 +94,38 @@ function exactFields(value: unknown, fields: string[]): value is Record<string, 
     && fields.every(field => Object.prototype.hasOwnProperty.call(value, field));
 }
 
+function parseImage(image: unknown, limit: number, allowedTypes: string[]): { url: string; sha256: string } {
+  const invalid = () => new Error("Launcher 图片资源不可用，请重试。");
+  if (!exactFields(image, ["contentType", "dataBase64", "sha256"])
+    || typeof image.contentType !== "string" || !allowedTypes.includes(image.contentType)
+    || typeof image.sha256 !== "string" || !/^[a-fA-F0-9]{64}$/.test(image.sha256)
+    || typeof image.dataBase64 !== "string") throw invalid();
+  const data = image.dataBase64;
+  if (!data.length || data.length > Math.ceil(limit / 3) * 4 || data.length % 4 !== 0
+    || !/^[A-Za-z0-9+/]*={0,2}$/.test(data)) throw invalid();
+  const padding = data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0;
+  const decodedLength = data.length / 4 * 3 - padding;
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  if (!decodedLength || decodedLength > limit
+    || (padding === 2 && alphabet.indexOf(data[data.length - 3]) % 16 !== 0)
+    || (padding === 1 && alphabet.indexOf(data[data.length - 2]) % 4 !== 0)) throw invalid();
+  try { if (atob(data).length !== decodedLength) throw invalid(); } catch { throw invalid(); }
+  return { url: `data:${image.contentType};base64,${data}`, sha256: image.sha256 };
+}
+
+/** Only the host-selected native assistant can supply this image. */
+export async function getLauncherAssistantAvatar(expectedAgentId: string, options?: { signal?: AbortSignal }): Promise<{ image: { url: string; sha256: string } | null }> {
+  options?.signal?.throwIfAborted();
+  if (!expectedAgentId.trim()) throw new Error("Launcher 个人助理身份不可用。");
+  const result = await launcherAssistantBridge().invoke({ operation: "assistantAvatar" });
+  options?.signal?.throwIfAborted();
+  if (!exactFields(result, ["schemaVersion", "agentId", "image"]) || result.schemaVersion !== 1 || result.agentId !== expectedAgentId)
+    throw new Error("Launcher 图片资源不可用，请重试。");
+  const image = result.image === null ? null : parseImage(result.image, 5 * 1024 * 1024, ["image/png", "image/jpeg", "image/webp", "image/svg+xml"]);
+  options?.signal?.throwIfAborted();
+  return { image };
+}
+
 /** Images cross only the fixed-kind Launcher IPC; no URL/path or HTTP fallback. */
 export async function getLauncherOperatorAsset(kind: LauncherOperatorAssetKind, options?: { signal?: AbortSignal }): Promise<LauncherOperatorAsset> {
   options?.signal?.throwIfAborted();
@@ -104,26 +138,10 @@ export async function getLauncherOperatorAsset(kind: LauncherOperatorAssetKind, 
     || typeof result.readability !== "string" || !["soft", "standard", "strong"].includes(result.readability)) throw invalid();
   const readability = result.readability as LauncherOperatorAsset["readability"];
   if (result.image === null) return { schemaVersion: 1, kind, image: null, readability };
-  const image = result.image;
-  if (!exactFields(image, ["contentType", "dataBase64", "sha256"])
-    || typeof image.contentType !== "string" || !["image/png", "image/jpeg", "image/webp"].includes(image.contentType)
-    || typeof image.sha256 !== "string" || !/^[a-fA-F0-9]{64}$/.test(image.sha256)
-    || typeof image.dataBase64 !== "string") throw invalid();
-  const data = image.dataBase64;
   const limit = (kind === "avatar" ? 5 : 10) * 1024 * 1024;
-  if (!data.length || data.length > Math.ceil(limit / 3) * 4 || data.length % 4 !== 0
-    || !/^[A-Za-z0-9+/]*={0,2}$/.test(data)) throw invalid();
-  const padding = data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0;
-  const decodedLength = data.length / 4 * 3 - padding;
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  // Reject non-canonical padding bits instead of silently normalizing input.
-  if (!decodedLength || decodedLength > limit
-    || (padding === 2 && alphabet.indexOf(data[data.length - 3]) % 16 !== 0)
-    || (padding === 1 && alphabet.indexOf(data[data.length - 2]) % 4 !== 0)) throw invalid();
-  try { if (atob(data).length !== decodedLength) throw invalid(); } catch { throw invalid(); }
+  const image = parseImage(result.image, limit, ["image/png", "image/jpeg", "image/webp"]);
   options?.signal?.throwIfAborted();
-  return { schemaVersion: 1, kind, readability,
-    image: { url: `data:${image.contentType};base64,${data}`, sha256: image.sha256 } };
+  return { schemaVersion: 1, kind, readability, image };
 }
 
 export async function getLauncherAssistantStatus(): Promise<LauncherAssistantStatus> {
@@ -135,6 +153,11 @@ export async function getLauncherAssistantStatus(): Promise<LauncherAssistantSta
   if (Object.prototype.hasOwnProperty.call(result, "operatorAssetsVersion") && result.operatorAssetsVersion !== 1) {
     throw new Error("Launcher 图片资源版本不可用。");
   }
+  if (Object.prototype.hasOwnProperty.call(result, "assistantAvatarVersion") && result.assistantAvatarVersion !== 1)
+    throw new Error("Launcher 图片资源版本不可用。");
+  if (Object.prototype.hasOwnProperty.call(result, "assistantAvatarRevision")
+    && result.assistantAvatarRevision !== null && (typeof result.assistantAvatarRevision !== "string" || !/^[a-f0-9]{64}$/.test(result.assistantAvatarRevision)))
+    throw new Error("Launcher 图片资源版本不可用。");
   if (result.operatorAssetRevisions !== undefined) {
     const revisions = result.operatorAssetRevisions;
     if (!record(revisions) || Array.isArray(revisions) || !exactFields(revisions, ["avatar", "background"])
