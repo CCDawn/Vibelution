@@ -37,6 +37,12 @@ class Project(Parameters):
     project_id: str = Field(min_length=1, max_length=160)
 
 
+class ProjectIndex(Parameters):
+    offset: int = Field(default=0, ge=0, le=128)
+    limit: int = Field(default=8, ge=1, le=8)
+    expected_revision: int | None = Field(default=None, ge=-1)
+
+
 class MainControlProject(Parameters):
     model_config = ConfigDict(extra="forbid", strict=True)
     project_id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
@@ -357,7 +363,7 @@ def _project_read_contracts():
             ("avatar_options", AvatarOptionsQuery))}
 
 
-_SCHEMAS = {"projects": Parameters, "agents": Project, "dispatch": Dispatch, "receipt": Receipt,
+_SCHEMAS = {"projects": ProjectIndex, "agents": Project, "dispatch": Dispatch, "receipt": Receipt,
             "agent_get": AgentRead, "management_receipt": ManagementReceipt, "team_status": TeamStatus, "team_result": TeamResult,
             "authorization_status": Project, "legacy_observers": LegacyObservers, "legacy_receipts": LegacyReceipts,
             "history_source_preview": MainControlProject}
@@ -365,7 +371,7 @@ _HELP = {
     "history_source_preview": "用户要求迁移历史或同步旧事务时，预览已登记项目的唯一旧个人助理身份和短期预览编号；不读取会话内容、不授予导入权限，也不表示切换完成。多个候选或来源变化时拒绝。",
     "legacy_observers": "分页只读本主体已明确交接的旧任务观察授权；不创建授权，不继承旧临时控制权限。新legacy:receipts:read须明确授予，旧授权不会自动扩大。",
     "legacy_receipts": "按observer_id分页查询白名单旧任务及迟到回执。businessTaskStatus是显式业务报告，nativeTurnStatus只是执行轮状态；unknown/unresolved不是完成。不得重派或将旧消息ID当external task ID；取消、继续、审批必须重新走原生授权。",
-    "projects": "列出 Launcher 已授权项目的 projectId。",
+    "projects": "分页检查 Launcher 已授权项目，每页最多8项；续页传 offset=nextOffset、expected_revision=registryRevision，授权变化则从首页重新查询。projects 仅列出当前可调用后端的 projectId；skippedProjects 说明未发现运行实例、版本不匹配或检查超时的项目。只对 projects 调用 agents 等项目动作，不逐个重试 skippedProjects，不自动启动分支。",
     "agents": "查询项目当前允许派遣的普通 Agent；不会创建项目内个人助理。",
     "dispatch": "以稳定 dispatch_id 派遣只读任务。优先用 task_source 的 start_after/end_before 唯一短锚点提取当前用户原文（都为空表示整条消息）；不得改写任务、ID或引号文字。task 仅允许用户消息的精确原文子串。未知时保留原参数与 ID，查询回执或由原生引用恢复，不能换 ID 重派。",
     "receipt": "查询原生任务回执；离线/超时/等待审批都不代表目标完成。",
@@ -797,7 +803,7 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
     elif action in {"api_catalog", "api_describe"}:
         coroutine = service.management.documentation(args.pop("project_id"), **args)
     elif action == "projects":
-        return {"projects": [{"projectId": key} for key in projects]}
+        coroutine = service.available_projects(**args)
     elif action == "history_source_preview":
         from .migration_io import MigrationIOError
         preview = getattr(service, "history_preview", None)

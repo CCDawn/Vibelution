@@ -17,6 +17,18 @@ with project transport decided by [ADR 0013](../../docs/adr/0013-launcher-assist
 
 ## Assistant discovery actions
 
+`projects` checks registered backends through the existing native SDK identity
+gate within a four-second budget (at most eight checks per page, continued with
+`nextOffset` and `expected_revision=registryRevision`; registry changes require
+starting again at the first page). These read-only diagnostics do not replace shared task clients or
+wait for their heartbeat borrowers. Only callable
+projects appear in `projects`; `skippedProjects` reports missing runtimes,
+identity failures and checks that could not finish. The assistant must not
+retry these entries or start their worktrees automatically. Discovery never
+starts a native task. Local missing-descriptor and source-revision failures
+have fixed, actionable messages; backend response text stays private. The
+top-level message summarizes skipped reasons for the existing tool-result UI.
+
 The local catalog exposes `preference_proposals`, `preference_proposal_accept`,
 `preference_proposal_reject`, and `dispatch_list` through index/describe/execute.
 They bind to the running assistant and its direct Session, never a model-provided

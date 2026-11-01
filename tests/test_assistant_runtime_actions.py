@@ -15,6 +15,9 @@ class Dispatch:
     def project_ids(self):
         return list(self.projects)
 
+    async def available_projects(self, **_kwargs):
+        return {"projects": [{"projectId": key} for key in self.projects], "skippedProjects": []}
+
     async def discover(self, project_id):
         return {"agents": [{"agentId": "agent-1"}], "projectId": project_id}
 
@@ -349,7 +352,7 @@ async def test_registered_project_discovery_and_native_dispatch_reuse():
     bind_actions(dispatch, asyncio.get_running_loop())
     try:
         projects = await asyncio.to_thread(execute_action, "projects", {})
-        assert projects == {"projects": [{"projectId": "test-project"}]}
+        assert projects == {"projects": [{"projectId": "test-project"}], "skippedProjects": []}
         result = await asyncio.to_thread(execute_action, "dispatch", {
             "project_id": "test-project", "agent_id": "agent-1", "task": "查项目状态",
             "dispatch_id": "dispatch-1"}, runtime={"agentId": "assistant", "sessionId": "own", "turnId": "turn"})

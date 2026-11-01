@@ -81,6 +81,171 @@ def adapter(tmp_path: Path, probe: ClientProbe) -> DispatchService:
     return DispatchService(tmp_path / "profile", {"project-a": tmp_path / "project"}, client_factory=probe.factory)
 
 
+@pytest.mark.anyio
+async def test_project_discovery_skips_offline_and_stale_backends_without_starting_tasks(tmp_path):
+    calls = []
+
+    def factory(root, **_kwargs):
+        class Client:
+            async def diagnostics(self):
+                calls.append(root.name)
+                reason = {"offline": "runtime_descriptor_missing", "stale": "runtime_revision_mismatch"}.get(root.name)
+                if reason:
+                    raise BackendClientError("private token and path", code=(
+                        "BACKEND_UNAVAILABLE" if root.name == "offline" else "RUNTIME_IDENTITY_MISMATCH"), reason=reason)
+                return {"status": "healthy"}
+        return Client()
+
+    projects = {key: tmp_path / key for key in ("online", "offline", "stale")}
+    for root in projects.values():
+        root.mkdir()
+    service = DispatchService(tmp_path / "profile", projects, client_factory=factory)
+    result = await service.available_projects()
+    assert result["projects"] == [{"projectId": "online"}]
+    skipped = {row["projectId"]: row for row in result["skippedProjects"]}
+    assert set(skipped) == {"offline", "stale"}
+    assert skipped["offline"]["code"] == "BACKEND_UNAVAILABLE"
+    assert "未发现" in skipped["offline"]["message"]
+    assert "后台仍在运行其他版本" in skipped["stale"]["message"]
+    assert "private" not in json.dumps(result)
+    assert sorted(calls) == ["offline", "online", "stale"]
+    assert service.list_dispatches() == []
+
+
+@pytest.mark.anyio
+async def test_project_discovery_bounds_slow_checks_and_keeps_healthy_projects(tmp_path, monkeypatch):
+    from core.assistant_runtime import dispatch
+    monkeypatch.setattr(dispatch, "_PROJECT_DISCOVERY_SECONDS", 0.05)
+
+    def factory(root, **_kwargs):
+        class Client:
+            async def diagnostics(self):
+                if root.name == "slow":
+                    await anyio.sleep_forever()
+                return {"status": "healthy"}
+        return Client()
+
+    projects = {key: tmp_path / key for key in ("healthy", "slow")}
+    for root in projects.values():
+        root.mkdir()
+    service = DispatchService(tmp_path / "profile", projects, client_factory=factory)
+    with anyio.fail_after(1):
+        result = await service.available_projects()
+    assert result["projects"] == [{"projectId": "healthy"}]
+    assert result["skippedProjects"][0]["projectId"] == "slow"
+    assert result["skippedProjects"][0]["code"] == "PROJECT_CHECK_TIMEOUT"
+
+
+@pytest.mark.anyio
+async def test_untrusted_backend_message_does_not_become_a_diagnostic_reason(tmp_path):
+    def factory(*_args, **_kwargs):
+        class Client:
+            async def diagnostics(self):
+                raise BackendClientError("private token and path", code="RUNTIME_IDENTITY_MISMATCH")
+        return Client()
+
+    root = tmp_path / "project"
+    root.mkdir()
+    service = DispatchService(tmp_path / "profile", {"project": root}, client_factory=factory)
+    with pytest.raises(DispatchError) as error:
+        await service.discover("project")
+    assert "版本或项目身份校验失败" in str(error.value)
+    assert "后台仍在运行其他版本" not in str(error.value)
+    assert "private" not in str(error.value)
+
+
+@pytest.mark.anyio
+async def test_project_discovery_drops_authorization_revoked_after_a_successful_check(tmp_path):
+    entered = anyio.Event()
+    finish = anyio.Event()
+
+    def factory(root, **_kwargs):
+        class Client:
+            async def diagnostics(self):
+                if root.name == "slow":
+                    entered.set()
+                    await finish.wait()
+                return {"status": "healthy"}
+        return Client()
+
+    projects = {key: tmp_path / key for key in ("healthy", "slow")}
+    for root in projects.values():
+        root.mkdir()
+    service = DispatchService(tmp_path / "profile", projects, client_factory=factory)
+
+    async def revoke():
+        await entered.wait()
+        service.replace_projects({"schemaVersion": 1, "revision": 0, "projects": {"slow": str(projects["slow"])}})
+        finish.set()
+
+    async with anyio.create_task_group() as tasks:
+        tasks.start_soon(revoke)
+        result = await service.available_projects()
+    assert result["projects"] == [{"projectId": "slow"}]
+    assert result["skippedProjects"][0]["code"] == "PROJECT_BINDING_CHANGED"
+
+
+@pytest.mark.anyio
+async def test_project_discovery_does_not_rotate_or_drain_a_borrowed_task_client(tmp_path):
+    from types import SimpleNamespace
+    probe = ClientProbe()
+    root = tmp_path / "project"
+    root.mkdir()
+    service = DispatchService(tmp_path / "profile", {"project": root}, client_factory=probe.factory)
+    borrowed = SimpleNamespace(borrowers=1, closing=False, drained=anyio.Event())
+    service._active_project_clients["project"] = borrowed
+    with anyio.fail_after(1):
+        result = await service.available_projects()
+    assert result["projects"] == [{"projectId": "project"}]
+    assert service._active_project_clients["project"] is borrowed
+    assert borrowed.closing is False and borrowed.borrowers == 1
+
+
+@pytest.mark.anyio
+async def test_project_discovery_pages_large_registries_within_the_model_budget(tmp_path):
+    from tests.test_assistant_runtime_actions import _through_native_model_budget
+    projects = {}
+    for index in range(128):
+        root = tmp_path / str(index)
+        root.mkdir()
+        projects[f"project-{index:03d}-" + "x" * 148] = root
+    service = DispatchService(tmp_path / "profile", projects)
+    first = await service.available_projects()
+    assert first["projects"] == []
+    assert len(first["skippedProjects"]) == 8
+    assert first["nextOffset"] == 8 and first["total"] == 128
+    assert "未发现" in first["message"]
+    raw, outcome, facts, _rendered = _through_native_model_budget(first)
+    assert len(raw) < 4000 and outcome is None and not facts.truncated
+    last = await service.available_projects(offset=120, expected_revision=first["registryRevision"])
+    assert len(last["skippedProjects"]) == 8 and last["nextOffset"] is None
+    assert {r["projectId"] for r in first["skippedProjects"]}.isdisjoint(
+        {r["projectId"] for r in last["skippedProjects"]})
+    service.replace_projects({"schemaVersion": 1, "revision": 0,
+                              "projects": {key: str(root) for key, root in list(projects.items())[1:]}})
+    with pytest.raises(DispatchError) as changed:
+        await service.available_projects(offset=8, expected_revision=first["registryRevision"])
+    assert changed.value.code == "PROJECT_REGISTRY_CHANGED"
+    with pytest.raises(DispatchError):
+        await service.available_projects(offset=8)
+
+
+@pytest.mark.anyio
+async def test_project_discovery_does_not_publish_arbitrary_backend_error_codes(tmp_path):
+    def factory(*_args, **_kwargs):
+        class Client:
+            async def diagnostics(self):
+                raise BackendClientError("PRIVATE_TOKEN", code="PRIVATE_TOKEN")
+        return Client()
+
+    root = tmp_path / "project"
+    root.mkdir()
+    service = DispatchService(tmp_path / "profile", {"project": root}, client_factory=factory)
+    result = await service.available_projects()
+    assert result["skippedProjects"][0]["code"] == "BACKEND_ERROR"
+    assert "PRIVATE_TOKEN" not in json.dumps(result)
+
+
 async def start(service: DispatchService, **kwargs):
     return await service.dispatch(
         "project-a", agent_id="coder", task="private original task", dispatch_id="dispatch-1", **kwargs
