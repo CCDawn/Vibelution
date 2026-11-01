@@ -229,14 +229,25 @@ def _wake_throttle_stamps(
     ledger_ready: bool,
     now: float,
 ) -> list[float]:
-    """Ledger stamps when available (restart-safe), else the in-memory window."""
+    """Ledger stamps plus any in-memory fallback stamps, else in-memory only.
+
+    The union matters: a submission whose ledger stamp write failed
+    (``complete_wake`` False, e.g. sqlite transient busy) is mirrored into
+    the process window, and the gate must honor it even while the ledger
+    itself keeps answering. Each submission lands in exactly one store
+    (the other is skipped), so the union never double-counts.
+    """
 
     if ledger_ready:
         persisted = _ledger_recent_wake_stamps(
             window_seconds=WAKE_HOUR_WINDOW_SECONDS, now=now
         )
         if persisted is not None:
-            return persisted
+            stamps = list(persisted)
+            for stamp in _in_memory_wake_stamps(state):
+                if all(abs(stamp - seen) > 1e-9 for seen in stamps):
+                    stamps.append(stamp)
+            return stamps
     return _in_memory_wake_stamps(state)
 
 
@@ -249,8 +260,10 @@ def _record_wake_submission(
     """Record a real (or unprovably-not-refused) submission toward the quota.
 
     Skipped attempts (busy/in-flight — provably no turn started) never land
-    here. When the ledger recorded the stamp (``wake_attempts.submitted_at_ms``)
-    the in-memory mirror is redundant.
+    here. ``ledger_recorded`` must be the actual ``complete_wake`` outcome:
+    only a confirmed ledger stamp (``wake_attempts.submitted_at_ms``) skips
+    the in-memory mirror — a failed write falls back to it so the gate can
+    never lose the submission.
     """
 
     if ledger_recorded:
@@ -507,11 +520,16 @@ def _collect_undigested_receipts(
     windows it fell (批三核心目标). Receipt bodies join from the PA inbox
     read for the wake prompt; rows the window cannot see degrade to ledger
     summary text. Receipts covered by a non-retryable wake attempt stay in
-    the digest count but never re-enter the wake set. Ledger unavailable →
-    the legacy counting-window scan, unchanged.
+    the digest count but never re-enter the wake set — the coverage filter
+    applies on the legacy fallback too, so a failed ledger query can never
+    resurrect receipts an ``unknown``/``accepted`` attempt already covered.
+    Ledger unavailable → the legacy counting-window scan, unchanged.
     """
 
+    covered: dict[str, str] = {}
     if ledger_ready and pa_agent_id:
+        # Coverage is read before the query so the fallback branch below
+        # keeps filtering even when the ledger query itself fails.
         covered = _ledger_wake_covered()
         rows = _ledger_undigested_receipts(pa_agent_id)
         if rows is not None:
@@ -541,6 +559,8 @@ def _collect_undigested_receipts(
             ]
             return merged, eligible
     rows = find_undigested_receipts(pa_agent_id, dispatch_message_ids)
+    if covered:
+        return rows, [row for row in rows if _text(row, "messageId") not in covered]
     return rows, list(rows)
 
 
@@ -630,22 +650,24 @@ def _attempt_merged_wake(
         logger.warning("PA patrol wake failed (%s).", type(exc).__name__)
         delivery = {"wakeStatus": "error", "reason": type(exc).__name__}
         # Unprovable outcome: quota consumed, receipts never re-woken.
+        recorded = False
         if attempt_id:
-            _ledger_complete_wake(
+            recorded = _ledger_complete_wake(
                 attempt_id,
                 state="unknown",
                 reason=str(delivery["reason"]),
                 submitted_at_ms=now,
             )
-        _record_wake_submission(state, now=now, ledger_recorded=bool(attempt_id))
+        _record_wake_submission(state, now=now, ledger_recorded=recorded)
     else:
         wake_status = _text(delivery, "wakeStatus")
         if wake_status.startswith("started"):
+            recorded = False
             if attempt_id:
-                _ledger_complete_wake(
+                recorded = _ledger_complete_wake(
                     attempt_id, state="accepted", submitted_at_ms=now
                 )
-            _record_wake_submission(state, now=now, ledger_recorded=bool(attempt_id))
+            _record_wake_submission(state, now=now, ledger_recorded=recorded)
             if attempt_id:
                 # One turn saw the whole batch → one transaction lands all
                 # N digested_at stamps (all or nothing, no half-digested).
@@ -666,14 +688,15 @@ def _attempt_merged_wake(
                 )
         else:
             # Unrecognized outcome — treat as unprovable (conservative).
+            recorded = False
             if attempt_id:
-                _ledger_complete_wake(
+                recorded = _ledger_complete_wake(
                     attempt_id,
                     state="unknown",
                     reason=wake_status or "unrecognized",
                     submitted_at_ms=now,
                 )
-            _record_wake_submission(state, now=now, ledger_recorded=bool(attempt_id))
+            _record_wake_submission(state, now=now, ledger_recorded=recorded)
     return {
         "attempted": True,
         "receiptCount": len(wake_eligible),

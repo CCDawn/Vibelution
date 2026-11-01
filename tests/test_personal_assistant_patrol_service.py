@@ -1084,6 +1084,66 @@ def test_ledger_wake_throttle_survives_restart(monkeypatch, personal_env):
     assert result["wake"]["attempted"] is True
 
 
+def test_ledger_wake_throttle_survives_complete_wake_failure(monkeypatch, personal_env):
+    """complete_wake 写失败（False）时内存镜像兜底：冷却内不二次唤醒。
+
+    节流读侧取台账∪内存并集——台账写失败的提交只要落在任一存储，
+    闸门都能看见。
+    """
+
+    _seed_ledger_agents(personal_env)
+    _seed_dispatch_and_receipts(personal_env, ["r-1"])
+    _LedgerHarness(monkeypatch)
+
+    def _failing_complete(attempt_id, **kwargs):
+        return False  # sqlite 瞬时 busy：台账没拿到这轮提交戳
+
+    monkeypatch.setattr(patrol, "_ledger_complete_wake", _failing_complete)
+    result = patrol.patrol_once(now=NOW)
+    assert result["wake"]["attempted"] is True
+
+    from core.web.services import personal_assistant_dispatch_ledger as ledger
+
+    assert ledger.recent_wake_submissions(
+        window_ms=int(patrol.WAKE_HOUR_WINDOW_SECONDS * 1000),
+        now_ms=int((NOW + 60.0) * 1000),
+    ) == []  # 台账确实没落账
+    assert patrol._in_memory_wake_stamps(patrol._patrol_state) != []  # 内存镜像兜底
+
+    # 新回执在冷却内到达：并集闸门压住，不风暴。
+    _ledger_write_inbox(personal_env, PA_ID, [
+        _ledger_receipt("r-1", reply_to="m-1", created_at=_iso(NOW - 60)),
+        _ledger_receipt("r-2", reply_to="m-1", created_at=_iso(NOW + 60)),
+    ])
+    throttled = patrol.patrol_once(now=NOW + 60.0)
+    assert throttled["wake"] == {"attempted": False, "reason": "throttled", "receiptCount": 1}
+
+
+def test_ledger_fallback_filters_covered_receipts(monkeypatch, personal_env):
+    """undigested 查询失败走 legacy 回退时，非重试意图盖住的回执不得复活
+    （否则 reserve 再成功 = 对 unknown/accepted 批次二次唤醒）。"""
+
+    _seed_ledger_agents(personal_env)
+    _seed_dispatch_and_receipts(personal_env, ["r-1"])
+    _LedgerHarness(monkeypatch)
+
+    def _boom(message):
+        raise RuntimeError("kernel exploded")
+
+    monkeypatch.setattr(patrol, "_wake_pa", _boom)
+    result = patrol.patrol_once(now=NOW)
+    assert result["wake"]["delivery"]["wakeStatus"] == "error"  # r-1 被 unknown 覆盖
+
+    def _failing_undigested(_agent_id):
+        raise RuntimeError("ledger busy")
+
+    monkeypatch.setattr(patrol, "_ledger_undigested_receipts", _failing_undigested)
+    result = patrol.patrol_once(now=NOW + patrol.WAKE_COOLDOWN_SECONDS + 1)
+    assert result["wake"] is None  # 回退路径同样过滤：r-1 不二次唤醒
+    states = [row[0] for row in _wake_attempt_rows()]
+    assert states == ["unknown"]  # 没有新的 reserve 落地
+
+
 def test_ledger_followup_pairs_via_ledger_without_jsonl_rescan(monkeypatch, personal_env):
     """催办 strict 正读走台账信封列，不再每轮全文件扫描。"""
 
