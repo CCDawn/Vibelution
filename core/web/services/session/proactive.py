@@ -78,6 +78,17 @@ def submit_session_proactive_turn(
         delivery_token=normalized_delivery_token,
     ):
         raise s.SessionValidationError("The proactive trigger is stale or no longer authorized.")
+    from core.web.services.session.managed_continuation import session_waits_for_person
+
+    if session_waits_for_person(s, normalized_session_id):
+        # waitsForPerson rail (queued-drain parity): a session resting on
+        # needs_continue/paused_limit whose last speaker was the person is
+        # waiting for that person — a machine proactive turn must not pull
+        # the session up. Raised before context creation, so no proactive
+        # context is registered and no journal fact is written.
+        raise s.SessionValidationError(
+            "The session is resting and waiting for its user; proactive wake is refused."
+        )
     trigger_payload = dict(trigger or {})
     turn_id = f"{normalized_session_id}-proactive-{uuid.uuid4().hex[:16]}"
     plugin_metadata = {

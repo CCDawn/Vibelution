@@ -1357,6 +1357,7 @@ def drain_session_queued_turns(session_id: str) -> bool:
             return False
         _DRAINING_SESSIONS.add(normalized_session_id)
     external_blocked = False
+    person_blocked = False
     try:
         # Keep the claim valid until submit/settlement, including cross-process TTL recovery.
         with s._session_submit_admit_lock(normalized_session_id):
@@ -1365,6 +1366,17 @@ def drain_session_queued_turns(session_id: str) -> bool:
                 # These queue sources lack the external task's permission
                 # profile. Leave all rows untouched for explicit recovery.
                 external_blocked = True
+                return False
+            from core.web.services.session.managed_continuation import (
+                runtime_notice_head_blocked_waiting_for_person,
+            )
+            if runtime_notice_head_blocked_waiting_for_person(s, normalized_session_id):
+                # waitsForPerson rail: the session rests on needs_continue/
+                # paused_limit with a person as its last speaker. A machine
+                # notice run must not pull it up; rows stay queued for the
+                # person's next action. User-row and control-notice heads are
+                # never gated (explicit user intent / journal-only records).
+                person_blocked = True
                 return False
             batch = _claim_drain_batch(normalized_session_id)
             if not batch:
@@ -1538,7 +1550,10 @@ def drain_session_queued_turns(session_id: str) -> bool:
         # (running sessions, no drainable rows) and is rolling-window capped,
         # so scheduling even after an empty claim is safe. Only after leaving
         # the single-flight set: an earlier schedule would be dropped by it.
-        if not external_blocked:
+        # Blocked drains skip the reschedule like external sessions do:
+        # rescheduling a permanently-gated head would only spin the window;
+        # the person's next action re-triggers a fresh drain.
+        if not external_blocked and not person_blocked:
             _schedule_session_queued_turn_drain_continuation(normalized_session_id)
 
 

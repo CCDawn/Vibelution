@@ -39,6 +39,9 @@ from core.web.services.session.turn_diagnostics import (
     _heartbeat_chat_turn_work_run,
 )
 from core.web.services.session import turn_stuck_analyzer
+from core.web.services.session.managed_continuation import (
+    MANAGED_CONTINUATION_MESSAGE_SOURCE,
+)
 
 _STRICT_RESEARCH_TASK_KINDS = frozenset(
     {"hypothesis_design", "protocol_review", "result_evaluation"}
@@ -913,6 +916,16 @@ def _session_context_allows_internal_auto_continue(context: dict[str, Any]) -> b
         )
         if external_explicit is not None:
             return bool(external_explicit)
+    if (
+        str(context.get("user_message_source") or "").strip()
+        == MANAGED_CONTINUATION_MESSAGE_SOURCE
+        and str(metadata.get("kind") or "").strip() == MANAGED_CONTINUATION_MESSAGE_SOURCE
+        and str(metadata.get("source") or "").strip()
+    ):
+        # Third wake signal: request_managed_continuation is the only sanctioned
+        # entry that can produce this double-confirmed shape, and it already
+        # passed the resting-phase / waitsForPerson / cap admission gates.
+        return True
     if _is_research_project_agent_task_context(context):
         return str(context.get("user_message_source") or "").strip() == "agent_inbox"
     if not s._source_collection_stage_task_context_metadata(context):
@@ -930,6 +943,63 @@ def _is_research_project_agent_task_context(context: dict[str, Any]) -> bool:
         else {}
     )
     return str(metadata.get("kind") or "").strip() == "research_project_agent_task"
+
+
+def _mark_agent_inbox_turn_messages_read(
+    session_id: str,
+    *,
+    turn_id: str,
+    context: dict[str, Any],
+) -> None:
+    """Inbox read receipt: sent (createdAt) -> read (readAt), consumed stays as-is.
+
+    Runs right after context assembly survived the stop race, so the inbox
+    message is genuinely part of this turn's model context. Best-effort: any
+    failure is logged, never raised — the turn must not depend on the receipt.
+    The rewrite reuses the consume mechanism's read/rewrite helpers beside it;
+    no new lock semantics (write races are a tracked separate concern).
+    """
+
+    metadata = (
+        context.get("message_metadata")
+        if isinstance(context.get("message_metadata"), dict)
+        else {}
+    )
+    if str(metadata.get("kind") or "").strip() != "agent_inbox_message":
+        return
+    agent_id = str(metadata.get("targetAgentId") or context.get("agent_id") or "").strip()
+    if not agent_id:
+        return
+    message_id = str(metadata.get("messageId") or "").strip()
+    try:
+        from core.web.services.agent_directory.ops_residual import (
+            mark_agent_inbox_messages_read,
+        )
+
+        mark_agent_inbox_messages_read(
+            agent_id,
+            [message_id] if message_id else None,
+            read_by_session_id=session_id,
+            read_by_turn_id=turn_id,
+        )
+    except Exception as exc:  # noqa: BLE001 - read receipt is best-effort
+        try:
+            _service().record_runtime_scene_event(
+                "conversation",
+                "session_turn",
+                "conversation.turn.inbox_read_receipt_failed",
+                level="warning",
+                outcome="read_receipt_failed",
+                message=f"Agent inbox read receipt failed: {type(exc).__name__}.",
+                fields={
+                    "sessionId": session_id,
+                    "turnId": turn_id,
+                    "agentId": agent_id,
+                    "messageId": message_id,
+                },
+            )
+        except Exception:
+            pass
 
 
 def _session_context_internal_auto_continue_max_turns(context: dict[str, Any]) -> int:
@@ -2104,6 +2174,10 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                     finish_worker=False,
                 ):
                     return
+                # Inbox read receipt (sent -> read): the assembly survived the
+                # stop race, so this turn's context actually carries the inbox
+                # message. Best-effort; never breaks the turn.
+                _mark_agent_inbox_turn_messages_read(session_id, turn_id=turn_id, context=context)
                 full_history_message_count = len(seedable_history_messages)
                 runtime_context_segments = (
                     s._session_context_segments_without_prompt_template(
