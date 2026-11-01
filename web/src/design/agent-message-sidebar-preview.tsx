@@ -1,5 +1,5 @@
 /** Isolated interaction design. All identities, messages and receipts are synthetic. */
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { AlertCircle, ArrowRight, CheckCheck, Clock3, LoaderCircle, Reply, Send, Users } from "lucide-react";
 
@@ -83,6 +83,7 @@ function Preview() {
   const [dark, setDark] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [announcement, setAnnouncement] = useState("");
+  const messageListRef = useRef<HTMLElement>(null);
   const selected = messages.find((m) => m.id === selectedId) ?? messages[0];
   const linkedReplies = messages.filter((m) => m.replyTo === selected.id);
   const visible = messages.filter((m) => {
@@ -93,7 +94,15 @@ function Preview() {
     if (filter === "pending") return m.recipients.some((r) => r.delivery === "sending" || (r.delivery === "delivered" && ["waiting", "queued", "processing"].includes(r.handling)));
     return true;
   });
-  const choose = (id: string) => { setSelectedId(id); setExpanded(false); };
+  const choose = (id: string) => {
+    setSelectedId(id); setExpanded(false);
+    if (!visible.some((m) => m.id === id)) { setFilter("all"); setQuery(""); }
+    requestAnimationFrame(() => {
+      const row = [...(messageListRef.current?.querySelectorAll<HTMLButtonElement>("[data-message-id]") ?? [])]
+        .find((element) => element.dataset.messageId === id);
+      row?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
+  };
   function simulateSend() {
     const id = `demo-${messages.length + 1}`;
     setMessages((current) => [{ id, senderId: "assistant", type: "request", time: "刚刚", title: "新增的消息已出现在左栏", body: "这条示例用于确认每次发送都会新增一条独立记录。当前选中的消息保持不变。", recipients: [{ agentId: "tester", delivery: "sending", handling: "waiting" }] }, ...current]);
@@ -131,7 +140,7 @@ function Preview() {
     <header className={styles.listHeader}><div><h2>已发送消息 <span data-testid="message-count">{messages.length}</span></h2><p>每条发送独立记录</p></div><Send size={18} aria-hidden="true" /></header>
     <div className={styles.search}><VInput aria-label="搜索消息或 Agent" placeholder="搜索消息或 Agent" value={query} onChange={(event) => setQuery(event.target.value)} /></div>
     <div className={styles.filters} aria-label="消息状态筛选">{filters.map((item) => <VButton key={item.id} className={styles.filter} aria-pressed={filter === item.id} onPress={() => setFilter(item.id)}>{item.label}</VButton>)}</div>
-    <nav className={styles.messageList} aria-label="已发送跨 Agent 消息" data-testid="sent-message-list">
+    <nav ref={messageListRef} className={styles.messageList} aria-label="已发送跨 Agent 消息" data-testid="sent-message-list">
       {visible.map((m) => <VButton key={m.id} contentLayout="plain" className={styles.messageRow} aria-pressed={selected.id === m.id} data-message-id={m.id} onPress={() => choose(m.id)}>
         <span className={styles.identityLine}><Actor id={m.senderId} compact /><ArrowRight size={12} className={styles.arrow} aria-hidden="true" />{m.recipients.length === 1 ? <Actor id={m.recipients[0].agentId} compact /> : <span className={styles.recipientGroup} title={m.recipients.map((r) => agents[r.agentId].name).join("、")}><span className={styles.avatarStack} aria-hidden="true">{m.recipients.slice(0, 2).map((r) => <span key={r.agentId} className={styles.avatar} data-agent={r.agentId}><ConversationTurnAvatarContent content={{ fallback: agents[r.agentId].initials }} /></span>)}</span><span>{agents[m.recipients[0].agentId].name}等 {m.recipients.length} 位</span></span>}</span>
         <span className={styles.messageTitle}>{m.title}</span>
