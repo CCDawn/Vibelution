@@ -205,9 +205,9 @@ describe("ConversationProcessDisclosure", () => {
 
   it("uses a readable assistant action in the collapsed summary and preserves ordinary tool identity", () => {
     const failed = { ...processCell("failed"), title: "personal_assistant_action_tool" };
-    expect(processLabel([failed], "zh")).toContain("查询项目与任务");
+    expect(processLabel([failed], "zh")).toContain("处理助理请求");
     expect(processLabel([failed], "zh")).not.toContain("personal_assistant_action_tool");
-    expect(processLabel([failed], "en")).toContain("Check projects and tasks");
+    expect(processLabel([failed], "en")).toContain("Handle assistant request");
     expect(processLabel([processCell("failed")], "zh")).toContain("cli_tool");
   });
 

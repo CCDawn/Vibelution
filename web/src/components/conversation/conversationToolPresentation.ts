@@ -1218,7 +1218,7 @@ export function conversationToolPresentationLabel(
     spawn_agent_tool: { zh: "派生代理", en: "Spawn agent" },
     personal_assistant_query_tool: { zh: "查询助理记录", en: "Check assistant records" },
     personal_assistant_platform_api_tool: { zh: "查询项目", en: "Check projects" },
-    personal_assistant_action_tool: { zh: "查询项目与任务", en: "Check projects and tasks" },
+    personal_assistant_action_tool: { zh: "处理助理请求", en: "Handle assistant request" },
     personal_assistant_overview_tool: { zh: "查看项目概况", en: "Check project overview" },
     personal_assistant_manage_tool: { zh: "执行助理操作", en: "Run assistant action" },
     personal_assistant_computer_observe_tool: { zh: "查看授权窗口", en: "Read authorized window" },
