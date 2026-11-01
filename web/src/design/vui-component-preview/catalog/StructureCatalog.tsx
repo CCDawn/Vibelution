@@ -41,6 +41,7 @@ import type { ActiveTurnStatusMessageLike } from "../../../components/conversati
 import type { ComposerContextRingModel } from "../../../routes/chat/composerContextModel";
 import { VuiPreviewCard } from "../VuiPreviewCard";
 import { VuiPreviewSection } from "../VuiPreviewSection";
+import { AgentMessageCatalog } from "./AgentMessageCatalog";
 
 const composerContextRingPreviewModel: ComposerContextRingModel = {
   usagePercent: 42,
@@ -171,6 +172,7 @@ export function StructureCatalog() {
 
   return (
     <VuiPreviewSection title="Structure">
+      <AgentMessageCatalog />
       <VuiPreviewCard name="VWorkbenchFrame" className="min-h-40">
         <div className="h-40 min-w-0">
           <VWorkbenchFrame><VPage className="p-3"><VPanelHeader title="持久页面壳" /><p className="text-vui-sm">共享圆角、背景与面板边界。</p></VPage></VWorkbenchFrame>
