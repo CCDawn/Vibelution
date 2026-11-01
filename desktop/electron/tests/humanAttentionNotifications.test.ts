@@ -449,8 +449,9 @@ describe("human attention shell contract wiring", () => {
     expect(segment).toContain("resolveHumanAttentionNotificationService().notify(acceptedPayload, source)");
   });
 
-  it("routes through sendToPet and the opened channel in main", () => {
-    expect(mainSource).toContain("windowProvider?.sendToPet(channel, payload) === true");
+  it("keeps the opened channel and OS-notification support wired in main", () => {
+    expect(mainSource).toContain("sendToAssistantWindow: () => false");
+    expect(mainSource).toContain("isAssistantWindowVisible: () => false");
     expect(mainSource).toContain("openedChannel: IPC_CHANNELS.humanAttentionOpened");
     expect(mainSource).toContain("notificationSupported: () => Notification.isSupported()");
   });
@@ -863,15 +864,14 @@ describe("human attention IPC sender boundary", () => {
     expect(sendToAssistantWindow).not.toHaveBeenCalled();
   });
 
-  it("keeps a branch card and its fallback attention away from the main pet and workbench", async () => {
-    const main = new FakeElectronWindow(1, ""), branch = new FakeElectronWindow(2, ""), pet = new FakeElectronWindow(3, "");
+  it("keeps a branch card and its fallback attention away from the main workbench", async () => {
+    const main = new FakeElectronWindow(1, ""), branch = new FakeElectronWindow(2, "");
     let next = 0;
     const provider = new ElectronWindowProvider(fakeDesktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000/", {
-      createWorkbenchWindow: () => next++ === 0 ? main : branch, createPetWindow: () => pet,
+      createWorkbenchWindow: () => next++ === 0 ? main : branch,
     });
     await provider.openOrFocusWorkbench();
     await provider.openOrFocusInstanceWorkbench({ instanceId: "branch", url: "http://127.0.0.1:8001/" });
-    await provider.openPet();
     const eventFor = (window: FakeElectronWindow) => {
       const frame = { url: window.webContents.getURL() };
       return { sender: Object.assign(window.webContents, { mainFrame: frame }), senderFrame: frame } as unknown as IpcMainInvokeEvent;
@@ -893,9 +893,11 @@ describe("human attention IPC sender boundary", () => {
     expect(await invoke(branch)).toEqual({ delivered: "attention_fallback" });
     expect(branch.flashes).toEqual([true]);
     expect(main.flashes).toEqual([]);
+    // The assistant-window channel admits no sender anymore: both workbenches
+    // fall back to the attention flash.
     expect(sendToAssistantWindow).not.toHaveBeenCalled();
-    expect(await invoke(main)).toEqual({ delivered: "assistant_window" });
-    expect(sendToAssistantWindow).toHaveBeenCalledTimes(1);
+    expect(await invoke(main)).toEqual({ delivered: "attention_fallback" });
+    expect(main.flashes).toEqual([true]);
   });
 
   it("does not reuse an old origin's dedup entry or click target after main navigation", async () => {
@@ -937,27 +939,5 @@ describe("human attention IPC sender boundary", () => {
     expect(main.sentIpc).toEqual([]);
     clicks[3]();
     expect(main.sentIpc).toHaveLength(1);
-  });
-});
-
-describe("window provider sendToPet", () => {
-  it("delivers only to a ready pet window and stops once it is gone", async () => {
-    const petWindow = new FakeElectronWindow(7, "");
-    const provider = new ElectronWindowProvider(
-      fakeDesktopPaths,
-      "http://127.0.0.1:8765/launcher",
-      "http://127.0.0.1:8000",
-      { createPetWindow: () => petWindow }
-    );
-
-    expect(provider.sendToPet(OPENED_CHANNEL, { id: "ha-1" })).toBe(false);
-
-    await provider.openPet();
-    expect(provider.sendToPet(OPENED_CHANNEL, { id: "ha-1" })).toBe(true);
-    expect(petWindow.sentIpc).toEqual([{ channel: OPENED_CHANNEL, payload: { id: "ha-1" } }]);
-    expect(petWindow.loadedUrls).toEqual(["http://127.0.0.1:8000/desktop-assistant"]);
-
-    petWindow.destroy();
-    expect(provider.sendToPet(OPENED_CHANNEL, { id: "ha-1" })).toBe(false);
   });
 });

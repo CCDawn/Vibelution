@@ -22,7 +22,6 @@ export type ConversationNotificationOpenPayload = {
   schemaVersion: 1;
   sessionId: string;
   companionAgentId?: string;
-  source?: "desktop-assistant";
 };
 
 type DesktopBridge = {
@@ -172,7 +171,7 @@ export function parseConversationNotificationOpenPayload(raw: unknown): Conversa
   if (typeof raw !== "object" || raw === null) {
     return null;
   }
-  const payload = raw as { schemaVersion?: unknown; sessionId?: unknown; companionAgentId?: unknown; source?: unknown };
+  const payload = raw as { schemaVersion?: unknown; sessionId?: unknown; companionAgentId?: unknown };
   if (payload.schemaVersion !== 1) {
     return null;
   }
@@ -188,7 +187,6 @@ export function parseConversationNotificationOpenPayload(raw: unknown): Conversa
     schemaVersion: 1,
     sessionId,
     ...(companionAgentId ? { companionAgentId } : {}),
-    ...(payload.source === "desktop-assistant" ? { source: "desktop-assistant" as const } : {}),
   };
 }
 
@@ -218,21 +216,9 @@ export function subscribeConversationNotificationOpened(
   }
   return bridge.onConversationNotificationOpened((raw) => {
     const parsed = parseConversationNotificationOpenPayload(raw);
-    if (parsed && !parsed.companionAgentId && parsed.source !== "desktop-assistant") {
+    if (parsed && !parsed.companionAgentId) {
       onOpen(parsed.sessionId);
     }
-  });
-}
-
-/** The main workbench owns this one fixed return target; ordinary notifications keep their existing route. */
-export function subscribeDesktopAssistantOpened(
-  bridge: DesktopBridge | undefined,
-  onOpen: (sessionId: string) => void,
-): () => void {
-  if (typeof bridge?.onConversationNotificationOpened !== "function") return () => undefined;
-  return bridge.onConversationNotificationOpened(raw => {
-    const parsed = parseConversationNotificationOpenPayload(raw);
-    if (parsed?.source === "desktop-assistant" && !parsed.companionAgentId) onOpen(parsed.sessionId);
   });
 }
 
@@ -245,7 +231,7 @@ export function subscribeCompanionNotificationOpened(
   }
   return bridge.onConversationNotificationOpened((raw) => {
     const parsed = parseConversationNotificationOpenPayload(raw);
-    if (parsed?.companionAgentId && parsed.source !== "desktop-assistant") {
+    if (parsed?.companionAgentId) {
       onOpen({
         sessionId: parsed.sessionId,
         companionAgentId: parsed.companionAgentId,

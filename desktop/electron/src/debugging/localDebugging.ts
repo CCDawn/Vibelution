@@ -14,7 +14,6 @@ export function identifyDebugWindow(
   windows: {
     launcher: { rendererProcessId: number };
     workbench: { rendererProcessId: number };
-    pet?: { rendererProcessId: number };
   } | null,
   instances: Array<{ rendererProcessId: number; instanceId: string }>
 ): { role: string; instanceId?: string } {
@@ -22,7 +21,6 @@ export function identifyDebugWindow(
   if (instance) return { role: "branch-workbench", instanceId: instance.instanceId };
   if (windows?.launcher.rendererProcessId === rendererProcessId) return { role: "launcher" };
   if (windows?.workbench.rendererProcessId === rendererProcessId) return { role: "main-workbench" };
-  if (windows?.pet?.rendererProcessId === rendererProcessId) return { role: "desktop-pet" };
   return { role: "unknown" };
 }
 

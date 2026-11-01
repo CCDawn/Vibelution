@@ -4,7 +4,6 @@ import { IPC_CHANNELS } from "./ipc.js";
 import { installRendererWindowClose } from "./windows/rendererWindowClose.js";
 
 const isLauncherControlWindow = process.argv.includes("--vibelution-window-role=launcher-control");
-const isDesktopPetWindow = process.argv.includes("--vibelution-window-role=desktop-pet");
 const isLauncherAssistantWindow = process.argv.includes("--vibelution-window-role=launcher-assistant");
 const isWorkbenchMainWindow = process.argv.includes("--vibelution-window-role=workbench-main");
 
@@ -43,12 +42,10 @@ if (isLauncherAssistantWindow || isWorkbenchMainWindow || isLauncherControlWindo
 }
 
 if (isLauncherAssistantWindow) {
-  // The unified resident assistant surface reuses the desktop pet drag and
-  // expand IPC. Expose only that pet subset here; the full vibelutionLauncher
-  // bridge stays limited to workbench and launcher control windows.
+  // The resident assistant surface reuses the desktop pet drag IPC. Expose
+  // only that pet subset here; the full vibelutionLauncher bridge stays
+  // limited to workbench and launcher control windows.
   contextBridge.exposeInMainWorld("vibelutionLauncher", {
-    setDesktopPetExpanded: (expanded: boolean) =>
-      ipcRenderer.invoke(IPC_CHANNELS.setDesktopPetExpanded, expanded),
     openConversationFromPet: (sessionId: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.openConversationFromPet, sessionId),
     beginDesktopPetWindowDrag: (point: unknown) =>
@@ -64,7 +61,7 @@ if (!isLauncherAssistantWindow) {
 contextBridge.exposeInMainWorld("vibelutionLauncher", {
   getVersion: () => ipcRenderer.invoke(IPC_CHANNELS.getVersion),
   getDesktopShellSummary: () => ipcRenderer.invoke(IPC_CHANNELS.getDesktopShellSummary),
-  ...(!isLauncherControlWindow && !isDesktopPetWindow ? {
+  ...(!isLauncherControlWindow ? {
     requestWindowClose: () => ipcRenderer.invoke(IPC_CHANNELS.requestWindowClose),
     readThemeAuthority: () => ipcRenderer.invoke(IPC_CHANNELS.readThemeAuthority),
     setThemeAuthority: (input: unknown) => ipcRenderer.invoke(IPC_CHANNELS.setThemeAuthority, input),
@@ -74,7 +71,6 @@ contextBridge.exposeInMainWorld("vibelutionLauncher", {
       ipcRenderer.on(IPC_CHANNELS.assistantThemeChanged, wrapped);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.assistantThemeChanged, wrapped);
     },
-    controlDesktopPet: (open?: boolean, mode?: "pet" | "assistant") => ipcRenderer.invoke(IPC_CHANNELS.controlDesktopPet, open, mode),
     requestWorkbenchRestart: (trigger?: string) => ipcRenderer.invoke(IPC_CHANNELS.requestWorkbenchRestart, trigger),
     requestWorkbenchShellUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.requestWorkbenchShellUpdate),
     getLauncherFreshness: () => ipcRenderer.invoke(IPC_CHANNELS.getLauncherFreshness),
@@ -133,25 +129,9 @@ contextBridge.exposeInMainWorld("vibelutionLauncher", {
         refreshLauncherState: () => ipcRenderer.invoke(IPC_CHANNELS.refreshLauncherState)
       }
     : {}),
-  ...(isDesktopPetWindow
-    ? {
-        getDesktopAssistantContext: () =>
-          ipcRenderer.invoke(IPC_CHANNELS.getDesktopAssistantContext),
-        setDesktopPetExpanded: (expanded: boolean) =>
-          ipcRenderer.invoke(IPC_CHANNELS.setDesktopPetExpanded, expanded),
-        openConversationFromPet: (sessionId: string) =>
-          ipcRenderer.invoke(IPC_CHANNELS.openConversationFromPet, sessionId),
-        beginDesktopPetWindowDrag: (point: unknown) =>
-          ipcRenderer.send(IPC_CHANNELS.beginDesktopPetWindowDrag, point),
-        moveDesktopPetWindowDrag: (point: unknown) =>
-          ipcRenderer.send(IPC_CHANNELS.moveDesktopPetWindowDrag, point),
-        endDesktopPetWindowDrag: () =>
-          ipcRenderer.send(IPC_CHANNELS.endDesktopPetWindowDrag)
-      }
-    : {})
 });
 }
 
-if (!isLauncherControlWindow && !isDesktopPetWindow && !isLauncherAssistantWindow) {
+if (!isLauncherControlWindow && !isLauncherAssistantWindow) {
   contextBridge.executeInMainWorld({ func: installRendererWindowClose });
 }

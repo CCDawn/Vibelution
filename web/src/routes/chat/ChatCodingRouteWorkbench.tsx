@@ -722,7 +722,7 @@ export function ChatCodingRouteWorkbench() {
   const verifiedCompanionMode = Boolean(activeCompanion);
   const financeSurface = location.pathname === "/finance";
   // Presentation only: the outer assistant route has already verified the canonical Agent/Session binding.
-  const personalAssistantSurface = location.pathname === "/personal-assistant" || location.pathname === "/desktop-assistant";
+  const personalAssistantSurface = location.pathname === "/personal-assistant";
   const embeddedSurface = financeSurface || personalAssistantSurface;
   const companionTransportAgentId = activeCompanion?.agentId;
   const companionRailState: CompanionRailState = companionsQuery.isPending && !companionsQuery.data

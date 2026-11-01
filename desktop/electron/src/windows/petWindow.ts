@@ -14,24 +14,6 @@ import {
 
 const PET_BOUNDS_FILE = "desktop-pet-window.json";
 
-export function desktopPetWindowUrl(workbenchUrl: string): string {
-  // The pet and the personal assistant are one surface: every mode request
-  // (legacy "pet" included) loads the unified /desktop-assistant window.
-  const url = new URL(workbenchUrl);
-  url.pathname = "/desktop-assistant";
-  url.search = "";
-  url.hash = "";
-  return url.toString();
-}
-
-export function isDesktopPetWindowUrl(rawUrl: string): boolean {
-  try {
-    return ["/desktop-pet", "/desktop-assistant"].includes(new URL(rawUrl).pathname);
-  } catch {
-    return false;
-  }
-}
-
 export function createPetWindow(_url: string, paths: Pick<DesktopPaths, "desktopBundleRoot" | "userDataRoot">,
   _options?: ElectronWindowCreateOptions,
   role: "desktop-pet" | "launcher-assistant" = "desktop-pet"): BrowserWindow {
@@ -68,9 +50,9 @@ export function createPetWindow(_url: string, paths: Pick<DesktopPaths, "desktop
   });
   window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   window.webContents.on("did-navigate", (_event, url) => {
-    // A mode switch always starts collapsed; expanded sizes are never persisted.
-    if ((!isDesktopPetWindowUrl(url) && !(role === "launcher-assistant" && url === "vibelution-launcher://launcher/launcher-assistant"))
-        || window.isDestroyed()) return;
+    // Re-entering the assistant surface always starts collapsed; expanded sizes are never persisted.
+    if (role !== "launcher-assistant" || url !== "vibelution-launcher://launcher/launcher-assistant") return;
+    if (window.isDestroyed()) return;
     const current = window.getBounds();
     window.setBounds(desktopPetWindowExpandedBounds(current, screen.getDisplayMatching(current).workArea, false), false);
   });

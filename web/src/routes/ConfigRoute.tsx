@@ -1,7 +1,6 @@
 import "../design/route-css/config.tailwind.css";
 import "./ConfigSettingsWorkbench.css";
 import { ConfigSettingsIndex } from "./ConfigSettingsIndex";
-import { ConfigDesktopPetSettings } from "./ConfigDesktopPetSettings";
 import { ConfigShortcutsPanel } from "./ConfigShortcutsPanel";
 import { ConfigDecisionModelsPanel, readDecisionModelMap } from "./ConfigDecisionModelsPanel";
 import { ConfigAppearancePreferences } from "./ConfigAppearancePreferences";
@@ -1708,12 +1707,6 @@ export function ConfigRoute() {
           sections={workspaceSections} language={currentLanguage} onNavigate={handleNavigateSettings}
         /> : null}
 
-        {isSectionVisible("pet") ? (
-          <VSettingsGroupCard>
-            <ConfigDesktopPetSettings language={currentLanguage} />
-          </VSettingsGroupCard>
-        ) : null}
-
         {notice.text && !providerSetupVisible ? (
           <div
             className={
@@ -2149,7 +2142,7 @@ export function ConfigRoute() {
             />
             {section.id === "ui" ? (
               // 界面字号：--vui-font-base 的本地偏好控制行（不进 config.toml），
-              // 渲染在「界面外观」分区卡片之后，VSettingsRow 组卡先例同 ConfigDesktopPetSettings。
+              // 渲染在「界面外观」分区卡片之后，沿用 VSettingsRow 组卡先例。
               <VSettingsGroupCard testId="config-ui-font-settings">
                 <ConfigAppearancePreferences copy={copy} />
               </VSettingsGroupCard>

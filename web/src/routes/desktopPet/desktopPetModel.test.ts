@@ -1,9 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import type { PetActivity } from "../../api/types/petActivity";
 import {
-  desktopPetBridge,
-  openSessionFromDesktopPet,
   petActivityRefetchInterval,
   petPhaseLabel,
 } from "./desktopPetModel";
@@ -19,10 +17,6 @@ const activity = (activeCount: number, attentionCount: number): PetActivity => (
 });
 
 describe("desktop pet model", () => {
-  it("does not claim navigation succeeded when the shell refuses or fails", async () => {
-    await expect(openSessionFromDesktopPet("session-1", { openConversationFromPet: async () => ({ opened: false }) })).resolves.toBe(false);
-    await expect(openSessionFromDesktopPet("session-1", { openConversationFromPet: async () => { throw new Error("offline"); } })).resolves.toBe(false);
-  });
   it("polls quickly while work or attention is present and backs off while idle", () => {
     expect(petActivityRefetchInterval(undefined)).toBe(1_000);
     expect(petActivityRefetchInterval(activity(1, 0))).toBe(1_000);
@@ -35,14 +29,4 @@ describe("desktop pet model", () => {
     expect(petPhaseLabel("verifying", "en")).toBe("Verifying");
   });
 
-  it("uses only the narrow pet bridge and rejects unsafe session ids", async () => {
-    const openConversationFromPet = vi.fn(async () => ({ opened: true }));
-    const bridge = desktopPetBridge({ vibelutionLauncher: { openConversationFromPet, launcherInvoke: vi.fn() } });
-
-    expect(bridge).toEqual({ openConversationFromPet });
-    await expect(openSessionFromDesktopPet("session-1", bridge)).resolves.toBe(true);
-    await expect(openSessionFromDesktopPet("../unsafe", bridge)).resolves.toBe(false);
-    expect(openConversationFromPet).toHaveBeenCalledTimes(1);
-    expect(openConversationFromPet).toHaveBeenCalledWith("session-1");
-  });
 });

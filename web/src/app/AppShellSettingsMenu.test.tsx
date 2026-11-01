@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { AppShellSettingsMenu } from "./AppShellSettingsMenu";
-const control = vi.fn(), refresh = vi.fn(), close = vi.fn(), theme = vi.fn();
+const refresh = vi.fn(), close = vi.fn(), theme = vi.fn();
 let root: Root, host: HTMLDivElement;
 async function mount(disabled = false, themePending = false) {
   await act(async () => root.render(<MemoryRouter><AppShellSettingsMenu lang="zh" theme="light" themePending={themePending} onThemeChange={theme} onClose={close} onRefresh={refresh} refreshDisabled={disabled} /></MemoryRouter>));
@@ -12,17 +12,18 @@ async function mount(disabled = false, themePending = false) {
 function button(label: string) { return [...host.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent?.includes(label) || b.getAttribute("aria-label") === label)!; }
 beforeEach(async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  vi.stubGlobal("vibelutionLauncher", { controlDesktopPet: control });
-  control.mockReset().mockResolvedValue({ open: false, busyElsewhere: false });
   refresh.mockReset(); close.mockReset(); theme.mockReset();
   host = document.createElement("div"); document.body.append(host); root = createRoot(host); await mount();
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
-it("shows five common entries and hides maintenance", () => {
-  expect(host.querySelectorAll("a, button, input[role=switch]")).toHaveLength(5);
+it("shows four common entries and hides maintenance", () => {
+  expect(host.querySelectorAll("a, button, input[role=switch]")).toHaveLength(4);
   expect(host.textContent).not.toContain("重新加载");
   expect(host.querySelector('a[href="/config"]')).not.toBeNull();
   expect(host.querySelector('a[href="/usage"]')).not.toBeNull();
+  // The retired desktop-pet toggle no longer mounts in the shell menu.
+  expect(host.querySelector('input[role="switch"]')).toBeNull();
+  expect(host.textContent).not.toContain("个人助理");
 });
 it("opens maintenance in place, preserves routes and returns", async () => {
   await act(async () => button("高级与诊断").click());
@@ -45,21 +46,4 @@ it("disables both theme choices while a prior selection is pending", async () =>
   await act(async () => button("外观").click());
   expect(button("浅色").disabled).toBe(true);
   expect(button("深色").disabled).toBe(true);
-});
-it("drives the real bridge and does not fake success on rejection", async () => {
-  const toggle = host.querySelector<HTMLInputElement>('input[role="switch"]')!;
-  control.mockResolvedValueOnce({ open: true, busyElsewhere: false });
-  await act(async () => toggle.click()); expect(control).toHaveBeenLastCalledWith(true); expect(toggle.checked).toBe(true);
-  control.mockRejectedValueOnce(new Error("failed"));
-  await act(async () => toggle.click()); expect(host.textContent).toContain("操作失败"); expect(toggle.checked).toBe(true);
-});
-it("disables compact pet control without a bridge", async () => {
-  vi.stubGlobal("vibelutionLauncher", undefined); await mount();
-  expect(host.querySelector<HTMLInputElement>('input[role="switch"]')!.disabled).toBe(true);
-  expect(host.textContent).toContain("仅桌面版");
-});
-it("does not take another workspace's pet", async () => {
-  control.mockResolvedValue({ open: false, busyElsewhere: true });
-  await act(async () => window.dispatchEvent(new Event("focus")));
-  expect(host.querySelector<HTMLInputElement>('input[role="switch"]')!.disabled).toBe(true);
 });

@@ -37,7 +37,7 @@ describe("renderer managed close", () => {
     expect(invoke).toHaveBeenCalledWith("workbench:request-window-close");
   });
 
-  it.each(["launcher-control", "desktop-pet"])("does not grant a workbench close bridge to %s", async role => {
+  it.each(["launcher-control"])("does not grant a workbench close bridge to %s", async role => {
     const { page, nativeClose, invoke } = await loadPreload(role);
     page.close();
     expect(nativeClose).toHaveBeenCalledOnce();

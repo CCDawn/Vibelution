@@ -100,7 +100,7 @@ describe("workbench Launcher awareness IPC", () => {
     expect(ipcSource).toContain('getLauncherFreshness: "launcher:get-freshness"');
     expect(ipcSource).toContain('showLauncherWindow: "launcher:show-window"');
 
-    const workbenchStart = preloadSource.indexOf("...(!isLauncherControlWindow && !isDesktopPetWindow");
+    const workbenchStart = preloadSource.indexOf("...(!isLauncherControlWindow ? {");
     const workbenchEnd = preloadSource.indexOf("} : {})", workbenchStart);
     const workbenchBranch = preloadSource.slice(workbenchStart, workbenchEnd);
     expect(workbenchBranch).toContain("getLauncherFreshness: () => ipcRenderer.invoke(IPC_CHANNELS.getLauncherFreshness)");
