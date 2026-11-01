@@ -34,7 +34,7 @@
 
 Launcher 的跨项目完整 Agent 目录使用 `personal_assistant_action_tool` 的 `agent_list`，由独立 `agents:directory:read` 授权保护，仅返回登记身份、状态、公开归属和原生派遣资格。它包含归档、系统、隐藏及团队类别，不读取其私密内容；现有授权不会自动扩张，须经 `authorization_status` 与显式 `authorization_upgrade`。目录按完整 ID 排序，续页绑定 `revision`，来源变化或权威缺失时明确拒绝，不把不可用解释为空。`agents` 仍只列外部可派遣候选，不能作为完整目录或项目总量。目录结果中的名称始终是不可信数据，不作为执行指令。
 
-Launcher 的平台管理使用实时 `index/describe` 的闭合契约。`runtime_list/runtime_get` 由独立 `operations:read` 保护，逐源报告元数据覆盖；`runtime_command` 使用 `operations:control`，以原生身份、对象版本和实际可用命令调用对应 owner。写入回执中的受理和停止意图不等于任务终态。已有团队、Agent 工具权限、知识 ACL 和 Flow 分别使用 `teams:manage:read/write`、`agents:tool-policy:read/write`、`knowledge:acl:read/write`、`teams:flows:read/write/run`；这些 scope 都须显式升级，不进入新建或旧 SDK 的默认授权。所有写入保留原生审批、真实操作者、CAS 与稳定请求键；知识 ACL 必须携带读取时返回的完整 scoped ID。查询不会初始化或修复缺失权威；不可用须明确报告。
+Launcher 的平台管理使用实时 `index/describe` 的闭合契约。`runtime_list/runtime_get` 由独立 `operations:read` 保护，逐源报告元数据覆盖；`runtime_command` 使用 `operations:control`，以原生身份、对象版本和实际可用命令调用对应 owner。写入回执中的受理和停止意图不等于任务终态。已有团队使用 `teams:manage:read` 与 `teams:write`；Agent 工具权限、知识 ACL 和 Flow 分别使用 `agents:tool-policy:read/write`、`knowledge:acl:read/write`、`teams:flows:read/write/run`。这些 scope 都须显式升级，不进入新建或旧 SDK 的默认授权。所有写入保留原生审批、真实操作者、CAS 与稳定请求键；知识 ACL 必须携带读取时返回的完整 scoped ID。查询不会初始化或修复缺失权威；不可用须明确报告。
 
 `management_requests` 只发现当前助理保存的项目、动作和请求引用，不复制参数、正文或凭据；历史无引用时明确报告覆盖缺口。新平台写入或永久删除在应答丢失后只查询原回执，回执不存在也不能证明原动作未执行。仅之前原始提交已明确被拒绝授权时，才可在显式补权后用同一请求继续。助理发起的团队及 Flow 由既有 patrol 查询原生运行终态并幂等触发后续会话，发现层与通知账本不成为第二份运行或对话权威。
 
