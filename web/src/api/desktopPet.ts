@@ -7,10 +7,8 @@ export type DesktopPetState = {
   supportedModes?: DesktopPetMode[];
 };
 export type DesktopPetExpandedState = { expanded: boolean; width: number; height: number };
-export type DesktopAssistantContext = { role: "desktop-assistant"; mode: "assistant" };
 type PetControlBridge = { controlDesktopPet: (open?: boolean, mode?: DesktopPetMode) => Promise<DesktopPetState> };
 type PetExpandedBridge = { setDesktopPetExpanded: (expanded: boolean) => Promise<DesktopPetExpandedState> };
-type AssistantContextBridge = { getDesktopAssistantContext: () => Promise<DesktopAssistantContext> };
 export function desktopPetControlBridge(source: unknown = globalThis): PetControlBridge | null {
   const bridge = (source as { vibelutionLauncher?: Partial<PetControlBridge> } | null)?.vibelutionLauncher;
   return typeof bridge?.controlDesktopPet === "function" ? bridge as PetControlBridge : null;
@@ -39,13 +37,4 @@ export async function setDesktopPetExpanded(expanded: boolean): Promise<DesktopP
   if (state?.expanded !== expanded || !Number.isFinite(state.width) || state.width <= 0
     || !Number.isFinite(state.height) || state.height <= 0) throw new Error("Invalid desktop pet expanded state");
   return state;
-}
-
-/** Native main-frame identity, unavailable to a plain browser route. */
-export async function getDesktopAssistantContext(): Promise<DesktopAssistantContext> {
-  const bridge = (globalThis as { vibelutionLauncher?: Partial<AssistantContextBridge> }).vibelutionLauncher;
-  if (typeof bridge?.getDesktopAssistantContext !== "function") throw new Error("此页面需要在个人助理窗口中打开。");
-  const context = await bridge.getDesktopAssistantContext();
-  if (context?.role !== "desktop-assistant" || context?.mode !== "assistant") throw new Error("Invalid desktop assistant context");
-  return context;
 }

@@ -71,7 +71,7 @@ beforeEach(() => {
       return () => undefined;
     },
   });
-  router = createMemoryRouter([{ path: "*", element: <Host /> }], { initialEntries: ["/desktop-assistant"] });
+  router = createMemoryRouter([{ path: "*", element: <Host /> }], { initialEntries: ["/personal-assistant"] });
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -154,7 +154,7 @@ describe("assistant window human-attention notice stack", () => {
     const close = container.querySelector<HTMLButtonElement>('button[aria-label="关闭通知"]')!;
     await act(async () => close.click());
     expect(cards()).toHaveLength(0);
-    expect(router.state.location.pathname).toBe("/desktop-assistant");
+    expect(router.state.location.pathname).toBe("/personal-assistant");
   });
 
   it("navigates immediately for bare opened clicks without showing a card", async () => {
@@ -237,7 +237,7 @@ describe("assistant window human-gate inline approval", () => {
       decision: "accept",
     });
     expect(cards()).toHaveLength(0);
-    expect(router.state.location.pathname).toBe("/desktop-assistant");
+    expect(router.state.location.pathname).toBe("/personal-assistant");
   });
 
   it("requires a two-step inline confirmation before reject executes", async () => {

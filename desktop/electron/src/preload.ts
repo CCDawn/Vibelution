@@ -4,7 +4,6 @@ import { IPC_CHANNELS } from "./ipc.js";
 import { installRendererWindowClose } from "./windows/rendererWindowClose.js";
 
 const isLauncherControlWindow = process.argv.includes("--vibelution-window-role=launcher-control");
-const isDesktopPetWindow = process.argv.includes("--vibelution-window-role=desktop-pet");
 const isLauncherAssistantWindow = process.argv.includes("--vibelution-window-role=launcher-assistant");
 const isWorkbenchMainWindow = process.argv.includes("--vibelution-window-role=workbench-main");
 
@@ -64,7 +63,7 @@ if (!isLauncherAssistantWindow) {
 contextBridge.exposeInMainWorld("vibelutionLauncher", {
   getVersion: () => ipcRenderer.invoke(IPC_CHANNELS.getVersion),
   getDesktopShellSummary: () => ipcRenderer.invoke(IPC_CHANNELS.getDesktopShellSummary),
-  ...(!isLauncherControlWindow && !isDesktopPetWindow ? {
+  ...(!isLauncherControlWindow ? {
     requestWindowClose: () => ipcRenderer.invoke(IPC_CHANNELS.requestWindowClose),
     readThemeAuthority: () => ipcRenderer.invoke(IPC_CHANNELS.readThemeAuthority),
     setThemeAuthority: (input: unknown) => ipcRenderer.invoke(IPC_CHANNELS.setThemeAuthority, input),
@@ -133,25 +132,9 @@ contextBridge.exposeInMainWorld("vibelutionLauncher", {
         refreshLauncherState: () => ipcRenderer.invoke(IPC_CHANNELS.refreshLauncherState)
       }
     : {}),
-  ...(isDesktopPetWindow
-    ? {
-        getDesktopAssistantContext: () =>
-          ipcRenderer.invoke(IPC_CHANNELS.getDesktopAssistantContext),
-        setDesktopPetExpanded: (expanded: boolean) =>
-          ipcRenderer.invoke(IPC_CHANNELS.setDesktopPetExpanded, expanded),
-        openConversationFromPet: (sessionId: string) =>
-          ipcRenderer.invoke(IPC_CHANNELS.openConversationFromPet, sessionId),
-        beginDesktopPetWindowDrag: (point: unknown) =>
-          ipcRenderer.send(IPC_CHANNELS.beginDesktopPetWindowDrag, point),
-        moveDesktopPetWindowDrag: (point: unknown) =>
-          ipcRenderer.send(IPC_CHANNELS.moveDesktopPetWindowDrag, point),
-        endDesktopPetWindowDrag: () =>
-          ipcRenderer.send(IPC_CHANNELS.endDesktopPetWindowDrag)
-      }
-    : {})
 });
 }
 
-if (!isLauncherControlWindow && !isDesktopPetWindow && !isLauncherAssistantWindow) {
+if (!isLauncherControlWindow && !isLauncherAssistantWindow) {
   contextBridge.executeInMainWorld({ func: installRendererWindowClose });
 }

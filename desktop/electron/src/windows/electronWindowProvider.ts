@@ -2,7 +2,6 @@ import type { DesktopPaths } from "../paths.js";
 import { isLauncherAppUrl, launcherAppOriginFor } from "../protocol/launcherAppProtocol.js";
 import { assertLocalHttpUrl } from "../security/urlPolicy.js";
 import { isExternalOpenableUrl } from "../security/externalOpenPolicy.js";
-import { desktopPetWindowUrl, isDesktopPetWindowUrl } from "./petWindow.js";
 import { isWorkbenchErrorPageUrl, workbenchErrorPageDataUrl } from "./workbenchErrorPage.js";
 import { closedWindowState, type ElectronWindowRole, type ManagedWindowState } from "./windowProviderTypes.js";
 
@@ -64,7 +63,6 @@ export type ElectronWindowFactory = (
 export type ElectronWindowProviderOptions = {
   createLauncherWindow?: ElectronWindowFactory;
   createWorkbenchWindow?: ElectronWindowFactory;
-  createPetWindow?: ElectronWindowFactory;
   launcherContentVersion?: () => string;
   listLauncherWindows?: (launcherOrigin: string) => ElectronWindowLike[];
   isLauncherControlWindow?: (window: ElectronWindowLike) => boolean;
@@ -150,12 +148,10 @@ export class ElectronWindowProvider {
   private workbenchCloseGeneration = 0;
   private launcherWindow: ElectronWindowLike | null = null;
   private workbenchWindow: ElectronWindowLike | null = null;
-  private petWindow: ElectronWindowLike | null = null;
   private readonly instanceWindows = new Map<string, InstanceWorkbenchEntry>();
   private readonly instanceNavigations = new Map<ElectronWindowLike, number>();
   private readonly createLauncherWindow: ElectronWindowFactory;
   private readonly createWorkbenchWindow: ElectronWindowFactory;
-  private readonly createPetWindow: ElectronWindowFactory;
   private readonly listAllWindows?: () => ElectronWindowLike[];
   private readonly reportState: (state: ManagedWindowState) => void | Promise<void>;
   private readonly shouldInterceptLauncherClose: () => boolean;
@@ -174,8 +170,6 @@ export class ElectronWindowProvider {
   private workbenchUrl: string;
   private workbenchReadyUrl: string | null = null;
   private workbenchNavigation: Promise<ManagedWindowState> | null = null;
-  private petNavigation: Promise<ManagedWindowState> | null = null;
-  private petReadyUrl: string | null = null;
   private workbenchCloseAuthorized = false;
   private workbenchCloseInFlight = false;
   private readonly instanceCloseAuthorized = new Map<string, ElectronWindowLike>();
@@ -203,7 +197,6 @@ export class ElectronWindowProvider {
     this.workbenchUrl = workbenchUrl;
     this.createLauncherWindow = options.createLauncherWindow ?? missingWindowFactory("launcher");
     this.createWorkbenchWindow = options.createWorkbenchWindow ?? missingWindowFactory("workbench");
-    this.createPetWindow = options.createPetWindow ?? missingWindowFactory("pet");
     this.listLauncherWindows = options.listLauncherWindows ?? (() => []);
     this.isLauncherControlWindow = options.isLauncherControlWindow ?? (() => false);
     this.listWorkbenchWindows = options.listWorkbenchWindows ?? (() => []);
@@ -368,64 +361,6 @@ export class ElectronWindowProvider {
         this.workbenchNavigation = null;
       }
     }
-  }
-
-  async openPet(workbenchUrl = this.workbenchUrl): Promise<ManagedWindowState> {
-    const safeWorkbenchUrl = localWorkbenchUrl(workbenchUrl);
-    const safeUrl = desktopPetWindowUrl(safeWorkbenchUrl);
-    if (this.petNavigation !== null) {
-      await this.petNavigation;
-      return this.openPet(safeWorkbenchUrl);
-    }
-    const navigation = Promise.resolve().then(async () => {
-      let window = this.petWindow;
-      if (!window || window.isDestroyed()) {
-        window = this.createPetWindow(safeUrl, this.paths);
-        this.petWindow = window;
-        this.petReadyUrl = null;
-        this.attachWindowEvents("pet", window);
-      }
-      if (this.petReadyUrl !== safeUrl) {
-        window.hide();
-        try {
-          await window.loadURL(safeUrl);
-          if (window.isDestroyed() || this.petWindow !== window) {
-            throw new Error("Desktop pet window closed before navigation completed");
-          }
-          this.petReadyUrl = safeUrl;
-        } catch (error: unknown) {
-          if (this.petWindow === window) {
-            this.petWindow = null;
-            this.petReadyUrl = null;
-          }
-          if (!window.isDestroyed()) {
-            window.destroy();
-          }
-          throw navigationFailure(safeUrl, error);
-        }
-      }
-      window.show();
-      return this.stateFor("pet");
-    });
-    this.petNavigation = navigation;
-    try {
-      return await navigation;
-    } finally {
-      if (this.petNavigation === navigation) {
-        this.petNavigation = null;
-      }
-    }
-  }
-
-  async closePet(): Promise<ManagedWindowState> {
-    const window = this.petWindow;
-    if (!window || window.isDestroyed()) {
-      this.petWindow = null;
-      this.petReadyUrl = null;
-      return closedWindowState("pet");
-    }
-    window.close();
-    return this.stateFor("pet");
   }
 
   async openOrFocusInstanceWorkbench(input: {
@@ -672,47 +607,6 @@ export class ElectronWindowProvider {
     }
   }
 
-  /**
-   * Deliver a message to the live pet/assistant surface (the unified
-   * /desktop-assistant window). Returns false when the surface is closed,
-   * still loading, or its webContents cannot receive, so callers can route to
-   * their fallback channel. A send failure is swallowed and reported as a
-   * non-delivery instead of surfacing in the main process.
-   */
-  sendToPet(channel: string, payload: unknown): boolean {
-    const window = this.petWindow;
-    if (!window || window.isDestroyed() || this.petReadyUrl === null) {
-      return false;
-    }
-    if (!isDesktopPetWindowUrl(this.petReadyUrl) || typeof window.webContents.send !== "function") {
-      return false;
-    }
-    try {
-      window.webContents.send(channel, payload);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Whether the pet/assistant surface is actually on screen. A minimized,
-   * hidden, or background surface still accepts `sendToPet`, so attention
-   * delivery must consult this before trusting the in-window channel.
-   */
-  isPetVisible(): boolean {
-    const window = this.petWindow;
-    if (!window || window.isDestroyed() || this.petReadyUrl === null) {
-      return false;
-    }
-    if (typeof window.isVisible !== "function" || !window.isVisible()) {
-      return false;
-    }
-    if (typeof window.isMinimized === "function" && window.isMinimized()) {
-      return false;
-    }
-    return true;
-  }
 
   sendToLauncher(channel: string, payload: unknown): boolean {
     const window = this.launcherWindow;
@@ -874,7 +768,7 @@ export class ElectronWindowProvider {
       }
       const captured: Captured[] = [], ids = new Set<number>();
       for (const window of alive) {
-        if (window === this.launcherWindow || window === this.petWindow) continue;
+        if (window === this.launcherWindow) continue;
         const id = window.id, pid = window.webContents.getOSProcessId(), url = window.webContents.getURL();
         if (window.isDestroyed() || !Number.isSafeInteger(id) || id <= 0 || ids.has(id)
             || !Number.isSafeInteger(pid) || pid < 0 || typeof url !== "string") return fail();
@@ -969,12 +863,11 @@ export class ElectronWindowProvider {
     return this.workbenchWindow;
   }
 
-  snapshot(): { launcher: ManagedWindowState; workbench: ManagedWindowState; pet: ManagedWindowState } {
+  snapshot(): { launcher: ManagedWindowState; workbench: ManagedWindowState } {
     this.reconcileCurrentWorkbenchWindow();
     return {
       launcher: this.stateFor("launcher"),
-      workbench: this.stateFor("workbench"),
-      pet: this.stateFor("pet")
+      workbench: this.stateFor("workbench")
     };
   }
 
@@ -1137,7 +1030,6 @@ export class ElectronWindowProvider {
       this.attachedWindows.delete(window);
       const wasLauncher = role === "launcher" && this.launcherWindow === window;
       const wasWorkbench = role === "workbench" && this.workbenchWindow === window;
-      const wasPet = role === "pet" && this.petWindow === window;
       if (wasLauncher) {
         this.launcherWindow = null;
       }
@@ -1147,14 +1039,10 @@ export class ElectronWindowProvider {
         this.workbenchCloseAuthorized = false;
         this.workbenchCloseInFlight = false;
       }
-      if (wasPet) {
-        this.petWindow = null;
-        this.petReadyUrl = null;
-      }
-      if (!wasLauncher && !wasWorkbench && !wasPet) {
+      if (!wasLauncher && !wasWorkbench) {
         return;
       }
-      const report = role === "pet" ? undefined : this.reportState(closedWindowState(role));
+      const report = this.reportState(closedWindowState(role));
       void Promise.resolve(report).catch(() => undefined);
       if (wasWorkbench) {
         // Native closure is already proven. A stalled state mirror must not
@@ -1169,13 +1057,11 @@ export class ElectronWindowProvider {
         this.onWorkbenchFocusAttentionClear(window.webContents);
         this.setWorkbenchAttention({ unreadCount: 0 });
       }
-      if (role !== "pet") {
-        void this.reportState(this.stateFor(role));
-      }
+      void this.reportState(this.stateFor(role));
     });
-    window.on("blur", () => role !== "pet" && void this.reportState(this.stateFor(role)));
-    window.on("unresponsive", () => role !== "pet" && void this.reportState(this.stateFor(role)));
-    window.webContents.on("render-process-gone", () => role !== "pet" && void this.reportState(this.stateFor(role)));
+    window.on("blur", () => void this.reportState(this.stateFor(role)));
+    window.on("unresponsive", () => void this.reportState(this.stateFor(role)));
+    window.webContents.on("render-process-gone", () => void this.reportState(this.stateFor(role)));
     if (role === "workbench") {
       window.webContents.on("will-navigate", (event, url) => {
         const nextUrl = String(url ?? "");
@@ -1298,7 +1184,7 @@ export class ElectronWindowProvider {
    * another origin (restore after close, backend port move). Same-origin path
    * differences belong to the frontend router: the user may have navigated to
    * a deep page (e.g. /teams?questionId=...), and repeated open/focus actions
-   * (desktop open_workbench converge, pet handoff) must never force that page
+   * (desktop open_workbench converge) must never force that page
    * back (SCI-049 pinning/bounce). Only tracked loads (workbenchReadyUrl)
    * count as "already there"; unknown URLs stay conservative and reload.
    */
@@ -1485,11 +1371,7 @@ export class ElectronWindowProvider {
   }
 
   private stateFor(role: ElectronWindowRole): ManagedWindowState {
-    const window = role === "launcher"
-      ? this.launcherWindow
-      : role === "workbench"
-        ? this.workbenchWindow
-        : this.petWindow;
+    const window = role === "launcher" ? this.launcherWindow : this.workbenchWindow;
     if (!window || window.isDestroyed()) {
       return closedWindowState(role);
     }

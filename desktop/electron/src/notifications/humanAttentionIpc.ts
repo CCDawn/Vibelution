@@ -22,15 +22,9 @@ function humanAttentionSource(
   const target = provider?.notificationTargetForSender(event.sender, frame.url);
   if (!target) throw new Error("blocked human attention sender");
   const origin = new URL(frame.url).origin;
-  const allowAssistantWindow = () => {
-    try {
-      const pet = provider?.snapshot().pet;
-      return instanceId === "main" && Boolean(pet?.open)
-        && target.isLive()
-        && provider?.trustedWorkbenchInstanceForSender(event.sender, frame.url) === instanceId
-        && new URL(pet!.url).origin === origin;
-    } catch { return false; }
-  };
+  // The floating assistant window retired; its in-window attention channel no
+  // longer admits any sender.
+  const allowAssistantWindow = () => false;
   return { instanceId, origin, documentToken: target.documentToken, target, allowAssistantWindow };
 }
 

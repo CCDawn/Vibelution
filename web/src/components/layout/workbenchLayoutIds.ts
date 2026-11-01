@@ -12,7 +12,6 @@ export const WORKBENCH_LAYOUT_IDS = {
   chat: "chat",
   finance: "finance",
   personalAssistant: "personal-assistant",
-  desktopAssistant: "desktop-assistant",
   configSettings: "config-settings",
   configModelAssets: "config-model-assets",
   evolution: "evolution",

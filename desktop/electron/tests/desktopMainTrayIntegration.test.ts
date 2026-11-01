@@ -15,7 +15,7 @@ describe("Electron main tray integration", () => {
     expect(normalQuit).not.toContain("await recordElectronSupervisorEvent(");
   });
 
-  it("keeps the desktop pet closed on workbench startup and exposes settings control", () => {
+  it("keeps the desktop pet window out of workbench startup and the tray", () => {
     const workbenchOpenStart = mainSource.indexOf("async function openWorkbenchAtCurrentLauncherUrl");
     const workbenchOpenEnd = mainSource.indexOf("\nasync function ", workbenchOpenStart + 1);
     const workbenchOpenSource = mainSource.slice(workbenchOpenStart, workbenchOpenEnd);
@@ -27,8 +27,7 @@ describe("Electron main tray integration", () => {
     const trayEnd = mainSource.indexOf("startPeriodicShellFreshnessWatch", trayStart);
     const traySource = mainSource.slice(trayStart, trayEnd);
     expect(traySource).not.toContain("openPet:");
-    expect(mainSource).toContain("IPC_CHANNELS.controlDesktopPet");
-    expect(mainSource).toContain("petSettingsOrigin(event.senderFrame.url, identity.role)");
+    expect(mainSource).not.toContain("petSettingsOrigin(");
   });
 
   it("routes tray actions through launcher control without direct main-workbench restart menu paths", () => {

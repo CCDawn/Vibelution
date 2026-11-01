@@ -281,8 +281,6 @@ import { ElectronWindowProvider } from "./windows/electronWindowProvider.js";
 import type { ManagedWindowState } from "./windows/windowProviderTypes.js";
 import { createLauncherWindow, isLauncherControlSender, isTrustedLauncherControlFrame } from "./windows/launcherWindow.js";
 import { createWorkbenchWindow, isWorkbenchMainSender } from "./windows/workbenchWindow.js";
-import { createPetWindow, isDesktopPetWindowUrl } from "./windows/petWindow.js";
-import { createPetSettingsControl, petSettingsOrigin } from "./windows/petSettingsControl.js";
 import { desktopPetWindowExpandedBounds } from "./windows/petWindowBounds.js";
 import {
   beginDesktopPetWindowDrag,
@@ -1829,7 +1827,6 @@ function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapR
     {
       createLauncherWindow,
       createWorkbenchWindow,
-      createPetWindow,
       launcherContentVersion: () => resolveLauncherDistRoot(launcherDistRootInput),
       listLauncherWindows: (launcherOrigin) =>
         BrowserWindow.getAllWindows().filter((window) => {
@@ -1844,7 +1841,7 @@ function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapR
         BrowserWindow.getAllWindows().filter((window) => {
           try {
             const url = window.webContents.getURL();
-            return !isDesktopPetWindowUrl(url) && isLiveWorkbenchWindowUrl(url, workbenchOrigin);
+            return isLiveWorkbenchWindowUrl(url, workbenchOrigin);
           } catch {
             return false;
           }
@@ -2118,9 +2115,10 @@ function resolveHumanAttentionNotificationService(): HumanAttentionNotificationS
     // The bridge reads the current window provider lazily, so a rebuilt
     // provider never strands the service on a stale window set.
     windowBridge: {
-      sendToAssistantWindow: (channel, payload) =>
-        windowProvider?.sendToPet(channel, payload) === true,
-      isAssistantWindowVisible: () => windowProvider?.isPetVisible() === true,
+      // The retired assistant-window card surface no longer takes in-window
+      // deliveries; the OS-notification channel now owns every delivery.
+      sendToAssistantWindow: () => false,
+      isAssistantWindowVisible: () => false,
       sendToWorkbench: (channel, payload) =>
         windowProvider?.sendToWorkbench(channel, payload) === true,
       focusWorkbench: () => windowProvider?.focusWorkbench() ?? Promise.resolve(),
@@ -2424,7 +2422,7 @@ async function persistManagedWindowState(
   bootstrap: LauncherBootstrapResult | null,
   state: ManagedWindowState
 ): Promise<void> {
-  if (state.role === "pet" || bootstrap === null || !desktopSessionMutations.accepts("window")) {
+  if (bootstrap === null || !desktopSessionMutations.accepts("window")) {
     return;
   }
   const managedRole: "launcher" | "workbench" = state.role;
@@ -4986,19 +4984,8 @@ ipcMain.handle(IPC_CHANNELS.focusWorkbenchWindow, async (event) => {
   return await windowProvider?.focusWorkbench();
 });
 
-const controlPetFromSettings = createPetSettingsControl(() => windowProvider);
-ipcMain.handle(IPC_CHANNELS.controlDesktopPet, async (event, open: unknown, mode: unknown) => {
-  const instances = windowProvider?.instanceWindowStates() ?? [];
-  assertTrustedIpcSender(event, [...trustedIpcOrigins(), ...instances.filter(item => item.open).map(item => new URL(item.url).origin)]);
-  if (event.senderFrame !== event.sender.mainFrame) throw new Error("Blocked pet settings subframe");
-  const identity = identifyDebugWindow(event.sender.getOSProcessId(), windowProvider?.snapshot() ?? null, instances);
-  const origin = petSettingsOrigin(event.senderFrame.url, identity.role);
-  return controlPetFromSettings(origin, open, mode);
-});
-
 ipcMain.handle(IPC_CHANNELS.openConversationFromPet, async (event, rawSessionId: unknown) => {
   assertDesktopPetIpcSender(event);
-  const fromDesktopAssistant = new URL(String(event.senderFrame?.url)).pathname === "/desktop-assistant";
   const sessionId = String(rawSessionId || "").trim();
   if (!/^[A-Za-z0-9._:-]{1,128}$/.test(sessionId)) {
     throw new Error("invalid desktop pet session id");
@@ -5007,30 +4994,7 @@ ipcMain.handle(IPC_CHANNELS.openConversationFromPet, async (event, rawSessionId:
   if (provider === null) {
     return { schemaVersion: 1, opened: false };
   }
-  return await withProjectAdmission(() => {
-    if (!fromDesktopAssistant) return registeredAdmissionRoot(createDesktopPathsForApp().workspaceRoot);
-    const pet = provider.snapshot().pet;
-    const origin = new URL(pet.url).origin;
-    const main = provider.snapshot().workbench;
-    const candidates = [
-      ...(main.open && new URL(main.url).origin === origin ? ["main"] : []),
-      ...provider.instanceWindowStates().filter(item => item.open && new URL(item.url).origin === origin).map(item => item.instanceId),
-    ];
-    if (candidates.length !== 1) throw new Error("PROJECT_ADMISSION_UNKNOWN");
-    return instanceAdmissionRoot(candidates[0]);
-  }, async admission => {
-  if (fromDesktopAssistant) {
-    const pet = provider.snapshot().pet;
-    if (!pet.open || new URL(pet.url).pathname !== "/desktop-assistant") {
-      return { schemaVersion: 1, opened: false };
-    }
-    const delivered = provider.focusAndSendToWorkbenchOrigin(new URL(pet.url).origin, IPC_CHANNELS.conversationNotificationOpened, {
-      schemaVersion: 1,
-      sessionId,
-      source: "desktop-assistant",
-    });
-    return { schemaVersion: 1, opened: delivered };
-  }
+  return await withProjectAdmission(() => registeredAdmissionRoot(createDesktopPathsForApp().workspaceRoot), async admission => {
   let state = await provider.focusWorkbench();
   admission?.check();
   if (!state.open) {
@@ -5051,29 +5015,16 @@ ipcMain.handle(IPC_CHANNELS.openConversationFromPet, async (event, rawSessionId:
 let activeDesktopPetWindowDrag: { senderId: number; drag: DesktopPetWindowDrag } | null = null;
 
 function assertDesktopPetIpcSender(event: IpcMainInvokeEvent | IpcMainEvent): void {
-  const pet = windowProvider?.snapshot().pet;
-  const origins = pet?.open ? [...trustedIpcOrigins(), new URL(pet.url).origin] : trustedIpcOrigins();
-  assertTrustedIpcSender(event as IpcMainInvokeEvent, origins);
+  assertTrustedIpcSender(event as IpcMainInvokeEvent, trustedIpcOrigins());
   // The resident launcher-assistant window reuses the desktop pet drag/expand
-  // IPC surface, but it is not tracked in the windowProvider pet slot. Admit
-  // its main frame through the same sender identity the theme channel uses.
+  // IPC surface, but it is not tracked in windowProvider. Admit its main frame
+  // through the same sender identity the theme channel uses; nothing else is
+  // on this surface anymore.
   if (launcherAssistantWindow?.isThemeSender(event)) {
     return;
   }
-  const rawUrl = String(event.senderFrame?.url || "");
-  const identity = identifyDebugWindow(event.sender.getOSProcessId(), windowProvider?.snapshot() ?? null, windowProvider?.instanceWindowStates() ?? []);
-  if (event.senderFrame !== event.sender.mainFrame || identity.role !== "desktop-pet" || !isDesktopPetWindowUrl(rawUrl)) {
-    throw new Error("blocked desktop pet ipc sender");
-  }
+  throw new Error("blocked desktop pet ipc sender");
 }
-
-ipcMain.handle(IPC_CHANNELS.getDesktopAssistantContext, (event) => {
-  assertDesktopPetIpcSender(event);
-  if (new URL(String(event.senderFrame?.url)).pathname !== "/desktop-assistant") {
-    throw new Error("blocked desktop assistant context sender");
-  }
-  return { role: "desktop-assistant", mode: "assistant" };
-});
 
 ipcMain.handle(IPC_CHANNELS.setDesktopPetExpanded, (event, expanded: unknown) => {
   assertDesktopPetIpcSender(event);

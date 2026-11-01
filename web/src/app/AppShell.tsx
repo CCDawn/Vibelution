@@ -170,7 +170,6 @@ import { useChatStartupPrefetch } from "./useChatStartupPrefetch";
 import { useChatRouteSelection } from "../routes/chat/useChatRouteSelection";
 import { CompanionDesktopAttention } from "../routes/companions/CompanionDesktopAttention";
 import { SpecialistAgentMenu } from "./SpecialistAgentMenu";
-import { DesktopAssistantReturnNotice } from "../routes/personalAssistant/DesktopAssistantReturnNotice";
 import { HumanAttentionNotifier } from "../routes/personalAssistant/HumanAttentionNotifier";
 import { WorkbenchConnectionNotice } from "./WorkbenchConnectionNotice";
 
@@ -2882,7 +2881,6 @@ export function AppShell() {
       data-browser-role="workbench"
       style={shellStyle}
     >
-      <DesktopAssistantReturnNotice />
       <HumanAttentionNotifier startupReady={shellOptionalReady} />
       {startupOverlayActive && !shutdownOpen ? (
         <div

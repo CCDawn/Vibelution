@@ -1,5 +1,5 @@
 import { lazy, Suspense, type ComponentType, type ReactNode } from "react";
-import { createBrowserRouter, Navigate } from "react-router-dom";
+import { createBrowserRouter } from "react-router-dom";
 
 import { AppShell } from "./AppShell";
 import { GlobalCommandSurfaces } from "./GlobalCommandSurfaces";
@@ -67,7 +67,6 @@ const LauncherToolsRoute = lazyRoute(() => import("../routes/LauncherToolsRoute"
 const LogsRoute = lazyRoute(() => import("../routes/LogsRoute").then((module) => ({ default: module.LogsRoute })));
 const MemoryRoute = lazyRoute(loadMemoryRouteChunk);
 const PetRoute = lazyRoute(() => import("../routes/PetRoute").then((module) => ({ default: module.PetRoute })));
-const DesktopAssistantRoute = lazyRoute(() => import("../routes/desktopPet/DesktopAssistantRoute").then((module) => ({ default: module.DesktopAssistantRoute })));
 const LauncherAssistantRoute = lazyRoute(() => import("../routes/desktopPet/LauncherAssistantRoute").then((module) => ({ default: module.LauncherAssistantRoute })));
 const LauncherAssistantWorkspaceRoute = lazyRoute(() => import("../routes/desktopPet/LauncherAssistantWorkspaceRoute"));
 const PersonalAssistantRoute = lazyRoute(() => import("../routes/PersonalAssistantRoute").then((module) => ({ default: module.PersonalAssistantRoute })));
@@ -181,16 +180,6 @@ export const router = createBrowserRouter([
   {
     path: "/launcher-assistant",
     ...guardedLazyElement(<LauncherAssistantRoute />, "launcher"),
-  },
-  {
-    path: "/desktop-assistant",
-    ...guardedLazyElement(<DesktopAssistantRoute />, "workbench"),
-  },
-  {
-    // Legacy desktop-pet URL: the pet and the personal assistant are one
-    // surface now, so old shells and bookmarks land on the unified window.
-    path: "/desktop-pet",
-    element: <Navigate to="/desktop-assistant" replace />,
   },
   {
     path: "/launcher",

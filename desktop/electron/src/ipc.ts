@@ -14,7 +14,6 @@ export const IPC_CHANNELS = {
   openConversationFromPet: "pet:open-conversation",
   controlDesktopPet: "pet:settings-control",
   setDesktopPetExpanded: "pet:window-expanded",
-  getDesktopAssistantContext: "pet:assistant-context",
   beginDesktopPetWindowDrag: "pet:window-drag-begin",
   moveDesktopPetWindowDrag: "pet:window-drag-move",
   endDesktopPetWindowDrag: "pet:window-drag-end",

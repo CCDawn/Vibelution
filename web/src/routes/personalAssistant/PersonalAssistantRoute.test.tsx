@@ -6,14 +6,12 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchSessionDetail } from "../../api/chat";
 import { createPersonalAssistant, fetchPersonalAssistant, fetchPersonalAssistantSettings } from "../../api/personalAssistant";
-import { getDesktopAssistantContext, setDesktopPetExpanded } from "../../api/desktopPet";
 import { fetchPetActivity } from "../../api/pet";
 import { queryKeys } from "../../api/queryKeys";
 import type { PetActivity } from "../../api/types/petActivity";
 import type { SessionDetail } from "../../api/types";
 import type { PersonalAssistant } from "../../api/types/personalAssistant";
 import { PersonalAssistantRoute } from "../PersonalAssistantRoute";
-import { DesktopAssistantRoute } from "../desktopPet/DesktopAssistantRoute";
 
 vi.mock("../../api/chat", () => ({ fetchSessionDetail: vi.fn() }));
 vi.mock("../../app/userActionTelemetry", () => ({ postUserActionObservation: vi.fn() }));
@@ -22,7 +20,6 @@ vi.mock("../../api/personalAssistant", () => ({ createPersonalAssistant: vi.fn()
   updatePersonalAssistantSettings: vi.fn().mockResolvedValue({ settings: null }),
   updatePersonalAssistantModel: vi.fn(),
 }));
-vi.mock("../../api/desktopPet", () => ({ getDesktopAssistantContext: vi.fn(), setDesktopPetExpanded: vi.fn() }));
 vi.mock("../../api/pet", () => ({ fetchPetActivity: vi.fn() }));
 vi.mock("../../api/personalAssistantComputer", () => ({ fetchPersonalAssistantComputer: vi.fn(async () => ({
   available: false, status: "idle", message: "", grantId: null, window: null, pending: null,
@@ -49,8 +46,6 @@ beforeEach(() => {
   vi.mocked(createPersonalAssistant).mockResolvedValue({ assistant });
   vi.mocked(fetchPersonalAssistantSettings).mockResolvedValue({ settings: null });
   vi.mocked(fetchSessionDetail).mockResolvedValue({ id: assistant.directSessionId, agentId: assistant.agentId, sessionKind: "main" } as SessionDetail);
-  vi.mocked(getDesktopAssistantContext).mockResolvedValue({ role: "desktop-assistant", mode: "assistant" });
-  vi.mocked(setDesktopPetExpanded).mockResolvedValue({ expanded: true, width: 760, height: 600 });
   vi.mocked(fetchPetActivity).mockResolvedValue({ schemaVersion: 1, aggregateTone: "idle", animationState: "idle", activeCount: 0, attentionCount: 0, generatedAt: "", sessions: [] });
   Object.defineProperty(window, "innerWidth", { value: 1200, configurable: true });
   vi.spyOn(window, "matchMedia").mockImplementation(query => ({ matches: false, media: query, addEventListener: vi.fn(), removeEventListener: vi.fn(),
@@ -60,9 +55,9 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); client.clear(); vi.restoreAllMocks(); });
 async function settle() { await act(async () => new Promise(resolve => setTimeout(resolve, 25))); }
-async function render(path: string, desktop = false) {
+async function render(path: string) {
   await act(async () => root.render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[path]}>
-    {desktop ? <DesktopAssistantRoute /> : <PersonalAssistantRoute />}<Location />
+    <PersonalAssistantRoute /><Location />
   </MemoryRouter></QueryClientProvider>));
   await settle(); await settle();
 }
@@ -212,86 +207,6 @@ describe("personal assistant page admission", () => {
     expect(container.querySelector("[data-native-session-chat]")).toBeNull();
     expect(container.textContent).toContain("原生会话与个人助理身份不匹配");
   });
-  it("does not provision or mount chat when the native desktop context is unavailable", async () => {
-    vi.mocked(getDesktopAssistantContext).mockRejectedValue(new Error("桌面壳需要更新"));
-    await render("/desktop-assistant?session=assistant-session", true);
-    expect(fetchPersonalAssistant).not.toHaveBeenCalled();
-    expect(fetchPetActivity).not.toHaveBeenCalled();
-    expect(createPersonalAssistant).not.toHaveBeenCalled();
-    expect(container.querySelector("[data-native-session-chat]")).toBeNull();
-    expect(container.textContent).toContain("桌面壳需要更新");
-  });
-  it("keeps desktop chat on its canonical Session and opens only after a successful native resize", async () => {
-    await render("/desktop-assistant", true);
-    expect(container.querySelector("[data-native-session-chat]")).toBeNull();
-    await act(async () => (container.querySelector('[aria-label="展开个人助理聊天"]') as HTMLButtonElement).click()); await settle();
-    expect(setDesktopPetExpanded).toHaveBeenCalledWith(true);
-    expect(container.querySelector("[data-native-session-chat]")).not.toBeNull();
-    expect(container.querySelector("output")?.textContent).toBe("/desktop-assistant?session=assistant-session");
-  });
-  it("verifies a server window once and makes it reusable by native chat", async () => {
-    const detail = { id: assistant.directSessionId, agentId: assistant.agentId, sessionKind: "main", messages: [], transcriptScope: "window" } as SessionDetail;
-    vi.mocked(fetchSessionDetail).mockResolvedValue(detail);
-    await render("/desktop-assistant", true);
-    expect(fetchSessionDetail).toHaveBeenCalledWith(assistant.directSessionId, expect.objectContaining({ transcriptScope: "window", messageLimit: 40, includeSecondary: true }));
-    expect(client.getQueryData(queryKeys.session(assistant.directSessionId))).toEqual(detail);
-    const nativeChatFetch = vi.fn().mockResolvedValue(detail);
-    const cached = await client.fetchQuery({ queryKey: queryKeys.session(assistant.directSessionId), queryFn: nativeChatFetch, staleTime: 1500 });
-    expect(cached).toEqual(detail);
-    expect(nativeChatFetch).not.toHaveBeenCalled();
-  });
-  it("does not admit chat from a fresh optimistic shell when the server binding is wrong", async () => {
-    client.setQueryData(queryKeys.session(assistant.directSessionId), { id: assistant.directSessionId, agentId: assistant.agentId,
-      sessionKind: "main", provisionalTranscript: true, messages: [] });
-    vi.mocked(fetchSessionDetail).mockResolvedValue({ id: assistant.directSessionId, agentId: "other", sessionKind: "main" } as SessionDetail);
-    await render("/desktop-assistant", true);
-    await act(async () => (container.querySelector('[aria-label="展开个人助理聊天"]') as HTMLButtonElement).click()); await settle();
-    expect(fetchSessionDetail).toHaveBeenCalled();
-    expect(container.querySelector('[data-native-session-chat]')).toBeNull();
-  });
-  it("keeps the whale collapsed when native expansion fails", async () => {
-    vi.mocked(setDesktopPetExpanded).mockRejectedValue(new Error("桌面壳需要更新"));
-    await render("/desktop-assistant", true);
-    await act(async () => (container.querySelector('[aria-label="展开个人助理聊天"]') as HTMLButtonElement).click()); await settle();
-    expect(container.querySelector("[data-native-session-chat]")).toBeNull();
-    expect(container.querySelector('[data-expanded="false"]')).not.toBeNull();
-    expect(container.textContent).toContain("桌面壳需要更新");
-  });
-  it("closes only the chat and returns to the desktop character", async () => {
-    const close = vi.spyOn(window, "close").mockImplementation(() => {});
-    await render("/desktop-assistant", true);
-    await act(async () => (container.querySelector('[aria-label="展开个人助理聊天"]') as HTMLButtonElement).click()); await settle();
-    await act(async () => (container.querySelector('[data-expanded="true"] [aria-label="关闭聊天"]') as HTMLButtonElement).click()); await settle();
-    expect(setDesktopPetExpanded).toHaveBeenLastCalledWith(false);
-    expect(container.querySelector('[data-expanded="false"]')).not.toBeNull();
-    expect(container.querySelector('[data-native-session-chat]')).toBeNull();
-    expect(close).not.toHaveBeenCalled();
-  });
-  it("keeps chat and shows the error if returning to the character fails", async () => {
-    const close = vi.spyOn(window, "close").mockImplementation(() => {});
-    await render("/desktop-assistant", true);
-    await act(async () => (container.querySelector('[aria-label="展开个人助理聊天"]') as HTMLButtonElement).click()); await settle();
-    vi.mocked(setDesktopPetExpanded).mockRejectedValueOnce(new Error("窗口调整失败"));
-    await act(async () => (container.querySelector('[data-expanded="true"] [aria-label="关闭聊天"]') as HTMLButtonElement).click()); await settle();
-    expect(container.querySelector('[data-expanded="true"]')).not.toBeNull();
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain("窗口调整失败");
-    expect(close).not.toHaveBeenCalled();
-  });
-  it.each([
-    ["running", "tooling", "正在陪你工作"], ["approval", "waiting", "需要你确认"], ["error", "alert", "有任务遇到问题"],
-  ] as const)("reflects the native platform %s projection while collapsed", async (aggregateTone, animationState, label) => {
-    vi.mocked(fetchPetActivity).mockResolvedValue({ schemaVersion: 1, aggregateTone, animationState, activeCount: 1, attentionCount: 1, generatedAt: "", sessions: [] } satisfies PetActivity);
-    await render("/desktop-assistant", true);
-    expect(container.querySelector(`[data-whale-tone="${aggregateTone}"][data-whale-animation="${animationState}"]`)).not.toBeNull();
-    expect(container.textContent).toContain(label);
-    expect(container.querySelector("[data-native-session-chat]")).toBeNull();
-  });
-  it("makes activity read failure visible instead of claiming the platform is idle", async () => {
-    vi.mocked(fetchPetActivity).mockRejectedValue(new Error("offline"));
-    await render("/desktop-assistant", true);
-    expect(container.textContent).toContain("暂时无法读取平台状态");
-    expect(container.textContent).not.toContain("在这里等你");
-  });
   it("places the character in the workbench sidebar and reflects platform work phases", async () => {
     vi.mocked(fetchPetActivity).mockResolvedValue({ schemaVersion: 1, aggregateTone: "running", animationState: "thinking", activeCount: 1,
       attentionCount: 0, generatedAt: "", sessions: [{ sessionId: "worker", title: "Worker", agentId: "worker", agentDisplayName: "Worker", tone: "running", phase: "thinking", updatedAt: "" }] });
@@ -299,32 +214,5 @@ describe("personal assistant page admission", () => {
     expect(container.querySelector('aside[aria-label="个人助理角色"]')).not.toBeNull();
     expect(container.querySelector('[data-whale-animation="thinking"]')).not.toBeNull();
     expect(container.textContent).toContain("思考中");
-  });
-  it("keeps the expanded desktop window focused on the same native chat", async () => {
-    await render("/desktop-assistant", true);
-    await act(async () => (container.querySelector('[aria-label="展开个人助理聊天"]') as HTMLButtonElement).click()); await settle();
-    expect(container.querySelector('[data-assistant-chat="compact"]')).not.toBeNull();
-    expect(container.querySelector('[data-native-session-chat]')).not.toBeNull();
-    expect(container.textContent).not.toContain("真实概览入口");
-    expect(container.querySelector('[aria-label="实时对话"]')).toBeNull();
-  });
-  it("announces a native final reply once, preserves approval priority, and clears on focused viewing", async () => {
-    await render("/desktop-assistant", true);
-    const reply = { id: assistant.directSessionId, agentId: assistant.agentId, sessionKind: "main", messages: [{ role: "assistant", status: "completed", turnId: "reply-turn", turnItems: [
-      { type: "agent_message", phase: "final_answer", status: "completed", itemId: "reply-item", text: "Done" },
-    ] }] } as SessionDetail;
-    await act(async () => client.setQueryData(queryKeys.personalAssistantReplies(assistant.agentId, assistant.directSessionId), reply));
-    await settle();
-    expect(container.textContent).toContain("有 1 条新消息");
-    await act(async () => client.setQueryData(queryKeys.personalAssistantReplies(assistant.agentId, assistant.directSessionId), { ...reply, updatedAt: "clock-only" }));
-    expect(container.textContent).not.toContain("有 2 条新消息");
-    await act(async () => client.setQueryData(queryKeys.petActivity(), { schemaVersion: 1, aggregateTone: "approval", animationState: "waiting", activeCount: 1, attentionCount: 1, generatedAt: "", sessions: [] }));
-    await settle();
-    expect(container.querySelector('[data-whale-animation="waiting"]')).not.toBeNull();
-    expect(container.querySelector('[aria-label="1 条未读提醒"]')).not.toBeNull();
-    const focus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
-    await act(async () => (container.querySelector('[aria-label="展开个人助理聊天"]') as HTMLButtonElement).click()); await settle();
-    expect(container.querySelector('[aria-label="1 条未读提醒"]')).toBeNull();
-    focus.mockRestore();
   });
 });

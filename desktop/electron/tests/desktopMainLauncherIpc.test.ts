@@ -639,7 +639,7 @@ describe("Electron main Launcher IPC facade", () => {
   });
 
   it("exposes requestWorkbenchRestart only on the workbench preload branch", () => {
-    const workbenchBranchStart = preloadSource.indexOf("!isLauncherControlWindow && !isDesktopPetWindow");
+    const workbenchBranchStart = preloadSource.indexOf("!isLauncherControlWindow ? {");
     const workbenchBranchEnd = preloadSource.indexOf("} : {})", workbenchBranchStart);
     const workbenchBranch = preloadSource.slice(workbenchBranchStart, workbenchBranchEnd);
     expect(workbenchBranch).toContain(
@@ -656,10 +656,7 @@ describe("Electron main Launcher IPC facade", () => {
     expect(controlBranch).not.toContain("requestWorkbenchRestart");
     expect(controlBranch).not.toContain("requestWorkbenchShellUpdate");
 
-    const petBranchStart = preloadSource.indexOf("...(isDesktopPetWindow");
-    const petBranchEnd = preloadSource.indexOf("} : {})", petBranchStart);
-    expect(preloadSource.slice(petBranchStart, petBranchEnd)).not.toContain("requestWorkbenchRestart");
-    expect(preloadSource.slice(petBranchStart, petBranchEnd)).not.toContain("requestWorkbenchShellUpdate");
+    expect(preloadSource).not.toContain("isDesktopPetWindow");
   });
 
   it("routes the workbench update banner to shell replacement", () => {

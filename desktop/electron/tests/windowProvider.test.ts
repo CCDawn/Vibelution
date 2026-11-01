@@ -687,7 +687,7 @@ describe("Electron window provider state", () => {
     await provider.openOrFocusInstanceWorkbench({ instanceId: "worktree:assistant", url: "http://127.0.0.1:8001/personal-assistant" });
     const mainFocus = main.focusCount;
     const branchFocus = branch.focusCount;
-    const payload = { sessionId: "owned-session", source: "desktop-assistant" };
+    const payload = { sessionId: "owned-session" };
     const origin = owner === "main" ? "http://127.0.0.1:8000" : "http://127.0.0.1:8001";
     expect(provider.focusAndSendToWorkbenchOrigin(origin, "conversation:opened", payload)).toBe(true);
     expect(main.focusCount - mainFocus).toBe(owner === "main" ? 1 : 0);
@@ -736,37 +736,6 @@ describe("Electron window provider state", () => {
       rendererProcessId: 0,
       url: ""
     });
-  });
-
-  it("opens one non-focusing desktop pet and keeps it after the workbench closes", async () => {
-    const workbenchWindow = new FakeWindow(42, "", 4242);
-    const petWindows: FakeWindow[] = [];
-    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
-      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
-      createWorkbenchWindow: () => workbenchWindow,
-      createPetWindow: (url) => {
-        const window = new FakeWindow(77, url, 7777);
-        petWindows.push(window);
-        return window;
-      },
-    });
-
-    await provider.openOrFocusWorkbench();
-    const first = await provider.openPet();
-    const second = await provider.openPet();
-    await provider.closeWorkbench();
-
-    expect(petWindows).toHaveLength(1);
-    expect(petWindows[0].focusCount).toBe(0);
-    expect(petWindows[0].showCount).toBe(2);
-    expect(first).toEqual(second);
-    expect(provider.snapshot().pet).toMatchObject({
-      role: "pet",
-      open: true,
-      focused: false,
-      url: "http://127.0.0.1:8000/desktop-assistant",
-    });
-    expect(provider.snapshot().workbench.open).toBe(false);
   });
 
   it("reuses an open workbench window and focuses it", async () => {
@@ -2297,7 +2266,6 @@ describe("IPC channels", () => {
       "conversationNotificationOpened",
       "endDesktopPetWindowDrag",
       "focusWorkbenchWindow",
-      "getDesktopAssistantContext",
       "getDesktopShellSummary",
       "getLauncherFreshness",
       "getLauncherState",
