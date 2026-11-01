@@ -1121,6 +1121,7 @@ def consume_agent_inbox_message(
             item["consumedByTurnId"] = str(consumed_by_turn_id or "").strip()
             s._write_jsonl(path, messages)
             s._record_memory_event("agent_inbox.message_consumed", item, agent_id=str(agent.get("agentId") or ""), lifecycle=True)
+            _mirror_ledger_status_change(str(agent.get("agentId") or ""), [normalized_message_id], "consumed")
         return item
     raise s.AgentMessageNotFoundError(f"Agent inbox message not found: {message_id}")
 
@@ -1149,6 +1150,7 @@ def consume_all_agent_inbox_messages(
         consumed_ids.append(str(item.get("messageId") or item.get("eventId") or "").strip())
     if consumed_ids:
         s._write_jsonl(path, messages)
+        _mirror_ledger_status_change(str(agent.get("agentId") or ""), consumed_ids, "consumed")
         s._record_memory_event(
             "agent_inbox.messages_consumed",
             {
@@ -2104,8 +2106,20 @@ def revoke_agent_inbox_message(
             item["revokeReason"] = s.trim_lines(str(reason or ""), max_lines=2)
             s._write_jsonl(path, messages)
             s._record_memory_event("agent_inbox.message_revoked", item, agent_id=str(agent.get("agentId") or ""), lifecycle=True)
+            _mirror_ledger_status_change(str(agent.get("agentId") or ""), [normalized_message_id], "revoked")
         return item
     raise s.AgentMessageNotFoundError(f"Agent inbox message not found: {message_id}")
+
+
+def _mirror_ledger_status_change(agent_id: str, message_ids: list[str], status: str) -> None:
+    """Best-effort ledger mirror for inbox status transitions; never raises."""
+
+    try:
+        from core.web.services import personal_assistant_dispatch_ledger as dispatch_ledger
+
+        dispatch_ledger.record_inbox_status_change(agent_id, message_ids, status)
+    except Exception:
+        pass
 
 
 def utc_now_iso() -> str:
@@ -2191,6 +2205,16 @@ def write_agent_inbox_message(
     s._append_jsonl(path, event_payload)
     s._record_memory_event("memory.event_written", event_payload, agent_id=str(target_agent.get("agentId") or ""))
     s._record_memory_event("agent_inbox.message_written", event_payload, agent_id=str(target_agent.get("agentId") or ""), lifecycle=True)
+    # Delivery-side observer for the PA dispatch ledger (批三地基): records
+    # PA-involving rows with their pairing envelope while it is still in
+    # memory, before the JSONL read path's 8192-char survival rule. The
+    # observer never raises, so inbox writes keep their authoritative path.
+    try:
+        from core.web.services import personal_assistant_dispatch_ledger as dispatch_ledger
+
+        dispatch_ledger.record_inbox_message(event_payload)
+    except Exception:
+        pass
     return event_payload
 
 
