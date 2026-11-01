@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { browserState, safeBrowserUrl } from "../../api/launcherAssistantBrowser";
 import { LauncherAssistantBrowserWorkspace } from "./LauncherAssistantBrowserWorkspace";
 vi.mock("./LauncherAssistantRoute", () => ({ LauncherAssistantRoute: () => <div>原生对话<input aria-label="对话草稿" /></div> }));
+vi.mock("../../i18n/useShellI18n", () => ({ useShellI18n: () => ({ lang: "zh" }) }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const page = { id: "one", url: "https://example.com/path?secret=1#part", title: "Example", loading: false, canGoBack: true, canGoForward: false };
 const initial = { pages: [page], activePageId: "one", takeover: false };
