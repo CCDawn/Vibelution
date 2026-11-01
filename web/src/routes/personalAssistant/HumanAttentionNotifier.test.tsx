@@ -161,7 +161,8 @@ describe("main workbench human-attention trigger chain", () => {
   });
   it("reads the dedicated feed even when the full overview is already cached", async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
-    client.setQueryData(queryKeys.personalAssistantOverview(), {
+    // 旧 overview 键已随工作台页退役；这里用字面量键模拟同前缀的缓存干扰。
+    client.setQueryData(["personal-assistant", "overview"], {
       humanAttention: [{ id: "cached-overview", kind: "anomaly", title: "Old overview" }],
     });
     vi.mocked(fetchPersonalAssistantHumanAttention).mockResolvedValue(feedWith([

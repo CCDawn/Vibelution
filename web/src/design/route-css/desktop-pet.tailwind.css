@@ -8,12 +8,6 @@
 @source "../../routes/desktopPet/LauncherAssistantBrowserWorkspace.styles.ts";
 @source "../../routes/desktopPet/LauncherAssistantWelcome.tsx";
 @source "../../routes/desktopPet/LauncherAssistantWelcome.styles.ts";
-@source "../../routes/personalAssistant/PersonalAssistantAffairs.tsx";
-@source "../../routes/personalAssistant/PersonalAssistantAffairs.styles.ts";
-@source "../../routes/personalAssistant/PersonalAssistantDialoguePreferences.tsx";
-@source "../../routes/personalAssistant/PersonalAssistantDialoguePreferences.styles.ts";
-@source "../../routes/personalAssistant/PersonalAssistantSettings.tsx";
-@source "../../routes/personalAssistant/PersonalAssistantSettings.styles.ts";
 @source "../../routes/personalAssistant/PersonalAssistantComputerPanel.tsx";
 @source "../../routes/personalAssistant/PersonalAssistantComputerPanel.styles.ts";
 @source "../../routes/desktopPet/DesktopAssistantRoute.styles.ts";
