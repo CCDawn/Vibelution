@@ -47,15 +47,15 @@ export function ChatProjectBusSurface(props: ChatProjectBusSurfaceProps) {
   useEffect(() => {
     if (!selectedId && model.records.length) selectAgentMessage(model.records[0].id);
   }, [selectedId, model.records]);
-  return <div className={`${styles.groupConversationFrame} !flex !flex-col`} data-testid="agent-message-center">
+  return <div className={styles.groupConversationFrame} data-testid="agent-message-center">
     {groupRoomActionError ? <div className={styles.inlineNotice} role="alert">{groupRoomActionError}</div> : null}
     {model.error ? <div className={styles.inlineNotice} role="alert">{model.error}</div> : null}
-    <div className="min-h-0 flex-1 overflow-hidden">
+    <div className={styles.messageDetailFrame}>
       {model.loading && !model.records.length
         ? <ProgressiveRegionSkeleton variant="list" label={lang === "zh" ? "正在加载跨 Agent 消息" : "Loading Agent messages"} />
         : <AgentMessageDetail records={model.records} selectedId={canonicalId} onSelect={selectAgentMessage} lang={lang} />}
     </div>
-    {revocable ? <div className="shrink-0 px-5 pb-2"><VButton isDisabled={projectBusRevokePending} onPress={() => onRevokeProjectBusMessage(revocable.eventId)}>{lang === "zh" ? "撤回这条广播" : "Recall this broadcast"}</VButton></div> : null}
+    {revocable ? <div className={styles.revokeRow}><VButton isDisabled={projectBusRevokePending} onPress={() => onRevokeProjectBusMessage(revocable.eventId)}>{lang === "zh" ? "撤回这条广播" : "Recall this broadcast"}</VButton></div> : null}
     <div className={styles.groupComposerBar}>
       {composerLeadingControl}
       <VNativeInput value={projectBusDraft} onChange={(event) => onProjectBusDraftChange(event.target.value)} disabled={projectBusSendPending}

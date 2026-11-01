@@ -40,6 +40,11 @@ const conversationParentStyleConsumers = [
 ];
 const productSharedParentStyleConsumers = [
   ...conversationParentStyleConsumers,
+  // The sidebar, center, receipts and detail share one message presentation owner.
+  "components/agent-messages/AgentMessageCenter.tsx",
+  "components/agent-messages/AgentMessageDetail.tsx",
+  "components/agent-messages/AgentMessageParts.tsx",
+  "components/agent-messages/AgentMessageSidebar.tsx",
   // Both assistant surfaces and the overview share their scoped, typed product style owner.
   "routes/PersonalAssistantRoute.tsx",
   "routes/desktopPet/LauncherAssistantRoute.tsx", // shares DesktopAssistantRoute.styles with the existing pet window

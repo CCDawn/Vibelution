@@ -16,6 +16,7 @@ import "./tailwind.css";
 import "./vui-provider-theme.css";
 import "./vui-native-controls.css";
 import "./agent-message-sidebar-preview.css";
+import styles from "./agent-message-sidebar-preview.styles";
 
 const agents = new Map([...[ ["assistant", "个人助理"], ["reviewer", "审查助手"], ["tester", "测试助手"], ["researcher", "调研助手"] ].map(([agentId, displayName]) => [agentId, { agentId, displayName, agentCode: agentId } as AgentInstance] as const)]);
 const stamp = "2026-11-01T12:00:00Z";
@@ -59,15 +60,15 @@ function Verification() {
   const route = useChatRouteSelection(), center = route.selection.kind === "project_bus";
   const [draft, setDraft] = useState("这是一份还没发送的草稿"), [broadcast, setBroadcast] = useState("");
   const [interrupt, setInterrupt] = useState(false), [dark, setDark] = useState(false);
-  return <div className="agent-message-verification min-h-0 overflow-hidden bg-[var(--vui-surface-chat)] text-vui-fg-primary">
-    <aside className="flex min-h-0 flex-col overflow-hidden border-r border-[var(--vui-border-subtle)] bg-[var(--vui-surface-rail)]">
+  return <div className={styles.frame} data-route-session-id={route.selection.kind === "session" ? route.selection.sessionId : ""}>
+    <aside className={styles.sidebar}>
       <AgentMessageChatRail lang="zh" sessionId={center ? null : source.id} agentsById={agents}><VButton onPress={() => route.openSession(source.id)}>保留当前对话</VButton></AgentMessageChatRail>
-      <footer className="flex shrink-0 flex-wrap items-center gap-1 p-2 text-[10px] text-vui-fg-tertiary"><span>隔离验收 · 合成数据</span>
+      <footer className={styles.footer}><span>隔离验收 · 合成数据</span>
         <VButton onPress={() => { timelines.unshift(event(`new-${timelines.length}`, "新增发送记录", ["tester"])); void client.invalidateQueries({ queryKey: queryKeys.agentMessageDirectory(30) }); }}>新增发送</VButton>
         <VButton onPress={() => { document.documentElement.dataset.theme = dark ? "light" : "dark"; setDark(!dark); }}>{dark ? "浅色" : "深色"}</VButton>
       </footer>
     </aside>
-    <main className="min-h-0 min-w-0 overflow-hidden" data-testid="native-message-main">
+    <main className={styles.main} data-testid="native-message-main">
       {center ? <ChatProjectBusSurface lang="zh" projectBusTimeline={null} projectBusEvents={[]} projectBusDraft={broadcast} projectBusInterruptTargets={interrupt} projectBusRefreshing={false} projectBusRefreshError="" projectBusSendPending={false} projectBusRevokePending={false} projectBusInitialLoading={false} groupRoomActionError="" userDisplayName="你" chatMentionTargets={[]} formatTime={(value) => value}
         onProjectBusDraftChange={setBroadcast} onProjectBusInterruptTargetsChange={setInterrupt} onRefreshProjectBus={() => undefined} onSendProjectBusMessage={() => undefined} onRevokeProjectBusMessage={() => undefined} onOpenMentionTarget={() => undefined} />
         : <ConversationView sessionId={source.id} title="保留当前对话" phase="ready" messages={source.messages} assistantDisplayName="个人助理" assistantAvatarFallback="助" showHeader={false} showSessionOverview={false} processDisplayMode="trace" autoScrollToLatest={false}
