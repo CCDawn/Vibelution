@@ -2341,15 +2341,20 @@ def _llm_provider_proxy_env(config: Any, base_url: Any) -> Iterator[None]:
             while _PROXY_ENV_STATE["users"] and _PROXY_ENV_STATE["proxy"] != desired_proxy:
                 _PROXY_ENV_CONDITION.wait()
             if not _PROXY_ENV_STATE["users"]:
-                _PROXY_ENV_STATE["previous"] = {
-                    env_name: os.environ.get(env_name) for env_name in _PROXY_ENV_NAMES
-                }
-                _PROXY_ENV_STATE["proxy"] = desired_proxy
-                for env_name in _PROXY_ENV_NAMES:
+                with _NO_PROXY_LOCK:
+                    names = _PROXY_ENV_NAMES + (_NO_PROXY_ENV_NAMES if desired_proxy is None else ())
+                    _PROXY_ENV_STATE["previous"] = {name: os.environ.get(name) for name in names}
+                    _PROXY_ENV_STATE["proxy"] = desired_proxy
+                    for env_name in _PROXY_ENV_NAMES:
+                        if desired_proxy is None:
+                            os.environ.pop(env_name, None)
+                        else:
+                            os.environ[env_name] = desired_proxy
                     if desired_proxy is None:
-                        os.environ.pop(env_name, None)
-                    else:
-                        os.environ[env_name] = desired_proxy
+                        # Clearing proxy env alone lets urllib/httpx fall back
+                        # to the Windows registry or macOS system proxy.
+                        for env_name in _NO_PROXY_ENV_NAMES:
+                            os.environ[env_name] = "*"
             _PROXY_ENV_STATE["users"] += 1
         leased = True
         _LLM_EFFECTIVE_PROXY.set(desired_proxy)
@@ -2360,11 +2365,20 @@ def _llm_provider_proxy_env(config: Any, base_url: Any) -> Iterator[None]:
             with _PROXY_ENV_CONDITION:
                 _PROXY_ENV_STATE["users"] -= 1
                 if not _PROXY_ENV_STATE["users"]:
-                    for env_name, value in _PROXY_ENV_STATE["previous"].items():
-                        if value is None:
-                            os.environ.pop(env_name, None)
-                        else:
-                            os.environ[env_name] = value
+                    with _NO_PROXY_LOCK:
+                        for env_name, value in _PROXY_ENV_STATE["previous"].items():
+                            if env_name in _NO_PROXY_ENV_NAMES:
+                                # Local calls may have added host exclusions
+                                # during this lease; retain those on restore.
+                                added = [part.strip() for part in os.environ.get(env_name, "").split(",")
+                                         if part.strip() and part.strip() != "*"]
+                                if added:
+                                    original = [part.strip() for part in (value or "").split(",") if part.strip()]
+                                    value = ",".join(dict.fromkeys([*original, *added]))
+                            if value is None:
+                                os.environ.pop(env_name, None)
+                            else:
+                                os.environ[env_name] = value
                     _PROXY_ENV_STATE["previous"] = {}
                     _PROXY_ENV_STATE["proxy"] = None
                     _PROXY_ENV_CONDITION.notify_all()
