@@ -1,9 +1,14 @@
 """PA 派遣心跳巡检：aged 判定 / 自动催办 / 回执消化唤醒 / 定时摘要卡 / 急停开关。
 
 成本红线全部钉死成断言：催办每派遣 2 轮上限 + 30min 间隔 + idempotency_key
-稳定；唤醒 15min 冷却 + 每小时 2 次上限、无回执不唤醒；摘要指纹无变化不推、
-30min 最多轮转一次；总开关关=空转（不催不唤醒不推卡）。所有节流状态进程内、
-重启（reset）清零。
+稳定；唤醒 15min 冷却 + 每小时 2 次上限、无回执不唤醒、busy/skipped 不吃
+配额（只对真实提交计）；摘要指纹无变化不推、30min 最多轮转一次；总开关
+关=空转（不催不唤醒不推卡）。
+
+批三收口环：本文件前半部分在「台账不可用」的回退语义下验证既有行为；
+`_LedgerHarness` 一节用真实 sqlite 台账验证台账驱动判定（出窗回执照样
+唤醒）、合并唤醒 N 条全落账、先预留后提交状态机（unknown 不重试、
+cancelled_pre_admission 可重试）、节流重启安全与催办走台账。
 """
 
 from __future__ import annotations
@@ -121,6 +126,9 @@ class _Harness:
         monkeypatch.setattr(
             patrol, "_read_pa_pending_messages", lambda _agent_id: list(self.pending_inbox)
         )
+        # 批三：默认模拟「台账不可用」，本文件既有用例全部走 JSONL 回退
+        # 语义（台账路径由 _LedgerHarness 专测）。
+        monkeypatch.setattr(patrol, "_ledger_ready", lambda _agent_id: False)
         monkeypatch.setattr(
             patrol,
             "_pa_sender",
@@ -559,8 +567,9 @@ def test_wake_seam_passes_policy_bypass_flag(monkeypatch):
     assert captured[0]["message"]["messageId"] == "r-1"
 
 
-def test_wake_tolerates_busy_skip_and_counts_the_attempt(monkeypatch):
-    """busy/skipped 语义原样透传并计入节流窗口（保守侧安全）。"""
+def test_wake_busy_skip_does_not_consume_quota(monkeypatch):
+    """busy/skipped 可证未起 turn：语义原样透传，但不再白白吃配额，
+    下一轮照常重试（批三：只对真实提交计）。"""
 
     harness = _Harness(
         monkeypatch,
@@ -575,9 +584,16 @@ def test_wake_tolerates_busy_skip_and_counts_the_attempt(monkeypatch):
     result = patrol.patrol_once(now=NOW)
     assert result["wake"]["delivery"]["wakeStatus"] == "skipped_busy"
     assert harness.wake_calls == []
-    # skipped 同样计入窗口：冷却期内不再尝试。
+    # 无预留（回退路径）也不吃配额：冷却期内仍重试。
     result = patrol.patrol_once(now=NOW + 60.0)
-    assert result["wake"]["reason"] == "throttled"
+    assert result["wake"]["attempted"] is True
+    # 真实提交（started）才计入：冷却窗口随后生效。
+    monkeypatch.setattr(
+        patrol, "_wake_pa", lambda message: {"wakeStatus": "started", "turnId": "t"}
+    )
+    assert patrol.patrol_once(now=NOW + 120.0)["wake"]["attempted"] is True
+    throttled = patrol.patrol_once(now=NOW + 180.0)
+    assert throttled["wake"] == {"attempted": False, "reason": "throttled", "receiptCount": 1}
 
 
 def test_wake_picks_newest_receipt_and_defaults_landing_fields(monkeypatch):
@@ -746,3 +762,345 @@ def test_forever_loop_survives_a_failing_pass(monkeypatch):
         assert calls["n"] >= 1
 
     asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# 台账路径（批三收口环）：真实 sqlite 台账驱动的判定 / 合并唤醒 / 预留状态机
+# ---------------------------------------------------------------------------
+
+from tests.test_personal_assistant_dispatch_ledger import (  # noqa: E402
+    _agent_row as _ledger_agent_row,
+    _write_inbox as _ledger_write_inbox,
+)
+from tests.test_personal_assistant_service import (  # noqa: E402
+    finance_env as _finance_env,
+)
+from tests.test_personal_assistant_service import personal_env  # noqa: E402,F401
+
+# fixture 解析需要本模块命名空间持有 finance_env 名字（personal_env 依赖它）。
+finance_env = _finance_env
+
+PA_ID = "agent-pa"
+TARGET_ID = "agent-researcher"
+
+
+def _seed_ledger_agents(personal_env) -> None:
+    from core.web.services import agent_directory_service as directory
+
+    state = directory.load_state()
+    state["agents"] = [
+        _ledger_agent_row(PA_ID, is_assistant=True),
+        _ledger_agent_row(TARGET_ID),
+    ]
+    directory.save_state(state)
+
+
+def _ledger_dispatch(message_id: str, *, created_at: str, status: str = "pending") -> dict:
+    return {
+        "eventId": f"event-{message_id}",
+        "messageId": message_id,
+        "threadId": f"thread-{message_id}",
+        "kind": "agent_message",
+        "status": status,
+        "sourceAgentId": PA_ID,
+        "sourceAgentName": "个人助理",
+        "targetAgentId": TARGET_ID,
+        "targetAgentName": "研究员",
+        "targetSessionId": "target-session",
+        "summary": "派遣摘要",
+        "createdAt": created_at,
+        "metadata": {"sourceSessionId": "pa-source-session"},
+    }
+
+
+def _ledger_receipt(
+    message_id: str,
+    *,
+    reply_to: str = "",
+    created_at: str,
+    thread_id: str = "",
+    kind: str = "agent_inbox_message",
+    status: str = "pending",
+) -> dict:
+    return {
+        "eventId": f"event-{message_id}",
+        "messageId": message_id,
+        "threadId": thread_id,
+        "kind": kind,
+        "status": status,
+        "promptEligible": True,
+        "sourceAgentId": TARGET_ID,
+        "sourceAgentName": "研究员",
+        "targetAgentId": PA_ID,
+        "targetSessionId": "pa-session",
+        "summary": "回执摘要",
+        "content": f"{message_id} 的回执正文",
+        "createdAt": created_at,
+        "metadata": {"replyToMessageId": reply_to} if reply_to else {},
+    }
+
+
+def _seed_dispatch_and_receipts(personal_env, receipt_ids: list[str]) -> str:
+    dispatch_id = "m-1"
+    _ledger_write_inbox(personal_env, TARGET_ID, [
+        _ledger_dispatch(dispatch_id, created_at=_iso(NOW - 120)),
+    ])
+    _ledger_write_inbox(personal_env, PA_ID, [
+        _ledger_receipt(
+            receipt_id,
+            reply_to=dispatch_id,
+            created_at=_iso(NOW - 60 + index),
+        )
+        for index, receipt_id in enumerate(receipt_ids)
+    ])
+    return dispatch_id
+
+
+class _LedgerHarness:
+    """Real ledger + real JSONL inboxes; only the action seams are faked."""
+
+    def __init__(self, monkeypatch, *, pa_agent_id: str = PA_ID) -> None:
+        self.pa_agent_id = pa_agent_id
+        self.wake_calls: list[dict] = []
+        self.followup_calls: list[dict] = []
+        self.sessions: dict[str, dict] = {
+            "target-session": {"id": "target-session", "agentId": TARGET_ID},
+        }
+        monkeypatch.setattr(patrol, "_pa_sender", lambda: {
+            "type": "agent", "id": pa_agent_id, "agentId": pa_agent_id,
+            "displayName": "个人助理", "agentCode": "pa",
+        })
+
+        def _fake_wake(message):
+            self.wake_calls.append({"message": message})
+            return {
+                "wakeStatus": "started",
+                "turnId": "turn-1",
+                "targetSessionId": str(message.get("targetSessionId") or ""),
+            }
+
+        monkeypatch.setattr(patrol, "_wake_pa", _fake_wake)
+
+        def _fake_submit(**kwargs):
+            self.followup_calls.append(kwargs)
+            return {"accepted": True}
+
+        monkeypatch.setattr(patrol, "_submit_followup_event", _fake_submit)
+
+        from core.web.services import session_service
+
+        monkeypatch.setattr(
+            session_service,
+            "load_session_chat_state",
+            lambda _root, session_id: self.sessions.get(session_id),
+        )
+
+
+def _wake_attempt_rows() -> list[tuple]:
+    import sqlite3
+
+    from core.web.services import personal_assistant_dispatch_ledger as ledger
+
+    connection = sqlite3.connect(str(ledger.ledger_database_path()))
+    try:
+        return list(connection.execute(
+            "SELECT state, submitted_at_ms, receipt_ids FROM wake_attempts "
+            "ORDER BY reserved_at_ms"
+        ))
+    finally:
+        connection.close()
+
+
+def _receipt_digested_at(message_id: str) -> str | None:
+    import sqlite3
+
+    from core.web.services import personal_assistant_dispatch_ledger as ledger
+
+    connection = sqlite3.connect(str(ledger.ledger_database_path()))
+    try:
+        row = connection.execute(
+            "SELECT digested_at, status FROM receipts WHERE message_id=?",
+            (message_id,),
+        ).fetchone()
+    finally:
+        connection.close()
+    return None if row is None else row[0]
+
+
+def test_ledger_merged_wake_digs_all_receipts_in_one_turn(monkeypatch, personal_env):
+    """合并唤醒：N 条未消化回执一轮 turn 消化，digested_at 全部落账。"""
+
+    _seed_ledger_agents(personal_env)
+    _seed_dispatch_and_receipts(personal_env, ["r-1", "r-2", "r-3"])
+    harness = _LedgerHarness(monkeypatch)
+
+    result = patrol.patrol_once(now=NOW)
+
+    assert result["wake"]["attempted"] is True
+    assert len(harness.wake_calls) == 1  # 一轮 turn，不是三条
+    message = harness.wake_calls[0]["message"]
+    assert message["messageId"] == "r-3"  # carrier = 最新一条
+    for receipt_id in ("r-1", "r-2", "r-3"):
+        assert receipt_id in message["content"]
+    assert "合并" in message["content"]
+    # 硬约束：N 条 digested_at 全部落账，不留半消化态。
+    assert result["wake"]["digestedReceiptIds"] == ["r-1", "r-2", "r-3"]
+    for receipt_id in ("r-1", "r-2", "r-3"):
+        assert _receipt_digested_at(receipt_id) is not None
+    states = [row[0] for row in _wake_attempt_rows()]
+    assert states == ["accepted"]
+    # 非 carrier 回执随轮 consume（carrier 由真实 wake 内部消费）。
+    assert sorted(result["wake"]["consumedReceiptIds"]) == ["r-1", "r-2"]
+    # 全部消化后：不再唤醒。
+    assert patrol.patrol_once(now=NOW + 60.0)["wake"] is None
+
+
+def test_ledger_wakes_receipt_outside_legacy_window(monkeypatch, personal_env):
+    """出窗回执照样可见照样唤醒（批三核心目标）：计数窗口现算已死。"""
+
+    _seed_ledger_agents(personal_env)
+    dispatch_id = _seed_dispatch_and_receipts(personal_env, ["r-old"])
+    # 250 条更新的无关行把 r-old 推出 200 条的 JSONL 读取窗口。
+    fillers = [
+        _ledger_receipt(
+            f"noise-{index:03d}",
+            created_at=_iso(NOW - 50 + index * 0.1),
+            kind="announcement",
+        )
+        for index in range(250)
+    ]
+    _ledger_write_inbox(personal_env, PA_ID, [
+        _ledger_receipt("r-old", reply_to=dispatch_id, created_at=_iso(NOW - 60)),
+        *fillers,
+    ])
+    _LedgerHarness(monkeypatch)
+
+    # 旧判定（计数窗口）看不见它。
+    assert patrol.find_undigested_receipts(PA_ID, {dispatch_id}) == []
+    result = patrol.patrol_once(now=NOW)
+
+    assert result["wake"]["attempted"] is True
+    assert result["wake"]["mergedReceiptIds"] == ["r-old"]
+    assert _receipt_digested_at("r-old") is not None
+
+
+def test_ledger_wake_unknown_never_retries_but_new_receipts_wake(monkeypatch, personal_env):
+    """unknown（结果不可证）永不重试；新回执照常唤醒且不带旧批次。"""
+
+    _seed_ledger_agents(personal_env)
+    _seed_dispatch_and_receipts(personal_env, ["r-1"])
+    harness = _LedgerHarness(monkeypatch)
+
+    def _boom(message):
+        raise RuntimeError("kernel exploded")
+
+    monkeypatch.setattr(patrol, "_wake_pa", _boom)
+    result = patrol.patrol_once(now=NOW)
+    assert result["wake"]["delivery"]["wakeStatus"] == "error"
+    states = [(row[0], row[1] is not None) for row in _wake_attempt_rows()]
+    assert states == [("unknown", True)]  # 计配额（真实提交与否不可证）
+
+    # r-1 被不可重试意图覆盖：冷却过后也不再为它唤醒。
+    assert patrol.patrol_once(now=NOW + patrol.WAKE_COOLDOWN_SECONDS + 1)["wake"] is None
+    assert _receipt_digested_at("r-1") is None  # 仍未消化，摘要卡可见
+
+    # 新回执到达：只唤醒新批次，不带 r-1。
+    _ledger_write_inbox(personal_env, PA_ID, [
+        _ledger_receipt("r-1", reply_to="m-1", created_at=_iso(NOW - 60)),
+        _ledger_receipt("r-2", reply_to="m-1", created_at=_iso(NOW + 60)),
+    ])
+    def _recovered_wake(message):
+        harness.wake_calls.append({"message": message})
+        return {"wakeStatus": "started", "turnId": "turn-1", "targetSessionId": ""}
+
+    monkeypatch.setattr(patrol, "_wake_pa", _recovered_wake)
+    result = patrol.patrol_once(now=NOW + 2 * patrol.WAKE_COOLDOWN_SECONDS)
+    assert result["wake"]["attempted"] is True
+    assert result["wake"]["mergedReceiptIds"] == ["r-2"]
+    message = harness.wake_calls[-1]["message"]
+    assert message["messageId"] == "r-2"
+    assert "r-1" not in message["content"]
+
+
+def test_ledger_wake_skipped_is_retryable_without_quota(monkeypatch, personal_env):
+    """cancelled_pre_admission 可重试且不吃配额；真实提交才落节流戳。"""
+
+    _seed_ledger_agents(personal_env)
+    _seed_dispatch_and_receipts(personal_env, ["r-1"])
+    harness = _LedgerHarness(monkeypatch)
+
+    def _busy(message):
+        harness.wake_calls.append({"message": message})
+        return {"wakeStatus": "skipped_busy", "reason": "target_session_busy"}
+
+    monkeypatch.setattr(patrol, "_wake_pa", _busy)
+    assert patrol.patrol_once(now=NOW)["wake"]["delivery"]["wakeStatus"] == "skipped_busy"
+    assert patrol.patrol_once(now=NOW + 60.0)["wake"]["attempted"] is True  # 可重试
+    states = [row[0] for row in _wake_attempt_rows()]
+    assert states == ["cancelled_pre_admission", "cancelled_pre_admission"]
+
+    from core.web.services import personal_assistant_dispatch_ledger as ledger
+
+    assert ledger.recent_wake_submissions(
+        window_ms=int(patrol.WAKE_HOUR_WINDOW_SECONDS * 1000), now_ms=int(NOW * 1000)
+    ) == []  # skipped 从不吃配额
+
+    def _started(message):
+        harness.wake_calls.append({"message": message})
+        return {"wakeStatus": "started", "turnId": "turn-1", "targetSessionId": ""}
+
+    monkeypatch.setattr(patrol, "_wake_pa", _started)
+    result = patrol.patrol_once(now=NOW + 120.0)
+    assert result["wake"]["attempted"] is True
+    assert len(harness.wake_calls) == 3
+    assert _receipt_digested_at("r-1") is not None
+
+
+def test_ledger_wake_throttle_survives_restart(monkeypatch, personal_env):
+    """节流持久化：accepted 戳在台账，进程重启（内存清零）不风暴。"""
+
+    _seed_ledger_agents(personal_env)
+    _seed_dispatch_and_receipts(personal_env, ["r-1"])
+    _LedgerHarness(monkeypatch)
+
+    assert patrol.patrol_once(now=NOW)["wake"]["attempted"] is True
+    # 真实提交只记台账（内存镜像冗余）；模拟进程重启：
+    patrol.reset_personal_assistant_patrol_for_tests()
+    assert patrol._in_memory_wake_stamps(patrol._patrol_state) == []
+    stamps = patrol._wake_throttle_stamps(
+        patrol._patrol_state, ledger_ready=True, now=NOW + 60.0
+    )
+    assert len(stamps) == 1  # 戳来自台账，重启不清零
+
+    # 新回执在冷却期内到达 → 台账节流仍然压制，不风暴。
+    _ledger_write_inbox(personal_env, PA_ID, [
+        _ledger_receipt("r-1", reply_to="m-1", created_at=_iso(NOW - 60)),
+        _ledger_receipt("r-2", reply_to="m-1", created_at=_iso(NOW + 60)),
+    ])
+    result = patrol.patrol_once(now=NOW + patrol.WAKE_COOLDOWN_SECONDS - 30)
+    assert result["wake"] == {"attempted": False, "reason": "throttled", "receiptCount": 1}
+    # 冷却过后放行。
+    result = patrol.patrol_once(now=NOW + patrol.WAKE_COOLDOWN_SECONDS + 1)
+    assert result["wake"]["attempted"] is True
+
+
+def test_ledger_followup_pairs_via_ledger_without_jsonl_rescan(monkeypatch, personal_env):
+    """催办 strict 正读走台账信封列，不再每轮全文件扫描。"""
+
+    from core.web.services import personal_assistant_dispatches_service as dispatches
+
+    _seed_ledger_agents(personal_env)
+    _ledger_write_inbox(personal_env, TARGET_ID, [
+        _ledger_dispatch("m-aged", created_at=_iso(NOW - 3600)),
+    ])
+    harness = _LedgerHarness(monkeypatch)
+
+    def _forbid_scan(*_args, **_kwargs):
+        pytest.fail("ledger verdict must replace the strict JSONL rescan")
+
+    monkeypatch.setattr(dispatches, "_scan_inbox_reverse", _forbid_scan)
+    result = patrol.patrol_once(now=NOW)
+
+    assert result["followupsSent"] == [{"messageId": "m-aged", "round": 1}]
+    assert len(harness.followup_calls) == 1
+    assert harness.followup_calls[0]["idempotency_key"] == "pa-followup:m-aged:1"

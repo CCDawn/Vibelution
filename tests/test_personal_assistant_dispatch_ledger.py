@@ -4,6 +4,7 @@ its JSONL fallback."""
 
 import json
 import sqlite3
+import time
 from pathlib import Path
 
 import pytest
@@ -522,3 +523,247 @@ def test_status_hooks_flow_through_directory_writes(seeded):
     payload = dispatches_service.list_personal_assistant_dispatches(limit=10)
     assert payload["dispatches"][0]["deliveryStatus"] == "revoked"
     assert payload["dispatches"][0]["taskStatus"] == "cancelled"
+
+
+# ---------------------------------------------------------------------------
+# 批三 patrol: wake reservation state machine, digest marking, pairing queries
+# ---------------------------------------------------------------------------
+
+
+def _seed_live_dispatch(seeded, *, status: str = "pending") -> dict:
+    dispatch = _dispatch_row("dispatch-live", status=status)
+    _write_inbox(seeded, TARGET_ID, [dispatch])
+    assert ledger.ensure_harvested(ASSISTANT_ID)
+    return dispatch
+
+
+def test_v1_database_migrates_to_v2_wake_attempts(seeded):
+    _seed_live_dispatch(seeded)
+    path = ledger.ledger_database_path()
+    connection = sqlite3.connect(str(path))
+    try:
+        connection.execute("DROP TABLE wake_attempts")
+        connection.execute("PRAGMA user_version=1")
+        connection.commit()
+    finally:
+        connection.close()
+
+    # The next writable open migrates in place; rows survive.
+    assert ledger.ensure_harvested(ASSISTANT_ID) is True
+    connection = sqlite3.connect(str(path))
+    try:
+        version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+        names = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_schema WHERE type='table'"
+            )
+        }
+    finally:
+        connection.close()
+    assert version == ledger.SCHEMA_VERSION == 2
+    assert "wake_attempts" in names
+
+
+def test_wake_attempt_state_machine_drives_throttle_and_coverage(seeded):
+    _seed_live_dispatch(seeded)
+    reserved_ms = int(time.time() * 1000) - 1000
+    token = ledger.reserve_wake(
+        ["receipt-1"], reserved_at="2026-11-01T00:00:00+00:00", reserved_at_ms=reserved_ms
+    )
+    # Reserved intent blocks re-wake before any submission happened.
+    assert ledger.wake_covered_receipt_ids() == {"receipt-1": "reserved"}
+    assert ledger.recent_wake_submissions(
+        window_ms=3_600_000, now_ms=reserved_ms + 500
+    ) == []
+
+    # Provably not submitted: retryable, no quota.
+    assert ledger.complete_wake(
+        token, state="cancelled_pre_admission", reason="skipped_busy"
+    ) is True
+    assert ledger.wake_covered_receipt_ids() == {}
+    assert ledger.recent_wake_submissions(
+        window_ms=3_600_000, now_ms=reserved_ms + 500
+    ) == []
+
+    # Retry, then a real submission: quota stamped, coverage non-retryable.
+    token2 = ledger.reserve_wake(
+        ["receipt-1"], reserved_at="2026-11-01T00:00:01+00:00", reserved_at_ms=reserved_ms + 1000
+    )
+    assert ledger.complete_wake(
+        token2, state="accepted", submitted_at_ms=reserved_ms + 1500
+    ) is True
+    assert ledger.recent_wake_submissions(
+        window_ms=3_600_000, now_ms=reserved_ms + 2000
+    ) == [reserved_ms + 1500]
+    assert ledger.wake_covered_receipt_ids() == {"receipt-1": "accepted"}
+
+    # A settled attempt can never be downgraded by a late completion.
+    assert ledger.complete_wake(token2, state="cancelled_pre_admission") is False
+    connection = sqlite3.connect(str(ledger.ledger_database_path()))
+    try:
+        state = connection.execute(
+            "SELECT state FROM wake_attempts WHERE attempt_id=?", (token2,)
+        ).fetchone()[0]
+    finally:
+        connection.close()
+    assert state == "accepted"
+
+
+def test_reserved_rows_survive_restart_and_unknown_consumes_quota(seeded):
+    _seed_live_dispatch(seeded)
+    reserved_ms = int(time.time() * 1000) - 1000
+    token = ledger.reserve_wake(
+        ["receipt-1"], reserved_at="2026-11-01T00:00:00+00:00", reserved_at_ms=reserved_ms
+    )
+    # Crash before completion: the reservation still blocks re-wake ...
+    assert ledger.wake_covered_receipt_ids() == {"receipt-1": "reserved"}
+    # ... and settling it as unknown stamps the throttle quota.
+    assert ledger.complete_wake(
+        token, state="unknown", reason="RuntimeError", submitted_at_ms=reserved_ms
+    ) is True
+    assert ledger.recent_wake_submissions(
+        window_ms=3_600_000, now_ms=reserved_ms + 1
+    ) == [reserved_ms]
+    assert ledger.wake_covered_receipt_ids() == {"receipt-1": "unknown"}
+
+
+def test_reserve_prunes_old_cancelled_rows(seeded):
+    _seed_live_dispatch(seeded)
+    now_ms = int(time.time() * 1000)
+    token = ledger.reserve_wake(
+        ["receipt-1"], reserved_at="2026-11-01T00:00:00+00:00", reserved_at_ms=now_ms
+    )
+    assert ledger.complete_wake(token, state="cancelled_pre_admission") is True
+    connection = sqlite3.connect(str(ledger.ledger_database_path()))
+    try:
+        connection.execute(
+            "UPDATE wake_attempts SET updated_at_ms=? WHERE attempt_id=?",
+            (now_ms - 2 * 3600 * 1000, token),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    ledger.reserve_wake(
+        ["receipt-2"], reserved_at="2026-11-01T00:00:01+00:00", reserved_at_ms=now_ms + 1000
+    )
+    connection = sqlite3.connect(str(ledger.ledger_database_path()))
+    try:
+        states = [row[0] for row in connection.execute("SELECT state FROM wake_attempts")]
+    finally:
+        connection.close()
+    assert states == ["reserved"]  # the stale cancelled row was pruned
+
+
+def test_mark_receipts_digested_is_all_rows_never_regresses(seeded):
+    _seed_live_dispatch(seeded)
+    _write_inbox(seeded, ASSISTANT_ID, [
+        _receipt_row("receipt-1", reply_to="dispatch-live"),
+        _receipt_row("receipt-2", reply_to="dispatch-live"),
+    ])
+    assert ledger.ensure_harvested(ASSISTANT_ID)
+
+    stamp = "2026-11-01T00:00:00+00:00"
+    assert ledger.mark_receipts_digested(
+        ["receipt-1", "receipt-2", "ghost"], digested_at=stamp
+    ) == 2
+    # Replay: digested_at never regresses, nothing double-stamps.
+    assert ledger.mark_receipts_digested(
+        ["receipt-1", "receipt-2"], digested_at="2026-11-02T00:00:00+00:00"
+    ) == 0
+    connection = sqlite3.connect(str(ledger.ledger_database_path()))
+    try:
+        rows = dict(connection.execute(
+            "SELECT message_id, digested_at FROM receipts"
+        ))
+    finally:
+        connection.close()
+    assert rows == {"receipt-1": stamp, "receipt-2": stamp}
+
+
+def test_undigested_wake_receipts_pairing_matrix(seeded):
+    live = _dispatch_row("dispatch-live", status="pending")
+    revoked = _dispatch_row("dispatch-revoked", status="revoked")
+    followup = dict(
+        _dispatch_row("followup-1", kind="pa_followup", thread=live["threadId"]),
+        metadata={"paFollowupOfMessageId": "dispatch-live"},
+    )
+    _write_inbox(seeded, TARGET_ID, [live, revoked, followup])
+    _write_inbox(seeded, ASSISTANT_ID, [
+        _receipt_row("receipt-direct", reply_to="dispatch-live"),
+        _receipt_row("receipt-chase", reply_to="followup-1"),
+        _receipt_row("receipt-thread", thread_id=live["threadId"]),
+        # Revoked dispatch reply: not a live dispatch, never wakes.
+        _receipt_row("receipt-revoked", reply_to="dispatch-revoked"),
+        # Unpaired chatter: digest material at most, never a wake.
+        _receipt_row("receipt-orphan"),
+        # Already consumed upstream: not undigested.
+        _receipt_row("receipt-consumed", reply_to="dispatch-live", status="consumed"),
+    ])
+    assert ledger.ensure_harvested(ASSISTANT_ID)
+
+    paired = {
+        row["messageId"] for row in ledger.undigested_wake_receipts(ASSISTANT_ID)
+    }
+    assert paired == {"receipt-direct", "receipt-chase", "receipt-thread"}
+
+    # Digestion removes a receipt from the wake set without touching status.
+    assert ledger.mark_receipts_digested(
+        ["receipt-direct"], digested_at="2026-11-01T00:00:00+00:00"
+    ) == 1
+    paired = {
+        row["messageId"] for row in ledger.undigested_wake_receipts(ASSISTANT_ID)
+    }
+    assert paired == {"receipt-chase", "receipt-thread"}
+
+
+def test_undigested_wake_receipts_thread_pairing_excludes_revoked(seeded):
+    live = _dispatch_row("dispatch-live", status="revoked")
+    _write_inbox(seeded, TARGET_ID, [live])
+    _write_inbox(seeded, ASSISTANT_ID, [
+        _receipt_row("receipt-thread", thread_id=live["threadId"]),
+    ])
+    assert ledger.ensure_harvested(ASSISTANT_ID)
+    assert ledger.undigested_wake_receipts(ASSISTANT_ID) == []
+
+
+def test_dispatch_envelope_verdict_replaces_strict_scan(seeded):
+    dispatch = _dispatch_row("dispatch-1", metadata={"sourceSessionId": "assistant-session"})
+    # Unknown id before anything is recorded: the ledger cannot answer.
+    assert ledger.dispatch_envelope_is_current(
+        "dispatch-1", source_agent_id=ASSISTANT_ID, target_agent_id=TARGET_ID,
+        target_session_id="target-session", source_session_id="assistant-session",
+        thread_id=dispatch["threadId"],
+    ) is None
+
+    _write_inbox(seeded, TARGET_ID, [dispatch])
+    assert ledger.ensure_harvested(ASSISTANT_ID)
+
+    def verdict(**changes):
+        fields = {
+            "source_agent_id": ASSISTANT_ID,
+            "target_agent_id": TARGET_ID,
+            "target_session_id": "target-session",
+            "source_session_id": "assistant-session",
+            "thread_id": dispatch["threadId"],
+        }
+        fields.update(changes)
+        return ledger.dispatch_envelope_is_current("dispatch-1", **fields)
+
+    assert verdict() is True
+    assert verdict(source_session_id="other-session") is False
+    assert verdict(thread_id="other-thread") is False
+    assert verdict(target_session_id="other-session") is False
+
+    # Revocation lands in the ledger (JSONL truth) → not current anymore.
+    _write_inbox(seeded, TARGET_ID, [_dispatch_row("dispatch-1", status="revoked",
+                                                   metadata={"sourceSessionId": "assistant-session"})])
+    assert ledger.ensure_harvested(ASSISTANT_ID)
+    assert verdict() is False
+
+    # Unknown id: the ledger cannot answer → caller falls back to JSONL.
+    assert ledger.dispatch_envelope_is_current(
+        "missing", source_agent_id=ASSISTANT_ID, target_agent_id=TARGET_ID,
+        target_session_id="target-session", source_session_id="assistant-session",
+        thread_id=dispatch["threadId"],
+    ) is None

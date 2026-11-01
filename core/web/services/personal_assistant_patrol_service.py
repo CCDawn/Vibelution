@@ -1,4 +1,4 @@
-"""个人助理派遣心跳巡检（操作成本减负第 2 档）。
+"""个人助理派遣心跳巡检（操作成本减负第 2 档；批三收口环改造）。
 
 PA 派出任务后是纯被动方：``delegationPolicy.allowWakeMessages=False`` 刻意
 让「目标 agent 的回复到达」不唤醒 PA（投递失败报告等后台收件箱写入依赖这
@@ -9,30 +9,42 @@ PA 派出任务后是纯被动方：``delegationPolicy.allowWakeMessages=False``
    ``submit_agent_message_event`` 以 PA 身份向目标 agent 发跟进消息
    （source=``pa_followup``，wake_target=True）。催办与普通派遣走同一条
    kernel 通道落到目标 agent 收件箱，PA 自己不用醒；催办内容携带原派遣
-   摘要，目标 agent 知道在催什么。
-2. 回执消化唤醒：PA inbox 存在未消化的回执类消息（kind=``agent_inbox_reply``
-   或 ``metadata.replyToMessageId`` 能对上派遣 messageId）时，逐条直呼
-   ``wake_agent_for_inbox_message(..., ignore_delegation_wake_policy=True)``
-   唤醒 PA 一次。这是刻意绕开 delegation 唤醒策略闸门的唯一例外路径：
+   摘要，目标 agent 知道在催什么。提交前的 strict 原行正读优先走台账
+   信封列比对（``dispatch_envelope_is_current``），台账答不了才回退
+   JSONL strict 扫描——不再每轮全文件正读。
+2. 回执消化唤醒（批三核心）：「未消化回执」判定以台账为准——
+   ``digested_at IS NULL`` 且配对到活跃派遣（直接回复 / 经催办链回指 /
+   线程唯一配对），没有回执窗口，出窗回执照样可见照样唤醒；台账不可用
+   时回退旧的计数窗口现算。命中时一次唤醒把全部 wake-eligible 回执合并
+   进一轮 turn（carrier=最新一条，其余回执摘要并入 prompt content），不再
+   一条一轮。这是刻意绕开 delegation 唤醒策略闸门的唯一例外路径：
    ``allowWakeMessages=False`` 的全局语义（到达不唤醒 PA）原样保留、此处
    不做任何修改——投递失败报告等后台写入仍依赖它静默；例外只发生在「PA
    自己的派遣已拿到回复、再不消化就永远没人看」这一种情形，并带 15min
    冷却 + 每小时 2 次上限。一次唤醒就是一轮完整 LLM turn，冷却是成本闸。
+   唤醒遵循「先预留后提交」（范本 assistant_runtime/patrol）：提交前把
+   ``reserved`` 意图落台账，turn 真正起来（started）才把本批 N 条回执在
+   一个事务里全部落 ``digested_at``（全有或全无，不留半消化态）并 consume
+   其余回实行；结果不可证（异常）记 ``unknown`` 永不重试、可证未提交
+   （skipped 类）记 ``cancelled_pre_admission`` 可重试。
 3. 定时摘要卡：聚合（进行中派遣/逾期待催办/未消化回执）进 humanAttention
    通道（kind=``assistant_digest``，severity=info，targetUrl=/personal-assistant）。
    内容指纹无变化不推新通知、id 每 ``DIGEST_MIN_INTERVAL_SECONDS`` 最多轮转
    一次，行只在 ``DIGEST_FRESHNESS_SECONDS`` 新鲜度窗口内可见后自然淡出。
 
-节流硬要求（全部进程内 dict+RLock，形状仿 delivery-failure 报告器；重启
-清零，测试经 ``reset_personal_assistant_patrol_for_tests`` 重置）：
+节流硬要求：
 
-- 催办：每派遣最多 ``MAX_FOLLOWUPS_PER_DISPATCH`` 轮、相邻两轮间隔
+- 催办（进程内 dict+RLock，形状仿 delivery-failure 报告器；测试经
+  ``reset_personal_assistant_patrol_for_tests`` 重置）：每派遣最多
+  ``MAX_FOLLOWUPS_PER_DISPATCH`` 轮、相邻两轮间隔
   ``>= FOLLOWUP_MIN_INTERVAL_SECONDS``、只催 ``FOLLOWUP_MAX_AGE_SECONDS``
   窗口内的派遣；idempotency_key 派生自 messageId+轮次，同轮重放由 kernel
   幂等账本兜底。
-- 唤醒：冷却 ``WAKE_COOLDOWN_SECONDS``、滚动 1 小时最多 ``MAX_WAKES_PER_HOUR``
-  次；skipped（busy/in-flight 等未真正起 turn）同样计入窗口——保守侧
-  永远安全。
+- 唤醒（持久化在台账 ``wake_attempts`` 表，重启不清零不风暴）：冷却
+  ``WAKE_COOLDOWN_SECONDS``、滚动 1 小时最多 ``MAX_WAKES_PER_HOUR`` 次；
+  只有真实提交（started，或提交与否不可证的 unknown）计入配额——
+  busy/skipped 可证未起 turn，不再白白吃配额。台账不可用时回退进程内
+  窗口（同样只记真实提交）。
 - 摘要：轮转间隔 ``DIGEST_MIN_INTERVAL_SECONDS``。
 
 急停开关（默认开启，显式关闭才停；命名仿 ``VIBELUTION_TURN_STUCK_DETECTION``）：
@@ -50,6 +62,7 @@ import logging
 import os
 import threading
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -133,6 +146,10 @@ def _parse_iso_timestamp(value: Any) -> float | None:
     return _parse(value)
 
 
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 # ---------------------------------------------------------------------------
 # 进程内节流状态（重启清零；形状仿 delivery-failure 报告器）
 # ---------------------------------------------------------------------------
@@ -189,24 +206,194 @@ def _record_followup(state: _PatrolState, message_id: str, round_index: int, *, 
         state.followups[message_id] = {"rounds": int(round_index), "last_sent_at": float(now)}
 
 
-def _wake_gate(state: _PatrolState, *, now: float) -> bool:
+def _wake_gate(*, stamps: list[float], now: float) -> bool:
+    """Cooldown + hourly cap over real-submission stamps only."""
+
+    if stamps and now - max(stamps) < WAKE_COOLDOWN_SECONDS:
+        return False
+    hour_ago = now - WAKE_HOUR_WINDOW_SECONDS
+    return sum(1 for stamp in stamps if stamp > hour_ago) < MAX_WAKES_PER_HOUR
+
+
+def _in_memory_wake_stamps(state: _PatrolState) -> list[float]:
     with state.lock:
-        if state.wake_last_at and now - state.wake_last_at < WAKE_COOLDOWN_SECONDS:
-            return False
-        hour_ago = now - WAKE_HOUR_WINDOW_SECONDS
-        recent = [stamp for stamp in state.wake_window if stamp > hour_ago]
-        return len(recent) < MAX_WAKES_PER_HOUR
+        stamps = list(state.wake_window)
+        if state.wake_last_at and state.wake_last_at not in stamps:
+            stamps.append(state.wake_last_at)
+        return stamps
 
 
-def _record_wake_attempt(state: _PatrolState, *, now: float) -> None:
-    # skipped（busy/in-flight，未真正起 turn）同样计入：保守侧永远安全，
-    # 代价只是忙碌时段少试几次。
+def _wake_throttle_stamps(
+    state: _PatrolState,
+    *,
+    ledger_ready: bool,
+    now: float,
+) -> list[float]:
+    """Ledger stamps when available (restart-safe), else the in-memory window."""
+
+    if ledger_ready:
+        persisted = _ledger_recent_wake_stamps(
+            window_seconds=WAKE_HOUR_WINDOW_SECONDS, now=now
+        )
+        if persisted is not None:
+            return persisted
+    return _in_memory_wake_stamps(state)
+
+
+def _record_wake_submission(
+    state: _PatrolState,
+    *,
+    now: float,
+    ledger_recorded: bool,
+) -> None:
+    """Record a real (or unprovably-not-refused) submission toward the quota.
+
+    Skipped attempts (busy/in-flight — provably no turn started) never land
+    here. When the ledger recorded the stamp (``wake_attempts.submitted_at_ms``)
+    the in-memory mirror is redundant.
+    """
+
+    if ledger_recorded:
+        return
     with state.lock:
         state.wake_last_at = float(now)
         state.wake_window = [
             stamp for stamp in state.wake_window if stamp > now - WAKE_HOUR_WINDOW_SECONDS
         ]
         state.wake_window.append(float(now))
+
+
+# ---------------------------------------------------------------------------
+# 台账 seam（批三；monkeypatch 友好的薄封装，失败一律回退 JSONL 语义）
+# ---------------------------------------------------------------------------
+
+
+def _ledger_ready(pa_agent_id: str) -> bool:
+    """Change-driven harvest + readiness probe; False on any failure."""
+
+    if not pa_agent_id:
+        return False
+    try:
+        from . import personal_assistant_dispatch_ledger as ledger
+
+        return bool(ledger.ensure_harvested(pa_agent_id))
+    except Exception:  # noqa: BLE001 - ledger must never break the patrol
+        return False
+
+
+def _ledger_undigested_receipts(pa_agent_id: str) -> list[dict[str, Any]] | None:
+    """Paired undigested receipts (no window); None = ledger cannot answer."""
+
+    try:
+        from . import personal_assistant_dispatch_ledger as ledger
+
+        return ledger.undigested_wake_receipts(pa_agent_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("PA patrol ledger undigested query failed (%s).", type(exc).__name__)
+        return None
+
+
+def _ledger_wake_covered() -> dict[str, str]:
+    """Receipts covered by non-retryable wake attempts; {} on failure."""
+
+    try:
+        from . import personal_assistant_dispatch_ledger as ledger
+
+        return ledger.wake_covered_receipt_ids()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("PA patrol ledger coverage read failed (%s).", type(exc).__name__)
+        return {}
+
+
+def _ledger_recent_wake_stamps(*, window_seconds: float, now: float) -> list[float] | None:
+    """Persisted submission stamps (seconds); None = ledger cannot answer."""
+
+    try:
+        from . import personal_assistant_dispatch_ledger as ledger
+
+        stamps = ledger.recent_wake_submissions(
+            window_ms=int(window_seconds * 1000), now_ms=int(now * 1000)
+        )
+        return [stamp / 1000.0 for stamp in stamps]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("PA patrol ledger throttle read failed (%s).", type(exc).__name__)
+        return None
+
+
+def _ledger_reserve_wake(receipt_ids: list[str], *, now: float) -> str | None:
+    """Commit the wake intent before submitting; None on failure."""
+
+    try:
+        from . import personal_assistant_dispatch_ledger as ledger
+
+        return ledger.reserve_wake(
+            receipt_ids,
+            reserved_at=_utc_now_iso(),
+            reserved_at_ms=int(now * 1000),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("PA patrol wake reservation failed (%s).", type(exc).__name__)
+        return None
+
+
+def _ledger_complete_wake(
+    attempt_id: str,
+    *,
+    state: str,
+    reason: str = "",
+    submitted_at_ms: float | None = None,
+) -> bool:
+    try:
+        from . import personal_assistant_dispatch_ledger as ledger
+
+        return ledger.complete_wake(
+            attempt_id,
+            state=state,
+            reason=reason,
+            submitted_at_ms=None if submitted_at_ms is None else int(submitted_at_ms * 1000),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("PA patrol wake completion failed (%s).", type(exc).__name__)
+        return False
+
+
+def _ledger_mark_digested(receipt_ids: list[str], *, digested_at: str) -> list[str]:
+    """All-or-nothing digest marking; the ids on success, [] on failure."""
+
+    try:
+        from . import personal_assistant_dispatch_ledger as ledger
+
+        ledger.mark_receipts_digested(receipt_ids, digested_at=digested_at)
+        return list(receipt_ids)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("PA patrol digest marking failed (%s).", type(exc).__name__)
+        return []
+
+
+def _ledger_dispatch_current(
+    message_id: str,
+    *,
+    source_agent_id: str,
+    target_agent_id: str,
+    target_session_id: str,
+    source_session_id: str,
+    thread_id: str,
+) -> bool | None:
+    """Ledger verdict for the follow-up strict read; None = fall back."""
+
+    try:
+        from . import personal_assistant_dispatch_ledger as ledger
+
+        return ledger.dispatch_envelope_is_current(
+            message_id,
+            source_agent_id=source_agent_id,
+            target_agent_id=target_agent_id,
+            target_session_id=target_session_id,
+            source_session_id=source_session_id,
+            thread_id=thread_id,
+        )
+    except Exception:  # noqa: BLE001 - strict fallback must stay available
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -274,6 +461,227 @@ def find_undigested_receipts(
         for row in rows or []
         if isinstance(row, dict) and _is_receipt_like(row, dispatch_message_ids)
     ]
+
+
+def _consume_pa_inbox_messages(
+    pa_agent_id: str,
+    message_ids: list[str],
+    *,
+    session_id: str = "",
+    turn_id: str = "",
+) -> list[str]:
+    """Consume merged-wake receipts from the PA inbox (best effort per row)."""
+
+    if not message_ids:
+        return []
+    from .agent_directory.ops_residual import consume_agent_inbox_message
+
+    consumed: list[str] = []
+    for message_id in message_ids:
+        try:
+            consume_agent_inbox_message(
+                pa_agent_id,
+                message_id,
+                consumed_by_session_id=session_id,
+                consumed_by_turn_id=turn_id,
+            )
+            consumed.append(message_id)
+        except Exception as exc:  # noqa: BLE001 - one bad row must not stop the batch
+            logger.warning(
+                "PA patrol wake consume failed. messageId=%s error=%s",
+                message_id, type(exc).__name__,
+            )
+    return consumed
+
+
+def _collect_undigested_receipts(
+    pa_agent_id: str,
+    dispatch_message_ids: set[str],
+    *,
+    ledger_ready: bool,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """``(all undigested, wake-eligible)`` — ledger-driven when available.
+
+    The ledger query has no receipt window: a paired ``digested_at IS NULL``
+    receipt stays wake-eligible no matter how far outside the legacy JSONL
+    windows it fell (批三核心目标). Receipt bodies join from the PA inbox
+    read for the wake prompt; rows the window cannot see degrade to ledger
+    summary text. Receipts covered by a non-retryable wake attempt stay in
+    the digest count but never re-enter the wake set. Ledger unavailable →
+    the legacy counting-window scan, unchanged.
+    """
+
+    if ledger_ready and pa_agent_id:
+        covered = _ledger_wake_covered()
+        rows = _ledger_undigested_receipts(pa_agent_id)
+        if rows is not None:
+            inbox_by_id: dict[str, dict[str, Any]] = {}
+            try:
+                for row in _read_pa_pending_messages(pa_agent_id):
+                    key = _text(row, "messageId") or _text(row, "eventId")
+                    if key and key not in inbox_by_id:
+                        inbox_by_id[key] = row
+            except Exception:  # noqa: BLE001 - prompt enrichment only
+                inbox_by_id = {}
+            merged: list[dict[str, Any]] = []
+            for paired in rows:
+                message_id = _text(paired, "messageId")
+                base = inbox_by_id.get(message_id)
+                if isinstance(base, dict):
+                    enriched = dict(base)
+                    enriched.setdefault("messageId", message_id)
+                else:
+                    # Out-of-window or unreadable body: the ledger row is
+                    # the pairing authority, the prompt degrades to summary.
+                    enriched = dict(paired)
+                    enriched.setdefault("content", "")
+                merged.append(enriched)
+            eligible = [
+                row for row in merged if _text(row, "messageId") not in covered
+            ]
+            return merged, eligible
+    rows = find_undigested_receipts(pa_agent_id, dispatch_message_ids)
+    return rows, list(rows)
+
+
+def _merged_wake_message(
+    carrier: dict[str, Any],
+    receipts: list[dict[str, Any]],
+    pa_agent_id: str,
+) -> dict[str, Any]:
+    """One turn digests every wake-eligible receipt, not one per turn.
+
+    The carrier (newest receipt) keeps its identity — ``wake_agent_for_inbox_message``
+    consumes exactly it — while every other receipt is appended to the prompt
+    content so the single PA turn sees the whole batch.
+    """
+
+    message = dict(carrier)
+    message.setdefault("targetAgentId", pa_agent_id)
+    message.setdefault("targetSessionId", "")
+    others = [
+        row
+        for row in receipts
+        if _text(row, "messageId") != _text(carrier, "messageId")
+    ]
+    if not others:
+        return message
+    lines = [
+        f"[合并消化] 本轮唤醒一并处理 {len(receipts)} 条未消化回执（全部随本轮标记为已消化）：",
+    ]
+    for index, row in enumerate([carrier, *others], start=1):
+        source = _text(row, "sourceAgentName") or _text(row, "sourceAgentId") or "外部来源"
+        summary = _clip(_text(row, "summary"), limit=_SUMMARY_LIMIT) or "（无摘要）"
+        lines.append(
+            f"{index}. {_text(row, 'messageId')}（{source}，{_text(row, 'createdAt')}）：{summary}"
+        )
+    lines.append("请逐条核对以上回执并纳入处理；这些回执已随本轮一并消化，无需再等下一次提醒。")
+    content = _text(message, "content") or _text(message, "summary")
+    message["content"] = "\n".join([content, *lines]) if content else "\n".join(lines)
+    message["summary"] = _clip(
+        f"合并 {len(receipts)} 条回执：{_text(message, 'summary')}", limit=_SUMMARY_LIMIT
+    )
+    return message
+
+
+def _attempt_merged_wake(
+    state: _PatrolState,
+    wake_eligible: list[dict[str, Any]],
+    pa_agent_id: str,
+    *,
+    ledger_ready: bool,
+    now: float,
+) -> dict[str, Any]:
+    """Reserve → submit → settle one merged wake, per the B-chain state machine.
+
+    ``reserved`` is committed before any submission; ``accepted`` (turn
+    started — the whole batch is digest-marked in one transaction and the
+    non-carrier receipts are consumed) and ``unknown`` (outcome unprovable —
+    never retried) consume quota; ``cancelled_pre_admission`` (skipped —
+    provably no turn) is retryable and consumes nothing. Without a
+    reservation (ledger off or reserve failed) the legacy single-receipt
+    wake runs unchanged.
+    """
+
+    carrier = max(
+        wake_eligible,
+        key=lambda row: _parse_iso_timestamp(_text(row, "createdAt")) or 0.0,
+    )
+    carrier_id = _text(carrier, "messageId")
+    receipt_ids = [_text(row, "messageId") for row in wake_eligible if _text(row, "messageId")]
+    attempt_id = _ledger_reserve_wake(receipt_ids, now=now) if ledger_ready else None
+    if attempt_id:
+        wake_message = _merged_wake_message(carrier, wake_eligible, pa_agent_id)
+    else:
+        if ledger_ready:
+            logger.warning(
+                "PA patrol wake reservation unavailable; falling back to the legacy wake."
+            )
+        wake_message = dict(carrier)
+        wake_message.setdefault("targetAgentId", pa_agent_id)
+        wake_message.setdefault("targetSessionId", "")
+
+    delivery: dict[str, Any]
+    digested_ids: list[str] = []
+    consumed_ids: list[str] = []
+    try:
+        delivery = _wake_pa(wake_message)
+    except Exception as exc:  # noqa: BLE001 - wake failure must not kill the pass
+        logger.warning("PA patrol wake failed (%s).", type(exc).__name__)
+        delivery = {"wakeStatus": "error", "reason": type(exc).__name__}
+        # Unprovable outcome: quota consumed, receipts never re-woken.
+        if attempt_id:
+            _ledger_complete_wake(
+                attempt_id,
+                state="unknown",
+                reason=str(delivery["reason"]),
+                submitted_at_ms=now,
+            )
+        _record_wake_submission(state, now=now, ledger_recorded=bool(attempt_id))
+    else:
+        wake_status = _text(delivery, "wakeStatus")
+        if wake_status.startswith("started"):
+            if attempt_id:
+                _ledger_complete_wake(
+                    attempt_id, state="accepted", submitted_at_ms=now
+                )
+            _record_wake_submission(state, now=now, ledger_recorded=bool(attempt_id))
+            if attempt_id:
+                # One turn saw the whole batch → one transaction lands all
+                # N digested_at stamps (all or nothing, no half-digested).
+                digested_ids = _ledger_mark_digested(
+                    receipt_ids, digested_at=_utc_now_iso()
+                )
+                consumed_ids = _consume_pa_inbox_messages(
+                    pa_agent_id,
+                    [mid for mid in receipt_ids if mid != carrier_id],
+                    session_id=_text(delivery, "targetSessionId"),
+                    turn_id=_text(delivery, "turnId"),
+                )
+        elif wake_status.startswith("skipped"):
+            # Provably not submitted: retryable, and it must not eat quota.
+            if attempt_id:
+                _ledger_complete_wake(
+                    attempt_id, state="cancelled_pre_admission", reason=wake_status
+                )
+        else:
+            # Unrecognized outcome — treat as unprovable (conservative).
+            if attempt_id:
+                _ledger_complete_wake(
+                    attempt_id,
+                    state="unknown",
+                    reason=wake_status or "unrecognized",
+                    submitted_at_ms=now,
+                )
+            _record_wake_submission(state, now=now, ledger_recorded=bool(attempt_id))
+    return {
+        "attempted": True,
+        "receiptCount": len(wake_eligible),
+        "mergedReceiptIds": receipt_ids if attempt_id else [mid for mid in [carrier_id] if mid],
+        "digestedReceiptIds": digested_ids,
+        "consumedReceiptIds": consumed_ids,
+        "delivery": delivery,
+    }
 
 
 def _dispatch_age_seconds(dispatch: dict[str, Any], *, now: float) -> float | None:
@@ -362,7 +770,12 @@ def _pa_sender() -> dict[str, Any] | None:
     }
 
 
-def _followup_target_is_current(dispatch: dict[str, Any], pa_agent_id: str) -> bool:
+def _followup_target_is_current(
+    dispatch: dict[str, Any],
+    pa_agent_id: str,
+    *,
+    ledger_ready: bool = False,
+) -> bool:
     """Read native authority only; never recover/create a missing target session."""
     from . import personal_assistant_dispatches_service as dispatches
     from . import session_service
@@ -396,6 +809,19 @@ def _followup_target_is_current(dispatch: dict[str, Any], pa_agent_id: str) -> b
         return False
     # Last read before submit: revocation/source/landing checks use the original
     # inbox row, never the earlier aggregate or user-supplied custom metadata.
+    # 批三：优先读台账信封列（含 instance 唯一性与收割完整性闸门），台账
+    # 答不了（None）才回退 JSONL strict 正读——不再每轮全文件扫描。
+    if ledger_ready:
+        ledger_verdict = _ledger_dispatch_current(
+            message_id,
+            source_agent_id=pa_agent_id,
+            target_agent_id=target_id,
+            target_session_id=session_id,
+            source_session_id=_text(dispatch, "sourceSessionId"),
+            thread_id=_text(dispatch, "threadId"),
+        )
+        if ledger_verdict is not None:
+            return ledger_verdict
     originals = dispatches._scan_inbox_reverse(
         dispatches._inbox_path(target),
         predicate=lambda row: (_text(row, "messageId") or _text(row, "eventId")) == message_id,
@@ -421,6 +847,7 @@ def send_followup_for_dispatch(
     round_index: int,
     age_seconds: float,
     pa_sender: dict[str, Any],
+    ledger_ready: bool = False,
 ) -> dict[str, Any]:
     """Submit one follow-up message to the dispatch target via the kernel."""
 
@@ -430,7 +857,9 @@ def send_followup_for_dispatch(
     content = _followup_content(dispatch, round_index=round_index, age_seconds=age_seconds)
     if (
         _text(dispatch, "deliveryStatus").lower() == "revoked"
-        or not _followup_target_is_current(dispatch, _text(pa_sender, "agentId"))
+        or not _followup_target_is_current(
+            dispatch, _text(pa_sender, "agentId"), ledger_ready=ledger_ready
+        )
     ):
         return {"accepted": False, "reason": "dispatch_target_unavailable"}
     return _submit_followup_event(
@@ -603,13 +1032,17 @@ def patrol_once(*, now: float | None = None) -> dict[str, Any]:
         "digest": None,
     }
 
-    # ---- stage 1: follow-ups ----
+    # ---- stage 0: undigested receipts (ledger-driven, 批三核心) ----
+    ledger_ready = _ledger_ready(pa_agent_id)
     try:
-        undigested = find_undigested_receipts(pa_agent_id, dispatch_message_ids)
+        undigested, wake_eligible = _collect_undigested_receipts(
+            pa_agent_id, dispatch_message_ids, ledger_ready=ledger_ready
+        )
     except Exception as exc:  # noqa: BLE001 - inbox read failure must not kill the pass
         logger.warning("PA patrol inbox read failed (%s).", type(exc).__name__)
-        undigested = []
+        undigested, wake_eligible = [], []
 
+    # ---- stage 1: follow-ups ----
     try:
         aged = [row for row in dispatches if _is_aged_dispatch(row, now=observed)]
         result["agedMessageIds"] = [_text(row, "messageId") for row in aged]
@@ -626,6 +1059,7 @@ def patrol_once(*, now: float | None = None) -> dict[str, Any]:
                         round_index=next_round,
                         age_seconds=age,
                         pa_sender=pa_sender,
+                        ledger_ready=ledger_ready,
                     )
                     if delivery.get("accepted") is False:
                         continue
@@ -640,33 +1074,24 @@ def patrol_once(*, now: float | None = None) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         logger.warning("PA patrol follow-up stage failed (%s).", type(exc).__name__)
 
-    # ---- stage 2: receipt digestion wake ----
+    # ---- stage 2: receipt digestion wake (merged, reserved-then-submitted) ----
     try:
-        if result["wakeEnabled"] and undigested:
-            if _wake_gate(_patrol_state, now=observed):
-                newest = max(
-                    undigested,
-                    key=lambda row: _parse_iso_timestamp(_text(row, "createdAt")) or 0.0,
+        if result["wakeEnabled"] and wake_eligible:
+            stamps = _wake_throttle_stamps(
+                _patrol_state, ledger_ready=ledger_ready, now=observed
+            )
+            if _wake_gate(stamps=stamps, now=observed):
+                result["wake"] = _attempt_merged_wake(
+                    _patrol_state,
+                    wake_eligible,
+                    pa_agent_id,
+                    ledger_ready=ledger_ready,
+                    now=observed,
                 )
-                wake_message = dict(newest)
-                wake_message.setdefault("targetAgentId", pa_agent_id)
-                wake_message.setdefault("targetSessionId", "")
-                try:
-                    delivery = _wake_pa(wake_message)
-                except Exception as exc:  # noqa: BLE001 - wake failure must not kill the pass
-                    logger.warning("PA patrol wake failed (%s).", type(exc).__name__)
-                    delivery = {"wakeStatus": "error", "reason": type(exc).__name__}
-                # 无论 started 还是 skipped 都记窗口（见 _record_wake_attempt）。
-                _record_wake_attempt(_patrol_state, now=observed)
-                result["wake"] = {
-                    "attempted": True,
-                    "receiptCount": len(undigested),
-                    "delivery": delivery,
-                }
             else:
-                result["wake"] = {"attempted": False, "reason": "throttled", "receiptCount": len(undigested)}
-        elif undigested:
-            result["wake"] = {"attempted": False, "reason": "wake_disabled", "receiptCount": len(undigested)}
+                result["wake"] = {"attempted": False, "reason": "throttled", "receiptCount": len(wake_eligible)}
+        elif wake_eligible:
+            result["wake"] = {"attempted": False, "reason": "wake_disabled", "receiptCount": len(wake_eligible)}
     except Exception as exc:  # noqa: BLE001
         logger.warning("PA patrol wake stage failed (%s).", type(exc).__name__)
 

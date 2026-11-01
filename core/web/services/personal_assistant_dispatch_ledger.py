@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import copy
 import json
+import secrets
 import sqlite3
 import threading
 import time
@@ -52,7 +53,7 @@ from core.logging import debug as _debug_logger
 
 LEDGER_DIR_NAME = "pa_dispatch_ledger"
 LEDGER_FILENAME = "dispatch_ledger.sqlite3"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # Rows scanned per inbox during harvest. Twice the read model's largest
 # window keeps the newest dispatch population complete while the cost
@@ -151,6 +152,29 @@ _HARVEST_SQL = """CREATE TABLE harvest_state (
     size INTEGER NOT NULL CHECK(size >= 0),
     complete INTEGER NOT NULL CHECK(complete IN (0,1))
 ) STRICT"""
+# Wake-intent state machine (批三 patrol). One row per wake attempt: the
+# reservation is committed BEFORE any PA turn is submitted so a crash can
+# never lose the fact that a submission might be in flight. ``digested_at``
+# on receipts is a per-receipt fact; this table is attempt-level intent, a
+# different layer — and the persisted ``submitted_at_ms`` stamps double as
+# the restart-safe wake throttle (cooldown + hourly cap), replacing the
+# process-memory window that a restart used to wipe. States mirror the
+# assistant-runtime patrol precedent: ``reserved`` (intent committed, turn
+# not yet submitted), ``accepted`` (turn started), ``cancelled_pre_admission``
+# (provably not submitted — retryable, and it never consumes throttle
+# quota), ``unknown`` (outcome unprovable — never retried, quota consumed).
+_WAKE_ATTEMPTS_SQL = """CREATE TABLE wake_attempts (
+    attempt_id TEXT PRIMARY KEY,
+    receipt_ids TEXT NOT NULL CHECK(json_valid(receipt_ids) AND
+        json_array_length(receipt_ids) >= 1),
+    state TEXT NOT NULL CHECK(state IN
+        ('reserved','accepted','cancelled_pre_admission','unknown')),
+    reason TEXT NOT NULL DEFAULT '',
+    reserved_at TEXT NOT NULL,
+    reserved_at_ms INTEGER NOT NULL CHECK(reserved_at_ms >= 0),
+    submitted_at_ms INTEGER CHECK(submitted_at_ms IS NULL OR submitted_at_ms >= 0),
+    updated_at_ms INTEGER NOT NULL CHECK(updated_at_ms >= 0)
+) STRICT"""
 _INDEX_SQL = (
     """CREATE INDEX idx_dispatches_window
        ON dispatches(row_kind, sent_at_ms DESC, message_id DESC)""",
@@ -218,14 +242,27 @@ def _migrate(connection: sqlite3.Connection) -> None:
             connection.execute(_RECEIPTS_SQL)
             connection.execute(_INSTANCES_SQL)
             connection.execute(_HARVEST_SQL)
+            connection.execute(_WAKE_ATTEMPTS_SQL)
             for statement in _INDEX_SQL:
                 connection.execute(statement)
             connection.execute("INSERT INTO ledger_meta(singleton) VALUES (1)")
             connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
-        elif version == SCHEMA_VERSION:
+        elif version == 1:
+            # v1 → v2: add the wake-attempt state machine (patrol wake
+            # reservation + persisted throttle). Existing rows stay as-is.
             if not {
                 "ledger_meta", "dispatches", "receipts", "dispatch_instances",
                 "harvest_state",
+            }.issubset(names):
+                raise DispatchLedgerUnavailableError("dispatch_ledger_schema_invalid")
+            if "wake_attempts" in names:
+                raise DispatchLedgerUnavailableError("dispatch_ledger_schema_invalid")
+            connection.execute(_WAKE_ATTEMPTS_SQL)
+            connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+        elif version == SCHEMA_VERSION:
+            if not {
+                "ledger_meta", "dispatches", "receipts", "dispatch_instances",
+                "harvest_state", "wake_attempts",
             }.issubset(names):
                 raise DispatchLedgerUnavailableError("dispatch_ledger_schema_invalid")
         else:
@@ -835,6 +872,7 @@ def ensure_harvested(assistant_agent_id: str) -> bool:
             connection.execute("DELETE FROM dispatches")
             connection.execute("DELETE FROM receipts")
             connection.execute("DELETE FROM harvest_state")
+            connection.execute("DELETE FROM wake_attempts")
             connection.execute(
                 "UPDATE ledger_meta SET pa_agent_id='', backfill_at='' WHERE singleton=1"
             )
@@ -1036,21 +1074,29 @@ def _receipt_row_dict(db_row: tuple) -> dict[str, Any]:
 
 
 def _unique_thread_dispatch_id(
-    connection: sqlite3.Connection, *, thread_id: str, target_agent_id: str
+    connection: sqlite3.Connection,
+    *,
+    thread_id: str,
+    target_agent_id: str,
+    require_live: bool = False,
 ) -> str | None:
     """Authoritative thread uniqueness over ledger history.
 
     Only dispatch rows living in their own target agent's inbox count,
     deduplicated by id (the JSONL thread predicate dedupes the same way);
     duplicate visibility is handled by the instance-count check at pairing.
+    ``require_live`` (wake eligibility only) excludes revoked dispatches —
+    a revoked dispatch's reply is moot and must not wake the assistant.
     """
 
-    rows = connection.execute(
+    sql = (
         "SELECT DISTINCT message_id FROM dispatches "
         "WHERE row_kind='dispatch' AND target_agent_id=? AND thread_id=? "
-        "AND inbox_agent_id=?",
-        (target_agent_id, thread_id, target_agent_id),
-    ).fetchall()
+        "AND inbox_agent_id=?"
+    )
+    if require_live:
+        sql += " AND status != 'revoked'"
+    rows = connection.execute(sql, (target_agent_id, thread_id, target_agent_id)).fetchall()
     ids = {str(row[0]) for row in rows if str(row[0]).strip()}
     return next(iter(ids)) if len(ids) == 1 else None
 
@@ -1325,5 +1371,383 @@ def read_dispatch_view(
             "dispatches": dispatches,
             "unmatchedReceipts": unmatched,
         }
+    finally:
+        connection.close()
+
+
+# ---------------------------------------------------------------------------
+# PA patrol: wake reservation state machine, digest marking, pairing queries
+# (批三收口环；JSONL 仍是 truth，台账只承载意图与判定辅助)
+# ---------------------------------------------------------------------------
+
+_WAKE_STATE_RESERVED = "reserved"
+_WAKE_STATE_ACCEPTED = "accepted"
+_WAKE_STATE_CANCELLED = "cancelled_pre_admission"
+_WAKE_STATE_UNKNOWN = "unknown"
+# States that block a receipt from being woken again. ``cancelled_pre_admission``
+# is deliberately absent: the submission provably never happened, so its
+# receipts stay wake-eligible (retryable).
+_WAKE_NON_RETRYABLE_STATES = (
+    _WAKE_STATE_RESERVED,
+    _WAKE_STATE_ACCEPTED,
+    _WAKE_STATE_UNKNOWN,
+)
+# Cancelled attempts carry no throttle weight; keep only a recent audit tail.
+_CANCELLED_AUDIT_HORIZON_MS = 3600 * 1000
+
+
+def _now_ms_utc() -> int:
+    return _iso_to_ms(datetime.now(timezone.utc).isoformat())
+
+
+def mark_receipts_digested(message_ids: list[str], *, digested_at: str) -> int:
+    """Digest all named receipts in one transaction — all or nothing.
+
+    ``digested_at`` never regresses (conflict merges keep it; here only
+    NULL rows are stamped). A partial digestion state is impossible: either
+    every id lands or the transaction rolls back and the caller retries on
+    the next pass.
+    """
+
+    ids = sorted({str(item or "").strip() for item in message_ids} - {""})
+    if not ids:
+        return 0
+    now_ms = _now_ms_utc()
+    connection = _open_writable()
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        placeholders = ",".join("?" for _ in ids)
+        cursor = connection.execute(
+            f"UPDATE receipts SET digested_at=?, updated_at_ms=? "
+            f"WHERE message_id IN ({placeholders}) AND digested_at IS NULL",
+            (digested_at, now_ms, *ids),
+        )
+        connection.execute("COMMIT")
+        return int(cursor.rowcount or 0)
+    except Exception:
+        connection.execute("ROLLBACK")
+        raise
+    finally:
+        connection.close()
+
+
+def reserve_wake(
+    receipt_ids: list[str],
+    *,
+    reserved_at: str,
+    reserved_at_ms: int,
+) -> str:
+    """Commit the wake intent BEFORE any PA turn is submitted.
+
+    Returns the attempt id (delivery token). A crash between this commit
+    and the outcome leaves a ``reserved`` row, which keeps its receipts
+    non-retryable — the conservative side of "unknown outcome is never
+    re-submitted". Recent cancelled attempts are pruned here so retry
+    churn stays bounded while the audit tail survives an hour.
+    """
+
+    ids = sorted({str(item or "").strip() for item in receipt_ids} - {""})
+    if not ids:
+        raise ValueError("wake reservation requires at least one receipt id")
+    attempt_id = secrets.token_hex(16)
+    now_ms = _now_ms_utc()
+    connection = _open_writable()
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute(
+            "DELETE FROM wake_attempts WHERE state=? AND updated_at_ms < ?",
+            (_WAKE_STATE_CANCELLED, now_ms - _CANCELLED_AUDIT_HORIZON_MS),
+        )
+        connection.execute(
+            "INSERT INTO wake_attempts("
+            "attempt_id, receipt_ids, state, reason, reserved_at, "
+            "reserved_at_ms, submitted_at_ms, updated_at_ms) "
+            "VALUES (?, ?, ?, '', ?, ?, NULL, ?)",
+            (
+                attempt_id,
+                json.dumps(ids, ensure_ascii=False),
+                _WAKE_STATE_RESERVED,
+                reserved_at,
+                int(reserved_at_ms),
+                now_ms,
+            ),
+        )
+        connection.execute("COMMIT")
+        return attempt_id
+    except Exception:
+        connection.execute("ROLLBACK")
+        raise
+    finally:
+        connection.close()
+
+
+def complete_wake(
+    attempt_id: str,
+    *,
+    state: str,
+    reason: str = "",
+    submitted_at_ms: int | None = None,
+) -> bool:
+    """Settle a reservation into its terminal state (reserved → terminal).
+
+    Only a ``reserved`` row transitions, so a double completion cannot
+    downgrade an ``accepted`` attempt. ``submitted_at_ms`` is set only for
+    real or possibly-real submissions (``accepted``/``unknown``): a
+    ``cancelled_pre_admission`` attempt provably never started a turn and
+    must not consume throttle quota.
+    """
+
+    if state not in {
+        _WAKE_STATE_ACCEPTED,
+        _WAKE_STATE_CANCELLED,
+        _WAKE_STATE_UNKNOWN,
+    }:
+        raise ValueError(f"invalid wake terminal state: {state}")
+    if state == _WAKE_STATE_CANCELLED:
+        submitted_at_ms = None
+    now_ms = _now_ms_utc()
+    connection = _open_writable()
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        cursor = connection.execute(
+            "UPDATE wake_attempts SET state=?, reason=?, "
+            "submitted_at_ms=COALESCE(?, submitted_at_ms), updated_at_ms=? "
+            "WHERE attempt_id=? AND state=?",
+            (
+                state,
+                str(reason or "")[:200],
+                submitted_at_ms,
+                now_ms,
+                str(attempt_id or "").strip(),
+                _WAKE_STATE_RESERVED,
+            ),
+        )
+        connection.execute("COMMIT")
+        return int(cursor.rowcount or 0) == 1
+    except Exception:
+        connection.execute("ROLLBACK")
+        raise
+    finally:
+        connection.close()
+
+
+def recent_wake_submissions(*, window_ms: int, now_ms: int) -> list[int]:
+    """Persisted throttle source: submission stamps inside the window.
+
+    Only ``accepted``/``unknown`` rows carry ``submitted_at_ms``, so a
+    restart inherits the cooldown and the hourly cap exactly where the
+    previous process left them.
+    """
+
+    connection = _open_readable()
+    try:
+        rows = connection.execute(
+            "SELECT submitted_at_ms FROM wake_attempts "
+            "WHERE submitted_at_ms IS NOT NULL AND submitted_at_ms > ? "
+            "ORDER BY submitted_at_ms ASC",
+            (int(now_ms) - int(window_ms),),
+        ).fetchall()
+        return [int(row[0]) for row in rows]
+    finally:
+        connection.close()
+
+
+def wake_covered_receipt_ids() -> dict[str, str]:
+    """receipt id → covering state for non-retryable wake attempts.
+
+    Receipts covered by ``reserved``/``accepted``/``unknown`` attempts never
+    re-enter the wake set; ``cancelled_pre_admission`` coverage is absent by
+    design (retryable).
+    """
+
+    connection = _open_readable()
+    try:
+        covered: dict[str, str] = {}
+        placeholders = ",".join("?" for _ in _WAKE_NON_RETRYABLE_STATES)
+        for raw_ids, state in connection.execute(
+            f"SELECT receipt_ids, state FROM wake_attempts "
+            f"WHERE state IN ({placeholders})",
+            _WAKE_NON_RETRYABLE_STATES,
+        ):
+            try:
+                ids = json.loads(raw_ids)
+            except ValueError:
+                continue
+            if isinstance(ids, list):
+                for item in ids:
+                    key = str(item or "").strip()
+                    if key:
+                        covered[key] = str(state)
+        return covered
+    finally:
+        connection.close()
+
+
+def undigested_wake_receipts(pa_agent_id: str) -> list[dict[str, Any]]:
+    """Undigested receipts paired to a live dispatch — the 批三 core query.
+
+    Replaces the patrol's counting-window scan: any ``digested_at IS NULL``
+    receipt that pairs to a live dispatch (status pending/consumed, living
+    in its own target's inbox) is wake-eligible, no matter how far outside
+    the legacy JSONL windows it fell. Pairing mirrors the read view —
+    explicit reply (direct, or via an authoritative chase), or a unique
+    same-thread same-source dispatch under a complete harvest — with one
+    tightening: revoked dispatches are not "live", so their replies never
+    wake the assistant.
+    """
+
+    if not str(pa_agent_id or "").strip():
+        return []
+    connection = _open_readable()
+    try:
+        live: dict[str, dict[str, str]] = {}
+        for message_id, target, thread in connection.execute(
+            "SELECT message_id, target_agent_id, thread_id FROM dispatches "
+            "WHERE row_kind='dispatch' AND status IN ('pending','consumed') "
+            "AND inbox_agent_id=target_agent_id AND target_agent_id != ''"
+        ):
+            live[str(message_id)] = {
+                "target": str(target),
+                "thread": str(thread),
+            }
+        if not live:
+            return []
+        complete_inboxes = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT agent_id FROM harvest_state WHERE complete=1"
+            )
+        }
+        chase_origin: dict[str, dict[str, str]] = {}
+        for (
+            chase_id, origin_id, chase_target, chase_inbox, chase_thread,
+        ) in connection.execute(
+            "SELECT message_id, pa_followup_of_message_id, target_agent_id, "
+            "inbox_agent_id, thread_id FROM dispatches "
+            "WHERE row_kind='followup' AND pa_followup_of_message_id != ''"
+        ):
+            inbox_instances = int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM dispatch_instances "
+                    "WHERE message_id=? AND inbox_agent_id=?",
+                    (str(chase_id), str(chase_inbox)),
+                ).fetchone()[0]
+            )
+            if (
+                str(chase_inbox) == str(chase_target)
+                and int(inbox_instances) == 1
+                and str(chase_inbox) in complete_inboxes
+                and str(origin_id) in live
+            ):
+                chase_origin[str(chase_id)] = {
+                    "origin": str(origin_id),
+                    "target": str(chase_target),
+                    "thread": str(chase_thread),
+                }
+        rows = connection.execute(
+            f"SELECT {_RECEIPT_COLUMNS}, received_at_ms FROM receipts "
+            "WHERE inbox_agent_id=? AND status='pending' AND digested_at IS NULL "
+            "ORDER BY received_at_ms ASC, message_id ASC",
+            (str(pa_agent_id),),
+        ).fetchall()
+        paired: list[dict[str, Any]] = []
+        for db_row in rows:
+            candidate = _receipt_row_dict(db_row[:-1])
+            metadata = candidate.get("metadata")
+            metadata = metadata if isinstance(metadata, dict) else {}
+            reply_to = str(metadata.get("replyToMessageId") or "").strip()
+            source_agent_id = str(candidate.get("sourceAgentId") or "").strip()
+            thread_id = str(candidate.get("threadId") or "").strip()
+            origin_id = ""
+            if reply_to and reply_to in live:
+                origin_id = reply_to
+            elif reply_to and reply_to in chase_origin:
+                chase = chase_origin[reply_to]
+                origin = live.get(chase["origin"])
+                if (
+                    origin is not None
+                    and chase["target"] == origin["target"]
+                    and chase["thread"] == origin["thread"]
+                ):
+                    origin_id = chase["origin"]
+            if not origin_id and thread_id and source_agent_id in complete_inboxes:
+                origin_id = _unique_thread_dispatch_id(
+                    connection,
+                    thread_id=thread_id,
+                    target_agent_id=source_agent_id,
+                    require_live=True,
+                ) or ""
+            if origin_id:
+                paired.append(candidate)
+        return paired
+    finally:
+        connection.close()
+
+
+def dispatch_envelope_is_current(
+    message_id: str,
+    *,
+    source_agent_id: str,
+    target_agent_id: str,
+    target_session_id: str,
+    source_session_id: str,
+    thread_id: str,
+) -> bool | None:
+    """Ledger verdict for the follow-up seam's strict original-row read.
+
+    Compares the recorded envelope columns instead of re-scanning the
+    target's inbox JSONL. Returns ``None`` when the ledger cannot answer
+    (row unknown / owning inbox not completely harvested) so the caller
+    falls back to the legacy strict scan; ``False`` covers every definite
+    mismatch, including duplicated rows (the strict scan raises on those).
+    """
+
+    normalized_id = str(message_id or "").strip()
+    if not normalized_id:
+        return False
+    try:
+        connection = _open_readable()
+    except DispatchLedgerUnavailableError:
+        # No ledger at all: the caller falls back to the JSONL strict scan.
+        return None
+    try:
+        row = connection.execute(
+            "SELECT row_kind, source_agent_id, target_agent_id, inbox_agent_id, "
+            "target_session_id, source_session_id, thread_id, status "
+            "FROM dispatches WHERE message_id=?",
+            (normalized_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        (
+            row_kind, src, tgt, inbox, tss, sss, thr, status,
+        ) = (str(part or "") for part in row)
+        if row_kind != "dispatch":
+            # The original row is a follow-up, never a chaseable dispatch.
+            return False
+        completeness = connection.execute(
+            "SELECT complete FROM harvest_state WHERE agent_id=?",
+            (inbox,),
+        ).fetchone()
+        if completeness is None or int(completeness[0]) != 1:
+            return None
+        instances = int(
+            connection.execute(
+                "SELECT COUNT(*) FROM dispatch_instances "
+                "WHERE message_id=? AND inbox_agent_id=?",
+                (normalized_id, inbox),
+            ).fetchone()[0]
+        )
+        if instances != 1:
+            # A duplicated original voids the strict-scan uniqueness proof.
+            return False
+        return (
+            src == str(source_agent_id or "").strip()
+            and tgt == str(target_agent_id or "").strip()
+            and tss == str(target_session_id or "").strip()
+            and sss == str(source_session_id or "").strip()
+            and thr == str(thread_id or "").strip()
+            and status != "revoked"
+        )
     finally:
         connection.close()
