@@ -3,8 +3,8 @@ import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { VButton, VDropdownMenu } from "../components/vui";
 
-// The personal assistant lives in the Launcher control surface now; the
-// /personal-assistant workbench route survives for deep links and settings.
+// The personal assistant lives in the Launcher control surface; the retired
+// /personal-assistant workbench route no longer participates in shell nav.
 export function specialistAgentSection(pathname: string): "finance" | "companions" | "" {
   if (pathname === "/finance" || pathname.startsWith("/finance/")) return "finance";
   if (pathname === "/companions" || pathname.startsWith("/companions/")) return "companions";

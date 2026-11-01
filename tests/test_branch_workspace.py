@@ -484,3 +484,50 @@ def test_worktree_is_dirty_fail_closed_on_timeout(tmp_path, monkeypatch):
     monkeypatch.setattr(workspace.git_process, "run_git", boom)
     assert workspace._worktree_is_dirty(root) is True
     assert called["n"] == 1
+
+
+def test_dirty_scan_skips_foreign_worktrees_and_reports_dirty_unknown(tmp_path):
+    project = _init_repo(tmp_path / "OtherApp")
+    in_pool = project / ".worktrees" / "feat-task"
+    foreign = tmp_path / "codex-wt" / "pa-flow" / "Vibelution"
+    foreign.parent.parent.mkdir(parents=True, exist_ok=True)
+    _git(project, "worktree", "add", "-b", "codex/feat-task", str(in_pool))
+    _git(project, "worktree", "add", "-b", "codex/pa-flow", str(foreign))
+    # Dirty means tracked changes: the dirty scan ignores untracked files.
+    (in_pool / "README.md").write_text("dirty\n", encoding="utf-8")
+    (foreign / "README.md").write_text("dirty\n", encoding="utf-8")
+
+    scanned: list[Path] = []
+    real_dirty = workspace._worktree_is_dirty
+
+    def spy_dirty(path: Path) -> bool:
+        scanned.append(path)
+        return real_dirty(path)
+
+    monkeypatch = pytest.MonkeyPatch()
+    try:
+        monkeypatch.setattr(workspace, "_worktree_is_dirty", spy_dirty)
+        payload = list_branch_instances(project)
+    finally:
+        monkeypatch.undo()
+
+    by_branch = {item["branch"]: item for item in payload["items"] if item.get("branch")}
+    task = by_branch["codex/feat-task"]
+    foreign_item = by_branch["codex/pa-flow"]
+
+    # Only Git-governed checkouts (main + task) pay for a git status scan; the
+    # foreign PA-lane worktree must never be scanned.
+    scanned_norm = {workspace._norm(path) for path in scanned}
+    assert workspace._norm(project) in scanned_norm
+    assert workspace._norm(in_pool) in scanned_norm
+    assert workspace._norm(foreign) not in scanned_norm
+
+    assert task["dirty"] is True
+    assert task["dirtyUnknown"] is False
+    assert task["promotable"] is False
+    # The foreign checkout keeps dirty=False (payload stays boolean for native
+    # consumers); dirtyUnknown carries the real "not scanned" semantics.
+    assert foreign_item["dirty"] is False
+    assert foreign_item["dirtyUnknown"] is True
+    assert foreign_item["promotable"] is False
+    assert by_branch["main"]["dirtyUnknown"] is False

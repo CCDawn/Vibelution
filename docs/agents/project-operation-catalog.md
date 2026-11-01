@@ -91,7 +91,7 @@ Launcher 的跨项目完整 Agent 目录使用 `personal_assistant_action_tool` 
 | 对象 | 操作 | 端点/入口 | 语义 |
 | --- | --- | --- | --- |
 | Agent | Archive | `DELETE /api/agents/{agent_id}`（`agent_archive`） | **归档**（非删除）：Agent 自身成功字段写 `status=archived`；关联 Session 走 Session lifecycle 归档（只读密封），可拒绝处于 queued/running/stopping/paused 的关联 Session（409）。`PATCH /agents/{id}` 置 `status=archived` 也走同一归档链路 |
-| Agent | Purge | `DELETE /api/agents/{agent_id}/purge`（`agent_purge`） | **独立、不可逆、仅 archived**：删除已归档 Session + 私有 workspace；拒绝 active；引用清理失败整批回滚 |
+| Agent | Purge | `DELETE /api/agents/{agent_id}/purge`（`agent_purge`） | **独立、不可逆、仅 archived**：清理关联 Session、私有 workspace 和引用；拒绝 active/protected。Launcher 助理可经独立 `agents:purge` 授权与原生管理审批调用同一 owner；`agent_purge_preview` 先读取对象和配置版本。失败按原生补偿处理，`cleanupPending` 必须明确报告 |
 | Agent | Restore | **无公开通用 restore** | `PATCH` **拒绝** archived→active 隐式复活；`reactivate_agent_instance` 仅供内部系统服务（team repair、supervised、bulk delete）使用，不是通用公开入口 |
 | Agent | Reset | `POST /api/agents/{agent_id}/reset`（`agent_reset`） | 重置 Agent 运行时/策略；高风险 |
 | Session | Delete | `DELETE /api/sessions/{session_id}`（`session_delete`） | **删除该 Session**；busy/validation 失败返回 409/422 |
@@ -99,7 +99,7 @@ Launcher 的跨项目完整 Agent 目录使用 `personal_assistant_action_tool` 
 | Session | Stop | `POST /api/sessions/{session_id}/stop`（`session_stop_turn`） | **202 异步受理**停止请求；成功证据是经 session detail / events 观察到终止/暂停/停止类稳定状态；失败边界 404（NotFound）/ 409（Busy） |
 
 硬规则：
-1. **Purge 前必须 Archive**；Purge 不可逆，`OPERATOR_ONLY`，仅接受 `status=archived` 的 Agent。
+1. **Purge 前必须 Archive**；Purge 不可逆，仍为操作者授权操作，仅接受 `status=archived` 的 Agent。Launcher 助理通过 operator-control、独立 `agents:purge` 和原生审批链代操；普通 Agent 不获得删除入口，旧授权不自动扩张。`full_access` 沿用现有自动审批语义。
 2. **Agent archive 不是无条件可用**：仅当 Agent 当前可归档（对象非 protected）且关联 Session 不处于 queued / running / stopping / paused 状态时允许；满足条件时**合法的 active Agent 也可以 archive**。
 3. Archive/Purge 引用清理失败必须整批回滚，不得半删。
 4. 不存在公开的通用 Agent restore；单 Session 使用上表 archive/unarchive，不能借此恢复已归档 Agent。

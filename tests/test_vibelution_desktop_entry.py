@@ -65,21 +65,39 @@ def test_desktop_entry_imports_safely_on_non_windows(monkeypatch):
 
 
 def test_append_log_rotates_the_bridge_log_before_it_exceeds_the_limit(tmp_path, monkeypatch):
-    log_path = tmp_path / "desktop-entry-python.log"
+    log_dir = tmp_path / "launcher-logs"
+    log_path = log_dir / "desktop-entry-python.log"
+    log_dir.mkdir()
     log_path.write_text("x" * 256, encoding="utf-8")
-    monkeypatch.setattr(desktop_entry, "RUNTIME_DIR", tmp_path)
+    monkeypatch.setattr(desktop_entry, "LAUNCHER_LOG_DIR", log_dir)
     monkeypatch.setattr(desktop_entry, "PYTHON_BRIDGE_LOG_PATH", log_path)
     monkeypatch.setattr(desktop_entry, "PYTHON_BRIDGE_LOG_MAX_BYTES", 128)
     monkeypatch.setattr(desktop_entry, "PYTHON_BRIDGE_LOG_BACKUP_COUNT", 2)
 
     desktop_entry._append_log("desktop_entry_python.test", level="info", value=1)
 
-    assert (tmp_path / "desktop-entry-python.log.1").read_text(encoding="utf-8") == "x" * 256
+    assert (log_dir / "desktop-entry-python.log.1").read_text(encoding="utf-8") == "x" * 256
     lines = log_path.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 1
     payload = json.loads(lines[0])
     assert payload["event"] == "desktop_entry_python.test"
     assert payload["fields"] == {"value": 1}
+
+
+def test_python_bridge_log_lives_outside_the_watched_launcher_runtime_dir():
+    """The bridge log must never be written into the Electron-watched runtime dir.
+
+    Every launcher-api run appends 3-4 log lines. While the log lived in
+    ``.runtime/launcher``, each state refresh logged inside the watched
+    directory and re-triggered the next refresh (self-exciting storm). The log
+    must live in a sibling directory of the launcher runtime dir instead.
+    """
+
+    assert desktop_entry.LAUNCHER_LOG_DIR.parent == desktop_entry.RUNTIME_DIR.parent
+    assert desktop_entry.LAUNCHER_LOG_DIR != desktop_entry.RUNTIME_DIR
+    assert desktop_entry.RUNTIME_DIR not in desktop_entry.PYTHON_BRIDGE_LOG_PATH.parents
+    assert desktop_entry.LAUNCHER_LOG_DIR in desktop_entry.PYTHON_BRIDGE_LOG_PATH.parents
+    assert desktop_entry.PYTHON_BRIDGE_LOG_PATH.name == "desktop-entry-python.log"
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows shell identity contract is Windows-only")

@@ -7,9 +7,9 @@ import unicodedata
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
-Scope = Literal["agents:read", "agents:create", "agents:create:files", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:results:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read", "source:read", "knowledge:catalog:read", "agents:directory:read"]
+Scope = Literal["agents:read", "agents:create", "agents:create:files", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:results:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read", "source:read", "knowledge:catalog:read", "agents:directory:read", "agents:purge"]
 # Add scopes at the end so legacy bootstrap prefixes keep their meaning.
-SCOPES = ("agents:read", "agents:create", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read", "source:read", "knowledge:catalog:read", "agents:create:files", "teams:results:read", "agents:directory:read")
+SCOPES = ("agents:read", "agents:create", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read", "source:read", "knowledge:catalog:read", "agents:create:files", "teams:results:read", "agents:directory:read", "agents:purge")
 _AVATAR_EXTENSION = r"(?:[pP][nN][gG]|[jJ][pP][gG]|[jJ][pP][eE][gG]|[wW][eE][bB][pP]|svg)"
 _AVATAR_PATH_PATTERN = r"^workspace/avatars/[A-Za-z0-9_.-]+\." + _AVATAR_EXTENSION + "$"
 
@@ -147,6 +147,11 @@ class AgentArchive(Closed):
     expected_config_revision: int = Field(ge=0)
 
 
+class AgentPurge(Closed):
+    agent_id: str = Field(min_length=1, max_length=128)
+    expected_config_revision: int = Field(ge=0)
+
+
 class AuthorizationUpgrade(Closed):
     expected_scopes: list[Scope] = Field(min_length=1, max_length=len(SCOPES))
     add_scopes: list[Scope] = Field(min_length=1, max_length=len(SCOPES))
@@ -190,8 +195,8 @@ class SessionPin(Closed):
     pinned: bool
 
 
-ACTION_MODELS = {"agent_create": AgentCreate, "agent_update": AgentUpdate, "agent_avatar": AgentAvatar, "agent_archive": AgentArchive, "team_run": TeamRun, "session_pin": SessionPin, "authorization_upgrade": AuthorizationUpgrade}
-ACTION_SCOPES = {"agent_create": "agents:create", "agent_update": "agents:update", "agent_avatar": "agents:avatar", "agent_archive": "agents:archive", "team_run": "teams:run", "session_pin": "sessions:pin", "authorization_upgrade": None}
+ACTION_MODELS = {"agent_create": AgentCreate, "agent_update": AgentUpdate, "agent_avatar": AgentAvatar, "agent_archive": AgentArchive, "agent_purge": AgentPurge, "team_run": TeamRun, "session_pin": SessionPin, "authorization_upgrade": AuthorizationUpgrade}
+ACTION_SCOPES = {"agent_create": "agents:create", "agent_update": "agents:update", "agent_avatar": "agents:avatar", "agent_archive": "agents:archive", "agent_purge": "agents:purge", "team_run": "teams:run", "session_pin": "sessions:pin", "authorization_upgrade": None}
 
 
 def contracts() -> dict:
@@ -200,12 +205,13 @@ def contracts() -> dict:
         "agent_update": "按原生 configRevision 更新普通 Agent 名称、对话模型、提示词或人物/任务档案；拒绝权限、身份与生命周期字段。",
         "agent_avatar": "按原生 updatedAt 使用已有头像候选或恢复默认；不接收 URL、文件上传或任意路径。",
         "agent_archive": "每次经原生审批，按 configRevision 归档普通 Agent 并封存关联 Session；protected 或关联 Session 忙时拒绝。稳定 request_id，未知结果只查询原回执，不提供 purge、reset、restore 或 force。verified 表示首次原生回读已归档，完成回执保留历史状态。",
+        "agent_purge": "agent_purge（永久删除）：先用 agent_purge_preview 读取归档对象与版本。按助理当前原生权限策略删除已归档且非 protected 的 Agent；full_access 可能自动批准。需独立 agents:purge，缺少时查 authorization_status 并通过 authorization_upgrade 仅增加此权限。删除不可恢复，级联删除绑定会话、私有工作区并清理团队、群聊和模式引用；忙碌或版本变化时拒绝。不支持 force 或删除活跃对象。稳定 request_id，unknown 只查询原回执，不能换 ID 重放。verified 需明确原生成功应答和登记记录缺失，cleanupPending=true 表示仍有清理未完成，不得宣称全部清理完成。完成回执为历史证明。",
         "team_run": "创建内置 dev-team 并受理原生工作流运行；稳定 request_id，未知结果查询原回执，只有 resumeAllowed 才可用原参数续接。",
         "session_pin": "经原生审批置顶或取消置顶普通可见 Session；不改变当前选择。verified 表示首次确认时原生元数据符合目标状态，不证明某次调用的因果；完成回执保留历史状态，当前状态用 session_get 查询。未知结果查询原 action/request_id，不能换 ID 重放。",
         "authorization_upgrade": "通过 personal_assistant_manage_tool 按助理当前原生权限策略显式增加当前Launcher原主体的指定缺失权限；full_access 可能自动批准。先authorization_status读取当前scopes，expected_scopes和add_scopes必须分别排序、唯一、不重叠。不能默认升级到全部权限，查询只选所需读取权；写权另行明确选择。保留client/subject/capability和任务关联，不支持撤销或换主体。unknown或异常保持同一request_id查询management_receipt(action=authorization_upgrade)，不更换ID重试。需要operator control，旧读取scope本身不授予升级权。完成回执为历史证明，当前状态另查。",
     }
     return {name: {"action": name, "description": descriptions[name], "parameters": model.model_json_schema(),
-                   "governed": name in {"team_run", "session_pin", "agent_archive", "authorization_upgrade"}, "scope": ACTION_SCOPES[name] or "operator:control"} for name, model in ACTION_MODELS.items()}
+                   "governed": name in {"team_run", "session_pin", "agent_archive", "agent_purge", "authorization_upgrade"}, "scope": ACTION_SCOPES[name] or "operator:control"} for name, model in ACTION_MODELS.items()}
 
 
 class BindingResponse(Closed):
@@ -342,6 +348,37 @@ class AgentView(Closed):
 
 class AgentReadResponse(Closed):
     agent: AgentView
+
+
+_PURGE_EFFECTS = ["agent", "sessions", "private_workspace", "team_room_mode_references"]
+
+
+class AgentPurgePreviewResponse(UntrustedResponse):
+    agent: AgentView
+    status: Literal["archived"]
+    irreversible: Literal[True]
+    effects: list[Literal["agent", "sessions", "private_workspace", "team_room_mode_references"]] = Field(
+        default_factory=lambda: list(_PURGE_EFFECTS))
+
+    @field_validator("irreversible", mode="before")
+    @classmethod
+    def explicitly_irreversible(cls, value):
+        if value is not True:
+            raise ValueError("Explicit irreversible marker required")
+        return value
+
+    @field_validator("effects")
+    @classmethod
+    def complete_effects(cls, value):
+        if value != _PURGE_EFFECTS:
+            raise ValueError("Complete native purge effects required")
+        return value
+
+
+class AgentPurgeResult(Closed):
+    agentId: str
+    status: Literal["purged"]
+    cleanupPending: StrictBool
 
 
 class DirectoryQuery(Closed):
@@ -984,13 +1021,14 @@ class AuthorizationStateResponse(Closed):
 
 class ReceiptResponse(Closed):
     status: Literal["completed", "unknown"]
-    action: Literal["agent_create", "agent_update", "agent_avatar", "agent_archive", "team_run", "session_pin", "authorization_upgrade"]
+    action: Literal["agent_create", "agent_update", "agent_avatar", "agent_archive", "agent_purge", "team_run", "session_pin", "authorization_upgrade"]
     requestId: str
     verified: bool
     reused: bool
     agent: AgentView | None = None
     session: SessionView | None = None
     authorization: AuthorizationView | None = None
+    purge: AgentPurgeResult | None = None
     code: Literal["OPERATION_UNCONFIRMED"] | None = None
     phase: Literal["materialization_pending", "materialized", "flow_saved", "started"] | None = None
     resumeAllowed: bool | None = None
@@ -1046,7 +1084,7 @@ class DocumentationDescribeQuery(Closed):
         return value.strip()
 
 
-DocumentationAction = Literal["session_list", "agent_create", "agent_update", "agent_avatar", "agent_archive", "session_config_get", "session_config_compare", "session_parameters_get", "session_pin", "team_list", "team_get", "room_list", "room_get", "authorization_status", "legacy_observers", "legacy_receipts"]
+DocumentationAction = Literal["session_list", "agent_create", "agent_update", "agent_avatar", "agent_archive", "agent_purge", "session_config_get", "session_config_compare", "session_parameters_get", "session_pin", "team_list", "team_get", "room_list", "room_get", "authorization_status", "legacy_observers", "legacy_receipts"]
 # This maps documentation to already-migrated semantic actions. It grants no
 # HTTP execution and deliberately advertises no other registered API operation.
 DOCUMENTATION_ACTIONS = {
@@ -1055,6 +1093,7 @@ DOCUMENTATION_ACTIONS = {
     ("PATCH", "/api/agents/{agent_id}"): "agent_update",
     ("PATCH", "/api/agents/{agent_id}/avatar"): "agent_avatar",
     ("DELETE", "/api/agents/{agent_id}"): "agent_archive",
+    ("DELETE", "/api/agents/{agent_id}/purge"): "agent_purge",
     ("GET", "/api/v1/launcher-assistant-management/sessions/{session_id}/config"): "session_config_get",
     ("GET", "/api/v1/launcher-assistant-management/sessions/{session_id}/config-comparison"): "session_config_compare",
     ("POST", "/api/sessions/{session_id}/pin"): "session_pin",

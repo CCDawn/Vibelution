@@ -27,7 +27,7 @@ ASSISTANT_MANAGE_TOOL_NAME = "personal_assistant_manage_tool"
 # The closed manage action set; mirrors tools/personal_assistant_tools.py.
 ASSISTANT_MANAGE_ACTIONS = frozenset(
     {
-        "agent_create", "agent_update", "agent_archive", "session_create",
+        "agent_create", "agent_update", "agent_archive", "agent_purge", "session_create",
         "session_update", "session_stop", "session_delete", "knowledge_acl_grant",
         "restart", "workflow_recovery_bind", "workflow_recovery_revoke", "workflow_start",
         "team_create", "knowledge_ingest", "config_update",

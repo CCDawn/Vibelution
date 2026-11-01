@@ -33,9 +33,10 @@ function navigatesToChatSelection(source: string): string[] {
 describe("Chat route write boundary (single authority)", () => {
   it("useChatRouteSelection is the only module allowed to build session/room route targets", () => {
     const writerSource = readSource(useChatRouteSelectionSourcePath);
-    for (const path of ["/chat", "/finance", "/personal-assistant"]) {
+    for (const path of ["/chat", "/finance"]) {
       expect(chatSelectionPathname(path)).toBe(path);
     }
+    // 旧 /personal-assistant 工作台页已退役：任何其他路径都落回 /chat。
     for (const path of ["/agents", "/personal-assistant/nested"]) {
       expect(chatSelectionPathname(path)).toBe("/chat");
     }
@@ -112,7 +113,7 @@ describe("Chat route write boundary (single authority)", () => {
     expect(source).toContain("useChatRouteSelection()");
     expect(source).toContain("canonicalizeBareRoute(bareRouteBootstrapTarget)");
     expect(source).toContain("indexRailEnabled: !embeddedSurface");
-    expect(source).toContain("const embeddedSurface = financeSurface || personalAssistantSurface");
+    expect(source).toContain("const embeddedSurface = financeSurface");
     // No direct Chat selection navigation remains in the workbench shell.
     for (const line of source.split("\n")) {
       if (line.includes("navigate(`/chat")) {

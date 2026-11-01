@@ -117,8 +117,8 @@ def test_dispatch_receipt_attention_reports_fresh_paired_receipt(monkeypatch):
     assert row["kind"] == "dispatch_receipt"
     assert row["severity"] == "info"
     assert "研究员-01" in row["title"]
-    # targetUrl 必须落到 PA 工作台派遣 tab，不许是空状态页。
-    assert row["targetUrl"] == "/personal-assistant?panel=dispatches"
+    # 旧助理页退役：targetUrl 置空，点击 toast 仅聚焦工作台。
+    assert row["targetUrl"] == ""
 
 
 def test_dispatch_receipt_attention_window_blocks_stale_receipts(monkeypatch):
@@ -525,7 +525,7 @@ def test_overview_carries_completion_lane_on_every_page(personal_env, monkeypatc
         "kind": "dispatch_receipt",
         "severity": "info",
         "title": "派遣回执",
-        "targetUrl": "/personal-assistant?panel=dispatches",
+        "targetUrl": "",
         "body": "调研完成",
     }
 

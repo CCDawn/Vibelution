@@ -2063,6 +2063,19 @@ def submit_session_message(
         submit_timing_fields["sessionAdmissionDisposition"] = str(
             journal_receipt.get("admissionDisposition") or "disabled"
         )
+        if normalized_message_source == "raw":
+            # waitsForPerson pendingQuestion one-time consumption: an accepted
+            # person message is the only unlock, so it stamps consumedAt on
+            # the slot (idempotent; absent/consumed slots are no-ops). The
+            # rail's kill switch skips the hook entirely.
+            from core.web.services.session.managed_continuation import waits_for_person_rail_enabled
+            from . import pending_question
+
+            if waits_for_person_rail_enabled():
+                try:
+                    pending_question.consume_session_pending_question(conversation_id)
+                except Exception:  # noqa: BLE001 - consumption must never fail the submit
+                    pass
         try:
             from . import title_generation
 

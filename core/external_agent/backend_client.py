@@ -31,7 +31,7 @@ CONTROL_TOKEN_HEADER = "X-Vibelution-Control-Token"
 TASK_CAPABILITY_HEADER = "X-Vibelution-External-Agent-Task-Capability"
 ADAPTER_CONNECTION_HEADER = "X-Vibelution-External-Agent-Connection"
 _MANAGEMENT_PREFIX = "/api/v1/launcher-assistant-management"
-_MANAGEMENT_ACTIONS = frozenset({"agent_create", "agent_update", "agent_avatar", "agent_archive", "team_run", "session_pin", "authorization_upgrade"})
+_MANAGEMENT_ACTIONS = frozenset({"agent_create", "agent_update", "agent_avatar", "agent_archive", "agent_purge", "team_run", "session_pin", "authorization_upgrade"})
 _MANAGEMENT_SCOPES = ["agents:archive", "agents:avatar", "agents:create", "agents:read", "agents:update", "legacy:receipts:read", "platform:describe", "rooms:read", "sessions:parameters:read", "sessions:pin", "sessions:read", "teams:directory:read", "teams:read", "teams:run"]
 # Historical grants without persisted scopes predate pin and archive. Freeze
 # their actual eight scopes; deriving this list from fresh scopes expands power.
@@ -221,7 +221,7 @@ class ManagedAgentBackendClient:
             # grant; only a fresh client may explicitly request the new scope.
             requested_scopes = saved.get("scopes", _LEGACY_MANAGEMENT_SCOPES if saved.get("clientId") else _MANAGEMENT_SCOPES)
             if (not isinstance(requested_scopes, list) or not requested_scopes
-                or any(not isinstance(scope, str) or scope not in (*_MANAGEMENT_SCOPES, "agents:directory:read", "tasks:read", "source:read", "knowledge:catalog:read", "agents:create:files", "teams:results:read") for scope in requested_scopes)
+                or any(not isinstance(scope, str) or scope not in (*_MANAGEMENT_SCOPES, "agents:directory:read", "tasks:read", "source:read", "knowledge:catalog:read", "agents:create:files", "teams:results:read", "agents:purge") for scope in requested_scopes)
                 or requested_scopes != sorted(set(requested_scopes))):
                 raise BackendClientError("Invalid management scopes.", code="UNKNOWN_MANAGEMENT_SUBJECT")
             self._state["management"] = {**saved, "clientId": client_id, "binding": binding, "scopes": requested_scopes}
@@ -259,7 +259,7 @@ class ManagedAgentBackendClient:
                                 require_existing_subject: bool = False) -> dict[str, Any]:
         if action not in _MANAGEMENT_ACTIONS or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,95}", request_id):
             raise BackendClientError("Unsupported management request.", code="INVALID_MANAGEMENT_REQUEST")
-        if action in {"session_pin", "agent_archive", "authorization_upgrade"}:
+        if action in {"session_pin", "agent_archive", "agent_purge", "authorization_upgrade"}:
             from pydantic import ValidationError
             from core.web.services.external_management.contracts import ACTION_MODELS
             try:
@@ -279,6 +279,8 @@ class ManagedAgentBackendClient:
             await self._sync_authorization_receipt(grant, public)
         if action == "agent_archive" and public["status"] == "completed" and public["agent"]["agentId"] != parameters["agent_id"]:
             raise BackendClientError("Mismatched Agent archive receipt.", code="BACKEND_PROTOCOL_ERROR")
+        if action == "agent_purge" and public["status"] == "completed" and public["purge"]["agentId"] != parameters["agent_id"]:
+            raise BackendClientError("Mismatched Agent purge receipt.", code="BACKEND_PROTOCOL_ERROR")
         if action == "session_pin" and public["status"] == "completed" and (
             public["session"]["id"] != parameters["session_id"] or public["session"]["pinned"] is not parameters["pinned"]
         ):
@@ -399,6 +401,22 @@ class ManagedAgentBackendClient:
         if not isinstance(agent, dict) or agent.get("agentId") != agent_id:
             raise BackendClientError("Invalid Agent projection.", code="BACKEND_PROTOCOL_ERROR")
         return {"agent": self._management_agent_view(agent)}
+
+    async def management_agent_purge_preview(self, *, agent_id: str) -> dict[str, Any]:
+        from pydantic import ValidationError
+        from core.web.services.external_management.contracts import AgentPurgePreviewResponse
+        if not isinstance(agent_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", agent_id):
+            raise BackendClientError("Invalid Agent identifier.", code="INVALID_MANAGEMENT_REQUEST")
+        grant = await self._management_grant(require_existing=False)
+        result = await self._request_json("GET", f"{_MANAGEMENT_PREFIX}/agents/{quote(agent_id, safe='')}/purge-preview",
+            management_auth=(grant["subjectId"], grant["capability"]))
+        try:
+            public = AgentPurgePreviewResponse.model_validate(result).model_dump()
+            if public["agent"]["agentId"] != agent_id:
+                raise ValueError("Agent preview target changed")
+        except (ValidationError, ValueError) as exc:
+            raise BackendClientError("Invalid Agent purge preview.", code="BACKEND_PROTOCOL_ERROR") from exc
+        return public
 
     async def management_avatar_options(self, *, offset: int = 0, limit: int = 20) -> dict[str, Any]:
         from pydantic import ValidationError
@@ -754,7 +772,21 @@ class ManagedAgentBackendClient:
     def _management_public_receipt(payload: dict[str, Any], *, action: str, request_id: str) -> dict[str, Any]:
         if payload.get("action") != action or payload.get("requestId") != request_id or payload.get("status") not in {"completed", "unknown"}:
             raise BackendClientError("Invalid management receipt.", code="BACKEND_PROTOCOL_ERROR")
+        if action != "agent_purge" and payload.get("purge") is not None:
+            raise BackendClientError("Unexpected Agent purge result.", code="BACKEND_PROTOCOL_ERROR")
         result = {key: deepcopy(payload[key]) for key in ("status", "action", "requestId", "verified", "reused", "code") if key in payload}
+        if action == "agent_purge":
+            from pydantic import ValidationError
+            from core.web.services.external_management.contracts import ReceiptResponse
+            try:
+                receipt = ReceiptResponse.model_validate(payload)
+                if (receipt.status == "completed" and (receipt.purge is None or receipt.verified is not True or receipt.code is not None)
+                    or receipt.status == "unknown" and (receipt.purge is not None or receipt.verified is not False or receipt.code != "OPERATION_UNCONFIRMED")
+                    or any(getattr(receipt, key) is not None for key in ("agent", "session", "authorization", "teamRun", "phase", "resumeAllowed"))):
+                    raise ValueError("Invalid purge receipt state")
+                return receipt.model_dump(exclude_none=True)
+            except (ValidationError, ValueError) as exc:
+                raise BackendClientError("Invalid Agent purge receipt.", code="BACKEND_PROTOCOL_ERROR") from exc
         if action == "authorization_upgrade":
             from pydantic import ValidationError
             from core.web.services.external_management.contracts import ReceiptResponse

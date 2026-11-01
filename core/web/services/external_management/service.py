@@ -70,7 +70,7 @@ class ManagementService:
     def binding(self) -> dict:
         current = self.identity()
         Binding.model_validate(current.binding)
-        return {"protocolVersion": 1, "binding": current.binding, "scopes": [scope for scope in SCOPES if scope not in {"tasks:read", "source:read", "knowledge:catalog:read", "agents:create:files", "teams:results:read", "agents:directory:read"}], "actions": contracts()}
+        return {"protocolVersion": 1, "binding": current.binding, "scopes": [scope for scope in SCOPES if scope not in {"tasks:read", "source:read", "knowledge:catalog:read", "agents:create:files", "teams:results:read", "agents:directory:read", "agents:purge"}], "actions": contracts()}
 
     def _expected(self, expected: dict):
         current = self.identity()
@@ -96,7 +96,7 @@ class ManagementService:
                     or grant.get("scopes") != scopes):
                     raise ManagementError("SUBJECT_GRANT_CONFLICT", 409)
             else:
-                if {"agents:create:files", "teams:results:read", "agents:directory:read"} & set(scopes):
+                if {"agents:create:files", "teams:results:read", "agents:directory:read", "agents:purge"} & set(scopes):
                     raise ManagementError("SCOPE_DENIED", 403)
                 grant = {"subject_id": "ops-" + uuid4().hex, "subject_capability": secrets.token_urlsafe(48),
                          "binding": current.binding, "authority": current.signature, "scopes": scopes}
@@ -154,6 +154,17 @@ class ManagementService:
         if not agent:
             raise ManagementError("AGENT_UNAVAILABLE", 404)
         return {"agent": _agent_view(agent)}
+
+    def read_purge_preview(self, subject: str, capability: str, agent_id: str) -> dict:
+        from .contracts import AgentPurgePreviewResponse
+        self._authorize(subject, capability, "agents:read")
+        if not isinstance(agent_id, str) or not 1 <= len(agent_id) <= 128:
+            raise ManagementError("INVALID_INPUT", 422)
+        agent = self.native.read_purge_preview(agent_id)
+        if not isinstance(agent, dict) or agent.get("agentId") != agent_id or agent.get("status") != "archived":
+            raise ManagementError("AGENT_UNAVAILABLE", 404)
+        return AgentPurgePreviewResponse.model_validate({"agent": _agent_view(agent), "status": "archived",
+            "irreversible": True, "untrustedContent": True}).model_dump()
 
     def read_avatar_options(self, subject: str, capability: str, *, offset=0, limit=20) -> dict:
         from .contracts import AvatarOption, AvatarOptionsQuery, AvatarOptionsResponse
@@ -391,6 +402,20 @@ class ManagementService:
         return agent.get("avatarImagePath") == parameters["avatar_image_path"]
 
     def _confirm(self, record: dict) -> bool:
+        if record["action"] == "agent_purge":
+            try:
+                from .contracts import AgentPurgeResult
+                # Absence alone cannot recover a lost native acknowledgement.
+                # Only this request's persisted successful result can be verified.
+                result = AgentPurgeResult.model_validate(record.get("nativeResult"))
+                agent_id = record["parameters"]["agent_id"]
+                if result.agentId != agent_id or self.native.read_archive_state(agent_id) is not None:
+                    return False
+                record["receipt"] = {"status": "completed", "action": "agent_purge", "requestId": record["requestId"],
+                    "verified": True, "purge": result.model_dump()}
+                return True
+            except Exception:  # noqa: BLE001 -- recovery never replays deletion or invents native proof
+                return False
         if record["action"] == "agent_archive":
             try:
                 from .contracts import AgentView
@@ -482,15 +507,23 @@ class ManagementService:
             try:
                 if action == "session_pin":
                     self.native.pin_session(parameters)
+                elif action == "agent_purge":
+                    from .contracts import AgentPurgeResult
+                    result = AgentPurgeResult.model_validate(self.native.purge(parameters, marker))
+                    if result.agentId != parameters["agent_id"]:
+                        raise ValueError("Mismatched native purge acknowledgement")
+                    record["nativeResult"] = result.model_dump()
                 else:
                     agent = getattr(self.native, {"agent_create": "create", "agent_update": "update", "agent_avatar": "avatar", "agent_archive": "archive"}[action])(parameters, marker)
             except ManagementError as exc:
+                if action == "agent_purge" and exc.code == "OPERATION_UNCONFIRMED":
+                    return self._receipt(record, reused=False)
                 record["failure"] = {"code": exc.code, "status_code": exc.status_code}
                 self.store.write(path, record)
                 raise
             except Exception:  # noqa: BLE001 -- lost native acknowledgement remains an unknown durable intent
                 return self._receipt(record, reused=False)
-            if action != "session_pin":
+            if action not in {"session_pin", "agent_purge"}:
                 record["agentId"] = agent.get("agentId", "")
             self.store.write(path, record)
             self._confirm(record)

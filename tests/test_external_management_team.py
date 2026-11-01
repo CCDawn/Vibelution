@@ -72,7 +72,7 @@ def env(tmp_path, monkeypatch):
     management = ManagementService(tmp_path / "management", identity=identity, native=None, teams=gateway)
     grant = management.bind({"client_id": "launcher", "expected_binding": BINDING,
                              "scopes": [scope for scope in SCOPES if scope not in {
-                                 "agents:create:files", "teams:results:read", "agents:directory:read"}]})
+                                 "agents:create:files", "teams:results:read", "agents:directory:read", "agents:purge"}]})
     args = (grant["subject_id"], grant["subject_capability"])
     payload = {"request_id": "request-1", "expected_binding": BINDING,
                "parameters": {"name": "Team", "goal": "Produce verified evidence", "template_id": "dev-team"}}
@@ -126,7 +126,7 @@ def test_scope_binding_and_subject_are_not_run_identifiers(env):
     invoke(env)
     other = env.service.bind({"client_id": "other", "expected_binding": BINDING,
                               "scopes": [scope for scope in SCOPES if scope not in {
-                                  "agents:create:files", "teams:results:read", "agents:directory:read"}]})
+                                  "agents:create:files", "teams:results:read", "agents:directory:read", "agents:purge"}]})
     with pytest.raises(ManagementError, match="REQUEST_UNAVAILABLE"):
         env.service.team_receipt(other["subject_id"], other["subject_capability"], "request-1")
     env.service.identity = lambda: TargetIdentity({**BINDING, "instanceId": "different"}, "native-root")
@@ -381,7 +381,7 @@ def test_real_partial_template_never_reenters_native_agent_creation(configured_e
                                    native=NativeAgentGateway(env["root"]))
     grant = management.bind({"client_id": "launcher", "expected_binding": BINDING,
                              "scopes": [scope for scope in SCOPES if scope not in {
-                                 "agents:create:files", "teams:results:read", "agents:directory:read"}]})
+                                 "agents:create:files", "teams:results:read", "agents:directory:read", "agents:purge"}]})
     args = grant["subject_id"], grant["subject_capability"]
     payload = {"request_id": "partial", "expected_binding": BINDING, "parameters": {"name": "Partial", "goal": "No model started"}}
     create = operations.create_configured_agent_with_session

@@ -45,10 +45,8 @@ const productSharedParentStyleConsumers = [
   "components/agent-messages/AgentMessageDetail.tsx",
   "components/agent-messages/AgentMessageParts.tsx",
   "components/agent-messages/AgentMessageSidebar.tsx",
-  // Both assistant surfaces and the overview share their scoped, typed product style owner.
-  "routes/PersonalAssistantRoute.tsx",
+  // Both assistant surfaces share their scoped, typed product style owner.
   "routes/desktopPet/LauncherAssistantRoute.tsx", // shares DesktopAssistantRoute.styles with the existing pet window
-  "routes/personalAssistant/PersonalAssistantOverview.tsx",
   "app/SpecialistAgentMenu.tsx", // shell-owned nav geometry is passed via props
   // Settings-align wave 3: the extracted ConfigSectionEditor shares the owning
   // route's style module (ConfigRoute.styles) instead of owning a copy.

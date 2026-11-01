@@ -25,7 +25,7 @@ from core.web.services.external_management.contracts import (
     SessionConfigComparisonResponse,
     DirectoryQuery, TeamListResponse, TeamReadResponse, RoomListResponse, RoomReadResponse, SessionParametersResponse, AuthorizationStateResponse,
     LegacyObserverView, LegacyObserversResponse, LegacyReceiptsResponse, ActiveTasksResponse, SourceReadResponse, SourceSearchResponse,
-    TeamKnowledgeResponse, TeamResultResponse, AgentDirectoryQuery, AgentDirectoryResponse,
+    TeamKnowledgeResponse, TeamResultResponse, AgentDirectoryQuery, AgentDirectoryResponse, AgentPurgePreviewResponse,
 )
 from core.web.services.external_management.service import (
     ManagementError,
@@ -150,6 +150,14 @@ async def avatar_options(request: Request, offset: int = 0, limit: int = 20):
 async def read_agent(agent_id: str, request: Request):
     _require_control(request)
     return await _call(lambda: _service().read_agent(*_credentials(request), agent_id))
+
+
+@router.get("/agents/{agent_id}/purge-preview", response_model=AgentPurgePreviewResponse)
+async def agent_purge_preview(agent_id: str, request: Request):
+    _require_control(request)
+    if request.query_params:
+        raise HTTPException(status_code=422, detail={"code": "INVALID_INPUT"})
+    return await _call(lambda: _service().read_purge_preview(*_credentials(request), agent_id))
 
 
 def _directory_query(request, *, detail=False):

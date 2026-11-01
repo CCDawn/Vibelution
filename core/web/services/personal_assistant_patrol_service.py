@@ -28,7 +28,8 @@ PA 派出任务后是纯被动方：``delegationPolicy.allowWakeMessages=False``
    其余回实行；结果不可证（异常）记 ``unknown`` 永不重试、可证未提交
    （skipped 类）记 ``cancelled_pre_admission`` 可重试。
 3. 定时摘要卡：聚合（进行中派遣/逾期待催办/未消化回执）进 humanAttention
-   通道（kind=``assistant_digest``，severity=info，targetUrl=/personal-assistant）。
+   通道（kind=``assistant_digest``，severity=info；旧助理页退役后 targetUrl
+   置空，点击仅聚焦工作台）。
    内容指纹无变化不推新通知、id 每 ``DIGEST_MIN_INTERVAL_SECONDS`` 最多轮转
    一次，行只在 ``DIGEST_FRESHNESS_SECONDS`` 新鲜度窗口内可见后自然淡出。
 
@@ -119,7 +120,9 @@ _PA_PENDING_INBOX_LIMIT = 200
 
 ATTENTION_KIND_ASSISTANT_DIGEST = "assistant_digest"
 ATTENTION_SEVERITY_INFO = "info"
-ASSISTANT_DIGEST_TARGET_URL = "/personal-assistant"
+# 旧 /personal-assistant 工作台页已退役：摘要卡不再深链，targetUrl 置空，
+# 点击 toast 仅聚焦工作台（不跳转具体页面）。
+ASSISTANT_DIGEST_TARGET_URL = ""
 
 _TITLE_LIMIT = 80
 _BODY_LIMIT = 160

@@ -54,7 +54,13 @@ from core.runtime_manager.process_identity import capture_process_identity, insp
 PROJECT_STORAGE = resolve_active_project_storage_paths(PROJECT_ROOT)
 RUNTIME_DIR = PROJECT_STORAGE.runtime / "launcher"
 STATE_PATH = RUNTIME_DIR / "state.json"
-PYTHON_BRIDGE_LOG_PATH = RUNTIME_DIR / "desktop-entry-python.log"
+# The CLI bridge log must live OUTSIDE RUNTIME_DIR. Electron watches the
+# launcher runtime directory for state/port changes; a state-refresh run that
+# logged inside it re-triggered the next refresh, producing a self-exciting
+# storm (measured 84,588 refreshes in 36h). The sibling launcher-logs/
+# directory is never watched.
+LAUNCHER_LOG_DIR = PROJECT_STORAGE.runtime / "launcher-logs"
+PYTHON_BRIDGE_LOG_PATH = LAUNCHER_LOG_DIR / "desktop-entry-python.log"
 PYTHON_BRIDGE_LOG_MAX_BYTES = DEFAULT_LOG_MAX_BYTES
 PYTHON_BRIDGE_LOG_BACKUP_COUNT = DEFAULT_LOG_BACKUP_COUNT
 LAUNCHER_STDOUT_PATH = RUNTIME_DIR / "launcher-backend.stdout.log"
@@ -99,7 +105,7 @@ def _now_iso() -> str:
 
 
 def _append_log(event: str, *, level: str = "info", **fields: object) -> None:
-    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    LAUNCHER_LOG_DIR.mkdir(parents=True, exist_ok=True)
     payload = {
         "ts": _now_iso(),
         "level": level,

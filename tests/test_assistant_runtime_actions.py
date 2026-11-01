@@ -182,10 +182,16 @@ async def test_index_query_search_and_unavailable_reasons_remain_visible():
     dispatch = Dispatch()
     bind_actions(dispatch, asyncio.get_running_loop())
     try:
-        session = await asyncio.to_thread(execute_action, "index", {"query": "SESSION"})
-        assert {r["action"] for r in session["actions"]} >= {"session_get", "session_config_get"}
-        chinese = await asyncio.to_thread(execute_action, "index", {"query": "历史"})
-        assert "session_config_get" in {r["action"] for r in chinese["actions"]}
+        async def matching_actions(query):
+            names, offset = set(), 0
+            while offset is not None:
+                page = await asyncio.to_thread(execute_action, "index", {"query": query, "offset": offset})
+                names.update(row["action"] for row in page["actions"])
+                offset = page["nextOffset"]
+            return names
+
+        assert await matching_actions("SESSION") >= {"session_get", "session_config_get"}
+        assert "session_config_get" in await matching_actions("历史")
         for name in ("provider_remove", "model_remove"):
             page = await asyncio.to_thread(execute_action, "index", {"query": name})
             row = next(r for r in page["actions"] if r["action"] == name)

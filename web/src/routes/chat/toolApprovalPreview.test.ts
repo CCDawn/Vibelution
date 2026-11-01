@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  agentPurgePreviewIsValid,
   preferenceProposalPreviewIsValid,
   managementApprovalActionIsKnown,
   authorizationUpgradePreviewIsValid,
@@ -17,6 +18,60 @@ import {
 } from "./toolApprovalPreview";
 
 describe("toolApprovalPreview", () => {
+  const purgeSummary = {
+    assistantAction: "agent_purge",
+    assistantTargets: { project_id: "project-1", agent_id: "agent-1", expected_config_revision: "42", request_id: "purge-1" },
+    assistantPurgeIrreversible: true,
+    assistantPurgeEffects: ["agent", "sessions", "private_workspace", "team_room_mode_references"],
+  };
+
+  it("shows the complete irreversible agent purge request and fixed effects", () => {
+    expect(agentPurgePreviewIsValid(purgeSummary)).toBe(true);
+    expect(managementApprovalActionIsKnown("agent_purge")).toBe(true);
+    const zh = toolApprovalActionPreview(purgeSummary, "personal_assistant_manage_tool", "zh");
+    const en = toolApprovalActionPreview(purgeSummary, "personal_assistant_manage_tool", "en");
+    for (const value of ["永久删除 Agent", "项目: project-1", "Agent: agent-1", "配置版本: 42", "请求 ID: purge-1",
+      "不可恢复", "Agent 记录", "会话", "私有工作区", "团队、群聊和模式引用"]) expect(zh).toContain(value);
+    for (const value of ["Permanently delete agent", "Project: project-1", "Agent: agent-1", "Config revision: 42", "Request ID: purge-1",
+      "irreversible", "agent record", "sessions", "private workspace", "team, chat room, and mode references"]) expect(en).toContain(value);
+    for (const revision of ["0", "9007199254740993", "1".repeat(30)]) {
+      const summary = { ...purgeSummary, assistantTargets: { ...purgeSummary.assistantTargets, expected_config_revision: revision } };
+      expect(agentPurgePreviewIsValid(summary)).toBe(true);
+      expect(toolApprovalActionPreview(summary, "personal_assistant_manage_tool")).toContain(`配置版本: ${revision}`);
+    }
+    const boundaryTargets = { project_id: "p".repeat(160), agent_id: "a".repeat(128), expected_config_revision: "0", request_id: "r".repeat(96) };
+    const boundarySummary = { ...purgeSummary, assistantTargets: boundaryTargets };
+    expect(agentPurgePreviewIsValid(boundarySummary)).toBe(true);
+    for (const value of Object.values(boundaryTargets)) expect(toolApprovalActionPreview(boundarySummary, "personal_assistant_manage_tool")).toContain(value);
+  });
+
+  it("rejects incomplete or altered purge identities, revisions, and effects", () => {
+    const targets = purgeSummary.assistantTargets;
+    const invalid = [
+      { ...purgeSummary, assistantTargets: undefined }, { ...purgeSummary, assistantTargets: [] },
+      ...Object.keys(targets).map(key => ({ ...purgeSummary, assistantTargets: Object.fromEntries(Object.entries(targets).filter(([name]) => name !== key)) })),
+      { ...purgeSummary, assistantTargets: { ...targets, extra: "forged" } },
+      ...["purge.1", "purge:1"].map(request_id => ({ ...purgeSummary, assistantTargets: { ...targets, request_id } })),
+      ...["project_id", "agent_id", "request_id"].flatMap(key => ["", "forged\n", "bad/id", "hidden\u202e", "x".repeat(key === "request_id" ? 97 : key === "agent_id" ? 129 : 161)]
+        .map(value => ({ ...purgeSummary, assistantTargets: { ...targets, [key]: value } }))),
+      ...[undefined, 42, -1, "-1", "+1", "01", "1.0", "1e3", " 1", "1\n", "", "NaN"]
+        .map(value => ({ ...purgeSummary, assistantTargets: { ...targets, expected_config_revision: value } })),
+      ...[undefined, false, "true"].map(value => ({ ...purgeSummary, assistantPurgeIrreversible: value })),
+      ...[undefined, [], [...purgeSummary.assistantPurgeEffects].reverse(), purgeSummary.assistantPurgeEffects.slice(1),
+        [...purgeSummary.assistantPurgeEffects, "all_history"], ["agent", "sessions", "private_workspace", "all_history"]]
+        .map(value => ({ ...purgeSummary, assistantPurgeEffects: value })),
+      { ...purgeSummary, assistantArgumentsInvalid: true }, { ...purgeSummary, assistantDetailsOmitted: true },
+    ];
+    expect(agentPurgePreviewIsValid(null)).toBe(false);
+    expect(agentPurgePreviewIsValid(undefined)).toBe(false);
+    expect(agentPurgePreviewIsValid({ ...purgeSummary, assistantAction: "agent_archive" })).toBe(false);
+    for (const summary of invalid) {
+      expect(agentPurgePreviewIsValid(summary)).toBe(false);
+      expect(toolApprovalActionPreview(summary, "personal_assistant_manage_tool", "zh")).toContain("参数无法核对");
+      expect(toolApprovalActionPreview(summary, "personal_assistant_manage_tool", "en")).toContain("Arguments cannot be verified");
+    }
+  });
+
   it("binds preference decisions to complete pending native values", () => {
     const summary = { assistantAction: "preference_proposal_accept", assistantTargets: { proposal_id: "companion-preference-proposal:123", expected_fingerprint: "a".repeat(64) },
       assistantPreference: { preferenceType: "address", candidateValue: "小明\u202e", status: "pending" } };

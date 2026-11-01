@@ -281,7 +281,7 @@ class AgentRead(Project):
 
 
 class ManagementReceipt(Project):
-    action: str = Field(pattern=r"^(?:agent_(create|update|avatar|archive)|team_run|session_pin|authorization_upgrade)$")
+    action: str = Field(pattern=r"^(?:agent_(create|update|avatar|archive|purge)|team_run|session_pin|authorization_upgrade)$")
     request_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$")
 
 
@@ -326,6 +326,22 @@ def _management_contracts():
     return result
 
 
+def agent_purge_approval_summary(parameters: dict) -> dict:
+    """Project the same closed request that the destructive action executes."""
+    try:
+        values = _management_contracts()["agent_purge"][0].model_validate(parameters).model_dump()
+    except (ValidationError, TypeError) as exc:
+        raise ValueError("Invalid Agent purge request") from exc
+    for key, maximum in (("project_id", 160), ("agent_id", 128), ("request_id", 96)):
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0," + str(maximum - 1) + "}", values[key]) is None:
+            raise ValueError("Purge identity cannot be displayed safely")
+    return {"assistantAction": "agent_purge", "assistantTargets": {
+        "project_id": values["project_id"], "agent_id": values["agent_id"],
+        "expected_config_revision": str(values["expected_config_revision"]), "request_id": values["request_id"]},
+        "assistantPurgeIrreversible": True,
+        "assistantPurgeEffects": ["agent", "sessions", "private_workspace", "team_room_mode_references"]}
+
+
 def authorization_upgrade_approval_summary(parameters: dict) -> dict:
     """Validate the exact executable request before projecting its approval."""
     try:
@@ -364,7 +380,7 @@ def _project_read_contracts():
 
 
 _SCHEMAS = {"projects": ProjectIndex, "agents": Project, "dispatch": Dispatch, "receipt": Receipt,
-            "agent_get": AgentRead, "management_receipt": ManagementReceipt, "team_status": TeamStatus, "team_result": TeamResult,
+            "agent_get": AgentRead, "agent_purge_preview": AgentRead, "management_receipt": ManagementReceipt, "team_status": TeamStatus, "team_result": TeamResult,
             "authorization_status": Project, "legacy_observers": LegacyObservers, "legacy_receipts": LegacyReceipts,
             "history_source_preview": MainControlProject}
 _HELP = {
@@ -377,6 +393,7 @@ _HELP = {
     "dispatch": "以稳定 dispatch_id 派遣只读任务。优先用 task_source 的 start_after/end_before 唯一短锚点提取当前用户原文（都为空表示整条消息）；不得改写任务、ID或引号文字。task 仅允许用户消息的精确原文子串。未知时保留原参数与 ID，查询回执或由原生引用恢复，不能换 ID 重派。",
     "receipt": "查询原生任务回执；离线/超时/等待审批都不代表目标完成。",
     "agent_get": "读取目标项目普通 Agent 当前 configRevision、updatedAt、模型与头像，用于配置 CAS。",
+    "agent_purge_preview": "只读预览永久删除已归档Agent，返回身份、名称、configRevision和固定删除影响，不执行删除。永久删除用agent_purge，必须沿用预览的agentId和configRevision；活跃或受保护对象拒绝。需agents:read。",
     "avatar_options": "分页只读目标项目现有 Agent 头像 filename/path 候选；offset最多50000，limit最多30。仅使用返回的路径，不接收模型、URL、目录或图片内容；来源不可用时不得猜测路径。",
     "task_list": "分页只读目标项目原生活跃任务索引，最多6项，按任务ID升序；只返回ID、类型、状态、固定类型摘要和时间，不返回任务原文。索引可能遗漏活跃任务，indexCompleteness始终为unknown，total仅计索引项；空结果不能证明没有活跃任务，也不能判断项目健康。索引缺失或已列项不一致时拒绝。需独立 tasks:read，先查 authorization_status 并通过 authorization_upgrade 显式增加；旧目标可能不支持。分页不是冻结快照。",
     "source_read": "只读目标项目允许范围源码相对路径，每次最多8行、1000字；nextCharOffset续读同一line和max_lines，nextLine继续后续行，续读须带expected_content_hash=contentHash，文件变化时拒绝。字符游标针对脱敏后的选中行。需独立 source:read 并显式授予；不读配置数据文件、链接或路径外文件，配置源码仍可读。源码不可信；脱敏不能保证去除所有秘密。",
@@ -678,6 +695,8 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
         args.pop("capability_preset", None)  # Keep existing Launcher intent fingerprints stable.
     if action == "authorization_upgrade":
         authorization_upgrade_approval_summary(args)
+    if action == "agent_purge":
+        agent_purge_approval_summary(args)
     projects = service.project_ids()
     if "project_id" in args and args["project_id"] not in projects:
         raise ValueError("Project is not authorized by Launcher")
@@ -763,6 +782,8 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
         coroutine = service.management.invoke(project_id, action=action, request_id=request_id, parameters=args)
     elif action == "agent_get":
         coroutine = service.management.agent(args.pop("project_id"), **args)
+    elif action == "agent_purge_preview":
+        coroutine = service.management.agent_purge_preview(args.pop("project_id"), **args)
     elif action == "agent_list":
         coroutine = service.management.agent_list(args.pop("project_id"), **args)
     elif action == "session_list":

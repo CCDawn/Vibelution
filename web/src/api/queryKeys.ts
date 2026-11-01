@@ -1,16 +1,11 @@
 export const queryKeys = {
-  personalAssistant: () => ["personal-assistant"] as const,
   personalAssistantComputer: () => ["personal-assistant", "computer"] as const,
   personalAssistantComputerWindows: () => ["personal-assistant", "computer-windows"] as const,
   launcherAssistantComputer: () => ["launcher-assistant", "computer"] as const,
   launcherAssistantComputerWindows: () => ["launcher-assistant", "computer-windows"] as const,
-  personalAssistantOverview: () => ["personal-assistant", "overview"] as const,
   personalAssistantHumanAttention: () => ["personal-assistant", "human-attention"] as const,
-  personalAssistantBinding: (agentId: string, sessionId: string) => ["personal-assistant", "binding", agentId, sessionId] as const,
-  personalAssistantReplies: (agentId: string, sessionId: string) => ["personal-assistant", "replies", agentId, sessionId] as const,
   challengePhaseBoundary: (teamId: string) => ["teams", teamId, "challenge-phase-boundary"] as const,
   runtimeSummary: () => ["runtime", "summary"] as const,
-  petActivity: () => ["pet", "activity"] as const,
   codeFreshness: () => ["runtime", "code-freshness"] as const,
   usageSummary: (scope = "global", sessionId = "", agentId = "", provider = "", model = "") =>
     ["usage", "summary", scope, sessionId, agentId, provider, model] as const,
@@ -48,10 +43,6 @@ export const queryKeys = {
   virtualHumanDiary: (id: string, localDate = "", limit = 100) => ["agents", id, "plugins", "virtual-human-life", "diary", localDate, limit] as const,
   virtualHumanRelationships: (id: string) => ["agents", id, "plugins", "virtual-human-life", "relationships"] as const,
   virtualHumanMemories: (id: string, limit = 100) => ["agents", id, "plugins", "virtual-human-life", "memories", limit] as const,
-  virtualHumanDialogueSettings: (id: string) => ["agents", id, "plugins", "virtual-human-life", "dialogue-settings"] as const,
-  virtualHumanPreferenceProposals: (id: string) => ["agents", id, "plugins", "virtual-human-life", "preference-proposals"] as const,
-  personalAffairs: (id: string, kind = "", status = "") =>
-    ["agents", id, "plugins", "personal-affairs", "affairs", kind, status] as const,
   agentRuns: (id: string) => ["agents", id, "runs"] as const,
   agentMessages: (id: string, status = "pending") => ["agents", id, "messages", status] as const,
   agentRuntimeEvidence: (id: string) => ["agents", id, "runtime-evidence"] as const,

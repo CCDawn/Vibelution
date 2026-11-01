@@ -102,15 +102,14 @@ const MAX_NOTIFIED_IDS = 400;
 export const HUMAN_ATTENTION_DEFAULT_TARGETS: Record<HumanAttentionKind, string> = {
   knowledge_review: "/memory/knowledge",
   anomaly: "/teams?researchView=workflow",
-  affair_reminder: "/personal-assistant",
+  // 旧 /personal-assistant 工作台页已退役：PA 相关三类不再深链，
+  // targetUrl 置空，点击 toast 仅聚焦工作台（不跳转具体页面）。
+  affair_reminder: "",
   human_gate: "/teams?researchView=workflow",
-  // 完成类事件的默认深链与后端 targetUrl 缺省兜底保持同一落点：
-  // 派遣 tab / 科研工作流 / 会话页。
-  dispatch_receipt: "/personal-assistant?panel=dispatches",
+  dispatch_receipt: "",
   run_completed: "/teams?researchView=workflow",
   session_completed: "/chat",
-  // PA 心跳巡检的定时摘要卡：点击落回助理面板。
-  assistant_digest: "/personal-assistant",
+  assistant_digest: "",
 };
 
 export const HUMAN_ATTENTION_FALLBACK_TITLES: Record<HumanAttentionKind, string> = {

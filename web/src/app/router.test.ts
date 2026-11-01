@@ -105,7 +105,8 @@ describe("router route contracts", () => {
     expect(topPaths).not.toContain("/desktop-assistant");
     expect(topPaths).not.toContain("/desktop-pet");
     expect(findWorkbenchRoute("pet")).toBeTruthy();
-    expect(findWorkbenchRoute("personal-assistant")).toBeTruthy();
+    // 旧 /personal-assistant 工作台页已退役：路由表不再注册该路径。
+    expect(topPaths).not.toContain("/personal-assistant");
   });
 
   it("guards split evolution routes with loading fallback and error boundary elements", () => {

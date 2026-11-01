@@ -45,7 +45,7 @@ let container: HTMLElement;
 
 function mount(initialEntries: string[]) {
   router = createMemoryRouter(
-    ["/chat", "/finance", "/personal-assistant"].map(path => ({ path, element: React.createElement(Host) })),
+    ["/chat", "/finance"].map(path => ({ path, element: React.createElement(Host) })),
     { initialEntries },
   );
   observedNavigationTypes = [];
@@ -79,7 +79,7 @@ afterEach(() => {
 });
 
 describe("chat route selection model", () => {
-  it.each(["/personal-assistant", "/finance", "/chat"])("keeps native session selection on %s", async pathname => {
+  it.each(["/finance", "/chat"])("keeps native session selection on %s", async pathname => {
     mount([`${pathname}?session=old`]);
     await act(async () => latest().openSession("native-session"));
     expect(router.state.location.pathname).toBe(pathname);

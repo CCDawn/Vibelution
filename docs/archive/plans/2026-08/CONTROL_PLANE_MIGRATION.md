@@ -203,7 +203,7 @@ Launcher refresh：**required before user testing**（Electron 主进程）。Py
 | C# 仍打 8765 | shim 在 Electron 活着时启动第二套 Python | T8 闸门 |
 | 与其它 lane 重叠 | `LauncherBranchInstancesPanel*`、`AGENTS.md`、`electronWindowProvider.ts` 现有 claim | 缩 scope；窗口合同只加测试不改行为，除非本任务明确拥有 |
 
-失败检测：runtime scene + `desktop-entry-python.log` + Electron 主进程日志。不要用 `taskkill` 清场。
+失败检测：runtime scene + `desktop-entry-python.log`（2026-11 起位于 `<runtime>/launcher-logs/`，已迁出被 Electron watch 的 `.runtime/launcher/`）+ Electron 主进程日志。不要用 `taskkill` 清场。
 
 ---
 

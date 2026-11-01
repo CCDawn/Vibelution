@@ -823,6 +823,25 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(filterBranchInstances([dirty, unmerged, clean], "", { unmerged: true }).map((item) => item.id)).toEqual(["worktree:unmerged"]);
   });
 
+  it("shows unknown-dirty foreign worktrees as neither dirty nor clean and keeps them out of the dirty filter", () => {
+    const foreign = instance({
+      id: "worktree:pa-flow",
+      shortName: "pa-flow",
+      branch: "codex/pa-flow",
+      dirty: false,
+      dirtyUnknown: true,
+      promotable: false,
+      mergedToMain: true,
+    });
+    const dirty = instance({ id: "worktree:dirty", shortName: "timing", dirty: true, mergedToMain: true });
+
+    // Unknown is its own state, never presented as clean or dirty.
+    expect(formatGitStatus(foreign, true)).toBe("未知 · 未扫描");
+    expect(formatGitStatus(foreign, false)).toBe("Unknown · not scanned");
+    expect(deriveCleanupRisks(foreign)).toEqual([]);
+    expect(filterBranchInstances([foreign, dirty], "", { dirty: true }).map((item) => item.id)).toEqual(["worktree:dirty"]);
+  });
+
   it("keeps main and live rows visible when git hygiene filters are on", () => {
     const main = instance({
       id: "main",

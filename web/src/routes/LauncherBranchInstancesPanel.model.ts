@@ -24,9 +24,19 @@ export function isCleanupEligible(item: LauncherBranchInstance): boolean {
   return item.kind !== "main" && !item.current && item.branch !== "main" && item.id !== "main";
 }
 
+/**
+ * True when the backend never scanned this worktree's dirty state (a
+ * pool-external registration: PA flow, external dev lane). Such rows must be
+ * shown as an unknown state — never clean, never dirty — and stay out of the
+ * dirty filter.
+ */
+export function isDirtyUnknown(item: LauncherBranchInstance): boolean {
+  return item.dirtyUnknown === true;
+}
+
 export function deriveCleanupRisks(item: LauncherBranchInstance): string[] {
   const risks: string[] = [];
-  if (item.dirty) {
+  if (item.dirty && !isDirtyUnknown(item)) {
     risks.push("discard_dirty");
   }
   if (item.alive) {
@@ -687,7 +697,9 @@ export function instanceMatchesFilters(
   if (instanceMustRemainVisible(item, pending)) {
     return true;
   }
-  if (filters.dirty && !item.dirty) {
+  // Unknown-dirty rows (foreign worktrees the backend never scans) stay out
+  // of the dirty filter: unknown is neither dirty nor clean.
+  if (filters.dirty && (!item.dirty || isDirtyUnknown(item))) {
     return false;
   }
   if (filters.unmerged && item.mergedToMain !== false) {
@@ -749,6 +761,9 @@ export function formatWorkbenchStatus(item: LauncherBranchInstance, isZh: boolea
 }
 
 export function formatGitStatus(item: LauncherBranchInstance, isZh: boolean): string {
+  if (isDirtyUnknown(item)) {
+    return isZh ? "未知 · 未扫描" : "Unknown · not scanned";
+  }
   const states: string[] = [];
   if (item.dirty) {
     states.push(isZh ? "有未提交" : "Uncommitted");
