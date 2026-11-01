@@ -207,6 +207,30 @@ def list_personal_assistant_dispatches(*, limit: int = DEFAULT_LIMIT) -> dict[st
             "The personal assistant has not been created. Dispatches are unavailable."
         )
     assistant_agent_id = _text(agent, "agentId")
+    receipt_window = max(window * _RECEIPT_WINDOW_MULTIPLIER, _RECEIPT_WINDOW_FLOOR)
+
+    # Ledger-first (批三地基): the sqlite dispatch ledger extracts the pairing
+    # envelope at write time and holds terminal reports, so late receipts
+    # stay paired and completed never regresses to running. Empty ledger
+    # (first deployment) or any ledger failure falls back to the JSONL scan
+    # below, unchanged.
+    try:
+        from core.web.services import personal_assistant_dispatch_ledger as dispatch_ledger
+
+        if dispatch_ledger.ensure_harvested(assistant_agent_id):
+            view = dispatch_ledger.read_dispatch_view_cached(
+                assistant_agent_id, window=window, receipt_window=receipt_window
+            )
+            if view is not None:
+                return {
+                    "assistantAgentId": assistant_agent_id,
+                    **view,
+                    "generatedAt": datetime.now(timezone.utc).isoformat(),
+                }
+    except Exception as exc:
+        _debug_logger.warning(
+            f"Dispatch ledger read failed; falling back to inbox scan. error={type(exc).__name__}"
+        )
 
     # Dispatches: PA-sent rows across every agent inbox (active and archived
     # targets alike — archived agents keep their workspace and history).
@@ -246,7 +270,6 @@ def list_personal_assistant_dispatches(*, limit: int = DEFAULT_LIMIT) -> dict[st
 
     # Receipts: rows in the assistant's own inbox, matched back to dispatches
     # by explicit replyToMessageId or by same-thread same-source.
-    receipt_window = max(window * _RECEIPT_WINDOW_MULTIPLIER, _RECEIPT_WINDOW_FLOOR)
     receipt_rows = _scan_inbox_reverse(
         _inbox_path(agent), predicate=lambda _payload: True, cap=receipt_window
     )
