@@ -1,5 +1,4 @@
 import { Activity, ChevronRight, Settings2 } from "lucide-react";
-import { ConfigDesktopPetSettings } from "./ConfigDesktopPetSettings";
 import type { ConfigSummary } from "../api/types";
 import { VNativeButton, VRouteLinkButton } from "../components/vui";
 import type { ConfigSettingsGroup, ConfigSettingsGroupId } from "./ConfigSettingsNavigation";
@@ -16,7 +15,6 @@ export function ConfigSettingsIndex({ groups, sections, language, onNavigate, sh
     {groups.map(group => <section className={styles.group} key={group.id}>
       <h2 className={styles.title}>{group.title}</h2>
       <div className={styles.rows}>
-        {group.id === "avatar-pet" ? <ConfigDesktopPetSettings language={language} /> : null}
         {group.pages.flatMap(page => page.memberSectionIds.map(id => {
           const section = sectionMap.get(id);
           if (!section) return null;

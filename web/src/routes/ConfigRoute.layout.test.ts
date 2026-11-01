@@ -1102,7 +1102,8 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("<ConfigSettingsIndex");
     expect(routeSource).not.toContain("返回设置列表");
     expect(routeSource).toContain('onShowAll={() => showSettingsIndex()}');
-    expect(routeSource).toContain("<ConfigDesktopPetSettings language={currentLanguage}");
+    // The retired floating-window toggle no longer mounts in the config route.
+    expect(routeSource).not.toContain("ConfigDesktopPetSettings");
     expect(routeSource).toContain('pageId: "personal-assistant", sectionId: "pet"');
     expect(routeSource).not.toContain('toolbar={isSectionVisible("models") ? undefined');
   });

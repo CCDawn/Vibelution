@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
  *   therefore not scanned.
  * - Files holding `zh/en` data pairs by design (bilingual-at-the-source, no
  *   hole): ConfigShortcutsPanel, ConfigFeatureDecisionPanel,
- *   ConfigSettingsNavigation, ConfigDesktopPetSettings, ConfigSettingsIndex.
+ *   ConfigSettingsNavigation, ConfigSettingsIndex.
  */
 import routeSource from "../ConfigRoute.tsx?raw";
 import providerRegistryPanelSource from "../ConfigProviderRegistryPanel.tsx?raw";

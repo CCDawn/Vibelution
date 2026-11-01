@@ -42,12 +42,10 @@ if (isLauncherAssistantWindow || isWorkbenchMainWindow || isLauncherControlWindo
 }
 
 if (isLauncherAssistantWindow) {
-  // The unified resident assistant surface reuses the desktop pet drag and
-  // expand IPC. Expose only that pet subset here; the full vibelutionLauncher
-  // bridge stays limited to workbench and launcher control windows.
+  // The resident assistant surface reuses the desktop pet drag IPC. Expose
+  // only that pet subset here; the full vibelutionLauncher bridge stays
+  // limited to workbench and launcher control windows.
   contextBridge.exposeInMainWorld("vibelutionLauncher", {
-    setDesktopPetExpanded: (expanded: boolean) =>
-      ipcRenderer.invoke(IPC_CHANNELS.setDesktopPetExpanded, expanded),
     openConversationFromPet: (sessionId: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.openConversationFromPet, sessionId),
     beginDesktopPetWindowDrag: (point: unknown) =>
@@ -73,7 +71,6 @@ contextBridge.exposeInMainWorld("vibelutionLauncher", {
       ipcRenderer.on(IPC_CHANNELS.assistantThemeChanged, wrapped);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.assistantThemeChanged, wrapped);
     },
-    controlDesktopPet: (open?: boolean, mode?: "pet" | "assistant") => ipcRenderer.invoke(IPC_CHANNELS.controlDesktopPet, open, mode),
     requestWorkbenchRestart: (trigger?: string) => ipcRenderer.invoke(IPC_CHANNELS.requestWorkbenchRestart, trigger),
     requestWorkbenchShellUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.requestWorkbenchShellUpdate),
     getLauncherFreshness: () => ipcRenderer.invoke(IPC_CHANNELS.getLauncherFreshness),

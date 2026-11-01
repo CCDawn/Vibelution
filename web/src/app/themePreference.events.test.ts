@@ -12,7 +12,7 @@ describe("shared workbench appearance preferences", () => {
     const next = { ...initial, revision: 2, theme: "dark" as const };
     let incoming!: (value: unknown) => void;
     const acknowledge = vi.fn().mockResolvedValue(undefined);
-    vi.stubGlobal("vibelutionLauncher", { setDesktopPetExpanded: vi.fn() });
+    vi.stubGlobal("vibelutionLauncher", {});
     vi.stubGlobal("vibelutionLauncherTheme", {
       readThemeAuthority: async () => ({ code: "read", snapshot: initial }),
       onAssistantThemeChanged: (handler: (value: unknown) => void) => { incoming = handler; return () => undefined; },

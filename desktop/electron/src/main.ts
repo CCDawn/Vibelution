@@ -281,7 +281,6 @@ import { ElectronWindowProvider } from "./windows/electronWindowProvider.js";
 import type { ManagedWindowState } from "./windows/windowProviderTypes.js";
 import { createLauncherWindow, isLauncherControlSender, isTrustedLauncherControlFrame } from "./windows/launcherWindow.js";
 import { createWorkbenchWindow, isWorkbenchMainSender } from "./windows/workbenchWindow.js";
-import { desktopPetWindowExpandedBounds } from "./windows/petWindowBounds.js";
 import {
   beginDesktopPetWindowDrag,
   desktopPetWindowBoundsAt,
@@ -5025,18 +5024,6 @@ function assertDesktopPetIpcSender(event: IpcMainInvokeEvent | IpcMainEvent): vo
   }
   throw new Error("blocked desktop pet ipc sender");
 }
-
-ipcMain.handle(IPC_CHANNELS.setDesktopPetExpanded, (event, expanded: unknown) => {
-  assertDesktopPetIpcSender(event);
-  if (typeof expanded !== "boolean") throw new Error("Invalid desktop pet expanded state");
-  const window = BrowserWindow.fromWebContents(event.sender);
-  if (!window || window.isDestroyed()) throw new Error("Desktop pet window is not available");
-  const current = window.getBounds();
-  const bounds = desktopPetWindowExpandedBounds(current, screen.getDisplayMatching(current).workArea, expanded);
-  activeDesktopPetWindowDrag = null;
-  window.setBounds(bounds, false);
-  return { expanded, width: bounds.width, height: bounds.height };
-});
 
 function desktopPetWindowFromEvent(event: IpcMainEvent): BrowserWindow | null {
   try {

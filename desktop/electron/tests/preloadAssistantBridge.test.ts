@@ -45,22 +45,23 @@ describe("preload assistant bridge injection by window role", () => {
     expect(typeof exposed.get("vibelutionLauncherTheme")!.readThemeAuthority).toBe("function");
   });
 
-  it("keeps the full workbench bridge on the same window without the pet drag subset", async () => {
+  it("keeps the full workbench bridge on the same window without the pet subset", async () => {
     const { exposed } = await loadPreload("workbench-main");
     const bridge = exposed.get("vibelutionLauncher")!;
     expect(bridge.requestWindowClose).toBeTypeOf("function");
-    expect(bridge.controlDesktopPet).toBeTypeOf("function");
+    expect(bridge.controlDesktopPet).toBeUndefined();
     expect(bridge.setDesktopPetExpanded).toBeUndefined();
     expect(bridge.beginDesktopPetWindowDrag).toBeUndefined();
   });
 
-  it("keeps the launcher-assistant float on the pet-subset bridge", async () => {
+  it("keeps the launcher-assistant float on the drag-subset bridge", async () => {
     const { exposed } = await loadPreload("launcher-assistant");
     expect([...exposed.keys()].sort()).toEqual(
       ["vibelutionLauncher", "vibelutionLauncherAssistant", "vibelutionLauncherTheme"]);
     const bridge = exposed.get("vibelutionLauncher")!;
-    expect(bridge.setDesktopPetExpanded).toBeTypeOf("function");
     expect(bridge.beginDesktopPetWindowDrag).toBeTypeOf("function");
+    expect(bridge.setDesktopPetExpanded).toBeUndefined();
+    expect(bridge.controlDesktopPet).toBeUndefined();
     expect(bridge.requestWindowClose).toBeUndefined();
   });
 

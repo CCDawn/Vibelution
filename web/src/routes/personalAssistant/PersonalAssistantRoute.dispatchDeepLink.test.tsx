@@ -6,7 +6,6 @@ import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchSessionDetail } from "../../api/chat";
 import { fetchPersonalAssistant, fetchPersonalAssistantSettings } from "../../api/personalAssistant";
-import { setDesktopPetExpanded } from "../../api/desktopPet";
 import { fetchPetActivity } from "../../api/pet";
 import { fetchPersonalAffairs } from "../../api/personalAffairs";
 import type { SessionDetail } from "../../api/types";
@@ -27,9 +26,6 @@ vi.mock("../../api/personalAssistant", () => ({
   fetchPersonalAssistantSettings: vi.fn().mockResolvedValue({ settings: null }),
   updatePersonalAssistantSettings: vi.fn(),
   updatePersonalAssistantModel: vi.fn(),
-}));
-vi.mock("../../api/desktopPet", () => ({
-  setDesktopPetExpanded: vi.fn(),
 }));
 vi.mock("../../api/pet", () => ({ fetchPetActivity: vi.fn() }));
 vi.mock("../../api/personalAffairs", () => ({
@@ -89,7 +85,6 @@ beforeEach(() => {
     agentId: assistant.agentId,
     sessionKind: "main",
   } as SessionDetail);
-  vi.mocked(setDesktopPetExpanded).mockResolvedValue({ expanded: true, width: 760, height: 600 });
   vi.mocked(fetchPetActivity).mockResolvedValue({
     schemaVersion: 1, aggregateTone: "idle", animationState: "idle",
     activeCount: 0, attentionCount: 0, generatedAt: "", sessions: [],

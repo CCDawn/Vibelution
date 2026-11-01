@@ -3,7 +3,6 @@ import { fileURLToPath } from "node:url";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
 import { describe, expect, it, vi } from "vitest";
-import { desktopPetWindowExpandedBounds } from "../src/windows/petWindowBounds.js";
 import { assertTrustedIpcSender } from "../src/security/ipcSenderValidation.js";
 import { ProjectAdmission } from "../src/lifecycle/projectAdmission.js";
 
@@ -13,18 +12,14 @@ const ipcSource = readFileSync(fileURLToPath(new URL("../src/ipc.ts", import.met
 const preloadSource = readFileSync(fileURLToPath(new URL("../src/preload.ts", import.meta.url)), "utf8");
 const mainSource = readFileSync(fileURLToPath(new URL("../src/main.ts", import.meta.url)), "utf8");
 
-function resizeHandler(themeSender = false) {
+function petIpcHandlers(themeSender = false) {
   const guardStart = mainSource.indexOf("function assertDesktopPetIpcSender(");
-  const guardEnd = mainSource.indexOf("\nipcMain.handle(IPC_CHANNELS.setDesktopPetExpanded", guardStart);
-  const resizeEnd = mainSource.indexOf("\n});", guardEnd) + "\n});".length;
+  const guardEnd = mainSource.indexOf("\nfunction desktopPetWindowFromEvent", guardStart);
   const openStart = mainSource.indexOf("ipcMain.handle(IPC_CHANNELS.openConversationFromPet");
   const openEnd = mainSource.indexOf("\n});", openStart) + "\n});".length;
-  const source = mainSource.slice(guardStart, resizeEnd) + "\n" + mainSource.slice(openStart, openEnd);
-  let handler: (event: unknown, expanded: unknown) => unknown = () => undefined;
+  const source = mainSource.slice(guardStart, guardEnd) + "\n" + mainSource.slice(openStart, openEnd);
   let openHandler: (event: unknown, sessionId: unknown) => Promise<unknown> = async () => undefined;
   const sendToWorkbench = vi.fn(() => true);
-  const setBounds = vi.fn();
-  const window = { getBounds: () => ({ x: 500, y: 600, width: 300, height: 330 }), isDestroyed: () => false, setBounds };
   const admission = new ProjectAdmission();
   runInNewContext(ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, {
     URL,
@@ -32,44 +27,29 @@ function resizeHandler(themeSender = false) {
     registeredAdmissionRoot: (root: string) => root,
     instanceAdmissionRoot: (_instanceId: string) => "C:/pet-project",
     createDesktopPathsForApp: () => ({ workspaceRoot: "C:/pet-project" }),
-    IPC_CHANNELS: { setDesktopPetExpanded: "pet:window-expanded",
-      openConversationFromPet: "pet:open-conversation", conversationNotificationOpened: "conversation:opened" },
+    IPC_CHANNELS: { openConversationFromPet: "pet:open-conversation", conversationNotificationOpened: "conversation:opened" },
     ipcMain: { handle: (channel: string, callback: unknown) => {
-      if (channel === "pet:window-expanded") handler = callback as typeof handler;
-      else openHandler = callback as typeof openHandler;
+      openHandler = callback as typeof openHandler;
     } },
     windowProvider: { snapshot: () => ({ workbench: { open: true, url: "http://127.0.0.1:8000/" } }), instanceWindowStates: () => [],
       focusWorkbench: async () => ({ open: true }), sendToWorkbench },
     launcherAssistantWindow: { isThemeSender: () => themeSender },
     trustedIpcOrigins: () => ["http://127.0.0.1:8000"],
     assertTrustedIpcSender,
-    BrowserWindow: { fromWebContents: () => window },
-    screen: { getDisplayMatching: () => ({ workArea: { x: 0, y: 0, width: 1000, height: 900 } }) },
-    desktopPetWindowExpandedBounds,
     activeDesktopPetWindowDrag: {},
   });
   const frame = { url: "http://127.0.0.1:8000/launcher-assistant" };
   const event = { senderFrame: frame, sender: { mainFrame: frame, getOSProcessId: () => 9 } };
-  return { handler, openHandler, sendToWorkbench, setBounds, event };
+  return { openHandler, sendToWorkbench, event };
 }
 
-describe("desktop pet fixed-bounds drag IPC", () => {
-  it("executes bounded resize for the admitted assistant surface and rejects other senders and free bounds", () => {
-    const { handler, setBounds, event } = resizeHandler(true);
-    expect(handler(event, true)).toEqual({ expanded: true, width: 400, height: 530 });
-    expect(setBounds).toHaveBeenCalledWith({ x: 500, y: 370, width: 400, height: 530 }, false);
-    expect(() => handler(event, { width: 3000, height: 3000 })).toThrow("Invalid desktop pet expanded state");
-    expect(handler(event, false)).toEqual({ expanded: false, width: 300, height: 330 });
-    expect(setBounds).toHaveBeenCalledTimes(2);
-    expect(() => resizeHandler(false).handler(event, false)).toThrow("blocked desktop pet ipc sender");
-    expect(() => handler({ ...event, senderFrame: { url: "https://evil.test/launcher-assistant" } }, false)).toThrow("origin");
-  });
+describe("desktop pet drag IPC surface", () => {
   it("focuses the workbench and forwards the opened session for admitted pet surfaces", async () => {
-    const { openHandler, sendToWorkbench, event } = resizeHandler(true);
+    const { openHandler, sendToWorkbench, event } = petIpcHandlers(true);
     await expect(openHandler(event, "session-owned")).resolves.toEqual({ schemaVersion: 1, opened: true });
     expect(sendToWorkbench).toHaveBeenCalledWith("conversation:opened", { schemaVersion: 1, sessionId: "session-owned" });
     await expect(openHandler(event, "../invalid")).rejects.toThrow("invalid desktop pet session id");
-    await expect(resizeHandler(false).openHandler(event, "session-owned")).rejects.toThrow("blocked desktop pet ipc sender");
+    await expect(petIpcHandlers(false).openHandler(event, "session-owned")).rejects.toThrow("blocked desktop pet ipc sender");
     expect(sendToWorkbench).toHaveBeenCalledTimes(1);
   });
   it("exposes drag operations only through the unified launcher-assistant preload branch", () => {
@@ -79,27 +59,31 @@ describe("desktop pet fixed-bounds drag IPC", () => {
     const assistantBranchStart = preloadSource.indexOf("if (isLauncherAssistantWindow)");
     const assistantBranchEnd = preloadSource.indexOf("if (!isLauncherAssistantWindow)");
     expect(preloadSource.slice(assistantBranchStart, assistantBranchEnd)).toContain("ipcRenderer.send(IPC_CHANNELS.moveDesktopPetWindowDrag, point)");
-    expect(preloadSource.slice(assistantBranchStart, assistantBranchEnd)).toContain("ipcRenderer.invoke(IPC_CHANNELS.setDesktopPetExpanded, expanded)");
-    expect(preloadSource.slice(0, assistantBranchStart)).not.toContain("setDesktopPetExpanded");
-    expect(preloadSource.slice(assistantBranchEnd)).not.toContain("setDesktopPetExpanded");
+    expect(preloadSource.slice(0, assistantBranchStart)).not.toContain("beginDesktopPetWindowDrag");
+    expect(preloadSource.slice(assistantBranchEnd)).not.toContain("beginDesktopPetWindowDrag");
+    // The settings-control and window-expanded channels retired with the old pet window.
+    expect(preloadSource).not.toContain("setDesktopPetExpanded");
+    expect(preloadSource).not.toContain("controlDesktopPet");
     expect(preloadSource).not.toContain("isDesktopPetWindow");
     expect(preloadSource).not.toContain("getDesktopAssistantContext");
   });
   it("moves the owning BrowserWindow with fixed bounds in the main process", () => {
     expect(mainSource).toContain("BrowserWindow.fromWebContents(event.sender)");
     expect(mainSource).toContain("const { x, y, width, height } = window.getBounds()");
-    expect(mainSource).toContain("desktopPetWindowExpandedBounds(current, screen.getDisplayMatching(current).workArea, expanded)");
     expect(mainSource).not.toContain("beginDesktopPetWindowDrag(rawPoint, window.getBounds())");
     expect(mainSource).toContain("window.setBounds(desktopPetWindowBoundsAt(active.drag, rawPoint), false)");
     expect(mainSource).not.toContain("window.moveBy(update.delta.screenX");
   });
-  it("restricts resizing to boolean presets behind the theme-sender identity gate", () => {
-    expect(ipcSource).toContain('setDesktopPetExpanded: "pet:window-expanded"');
+  it("keeps the pet IPC surface behind the theme-sender identity gate", () => {
     // The guard keeps its main-process trust kernel: trusted origins first,
     // then the launcher-assistant identity admission, and nothing else passes.
     expect(mainSource).toContain("assertTrustedIpcSender(event as IpcMainInvokeEvent, trustedIpcOrigins())");
     expect(mainSource).toContain("launcherAssistantWindow?.isThemeSender(event)");
     expect(mainSource).toContain('throw new Error("blocked desktop pet ipc sender")');
-    expect(mainSource).toContain('typeof expanded !== "boolean"');
+    // The retired expand/settings-control handlers are gone for good.
+    expect(mainSource).not.toContain("setDesktopPetExpanded");
+    expect(mainSource).not.toContain("controlDesktopPet");
+    expect(ipcSource).not.toContain("setDesktopPetExpanded");
+    expect(ipcSource).not.toContain("controlDesktopPet");
   });
 });
