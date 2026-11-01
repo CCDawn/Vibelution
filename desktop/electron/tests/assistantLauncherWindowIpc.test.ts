@@ -82,10 +82,10 @@ describe("assistant Launcher window IPC", () => {
   });
   it("rejects a registered window after foreign navigation for lifecycle and selection", async () => {
     const f = handlers(); const invoke = f.callbacks.get("invoke")!, select = f.callbacks.get("select")!, close = f.callbacks.get("return")!, assistant = f.callbacks.get("assistant")!;
-    await expect(assistant(f.event, { operation: "panelAffairs", kind: "", status: "" })).resolves.toMatchObject({ agentId: "resident" });
+    await expect(assistant(f.event, { operation: "status" })).resolves.toMatchObject({ agentId: "resident" });
     f.event.senderFrame.url = "https://example.com/launcher/assistant";
     await expect(invoke(f.event, { schemaVersion: 1, path: "start" })).rejects.toThrow("blocked launcher window sender");
-    await expect(assistant(f.event, { operation: "panelAffairs", kind: "", status: "" })).rejects.toThrow("ASSISTANT_SENDER_FORBIDDEN");
+    await expect(assistant(f.event, { operation: "status" })).rejects.toThrow("ASSISTANT_SENDER_FORBIDDEN");
     expect(() => select(f.event)).toThrow("blocked launcher window sender");
     expect(() => close(f.event)).toThrow("blocked launcher window sender");
     expect(f.dialog.showOpenDialog).not.toHaveBeenCalled();

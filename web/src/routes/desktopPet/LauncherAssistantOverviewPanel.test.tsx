@@ -14,14 +14,6 @@ vi.mock("../../api/launcher", () => ({
   isLauncherProjectNotSelected: (error: unknown) => error instanceof Error && error.message === "not-selected",
 }));
 vi.mock("../../api/launcherAssistant", () => ({ getLauncherAssistantStatus: vi.fn(), getLauncherAssistantDetail: vi.fn(), getLauncherAssistantDispatches: vi.fn() }));
-vi.mock("../../api/launcherAssistantComputer", () => ({ launcherAssistantComputer: { scope: "launcher" } }));
-vi.mock("../../api/launcherAssistantPanels", () => ({ createLauncherAssistantPanelTransport: (agentId: string) => ({
-  cacheKey: ["launcher-assistant", agentId], affairs: {}, preferences: {}, settings: {},
-}) }));
-vi.mock("../personalAssistant/PersonalAssistantAffairs", () => ({ PersonalAssistantAffairs: (props: any) => <div>{props.showHeading !== false ? <h2>待办与提醒</h2> : null}native affairs {props.agentId} {props.transport.cacheKey.join(":")}</div> }));
-vi.mock("../personalAssistant/PersonalAssistantComputerPanel", () => ({ PersonalAssistantComputerPanel: (props: any) => <div>native computer {props.transport.scope}</div> }));
-vi.mock("../personalAssistant/PersonalAssistantDialoguePreferences", () => ({ PersonalAssistantDialoguePreferences: (props: any) => <div>native preferences {props.agentId} {props.transport.cacheKey.join(":")}</div> }));
-vi.mock("../personalAssistant/PersonalAssistantSettings", () => ({ PersonalAssistantSettings: (props: any) => <div>native settings {props.presentation} {props.transport.cacheKey.join(":")}</div> }));
 vi.mock("./LauncherAssistantRoute", () => ({ LauncherAssistantRoute: (props: any) => <div data-computer-requested={String(Boolean(props.computerRequested))}>native dialogue<input aria-label="对话草稿" />{props.entryIntent ? <button>{props.entryIntent.label}</button> : null}</div> }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

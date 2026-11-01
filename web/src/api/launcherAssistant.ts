@@ -59,12 +59,6 @@ export type LauncherAssistantRequest =
   | { operation: "continue"; requestId: string; continuation: SessionContinuationExpectation }
   | { operation: "config" }
   | { operation: "operatorAsset"; kind: LauncherOperatorAssetKind }
-  | { operation: "panelSettings" | "panelDialogue" | "panelProposals" }
-  | { operation: "panelSettingsUpdate" | "panelModelUpdate" | "panelDialogueUpdate" | "panelAffairAdd"; payload: Record<string, unknown> }
-  | { operation: "panelAffairs"; kind: string; status: string }
-  | { operation: "panelAffairComplete" | "panelAffairCancel" | "panelAffairReopen"; itemId: string }
-  | { operation: "panelAffairDue"; itemId: string; payload: Record<string, unknown> }
-  | { operation: "panelProposalAccept" | "panelProposalReject"; proposalId: string }
   | { operation: "computerState" | "computerWindows" }
   | { operation: "computerGrant"; selectionId: string; allowVision: true; authorizationRequestId?: string }
   | { operation: "computerControl"; grantId: string; action: "pause" | "resume" | "takeover" | "return" | "end" }
