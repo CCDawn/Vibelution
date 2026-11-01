@@ -6,7 +6,7 @@ import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchSessionDetail } from "../../api/chat";
 import { fetchPersonalAssistant, fetchPersonalAssistantSettings } from "../../api/personalAssistant";
-import { controlDesktopAssistant, getDesktopAssistantContext, setDesktopPetExpanded } from "../../api/desktopPet";
+import { getDesktopAssistantContext, setDesktopPetExpanded } from "../../api/desktopPet";
 import { fetchPetActivity } from "../../api/pet";
 import { fetchPersonalAffairs } from "../../api/personalAffairs";
 import type { SessionDetail } from "../../api/types";
@@ -31,7 +31,6 @@ vi.mock("../../api/personalAssistant", () => ({
 vi.mock("../../api/desktopPet", () => ({
   getDesktopAssistantContext: vi.fn(),
   setDesktopPetExpanded: vi.fn(),
-  controlDesktopAssistant: vi.fn(),
 }));
 vi.mock("../../api/pet", () => ({ fetchPetActivity: vi.fn() }));
 vi.mock("../../api/personalAffairs", () => ({

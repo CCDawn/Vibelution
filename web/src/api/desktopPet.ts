@@ -31,21 +31,6 @@ export async function controlDesktopPet(open?: boolean): Promise<DesktopPetState
   return validDesktopPetState(await bridge.controlDesktopPet(open));
 }
 
-export async function controlDesktopAssistant(open?: boolean): Promise<DesktopPetState> {
-  const bridge = desktopPetControlBridge();
-  if (!bridge) throw new Error("个人助理需要更新桌面壳，请通过 Launcher 重建后重启。");
-  const current = validDesktopPetState(await bridge.controlDesktopPet());
-  if (!current.supportedModes?.includes("assistant")) {
-    throw new Error("个人助理需要更新桌面壳，请通过 Launcher 重建后重启。");
-  }
-  if (open === undefined || current.busyElsewhere) return current;
-  const next = validDesktopPetState(await bridge.controlDesktopPet(open, "assistant"));
-  if (open && next.open && !next.busyElsewhere && next.mode !== "assistant") {
-    throw new Error("桌面壳未能打开个人助理窗口，请更新桌面壳。");
-  }
-  return next;
-}
-
 /** Available only inside the registered floating window, with fixed size presets. */
 export async function setDesktopPetExpanded(expanded: boolean): Promise<DesktopPetExpandedState> {
   const bridge = (globalThis as { vibelutionLauncher?: Partial<PetExpandedBridge> }).vibelutionLauncher;

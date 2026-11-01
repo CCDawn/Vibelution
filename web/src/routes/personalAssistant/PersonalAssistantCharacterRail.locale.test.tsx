@@ -24,8 +24,7 @@ it("switches interface and existing save feedback without renaming the assistant
   const root = createRoot(container);
   try {
     await act(async () => root.render(<QueryClientProvider client={client}><PersonalAssistantCharacterRail
-      assistant={{ agentId: "assistant", directSessionId: "session", displayName: "我的私人助理", status: "active", setupStatus: "ready", profile: "personal_assistant_v1", renderer: "whale" }}
-      desktopPending={false} onOpenDesktop={vi.fn()} /></QueryClientProvider>));
+      assistant={{ agentId: "assistant", directSessionId: "session", displayName: "我的私人助理", status: "active", setupStatus: "ready", profile: "personal_assistant_v1", renderer: "whale" }} /></QueryClientProvider>));
     expect(container.querySelector('aside[aria-label="Assistant character"]')).not.toBeNull();
     expect(container.querySelector("h2")?.textContent).toBe("我的私人助理");
     expect(container.textContent).toContain("View 1 new message");
