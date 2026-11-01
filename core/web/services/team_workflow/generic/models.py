@@ -1,7 +1,7 @@
 """Version-one public contracts and bounded input validation."""
 from __future__ import annotations
 
-from core.web.services.self_evolution_local_integration import LocalIntegrationRequest
+from core.web.services.self_evolution_local_integration_contracts import LocalIntegrationRequest
 
 from datetime import datetime
 from typing import Literal

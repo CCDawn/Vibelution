@@ -5,13 +5,12 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
-from core.web.services.agent_directory_service import TOOL_POLICY_WORKSPACE_SCOPES
-
-
 Reference = Annotated[str, Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")]
 Fingerprint = Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
 ToolName = Annotated[str, Field(min_length=2, max_length=128, pattern=r"^[a-z][a-z0-9_.:-]+$")]
-Scope = Literal[tuple(TOOL_POLICY_WORKSPACE_SCOPES)]
+# Keep public DTO imports free of a stateful Agent facade. Native policy still
+# validates scope values; the contract parity regression guards this boundary.
+Scope = Literal["private", "shared", "team_workflow_ledger"]
 Permission = Literal["read", "propose", "review"]
 Approval = Literal["never", "on_request", "always"]
 

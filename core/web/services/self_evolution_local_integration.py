@@ -17,12 +17,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, field_validator
-
 from core.infrastructure.file_lock import cross_process_file_lock
 from core.runtime_manager.work_run_store import WorkRunStore, normalize_run_id
 
-from .self_evolution_candidate_target_contract import CandidateTargetContractError, normalize_target_files
+from .self_evolution_local_integration_contracts import LocalIntegrationRequest
 from .team_workflow.research_runtime.operator_authorization import current_server_operator
 from .team_workflow.research_runtime.operator_permissions import operator_has_privileged_role
 
@@ -35,43 +33,6 @@ _SHA = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 
 class LocalIntegrationError(ValueError):
     """Local authority or canonical review evidence is missing or stale."""
-
-
-class LocalIntegrationRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    acknowledge: StrictBool
-    allowedFiles: list[StrictStr] = Field(min_length=1, max_length=8)
-    teamId: StrictStr = Field(min_length=1, max_length=160)
-    validForSeconds: StrictInt = Field(ge=60, le=3600)
-
-    @field_validator("acknowledge")
-    @classmethod
-    def acknowledged(cls, value: bool) -> bool:
-        if value is not True:
-            raise ValueError("Explicit local integration acknowledgement is required.")
-        return value
-
-    @field_validator("allowedFiles")
-    @classmethod
-    def exact_files(cls, value: list[str]) -> list[str]:
-        for item in value:
-            raw = item.replace("\\", "/")
-            if any(char in raw for char in "*?[]{}") or any(
-                part in {"", ".", ".."} for part in raw.split("/")
-            ):
-                raise ValueError("allowedFiles requires exact repository-relative files.")
-        try:
-            return normalize_target_files(value)
-        except CandidateTargetContractError as exc:
-            raise ValueError(str(exc)) from exc
-
-    @field_validator("teamId")
-    @classmethod
-    def team_id(cls, value: str) -> str:
-        if not value.strip() or value != value.strip():
-            raise ValueError("teamId must be a nonempty exact Team id.")
-        return value
 
 
 def normalize_request(payload: Any) -> dict[str, Any]:

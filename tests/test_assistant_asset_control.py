@@ -17,6 +17,11 @@ from tests.test_agent_tool_policy_configuration import configured_agent as nativ
 from tests.test_team_knowledge_service import isolate_developer_sandbox_config, knowledge_env
 
 
+def test_workspace_scope_contract_matches_native_policy():
+    from typing import get_args
+    assert get_args(contracts.Scope) == directory.TOOL_POLICY_WORKSPACE_SCOPES
+
+
 @pytest.fixture
 def configured_agent(native_policy_agent, monkeypatch):
     # Mutation tests supply an explicit native registry fixture. Real authority
