@@ -41,6 +41,7 @@ import { ChatSessionIndexToolbar } from "./ChatSessionIndexToolbar";
 import { ChatSessionIndexSearch } from "./ChatSessionIndexSearch";
 import type { SessionListPreferences } from "./sessionListPreferences";
 import { SESSION_INDEX_SEARCH_EVENT } from "../../shortcuts/sessionSearchDispatch";
+import { AgentMessageChatRail } from "./AgentMessageChatRail";
 
 export type ConversationIndexPanelKey = "conversations" | "members";
 
@@ -294,6 +295,7 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
         role={conversationIndexOverlayOpen ? "dialog" : undefined}
         aria-label={conversationIndexOverlayOpen ? (lang === "zh" ? "会话列表" : "Conversation list") : undefined}
       >
+        <AgentMessageChatRail sessionId={activeSessionId} agentsById={agentsById} lang={lang} disabled={standardGroupRoomActive} revealConversations={groupComposerOpen || createMenuOpen || optionsOpen}>
           <ChatSessionIndexToolbar
             lang={lang} archived={showArchivedSessions} preferences={sessionListPreferences}
             onPreferencesChange={onSessionListPreferencesChange} onToggleArchive={onToggleShowArchivedSessions}
@@ -651,6 +653,7 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
             </div>
           )}
           </div>
+          </AgentMessageChatRail>
           <ChatSessionIndexSearch
             open={searchOpen} onOpenChange={setSearchOpen} lang={lang} agentsById={agentsById} teams={teams}
             activeSessionId={activeSessionId} approvalSessionIds={sessionIdsNeedingApproval}

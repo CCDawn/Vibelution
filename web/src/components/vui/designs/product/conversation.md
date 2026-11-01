@@ -1,5 +1,15 @@
 # Product — conversation
 
+## AgentMessageSidebar / AgentMessageDetail / AgentMessageCenter
+
+跨 Agent 消息使用同一套只读记录和展示组件。消息目录、当前对话/消息中心切换、搜索、状态筛选及刷新均位于左栏；没有跨页操作顶栏或状态装饰竖线。每次发送和回复均以来源 ID 独立成行，显示发送者和接收者的真实目录头像/名字、摘要、时间和状态，相同正文不会合并；群发保留一条逻辑消息并在详情中逐人显示回执。
+
+普通聊天沿用原会话、composer、快捷键和草稿，点击左栏消息才打开 VDialog 详情；消息中心在主区使用相同详情组件。会话目录可由左栏返回，群聊成员目录保持原行为。新数据不得更改消息选择、Chat 路由或阅读位置；显式定位回复/原消息才清除阻挡筛选并将目标滚入可见区。
+
+复用现有 VUI、ConversationTurnAvatarContent、目录头像解析、Session Journal、kernel timeline 与 project bus API。前端仅生成读取投影，不写入 transcript、不读取其他 Agent 私有 Inbox、不制造回执。已送达只表示投递成功；已收取表示原生会话已取用；缺少真实处理证据显示待确认。通知收取结束，协作请求默认等待明确关联回复。投递失败和唤醒失败显示原始错误，不能伪装成已回复或处理中。
+
+历史目录分批读取既有 kernel API（每批增加 30，后端上限 300），并明确说明覆盖范围和来源读取错误；请求并发最多 4，终态记录复用缓存。来源会话的只读历史用于关联自动回复，原生 Session 仍为正文权威。生产组件不包含预览演示按钮或示例身份。Tailwind 局部样式归 components/agent-messages/AgentMessages.styles.ts，页级组合使用 VListDetailPage；所有选择/切换均可键盘操作，窄屏控件至少 44px。
+
 > 对话工作台组合层：只服务 Chat composer / 时间线。
 > **禁止**在此重新实现按钮/输入；必须组合 VUI primitives。
 

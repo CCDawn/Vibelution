@@ -1,0 +1,13 @@
+/* Only the isolated fixture shell; production elements use the shared VUI styles. */
+.agent-message-verification {
+  display: grid;
+  height: 100dvh;
+  grid-template-columns: 352px minmax(0, 1fr);
+}
+
+@media (max-width: 680px) {
+  .agent-message-verification {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 48dvh minmax(0, 1fr);
+  }
+}

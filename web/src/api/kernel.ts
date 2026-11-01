@@ -12,8 +12,8 @@ export function kernelTaskListUrl(status = "", limit = 80) {
   return `${KERNEL_TASKS_ENDPOINT}?${params.toString()}`;
 }
 
-export function listKernelTasks(status = "", limit = 80) {
-  return fetchJson<KernelTaskListPayload>(kernelTaskListUrl(status, limit));
+export function listKernelTasks(status = "", limit = 80, init?: RequestInit) {
+  return fetchJson<KernelTaskListPayload>(kernelTaskListUrl(status, limit), init);
 }
 
 export function kernelTaskTimelineUrl(taskId: string) {
@@ -38,6 +38,6 @@ export function selectKernelTaskId(tasks: Array<Pick<KernelTask, "taskId">>, req
   return tasks[0]?.taskId ?? "";
 }
 
-export function getKernelTaskTimeline(taskId: string) {
-  return fetchJson<KernelTaskTimelinePayload>(kernelTaskTimelineUrl(taskId));
+export function getKernelTaskTimeline(taskId: string, init?: RequestInit) {
+  return fetchJson<KernelTaskTimelinePayload>(kernelTaskTimelineUrl(taskId), init);
 }

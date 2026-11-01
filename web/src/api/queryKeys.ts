@@ -99,6 +99,8 @@ export const queryKeys = {
     ["runtime-tasks", kind, parentSessionId] as const,
   runtimeTask: (taskId: string) => ["runtime-tasks", "detail", taskId] as const,
   projectAgentBus: () => ["project-agent-bus"] as const,
+  agentMessageDirectory: (limit: number) => ["agent-message-directory", limit] as const,
+  agentMessageSourceHistory: (id: string) => ["agent-message-source-history", id] as const,
   projectAgentBusLatestEvent: () => ["project-agent-bus", "latest-event"] as const,
   teams: () => ["teams"] as const,
   teamTemplates: () => ["teams", "templates"] as const,

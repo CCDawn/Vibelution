@@ -175,6 +175,7 @@
 | `ChatSessionBrowser` | [product/conversation.md](./product/conversation.md#chatsessionbrowser) |
 | `ChatSessionIndexToolbar` | [product/conversation.md](./product/conversation.md#chatsessionindextoolbar) |
 | `ChatSessionIndexSearch` | [product/conversation.md](./product/conversation.md#chatsessionindexsearch) |
+| `AgentMessageSidebar` / `AgentMessageDetail` / `AgentMessageCenter` | [product/conversation.md](./product/conversation.md#agentmessagesidebar--agentmessagedetail--agentmessagecenter) |
 | `ConversationTodoChecklist` | [product/conversation.md](./product/conversation.md#conversationtodochecklist) |
 | `ConversationTodoProgressButton` | [product/conversation.md](./product/conversation.md#conversationtodoprogressbutton) |
 | `ConversationFollowupQueueBar` | [product/conversation.md](./product/conversation.md#conversationfollowupqueuebar) |
