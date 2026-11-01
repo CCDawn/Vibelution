@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   LAUNCHER_STATE_NULL_EVENT_QUIET_MS,
   createLauncherStateFileHintGate,
+  createLauncherStateHintBackoff,
 } from "../src/state/launcherStateFileHintGate.js";
 
 function makeGate(signatures: Map<string, string>, options?: { now?: () => number; quietMs?: number }) {
@@ -65,5 +66,82 @@ describe("launcherStateFileHintGate", () => {
     expect(gate.consumeStatPoll()).toBe(true);
     expect(gate.consumeStatPoll()).toBe(false);
     expect(gate.consumeNullFilenameEvent()).toBe(false);
+  });
+});
+
+describe("launcherStateHintBackoff", () => {
+  function makeBackoff(now: { value: number }, overrides?: { limit?: number; maxDelayMs?: number }) {
+    const onEscalate = vi.fn();
+    const backoff = createLauncherStateHintBackoff({
+      now: () => now.value,
+      limit: overrides?.limit ?? 3,
+      maxDelayMs: overrides?.maxDelayMs ?? 30_000,
+      onEscalate,
+    });
+    return { backoff, onEscalate };
+  }
+
+  it("keeps the base debounce until the sliding window breaches, then doubles", () => {
+    const clock = { value: 1_000 };
+    const { backoff, onEscalate } = makeBackoff(clock);
+    for (let index = 0; index < 3; index += 1) {
+      backoff.recordFire();
+    }
+    expect(backoff.currentDelayMs()).toBe(200);
+    expect(backoff.isEscalated()).toBe(false);
+    expect(onEscalate).not.toHaveBeenCalled();
+
+    backoff.recordFire();
+    expect(backoff.currentDelayMs()).toBe(400);
+    expect(backoff.isEscalated()).toBe(true);
+    expect(onEscalate).toHaveBeenCalledTimes(1);
+    expect(onEscalate).toHaveBeenCalledWith(4, 400);
+
+    backoff.recordFire();
+    expect(backoff.currentDelayMs()).toBe(800);
+    // Warn once per episode: the later doublings stay silent.
+    expect(onEscalate).toHaveBeenCalledTimes(1);
+  });
+
+  it("caps the backoff at the max delay", () => {
+    const clock = { value: 1_000 };
+    const { backoff } = makeBackoff(clock, { maxDelayMs: 1_000 });
+    for (let index = 0; index < 10; index += 1) {
+      backoff.recordFire();
+    }
+    expect(backoff.currentDelayMs()).toBe(1_000);
+  });
+
+  it("resets to the base debounce after the window goes quiet and can warn again", () => {
+    const clock = { value: 1_000 };
+    const { backoff, onEscalate } = makeBackoff(clock);
+    for (let index = 0; index < 5; index += 1) {
+      backoff.recordFire();
+    }
+    expect(backoff.isEscalated()).toBe(true);
+
+    clock.value = 1_000 + 60_000 + 1;
+    expect(backoff.currentDelayMs()).toBe(200);
+    expect(backoff.isEscalated()).toBe(false);
+
+    for (let index = 0; index < 4; index += 1) {
+      backoff.recordFire();
+    }
+    expect(backoff.currentDelayMs()).toBe(400);
+    expect(onEscalate).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not reset while fires keep arriving inside the window", () => {
+    const clock = { value: 1_000 };
+    const { backoff } = makeBackoff(clock);
+    for (let index = 0; index < 4; index += 1) {
+      backoff.recordFire();
+    }
+    clock.value += 50_000;
+    expect(backoff.currentDelayMs()).toBe(400);
+    clock.value += 9_999;
+    expect(backoff.currentDelayMs()).toBe(400);
+    clock.value += 1;
+    expect(backoff.currentDelayMs()).toBe(200);
   });
 });

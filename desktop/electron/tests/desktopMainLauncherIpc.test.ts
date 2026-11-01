@@ -237,7 +237,11 @@ describe("Electron main Launcher IPC facade", () => {
 
   it("refreshes state from debounced file hints and stat-only safety checks", () => {
     expect(mainSource).toContain("scheduleLauncherStateFileHint");
-    expect(mainSource).toContain("}, 200)");
+    // The hint debounce is storm-breaker driven (200ms base with exponential
+    // backoff); the exact delays are pinned behaviorally in
+    // launcherStateFileHintGate.test.ts.
+    expect(mainSource).toContain("launcherStateHintBackoff.currentDelayMs()");
+    expect(mainSource).toContain("launcherStateHintBackoff.recordFire()");
     expect(mainSource).toContain("statSync(path)");
     expect(mainSource).toContain("state.json");
     expect(mainSource).toContain("ports.json");

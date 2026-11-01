@@ -123,7 +123,7 @@ import {
 } from "./protocol/launcherIpcHost.js";
 import { createLocalLauncherStatusSnapshot } from "./protocol/launcherStatusSnapshot.js";
 import { createReconcileDeadlineScheduler } from "./state/reconcileDeadlineScheduler.js";
-import { createLauncherStateFileHintGate, type LauncherStateFileHintGate } from "./state/launcherStateFileHintGate.js";
+import { createLauncherStateFileHintGate, createLauncherStateHintBackoff, type LauncherStateFileHintGate } from "./state/launcherStateFileHintGate.js";
 import { LauncherStateStore, unwrapSource, type LauncherWindowTruth } from "./state/launcherStateStore.js";
 import {
   LAUNCHER_APP_PROTOCOL,
@@ -359,7 +359,12 @@ let launcherStateWatchers: FSWatcher[] = [];
 let launcherActiveReleaseWatcher: LauncherActiveReleaseWatcherHandle | null = null;
 let launcherStateHintTimer: ReturnType<typeof setTimeout> | null = null;
 let launcherStateStatTimer: ReturnType<typeof setInterval> | null = null;
-let launcherStateFileHintGate: LauncherStateFileHintGate | null = null;
+let launcherStateFileHintGates: LauncherStateFileHintGate[] = [];
+const launcherStateHintBackoff = createLauncherStateHintBackoff({
+  onEscalate: (fireCount, delayMs) => {
+    console.warn(`Launcher state file hints fired ${fireCount} times within 60s; file_change debounce backed off to ${delayMs}ms.`);
+  }
+});
 let deferredRestartFulfillmentTimer: ReturnType<typeof setInterval> | null = null;
 let deferredRestartFulfillmentInFlight = false;
 const launcherStateStatSignatures = new Map<string, string>();
@@ -6620,9 +6625,12 @@ function scheduleLauncherStateFileHint(): void {
   }
   launcherStateHintTimer = setTimeout(() => {
     launcherStateHintTimer = null;
-    launcherStateFileHintGate?.markRefreshStarted();
+    launcherStateHintBackoff.recordFire();
+    for (const gate of launcherStateFileHintGates) {
+      gate.markRefreshStarted();
+    }
     void launcherStateStore.refresh("file_change");
-  }, 200);
+  }, launcherStateHintBackoff.currentDelayMs());
 }
 
 function startLauncherStateFileHints(paths: DesktopPaths): void {
@@ -6631,45 +6639,69 @@ function startLauncherStateFileHints(paths: DesktopPaths): void {
   const runtimeDir = dirname(launcherStatePath(paths.workspaceRoot));
   const statePath = resolve(runtimeDir, "state.json");
   const portsPath = resolve(runtimeDir, "ports.json");
-  const observedStatePaths = [statePath, portsPath];
-  const extraStatTargets = [
-    resolve(paths.workspaceRoot, ".git"),
-    ...(localAppData ? [resolve(localAppData, "Vibelution", "instances.json")] : [])
+  const gitDir = resolve(paths.workspaceRoot, ".git");
+  const localVibelutionRoot = localAppData ? resolve(localAppData, "Vibelution") : "";
+  const instancesPath = localVibelutionRoot ? resolve(localVibelutionRoot, "instances.json") : "";
+  const extraStatTargets = instancesPath ? [instancesPath] : [];
+  const statTargets = [statePath, portsPath, ...extraStatTargets];
+  // Per-target evidence policy. A refresh's own side effects must never
+  // become fresh evidence — the instance registry lockdir create/remove
+  // (instances.json.lockdir + release markers), sqlite -wal/-shm churn, CLI
+  // bridge logs, and `git status` index rewrites all happen BECAUSE a refresh
+  // ran. Only the allowlisted names prove an observed fact moved; null
+  // events go through the target's signature gate.
+  const watchPolicies: {
+    target: string;
+    allowedNames: ReadonlySet<string>;
+    gate: LauncherStateFileHintGate;
+  }[] = [
+    {
+      target: runtimeDir,
+      allowedNames: new Set(["state.json", "ports.json"]),
+      gate: createLauncherStateFileHintGate({
+        observedPaths: [statePath, portsPath],
+        statSignature: launcherStateStatSignature
+      })
+    },
+    {
+      // Branch switches and commit advances move HEAD/ORIG_HEAD/packed-refs;
+      // `index`/`index.lock`/`*.lock` churn is produced by git status itself.
+      target: gitDir,
+      allowedNames: new Set(["HEAD", "ORIG_HEAD", "packed-refs"]),
+      gate: createLauncherStateFileHintGate({
+        observedPaths: [resolve(gitDir, "HEAD"), resolve(gitDir, "packed-refs")],
+        statSignature: launcherStateStatSignature
+      })
+    },
+    ...(instancesPath ? [{
+      // The registry lock lives next to instances.json: its lockdir
+      // create/remove cycles on every refresh must stay ignored.
+      target: localVibelutionRoot,
+      allowedNames: new Set(["instances.json"]),
+      gate: createLauncherStateFileHintGate({
+        observedPaths: [instancesPath],
+        statSignature: launcherStateStatSignature
+      })
+    }] : [])
   ];
-  const statTargets = [...observedStatePaths, ...extraStatTargets];
-  const watchTargets = [
-    runtimeDir,
-    resolve(paths.workspaceRoot, ".git"),
-    ...(localAppData ? [resolve(localAppData, "Vibelution")] : [])
-  ];
-  launcherStateFileHintGate = createLauncherStateFileHintGate({
-    observedPaths: observedStatePaths,
-    statSignature: launcherStateStatSignature
-  });
+  launcherStateFileHintGates = watchPolicies.map((policy) => policy.gate);
   for (const target of statTargets) {
     launcherStateStatSignatures.set(target, launcherStateStatSignature(target));
   }
-  for (const target of watchTargets) {
+  for (const policy of watchPolicies) {
     try {
-      const watcher = watch(target, { persistent: false }, (_event, filename) => {
-        if (target !== runtimeDir) {
-          scheduleLauncherStateFileHint();
-          return;
-        }
-        // Runtime logs and atomic-write temporary files share this directory.
-        // Only finalized state/port observations should trigger inventory work.
+      const watcher = watch(policy.target, { persistent: false }, (_event, filename) => {
         if (filename !== null) {
-          if (!["state.json", "ports.json"].includes(filename.toString())) return;
+          if (!policy.allowedNames.has(filename.toString())) return;
           scheduleLauncherStateFileHint();
           return;
         }
         // Windows ReadDirectoryChangesW reports filename=null for churn
-        // anywhere in this directory (CLI bridge logs used to live here). A
-        // null event alone is not evidence: require a real stat-signature
-        // change of the observed state/port files, and merge away null events
-        // inside the post-refresh quiet window, or the refresh would keep
-        // re-triggering itself.
-        if (launcherStateFileHintGate?.consumeNullFilenameEvent()) {
+        // anywhere in the watched directory. A null event alone is not
+        // evidence: require a real stat-signature change of this target's
+        // observed files, and merge away null events inside the post-refresh
+        // quiet window, or the refresh would keep re-triggering itself.
+        if (policy.gate.consumeNullFilenameEvent()) {
           scheduleLauncherStateFileHint();
         }
       });
@@ -6680,9 +6712,14 @@ function startLauncherStateFileHints(paths: DesktopPaths): void {
     }
   }
   launcherStateStatTimer = setInterval(() => {
-    // state/port signatures are sampled by the gate; the other stat targets
-    // (.git, instances.json) are sampled here directly.
-    let changed = Boolean(launcherStateFileHintGate?.consumeStatPoll());
+    // Each gate samples its own observed paths (state/port files, git
+    // HEAD/packed-refs, instances.json) — never side-effect files.
+    let changed = false;
+    for (const gate of launcherStateFileHintGates) {
+      if (gate.consumeStatPoll()) {
+        changed = true;
+      }
+    }
     for (const target of extraStatTargets) {
       const next = launcherStateStatSignature(target);
       if (launcherStateStatSignatures.get(target) !== next) {
@@ -6708,7 +6745,7 @@ function stopLauncherStateFileHints(): void {
     clearInterval(launcherStateStatTimer);
     launcherStateStatTimer = null;
   }
-  launcherStateFileHintGate = null;
+  launcherStateFileHintGates = [];
   reconcileDeadlineScheduler.clear();
   for (const watcher of launcherStateWatchers) {
     watcher.close();
