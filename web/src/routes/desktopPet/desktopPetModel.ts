@@ -4,12 +4,6 @@ import type {
   PetActivityTone,
 } from "../../api/types/petActivity";
 
-type DesktopPetBridge = {
-  openConversationFromPet?: (sessionId: string) => Promise<unknown>;
-};
-
-const SESSION_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
-
 export function petActivityRefetchInterval(activity: PetActivity | undefined): number {
   if (!activity) {
     return 1_000;
@@ -59,33 +53,4 @@ export function petPhaseLabel(phase: PetActivityPhase, lang: "zh" | "en"): strin
         completed: "Completed",
       };
   return labels[phase];
-}
-
-export function desktopPetBridge(globalLike: unknown = globalThis): DesktopPetBridge | undefined {
-  const bridge = (globalLike as { vibelutionLauncher?: unknown })?.vibelutionLauncher;
-  if (typeof bridge !== "object" || bridge === null) {
-    return undefined;
-  }
-  const candidate = bridge as DesktopPetBridge;
-  if (typeof candidate.openConversationFromPet !== "function") {
-    return undefined;
-  }
-  return { openConversationFromPet: candidate.openConversationFromPet };
-}
-
-export async function openSessionFromDesktopPet(
-  sessionId: string,
-  bridge = desktopPetBridge(),
-): Promise<boolean> {
-  const normalized = sessionId.trim();
-  if (!SESSION_ID_PATTERN.test(normalized) || typeof bridge?.openConversationFromPet !== "function") {
-    return false;
-  }
-  try {
-    const result = await bridge.openConversationFromPet(normalized);
-    return typeof result === "object" && result !== null
-      && (result as { opened?: unknown }).opened === true;
-  } catch {
-    return false;
-  }
 }

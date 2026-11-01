@@ -1,7 +1,6 @@
 @import "tailwindcss" source(none);
 @import "../theme.tailwind.css";
 
-@source "../../routes/desktopPet/DesktopAssistantRoute.tsx";
 @source "../../routes/desktopPet/LauncherAssistantRoute.tsx";
 @source "../../routes/desktopPet/LauncherAssistantWorkspaceRoute.tsx";
 @source "../../routes/desktopPet/LauncherAssistantWorkspaceRoute.styles.ts";

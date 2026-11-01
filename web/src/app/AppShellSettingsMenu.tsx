@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Activity, ArrowLeft, Check, ChevronRight, Cpu, ExternalLink, Moon, RefreshCw, ScrollText, SlidersHorizontal, Sun, Wrench } from "lucide-react";
 import { VButton, VRouteLinkButton } from "../components/vui";
-import { ConfigDesktopPetSettings } from "../routes/ConfigDesktopPetSettings";
 import styles from "./AppShellSettingsMenu.styles";
 
 export type AppShellSettingsMenuProps = {
@@ -29,7 +28,6 @@ export function AppShellSettingsMenu({ lang, theme, themeSyncState, themePending
       <VButton variant="ghost" contentLayout="plain" className={styles.row} onPress={() => setPage("appearance")}>
         {theme === "light" ? <Sun size={16} /> : <Moon size={16} />}<span className={styles.label}>{zh ? "外观" : "Appearance"}</span><span className={styles.value}>{theme === "light" ? (zh ? "浅色" : "Light") : (zh ? "深色" : "Dark")}</span><ChevronRight size={14} />
       </VButton>
-      <ConfigDesktopPetSettings language={lang} compact />
       <VRouteLinkButton to="/usage" variant="ghost" className={styles.row} onClick={onClose} icon={<Activity size={16} />}><span className={styles.label}>{zh ? "用量统计" : "Usage"}</span><ChevronRight size={14} /></VRouteLinkButton>
       <div className={styles.divider} />
       <VButton variant="ghost" contentLayout="plain" className={styles.row} onPress={() => setPage("advanced")}><Wrench size={16} /><span className={styles.label}>{zh ? "高级与诊断" : "Advanced and diagnostics"}</span><ChevronRight size={14} /></VButton>

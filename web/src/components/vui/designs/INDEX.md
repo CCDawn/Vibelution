@@ -11,10 +11,8 @@
 | `LauncherToolsRoute` / `LauncherProcessMonitorPanel` / `LauncherProjectMaintenancePanel` | [product/personal-assistant.md](./product/personal-assistant.md#launchertoolsroute--launcherprocessmonitorpanel--launcherprojectmaintenancepanel) |
 | `PersonalAssistantRoute` | [product/personal-assistant.md](./product/personal-assistant.md#personalassistantroute) |
 | `PersonalAssistantComputerPanel` | [product/personal-assistant.md](./product/personal-assistant.md#personalassistantcomputerpanel) |
-| `DesktopAssistantRoute` | [product/personal-assistant.md](./product/personal-assistant.md#desktopassistantroute) |
 | `PersonalAssistantOverview` | [product/personal-assistant.md](./product/personal-assistant.md#personalassistantoverview) |
 | `PersonalAssistantState` | [product/personal-assistant.md](./product/personal-assistant.md#personalassistantstate) |
-| `DesktopAssistantReturnNotice` | [product/personal-assistant.md](./product/personal-assistant.md#desktopassistantreturnnotice) |
 | `HumanAttentionNotifier` | [product/personal-assistant.md](./product/personal-assistant.md#humanattentionnotifier) |
 | `HumanAttentionNoticeStack` | [product/personal-assistant.md](./product/personal-assistant.md#humanattentionnoticestack) |
 | `PersonalAssistantSettings` | [product/personal-assistant.md](./product/personal-assistant.md#personalassistantsettings) |

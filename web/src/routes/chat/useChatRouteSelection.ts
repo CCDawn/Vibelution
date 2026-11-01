@@ -12,7 +12,7 @@ import {
 
 /** Dedicated native-session hosts keep their own page. Ordinary chat stays on /chat. */
 export function chatSelectionPathname(pathname: string) {
-  return pathname === "/finance" || pathname === "/personal-assistant" || pathname === "/desktop-assistant" ? pathname : "/chat";
+  return pathname === "/finance" || pathname === "/personal-assistant" ? pathname : "/chat";
 }
 
 export type ChatRouteNavigateOptions = {

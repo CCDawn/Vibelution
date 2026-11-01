@@ -56,9 +56,8 @@ const previewExemptDesignSections = new Set([
   // Route-owned compositions of existing VUI APIs. Canonical Agent/Session
   // queries and the native desktop bridge supply their meaningful states;
   // none is a standalone VUI export. Covered by personal-assistant route,
-  // overview, identity/return interaction tests and native desktop acceptance.
+  // overview and identity interaction tests.
   "PersonalAssistantRoute",
-  "DesktopAssistantRoute",
   // Launcher-owned composition requires role-scoped IPC and native Session
   // state; real query-refresh and recovery-model tests cover it. It is not a
   // standalone VUI export. Packaged GUI acceptance remains a separate check.
@@ -115,7 +114,6 @@ const previewExemptDesignSections = new Set([
   // meaningful state cannot be expressed as a static preview. Covered by its
   // render/expand-receipts/unmatched and empty-state interaction tests.
   "PersonalAssistantDispatches",
-  "DesktopAssistantReturnNotice",
   // Dual-channel human-attention surfaces bound to the native desktop bridge:
   // the notifier renders null and is driven by overview polling plus
   // notifyHumanAttention/onHumanAttentionOpened; the notice stack's cards only

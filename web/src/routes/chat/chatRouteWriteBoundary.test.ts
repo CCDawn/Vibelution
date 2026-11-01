@@ -33,10 +33,10 @@ function navigatesToChatSelection(source: string): string[] {
 describe("Chat route write boundary (single authority)", () => {
   it("useChatRouteSelection is the only module allowed to build session/room route targets", () => {
     const writerSource = readSource(useChatRouteSelectionSourcePath);
-    for (const path of ["/chat", "/finance", "/personal-assistant", "/desktop-assistant"]) {
+    for (const path of ["/chat", "/finance", "/personal-assistant"]) {
       expect(chatSelectionPathname(path)).toBe(path);
     }
-    for (const path of ["/agents", "/personal-assistant/nested", "/desktop-assistant/"]) {
+    for (const path of ["/agents", "/personal-assistant/nested"]) {
       expect(chatSelectionPathname(path)).toBe("/chat");
     }
     expect(writerSource).toContain("serializeChatRouteSelection");
