@@ -31,7 +31,13 @@ export function buildWorkbenchJob(input = {}) {
     const result = run(
       process.execPath,
       [join(root, "node_modules", "node-gyp", "bin", "node-gyp.js"), "rebuild"],
-      { cwd: buildRoot, stdio: "inherit", windowsHide: true }
+      {
+        cwd: buildRoot,
+        stdio: "inherit",
+        shell: false,
+        windowsHide: true,
+        env: resolveNativeBuildEnvironment({ env: input.env ?? process.env, run, exists: input.exists ?? existsSync })
+      }
     );
     if (result.error) {
       throw result.error;
@@ -51,6 +57,44 @@ export function buildWorkbenchJob(input = {}) {
       rmSync(buildRoot, { recursive: true, force: true });
     }
   }
+}
+
+// node-gyp can use a Developer Command Prompt location directly, avoiding its
+// PowerShell discovery. Keep this environment local to the native build.
+export function resolveNativeBuildEnvironment({ env = process.env, run = spawnSync, exists = existsSync } = {}) {
+  const value = (name) => Object.entries(env).find(([key]) => key.toLowerCase() === name.toLowerCase())?.[1];
+  if (value("VCINSTALLDIR") || value("VSCMD_VER") || value("npm_config_msvs_version")) {
+    return env;
+  }
+  const programFiles = value("ProgramFiles(x86)");
+  if (!programFiles) return env;
+  const vswhere = join(programFiles, "Microsoft Visual Studio", "Installer", "vswhere.exe");
+  if (!exists(vswhere)) return env;
+
+  try {
+    const result = run(vswhere, [
+      "-sort", "-products", "*", "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+      "-format", "json", "-utf8", "-include", "packages"
+    ], { encoding: "utf8", maxBuffer: 8 * 1024 * 1024, shell: false, windowsHide: true, env });
+    if (result.error || result.status !== 0) return env;
+    const instances = JSON.parse(String(result.stdout).replace(/^\uFEFF/, ""));
+    if (!Array.isArray(instances)) return env;
+    for (const instance of instances) {
+      const { installationPath, installationVersion, packages } = instance;
+      if (typeof installationPath !== "string" || !installationPath ||
+          typeof installationVersion !== "string" || !/^(16|17|18)\.\d+/.test(installationVersion) ||
+          !Array.isArray(packages)) continue;
+      const sdkBuilds = packages.map((pkg) => /^Microsoft\.VisualStudio\.Component\.Windows(?:10|11)SDK\.(\d+)(?:\.Desktop)?$/i.exec(pkg?.id ?? ""))
+        .filter(Boolean).map((match) => Number(match[1]));
+      const sdk = value("WindowsSDKVersion") || (sdkBuilds.length ? `10.0.${Math.max(...sdkBuilds)}.0` : "");
+      const vc = join(installationPath, "VC");
+      if (!sdk || !exists(vc) || !exists(join(installationPath, "MSBuild", "Current", "Bin", "MSBuild.exe"))) continue;
+      return { ...env, VCINSTALLDIR: vc, VSCMD_VER: installationVersion, ...(!value("WindowsSDKVersion") && { WindowsSDKVersion: sdk }) };
+    }
+  } catch {
+    // Fall back to node-gyp's own discovery and error output.
+  }
+  return env;
 }
 
 function requireOwnedNativeBuildPaths(input, electronRootPath) {

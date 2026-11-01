@@ -1783,6 +1783,32 @@ def test_ensure_latest_launcher_raises_when_frontend_preflight_fails(tmp_path, m
         raise AssertionError("expected frontend preflight failure to raise")
 
 
+def test_packaged_update_prepares_the_actual_package_before_reporting_ready(tmp_path, monkeypatch):
+    events = []
+    monkeypatch.setattr(desktop_shell, "prepare_unpackaged_electron", lambda *_: pytest.fail("wrong build kind"))
+    monkeypatch.setattr(
+        "core.runtime_manager.daemon._preflight_frontend_build_for_restart",
+        lambda *_args, **_kwargs: events.append("frontend") or {"ok": True},
+    )
+    monkeypatch.setattr(desktop_shell, "run_desktop_shell_prebuild", lambda _root: events.append("package") or {"ok": True, "staged": True})
+    result = desktop_shell.ensure_latest_launcher(tmp_path, shell_kind="packaged")
+    assert events == ["frontend", "package"]
+    assert result["ok"] is True
+    assert result["electron"]["prepared"] is True
+
+
+@pytest.mark.parametrize("result", [
+    {"ok": False, "message": "compiler unavailable"},
+    {"ok": True, "skipped": "refresh_in_progress"},
+    {"ok": True},
+])
+def test_packaged_update_rejects_failed_or_unconfirmed_preparation(tmp_path, monkeypatch, result):
+    monkeypatch.setattr("core.runtime_manager.daemon._preflight_frontend_build_for_restart", lambda *_args, **_kwargs: {"ok": True})
+    monkeypatch.setattr(desktop_shell, "run_desktop_shell_prebuild", lambda _root: result)
+    with pytest.raises(RuntimeError):
+        desktop_shell.ensure_latest_launcher(tmp_path, shell_kind="packaged")
+
+
 def test_launch_desktop_shell_does_not_hide_unpackaged_gui(tmp_path, monkeypatch):
     tree = "a" * 40
     electron_exe = _write_unpackaged_electron(tmp_path, tree_hash=tree, main_mtime=2_000_000_000)

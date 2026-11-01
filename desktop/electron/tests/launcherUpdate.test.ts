@@ -294,6 +294,7 @@ describe("guarded local Launcher update", () => {
     const update = main.slice(main.indexOf("async function restartLauncherToLatestBuild"), main.indexOf("async function exitAndRelaunchLauncherShell"));
     expect(update).toContain("executeLauncherUpdate");
     expect(update).toContain("ensureLatestLauncher");
+    expect(update).toContain('shellKind: options.shellKind ?? (app.isPackaged ? "packaged" : "unpackaged")');
     expect(update).toContain("stopMainRuntimeForApprovedShutdown");
     expect(update).toContain("stopIsolatedInstancesForApprovedShutdown");
     expect(update).not.toContain("bestEffortStopIsolatedInstancesForShutdown");

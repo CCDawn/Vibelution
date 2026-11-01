@@ -1730,11 +1730,13 @@ def test_launch_desktop_shell_skips_settlement_wait_for_non_lifecycle_ops(monkey
     assert "lifecycleSettlement" not in payload
 
 
-def test_ensure_latest_launcher_action_dispatches_to_desktop_shell(monkeypatch, capsys):
+@pytest.mark.parametrize("shell_kind", ["packaged", "unpackaged"])
+def test_ensure_latest_launcher_action_dispatches_to_desktop_shell(monkeypatch, capsys, shell_kind):
     captured: dict[str, object] = {}
 
-    def fake_ensure(root):
+    def fake_ensure(root, *, shell_kind):
         captured["root"] = root
+        captured["kind"] = shell_kind
         return {
             "schemaVersion": 1,
             "ok": True,
@@ -1743,12 +1745,13 @@ def test_ensure_latest_launcher_action_dispatches_to_desktop_shell(monkeypatch, 
         }
 
     monkeypatch.setattr("core.launcher.desktop_shell.ensure_latest_launcher", fake_ensure)
-    result = desktop_entry.main(["--action", "ensure-latest-launcher", "--output", "json"])
+    result = desktop_entry.main(["--action", "ensure-latest-launcher", "--output", "json", "--shell-kind", shell_kind])
     assert result == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["ok"] is True
     assert payload["frontend"]["skipped"] is True
     assert captured["root"] is not None
+    assert captured["kind"] == shell_kind
 
 
 def test_ensure_frontend_build_action_uses_shared_release_builder(monkeypatch, tmp_path, capsys):

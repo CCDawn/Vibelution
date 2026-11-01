@@ -405,6 +405,13 @@ describe("desktop shell freshness", () => {
     );
   });
 
+  it("prepares the packaged replacement when the running app is packaged", async () => {
+    const spawnImpl = fakeSpawnWithOutput(JSON.stringify({ schemaVersion: 1, ok: true, electron: { prepared: true } }));
+    await ensureLatestLauncher({ workspaceRoot: "C:/repo", pythonPath: "C:/repo/.venv/Scripts/python.exe", shellKind: "packaged", spawnImpl });
+    const args = spawnImpl.mock.calls[0][1] as string[];
+    expect(args[args.indexOf("--shell-kind") + 1]).toBe("packaged");
+  });
+
   it("formats tray launcher version from desktop shell status, not workbench HTTP", () => {
     expect(
       formatTrayLauncherFreshness({

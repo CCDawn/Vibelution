@@ -4323,7 +4323,8 @@ async function restartLauncherToLatestBuild(
       activeWork: () => resolveLauncherUpdateActiveWork(true),
       prepare: () => ensureLatestLauncher({
         workspaceRoot: createDesktopPathsForApp().workspaceRoot,
-        pythonPath: desktopPythonPath()
+        pythonPath: desktopPythonPath(),
+        shellKind: options.shellKind ?? (app.isPackaged ? "packaged" : "unpackaged")
       }),
       stopWorkspaces: async () => {
         // Each task owner must confirm saved state before replacement.

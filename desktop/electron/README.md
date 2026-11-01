@@ -9,6 +9,8 @@
 
 本地调试：[桌面调试与后台操作](../../docs/guides/desktop-debugging.md)。本地启动默认开放仅 `127.0.0.1` 可连的动态 CDP 端口，不弹 DevTools；开发优先 API / Playwright。地址发现入口为 `scripts/desktop_debug.py`，实现归 `src/debugging/localDebugging.ts`，生命周期仍归 Launcher。
 
+更新按钮在保存并停止工作区前，必须准备与当前 `shellKind` 一致的替换产物：packaged 先完成前端与完整安装包 staging，unpackaged 使用隔离 Electron staging。构建失败或准备状态不明确时保留当前窗口并返回错误，不能用 unpackaged 当前来证明 packaged 已准备好。原生编译通过已安装的 `vswhere` 发现 VC/SDK，仅给构建子进程补充环境；保留显式开发环境，所有发现与构建子进程均隐藏窗口且不经 shell。
+
 ---
 
 ## 30 秒编辑表

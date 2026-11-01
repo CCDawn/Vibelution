@@ -376,12 +376,13 @@ export function parseLatestLauncherEnsureResult(raw: string): LatestLauncherEnsu
 export async function ensureLatestLauncher(input: {
   workspaceRoot: string;
   pythonPath: string;
+  shellKind?: "packaged" | "unpackaged";
   spawnImpl?: PythonJsonBridgeSpawn;
   signal?: AbortSignal;
 }): Promise<LatestLauncherEnsureResult> {
   const raw = await runPythonJsonBridge({
     pythonPath: input.pythonPath,
-    args: desktopShellBridgeArgs(input.workspaceRoot, input.pythonPath, "ensure-latest-launcher"),
+    args: desktopShellBridgeArgs(input.workspaceRoot, input.pythonPath, "ensure-latest-launcher", input.shellKind ? ["--shell-kind", input.shellKind] : []),
     cwd: input.workspaceRoot,
     spawnImpl: input.spawnImpl,
     failureLabel: "latest launcher ensure",

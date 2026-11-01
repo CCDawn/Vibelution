@@ -2295,7 +2295,8 @@ def _launch_desktop_shell_bridge(args: argparse.Namespace) -> dict[str, object]:
 def _ensure_latest_launcher_bridge(args: argparse.Namespace) -> dict[str, object]:
     from core.launcher.desktop_shell import ensure_latest_launcher
 
-    payload = ensure_latest_launcher(_workspace_root(args))
+    shell_kind = str(getattr(args, "shell_kind", "") or "unpackaged")
+    payload = ensure_latest_launcher(_workspace_root(args), shell_kind=shell_kind)
     electron = payload.get("electron") if isinstance(payload.get("electron"), dict) else {}
     frontend = payload.get("frontend") if isinstance(payload.get("frontend"), dict) else {}
     _append_log(

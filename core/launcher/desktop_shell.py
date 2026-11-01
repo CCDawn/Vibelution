@@ -2016,19 +2016,34 @@ def prepare_unpackaged_electron(project_root: Path | str = PROJECT_ROOT) -> dict
     return _rebuild_unpackaged_electron(root, prepare_only=True)
 
 
-def ensure_latest_launcher(project_root: Path | str = PROJECT_ROOT) -> dict[str, Any]:
+def ensure_latest_launcher(
+    project_root: Path | str = PROJECT_ROOT, *, shell_kind: str = "unpackaged"
+) -> dict[str, Any]:
     """Prepare Electron and the frontend while the old shell remains usable.
 
     The refresh helper publishes the prepared Electron tree after wait_pid exits.
     """
 
     root = Path(project_root)
-    electron = prepare_unpackaged_electron(root)
+    if shell_kind not in {"packaged", "unpackaged"}:
+        raise ValueError("Unsupported desktop shell kind.")
+    electron = prepare_unpackaged_electron(root) if shell_kind == "unpackaged" else {}
     from core.runtime_manager.daemon import _preflight_frontend_build_for_restart
 
     frontend = _preflight_frontend_build_for_restart("ensure-latest-launcher", project_root=root)
     if not bool(frontend.get("ok", True)):
         raise RuntimeError(str(frontend.get("reason") or "frontend ensure failed"))
+    if shell_kind == "packaged":
+        staged = run_desktop_shell_prebuild(root)
+        if staged.get("ok") is not True or not (
+            staged.get("staged") is True or staged.get("skipped") == "current"
+        ):
+            raise RuntimeError(str(staged.get("message") or "Launcher 更新准备未完成，当前窗口保持打开。"))
+        electron = {
+            "rebuilt": False,
+            "prepared": staged.get("staged") is True,
+            "reason": "prepared" if staged.get("staged") else str(staged.get("skipped") or "current"),
+        }
     return {
         "schemaVersion": 1,
         "ok": True,
