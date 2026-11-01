@@ -21,15 +21,43 @@ import tempfile
 import threading
 import time
 from collections import OrderedDict
+from contextlib import AbstractContextManager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
+
+from core.infrastructure.atomic_io import atomic_write_text
+from core.infrastructure.file_lock import DEFAULT_LOCK_TIMEOUT_SECONDS, cross_process_file_lock
 
 # Local default for signature evaluation (facade remains SSOT).
 DEFAULT_AGENT_PRIMARY_MODE = "chat"
 
 _source_authority_ref_fn = None
 _projection_edit_contract_fn = None
+
+# Workspace event JSONL files (inbox, group context, proposals, ...) have two
+# writer shapes: delivery appends one row, consume / read-receipt / revoke /
+# promote rewrite the whole file from an in-memory snapshot. Both go through
+# one per-target cross-process lock (``<file>.lock`` sidecar, see
+# ``core.infrastructure.file_lock``) so an append can never land on a snapshot
+# a concurrent rewrite is about to replace. The lock is reentrant per thread:
+# read-modify-rewrite callers hold it across read -> mutate -> rewrite and the
+# helpers re-enter it. Readers deliberately stay lock-free; the rewrite is a
+# temp-file + ``os.replace`` so they only ever see a complete file.
+_JSONL_WRITE_LOCK_TIMEOUT_SECONDS = DEFAULT_LOCK_TIMEOUT_SECONDS
+# Windows: any reader that still has the target open (Python ``open`` never
+# requests ``FILE_SHARE_DELETE``) makes ``os.replace`` raise
+# ``PermissionError`` until it closes. Readers hold handles for milliseconds
+# (reverse-iterator previews, status counts), so the rewrite retries with
+# short backoff (50ms, 100ms, ... capped at 250ms) for this budget and then
+# re-raises the original error; it never falls back to an in-place write.
+_JSONL_REPLACE_RETRY_TIMEOUT_SECONDS = 2.0
+
+
+def _jsonl_write_lock(path: Path) -> AbstractContextManager[None]:
+    """Per-target write lock shared by ``_append_jsonl`` and ``_write_jsonl``."""
+
+    return cross_process_file_lock(path, timeout=_JSONL_WRITE_LOCK_TIMEOUT_SECONDS)
 
 # Memoized workspace event paths. ``_resolve_project_path`` ends in a Windows
 # ``Path.resolve()`` (realpath syscalls), and the session list used to pay one
@@ -392,8 +420,10 @@ def _agent_workspace_territory(agent: dict[str, Any]) -> dict[str, Any]:
 def _append_jsonl(path: Path, payload: dict[str, Any]) -> None:
     s = _service()
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8", newline="\n") as handle:
-        handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
+    line = json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n"
+    with _jsonl_write_lock(path):
+        with path.open("a", encoding="utf-8", newline="\n") as handle:
+            handle.write(line)
     s.record_agent_api_hydration_event_file_changed(path)
 
 
@@ -1091,7 +1121,19 @@ def _write_jsonl(path: Path, payloads: list[dict[str, Any]]) -> None:
         for item in list(payloads or [])
         if isinstance(item, dict)
     ]
-    path.write_text(("\n".join(lines) + "\n") if lines else "", encoding="utf-8", newline="\n")
+    # ``atomic_write_text`` takes the same ``<path>.lock`` sidecar as
+    # ``_jsonl_write_lock`` (reentrant for a caller already inside the
+    # read-modify-rewrite span) and replaces the target via temp file.
+    # ``strict_replace`` keeps a replace that stays blocked past the retry
+    # budget as the original ``PermissionError`` instead of degrading to a
+    # truncating in-place write a concurrent reader could observe.
+    atomic_write_text(
+        path,
+        ("\n".join(lines) + "\n") if lines else "",
+        retry_timeout_seconds=_JSONL_REPLACE_RETRY_TIMEOUT_SECONDS,
+        lock_timeout_seconds=_JSONL_WRITE_LOCK_TIMEOUT_SECONDS,
+        strict_replace=True,
+    )
     s.record_agent_api_hydration_event_file_changed(path)
 
 
@@ -1110,20 +1152,28 @@ def consume_agent_inbox_message(
     if not normalized_message_id:
         raise s.AgentMessageNotFoundError("Agent inbox message id is required.")
     path = s._agent_workspace_event_path(agent, "agent_inbox_messages.jsonl")
-    messages = s._read_jsonl(path)
-    for item in messages:
-        if str(item.get("messageId") or item.get("eventId") or "").strip() != normalized_message_id:
-            continue
-        if str(item.get("status") or "pending").strip().lower() != "consumed":
-            item["status"] = "consumed"
-            item["consumedAt"] = s.utc_now_iso()
-            item["consumedBySessionId"] = str(consumed_by_session_id or agent.get("directSessionId") or "").strip()
-            item["consumedByTurnId"] = str(consumed_by_turn_id or "").strip()
-            s._write_jsonl(path, messages)
-            s._record_memory_event("agent_inbox.message_consumed", item, agent_id=str(agent.get("agentId") or ""), lifecycle=True)
-            _mirror_ledger_status_change(str(agent.get("agentId") or ""), [normalized_message_id], "consumed")
-        return item
-    raise s.AgentMessageNotFoundError(f"Agent inbox message not found: {message_id}")
+    matched: dict[str, Any] | None = None
+    consumed_now = False
+    with _jsonl_write_lock(path):
+        messages = s._read_jsonl(path)
+        for item in messages:
+            if str(item.get("messageId") or item.get("eventId") or "").strip() != normalized_message_id:
+                continue
+            matched = item
+            if str(item.get("status") or "pending").strip().lower() != "consumed":
+                item["status"] = "consumed"
+                item["consumedAt"] = s.utc_now_iso()
+                item["consumedBySessionId"] = str(consumed_by_session_id or agent.get("directSessionId") or "").strip()
+                item["consumedByTurnId"] = str(consumed_by_turn_id or "").strip()
+                s._write_jsonl(path, messages)
+                consumed_now = True
+            break
+    if matched is None:
+        raise s.AgentMessageNotFoundError(f"Agent inbox message not found: {message_id}")
+    if consumed_now:
+        s._record_memory_event("agent_inbox.message_consumed", matched, agent_id=str(agent.get("agentId") or ""), lifecycle=True)
+        _mirror_ledger_status_change(str(agent.get("agentId") or ""), [normalized_message_id], "consumed")
+    return matched
 
 
 def consume_all_agent_inbox_messages(
@@ -1137,19 +1187,21 @@ def consume_all_agent_inbox_messages(
     if not agent:
         raise s.AgentNotFoundError(f"Agent not found: {agent_id}")
     path = s._agent_workspace_event_path(agent, "agent_inbox_messages.jsonl")
-    messages = s._read_jsonl(path)
-    now = s.utc_now_iso()
-    consumed_ids: list[str] = []
-    for item in messages:
-        if str(item.get("status") or "pending").strip().lower() == "consumed":
-            continue
-        item["status"] = "consumed"
-        item["consumedAt"] = now
-        item["consumedBySessionId"] = str(consumed_by_session_id or agent.get("directSessionId") or "").strip()
-        item["consumedByTurnId"] = str(consumed_by_turn_id or "").strip()
-        consumed_ids.append(str(item.get("messageId") or item.get("eventId") or "").strip())
+    with _jsonl_write_lock(path):
+        messages = s._read_jsonl(path)
+        now = s.utc_now_iso()
+        consumed_ids: list[str] = []
+        for item in messages:
+            if str(item.get("status") or "pending").strip().lower() == "consumed":
+                continue
+            item["status"] = "consumed"
+            item["consumedAt"] = now
+            item["consumedBySessionId"] = str(consumed_by_session_id or agent.get("directSessionId") or "").strip()
+            item["consumedByTurnId"] = str(consumed_by_turn_id or "").strip()
+            consumed_ids.append(str(item.get("messageId") or item.get("eventId") or "").strip())
+        if consumed_ids:
+            s._write_jsonl(path, messages)
     if consumed_ids:
-        s._write_jsonl(path, messages)
         _mirror_ledger_status_change(str(agent.get("agentId") or ""), consumed_ids, "consumed")
         s._record_memory_event(
             "agent_inbox.messages_consumed",
@@ -1188,8 +1240,8 @@ def mark_agent_inbox_messages_read(
     empty ``readAt`` — including on legacy rows written before the field —
     means unread. ``message_ids`` targets explicit rows; without it the sweep
     falls back to rows consumed by the given session+turn. Reuses the consume
-    mechanism's read/rewrite helpers as a sibling function; no new lock
-    semantics (write races are a tracked separate concern).
+    mechanism's read/rewrite helpers as a sibling function, inside the same
+    per-file write lock so a racing delivery append is never overwritten.
     """
 
     s = _service()
@@ -1204,31 +1256,32 @@ def mark_agent_inbox_messages_read(
     session_key = str(read_by_session_id or "").strip()
     turn_key = str(read_by_turn_id or "").strip()
     path = s._agent_workspace_event_path(agent, "agent_inbox_messages.jsonl")
-    messages = s._read_jsonl(path)
-    now = s.utc_now_iso()
-    read_ids: list[str] = []
-    for item in messages:
-        if str(item.get("readAt") or "").strip():
-            continue
-        row_id = str(item.get("messageId") or item.get("eventId") or "").strip()
-        if wanted_ids:
-            if row_id not in wanted_ids:
+    with _jsonl_write_lock(path):
+        messages = s._read_jsonl(path)
+        now = s.utc_now_iso()
+        read_ids: list[str] = []
+        for item in messages:
+            if str(item.get("readAt") or "").strip():
                 continue
-        elif (
-            str(item.get("consumedBySessionId") or "").strip() != session_key
-            or str(item.get("consumedByTurnId") or "").strip() != turn_key
-        ):
-            continue
-        item["readAt"] = now
-        if row_id:
-            read_ids.append(row_id)
-    if not read_ids:
-        return {
-            "agentId": str(agent.get("agentId") or "").strip(),
-            "readCount": 0,
-            "readMessageIds": [],
-        }
-    s._write_jsonl(path, messages)
+            row_id = str(item.get("messageId") or item.get("eventId") or "").strip()
+            if wanted_ids:
+                if row_id not in wanted_ids:
+                    continue
+            elif (
+                str(item.get("consumedBySessionId") or "").strip() != session_key
+                or str(item.get("consumedByTurnId") or "").strip() != turn_key
+            ):
+                continue
+            item["readAt"] = now
+            if row_id:
+                read_ids.append(row_id)
+        if not read_ids:
+            return {
+                "agentId": str(agent.get("agentId") or "").strip(),
+                "readCount": 0,
+                "readMessageIds": [],
+            }
+        s._write_jsonl(path, messages)
     s._record_memory_event(
         "agent_inbox.messages_read",
         {
@@ -1271,25 +1324,33 @@ def promote_agent_inbox_message_body(
     if not normalized_message_id or not normalized_content:
         raise s.AgentDirectoryError("Agent inbox message id and content are required.")
     path = s._agent_workspace_event_path(agent, "agent_inbox_messages.jsonl")
-    messages = s._read_jsonl(path)
-    for item in messages:
-        if str(item.get("messageId") or item.get("eventId") or "").strip() != normalized_message_id:
-            continue
-        if str(item.get("status") or "pending").strip().lower() == "pending":
-            item["content"] = normalized_content
-            metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
-            metadata.pop("bodyPreviewOnly", None)
-            metadata["bodyPromotedForDrain"] = True
-            item["metadata"] = metadata
-            s._write_jsonl(path, messages)
-            s._record_memory_event(
-                "agent_inbox.message_body_promoted",
-                item,
-                agent_id=str(agent.get("agentId") or ""),
-                lifecycle=True,
-            )
-        return item
-    raise s.AgentMessageNotFoundError(f"Agent inbox message not found: {message_id}")
+    matched: dict[str, Any] | None = None
+    promoted_now = False
+    with _jsonl_write_lock(path):
+        messages = s._read_jsonl(path)
+        for item in messages:
+            if str(item.get("messageId") or item.get("eventId") or "").strip() != normalized_message_id:
+                continue
+            matched = item
+            if str(item.get("status") or "pending").strip().lower() == "pending":
+                item["content"] = normalized_content
+                metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+                metadata.pop("bodyPreviewOnly", None)
+                metadata["bodyPromotedForDrain"] = True
+                item["metadata"] = metadata
+                s._write_jsonl(path, messages)
+                promoted_now = True
+            break
+    if matched is None:
+        raise s.AgentMessageNotFoundError(f"Agent inbox message not found: {message_id}")
+    if promoted_now:
+        s._record_memory_event(
+            "agent_inbox.message_body_promoted",
+            matched,
+            agent_id=str(agent.get("agentId") or ""),
+            lifecycle=True,
+        )
+    return matched
 
 
 def count_agent_inbox_messages_for_agent(agent_id: str, *, status: str = "pending") -> int:
@@ -2094,21 +2155,29 @@ def revoke_agent_inbox_message(
     if not normalized_message_id:
         raise s.AgentMessageNotFoundError("Agent inbox message id is required.")
     path = s._agent_workspace_event_path(agent, "agent_inbox_messages.jsonl")
-    messages = s._read_jsonl(path)
-    for item in messages:
-        if str(item.get("messageId") or item.get("eventId") or "").strip() != normalized_message_id:
-            continue
-        if str(item.get("status") or "pending").strip().lower() != "revoked":
-            item["status"] = "revoked"
-            item["promptEligible"] = False
-            item["revokedAt"] = s.utc_now_iso()
-            item["revokedBy"] = str(revoked_by or "user").strip() or "user"
-            item["revokeReason"] = s.trim_lines(str(reason or ""), max_lines=2)
-            s._write_jsonl(path, messages)
-            s._record_memory_event("agent_inbox.message_revoked", item, agent_id=str(agent.get("agentId") or ""), lifecycle=True)
-            _mirror_ledger_status_change(str(agent.get("agentId") or ""), [normalized_message_id], "revoked")
-        return item
-    raise s.AgentMessageNotFoundError(f"Agent inbox message not found: {message_id}")
+    matched: dict[str, Any] | None = None
+    revoked_now = False
+    with _jsonl_write_lock(path):
+        messages = s._read_jsonl(path)
+        for item in messages:
+            if str(item.get("messageId") or item.get("eventId") or "").strip() != normalized_message_id:
+                continue
+            matched = item
+            if str(item.get("status") or "pending").strip().lower() != "revoked":
+                item["status"] = "revoked"
+                item["promptEligible"] = False
+                item["revokedAt"] = s.utc_now_iso()
+                item["revokedBy"] = str(revoked_by or "user").strip() or "user"
+                item["revokeReason"] = s.trim_lines(str(reason or ""), max_lines=2)
+                s._write_jsonl(path, messages)
+                revoked_now = True
+            break
+    if matched is None:
+        raise s.AgentMessageNotFoundError(f"Agent inbox message not found: {message_id}")
+    if revoked_now:
+        s._record_memory_event("agent_inbox.message_revoked", matched, agent_id=str(agent.get("agentId") or ""), lifecycle=True)
+        _mirror_ledger_status_change(str(agent.get("agentId") or ""), [normalized_message_id], "revoked")
+    return matched
 
 
 def _mirror_ledger_status_change(agent_id: str, message_ids: list[str], status: str) -> None:
