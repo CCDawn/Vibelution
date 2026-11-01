@@ -544,6 +544,11 @@ let trayRestartAllInFlight = false;
 let trayQuitAllInFlight = false;
 let trayRestartLauncherInFlight = false;
 let shellRefreshInFlight = false;
+let shellRefreshRequest: {
+  result: Promise<OrchestratedLifecycleResult>;
+  operationToRestore: string;
+  shellKind: "packaged" | "unpackaged";
+} | null = null;
 let lastKnownDesktopShell: DesktopShellStatus | undefined;
 let periodicShellFreshnessTimer: ReturnType<typeof setInterval> | null = null;
 let periodicAdvisoryStaleNotified = false;
@@ -4308,6 +4313,13 @@ async function restartLauncherToLatestBuild(
   operationToRestore = "open",
   options: { shellKind?: "packaged" | "unpackaged"; forceRefresh?: boolean } = {}
 ): Promise<OrchestratedLifecycleResult> {
+  // A manual update can overlap an automatic freshness refresh. Both callers
+  // observe the same preparation/result rather than reporting a false failure.
+  const shellKind = options.shellKind ?? (app.isPackaged ? "packaged" : "unpackaged");
+  const existing = shellRefreshRequest;
+  const compatibleOperation = existing !== null && (operationToRestore === existing.operationToRestore
+    || (operationToRestore === "open" && ["start", "restart", "rebuild-and-start"].includes(existing.operationToRestore)));
+  if (existing !== null && compatibleOperation && shellKind === existing.shellKind) return await existing.result;
   if (shellRefreshInFlight) {
     return {
       schemaVersion: 1,
@@ -4317,6 +4329,27 @@ async function restartLauncherToLatestBuild(
     };
   }
   shellRefreshInFlight = true;
+  const request = {
+    result: performLauncherUpdate(interruptActiveWork, operationToRestore, { ...options, shellKind }),
+    operationToRestore,
+    shellKind,
+  };
+  shellRefreshRequest = request;
+  try {
+    return await request.result;
+  } finally {
+    // Only share the live transaction. Never cache an accepted result after
+    // handoff: later exit failures must not replay an old acceptance forever.
+    if (shellRefreshRequest === request) shellRefreshRequest = null;
+  }
+
+}
+
+async function performLauncherUpdate(
+  interruptActiveWork: boolean,
+  operationToRestore: string,
+  options: { shellKind?: "packaged" | "unpackaged"; forceRefresh?: boolean }
+): Promise<OrchestratedLifecycleResult> {
   try {
     const result = await executeLauncherUpdate({
       interruptActiveWork,
