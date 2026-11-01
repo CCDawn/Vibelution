@@ -30,6 +30,5 @@ const styles = {
   sessionTitle: "truncate text-vui-xs [line-height:var(--vui-line-readable)] font-medium",
   sessionMeta: "truncate text-vui-micro-10 text-[var(--fg-secondary)]",
   overviewFill: "flex min-h-0 flex-1 flex-col",
-  error: "p-2 text-vui-xs [line-height:var(--vui-line-readable)] text-[var(--state-error)]",
 } as const;
 export default styles;

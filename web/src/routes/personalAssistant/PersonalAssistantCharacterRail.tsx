@@ -1,6 +1,6 @@
 import "../../design/route-css/desktop-pet.tailwind.css";
 import { useState } from "react";
-import { Monitor, Settings2 } from "lucide-react";
+import { Settings2 } from "lucide-react";
 import type { PersonalAssistant } from "../../api/types/personalAssistant";
 import { VButton, VCheckbox } from "../../components/vui";
 import { DesktopPetCharacter } from "../desktopPet/DesktopPetCharacter";
@@ -12,8 +12,8 @@ import { useShellI18n } from "../../i18n/useShellI18n";
 import { PERSONAL_ASSISTANT_COPY } from "./personalAssistantCopy";
 import styles from "./PersonalAssistantCharacterRail.styles";
 
-export function PersonalAssistantCharacterRail({ assistant, onOpenDesktop, desktopPending }: {
-  assistant: PersonalAssistant; onOpenDesktop: () => void; desktopPending: boolean;
+export function PersonalAssistantCharacterRail({ assistant }: {
+  assistant: PersonalAssistant;
 }) {
   const { lang } = useShellI18n();
   const copy = PERSONAL_ASSISTANT_COPY[lang];
@@ -34,9 +34,7 @@ export function PersonalAssistantCharacterRail({ assistant, onOpenDesktop, deskt
       <p className={styles.status} role="status"><i className={styles.dot} />{activity.statusText}</p></div>
     {activity.unreadCount ? <VButton variant="secondary" className={styles.unread} onClick={activity.markRead}>{copy.unread(activity.unreadCount)}</VButton> : null}
     <p className={styles.line}>{copy.tagline}</p>
-    <div className={styles.actions}><VButton variant="secondary" className={styles.desktop} icon={<Monitor size={14} />}
-      isPending={desktopPending} onClick={onOpenDesktop}>{copy.switchDesktop}</VButton>
-      <VButton variant="ghost" icon={<Settings2 size={14} />} onClick={() => setSettingsOpen(true)}>{copy.settings}</VButton></div>
+    <div className={styles.actions}><VButton variant="ghost" icon={<Settings2 size={14} />} onClick={() => setSettingsOpen(true)}>{copy.settings}</VButton></div>
     <PersonalAssistantSettings open={settingsOpen} onOpenChange={setSettingsOpen}>
       <div className={styles.settings}>
         <VCheckbox isSelected={preferences.showCompletion} onChange={showCompletion => update({ showCompletion })}>{copy.showCompletion}</VCheckbox>

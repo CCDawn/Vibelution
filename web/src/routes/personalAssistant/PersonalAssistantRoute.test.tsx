@@ -6,7 +6,7 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchSessionDetail } from "../../api/chat";
 import { createPersonalAssistant, fetchPersonalAssistant, fetchPersonalAssistantSettings } from "../../api/personalAssistant";
-import { controlDesktopAssistant, getDesktopAssistantContext, setDesktopPetExpanded } from "../../api/desktopPet";
+import { getDesktopAssistantContext, setDesktopPetExpanded } from "../../api/desktopPet";
 import { fetchPetActivity } from "../../api/pet";
 import { queryKeys } from "../../api/queryKeys";
 import type { PetActivity } from "../../api/types/petActivity";
@@ -22,7 +22,7 @@ vi.mock("../../api/personalAssistant", () => ({ createPersonalAssistant: vi.fn()
   updatePersonalAssistantSettings: vi.fn().mockResolvedValue({ settings: null }),
   updatePersonalAssistantModel: vi.fn(),
 }));
-vi.mock("../../api/desktopPet", () => ({ getDesktopAssistantContext: vi.fn(), setDesktopPetExpanded: vi.fn(), controlDesktopAssistant: vi.fn() }));
+vi.mock("../../api/desktopPet", () => ({ getDesktopAssistantContext: vi.fn(), setDesktopPetExpanded: vi.fn() }));
 vi.mock("../../api/pet", () => ({ fetchPetActivity: vi.fn() }));
 vi.mock("../../api/personalAssistantComputer", () => ({ fetchPersonalAssistantComputer: vi.fn(async () => ({
   available: false, status: "idle", message: "", grantId: null, window: null, pending: null,
@@ -113,22 +113,20 @@ describe("personal assistant page admission", () => {
     expect(container.querySelector('[aria-label="助理侧栏"]')).not.toBeNull();
     expect(container.querySelector('[aria-label="收起平台概览"]')).not.toBeNull();
   });
-  it("switches narrow entries and an existing desktop error when language changes", async () => {
+  it("switches narrow entries with the language and keeps the desktop-mode entry removed", async () => {
     Object.defineProperty(window, "innerWidth", { value: 390, configurable: true });
     vi.mocked(window.matchMedia).mockImplementation(query => ({ matches: true, media: query, addEventListener: vi.fn(), removeEventListener: vi.fn(),
       addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn(), onchange: null } as MediaQueryList));
-    vi.mocked(controlDesktopAssistant).mockResolvedValue({ busyElsewhere: true } as Awaited<ReturnType<typeof controlDesktopAssistant>>);
     await render("/personal-assistant");
-    await act(async () => ([...container.querySelectorAll("button")].find(row => row.textContent === "桌面模式") as HTMLButtonElement).click());
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain("另一个工作台");
+    expect(container.querySelector('[aria-label="个人助理操作"]')).not.toBeNull();
+    expect(container.textContent).not.toContain("桌面模式");
     locale.lang = "en";
     await render("/personal-assistant");
     expect(container.querySelector('[aria-label="Personal assistant actions"]')).not.toBeNull();
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain("another workbench");
+    expect(container.textContent).not.toContain("Desktop mode");
     const overview = [...container.querySelectorAll("button")].find(row => row.textContent === "Platform overview") as HTMLButtonElement;
     await act(async () => overview.click());
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Platform overview");
-    expect(controlDesktopAssistant).toHaveBeenCalledTimes(1);
   });
   it("mounts the affairs panel from the rail tab", async () => {
     await render("/personal-assistant");

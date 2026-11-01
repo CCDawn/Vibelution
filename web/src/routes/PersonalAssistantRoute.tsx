@@ -2,7 +2,6 @@ import "./personalAssistant/personal-assistant.tailwind.css";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 import { PanelRightClose } from "lucide-react";
-import { controlDesktopAssistant } from "../api/desktopPet";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { VButton, VDialog, VIconButton, VSplitWorkspace, VTabs } from "../components/vui";
 import { ChatCodingRoute } from "./ChatCodingRoute";
@@ -20,8 +19,6 @@ import { PersonalAssistantComputerPanel } from "./personalAssistant/PersonalAssi
 import computerStyles from "./personalAssistant/PersonalAssistantComputerPanel.styles";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { PERSONAL_ASSISTANT_COPY } from "./personalAssistant/personalAssistantCopy";
-
-type DesktopError = { key: "desktopBusy" | "desktopFailed" | "desktopOpenFailed" } | { message: string };
 
 export function PersonalAssistantRoute() {
   const { lang } = useShellI18n();
@@ -60,19 +57,6 @@ export function PersonalAssistantRoute() {
   }, [location.key, searchParamsString]);
   const nativeWorkspace = useMemo(() => <ChatCodingRoute />, []);
   const assistantAgentId = state.assistant?.agentId ?? "";
-  const [desktopPending, setDesktopPending] = useState(false);
-  const [desktopError, setDesktopError] = useState<DesktopError | null>(null);
-  const desktopErrorText = desktopError && ("key" in desktopError ? copy[desktopError.key] : desktopError.message);
-  async function openDesktop() {
-    if (desktopPending) return;
-    setDesktopPending(true); setDesktopError(null);
-    try {
-      const result = await controlDesktopAssistant(true);
-      if (result.busyElsewhere) setDesktopError({ key: "desktopBusy" });
-      else if (!result.open || result.mode !== "assistant") setDesktopError({ key: "desktopFailed" });
-    } catch (error) { setDesktopError(error instanceof Error ? { message: error.message } : { key: "desktopOpenFailed" }); }
-    finally { setDesktopPending(false); }
-  }
   return <div className={styles.root} data-vui-domain-recipe="personal-assistant">
     {narrow ? <div className={styles.narrowActions} aria-label={copy.assistantActions}>
       <VButton variant="secondary" isDisabled={!state.verified} onClick={() => setOverviewOpen(true)}>{copy.overview}</VButton>
@@ -81,15 +65,13 @@ export function PersonalAssistantRoute() {
       <VButton variant="secondary" isDisabled={!state.verified} onClick={() => setAffairsOpen(true)}>{copy.affairs}</VButton>
       <VButton variant="secondary" isDisabled={!state.verified} onClick={() => setDispatchesOpen(true)}>{copy.dispatches}</VButton>
       <VButton variant="secondary" isDisabled={!state.verified} onClick={() => setSettingsOpen(true)}>{copy.settings}</VButton>
-      <VButton variant="secondary" isDisabled={!state.verified} isPending={desktopPending} onClick={() => void openDesktop()}>{copy.desktopMode}</VButton>
     </div> : null}
-    {desktopErrorText ? <p className={styles.error} role="alert">{desktopErrorText}</p> : null}
     <VSplitWorkspace className={styles.split} chrome="workbench" resize={{ layoutId: WORKBENCH_LAYOUT_IDS.personalAssistant,
       sidebar: { defaultWidth: 176, minWidth: 148, maxWidth: 220 },
       aside: { defaultWidth: 340, minWidth: 280, maxWidth: 440 },
       collapse: { aside: { separatorLabel: copy.resizeOverview, collapseLabel: copy.collapseOverview, expandLabel: copy.expandOverview,
         placement: "header", restoreInRail: true, collapsed: overviewCollapsed, onCollapsedChange: setOverviewCollapsed } } }}
-      sidebar={state.verified && !narrow ? <PersonalAssistantCharacterRail assistant={state.assistant!} desktopPending={desktopPending} onOpenDesktop={() => void openDesktop()} /> : undefined}
+      sidebar={state.verified && !narrow ? <PersonalAssistantCharacterRail assistant={state.assistant!} /> : undefined}
       main={<div className={styles.main}>{state.verified ? nativeWorkspace : <PersonalAssistantState state={state} />}</div>}
       aside={state.verified && !narrow ? <VTabs className={computerStyles.rail} listClassName={computerStyles.tabs}
         contentClassName="min-h-0 flex-1 overflow-hidden" aria-label={copy.assistantRail} value={rightTab} onValueChange={setRightTab} items={[
