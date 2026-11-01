@@ -69,6 +69,10 @@ class TeamKnowledgeIdempotencyConflictError(TeamKnowledgeError):
     """Raised when an Idempotency-Key is reused with a different request."""
 
 
+class TeamKnowledgeACLConflictError(TeamKnowledgeError):
+    """Raised when an operator's exact ACL snapshot is stale."""
+
+
 class TeamKnowledgeAmbiguousKnowledgeBaseError(TeamKnowledgeError):
     """Raised when an unscoped knowledge base id matches multiple owners."""
 
@@ -596,6 +600,177 @@ def grant_knowledge_base_access(
         "changedPermissions": changed_permissions,
         "changed": bool(changed_permissions),
     }
+
+
+def _knowledge_acl_operator():
+    from .team_workflow.research_runtime.operator_authorization import current_server_operator
+    from .team_workflow.research_runtime.operator_permissions import operator_has_privileged_role
+
+    operator = current_server_operator()
+    if operator is None or not operator.operator_id or not operator_has_privileged_role(operator.roles):
+        raise TeamKnowledgePermissionError("A privileged server operator is required to manage knowledge ACLs.")
+    return operator
+
+
+def _operator_acl_snapshot(owner, base):
+    acl = _normalize_acl(base.get("acl"))
+    identity = {"ownerType": owner["ownerType"], "ownerId": owner["ownerId"],
+                "knowledgeBaseId": base["knowledgeBaseId"], "status": base.get("status", "active"),
+                "updatedAt": base.get("updatedAt", ""), "acl": acl}
+    fingerprint = hashlib.sha256(json.dumps(identity, ensure_ascii=False, sort_keys=True,
+        separators=(",", ":"), allow_nan=False).encode("utf-8")).hexdigest()
+    return {**identity, "scopedKnowledgeBaseId": _owner_scoped_knowledge_base_id(owner, base["knowledgeBaseId"]),
+            "fingerprint": fingerprint, "untrustedContent": True}
+
+
+def _operator_acl_base(knowledge_base_id):
+    owner, base = _require_base_with_owner(knowledge_base_id)
+    if (not isinstance(knowledge_base_id, str) or knowledge_base_id not in
+            {base["knowledgeBaseId"], _owner_scoped_knowledge_base_id(owner, base["knowledgeBaseId"])}):
+        raise TeamKnowledgeError("Use the exact knowledge base reference; aliases are not accepted.")
+    return owner, base
+
+
+def _existing_operator_acl_base(knowledge_base_id, snapshot):
+    """Resolve scoped/legacy references from existing metadata without hydration."""
+    owner_type, owner_id, base_id = _parse_owner_scoped_knowledge_base_id(knowledge_base_id)
+    owners = []
+    for kind in ([owner_type] if owner_type else ["team", "agent"]):
+        plural, field, id_key = ("teams", "teams", "teamId") if kind == "team" else ("agents", "agents", "agentId")
+        state = snapshot.read_json(snapshot.path(plural, plural + ".json"), strict=True)
+        rows = state.get(field)
+        if (not isinstance(rows, list) or len(rows) > 10000 or any(not isinstance(row, dict) for row in rows)
+                or any(not isinstance(row.get(id_key), str) or _safe_token(row[id_key], default="", max_length=128) != row[id_key] for row in rows)
+                or len({row[id_key] for row in rows}) != len(rows)):
+            raise ValueError("Knowledge owner authority unavailable")
+        for row in rows:
+            if owner_id and row[id_key] != owner_id:
+                continue
+            owners.append({"ownerType": kind, "ownerId": row[id_key], kind: row})
+    matches = []
+    for owner in owners:
+        plural = "teams" if owner["ownerType"] == "team" else "agents"
+        path = snapshot.path(plural, owner["ownerId"], "knowledge", "knowledge_bases.json")
+        if not owner_type and not path.exists():
+            # Not every registered owner has a library. Missing the explicitly
+            # addressed library is an unavailable authority, never an empty ACL.
+            continue
+        state = snapshot.read_json(path, strict=True, max_bytes=8_000_000)
+        bases = state.get("knowledgeBases")
+        if (not isinstance(bases, list) or len(bases) > 10000
+                or any(not isinstance(base, dict) or not isinstance(base.get("knowledgeBaseId"), str) for base in bases)
+                or len({base["knowledgeBaseId"] for base in bases}) != len(bases)):
+            raise ValueError("Knowledge base authority unavailable")
+        for base in bases:
+            if base["knowledgeBaseId"] == base_id:
+                if (base.get("ownerType", owner["ownerType"]) != owner["ownerType"]
+                        or base.get("ownerId", owner["ownerId"]) != owner["ownerId"]):
+                    raise ValueError("Knowledge owner binding changed")
+                acl = base.get("acl", {})
+                if (not isinstance(acl, dict) or any(key in acl and not isinstance(acl[key], str)
+                        for key in ("read", "propose", "review")) or not isinstance(acl.get("grants", {}), dict)):
+                    raise ValueError("Knowledge ACL authority unavailable")
+                if any(not isinstance(ids, list) or any(not isinstance(aid, str) for aid in ids)
+                       for ids in acl.get("grants", {}).values()):
+                    raise ValueError("Knowledge ACL grants unavailable")
+                matches.append((owner, base))
+    snapshot.verify_workspace()
+    if len(matches) > 1:
+        raise TeamKnowledgeAmbiguousKnowledgeBaseError("Use scopedKnowledgeBaseId for an ambiguous library.")
+    if not matches:
+        raise TeamKnowledgeNotFoundError("Knowledge base not found.")
+    owner, base = matches[0]
+    if knowledge_base_id not in {base["knowledgeBaseId"], _owner_scoped_knowledge_base_id(owner, base["knowledgeBaseId"])}:
+        raise TeamKnowledgeError("Use the exact knowledge base reference.")
+    return owner, base
+
+
+def read_operator_knowledge_base_acl(knowledge_base_id: str, *, existing_snapshot=None) -> dict[str, Any]:
+    """Read ACL metadata as the authenticated operator, never as an Agent."""
+    _knowledge_acl_operator()
+    if existing_snapshot is None:
+        from .external_management.state_snapshot import ExistingStateSnapshot
+        existing_snapshot = ExistingStateSnapshot(PROJECT_ROOT, agent_directory_service, pin_workspace=True)
+    with _LOCK:
+        owner, base = _existing_operator_acl_base(knowledge_base_id, existing_snapshot)
+        result = _operator_acl_snapshot(owner, base)
+        existing_snapshot.verify_workspace()
+        return result
+
+
+def mutate_operator_knowledge_base_acl(knowledge_base_id: str, target_agent_id: str, *,
+        permissions: list[str], expected_acl_fingerprint: str, revoke: bool = False) -> dict[str, Any]:
+    """Keep active-target admission stable against native Agent archival."""
+    _knowledge_acl_operator()
+    with agent_directory_service.agent_session_lifecycle_transaction():
+        return _mutate_operator_knowledge_base_acl(knowledge_base_id, target_agent_id,
+            permissions=permissions, expected_acl_fingerprint=expected_acl_fingerprint, revoke=revoke)
+
+
+def _mutate_operator_knowledge_base_acl(knowledge_base_id: str, target_agent_id: str, *,
+        permissions: list[str], expected_acl_fingerprint: str, revoke: bool = False) -> dict[str, Any]:
+    """Change explicit grants with process-local CAS and operator attribution.
+
+    Agent admission and reviewer rules remain in grant_knowledge_base_access.
+    This separate control-plane owner cannot be reached by supplying actor IDs.
+    """
+    import re
+
+    operator = _knowledge_acl_operator()
+    if (type(revoke) is not bool or not isinstance(target_agent_id, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}", target_agent_id)
+            or not isinstance(permissions, list) or not permissions or len(permissions) > 3
+            or any(type(item) is not str or item not in {"read", "propose", "review"} for item in permissions)
+            or len(permissions) != len(set(permissions))
+            or not isinstance(expected_acl_fingerprint, str)
+            or not re.fullmatch(r"[a-f0-9]{64}", expected_acl_fingerprint)):
+        raise TeamKnowledgeError("Explicit knowledge ACL permissions and fingerprint are required.")
+    # Preserve native lock ordering: Agent reads precede the knowledge lock.
+    # Revocation may remove orphaned grants after the target was archived/deleted.
+    if not revoke:
+        target_agent = _require_agent(target_agent_id)
+        if target_agent.get("status") != "active":
+            raise TeamKnowledgeError("Knowledge ACL grants require an active target Agent.")
+    owner, base = _operator_acl_base(knowledge_base_id)
+    with _LOCK:
+        state = _load_bases_state_for_owner(owner)
+        target = _find_by_id(state.get("knowledgeBases") or [], "knowledgeBaseId", base["knowledgeBaseId"])
+        if target is None:
+            raise TeamKnowledgeNotFoundError("Knowledge base not found.")
+        before = _operator_acl_snapshot(owner, target)
+        if before["fingerprint"] != expected_acl_fingerprint:
+            raise TeamKnowledgeACLConflictError("Knowledge ACL changed; refresh its fingerprint.")
+        if before["status"] != "active":
+            raise TeamKnowledgeError("Archived knowledge bases are read-only.")
+        acl = _normalize_acl(target.get("acl"))
+        changed = []
+        for permission in permissions:
+            grants = list(acl["grants"][permission])
+            if revoke and target_agent_id in grants:
+                grants.remove(target_agent_id)
+                changed.append(permission)
+            elif not revoke and target_agent_id not in grants:
+                grants.append(target_agent_id)
+                changed.append(permission)
+            acl["grants"][permission] = _unique_strings(grants)
+        if changed:
+            target["acl"] = acl
+            target["updatedAt"] = state["updatedAt"] = utc_now_iso()
+            _save_bases_state_for_owner(owner, state)
+            action = "knowledge_base.operator_access_revoked" if revoke else "knowledge_base.operator_access_granted"
+            after = _operator_acl_snapshot(owner, target)
+            _append_jsonl(_audit_path_for_owner(owner), {
+                "auditId": _new_event_id("kaudit"), "action": action, "createdAt": target["updatedAt"],
+                "actorAgentId": "", "actorOperatorId": operator.operator_id,
+                "payload": {"ownerType": owner["ownerType"], "ownerId": owner["ownerId"],
+                    "knowledgeBaseId": base["knowledgeBaseId"], "targetAgentId": target_agent_id,
+                    "permissions": changed, "previousFingerprint": before["fingerprint"], "fingerprint": after["fingerprint"]}})
+        result = _operator_acl_snapshot(owner, target)
+    if changed:
+        _record_event(action, owner, base["knowledgeBaseId"],
+            fields={"actorOperatorId": operator.operator_id, "targetAgentId": target_agent_id,
+                    "permissions": changed})
+    return result
 
 
 def create_agent_knowledge_base(

@@ -128,6 +128,18 @@ class NativeAgentGateway:
         except (OSError, ValueError, TypeError):
             raise ManagementError("TASK_INDEX_UNAVAILABLE", 503) from None
 
+    def read_runtime_operations(self, query):
+        from .runtime_operations import read_operations
+        return read_operations(self, query)
+
+    def read_runtime_operation(self, query):
+        from .runtime_operations import read_operation
+        return read_operation(self, **query.model_dump())
+
+    def runtime_command(self, parameters, marker):
+        from .runtime_operations import command
+        return command(self, parameters, request_id=marker["requestKey"])
+
     def read_source(self, query):
         from core.web.services.personal_assistant_project import workspace
         from .contracts import _SOURCE_REDACTION

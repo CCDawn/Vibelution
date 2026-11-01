@@ -1,0 +1,692 @@
+"""Metadata-only runtime discovery and delegation to the original command owners.
+
+No read repairs an index, hydrates a Session, or interprets task content. Version
+fingerprints on owners without CAS are preflight checks, never atomic fences.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+import time
+from pathlib import Path
+
+from .service import ManagementError
+
+KINDS = ("session_turn", "runtime_task", "external_task", "team_run", "supervised_run",
+         "self_evolution_run", "research_run")
+_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}\Z")
+_STATUSES = frozenset({"idle", "created", "queued", "sent", "running", "waiting", "waiting_human",
+    "waiting_external", "awaiting_approval", "paused", "pausing", "pause_requested", "stopping",
+    "cancelling", "stop_unconfirmed", "done", "completed", "succeeded", "success", "failed",
+    "error", "stopped", "cancelled", "canceled", "blocked", "closed", "dropped", "exited",
+    "incomplete", "stale", "superseded", "timed_out", "timeout", "budget_exhausted",
+    "reconciliation_required", "archived", "needs_continue", "paused_limit", "partial", "settled"})
+_TERMINAL = _STATUSES - {"idle", "created", "queued", "sent", "running", "waiting", "waiting_human",
+    "waiting_external", "awaiting_approval", "paused", "pausing", "pause_requested", "stopping",
+    "cancelling", "stop_unconfirmed"}
+_TERMINAL_BY_KIND = {"team_run": {"completed", "failed", "stopped"},
+    "external_task": {"succeeded", "failed", "cancelled", "timed_out"},
+    "research_run": {"succeeded", "failed", "cancelled", "archived"}}
+_KNOWN_BY_KIND = {
+    "runtime_task": {"queued", "sent", "running", "idle", "blocked", "canceled", "cancelled", "closed",
+        "completed", "dropped", "error", "exited", "failed", "incomplete", "stale", "stopped",
+        "superseded", "timed_out", "timeout"},
+    "external_task": {"queued", "running", "awaiting_approval", "cancelling", "stop_unconfirmed",
+        "succeeded", "failed", "cancelled", "timed_out"},
+    "team_run": {"running", "waiting", "completed", "failed", "stopped"},
+    "supervised_run": {"queued", "running", "stopping", "paused", "done", "failed", "cancelled"},
+    "self_evolution_run": {"queued", "running", "stopping", "paused", "done", "failed", "cancelled"},
+    "research_run": {"created", "running", "waiting_human", "blocked", "paused", "reconciliation_required",
+        "succeeded", "failed", "cancelled", "archived"}}
+_REFS = ("session_id", "team_id", "flow_id")
+_MAX_FILES = 10000
+_MAX_BYTES = 16 * 1024 * 1024
+
+
+def _token(value):
+    if not isinstance(value, str) or not _TOKEN.fullmatch(value):
+        raise ValueError("Invalid metadata identity")
+    return value
+
+
+def _parameters(value):
+    return value.model_dump() if hasattr(value, "model_dump") else dict(value)
+
+
+def _reference(kind, resource_id, refs):
+    try:
+        if kind not in KINDS or set(refs) - set(_REFS):
+            raise ValueError("Unknown operation reference")
+        _token(resource_id)
+        refs = {key: value for key, value in refs.items() if value not in (None, "")}
+        for value in refs.values():
+            _token(value)
+        required, allowed = ({"session_id"}, {"session_id"}) if kind == "session_turn" else (
+            ({"team_id"}, {"team_id", "flow_id"}) if kind == "team_run" else (
+            ({"team_id", "flow_id"}, {"team_id", "flow_id"}) if kind == "research_run" else (set(), set())))
+        if not required <= set(refs) or set(refs) - allowed:
+            raise ValueError("Invalid operation reference")
+        return refs
+    except (ValueError, TypeError):
+        raise ManagementError("INVALID_INPUT", 422) from None
+
+
+def _fingerprint(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=True).encode()).hexdigest()
+
+
+def _operator_context():
+    from core.web.services.team_workflow.research_runtime.operator_authorization import current_server_operator
+    from core.web.services.team_workflow.research_runtime.operator_permissions import operator_has_privileged_role
+    operator = current_server_operator()
+    return operator if operator and operator.operator_id and operator_has_privileged_role(operator.roles) else None
+
+
+def _project(kind, raw):
+    """Closed projection: even values in metadata columns must satisfy grammar."""
+    key = "taskId" if kind in {"runtime_task", "external_task"} else "id" if kind == "team_run" else "runId"
+    rid = _token(raw.get(key))
+    if any(key in raw and type(raw[key]) is not bool for key in ("pauseRequested", "stopRequested")):
+        raise ValueError("Invalid native control flag")
+    if kind == "runtime_task" and raw.get("kind", "cli_agent") not in {"cli_agent", "child_session", "research_task"}:
+        raise ValueError("Unknown native task kind")
+    if kind == "runtime_task" and raw.get("stopInitiator") not in (None, "", "user", "model"):
+        raise ValueError("Invalid native stop initiator")
+    status = raw.get("status")
+    if not isinstance(status, str) or status not in _KNOWN_BY_KIND.get(kind, _STATUSES):
+        status = "unknown"
+    elif kind in {"session_turn", "supervised_run", "self_evolution_run"} and (
+            raw.get("finishedAt") or raw.get("endedAt")) and status not in _TERMINAL:
+        status = "settled"
+    result = {"kind": kind, "resourceId": rid, "status": status,
+              "agentId": "", "sessionId": "", "teamId": "", "flowId": ""}
+    for field in ("agentId", "sessionId", "teamId", "flowId"):
+        value = raw.get(field) or ""
+        if kind == "team_run" and field == "flowId":
+            value = (raw.get("flow") or {}).get("id") or ""
+        if value:
+            result[field] = _token(value)
+    if kind == "session_turn" and not result.get("sessionId"):
+        raise ValueError("Missing Session identity")
+    if kind in {"team_run", "research_run"} and not all(result.get(key) for key in ("teamId", "flowId")):
+        raise ValueError("Missing workflow identity")
+    commands = []
+    if (kind in {"session_turn", "runtime_task"} and status != "unknown" and status not in _TERMINAL
+            and not raw.get("stopRequested") and not raw.get("stopInitiator")
+            and (kind != "session_turn" or raw.get("_liveControl") is True)):
+        commands = ["stop"]
+    elif kind == "team_run":
+        if status not in {"completed", "stopped"} and not raw.get("stopRequested"):
+            commands.append("stop")
+        if not raw.get("_recoveryParent"):
+            if status == "waiting":
+                commands.append("confirm")
+            if status == "failed" and not raw.get("stopRequested"):
+                recovery = raw.get("recovery") or {}
+                if recovery.get("status") not in {"repairing", "awaiting_deployment"}:
+                    commands.append("retry")
+    elif kind in {"supervised_run", "self_evolution_run"} and status in {"queued", "running", "paused"}:
+        commands.append("stop")
+        commands.append("resume" if status == "paused" or raw.get("pauseRequested") else "pause")
+    elif kind == "external_task" and raw.get("_operatorControl") and status in {
+            "queued", "running", "awaiting_approval", "cancelling", "stop_unconfirmed"}:
+        commands.append("stop")
+    elif kind == "research_run" and raw.get("_operatorControl") and status in {
+            "created", "running", "waiting_human", "blocked", "paused", "reconciliation_required"}:
+        commands.append("stop")
+        if status == "paused":
+            commands.append("resume")
+        elif status in {"running", "waiting_human"} and raw.get("_hasAttempts"):
+            commands.append("pause")
+    result["commands"] = commands
+    if kind in {"team_run", "external_task", "research_run"}:
+        revision = raw.get("revision")
+        if type(revision) is not int or revision < 0:
+            raise ValueError("Invalid native version")
+        result["revision"] = str(revision)
+    else:
+        # Include control-changing facts, never a prompt, summary, or transcript.
+        result["revision"] = _fingerprint([result, {key: raw.get(key) for key in (
+            "updatedAt", "pauseRequested", "stopRequested", "stopInitiator", "finishedAt")}])
+    return result
+
+
+def _json(path, max_bytes=2 * 1024 * 1024):
+    from core.assistant_runtime.migration_io import read_stable_file, strict_json
+    raw = read_stable_file(Path(path), max_bytes).raw
+    row = strict_json(raw)
+    if not isinstance(row, dict):
+        raise ValueError("Invalid native metadata")
+    return row, len(raw)
+
+
+def _scan(folder, *, key, prefix="", budget=None):
+    """Read all existing snapshots, including unindexed rows, without repair."""
+    from core.assistant_runtime.migration_io import check_path, path_identity
+    folder = check_path(Path(folder))
+    before = path_identity(folder)
+    rows, paths, complete = [], [], True
+    budget = [_MAX_FILES, _MAX_BYTES] if budget is None else budget
+    for visited, path in enumerate(folder.iterdir()):
+        if visited >= _MAX_FILES * 3:
+            complete = False
+            break
+        if path.name.endswith(".json") and path.name.startswith(prefix) and not path.name.startswith("_"):
+            paths.append(path)
+            if len(paths) > budget[0]:
+                complete = False
+                break
+    paths = sorted(paths)[:budget[0]]
+    for path in paths:
+        if budget[1] <= 0:
+            complete = False
+            break
+        budget[0] -= 1
+        try:
+            allowance = min(2 * 1024 * 1024, budget[1])
+            # Charge corrupt records too; invalid JSON must not bypass the
+            # per-source byte budget and force thousands of full-size reads.
+            budget[1] -= min(path.stat().st_size, allowance)
+            row, _ = _json(path, allowance)
+            if _token(row.get(key)) != path.stem:
+                raise ValueError("Snapshot identity mismatch")
+            rows.append(row)
+        except (OSError, ValueError, TypeError):
+            complete = False
+    return rows, complete and path_identity(folder) == before
+
+
+def _root(gateway, *owners):
+    if any(Path(owner.PROJECT_ROOT).resolve() != gateway.project_root for owner in owners):
+        raise ManagementError("TARGET_BINDING_CHANGED", 409)
+
+
+def _work_store(gateway):
+    from core.web.services import session_service
+    from core.infrastructure import developer_sandbox
+    from vibelution_storage import resolve_project_runtime_home
+    _root(gateway, session_service)
+    expected = resolve_project_runtime_home(gateway.project_root) / "runtime-manager" / "work_runs"
+    if developer_sandbox.is_developer_mode_enabled():
+        sandbox = developer_sandbox.sandbox_root(gateway.project_root, ensure=False)
+        if sandbox is None:
+            raise ValueError("Missing runtime authority")
+        expected = sandbox / ".runtime" / "runtime-manager" / "work_runs"
+    store = session_service._WORK_RUN_STORE
+    if Path(store.root).resolve() != expected.resolve():
+        raise ValueError("Runtime authority mismatch")
+    from core.assistant_runtime.migration_io import check_path
+    check_path(Path(store.root))
+    return store
+
+
+def _sessions(gateway):
+    from core.web.services import session_service as sessions
+    store = _work_store(gateway)
+    try:
+        persisted, _ = _scan(store.runs_dir("chat_turn"), key="runId")
+    except (OSError, ValueError):
+        persisted = []
+    by_id = {row["runId"]: {**row, "_liveControl": False} for row in persisted}
+    with sessions._RUNNING_SESSIONS_LOCK:
+        live = [(sid, sessions._SESSION_ACTIVE_TURN_IDS.get(sid)) for sid in sessions._RUNNING_SESSION_IDS]
+    for sid, turn_id in live:
+        controller = sessions._get_session_turn_control(sid)
+        if controller is None or controller.turn_id != turn_id:
+            continue
+        state = controller.snapshot()
+        previous_status = by_id.get(turn_id, {}).get("status")
+        by_id[turn_id] = {**by_id.get(turn_id, {}), "runId": turn_id, "sessionId": sid,
+            "status": "stopping" if state.get("stopRequested") else previous_status if previous_status in {"queued", "running"} else "running",
+            "stopRequested": bool(state.get("stopRequested")), "finishedAt": "", "endedAt": "", "_liveControl": True}
+    # No native authority certifies a global atomic Session/queued snapshot.
+    return list(by_id.values()), False
+
+
+def _runtime_store(gateway):
+    from core.web.services import runtime_task_registry as registry
+    from vibelution_storage import resolve_project_runtime_home
+    _root(gateway, registry)
+    store = registry.default_store()
+    expected = resolve_project_runtime_home(gateway.project_root) / registry.STORE_DIR_NAME
+    if store.root.resolve() != expected.resolve():
+        raise ValueError("Task authority mismatch")
+    from core.assistant_runtime.migration_io import check_path
+    check_path(store.root)
+    return store
+
+
+def _runtime_tasks(gateway):
+    return _scan(_runtime_store(gateway).root, key="taskId")
+
+
+def _external_store(gateway):
+    from core.web.services.external_agent.store import ExternalAgentTaskStore
+    from vibelution_storage import resolve_project_runtime_home
+    from core.assistant_runtime.migration_io import check_path
+    authority = resolve_project_runtime_home(gateway.project_root) / "external_agents"
+    check_path(authority)
+    return ExternalAgentTaskStore(authority)
+
+
+def _external_tasks(gateway):
+    store = _external_store(gateway)
+    # The native list silently skips corrupt records; scan its whole namespace.
+    rows, complete = _scan(store.tasks_dir, key="taskId", prefix="eat-")
+    return [{**row, "_operatorControl": _operator_context() is not None} for row in rows], complete
+
+
+def _team_context(gateway):
+    from core.web.services import team_service
+    from .state_snapshot import ExistingStateSnapshot
+    _root(gateway, team_service)
+    snapshot = ExistingStateSnapshot(gateway.project_root, gateway._owners(), pin_workspace=True)
+    root = snapshot.path("teams")
+    index, _ = _json(root / "teams.json")
+    teams = index.get("teams")
+    if not isinstance(teams, list):
+        raise ValueError("Missing Team authority")
+    if len(teams) > _MAX_FILES:
+        raise ValueError("Team authority too large")
+    ids = [_token(team.get("teamId")) for team in teams]
+    if len(ids) != len(set(ids)):
+        raise ValueError("Ambiguous Team authority")
+    snapshot.verify_workspace()
+    return snapshot, root, ids
+
+
+def _team_runs(gateway):
+    snapshot, root, team_ids = _team_context(gateway)
+    rows, complete, budget = [], True, [_MAX_FILES, _MAX_BYTES]
+    # Discover files even if an old bounded per-Team list would omit them.
+    for tid in team_ids:
+        folder = root / tid / "generic-workflows" / "runs"
+        if not folder.exists():
+            continue
+        items, found_all = _scan(folder, key="id", budget=budget)
+        complete = complete and found_all
+        for row in items:
+            if row.get("teamId") != tid:
+                complete = False
+            else:
+                rows.append(row)
+    snapshot.verify_workspace()
+    return rows, complete
+
+
+def _managed_runs(gateway, kind):
+    native_kind = {"supervised_run": "supervised", "self_evolution_run": "self"}[kind]
+    store = _work_store(gateway)
+    rows, _ = _scan(store.runs_dir(native_kind), key="runId")
+    # A backend's durable directory cannot certify the manager's live slots.
+    return rows, False
+
+
+def _research_store(gateway):
+    from core.web.services.team_workflow.research_runtime import formal_read_runtime, paths
+    _root(gateway, paths)
+    store = formal_read_runtime.get_formal_read_store()
+    if Path(store.path).resolve() != paths.workflow_ledger_path().resolve():
+        raise ValueError("Research authority mismatch")
+    from core.assistant_runtime.migration_io import check_path
+    check_path(paths.workflow_ledger_path())
+    return store
+
+
+def _research_runs(gateway):
+    rows = _research_metadata(gateway)
+    return rows[:_MAX_FILES], len(rows) <= _MAX_FILES
+
+
+def _research_metadata(gateway, resource_id=None):
+    store = _research_store(gateway)
+    # Repository-owned read connection; fixed columns contain no content.
+    suffix = " ORDER BY run_id LIMIT ?" if resource_id is None else " WHERE run_id=? LIMIT 2"
+    parameters = (_MAX_FILES + 1,) if resource_id is None else (resource_id,)
+    rows = store.read(lambda repo: repo.execute(
+        "SELECT run_id,team_id,workflow_id,status,run_version,"
+        "EXISTS(SELECT 1 FROM node_attempts a WHERE a.run_id=workflow_runs.run_id) "
+        "FROM workflow_runs" + suffix, parameters).fetchall())
+    control = False
+    if _operator_context() is not None:
+        try:
+            _research_command_owner(gateway)
+            control = True
+        except Exception:
+            pass  # Read coverage is independent of a configured write runtime.
+    return [{"runId": row[0], "teamId": row[1], "flowId": row[2], "status": row[3], "revision": row[4]}
+            | {"_hasAttempts": bool(row[5]), "_operatorControl": control}
+            for row in rows]
+
+
+def _research_command_owner(gateway):
+    from core.web.services.team_workflow.research_runtime import formal_write_runtime
+    store = _research_store(gateway)
+    owner = formal_write_runtime.get_command_service()
+    if (Path(formal_write_runtime.get_write_store().path).resolve() != Path(store.path).resolve()
+            or Path(owner._store.path).resolve() != Path(store.path).resolve()):
+        raise ManagementError("TARGET_BINDING_CHANGED", 409)
+    return owner
+
+
+def _research_command(gateway, before, action, expected, request_id):
+    from core.research.workflow.contracts import ActorRef, CommandRequest, WorkflowCommandKind
+    from core.research.workflow.ledger import CommandNotAllowedError, IdempotencyConflictError, RunVersionConflictError
+    from core.web.services.team_workflow.research_runtime import command_service as native
+    from core.web.services.team_workflow.research_runtime.formal_write_runtime import (
+        FormalWriteRuntimeUnavailable, WorkflowMigrationRequired)
+    operator = _operator_context()
+    if operator is None:
+        raise ManagementError("command_forbidden", 403)
+    try:
+        owner = _research_command_owner(gateway)
+    except (FormalWriteRuntimeUnavailable, WorkflowMigrationRequired) as exc:
+        raise ManagementError(exc.code, 503) from None
+    mapping = {"pause": WorkflowCommandKind.PAUSE_RUN, "resume": WorkflowCommandKind.RESUME_RUN,
+               "stop": WorkflowCommandKind.CANCEL_RUN}
+    request = CommandRequest(command_id="management-" + _fingerprint(request_id)[:32],
+        run_id=before["resourceId"], team_id=before["teamId"], command=mapping[action], node_id=None,
+        expected_run_version=int(expected), idempotency_key=request_id,
+        payload={"reason": "launcher_assistant_operator_control"},
+        requested_by=ActorRef("user", operator.operator_id), requested_at_ms=int(time.time() * 1000))
+    try:
+        receipt = owner.submit(request)
+    except native.CommandForbiddenError:
+        raise ManagementError("command_forbidden", 403) from None
+    except (RunVersionConflictError, IdempotencyConflictError, CommandNotAllowedError) as exc:
+        raise ManagementError(exc.code, 409) from None
+    except native.RunNotFoundError:
+        raise ManagementError("run_not_found", 404) from None
+    except native.TeamScopeMismatchError:
+        raise ManagementError("team_scope_mismatch", 404) from None
+    except native.WorkflowDefinitionUnavailableError as exc:
+        raise ManagementError(exc.code, 422) from None
+    except native.WorkflowCommandError:
+        raise ManagementError("unknown_command", 422) from None
+    if receipt.run_id != before["resourceId"] or receipt.idempotency_key != request_id or receipt.status != "accepted":
+        raise ManagementError("OPERATION_UNCONFIRMED", 503)
+    refs = {"team_id": before["teamId"], "flow_id": before["flowId"]}
+    return _after_command(gateway, "research_run", before["resourceId"], refs), True, action == "stop"
+
+
+def _external_command(gateway, before, expected):
+    from core.web.services.external_agent import service
+    from vibelution_storage import resolve_project_runtime_home
+    _external_store(gateway)
+    owner = service.get_default_service(gateway.project_root)
+    authority = resolve_project_runtime_home(gateway.project_root) / "external_agents"
+    if owner.store.root.resolve() != authority.resolve():
+        raise ManagementError("TARGET_BINDING_CHANGED", 409)
+    try:
+        result = owner.operator_cancel_task(task_id=before["resourceId"], expected_revision=int(expected))
+    except service.ExternalAgentAccessError as exc:
+        raise ManagementError(exc.code, 404 if exc.code == "TASK_NOT_FOUND" else 403) from None
+    except service.ExternalAgentConflictError as exc:
+        raise ManagementError(exc.code, 422 if exc.code == "INVALID_INPUT" else 409) from None
+    return _project("external_task", {**result, "_operatorControl": True}), result["accepted"], result["stopRequested"]
+
+
+def _source(gateway, kind):
+    return {"session_turn": _sessions, "runtime_task": _runtime_tasks, "external_task": _external_tasks,
+        "team_run": _team_runs, "research_run": _research_runs}.get(kind, lambda g: _managed_runs(g, kind))(gateway)
+
+
+def _snapshot(gateway, kind):
+    try:
+        raw, complete = _source(gateway, kind)
+    except Exception:
+        # Source-local failures never erase other owners or claim an idle source.
+        return [], {"source": kind, "state": "unavailable", "complete": False}
+    rows, seen = [], set()
+    for item in raw:
+        try:
+            projected = _project(kind, item)
+            identity = tuple(projected[key] for key in ("resourceId", "sessionId", "teamId", "flowId"))
+            if identity in seen:
+                raise ValueError("Ambiguous operation identity")
+            seen.add(identity)
+            if projected["status"] == "unknown":
+                complete = False
+            rows.append(projected)
+        except (ValueError, TypeError, AttributeError):
+            complete = False
+    return rows, {"source": kind, "state": "available" if complete else "partial", "complete": complete}
+
+
+def read_operations(gateway, query):
+    gateway._owners()
+    query = _parameters(query)
+    kind, offset, limit = query.get("kind"), query.get("offset", 0), query.get("limit", 3)
+    filter_state = query.get("state", "active")
+    if (set(query) - {"kind", "state", "offset", "limit"} or kind not in (None, "", *KINDS)
+            or filter_state not in {"active", "terminal", "all"}
+            or type(offset) is not int or not 0 <= offset <= 1000000 or type(limit) is not int or not 1 <= limit <= 3):
+        raise ManagementError("INVALID_INPUT", 422)
+    operations, coverage = [], []
+    for selected in (kind,) if kind else KINDS:
+        rows, source_state = _snapshot(gateway, selected)
+        operations.extend(row for row in rows if filter_state == "all" or
+            (row["status"] in _TERMINAL_BY_KIND.get(selected, _TERMINAL)) == (filter_state == "terminal"))
+        coverage.append(source_state)
+    operations.sort(key=lambda row: (row["kind"], row["resourceId"]))
+    result = {"operations": [], "offset": offset, "total": len(operations), "nextOffset": None, "coverage": coverage,
+        "complete": all(state["complete"] for state in coverage), "untrustedContent": True}
+    for row in operations[offset:offset + limit]:
+        candidate = {**result, "operations": [*result["operations"], row], "nextOffset": offset + limit}
+        if len(json.dumps(candidate, ensure_ascii=False)) > 3000 and result["operations"]:
+            break
+        result["operations"].append(row)
+    end = offset + len(result["operations"])
+    result["nextOffset"] = end if end < len(operations) else None
+    return result
+
+
+def _file_reference(value):
+    # A DTO token is also used by SQLite. File-backed owners additionally reject
+    # Windows aliases, alternate streams, and device names before path lookup.
+    devices = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+    if ":" in value or value.endswith(".") or value.split(".", 1)[0].upper() in devices:
+        raise ManagementError("INVALID_INPUT", 422)
+
+
+def _point_json(path, key, resource_id):
+    from core.assistant_runtime.migration_io import check_path
+    check_path(path.parent)
+    if not path.exists():
+        raise ManagementError("OPERATION_UNAVAILABLE", 404)
+    row, _ = _json(path)
+    if row.get(key) != resource_id:
+        raise ValueError("Native target identity mismatch")
+    return row
+
+
+def _session_target(gateway, resource_id, session_id):
+    from core.web.services import session_service as sessions
+    store = _work_store(gateway)
+    path = store.runs_dir("chat_turn") / (resource_id + ".json")
+    controller = sessions._get_session_turn_control(session_id)
+    with sessions._RUNNING_SESSIONS_LOCK:
+        live = session_id in sessions._RUNNING_SESSION_IDS and sessions._SESSION_ACTIVE_TURN_IDS.get(session_id) == resource_id
+    live = live and controller is not None and controller.turn_id == resource_id
+    if path.exists():
+        row = _point_json(path, "runId", resource_id)
+        if row.get("sessionId") != session_id:
+            raise ManagementError("OPERATION_UNAVAILABLE", 404)
+    elif live:
+        row = {"runId": resource_id, "sessionId": session_id}
+    else:
+        return _point_json(path, "runId", resource_id)
+    if live:
+        state = controller.snapshot()
+        previous = row.get("status")
+        row = {**row, "status": "stopping" if state.get("stopRequested") else previous if previous in ("queued", "running") else "running",
+               "stopRequested": bool(state.get("stopRequested")), "finishedAt": "", "endedAt": ""}
+    row["_liveControl"] = bool(live)
+    return row
+
+
+def _point_operation(gateway, kind, resource_id, refs):
+    if kind == "research_run":
+        rows = _research_metadata(gateway, resource_id)
+        if not rows:
+            raise ManagementError("OPERATION_UNAVAILABLE", 404)
+        if len(rows) != 1:
+            raise ValueError("Ambiguous research identity")
+        return rows[0]
+    if kind == "session_turn":
+        return _session_target(gateway, resource_id, refs["session_id"])
+    if kind == "runtime_task":
+        store = _runtime_store(gateway)
+        path = store.task_state_path(resource_id)
+        if path.stem != resource_id:
+            raise ManagementError("INVALID_INPUT", 422)
+        return _point_json(path, "taskId", resource_id)
+    if kind == "external_task":
+        store = _external_store(gateway)
+        return {**_point_json(store.task_path(resource_id), "taskId", resource_id),
+                "_operatorControl": _operator_context() is not None}
+    if kind == "team_run":
+        from core.web.services.team_workflow.generic import store
+        for value in (resource_id, *refs.values()):
+            store.token(value)
+        snapshot, root, team_ids = _team_context(gateway)
+        if refs["team_id"] not in team_ids:
+            raise ManagementError("OPERATION_UNAVAILABLE", 404)
+        row = _point_json(root / refs["team_id"] / "generic-workflows" / "runs" / (resource_id + ".json"), "id", resource_id)
+        snapshot.verify_workspace()
+        return row
+    store = _work_store(gateway)
+    native_kind = "supervised" if kind == "supervised_run" else "self"
+    return _point_json(store.runs_dir(native_kind) / (resource_id + ".json"), "runId", resource_id)
+
+
+def read_operation(gateway, kind, resource_id, **refs):
+    refs = _reference(kind, resource_id, refs)
+    if kind != "research_run":
+        for value in (resource_id, *refs.values()):
+            _file_reference(value)
+        if (kind == "runtime_task" and len(resource_id) > 120
+                or kind == "external_task" and not re.fullmatch(r"[A-Za-z0-9_-]+", resource_id)
+                or kind == "team_run" and any(len(value) > 96 for value in (resource_id, *refs.values()))):
+            raise ManagementError("INVALID_INPUT", 422)
+    gateway._owners()
+    try:
+        row = _project(kind, _point_operation(gateway, kind, resource_id, refs))
+    except ManagementError:
+        raise
+    except Exception:
+        raise ManagementError("OPERATION_SOURCE_UNAVAILABLE", 503) from None
+    if row["resourceId"] != resource_id or any(
+            row[{"session_id": "sessionId", "team_id": "teamId", "flow_id": "flowId"}[key]] != value for key, value in refs.items()):
+        raise ManagementError("OPERATION_UNAVAILABLE", 404)
+    return {"operation": row, "untrustedContent": True}
+
+
+def _after_command(gateway, kind, rid, refs):
+    try:
+        return read_operation(gateway, kind, rid, **refs)["operation"]
+    except Exception:
+        raise ManagementError("OPERATION_UNCONFIRMED", 503) from None
+
+
+def command(gateway, parameters, *, request_id=""):
+    parameters = _parameters(parameters)
+    if set(parameters) - {"kind", "resource_id", "command", "expected_revision", *_REFS}:
+        raise ManagementError("INVALID_INPUT", 422)
+    kind, rid, action = parameters.get("kind"), parameters.get("resource_id"), parameters.get("command")
+    refs = _reference(kind, rid, {key: parameters[key] for key in _REFS if key in parameters})
+    expected = parameters.get("expected_revision")
+    if not isinstance(expected, str) or not expected or len(expected) > 160 or action not in {"stop", "pause", "resume", "retry", "confirm"}:
+        raise ManagementError("INVALID_INPUT", 422)
+    if kind in {"research_run", "external_task"} and _operator_context() is None:
+        raise ManagementError("command_forbidden", 403)
+    if kind == "research_run":
+        if action not in {"pause", "resume", "stop"}:
+            raise ManagementError("COMMAND_UNAVAILABLE", 409)
+        if not expected.isdecimal():
+            raise ManagementError("INVALID_INPUT", 422)
+        try:
+            _token(request_id)
+        except ValueError:
+            raise ManagementError("INVALID_INPUT", 422) from None
+    before = read_operation(gateway, kind, rid, **refs)["operation"]
+    replay = kind == "research_run" and _research_store(gateway).get_command_by_idempotency(rid, request_id) is not None
+    if not replay and before["revision"] != expected:
+        raise ManagementError("STATE_CONFLICT", 409)
+    if not replay and action not in before["commands"]:
+        raise ManagementError("COMMAND_UNAVAILABLE", 409)
+    # Everything above is preflight and side-effect free. From here, an unknown
+    # exception is a lost acknowledgement, not permission to repeat the command.
+    try:
+        accepted, stop_requested = True, False
+        if kind == "session_turn":
+            from core.web.services import session_service as sessions
+            from core.web.services.session.control import request_stop_session_turn
+            controller = sessions._get_session_turn_control(refs["session_id"])
+            if controller is None or controller.turn_id != rid or not sessions._is_session_running(refs["session_id"]):
+                raise ManagementError("STATE_CONFLICT", 409)
+            try:
+                raw = request_stop_session_turn(refs["session_id"], expected_turn_id=rid, fast_ack=True, cascade=True)
+            except sessions.SessionBusyError:
+                raise ManagementError("STATE_CONFLICT", 409) from None
+            except sessions.SessionNotFoundError:
+                raise ManagementError("OPERATION_UNAVAILABLE", 404) from None
+            if raw.get("activeTurnId") != rid or raw.get("stopRequested") is not True:
+                raise ManagementError("OPERATION_UNCONFIRMED", 503)
+            stop_requested = True
+            after = _after_command(gateway, kind, rid, refs)
+        elif kind == "runtime_task":
+            from core.web.services import runtime_task_registry
+            from core.web.services.runtime_task_query_service import RuntimeTaskQueryService
+            raw = RuntimeTaskQueryService(runtime_task_registry.default_store()).stop_task(rid, initiator="user")
+            if raw is None:
+                raise ManagementError("OPERATION_UNCONFIRMED", 503)
+            accepted, stop_requested = raw.get("accepted") is True, raw.get("accepted") is True
+            after = _after_command(gateway, kind, rid, {})
+        elif kind == "team_run":
+            from core.web.services.team_workflow.generic import service, store
+            try:
+                raw = service.command_run(refs["team_id"], rid, {"action": action, "expectedRevision": int(expected)})
+            except store.Conflict:
+                raise ManagementError("STATE_CONFLICT", 409) from None
+            except store.NotFound:
+                raise ManagementError("OPERATION_UNAVAILABLE", 404) from None
+            except store.WorkflowError:
+                raise ManagementError("STATE_CONFLICT", 409) from None
+            after = _project(kind, raw)
+            stop_requested = action == "stop" and raw.get("stopRequested") is True
+        elif kind == "research_run":
+            after, accepted, stop_requested = _research_command(gateway, before, action, expected, request_id)
+        elif kind == "external_task":
+            after, accepted, stop_requested = _external_command(gateway, before, expected)
+        else:
+            from core.web.services import self_evolution_control_service, supervised_control_service
+            owner = supervised_control_service if kind == "supervised_run" else self_evolution_control_service
+            _root(gateway, owner)
+            methods = ({"pause": owner.request_pause_supervised_run, "resume": owner.request_resume_supervised_run,
+                        "stop": owner.request_stop_supervised_run} if kind == "supervised_run" else
+                       {"pause": owner.request_pause_self_evolution_run, "resume": owner.resume_self_evolution_run,
+                        "stop": owner.request_stop_self_evolution_run})
+            state_errors = ((owner.SupervisedRunBusyError, owner.SupervisedRunStateError) if kind == "supervised_run"
+                            else (owner.SelfEvolutionRunBusyError,))
+            not_found = owner.SupervisedRunNotFoundError if kind == "supervised_run" else owner.SelfEvolutionRunNotFoundError
+            invalid = owner.SupervisedRunValidationError if kind == "supervised_run" else owner.SelfEvolutionRunValidationError
+            try:
+                raw = methods[action](rid)
+            except state_errors:
+                raise ManagementError("STATE_CONFLICT", 409) from None
+            except not_found:
+                raise ManagementError("OPERATION_UNAVAILABLE", 404) from None
+            except invalid:
+                raise ManagementError("INVALID_INPUT", 422) from None
+            after = _project(kind, raw)
+            stop_requested = action == "stop" and (raw.get("stopRequested") is True or raw.get("status") in {"stopping", "cancelled"})
+        if any(after.get(key) != before.get(key) for key in ("kind", "resourceId", "agentId", "sessionId", "teamId", "flowId")):
+            raise ManagementError("OPERATION_UNCONFIRMED", 503)
+        return {"operation": after, "command": action, "accepted": accepted, "stopRequested": stop_requested,
+            "revisionCheck": "native_cas" if kind in {"team_run", "research_run"} else "preflight_only", "untrustedContent": True}
+    except ManagementError:
+        raise
+    except Exception:
+        raise ManagementError("OPERATION_UNCONFIRMED", 503) from None

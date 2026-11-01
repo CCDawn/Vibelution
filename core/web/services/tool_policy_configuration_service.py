@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+from copy import deepcopy
 from typing import Any
 
 from core.authorization.tool_authorization_service import resolve_enforced_authorization
@@ -48,21 +50,57 @@ def list_tool_policy_configurations() -> dict[str, Any]:
     return {"schemaVersion": 1, "items": sorted(grouped.values(), key=lambda item: item["policyId"])}
 
 
-def get_tool_policy_configuration(agent_id: str) -> dict[str, Any]:
-    agent = agent_directory_service.get_agent(agent_id)
+def _existing_agents(snapshot):
+    state = snapshot.read_json(snapshot.path("agents", "agents.json"), strict=True)
+    rows = state.get("agents")
+    if (not isinstance(rows, list) or len(rows) > 100000 or any(not isinstance(row, dict) for row in rows)
+            or any(not isinstance(row.get("agentId"), str) or not row["agentId"] for row in rows)
+            or any(key in row and not isinstance(row[key], dict) for row in rows for key in ("toolPolicy", "metadata"))
+            or len({row["agentId"] for row in rows}) != len(rows)):
+        raise ToolPolicyConfigurationError("Existing Agent authority is unavailable")
+    return state, rows
+
+
+def _configuration_agent(agent_id: str, *, declared_policy: bool = False, existing_snapshot=None) -> dict[str, Any]:
+    if existing_snapshot is not None:
+        state, rows = _existing_agents(existing_snapshot)
+        agent = next((deepcopy(row) for row in rows if row["agentId"] == agent_id), None)
+    else:
+        agent = agent_directory_service.get_agent(agent_id)
     if not agent:
         raise ToolPolicyConfigurationNotFoundError(f"Agent not found: {agent_id}")
+    if declared_policy:
+        # API Agent projections deliberately hide delegation-gated tools. An
+        # editor must preserve the persisted declaration rather than saving
+        # that effective runtime subset back as the owner's configuration.
+        state = state if existing_snapshot is not None else agent_directory_service.load_state()
+        raw = agent_directory_service._find_agent(state, agent_id)
+        if raw is None:
+            raise ToolPolicyConfigurationNotFoundError(f"Agent not found: {agent_id}")
+        policy_id = str(raw.get("toolPolicyId") or agent_directory_service.DEFAULT_TOOL_POLICY_ID)
+        source = raw.get("toolPolicy")
+        if not isinstance(source, dict):
+            source = agent_directory_service._tool_policies(state).get(policy_id)
+        if not isinstance(source, dict):
+            source = agent_directory_service.default_tool_policy(policy_id)
+        agent = {**agent, "toolPolicy": deepcopy(source), "toolPolicyId": policy_id,
+                 "metadata": deepcopy(raw.get("metadata") or {})}
+    return agent
+
+
+def get_tool_policy_configuration(agent_id: str, *, declared_policy: bool = False, existing_snapshot=None) -> dict[str, Any]:
+    agent = _configuration_agent(agent_id, declared_policy=declared_policy, existing_snapshot=existing_snapshot)
     policy = agent_directory_service.normalize_tool_policy(
         agent.get("toolPolicy") if isinstance(agent.get("toolPolicy"), dict) else {},
         str(agent.get("toolPolicyId") or ""),
     )
-    return _configuration_payload(agent, policy, proposed_policy=policy)
+    return _configuration_payload(agent, policy, proposed_policy=policy, declared_policy=declared_policy,
+                                  existing_snapshot=existing_snapshot)
 
 
-def validate_tool_policy_configuration(agent_id: str, policy: dict[str, Any]) -> dict[str, Any]:
-    agent = agent_directory_service.get_agent(agent_id)
-    if not agent:
-        raise ToolPolicyConfigurationNotFoundError(f"Agent not found: {agent_id}")
+def validate_tool_policy_configuration(agent_id: str, policy: dict[str, Any], *, declared_policy: bool = False,
+                                      existing_snapshot=None) -> dict[str, Any]:
+    agent = _configuration_agent(agent_id, declared_policy=declared_policy, existing_snapshot=existing_snapshot)
     current_policy = agent_directory_service.normalize_tool_policy(
         agent.get("toolPolicy") if isinstance(agent.get("toolPolicy"), dict) else {},
         str(agent.get("toolPolicyId") or ""),
@@ -72,7 +110,8 @@ def validate_tool_policy_configuration(agent_id: str, policy: dict[str, Any]) ->
         str(current_policy.get("policyId") or agent.get("toolPolicyId") or ""),
     )
     proposed["policyVersion"] = int(current_policy.get("policyVersion") or 1) + 1
-    return _configuration_payload(agent, current_policy, proposed_policy=proposed)
+    return _configuration_payload(agent, current_policy, proposed_policy=proposed, declared_policy=declared_policy,
+                                  existing_snapshot=existing_snapshot)
 
 
 def update_tool_policy_configuration(
@@ -82,23 +121,42 @@ def update_tool_policy_configuration(
     expected_agent_updated_at: str,
     expected_policy_fingerprint: str,
     confirmed: bool,
+    expected_registry_version: str | None = None,
+    expected_registry_fingerprint: str | None = None,
+    declared_policy: bool = False,
+    existing_snapshot=None,
 ) -> dict[str, Any]:
-    preview = validate_tool_policy_configuration(agent_id, policy)
-    if not preview["validation"]["valid"]:
-        raise ToolPolicyConfigurationError("; ".join(preview["validation"]["errors"]))
-    if preview["confirmation"]["required"] and not confirmed:
-        raise ToolPolicyConfigurationConfirmationRequired(preview["confirmation"]["summary"])
-    try:
-        agent_directory_service.update_agent_instance(
-            agent_id,
-            tool_policy=preview["proposedPolicy"],
-            expected_updated_at=expected_agent_updated_at,
-            expected_tool_policy_fingerprint=expected_policy_fingerprint,
-            confirm_shared_tool_policy=confirmed,
-        )
-    except agent_directory_service.AgentStateConflictError as exc:
-        raise ToolPolicyConfigurationConflictError(str(exc)) from exc
-    return get_tool_policy_configuration(agent_id)
+    with agent_directory_service._STATE_LOCK if declared_policy else nullcontext():
+        preview = validate_tool_policy_configuration(agent_id, policy, declared_policy=declared_policy,
+                                                     existing_snapshot=existing_snapshot)
+        if (expected_registry_version is not None and preview["registryVersion"] != expected_registry_version
+                or expected_registry_fingerprint is not None and preview["registryFingerprint"] != expected_registry_fingerprint):
+            raise ToolPolicyConfigurationConflictError("Tool Registry changed after this editor was opened. Refresh and retry.")
+        if not preview["validation"]["valid"]:
+            raise ToolPolicyConfigurationError("; ".join(preview["validation"]["errors"]))
+        if preview["confirmation"]["required"] and not confirmed:
+            raise ToolPolicyConfigurationConfirmationRequired(preview["confirmation"]["summary"])
+        native_fingerprint = expected_policy_fingerprint
+        if declared_policy:
+            if preview["policyFingerprint"] != expected_policy_fingerprint:
+                raise ToolPolicyConfigurationConflictError("Declared ToolPolicy changed. Refresh and retry.")
+            # The existing directory mutator CAS is explicitly over its
+            # effective projection. Translate only inside the same RLock after
+            # checking the declared snapshot; never widen delegation rights.
+            raw = agent_directory_service._find_agent(agent_directory_service.load_state(), agent_id)
+            native_fingerprint = agent_directory_service.tool_policy_fingerprint(
+                agent_directory_service._tool_policy_for_agent(raw))
+        try:
+            agent_directory_service.update_agent_instance(
+                agent_id,
+                tool_policy=preview["proposedPolicy"],
+                expected_updated_at=expected_agent_updated_at,
+                expected_tool_policy_fingerprint=native_fingerprint,
+                confirm_shared_tool_policy=confirmed,
+            )
+        except agent_directory_service.AgentStateConflictError as exc:
+            raise ToolPolicyConfigurationConflictError(str(exc)) from exc
+        return get_tool_policy_configuration(agent_id, declared_policy=declared_policy, existing_snapshot=existing_snapshot)
 
 
 def _configuration_payload(
@@ -106,8 +164,11 @@ def _configuration_payload(
     current_policy: dict[str, Any],
     *,
     proposed_policy: dict[str, Any],
+    declared_policy: bool = False,
+    existing_snapshot=None,
 ) -> dict[str, Any]:
-    registry = tool_registry_service.get_tool_registry()
+    registry = (tool_registry_service.get_tool_registry() if existing_snapshot is None
+                else tool_registry_service.get_existing_tool_registry(existing_snapshot))
     registry_items = [item for item in list(registry.get("tools") or []) if isinstance(item, dict)]
     registry_by_name = {str(item.get("name") or "").strip(): item for item in registry_items if str(item.get("name") or "").strip()}
     configured_names = _ordered_unique(
@@ -115,6 +176,8 @@ def _configuration_payload(
             *list(proposed_policy.get("allowedTools") or []),
             *list(proposed_policy.get("blockedTools") or []),
             *list(proposed_policy.get("preferredTools") or []),
+            *list(proposed_policy.get("perToolRules") or {}),
+            *list(proposed_policy.get("approvalOverrides") or {}),
         ]
     )
     unknown = [name for name in configured_names if name not in registry_by_name]
@@ -132,6 +195,9 @@ def _configuration_payload(
     if invalid_preferred:
         errors.append("Preferred tools must also be allowed: " + ", ".join(invalid_preferred[:12]))
     preview_policy = _policy_with_known_tools(proposed_policy, registry_by_name)
+    if declared_policy:
+        preview_policy = agent_directory_service._effective_agent_tool_policy(
+            preview_policy, (agent.get("metadata") or {}).get("delegationPolicy"))
     preview_decision = resolve_enforced_authorization(
         runtime={
             "agentId": str(agent.get("agentId") or "").strip(),
@@ -153,9 +219,11 @@ def _configuration_payload(
         if reason.code == ToolDenyCode.AGENT_BLOCKED
     ]
     policy_id = str(current_policy.get("policyId") or agent.get("toolPolicyId") or "").strip()
+    agents = (agent_directory_service.list_agents(include_archived=False, detail="full") if existing_snapshot is None
+              else [row for row in _existing_agents(existing_snapshot)[1] if row.get("status") == "active"])
     affected_agents = [
         _agent_identity(item)
-        for item in agent_directory_service.list_agents(include_archived=False, detail="full")
+        for item in agents
         if str(item.get("toolPolicyId") or "").strip() == policy_id
     ]
     newly_allowed = set(proposed_policy.get("allowedTools") or []) - set(current_policy.get("allowedTools") or [])
@@ -180,6 +248,7 @@ def _configuration_payload(
         "policyFingerprint": agent_directory_service.tool_policy_fingerprint(current_policy),
         "proposedPolicyFingerprint": agent_directory_service.tool_policy_fingerprint(proposed_policy),
         "registryVersion": str(registry.get("registryVersion") or ""),
+        "registryFingerprint": str(registry.get("registryFingerprint") or ""),
         "currentPolicy": current_policy,
         "proposedPolicy": proposed_policy,
         "validation": {"valid": not errors, "errors": errors, "warnings": warnings},

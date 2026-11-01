@@ -740,6 +740,45 @@ class ExternalAgentTaskService:
         self._record_event("external_agent.task.cancel_requested", record)
         return self._public_task(record)
 
+    def operator_cancel_task(self, *, task_id: str, expected_revision: int) -> dict[str, Any]:
+        """Cancel across owners using the authenticated server operator only.
+
+        The task owner capability remains private. This separate control entry
+        uses the existing stop/confirmation pipeline and returns metadata only.
+        Its revision check shares the process task lock with ordinary lifecycle
+        calls; it does not claim a cross-process atomic command fence.
+        """
+        from core.web.services.team_workflow.research_runtime.operator_authorization import require_server_operator
+        from core.web.services.team_workflow.research_runtime.operator_permissions import operator_has_privileged_role
+
+        try:
+            operator = require_server_operator()
+            if not operator_has_privileged_role(operator.roles):
+                raise PermissionError("command_forbidden")
+        except PermissionError:
+            raise ExternalAgentAccessError("Privileged server operator required.", code="COMMAND_FORBIDDEN") from None
+        if type(expected_revision) is not int or expected_revision < 1:
+            raise ExternalAgentConflictError("Invalid expected task revision.", code="INVALID_INPUT")
+        with self._task_lock(task_id):
+            try:
+                record = self.store.get_task(task_id)
+            except ExternalAgentTaskNotFoundError:
+                raise ExternalAgentAccessError("External task not found.", code="TASK_NOT_FOUND") from None
+            if record.get("revision") != expected_revision:
+                raise ExternalAgentConflictError("Task revision changed.", code="TASK_REVISION_CONFLICT")
+            accepted = record.get("status") not in TASK_TERMINAL_STATUSES
+            if accepted:
+                record = self._request_cancel_locked(record, terminal_status="cancelled", reason_code="operator_cancel_requested",
+                                                     strict_confirmation=True)
+            self._record_event("external_agent.task.operator_cancel_requested", record,
+                fields={"operatorId": operator.operator_id, "controlSource": "launcher_assistant",
+                        "operatorReasonCode": "operator_cancel_requested", "reasonCode": "operator_cancel_requested",
+                        "accepted": accepted})
+            return {"taskId": record["taskId"], "agentId": str(record.get("agentId") or ""),
+                    "sessionId": str(record.get("sessionId") or ""), "status": record["status"],
+                    "revision": record["revision"], "accepted": accepted,
+                    "stopRequested": accepted and (not record.get("sessionId") or bool(record.get("stopSignalSentAt")))}
+
     def heartbeat(
         self,
         *,
@@ -841,10 +880,17 @@ class ExternalAgentTaskService:
             return self._request_cancel_locked(self.store.get_task(record["taskId"]),
                 terminal_status=terminal_status, reason_code=reason_code)
 
-    def _request_cancel_locked(self, record, *, terminal_status, reason_code):
+    def _request_cancel_locked(self, record, *, terminal_status, reason_code, strict_confirmation=False):
         status = str(record.get("status") or "")
         if status in TASK_TERMINAL_STATUSES:
             return record
+        if strict_confirmation and record.get("operatorStopConfirmation") is not True:
+            record = self._transition(record["taskId"], status=status,
+                expected_revision=int(record["revision"]), reason_code=reason_code,
+                fields={"operatorStopConfirmation": True})
+        # The resident refresh/ordinary-owner retry must retain the stricter
+        # evidence contract after an operator has requested cancellation.
+        strict_confirmation = strict_confirmation or record.get("operatorStopConfirmation") is True
         session_id = str(record.get("sessionId") or "")
         turn_id = str(record.get("turnId") or "")
         if not session_id:
@@ -899,7 +945,16 @@ class ExternalAgentTaskService:
             include_secondary=False,
         )
         latest = self.store.get_task(record["taskId"])
-        if not self._session_running(detail):
+        confirmed = not self._session_running(detail)
+        if strict_confirmation:
+            phase = self._session_phase(detail)
+            if not phase and isinstance(detail, dict):
+                phase = str(detail.get("currentPhase") or "").strip().lower()
+            flags = [detail[key] for key in ("running", "isRunning")
+                     if type(detail.get(key)) is bool] if isinstance(detail, dict) else []
+            confirmed = (phase not in _RUNNING_PHASES and True not in flags and
+                         (phase in _TERMINAL_PHASES or phase in _RESUMABLE_PHASES or False in flags))
+        if confirmed:
             return self._transition(
                 latest["taskId"],
                 status=str(latest.get("cancellationTerminalStatus") or terminal_status),

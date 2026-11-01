@@ -8,6 +8,8 @@ repair, projection, canvas defaults, and chat-room helpers.
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -262,6 +264,15 @@ def assert_team_exists(team_id: str) -> str:
     return normalized_team_id
 
 
+class TeamStateConflictError(ValueError):
+    """Raised when the exact native Team record changed before mutation."""
+
+
+def team_record_fingerprint(team: dict[str, Any]) -> str:
+    return hashlib.sha256(json.dumps(team, ensure_ascii=False, sort_keys=True,
+        separators=(",", ":"), allow_nan=False).encode("utf-8")).hexdigest()
+
+
 def update_team(
     team_id: str,
     *,
@@ -270,6 +281,7 @@ def update_team(
     purpose: str | None = None,
     status: str | None = None,
     members: list[dict[str, Any]] | None = None,
+    expected_fingerprint: str | None = None,
 ) -> dict[str, Any]:
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
@@ -280,6 +292,8 @@ def update_team(
         team = s._find_team(state, normalized_team_id)
         if team is None:
             raise s.TeamNotFoundError("Team not found.")
+        if expected_fingerprint is not None and team_record_fingerprint(team) != expected_fingerprint:
+            raise TeamStateConflictError("Team changed; refresh its fingerprint.")
         _reject_locked_team_update(team)
         if members is not None or status is not None:
             team_admission.assert_roster_mutation_allowed(normalized_team_id)

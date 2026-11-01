@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
@@ -27,6 +28,14 @@ from core.web.services.external_management.contracts import (
     LegacyObserverView, LegacyObserversResponse, LegacyReceiptsResponse, ActiveTasksResponse, SourceReadResponse, SourceSearchResponse,
     TeamKnowledgeResponse, TeamResultResponse, AgentDirectoryQuery, AgentDirectoryResponse, AgentPurgePreviewResponse,
 )
+from core.web.services.external_management.runtime_contracts import (
+    RuntimeOperationsQuery, RuntimeOperationsResponse, RuntimeOperationQuery, RuntimeOperationResponse, RuntimeKind,
+)
+from core.web.services.external_management.asset_contracts import (
+    TeamAssetQuery, TeamAssetResponse, ToolPolicyQuery, ToolPolicyResponse, KnowledgeACLQuery, KnowledgeACLResponse,
+)
+from core.web.services.external_management.flow_contracts import FlowListQuery, FlowListResponse, FlowReadQuery, FlowReadResponse
+from core.web.services.external_management.platform_actions import PLATFORM_ACTIONS
 from core.web.services.external_management.service import (
     ManagementError,
     ManagementService,
@@ -88,6 +97,81 @@ async def _call(operation, *args):
         raise HTTPException(status_code=409, detail={"code": "MANAGEMENT_BUSY"}) from None
     except Exception:  # noqa: BLE001 -- the transport exposes bounded errors, never filesystem or credential detail
         raise HTTPException(status_code=503, detail={"code": "MANAGEMENT_UNAVAILABLE"}) from None
+
+
+async def _operator_call(request, operation):
+    from core.web.services.team_workflow.research_runtime.operator_authorization import server_operator_scope_from_http
+    try:
+        with server_operator_scope_from_http(request):
+            return await _call(operation)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail={"code": "OPERATOR_CONTROL_REQUIRED"}) from None
+
+
+def _closed_query(request, model):
+    values = request.query_params
+    if set(values) - model.model_fields.keys() or len(values.multi_items()) != len(values):
+        raise HTTPException(status_code=422, detail={"code": "INVALID_INPUT"})
+    result = dict(values)
+    for key in ("offset", "limit"):
+        if key in result:
+            if not re.fullmatch(r"[0-9]{1,7}", result[key]):
+                raise HTTPException(status_code=422, detail={"code": "INVALID_INPUT"})
+            result[key] = int(result[key])
+    return result
+
+
+@router.get("/runtime/operations", response_model=RuntimeOperationsResponse)
+async def runtime_operations(request: Request, kind: RuntimeKind | None = None,
+                             state: Literal["active", "terminal", "all"] = "active", offset: int = 0, limit: int = 3):
+    _require_control(request)
+    query = _closed_query(request, RuntimeOperationsQuery)
+    return await _operator_call(request, lambda: _service().read_runtime(*_credentials(request), "list", query))
+
+
+@router.get("/runtime/operation", response_model=RuntimeOperationResponse)
+async def runtime_operation(request: Request, kind: RuntimeKind, resource_id: str,
+                            session_id: str = "", team_id: str = "", flow_id: str = ""):
+    _require_control(request)
+    query = _closed_query(request, RuntimeOperationQuery)
+    return await _operator_call(request, lambda: _service().read_runtime(*_credentials(request), "get", query))
+
+
+@router.get("/assets/team", response_model=TeamAssetResponse)
+async def read_team_asset(request: Request, team_id: str = ""):
+    _require_control(request)
+    query = _closed_query(request, TeamAssetQuery)
+    return await _operator_call(request, lambda: _service().read_asset(*_credentials(request), "team", query))
+
+
+@router.get("/assets/tool-policy", response_model=ToolPolicyResponse)
+async def read_tool_policy(request: Request, agent_id: str = ""):
+    _require_control(request)
+    query = _closed_query(request, ToolPolicyQuery)
+    return await _operator_call(request, lambda: _service().read_asset(*_credentials(request), "tool-policy", query))
+
+
+@router.get("/assets/knowledge-acl", response_model=KnowledgeACLResponse)
+async def read_knowledge_acl(request: Request, knowledge_base_id: str = ""):
+    _require_control(request)
+    query = _closed_query(request, KnowledgeACLQuery)
+    return await _operator_call(request, lambda: _service().read_asset(*_credentials(request), "knowledge-acl", query))
+
+
+@router.get("/team-flows", response_model=FlowListResponse)
+async def list_team_flows(request: Request, team_id: str = "", offset: int = 0, limit: int = 5,
+                          expected_digest: str | None = None):
+    _require_control(request)
+    query = _closed_query(request, FlowListQuery)
+    return await _operator_call(request, lambda: _service().read_flow(*_credentials(request), "list", query))
+
+
+@router.get("/team-flow", response_model=FlowReadResponse)
+async def read_team_flow(request: Request, team_id: str = "", flow_id: str = "", pointer: str = "",
+                         offset: int = 0, limit: int = 512, expected_digest: str | None = None):
+    _require_control(request)
+    query = _closed_query(request, FlowReadQuery)
+    return await _operator_call(request, lambda: _service().read_flow(*_credentials(request), "get", query))
 
 
 @router.get("/binding", response_model=BindingResponse)
@@ -256,7 +340,11 @@ async def read_room(room_id: str, request: Request):
 @router.post("/actions/{action}", response_model=ReceiptResponse, response_model_exclude_none=True)
 async def invoke(action: str, request: Request):
     _require_control(request)
-    payload = await _body(request, unique_keys=action == "authorization_upgrade")
+    if action in PLATFORM_ACTIONS and request.query_params:
+        raise HTTPException(status_code=422, detail={"code": "INVALID_INPUT"})
+    payload = await _body(request, unique_keys=action in {"authorization_upgrade", *PLATFORM_ACTIONS})
+    if action in PLATFORM_ACTIONS:
+        return await _operator_call(request, lambda: _service().invoke(*_credentials(request), action, payload))
     return await _call(lambda: _service().invoke(*_credentials(request), action, payload))
 
 

@@ -1,5 +1,148 @@
 import { TOOL_APPROVAL_LABELS } from "./toolApprovalLabels";
 
+const PLATFORM_MANAGE_ACTIONS = new Set(["dispatch_cancel", "runtime_command", "team_update", "agent_tool_policy_update",
+  "knowledge_acl_grant", "knowledge_acl_revoke", "flow_save", "flow_start"]);
+type PreviewRule = (value: unknown) => boolean;
+const previewRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+const previewText = (value: unknown, max = 160, empty = false) => typeof value === "string"
+  && (empty || value.length > 0) && Array.from(value).length <= max && !/[\p{Cc}\p{Cf}\p{Cs}]/u.test(value);
+const previewId = (value: unknown, max = 160) => typeof value === "string"
+  && value.length <= max && /^[A-Za-z0-9][A-Za-z0-9_.:-]*(?![\s\S])/.test(value);
+const previewDecimal = (value: unknown) => typeof value === "string" && /^(0|[1-9][0-9]*)(?![\s\S])/.test(value);
+const previewDigest = (value: unknown) => typeof value === "string" && /^[a-f0-9]{64}(?![\s\S])/.test(value);
+const previewOneOf = (...values: unknown[]): PreviewRule => value => values.includes(value);
+const previewArray = (rule: PreviewRule, max = 512): PreviewRule => value => Array.isArray(value) && value.length <= max && value.every(item => rule(item));
+const previewExact = (value: unknown, rules: Record<string, PreviewRule>) => previewRecord(value)
+  && Object.keys(value).length === Object.keys(rules).length
+  && Object.entries(rules).every(([key, rule]) => Object.hasOwn(value, key) && rule(value[key]));
+const previewMap = (keyRule: PreviewRule, valueRule: PreviewRule): PreviewRule => value => previewRecord(value)
+  && Object.keys(value).length <= 512 && Object.entries(value).every(([key, entry]) => keyRule(key) && valueRule(entry));
+const previewInputId = (value: unknown) => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}(?![\s\S])/.test(value);
+const previewRequestId = (value: unknown) => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,95}(?![\s\S])/.test(value);
+const previewTool = (value: unknown) => typeof value === "string" && /^[a-z][a-z0-9_.:-]{1,127}(?![\s\S])/.test(value);
+const previewCount = (value: unknown) => previewDecimal(value) && (value as string).length <= 5 && BigInt(value as string) <= 10000n;
+
+export function platformManagementActionIsKnown(value: unknown): boolean {
+  return typeof value === "string" && PLATFORM_MANAGE_ACTIONS.has(value);
+}
+
+/** Only complete server-produced platform metadata can enable manual approval. */
+export function platformManagementPreviewIsValid(summary: Record<string, unknown> | null | undefined): boolean {
+  if (!summary || !platformManagementActionIsKnown(summary.assistantAction) || summary.assistantPlatformPreviewVersion !== 1
+    || summary.assistantArgumentsInvalid || summary.assistantDetailsOmitted !== false
+    || typeof summary.assistantContentOmitted !== "boolean" || !previewDigest(summary.assistantParametersDigest)) return false;
+  const permitted = new Set(["argumentKeys", "assistantPlatformPreviewVersion", "assistantAction", "assistantTargets", "assistantParametersDigest",
+    "assistantChangedFields", "assistantDelta", "assistantContentOmitted", "assistantDetailsOmitted", "assistantPermissions"]);
+  try { if (Object.keys(summary).some(key => !permitted.has(key)) || JSON.stringify(summary).length > 16000) return false; } catch { return false; }
+  const action = summary.assistantAction as string;
+  if (Object.hasOwn(summary, "assistantPermissions") && !action.startsWith("knowledge_acl_")
+    || Object.hasOwn(summary, "argumentKeys") && !previewArray(value => previewText(value, 160), 24)(summary.argumentKeys)) return false;
+  const targets = summary.assistantTargets;
+  const delta = summary.assistantDelta;
+  const fields = summary.assistantChangedFields;
+  if (!previewRecord(targets) || !previewRecord(delta) || !Array.isArray(fields) || !fields.length
+    || !fields.every(value => typeof value === "string") || new Set(fields).size !== fields.length
+    || fields.join("\n") !== [...fields].sort().join("\n")) return false;
+  const targetRules: Record<string, PreviewRule> = { project_id: previewId };
+  if (action !== "dispatch_cancel") targetRules.request_id = previewRequestId;
+  const sameFields = (...expected: string[]) => fields.join("\n") === expected.sort().join("\n");
+  if (action === "dispatch_cancel") {
+    targetRules.dispatch_id = value => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,119}(?![\s\S])/.test(value);
+    targetRules.native_task_id = previewId;
+    return previewExact(targets, targetRules) && sameFields("stopRequested")
+      && previewExact(delta, { operation: previewOneOf("request_stop") }) && summary.assistantContentOmitted === false;
+  }
+  if (action === "runtime_command") {
+    targetRules.kind = previewOneOf("session_turn", "runtime_task", "external_task", "team_run", "supervised_run", "self_evolution_run", "research_run");
+    targetRules.resource_id = previewId;
+    targetRules.expected_revision = value => typeof value === "string" && /^[A-Za-z0-9_.:-]{1,160}(?![\s\S])/.test(value);
+    if (targets.kind === "session_turn") targetRules.session_id = previewId;
+    if (targets.kind === "team_run" || targets.kind === "research_run") targetRules.team_id = previewId;
+    if (targets.kind === "research_run" || targets.kind === "team_run" && Object.hasOwn(targets, "flow_id")) targetRules.flow_id = previewId;
+    return previewExact(targets, targetRules) && sameFields("command")
+      && previewExact(delta, { command: previewOneOf("stop", "pause", "resume", "retry", "confirm") })
+      && summary.assistantContentOmitted === false;
+  }
+  if (action.startsWith("knowledge_acl_")) {
+    targetRules.knowledge_base_id = value => typeof value === "string" && value.length <= 390
+      && /^(?:(?:team|agent):[A-Za-z0-9][A-Za-z0-9_.-]{0,127}:)?[A-Za-z0-9][A-Za-z0-9_.-]{0,127}(?![\s\S])/.test(value);
+    targetRules.target_agent_id = previewId;
+    targetRules.expected_acl_fingerprint = previewDigest;
+    const permissions = delta.permissions;
+    return previewExact(targets, targetRules) && sameFields("permissions")
+      && previewExact(delta, { permissions: previewArray(previewOneOf("read", "propose", "review"), 3) })
+      && Array.isArray(permissions) && permissions.length > 0 && new Set(permissions).size === permissions.length
+      && JSON.stringify(summary.assistantPermissions) === JSON.stringify(permissions) && summary.assistantContentOmitted === false;
+  }
+  if (action === "agent_tool_policy_update") {
+    Object.assign(targetRules, { agent_id: previewId, expected_config_revision: previewDecimal,
+      expected_agent_updated_at: (value: unknown) => previewText(value, 80), expected_policy_fingerprint: previewDigest,
+      expected_registry_version: (value: unknown) => previewText(value, 160), expected_registry_fingerprint: (value: unknown) => previewText(value, 160) });
+    const approval = previewOneOf("never", "on_request", "always");
+    const scope = previewOneOf("private", "shared", "team_workflow_ledger");
+    const rules: Record<string, PreviewRule> = { allowedTools: previewArray(previewTool), preferredTools: previewArray(previewTool), blockedTools: previewArray(previewTool),
+      readScopes: previewArray(scope, 256), writeScopes: previewArray(scope, 256), allowedCommandKinds: previewArray(value => previewText(value, 80), 128),
+      networkAccess: previewOneOf("none", "restricted", "full", "inherit", "controlled"), mutationAccess: previewOneOf("none", "workspace", "controlled", "inherit", "restricted"),
+      delegationAccess: previewOneOf("none", "assigned_only"), approvalOverrides: previewMap(previewTool, approval), maxCallsPerTurn: previewCount,
+      maxCallsPerTurnByModelFamily: previewMap(value => previewText(value, 64), previewCount),
+      perToolRules: previewMap(previewTool, value => previewExact(value, { approval })) };
+    return previewExact(targets, targetRules) && fields.every(key => Object.hasOwn(rules, key))
+      && previewExact(delta, Object.fromEntries(fields.map(key => [key, rules[key]]))) && summary.assistantContentOmitted === false;
+  }
+  if (action === "team_update") {
+    Object.assign(targetRules, { team_id: previewId, expected_team_fingerprint: previewDigest });
+    if (!fields.every(key => ["name", "description", "purpose", "members"].includes(key))) return false;
+    const rules: Record<string, PreviewRule> = {};
+    for (const field of fields) {
+      if (field === "name") rules.name = value => previewText(value, 160);
+      else if (field === "members") Object.assign(rules, { memberAgentIds: previewArray(previewId, 120),
+        memberIds: previewArray(value => previewText(value, 96, true), 120), membersMode: previewOneOf("replace"),
+        memberRoles: previewArray(value => previewExact(value, { memberId: item => previewText(item, 96, true), agentId: previewId,
+          role: item => previewText(item, 160, true), effectiveRole: item => previewText(item, 320),
+          knowledgeReviewEligible: item => typeof item === "boolean" }), 120),
+        membersDigest: previewDigest, memberCount: previewDecimal });
+      else { rules[field + "Chars"] = previewDecimal; rules[field + "Digest"] = previewDigest; }
+    }
+    if (!previewExact(targets, targetRules) || !previewExact(delta, rules)) return false;
+    if (fields.includes("members")) {
+      const ids = delta.memberAgentIds as string[];
+      const roles = delta.memberRoles as Record<string, unknown>[];
+      if ((delta.memberIds as string[]).length !== ids.length || new Set(ids).size !== ids.length
+        || BigInt(delta.memberCount as string) !== BigInt(ids.length) || roles.length !== ids.length
+        || roles.some((row, index) => row.agentId !== ids[index] || row.memberId !== (delta.memberIds as string[])[index]
+          || row.effectiveRole !== ((row.role as string).trim().toLowerCase() || "member"))) return false;
+    }
+    return true;
+  }
+  Object.assign(targetRules, { team_id: (value: unknown) => previewId(value, 96), flow_id: previewInputId, expectedRevision: previewDecimal });
+  if (!previewExact(targets, targetRules)) return false;
+  if (action === "flow_save") {
+    if (!sameFields("flow") || summary.assistantContentOmitted !== true || !previewExact(delta, {
+      fieldIds: previewArray(previewInputId, 40), fieldKinds: previewArray(previewOneOf("text", "paragraph", "select"), 40),
+      requiredFieldIds: previewArray(previewInputId, 40), optionCounts: previewArray(previewDecimal, 40),
+      nodeIds: previewArray(previewInputId, 60), nodeKinds: previewArray(previewOneOf("input", "agent", "human", "output", "research", "session"), 60),
+      nodeOwners: previewArray(value => previewText(value, 128, true), 60), nodeSourceRefs: previewArray(previewRecord, 60), instructionNodeIds: previewArray(previewInputId, 60),
+      definitionDigest: previewDigest, recoveryPolicyDigest: previewDigest })) return false;
+    const ids = delta.fieldIds as string[], nodes = delta.nodeIds as string[];
+    const sources = delta.nodeSourceRefs as Record<string, unknown>[];
+    return new Set(ids).size === ids.length && new Set(nodes).size === nodes.length
+      && (delta.fieldKinds as unknown[]).length === ids.length && (delta.optionCounts as unknown[]).length === ids.length
+      && (delta.nodeKinds as unknown[]).length === nodes.length && (delta.nodeOwners as unknown[]).length === nodes.length
+      && sources.length === nodes.length && sources.every((source, index) => (delta.nodeKinds as string[])[index] === "research"
+        ? previewExact(source, { runId: previewId, nodeId: value => previewId(value, 128) })
+        : (delta.nodeKinds as string[])[index] === "session" ? previewExact(source, { sessionId: previewId, turnId: previewId, agentId: value => previewText(value, 128) })
+        : Object.keys(source).length === 0)
+      && (delta.requiredFieldIds as string[]).every(id => ids.includes(id))
+      && (delta.instructionNodeIds as string[]).every(id => nodes.includes(id));
+  }
+  if (!sameFields("values") || BigInt(targets.expectedRevision as string) < 1n || !previewExact(delta, {
+    inputIds: previewArray(previewInputId, 40), inputValueLengths: previewMap(previewInputId, previewDecimal),
+    inputsDigest: previewDigest, localIntegration: previewOneOf(false) })) return false;
+  const ids = delta.inputIds as string[];
+  return new Set(ids).size === ids.length && Object.keys(delta.inputValueLengths as object).length === ids.length
+    && ids.every(id => Object.hasOwn(delta.inputValueLengths as object, id)) && summary.assistantContentOmitted === (ids.length > 0);
+}
+
 /**
  * Codex-style approval preview helpers.
  * Codex CLI prompts "Allow command?" with Yes / Always / No and shows the action body.
@@ -162,6 +305,10 @@ export function preferenceProposalPreviewIsValid(summary: Record<string, unknown
 }
 
 const MANAGE_ACTIONS: Record<string, [string, string]> = {
+      dispatch_cancel: ["停止原派遣任务", "Stop original dispatched task"], runtime_command: ["控制原生运行", "Control native run"],
+      agent_tool_policy_update: ["修改 Agent 工具权限", "Update agent tool permissions"],
+      knowledge_acl_revoke: ["撤销知识访问权限", "Revoke knowledge access"],
+      flow_save: ["保存团队 Flow 定义", "Save team Flow definition"], flow_start: ["启动已有团队 Flow", "Start existing team Flow"],
       preference_proposal_accept: ["接受偏好建议", "Accept preference suggestion"],
       preference_proposal_reject: ["拒绝偏好建议", "Reject preference suggestion"],
       operator_image_upload: ["上传图片", "Upload image"],
@@ -221,6 +368,53 @@ export function toolApprovalActionPreview(
       return `${title}\n${lang === "zh" ? "参数无法核对，请拒绝并重新发起。" : "Arguments cannot be verified. Decline and request again."}`;
     }
     const targets = summary.assistantTargets;
+    if (platformManagementActionIsKnown(action) && (summary.assistantPlatformPreviewVersion !== undefined
+      || !["team_update", "knowledge_acl_grant"].includes(action))) {
+      if (!platformManagementPreviewIsValid(summary)) return `${title}\n${lang === "zh"
+        ? "参数无法核对，请拒绝并重新发起。关键权限缺失或未完整展示时不能批准。"
+        : "Arguments cannot be verified. Decline and request again; missing or omitted permissions cannot be approved."}`;
+      const targetLabels: Record<string, [string, string]> = { project_id: ["项目", "Project"], request_id: ["请求 ID", "Request ID"],
+        dispatch_id: ["原派遣 ID", "Original dispatch ID"], native_task_id: ["原生任务 ID", "Native task ID"],
+        agent_id: ["Agent", "Agent"], team_id: ["团队", "Team"], flow_id: ["Flow", "Flow"], kind: ["运行类型", "Run kind"],
+        resource_id: ["运行 ID", "Run ID"], session_id: ["会话 ID", "Session ID"], knowledge_base_id: ["知识库", "Knowledge base"],
+        target_agent_id: ["目标 Agent", "Target agent"], expected_revision: ["预期版本", "Expected revision"], expectedRevision: ["Flow 预期版本", "Expected Flow revision"],
+        expected_config_revision: ["预期配置版本", "Expected config revision"], expected_agent_updated_at: ["Agent 原更新时间", "Previous agent update"],
+        expected_policy_fingerprint: ["原工具策略指纹", "Previous policy fingerprint"], expected_registry_version: ["工具注册表版本", "Tool registry version"],
+        expected_registry_fingerprint: ["工具注册表指纹", "Tool registry fingerprint"], expected_team_fingerprint: ["原团队指纹", "Previous team fingerprint"],
+        expected_acl_fingerprint: ["原 ACL 指纹", "Previous ACL fingerprint"] };
+      const quote = (value: unknown) => JSON.stringify(value, null, 2).replace(/[\p{Cf}\p{Cs}\p{Zl}\p{Zp}]/gu,
+        char => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`);
+      const deltaLabels: Record<string, [string, string]> = { operation: ["操作", "Operation"], command: ["控制命令", "Control command"],
+        allowedTools: ["允许工具", "Allowed tools"], preferredTools: ["优先工具", "Preferred tools"], blockedTools: ["禁用工具", "Blocked tools"],
+        readScopes: ["读取范围", "Read scopes"], writeScopes: ["写入范围", "Write scopes"], allowedCommandKinds: ["允许命令类别", "Allowed command kinds"],
+        networkAccess: ["联网权限", "Network access"], mutationAccess: ["修改权限", "Mutation access"], delegationAccess: ["转派权限", "Delegation access"],
+        approvalOverrides: ["审批策略", "Approval overrides"], maxCallsPerTurn: ["每轮调用上限", "Calls per turn"],
+        maxCallsPerTurnByModelFamily: ["各模型调用上限", "Calls by model family"], perToolRules: ["单工具审批", "Per-tool approvals"],
+        permissions: ["访问权限", "Access permissions"], name: ["团队名称", "Team name"], descriptionChars: ["说明字符数", "Description character count"],
+        descriptionDigest: ["说明摘要", "Description digest"], purposeChars: ["用途字符数", "Purpose character count"], purposeDigest: ["用途摘要", "Purpose digest"],
+        memberAgentIds: ["成员 Agent ID", "Member agent IDs"], memberIds: ["成员记录 ID", "Membership IDs"], membersMode: ["成员变更方式", "Membership change"],
+        memberRoles: ["成员角色与知识资格", "Member roles and knowledge eligibility"],
+        membersDigest: ["成员元数据摘要", "Membership digest"], memberCount: ["成员数", "Member count"], fieldIds: ["输入字段 ID", "Input field IDs"],
+        fieldKinds: ["输入类型", "Input kinds"], requiredFieldIds: ["必填字段 ID", "Required input IDs"], optionCounts: ["选择项数量", "Option counts"],
+        nodeIds: ["节点 ID", "Node IDs"], nodeKinds: ["节点类型", "Node kinds"], nodeOwners: ["节点负责人", "Node owners"],
+        nodeSourceRefs: ["原生来源引用", "Native source references"],
+        instructionNodeIds: ["含指令节点", "Nodes with instructions"], definitionDigest: ["定义摘要", "Definition digest"], recoveryPolicyDigest: ["恢复策略摘要", "Recovery policy digest"],
+        inputIds: ["本次输入 ID", "Submitted input IDs"], inputValueLengths: ["输入字符数", "Input character counts"], inputsDigest: ["输入摘要", "Inputs digest"],
+        localIntegration: ["本地合入", "Local integration"] };
+      return [title, lang === "zh" ? "对象、版本和权限变化绑定本次原生请求；控制受理不代表任务完成。"
+        : "Targets, revisions and permission changes bind this native request; acceptance does not prove completion.",
+        ...Object.entries(targets as Record<string, string>).map(([key, value]) => `${targetLabels[key]?.[lang === "zh" ? 0 : 1] ?? key}: ${value}`),
+        `${lang === "zh" ? "修改字段" : "Changed fields"}: ${(summary.assistantChangedFields as string[]).join(", ")}`,
+        `${lang === "zh" ? "范围与权限变化" : "Scope and permission changes"}:`,
+        ...(action === "team_update" && previewRecord(summary.assistantDelta) && Object.hasOwn(summary.assistantDelta, "memberRoles")
+          ? [lang === "zh" ? "成员角色逐项绑定成员记录与 Agent；knowledgeReviewEligible 仅表示知识审核、评分及 ACL 管理的角色资格。实际访问仍受原生 ACL、owner、团队及工具策略限制。"
+            : "Each role binds its membership and agent. knowledgeReviewEligible denotes role eligibility for knowledge review, rating and ACL management; actual access remains subject to native ACL, owner, team and tool policies."] : []),
+        ...Object.entries(summary.assistantDelta as Record<string, unknown>).map(([key, value]) =>
+          `${deltaLabels[key]?.[lang === "zh" ? 0 : 1] ?? key} (${key}): ${quote(value)}`),
+        `${lang === "zh" ? "参数摘要" : "Parameter digest"}: ${summary.assistantParametersDigest}`,
+        summary.assistantContentOmitted ? (lang === "zh" ? "用户正文未记录；此处仅展示完整对象、结构和权限范围。"
+          : "User content is not recorded; complete targets, structure and permission scope are shown here.") : ""].filter(Boolean).join("\n");
+    }
     if (action === "agent_purge") {
       if (!agentPurgePreviewIsValid(summary)) {
         return `${title}\n${lang === "zh" ? "参数无法核对，请拒绝并重新发起。" : "Arguments cannot be verified. Decline and request again."}`;

@@ -306,15 +306,53 @@ def get_tool_registry() -> dict[str, Any]:
     return copy.deepcopy(payload)
 
 
-def _build_tool_registry() -> dict[str, Any]:
+def get_existing_tool_registry(snapshot) -> dict[str, Any]:
+    """Build native descriptors from pinned existing authorities, without seeding.
+
+    No cache-signature paths, Agent hydration or dependency refresh is entered.
+    Missing generated-tool authority is unavailable, not an empty full catalog.
+    """
+    try:
+        if Path(PROJECT_ROOT).resolve() != Path(snapshot.project_root).resolve():
+            raise ValueError("Registry project binding changed")
+        path = snapshot.path("tool_registry", "generated_tools.json")
+        configured = Path(GENERATED_TOOLS_PATH).resolve()
+        formal = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "tool_registry", "generated_tools.json").resolve()
+        if configured not in {_DEFAULT_GENERATED_TOOLS_PATH.resolve(), formal, path.resolve()}:
+            raise ValueError("Existing registry authority differs from the configured native source")
+        payload = snapshot.read_json(path, strict=True, max_bytes=8_000_000)
+        records = payload.get("tools")
+        if (type(payload.get("schemaVersion")) is not int or payload["schemaVersion"] != 1
+                or not isinstance(records, list) or len(records) > 10000
+                or any(not isinstance(row, dict) for row in records)):
+            raise ValueError("Invalid existing registry authority")
+        names = []
+        for row in records:
+            if (not isinstance(row.get("name", row.get("id")), str)
+                    or not row.get("name", row.get("id"))
+                    or any(key in row and type(row[key]) is not bool for key in ("enabled", "validated"))):
+                raise ValueError("Invalid existing generated tool")
+            names.append(row.get("name", row.get("id")))
+        if len(names) != len(set(names)):
+            raise ValueError("Ambiguous existing generated tool authority")
+        result = _build_tool_registry(existing_snapshot=snapshot, generated_records=records)
+        snapshot.verify_workspace()
+        return result
+    except (OSError, ValueError, TypeError) as exc:
+        raise ToolRegistryError("EXISTING_REGISTRY_UNAVAILABLE") from exc
+
+
+def _build_tool_registry(*, existing_snapshot=None, generated_records=None) -> dict[str, Any]:
     """Assemble the registry payload from current inputs (uncached)."""
 
-    builtins = _builtin_tool_items()
-    generated = _generated_tool_items(_load_generated_tools(), builtin_names={item["name"] for item in builtins})
+    builtins = _builtin_tool_items() if existing_snapshot is None else _builtin_tool_items(existing_only=True)
+    generated = _generated_tool_items(_load_generated_tools() if generated_records is None else generated_records,
+                                     builtin_names={item["name"] for item in builtins})
     tools = [*builtins, *generated]
     descriptors = _canonical_registry_descriptors(tools)
     descriptor_names = {descriptor.name for descriptor in descriptors}
-    tools = [_with_agent_scope_states(item) for item in tools]
+    if existing_snapshot is None:
+        tools = [_with_agent_scope_states(item) for item in tools]
     counts = {
         "total": len(tools),
         "builtIn": len(builtins),
@@ -345,9 +383,11 @@ def _build_tool_registry() -> dict[str, Any]:
         "registryVersion": TOOL_REGISTRY_VERSION,
         "registryFingerprint": registry_descriptor_fingerprint(descriptors),
         "mode": "safe_manifest_registry",
-        "storagePath": _relative_project_path(_generated_tools_path()),
+        "storagePath": (_relative_project_path(_generated_tools_path()) if existing_snapshot is None
+                        else "existing-workspace/tool_registry/generated_tools.json"),
         "counts": counts,
-        "agentScopes": _agent_scope_summaries(tools),
+        "agentScopes": _agent_scope_summaries(tools) if existing_snapshot is None else [],
+        **({"catalogState": "available", "agentScopeState": "not_evaluated"} if existing_snapshot is not None else {}),
         "toolBundles": list_tool_bundles(available_tool_names={str(item.get("name") or "") for item in tools}),
         "descriptors": [descriptor.public_projection() for descriptor in descriptors],
         "tools": tools,
@@ -1463,15 +1503,25 @@ def _canonical_registry_descriptors(items: list[dict[str, Any]]) -> tuple[ToolDe
         raise ToolRegistryError(str(exc)) from exc
 
 
-def _builtin_tool_items() -> list[dict[str, Any]]:
+def _builtin_tool_items(*, existing_only=False) -> list[dict[str, Any]]:
     from tools.Key_Tools import create_key_tools, create_llm_facing_tools
     from tools.web_search_tool import autoglm_search_tool_availability
     from tools.financial_report_tools import financial_report_availability
 
     built_tools = create_key_tools()
-    llm_visible_names = {str(tool.name) for tool in create_llm_facing_tools() if getattr(tool, "name", "")}
+    facing = create_llm_facing_tools() if not existing_only else create_llm_facing_tools(probe_dependencies=False)
+    llm_visible_names = {str(tool.name) for tool in facing if getattr(tool, "name", "")}
     available_tool_names = {str(getattr(tool, "name", "") or "").strip() for tool in built_tools if getattr(tool, "name", "")}
-    web_search_dependency = autoglm_search_tool_availability()
+    if existing_only:
+        from tools import web_search_tool as search
+        with search._TOKEN_HEALTH_CACHE_LOCK:
+            cached = search._TOKEN_HEALTH_CACHE.get("status")
+            fresh = time.monotonic() - float(search._TOKEN_HEALTH_CACHE.get("checkedAt") or 0) < search._TOKEN_HEALTH_CACHE_TTL
+            web_search_dependency = (dict(cached) if isinstance(cached, dict) and fresh else
+                {"available": False, "dependency": "autoglm_token_service", "status": "unavailable",
+                 "availabilityProvisional": True, "blockReason": "Existing dependency health is unavailable; no refresh was started."})
+    else:
+        web_search_dependency = autoglm_search_tool_availability()
     items: list[dict[str, Any]] = []
     for tool in built_tools:
         name = str(getattr(tool, "name", "") or "").strip()

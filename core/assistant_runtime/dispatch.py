@@ -800,16 +800,21 @@ class DispatchService:
 
             return await self._update(record, resolve)
 
-    async def cancel(self, dispatch_id: str) -> dict[str, Any]:
+    async def cancel(self, dispatch_id: str, *, project_id: str | None = None,
+                     expected_task_id: str | None = None) -> dict[str, Any]:
         """Explicitly request native cancellation and retain stop-unconfirmed state."""
         async with self._dispatch_admission:
             self._check_dispatch_unfenced()
-            return await self._cancel(dispatch_id)
+            return await self._cancel(dispatch_id, project_id=project_id, expected_task_id=expected_task_id)
 
-    async def _cancel(self, dispatch_id: str) -> dict[str, Any]:
+    async def _cancel(self, dispatch_id: str, *, project_id: str | None = None,
+                      expected_task_id: str | None = None) -> dict[str, Any]:
         async with self._dispatch_lock(dispatch_id):
             record = self._read(dispatch_id)
             self._require_task(record)
+            if (project_id is not None and record.get("projectId") != project_id
+                or expected_task_id is not None and record.get("nativeTaskId") != expected_task_id):
+                raise DispatchError("Native task binding changed; refresh its original receipt.", code="DISPATCH_CONFLICT")
             return await self._update(record, lambda client: client.cancel_task(task_id=record["nativeTaskId"]))
 
     async def heartbeat(self) -> list[dict[str, Any]]:

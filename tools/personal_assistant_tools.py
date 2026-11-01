@@ -131,6 +131,11 @@ def personal_assistant_action_tool(action: str = "index", parameters: dict | Non
                 "session_parameters_get": ["sessions:parameters:read", "sessions:read"],
                 "team_list": ["teams:directory:read"], "team_get": ["teams:directory:read"],
                 "team_result": ["teams:results:read"],
+                "runtime_list": ["operations:read"], "runtime_get": ["operations:read"],
+                "team_asset_get": ["teams:manage:read"],
+                "agent_tool_policy_get": ["agents:tool-policy:read"],
+                "knowledge_acl_get": ["knowledge:acl:read"],
+                "flow_list": ["teams:flows:read"], "flow_get": ["teams:flows:read"],
                 "team_knowledge_list": ["knowledge:catalog:read", "teams:directory:read"],
                 "room_list": ["rooms:read"], "room_get": ["rooms:read"],
                 "legacy_observers": ["legacy:receipts:read"], "legacy_receipts": ["legacy:receipts:read"],
@@ -226,8 +231,10 @@ def personal_assistant_manage_tool(action: str, arguments_json: str) -> str:
     workflow_recovery_bind, workflow_recovery_revoke, workflow_start,
     team_create, knowledge_ingest, config_update.
     Arguments use the corresponding canonical tool's named parameters.
-    Launcher also supports agent_purge after agent_purge_preview for archived
-    targets. Other adapters accept no purge, arbitrary API, command, restore,
+    Launcher also supports bounded runtime commands, existing team/Flow edits,
+    Agent tool policy and knowledge ACL changes through its live describe
+    contracts, plus agent_purge after agent_purge_preview for archived targets.
+    Other adapters accept no purge, arbitrary API, command, restore,
     or private data read.
     """
     try:
@@ -241,10 +248,13 @@ def personal_assistant_manage_tool(action: str, arguments_json: str) -> str:
         if is_launcher_assistant_process():
             from core.assistant_runtime.actions import execute_action
             result = execute_action(action, args, runtime=runtime, governed=True)
-            if action == "agent_purge" and result.get("code") == "SCOPE_DENIED":
-                result = {**result, "requiredScopes": ["agents:purge"], "nextStep": (
+            from core.web.services.external_management.contracts import ACTION_SCOPES
+            required_scope = ACTION_SCOPES.get(action)
+            if required_scope and result.get("code") == "SCOPE_DENIED":
+                result = {**result, "requiredScopes": [required_scope], "requiredScope": required_scope, "nextStep": (
                     "先用 authorization_status 查询，再通过 personal_assistant_manage_tool 的 "
-                    "authorization_upgrade 仅增加缺失的 agents:purge；沿用原请求继续，不修改其他权限。"
+                    "authorization_upgrade 仅增加 requiredScopes 中缺失的权限；沿用原 request_id 和参数继续，"
+                    "不修改其他权限。拒绝或结果未知时保留原请求并说明，不更换 ID 重复执行。"
                 )}
             return json.dumps({"source": "launcher-assistant", "untrustedContent": True,
                 **result}, ensure_ascii=False)

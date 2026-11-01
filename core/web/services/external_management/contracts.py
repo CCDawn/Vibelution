@@ -7,9 +7,20 @@ import unicodedata
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
-Scope = Literal["agents:read", "agents:create", "agents:create:files", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:results:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read", "source:read", "knowledge:catalog:read", "agents:directory:read", "agents:purge"]
+from .runtime_contracts import RuntimeCommand, RuntimeCommandResponse
+from .asset_contracts import ASSET_ACTION_MODELS, ASSET_ACTION_SCOPES, ASSET_ACTION_HELP, AssetMutationResponse
+from .flow_contracts import FLOW_ACTION_MODELS, FLOW_ACTION_SCOPES, FLOW_ACTION_HELP, FLOW_SCOPES, FlowMutationResponse
+
+Scope = Literal["agents:read", "agents:create", "agents:create:files", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:results:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read", "source:read", "knowledge:catalog:read", "agents:directory:read", "agents:purge", "operations:read", "operations:control", "teams:manage:read", "teams:write", "agents:tool-policy:read", "agents:tool-policy:write", "knowledge:acl:read", "knowledge:acl:write", "teams:flows:read", "teams:flows:write", "teams:flows:run"]
 # Add scopes at the end so legacy bootstrap prefixes keep their meaning.
-SCOPES = ("agents:read", "agents:create", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read", "source:read", "knowledge:catalog:read", "agents:create:files", "teams:results:read", "agents:directory:read", "agents:purge")
+SCOPES = ("agents:read", "agents:create", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read", "source:read", "knowledge:catalog:read", "agents:create:files", "teams:results:read", "agents:directory:read", "agents:purge", "operations:read", "operations:control")
+SCOPES += ("teams:manage:read", "teams:write", "agents:tool-policy:read", "agents:tool-policy:write", "knowledge:acl:read", "knowledge:acl:write")
+SCOPES += FLOW_SCOPES
+# Keep historical bind semantics and SDK defaults. New platform powers require
+# the existing explicit upgrade of the same authenticated operator subject.
+EXPLICIT_UPGRADE_SCOPES = frozenset({"agents:create:files", "teams:results:read", "agents:directory:read", "agents:purge",
+    "operations:read", "operations:control", "teams:manage:read", "teams:write", "agents:tool-policy:read",
+    "agents:tool-policy:write", "knowledge:acl:read", "knowledge:acl:write", *FLOW_SCOPES})
 _AVATAR_EXTENSION = r"(?:[pP][nN][gG]|[jJ][pP][gG]|[jJ][pP][eE][gG]|[wW][eE][bB][pP]|svg)"
 _AVATAR_PATH_PATTERN = r"^workspace/avatars/[A-Za-z0-9_.-]+\." + _AVATAR_EXTENSION + "$"
 
@@ -195,12 +206,17 @@ class SessionPin(Closed):
     pinned: bool
 
 
-ACTION_MODELS = {"agent_create": AgentCreate, "agent_update": AgentUpdate, "agent_avatar": AgentAvatar, "agent_archive": AgentArchive, "agent_purge": AgentPurge, "team_run": TeamRun, "session_pin": SessionPin, "authorization_upgrade": AuthorizationUpgrade}
-ACTION_SCOPES = {"agent_create": "agents:create", "agent_update": "agents:update", "agent_avatar": "agents:avatar", "agent_archive": "agents:archive", "agent_purge": "agents:purge", "team_run": "teams:run", "session_pin": "sessions:pin", "authorization_upgrade": None}
+ACTION_MODELS = {"agent_create": AgentCreate, "agent_update": AgentUpdate, "agent_avatar": AgentAvatar, "agent_archive": AgentArchive, "agent_purge": AgentPurge, "team_run": TeamRun, "session_pin": SessionPin, "authorization_upgrade": AuthorizationUpgrade, "runtime_command": RuntimeCommand}
+ACTION_SCOPES = {"agent_create": "agents:create", "agent_update": "agents:update", "agent_avatar": "agents:avatar", "agent_archive": "agents:archive", "agent_purge": "agents:purge", "team_run": "teams:run", "session_pin": "sessions:pin", "authorization_upgrade": None, "runtime_command": "operations:control"}
+ACTION_MODELS.update(ASSET_ACTION_MODELS)
+ACTION_SCOPES.update(ASSET_ACTION_SCOPES)
+ACTION_MODELS.update(FLOW_ACTION_MODELS)
+ACTION_SCOPES.update(FLOW_ACTION_SCOPES)
 
 
 def contracts() -> dict:
     descriptions = {
+        "runtime_command": "按 runtime_list/runtime_get 的精确 kind、resourceId、owner引用和 revision 控制原生工作。command仅允许该对象返回的commands；沿用独立operations:control及当前原生管理审批策略，full_access可自动批准。稳定request_id，unknown只查询原management_receipt，不换ID重放。外层completed仅证明原生控制应答；stopRequested/accepted不是实际终态，后续用runtime_get复核。revisionCheck=preflight_only表示版本只作预检，原生owner继续决定当前状态是否可执行。",
         "agent_create": "默认不授予任何工具或读写范围，派遣写任务也不会自动增加工具权限。文件任务可选固定 project_files_v1，须通过 personal_assistant_manage_tool 并具备 agents:create 和独立 agents:create:files；缺少时先 authorization_status，再用 authorization_upgrade 仅增加此权限。创建和权限升级按助理当前原生权限策略执行，full_access 可能自动批准。授权五个工具并持久生效；写入按当前权限和协作模式审批，edit/yolo 等模式可能自动批准。目标派遣任务的审批只有在完整预览、版本和执行参数均可验证时才能批准。目录遵守平台动态边界，含项目、Agent 工作区、项目存储、工具目录、临时目录和用户配置允许目录，未来可能变化；不能运行命令或测试。必须选择模型和稳定 request_id，未知结果查询原回执。",
         "agent_update": "按原生 configRevision 更新普通 Agent 名称、对话模型、提示词或人物/任务档案；拒绝权限、身份与生命周期字段。",
         "agent_avatar": "按原生 updatedAt 使用已有头像候选或恢复默认；不接收 URL、文件上传或任意路径。",
@@ -210,8 +226,10 @@ def contracts() -> dict:
         "session_pin": "经原生审批置顶或取消置顶普通可见 Session；不改变当前选择。verified 表示首次确认时原生元数据符合目标状态，不证明某次调用的因果；完成回执保留历史状态，当前状态用 session_get 查询。未知结果查询原 action/request_id，不能换 ID 重放。",
         "authorization_upgrade": "通过 personal_assistant_manage_tool 按助理当前原生权限策略显式增加当前Launcher原主体的指定缺失权限；full_access 可能自动批准。先authorization_status读取当前scopes，expected_scopes和add_scopes必须分别排序、唯一、不重叠。不能默认升级到全部权限，查询只选所需读取权；写权另行明确选择。保留client/subject/capability和任务关联，不支持撤销或换主体。unknown或异常保持同一request_id查询management_receipt(action=authorization_upgrade)，不更换ID重试。需要operator control，旧读取scope本身不授予升级权。完成回执为历史证明，当前状态另查。",
     }
+    descriptions.update(ASSET_ACTION_HELP)
+    descriptions.update(FLOW_ACTION_HELP)
     return {name: {"action": name, "description": descriptions[name], "parameters": model.model_json_schema(),
-                   "governed": name in {"team_run", "session_pin", "agent_archive", "agent_purge", "authorization_upgrade"}, "scope": ACTION_SCOPES[name] or "operator:control"} for name, model in ACTION_MODELS.items()}
+                   "governed": name in {"team_run", "session_pin", "agent_archive", "agent_purge", "authorization_upgrade", "runtime_command", *ASSET_ACTION_MODELS, *FLOW_ACTION_MODELS}, "scope": ACTION_SCOPES[name] or "operator:control"} for name, model in ACTION_MODELS.items()}
 
 
 class BindingResponse(Closed):
@@ -1021,7 +1039,7 @@ class AuthorizationStateResponse(Closed):
 
 class ReceiptResponse(Closed):
     status: Literal["completed", "unknown"]
-    action: Literal["agent_create", "agent_update", "agent_avatar", "agent_archive", "agent_purge", "team_run", "session_pin", "authorization_upgrade"]
+    action: Literal["agent_create", "agent_update", "agent_avatar", "agent_archive", "agent_purge", "team_run", "session_pin", "authorization_upgrade", "runtime_command", "team_update", "agent_tool_policy_update", "knowledge_acl_grant", "knowledge_acl_revoke", "flow_save", "flow_start"]
     requestId: str
     verified: bool
     reused: bool
@@ -1029,6 +1047,9 @@ class ReceiptResponse(Closed):
     session: SessionView | None = None
     authorization: AuthorizationView | None = None
     purge: AgentPurgeResult | None = None
+    operation: RuntimeCommandResponse | None = None
+    asset: AssetMutationResponse | None = None
+    flow: FlowMutationResponse | None = None
     code: Literal["OPERATION_UNCONFIRMED"] | None = None
     phase: Literal["materialization_pending", "materialized", "flow_saved", "started"] | None = None
     resumeAllowed: bool | None = None
@@ -1084,10 +1105,23 @@ class DocumentationDescribeQuery(Closed):
         return value.strip()
 
 
-DocumentationAction = Literal["session_list", "agent_create", "agent_update", "agent_avatar", "agent_archive", "agent_purge", "session_config_get", "session_config_compare", "session_parameters_get", "session_pin", "team_list", "team_get", "room_list", "room_get", "authorization_status", "legacy_observers", "legacy_receipts"]
+DocumentationAction = Literal["runtime_list", "runtime_get", "runtime_command", "team_asset_get", "team_update", "agent_tool_policy_get", "agent_tool_policy_update", "knowledge_acl_get", "knowledge_acl_grant", "knowledge_acl_revoke", "flow_list", "flow_get", "flow_save", "flow_start", "session_list", "agent_create", "agent_update", "agent_avatar", "agent_archive", "agent_purge", "session_config_get", "session_config_compare", "session_parameters_get", "session_pin", "team_list", "team_get", "room_list", "room_get", "authorization_status", "legacy_observers", "legacy_receipts"]
 # This maps documentation to already-migrated semantic actions. It grants no
 # HTTP execution and deliberately advertises no other registered API operation.
 DOCUMENTATION_ACTIONS = {
+    ("GET", "/api/v1/launcher-assistant-management/runtime/operations"): "runtime_list",
+    ("GET", "/api/v1/launcher-assistant-management/runtime/operation"): "runtime_get",
+    ("GET", "/api/v1/launcher-assistant-management/assets/team"): "team_asset_get",
+    ("GET", "/api/v1/launcher-assistant-management/assets/tool-policy"): "agent_tool_policy_get",
+    ("GET", "/api/v1/launcher-assistant-management/assets/knowledge-acl"): "knowledge_acl_get",
+    ("GET", "/api/v1/launcher-assistant-management/team-flows"): "flow_list",
+    ("GET", "/api/v1/launcher-assistant-management/team-flow"): "flow_get",
+    ("PATCH", "/api/teams/{team_id}"): "team_update",
+    ("GET", "/api/agents/{agent_id}/tool-policy"): "agent_tool_policy_get",
+    ("PUT", "/api/agents/{agent_id}/tool-policy"): "agent_tool_policy_update",
+    ("GET", "/api/teams/{team_id}/workflows"): "flow_list",
+    ("PUT", "/api/teams/{team_id}/workflows/{flow_id}"): "flow_save",
+    ("POST", "/api/teams/{team_id}/workflows/{flow_id}/runs"): "flow_start",
     ("GET", "/api/v1/launcher-assistant-management/sessions"): "session_list",
     ("POST", "/api/agents"): "agent_create",
     ("PATCH", "/api/agents/{agent_id}"): "agent_update",

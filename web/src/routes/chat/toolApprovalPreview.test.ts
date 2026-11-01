@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   agentPurgePreviewIsValid,
+  platformManagementActionIsKnown,
+  platformManagementPreviewIsValid,
   preferenceProposalPreviewIsValid,
   managementApprovalActionIsKnown,
   authorizationUpgradePreviewIsValid,
@@ -16,6 +18,143 @@ import {
   toolApprovalDisplayName,
   toolApprovalSessionGrantDescription,
 } from "./toolApprovalPreview";
+
+describe("Launcher platform approval metadata", () => {
+  const summary = { assistantPlatformPreviewVersion: 1, assistantAction: "dispatch_cancel",
+    assistantTargets: { project_id: "project-a", dispatch_id: "dispatch-a", native_task_id: "task-a" },
+    assistantParametersDigest: "a".repeat(64), assistantChangedFields: ["stopRequested"],
+    assistantDelta: { operation: "request_stop" }, assistantContentOmitted: false, assistantDetailsOmitted: false };
+  it("requires complete original native identity before reviewing a cancellation", () => {
+    expect(platformManagementActionIsKnown("dispatch_cancel")).toBe(true);
+    expect(platformManagementPreviewIsValid(summary)).toBe(true);
+    for (const lang of ["zh", "en"] as const) {
+      const preview = toolApprovalActionPreview(summary, "personal_assistant_manage_tool", lang);
+      for (const value of ["project-a", "dispatch-a", "task-a", "a".repeat(64)]) expect(preview).toContain(value);
+    }
+    for (const invalid of [{ ...summary, assistantPlatformPreviewVersion: "1" },
+      { ...summary, assistantPlatformPreviewVersion: 2 }, { ...summary, assistantPlatformPreviewVersion: undefined },
+      { ...summary, assistantTargets: { ...summary.assistantTargets, approved: "true" } },
+      { ...summary, assistantTargets: { project_id: "project-a", dispatch_id: "dispatch-a" } },
+      { ...summary, assistantDetailsOmitted: true }, { ...summary, assistantParametersDigest: "bad" },
+      { ...summary, assistantDelta: { operation: "request_stop", approved: true } }]) {
+      expect(platformManagementPreviewIsValid(invalid)).toBe(false);
+      expect(toolApprovalActionPreview(invalid, "personal_assistant_manage_tool", "zh")).toContain("参数无法核对");
+    }
+  });
+  const platform = (action: string, targets: Record<string, string>, delta: Record<string, unknown>, fields: string[], content = false) => ({
+    assistantPlatformPreviewVersion: 1, assistantAction: action, assistantTargets: { project_id: "project-a", request_id: "request-a", ...targets },
+    assistantParametersDigest: "a".repeat(64), assistantChangedFields: [...fields].sort(), assistantDelta: delta,
+    assistantContentOmitted: content, assistantDetailsOmitted: false });
+  const policyDelta = { allowedTools: ["read_file_tool", "write_file_tool"], preferredTools: ["read_file_tool"], blockedTools: ["exec_command"],
+    readScopes: ["private", "shared"], writeScopes: ["private"], allowedCommandKinds: ["read"], networkAccess: "restricted",
+    mutationAccess: "workspace", delegationAccess: "assigned_only", approvalOverrides: { write_file_tool: "always" },
+    maxCallsPerTurn: "12", maxCallsPerTurnByModelFamily: { "model-family": "7" }, perToolRules: { read_file_tool: { approval: "never" } } };
+  const policy = platform("agent_tool_policy_update", { agent_id: "agent-a", expected_config_revision: "9007199254740993",
+    expected_agent_updated_at: "2026-11-02T00:00:00Z", expected_policy_fingerprint: "b".repeat(64),
+    expected_registry_version: "registry-v1", expected_registry_fingerprint: "c".repeat(64) }, policyDelta, Object.keys(policyDelta));
+  const flow = platform("flow_save", { team_id: "team-a", flow_id: "flow-a", expectedRevision: "9007199254740993" }, {
+    fieldIds: ["goal"], fieldKinds: ["text"], requiredFieldIds: ["goal"], optionCounts: ["0"], nodeIds: ["work"],
+    nodeKinds: ["agent"], nodeOwners: ["agent-a"], nodeSourceRefs: [{}], instructionNodeIds: ["work"], definitionDigest: "b".repeat(64),
+    recoveryPolicyDigest: "c".repeat(64) }, ["flow"], true);
+  const start = platform("flow_start", { team_id: "team-a", flow_id: "flow-a", expectedRevision: "9007199254740993" }, {
+    inputIds: ["goal"], inputValueLengths: { goal: "17" }, inputsDigest: "d".repeat(64), localIntegration: false }, ["values"], true);
+  const team = platform("team_update", { team_id: "team-a", expected_team_fingerprint: "b".repeat(64) }, {
+    name: "Team", descriptionChars: "10", descriptionDigest: "c".repeat(64), memberAgentIds: ["member-a"], memberIds: [""],
+    memberRoles: [{ memberId: "", agentId: "member-a", role: "member", effectiveRole: "member", knowledgeReviewEligible: false }],
+    membersMode: "replace", membersDigest: "d".repeat(64), memberCount: "1" }, ["name", "description", "members"], true);
+  const acl = (action: string) => ({ ...platform(action, { knowledge_base_id: "team:team-a:kb-a", target_agent_id: "agent-a",
+    expected_acl_fingerprint: "c".repeat(64) }, { permissions: ["read", "review"] }, ["permissions"]), assistantPermissions: ["read", "review"] });
+  const runtime = platform("runtime_command", { kind: "team_run", resource_id: "run-a", team_id: "team-a", flow_id: "flow-a",
+    expected_revision: "9007199254740993" }, { command: "stop" }, ["command"]);
+  it.each([runtime, team, policy, acl("knowledge_acl_grant"), acl("knowledge_acl_revoke"), flow, start])("verifies complete %j metadata and displays both languages", value => {
+    expect(platformManagementPreviewIsValid(value)).toBe(true);
+    for (const lang of ["zh", "en"] as const) {
+      const preview = toolApprovalActionPreview(value, "personal_assistant_manage_tool", lang);
+      expect(preview).not.toContain("参数无法核对");
+      for (const target of Object.values(value.assistantTargets)) expect(preview).toContain(target);
+      for (const field of Object.keys(value.assistantDelta)) expect(preview).toContain(field);
+    }
+  });
+  it("keeps exact large revisions and every ToolPolicy permission field visible", () => {
+    const zh = toolApprovalActionPreview(policy, "personal_assistant_manage_tool", "zh");
+    const en = toolApprovalActionPreview(policy, "personal_assistant_manage_tool", "en");
+    for (const text of ["9007199254740993", "read_file_tool", "write_file_tool", "exec_command", "private", "shared", "always", "never", "assigned_only"]) {
+      expect(zh).toContain(text); expect(en).toContain(text);
+    }
+    expect(zh).toContain("联网权限"); expect(en).toContain("Network access");
+    expect(zh).not.toContain("9007199254740992");
+    expect(platformManagementPreviewIsValid({ ...policy, assistantTargets: { ...policy.assistantTargets, expected_config_revision: 9007199254740993 } })).toBe(false);
+    for (const patch of [{ approvalGrants: ["forged"] }, { perToolRules: { read_file_tool: { approval: "never", approvalGrants: ["forged"] } } },
+      { blockedCommandPatternsCount: "1", blockedCommandPatternsDigest: "a".repeat(64) }, { allowedTools: ["UNKNOWN TOOL"] },
+      { maxCallsPerTurn: 12 }, { unexpectedPermission: "full" }]) {
+      const invalid = { ...policy, assistantDelta: { ...policy.assistantDelta, ...patch } };
+      expect(platformManagementPreviewIsValid(invalid)).toBe(false);
+    }
+  });
+  it("permits fixed Flow content isolation but rejects missing structure, mismatched inputs or extra targets", () => {
+    expect(toolApprovalActionPreview(flow, "personal_assistant_manage_tool", "zh")).toContain("用户正文未记录");
+    for (const invalid of [{ ...flow, assistantDelta: { ...flow.assistantDelta, nodeOwners: [] } },
+      { ...flow, assistantDelta: { ...flow.assistantDelta, instructionNodeIds: ["unknown"] } },
+      { ...flow, assistantDelta: { ...flow.assistantDelta, fieldKinds: [] } },
+      { ...flow, assistantContentOmitted: false }, { ...flow, assistantDetailsOmitted: true },
+      { ...start, assistantDelta: { ...start.assistantDelta, inputValueLengths: {} } },
+      { ...start, assistantDelta: { ...start.assistantDelta, localIntegration: true } },
+      { ...team, assistantDelta: { ...team.assistantDelta, memberCount: "2" } },
+      { ...runtime, assistantTargets: { ...runtime.assistantTargets, session_id: "extra-session" } },
+      { ...runtime, assistantTargets: { ...runtime.assistantTargets, kind: "unknown" } },
+      { ...start, assistantTargets: { ...start.assistantTargets, approved: "true" } }]) {
+      expect(platformManagementPreviewIsValid(invalid)).toBe(false);
+      expect(toolApprovalActionPreview(invalid, "personal_assistant_manage_tool", "en")).toContain("Arguments cannot be verified");
+    }
+  });
+  it("keeps ordinary legacy Team and ACL preview paths without the Launcher marker", () => {
+    for (const value of [{ assistantAction: "team_update", assistantTargets: { team_id: "team-a" }, assistantChangedFields: ["name"] },
+      { assistantAction: "knowledge_acl_grant", assistantTargets: { knowledge_base_id: "kb-a" }, assistantPermissions: ["read"] }]) {
+      expect(platformManagementPreviewIsValid(value)).toBe(false);
+      expect(toolApprovalActionPreview(value, "personal_assistant_manage_tool", "zh")).not.toContain("参数无法核对");
+    }
+  });
+  it("shows paired member and lead roles with native role eligibility, without claiming actual ACL access", () => {
+    const member = { ...team, assistantDelta: { ...team.assistantDelta, memberIds: ["membership-a"],
+      memberRoles: [{ memberId: "membership-a", agentId: "member-a", role: "member", effectiveRole: "member", knowledgeReviewEligible: false }] } };
+    const lead = { ...member, assistantDelta: { ...member.assistantDelta,
+      memberRoles: [{ memberId: "membership-a", agentId: "member-a", role: " LEAD ", effectiveRole: "lead", knowledgeReviewEligible: true }] } };
+    expect(platformManagementPreviewIsValid(member)).toBe(true);
+    expect(platformManagementPreviewIsValid(lead)).toBe(true);
+    for (const lang of ["zh", "en"] as const) {
+      const memberPreview = toolApprovalActionPreview(member, "personal_assistant_manage_tool", lang);
+      const leadPreview = toolApprovalActionPreview(lead, "personal_assistant_manage_tool", lang);
+      for (const value of ["membership-a", "member-a", "knowledgeReviewEligible"]) {
+        expect(memberPreview).toContain(value); expect(leadPreview).toContain(value);
+      }
+      expect(memberPreview).toContain('"knowledgeReviewEligible": false');
+      expect(leadPreview).toContain('"knowledgeReviewEligible": true');
+      expect(leadPreview).toContain('"effectiveRole": "lead"');
+      expect(leadPreview).not.toBe(memberPreview);
+      expect(leadPreview).toContain(lang === "zh" ? "实际访问仍受原生 ACL" : "actual access remains subject to native ACL");
+    }
+    const role = lead.assistantDelta.memberRoles[0];
+    for (const rows of [undefined, [], [{ ...role, memberId: "wrong-membership" }], [{ ...role, agentId: "wrong-agent" }],
+      [{ ...role, role: "lead\u202e" }], [{ ...role, effectiveRole: "member" }],
+      [{ ...role, knowledgeReviewEligible: "true" }], [{ ...role, extraPermission: true }]]) {
+      const invalid = { ...lead, assistantDelta: { ...lead.assistantDelta, memberRoles: rows } };
+      expect(platformManagementPreviewIsValid(invalid)).toBe(false);
+      expect(toolApprovalActionPreview(invalid, "personal_assistant_manage_tool", "zh")).toContain("参数无法核对");
+    }
+    expect(platformManagementPreviewIsValid({ ...lead, assistantDetailsOmitted: true })).toBe(false);
+  });
+  it("requires every native Session, Turn or research source reference for a supervising Flow", () => {
+    for (const [kind, source] of [["session", { sessionId: "session-a", turnId: "turn-a", agentId: "source-agent" }],
+      ["research", { runId: "research-a", nodeId: "node-a" }]] as const) {
+      const supervised = { ...flow, assistantDelta: { ...flow.assistantDelta, fieldIds: [], fieldKinds: [], requiredFieldIds: [], optionCounts: [],
+        nodeKinds: [kind], nodeOwners: [""], nodeSourceRefs: [source], instructionNodeIds: [] } };
+      expect(platformManagementPreviewIsValid(supervised)).toBe(true);
+      for (const value of Object.values(source)) expect(toolApprovalActionPreview(supervised, "personal_assistant_manage_tool", "zh")).toContain(value);
+      expect(platformManagementPreviewIsValid({ ...supervised, assistantDelta: { ...supervised.assistantDelta, nodeSourceRefs: [{}] } })).toBe(false);
+      expect(platformManagementPreviewIsValid({ ...supervised, assistantDelta: { ...supervised.assistantDelta, nodeSourceRefs: [{ ...source, approved: true }] } })).toBe(false);
+    }
+  });
+});
 
 describe("toolApprovalPreview", () => {
   const purgeSummary = {

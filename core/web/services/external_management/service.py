@@ -23,6 +23,7 @@ from .contracts import (
     contracts,
 )
 from .store import Store, digest
+from .platform_actions import PLATFORM_ACTIONS, RESULT_FIELDS, native_result, verify_target, execute as execute_platform_action
 
 
 class ManagementError(Exception):
@@ -70,7 +71,8 @@ class ManagementService:
     def binding(self) -> dict:
         current = self.identity()
         Binding.model_validate(current.binding)
-        return {"protocolVersion": 1, "binding": current.binding, "scopes": [scope for scope in SCOPES if scope not in {"tasks:read", "source:read", "knowledge:catalog:read", "agents:create:files", "teams:results:read", "agents:directory:read", "agents:purge"}], "actions": contracts()}
+        from .contracts import EXPLICIT_UPGRADE_SCOPES
+        return {"protocolVersion": 1, "binding": current.binding, "scopes": [scope for scope in SCOPES if scope not in EXPLICIT_UPGRADE_SCOPES | {"tasks:read", "source:read", "knowledge:catalog:read"}], "actions": contracts()}
 
     def _expected(self, expected: dict):
         current = self.identity()
@@ -96,7 +98,8 @@ class ManagementService:
                     or grant.get("scopes") != scopes):
                     raise ManagementError("SUBJECT_GRANT_CONFLICT", 409)
             else:
-                if {"agents:create:files", "teams:results:read", "agents:directory:read", "agents:purge"} & set(scopes):
+                from .contracts import EXPLICIT_UPGRADE_SCOPES
+                if EXPLICIT_UPGRADE_SCOPES & set(scopes):
                     raise ManagementError("SCOPE_DENIED", 403)
                 grant = {"subject_id": "ops-" + uuid4().hex, "subject_capability": secrets.token_urlsafe(48),
                          "binding": current.binding, "authority": current.signature, "scopes": scopes}
@@ -226,6 +229,63 @@ class ManagementService:
             return response_model.model_validate(reader(query)).model_dump()
         except ValidationError:
             raise ManagementError("SOURCE_UNAVAILABLE", 503) from None
+
+    def read_runtime(self, subject, capability, operation, parameters):
+        from .runtime_contracts import (RuntimeOperationsQuery, RuntimeOperationsResponse,
+            RuntimeOperationQuery, RuntimeOperationResponse)
+        grant = self._authorize(subject, capability, "operations:read")
+        query_type, response_type, reader = {
+            "list": (RuntimeOperationsQuery, RuntimeOperationsResponse, self.native.read_runtime_operations),
+            "get": (RuntimeOperationQuery, RuntimeOperationResponse, self.native.read_runtime_operation),
+        }[operation]
+        try:
+            query = query_type.model_validate(parameters)
+        except ValidationError:
+            raise ManagementError("INVALID_INPUT", 422) from None
+        try:
+            result = response_type.model_validate(reader(query)).model_dump()
+        except (ValidationError, ValueError, TypeError, OSError):
+            raise ManagementError("OPERATION_SOURCE_UNAVAILABLE", 503) from None
+        if self._authorize(subject, capability, "operations:read") != grant:
+            raise ManagementError("AUTHORIZATION_CONFLICT", 409)
+        return result
+
+    def read_asset(self, subject, capability, operation, parameters):
+        from .asset_contracts import (TeamAssetQuery, TeamAssetResponse, ToolPolicyQuery, ToolPolicyResponse,
+            KnowledgeACLQuery, KnowledgeACLResponse)
+        from .asset_control import AssetControl
+        control = AssetControl(self.native)
+        scope, query_type, response_type, reader = {
+            "team": ("teams:manage:read", TeamAssetQuery, TeamAssetResponse, control.read_team),
+            "tool-policy": ("agents:tool-policy:read", ToolPolicyQuery, ToolPolicyResponse, control.read_tool_policy),
+            "knowledge-acl": ("knowledge:acl:read", KnowledgeACLQuery, KnowledgeACLResponse, control.read_knowledge_acl),
+        }[operation]
+        grant = self._authorize(subject, capability, scope)
+        try:
+            query = query_type.model_validate(parameters)
+        except ValidationError:
+            raise ManagementError("INVALID_INPUT", 422) from None
+        result = response_type.model_validate(reader(**query.model_dump())).model_dump()
+        if self._authorize(subject, capability, scope) != grant:
+            raise ManagementError("AUTHORIZATION_CONFLICT", 409)
+        return result
+
+    def read_flow(self, subject, capability, operation, parameters):
+        from .flow_contracts import FlowListQuery, FlowListResponse, FlowReadQuery, FlowReadResponse
+        from .flow_control import FlowControl
+        grant = self._authorize(subject, capability, "teams:flows:read")
+        query_type, response_type, reader = {
+            "list": (FlowListQuery, FlowListResponse, FlowControl(self.native).list_flows),
+            "get": (FlowReadQuery, FlowReadResponse, FlowControl(self.native).read_flow),
+        }[operation]
+        try:
+            query = query_type.model_validate(parameters)
+        except ValidationError:
+            raise ManagementError("INVALID_INPUT", 422) from None
+        result = response_type.model_validate(reader(query)).model_dump()
+        if self._authorize(subject, capability, "teams:flows:read") != grant:
+            raise ManagementError("AUTHORIZATION_CONFLICT", 409)
+        return result
 
     def _directory_read(self, subject, capability, action, parameters):
         from .contracts import (DirectoryQuery, TeamReadQuery, RoomReadQuery, TeamListResponse,
@@ -402,6 +462,15 @@ class ManagementService:
         return agent.get("avatarImagePath") == parameters["avatar_image_path"]
 
     def _confirm(self, record: dict) -> bool:
+        if record["action"] in PLATFORM_ACTIONS:
+            try:
+                result = native_result(record["action"], record.get("nativeResult"))
+                verify_target(record["action"], result, record["parameters"])
+                record["receipt"] = {"status": "completed", "action": record["action"], "requestId": record["requestId"],
+                    "verified": True, RESULT_FIELDS[record["action"]]: result}
+                return True
+            except (ValidationError, ValueError, TypeError, KeyError, StopIteration):
+                return False
         if record["action"] == "agent_purge":
             try:
                 from .contracts import AgentPurgeResult
@@ -473,7 +542,8 @@ class ManagementService:
             from json import dumps
             if len(dumps(envelope.parameters, ensure_ascii=False, allow_nan=False).encode()) > 16_000:
                 raise ValueError("parameters too large")
-            parameters = ACTION_MODELS[action].model_validate(envelope.parameters).model_dump(exclude_unset=action == "agent_update")
+            parameters = ACTION_MODELS[action].model_validate(envelope.parameters).model_dump(
+                exclude_unset=action in {"agent_update", "team_update", "agent_tool_policy_update"})
             if action == "agent_create" and parameters.get("capability_preset") is None:
                 parameters.pop("capability_preset", None)  # Preserve historical intent fingerprints.
         except (ValidationError, ValueError):
@@ -513,17 +583,20 @@ class ManagementService:
                     if result.agentId != parameters["agent_id"]:
                         raise ValueError("Mismatched native purge acknowledgement")
                     record["nativeResult"] = result.model_dump()
+                elif action in PLATFORM_ACTIONS:
+                    record["nativeResult"] = execute_platform_action(self.native, action, parameters, marker)
                 else:
                     agent = getattr(self.native, {"agent_create": "create", "agent_update": "update", "agent_avatar": "avatar", "agent_archive": "archive"}[action])(parameters, marker)
             except ManagementError as exc:
-                if action == "agent_purge" and exc.code == "OPERATION_UNCONFIRMED":
+                if (action in {"agent_purge", *PLATFORM_ACTIONS} and exc.code == "OPERATION_UNCONFIRMED"
+                    or action in {"flow_save", "flow_start"} and exc.code in {"FLOW_SAVE_UNCONFIRMED", "FLOW_START_UNCONFIRMED"}):
                     return self._receipt(record, reused=False)
                 record["failure"] = {"code": exc.code, "status_code": exc.status_code}
                 self.store.write(path, record)
                 raise
             except Exception:  # noqa: BLE001 -- lost native acknowledgement remains an unknown durable intent
                 return self._receipt(record, reused=False)
-            if action not in {"session_pin", "agent_purge"}:
+            if action not in {"session_pin", "agent_purge", *PLATFORM_ACTIONS}:
                 record["agentId"] = agent.get("agentId", "")
             self.store.write(path, record)
             self._confirm(record)

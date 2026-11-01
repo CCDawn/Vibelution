@@ -95,9 +95,11 @@ def _configure_tool_budgets() -> None:
     """
     from core.infrastructure.tool_executor import get_tool_executor
     from tools.Key_Tools import create_key_tools
+    from .actions import configure_action_result_budget
 
     tool = next(tool for tool in create_key_tools() if tool.name == "personal_assistant_manage_tool")
     get_tool_executor().register_tool(tool.name, tool.func, timeout=130)
+    configure_action_result_budget()
 
 
 def _bootstrap(root: Path | str, *, offline_migration: bool) -> dict[str, Any]:

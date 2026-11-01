@@ -1338,6 +1338,26 @@ def _argument_summary(tool_name: str, tool_args: Mapping[str, Any]) -> dict[str,
 def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
     """Approval-only projection; never expose nested prompt/policy values."""
     action = args.get("action")
+    from core.assistant_runtime.platform_approval import PLATFORM_MANAGEMENT_ACTIONS
+    if isinstance(action, str) and action in PLATFORM_MANAGEMENT_ACTIONS:
+        from core.infrastructure.native_runtime import is_launcher_assistant_process
+        if is_launcher_assistant_process():
+            try:
+                raw = args.get("arguments_json")
+                def unique(pairs):
+                    result = {}
+                    for key, value in pairs:
+                        if key in result:
+                            raise ValueError("Duplicate platform argument")
+                        result[key] = value
+                    return result
+                values = json.loads(raw, object_pairs_hook=unique) if isinstance(raw, str) and len(raw) <= 2 * 1024 * 1024 else None
+                if not isinstance(values, dict):
+                    raise ValueError("Invalid platform management arguments")
+                from core.assistant_runtime.platform_approval import platform_management_approval_summary
+                return platform_management_approval_summary(action, values)
+            except (ValueError, TypeError, KeyError, RuntimeError, RecursionError):
+                return {"assistantAction": action, "assistantArgumentsInvalid": True}
     if action == "agent_purge":
         from core.infrastructure.native_runtime import is_launcher_assistant_process
         if not is_launcher_assistant_process():

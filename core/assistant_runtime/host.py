@@ -551,8 +551,10 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                     # Heartbeat omits previously terminal tasks; use the full
                     # durable native projection so delayed wakeups survive.
                     await patrol.refresh_stale_terminals(dispatch.list_dispatches())
-                    result = await patrol_call(patrol.inspect, dispatch.list_dispatches())
-                    app.state.patrol_status = {"state": "ready", "deliveryStates": result.get("deliveryStates", {})}
+                    teams = await patrol.refresh_team_runs()
+                    result = await patrol_call(patrol.inspect, [*dispatch.list_dispatches(), *teams])
+                    app.state.patrol_status = {"state": "ready", "deliveryStates": result.get("deliveryStates", {}),
+                                              "teamRuns": patrol.team_observation}
             except Exception:  # noqa: BLE001 - private backend data stays out of logs.
                 # Native IDs and credentials remain durable. A failed poll is
                 # not permission to repeat a task or cancel it.

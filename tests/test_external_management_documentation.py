@@ -40,7 +40,7 @@ def env(tmp_path, monkeypatch, private_operator_environment):
     from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
     from core.web.routes import launcher_assistant_management as route
     from core.web.services.external_management import documentation
-    from core.web.services.external_management.contracts import SCOPES
+    from core.web.services.external_management.contracts import SCOPES, EXPLICIT_UPGRADE_SCOPES
     from core.web.services.external_management.service import (
         ManagementService,
         TargetIdentity,
@@ -58,8 +58,7 @@ def env(tmp_path, monkeypatch, private_operator_environment):
     binding = {"projectId": "documentation-project", "instanceId": "documentation-instance"}
     service = ManagementService(tmp_path / "management", identity=lambda: TargetIdentity(binding, "canonical"), native=Native())
     grant = service.bind({"client_id": "launcher", "expected_binding": binding,
-                          "scopes": [scope for scope in SCOPES if scope not in {
-                              "agents:create:files", "teams:results:read", "agents:directory:read", "agents:purge"}]})
+                          "scopes": [scope for scope in SCOPES if scope not in EXPLICIT_UPGRADE_SCOPES]})
     monkeypatch.setattr(route, "_SERVICE", service)
     monkeypatch.setattr(api, "_filter_get_endpoints", lambda paths: {path: item for path, item in paths.items() if "get" in item})
     spec = {"openapi": "3.1.0", "paths": {
@@ -172,7 +171,7 @@ def test_description_budget_and_zero_mutation_no_pa_no_http(env, monkeypatch):
 
 
 def test_seven_scope_bind_never_upgrades_existing_six_scope_subject(env):
-    from core.web.services.external_management.contracts import SCOPES
+    from core.web.services.external_management.contracts import SCOPES, EXPLICIT_UPGRADE_SCOPES
     from core.web.services.external_management.service import ManagementError
     assert SCOPES[9:13] == ("platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read")
     assert SCOPES[13] == "legacy:receipts:read" and "tasks:read" in SCOPES

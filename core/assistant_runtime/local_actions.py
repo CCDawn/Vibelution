@@ -67,7 +67,7 @@ def execute(action: str, parameters: dict, runtime: dict, *, governed: bool = Fa
     contract = contracts().get(action)
     if contract is None:
         raise ValueError("未知的 Launcher 本地操作，请先 index/describe 查询。")
-    if action in {"preference_proposals", "preference_proposal_accept", "preference_proposal_reject", "dispatch_list"}:
+    if action in {"preference_proposals", "preference_proposal_accept", "preference_proposal_reject", "dispatch_list", "management_requests"}:
         from .discovery_actions import execute as execute_discovery
         return execute_discovery(action, parameters, runtime, governed=governed)
     if action in {"history_list", "history_read", "history_search", "history_commentary_read"}:

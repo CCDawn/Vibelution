@@ -3078,6 +3078,13 @@ def _build_key_tools() -> List[BaseTool]:
         dispatch使用project_id、agent_id、稳定dispatch_id，并优先用task_source的start_after/end_before唯一短锚点提取用户任务原文；
         两锚点都为空时使用整条用户消息。不要改写任务、ID和引号文字；task只接受用户消息的精确原文子串。
         receipt查询原任务；项目取自授权目录，同一请求复用原ID和选择参数，原生引用可恢复原任务，不要求用户重新抄写。
+        management_requests发现本地已保存的管理请求引用，按nextOffset续页；覆盖不完整时不能声称没有历史请求。
+        runtime_list按来源查询运行元数据和coverage，runtime_get读取精确对象及可用commands/revision；
+        只有available的原生命令可执行，部分覆盖与unknown不能当作平台空闲或任务终态。
+        修改已有团队先team_asset_get；修改Agent工具权限先agent_tool_policy_get；
+        修改知识ACL先knowledge_acl_get，写入须原样携scopedKnowledgeBaseId及fingerprint。
+        flow_list/flow_get分页读取已有团队流程，flow_get的pointer定位节点，续读沿用digest；
+        flow_save/flow_start经manage执行，完成后再查原回执和runtime_get，受理不等于业务完成。
         agent_create: display_name、request_id（本次创建稳定唯一标识），可选model_id、mission；
         默认沿用助理模型，创建可接收派遣的普通Agent，权限固定为消息协作；需要文件/命令等权限另走审批。
         agent_avatar: agent_id 和 avatar_image_path，或reset_to_default=true；先avatar_options查现有图片。
@@ -3117,6 +3124,10 @@ def _build_key_tools() -> List[BaseTool]:
         running不等于完成，用action_tool的team_status查询；unknown/partial用原key核验已有记录。
         普通Agent改名/模型/档案、用户设置等优先用personal_assistant_action_tool对象参数自动执行。
         action_tool的index/describe登记的governed=true动作在此用相同action执行，arguments_json遵循其parameters schema。
+        Launcher支持dispatch_cancel（严格绑定原project_id、dispatch_id、native_task_id）、runtime_command、
+        team_update、agent_tool_policy_update、knowledge_acl_grant/revoke、flow_save/start；
+        先用对应读取动作取得当前身份和CAS版本，使用稳定request_id与原生审批，缺权限仅显式补所需scope。
+        各类命令的受理、stopRequested与实际终态分别核验；unknown只查原management_receipt，不换ID重放。
         包含provider_add/update/remove/test、model_remove/default，以及session置顶/参数/归档、team_update/archive、room_update。
         不接受任意HTTP方法或URL；普通连接地址仅可通过provider语义动作变更，跨地址不会沿用旧凭据。
         team_create: name（必填）、description、templateId（如 dev-team；不给则建空团队）。
@@ -4075,7 +4086,7 @@ def create_key_tools() -> List[BaseTool]:
     return [copy(tool_definition) for tool_definition in _cached_key_tools()]
 
 
-def create_llm_facing_tools() -> List[BaseTool]:
+def create_llm_facing_tools(*, probe_dependencies: bool = True) -> List[BaseTool]:
     """返回默认暴露给 LLM 的精简工具集。"""
     all_tools = create_key_tools()
     excluded_names = {
@@ -4094,6 +4105,6 @@ def create_llm_facing_tools() -> List[BaseTool]:
         "get_self_model_tool",
         "record_evolution_tool",
     }
-    if not _is_autoglm_search_tool_available():
+    if probe_dependencies and not _is_autoglm_search_tool_available():
         excluded_names.add("web_search_tool")
     return [tool for tool in all_tools if getattr(tool, "name", "") not in excluded_names]

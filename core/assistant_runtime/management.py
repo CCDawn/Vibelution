@@ -202,14 +202,25 @@ class ManagementAdapter:
 
     def _read(self, path):
         try:
-            value = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(value, dict) and value.get("schemaVersion") == 1 and re.fullmatch(r"[a-f0-9]{64}", value.get("fingerprint", "")):
+            with path.open("rb") as handle:
+                content = handle.read(64 * 1024 + 1)
+            if len(content) > 64 * 1024:
+                raise ValueError("Management association exceeds limit")
+            value = json.loads(content)
+            if (isinstance(value, dict) and type(value.get("schemaVersion")) is int
+                    and value["schemaVersion"] == 1 and re.fullmatch(r"[a-f0-9]{64}", value.get("fingerprint", ""))):
                 return value
         except (OSError, ValueError, TypeError):
             pass
         raise DispatchError("Existing management association is unreadable; preserved without replay.", code="MANAGEMENT_STATE_INVALID")
 
+    def list_requests(self, *, project_id=None, action="", offset=0, limit=10):
+        from .management_discovery import list_requests
+        return list_requests(self, project_id=project_id, action=action, offset=offset, limit=limit)
+
     async def invoke(self, project_id: str, *, action: str, request_id: str, parameters: dict):
+        from core.web.services.external_management.platform_actions import PLATFORM_ACTIONS
+        never_replay = action in PLATFORM_ACTIONS or action == "agent_purge"
         key = self._key(project_id, action, request_id)
         fingerprint = hashlib.sha256(json.dumps(parameters, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
         path = self._root / (key + ".json")
@@ -238,12 +249,29 @@ class ManagementAdapter:
                 except DispatchError as exc:
                     if exc.code != "REQUEST_UNAVAILABLE":
                         raise
+                    if never_replay and record.get("admissionDenied") != "SCOPE_DENIED":
+                        raise DispatchError("Original request receipt is unavailable; outcome remains unconfirmed.",
+                                            code="OPERATION_UNCONFIRMED") from None
                     # Only an authenticated not-admitted result permits the
                     # original envelope to reach the target's durable gate.
             else:
-                atomic_write_json(path, {"schemaVersion": 1, "fingerprint": fingerprint})
-            result = await self._call(project_id, lambda client: client.management_action(action=action,
-                request_id=request_id, parameters=parameters, require_existing_subject=retrying))
+                atomic_write_json(path, {"schemaVersion": 1, "fingerprint": fingerprint,
+                    "reference": {"projectId": project_id, "action": action, "requestId": request_id}})
+            # A missing target receipt cannot prove that an earlier control did
+            # not run. Only this attempt's authenticated, pre-admission scope
+            # denial permits the same key after its explicit scope upgrade.
+            if never_replay:
+                record = self._read(path)
+                record.pop("admissionDenied", None)
+                atomic_write_json(path, record)
+            try:
+                result = await self._call(project_id, lambda client: client.management_action(action=action,
+                    request_id=request_id, parameters=parameters, require_existing_subject=retrying))
+            except DispatchError as exc:
+                if never_replay and exc.code == "SCOPE_DENIED":
+                    record["admissionDenied"] = "SCOPE_DENIED"
+                    atomic_write_json(path, record)
+                raise
             return {**result, "projectId": project_id}
 
     async def receipt(self, project_id: str, *, action: str, request_id: str):
@@ -335,6 +363,28 @@ class ManagementAdapter:
         if project_id not in self._projects:
             raise DispatchError("Project is not authorized.", code="PROJECT_NOT_AUTHORIZED")
         result = await self._call(project_id, lambda client: client.management_active_tasks(**parameters))
+        return {**result, "projectId": project_id}
+
+    async def runtime(self, project_id: str, operation: str, **parameters):
+        if project_id not in self._projects:
+            raise DispatchError("Project is not authorized.", code="PROJECT_NOT_AUTHORIZED")
+        result = await self._call(project_id, lambda client: client.management_runtime(operation, **parameters))
+        return {**result, "projectId": project_id}
+
+    async def asset(self, project_id: str, operation: str, **parameters):
+        if project_id not in self._projects:
+            raise DispatchError("Project is not authorized.", code="PROJECT_NOT_AUTHORIZED")
+        from .management_projection import ManagementAssetView, project_management_asset
+        view = ManagementAssetView.model_validate({key: parameters.pop(key) for key in tuple(parameters)
+            if key in ManagementAssetView.model_fields})
+        result = await self._call(project_id, lambda client: client.management_asset(operation, **parameters))
+        action = {"team": "team_asset_get", "tool-policy": "agent_tool_policy_get", "knowledge-acl": "knowledge_acl_get"}[operation]
+        return project_management_asset(action, result, project_id, view.model_dump())
+
+    async def flow(self, project_id: str, operation: str, **parameters):
+        if project_id not in self._projects:
+            raise DispatchError("Project is not authorized.", code="PROJECT_NOT_AUTHORIZED")
+        result = await self._call(project_id, lambda client: client.management_flow(operation, **parameters))
         return {**result, "projectId": project_id}
 
     async def source(self, project_id: str, operation: str, **parameters):

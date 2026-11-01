@@ -9,6 +9,12 @@ from core.assistant_runtime.actions import bind_actions, execute_action, unbind_
 from core.assistant_runtime.dispatch import DispatchError
 
 
+@pytest.fixture(autouse=True)
+def isolated_action_result_budget(monkeypatch):
+    from core.infrastructure import tool_result_budget
+    monkeypatch.setattr(tool_result_budget, "_TOOL_RESULT_BUDGETS", dict(tool_result_budget._TOOL_RESULT_BUDGETS))
+
+
 class Dispatch:
     projects = {"test-project": "/private/source/path"}
 
@@ -58,12 +64,15 @@ def test_denied_parameter_query_names_both_required_read_scopes(monkeypatch):
 
 
 def _through_native_model_budget(payload):
-    from core.infrastructure.tool_result_budget import apply_tool_result_budget
+    from core.infrastructure.tool_result_budget import apply_tool_result_budget, get_tool_result_budget
     from core.infrastructure.tool_result import package_tool_result_facts, render_tool_result_for_model
+    from core.assistant_runtime.actions import configure_action_result_budget
+    configure_action_result_budget()
+    budget = get_tool_result_budget("personal_assistant_action_tool").packaging_max_chars
     raw = json.dumps({"source": "launcher-assistant", "untrustedContent": True, **payload}, ensure_ascii=False)
     result, outcome = apply_tool_result_budget(raw, tool_name="personal_assistant_action_tool")
-    facts = package_tool_result_facts(result, tool_name="personal_assistant_action_tool", action="index")
-    rendered = render_tool_result_for_model(facts)
+    facts = package_tool_result_facts(result, tool_name="personal_assistant_action_tool", action="index", max_chars=budget)
+    rendered = render_tool_result_for_model(facts, max_chars=budget)
     return raw, outcome, facts, rendered
 
 

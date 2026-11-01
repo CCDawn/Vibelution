@@ -25,17 +25,26 @@ from core.external_agent.contracts import (
     TASK_TERMINAL_STATUSES,
 )
 from core.infrastructure.atomic_io import atomic_write_json
+from core.web.services.external_management.platform_actions import (
+    PLATFORM_ACTIONS as _PLATFORM_ACTIONS, RESULT_FIELDS as _PLATFORM_RESULTS,
+    public_receipt as _platform_receipt, verify_target as _platform_verify_target,
+)
 from vibelution_storage import resolve_project_runtime_home
 
 CONTROL_TOKEN_HEADER = "X-Vibelution-Control-Token"
 TASK_CAPABILITY_HEADER = "X-Vibelution-External-Agent-Task-Capability"
 ADAPTER_CONNECTION_HEADER = "X-Vibelution-External-Agent-Connection"
 _MANAGEMENT_PREFIX = "/api/v1/launcher-assistant-management"
-_MANAGEMENT_ACTIONS = frozenset({"agent_create", "agent_update", "agent_avatar", "agent_archive", "agent_purge", "team_run", "session_pin", "authorization_upgrade"})
+_MANAGEMENT_ACTIONS = frozenset({"agent_create", "agent_update", "agent_avatar", "agent_archive", "agent_purge", "team_run", "session_pin", "authorization_upgrade"}) | _PLATFORM_ACTIONS
 _MANAGEMENT_SCOPES = ["agents:archive", "agents:avatar", "agents:create", "agents:read", "agents:update", "legacy:receipts:read", "platform:describe", "rooms:read", "sessions:parameters:read", "sessions:pin", "sessions:read", "teams:directory:read", "teams:read", "teams:run"]
 # Historical grants without persisted scopes predate pin and archive. Freeze
 # their actual eight scopes; deriving this list from fresh scopes expands power.
 _LEGACY_MANAGEMENT_SCOPES = ["agents:avatar", "agents:create", "agents:read", "agents:update", "platform:describe", "sessions:read", "teams:read", "teams:run"]
+
+
+def _supported_management_scopes():
+    from core.web.services.external_management.contracts import SCOPES
+    return SCOPES
 
 
 class BackendClientError(RuntimeError):
@@ -221,7 +230,7 @@ class ManagedAgentBackendClient:
             # grant; only a fresh client may explicitly request the new scope.
             requested_scopes = saved.get("scopes", _LEGACY_MANAGEMENT_SCOPES if saved.get("clientId") else _MANAGEMENT_SCOPES)
             if (not isinstance(requested_scopes, list) or not requested_scopes
-                or any(not isinstance(scope, str) or scope not in (*_MANAGEMENT_SCOPES, "agents:directory:read", "tasks:read", "source:read", "knowledge:catalog:read", "agents:create:files", "teams:results:read", "agents:purge") for scope in requested_scopes)
+                or any(not isinstance(scope, str) or scope not in _supported_management_scopes() for scope in requested_scopes)
                 or requested_scopes != sorted(set(requested_scopes))):
                 raise BackendClientError("Invalid management scopes.", code="UNKNOWN_MANAGEMENT_SUBJECT")
             self._state["management"] = {**saved, "clientId": client_id, "binding": binding, "scopes": requested_scopes}
@@ -259,11 +268,12 @@ class ManagedAgentBackendClient:
                                 require_existing_subject: bool = False) -> dict[str, Any]:
         if action not in _MANAGEMENT_ACTIONS or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,95}", request_id):
             raise BackendClientError("Unsupported management request.", code="INVALID_MANAGEMENT_REQUEST")
-        if action in {"session_pin", "agent_archive", "agent_purge", "authorization_upgrade"}:
+        if action in {"session_pin", "agent_archive", "agent_purge", "authorization_upgrade", *_PLATFORM_ACTIONS}:
             from pydantic import ValidationError
             from core.web.services.external_management.contracts import ACTION_MODELS
             try:
-                parameters = ACTION_MODELS[action].model_validate(parameters).model_dump()
+                parameters = ACTION_MODELS[action].model_validate(parameters).model_dump(
+                    exclude_unset=action in {"team_update", "agent_tool_policy_update"})
             except ValidationError:
                 raise BackendClientError("Invalid management parameters.", code="INVALID_MANAGEMENT_REQUEST") from None
         grant = (await self._original_management_grant(require_original=True) if action == "authorization_upgrade"
@@ -272,6 +282,11 @@ class ManagedAgentBackendClient:
             management_auth=(grant["subjectId"], grant["capability"]), json_payload={
                 "request_id": request_id, "expected_binding": grant["binding"], "parameters": parameters})
         public = self._management_public_receipt(result, action=action, request_id=request_id)
+        if action in _PLATFORM_ACTIONS and public["status"] == "completed":
+            try:
+                _platform_verify_target(action, public[_PLATFORM_RESULTS[action]], parameters)
+            except (ValueError, KeyError, StopIteration):
+                raise BackendClientError("Mismatched platform operation receipt.", code="BACKEND_PROTOCOL_ERROR") from None
         if action == "authorization_upgrade":
             if public["status"] == "completed" and (public["authorization"]["previousScopes"] != parameters["expected_scopes"]
                 or public["authorization"]["addedScopes"] != parameters["add_scopes"]):
@@ -466,6 +481,73 @@ class ManagedAgentBackendClient:
             raise BackendClientError("Task query binding changed.", code="BACKEND_PROTOCOL_ERROR")
         return result
 
+    async def management_runtime(self, operation: str, **parameters) -> dict[str, Any]:
+        from pydantic import ValidationError
+        from core.web.services.external_management.runtime_contracts import (
+            RuntimeOperationsQuery, RuntimeOperationsResponse, RuntimeOperationQuery, RuntimeOperationResponse)
+        if operation not in {"list", "get"}:
+            raise BackendClientError("Unknown runtime query.", code="INVALID_MANAGEMENT_REQUEST")
+        query_type, response_type, suffix = {
+            "list": (RuntimeOperationsQuery, RuntimeOperationsResponse, "operations"),
+            "get": (RuntimeOperationQuery, RuntimeOperationResponse, "operation"),
+        }[operation]
+        try:
+            query = query_type.model_validate(parameters).model_dump(exclude_none=True)
+        except ValidationError:
+            raise BackendClientError("Invalid runtime query.", code="INVALID_MANAGEMENT_REQUEST") from None
+        result = await self._management_directory_read("/runtime/" + suffix + "?" + urlencode(query), response_type)
+        if operation == "list":
+            if (result["offset"] != query["offset"] or len(result["operations"]) > query["limit"]
+                or query.get("kind") and any(row["kind"] != query["kind"] for row in result["operations"])):
+                raise BackendClientError("Runtime query binding changed.", code="BACKEND_PROTOCOL_ERROR")
+        elif (result["operation"]["kind"] != query["kind"] or result["operation"]["resourceId"] != query["resource_id"]
+            or any(result["operation"].get(output, "") != query.get(key, "") for key, output in
+                   (("session_id", "sessionId"), ("team_id", "teamId"), ("flow_id", "flowId")) if query.get(key))):
+            raise BackendClientError("Native operation identity changed.", code="BACKEND_PROTOCOL_ERROR")
+        return result
+
+    async def management_asset(self, operation: str, **parameters) -> dict[str, Any]:
+        from pydantic import ValidationError
+        from core.web.services.external_management.asset_contracts import (
+            TeamAssetQuery, TeamAssetResponse, ToolPolicyQuery, ToolPolicyResponse, KnowledgeACLQuery, KnowledgeACLResponse)
+        choices = {"team": (TeamAssetQuery, TeamAssetResponse, "team_id", "teamId"),
+            "tool-policy": (ToolPolicyQuery, ToolPolicyResponse, "agent_id", "agentId"),
+            "knowledge-acl": (KnowledgeACLQuery, KnowledgeACLResponse, "knowledge_base_id", "knowledgeBaseId")}
+        if operation not in choices:
+            raise BackendClientError("Unknown managed asset query.", code="INVALID_MANAGEMENT_REQUEST")
+        query_type, response_type, input_id, output_id = choices[operation]
+        try:
+            query = query_type.model_validate(parameters).model_dump()
+        except ValidationError:
+            raise BackendClientError("Invalid managed asset query.", code="INVALID_MANAGEMENT_REQUEST") from None
+        result = await self._management_directory_read("/assets/" + operation + "?" + urlencode(query), response_type)
+        if (result[output_id] != query[input_id]
+            and not (operation == "knowledge-acl" and result["scopedKnowledgeBaseId"] == query[input_id])):
+            raise BackendClientError("Managed asset query identity changed.", code="BACKEND_PROTOCOL_ERROR")
+        return result
+
+    async def management_flow(self, operation: str, **parameters) -> dict[str, Any]:
+        from pydantic import ValidationError
+        from core.web.services.external_management.flow_contracts import FlowListQuery, FlowListResponse, FlowReadQuery, FlowReadResponse
+        if operation not in {"list", "get"}:
+            raise BackendClientError("Unknown flow query.", code="INVALID_MANAGEMENT_REQUEST")
+        query_type, response_type, suffix = {
+            "list": (FlowListQuery, FlowListResponse, "team-flows"),
+            "get": (FlowReadQuery, FlowReadResponse, "team-flow"),
+        }[operation]
+        try:
+            query = query_type.model_validate(parameters).model_dump(exclude_none=True)
+        except ValidationError:
+            raise BackendClientError("Invalid flow query.", code="INVALID_MANAGEMENT_REQUEST") from None
+        result = await self._management_directory_read("/" + suffix + "?" + urlencode(query), response_type)
+        if (result["teamId"] != query["team_id"] or result["offset"] != query["offset"]
+            or result["limit"] > query["limit"]
+            or len(result["flows"] if operation == "list" else result["items"]) > query["limit"]
+            or operation == "get" and (result["flowId"] != query["flow_id"] or result["pointer"] != query["pointer"])
+            or query.get("expected_digest") is not None and result["digest"] != query["expected_digest"]):
+            raise BackendClientError("Flow query identity changed.", code="BACKEND_PROTOCOL_ERROR")
+        return result
+
     async def management_session_list(self, **parameters) -> dict[str, Any]:
         from pydantic import ValidationError
         from core.web.services.external_management.contracts import SessionListQuery, SessionListResponse
@@ -556,6 +638,8 @@ class ManagedAgentBackendClient:
         grant = await self._management_grant(require_existing=False)
         result = await self._request_json("GET", _MANAGEMENT_PREFIX + suffix,
             management_auth=(grant["subjectId"], grant["capability"]))
+        if "untrustedContent" in response_model.model_fields and result.get("untrustedContent") is not True:
+            raise BackendClientError("Missing untrusted source marker.", code="BACKEND_PROTOCOL_ERROR")
         try:
             return response_model.model_validate(result).model_dump()
         except ValidationError:
@@ -774,6 +858,14 @@ class ManagedAgentBackendClient:
             raise BackendClientError("Invalid management receipt.", code="BACKEND_PROTOCOL_ERROR")
         if action != "agent_purge" and payload.get("purge") is not None:
             raise BackendClientError("Unexpected Agent purge result.", code="BACKEND_PROTOCOL_ERROR")
+        if action in _PLATFORM_ACTIONS:
+            from pydantic import ValidationError
+            try:
+                return _platform_receipt(payload, action, request_id)
+            except (ValidationError, ValueError, TypeError, KeyError):
+                raise BackendClientError("Invalid platform management receipt.", code="BACKEND_PROTOCOL_ERROR") from None
+        if any(payload.get(key) is not None for key in ("operation", "asset", "flow")):
+            raise BackendClientError("Unexpected platform management result.", code="BACKEND_PROTOCOL_ERROR")
         result = {key: deepcopy(payload[key]) for key in ("status", "action", "requestId", "verified", "reused", "code") if key in payload}
         if action == "agent_purge":
             from pydantic import ValidationError
