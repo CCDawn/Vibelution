@@ -351,6 +351,21 @@ def enqueue_session_queued_turn(
         created = True
     if created and record_steer_admission and _row_kind(row) == KIND_USER:
         _record_queued_turn_steer_admission(s, normalized_session_id, row)
+    if created and _row_kind(row) == KIND_USER:
+        # waitsForPerson pendingQuestion one-time consumption: an accepted
+        # queued person message counts as the person answering. Consumption
+        # happens on arrival, not on drain — drained rows journal under the
+        # machine-shaped "queued_turn" source, so the submit-side raw hook
+        # can never see them. Idempotent and best-effort; the rail's kill
+        # switch skips the hook entirely.
+        from core.web.services.session.managed_continuation import waits_for_person_rail_enabled
+        from . import pending_question
+
+        if waits_for_person_rail_enabled():
+            try:
+                pending_question.consume_session_pending_question(normalized_session_id)
+            except Exception:  # noqa: BLE001 - consumption must never fail the enqueue
+                pass
     s._publish_session_detail_snapshot(normalized_session_id)
     s._schedule_session_queued_turn_drain(normalized_session_id)
     row["position"] = len(rows) + 1
@@ -880,6 +895,23 @@ def enqueue_session_runtime_notice(
             "createdAt": s._now_timestamp(),
             "updatedAt": s._now_timestamp(),
         }
+        # waitsForPerson held marker (batch 4): a machine notice admitted while
+        # the session holds its floor for a person is stamped at admission and
+        # kept — never dropped, never duplicated (sourceId idempotency already
+        # guards replays). The drain gate stays the enforcing second barrier;
+        # the marker only makes the held state auditable on the row, mirroring
+        # the queued_turn_hold shape, under the same chat-state lock.
+        from core.web.services.session.managed_continuation import (
+            session_waits_for_person,
+            waits_for_person_rail_enabled,
+        )
+
+        if (
+            waits_for_person_rail_enabled()
+            and not s._is_session_running(normalized_session_id)
+            and session_waits_for_person(s, normalized_session_id, conversation=conversation)
+        ):
+            row["held"] = {"reason": "waiting_for_person", "heldAt": s._now_timestamp()}
         _write_queued_turn_rows(s, normalized_session_id, conversation, [*rows, row])
     s._publish_session_detail_snapshot(normalized_session_id)
     s._schedule_session_queued_turn_drain(normalized_session_id)
@@ -1371,11 +1403,13 @@ def drain_session_queued_turns(session_id: str) -> bool:
                 runtime_notice_head_blocked_waiting_for_person,
             )
             if runtime_notice_head_blocked_waiting_for_person(s, normalized_session_id):
-                # waitsForPerson rail: the session rests on needs_continue/
-                # paused_limit with a person as its last speaker. A machine
-                # notice run must not pull it up; rows stay queued for the
-                # person's next action. User-row and control-notice heads are
-                # never gated (explicit user intent / journal-only records).
+                # waitsForPerson rail: the session holds its floor for a person
+                # (batch-4 anchor semantics — a person-driven resumable pause
+                # with no person message after it, or an unconsumed
+                # pendingQuestion). A machine notice run must not pull it up;
+                # held-marked rows stay queued for the person's next action.
+                # User-row and control-notice heads are never gated (explicit
+                # user intent / journal-only records).
                 person_blocked = True
                 return False
             batch = _claim_drain_batch(normalized_session_id)

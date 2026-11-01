@@ -81,11 +81,12 @@ def submit_session_proactive_turn(
     from core.web.services.session.managed_continuation import session_waits_for_person
 
     if session_waits_for_person(s, normalized_session_id):
-        # waitsForPerson rail (queued-drain parity): a session resting on
-        # needs_continue/paused_limit whose last speaker was the person is
-        # waiting for that person — a machine proactive turn must not pull
-        # the session up. Raised before context creation, so no proactive
-        # context is registered and no journal fact is written.
+        # waitsForPerson rail (queued-drain parity): a session holding its
+        # floor for a person (batch-4 anchor semantics, or an unconsumed
+        # pendingQuestion) is waiting for that person — a machine proactive
+        # turn must not pull the session up. Raised before context creation,
+        # so no proactive context is registered and no journal fact is
+        # written.
         raise s.SessionValidationError(
             "The session is resting and waiting for its user; proactive wake is refused."
         )

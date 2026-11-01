@@ -14,10 +14,12 @@ source. The worker's internal auto-continue gate
 branch for that source, mirroring the ``external_agent_task`` shape.
 
 Hard rails:
-- waitsForPerson: when the session rests on a turn whose last user input was
-  written by a person (``native.py`` operator-event predicate shape), every
+- waitsForPerson: when the session holds the floor for its person, every
   machine request is refused (``rejected_waiting_for_person``). Human
-  messages keep their existing "继续" channel untouched.
+  messages keep their existing "继续" channel untouched. See
+  ``session_waits_for_person`` for the batch-4 anchor semantics (machine
+  messages arm nothing and resolve nothing; a human message is the only
+  unlock for a person-armed wait).
 - Cap: per resting chain, at most ``MANAGED_CONTINUATION_LIMIT`` managed
   continuations (aligned with the external-agent task cap of 3). The count is
   persisted in the session chat state, so a restart cannot reset it. Beyond
@@ -31,6 +33,7 @@ functions) so any session-side module can import this one safely.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 # Dedicated message source; also the payload["source"] recorded on the
@@ -54,6 +57,24 @@ _MAX_REASON_CHARS = 500
 _MAX_PROMPT_CHARS = 8000
 
 EVENT_USER_MESSAGE = "user_message"
+
+# Batch-4 human-slot lane total switch (named after the repo precedent
+# ``VIBELUTION_TURN_STUCK_DETECTION``): enabled unless the env explicitly
+# turns it off. Off restores the batch-3 shape exactly — the inbox-wake gate
+# disappears, notice rows enqueue unmarked, the pendingQuestion slot stops
+# counting, and the predicate reverts to the legacy "last user speaker"
+# reading (the batch-3 managed-continuation/proactive/drain rails themselves
+# stay alive; they are not batch-4 work).
+WAITS_FOR_PERSON_RAIL_ENV = "VIBELUTION_WAITS_FOR_PERSON_RAIL"
+
+_RAIL_OFF_VALUES = frozenset({"0", "false", "off", "no", "disabled"})
+
+
+def waits_for_person_rail_enabled() -> bool:
+    """Total switch for the waitsForPerson lane; on unless explicitly off."""
+
+    raw = os.environ.get(WAITS_FOR_PERSON_RAIL_ENV, "").strip().lower()
+    return raw not in _RAIL_OFF_VALUES
 
 
 def _service():
@@ -95,14 +116,17 @@ def _journal_user_event_is_person_message(event: Any) -> bool:
     return True
 
 
-def _last_user_journal_event(s: Any, session_id: str) -> Any:
+def _session_journal_events(s: Any, session_id: str) -> list[Any]:
     from . import journal_bridge
 
-    events = journal_bridge.load_session_conversation_events_cached(
+    return journal_bridge.load_session_conversation_events_cached(
         session_id, project_root=s.PROJECT_ROOT
     )
+
+
+def _last_user_journal_event(s: Any, session_id: str) -> Any:
     last_user = None
-    for event in events:
+    for event in _session_journal_events(s, session_id):
         if str(getattr(event, "event_type", "") or "").strip() == EVENT_USER_MESSAGE:
             last_user = event
     return last_user
@@ -115,18 +139,122 @@ def session_resting_phase(conversation: dict[str, Any] | None) -> str:
     return status if status in MANAGED_CONTINUATION_RESUMABLE_PHASES else ""
 
 
+def _event_settled_resumable_phase(event: Any) -> bool:
+    """True when the terminal journal event settled a turn into a resumable phase."""
+
+    from core.chat.turn_journal import TERMINAL_EVENTS
+
+    if str(getattr(event, "event_type", "") or "").strip() not in TERMINAL_EVENTS:
+        return False
+    payload = getattr(event, "payload", None)
+    payload = payload if isinstance(payload, dict) else {}
+    status = str(getattr(event, "status", "") or "").strip().lower()
+    final_status = str(payload.get("finalStatus") or "").strip().lower()
+    return status in MANAGED_CONTINUATION_RESUMABLE_PHASES or final_status in MANAGED_CONTINUATION_RESUMABLE_PHASES
+
+
+def _person_resting_entry_anchor(events: list[Any]) -> Any | None:
+    """Newest journal event that started a person-held resting phase.
+
+    A resting phase begins at the terminal journal event that settled a turn
+    into ``needs_continue``/``paused_limit`` (``persist.py`` writes it in the
+    same flow that stamps ``last_turn_status``). That event anchors the wait
+    only when the settled turn was person-driven: the nearest preceding
+    ``user_message`` classifies as a person message. A machine-driven
+    resumable settlement never arms the wait and never moves the anchor, so
+    scanning past it keeps an earlier person anchor alive — a machine turn
+    can never dissolve an already-armed wait.
+    """
+
+    from core.chat.turn_journal import TERMINAL_EVENTS
+
+    for index in range(len(events) - 1, -1, -1):
+        event = events[index]
+        if str(getattr(event, "event_type", "") or "").strip() not in TERMINAL_EVENTS:
+            continue
+        if not _event_settled_resumable_phase(event):
+            continue
+        driver = None
+        for earlier in events[:index]:
+            if str(getattr(earlier, "event_type", "") or "").strip() == EVENT_USER_MESSAGE:
+                driver = earlier
+        if driver is not None and _journal_user_event_is_person_message(driver):
+            return event
+    return None
+
+
+def _has_person_message_after(events: list[Any], anchor_sequence: int) -> bool:
+    for event in events:
+        try:
+            sequence = int(getattr(event, "sequence", 0) or 0)
+        except (TypeError, ValueError):
+            sequence = 0
+        if sequence <= anchor_sequence:
+            continue
+        if str(getattr(event, "event_type", "") or "").strip() != EVENT_USER_MESSAGE:
+            continue
+        if _journal_user_event_is_person_message(event):
+            return True
+    return False
+
+
+def _legacy_waits_for_person(
+    s: Any,
+    session_id: str,
+    conversation: dict[str, Any] | None,
+) -> bool:
+    """Batch-3 shape: resting on a resumable phase whose last user speaker was a person."""
+
+    if not isinstance(conversation, dict):
+        return False
+    if not session_resting_phase(conversation):
+        return False
+    last_user = _last_user_journal_event(s, session_id)
+    if last_user is None:
+        return False
+    return _journal_user_event_is_person_message(last_user)
+
+
 def session_waits_for_person(
     s: Any,
     session_id: str,
     *,
     conversation: dict[str, Any] | None = None,
 ) -> bool:
-    """True when the session rests on a turn whose last user input was human.
+    """True while the session is holding its floor for a person (waitsForPerson).
 
-    Shared gate predicate for the three machine wake surfaces: the managed
-    continuation channel, the queued-notice drain, and proactive plugin
-    turns. Sessions not resting in needs_continue/paused_limit never count as
-    waiting (ready/idle sessions keep their normal machine wake behavior).
+    Shared gate predicate for the machine wake surfaces: the managed
+    continuation channel, the queued-notice drain, proactive plugin turns,
+    and (since batch 4) the agent-inbox wake.
+
+    Batch-4 semantics (``VIBELUTION_WAITS_FOR_PERSON_RAIL``, default on):
+
+    1. An unconsumed ``pendingQuestion`` slot means the assistant asked the
+       person something and no person answered yet — waiting, regardless of
+       the resting phase.
+    2. Otherwise the session must rest in ``needs_continue``/``paused_limit``.
+       The wait anchors at the newest terminal journal event that settled a
+       turn into a resumable phase AND whose settled turn was person-driven
+       (see ``_person_resting_entry_anchor``). The wait resolves only when a
+       person message lands AFTER that anchor:
+       - machine user messages after the anchor (inbox wake rows, control
+         notices, managed continuations) arm nothing and resolve nothing.
+         This closes the batch-3 blind spot where any machine
+         ``user_message`` became the "last speaker" and silently dissolved
+         an armed wait;
+       - a person message after the anchor resolves it: the floor passed to
+         the person's new turn, and when that turn re-settles into a
+         resumable phase its own terminal event becomes the fresh anchor;
+       - leaving the resting phase (ready/running/failed) clears the wait.
+       A machine-driven resumable settlement neither arms the wait nor moves
+       the anchor, so the managed-continuation channel keeps flowing for
+       machine-owned work exactly as in batch 3.
+    3. A journal without any person-driven resumable terminal event (legacy
+       sessions, synthetic seeds) keeps the batch-3 reading: waiting is the
+       last user journal event being a person message.
+
+    With the rail explicitly disabled the predicate is the batch-3 shape
+    verbatim and the ``pendingQuestion`` slot stops counting.
     """
 
     normalized_session_id = str(session_id or "").strip()
@@ -134,14 +262,33 @@ def session_waits_for_person(
         return False
     if not isinstance(conversation, dict):
         conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
-    if not isinstance(conversation, dict):
-        return False
-    if not session_resting_phase(conversation):
-        return False
-    last_user = _last_user_journal_event(s, normalized_session_id)
-    if last_user is None:
-        return False
-    return _journal_user_event_is_person_message(last_user)
+    rail_on = waits_for_person_rail_enabled()
+    if rail_on:
+        from .pending_question import conversation_pending_question
+
+        if conversation_pending_question(conversation) is not None:
+            return True
+        if not session_resting_phase(conversation):
+            return False
+        events = _session_journal_events(s, normalized_session_id)
+        anchor = _person_resting_entry_anchor(events)
+        if anchor is None:
+            # Legacy/synthetic journal shape: no person-driven resumable
+            # settlement exists, so fall back to the batch-3 last-speaker
+            # reading instead of inventing an anchor.
+            last_user = None
+            for event in events:
+                if str(getattr(event, "event_type", "") or "").strip() == EVENT_USER_MESSAGE:
+                    last_user = event
+            if last_user is None:
+                return False
+            return _journal_user_event_is_person_message(last_user)
+        try:
+            anchor_sequence = int(getattr(anchor, "sequence", 0) or 0)
+        except (TypeError, ValueError):
+            anchor_sequence = 0
+        return not _has_person_message_after(events, anchor_sequence)
+    return _legacy_waits_for_person(s, normalized_session_id, conversation)
 
 
 def runtime_notice_head_blocked_waiting_for_person(
@@ -413,8 +560,10 @@ __all__ = [
     "MANAGED_CONTINUATION_PROMPT",
     "MANAGED_CONTINUATION_RESUMABLE_PHASES",
     "MANAGED_CONTINUATION_STATE_KEY",
+    "WAITS_FOR_PERSON_RAIL_ENV",
     "request_managed_continuation",
     "runtime_notice_head_blocked_waiting_for_person",
     "session_resting_phase",
     "session_waits_for_person",
+    "waits_for_person_rail_enabled",
 ]

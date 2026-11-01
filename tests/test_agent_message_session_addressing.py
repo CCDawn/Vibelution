@@ -530,6 +530,14 @@ def test_wake_prefers_persisted_target_session(monkeypatch) -> None:
         def _is_session_running(self, session_id):
             return False
 
+        # Batch-4 waitsForPerson gate parity: the fake must expose the same
+        # chat-state surface the busy gate's neighbors read. A ready session
+        # keeps this wake ungated.
+        PROJECT_ROOT = None
+
+        def load_session_chat_state(self, project_root, session_id):
+            return {"conversation_id": session_id, "last_turn_status": "ready"}
+
         def _format_agent_inbox_wake_prompt(self, message):
             return "wake-prompt"
 

@@ -3502,7 +3502,9 @@ def wake_agent_for_inbox_message(
     rewriting to the Agent's current direct session.
 
     ``ignore_delegation_wake_policy`` skips only the delegationPolicy wake gate
-    (every other gate — session ownership, busy, in-flight dedup — still runs).
+    (every other gate — session ownership, busy, waitsForPerson, in-flight
+    dedup — still runs; waiting-for-person outranks every machine wake per the
+    batch-4 ruling, so the patrol is NOT exempt from that one).
     Default ``False`` keeps the historical behavior byte-for-byte. The sole
     sanctioned caller is the personal-assistant patrol
     (``personal_assistant_patrol_service``): the assistant keeps
@@ -3603,6 +3605,23 @@ def wake_agent_for_inbox_message(
     if s._is_session_running(target_session_id):
         delivery["wakeStatus"] = "skipped_busy"
         delivery["reason"] = "target_session_busy"
+        s._record_agent_inbox_wake_event("agent_inbox.wake_skipped", message, delivery, level="info")
+        return delivery
+
+    # waitsForPerson gate (batch 4): a target holding its floor for a person
+    # must not be pulled up by a machine message — same rail as the managed
+    # continuation, queued-drain, and proactive gates. Unlike the delegation
+    # gate above, this one is deliberately NOT skipped by
+    # ``ignore_delegation_wake_policy``: waiting-for-person outranks every
+    # machine wake, including the personal-assistant patrol's exception wake
+    # (receipts stay in the inbox ledger undigested and ride the patrol's
+    # retryable "skipped" path until the person acts). The rail's kill switch
+    # restores the ungated batch-3 behavior.
+    from .managed_continuation import session_waits_for_person, waits_for_person_rail_enabled
+
+    if waits_for_person_rail_enabled() and session_waits_for_person(s, target_session_id):
+        delivery["wakeStatus"] = "skipped_waiting_for_person"
+        delivery["reason"] = "session_waiting_for_person"
         s._record_agent_inbox_wake_event("agent_inbox.wake_skipped", message, delivery, level="info")
         return delivery
 

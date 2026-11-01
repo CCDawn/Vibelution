@@ -1956,6 +1956,158 @@ def test_agent_inbox_wake_respects_target_delegation_policy(tmp_path, monkeypatc
     assert [item["messageId"] for item in pending] == [message["messageId"]]
 
 
+# ---------------------------------------------------------------------------
+# Batch-4 waitsForPerson gate on the inbox wake (human slot lane)
+# ---------------------------------------------------------------------------
+
+
+def _settle_session_waiting_for_person(tmp_path, session_id: str) -> None:
+    """Journal a real person-driven resumable pause for the given session."""
+
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        "turn-resting",
+        EVENT_USER_MESSAGE,
+        payload={"content": "帮我把调研提纲补全", "source": "raw", "metadata": {}},
+        source="submit_session_message",
+    )
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        "turn-resting",
+        "turn_completed",
+        status="needs_continue",
+        payload={"resultStatus": "needs_continue", "finalStatus": "needs_continue"},
+        source="persist_session_turn_result",
+    )
+    payload = load_chat_state(tmp_path)
+    conversation = next(
+        item for item in payload["conversations"] if item["conversation_id"] == session_id
+    )
+    conversation["last_turn_status"] = "needs_continue"
+    conversation["last_turn_terminal_turn_id"] = "turn-resting"
+    save_chat_state(tmp_path, payload)
+
+
+def test_agent_inbox_wake_skips_when_target_waits_for_person(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    _settle_session_waiting_for_person(tmp_path, beta["id"])
+    started = []
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda *args, **kwargs: started.append((args, kwargs)) or {"startedTurnId": "turn-wake"},
+    )
+    message = agent_directory_service.write_agent_inbox_message(
+        beta["agentId"],
+        source_agent_id=alpha["agentId"],
+        content="Beta，看到请继续推进。",
+    )
+
+    delivery = session_service.wake_agent_for_inbox_message(message)
+
+    assert delivery["wakeStatus"] == "skipped_waiting_for_person"
+    assert delivery["reason"] == "session_waiting_for_person"
+    assert started == []
+    pending = agent_directory_service.list_agent_inbox_messages_for_agent(beta["agentId"], status="pending")
+    assert [item["messageId"] for item in pending] == [message["messageId"]]
+
+
+def test_agent_inbox_wake_waiting_gate_covers_patrol_exception_wake(tmp_path, monkeypatch):
+    """批四语义变更：PA patrol 的例外唤醒（ignore_delegation_wake_policy=True）
+    不豁免等人闸——等人优先于一切机器唤醒。"""
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    _settle_session_waiting_for_person(tmp_path, beta["id"])
+    started = []
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda *args, **kwargs: started.append((args, kwargs)) or {"startedTurnId": "turn-wake"},
+    )
+    message = agent_directory_service.write_agent_inbox_message(
+        beta["agentId"],
+        source_agent_id=alpha["agentId"],
+        content="Beta，回执摘要请消化。",
+    )
+
+    delivery = session_service.wake_agent_for_inbox_message(
+        message, ignore_delegation_wake_policy=True
+    )
+
+    assert delivery["wakeStatus"] == "skipped_waiting_for_person"
+    assert delivery["reason"] == "session_waiting_for_person"
+    assert started == []
+
+
+def test_agent_inbox_wake_waiting_gate_env_off_restores_legacy_wake(tmp_path, monkeypatch):
+    """急停开关关闭：等人闸消失，回到批三无闸行为（消息照常拉起）。"""
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setenv("VIBELUTION_WAITS_FOR_PERSON_RAIL", "0")
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    _settle_session_waiting_for_person(tmp_path, beta["id"])
+    started = []
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda *args, **kwargs: started.append((args, kwargs)) or {"startedTurnId": "turn-wake"},
+    )
+    message = agent_directory_service.write_agent_inbox_message(
+        beta["agentId"],
+        source_agent_id=alpha["agentId"],
+        content="Beta，看到请继续推进。",
+    )
+
+    delivery = session_service.wake_agent_for_inbox_message(message)
+
+    assert delivery["wakeStatus"] == "started"
+    assert len(started) == 1
+    consumed = agent_directory_service.list_agent_inbox_messages_for_agent(beta["agentId"], status="consumed")
+    assert [item["messageId"] for item in consumed] == [message["messageId"]]
+
+
+def test_agent_inbox_startup_recovery_skips_when_target_waits_for_person(tmp_path, monkeypatch):
+    """startup 重放同闸：等人会话的持久化消息不被重放拉起。"""
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    _settle_session_waiting_for_person(tmp_path, beta["id"])
+    started: list[tuple[tuple, dict]] = []
+    runtime_events: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda *args, **kwargs: started.append((args, kwargs)) or {"startedTurnId": "turn-startup"},
+    )
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: runtime_events.append((args, kwargs)) or {"accepted": True},
+    )
+    message = agent_directory_service.write_agent_inbox_message(
+        beta["agentId"],
+        source_agent_id=alpha["agentId"],
+        content="Beta，请在后端恢复后继续处理。",
+        metadata={"wakeRequested": True},
+    )
+
+    summary = session_service.recover_wakeable_agent_inbox_messages_on_startup()
+
+    assert started == []
+    assert summary["startedCount"] == 0
+    assert summary["wakeStatusCounts"] == {"skipped_waiting_for_person": 1}
+    pending = agent_directory_service.list_agent_inbox_messages_for_agent(beta["agentId"], status="pending")
+    assert [item["messageId"] for item in pending] == [message["messageId"]]
+
+
 def test_agent_inbox_wake_skips_archived_target_agent(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     alpha = session_service.create_chat_session(title="Alpha Agent")
