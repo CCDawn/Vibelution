@@ -198,6 +198,22 @@ async def test_dispatch_candidates_are_never_a_complete_directory(tmp_path):
     finally: unbind_actions(service)
 
 
+@pytest.mark.anyio
+async def test_complete_directory_is_discoverable_from_candidate_navigation(tmp_path):
+    service = DispatchService(tmp_path / "profile", {"p": tmp_path})
+    bind_actions(service, asyncio.get_running_loop())
+    try:
+        # Replay the real assistant's catalog search after reading candidates.
+        for query in ("catalog", "目录"):
+            page = execute_action("index", {"query": query})
+            assert any(row["action"] == "agent_list" for row in page["actions"])
+        candidates = execute_action("index", {"query": "externally_dispatchable"})
+        row = next(row for row in candidates["actions"] if row["action"] == "agents")
+        assert "agent_list" in row["description"]
+    finally:
+        unbind_actions(service)
+
+
 def test_agent_directory_scope_denial_explains_explicit_upgrade(monkeypatch):
     import core.infrastructure.native_runtime as runtime
     import tools.personal_assistant_tools as tool
