@@ -55,7 +55,9 @@ MAX_SESSION_COMPLETED_ITEMS = 3
 # 聚合层全局上限：单次轮询新增的完成类行总量的硬顶。
 MAX_COMPLETION_ITEMS = 8
 
-DISPATCH_RECEIPT_TARGET_URL = "/personal-assistant?panel=dispatches"
+# 旧 /personal-assistant 工作台页已退役：派遣回执行不再深链，targetUrl
+# 置空，点击 toast 仅聚焦工作台（不跳转具体页面）。
+DISPATCH_RECEIPT_TARGET_URL = ""
 
 _TITLE_LIMIT = 80
 _ID_SEGMENT_LIMIT = 64

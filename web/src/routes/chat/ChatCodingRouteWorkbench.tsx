@@ -722,8 +722,8 @@ export function ChatCodingRouteWorkbench() {
   const verifiedCompanionMode = Boolean(activeCompanion);
   const financeSurface = location.pathname === "/finance";
   // Presentation only: the outer assistant route has already verified the canonical Agent/Session binding.
-  const personalAssistantSurface = location.pathname === "/personal-assistant";
-  const embeddedSurface = financeSurface || personalAssistantSurface;
+  // 旧 /personal-assistant 工作台页已退役：内嵌会话面只剩 finance 一处。
+  const embeddedSurface = financeSurface;
   const companionTransportAgentId = activeCompanion?.agentId;
   const companionRailState: CompanionRailState = companionsQuery.isPending && !companionsQuery.data
     ? "loading"
@@ -3234,7 +3234,7 @@ export function ChatCodingRouteWorkbench() {
   const sessionTabStrip = (
           <ChatCodingCenterTabs
             lang={lang}
-            chatReturnTarget={personalAssistantSurface ? null : chatReturnTarget}
+            chatReturnTarget={chatReturnTarget}
             chatReturnLabel={chatReturnLabel}
             groupPanelActive={groupPanelActive}
             projectBusActive={projectBusActive}
@@ -3249,7 +3249,7 @@ export function ChatCodingRouteWorkbench() {
             onSessionTabSelected={paneDock.dismissCenter}
             cliAgentRunTabs={cliAgentRunTabs}
             activeCompanion={activeCompanion}
-            leftOverlayVisible={personalAssistantSurface || responsiveLayout.leftVisible}
+            leftOverlayVisible={responsiveLayout.leftVisible}
             rightOverlayVisible={responsiveLayout.rightVisible}
             conversationIndexCollapsed={conversationIndexCollapsed}
             setLeftRailCollapsed={setLeftRailCollapsed}

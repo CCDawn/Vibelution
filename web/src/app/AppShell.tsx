@@ -1057,7 +1057,7 @@ export function AppShell() {
     return () => media.removeEventListener("change", update);
   }, []);
   const projectUtilityFallback = projectUtilities.opened && !projectUtilities.hosted;
-  const projectUtilityOverlay = compactProjectUtilities || location.pathname.startsWith("/finance") || location.pathname === "/chat" || location.pathname === "/personal-assistant";
+  const projectUtilityOverlay = compactProjectUtilities || location.pathname.startsWith("/finance") || location.pathname === "/chat";
   const [utilityOpen, setUtilityOpen] = useState(false);
   const [activeWorkOpen, setActiveWorkOpen] = useState(false);
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
@@ -1372,7 +1372,6 @@ export function AppShell() {
   const activePrimaryRouteLabel = useMemo(() => {
     const pathname = location.pathname;
     if (pathname.startsWith("/finance")) return lang === "en" ? "Investment assistant" : "炒股智能体";
-    if (pathname === "/personal-assistant") return lang === "en" ? "Personal assistant" : "个人助理";
     if (pathname.startsWith("/companions")) return t("navCompanions");
     if (pathname.startsWith("/chat")) return t("navChat");
     if (pathname.startsWith("/supervised-evolution")) return t("navEvolution");

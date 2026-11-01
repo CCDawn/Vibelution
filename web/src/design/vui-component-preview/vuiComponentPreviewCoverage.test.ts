@@ -53,11 +53,6 @@ const previewExemptDesignSections = new Set([
   // approved single-row preview and the isolated workbench browser acceptance.
   "ChatSessionIndexToolbar",
   "ChatSessionIndexSearch",
-  // Route-owned compositions of existing VUI APIs. Canonical Agent/Session
-  // queries and the native desktop bridge supply their meaningful states;
-  // none is a standalone VUI export. Covered by personal-assistant route,
-  // overview and identity interaction tests.
-  "PersonalAssistantRoute",
   // Launcher-owned composition requires role-scoped IPC and native Session
   // state; real query-refresh and recovery-model tests cover it. It is not a
   // standalone VUI export. Packaged GUI acceptance remains a separate check.
@@ -88,32 +83,10 @@ const previewExemptDesignSections = new Set([
   "LauncherToolsRoute",
   "LauncherProcessMonitorPanel",
   "LauncherProjectMaintenancePanel",
-  "PersonalAssistantOverview",
   // Route-owned operator control: window choices and one-shot confirmations
   // require live consent state, not a static standalone VUI export. Covered
   // by its interaction/authorization tests and the approved isolated CUA preview.
   "PersonalAssistantComputerPanel",
-  "PersonalAssistantState",
-  // Server-bound product dialog: settings payload and whitelisted model
-  // choices come from the personal-assistant settings API and session LLM
-  // options, so its meaningful state cannot be expressed as a static preview.
-  // Covered by its dialog interaction tests (open/rename/appearance/model).
-  "PersonalAssistantSettings",
-  // Server-bound preference panel: dialogue settings enums and the pending
-  // proposal queue come from the companion plugin API, so its meaningful state
-  // cannot be expressed as a static preview. Covered by its settings-save,
-  // proposal accept/reject and read-failure interaction tests.
-  "PersonalAssistantDialoguePreferences",
-  // Server-bound affairs panel: the ledger items, counts and due states come
-  // from the personal-affairs plugin API, so its meaningful state cannot be
-  // expressed as a static preview. Covered by its add/complete/cancel/reopen/
-  // set-due/filter and read-failure interaction tests.
-  "PersonalAssistantAffairs",
-  // Server-bound dispatch panel: the dispatch rows, delivery statuses and
-  // receipts come from the personal-assistant dispatches API poll, so its
-  // meaningful state cannot be expressed as a static preview. Covered by its
-  // render/expand-receipts/unmatched and empty-state interaction tests.
-  "PersonalAssistantDispatches",
   // Dual-channel human-attention surfaces bound to the native desktop bridge:
   // the notifier renders null and is driven by overview polling plus
   // notifyHumanAttention/onHumanAttentionOpened; the notice stack's cards only

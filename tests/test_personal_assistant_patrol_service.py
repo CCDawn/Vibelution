@@ -628,7 +628,7 @@ def test_digest_rotates_on_first_signal_and_stays_stable_without_change(monkeypa
     first_row = result["digest"]["row"]
     assert first_row["kind"] == "assistant_digest"
     assert first_row["severity"] == "info"
-    assert first_row["targetUrl"] == "/personal-assistant"
+    assert first_row["targetUrl"] == ""
     assert first_row["id"].startswith("assistant-digest:")
     # 指纹无变化：id 不轮转（不推新通知），行内容保持。
     result = patrol.patrol_once(now=NOW + 60.0)

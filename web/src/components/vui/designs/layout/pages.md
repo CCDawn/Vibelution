@@ -529,11 +529,9 @@ import { VSplitWorkspace } from "@/components/vui";
 ### 实现落点
 - `layout/VSplitWorkspace.tsx` + `usePersistedPaneResize`
 
-### 个人助理工作台与桌面聊天
+### 助理桌面聊天窗与桌宠角色
 
-`PersonalAssistantRoute` 复用 `VSplitWorkspace`：左栏角色、中央原生会话、右栏平台概览。桌面端直接进入三栏正文，不增加重复的页面标题或宣传语行。两侧宽度只由 `WORKBENCH_LAYOUT_IDS.personalAssistant` 记忆；右栏收起按钮位于自身顶栏最右侧。窄屏仅保留紧凑的概览、桌面模式操作入口，通过现有 `VDialog` 打开概览，不挤压原生输入区。
-
-概览固定顶部管理入口、状态条与 `VTabs`，正文只保留一个滚动区域。默认关注事项；会话和智能体独立搜索，每页八条；其余管理入口由 `VDropdownMenu` 保留。读取失败直接显示，旧缓存不可表示为刚刚更新的成功状态。
+旧 `/personal-assistant` 工作台页已退役；助理会话由 Launcher 控制面与浮动窗承载。以下仅保留桌面聊天窗与桌宠角色的布局契约。
 
 角色复用 `DesktopPetCharacter`、现有 `PetActivity` 与原生 Session 的只读消息窗口。待确认、近期异常优先；新消息用原生 `turnId` + 逻辑 `itemId` 去重，首次历史快照不提醒，界面只保存有界 ID 与查看标记。未读提醒短暂播放后恢复，未读数保留到实际查看；减少动态效果时保留静态提示。
 

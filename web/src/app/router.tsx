@@ -69,7 +69,6 @@ const MemoryRoute = lazyRoute(loadMemoryRouteChunk);
 const PetRoute = lazyRoute(() => import("../routes/PetRoute").then((module) => ({ default: module.PetRoute })));
 const LauncherAssistantRoute = lazyRoute(() => import("../routes/desktopPet/LauncherAssistantRoute").then((module) => ({ default: module.LauncherAssistantRoute })));
 const LauncherAssistantWorkspaceRoute = lazyRoute(() => import("../routes/desktopPet/LauncherAssistantWorkspaceRoute"));
-const PersonalAssistantRoute = lazyRoute(() => import("../routes/PersonalAssistantRoute").then((module) => ({ default: module.PersonalAssistantRoute })));
 const PromptTemplatesRoute = lazyRoute(() => import("../routes/PromptTemplatesRoute").then((module) => ({ default: module.PromptTemplatesRoute })));
 const ResetRoute = lazyRoute(() => import("../routes/ResetRoute").then((module) => ({ default: module.ResetRoute })));
 const SkillsRoute = lazyRoute(() => import("../routes/SkillsRoute").then((module) => ({ default: module.SkillsRoute })));
@@ -218,10 +217,6 @@ export const router = createBrowserRouter([
       {
         path: "finance",
         ...guardedLazyElement(<WorkbenchDomainRoute domain="chat"><FinanceRoute /></WorkbenchDomainRoute>, "workbench", "finance"),
-      },
-      {
-        path: "personal-assistant",
-        ...guardedLazyElement(<WorkbenchDomainRoute domain="chat"><PersonalAssistantRoute /></WorkbenchDomainRoute>, "workbench", "chat"),
       },
       {
         path: "companions",

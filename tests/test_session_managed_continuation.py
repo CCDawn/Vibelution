@@ -22,7 +22,7 @@ from core.chat.turn_journal import EVENT_USER_MESSAGE
 from core.infrastructure import developer_sandbox
 from core.ui.chat_state import load_session_chat_state, save_chat_state
 from core.web.services import session_service
-from core.web.services.session import managed_continuation, proactive, queued_turns, submit, worker
+from core.web.services.session import managed_continuation, pending_question, proactive, queued_turns, submit, worker
 from tests.helpers.web_chat_state import _reset_seeded_session_runtime
 from tests.test_session_submit import _prepare_default_submit_session
 
@@ -515,6 +515,10 @@ def drain_env(tmp_path, monkeypatch):
         lambda session_id, **_kwargs: published.append(str(session_id)),
     )
     monkeypatch.setattr(queued_turns, "_schedule_session_queued_turn_drain_continuation", lambda _sid: None)
+    # Batch-4 held-marker tests enqueue through the real API; keep the
+    # enqueue-triggered drain synchronous-only so the test's own drain call
+    # is the one that decides.
+    monkeypatch.setattr(session_service, "_schedule_session_queued_turn_drain", lambda _sid: None)
     submitted: list[dict] = []
 
     def fake_submit(_session_id, content, **kwargs):
@@ -734,3 +738,196 @@ def test_not_resting_sessions_never_count_as_waiting(tmp_path, monkeypatch):
     _seed_conversation(tmp_path, last_turn_status="ready")
     _append_user_event(tmp_path, source="raw")
     assert managed_continuation.session_waits_for_person(session_service, SESSION_ID) is False
+
+
+# ---------------------------------------------------------------------------
+# Batch-4 waitsForPerson anchor semantics (real journal shape)
+# ---------------------------------------------------------------------------
+
+
+def _append_settled_waiting_turn(
+    tmp_path,
+    *,
+    turn_id: str = "turn-person",
+    driver_source: str = "raw",
+    driver_metadata: dict[str, Any] | None = None,
+    final_status: str = "needs_continue",
+) -> None:
+    """Journal a full turn: person/machine driver input + resumable settlement.
+
+    This is the real ``persist.py`` shape: a ``user_message`` event followed
+    by a terminal event carrying the resumable ``finalStatus``.
+    """
+
+    append_conversation_event(
+        tmp_path,
+        SESSION_ID,
+        turn_id,
+        EVENT_USER_MESSAGE,
+        payload={"content": "推进任务", "source": driver_source, "metadata": driver_metadata or {}},
+        source="submit_session_message",
+    )
+    append_conversation_event(
+        tmp_path,
+        SESSION_ID,
+        turn_id,
+        "turn_completed",
+        status=final_status,
+        payload={"resultStatus": final_status, "finalStatus": final_status},
+        source="persist_session_turn_result",
+    )
+
+
+def _waits() -> bool:
+    return managed_continuation.session_waits_for_person(session_service, SESSION_ID)
+
+
+def test_predicate_machine_message_does_not_resolve_waiting(tmp_path, monkeypatch):
+    """盲区② 收口：person-driven pause 之后的机器 user_message 不得解除等待。"""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_is_session_running", lambda sid: False)
+    _seed_conversation(tmp_path)
+    _append_settled_waiting_turn(tmp_path)
+    assert _waits() is True
+    # A machine user_message (inbox wake row) lands after the resting anchor.
+    _append_user_event(tmp_path, source="agent_inbox", metadata={"kind": "agent_inbox_message"}, turn_id="turn-machine")
+    assert _waits() is True
+
+
+def test_predicate_person_message_after_anchor_resolves_waiting(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_is_session_running", lambda sid: False)
+    _seed_conversation(tmp_path)
+    _append_settled_waiting_turn(tmp_path)
+    assert _waits() is True
+    _append_user_event(tmp_path, source="raw", content="继续", turn_id="turn-human-2")
+    assert _waits() is False
+
+
+def test_predicate_phase_exit_clears_waiting(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_is_session_running", lambda sid: False)
+    _seed_conversation(tmp_path)
+    _append_settled_waiting_turn(tmp_path)
+    assert _waits() is True
+    _seed_conversation(tmp_path, last_turn_status="ready")
+    assert _waits() is False
+
+
+def test_predicate_machine_driven_pause_never_arms_waiting(tmp_path, monkeypatch):
+    """Machine-owned work keeps flowing: a machine-driven resumable settlement
+    neither arms the wait nor moves a person anchor (batch-3 channel intact)."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_is_session_running", lambda sid: False)
+    _seed_conversation(tmp_path)
+    _append_settled_waiting_turn(
+        tmp_path,
+        turn_id="turn-machine",
+        driver_source="agent_inbox",
+        driver_metadata={"kind": "agent_inbox_message"},
+    )
+    assert _waits() is False
+
+
+def test_predicate_machine_turn_does_not_dissolve_armed_wait(tmp_path, monkeypatch):
+    """An armed person wait survives a machine turn that re-pauses resumably."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_is_session_running", lambda sid: False)
+    _seed_conversation(tmp_path)
+    _append_settled_waiting_turn(tmp_path, turn_id="turn-person")
+    _append_settled_waiting_turn(
+        tmp_path,
+        turn_id="turn-machine-2",
+        driver_source="agent_inbox",
+        driver_metadata={"kind": "agent_inbox_message"},
+    )
+    assert _waits() is True
+
+
+def test_predicate_pending_question_slot_arms_waiting_without_resting(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_is_session_running", lambda sid: False)
+    _seed_conversation(tmp_path, last_turn_status="ready")
+    assert _waits() is False
+    pending_question.set_session_pending_question(SESSION_ID, question_text="要把结论整理成简报吗？")
+    assert _waits() is True
+    pending_question.consume_session_pending_question(SESSION_ID)
+    assert _waits() is False
+
+
+def test_rail_off_restores_legacy_last_speaker_predicate(tmp_path, monkeypatch):
+    """急停开关关闭=批三旧语义：机器 last-speaker 翻 False，闸门全部回到旧形状。"""
+
+    monkeypatch.setenv(managed_continuation.WAITS_FOR_PERSON_RAIL_ENV, "0")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_is_session_running", lambda sid: False)
+    _seed_conversation(tmp_path)
+    _append_settled_waiting_turn(tmp_path, turn_id="turn-person")
+    assert _waits() is True
+    # Under the legacy shape the machine message flips the last speaker, so
+    # the armed wait silently dissolves — the exact batch-3 behavior.
+    _append_user_event(tmp_path, source="agent_inbox", metadata={"kind": "agent_inbox_message"}, turn_id="turn-machine")
+    assert _waits() is False
+    # The pendingQuestion slot stops counting too.
+    _seed_conversation(tmp_path, last_turn_status="ready")
+    pending_question.set_session_pending_question(SESSION_ID, question_text="要继续吗？")
+    assert _waits() is False
+
+
+# ---------------------------------------------------------------------------
+# Batch-4 held marker on machine notices enqueued while waiting
+# ---------------------------------------------------------------------------
+
+
+def test_enqueue_marks_notice_held_while_waiting_and_drain_still_refuses(drain_env):
+    _seed_drain_session(drain_env.tmp_path, [])
+    _append_settled_waiting_turn(drain_env.tmp_path, turn_id="turn-person")
+    row = queued_turns.enqueue_session_runtime_notice(
+        SESSION_ID,
+        kind="task_notification",
+        content="后台任务回执",
+        source_id="task-notice-1",
+    )
+    assert row.get("status") == "queued"
+    held = row.get("held")
+    assert isinstance(held, dict) and held.get("reason") == "waiting_for_person"
+    assert str(held.get("heldAt") or "").strip()
+    # The drain gate stays the enforcing second barrier.
+    assert queued_turns.drain_session_queued_turns(SESSION_ID) is False
+    assert drain_env.submitted == []
+    rows = load_session_chat_state(drain_env.tmp_path, SESSION_ID)["queued_turns"]
+    assert rows[0]["id"] == row["id"] and rows[0].get("held")
+
+
+def test_held_row_drains_exactly_once_after_person_resolves(drain_env):
+    _seed_drain_session(drain_env.tmp_path, [])
+    _append_settled_waiting_turn(drain_env.tmp_path, turn_id="turn-person")
+    row = queued_turns.enqueue_session_runtime_notice(
+        SESSION_ID,
+        kind="task_notification",
+        content="后台任务回执",
+        source_id="task-notice-1",
+    )
+    assert row.get("held")
+    # The person answers: their message lands after the resting anchor.
+    _append_user_event(drain_env.tmp_path, source="raw", content="继续", turn_id="turn-human-2")
+    assert queued_turns.drain_session_queued_turns(SESSION_ID) is True
+    assert len(drain_env.submitted) == 1
+    rows = load_session_chat_state(drain_env.tmp_path, SESSION_ID).get("queued_turns") or []
+    assert [item["id"] for item in rows if item.get("status") == "queued"] == []
+
+
+def test_enqueue_skips_held_marker_when_rail_off(drain_env, monkeypatch):
+    monkeypatch.setenv(managed_continuation.WAITS_FOR_PERSON_RAIL_ENV, "0")
+    _seed_drain_session(drain_env.tmp_path, [])
+    _append_settled_waiting_turn(drain_env.tmp_path, turn_id="turn-person")
+    row = queued_turns.enqueue_session_runtime_notice(
+        SESSION_ID,
+        kind="task_notification",
+        content="后台任务回执",
+        source_id="task-notice-2",
+    )
+    assert "held" not in row

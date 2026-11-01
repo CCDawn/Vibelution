@@ -638,6 +638,12 @@ from core.web.services.session.queued_turns import (
     schedule_session_queued_turn_drain as _schedule_session_queued_turn_drain,
     schedule_session_queued_turn_stale_retry as _schedule_session_queued_turn_stale_retry,
 )
+from core.web.services.session.pending_question import (
+    clear_session_pending_question,
+    consume_session_pending_question,
+    session_pending_question,
+    set_session_pending_question,
+)
 from core.web.services.session.events import (
     _record_session_cycle_message,
     _record_session_delete_event,

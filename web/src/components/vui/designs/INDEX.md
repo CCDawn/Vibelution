@@ -9,16 +9,9 @@
 | `LauncherUpdatesRoute` / `LauncherUpdateTopbar` | [product/personal-assistant.md](./product/personal-assistant.md#launcherupdatesroute--launcherupdatetopbar) |
 | `LauncherStartupSettingsPanel` / `LauncherBranchInstancesPanel` | [product/personal-assistant.md](./product/personal-assistant.md#launcherstartupsettingspanel--launcherbranchinstancespanel) |
 | `LauncherToolsRoute` / `LauncherProcessMonitorPanel` / `LauncherProjectMaintenancePanel` | [product/personal-assistant.md](./product/personal-assistant.md#launchertoolsroute--launcherprocessmonitorpanel--launcherprojectmaintenancepanel) |
-| `PersonalAssistantRoute` | [product/personal-assistant.md](./product/personal-assistant.md#personalassistantroute) |
 | `PersonalAssistantComputerPanel` | [product/personal-assistant.md](./product/personal-assistant.md#personalassistantcomputerpanel) |
-| `PersonalAssistantOverview` | [product/personal-assistant.md](./product/personal-assistant.md#personalassistantoverview) |
-| `PersonalAssistantState` | [product/personal-assistant.md](./product/personal-assistant.md#personalassistantstate) |
 | `HumanAttentionNotifier` | [product/personal-assistant.md](./product/personal-assistant.md#humanattentionnotifier) |
 | `HumanAttentionNoticeStack` | [product/personal-assistant.md](./product/personal-assistant.md#humanattentionnoticestack) |
-| `PersonalAssistantSettings` | [product/personal-assistant.md](./product/personal-assistant.md#personalassistantsettings) |
-| `PersonalAssistantDialoguePreferences` | [product/personal-assistant.md](./product/personal-assistant.md#personalassistantdialoguepreferences) |
-| `PersonalAssistantAffairs` | [product/personal-assistant.md](./product/personal-assistant.md#personalassistantaffairs) |
-| `PersonalAssistantDispatches` | [product/personal-assistant.md](./product/personal-assistant.md#personalassistantdispatches) |
 
 选型与反冗余入口。路径均为 `designs/` 相对路径。
 
