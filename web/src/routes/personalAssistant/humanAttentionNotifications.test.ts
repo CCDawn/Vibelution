@@ -141,10 +141,11 @@ describe("human attention target resolution", () => {
     expect(humanAttentionTargetFor({ kind: "anomaly", targetUrl: "/memory/knowledge" })).toBe("/memory/knowledge");
     expect(humanAttentionTargetFor({})).toBe("");
   });
-  it("accepts affair_reminder rows with the assistant-page default target", () => {
+  it("accepts affair_reminder rows with an empty default target after the assistant page retirement", () => {
     expect(isHumanAttentionKind("affair_reminder")).toBe(true);
     expect(isHumanAttentionKind("affair-reminder")).toBe(false);
-    expect(humanAttentionTargetFor({ kind: "affair_reminder" })).toBe("/personal-assistant");
+    // 旧 /personal-assistant 工作台页已退役：默认 targetUrl 置空，点击仅聚焦工作台。
+    expect(humanAttentionTargetFor({ kind: "affair_reminder" })).toBe("");
     expect(HUMAN_ATTENTION_FALLBACK_TITLES.affair_reminder).toContain("事务");
   });
   it("keeps human_gate in the whitelist with the research-workflow default target", () => {
@@ -165,15 +166,15 @@ describe("human attention target resolution", () => {
       "session_completed",
     ]);
   });
-  it("accepts assistant_digest rows with the assistant-page default target", () => {
+  it("accepts assistant_digest rows with an empty default target after the assistant page retirement", () => {
     expect(isHumanAttentionKind("assistant_digest")).toBe(true);
     expect(isHumanAttentionKind("assistant-digest")).toBe(false);
-    expect(humanAttentionTargetFor({ kind: "assistant_digest" })).toBe("/personal-assistant");
+    expect(humanAttentionTargetFor({ kind: "assistant_digest" })).toBe("");
     expect(HUMAN_ATTENTION_FALLBACK_TITLES.assistant_digest).toContain("派遣");
   });
   it("maps the three completion kinds to real pages with info severity", () => {
-    // 完成类事件（好消息）：targetUrl 必须落到真实页面，不许是空状态页。
-    expect(humanAttentionTargetFor({ kind: "dispatch_receipt" })).toBe("/personal-assistant?panel=dispatches");
+    // 完成类事件（好消息）：dispatch_receipt 旧助理页退役后置空，其余落真实页面。
+    expect(humanAttentionTargetFor({ kind: "dispatch_receipt" })).toBe("");
     expect(humanAttentionTargetFor({ kind: "run_completed" })).toBe("/teams?researchView=workflow");
     expect(humanAttentionTargetFor({ kind: "session_completed" })).toBe("/chat");
     expect(isHumanAttentionKind("dispatch_receipt") && isHumanAttentionKind("run_completed") && isHumanAttentionKind("session_completed")).toBe(true);

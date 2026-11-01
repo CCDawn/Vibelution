@@ -6,8 +6,6 @@ import threading
 import os
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode
-
 from core.agent_plugins.personal_affairs.service import (
     PersonalAffairsError,
     PersonalAffairsNotFoundError,
@@ -61,7 +59,9 @@ def get_personal_affairs_service() -> PersonalAffairsService:
 
 AFFAIR_REMINDER_KIND = "affair_reminder"
 AFFAIR_REMINDER_LIMIT = 5
-AFFAIR_REMINDER_TARGET = "/personal-assistant"
+# 旧 /personal-assistant 工作台页已退役：提醒行不再深链，targetUrl 置空，
+# 点击 toast 仅聚焦工作台（不跳转具体页面）。
+AFFAIR_REMINDER_TARGET = ""
 _REMINDER_DUE_STATES = ("overdue", "today")
 _REMINDER_TEXT_LIMIT = 80
 
@@ -107,7 +107,6 @@ def collect_affair_reminder_attention(*, limit: int = AFFAIR_REMINDER_LIMIT) -> 
     for item in due_items[: max(0, int(limit))]:
         title = " ".join(str(item.get("title") or "").split())[:_REMINDER_TEXT_LIMIT] or "事务"
         due_text = str(item.get("dueAt") or "").strip()
-        target_query = urlencode({"panel": "affairs", "item": str(item.get("itemId") or "")})
         rows.append(
             {
                 "id": f"affair-reminder:{item.get('itemId')}:{day_key}",
@@ -115,7 +114,7 @@ def collect_affair_reminder_attention(*, limit: int = AFFAIR_REMINDER_LIMIT) -> 
                 "severity": "high" if str(item.get("dueState") or "") == "overdue" else "medium",
                 "title": f"事务提醒：{title}",
                 "body": (f"截止 {due_text}" if due_text else "已到期")[:_REMINDER_TEXT_LIMIT],
-                "targetUrl": f"{AFFAIR_REMINDER_TARGET}?{target_query}",
+                "targetUrl": AFFAIR_REMINDER_TARGET,
             }
         )
     return rows
