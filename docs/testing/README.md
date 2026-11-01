@@ -9,6 +9,7 @@
 | --- | --- |
 | [remote-test-runner.md](remote-test-runner.md) | `scripts/remote_test_runner.py` 远程 Linux 测说明 |
 | [electron-launcher-protocol-contract.md](electron-launcher-protocol-contract.md) | Launcher/Desktop Supervisor 协议形状（参考；实现以代码与 tests 为准） |
+| [model-decision-stub-convention.md](model-decision-stub-convention.md) | assistant/编排层测试「模型决策用 stub、编排全真跑」的适用与取舍标准 |
 
 ## 已归档
 
