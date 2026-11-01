@@ -361,6 +361,7 @@ from .agent_directory.ops_residual import (
     list_agent_policy_options,
     list_group_context_events_for_agent,
     list_project_memory_update_proposals,
+    mark_agent_inbox_messages_read,
     next_wakeable_agent_inbox_message_for_agent,
     normalize_conversation_index_kind,
     promote_agent_inbox_message_body,

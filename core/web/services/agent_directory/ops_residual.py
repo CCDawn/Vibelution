@@ -1171,6 +1171,82 @@ def consume_all_agent_inbox_messages(
     }
 
 
+def mark_agent_inbox_messages_read(
+    agent_id: str,
+    message_ids: list[str] | None = None,
+    *,
+    read_by_session_id: str = "",
+    read_by_turn_id: str = "",
+) -> dict[str, Any]:
+    """Write the ``readAt`` receipt on inbox rows without touching consume.
+
+    Three-state timeline per row: ``createdAt`` (sent) -> ``readAt`` (read,
+    written by the session worker right after context assembly) ->
+    ``consumedAt`` (consumed, written optimistically at submit). Missing or
+    empty ``readAt`` — including on legacy rows written before the field —
+    means unread. ``message_ids`` targets explicit rows; without it the sweep
+    falls back to rows consumed by the given session+turn. Reuses the consume
+    mechanism's read/rewrite helpers as a sibling function; no new lock
+    semantics (write races are a tracked separate concern).
+    """
+
+    s = _service()
+    agent = s.get_agent(agent_id, include_archived=True)
+    if not agent:
+        raise s.AgentNotFoundError(f"Agent not found: {agent_id}")
+    wanted_ids = {
+        str(item or "").strip()
+        for item in (message_ids or [])
+        if str(item or "").strip()
+    }
+    session_key = str(read_by_session_id or "").strip()
+    turn_key = str(read_by_turn_id or "").strip()
+    path = s._agent_workspace_event_path(agent, "agent_inbox_messages.jsonl")
+    messages = s._read_jsonl(path)
+    now = s.utc_now_iso()
+    read_ids: list[str] = []
+    for item in messages:
+        if str(item.get("readAt") or "").strip():
+            continue
+        row_id = str(item.get("messageId") or item.get("eventId") or "").strip()
+        if wanted_ids:
+            if row_id not in wanted_ids:
+                continue
+        elif (
+            str(item.get("consumedBySessionId") or "").strip() != session_key
+            or str(item.get("consumedByTurnId") or "").strip() != turn_key
+        ):
+            continue
+        item["readAt"] = now
+        if row_id:
+            read_ids.append(row_id)
+    if not read_ids:
+        return {
+            "agentId": str(agent.get("agentId") or "").strip(),
+            "readCount": 0,
+            "readMessageIds": [],
+        }
+    s._write_jsonl(path, messages)
+    s._record_memory_event(
+        "agent_inbox.messages_read",
+        {
+            "eventId": s._new_event_id("agentinbox"),
+            "messageId": "",
+            "targetAgentId": str(agent.get("agentId") or "").strip(),
+            "status": str(messages[0].get("status") or "pending") if messages else "pending",
+            "createdAt": now,
+            "metadata": {"readCount": len(read_ids)},
+        },
+        agent_id=str(agent.get("agentId") or ""),
+        lifecycle=True,
+    )
+    return {
+        "agentId": str(agent.get("agentId") or "").strip(),
+        "readCount": len(read_ids),
+        "readMessageIds": read_ids,
+    }
+
+
 def promote_agent_inbox_message_body(
     agent_id: str,
     message_id: str,
@@ -2105,6 +2181,7 @@ def write_agent_inbox_message(
         "promptEligible": bool(prompt_eligible),
         "createdBy": str(created_by or "agent").strip() or "agent",
         "createdAt": now,
+        "readAt": "",
         "consumedAt": "",
         "consumedBySessionId": "",
         "consumedByTurnId": "",
