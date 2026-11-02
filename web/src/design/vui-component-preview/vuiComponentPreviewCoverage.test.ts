@@ -64,6 +64,10 @@ const previewExemptDesignSections = new Set([
   // Their read/interaction tests and isolated real-component fixture cover the
   // composition; packaged visual acceptance remains a separate check.
   "LauncherAssistantTaskCards",
+  // Launcher-owned confirmation consumes identity-bound native cleanup plans
+  // and one-use tokens; it is not a standalone VUI export. Card interaction
+  // tests and the isolated real-component delete/cancel/bulk preview cover it.
+  "LauncherTaskCleanupDialog",
   // Route composition uses the live Launcher browser bridge and native view;
   // interaction tests and the approved isolated preview cover its UI.
   "LauncherAssistantBrowserWorkspace",
