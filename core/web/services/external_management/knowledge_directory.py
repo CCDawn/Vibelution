@@ -21,6 +21,7 @@ from core.web.services.team.kind_helpers import SYSTEM_MANAGED_TEAM_IDS
 
 from core.assistant_runtime.migration_io import check_path, pinned_source_files, read_stable_file, strict_json
 from core.infrastructure import developer_sandbox
+from core.infrastructure.storage_owner_handoff import pinned_storage_owner_handoff
 from core.web.services.personal_assistant_project.windows_read import _locked_source
 
 from .service import ManagementError
@@ -104,23 +105,6 @@ def _existing_sources(project_root, directory):
         paths = storage.resolve_project_storage_paths(root)
         if paths.project_id != project_id:
             raise ValueError("Project identity mismatch")
-        marker = read_stable_file(storage.storage_migration_state_path(paths), 64 * 1024)
-        pins.enter_context(pinned_source_files((marker,)))
-        marker_data = strict_json(marker.raw)
-        if (not isinstance(marker_data, dict) or type(marker_data.get("schemaVersion")) is not int
-                or marker_data["schemaVersion"] != storage.STORAGE_MIGRATION_SCHEMA_VERSION
-                or marker_data.get("status") != "completed" or marker_data.get("projectId") != project_id
-                or marker_data.get("instanceId") != paths.instance_id):
-            raise ValueError("Unproven project storage")
-        marker_root = marker_data.get("projectRoot")
-        if not isinstance(marker_root, str) or not marker_root:
-            raise ValueError("Missing project storage owner")
-        owner_path = check_path(Path(marker_root))
-        # Pin both directory chains and compare their physical identities.
-        # Windows case-sensitive directories can contain distinct paths
-        # that differ only by case, so textual case folding is not proof.
-        _, _, owner_info = pins.enter_context(_locked_source(
-            Path(owner_path.anchor), owner_path, directory=True, allow_child_replacement=True))
         _, _, root_info = pins.enter_context(_locked_source(
             Path(root.anchor), root, directory=True, allow_child_replacement=True))
         def physical_id(info):
@@ -128,8 +112,30 @@ def _existing_sources(project_root, directory):
             if not index:
                 raise ValueError("Unproven physical directory identity")
             return info.volume, index
-        if physical_id(owner_info) != physical_id(root_info):
-            raise ValueError("Project storage owner mismatch")
+        if os.path.lexists(storage.storage_migration_state_path(paths)):
+            # A current migration marker always retains native authority,
+            # including fail-closed handling of malformed/conflicting markers.
+            marker = read_stable_file(storage.storage_migration_state_path(paths), 64 * 1024)
+            pins.enter_context(pinned_source_files((marker,)))
+            marker_data = strict_json(marker.raw)
+            if (not isinstance(marker_data, dict) or type(marker_data.get("schemaVersion")) is not int
+                    or marker_data["schemaVersion"] != storage.STORAGE_MIGRATION_SCHEMA_VERSION
+                    or marker_data.get("status") != "completed" or marker_data.get("projectId") != project_id
+                    or marker_data.get("instanceId") != paths.instance_id):
+                raise ValueError("Unproven project storage")
+            marker_root = marker_data.get("projectRoot")
+            if not isinstance(marker_root, str) or not marker_root:
+                raise ValueError("Missing project storage owner")
+            owner_path = check_path(Path(marker_root))
+            _, _, owner_info = pins.enter_context(_locked_source(
+                Path(owner_path.anchor), owner_path, directory=True, allow_child_replacement=True))
+            if physical_id(owner_info) != physical_id(root_info):
+                raise ValueError("Project storage owner mismatch")
+        else:
+            # This proof only admits the configured legacy metadata route.
+            # It never changes the native resolver or ACL/operator admission.
+            paths = pins.enter_context(pinned_storage_owner_handoff(
+                Path(project_root), identity_snapshot=identity, config_snapshot=config))
         # Match the native resolver's environment-over-config priority;
         # only the already-proven canonical instance data may be read.
         raw_data = data_env.strip() or configured_data.strip()
