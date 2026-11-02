@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 
 import {
+  agentArchivePreviewIsValid,
   agentPurgePreviewIsValid,
   autonomyActionIsKnown,
   autonomyApprovalPreviewIsValid,
@@ -21,6 +22,57 @@ import {
   toolApprovalDisplayName,
   toolApprovalSessionGrantDescription,
 } from "./toolApprovalPreview";
+
+describe("Launcher exact Agent cleanup and dispatch access approvals", () => {
+  const archive = { assistantAction: "agent_archive", assistantDetailsOmitted: false, assistantTargets: {
+    project_id: "registered:1", agent_id: "agent-1", request_id: "archive-1", expected_config_revision: "9007199254740993" } };
+  it("shows every archive identity and lossless revision, and refuses missing binding fields", () => {
+    expect(agentArchivePreviewIsValid(archive)).toBe(true);
+    for (const lang of ["zh", "en"] as const) {
+      const text = toolApprovalActionPreview(archive, "personal_assistant_manage_tool", lang);
+      for (const value of Object.values(archive.assistantTargets)) expect(text).toContain(value);
+    }
+    for (const key of Object.keys(archive.assistantTargets)) {
+      const targets = { ...archive.assistantTargets } as Record<string, string>;
+      delete targets[key];
+      expect(agentArchivePreviewIsValid({ ...archive, assistantTargets: targets })).toBe(false);
+    }
+    expect(agentArchivePreviewIsValid({ ...archive, assistantDetailsOmitted: true })).toBe(false);
+    expect(agentArchivePreviewIsValid({ ...archive, assistantTargets: { ...archive.assistantTargets, force: "true" } })).toBe(false);
+    const source = readFileSync(new URL("../desktopPet/LauncherAssistantRoute.tsx", import.meta.url), "utf8");
+    expect(source).toContain('summary?.assistantAction === "agent_archive" && !agentArchivePreviewIsValid(summary)');
+  });
+  it("preserves the legacy ordinary archive rendering", () => {
+    const text = toolApprovalActionPreview({ assistantAction: "agent_archive", assistantDetailsOmitted: true,
+      assistantTargets: { agent_id: "legacy-agent" } }, "personal_assistant_manage_tool", "zh");
+    expect(text).toContain("legacy-agent");
+    expect(text).not.toContain("参数无法核对");
+  });
+  it.each([true, false])("binds only one Agent and the exact requested access=%s", enabled => {
+    const summary = { assistantPlatformPreviewVersion: 1, assistantAction: "agent_dispatch_access_set",
+      assistantTargets: { project_id: "project-a", request_id: "request-a", agent_id: "agent-a",
+        expected_public_config_hash: "a".repeat(64), expected_eligibility_fingerprint: "b".repeat(64) },
+      assistantParametersDigest: "c".repeat(64), assistantChangedFields: ["enabled"], assistantDelta: { enabled },
+      assistantContentOmitted: false, assistantDetailsOmitted: false };
+    expect(managementApprovalActionIsKnown(summary.assistantAction)).toBe(true);
+    expect(platformManagementPreviewIsValid(summary)).toBe(true);
+    for (const lang of ["zh", "en"] as const) {
+      const text = toolApprovalActionPreview(summary, "personal_assistant_manage_tool", lang);
+      expect(text).toContain("agent-a");
+      expect(text).toContain(String(enabled));
+      expect(text).not.toContain("参数无法核对");
+    }
+    for (const patch of [{ enabled: String(enabled) }, { enabled, allowed_agent_ids: [] }, {}]) {
+      expect(platformManagementPreviewIsValid({ ...summary, assistantDelta: patch })).toBe(false);
+    }
+    for (const key of Object.keys(summary.assistantTargets)) {
+      const targets = { ...summary.assistantTargets } as Record<string, string>;
+      delete targets[key];
+      expect(platformManagementPreviewIsValid({ ...summary, assistantTargets: targets })).toBe(false);
+    }
+    expect(platformManagementPreviewIsValid({ ...summary, assistantDetailsOmitted: true })).toBe(false);
+  });
+});
 
 describe("Launcher autonomy approvals use the existing complete VUI preview", () => {
   const actions = ["delegation_goal_create", "delegation_goal_revoke", "dispatch_derived", "research_command", "authorization_reduce", "authorization_revoke"];

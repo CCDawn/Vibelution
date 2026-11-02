@@ -580,12 +580,14 @@ class ManagedAgentBackendClient:
     async def management_asset(self, operation: str, **parameters) -> dict[str, Any]:
         from pydantic import ValidationError
         from core.web.services.external_management.asset_contracts import (
-            TeamAssetQuery, TeamAssetResponse, ToolPolicyQuery, ToolPolicyResponse, KnowledgeACLQuery, KnowledgeACLResponse)
+            TeamAssetQuery, TeamAssetResponse, ToolPolicyQuery, ToolPolicyResponse, KnowledgeACLQuery, KnowledgeACLResponse,
+            DispatchAccessQuery, DispatchAccessResponse)
         from core.web.services.external_management.team_lifecycle_contracts import TeamArchivePreviewResponse
         choices = {"team": (TeamAssetQuery, TeamAssetResponse, "team_id", "teamId"),
             "team-archive": (TeamAssetQuery, TeamArchivePreviewResponse, "team_id", "teamId"),
             "tool-policy": (ToolPolicyQuery, ToolPolicyResponse, "agent_id", "agentId"),
-            "knowledge-acl": (KnowledgeACLQuery, KnowledgeACLResponse, "knowledge_base_id", "knowledgeBaseId")}
+            "knowledge-acl": (KnowledgeACLQuery, KnowledgeACLResponse, "knowledge_base_id", "knowledgeBaseId"),
+            "dispatch-access": (DispatchAccessQuery, DispatchAccessResponse, "agent_id", "agentId")}
         if operation not in choices:
             raise BackendClientError("Unknown managed asset query.", code="INVALID_MANAGEMENT_REQUEST")
         query_type, response_type, input_id, output_id = choices[operation]

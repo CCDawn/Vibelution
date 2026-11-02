@@ -15,17 +15,18 @@ from .asset_contracts import ASSET_ACTION_MODELS, ASSET_ACTION_SCOPES, ASSET_ACT
 from .team_lifecycle_contracts import TEAM_LIFECYCLE_ACTION_MODELS, TEAM_LIFECYCLE_ACTION_SCOPES, TEAM_LIFECYCLE_ACTION_HELP
 from .flow_contracts import FLOW_ACTION_MODELS, FLOW_ACTION_SCOPES, FLOW_ACTION_HELP, FLOW_SCOPES, FlowMutationResponse
 
-Scope = Literal["agents:read", "agents:create", "agents:create:files", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:results:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read", "source:read", "knowledge:catalog:read", "agents:directory:read", "agents:purge", "operations:read", "operations:control", "teams:manage:read", "teams:write", "agents:tool-policy:read", "agents:tool-policy:write", "knowledge:acl:read", "knowledge:acl:write", "teams:flows:read", "teams:flows:write", "teams:flows:run", "teams:create", "teams:archive"]
+Scope = Literal["agents:read", "agents:create", "agents:create:files", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:results:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read", "source:read", "knowledge:catalog:read", "agents:directory:read", "agents:purge", "operations:read", "operations:control", "teams:manage:read", "teams:write", "agents:tool-policy:read", "agents:tool-policy:write", "knowledge:acl:read", "knowledge:acl:write", "teams:flows:read", "teams:flows:write", "teams:flows:run", "agents:dispatch-access:read", "agents:dispatch-access:write", "teams:create", "teams:archive"]
 # Add scopes at the end so legacy bootstrap prefixes keep their meaning.
 SCOPES = ("agents:read", "agents:create", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read", "source:read", "knowledge:catalog:read", "agents:create:files", "teams:results:read", "agents:directory:read", "agents:purge", "operations:read", "operations:control")
 SCOPES += ("teams:manage:read", "teams:write", "agents:tool-policy:read", "agents:tool-policy:write", "knowledge:acl:read", "knowledge:acl:write")
 SCOPES += FLOW_SCOPES
-SCOPES += ("teams:create", "teams:archive")
+SCOPES += ("agents:dispatch-access:read", "agents:dispatch-access:write", "teams:create", "teams:archive")
 # Keep historical bind semantics and SDK defaults. New platform powers require
 # the existing explicit upgrade of the same authenticated operator subject.
 EXPLICIT_UPGRADE_SCOPES = frozenset({"agents:create:files", "teams:results:read", "agents:directory:read", "agents:purge",
     "operations:read", "operations:control", "teams:manage:read", "teams:write", "agents:tool-policy:read",
-    "agents:tool-policy:write", "knowledge:acl:read", "knowledge:acl:write", *FLOW_SCOPES, "teams:create", "teams:archive"})
+    "agents:tool-policy:write", "knowledge:acl:read", "knowledge:acl:write", *FLOW_SCOPES,
+    "agents:dispatch-access:read", "agents:dispatch-access:write", "teams:create", "teams:archive"})
 _AVATAR_EXTENSION = r"(?:[pP][nN][gG]|[jJ][pP][gG]|[jJ][pP][eE][gG]|[wW][eE][bB][pP]|svg)"
 _AVATAR_PATH_PATTERN = r"^workspace/avatars/[A-Za-z0-9_.-]+\." + _AVATAR_EXTENSION + "$"
 
@@ -1053,7 +1054,7 @@ class AuthorizationStateResponse(Closed):
 
 class ReceiptResponse(Closed):
     status: Literal["completed", "unknown"]
-    action: Literal["agent_create", "agent_update", "agent_avatar", "agent_archive", "agent_purge", "team_run", "session_pin", "authorization_upgrade", "runtime_command", "team_update", "agent_tool_policy_update", "knowledge_acl_grant", "knowledge_acl_revoke", "flow_save", "flow_start", "research_command", "authorization_reduce", "authorization_revoke", "team_create", "team_member_add", "team_member_remove", "team_archive"]
+    action: Literal["agent_create", "agent_update", "agent_avatar", "agent_archive", "agent_purge", "team_run", "session_pin", "authorization_upgrade", "runtime_command", "team_update", "agent_tool_policy_update", "knowledge_acl_grant", "knowledge_acl_revoke", "flow_save", "flow_start", "research_command", "authorization_reduce", "authorization_revoke", "agent_dispatch_access_set", "team_create", "team_member_add", "team_member_remove", "team_archive"]
     requestId: str
     verified: bool
     reused: bool
@@ -1120,7 +1121,7 @@ class DocumentationDescribeQuery(Closed):
         return value.strip()
 
 
-DocumentationAction = Literal["team_create", "team_member_add", "team_member_remove", "team_archive", "team_archive_preview", "runtime_list", "runtime_get", "runtime_command", "team_asset_get", "team_update", "agent_tool_policy_get", "agent_tool_policy_update", "knowledge_acl_get", "knowledge_acl_grant", "knowledge_acl_revoke", "flow_list", "flow_get", "flow_save", "flow_start", "session_list", "agent_create", "agent_update", "agent_avatar", "agent_archive", "agent_purge", "session_config_get", "session_config_compare", "session_parameters_get", "session_pin", "team_list", "team_get", "room_list", "room_get", "authorization_status", "legacy_observers", "legacy_receipts", "knowledge_list", "research_get", "research_command", "management_reconcile"]
+DocumentationAction = Literal["runtime_list", "runtime_get", "runtime_command", "team_asset_get", "team_update", "agent_tool_policy_get", "agent_tool_policy_update", "knowledge_acl_get", "knowledge_acl_grant", "knowledge_acl_revoke", "flow_list", "flow_get", "flow_save", "flow_start", "session_list", "agent_create", "agent_update", "agent_avatar", "agent_archive", "agent_purge", "session_config_get", "session_config_compare", "session_parameters_get", "session_pin", "team_list", "team_get", "room_list", "room_get", "authorization_status", "legacy_observers", "legacy_receipts", "knowledge_list", "research_get", "research_command", "management_reconcile", "agent_dispatch_access_get", "agent_dispatch_access_set", "team_create", "team_member_add", "team_member_remove", "team_archive", "team_archive_preview"]
 # This maps documentation to already-migrated semantic actions. It grants no
 # HTTP execution and deliberately advertises no other registered API operation.
 DOCUMENTATION_ACTIONS = {
@@ -1134,6 +1135,7 @@ DOCUMENTATION_ACTIONS = {
     ("GET", "/api/v1/launcher-assistant-management/assets/team"): "team_asset_get",
     ("GET", "/api/v1/launcher-assistant-management/assets/team-archive"): "team_archive_preview",
     ("GET", "/api/v1/launcher-assistant-management/assets/tool-policy"): "agent_tool_policy_get",
+    ("GET", "/api/v1/launcher-assistant-management/assets/dispatch-access"): "agent_dispatch_access_get",
     ("GET", "/api/v1/launcher-assistant-management/assets/knowledge-acl"): "knowledge_acl_get",
     ("GET", "/api/v1/launcher-assistant-management/team-flows"): "flow_list",
     ("GET", "/api/v1/launcher-assistant-management/team-flow"): "flow_get",

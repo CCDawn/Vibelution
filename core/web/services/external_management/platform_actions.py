@@ -60,6 +60,13 @@ def verify_target(action, result, parameters, marker=None):
 
 def execute(native, action, parameters, marker):
     from .operation_receipts import owner, record_success
+    if action == "agent_dispatch_access_set":
+        from .dispatch_access import DispatchAccessControl
+        # This operation's completed config manifest is the native proof.
+        # Do not introduce a second acknowledgement authority after commit.
+        result = native_result(action, DispatchAccessControl(native).set(parameters, marker))
+        verify_target(action, result, parameters, marker)
+        return result
     outcome = owner(native)
     if outcome is not None:
         previous = outcome.read(action, parameters, marker)
@@ -99,6 +106,14 @@ def reconcile(native, action, parameters, marker):
         return {"state": state, "evidence": evidence, "result": result, "code": code}
     try:
         _binding(native.project_root, action, parameters, marker)
+        if action == "agent_dispatch_access_set":
+            from .dispatch_access import DispatchAccessControl
+            result = DispatchAccessControl(native).receipt(parameters, marker)
+            if result is None:
+                return response("requires_review")
+            result = native_result(action, result)
+            verify_target(action, result, parameters, marker)
+            return response("confirmed", "native_outcome", result)
         outcome = owner(native)
         result = outcome.read(action, parameters, marker) if outcome is not None else None
         if result is not None:

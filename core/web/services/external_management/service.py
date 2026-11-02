@@ -294,16 +294,19 @@ class ManagementService:
 
     def read_asset(self, subject, capability, operation, parameters):
         from .asset_contracts import (TeamAssetQuery, TeamAssetResponse, ToolPolicyQuery, ToolPolicyResponse,
-            KnowledgeACLQuery, KnowledgeACLResponse)
+            KnowledgeACLQuery, KnowledgeACLResponse, DispatchAccessQuery, DispatchAccessResponse)
         from .asset_control import AssetControl
         from .team_lifecycle_contracts import TeamArchivePreviewResponse
         from .team_lifecycle_control import TeamLifecycleControl
+        from .dispatch_access import DispatchAccessControl
         control = AssetControl(self.native)
         scope, query_type, response_type, reader = {
             "team": ("teams:manage:read", TeamAssetQuery, TeamAssetResponse, control.read_team),
             "team-archive": ("teams:manage:read", TeamAssetQuery, TeamArchivePreviewResponse, TeamLifecycleControl(self.native).read_archive_preview),
             "tool-policy": ("agents:tool-policy:read", ToolPolicyQuery, ToolPolicyResponse, control.read_tool_policy),
             "knowledge-acl": ("knowledge:acl:read", KnowledgeACLQuery, KnowledgeACLResponse, control.read_knowledge_acl),
+            "dispatch-access": ("agents:dispatch-access:read", DispatchAccessQuery, DispatchAccessResponse,
+                                DispatchAccessControl(self.native).read),
         }[operation]
         grant = self._authorize(subject, capability, scope)
         try:

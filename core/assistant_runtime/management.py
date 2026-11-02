@@ -388,6 +388,8 @@ class ManagementAdapter:
         return await self._bound_read(project_id, lambda client: client.management_research(**parameters))
 
     async def asset(self, project_id: str, operation: str, **parameters):
+        if operation == "dispatch-access":
+            return await self._bound_read(project_id, lambda client: client.management_asset(operation, **parameters))
         if project_id not in self._projects:
             raise DispatchError("Project is not authorized.", code="PROJECT_NOT_AUTHORIZED")
         from .management_projection import ManagementAssetView, project_management_asset

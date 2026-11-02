@@ -31,7 +31,7 @@ import {
 import { DEFAULT_PET_PREFERENCES } from "./desktopPetPreferences";
 import { ChatToolApprovalDialog } from "../chat/ChatToolApprovalDialog";
 import { toolApprovalRiskLabel } from "../chat/toolApprovalLabels";
-import { agentPurgePreviewIsValid, autonomyActionIsKnown, autonomyApprovalPreviewIsValid, authorizationUpgradePreviewIsValid, browserInteractPreviewIsValid, dispatchWritePreviewIsValid, launcherAgentCreatePreviewIsValid, operatorImageUploadPreviewIsValid, preferenceProposalPreviewIsValid, projectLifecyclePreviewIsValid, recoveryPreviewIsValid, managementApprovalActionIsKnown, platformManagementActionIsKnown, platformManagementPreviewIsValid, toolApprovalActionPreview, toolApprovalDisplayName } from "../chat/toolApprovalPreview";
+import { agentArchivePreviewIsValid, agentPurgePreviewIsValid, autonomyActionIsKnown, autonomyApprovalPreviewIsValid, authorizationUpgradePreviewIsValid, browserInteractPreviewIsValid, dispatchWritePreviewIsValid, launcherAgentCreatePreviewIsValid, operatorImageUploadPreviewIsValid, preferenceProposalPreviewIsValid, projectLifecyclePreviewIsValid, recoveryPreviewIsValid, managementApprovalActionIsKnown, platformManagementActionIsKnown, platformManagementPreviewIsValid, toolApprovalActionPreview, toolApprovalDisplayName } from "../chat/toolApprovalPreview";
 import { launcherTeamActionIsKnown, launcherTeamPreviewIsValid, launcherTeamActionPreview, launcherTeamActionTitle } from "./teamManagementApprovalPreview";
 import { useLauncherThemeControl } from "./useLauncherThemeControl";
 import { readStoredWorkbenchTheme, requestWorkbenchTheme, subscribeWorkbenchThemeSync, useAuthorityTheme } from "../../app/themePreference";
@@ -82,6 +82,7 @@ function approvalAcceptDisabled(request: SessionToolApprovalRequest): boolean {
     || launcherTeamActionIsKnown(summary?.assistantAction) && !launcherTeamPreviewIsValid(summary)
     || summary?.assistantAction === "agent_create" && !launcherAgentCreatePreviewIsValid(summary)
     || summary?.assistantAction === "agent_purge" && !agentPurgePreviewIsValid(summary)
+    || summary?.assistantAction === "agent_archive" && !agentArchivePreviewIsValid(summary)
     || summary?.assistantAction === "authorization_upgrade" && !authorizationUpgradePreviewIsValid(summary)
     || summary?.assistantAction === "dispatch_write" && !dispatchWritePreviewIsValid(summary)
     || summary?.assistantAction === "project_lifecycle" && !projectLifecyclePreviewIsValid(summary)
@@ -833,7 +834,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       toolLabels={[{ id: approval.toolName, label: toolApprovalDisplayName(approval.toolName, lang) }]}
       toolName={approval.toolName} actionPreview={approval.toolName === "personal_assistant_manage_tool" && launcherTeamActionIsKnown(approval.argumentSummary?.assistantAction)
         ? launcherTeamActionPreview(approval.argumentSummary, lang) : toolApprovalActionPreview(approval.argumentSummary, approval.toolName, lang)}
-      fullActionPreview={approval.toolName === "personal_assistant_manage_tool" && (launcherTeamActionIsKnown(approval.argumentSummary?.assistantAction) || autonomyActionIsKnown(approval.argumentSummary?.assistantAction) || platformManagementActionIsKnown(approval.argumentSummary?.assistantAction) || ["agent_create", "agent_purge", "authorization_upgrade", "dispatch_write", "project_lifecycle", "operator_image_upload", "reminder_handoff_recover", "browser_interact"].includes(String(approval.argumentSummary?.assistantAction)))}
+      fullActionPreview={approval.toolName === "personal_assistant_manage_tool" && (launcherTeamActionIsKnown(approval.argumentSummary?.assistantAction) || autonomyActionIsKnown(approval.argumentSummary?.assistantAction) || platformManagementActionIsKnown(approval.argumentSummary?.assistantAction) || ["agent_create", "agent_archive", "agent_purge", "authorization_upgrade", "dispatch_write", "project_lifecycle", "operator_image_upload", "reminder_handoff_recover", "browser_interact"].includes(String(approval.argumentSummary?.assistantAction)))}
       approveDisabled={approvalAcceptDisabled(approval)}
       onApprove={() => void decide(approval, "accept")} onReject={() => void decide(approval, "decline")} /> : null}
     {dispatchApproval ? <ChatToolApprovalDialog lang={lang} variant="composer"

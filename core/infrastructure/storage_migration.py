@@ -8,6 +8,7 @@ import json
 import os
 import shutil
 import sqlite3
+import stat
 import tempfile
 import time
 from contextlib import contextmanager
@@ -567,7 +568,16 @@ def plan_storage_migration(
     archived_conflicts = 0
     skipped_ephemeral_files = 0
     for category, source_root, destination_root in mappings:
-        if _same_path(source_root, destination_root) or not source_root.exists():
+        try:
+            source_root.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise _source_inventory_blocked("source_unreadable", source_root) from exc
+        # Check before resolving equality: a dangling or target-pointing
+        # junction must not be mistaken for an absent/already-migrated source.
+        _inventory_source_node(source_root)
+        if _same_path(source_root, destination_root):
             continue
         for source in _iter_source_files(source_root):
             relative = source.relative_to(source_root)
@@ -1225,20 +1235,65 @@ def _unlock_handle(handle) -> None:
         pass
 
 
+def _source_inventory_blocked(code: str, path: Path) -> StorageMigrationError:
+    return StorageMigrationError(f"storage inventory blocked: {code}: {path}")
+
+
+def _inventory_source_node(path: Path):
+    try:
+        info = path.lstat()
+        # followlinks=False does not protect an os.walk from every Windows
+        # junction. Reuse the native reparse-bit guard before resolving paths.
+        if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+            raise _source_inventory_blocked("source_reparse_point", path)
+        return path.resolve(strict=True), info
+    except OSError as exc:
+        raise _source_inventory_blocked("source_unreadable", path) from exc
+
+
 def _iter_persistent_domain_files(root: Path) -> Iterable[Path]:
-    root = root.resolve()
-    for current, directory_names, file_names in os.walk(root, followlinks=False):
-        current_path = Path(current)
-        for directory_name in list(directory_names):
-            candidate = current_path / directory_name
-            if candidate.is_symlink():
-                raise StorageMigrationError(f"symlinked directory is not migrated: {candidate}")
+    blocked = _source_inventory_blocked
+    root, root_info = _inventory_source_node(Path(root))
+    if not stat.S_ISDIR(root_info.st_mode):
+        raise blocked("source_not_directory", root)
+    root_identity = (root_info.st_dev, root_info.st_ino)
+
+    def checked(path: Path):
+        resolved, info = _inventory_source_node(path)
+        try:
+            relative = resolved.relative_to(root)
+        except ValueError as exc:
+            raise blocked("source_outside_root", path) from exc
+        # Path equality on Windows is case-insensitive, even inside a native
+        # case-sensitive directory. Also verify the actual root file identity.
+        anchor = resolved.parents[len(relative.parts) - 1] if relative.parts else resolved
+        try:
+            anchor_info = anchor.stat()
+        except OSError as exc:
+            raise blocked("source_unreadable", anchor) from exc
+        if (anchor_info.st_dev, anchor_info.st_ino) != root_identity:
+            raise blocked("source_outside_root", path)
+        return resolved, info
+
+    def on_error(exc: OSError):
+        # os.walk otherwise silently omits inaccessible directories, turning
+        # unknown coverage into a successful but incomplete migration plan.
+        raise blocked("source_unreadable", Path(exc.filename) if exc.filename else root) from exc
+
+    for current, directory_names, file_names in os.walk(root, followlinks=False, onerror=on_error):
+        current_path, current_info = checked(Path(current))
+        if not stat.S_ISDIR(current_info.st_mode):
+            raise blocked("source_not_directory", current_path)
+        for directory_name in directory_names:
+            candidate, info = checked(current_path / directory_name)
+            if not stat.S_ISDIR(info.st_mode):
+                raise blocked("source_not_directory", candidate)
         for file_name in file_names:
-            candidate = current_path / file_name
-            if candidate.is_symlink():
-                raise StorageMigrationError(f"symlinked file is not migrated: {candidate}")
-            if candidate.is_file():
-                yield candidate.resolve()
+            candidate, info = checked(current_path / file_name)
+            if not stat.S_ISREG(info.st_mode):
+                raise blocked("source_not_regular_file", candidate)
+            yield candidate
+    checked(root)
 
 
 def _manifest_tracked_paths(entries: Iterable[StorageMigrationEntry]) -> set[str]:
@@ -1283,21 +1338,9 @@ def _manifest_entry_bundle_changed(entry: StorageMigrationEntry) -> bool:
 
 
 def _iter_source_files(root: Path) -> Iterable[Path]:
-    root = root.resolve()
-    for current, directory_names, file_names in os.walk(root, followlinks=False):
-        current_path = Path(current)
-        for directory_name in list(directory_names):
-            candidate = current_path / directory_name
-            if candidate.is_symlink():
-                raise StorageMigrationError(f"symlinked directory is not migrated: {candidate}")
-        for file_name in file_names:
-            candidate = current_path / file_name
-            if candidate.is_symlink():
-                raise StorageMigrationError(f"symlinked file is not migrated: {candidate}")
-            if _is_sqlite_sidecar(candidate):
-                continue
-            if candidate.is_file():
-                yield candidate.resolve()
+    for candidate in _iter_persistent_domain_files(root):
+        if not _is_sqlite_sidecar(candidate):
+            yield candidate
 
 
 def _is_ephemeral_source_file(relative_path: Path) -> bool:

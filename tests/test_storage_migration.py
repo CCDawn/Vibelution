@@ -5,6 +5,7 @@ import os
 import shutil
 import sqlite3
 import subprocess
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -219,6 +220,112 @@ def test_plan_skips_ephemeral_lock_files_and_reports_the_count(tmp_path, monkeyp
     assert [entry.relative_path for entry in plan.entries] == [
         "workspace/chat/chat_state.json"
     ]
+
+
+@contextmanager
+def _inventory_directory_link(link: Path, target: Path):
+    if os.name == "nt":
+        import _winapi
+        _winapi.CreateJunction(str(target), str(link))
+    else:
+        link.symlink_to(target, target_is_directory=True)
+    try:
+        yield link
+    finally:
+        # Remove only the temporary link, never recursively remove its target.
+        if os.name == "nt":
+            link.rmdir()
+        else:
+            link.unlink()
+
+
+def test_inventory_blocks_nested_snapshot_junction_without_reading_external_files(tmp_path, monkeypatch):
+    project, _projects_home, _data_home = _project(tmp_path, monkeypatch)
+    snapshot = project / ".runtime" / "snapshots" / "historical"
+    snapshot.mkdir(parents=True)
+    external = tmp_path / "external-node-modules"
+    external.mkdir()
+    outside = external / ".package-lock.json"
+    outside.write_text("external dependency metadata", encoding="utf-8")
+    before = outside.read_bytes(), outside.stat().st_mtime_ns
+    with _inventory_directory_link(snapshot / "node_modules", external):
+        with pytest.raises(StorageMigrationError, match="storage inventory blocked: source_reparse_point"):
+            plan_storage_migration(project)
+    assert (outside.read_bytes(), outside.stat().st_mtime_ns) == before
+    assert not resolve_project_storage_paths(project).instance_home.exists()
+
+
+def test_inventory_blocks_a_linked_source_root_before_resolving_it(tmp_path):
+    external = tmp_path / "external-owner"
+    external.mkdir()
+    (external / "state.json").write_text("{}", encoding="utf-8")
+    with _inventory_directory_link(tmp_path / "source", external) as linked:
+        with pytest.raises(StorageMigrationError, match="storage inventory blocked: source_reparse_point"):
+            list(storage_migration_module._iter_source_files(linked))
+
+
+def test_inventory_does_not_treat_a_dangling_source_junction_as_empty(tmp_path, monkeypatch):
+    project, _projects_home, _data_home = _project(tmp_path, monkeypatch)
+    external = tmp_path / "former-runtime"
+    external.mkdir()
+    with _inventory_directory_link(project / ".runtime", external):
+        external.rmdir()
+        with pytest.raises(StorageMigrationError, match="storage inventory blocked: source_reparse_point"):
+            plan_storage_migration(project)
+
+
+def test_inventory_blocks_unreadable_directory_instead_of_silently_omitting_files(tmp_path, monkeypatch):
+    project, _projects_home, _data_home = _project(tmp_path, monkeypatch)
+    hidden = project / ".runtime" / "unreadable"
+    hidden.mkdir(parents=True)
+    (hidden / "state.json").write_text("{}", encoding="utf-8")
+    scandir = os.scandir
+    def deny_directory(path):
+        if Path(path) == hidden:
+            raise PermissionError("fixture scan denied")
+        return scandir(path)
+    monkeypatch.setattr(storage_migration_module.os, "scandir", deny_directory)
+    with pytest.raises(StorageMigrationError, match="storage inventory blocked: source_unreadable"):
+        plan_storage_migration(project)
+
+
+def test_inventory_blocks_walker_escape_as_a_domain_error_before_hashing(tmp_path, monkeypatch):
+    project, _projects_home, _data_home = _project(tmp_path, monkeypatch)
+    (project / ".runtime").mkdir()
+    external = tmp_path / "outside-root"
+    external.mkdir()
+    (external / "state.json").write_text("{}", encoding="utf-8")
+    def escaped_walk(*_args, **_kwargs):
+        yield str(external), [], ["state.json"]
+    monkeypatch.setattr(storage_migration_module.os, "walk", escaped_walk)
+    monkeypatch.setattr(storage_migration_module, "_sha256_file", lambda *_args: pytest.fail("escaped file was hashed"))
+    with pytest.raises(StorageMigrationError, match="storage inventory blocked: source_outside_root"):
+        plan_storage_migration(project)
+
+
+def test_inventory_source_and_persistent_walk_keep_their_native_sidecar_contract(tmp_path):
+    root = tmp_path / "source"
+    root.mkdir()
+    names = {"state.sqlite3", "state.sqlite3-wal", "state.sqlite3-shm", "state.json"}
+    for name in names:
+        (root / name).write_bytes(b"fixture")
+    assert {path.name for path in storage_migration_module._iter_persistent_domain_files(root)} == names
+    assert {path.name for path in storage_migration_module._iter_source_files(root)} == {"state.sqlite3", "state.json"}
+
+
+def test_inventory_cli_reports_blocked_unknown_coverage_without_an_empty_success(tmp_path, monkeypatch, capsys):
+    from scripts.migrate_project_storage import main
+    project, _projects_home, _data_home = _project(tmp_path, monkeypatch)
+    snapshot = project / ".runtime" / "snapshot"
+    snapshot.mkdir(parents=True)
+    external = tmp_path / "external-cache"
+    external.mkdir()
+    with _inventory_directory_link(snapshot / "node_modules", external):
+        status = main(["inventory", "--project", str(project)])
+    result = json.loads(capsys.readouterr().out)
+    assert status == 2 and result["ok"] is False
+    assert result["error"].startswith("storage inventory blocked: source_reparse_point:")
+    assert "totalFiles" not in result and "entries" not in result
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows extended-length path contract")

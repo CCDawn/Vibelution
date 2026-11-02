@@ -34,7 +34,7 @@ ASSISTANT_MANAGE_ACTIONS = frozenset(
         "dispatch_cancel", "runtime_command", "team_update", "agent_tool_policy_update",
         "knowledge_acl_revoke", "flow_save", "flow_start",
         "delegation_goal_create", "delegation_goal_revoke", "dispatch_derived", "research_command",
-        "authorization_reduce", "authorization_revoke",
+        "authorization_reduce", "authorization_revoke", "agent_dispatch_access_set",
     }
 )
 

@@ -3,7 +3,7 @@ import { AUTONOMY_APPROVAL_LABELS, autonomyActionIsKnown, autonomyApprovalText }
 export { autonomyActionIsKnown, autonomyApprovalPreviewIsValid } from "./autonomyApprovalPreview";
 
 const PLATFORM_MANAGE_ACTIONS = new Set(["dispatch_cancel", "runtime_command", "team_update", "agent_tool_policy_update",
-  "knowledge_acl_grant", "knowledge_acl_revoke", "flow_save", "flow_start"]);
+  "knowledge_acl_grant", "knowledge_acl_revoke", "flow_save", "flow_start", "agent_dispatch_access_set"]);
 type PreviewRule = (value: unknown) => boolean;
 const previewRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const previewText = (value: unknown, max = 160, empty = false) => typeof value === "string"
@@ -48,6 +48,12 @@ export function platformManagementPreviewIsValid(summary: Record<string, unknown
   const targetRules: Record<string, PreviewRule> = { project_id: previewId };
   if (action !== "dispatch_cancel") targetRules.request_id = previewRequestId;
   const sameFields = (...expected: string[]) => fields.join("\n") === expected.sort().join("\n");
+  if (action === "agent_dispatch_access_set") {
+    Object.assign(targetRules, { agent_id: (value: unknown) => previewId(value, 128),
+      expected_public_config_hash: previewDigest, expected_eligibility_fingerprint: previewDigest });
+    return previewExact(targets, targetRules) && sameFields("enabled")
+      && previewExact(delta, { enabled: value => typeof value === "boolean" }) && summary.assistantContentOmitted === false;
+  }
   if (action === "dispatch_cancel") {
     targetRules.dispatch_id = value => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,119}(?![\s\S])/.test(value);
     targetRules.native_task_id = previewId;
@@ -177,6 +183,14 @@ export function launcherAgentCreatePreviewIsValid(summary: Record<string, unknow
   return Object.keys(targets).length === 3
     && typeof project === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}(?![\s\S])/.test(project)
     && displayable(name, 120) && displayable(model, 200);
+}
+
+/** Archive approval binds project, target, stable request and lossless CAS. */
+export function agentArchivePreviewIsValid(summary: Record<string, unknown> | null | undefined): boolean {
+  if (!summary || summary.assistantAction !== "agent_archive" || summary.assistantArgumentsInvalid
+    || summary.assistantDetailsOmitted !== false || summary.assistantPurgeIrreversible) return false;
+  return previewExact(summary.assistantTargets, { project_id: previewId, agent_id: value => previewId(value, 128),
+    request_id: previewRequestId, expected_config_revision: previewDecimal });
 }
 
 /** Purge approval requires the complete identity and fixed irreversible effects. */
@@ -320,7 +334,8 @@ const MANAGE_ACTIONS: Record<string, readonly [string, string]> = {
       authorization_upgrade: ["新增项目权限", "Add project permissions"],
       agent_create: ["创建 Agent", "Create agent"], agent_update: ["修改 Agent", "Update agent"],
       agent_purge: ["永久删除 Agent", "Permanently delete agent"],
-      agent_archive: ["归档 Agent", "Archive agent"], session_create: ["创建会话", "Create session"],
+      agent_archive: ["归档 Agent", "Archive agent"], agent_dispatch_access_set: ["调整 Agent 接单资格", "Set agent dispatch access"],
+      session_create: ["创建会话", "Create session"],
       session_update: ["修改会话", "Update session"], session_stop: ["停止会话任务", "Stop session turn"],
       session_delete: ["删除会话", "Delete session"], knowledge_acl_grant: ["变更知识访问权限", "Change knowledge access"],
       restart: ["重启平台", "Restart platform"], workflow_recovery_bind: ["绑定失败恢复流程", "Bind failure recovery"],
@@ -387,10 +402,13 @@ export function toolApprovalActionPreview(
         expected_config_revision: ["预期配置版本", "Expected config revision"], expected_agent_updated_at: ["Agent 原更新时间", "Previous agent update"],
         expected_policy_fingerprint: ["原工具策略指纹", "Previous policy fingerprint"], expected_registry_version: ["工具注册表版本", "Tool registry version"],
         expected_registry_fingerprint: ["工具注册表指纹", "Tool registry fingerprint"], expected_team_fingerprint: ["原团队指纹", "Previous team fingerprint"],
-        expected_acl_fingerprint: ["原 ACL 指纹", "Previous ACL fingerprint"] };
+        expected_acl_fingerprint: ["原 ACL 指纹", "Previous ACL fingerprint"],
+        expected_public_config_hash: ["原配置快照", "Previous config snapshot"],
+        expected_eligibility_fingerprint: ["原接单资格快照", "Previous eligibility snapshot"] };
       const quote = (value: unknown) => JSON.stringify(value, null, 2).replace(/[\p{Cf}\p{Cs}\p{Zl}\p{Zp}]/gu,
         char => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`);
       const deltaLabels: Record<string, [string, string]> = { operation: ["操作", "Operation"], command: ["控制命令", "Control command"],
+        enabled: ["允许所示 Agent 接单", "Allow this agent to receive tasks"],
         allowedTools: ["允许工具", "Allowed tools"], preferredTools: ["优先工具", "Preferred tools"], blockedTools: ["禁用工具", "Blocked tools"],
         readScopes: ["读取范围", "Read scopes"], writeScopes: ["写入范围", "Write scopes"], allowedCommandKinds: ["允许命令类别", "Allowed command kinds"],
         networkAccess: ["联网权限", "Network access"], mutationAccess: ["修改权限", "Mutation access"], delegationAccess: ["转派权限", "Delegation access"],
@@ -420,6 +438,14 @@ export function toolApprovalActionPreview(
         `${lang === "zh" ? "参数摘要" : "Parameter digest"}: ${summary.assistantParametersDigest}`,
         summary.assistantContentOmitted ? (lang === "zh" ? "用户正文未记录；此处仅展示完整对象、结构和权限范围。"
           : "User content is not recorded; complete targets, structure and permission scope are shown here.") : ""].filter(Boolean).join("\n");
+    }
+    if (action === "agent_archive" && summary.assistantDetailsOmitted === false) {
+      if (!agentArchivePreviewIsValid(summary)) return `${title}\n${lang === "zh"
+        ? "参数无法核对，请拒绝并重新发起。" : "Arguments cannot be verified. Decline and request again."}`;
+      const identity = targets as Record<string, string>;
+      return [title, `${lang === "zh" ? "项目" : "Project"}: ${identity.project_id}`, `Agent: ${identity.agent_id}`,
+        `${lang === "zh" ? "配置版本" : "Config revision"}: ${identity.expected_config_revision}`,
+        `${lang === "zh" ? "请求 ID" : "Request ID"}: ${identity.request_id}`].join("\n");
     }
     if (action === "agent_purge") {
       if (!agentPurgePreviewIsValid(summary)) {

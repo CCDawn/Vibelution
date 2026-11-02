@@ -86,6 +86,40 @@ class ToolPolicyQuery(Closed):
     agent_id: Reference
 
 
+DispatchAgentReference = Annotated[str, Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")]
+
+
+class DispatchAccessQuery(Closed):
+    agent_id: DispatchAgentReference
+
+
+class DispatchAccessSet(DispatchAccessQuery):
+    enabled: bool
+    expected_public_config_hash: Fingerprint
+    expected_eligibility_fingerprint: Fingerprint
+
+
+class DispatchAccessResponse(Closed):
+    agentId: DispatchAgentReference
+    gatewayEnabled: bool
+    operatorEnabled: bool
+    dispatchable: bool
+    dispatchReason: Literal["agent_inactive", "team_dedicated_agent", "active_team_member", "operator_disabled",
+                            "unsupported_agent_class", "agent_protected", "eligible"]
+    publicConfigHash: Fingerprint
+    eligibilityFingerprint: Fingerprint
+    untrustedContent: Literal[True] = True
+
+    @model_validator(mode="after")
+    def consistent_access(self):
+        if (self.operatorEnabled and not self.gatewayEnabled
+                or self.dispatchable != (self.dispatchReason == "eligible")
+                or self.dispatchable and not self.operatorEnabled
+                or self.dispatchReason == "operator_disabled" and self.operatorEnabled):
+            raise ValueError("Inconsistent dispatch access observation")
+        return self
+
+
 class ToolPolicyUpdate(ToolPolicyQuery):
     expected_config_revision: int = Field(ge=0)
     expected_agent_updated_at: str = Field(min_length=1, max_length=80)
@@ -170,7 +204,7 @@ class KnowledgeACLResponse(Closed):
 
 
 class AssetMutationResponse(Closed):
-    action: Literal["team_update", "agent_tool_policy_update", "knowledge_acl_grant", "knowledge_acl_revoke", "team_create", "team_member_add", "team_member_remove", "team_archive"]
+    action: Literal["team_update", "agent_tool_policy_update", "knowledge_acl_grant", "knowledge_acl_revoke", "team_create", "team_member_add", "team_member_remove", "team_archive", "agent_dispatch_access_set"]
     resourceId: str
     revision: int | None = None
     fingerprint: Fingerprint
@@ -179,10 +213,13 @@ class AssetMutationResponse(Closed):
 
 
 ASSET_ACTION_MODELS = {"team_update": TeamUpdate, "agent_tool_policy_update": ToolPolicyUpdate,
-                       "knowledge_acl_grant": KnowledgeACLMutation, "knowledge_acl_revoke": KnowledgeACLMutation}
+                       "knowledge_acl_grant": KnowledgeACLMutation, "knowledge_acl_revoke": KnowledgeACLMutation,
+                       "agent_dispatch_access_set": DispatchAccessSet}
 ASSET_ACTION_SCOPES = {"team_update": "teams:write", "agent_tool_policy_update": "agents:tool-policy:write",
-                       "knowledge_acl_grant": "knowledge:acl:write", "knowledge_acl_revoke": "knowledge:acl:write"}
+                       "knowledge_acl_grant": "knowledge:acl:write", "knowledge_acl_revoke": "knowledge:acl:write",
+                       "agent_dispatch_access_set": "agents:dispatch-access:write"}
 ASSET_ACTION_HELP = {
+    "agent_dispatch_access_set": "经原生审批精确启用或禁用一个普通personal Agent的gateway派遣入口；需独立agents:dispatch-access:write，先用agent_dispatch_access_get读取两个原CAS指纹。不会开启global gateway、清空allowlist或修改其他Agent/权限上限。未知结果只查原management_receipt/management_reconcile，不换request_id重放。",
     "team_update": "经原生管理审批维护已有团队名称、用途和成员；先读取原团队fingerprint，拒绝过期版本、系统团队和忙碌成员变更。原生成员身份与唯一归属规则继续生效。",
     "agent_tool_policy_update": "经原生管理审批修改目标Agent的声明式工具与范围策略；先读取配置版本、更新时间、policyFingerprint、registryVersion和registryFingerprint并原样传回，版本与内容指纹必须一致。声明中保留的工具仍受原生delegation门控制，不隐式授予全部工具、任意命令或审批凭据；更新不改变已接收Session的版本pin。",
     "knowledge_acl_grant": "经原生管理审批和独立知识ACL写授权，以真实操作者身份为active Agent增加显式read/propose/review；knowledge_base_id必须原样使用knowledge_acl_get返回的scopedKnowledgeBaseId，并携原ACL fingerprint，不冒充owner或reviewer。此授权不证明知识正文已读取。",

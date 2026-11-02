@@ -191,6 +191,8 @@ def create_configured_agent_with_session(
     if primary_mode in {"", "chat"} and not str(role_key or "").strip() and (persona or task):
         raise AgentDirectoryError("Roleless chat Agents do not retain persona or task profiles.")
     initial_metadata = dict(metadata or {})
+    initial_metadata.update(agent_directory_service._agent_metadata_conversation_index_updates(
+        CONVERSATION_INDEX_KIND_PERSONAL_AGENT))
     if delegation_policy is not None:
         initial_metadata["delegationPolicy"] = dict(delegation_policy)
     with agent_directory_service.agent_session_lifecycle_transaction():
