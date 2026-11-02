@@ -9,7 +9,8 @@ import unicodedata
 from pydantic import ValidationError
 
 PLATFORM_MANAGEMENT_ACTIONS = frozenset({"dispatch_cancel", "runtime_command", "team_update",
-    "agent_tool_policy_update", "knowledge_acl_grant", "knowledge_acl_revoke", "flow_save", "flow_start"})
+    "agent_tool_policy_update", "knowledge_acl_grant", "knowledge_acl_revoke", "flow_save", "flow_start",
+    "agent_dispatch_access_set"})
 
 
 def _digest(value):
@@ -58,7 +59,7 @@ def platform_management_approval_summary(action, parameters):
         "kind", "resource_id", "session_id", "knowledge_base_id", "target_agent_id", "expected_revision",
         "expected_config_revision", "expected_agent_updated_at", "expected_policy_fingerprint",
         "expected_registry_version", "expected_registry_fingerprint", "expected_team_fingerprint",
-        "expected_acl_fingerprint", "expectedRevision"}
+        "expected_acl_fingerprint", "expectedRevision", "expected_public_config_hash", "expected_eligibility_fingerprint"}
     targets = {key: str(value) for key, value in values.items() if key in target_keys and value not in (None, "")}
     for key, value in targets.items():
         if not _displayable(value):
@@ -71,6 +72,8 @@ def platform_management_approval_summary(action, parameters):
         changed, delta = ["stopRequested"], {"operation": "request_stop"}
     elif action == "runtime_command":
         changed, delta = ["command"], {"command": values["command"]}
+    elif action == "agent_dispatch_access_set":
+        changed, delta = ["enabled"], {"enabled": values["enabled"]}
     elif action.startswith("knowledge_acl_"):
         changed, delta = ["permissions"], {"permissions": values["permissions"]}
     elif action == "agent_tool_policy_update":

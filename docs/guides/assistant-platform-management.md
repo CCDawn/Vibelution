@@ -41,6 +41,10 @@ Research 续页必须同时传原 `operation.revision` 为 `expected_revision`�
 
 ## 派遣授权与主体撤销
 
+`agent_create` 在首次原生目录写入时声明 `personal_agent` 分类；创建成功不授予网关派遣资格。`agent_dispatch_access_get` 需要独立 `agents:dispatch-access:read`，只返回所选 Agent 的当前资格与两个 CAS 快照，不返回完整允许或拒绝名单。`agent_dispatch_access_set` 需要显式升级的 `agents:dispatch-access:write`、精确原生审批、稳定请求编号及两个原指纹。启用要求网关已开放，非空 allowlist 只追加所选 Agent，并仅移除它的 deny；停用仅追加所选 Agent 的 deny，保留 allowlist 和其他 Agent 的有效策略。hidden、团队专用、受保护和活跃团队成员均拒绝。
+
+停用持原生 Session 与 Agent admission，遇到目标活跃任务、durable queued、未知任务状态或不完整扫描均拒绝，不隐式取消任务。网关默认准入在同一 lifecycle 临界区重新读取当前策略并写入 durable queued，随后才创建 Session；重载前的旧 service 对象不能沿旧名单继续接单。配置事务使用现有 config owner 与原请求 manifest，只有绑定正确且最终 `completed` 的 manifest 是成功证据；应答丢失时读原回执，不根据当前名单猜成功。重载保证目标后端后续派遣使用新策略，其他运行后端的缓存同步不在该回执证明范围内。
+
 `delegation_goal_*` 将当前助理会话的原生用户来源绑定到目标 Agent、权限上限、任务额度和期限。`dispatch_derived` 可在该 envelope 内派遣拆分任务，每次仍受原生 manage 审批与目标项目权限限制。稳定 dispatch ID 不重复扣额度，也不能用新 ID 重派未知任务。目录 `active` 只代表未撤销且未过期，`sourceVerified=false` / `partial` 不证明当前可执行或目录完整；继续前验证原 goal。撤销 goal 只阻止新派工，已有任务继续查询原 `receipt`。
 
 `authorization_status` 返回当前 scopes/revision。`authorization_reduce` 只移除非空真子集，清空访问必须明确 `authorization_revoke`；两者要求真实 operator control、原 capability、精确 `expected_scopes` / `expected_grant_revision`、稳定 request ID 与原生审批，不接受外部 subject/actor/force。scopes、revision、receipt 在同一原生 subject 记录中原子保存。撤销立即拒绝业务操作及新升级/降权，原凭据只可恢复本次撤销的原回执；历史证据和任务关联保留，旧升级回执不会恢复已移除权限。

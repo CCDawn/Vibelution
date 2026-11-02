@@ -33,6 +33,7 @@ from core.web.services.external_management.runtime_contracts import (
 )
 from core.web.services.external_management.asset_contracts import (
     TeamAssetQuery, TeamAssetResponse, ToolPolicyQuery, ToolPolicyResponse, KnowledgeACLQuery, KnowledgeACLResponse,
+    DispatchAccessQuery, DispatchAccessResponse,
 )
 from core.web.services.external_management.flow_contracts import FlowListQuery, FlowListResponse, FlowReadQuery, FlowReadResponse
 from core.web.services.external_management.platform_actions import PLATFORM_ACTIONS
@@ -185,6 +186,13 @@ async def read_tool_policy(request: Request, agent_id: str = ""):
     _require_control(request)
     query = _closed_query(request, ToolPolicyQuery)
     return await _operator_call(request, lambda: _service().read_asset(*_credentials(request), "tool-policy", query))
+
+
+@router.get("/assets/dispatch-access", response_model=DispatchAccessResponse)
+async def read_dispatch_access(request: Request, agent_id: str = ""):
+    _require_control(request)
+    query = _closed_query(request, DispatchAccessQuery)
+    return await _operator_call(request, lambda: _service().read_asset(*_credentials(request), "dispatch-access", query))
 
 
 @router.get("/assets/knowledge-acl", response_model=KnowledgeACLResponse)

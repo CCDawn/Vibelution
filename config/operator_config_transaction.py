@@ -66,6 +66,7 @@ class PreparedOperatorConfigTransaction:
     base_hash: str
     candidate_hash: str
     manifest_path: Path
+    native_request: dict[str, Any] | None = field(default=None, repr=False)
 
 
 @dataclass
@@ -466,6 +467,74 @@ def _write_manifest(path: Path, manifest: dict[str, Any]) -> None:
     _strict_atomic_write(path, payload)
 
 
+def _native_config_request(value: dict[str, Any]) -> dict[str, Any]:
+    """The one closed native config operation, with no caller paths or prose."""
+    fields = {"projectRoot", "subjectType", "subjectId", "action", "requestKey",
+              "requestFingerprint", "agentId", "enabled"}
+    if (not isinstance(value, dict) or set(value) != fields
+            or value.get("subjectType") != "operator" or value.get("action") != "agent_dispatch_access_set"
+            or type(value.get("enabled")) is not bool
+            or any(not isinstance(value.get(key), str) for key in fields - {"enabled"})
+            or not re.fullmatch(r"ops-[a-f0-9]{32}", value["subjectId"])
+            or any(not re.fullmatch(r"[a-f0-9]{64}", value[key]) for key in ("requestKey", "requestFingerprint"))
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", value["agentId"])
+            or not Path(value["projectRoot"]).is_absolute()):
+        raise ValueError("native operator config binding unavailable")
+    result = dict(value)
+    result["projectRoot"] = str(Path(value["projectRoot"]).resolve()).casefold()
+    return result
+
+
+def native_config_operation_id(config_path: Path | str, native_request: dict[str, Any]) -> str:
+    request = _native_config_request(native_request)
+    identity = [str(Path(config_path).resolve()).casefold(), *(request[key] for key in
+                ("projectRoot", "subjectId", "action", "requestKey"))]
+    return "operator-config-native-" + _sha256(json.dumps(identity, separators=(",", ":")).encode())
+
+
+def read_native_config_outcome(config_path: Path | str, native_request: dict[str, Any]) -> dict[str, Any] | None:
+    """Read this original transaction; current policy is never causal proof.
+
+    Does not acquire/create config locks, directories or recovery records. A
+    non-completed manifest is returned as such, never permission to replay it.
+    """
+    from core.assistant_runtime.migration_io import read_stable_file, strict_json
+    request = _native_config_request(native_request)
+    config_path = Path(config_path).resolve()
+    operation_id = native_config_operation_id(config_path, request)
+    backup_dir = resolve_config_backup_dir(config_path).resolve()
+    manifest_path = backup_dir / f"operator-config-transaction-{operation_id}.json"
+    try:
+        manifest_path.lstat()
+    except FileNotFoundError:
+        return None
+    record = strict_json(read_stable_file(manifest_path, 32 * 1024).raw)
+    required = {"schemaVersion", "operationId", "operationKind", "status", "phase", "configPath", "baseHash",
+                "candidateHash", "beforeBackup", "afterBackup", "beforeSha256", "afterSha256", "participants", "nativeRequest"}
+    if (not isinstance(record, dict) or set(record) - required - {"failurePhase", "errorType", "rollbackErrors"}
+            or not required <= record.keys() or type(record["schemaVersion"]) is not int or record["schemaVersion"] != 2
+            or record["operationId"] != operation_id or record["operationKind"] != "agent_dispatch_access_set"
+            or record["configPath"] != str(config_path) or record["nativeRequest"] != request
+            or _native_config_request(record["nativeRequest"]) != request
+            or record["status"] not in {"prepared", "reloaded", "completed", "rolled_back", "rollback_failed"}
+            or record["phase"] != record["status"]
+            or any(not isinstance(record[key], str) or not re.fullmatch(r"[a-f0-9]{64}", record[key])
+                   for key in ("baseHash", "candidateHash", "beforeSha256", "afterSha256"))
+            or not isinstance(record["participants"], list)
+            or any(not isinstance(name, str) for name in record["participants"])):
+        raise ValueError("native operator config outcome binding changed")
+    for label in ("before", "after"):
+        path = backup_dir / f"operator-config-transaction-{operation_id}.{label}.bin"
+        if record[label + "Backup"] != str(path):
+            raise ValueError("native operator config backup binding changed")
+        payload = read_stable_file(path, 16 * 1024 * 1024).raw
+        public = tomllib.loads(payload.decode("utf-8"))
+        if (_sha256(payload) != record[label + "Sha256"]
+                or public_config_hash(public) != record["baseHash" if label == "before" else "candidateHash"]):
+            raise ValueError("native operator config backup changed")
+    return {key: record[key] for key in ("operationId", "status", "baseHash", "candidateHash", "nativeRequest")}
+
+
 def _prepared_transaction(
     operation_kind: str,
     config_path: Path,
@@ -473,11 +542,16 @@ def _prepared_transaction(
     after_bytes: bytes,
     base_hash: str,
     candidate_hash: str,
+    native_request: dict[str, Any] | None = None,
 ) -> PreparedOperatorConfigTransaction:
     kind = str(operation_kind or "").strip()
     if not kind:
         raise ValueError("operation_kind is required")
-    operation_id = "operator-config-" + uuid.uuid4().hex
+    native_request = _native_config_request(native_request) if native_request is not None else None
+    if native_request is not None and kind != native_request["action"]:
+        raise ValueError("native operator config operation kind changed")
+    operation_id = (native_config_operation_id(config_path, native_request) if native_request is not None
+                    else "operator-config-" + uuid.uuid4().hex)
     manifest_path = (
         resolve_config_backup_dir(config_path)
         / f"operator-config-transaction-{operation_id}.json"
@@ -491,6 +565,7 @@ def _prepared_transaction(
         base_hash=base_hash,
         candidate_hash=candidate_hash,
         manifest_path=manifest_path,
+        native_request=native_request,
     )
 
 
@@ -500,6 +575,7 @@ def prepare_operator_config_transaction(
     expected_base_hash: str,
     mutate_text: Callable[[str], str],
     config_path: Path | str = CONFIG_PATH,
+    native_request: dict[str, Any] | None = None,
 ) -> PreparedOperatorConfigTransaction:
     path = Path(config_path).expanduser().resolve()
     before = path.read_bytes()
@@ -523,6 +599,7 @@ def prepare_operator_config_transaction(
         after,
         base_hash,
         candidate_hash,
+        native_request,
     )
 
 
@@ -533,6 +610,10 @@ def _write_transaction_artifacts(
     participant_names: Sequence[str],
 ) -> _TransactionArtifacts:
     backup_dir = prepared.manifest_path.parent
+    if prepared.native_request is not None and prepared.manifest_path.exists():
+        # A prior admitted scope is never overwritten or resumed by another
+        # prepare/apply call. Its final manifest is the only native proof.
+        raise ValueError("native operator config request already exists")
     before_path = (
         backup_dir / f"operator-config-transaction-{prepared.operation_id}.before.bin"
     ).resolve()
@@ -556,6 +637,8 @@ def _write_transaction_artifacts(
         "afterSha256": _sha256(prepared.after_bytes),
         "participants": list(participant_names),
     }
+    if prepared.native_request is not None:
+        manifest.update(schemaVersion=2, nativeRequest=prepared.native_request)
     _write_manifest(prepared.manifest_path, manifest)
     return _TransactionArtifacts(
         manifest_path=prepared.manifest_path, manifest=manifest
@@ -663,6 +746,13 @@ def _apply_operator_config_transaction(
                 "manifestPath": str(prepared.manifest_path),
             }
         except Exception as exc:
+            if prepared.native_request is not None and failure_phase == "manifest_completed":
+                # Publication may have succeeded before its acknowledgement
+                # failed. Rolling back now could leave a completed proof for
+                # restored config after a crash. Retain the verified candidate;
+                # only the original final manifest can settle this uncertainty.
+                raise OperatorConfigTransactionError(status="commit_unconfirmed",
+                    operation_id=prepared.operation_id, manifest_path=prepared.manifest_path) from None
             for participant in reversed(applied):
                 try:
                     participant.rollback()
@@ -732,4 +822,6 @@ __all__ = [
     "prepare_operator_config_transaction",
     "remove_toml_table_tree",
     "replace_toml_scalar",
+    "native_config_operation_id",
+    "read_native_config_outcome",
 ]

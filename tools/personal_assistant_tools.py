@@ -135,6 +135,7 @@ def personal_assistant_action_tool(action: str = "index", parameters: dict | Non
                 "research_get": ["operations:read"], "knowledge_list": ["knowledge:catalog:read"],
                 "team_asset_get": ["teams:manage:read"],
                 "agent_tool_policy_get": ["agents:tool-policy:read"],
+                "agent_dispatch_access_get": ["agents:dispatch-access:read"],
                 "knowledge_acl_get": ["knowledge:acl:read"],
                 "flow_list": ["teams:flows:read"], "flow_get": ["teams:flows:read"],
                 "team_knowledge_list": ["knowledge:catalog:read", "teams:directory:read"],

@@ -354,6 +354,21 @@ def _management_contracts():
     return result
 
 
+def agent_archive_approval_summary(parameters: dict) -> dict:
+    """Keep every executable identity and the exact CAS visible for archival."""
+    try:
+        values = _management_contracts()["agent_archive"][0].model_validate(parameters).model_dump()
+    except (ValidationError, TypeError) as exc:
+        raise ValueError("Invalid Agent archive request") from exc
+    for key, maximum in (("project_id", 160), ("agent_id", 128), ("request_id", 96)):
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0," + str(maximum - 1) + "}", values[key]) is None:
+            raise ValueError("Archive identity cannot be displayed safely")
+    return {"assistantAction": "agent_archive", "assistantTargets": {
+        "project_id": values["project_id"], "agent_id": values["agent_id"],
+        "expected_config_revision": str(values["expected_config_revision"]), "request_id": values["request_id"]},
+        "assistantDetailsOmitted": False}
+
+
 def agent_purge_approval_summary(parameters: dict) -> dict:
     """Project the same closed request that the destructive action executes."""
     try:
@@ -395,7 +410,7 @@ def _documentation_contracts():
 
 def _project_read_contracts():
     from core.web.services.external_management.runtime_contracts import RuntimeOperationsQuery, RuntimeOperationQuery
-    from core.web.services.external_management.asset_contracts import TeamAssetQuery, ToolPolicyQuery, KnowledgeACLQuery
+    from core.web.services.external_management.asset_contracts import TeamAssetQuery, ToolPolicyQuery, KnowledgeACLQuery, DispatchAccessQuery
     from core.web.services.external_management.flow_contracts import FlowListQuery, FlowReadQuery
     from core.web.services.external_management.research_contracts import ResearchReadQuery
     from core.web.services.external_management.knowledge_catalog_contracts import KnowledgeCatalogQuery
@@ -412,6 +427,7 @@ def _project_read_contracts():
             ("team_knowledge_list", TeamKnowledgeQuery),
             ("runtime_list", RuntimeOperationsQuery), ("runtime_get", RuntimeOperationQuery),
             ("research_get", ResearchReadQuery), ("knowledge_list", KnowledgeCatalogQuery),
+            ("agent_dispatch_access_get", DispatchAccessQuery),
             ("management_reconcile", ReconciliationQuery),
             ("flow_list", FlowListQuery), ("flow_get", FlowReadQuery),
             ("room_list", DirectoryQuery), ("room_get", RoomReadQuery),
@@ -428,6 +444,7 @@ _SCHEMAS = {"projects": ProjectIndex, "agents": Project, "dispatch": Dispatch, "
             "authorization_status": Project, "legacy_observers": LegacyObservers, "legacy_receipts": LegacyReceipts,
             "history_source_preview": MainControlProject}
 _HELP = {
+    "agent_dispatch_access_get": "只读所选普通Agent的接单资格、网关状态、publicConfigHash与eligibilityFingerprint，不返回全局允许或拒绝名单。需独立agents:dispatch-access:read；用agent_dispatch_access_set只改变该Agent，原样传回两个CAS指纹，经原生审批执行。gatewayEnabled=false或非普通personal Agent不能通过此入口放开。",
     "management_reconcile": "按原action/request_id只读对账管理意图；confirmed只证明原回执确认，业务终态仍读原对象。requiresReview=true表示应明确汇报或接管，不要无限查询同一unknown，也不能换ID重放。返回原对象引用、不含参数正文；权限仍为原动作独立scope，不能凭此扩大读取。",
     "knowledge_list": "按owner_type/owner_id及query发现当前项目知识库元数据，包括Agent库和可管理系统团队库；不读取正文。独立knowledge:catalog:read。分页使用nextOffset及expected_digest，来源partial/unavailable不能当空库或全量；返回scopedKnowledgeBaseId可用于knowledge_acl_get。",
     "research_get": "读取research_run精确run_id/team_id/flow_id节点与人工任务元数据，不读任务Prompt。按nextNodeOffset/nextHumanTaskOffset续页须同时传原operation.revision为expected_revision、snapshot为expected_snapshot；版本或目录变化从首页重读。operation.revision也用于research_command原生CAS。decision只能取任务返回decisions，revise绑定返回checkpointId。需operations:read。",
@@ -883,8 +900,9 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
         coroutine = service.management.research(args.pop("project_id"), **args)
     elif action == "management_reconcile":
         coroutine = service.management.reconciliation(args.pop("project_id"), **args)
-    elif action in {"team_asset_get", "agent_tool_policy_get", "knowledge_acl_get"}:
-        operation = {"team_asset_get": "team", "agent_tool_policy_get": "tool-policy", "knowledge_acl_get": "knowledge-acl"}[action]
+    elif action in {"team_asset_get", "agent_tool_policy_get", "knowledge_acl_get", "agent_dispatch_access_get"}:
+        operation = {"team_asset_get": "team", "agent_tool_policy_get": "tool-policy", "knowledge_acl_get": "knowledge-acl",
+                     "agent_dispatch_access_get": "dispatch-access"}[action]
         coroutine = service.management.asset(args.pop("project_id"), operation, **args)
     elif action in {"flow_list", "flow_get"}:
         coroutine = service.management.flow(args.pop("project_id"), "list" if action == "flow_list" else "get", **args)

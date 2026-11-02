@@ -1379,17 +1379,18 @@ def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
                 return platform_management_approval_summary(action, values)
             except (ValueError, TypeError, KeyError, RuntimeError, RecursionError):
                 return {"assistantAction": action, "assistantArgumentsInvalid": True}
-    if action == "agent_purge":
-        from core.infrastructure.native_runtime import is_launcher_assistant_process
+    from core.infrastructure.native_runtime import is_launcher_assistant_process
+    if action == "agent_purge" or action == "agent_archive" and is_launcher_assistant_process():
         if not is_launcher_assistant_process():
             return {"assistantAction": action, "assistantArgumentsInvalid": True}
         try:
             raw = args.get("arguments_json")
             values = json.loads(raw) if isinstance(raw, str) and len(raw) <= 16000 else None
             if not isinstance(values, dict):
-                raise ValueError("Invalid Agent purge arguments")
-            from core.assistant_runtime.actions import agent_purge_approval_summary
-            return agent_purge_approval_summary(values)
+                raise ValueError("Invalid Agent cleanup arguments")
+            from core.assistant_runtime.actions import agent_archive_approval_summary, agent_purge_approval_summary
+            summary = agent_archive_approval_summary if action == "agent_archive" else agent_purge_approval_summary
+            return summary(values)
         except (ValueError, TypeError, KeyError, RuntimeError, RecursionError):
             return {"assistantAction": action, "assistantArgumentsInvalid": True}
     if isinstance(action, str) and action in {"preference_proposal_accept", "preference_proposal_reject"}:

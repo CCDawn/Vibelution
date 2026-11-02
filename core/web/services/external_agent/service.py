@@ -9,6 +9,7 @@ import threading
 import weakref
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -199,6 +200,9 @@ class ExternalAgentTaskService:
         )
         self.approval_persist_enabled = bool(approval_persist_enabled)
         self._refresh_lock = threading.RLock()
+        # Only build_default_service installs the trusted native admission seam.
+        # Custom/injected services retain their existing dependency contract.
+        self._native_start_admission = None
 
     def list_agents(self, *, limit: int = 50) -> dict[str, Any]:
         self._require_gateway_enabled()
@@ -227,6 +231,25 @@ class ExternalAgentTaskService:
         }
 
     def start_task(
+        self, *, owner_id: str, adapter_connection_id: str, capabilities: set[str], agent_id: str,
+        task: str, permission_profile: str, client_request_id: str, title: str, runtime_revision: str,
+        include_private: bool = False,
+    ) -> dict[str, Any]:
+        admission = self._native_start_admission() if self._native_start_admission is not None else nullcontext(None)
+        with admission as gateway:
+            record, created, resolved_agent_id, normalized_task, effective = self._admit_start_task(
+                owner_id=owner_id, adapter_connection_id=adapter_connection_id, capabilities=capabilities,
+                agent_id=agent_id, task=task, permission_profile=permission_profile, client_request_id=client_request_id,
+                title=title, runtime_revision=runtime_revision, gateway=gateway)
+        if not created:
+            return self._public_task(record, include_private=include_private)
+        # The durable queued row now blocks an access change. Do not retain
+        # lifecycle across Session compilation, writer work or model submit.
+        return self._start_native_task(record, resolved_agent_id=resolved_agent_id,
+            normalized_task=normalized_task, title=title, effective=effective,
+            runtime_revision=runtime_revision, include_private=include_private)
+
+    def _admit_start_task(
         self,
         *,
         owner_id: str,
@@ -238,10 +261,13 @@ class ExternalAgentTaskService:
         client_request_id: str,
         title: str,
         runtime_revision: str,
-        include_private: bool = False,
-    ) -> dict[str, Any]:
+        gateway=None,
+    ):
         del capabilities  # Reserved for future per-start capability checks.
-        self._require_gateway_enabled()
+        if gateway is not None and not gateway.enabled:
+            raise ExternalAgentAccessError("Managed external-Agent gateway is disabled", code="GATEWAY_NOT_READY")
+        if gateway is None:
+            self._require_gateway_enabled()
         normalized_task = str(task or "").strip()
         if not normalized_task:
             raise ValueError("task is required")
@@ -251,7 +277,7 @@ class ExternalAgentTaskService:
             str(agent_id or "").strip(), include_archived=False
         )
         try:
-            self._require_eligible(agent)
+            self._require_eligible(agent, gateway=gateway)
         except ExternalAgentAccessError as exc:
             self._record_gateway_event(
                 "external_agent.execution.denied",
@@ -316,12 +342,7 @@ class ExternalAgentTaskService:
         except ExternalAgentTaskConflictError as exc:
             raise ExternalAgentConflictError(str(exc), code="TASK_CONFLICT") from exc
 
-        if not created:
-            return self._public_task(record, include_private=include_private)
-
-        return self._start_native_task(record, resolved_agent_id=resolved_agent_id,
-            normalized_task=normalized_task, title=title, effective=effective,
-            runtime_revision=runtime_revision, include_private=include_private)
+        return record, created, resolved_agent_id, normalized_task, effective
 
     def _task_lock(self, task_id: str):
         # Serialize this task within the process, including service reloads;
@@ -1171,12 +1192,15 @@ class ExternalAgentTaskService:
             )
         return record
 
-    def _require_eligible(self, agent: dict[str, Any] | None) -> None:
+    def _require_eligible(self, agent: dict[str, Any] | None, *, gateway=None) -> None:
         decision = external_mcp_eligibility(
             agent,
             active_team_lookup=self.dependencies.active_team_lookup,
-            operator_enabled=self._operator_agent_enabled,
-            operator_explicitly_enabled=self._operator_agent_explicitly_enabled,
+            operator_enabled=(self._operator_agent_enabled if gateway is None else lambda aid:
+                gateway.enabled and aid not in gateway.denied_agent_ids
+                and (not gateway.allowed_agent_ids or aid in gateway.allowed_agent_ids)),
+            operator_explicitly_enabled=(self._operator_agent_explicitly_enabled if gateway is None else lambda aid:
+                gateway.enabled and aid in gateway.allowed_agent_ids and aid not in gateway.denied_agent_ids),
         )
         if not decision.eligible:
             raise ExternalAgentAccessError(
@@ -1466,11 +1490,25 @@ class ExternalAgentTaskService:
         return updated
 
 
+@contextmanager
+def _native_start_admission(project_root: Path):
+    from config.settings import get_config
+    from core.web.services import agent_directory_service as directory
+    project_root = Path(project_root).resolve()
+    if (Path(directory.PROJECT_ROOT).resolve() != project_root
+            or Path(directory._active_project_root()).resolve() != project_root):
+        raise ExternalAgentAccessError("Native Agent owner changed", code="GATEWAY_NOT_READY")
+    with directory.agent_session_lifecycle_transaction():
+        if Path(directory._active_project_root()).resolve() != project_root:
+            raise ExternalAgentAccessError("Native Agent owner changed", code="GATEWAY_NOT_READY")
+        yield get_config().external_agent_gateway
+
+
 def build_default_service(project_root: Path) -> ExternalAgentTaskService:
     from config.settings import get_config
 
     gateway = get_config().external_agent_gateway
-    return ExternalAgentTaskService(
+    service = ExternalAgentTaskService(
         ExternalAgentTaskStore(
             resolve_project_runtime_home(project_root) / "external_agents"
         ),
@@ -1485,6 +1523,8 @@ def build_default_service(project_root: Path) -> ExternalAgentTaskService:
         denied_agent_ids=gateway.denied_agent_ids,
         approval_persist_enabled=gateway.approval_persist_enabled,
     )
+    service._native_start_admission = lambda: _native_start_admission(project_root)
+    return service
 
 
 _DEFAULT_SERVICES_LOCK = threading.RLock()

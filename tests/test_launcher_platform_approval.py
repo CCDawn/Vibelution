@@ -39,6 +39,8 @@ def cases():
                 "delegationAccess": "assigned_only", "approvalOverrides": {"write_file_tool": "always"},
                 "maxCallsPerTurn": 12, "maxCallsPerTurnByModelFamily": {"model-family": 7},
                 "perToolRules": {"read_file_tool": {"approval": "never"}}}},
+        "agent_dispatch_access_set": {**base, "agent_id": "agent-a", "enabled": True,
+            "expected_public_config_hash": "f" * 64, "expected_eligibility_fingerprint": "e" * 64},
         "knowledge_acl_grant": {**base, "knowledge_base_id": "team:team-a:kb-a", "target_agent_id": "agent-a",
                                 "permissions": ["read", "review"], "expected_acl_fingerprint": "d" * 64},
         "knowledge_acl_revoke": {**base, "knowledge_base_id": "agent:owner-a:kb-a", "target_agent_id": "agent-a",
