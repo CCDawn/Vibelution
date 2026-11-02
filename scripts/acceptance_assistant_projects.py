@@ -252,7 +252,9 @@ def launcher_handoff(fixture: AssistantAcceptanceFixture, slots: list[ProjectSlo
     base.private_json(user_data / "vibelution-launch-profile.json", {
         "schemaVersion": 1, "workspaceRoot": str(a.root), "operatorConfigPath": str(config), "pythonPath": str(pythonw)})
     for slot in slots:
-        shutil.copytree(desktop_dist, slot.root / "desktop/electron/dist", dirs_exist_ok=True)
+        target = slot.root / "desktop/electron/dist"
+        if desktop_dist.resolve() != target.resolve():
+            shutil.copytree(desktop_dist, target, dirs_exist_ok=True)
     target_dist = a.root / "desktop" / "electron" / "dist"
     environment_paths = {"LOCALAPPDATA": local, "APPDATA": stage / "appdata", "USERPROFILE": stage / "user",
                          "HOME": stage / "user", "VIBELUTION_PROJECTS_HOME": stage / "projects",
