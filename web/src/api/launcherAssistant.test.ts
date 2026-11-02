@@ -29,6 +29,23 @@ describe("Launcher team run reads", () => {
     expect(invoke).toHaveBeenCalledExactlyOnceWith({ operation: "teamRuns" });
   });
 
+  it.each(["ready", "unknown"])("normalizes nullable optional metadata without hiding a %s native run", async readState => {
+    const nativeRow = readState === "ready" ? row : { ...row, teamId: null, flowId: null, runId: null,
+      status: null, observedAt: null, readState };
+    const optional = { teamName: null, projectName: null, current: null, stepCount: null, attemptCount: null,
+      currentAgentName: null, createdAt: null, updatedAt: null, resultSummary: null, error: null };
+    const response = { ...page(), state: readState === "ready" ? "ready" : "partial", teamRuns: [{ ...nativeRow, ...optional }] };
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke: vi.fn().mockResolvedValue(response) });
+    await expect(getLauncherAssistantTeamRuns(assistant)).resolves.toEqual({ ...response, teamRuns: [nativeRow] });
+  });
+
+  it.each([{ teamName: 1 }, { projectName: [] }, { currentAgentName: false }, { stepCount: -1 }, { attemptCount: 0.5 }])(
+    "still rejects malformed non-null optional metadata %j", async metadata => {
+      vi.stubGlobal("vibelutionLauncherAssistant", { invoke: vi.fn().mockResolvedValue({ ...page(), teamRuns: [{ ...row, ...metadata }] }) });
+      await expect(getLauncherAssistantTeamRuns(assistant)).rejects.toThrow("团队运行暂不可用");
+    },
+  );
+
   it("binds pagination to the same inventory and exact offset", async () => {
     const nextCursor = cursor(1);
     const invoke = vi.fn().mockResolvedValueOnce({ ...page(), total: 2, nextCursor })

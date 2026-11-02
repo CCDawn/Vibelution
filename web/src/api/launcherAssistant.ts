@@ -436,9 +436,9 @@ export async function getLauncherAssistantTeamRuns(
   const optionalKeys = ["teamName", "projectName", "current", "stepCount", "attemptCount", "currentAgentName", "createdAt", "updatedAt", "resultSummary", "error"];
   for (const row of result.teamRuns) {
     if (!record(row) || keys.some(key => !(key in row)) || Object.keys(row).some(key => !keys.includes(key) && !optionalKeys.includes(key)) || !id(row.projectId) || typeof row.requestId !== "string"
-      || [row.stepCount, row.attemptCount].some(value => value !== undefined && (!Number.isSafeInteger(value) || (value as number) < 0))
+      || [row.stepCount, row.attemptCount].some(value => value != null && (!Number.isSafeInteger(value) || (value as number) < 0))
       || row.current !== undefined && row.current !== null && !(typeof row.current === "string" && row.current.length <= 160 || Number.isSafeInteger(row.current) && (row.current as number) >= 0)
-      || [row.teamName, row.projectName, row.currentAgentName].some(value => value !== undefined && (typeof value !== "string" || value.length > 160 || /[\u0000-\u001f\u007f-\u009f]/.test(value)))
+      || [row.teamName, row.projectName, row.currentAgentName].some(value => value != null && (typeof value !== "string" || value.length > 160 || /[\u0000-\u001f\u007f-\u009f]/.test(value)))
       || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$/.test(row.requestId) || !["team_run", "flow_start"].includes(String(row.originAction))
       || [row.teamId, row.flowId, row.runId].some(value => value !== null && !id(value))
       || row.status !== null && !id(row.status)
@@ -449,10 +449,14 @@ export async function getLauncherAssistantTeamRuns(
       || row.readState === "unknown" && (row.status !== null || row.observedAt !== null)) throw invalid();
   }
   // A bad optional label cannot hide an otherwise usable native run reference.
-  return { ...result, teamRuns: result.teamRuns.map(row => ({ ...row,
-    title: typeof row.title === "string" && Array.from(row.title).length <= 160
-      ? row.title.replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, " ") : "",
-  })) } as LauncherAssistantTeamRunsPage;
+  return { ...result, teamRuns: result.teamRuns.map(row => {
+    const normalized = { ...row };
+    // Native response models emit null for absent optional display metadata.
+    // Keep required nullable run references; UI metadata uses omitted values.
+    for (const key of optionalKeys) if (normalized[key] === null) delete normalized[key];
+    return { ...normalized, title: typeof row.title === "string" && Array.from(row.title).length <= 160
+      ? row.title.replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, " ") : "" };
+  }) } as LauncherAssistantTeamRunsPage;
 }
 
 export async function getLauncherAssistantDispatches(): Promise<LauncherAssistantDispatch[]> {
