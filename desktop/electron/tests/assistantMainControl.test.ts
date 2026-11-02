@@ -9,6 +9,7 @@ import { AssistantProjectLifecycleRequestStore } from "../src/assistant/projectL
 import { mainLineCommandResultPath } from "../src/lifecycle/mainLine/commandEvidence.js";
 import { parseDesktopCliArgs } from "../src/cli/desktopCli.js";
 import { waitForMainLineIntentPersistence } from "../src/lifecycle/mainLine/commandQueue.js";
+import { resolveRuntimeManagerDir } from "../src/lifecycle/projectStoragePaths.js";
 import { runWorkbenchLifecycle, type RunWorkbenchLifecycleInput } from "../src/process/workbenchLifecycle.js";
 
 const roots: string[] = [];
@@ -38,6 +39,37 @@ async function setup() {
 }
 
 describe("production main control composition", () => {
+  it("recovers the original native start after a real unrelated inventory refresh and facade restart", async () => {
+    const f = await setup();
+    f.execute.mockImplementationOnce(input => input.queue!.submit({ operation: input.operation, execute: async command => {
+      await waitForMainLineIntentPersistence(command);
+      const manager = resolveRuntimeManagerDir(input.workspaceRoot);
+      mkdirSync(join(manager, "results"), { recursive: true });
+      writeFileSync(mainLineCommandResultPath(manager, command.commandId), JSON.stringify({ schemaVersion: 1, source: "electron_main",
+        commandId: command.commandId, type: command.type, operation: command.operation, accepted: true, ok: true, completed: true,
+        startedAt: "2026-11-02T06:01:53Z", settledAt: "2026-11-02T06:01:55Z", runMs: 2000 }));
+      await f.registry.reconcile({ schemaVersion: 1, integrationRoot: f.project, items: [{ id: "main", path: f.project, checkedOut: true }] });
+      return { schemaVersion: 1, accepted: true, operation: command.operation, commandId: command.commandId };
+    } }));
+    expect(await f.create()(f.request)).toMatchObject({ state: "completed", accepted: true });
+    const store = new AssistantProjectLifecycleRequestStore({ directory: join(f.root, "requests") });
+    const before = await store.get(f.request.requestId);
+    expect(await f.create()({ ...f.request, action: "project_lifecycle_receipt" })).toMatchObject({ state: "completed", accepted: true });
+    expect(await f.create()(f.request)).toMatchObject({ state: "completed", accepted: true });
+    expect(await store.get(f.request.requestId)).toEqual(before);
+    expect(f.execute).toHaveBeenCalledTimes(1);
+    await f.registry.reconcile({ schemaVersion: 1, integrationRoot: f.project, items: [] });
+    const denied = await f.create()({ ...f.request, action: "project_lifecycle_receipt" }) as Record<string, unknown>;
+    expect(denied).toMatchObject({ state: "unknown", code: "project_unavailable" });
+    expect(denied.accepted).toBeUndefined();
+    await f.registry.reconcile({ schemaVersion: 1, integrationRoot: f.project, items: [{ id: "main", path: f.project, checkedOut: true }] });
+    const newId = Object.entries(f.registry.snapshot().projects).find(([, path]) => path === f.project)![0];
+    expect(newId).not.toBe(f.mainId); // Same physical root does not revive an old registration UUID.
+    expect(await f.create()({ ...f.request, action: "project_lifecycle_receipt" })).toMatchObject({ state: "unknown", code: "project_unavailable" });
+    expect(await store.get(f.request.requestId)).toEqual(before);
+    expect(f.execute).toHaveBeenCalledTimes(1);
+  });
+
   it.each(["start", "stop", "restart"] as const)("reserves and dispatches new %s to the native runner", async operation => {
     const f = await setup(), control = f.create();
     expect(await control({ ...f.request, operation })).toMatchObject({ state: "unknown", code: "receipt_unavailable" });
@@ -143,7 +175,7 @@ describe("production main control composition", () => {
   it("uses persisted registration metadata, refuses branch instance writes and does not infer a main root", async () => {
     const f = await setup();
     expect(f.registry.registration(f.branchId)?.integrationRoot).toBe(f.project);
-    expect(await f.create()({ ...f.request, projectId: f.branchId })).toMatchObject({ state: "rejected", code: "prerequisite_required" });
+    expect(await f.create()({ ...f.request, projectId: f.branchId })).toMatchObject({ state: "unknown", code: "prerequisite_required" });
     expect(await f.create()({ deliveryId: "b".repeat(32), projectId: f.branchId, action: "project_status", operation: "status" }))
       .toMatchObject({ accepted: false, code: "prerequisite_required" });
     expect(f.execute).not.toHaveBeenCalled();
@@ -156,6 +188,6 @@ describe("production main control composition", () => {
     expect(f.execute).not.toHaveBeenCalled();
     await f.registry.stop();
     expect(() => f.registry.snapshot()).toThrow();
-    expect(await control(f.request)).toMatchObject({ state: "rejected", code: "project_unavailable" });
+    expect(await control(f.request)).toMatchObject({ state: "unknown", code: "project_unavailable" });
   });
 });

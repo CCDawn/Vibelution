@@ -5,7 +5,7 @@ import { branchCommandResultPath } from "../lifecycle/branchLifecycleCommands.js
 import { projectLifecycleResultCode, type createAssistantProjectLifecycle } from "./projectLifecycle.js";
 import {
   AssistantProjectLifecycleRequestStoreError, normalizeLifecycleRequest,
-  type AssistantProjectLifecycleRequestStore, type LifecycleRequestIdentity, type LifecycleRequestRecord,
+  type AssistantProjectLifecycleRequestStore, type LifecycleRequestBinding, type LifecycleRequestIdentity, type LifecycleRequestRecord,
 } from "./projectLifecycleRequestStore.js";
 
 export type AssistantLifecycleRequestResult = {
@@ -17,7 +17,7 @@ export type AssistantLifecycleRequestResult = {
   code: string;
   accepted?: boolean;
 };
-type Facade = ReturnType<typeof createAssistantProjectLifecycle>;
+type Facade = Pick<ReturnType<typeof createAssistantProjectLifecycle>, "bindingFor" | "dispatch">;
 const MAX_RECEIPT_BYTES = 64 * 1024;
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
 const same = (a: Stats, b: Stats) => a.dev === b.dev && a.ino === b.ino && a.nlink === b.nlink;
@@ -88,10 +88,15 @@ export function createAssistantProjectLifecycleRequests(options: {
   receipt(input: unknown): Promise<AssistantLifecycleRequestResult>;
 } {
   const base = (request: LifecycleRequestIdentity) => ({ schemaVersion: 1 as const, ...request });
-  const failure = (error: unknown, request?: LifecycleRequestIdentity): AssistantLifecycleRequestResult => ({
-    ...(request ? base(request) : { schemaVersion: 1 as const }), state: "rejected",
-    code: error instanceof AssistantProjectLifecycleRequestStoreError ? error.code : "request_failed",
-  });
+  const failure = (error: unknown, request?: LifecycleRequestIdentity): AssistantLifecycleRequestResult => {
+    const code = error instanceof AssistantProjectLifecycleRequestStoreError ? error.code : "request_failed";
+    // Failed permission/association reads cannot prove that an original
+    // request never executed, including when it is now revoked. Use the same
+    // closed answer for every denied ID; never reveal its stored outcome.
+    const uncertain = request && new Set(["project_unavailable", "registration_changed", "storage_owner_changed",
+      "request_store_invalid", "request_store_read_failed", "request_store_write_failed", "binding_conflict"]).has(code);
+    return { ...(request ? base(request) : { schemaVersion: 1 as const }), state: uncertain ? "unknown" : "rejected", code };
+  };
   function authorize(request: LifecycleRequestIdentity): void {
     try { options.facade.bindingFor(request.projectId); }
     catch { throw new AssistantProjectLifecycleRequestStoreError("project_unavailable"); }
@@ -99,17 +104,24 @@ export function createAssistantProjectLifecycleRequests(options: {
   function inspect(row: LifecycleRequestRecord): AssistantLifecycleRequestResult {
     const result = base(row.request);
     if (!row.binding || !row.command) return { ...result, state: "unknown", code: "request_unbound" };
-    let binding;
+    const captured = row.binding;
+    let binding: LifecycleRequestBinding;
     try { binding = options.facade.bindingFor(row.request.projectId); }
-    catch { return { ...result, state: "rejected", code: "registration_changed" }; }
-    if (JSON.stringify(binding) !== JSON.stringify(row.binding)) return { ...result, state: "rejected", code: "registration_changed" };
+    catch { return { ...result, state: "unknown", code: "registration_changed" }; }
+    // Schema-1 bindings originally hashed the whole permission epoch. Preserve
+    // those immutable records and recover by exact current request.projectId
+    // (including its registration UUID), physical-root and native-owner gates.
+    // The old global hash is observational metadata, never native outcome proof.
+    const sameAuthority = (current: LifecycleRequestBinding) => current.workspaceRoot === captured.workspaceRoot
+      && current.runtimeManagerDir === captured.runtimeManagerDir;
+    if (!sameAuthority(binding)) return { ...result, state: "unknown", code: "registration_changed" };
     const receipt = nativeReceipt(row);
     // Revalidate permission after filesystem I/O as well as before it.
     try {
-      if (JSON.stringify(options.facade.bindingFor(row.request.projectId)) !== JSON.stringify(row.binding)) {
-        return { ...result, state: "rejected", code: "registration_changed" };
+      if (!sameAuthority(options.facade.bindingFor(row.request.projectId))) {
+        return { ...result, state: "unknown", code: "registration_changed" };
       }
-    } catch { return { ...result, state: "rejected", code: "registration_changed" }; }
+    } catch { return { ...result, state: "unknown", code: "registration_changed" }; }
     if (!receipt) return { ...result, state: "unknown", code: "receipt_unavailable" };
     const accepted = receipt.accepted as boolean;
     const code = projectLifecycleResultCode(accepted, receipt.code);

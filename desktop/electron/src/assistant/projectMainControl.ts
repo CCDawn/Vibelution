@@ -102,7 +102,7 @@ export function createAssistantProjectMainControl(options: {
       else if (registered.root !== registered.integrationRoot && !branch) code = "prerequisite_required";
     } catch { code = "project_unavailable"; }
     if (code) return { schemaVersion: 1, projectId: request.projectId, operation: request.operation, code,
-      ...(request.action === "project_status" ? { accepted: false } : { requestId: request.requestId, state: "rejected" }) };
+      ...(request.action === "project_status" ? { accepted: false } : { requestId: request.requestId, state: "unknown" }) };
     if (request.action === "project_status") return combined.dispatch({ projectId: request.projectId, operation: "status" });
     const identity = { requestId: request.requestId, projectId: request.projectId, operation: request.operation };
     return request.action === "project_lifecycle" ? requests.dispatch(identity) : requests.receipt(identity);

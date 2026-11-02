@@ -27,11 +27,13 @@ export function createAssistantBranchLifecycle(options: {
       const base = { schemaVersion: 1 as const, ...captured };
       let ticket: ProjectAdmissionTicket | undefined;
       try {
+        const recheckPermission = permission.capturePermission(captured.projectId);
         const binding = permission.bindingFor(captured.projectId), target = await options.owner.resolveTarget(binding.workspaceRoot, options.integrationRootFor(captured.projectId));
         if (!target) return { ...base, accepted: false, code: "prerequisite_required" };
         if (options.admission) ticket = options.admission.enter(binding.workspaceRoot);
         const check = () => {
           execution.signal?.throwIfAborted(); ticket?.check();
+          recheckPermission();
           if (JSON.stringify(permission.bindingFor(captured.projectId)) !== JSON.stringify(binding)) throw new Error("BRANCH_REGISTRATION_CHANGED");
         };
         const result = await options.owner.execute({ target, operation: captured.operation, signal: execution.signal, check,

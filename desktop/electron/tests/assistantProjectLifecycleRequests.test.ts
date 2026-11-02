@@ -1,8 +1,9 @@
 import { linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createAssistantProjectLifecycle } from "../src/assistant/projectLifecycle.js";
+import { createAssistantProjectLifecycle, type AssistantProjectLifecycleOptions } from "../src/assistant/projectLifecycle.js";
 import { createAssistantProjectLifecycleRequests } from "../src/assistant/projectLifecycleRequests.js";
 import { AssistantProjectLifecycleRequestStore } from "../src/assistant/projectLifecycleRequestStore.js";
 import { mainLineCommandResultPath } from "../src/lifecycle/mainLine/commandEvidence.js";
@@ -17,6 +18,8 @@ function setup(realNative = false) {
   const runtimeManagerDir = join(root, ".runtime", "runtime-manager");
   const directory = join(root, "requests");
   let revision = 1;
+  let authorized = true, projectRoot = root, nativeOwner = runtimeManagerDir;
+  const otherProjects: Record<string, string> = {};
   const execute = vi.fn(async (command) => {
     await waitForMainLineIntentPersistence(command);
     mkdirSync(join(runtimeManagerDir, "results"), { recursive: true });
@@ -27,10 +30,10 @@ function setup(realNative = false) {
     }));
     return { schemaVersion: 1 as const, accepted: true, operation: command.operation, commandId: command.commandId };
   });
-  const facade = createAssistantProjectLifecycle({
-    getPermissionSnapshot: () => ({ schemaVersion: 1, revision, projects: { synthetic: root } }),
-    resolveNativeRuntimeManagerDir: () => runtimeManagerDir,
-    resolveRuntimeContext: async () => ({ workspaceRoot: root, runtimeManagerDir, pythonPath: join(root, "python.exe"), operatorConfigPath: join(root, "test.toml") }),
+  const facadeOptions: AssistantProjectLifecycleOptions = {
+    getPermissionSnapshot: () => ({ schemaVersion: 1, revision, projects: { ...(authorized ? { synthetic: projectRoot } : {}), ...otherProjects } }),
+    resolveNativeRuntimeManagerDir: () => nativeOwner,
+    resolveRuntimeContext: async () => ({ workspaceRoot: projectRoot, runtimeManagerDir: nativeOwner, pythonPath: join(root, "python.exe"), operatorConfigPath: join(root, "test.toml") }),
     readStatus: async () => ({ state: "stopped" }),
     runLifecycle: realNative ? input => runWorkbenchLifecycle({ ...input,
       spawnImpl: () => { throw new Error("native guard must not spawn"); },
@@ -38,13 +41,71 @@ function setup(realNative = false) {
       listActiveWork: () => [{ kind: "chat_turn", runId: "synthetic-work", status: "running", sessionId: "synthetic-session" }],
       connect: async () => false, pidAlive: () => false,
     }) : async input => input.queue!.submit({ operation: input.operation, execute }),
+  };
+  const facade = createAssistantProjectLifecycle(facadeOptions);
+  const make = (fresh = false) => createAssistantProjectLifecycleRequests({
+    facade: fresh ? createAssistantProjectLifecycle(facadeOptions) : facade, store: new AssistantProjectLifecycleRequestStore({ directory }),
   });
-  const make = () => createAssistantProjectLifecycleRequests({ facade, store: new AssistantProjectLifecycleRequestStore({ directory }) });
   const request = { requestId: "synthetic-request", projectId: "synthetic", operation: "restart" as const };
-  return { root, directory, runtimeManagerDir, facade, execute, request, make, revoke: () => { revision++; } };
+  return { root, directory, runtimeManagerDir, facade, execute, request, make,
+    refresh: () => { revision++; }, revoke: () => { revision++; authorized = false; },
+    unrelated: () => { revision++; otherProjects.other = join(root, "unrelated-project"); mkdirSync(otherProjects.other, { recursive: true }); },
+    redirect: () => { revision++; projectRoot = join(root, "different-project"); mkdirSync(projectRoot); },
+    changeOwner: () => { nativeOwner = join(root, "different-authority", "runtime-manager"); mkdirSync(nativeOwner, { recursive: true }); } };
 }
 
 describe("assistant durable lifecycle request recovery", () => {
+  it("keeps the original start receipt across a same-target registry refresh during native execution", async () => {
+    const f = setup(), nativeExecute = f.execute.getMockImplementation()!;
+    f.execute.mockImplementationOnce(async command => {
+      const result = await nativeExecute(command);
+      f.refresh();
+      return result;
+    });
+    const request = { ...f.request, operation: "start" as const };
+    expect(await f.make().dispatch(request)).toMatchObject({ state: "completed", accepted: true });
+    f.refresh();
+    expect(await f.make(true).receipt(request)).toMatchObject({ state: "completed", accepted: true });
+    expect(await f.make(true).dispatch(request)).toMatchObject({ state: "completed", accepted: true });
+    expect(f.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("recovers a schema-1 global-epoch binding after unrelated registration changes without rewriting it", async () => {
+    const f = setup(), request = { ...f.request, operation: "start" as const };
+    const store = new AssistantProjectLifecycleRequestStore({ directory: f.directory });
+    const reserved = await store.reserve(request);
+    const legacy = { ...f.facade.bindingFor(request.projectId), registryFingerprint: createHash("sha256")
+      .update(JSON.stringify([1, [["synthetic", f.root]]])).digest("hex") };
+    await store.bind(request, reserved.reservationToken!, legacy, { commandId: "cmd_original_start", type: "open", operation: "start" });
+    mkdirSync(join(f.runtimeManagerDir, "results"), { recursive: true });
+    writeFileSync(mainLineCommandResultPath(f.runtimeManagerDir, "cmd_original_start"), JSON.stringify({ schemaVersion: 1,
+      source: "electron_main", commandId: "cmd_original_start", type: "open", operation: "start", accepted: true, ok: true,
+      completed: true, startedAt: "2026-11-02T06:01:53Z", settledAt: "2026-11-02T06:01:55Z", runMs: 2000 }));
+    const path = join(f.directory, `${createHash("sha256").update(request.requestId).digest("hex")}.json`);
+    const before = readFileSync(path, "utf8");
+    f.unrelated(); f.refresh();
+    expect(f.facade.bindingFor(request.projectId).registryFingerprint).not.toBe(legacy.registryFingerprint);
+    expect(await f.make(true).receipt(request)).toMatchObject({ state: "completed", accepted: true });
+    expect(await f.make(true).dispatch(request)).toMatchObject({ state: "completed", accepted: true });
+    expect(readFileSync(path, "utf8")).toBe(before);
+    expect(f.execute).not.toHaveBeenCalled();
+  });
+
+  it.each(["revoke", "redirect", "changeOwner"] as const)("never exposes an old native outcome after real target authority changes: %s", async change => {
+    const f = setup();
+    await f.make().dispatch(f.request);
+    const store = new AssistantProjectLifecycleRequestStore({ directory: f.directory });
+    const before = await store.get(f.request.requestId);
+    f[change]();
+    for (const response of [await f.make(true).receipt(f.request), await f.make(true).dispatch(f.request)]) {
+      expect(response.state).toBe("unknown");
+      expect(response.accepted).toBeUndefined();
+      expect(JSON.stringify(response)).not.toContain("SECRET"); expect(JSON.stringify(response)).not.toContain(f.root);
+    }
+    expect(await store.get(f.request.requestId)).toEqual(before);
+    expect(f.execute).toHaveBeenCalledTimes(1);
+  });
+
   it("reads actual native active-work settlements after recreation, keeping queued restart distinct", async () => {
     const f = setup(true);
     const stop = { ...f.request, requestId: "native-stop", operation: "stop" as const };
@@ -82,12 +143,12 @@ describe("assistant durable lifecycle request recovery", () => {
     const store = new AssistantProjectLifecycleRequestStore({ directory: f.directory, maxRequests: 1 });
     const controller = createAssistantProjectLifecycleRequests({ facade: f.facade, store });
     const denied = { ...f.request, requestId: "bogus-request", projectId: "unregistered" };
-    expect(await controller.dispatch(denied)).toMatchObject({ state: "rejected", code: "project_unavailable" });
+    expect(await controller.dispatch(denied)).toMatchObject({ state: "unknown", code: "project_unavailable" });
     expect(await store.get(denied.requestId)).toBeNull();
     expect(await controller.dispatch(f.request)).toMatchObject({ state: "completed" });
     const unavailable = { ...f.facade, bindingFor: () => { throw new Error("revoked"); } };
     expect(await createAssistantProjectLifecycleRequests({ facade: unavailable, store }).receipt(f.request))
-      .toMatchObject({ state: "rejected", code: "project_unavailable" });
+      .toMatchObject({ state: "unknown", code: "project_unavailable" });
     expect(f.execute).toHaveBeenCalledTimes(1);
   });
 
@@ -96,7 +157,7 @@ describe("assistant durable lifecycle request recovery", () => {
     await controller.dispatch(f.request);
     expect(await controller.dispatch({ ...f.request, operation: "stop" })).toMatchObject({ state: "rejected", code: "request_conflict" });
     f.revoke();
-    expect(await controller.receipt(f.request)).toMatchObject({ state: "rejected", code: "registration_changed" });
+    expect(await controller.receipt(f.request)).toMatchObject({ state: "unknown", code: "project_unavailable" });
     expect(f.execute).toHaveBeenCalledTimes(1);
   });
 
@@ -116,8 +177,10 @@ describe("assistant durable lifecycle request recovery", () => {
       if (kind === "blocked") { raw.code = "active_work_blocked"; raw.accepted = false; raw.ok = false; }
       writeFileSync(path, JSON.stringify(raw));
     }
-    const result = await f.make().dispatch(f.request);
+    f.unrelated();
+    const result = await f.make(true).dispatch(f.request);
     expect(result.state).toBe(kind === "queued" ? "queued" : kind === "blocked" ? "rejected" : "unknown");
+    expect(await new AssistantProjectLifecycleRequestStore({ directory: f.directory }).get(f.request.requestId)).toEqual(row);
     expect(f.execute).toHaveBeenCalledTimes(1);
   });
 

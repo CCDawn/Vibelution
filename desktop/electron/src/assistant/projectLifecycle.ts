@@ -96,6 +96,8 @@ export function createAssistantProjectLifecycle(options: AssistantProjectLifecyc
   dispatch(input: unknown, execution?: AssistantProjectLifecycleExecution): Promise<AssistantProjectLifecycleResult>;
   /** Trusted main-only binding inspection; not a model/renderer response. */
   bindingFor(projectId: string): LifecycleRequestBinding;
+  /** A live admission fence, separate from durable receipt identity. */
+  capturePermission(projectId: string): () => void;
 } {
   const { getPermissionSnapshot, resolveRuntimeContext, readStatus } = options;
   const runner = options.runLifecycle ?? runWorkbenchLifecycle;
@@ -147,8 +149,13 @@ export function createAssistantProjectLifecycle(options: AssistantProjectLifecyc
   }
   function checkSignal(signal?: AbortSignal): void { if (signal?.aborted) fail("cancelled"); }
   function bindingFor(expected: Permission): LifecycleRequestBinding {
+    // The complete snapshot epoch fences a live dispatch above. A durable
+    // command belongs to this registration/physical root/storage owner; other
+    // project inventory changes must not invalidate its historical receipt.
     return { workspaceRoot: expected.workspaceRoot, runtimeManagerDir: expected.runtimeManagerDir,
-      registryFingerprint: createHash("sha256").update(expected.fingerprint).digest("hex") };
+      registryFingerprint: createHash("sha256").update(JSON.stringify([
+        "assistant_lifecycle_target_v1", expected.projectId, expected.workspaceRoot, expected.physicalRoot, expected.runtimeManagerDir,
+      ])).digest("hex") };
   }
   async function contextFor(expected: Permission): Promise<Context> {
     recheck(expected);
@@ -215,6 +222,10 @@ export function createAssistantProjectLifecycle(options: AssistantProjectLifecyc
   }
   return {
     bindingFor: projectId => bindingFor(permission(request({ projectId, operation: "status" }).projectId)),
+    capturePermission: projectId => {
+      const expected = permission(request({ projectId, operation: "status" }).projectId);
+      return () => recheck(expected);
+    },
     async dispatch(input, execution = {}) {
       let captured: Request;
       try { captured = request(input); } catch { return { schemaVersion: 1, accepted: false, code: "invalid_request" }; }

@@ -142,9 +142,24 @@ describe("registered branch lifecycle through the native instance owner", () => 
     await entered.promise;
     await f.registry.reconcile({ schemaVersion: 1, integrationRoot: f.main, items: [{ id: "main", path: f.main, checkedOut: true }] });
     release.release();
-    expect(await pending).toMatchObject({ state: "rejected", code: "registration_changed" });
+    expect(await pending).toMatchObject({ state: "unknown", code: "registration_changed" });
     expect(f.nativeEffect).not.toHaveBeenCalled();
-    expect(await f.control()(f.request)).toMatchObject({ state: "rejected", code: "project_unavailable" });
+    expect(await f.control()(f.request)).toMatchObject({ state: "unknown", code: "project_unavailable" });
+  });
+
+  it("retains the strict live epoch fence when another integration changes before the native effect", async () => {
+    const f = await setup(), entered = defer(), release = defer();
+    f.setBefore(async () => { entered.release(); await release.promise; });
+    const pending = f.control()(f.request);
+    await entered.promise;
+    await f.registry.reconcile({ schemaVersion: 1, integrationRoot: f.otherMain,
+      items: [{ id: "main", path: f.otherMain, checkedOut: true }] });
+    expect(f.registry.registration(f.branchId)?.root).toBe(f.branch);
+    release.release();
+    expect(await pending).toMatchObject({ state: "unknown" });
+    expect(f.nativeEffect).not.toHaveBeenCalled();
+    expect(await f.control()(f.request)).toMatchObject({ state: "unknown" });
+    expect(f.nativeEffect).not.toHaveBeenCalled();
   });
 
   it("keeps unknown native work uncertain across restart and never replays the same request", async () => {
