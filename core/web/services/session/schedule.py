@@ -210,6 +210,39 @@ def _release_scheduled_session_turn(context: dict[str, Any]) -> None:
             _submit_released_session_turn(runnable_context)
     finally:
         _drain_wakeable_agent_inbox_after_session_release(context)
+        _self_heal_pa_dispatched_session_after_release(context)
+
+def _self_heal_pa_dispatched_session_after_release(context: dict[str, Any]) -> None:
+    """PA 派遣被派会话的停摆自愈接线点（release 链最后一段）。
+
+    Inbox drain 之后：队列无排队、会话已落座（needs_continue/paused_limit）
+    且最近一次驱动是仍在册的 PA 派遣信封时，走 ``request_managed_continuation``
+    机器续推一次。预算、信封 currency、无进展永久停等闸门全部在
+    ``managed_continuation`` 侧；这里只负责把 release 事件接进去，任何失败
+    只记事件，绝不影响 release 路径本身。
+    """
+
+    s = _service()
+    session_id = str(context.get("session_id") or context.get("sessionId") or "").strip()
+    if not session_id:
+        return
+    try:
+        from .managed_continuation import maybe_self_heal_pa_dispatched_session_after_release
+
+        maybe_self_heal_pa_dispatched_session_after_release(session_id)
+    except Exception as exc:  # noqa: BLE001 - self-heal must never break the release path
+        try:
+            s.record_runtime_scene_event(
+                "conversation",
+                "session_turn",
+                "conversation.scheduler.pa_dispatch_self_heal_failed",
+                level="warning",
+                outcome="self_heal_failed",
+                message=f"PA dispatch self-heal failed: {type(exc).__name__}.",
+                fields={"sessionId": session_id, "exceptionType": type(exc).__name__},
+            )
+        except Exception:  # noqa: BLE001 - telemetry stays best-effort
+            pass
 
 def _drain_wakeable_agent_inbox_after_session_release(context: dict[str, Any]) -> None:
     s = _service()

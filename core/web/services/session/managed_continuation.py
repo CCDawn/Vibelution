@@ -34,6 +34,7 @@ functions) so any session-side module can import this one safely.
 from __future__ import annotations
 
 import os
+import threading
 from typing import Any
 
 # Dedicated message source; also the payload["source"] recorded on the
@@ -563,13 +564,309 @@ def request_managed_continuation(
     }
 
 
+# ---------------------------------------------------------------------------
+# PA-dispatch self-heal lane (被派会话停摆自愈).
+#
+# A session woken by a personal-assistant dispatch envelope (the inbox wake
+# whose ``message_metadata`` carries ``kind=agent_inbox_message`` plus the PA
+# dispatch identity) had no machine recovery once it settled stalled into
+# ``needs_continue``/``paused_limit``: the internal auto-continue gate keeps
+# those sessions closed (worker), and recovery waited on the PA patrol's
+# follow-up rounds (30min apart, 2 rounds per dispatch, 24h window). This lane
+# wires those stalled sessions into the managed-continuation channel above.
+#
+# Rails (all conservative):
+# - Envelope currency: the continuation fires only while the driving dispatch
+#   envelope is still current per ``dispatch_envelope_is_current`` (ledger
+#   verdict covering revocation, uniqueness, and harvest completeness). The
+#   ledger answering ``None`` (unknown row / incomplete harvest / missing
+#   ledger) fails closed: no continuation.
+# - Budget: at most ``PA_DISPATCH_SELF_HEAL_LIMIT`` continuations per dispatch
+#   envelope (aligned with the patrol's ``MAX_FOLLOWUPS_PER_DISPATCH``). A new
+#   dispatch envelope starts a fresh budget; the patrol's follow-up rows never
+#   drive this lane and never consume its budget.
+# - No-progress stop: two consecutive continuations that still settle stalled
+#   permanently stop the lane for the session (persisted), so a
+#   required_tool_progress_missing/stuck-loop shape cannot be nudged forever.
+# - Person supremacy is inherited, not duplicated: ``request_managed_continuation``
+#   already refuses when the session waits for its person.
+# ---------------------------------------------------------------------------
+
+PA_DISPATCH_SELF_HEAL_SOURCE = "pa_dispatch_self_heal"
+
+PA_DISPATCH_SELF_HEAL_STATE_KEY = "paDispatchSelfHeal"
+
+# Aligned with personal_assistant_patrol_service.MAX_FOLLOWUPS_PER_DISPATCH.
+PA_DISPATCH_SELF_HEAL_LIMIT = 2
+
+# Two consecutive stalled continuations mean the work cannot advance through
+# this channel; the lane stops permanently for the session.
+PA_DISPATCH_SELF_HEAL_MAX_CONSECUTIVE_NO_PROGRESS = 2
+
+# Total switch for the lane (repo precedent VIBELUTION_WAITS_FOR_PERSON_RAIL):
+# enabled unless the env explicitly turns it off.
+PA_DISPATCH_SELF_HEAL_ENV = "VIBELUTION_PA_DISPATCH_SELF_HEAL"
+
+_PA_DISPATCH_SELF_HEAL_OFF_VALUES = frozenset({"0", "false", "off", "no", "disabled"})
+
+_PA_SELF_HEAL_IN_FLIGHT_LOCK = threading.Lock()
+_PA_SELF_HEAL_IN_FLIGHT_SESSION_IDS: set[str] = set()
+
+
+def pa_dispatch_self_heal_enabled() -> bool:
+    """Total switch for the PA-dispatch self-heal lane; on unless explicitly off."""
+
+    raw = os.environ.get(PA_DISPATCH_SELF_HEAL_ENV, "").strip().lower()
+    return raw not in _PA_DISPATCH_SELF_HEAL_OFF_VALUES
+
+
+def _pa_dispatch_self_heal_state(conversation: dict[str, Any]) -> dict[str, Any]:
+    state = conversation.get(PA_DISPATCH_SELF_HEAL_STATE_KEY)
+    return dict(state) if isinstance(state, dict) else {}
+
+
+def _write_pa_dispatch_self_heal_state(
+    s: Any,
+    session_id: str,
+    state: dict[str, Any],
+) -> None:
+    with s._CHAT_STATE_LOCK:
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, session_id)
+        if conversation is None:
+            return
+        conversation[PA_DISPATCH_SELF_HEAL_STATE_KEY] = dict(state)
+        conversation["updated_at"] = s._now_timestamp()
+        s.save_session_chat_state(s.PROJECT_ROOT, session_id, conversation)
+
+
+def _pa_agent_id() -> str:
+    try:
+        from core.web.services import personal_assistant_service
+
+        agent = personal_assistant_service.profile_agent()
+    except Exception:  # noqa: BLE001 - PA absence just means no lane
+        return ""
+    return str((agent or {}).get("agentId") or "").strip()
+
+
+def _pa_dispatch_envelope_from_journal_event(event: Any) -> dict[str, str] | None:
+    """Extract the PA dispatch envelope from an inbox-wake journal driver.
+
+    The wake's ``message_metadata`` (persisted verbatim on the journal
+    ``user_message`` payload) carries the inbox identity. PA patrol follow-up
+    rows (``pa_followup``) are excluded: they are the patrol's own lane and
+    must never drive or consume this one.
+    """
+
+    payload = getattr(event, "payload", None)
+    payload = payload if isinstance(payload, dict) else {}
+    if str(payload.get("source") or "").strip() != "agent_inbox":
+        return None
+    metadata = payload.get("metadata")
+    metadata = metadata if isinstance(metadata, dict) else {}
+    if str(metadata.get("kind") or "").strip() != "agent_inbox_message":
+        return None
+    envelope = {
+        key: str(metadata.get(key) or "").strip()
+        for key in ("messageId", "sourceAgentId", "sourceSessionId", "threadId", "targetAgentId", "inboxKind")
+    }
+    if not envelope["messageId"] or not envelope["sourceAgentId"]:
+        return None
+    if envelope["inboxKind"] == "pa_followup":
+        return None
+    return envelope
+
+
+def _pa_dispatch_envelope_is_current(
+    envelope: dict[str, str],
+    *,
+    pa_agent_id: str,
+    session_id: str,
+) -> bool:
+    """Strict ledger verdict; every non-True answer fails closed."""
+
+    try:
+        from core.web.services import personal_assistant_dispatch_ledger as ledger
+
+        verdict = ledger.dispatch_envelope_is_current(
+            str(envelope.get("messageId") or "").strip(),
+            source_agent_id=pa_agent_id,
+            target_agent_id=str(envelope.get("targetAgentId") or "").strip(),
+            target_session_id=str(session_id or "").strip(),
+            source_session_id=str(envelope.get("sourceSessionId") or "").strip(),
+            thread_id=str(envelope.get("threadId") or "").strip(),
+        )
+    except Exception:  # noqa: BLE001 - ledger trouble must never wake a session
+        return False
+    return verdict is True
+
+
+def _state_int(state: dict[str, Any], key: str) -> int:
+    try:
+        return max(0, int(state.get(key) or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _is_self_heal_driver(payload: dict[str, Any]) -> bool:
+    metadata = payload.get("metadata")
+    metadata = metadata if isinstance(metadata, dict) else {}
+    return (
+        str(payload.get("source") or "").strip() == MANAGED_CONTINUATION_MESSAGE_SOURCE
+        and str(metadata.get("source") or "").strip() == PA_DISPATCH_SELF_HEAL_SOURCE
+    )
+
+
+def maybe_self_heal_pa_dispatched_session_after_release(
+    session_id: str,
+) -> dict[str, Any] | None:
+    """Release-seam entry: continue a stalled PA-dispatched session once.
+
+    Called after every session turn release (schedule.py). Returns the
+    ``request_managed_continuation`` receipt when a continuation was attempted,
+    a skipped receipt dict for lane decisions worth surfacing, and ``None``
+    when the session is simply not this lane's business.
+    """
+
+    if not pa_dispatch_self_heal_enabled():
+        return None
+    s = _service()
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return None
+    conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
+    if not isinstance(conversation, dict):
+        return None
+    if s._is_session_running(normalized_session_id):
+        return None
+    with _PA_SELF_HEAL_IN_FLIGHT_LOCK:
+        if normalized_session_id in _PA_SELF_HEAL_IN_FLIGHT_SESSION_IDS:
+            return None
+        _PA_SELF_HEAL_IN_FLIGHT_SESSION_IDS.add(normalized_session_id)
+    try:
+        return _self_heal_pa_dispatched_session(s, normalized_session_id, conversation)
+    finally:
+        with _PA_SELF_HEAL_IN_FLIGHT_LOCK:
+            _PA_SELF_HEAL_IN_FLIGHT_SESSION_IDS.discard(normalized_session_id)
+
+
+def _self_heal_pa_dispatched_session(
+    s: Any,
+    session_id: str,
+    conversation: dict[str, Any],
+) -> dict[str, Any] | None:
+    state = _pa_dispatch_self_heal_state(conversation)
+    if state.get("stopped") is True:
+        # Permanent stop: the persisted flag survives restarts and newer
+        # envelopes; only the person and the patrol remain.
+        return None
+    resting_phase = session_resting_phase(conversation)
+    last = _last_user_journal_event(s, session_id)
+    if last is None:
+        return None
+    payload = getattr(last, "payload", None)
+    payload = payload if isinstance(payload, dict) else {}
+
+    if not resting_phase:
+        # A self-heal continuation that left the resumable phases made
+        # progress; keep the lane armed for the next stall of this envelope.
+        if _is_self_heal_driver(payload) and state:
+            state["consecutiveNoProgress"] = 0
+            state["updatedAt"] = s._now_timestamp()
+            _write_pa_dispatch_self_heal_state(s, session_id, state)
+        return None
+
+    if _is_self_heal_driver(payload):
+        envelope = state.get("envelope")
+        envelope = envelope if isinstance(envelope, dict) else {}
+        if not str(envelope.get("messageId") or "").strip():
+            # Chain identity lost (state cleared): currency cannot be proven.
+            return None
+        consecutive = _state_int(state, "consecutiveNoProgress") + 1
+        state["consecutiveNoProgress"] = consecutive
+        state["lastSettledPhase"] = resting_phase
+        state["updatedAt"] = s._now_timestamp()
+        _write_pa_dispatch_self_heal_state(s, session_id, state)
+        if consecutive >= PA_DISPATCH_SELF_HEAL_MAX_CONSECUTIVE_NO_PROGRESS:
+            state["stopped"] = True
+            state["stoppedReason"] = "no_progress"
+            state["updatedAt"] = s._now_timestamp()
+            _write_pa_dispatch_self_heal_state(s, session_id, state)
+            s._record_session_turn_lifecycle_event(
+                session_id,
+                "pa_dispatch_self_heal_stopped",
+                level="warning",
+                outcome="stopped",
+                fields={
+                    "reason": "no_progress",
+                    "consecutiveNoProgress": consecutive,
+                    "count": _state_int(state, "count"),
+                    "messageId": str(envelope.get("messageId") or "").strip(),
+                    "restingPhase": resting_phase,
+                },
+            )
+            return {
+                "accepted": False,
+                "reason": "stopped_no_progress",
+                "sessionId": session_id,
+                "source": PA_DISPATCH_SELF_HEAL_SOURCE,
+                "restingPhase": resting_phase,
+            }
+    else:
+        envelope = _pa_dispatch_envelope_from_journal_event(last)
+        if envelope is None:
+            return None
+        previous_envelope = state.get("envelope")
+        previous_envelope = previous_envelope if isinstance(previous_envelope, dict) else {}
+        if str(previous_envelope.get("messageId") or "").strip() != envelope["messageId"]:
+            # Fresh dispatch envelope: a new budget, never a reset of a
+            # permanent stop (that check already ran above).
+            state = {
+                "envelope": envelope,
+                "count": 0,
+                "consecutiveNoProgress": 0,
+                "updatedAt": s._now_timestamp(),
+            }
+        else:
+            state.setdefault("count", 0)
+            state.setdefault("consecutiveNoProgress", 0)
+            state["envelope"] = envelope
+
+    if _state_int(state, "count") >= PA_DISPATCH_SELF_HEAL_LIMIT:
+        return None
+    pa_agent_id = _pa_agent_id()
+    if not pa_agent_id or str(envelope.get("sourceAgentId") or "").strip() != pa_agent_id:
+        return None
+    if not _pa_dispatch_envelope_is_current(envelope, pa_agent_id=pa_agent_id, session_id=session_id):
+        # Revoked / stale / duplicated / unharvested envelope: never continue.
+        return None
+    receipt = request_managed_continuation(
+        session_id,
+        source=PA_DISPATCH_SELF_HEAL_SOURCE,
+        reason=f"dispatch envelope stalled in {resting_phase}",
+    )
+    if isinstance(receipt, dict) and receipt.get("accepted") is True:
+        state["count"] = _state_int(state, "count") + 1
+        state["lastSettledPhase"] = resting_phase
+        state["updatedAt"] = s._now_timestamp()
+        _write_pa_dispatch_self_heal_state(s, session_id, state)
+    return receipt
+
+
 __all__ = [
     "MANAGED_CONTINUATION_LIMIT",
     "MANAGED_CONTINUATION_MESSAGE_SOURCE",
     "MANAGED_CONTINUATION_PROMPT",
     "MANAGED_CONTINUATION_RESUMABLE_PHASES",
     "MANAGED_CONTINUATION_STATE_KEY",
+    "PA_DISPATCH_SELF_HEAL_ENV",
+    "PA_DISPATCH_SELF_HEAL_LIMIT",
+    "PA_DISPATCH_SELF_HEAL_MAX_CONSECUTIVE_NO_PROGRESS",
+    "PA_DISPATCH_SELF_HEAL_SOURCE",
+    "PA_DISPATCH_SELF_HEAL_STATE_KEY",
     "WAITS_FOR_PERSON_RAIL_ENV",
+    "maybe_self_heal_pa_dispatched_session_after_release",
+    "pa_dispatch_self_heal_enabled",
     "request_managed_continuation",
     "runtime_notice_head_blocked_waiting_for_person",
     "session_resting_phase",
