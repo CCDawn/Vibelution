@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { getLauncherAssistantDispatches, getLauncherAssistantStatus } from "../../../api/launcherAssistant";
 import { VButton, VChip, VStateSurface, VSurface } from "../../../components/vui";
 import { projectAssistantDispatchTasks, type AssistantDispatchTask } from "./assistantDispatchTasks";
+import styles from "./LauncherAssistantTaskCards.styles";
 
 type Props = {
   lang?: "zh" | "en";
@@ -60,15 +61,15 @@ function TaskCard({ task, onReview, onApproval, lang = "zh" }: Props & { task: A
   const state = copy.states[task.state];
   const reviewable = ["unknown", "failed", "awaiting_verification"].includes(task.state);
   return (
-    <VSurface as="article" tone="card" padding="normal" ariaLabel={title} data-task-state={task.state} className="grid gap-2">
-      <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
-        <h3 className="min-w-0 flex-1 break-words text-sm font-medium text-[var(--fg-primary)]">{title}</h3>
+    <VSurface as="article" tone="card" padding="normal" ariaLabel={title} data-task-state={task.state} className={styles.card}>
+      <div className={styles.heading}>
+        <h3 className={styles.title}>{title}</h3>
         <VChip tone={state.tone}>{state.label}</VChip>
       </div>
-      <p className="text-xs leading-relaxed text-[var(--fg-secondary)]">
+      <p className={styles.progress}>
         {task.state === "unknown" && !task.sourceAvailable ? copy.unknownCached : state.progress}
       </p>
-      <div className="flex flex-wrap items-center gap-2">
+      <div className={styles.actions}>
         {task.state === "waiting_user" ? <VButton onClick={() => onApproval(task)}>{copy.approval}</VButton> : null}
         {reviewable ? <VButton onClick={() => onReview(task)}>{copy.review}</VButton> : null}
         <VButton variant="ghost" aria-expanded={expanded} aria-controls={detailsId}
@@ -76,15 +77,15 @@ function TaskCard({ task, onReview, onApproval, lang = "zh" }: Props & { task: A
           {expanded ? copy.hideDetails : copy.details}
         </VButton>
       </div>
-      {expanded ? <div id={detailsId} className="grid min-w-0 gap-2 border-t border-vui-border-subtle pt-2 text-xs leading-relaxed text-[var(--fg-secondary)]">
+      {expanded ? <div id={detailsId} className={styles.details}>
         <div>
-          <p className="font-medium">{copy.summary}</p>
-          <p className="whitespace-pre-wrap break-words">{task.resultSummary || copy.noSummary}</p>
+          <p className={styles.summaryHeading}>{copy.summary}</p>
+          <p className={styles.summary}>{task.resultSummary || copy.noSummary}</p>
         </div>
-        <dl className="grid min-w-0 gap-1 break-all">
-          <div><dt className="inline text-[var(--fg-tertiary)]">{copy.dispatchId}</dt><dd className="inline">{task.dispatchId}</dd></div>
-          <div><dt className="inline text-[var(--fg-tertiary)]">{copy.projectId}</dt><dd className="inline">{task.projectId || copy.notBound}</dd></div>
-          <div><dt className="inline text-[var(--fg-tertiary)]">{copy.nativeTaskId}</dt><dd className="inline">{task.nativeTaskId || copy.notBound}</dd></div>
+        <dl className={styles.references}>
+          <div><dt className={styles.referenceLabel}>{copy.dispatchId}</dt><dd className={styles.referenceValue}>{task.dispatchId}</dd></div>
+          <div><dt className={styles.referenceLabel}>{copy.projectId}</dt><dd className={styles.referenceValue}>{task.projectId || copy.notBound}</dd></div>
+          <div><dt className={styles.referenceLabel}>{copy.nativeTaskId}</dt><dd className={styles.referenceValue}>{task.nativeTaskId || copy.notBound}</dd></div>
         </dl>
       </div> : null}
     </VSurface>
@@ -154,9 +155,9 @@ export function LauncherAssistantTaskCards({ onReview, onApproval, lang = "zh" }
   const refreshButton = <VButton isPending={refreshing} onClick={() => { void refresh(); }}>{copy.refresh}</VButton>;
 
   return (
-    <section aria-label={copy.label} className="grid min-w-0 content-start gap-3" data-assistant-task-cards>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs text-[var(--fg-secondary)]">{copy.scope}</p>
+    <section aria-label={copy.label} className={styles.root} data-assistant-task-cards>
+      <div className={styles.toolbar}>
+        <p className={styles.scope}>{copy.scope}</p>
         {refreshButton}
       </div>
       {unavailable ? <VStateSurface density="compact" tone="unavailable" title={copy.unavailable}>
@@ -164,13 +165,13 @@ export function LauncherAssistantTaskCards({ onReview, onApproval, lang = "zh" }
       </VStateSurface> : loading ? <VStateSurface density="compact" tone="loading" title={copy.loading} /> : null}
       {!loading && !unavailable && !feed.tasks.length ? <VStateSurface density="compact"
         tone={feed.invalidRecords ? "unavailable" : "empty"} title={feed.invalidRecords ? copy.invalid : copy.empty} /> : null}
-      {feed.tasks.length ? <div role="list" className="grid min-w-0 gap-3">
+      {feed.tasks.length ? <div role="list" className={styles.list}>
         {feed.tasks.slice(0, shown).map(task => <div role="listitem" key={JSON.stringify([identity, task.id])}>
           <TaskCard task={task} onReview={value => { if (identityConfirmed) onReview(value); }}
             onApproval={value => { if (identityConfirmed) onApproval(value); }} lang={lang} />
         </div>)}
       </div> : null}
-      {feed.tasks.length > shown ? <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--fg-secondary)]">
+      {feed.tasks.length > shown ? <div className={styles.more}>
         <span>{copy.showing(shown)}</span>
         <VButton variant="ghost" onClick={() => setShown(value => value + PAGE_SIZE)}>{copy.more}</VButton>
       </div> : null}
