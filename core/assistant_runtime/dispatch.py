@@ -635,6 +635,12 @@ class DispatchService:
         }, sort_keys=True, ensure_ascii=False))
         async with self._dispatch_lock(dispatch_id):
             self._project(project_id)
+            # Permanent cleanup leaves only a content-free request fence. Its
+            # identity must remain consumed even if the SDK credential ledger
+            # is later lost; recreating it could execute the old task twice.
+            if (self._root / "deleted" / f"{dispatch_id}.json").exists():
+                raise DispatchError("This task was permanently cleaned; use a new dispatch identity for new work.",
+                                    code="DISPATCH_ALREADY_CLEANED")
             path = self._path(dispatch_id)
             retrying = path.exists()
             if path.exists():
@@ -654,6 +660,7 @@ class DispatchService:
                     "projectId": project_id,
                     "projectBinding": self._binding(project_root),
                     "agentId": agent_id,
+                    "title": title,
                     "clientRequestId": f"launcher-assistant:{dispatch_id}",
                     "requestDigest": request_digest,
                     "nativeTaskId": "",
@@ -1211,6 +1218,7 @@ class DispatchService:
     @staticmethod
     def _public(record: dict[str, Any]) -> dict[str, Any]:
         result = {key: deepcopy(value) for key, value in record.items() if key not in {"requestDigest", "projectBinding", "schemaVersion", "sourceRef", "derivedSourceRef"}}
+        result.setdefault("title", "")
         receipt = record.get("receipt") or {}
         result["completionEvidence"] = {
             "source": "native_external_agent_task",

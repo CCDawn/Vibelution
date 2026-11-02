@@ -1389,8 +1389,12 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
 
     if dispatch is not None:
         @app.get("/api/assistant/dispatches")
-        def dispatches():
-            return {"dispatches": dispatch.list_dispatches()}
+        async def dispatches():
+            from .task_card_metadata import enrich_dispatch_cards
+            return {"dispatches": await enrich_dispatch_cards(dispatch, dispatch.list_dispatches())}
+
+        from .task_cleanup import create_task_cleanup_router
+        app.include_router(create_task_cleanup_router(dispatch, native, app))
 
         @app.post("/api/assistant/dispatches/approval/preview")
         async def preview_dispatch_approval(payload: DispatchApprovalPreview):

@@ -16,6 +16,8 @@ class DispatchWrite(BaseModel):
     agent_id: str = Field(min_length=1, max_length=160)
     dispatch_id: str = Field(min_length=1, max_length=120)
     task: str = Field(min_length=1, max_length=MAX_WRITE_TASK_CHARS)
+    title: str = Field(default="", max_length=160,
+        description="简短可识别的任务名称，单行且不超过160字符；新任务应明确填写。")
 
     @field_validator("project_id", "agent_id", "dispatch_id")
     @classmethod
@@ -33,6 +35,14 @@ class DispatchWrite(BaseModel):
             raise ValueError("Task cannot be displayed safely")
         return value
 
+    @field_validator("title")
+    @classmethod
+    def displayable_title(cls, value: str):
+        if (value != value.strip() or any(unicodedata.category(char) in {"Cc", "Cf", "Cs", "Zl", "Zp"}
+                for char in value)):
+            raise ValueError("Title cannot be displayed safely on one line")
+        return value
+
 
 def dispatch_write_approval_summary(parameters: dict) -> dict:
     values = DispatchWrite.model_validate(parameters)
@@ -42,4 +52,5 @@ def dispatch_write_approval_summary(parameters: dict) -> dict:
                              "dispatch_id": values.dispatch_id},
         "assistantRequestedPermission": "workspace_write",
         "assistantTask": values.task,
+        **({"assistantTitle": values.title} if values.title else {}),
     }

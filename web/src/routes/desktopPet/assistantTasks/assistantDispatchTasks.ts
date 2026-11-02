@@ -1,10 +1,11 @@
 import type { LauncherAssistantDispatch } from "../../../api/launcherAssistant";
+import { displayError, taskMetadata, type AssistantTaskMetadata } from "./assistantTaskMetadata";
 
 /** Read-only presentation of the existing bounded dispatch feed. This is not a
  * task store, an execution owner, or proof that the user's goal was achieved. */
 export type AssistantDispatchTaskState = "running" | "stopping" | "waiting_user" | "awaiting_verification" | "failed" | "stopped" | "unknown";
 
-export type AssistantDispatchTask = {
+export type AssistantDispatchTask = AssistantTaskMetadata & {
   id: string;
   dispatchId: string;
   projectId: string | null;
@@ -66,12 +67,14 @@ function projectRow(row: LauncherAssistantDispatch, sourceAvailable: boolean): A
       : nativeStatus === "cancelled" ? "stopped" : "failed";
   }
   return {
+    ...taskMetadata(row),
     // Dispatch identity exists before native admission and survives later binding.
     // Tuple encoding avoids delimiter collisions and cross-project conflation.
     id: JSON.stringify([projectId, "dispatch", row.dispatchId]),
     dispatchId: row.dispatchId, projectId, agentId, nativeTaskId, nativeStatus,
     title: boundedText(row.title, 100),
     resultSummary: bound ? boundedText(row.receipt?.resultSummary, 600) : "",
+    error: bound ? displayError((row.receipt as { error?: unknown } | null)?.error) : "",
     shouldPoll: current && row.receipt?.shouldPoll === true && ["running", "stopping", "waiting_user"].includes(state),
     state, sourceAvailable: sourceAvailable && !row.lastError, receiptBound: bound, conflictingObservations: false,
     pendingApprovalCount: pending.size, businessAcceptance: "not_evaluated",
@@ -80,7 +83,7 @@ function projectRow(row: LauncherAssistantDispatch, sourceAvailable: boolean): A
 
 function fingerprint(task: AssistantDispatchTask): string {
   return JSON.stringify([task.agentId, task.nativeTaskId, task.nativeStatus, task.state,
-    task.sourceAvailable, task.receiptBound, task.pendingApprovalCount, task.title, task.resultSummary, task.shouldPoll]);
+    task.sourceAvailable, task.receiptBound, task.pendingApprovalCount, task.title, task.resultSummary, task.shouldPoll, task.cleanupPending]);
 }
 
 export function projectAssistantDispatchTasks(
@@ -97,7 +100,7 @@ export function projectAssistantDispatchTasks(
       // The feed has no revision/timestamp ordering contract. Never guess which
       // duplicate observation won, including whether an approval is still live.
       indexed.set(task.id, { ...previous, nativeStatus: null, state: "unknown", sourceAvailable: false, receiptBound: false,
-        conflictingObservations: true, pendingApprovalCount: 0, resultSummary: "", shouldPoll: false });
+        conflictingObservations: true, pendingApprovalCount: 0, resultSummary: "", shouldPoll: false, cleanupPending: false });
     }
   }
   const tasks = [...indexed.values()];

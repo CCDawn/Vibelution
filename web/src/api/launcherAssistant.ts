@@ -29,8 +29,13 @@ export type LauncherAssistantDispatch = {
   title?: string;
   projectId?: string;
   agentId?: string;
+  agentName?: string;
+  projectName?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  cleanupPending?: boolean;
   nativeTaskId?: string;
-  receipt?: { taskId?: string; status?: string; resultSummary?: string; shouldPoll?: boolean; pendingApprovals?: LauncherDispatchApproval[] } | null;
+  receipt?: { taskId?: string; status?: string; resultSummary?: string; shouldPoll?: boolean; pendingApprovals?: LauncherDispatchApproval[]; error?: string | { message?: string; code?: string } | null } | null;
   lastError?: { message?: string; code?: string } | null;
 };
 
@@ -51,6 +56,7 @@ export type LauncherDispatchApprovalPreview = {
 };
 
 export type LauncherAssistantRequest =
+  | { operation: "previewTaskCleanup" | "executeTaskCleanup"; agentId: string; directSessionId: string; targets: LauncherTaskCleanupTarget[]; fingerprint?: string }
   | { operation: "teamRuns"; cursor?: string }
   | { operation: "status" | "detail" | "dispatches" | "hide" | "approvals" | "openLauncher" | "assistantAvatar" }
   | { operation: "resolveApproval"; requestId: string; decision: "accept" | "decline" }
@@ -73,6 +79,14 @@ export type LauncherAssistantRequest =
   | { operation: "setExpanded"; expanded: boolean };
 
 type LauncherAssistantBridge = { invoke: (payload: LauncherAssistantRequest) => Promise<unknown> };
+
+export type LauncherTaskCleanupTarget =
+  | { kind: "dispatch"; projectId: string; dispatchId: string }
+  | { kind: "team_run"; projectId: string; requestId: string; originAction: "team_run" | "flow_start"; teamId: string; flowId: string; runId: string };
+
+export function launcherAssistantInvoke(payload: LauncherAssistantRequest): Promise<unknown> {
+  return launcherAssistantBridge().invoke(payload);
+}
 
 export function launcherAssistantBridge(source: unknown = globalThis): LauncherAssistantBridge {
   const bridge = (source as { vibelutionLauncherAssistant?: Partial<LauncherAssistantBridge> } | null)?.vibelutionLauncherAssistant;
@@ -348,6 +362,16 @@ export async function resolveLauncherAssistantApproval(request: SessionToolAppro
 }
 
 export type LauncherAssistantTeamRun = {
+  teamName?: string;
+  projectName?: string;
+  current?: number | string | null;
+  stepCount?: number;
+  attemptCount?: number;
+  currentAgentName?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  resultSummary?: string;
+  error?: string | { message?: string; code?: string } | null;
   projectId: string;
   requestId: string;
   originAction: "team_run" | "flow_start";
@@ -409,8 +433,12 @@ export async function getLauncherAssistantTeamRuns(
       || previous !== null && next.snapshot !== previous.snapshot
     : result.nextCursor !== null) throw invalid();
   const keys = ["projectId", "requestId", "originAction", "teamId", "flowId", "runId", "status", "revision", "title", "readState", "observedAt", "businessAcceptance"];
+  const optionalKeys = ["teamName", "projectName", "current", "stepCount", "attemptCount", "currentAgentName", "createdAt", "updatedAt", "resultSummary", "error"];
   for (const row of result.teamRuns) {
-    if (!exactFields(row, keys) || !id(row.projectId) || typeof row.requestId !== "string"
+    if (!record(row) || keys.some(key => !(key in row)) || Object.keys(row).some(key => !keys.includes(key) && !optionalKeys.includes(key)) || !id(row.projectId) || typeof row.requestId !== "string"
+      || [row.stepCount, row.attemptCount].some(value => value !== undefined && (!Number.isSafeInteger(value) || (value as number) < 0))
+      || row.current !== undefined && row.current !== null && !(typeof row.current === "string" && row.current.length <= 160 || Number.isSafeInteger(row.current) && (row.current as number) >= 0)
+      || [row.teamName, row.projectName, row.currentAgentName].some(value => value !== undefined && (typeof value !== "string" || value.length > 160 || /[\u0000-\u001f\u007f-\u009f]/.test(value)))
       || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$/.test(row.requestId) || !["team_run", "flow_start"].includes(String(row.originAction))
       || [row.teamId, row.flowId, row.runId].some(value => value !== null && !id(value))
       || row.status !== null && !id(row.status)

@@ -11,7 +11,6 @@ import hashlib
 import json
 import re
 import time
-import unicodedata
 from datetime import datetime, timezone
 from typing import Literal
 
@@ -19,6 +18,7 @@ import anyio
 from pydantic import BaseModel, ConfigDict, Field
 
 from .team_patrol import TeamPatrolObserver, _ID, _key
+from .task_card_metadata import display_name, project_display_name
 
 _PAGE_SIZE = 16
 _BUDGET = 4.0
@@ -47,6 +47,16 @@ class _TeamRun(_Closed):
     status: str | None
     revision: str | None
     title: str = Field(max_length=160)
+    teamName: str | None = Field(default=None, max_length=160)
+    projectName: str | None = Field(default=None, max_length=160)
+    current: int | None = Field(default=None, ge=0)
+    stepCount: int | None = Field(default=None, ge=0)
+    attemptCount: int | None = Field(default=None, ge=0)
+    currentAgentName: str | None = Field(default=None, max_length=160)
+    createdAt: str | None = None
+    updatedAt: str | None = None
+    resultSummary: str | None = Field(default=None, max_length=160)
+    error: str | None = Field(default=None, max_length=160)
     readState: Literal["ready", "unknown"]
     observedAt: str | None
     businessAcceptance: Literal["not_evaluated"]
@@ -125,12 +135,7 @@ def _unknown(row):
 
 
 def _title(value):
-    """Public names are untrusted display text, never instructions."""
-    if not isinstance(value, str):
-        return ""
-    visible = (" " if char.isspace() else char for char in value
-               if char.isspace() or unicodedata.category(char) not in {"Cc", "Cf", "Cs"})
-    return " ".join("".join(visible).split())[:160]
+    return display_name(value)
 
 
 async def read_team_task_cards(dispatch, assistant, *, cursor=None):
@@ -191,7 +196,17 @@ async def read_team_task_cards(dispatch, assistant, *, cursor=None):
                         cards[index] = {**cards[index], **{key: run[key] for key in
                             ("teamId", "flowId", "runId", "status")}, "revision": revision,
                             "readState": "ready", "observedAt": datetime.now(timezone.utc).isoformat()}
+                        # These counters are public TeamRunView fields. Do not
+                        # inspect attempts, goal, result bodies or Session data.
+                        for key in ("current", "stepCount", "attemptCount"):
+                            if type(run.get(key)) is int and run[key] >= 0:
+                                cards[index][key] = run[key]
+                        project_name = project_display_name(bindings[row["projectId"]])
+                        if project_name:
+                            cards[index]["projectName"] = project_name
                         cards[index]["title"] = await team_title(row["projectId"], run["teamId"])
+                        if cards[index]["title"]:
+                            cards[index]["teamName"] = cards[index]["title"]
                     except Exception:
                         pass  # No target error, path, prompt or result body crosses this boundary.
 

@@ -36,6 +36,7 @@ export type AssistantHostSnapshot = {
   errorCode: string | null;
 };
 export type AssistantHostRequest =
+  | { operation: "previewTaskCleanup" | "executeTaskCleanup"; agentId: string; directSessionId: string; targets: unknown[]; fingerprint?: string }
   | { operation: "teamRuns"; cursor?: string }
   | { operation: "status" | "detail" | "dispatches" | "config" | "approvals" | "assistantAvatar" }
   | { operation: "resolveApproval"; requestId: string; decision: "accept" | "decline" }
@@ -924,6 +925,18 @@ export class AssistantHost {
     }
     if (!object(payload)) throw new HostError("ASSISTANT_REQUEST_INVALID");
     switch (payload.operation) {
+      case "previewTaskCleanup":
+      case "executeTaskCleanup": {
+        const execute = payload.operation === "executeTaskCleanup";
+        if (!ownKeys(payload, ["operation", "agentId", "directSessionId", "targets", ...(execute ? ["fingerprint"] : [])])
+          || payload.agentId !== generation.agentId || payload.directSessionId !== generation.sessionId
+          || !Array.isArray(payload.targets) || !payload.targets.length || payload.targets.length > 32
+          || execute && (typeof payload.fingerprint !== "string" || !/^[a-f0-9]{64}$/.test(payload.fingerprint)))
+          throw new HostError("ASSISTANT_REQUEST_INVALID");
+        return await this.rpc(generation, `/api/assistant/task-cleanup/${execute ? "execute" : "preview"}`, "POST",
+          { agentId: payload.agentId, directSessionId: payload.directSessionId, targets: payload.targets,
+            ...(execute ? { fingerprint: payload.fingerprint } : {}) }, 60_000);
+      }
       case "teamRuns": {
         if (!ownKeys(payload, ["operation", "cursor"])
           || Object.prototype.hasOwnProperty.call(payload, "cursor") && (typeof payload.cursor !== "string"

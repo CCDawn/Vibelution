@@ -4,6 +4,11 @@ const styles = {
   heading: "flex min-w-0 flex-wrap items-start justify-between gap-2",
   title: "min-w-0 flex-1 break-words text-sm font-medium text-vui-fg-primary",
   progress: "text-xs leading-relaxed text-vui-fg-secondary",
+  metadata: "flex min-w-0 flex-wrap gap-x-3 gap-y-1 break-words text-xs text-vui-fg-secondary",
+  timestamp: "text-xs text-vui-fg-tertiary",
+  summaryPreview: "line-clamp-2 break-words text-xs leading-relaxed text-vui-fg-secondary",
+  summaryToggle: "justify-self-start",
+  group: "grid min-w-0 gap-1",
   actions: "flex flex-wrap items-center gap-2",
   details: "grid min-w-0 gap-2 border-t border-vui-border-subtle pt-2 text-xs leading-relaxed text-vui-fg-secondary",
   summaryHeading: "font-medium",
@@ -15,6 +20,9 @@ const styles = {
   scope: "text-xs text-vui-fg-secondary",
   list: "grid min-w-0 gap-3",
   more: "flex flex-wrap items-center gap-2 text-xs text-vui-fg-secondary",
+  cleanupBody: "grid min-w-0 gap-3 text-sm leading-relaxed text-vui-fg-secondary",
+  cleanupList: "grid min-w-0 gap-3",
+  cleanupItem: "grid min-w-0 gap-1 break-words border-t border-vui-border-subtle pt-2 text-xs",
 };
 
 export default styles;

@@ -1,5 +1,6 @@
 import type { LauncherAssistantTeamRun, LauncherAssistantTeamRunsPage } from "../../../api/launcherAssistant";
 import type { AssistantDispatchTask, AssistantDispatchTaskState } from "./assistantDispatchTasks";
+import { taskMetadata, type AssistantTaskMetadata } from "./assistantTaskMetadata";
 
 /** A local association points to the owning team run; it is never an execution
  * store or evidence that the user's business goal has been accepted. */
@@ -18,7 +19,7 @@ export type AssistantTeamRunObservationPage = Omit<LauncherAssistantTeamRunsPage
   teamRuns: AssistantTeamRunObservation[];
 };
 
-export type AssistantTeamRunTask = {
+export type AssistantTeamRunTask = AssistantTaskMetadata & {
   kind: "team_run";
   id: string;
   projectId: string | null;
@@ -94,6 +95,7 @@ function projectRow(row: AssistantTeamRunObservation, sourceAvailable: boolean):
           : nativeStatus === "failed" ? "failed"
             : nativeStatus === "stopped" ? "stopped" : "unknown";
   return {
+    ...taskMetadata(row),
     kind: "team_run",
     id: group ? JSON.stringify([projectId, "team", group.teamId, group.flowId, group.runId])
       : JSON.stringify([projectId, row.originAction, row.requestId]),

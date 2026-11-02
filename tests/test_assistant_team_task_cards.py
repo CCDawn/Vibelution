@@ -112,7 +112,7 @@ def test_admission_completed_preserves_current_native_status_without_business_cl
     assert row["businessAcceptance"] == "not_evaluated" and row["title"] == "" and row["revision"] is None
     assert row["observedAt"].endswith("+00:00")
     assert set(row) == {"projectId", "requestId", "originAction", "teamId", "flowId", "runId", "status",
-                        "revision", "title", "readState", "observedAt", "businessAcceptance"}
+                        "revision", "title", "readState", "observedAt", "businessAcceptance", "projectName"}
 
 
 @pytest.mark.parametrize("fault", ["offline", "unverified", "unconfirmed", "projectId", "action", "requestId", "runId"])
@@ -225,7 +225,35 @@ def test_public_team_name_is_cleaned_and_reused_once_per_page(team_setup):
     result = page(dispatch)
     assert len(reads) == 1 and result["state"] == "ready"
     assert all(row["title"] == ("研发 组 " + "中" * 180)[:160] for row in result["teamRuns"])
+    assert all(row["teamName"] == row["title"] for row in result["teamRuns"])
     assert "private" not in json.dumps(result)
+
+
+def test_only_public_native_counters_are_projected_without_attempt_or_body_reads(team_setup):
+    root, _, dispatch = team_setup
+    dispatch.management.results["request-1"]["teamRun"].update(
+        current=2, stepCount=5, attemptCount=3,
+        attempts=[{"agentId": "private", "prompt": "private"}], goal="private",
+        createdAt="private", updatedAt="private", resultSummary="private", error="private",
+        currentAgentName="private")
+    result = page(dispatch)
+    row = result["teamRuns"][0]
+    assert {key: row[key] for key in ("current", "stepCount", "attemptCount")} == {
+        "current": 2, "stepCount": 5, "attemptCount": 3}
+    assert row["projectName"] == root.name
+    assert "private" not in json.dumps(result)
+    cards.TeamTaskCardsPage.model_validate(result)
+
+
+@pytest.mark.parametrize("value", [True, -1, "3", 2.5, None])
+def test_invalid_optional_counters_do_not_hide_confirmed_native_status(team_setup, value):
+    _, _, dispatch = team_setup
+    dispatch.management.results["request-1"]["teamRun"].update(
+        current=value, stepCount=value, attemptCount=value)
+    result = page(dispatch)
+    assert result["state"] == "ready"
+    assert not any(key in result["teamRuns"][0] for key in ("current", "stepCount", "attemptCount"))
+    cards.TeamTaskCardsPage.model_validate(result)
 
 
 @pytest.mark.parametrize("fault", ["projectId", "teamId", "missing_id", "permission", "timeout", "invalid_name"])

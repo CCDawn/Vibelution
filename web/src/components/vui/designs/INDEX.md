@@ -240,6 +240,13 @@
 | `ComposerContextRing` | [product/composer-context.md](./product/composer-context.md#composercontextring) |
 | `ConversationTokenSpeedIndicator` | [product/token-speed.md](./product/token-speed.md#conversationtokenspeedindicator) |
 
+## Product — Launcher 个人助理任务
+
+| 组件 | 设计说明 |
+| --- | --- |
+| `LauncherAssistantTaskCards` | [product/launcher-assistant-task-cards.md](./product/launcher-assistant-task-cards.md#launcherassistanttaskcards) |
+| `LauncherTaskCleanupDialog` | [product/launcher-assistant-task-cards.md](./product/launcher-assistant-task-cards.md#launchertaskcleanupdialog) |
+
 ## Provider
 
 | 组件 | 设计说明 |

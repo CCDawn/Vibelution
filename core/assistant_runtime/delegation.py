@@ -380,7 +380,10 @@ class DelegationManager:
 
     async def derived(self, parameters, runtime):
         args = DerivedDispatch.model_validate(parameters)
-        identity = _hash(args.model_dump(exclude={"dispatch_id"}))
+        child_identity = args.model_dump(exclude={"dispatch_id"})
+        if not args.title:
+            child_identity.pop("title")  # Preserve pre-title child fingerprints.
+        identity = _hash(child_identity)
         async with self.dispatch._dispatch_admission:
             self.dispatch._check_dispatch_unfenced()
             async with self._locks.setdefault(args.goal_id, anyio.Lock()):
@@ -406,7 +409,8 @@ class DelegationManager:
                         taskHash=hashlib.sha256(args.task.encode()).hexdigest()).model_dump()
                 await anyio.to_thread.run_sync(self._verify, row, runtime)
                 return await self.dispatch._dispatch(args.project_id, agent_id=args.agent_id, task=args.task,
-                    dispatch_id=args.dispatch_id, permission_profile=args.permission_profile, derived_ref=reference)
+                    dispatch_id=args.dispatch_id, title=args.title,
+                    permission_profile=args.permission_profile, derived_ref=reference)
 
 
 def contracts():
@@ -425,5 +429,7 @@ def approval_summary(action, parameters):
         "dispatch_derived": DerivedDispatch}[action]
     values = model.model_validate(parameters).model_dump()
     task = values.pop("task", None)
+    title = values.pop("title", "")
     return {"assistantAction": action, "assistantTargets": values,
+        **({"assistantTitle": title} if title else {}),
         **({"assistantTask": task, "assistantRequestedPermission": values["permission_profile"]} if task is not None else {})}

@@ -14,7 +14,8 @@ route_service: ContextVar[ExternalAgentTaskService | None] = ContextVar("local_a
 
 
 def task_store(project_root):
-    return ExternalAgentTaskStore(resolve_project_runtime_home(Path(project_root)) / "local_assistant_tasks")
+    from .task_cleanup import LocalAssistantCleanupTaskStore
+    return LocalAssistantCleanupTaskStore(resolve_project_runtime_home(Path(project_root)) / "local_assistant_tasks")
 
 
 def materialize_workspace(project_root, task_id):

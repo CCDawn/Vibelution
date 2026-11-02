@@ -31,7 +31,7 @@ async def test_write_action_requires_governed_tool_and_reports_target_ceiling():
         blocked = await asyncio.to_thread(actions.execute_action, "dispatch_write", args, runtime=runtime)
         assert blocked["status"] == "approval_required" and service.calls == []
         result = await asyncio.to_thread(actions.execute_action, "dispatch_write", args, runtime=runtime, governed=True)
-        assert service.calls == [("project-a", {"agent_id": "coder", "dispatch_id": "request-a", "task": "修改文件", "runtime": runtime})]
+        assert service.calls == [("project-a", {"agent_id": "coder", "dispatch_id": "request-a", "task": "修改文件", "title": "", "runtime": runtime})]
         assert result["receipt"]["effectivePermissionProfile"] == "read_only"
         assert "只读" in result["permissionNotice"]
         with pytest.raises(ValueError, match="schema"):
