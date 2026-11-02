@@ -60,6 +60,20 @@ class LocalAssistantTaskService(ExternalAgentTaskService):
             raise ExternalAgentAccessError("Agent is protected", code="AGENT_NOT_FOUND")
         super()._require_eligible(agent)
 
+    def _admit_start_task(self, **kwargs):
+        record, created, agent_id, task, effective = super()._admit_start_task(**kwargs)
+        if created:
+            # Cleanup ownership is established at authenticated admission, not
+            # by the later workspace-complete marker used by native startup.
+            with self._task_lock(record["taskId"]):
+                record = self.store.get_task(record["taskId"])
+                record = self.store.transition(record["taskId"], status=record["status"],
+                    expected_revision=record["revision"], fields={
+                        "localCleanupAuthorityFingerprint": self.request_authority_fingerprint or self.authority_fingerprint(),
+                        "localCleanupWorkspaceState": "not_started",
+                    })
+        return record, created, agent_id, task, effective
+
     def _request_cancel_locked(self, record, *, terminal_status, reason_code, strict_confirmation=False):
         # A checkout can outlive its lease before any native session exists.
         # Follow the store's cancellation path rather than inventing a direct
@@ -109,10 +123,14 @@ class LocalAssistantTaskService(ExternalAgentTaskService):
                     current = self._stop_preparation(current, reason)
                     return self._public_task(current, include_private=kwargs["include_private"])
                 needs_workspace = not current.get("localAuthorityFingerprint")
+                if needs_workspace:
+                    current = self.store.transition(task_id, status=current["status"],
+                        expected_revision=current["revision"], fields={"localCleanupWorkspaceState": "preparing"})
             if needs_workspace:
                 try:
                     workspace = (self.workspace_factory(task_id)
                                  if kwargs["effective"] == "workspace_write" else self.project_root)
+                    cleanup_workspace = str(Path(workspace).absolute())
                 except Exception:
                     # This preparation precedes the native owner's own startup
                     # try/except. Persist failure on the original idempotent row
@@ -123,10 +141,21 @@ class LocalAssistantTaskService(ExternalAgentTaskService):
                             self._transition(task_id, status="failed",
                                 expected_revision=latest["revision"], reason_code="workspace_setup_failed",
                                 fields={"error": {"code": "WORKSPACE_SETUP_FAILED",
-                                                  "message": "Agent task workspace could not be prepared."}})
+                                                  "message": "Agent task workspace could not be prepared."},
+                                        "localCleanupWorkspaceState": "unknown"})
+                        else:
+                            self.store.transition(task_id, status=latest["status"],
+                                expected_revision=latest["revision"], fields={"localCleanupWorkspaceState": "unknown"})
                     raise
             with self._task_lock(task_id):
                 current = self.store.get_task(task_id)
+                if needs_workspace:
+                    # Cancellation must stay responsive during preparation,
+                    # but must not lose a successfully prepared directory.
+                    current = self.store.transition(task_id, status=current["status"],
+                        expected_revision=current["revision"], fields={
+                            "localCleanupWorkspaceState": "ready", "localCleanupWorkspacePath": cleanup_workspace,
+                        })
                 if current["status"] in TASK_TERMINAL_STATUSES:
                     return self._public_task(current, include_private=kwargs["include_private"])
                 reason = self._preparation_stop_reason(current, fingerprint)

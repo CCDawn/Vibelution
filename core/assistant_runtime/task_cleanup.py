@@ -79,6 +79,8 @@ def _retained(rows):
         "workspace_has_unmerged_commits": "工作区含未合入的提交，已保留代码。",
         "workspace_shared_by_task": "工作区仍被其他任务引用，仅清理本项的独占记录。",
         "workspace_registration_changed": "工作区注册或锁定状态已变化；任务记录会保留，核对后可重试。",
+        "workspace_preparation_active": "工作区仍在准备，请等待准备结束后重新预览；任务记录会保留。",
+        "workspace_preparation_unconfirmed": "工作区准备失败，尚不能确认遗留目录的位置；请先核对分支工作区，任务记录会保留。",
         "shared_database_and_git_objects": "数据库和 Git 对象由其他任务共用。",
         "native_recovery_and_admission_guards": "仅保留原生删除标记和并发锁，不保存会话内容。",
         "prevent_request_replay": "仅保留防止重复执行的最小摘要，不保存任务内容。",

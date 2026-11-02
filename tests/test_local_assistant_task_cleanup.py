@@ -466,3 +466,67 @@ def test_routes_require_control_launcher_and_task_owner_and_validate_fingerprint
     stale = {"revision": snapshot["revision"], "fingerprint": "0" * 64}
     assert client.post(path, headers=headers, json=stale).status_code == 409
     assert client.post(path, headers=headers, json={"revision": snapshot["revision"], "fingerprint": snapshot["fingerprint"]}).json()["status"] == "deleted"
+
+
+@pytest.mark.parametrize("ending", ["cancel", "lease", "deadline"])
+def test_preparation_terminal_keeps_cleanup_authority_and_confirmed_workspace(tmp_path, ending):
+    from tests.test_local_assistant_tasks import local_service, start
+    service, _, runtime, _ = local_service(tmp_path)
+    service.store = cleanup.LocalAssistantCleanupTaskStore(service.store.root)
+    calls = []
+
+    def prepare(task_id):
+        calls.append(task_id)
+        row = service.store.get_task(task_id)
+        assert not row.get("localAuthorityFingerprint")  # Must still prepare.
+        assert row["localCleanupWorkspaceState"] == "preparing"
+        if ending == "cancel":
+            service.cancel_task(owner_id="private-task-owner", task_id=task_id)
+            blocked = cleanup.preview_task_cleanup(service, owner_id="private-task-owner", task_id=task_id)
+            assert blocked["status"] == "blocked"
+            assert any(item["reason"] == "workspace_preparation_active" for item in blocked["retained"])
+        else:
+            key = "leaseExpiresAt" if ending == "lease" else "deadlineAt"
+            service.store.transition(task_id, status=row["status"], fields={key: "2000-01-01T00:00:00Z"})
+        return service.project_root  # Explicitly shared; never remove user source.
+
+    service.workspace_factory = prepare
+    result = start(service)
+    assert result["status"] == ("cancelled" if ending == "cancel" else "timed_out")
+    assert len(calls) == 1 and runtime.create_calls == runtime.submit_calls == []
+    row = service.store.get_task(result["taskId"])
+    assert not row.get("localAuthorityFingerprint")
+    assert row["localCleanupAuthorityFingerprint"] == "a" * 64
+    assert row["localCleanupWorkspacePath"] == str(service.project_root)
+    snapshot = cleanup.preview_task_cleanup(service, owner_id="private-task-owner", task_id=result["taskId"])
+    assert snapshot["status"] == "ready"
+    outcome = cleanup.cleanup_task(service, owner_id="private-task-owner", task_id=result["taskId"],
+        revision=snapshot["revision"], fingerprint=snapshot["fingerprint"])
+    assert outcome["status"] == "deleted" and service.project_root.exists()
+    assert cleanup.preview_task_cleanup(service, owner_id="private-task-owner", task_id=result["taskId"])["alreadyDeleted"]
+
+
+def test_failed_preparation_keeps_unknown_resources_visible_without_retagging_on_replay(tmp_path):
+    from tests.test_local_assistant_tasks import local_service, start
+    service, _, runtime, _ = local_service(tmp_path)
+    service.store = cleanup.LocalAssistantCleanupTaskStore(service.store.root)
+    created = []
+
+    def prepare(task_id):
+        created.append(task_id)
+        raise TimeoutError("fixture preparation failed before returning its path")
+
+    service.workspace_factory = prepare
+    with pytest.raises(TimeoutError):
+        start(service)
+    row = service.store.get_task(created[0])
+    assert row["status"] == "failed" and row["localCleanupWorkspaceState"] == "unknown"
+    snapshot = cleanup.preview_task_cleanup(service, owner_id="private-task-owner", task_id=created[0])
+    assert snapshot["status"] == "blocked"
+    assert any(item["reason"] == "workspace_preparation_unconfirmed" for item in snapshot["retained"])
+    service.authority_fingerprint = lambda: "b" * 64
+    start(service)  # Existing task identity must not gain new cleanup authority.
+    assert service.store.get_task(created[0])["localCleanupAuthorityFingerprint"] == "a" * 64
+    with pytest.raises(ExternalAgentAccessError):
+        cleanup.preview_task_cleanup(service, owner_id="private-task-owner", task_id=created[0])
+    assert len(created) == 1 and runtime.create_calls == runtime.submit_calls == []

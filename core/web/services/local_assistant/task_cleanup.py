@@ -122,7 +122,9 @@ def _native_session_service(service):
 def _owned_record(service, owner_id, task_id):
     service._require_gateway_enabled()
     record = service._owned_task(owner_id, task_id)
-    if not service.authority_fingerprint() or record.get("localAuthorityFingerprint") != service.authority_fingerprint():
+    authority = service.authority_fingerprint()
+    proofs = [record.get(key) for key in ("localAuthorityFingerprint", "localCleanupAuthorityFingerprint") if record.get(key)]
+    if not authority or not proofs or any(proof != authority for proof in proofs):
         raise ExternalAgentAccessError("Task does not belong to current Launcher", code="TASK_NOT_FOUND")
     if record.get("status") not in TASK_TERMINAL_STATUSES:
         raise ExternalAgentConflictError("Only stopped terminal tasks can be cleaned", code="TASK_NOT_TERMINAL")
@@ -218,8 +220,14 @@ def _git(root, *args):
 
 
 def _workspace_plan(service, record):
-    raw = record.get("localWorkspacePath")
+    if record.get("localCleanupWorkspaceState") == "preparing":
+        return None, [], "workspace_preparation_active"
+    if record.get("localCleanupWorkspaceState") == "unknown":
+        return None, [], "workspace_preparation_unconfirmed"
+    raw = record.get("localWorkspacePath") or record.get("localCleanupWorkspacePath")
     if not raw:
+        if record.get("localCleanupWorkspaceState") == "ready":
+            return None, [], "workspace_ownership_unproven"
         return None, [], ""
     path = Path(raw).absolute()
     if path == service.project_root:
@@ -233,9 +241,9 @@ def _workspace_plan(service, record):
         return None, [], "workspace_ownership_unproven"
     for task_path in service.store.tasks_dir.glob("eat-*.json"):
         other = service.store._read_path(task_path)
-        other_path = other.get("localWorkspacePath")
-        if (other.get("taskId") != record["taskId"] and other_path
-                and Path(other_path).resolve() == path):
+        other_paths = [other.get(key) for key in ("localWorkspacePath", "localCleanupWorkspacePath") if other.get(key)]
+        if (other.get("taskId") != record["taskId"]
+                and any(Path(other_path).resolve() == path for other_path in other_paths)):
             return None, [], "workspace_shared_by_task"
     files = _safe_tree(path)
     main = layout.integration_root
@@ -457,7 +465,7 @@ def _cleanup_task(service, *, owner_id, task_id, revision, fingerprint):
         if not failures:
             tombstone = {"schemaVersion": 1, "taskId": task_id, "ownerSubjectHash": record["ownerSubjectHash"],
                 "requestKeyHash": _digest([record["ownerSubjectHash"], record.get("clientRequestId") or ""]),
-                "localAuthorityFingerprint": record["localAuthorityFingerprint"],
+                "localAuthorityFingerprint": record.get("localAuthorityFingerprint") or record["localCleanupAuthorityFingerprint"],
                 "cleanupRevision": revision, "cleanupFingerprint": fingerprint}
             path = service.store.tombstone_path(task_id)
             try:
