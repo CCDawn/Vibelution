@@ -23,7 +23,11 @@ export const queryKeys = {
   tools: () => ["tools"] as const,
   toolWebSearchHealth: () => ["tools", "web-search", "health"] as const,
   skills: () => ["skills"] as const,
-  skill: (command: string) => ["skills", command] as const,
+  // Skill detail identity is (source, command): the same slash command can
+  // live under both ~/.codex/skills and ~/.agents/skills, and a bare-command
+  // key made those entries share one cache slot. Callers without a source
+  // dimension still get a stable key via the "" default.
+  skill: (command: string, source = "") => ["skills", source, command] as const,
   toolImage2Models: () => ["tools", "image2", "models"] as const,
   gitCommits: () => ["git", "commits"] as const,
   gitDiff: (path: string) => ["git", "diff", path] as const,

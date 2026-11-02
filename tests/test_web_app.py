@@ -426,6 +426,36 @@ def test_skills_api_returns_skill_detail(tmp_path, monkeypatch):
     assert "Ask one question at a time." in payload["content"]
 
 
+def test_skills_api_detail_source_query_selects_root(tmp_path, monkeypatch):
+    """`?source=` narrows the detail lookup to one root; omitting it keeps first-match."""
+
+    codex_root = tmp_path / ".codex" / "skills"
+    agents_root = tmp_path / ".agents" / "skills"
+    for root, body in ((codex_root, "Codex copy."), (agents_root, "Agents copy.")):
+        skill_dir = root / "router"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            f"---\nname: router\ndescription: Router\n---\n\n# Router\n\n{body}\n",
+            encoding="utf-8",
+        )
+    monkeypatch.setattr(skill_service, "default_skill_roots", lambda: [codex_root, agents_root])
+
+    agents = client.get("/api/skills/router", params={"source": "agents"})
+    codex = client.get("/api/skills/router", params={"source": "codex"})
+    default = client.get("/api/skills/router")
+    missing = client.get("/api/skills/router", params={"source": "other"})
+
+    assert agents.status_code == 200
+    assert agents.json()["source"] == "agents"
+    assert "Agents copy." in agents.json()["content"]
+    assert codex.status_code == 200
+    assert codex.json()["source"] == "codex"
+    assert "Codex copy." in codex.json()["content"]
+    assert default.status_code == 200
+    assert default.json()["source"] == "codex"
+    assert missing.status_code == 404
+
+
 def test_history_seed_omits_state_only_assistant_messages():
     history = session_service._history_messages_for_agent_seed(
         [

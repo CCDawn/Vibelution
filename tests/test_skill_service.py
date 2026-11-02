@@ -57,3 +57,65 @@ def test_skill_detail_rejects_unknown_skill(tmp_path):
 
     with pytest.raises(FileNotFoundError):
         skill_service.get_skill_detail("missing", roots=[tmp_path])
+
+
+def _write_same_command_under_both_roots(tmp_path: Path) -> tuple[Path, Path]:
+    """Install one slash command under a codex root and an agents root.
+
+    The directory suffixes matter: ``_root_source`` classifies a root by its
+    ``/.codex/skills`` / ``/.agents/skills`` tail, which is what the ``source``
+    filter keys on.
+    """
+
+    codex_root = tmp_path / ".codex" / "skills"
+    agents_root = tmp_path / ".agents" / "skills"
+    _write_skill(codex_root, "router", name="router", body="Codex copy of the router.")
+    _write_skill(agents_root, "router", name="router", body="Agents copy of the router.")
+    return codex_root, agents_root
+
+
+def test_skill_detail_without_source_keeps_registry_first_match(tmp_path):
+    codex_root, agents_root = _write_same_command_under_both_roots(tmp_path)
+
+    first_codex = skill_service.get_skill_detail("router", roots=[codex_root, agents_root])
+    first_agents = skill_service.get_skill_detail("router", roots=[agents_root, codex_root])
+
+    assert first_codex["source"] == "codex"
+    assert "Codex copy of the router." in first_codex["content"]
+    assert first_agents["source"] == "agents"
+    assert "Agents copy of the router." in first_agents["content"]
+
+
+@pytest.mark.parametrize(
+    ("source", "expected_source", "expected_body"),
+    [
+        ("agents", "agents", "Agents copy of the router."),
+        ("codex", "codex", "Codex copy of the router."),
+        # The filter is tolerant of surrounding whitespace and casing.
+        (" Agents ", "agents", "Agents copy of the router."),
+    ],
+)
+def test_skill_detail_source_filter_resolves_requested_root(tmp_path, source, expected_source, expected_body):
+    codex_root, agents_root = _write_same_command_under_both_roots(tmp_path)
+
+    payload = skill_service.get_skill_detail("router", roots=[codex_root, agents_root], source=source)
+
+    assert payload["source"] == expected_source
+    assert payload["command"] == "/router"
+    assert expected_body in payload["content"]
+    assert Path(payload["path"]).resolve().is_relative_to((codex_root if expected_source == "codex" else agents_root).resolve())
+
+
+def test_skill_detail_source_filter_does_not_fall_back_to_other_roots(tmp_path):
+    """A source that has no matching root, or no matching skill, is a miss."""
+
+    codex_root = tmp_path / ".codex" / "skills"
+    agents_root = tmp_path / ".agents" / "skills"
+    _write_skill(codex_root, "only-codex", name="only-codex")
+    agents_root.mkdir(parents=True)
+
+    assert skill_service.get_skill_detail("only-codex", roots=[codex_root, agents_root])["source"] == "codex"
+    with pytest.raises(FileNotFoundError):
+        skill_service.get_skill_detail("only-codex", roots=[codex_root, agents_root], source="agents")
+    with pytest.raises(FileNotFoundError):
+        skill_service.get_skill_detail("only-codex", roots=[codex_root, agents_root], source="other")

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from core.web.routes.skills_models import SkillLibraryDetailResponse, SkillLibraryResponse
 from core.web.services.skill_service import get_skill_detail, get_skill_library
@@ -25,8 +25,8 @@ def skills_library() -> dict:
     response_model=SkillLibraryDetailResponse,
     response_model_exclude_unset=True,
 )
-def skills_detail(command: str) -> dict:
+def skills_detail(command: str, source: str = Query("")) -> dict:
     try:
-        return get_skill_detail(command)
+        return get_skill_detail(command, source=source)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

@@ -34,6 +34,22 @@ function normalizeCommand(command: string) {
   return String(command || "").replace(/^\/+/, "").trim();
 }
 
+// Skill identity on this page is (source, command), not the bare command: the
+// same slash command can exist under both ~/.codex/skills and ~/.agents/skills,
+// and keying by command alone made those rows share highlight, selection and
+// the detail cache slot. The key is "<source>:<normalized command>".
+function skillKey(skill: Pick<SkillLibraryItem, "source" | "command">) {
+  return `${skill.source}:${normalizeCommand(skill.command)}`;
+}
+
+function splitSkillKey(key: string) {
+  const separator = key.indexOf(":");
+  if (separator < 0) {
+    return { source: "", command: "" };
+  }
+  return { source: key.slice(0, separator), command: key.slice(separator + 1) };
+}
+
 function sourceLabel(source: string, lang: string) {
   if (source === "codex") {
     return "Codex";
@@ -154,10 +170,10 @@ export function SkillsRoute() {
   const copy = useMemo(() => copyFor(lang), [lang]);
   const [searchText, setSearchText] = useState("");
   const [sourceFilter, setSourceFilter] = useState<SkillSourceFilter>("all");
-  const [activeCommand, setActiveCommand] = useState("");
+  const [activeKey, setActiveKey] = useState("");
   const [copyState, setCopyState] = useState("");
   const [bulkSelectionMode, setBulkSelectionMode] = useState(false);
-  const [selectedSkillCommands, setSelectedSkillCommands] = useState<Set<string>>(() => new Set());
+  const [selectedSkillKeys, setSelectedSkillKeys] = useState<Set<string>>(() => new Set());
 
   const libraryQuery = useQuery({
     queryKey: queryKeys.skills(),
@@ -174,32 +190,33 @@ export function SkillsRoute() {
     });
   }, [searchText, skills, sourceFilter]);
   const selectedSkills = useMemo(
-    () => filteredSkills.filter((skill) => selectedSkillCommands.has(skill.command)),
-    [filteredSkills, selectedSkillCommands],
+    () => filteredSkills.filter((skill) => selectedSkillKeys.has(skillKey(skill))),
+    [filteredSkills, selectedSkillKeys],
   );
   const allVisibleSkillsSelected = filteredSkills.length > 0 && selectedSkills.length === filteredSkills.length;
 
   useEffect(() => {
-    if (activeCommand && skills.some((skill) => skill.command === activeCommand)) {
+    if (activeKey && skills.some((skill) => skillKey(skill) === activeKey)) {
       return;
     }
-    setActiveCommand(filteredSkills[0]?.command ?? "");
-  }, [activeCommand, filteredSkills, skills]);
+    setActiveKey(filteredSkills[0] ? skillKey(filteredSkills[0]) : "");
+  }, [activeKey, filteredSkills, skills]);
 
   useEffect(() => {
-    setSelectedSkillCommands((current) => {
-      const visibleCommands = new Set(filteredSkills.map((skill) => skill.command));
-      const next = new Set(Array.from(current).filter((command) => visibleCommands.has(command)));
+    setSelectedSkillKeys((current) => {
+      const visibleKeys = new Set(filteredSkills.map(skillKey));
+      const next = new Set(Array.from(current).filter((key) => visibleKeys.has(key)));
       return next.size === current.size ? current : next;
     });
   }, [filteredSkills]);
 
+  const activeSkillId = splitSkillKey(activeKey);
   const detailQuery = useQuery({
-    queryKey: queryKeys.skill(activeCommand),
-    queryFn: () => fetchSkillLibraryDetail(normalizeCommand(activeCommand)),
-    enabled: Boolean(activeCommand),
+    queryKey: queryKeys.skill(activeSkillId.command, activeSkillId.source),
+    queryFn: () => fetchSkillLibraryDetail(activeSkillId.command, activeSkillId.source),
+    enabled: Boolean(activeSkillId.command),
   });
-  const activeSkill = detailQuery.data ?? filteredSkills.find((skill) => skill.command === activeCommand) ?? null;
+  const activeSkill = detailQuery.data ?? filteredSkills.find((skill) => skillKey(skill) === activeKey) ?? null;
   async function copyCommand(command: string) {
     const text = `${command} `;
     try {
@@ -214,24 +231,24 @@ export function SkillsRoute() {
     }
   }
 
-  function toggleSkillSelection(command: string, selected: boolean) {
-    setSelectedSkillCommands((current) => {
+  function toggleSkillSelection(key: string, selected: boolean) {
+    setSelectedSkillKeys((current) => {
       const next = new Set(current);
       if (selected) {
-        next.add(command);
+        next.add(key);
       } else {
-        next.delete(command);
+        next.delete(key);
       }
       return next;
     });
   }
 
   function selectVisibleSkills() {
-    setSelectedSkillCommands(new Set(filteredSkills.map((skill) => skill.command)));
+    setSelectedSkillKeys(new Set(filteredSkills.map(skillKey)));
   }
 
   function clearSelectedSkills() {
-    setSelectedSkillCommands(new Set());
+    setSelectedSkillKeys(new Set());
   }
 
   async function copySelectedSkillCommands() {
@@ -369,7 +386,9 @@ export function SkillsRoute() {
               <VStateSurface className={styles.emptyStateClass} tone="empty" title={copy.emptyList} />
             ) : (
               filteredSkills.map((skill) => {
-                const selected = selectedSkillCommands.has(skill.command);
+                const key = skillKey(skill);
+                const selected = selectedSkillKeys.has(key);
+                const isActive = key === activeKey;
                 return (
                   <div key={`${skill.path}-${skill.hash}`} className={bulkSelectionMode ? `${styles.selectableRowClass} ${styles.selectableRowSelectingClass}` : styles.selectableRowClass}>
                     {bulkSelectionMode ? <VTooltip content={`${copy.bulkSelected}: ${skill.name}`} width="compact">
@@ -379,7 +398,7 @@ export function SkillsRoute() {
                           type="checkbox"
                           checked={selected}
                           aria-label={`${copy.bulkSelected}: ${skill.name}`}
-                          onChange={(event) => toggleSkillSelection(skill.command, event.target.checked)}
+                          onChange={(event) => toggleSkillSelection(key, event.target.checked)}
                         />
                         {selected ? <CheckSquare size={15} aria-hidden="true" /> : <Square size={15} aria-hidden="true" />}
                       </label>
@@ -387,9 +406,9 @@ export function SkillsRoute() {
                     <VButton
                       type="button"
                       contentLayout="plain"
-                      className={activeCommand === skill.command ? `${styles.skillButtonBaseClass} ${styles.skillButtonActiveClass}` : styles.skillButtonBaseClass}
-                      aria-pressed={activeCommand === skill.command}
-                      onPress={() => setActiveCommand(skill.command)}
+                      className={isActive ? `${styles.skillButtonBaseClass} ${styles.skillButtonActiveClass}` : styles.skillButtonBaseClass}
+                      aria-pressed={isActive}
+                      onPress={() => setActiveKey(key)}
                     >
                       <BookOpen size={16} className={styles.skillIconClass} aria-hidden="true" />
                       <span className={styles.skillCopyClass}>

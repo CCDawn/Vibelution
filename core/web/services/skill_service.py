@@ -43,10 +43,25 @@ def get_skill_library(*, roots: list[Path] | None = None) -> dict[str, Any]:
     }
 
 
-def get_skill_detail(command: str, *, roots: list[Path] | None = None) -> dict[str, Any]:
-    """Return one local skill with bounded SKILL.md content for preview."""
+def get_skill_detail(
+    command: str,
+    *,
+    roots: list[Path] | None = None,
+    source: str = "",
+) -> dict[str, Any]:
+    """Return one local skill with bounded SKILL.md content for preview.
+
+    ``source`` is an optional root-source filter (``codex`` / ``agents`` /
+    ``other``). When empty the lookup keeps the registry's first-match order so
+    callers without a source dimension are unaffected. When set, only roots
+    whose ``_root_source`` matches are consulted, so same-command skills that
+    live under different roots resolve to the requested one.
+    """
 
     root_paths = [Path(root) for root in roots] if roots is not None else default_skill_roots()
+    source_filter = str(source or "").strip().lower()
+    if source_filter:
+        root_paths = [root for root in root_paths if _root_source(root) == source_filter]
     descriptor = resolve_skill(command, roots=root_paths)
     if descriptor is None:
         raise FileNotFoundError(f"Unknown skill: {command}")

@@ -57,7 +57,7 @@ describe("SkillsRoute layout contract", () => {
   });
 
   it("adds bulk selection without breaking the read-only skill contract", () => {
-    expect(routeSource).toContain("selectedSkillCommands");
+    expect(routeSource).toContain("selectedSkillKeys");
     expect(routeSource).toContain("copySelectedSkillCommands");
     expect(routeSource).toContain("copy.bulkReadOnlyReason");
     expect(routeSource).toContain("<VNativeInput");
@@ -156,7 +156,7 @@ describe("SkillsRoute layout contract", () => {
     expect(styles.skillButtonBaseClass).toContain("!border-0");
     expect(styles.skillButtonBaseClass).toContain("!shadow-none");
     expect(styles.skillButtonActiveClass).toBe("aria-pressed:!bg-[var(--vui-selection-bg)]");
-    expect(routeSource).toContain("aria-pressed={activeCommand === skill.command}");
+    expect(routeSource).toContain("aria-pressed={isActive}");
     expect(routeSource).toContain("<small className={styles.sourceCaptionClass}>");
     expect(routeSource).not.toContain("sourcePillClass");
     expect(styles.contentPreClass).toContain("border-0 bg-transparent");
