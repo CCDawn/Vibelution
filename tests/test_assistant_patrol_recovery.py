@@ -12,6 +12,45 @@ from tests.test_assistant_runtime_patrol import setup, journal_events
 
 
 @pytest.mark.parametrize("terminal", ["turn_failed", "turn_interrupted"])
+@pytest.mark.parametrize("event_type,payload,visible", [
+    ("tool_call_started", {}, False),  # Intent alone, without a result, is uncertain.
+    ("tool_result", {"result": "SECRET native result"}, False),
+    ("cli_task_sent", {"arguments": "SECRET CLI arguments"}, False),
+    ("cli_task_result", {"result": "SECRET CLI result"}, False),
+    ("assistant_item_committed", {"kind": "tool_call", "arguments": "SECRET tool arguments"}, False),
+    ("tool_call_started", {}, True),
+])
+def test_tool_side_effect_evidence_blocks_report_replay_after_restart(setup, monkeypatch, terminal, event_type, payload, visible):
+    class MetadataOnly(dict):
+        def get(self, key, *default):
+            assert key not in {"arguments", "args", "result", "error", "name"}, "recovery must not inspect tool bodies"
+            return super().get(key, *default)
+
+    root, row, dispatch = setup
+    runtime = patrol.LauncherPatrol(root, "pa", "session", dispatch)
+    calls = []
+    monkeypatch.setattr(proactive, "submit_session_proactive_turn", lambda **kw: calls.append(kw) or {"accepted": True})
+    assert runtime.inspect([row], now=10000)["wake"] == "accepted"
+    item = runtime._state["entries"][0]
+    token = item["token"]
+    journal = journal_events(token, item["event"]["eventId"], terminal, visible)
+    journal.insert(2, SimpleNamespace(event_type=event_type, turn_id="turn-1", correlation_id="",
+                                      payload=MetadataOnly(payload), visible_in_model=False))
+    monkeypatch.setattr(journal_bridge, "load_session_conversation_events_cached", lambda *a, **kw: journal)
+    assert runtime.reconcile()["unknown"] == 1
+    assert item["visibleReport"] is visible and item["escalation"] == "delivery_outcome_unknown"
+    runtime.close()
+    reopened = patrol.LauncherPatrol(root, "pa", "session", dispatch)
+    for now in (20000, 30000):
+        assert reopened.inspect([row], now=now)["wake"] == "none"
+        stored = reopened._state["entries"][0]
+        assert stored["token"] == token and stored["state"] == "unknown" and not stored.get("history")
+        assert stored["visibleReport"] is visible and stored["escalation"] == "delivery_outcome_unknown"
+        assert reopened.delivery_escalations["unresolved"] == 1
+    assert len(calls) == 1 and "SECRET" not in reopened._path.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("terminal", ["turn_failed", "turn_interrupted"])
 def test_report_failure_recovers_after_restart_with_new_token_at_most_twice(setup, monkeypatch, terminal):
     root, row, dispatch = setup
     runtime = patrol.LauncherPatrol(root, "pa", "session", dispatch)

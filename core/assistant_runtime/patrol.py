@@ -538,6 +538,15 @@ class LauncherPatrol:
             and e.payload.get("channel") == "answer" and str(e.payload.get("text") or "").strip()
             for e in turn_events)
         item["priorTurnId"], item["visibleReport"] = turn, bool(any_visible)
+        if kind in {"turn_failed", "turn_interrupted"} and any(
+            e.event_type in {"tool_call_started", "tool_result", "cli_task_sent", "cli_task_result"}
+            or e.event_type == "assistant_item_committed" and e.payload.get("kind") == "tool_call"
+            for e in turn_events
+        ):
+            # A failed report may already have changed native state. Even an
+            # intent without a result forbids replaying the whole turn; only
+            # tool event/kind metadata matters, never arguments or result text.
+            return "unknown"
         if kind == "turn_failed":
             return "failed"
         if kind == "turn_interrupted":

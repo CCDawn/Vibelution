@@ -12,7 +12,7 @@ from tools import pa_settings_actions as settings
 def test_catalog_reuses_native_schema_and_governance_without_project_actions():
     contracts = local.contracts()
     expected = set(assistant.contracts()) | set(config.contracts()) | {
-        "settings_catalog", "settings_update", "model_add", "model_options",
+        "settings_catalog", "settings_update", "model_add", "model_options", "configuration_references",
         "operator_image_options", "operator_image_select",
         "history_list", "history_read", "history_search", "history_commentary_read",
         "affairs_conflict_sets", "affairs_conflict_list", "affairs_conflict_read", "affairs_sync_receipt",
