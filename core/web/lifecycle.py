@@ -299,9 +299,11 @@ def reconcile_external_agent_tasks_once() -> list[dict[str, Any]]:
     """Recover and reconcile durable external task projections once."""
 
     from .services.external_agent.service import get_default_service
+    from .services.local_assistant.service import build_local_service
 
     project_root = Path(__file__).resolve().parents[2]
-    return list(get_default_service(project_root).reconcile())
+    return (list(get_default_service(project_root).reconcile())
+            + list(build_local_service(project_root).reconcile()))
 
 
 def _start_pa_patrol_job(startup_jobs: StartupJobGroup):

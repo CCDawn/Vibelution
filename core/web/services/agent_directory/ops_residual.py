@@ -952,8 +952,11 @@ def _with_runtime_tool_grants(
         "workspace_write",
         "full_access",
     }
+    local_runtime_profile = (runtime_source.partition(":")[2]
+                             if runtime_source.startswith("launcher_assistant_task:") else "")
+    local_runtime_tools = local_runtime_profile in {"read_only", "workspace_write"}
     exclusive_runtime_tools = (
-        runtime_source == "self_evolution_autonomous_loop" or external_runtime_tools
+        runtime_source == "self_evolution_autonomous_loop" or external_runtime_tools or local_runtime_tools
     )
     runtime_grants = s._tool_name_list(grants or [])
     if not runtime_grants and not exclusive_runtime_tools:
@@ -1026,6 +1029,12 @@ def _with_runtime_tool_grants(
         except (TypeError, ValueError):
             current_max_calls = 0
         runtime_max_calls_per_turn = max(current_max_calls, 24)
+    if local_runtime_tools:
+        runtime_max_calls_per_turn = max(int(max_calls_per_turn or 0), 64)
+        # Temporary tools belong to this authenticated task, not the Agent's
+        # persistent policy. Explicit blockedTools remain effective above.
+        for tool in added:
+            approval_overrides[tool] = "on_request"
     if (
         not exclusive_runtime_tools
         and not added
@@ -1043,6 +1052,10 @@ def _with_runtime_tool_grants(
         "mutationAccess": runtime_mutation_access,
         "maxCallsPerTurn": runtime_max_calls_per_turn,
         "approvalOverrides": approval_overrides,
+        **({"readScopes": ["private", "shared"],
+            "writeScopes": ["private"] if local_runtime_profile == "workspace_write" else [],
+            "mutationAccess": "controlled" if local_runtime_profile == "workspace_write" else "none"}
+           if local_runtime_tools else {}),
     }
 
 

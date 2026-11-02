@@ -1227,6 +1227,12 @@ def active_agent_runtime(
         "delegationPolicy": delegation_policy,
         "supervisionPolicy": supervision_policy,
     }
+    if str(runtime_tool_source or "").strip() == "launcher_assistant_task:workspace_write":
+        # Windows has no verified workspace-only shell sandbox. This is an
+        # authenticated local execution grant, not an OS sandbox claim; the
+        # final executor still applies per-command task consent and asks for
+        # destructive, external or out-of-worktree operations.
+        context["runtimePermissions"] = {**context["runtimePermissions"], "sandboxMode": "danger_full_access"}
     if str(session_id or "").strip():
         try:
             from core.web.services.session import directory_runtime
@@ -1249,6 +1255,8 @@ def _runtime_permission_preset(
     *,
     runtime_tool_source: str = "",
 ) -> str:
+    if str(runtime_tool_source or "").strip().startswith("launcher_assistant_task:"):
+        return "auto_review"
     if str(runtime_tool_source or "").strip().startswith("external_agent_task:"):
         return "request_approval"
     return normalize_permission_preset(value) if str(value or "").strip() else ""

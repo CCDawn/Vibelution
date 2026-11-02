@@ -1,0 +1,106 @@
+"""Launcher-only transport adapter over the unchanged external Agent SDK."""
+from __future__ import annotations
+
+import hashlib
+import re
+import secrets
+from pathlib import Path
+from typing import Any
+
+from core.external_agent.backend_client import BackendClientError, ManagedAgentBackendClient, _read_json
+from core.infrastructure.launcher_assistant_authority import current_launcher_authority
+
+_EXTERNAL_PREFIX = "/api/v1/external-agent/"
+_LOCAL_PREFIX = "/api/local-assistant/v1/external-agent/"
+
+
+class LocalAssistantBackendClient(ManagedAgentBackendClient):
+    """Route task traffic only when the host explicitly supplied local authority."""
+
+    def __init__(self, project_root: Path, *, capability: str | None = None, **kwargs: Any) -> None:
+        credential = current_launcher_authority() if capability is None else capability
+        if credential is not None and (not isinstance(credential, str)
+                or (credential != "" and re.fullmatch(r"[A-Za-z0-9_-]{32,128}", credential, re.ASCII) is None)):
+            raise ValueError("Invalid Launcher authority credential.")
+        # Keep this out of the inherited SDK state/ledger. File access belongs
+        # exclusively to host bootstrap and the backend verifier.
+        self._launcher_capability = credential or ""
+        super().__init__(project_root, **kwargs)
+
+    def _load_state(self) -> dict[str, Any]:
+        state = super()._load_state()
+        payload = _read_json(self.state_path)
+        namespaces = payload.get("transportNamespaces")
+        state["transportNamespaces"] = {
+            digest: namespace for digest, namespace in namespaces.items()
+            if isinstance(digest, str) and re.fullmatch(r"[a-f0-9]{64}", digest)
+            and isinstance(namespace, str) and namespace in {"local", "external"}
+        } if payload.get("projectRoot") == str(self.project_root) and isinstance(namespaces, dict) else {}
+        return state
+
+    async def start_task(
+        self,
+        *,
+        agent_id: str,
+        task: str,
+        permission_profile: str,
+        client_request_id: str,
+        title: str,
+        require_existing_capability: bool = False,
+    ) -> dict[str, Any]:
+        request_id = str(client_request_id or "").strip()
+        if not request_id:
+            raise BackendClientError("A stable request identity is required.", code="INVALID_REQUEST")
+        async with self._state_lock:
+            requests = self._state.setdefault("requests", {})
+            saved = requests.get(request_id)
+            capability = str(saved.get("taskCapability") or "").strip() if isinstance(saved, dict) else ""
+            namespaces = self._state.setdefault("transportNamespaces", {})
+            if capability:
+                # A pre-upgrade request can already have been accepted after a
+                # lost response. Absence of metadata always means external.
+                namespaces.setdefault(hashlib.sha256(capability.encode()).hexdigest(), "external")
+            else:
+                if require_existing_capability:
+                    raise BackendClientError("no durable credential for this request", code="UNKNOWN_REQUEST")
+                capability = secrets.token_urlsafe(32)
+                requests[request_id] = {"taskCapability": capability}
+                namespaces[hashlib.sha256(capability.encode()).hexdigest()] = (
+                    "local" if self._launcher_capability else "external")
+            # Persist the capability and its immutable transport together before
+            # the base implementation can send the first idempotent POST.
+            self._save_state_locked()
+        return await super().start_task(
+            agent_id=agent_id, task=task, permission_profile=permission_profile,
+            client_request_id=request_id, title=title, require_existing_capability=True,
+        )
+
+    async def _request_json(
+        self,
+        method: str,
+        path: str,
+        *,
+        task_capability: str = "",
+        management_auth: tuple[str, str] | None = None,
+        json_payload: dict[str, Any] | None = None,
+        timeout_seconds: float | None = None,
+        max_response_bytes: int | None = None,
+    ) -> dict[str, Any]:
+        namespace = "external"
+        if task_capability:
+            async with self._state_lock:
+                namespace = self._state.get("transportNamespaces", {}).get(
+                    hashlib.sha256(task_capability.encode()).hexdigest(), "external")
+        discovery = (not task_capability and method == "GET"
+                     and path.split("?", 1)[0] == _EXTERNAL_PREFIX + "agents")
+        if namespace == "local" and not self._launcher_capability:
+            raise BackendClientError("Launcher authority is unavailable.", code="LAUNCHER_AUTHORITY_REQUIRED")
+        if self._launcher_capability and (namespace == "local" or discovery) and path.startswith(_EXTERNAL_PREFIX):
+            path = _LOCAL_PREFIX + path[len(_EXTERNAL_PREFIX):]
+            management_auth = ("launcher-local", self._launcher_capability)
+        # The base SDK retains its raw external /info identity handshake,
+        # capability isolation, payload/timeout limits and single reconnect.
+        return await super()._request_json(
+            method, path, task_capability=task_capability, management_auth=management_auth,
+            json_payload=json_payload, timeout_seconds=timeout_seconds, max_response_bytes=max_response_bytes,
+        )

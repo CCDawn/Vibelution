@@ -60,6 +60,10 @@ def _runtime_source_identity(request: Request) -> dict[str, Any] | None:
 
 
 def _service() -> ExternalAgentTaskService | Any:
+    from core.web.services.local_assistant.service import route_service
+    local = route_service.get()
+    if local is not None:
+        return local
     return _SERVICE if _SERVICE is not None else get_default_service(PROJECT_ROOT)
 
 
