@@ -139,6 +139,11 @@ def test_web_route_contract_rule_avoids_static_python_fallback() -> None:
             "tests/test_external_agent_dispatch_admission.py",
             "tests/test_external_management_dispatch_access.py",
         )),
+        ("core/web/services/local_assistant/service.py", (
+            "tests/test_local_assistant_tasks.py",
+            "tests/test_local_dispatch_access_admission.py",
+            "tests/test_external_management_dispatch_access.py",
+        )),
         ("config/operator_config_transaction.py", (
             "tests/test_operator_config_native_outcome.py",
             "tests/test_external_agent_dispatch_access_client.py",
