@@ -21,6 +21,15 @@ const RESPAWN_MAX_DELAY_MS = 60_000;
 const RESPAWN_MAX_ATTEMPTS = 5;
 const RESPAWN_WINDOW_MS = 600_000;
 const FORENSICS_STDERR_TAIL_BYTES = 2_048;
+/** A dying host resets its control sockets before its Job settles: a venv
+ * pythonw redirector root exits only after its killed host child. A failed
+ * pump on a still-counted Job is re-probed this long before it is treated as
+ * a live host's control-channel failure. */
+const CONTROL_FAILURE_SETTLE_MS = 1_000;
+const CONTROL_FAILURE_SETTLE_POLL_MS = 50;
+
+/** Which shell observer first classified an unexpected host exit. */
+type HostDeathObserver = "liveness_poll" | "main_control";
 
 export type AssistantHostSnapshot = {
   state: "stopped" | "starting" | "ready" | "stopping" | "failed";
@@ -106,8 +115,12 @@ type Generation = {
   controlPump?: AbortController;
   /** Job root pid captured at spawn; forensics only, never an ownership proof. */
   pid?: number;
+  /** ready.json pid of the serving host; differs from pid under a venv redirector. Forensics only. */
+  hostPid?: number;
   /** Wall clock when this generation reached the ready view; uptime source. */
   readyAt?: number;
+  /** Set by the first observer that classifies this generation's exit. */
+  exitHandled?: boolean;
 };
 
 class HostError extends Error {
@@ -184,6 +197,7 @@ export class AssistantHost {
   private respawnWindowStart = 0;
   private respawnRevision = -1;
   private respawnSuspended = false;
+  private hostDeaths = 0;
 
   constructor(options: AssistantHostOptions) {
     for (const path of [options.profileRoot, options.runtimeRoot, options.sourceRoot, options.pythonPath, ...Object.values(options.projects)]) {
@@ -632,21 +646,36 @@ export class AssistantHost {
     this.handleUnexpectedDeath(generation);
   }
 
-  private handleUnexpectedDeath(generation: Generation): void {
-    this.recordHostDeathForensics(generation);
+  /** The liveness poll and the control pump can both observe one exit; the
+   * first observer classifies it, once per generation. Evidence and the
+   * failed view precede respawn scheduling. */
+  private handleUnexpectedDeath(generation: Generation, detectedBy: HostDeathObserver = "liveness_poll"): void {
+    if (generation.exitHandled) return;
+    generation.exitHandled = true;
+    this.hostDeaths += 1;
+    this.recordHostDeathForensics(generation, detectedBy);
     this.view = { state: "failed", errorCode: "ASSISTANT_EXITED" };
     this.scheduleRespawn();
   }
 
-  /** One greppable shell-log line carrying every attribution input. */
-  private recordHostDeathForensics(generation: Generation): void {
+  /** One greppable shell-log line plus a best-effort death-forensics.json in
+   * the generation directory: packaged shells capture no main stdout. */
+  private recordHostDeathForensics(generation: Generation, detectedBy: HostDeathObserver): void {
     let exitCode: number | null = null;
     try { exitCode = typeof generation.native.exitCode === "function" ? generation.native.exitCode(generation.job) : null; }
     catch { exitCode = null; }
     const uptimeMs = typeof generation.readyAt === "number" ? Math.max(0, Date.now() - generation.readyAt) : null;
-    console.warn(`ASSISTANT_HOST_DEATH phase=unexpected_exit exitCode=${exitCode ?? "unknown"} `
+    const stderrTail = this.stderrTail(generation);
+    console.warn(`ASSISTANT_HOST_DEATH phase=unexpected_exit detectedBy=${detectedBy} exitCode=${exitCode ?? "unknown"} `
       + `instanceId=${generation.id} pid=${generation.pid ?? "unknown"} uptimeMs=${uptimeMs ?? "unknown"} `
-      + `stderrTail=${JSON.stringify(this.stderrTail(generation))}`);
+      + `stderrTail=${JSON.stringify(stderrTail)}`);
+    try {
+      writeFileSync(join(generation.directory, "death-forensics.json"), JSON.stringify({
+        schemaVersion: 1, phase: "unexpected_exit", detectedBy, recordedAt: new Date().toISOString(), exitCode,
+        instanceId: generation.id, pid: generation.pid ?? null, hostPid: generation.hostPid ?? null, uptimeMs, revision: this.revision,
+        deathsInSession: this.hostDeaths, stderrTail,
+      }), { encoding: "utf8", mode: 0o600 });
+    } catch { /* Best-effort evidence never blocks classification or respawn. */ }
   }
 
   /** Bounded best-effort tail of this generation's stderr log; never throws. */
@@ -1173,6 +1202,7 @@ export class AssistantHost {
         const ready = this.readReady(generation);
         if (ready) {
           generation.origin = `http://127.0.0.1:${ready.port}`;
+          generation.hostPid = ready.pid;
           try {
             const timeout = Math.max(1, Math.min(2_000, deadline - Date.now()));
             const health = await this.rpc(generation, "/health", "GET", undefined, timeout);
@@ -1469,14 +1499,20 @@ export class AssistantHost {
         pump.abort();
         if (generation.referenceLeases?.size || generation.referenceRecovery
             || uncertain?.some(request => isConfigurationReferenceRequest(request))) {
+          // A dead Job's leases died with their writer: never reconnect to it.
+          if (this.jobExited(generation)) { if (!this.migrationAdmission) this.retireFailedGeneration(generation, true); return; }
           // Retain the exact native writer. Only the transport is replaced;
           // original deliveries are neither retried nor sent to another Job.
           generation.referenceRecovery = true;
           const retry = generation.controlRetryMs ?? 100;
           generation.controlRetryMs = Math.min(1000, retry * 2);
           void sleep(retry, generation.abort.signal).then(() => {
-            if (this.current === generation && !generation.closed && !generation.abort.signal.aborted
-                && this.view.state === "ready" && generation.controlPump === pump) this.startMainControl(generation);
+            if (this.current !== generation || generation.closed || generation.abort.signal.aborted
+                || this.view.state !== "ready" || generation.controlPump !== pump) return;
+            // The retry delay doubles as a settle window: never reconnect a
+            // transport to a Job that died meanwhile.
+            if (this.jobExited(generation)) { if (!this.migrationAdmission) this.retireFailedGeneration(generation, true); return; }
+            this.startMainControl(generation);
           }).catch(() => undefined);
           return;
         }
@@ -1486,21 +1522,59 @@ export class AssistantHost {
           this.mainControlUncertain = true;
           return;
         }
-        generation.abort.abort();
-        this.view = { state: "failed", errorCode: "ASSISTANT_MAIN_CONTROL_FAILED" };
-        // Reuse the same serialized Job owner; never race another retirement or
-        // cancel a native project command when only the assistant channel failed.
-        const operation = this.serial.then(async () => {
-          if (this.current !== generation) return;
-          try { await this.retire(generation, false); }
-          finally { if (generation.closed && this.current === generation) this.current = null; }
-        });
-        this.serial = operation.catch(() => undefined);
+        if (this.jobExited(generation)) { this.retireFailedGeneration(generation, true); return; }
+        this.settleMainControlFailure(generation);
       },
     }).catch(() => undefined);
   }
 
-  private readReady(generation: Generation): { port: number } | null {
+  /** Host death evidence for this exact Job: no live process, or its root
+   * handle signaled (a venv pythonw redirector root exits only after its host
+   * child; lingering grandchildren can keep accounting above zero). A failed
+   * native query is never death. */
+  private jobExited(generation: Generation): boolean {
+    try {
+      return generation.native.activeCount(generation.job) === 0
+        || (typeof generation.native.exitCode === "function" && generation.native.exitCode(generation.job) !== null);
+    } catch { return false; }
+  }
+
+  /** rpc() and the instant probe can both still read a live Job while the host
+   * dies, so a failed pump is re-probed for a bounded window. Every step first
+   * revalidates ownership: a stopped, retired, already classified or
+   * admission-held generation is never classified here. */
+  private settleMainControlFailure(generation: Generation): void {
+    const owned = () => this.current === generation && !generation.closed && !generation.abort.signal.aborted
+      && this.view.state === "ready";
+    void (async () => {
+      for (let waited = 0; waited < CONTROL_FAILURE_SETTLE_MS; waited += CONTROL_FAILURE_SETTLE_POLL_MS) {
+        await sleep(CONTROL_FAILURE_SETTLE_POLL_MS, generation.abort.signal);
+        if (!owned()) return;
+        if (this.migrationAdmission) { this.mainControlUncertain = true; return; }
+        if (this.jobExited(generation)) { this.retireFailedGeneration(generation, true); return; }
+      }
+      this.retireFailedGeneration(generation, false);
+    })().catch(() => undefined);
+  }
+
+  /** abort, classify, then retire on the serialized Job owner. Classification
+   * and any respawn scheduling complete first; a failed retirement only
+   * leaves cleanup to the respawn's own previous-generation retirement. */
+  private retireFailedGeneration(generation: Generation, exited: boolean): void {
+    generation.abort.abort();
+    if (exited) this.handleUnexpectedDeath(generation, "main_control");
+    else this.view = { state: "failed", errorCode: "ASSISTANT_MAIN_CONTROL_FAILED" };
+    // Reuse the same serialized Job owner; never race another retirement or
+    // cancel a native project command when only the assistant channel failed.
+    const operation = this.serial.then(async () => {
+      if (this.current !== generation) return;
+      try { await this.retire(generation, false); }
+      finally { if (generation.closed && this.current === generation) this.current = null; }
+    });
+    this.serial = operation.catch(() => undefined);
+  }
+
+  private readReady(generation: Generation): { port: number; pid: number } | null {
     const path = join(generation.directory, "ready.json");
     if (!existsSync(path)) return null;
     let ready: unknown;
@@ -1512,7 +1586,7 @@ export class AssistantHost {
       || ready.protocolVersion !== 1 || ready.role !== "launcher_assistant" || ready.instanceId !== generation.id
       || !positiveInteger(ready.pid) || !positiveInteger(ready.port, 65_535)) throw new HostError("ASSISTANT_READY_INVALID");
     // A venv pythonw redirector can have a different root PID; Job ownership is authoritative.
-    return { port: ready.port };
+    return { port: ready.port, pid: ready.pid };
   }
 
   private configurationReferenceContext(generation: Generation): ConfigurationReferenceHostContext {

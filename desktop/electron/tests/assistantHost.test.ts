@@ -1,10 +1,10 @@
 /** Fake-Job coverage for the Launcher-owned assistant source-host lifecycle. */
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AssistantHost, type AssistantHostRequest } from "../src/assistant/assistantHost.js";
+import { AssistantHost, type AssistantHostOptions, type AssistantHostRequest } from "../src/assistant/assistantHost.js";
 import { invokeAssistant, LAUNCHER_ASSISTANT_URL } from "../src/assistant/assistantBridge.js";
 import { affairsSyncMigrationId } from "../src/assistant/mainControlTransport.js";
 import { applyDesktopLaunchSettingsToEnvironment } from "../src/launch/desktopLaunchSettings.js";
@@ -20,7 +20,7 @@ afterEach(() => {
   }
 });
 
-function fixture(options: { stale?: boolean; noReadyFirst?: boolean; graceful?: boolean; pythonArguments?: string[]; env?: NodeJS.ProcessEnv; projectsSuspended?: boolean; initialMigrationControl?: boolean } = {}) {
+function fixture(options: { stale?: boolean; noReadyFirst?: boolean; graceful?: boolean; pythonArguments?: string[]; env?: NodeJS.ProcessEnv; projectsSuspended?: boolean; initialMigrationControl?: boolean; mainControl?: AssistantHostOptions["mainControl"] } = {}) {
   const root = mkdtempSync(join(tmpdir(), "assistant-host-test-"));
   tempRoots.push(root);
   const python = join(root, "pythonw.exe");
@@ -49,7 +49,8 @@ function fixture(options: { stale?: boolean; noReadyFirst?: boolean; graceful?: 
   const fetchImpl = vi.fn(async (...args: Parameters<typeof globalThis.fetch>): Promise<Response> => {
     const url = String(args[0]);
     if (url.endsWith("/health")) return Response.json({ status: "ok", protocolVersion: 1, role: "launcher_assistant",
-      ...(options.initialMigrationControl ? { initialMigrationControlVersion: 1 } : {}) });
+      ...(options.initialMigrationControl ? { initialMigrationControlVersion: 1 } : {}),
+      ...(options.mainControl ? { mainControlVersion: 1 } : {}) });
     if (url.endsWith("/api/assistant")) return Response.json({ assistant: { agentId: "a", directSessionId: "s", displayName: "Assistant" } });
     if (url.endsWith("/api/assistant/session")) return Response.json({ id: "s", messages: [] });
     if (url.endsWith("/migration-barrier/status")) return Response.json({ schemaVersion: 1, state: "ready" });
@@ -61,6 +62,7 @@ function fixture(options: { stale?: boolean; noReadyFirst?: boolean; graceful?: 
   });
   const host = new AssistantHost({ profileRoot: join(root, "profile"), runtimeRoot: join(root, "runtime"),
     sourceRoot: root, pythonPath: python, pythonArguments: options.pythonArguments, projects: { project: root }, projectsSuspended: options.projectsSuspended, initialMigrationControl: options.initialMigrationControl, native, fetch: fetchImpl,
+    ...(options.mainControl ? { mainControl: options.mainControl } : {}),
     env: { VIBELUTION_CONFIG_PATH: join(root, "config.toml"), ...options.env, VIBELUTION_ASSISTANT_TOKEN: "must-not-override-token" } });
   return { host, native, fetchImpl, inputs, root, active };
 }
@@ -1412,6 +1414,50 @@ describe("AssistantHost liveness watch and bounded respawn", () => {
     active.set(job, 0);
   }
 
+  /** Long polls hang like the host's bounded ones. A dying host resets every
+   * socket it owns at once, and the dead generation's token never reconnects. */
+  function controlChannel(fetchImpl: ReturnType<typeof fixture>["fetchImpl"], claim?: Record<string, unknown>) {
+    const base = fetchImpl.getMockImplementation()!;
+    const pending = new Map<(error: Error) => void, string>();
+    const dead = new Set<string>();
+    let claimed = !claim, polls = 0, deadRetries = 0;
+    fetchImpl.mockImplementation(async (...args: Parameters<typeof globalThis.fetch>) => {
+      const [url, init] = args;
+      const token = String((init?.headers as Record<string, string> | undefined)?.Authorization ?? "");
+      if (String(url).endsWith("/api/assistant/main-control/settle")) return Response.json({ schemaVersion: 1, accepted: true });
+      if (!String(url).endsWith("/api/assistant/main-control/next")) return base(...args);
+      polls += 1;
+      if (dead.has(token)) { deadRetries += 1; throw new TypeError("fetch failed"); }
+      if (!claimed) { claimed = true; return Response.json({ schemaVersion: 1, request: claim }); }
+      return await new Promise<Response>((_resolve, reject) => {
+        const fail = (error: Error) => { pending.delete(fail); reject(error); };
+        pending.set(fail, token);
+        init?.signal?.addEventListener("abort", () => fail(new Error("aborted")), { once: true });
+      });
+    });
+    return {
+      polls: () => polls,
+      deadRetries: () => deadRetries,
+      reset: () => { for (const [fail, token] of [...pending]) { dead.add(token); fail(new TypeError("fetch failed")); } },
+    };
+  }
+
+  /** A venv pythonw redirector root outlives its killed host child for a few ms. */
+  function hostExitsAfter(active: Map<WorkbenchJobHandle, number>, ms: number): void {
+    const job = [...active.keys()].at(-1)!;
+    setTimeout(() => active.set(job, 0), ms);
+  }
+
+  function deathForensics(root: string, inputs: WorkbenchJobSpawnInput[], spawn: number): Record<string, unknown> | null {
+    const args = inputs[spawn]!.arguments;
+    const path = join(root, "runtime", args[args.indexOf("--instance-id") + 1]!, "death-forensics.json");
+    return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown> : null;
+  }
+
+  function deathLines(warn: { mock: { calls: unknown[][] } }): string[] {
+    return warn.mock.calls.map(([line]) => String(line)).filter(line => line.includes("ASSISTANT_HOST_DEATH"));
+  }
+
   it("records exit forensics and respawns an unexpectedly dead generation with 2s/4s/8s backoff", async () => {
     vi.useFakeTimers();
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -1427,6 +1473,7 @@ describe("AssistantHost liveness watch and bounded respawn", () => {
     expect(native.spawn).toHaveBeenCalledTimes(1);
     const deathLine = warnSpy.mock.calls.map(([line]) => String(line)).find(line => line.includes("ASSISTANT_HOST_DEATH"));
     expect(deathLine).toContain("phase=unexpected_exit");
+    expect(deathLine).toContain("detectedBy=liveness_poll");
     expect(deathLine).toContain("exitCode=3");
     expect(deathLine).toContain(`instanceId=${instanceId}`);
     expect(deathLine).toContain("pid=100");
@@ -1434,6 +1481,9 @@ describe("AssistantHost liveness watch and bounded respawn", () => {
     const tail = JSON.parse(deathLine!.match(/stderrTail=(.*)$/)![1]!) as string;
     expect(tail.length).toBeLessThanOrEqual(2048);
     expect(tail.endsWith("FINAL-stderr-LINE")).toBe(true);
+    // Packaged shells capture no main stdout: the same evidence is on disk.
+    expect(deathForensics(root, inputs, 0)).toMatchObject({ schemaVersion: 1, phase: "unexpected_exit", detectedBy: "liveness_poll",
+      exitCode: 3, instanceId, pid: 100, hostPid: 900, uptimeMs: expect.any(Number), revision: expect.any(Number), deathsInSession: 1, stderrTail: tail });
     await vi.advanceTimersByTimeAsync(2_000);
     expect(native.spawn).toHaveBeenCalledTimes(2);
     await vi.advanceTimersByTimeAsync(4_000);
@@ -1554,5 +1604,108 @@ describe("AssistantHost liveness watch and bounded respawn", () => {
     expect(native.spawn).toHaveBeenCalledTimes(2);
     expect(host.snapshot()).toEqual({ state: "stopped", errorCode: null });
     warnSpy.mockRestore();
+  });
+
+  it("classifies a control failure during a redirector-delayed exit as a host death and respawns exactly once", async () => {
+    // Live-fire defect record (2026-11-03): the host socket resets while the
+    // venv pythonw redirector root still holds the Job (activeCount=1); the
+    // accounting reaches zero ~5ms later. rpc() cannot see the exit, the pump
+    // reports a control failure, and an instant activeCount probe still reads
+    // 1, so the generation used to end ASSISTANT_MAIN_CONTROL_FAILED with no
+    // respawn. Red on the pre-fix code and on an instant-probe-only fix.
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { host, native, fetchImpl, active, root, inputs } = fixture({ graceful: true, mainControl: async () => ({}) });
+    const channel = controlChannel(fetchImpl);
+    await host.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(channel.polls()).toBeGreaterThan(0);
+    const instanceId = inputs[0]!.arguments[inputs[0]!.arguments.indexOf("--instance-id") + 1]!;
+    hostExitsAfter(active, 5);
+    channel.reset();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(host.snapshot()).toEqual({ state: "failed", errorCode: "ASSISTANT_EXITED" });
+    expect(deathLines(warnSpy)).toHaveLength(1);
+    expect(deathLines(warnSpy)[0]).toContain("detectedBy=main_control");
+    expect(deathForensics(root, inputs, 0)).toMatchObject({ schemaVersion: 1, phase: "unexpected_exit", detectedBy: "main_control",
+      exitCode: null, instanceId, pid: 100, hostPid: 900, uptimeMs: expect.any(Number), revision: expect.any(Number), deathsInSession: 1,
+      stderrTail: expect.any(String), recordedAt: expect.any(String) });
+    expect(native.terminate).not.toHaveBeenCalled();
+    expect(native.spawn).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(native.spawn).toHaveBeenCalledTimes(2);
+    expect(host.snapshot()).toEqual({ state: "ready", errorCode: null });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(native.spawn).toHaveBeenCalledTimes(2);
+    expect(deathLines(warnSpy)).toHaveLength(1);
+    expect(channel.deadRetries()).toBe(0);
+    warnSpy.mockRestore();
+    await host.stop();
+  });
+
+  it("does not reconnect the control transport to a dead host under reference recovery", async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const leases: Array<() => void> = [];
+    const { host, native, fetchImpl, active, root, inputs } = fixture({ graceful: true,
+      mainControl: async (_request, _signal, context) => { leases.push(context!.retainLease()); return {}; } });
+    const channel = controlChannel(fetchImpl, { deliveryId: "b".repeat(32), action: "project_lifecycle", projectId: "project",
+      operation: "start", requestId: "lease-holder" });
+    await host.start();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(leases).toHaveLength(1);
+    hostExitsAfter(active, 5);
+    channel.reset();
+    await vi.advanceTimersByTimeAsync(150);
+    expect(channel.deadRetries()).toBe(0);
+    expect(host.snapshot()).toEqual({ state: "failed", errorCode: "ASSISTANT_EXITED" });
+    expect(deathForensics(root, inputs, 0)).toMatchObject({ phase: "unexpected_exit", detectedBy: "main_control" });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(native.spawn).toHaveBeenCalledTimes(2);
+    expect(host.snapshot()).toEqual({ state: "ready", errorCode: null });
+    expect(deathLines(warnSpy)).toHaveLength(1);
+    warnSpy.mockRestore();
+    await host.stop();
+  });
+
+  it("keeps a live host's control-channel failure terminal without forensics or respawn", async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { host, native, fetchImpl, root, inputs } = fixture({ graceful: true, mainControl: async () => ({}) });
+    const channel = controlChannel(fetchImpl);
+    await host.start();
+    await vi.advanceTimersByTimeAsync(0);
+    channel.reset();
+    await vi.advanceTimersByTimeAsync(1_100);
+    expect(host.snapshot()).toEqual({ state: "failed", errorCode: "ASSISTANT_MAIN_CONTROL_FAILED" });
+    expect(native.terminate).toHaveBeenCalledTimes(1);
+    expect(deathForensics(root, inputs, 0)).toBeNull();
+    expect(deathLines(warnSpy)).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(native.spawn).toHaveBeenCalledTimes(1);
+    expect(host.snapshot()).toEqual({ state: "failed", errorCode: "ASSISTANT_MAIN_CONTROL_FAILED" });
+    warnSpy.mockRestore();
+  });
+
+  it("lets the first of the liveness poll and the control-pump settle window classify one exit", async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { host, native, fetchImpl, active, root, inputs } = fixture({ graceful: true, mainControl: async () => ({}) });
+    const channel = controlChannel(fetchImpl);
+    await host.start();
+    await vi.advanceTimersByTimeAsync(1_990);
+    hostExitsAfter(active, 5);
+    channel.reset();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(deathLines(warnSpy)).toHaveLength(1);
+    expect(host.snapshot()).toEqual({ state: "failed", errorCode: "ASSISTANT_EXITED" });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(deathLines(warnSpy)).toHaveLength(1);
+    expect(deathForensics(root, inputs, 0)).toMatchObject({ detectedBy: "liveness_poll" });
+    await vi.advanceTimersByTimeAsync(1_900);
+    expect(native.spawn).toHaveBeenCalledTimes(2);
+    expect(host.snapshot()).toEqual({ state: "ready", errorCode: null });
+    warnSpy.mockRestore();
+    await host.stop();
   });
 });
