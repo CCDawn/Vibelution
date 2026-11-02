@@ -3088,7 +3088,7 @@ def _build_key_tools() -> List[BaseTool]:
         action取其中governed=true的真实动作名，arguments_json为对应parameters的JSON对象字符串。
         session_create/update/stop/delete、room_update、team_create、knowledge_ingest、config_update、
         workflow_recovery_bind/revoke/start、provider_*/model_*等为旧适配器能力；Launcher使用自己的目录。
-        旧适配器agent_create必须明确display_name、primary_mode、prompt_template_id、model_id
+        旧适配器agent_create需要明确display_name、primary_mode、prompt_template_id、model_id
         （或llm_bindings_json）；非chat模式按schema另需role_key及persona/task/tool-policy等JSON字段。
         旧适配器agent_update使用agent_id、updates_json，knowledge_acl_grant使用原生permissions_json；
         config_update仅接受白名单updates数组，不能写密钥或借配置扩大权限。
@@ -3109,14 +3109,14 @@ def _build_key_tools() -> List[BaseTool]:
         parameters直接传JSON对象。实时目录是执行契约；API文档可见、catalog结果或历史工具说明均不授予权限。
         projects定位已授权项目，agents/agent_list发现目标。用户只要求读取源码时先source_search/source_read。
         dispatch使用project_id、agent_id、稳定dispatch_id；优先task_source的start_after/end_before唯一短锚点提取用户原文，
-        两锚点为空时使用整条用户消息；task必须是精确原文子串，不能添加目标或改写任务。
+        两锚点为空时使用整条用户消息；task使用精确原文子串，不能添加目标或改写任务。
         其他委派入口、任务目标管理与派遣参数以当前index/describe为准，不自行拼接旧适配器动作。
         receipt/dispatch_list恢复原任务；management_requests分页发现已保存管理请求，unknown只查原management_receipt。
         runtime_list/runtime_get读取来源、coverage、精确对象、commands与revision；仅执行available的原生命令。
         knowledge_list按owner_type、owner_id、query发现已有知识库元数据，续页原样携expected_digest；partial/unavailable不等于空库。
         修改团队先team_asset_get，工具权限先agent_tool_policy_get，知识ACL先knowledge_acl_get；原样携scopedKnowledgeBaseId及fingerprint。
         flow_list/flow_get续读沿用digest，flow_save/start经manage执行。受理、stopRequested、running均不代表业务完成。
-        agent_create必须提供project_id、request_id、display_name、model_id；mission可选，不会自动沿用助理模型。
+        agent_create需要提供project_id、request_id、display_name、model_id；mission可选，不会自动沿用助理模型。
         默认不授予工具或读写范围；需要文件能力时按describe使用capability_preset及独立授权，不凭派遣自动扩权。
         index中governed=true的动作按当前原生审批策略交personal_assistant_manage_tool同名action，arguments_json遵循该动作parameters schema。
         SCOPE_DENIED带requiredScopes时，先authorization_status，再经manage的authorization_upgrade仅申请缺失scope，批准后继续原请求。
@@ -3127,8 +3127,8 @@ def _build_key_tools() -> List[BaseTool]:
 
         先用personal_assistant_action_tool的index/describe读取本运行面的实时动作及参数schema；
         action使用其中governed=true的原名，arguments_json为对应parameters的JSON对象字符串。
-        项目动作必须携授权project_id及稳定request_id；版本、指纹和原生引用从对应读取动作取得并原样传回。
-        agent_create必须提供project_id、request_id、display_name、model_id，mission可选；不会自动选择默认模型或隐式授予工具。
+        项目动作需要携授权project_id及稳定request_id；版本、指纹和原生引用从对应读取动作取得并原样传回。
+        agent_create需要提供project_id、request_id、display_name、model_id，mission可选；不会自动选择默认模型或隐式授予工具。
         团队、工具权限、知识ACL、流程和运行控制均使用目录中各自读取/写入契约，不混用旧适配器参数。
         agent_purge先agent_purge_preview，使用已归档对象版本和独立agents:purge；不可恢复，cleanupPending仍表示清理未结束。
         authorization_upgrade先authorization_status，只申请当前请求缺失的scope，遵循当前原生审批策略；目录发现不等于获权。

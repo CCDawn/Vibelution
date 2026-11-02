@@ -36,8 +36,8 @@ async def test_launcher_actual_tool_descriptions_agree_with_native_describe(tool
         # text or an unused helper cannot satisfy the runtime description.
         create = json.loads(action.invoke({"action": "describe", "parameters": {"action": "agent_create"}}))
         assert {"project_id", "request_id", "display_name", "model_id"} <= set(create["parameters"]["required"])
-        assert "必须提供project_id、request_id、display_name、model_id" in action.description
-        assert "必须提供project_id、request_id、display_name、model_id" in manage.description
+        assert "需要提供project_id、request_id、display_name、model_id" in action.description
+        assert "需要提供project_id、request_id、display_name、model_id" in manage.description
         assert create["governed"] is False
         assert execute_action("describe", {"action": "knowledge_acl_grant"})["governed"] is True
         for name in ("workspace_list", "session_create", "session_delete", "room_update", "knowledge_ingest", "config_update", "workflow_recovery_bind"):
@@ -45,6 +45,7 @@ async def test_launcher_actual_tool_descriptions_agree_with_native_describe(tool
             with pytest.raises(ValueError, match="Unknown Launcher action"):
                 execute_action("describe", {"action": name})
         for description in (action.description, manage.description):
+            assert not any(marker in description for marker in ("必须", "禁止", "禁用", "强制"))
             assert "index/describe" in description and "原生审批策略" in description
             assert "原management_receipt" in description
         assert set(action.args_schema.model_json_schema()["properties"]) == {"action", "parameters"}
