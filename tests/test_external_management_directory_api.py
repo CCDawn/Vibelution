@@ -247,7 +247,7 @@ async def test_governed_upgrade_keeps_original_credentials_and_recovers_lost_ack
         receipt = await asyncio.to_thread(execute_action, "management_receipt", {
             "project_id": "p", "action": "authorization_upgrade", "request_id": "upgrade-1"})
         assert receipt["status"] == "completed" and receipt["authorization"]["addedScopes"] == additions
-        assert restarted._state["management"] == {**saved, "scopes": sorted(original + additions)}
+        assert restarted._state["management"] == {**saved, "scopes": sorted(original + additions), "grantRevision": 1}
         assert "agents:archive" not in restarted._state["management"]["scopes"] and "sessions:pin" not in restarted._state["management"]["scopes"]
         second = await asyncio.to_thread(execute_action, "authorization_upgrade", {"project_id": "p", "request_id": "upgrade-2",
             "expected_scopes": restarted._state["management"]["scopes"], "add_scopes": ["agents:archive"]}, governed=True)

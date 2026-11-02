@@ -32,7 +32,8 @@ describe("isolated lifecycle recovery", () => {
 
     const stopReturnStart = body.indexOf('if (input.operation === "stop" || input.operation === "force-stop")');
     const stopReturn = body.slice(stopReturnStart);
-    expect(stopReturn).toContain("const stopCommandId = randomUUID()");
+    expect(stopReturn).toContain("const stopCommandId = input.commandId || randomUUID()");
+    expect(stopReturn).toContain("commandId: stopCommandId");
     expect(stopReturn).toContain("const commandId = String(claimed.entry.commandId || stopCommandId)");
     expect(stopReturn).toContain("      commandId,");
     expect(stopReturn).toContain("backend_retire_incomplete");

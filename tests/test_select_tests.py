@@ -575,9 +575,11 @@ def test_selector_matches_agent_directory_services_to_focused_commands():
         select_tests.load_matrix(),
     )
 
-    assert {rule["id"] for rule in result["matchedRules"]} == {"agent-directory-config"}
+    assert {rule["id"] for rule in result["matchedRules"]} == {"agent-directory-config", "assistant-platform-autonomy"}
     assert any("tests/test_agent_config_workspace_service.py" in command for command in result["commands"])
     assert any("tests/test_model_reference_service.py" in command for command in result["commands"])
+    assert any("tests/test_assistant_global_model_references.py" in command for command in result["commands"])
+    assert any("tests/test_assistant_configuration_control.py" in command for command in result["commands"])
     assert not any("tests/ --collect-only" in command for command in result["commands"])
 
 
