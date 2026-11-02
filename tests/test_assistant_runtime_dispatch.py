@@ -107,6 +107,14 @@ async def test_project_discovery_skips_offline_and_stale_backends_without_starti
     assert skipped["offline"]["code"] == "BACKEND_UNAVAILABLE"
     assert "未发现" in skipped["offline"]["message"]
     assert "后台仍在运行其他版本" in skipped["stale"]["message"]
+    # Only identity drift carries the backend-free restart path; an offline
+    # backend has nothing a Launcher-side restart could prove.
+    assert "recovery" not in skipped["offline"]
+    assert skipped["stale"]["recovery"] == {
+        "action": "project_lifecycle", "operation": "restart", "projectId": "stale",
+        "tool": "personal_assistant_manage_tool", "receiptAction": "project_lifecycle_receipt",
+        "bypassesProjectBackend": True}
+    assert "project_lifecycle" in skipped["stale"]["message"]
     assert "private" not in json.dumps(result)
     assert sorted(calls) == ["offline", "online", "stale"]
     assert service.list_dispatches() == []
@@ -152,6 +160,63 @@ async def test_untrusted_backend_message_does_not_become_a_diagnostic_reason(tmp
     assert "版本或项目身份校验失败" in str(error.value)
     assert "后台仍在运行其他版本" not in str(error.value)
     assert "private" not in str(error.value)
+    # A code-only identity failure still points at the same backend-free restart.
+    assert error.value.recovery == {
+        "action": "project_lifecycle", "operation": "restart", "projectId": "project",
+        "tool": "personal_assistant_manage_tool", "receiptAction": "project_lifecycle_receipt",
+        "bypassesProjectBackend": True}
+
+
+@pytest.mark.anyio
+async def test_identity_drift_error_names_the_backend_free_restart_but_other_failures_do_not(tmp_path):
+    """Every backend-bound action is rejected on drift; the error must name the one exit.
+
+    ``project_lifecycle`` reaches Electron main over the host transport and never
+    opens a project-backend client, so it stays callable while this adapter's own
+    diagnostics gate refuses. Other failures get no recovery hint: a restart would
+    prove nothing for an offline backend or an unauthorized project.
+    """
+    failure = {"code": "RUNTIME_IDENTITY_MISMATCH", "reason": "runtime_revision_mismatch"}
+
+    def factory(*_args, **_kwargs):
+        class Client:
+            async def diagnostics(self):
+                raise BackendClientError("private token and path", **failure)
+
+            async def list_agents(self, **_kwargs):
+                raise AssertionError("a drifted backend must be refused before any management call")
+        return Client()
+
+    root = tmp_path / "project"
+    root.mkdir()
+    service = DispatchService(tmp_path / "profile", {"project-a": root}, client_factory=factory)
+    with pytest.raises(DispatchError) as drift:
+        await service.discover("project-a")
+    assert drift.value.code == "RUNTIME_IDENTITY_MISMATCH"
+    assert drift.value.recovery == {
+        "action": "project_lifecycle", "operation": "restart", "projectId": "project-a",
+        "tool": "personal_assistant_manage_tool", "receiptAction": "project_lifecycle_receipt",
+        "bypassesProjectBackend": True}
+    message = str(drift.value)
+    assert "后台仍在运行其他版本" in message
+    for needle in ("project_lifecycle", "operation=restart", "project_lifecycle_receipt", "原 ID 重试"):
+        assert needle in message
+    assert "private" not in message and "token" not in message
+    # The receipt path is keyed by the same opaque IDs the model already holds;
+    # nothing in the hint reveals a path, credential or backend URL.
+    assert all(isinstance(value, (str, bool)) for value in drift.value.recovery.values())
+
+    failure.update(code="BACKEND_UNAVAILABLE", reason="runtime_descriptor_missing")
+    with pytest.raises(DispatchError) as offline:
+        await service.discover("project-a")
+    assert offline.value.code == "BACKEND_UNAVAILABLE"
+    assert offline.value.recovery is None
+    assert "project_lifecycle" not in str(offline.value)
+
+    with pytest.raises(DispatchError) as unauthorized:
+        await service.discover("project-b")
+    assert unauthorized.value.code == "PROJECT_NOT_AUTHORIZED"
+    assert unauthorized.value.recovery is None
 
 
 @pytest.mark.anyio

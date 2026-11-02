@@ -34,20 +34,46 @@ from core.external_agent.contracts import TASK_TERMINAL_STATUSES
 from core.infrastructure.atomic_io import atomic_write_json
 
 _PROJECT_DISCOVERY_SECONDS = 4.0
+# Identity drift is cleared by restarting the project through ``project_lifecycle``:
+# that action travels host -> Electron main -> runtime manager and never calls the
+# drifted project backend, and the restarted backend re-snapshots the checkout HEAD.
+_IDENTITY_RECOVERY_HINT = (
+    "可经原生审批调用 project_lifecycle（operation=restart，同一 project_id，稳定 request_id）重启该项目，"
+    "再用 project_lifecycle_receipt 确认后以原 ID 重试；或通过 Launcher 更新并重启。"
+)
 _BACKEND_ERROR_MESSAGES = {
-    "runtime_revision_mismatch": "项目代码已更新，但后台仍在运行其他版本。请通过 Launcher 更新并重启该项目后再试；已有任务引用已保留。",
+    "runtime_revision_mismatch": "项目代码已更新，但后台仍在运行其他版本。" + _IDENTITY_RECOVERY_HINT + "已有任务引用已保留。",
     "runtime_descriptor_missing": "未发现该项目的后端运行信息，已跳过。需要操作该项目时，请先通过 Launcher 启动；已有任务引用已保留。",
 }
 _BACKEND_CODE_MESSAGES = {
     "AGENT_DIRECTORY_UNAVAILABLE": "目标项目暂不支持完整 Agent 目录，请通过 Launcher 更新并重启后再查；这不表示目录为空。",
     "BACKEND_UNAVAILABLE": "无法连接该项目后端。请检查 Launcher 中该项目的运行状态；已有任务引用已保留。",
-    "RUNTIME_IDENTITY_MISMATCH": "项目后端的版本或项目身份校验失败。请通过 Launcher 更新并重启该项目后再试；已有任务引用已保留。",
+    "RUNTIME_IDENTITY_MISMATCH": "项目后端的版本或项目身份校验失败。" + _IDENTITY_RECOVERY_HINT + "已有任务引用已保留。",
 }
 
 
 def _backend_error_message(exc: BackendClientError) -> str:
     return (_BACKEND_ERROR_MESSAGES.get(exc.reason) or _BACKEND_CODE_MESSAGES.get(exc.code)
             or "项目后端操作失败；已有任务引用已保留。")
+
+
+def _identity_recovery(exc: BackendClientError, project_id: str) -> dict[str, Any] | None:
+    """Structured self-service path for a drifted backend; ``None`` for other failures.
+
+    Only ``project_lifecycle`` is named here: it is the one registered action that
+    reaches the Launcher main process without the project backend, so it stays
+    callable while every backend-bound action is rejected. Approval is per use.
+    """
+    if exc.code != "RUNTIME_IDENTITY_MISMATCH":
+        return None
+    return {
+        "action": "project_lifecycle",
+        "operation": "restart",
+        "projectId": project_id,
+        "tool": "personal_assistant_manage_tool",
+        "receiptAction": "project_lifecycle_receipt",
+        "bypassesProjectBackend": True,
+    }
 
 _DISPATCH_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,119}\Z")
 _DRAIN_ADMISSION_TIMEOUT = 5.0
@@ -65,9 +91,12 @@ _RECEIPT_FIELDS = frozenset({
 class DispatchError(RuntimeError):
     """Bounded adapter error; raw backend exceptions and credentials stay private."""
 
-    def __init__(self, message: str, *, code: str) -> None:
+    def __init__(self, message: str, *, code: str, recovery: dict[str, Any] | None = None) -> None:
         super().__init__(message)
         self.code = code
+        # Set only when a registered Launcher action that bypasses the project
+        # backend can clear this failure; it never carries backend detail.
+        self.recovery = recovery
 
 
 class _ActiveProjectClient:
@@ -521,7 +550,9 @@ class DispatchService:
                     await client.diagnostics()
                 except BackendClientError as exc:
                     code = exc.code if exc.code in {*_BACKEND_CODE_MESSAGES, "BACKEND_PROTOCOL_ERROR"} else "BACKEND_ERROR"
-                    skipped[key] = {"projectId": key, "code": code, "message": _backend_error_message(exc)}
+                    recovery = _identity_recovery(exc, key)
+                    skipped[key] = {"projectId": key, "code": code, "message": _backend_error_message(exc),
+                                    **({"recovery": recovery} if recovery is not None else {})}
                 except DispatchError as exc:
                     skipped[key] = {"projectId": key, "code": exc.code, "message": str(exc)}
                 else:
@@ -1078,6 +1109,7 @@ class DispatchService:
                 code = re.sub(r"[^A-Z0-9_]", "_", str(exc.code).upper())[:80] or "BACKEND_ERROR"
                 raise DispatchError(
                     _backend_error_message(exc), code=code,
+                    recovery=_identity_recovery(exc, project_id),
                 ) from None
 
     async def _update(self, record: dict[str, Any], action: Callable[[Any], Awaitable[dict[str, Any]]]) -> dict[str, Any]:

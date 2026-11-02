@@ -809,3 +809,86 @@ async def test_optional_main_actions_have_full_discoverable_contracts_within_too
                 execute_action("describe", {"action": name})
     finally:
         unbind_actions(service)
+
+
+@pytest.mark.anyio
+async def test_identity_drift_recovery_restarts_through_main_without_touching_the_project_backend(tmp_path):
+    """Self-service recovery for RUNTIME_IDENTITY_MISMATCH must not dead-lock on the drifted backend.
+
+    The adapter's own diagnostics gate rejects every backend-bound action once the
+    checkout moved past the running backend. The rejection text names
+    ``project_lifecycle`` (operation=restart) and that action travels host ->
+    Electron main over this broker, so following the hint never constructs a
+    project-backend client. Approval stays per use.
+
+    The model acts on the message text: ``execute_action`` forwards ``str(exc)``
+    unchanged, so the text alone must carry every field the restart needs. The
+    structured ``DispatchError.recovery`` payload is asserted at the adapter
+    level in ``test_assistant_runtime_dispatch``; surfacing it as a key of the
+    tool result is a separate ``actions.py`` change.
+    """
+    from core.assistant_runtime.dispatch import DispatchService
+    from core.external_agent.backend_client import BackendClientError
+
+    backend_clients = []
+
+    def drifted_factory(root, **_kwargs):
+        backend_clients.append(root)
+
+        class Client:
+            async def diagnostics(self):
+                raise BackendClientError("private token and path",
+                                         code="RUNTIME_IDENTITY_MISMATCH", reason="runtime_revision_mismatch")
+        return Client()
+
+    root = tmp_path / "project"
+    root.mkdir()
+    service = DispatchService(tmp_path / "profile", {"p:main": root}, client_factory=drifted_factory)
+    owner = broker(service, claim_seconds=2)
+    bind_actions(service, asyncio.get_running_loop(), main_control=owner)
+    runtime = {"agentId": "a", "sessionId": "s", "turnId": "turn-1"}
+    try:
+        # 1. Any backend-bound action is refused and the refusal text names the
+        #    exit with every field the restart needs; nothing private leaks.
+        refused = await asyncio.to_thread(execute_action, "agents", {"project_id": "p:main"}, runtime=runtime)
+        assert refused["ok"] is False and refused["code"] == "RUNTIME_IDENTITY_MISMATCH"
+        message = refused["message"]
+        assert "后台仍在运行其他版本" in message
+        for needle in ("project_lifecycle", "operation=restart", "同一 project_id", "稳定 request_id",
+                       "project_lifecycle_receipt", "原 ID 重试"):
+            assert needle in message
+        assert "private" not in json.dumps(refused) and "token" not in message
+        assert len(backend_clients) == 1
+
+        # 2. The named action is governed: per-use approval, never auto-granted.
+        #    The model builds the call from the hint: same project_id, stable request_id.
+        args = {"project_id": "p:main", "operation": "restart", "request_id": "recover-1"}
+        denied = await asyncio.to_thread(execute_action, "project_lifecycle", args, runtime=runtime)
+        assert denied == {"ok": False, "status": "approval_required", "action": "project_lifecycle",
+                          "tool": "personal_assistant_manage_tool"}
+        assert await owner.claim() == {"schemaVersion": 1, "request": None}
+
+        # 3. Approved, it reaches main over the broker; main (stand-in) settles it.
+        task = asyncio.create_task(asyncio.to_thread(execute_action, "project_lifecycle", args, runtime=runtime, governed=True))
+        wire = (await owner.claim())["request"]
+        assert {key: wire[key] for key in ("action", "projectId", "operation", "requestId")} == {
+            "action": "project_lifecycle", "projectId": "p:main", "operation": "restart", "requestId": "recover-1"}
+        settled = {"schemaVersion": 1, "projectId": "p:main", "operation": "restart", "requestId": "recover-1",
+                   "state": "queued", "code": "restart_queued", "accepted": True}
+        assert owner.settle(wire["deliveryId"], settled)
+        assert await task == settled
+
+        # 4. The receipt follows the same backend-free path with the same IDs.
+        task = asyncio.create_task(asyncio.to_thread(execute_action, "project_lifecycle_receipt", args, runtime=runtime))
+        wire = (await owner.claim())["request"]
+        assert wire["action"] == "project_lifecycle_receipt" and wire["requestId"] == "recover-1"
+        completed = {**settled, "state": "completed", "code": "accepted"}
+        assert owner.settle(wire["deliveryId"], completed)
+        assert await task == completed
+
+        # The drifted backend was contacted exactly once, by the refused action;
+        # neither the restart nor its receipt opened a project-backend client.
+        assert len(backend_clients) == 1
+    finally:
+        owner.close()
+        unbind_actions(service)
