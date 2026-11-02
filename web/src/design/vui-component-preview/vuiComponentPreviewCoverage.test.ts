@@ -91,14 +91,11 @@ const previewExemptDesignSections = new Set([
   // require live consent state, not a static standalone VUI export. Covered
   // by its interaction/authorization tests and the approved isolated CUA preview.
   "PersonalAssistantComputerPanel",
-  // Dual-channel human-attention surfaces bound to the native desktop bridge:
-  // the notifier renders null and is driven by overview polling plus
-  // notifyHumanAttention/onHumanAttentionOpened; the notice stack's cards only
-  // arrive through the Electron preload delivery channel inside the floating
-  // assistant window. Covered by their trigger-chain, dedup, card render,
-  // click/close/stack and 12s hover-pause interaction tests.
+  // Human-attention surface bound to the native desktop bridge: the notifier
+  // renders null and is driven by overview polling plus
+  // notifyHumanAttention/onHumanAttentionOpened. Covered by its trigger-chain,
+  // dedup and open-callback navigation interaction tests.
   "HumanAttentionNotifier",
-  "HumanAttentionNoticeStack",
   // Route-owned composer composition: the plus menu's meaningful state comes
   // from workbench-injected attachment/reference/capability/budget props. It
   // has an approved isolated preview (design/chat-composer-plus-menu-preview)

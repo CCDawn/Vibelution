@@ -11,8 +11,6 @@
 @source "../../routes/personalAssistant/PersonalAssistantComputerPanel.tsx";
 @source "../../routes/personalAssistant/PersonalAssistantComputerPanel.styles.ts";
 @source "../../routes/desktopPet/DesktopAssistantRoute.styles.ts";
-@source "../../routes/desktopPet/HumanAttentionNoticeStack.tsx";
-@source "../../routes/desktopPet/HumanAttentionNoticeStack.styles.ts";
 @source "../../routes/desktopPet/DesktopPetCharacter.tsx";
 @source "../../routes/desktopPet/DesktopPetCharacter.styles.ts";
 
