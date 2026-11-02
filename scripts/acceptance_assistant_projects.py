@@ -651,15 +651,36 @@ class IsolatedLauncherController:
             runtime = resolve_project_runtime_home(root)
         require(self._private_runtime_path(runtime, root), "launcher_runtime_outside_fixture")
         path = runtime / "launcher" / "state.json"
-        state = base.read_json(path) if path.is_file() else {}
+        branch = root.resolve() == self.slots["A1"].root.resolve()
+        state = self._branch_backend_state(root) if branch else base.read_json(path) if path.is_file() else {}
         pid = state.get("backendPid", 0)
         create_time = state.get("backendCreateTime")
-        alive = type(pid) is int and pid > 0 and base.acceptance_runtime._process_matches(pid, create_time)
+        alive = (type(pid) is int and pid > 0 and type(create_time) in {int, float}
+                 and math.isfinite(create_time) and create_time > 0
+                 and base.acceptance_runtime._process_matches(pid, create_time))
         if alive:
             require(Path(psutil.Process(pid).cwd()).resolve() == root.resolve(), "launcher_backend_process_root_mismatch")
             create_time = psutil.Process(pid).create_time()
         return {"root": str(root), "runtimeRoot": str(runtime), "pid": pid, "createTime": create_time, "alive": alive,
-                "port": state.get("backendPort", state.get("port"))}
+                "port": state.get("backendPort", state.get("port")),
+                "identitySource": "native_instance_registry" if branch else "native_launcher_state"}
+
+    def _branch_backend_state(self, root: Path) -> dict:
+        path = Path(self.plan["instanceRegistryPath"])
+        if not path.is_file():
+            return {}
+        instances = base.read_json(path).get("instances") or {}
+        require(isinstance(instances, dict), "launcher_instance_registry_invalid")
+        matches = [(key, row) for key, row in instances.items() if isinstance(row, dict)
+                   and Path(str(row.get("projectRoot") or "")).resolve() == root.resolve()]
+        require(len(matches) <= 1, "launcher_branch_instance_duplicate")
+        if not matches:
+            return {}
+        instance_id, row = matches[0]
+        require(instance_id != "main" and base.inside(Path(str(row.get("dataHome") or "")), self.fixture.home),
+                "launcher_branch_instance_outside_fixture")
+        return {"backendPid": row.get("spawnPid"), "backendCreateTime": row.get("spawnCreateTime"),
+                "backendPort": row.get("port")}
 
     def _backend_ready(self, identity: dict, root: Path) -> bool:
         port = identity.get("port")

@@ -155,6 +155,26 @@ def test_lifecycle_requires_healthy_routes_on_the_same_real_workspace(tmp_path, 
     assert len(calls) == 1
 
 
+def test_branch_process_proof_uses_native_instance_registry_and_rejects_foreign_data_home(tmp_path):
+    controller = object.__new__(case.IsolatedLauncherController)
+    controller.fixture = SimpleNamespace(home=tmp_path / "private")
+    registry = tmp_path / "instances.json"
+    controller.plan = {"instanceRegistryPath": str(registry)}
+    root = tmp_path / "branch"
+    row = {"projectRoot": str(root), "dataHome": str(controller.fixture.home / "branch/data"),
+           "spawnPid": 123, "spawnCreateTime": 456.0, "port": 22345}
+    case.base.private_json(registry, {"schemaVersion": 3, "instances": {"worktree:branch": row}})
+    assert controller._branch_backend_state(root) == {"backendPid": 123, "backendCreateTime": 456.0, "backendPort": 22345}
+    row["dataHome"] = str(tmp_path / "foreign")
+    case.base.private_json(registry, {"instances": {"worktree:branch": row}})
+    with pytest.raises(case.AcceptanceFailure, match="launcher_branch_instance_outside_fixture"):
+        controller._branch_backend_state(root)
+    row["dataHome"] = str(controller.fixture.home / "branch/data")
+    case.base.private_json(registry, {"instances": {"worktree:branch": row, "duplicate": row}})
+    with pytest.raises(case.AcceptanceFailure, match="launcher_branch_instance_duplicate"):
+        controller._branch_backend_state(root)
+
+
 def lifecycle_inputs(tmp_path, branch=False):
     expected = {"slot": "A1" if branch else "A", "root": str(tmp_path), "projectId": "native-project-id",
                 "operation": "restart", "requestId": "stable-restart-id"}
