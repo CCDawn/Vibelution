@@ -32,6 +32,9 @@ PA 派出任务后是纯被动方：``delegationPolicy.allowWakeMessages=False``
    置空，点击仅聚焦工作台）。
    内容指纹无变化不推新通知、id 每 ``DIGEST_MIN_INTERVAL_SECONDS`` 最多轮转
    一次，行只在 ``DIGEST_FRESHNESS_SECONDS`` 新鲜度窗口内可见后自然淡出。
+   停摆升级：信号持续未处理（派遣一直待确认 / 回执一直没人消化）时，卡过
+   新鲜度窗口后按同一节流重新轮转一个新 id 再提醒一次，正文带「已持续
+   N 分钟待处理」；不再 30min 后静默消失。信号归零照旧清行。
 
 节流硬要求：
 
@@ -170,6 +173,10 @@ class _PatrolState:
         self.digest_fingerprint: str = ""
         self.digest_last_rotation: float = 0.0
         self.digest_row: dict[str, str] | None = None
+        # 当前「连续有信号」段的起点（epoch）；0 = 当前无信号。只用于停摆
+        # 升级卡正文里的「已持续 N 分钟」，信号归零即清零——不是新持久化，
+        # 与其余摘要状态一样重启清零。
+        self.digest_signal_since: float = 0.0
 
     def reset(self) -> None:
         with self.lock:
@@ -179,6 +186,7 @@ class _PatrolState:
             self.digest_fingerprint = ""
             self.digest_last_rotation = 0.0
             self.digest_row = None
+            self.digest_signal_since = 0.0
 
 
 _patrol_state = _PatrolState()
@@ -941,14 +949,49 @@ def _digest_fingerprint(aggregate: dict[str, int]) -> str:
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()
 
 
-def _digest_row(aggregate: dict[str, int], rotation: float) -> dict[str, str]:
+def _stalled_duration_label(seconds: float) -> str:
+    """``"31 分钟"`` / ``"2 小时"`` / ``"2 小时 5 分钟"``; empty under one minute."""
+
+    minutes = int(max(0.0, float(seconds)) // 60)
+    if minutes < 1:
+        return ""
+    hours, minutes = divmod(minutes, 60)
+    if hours and minutes:
+        return f"{hours} 小时 {minutes} 分钟"
+    if hours:
+        return f"{hours} 小时"
+    return f"{minutes} 分钟"
+
+
+def _digest_row(
+    aggregate: dict[str, int],
+    rotation: float,
+    *,
+    stalled_seconds: float = 0.0,
+) -> dict[str, str]:
+    """Digest row; ``stalled_seconds`` is how long the signal has persisted.
+
+    行形状（id/kind/severity/title/targetUrl/body）不变。只有信号已持续
+    超过 ``DIGEST_FRESHNESS_SECONDS``（即这张卡是停摆升级重现的）时，正文
+    才追加「已持续 N 分钟待处理」——首张卡与正常路径的正文逐字保持原样，
+    用户在 toast 里就能分辨「首次提醒」和「还没人处理的升级提醒」，不需要
+    前端新字段。
+    """
+
     title = _clip(
         "助理派遣摘要：进行中 {inFlightDispatches} · 逾期待催办 {agedDueChases}"
         " · 阻塞 {blockedDispatches} · 失败 {failedDispatches}"
         " · 未消化回执 {undigestedReceipts}".format(**aggregate)
     )
+    stalled = (
+        _stalled_duration_label(stalled_seconds)
+        if stalled_seconds >= DIGEST_FRESHNESS_SECONDS
+        else ""
+    )
     body = _clip(
-        "个人助理有派遣仍在进行或回执未消化；点击查看派遣面板详情。",
+        "个人助理有派遣仍在进行或回执未消化"
+        + (f"，已持续 {stalled}待处理" if stalled else "")
+        + "；点击查看派遣面板详情。",
         limit=_BODY_LIMIT,
     )
     return {
@@ -967,10 +1010,22 @@ def _refresh_digest(
     *,
     now: float,
 ) -> tuple[bool, dict[str, str] | None]:
-    """Rotate the digest id at most once per interval on fingerprint change.
+    """Rotate the digest id at most once per interval; re-surface stalls.
 
     Returns ``(rotated, row)``; ``row`` is None when there is no signal at
     all (everything settled → the lane goes quiet instead of showing 0s).
+
+    轮转触发条件（二者任一，且都受 ``DIGEST_MIN_INTERVAL_SECONDS`` 节流）：
+
+    1. 内容指纹变化（原有语义）。
+    2. 停摆升级：指纹没变但当前卡已过 ``DIGEST_FRESHNESS_SECONDS`` 而信号
+       仍在——派遣一直 awaiting_confirmation、回执一直没人消化。此前这种
+       情形永不轮转，卡过新鲜度窗口后从 humanAttention 静默消失、再无提醒。
+       现在它按同一节流重新轮转一个新 id：humanAttention 的唯一前端消费方
+       （``HumanAttentionNotifier`` → 按 id 日级去重的 toast）只对新 id 再
+       提醒一次，所以「重新出现」必须换 id 才对用户可见；节流仍跟随巡逻
+       节奏，最多每 ``DIGEST_MIN_INTERVAL_SECONDS`` 一次，不会每巡逻都推。
+       信号归零照旧清行（已处理的事项不会被这条路径复活）。
     """
 
     fingerprint = _digest_fingerprint(aggregate)
@@ -980,16 +1035,25 @@ def _refresh_digest(
             state.digest_fingerprint = fingerprint
             state.digest_last_rotation = float(now)
             state.digest_row = None
+            state.digest_signal_since = 0.0
             return False, None
+        if state.digest_signal_since <= 0.0:
+            state.digest_signal_since = float(now)
+        since_rotation = now - state.digest_last_rotation
+        card_stale = since_rotation >= DIGEST_FRESHNESS_SECONDS
         rotated = False
         if (
-            fingerprint != state.digest_fingerprint
-            and now - state.digest_last_rotation >= DIGEST_MIN_INTERVAL_SECONDS
+            (fingerprint != state.digest_fingerprint or card_stale)
+            and since_rotation >= DIGEST_MIN_INTERVAL_SECONDS
         ):
             state.digest_fingerprint = fingerprint
             state.digest_last_rotation = float(now)
             rotated = True
-        row = _digest_row(aggregate, state.digest_last_rotation)
+        row = _digest_row(
+            aggregate,
+            state.digest_last_rotation,
+            stalled_seconds=now - state.digest_signal_since,
+        )
         state.digest_row = row
         return rotated, row
 

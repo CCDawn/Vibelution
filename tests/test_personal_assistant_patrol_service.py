@@ -685,6 +685,109 @@ def test_digest_freshness_window_hides_stale_rows(monkeypatch):
     assert patrol.collect_assistant_digest_attention() == []
 
 
+def _stuck_dispatch() -> dict:
+    """超出催办窗口、永远 in-flight 的派遣：不催办（agedDue 恒 0）→ 指纹全程不变。"""
+
+    return _dispatch("m-stuck", sent_age_seconds=patrol.FOLLOWUP_MAX_AGE_SECONDS + 3600.0)
+
+
+def test_digest_stalled_signal_resurfaces_with_new_id_after_freshness_window(monkeypatch):
+    """停摆升级：一直没人处理的事项不再 30min 后从 humanAttention 静默消失。
+
+    指纹全程不变（旧逻辑永不再轮转）；现在卡过新鲜度窗口后按同一 30min
+    节流换新 id 再提醒一次（前端 toast 按 id 去重，新 id 才可见），正文带
+    「已持续 N 分钟待处理」；首张卡与窗口内正文逐字保持原样。
+    """
+    _Harness(monkeypatch, dispatches=[_stuck_dispatch()])
+    first = patrol.patrol_once(now=NOW)["digest"]
+    assert first["rotated"] is True
+    assert first["aggregate"]["inFlightDispatches"] == 1
+    assert first["aggregate"]["agedDueChases"] == 0
+    first_id = first["row"]["id"]
+    assert first["row"]["body"] == "个人助理有派遣仍在进行或回执未消化；点击查看派遣面板详情。"
+    # 窗口内：不轮转、整行逐字不变（正常路径零差异）。
+    steady = patrol.patrol_once(now=NOW + 60.0)["digest"]
+    assert steady["rotated"] is False
+    assert steady["row"] == first["row"]
+    # 卡过新鲜度窗口：读侧先把旧卡淡出（旧行为保留）……
+    later = NOW + patrol.DIGEST_FRESHNESS_SECONDS + 61.0
+    monkeypatch.setattr(patrol.time, "time", lambda: later)
+    assert patrol.collect_assistant_digest_attention() == []
+    # ……下一轮巡逻把它作为升级卡重新轮转：新 id、同标题、正文带时长、重回投影。
+    escalated = patrol.patrol_once(now=later)["digest"]
+    assert escalated["aggregate"] == first["aggregate"]
+    assert escalated["rotated"] is True
+    assert escalated["row"]["id"] != first_id
+    assert escalated["row"]["kind"] == "assistant_digest"
+    assert escalated["row"]["title"] == first["row"]["title"]
+    assert "已持续 31 分钟待处理" in escalated["row"]["body"]
+    assert [row["id"] for row in patrol.collect_assistant_digest_attention()] == [escalated["row"]["id"]]
+    # 防轰炸：升级卡同样受 DIGEST_MIN_INTERVAL_SECONDS 节流，下一巡逻不换 id。
+    throttled = patrol.patrol_once(now=later + 60.0)["digest"]
+    assert throttled["rotated"] is False
+    assert throttled["row"]["id"] == escalated["row"]["id"]
+    # 再过一个间隔仍没人处理 → 再提醒一次；时长从信号起点累计，不从上次升级重算。
+    much_later = later + patrol.DIGEST_MIN_INTERVAL_SECONDS + 61.0
+    third = patrol.patrol_once(now=much_later)["digest"]
+    assert third["rotated"] is True
+    assert third["row"]["id"] not in {first_id, escalated["row"]["id"]}
+    assert "已持续 1 小时 2 分钟待处理" in third["row"]["body"]
+
+
+def test_digest_resolved_signal_clears_and_stall_escalation_does_not_revive_it(monkeypatch):
+    """已处理的事项照旧清出：信号归零 → 行清空；停摆升级分支不会把它复活。"""
+    harness = _Harness(monkeypatch, dispatches=[_stuck_dispatch()])
+    patrol.patrol_once(now=NOW)
+    assert patrol.collect_assistant_digest_attention()
+    # 用户处理掉了：派遣清空 → 无信号 → 行清空。
+    harness.listing["dispatches"] = []
+    settled = patrol.patrol_once(now=NOW + 60.0)["digest"]
+    assert settled["rotated"] is False and settled["row"] is None
+    assert patrol.collect_assistant_digest_attention() == []
+    # 过了新鲜度窗口仍无信号：没有任何升级卡凭空出现。
+    later = NOW + patrol.DIGEST_FRESHNESS_SECONDS + 61.0
+    monkeypatch.setattr(patrol.time, "time", lambda: later)
+    assert patrol.patrol_once(now=later)["digest"]["row"] is None
+    assert patrol.collect_assistant_digest_attention() == []
+    # 之后出现新事项：是全新的首张卡（时长从零起算，不带升级文案）。
+    harness.listing["dispatches"] = [_stuck_dispatch()]
+    fresh = patrol.patrol_once(now=later + 60.0)["digest"]
+    assert fresh["row"] is not None
+    assert "已持续" not in fresh["row"]["body"]
+    assert patrol.collect_assistant_digest_attention()
+
+
+def test_digest_content_change_rotation_is_unchanged_by_stall_escalation(monkeypatch):
+    """正常轮转路径无回归：窗口内指纹变了仍不轮转；窗口后指纹变了轮转一次。"""
+    harness = _Harness(monkeypatch, dispatches=[_stuck_dispatch()])
+    first_id = patrol.patrol_once(now=NOW)["digest"]["row"]["id"]
+    # 窗口内新增一条超窗派遣：指纹变了、卡仍新鲜 → 不轮转。
+    harness.listing["dispatches"] = [
+        _stuck_dispatch(),
+        _dispatch("m-stuck-2", sent_age_seconds=patrol.FOLLOWUP_MAX_AGE_SECONDS + 7200.0),
+    ]
+    changed = patrol.patrol_once(now=NOW + 60.0)["digest"]
+    assert changed["aggregate"]["inFlightDispatches"] == 2
+    assert changed["rotated"] is False
+    assert changed["row"]["id"] == first_id
+    # 间隔过后：指纹变化照旧轮转一次（与停摆分支共用同一节流）。
+    rotated = patrol.patrol_once(now=NOW + patrol.DIGEST_MIN_INTERVAL_SECONDS + 60.0)["digest"]
+    assert rotated["rotated"] is True
+    assert rotated["row"]["id"] != first_id
+
+
+@pytest.mark.parametrize("seconds,label", [
+    (59.0, ""),
+    (60.0, "1 分钟"),
+    (1860.0, "31 分钟"),
+    (3600.0, "1 小时"),
+    (3720.0, "1 小时 2 分钟"),
+    (7200.0, "2 小时"),
+])
+def test_stalled_duration_label_formats_minutes_and_hours(seconds, label):
+    assert patrol._stalled_duration_label(seconds) == label
+
+
 def test_digest_source_registered_in_human_attention_lane(monkeypatch):
     from core.web.services import personal_attention_service as attention
 
