@@ -159,7 +159,8 @@ def _project(kind, raw):
                 recovery = raw.get("recovery") or {}
                 if recovery.get("status") not in {"repairing", "awaiting_deployment"}:
                     commands.append("retry")
-    elif kind in {"supervised_run", "self_evolution_run"} and status in {"queued", "running", "paused"}:
+    elif (kind in {"supervised_run", "self_evolution_run"} and raw.get("_liveControl") is True
+            and status in {"queued", "running", "paused"} and not raw.get("stopRequested")):
         commands.append("stop")
         commands.append("resume" if status == "paused" or raw.get("pauseRequested") else "pause")
     elif kind == "external_task" and raw.get("_operatorControl") and status in {
@@ -349,12 +350,72 @@ def _team_runs(gateway):
     return rows, complete
 
 
+def _managed_directory(path):
+    """Validate existing ancestors without initializing a missing namespace."""
+    from core.assistant_runtime.migration_io import check_path, validate_path
+    path = validate_path(Path(path))
+    ancestor = path
+    while True:
+        try:
+            ancestor.lstat()
+        except FileNotFoundError:
+            if ancestor == ancestor.parent:
+                raise ValueError("Missing evolution ancestor") from None
+            ancestor = ancestor.parent
+            continue
+        check_path(ancestor)
+        if not ancestor.is_dir():
+            raise ValueError("Invalid evolution directory")
+        return ancestor == path
+
+
+def _managed_store(gateway):
+    from core.runtime_manager import constants, evolution_store
+    from vibelution_storage import resolve_project_runtime_home
+    _root(gateway, constants)
+    expected = resolve_project_runtime_home(gateway.project_root) / "runtime-manager" / "evolution"
+    store = evolution_store._WORK_RUN_STORE
+    if (Path(store.root).resolve() != expected.resolve()
+            or Path(evolution_store.EVOLUTION_DIR).resolve() != expected.resolve()):
+        raise ValueError("Evolution authority mismatch")
+    _managed_directory(store.root)
+    return store
+
+
+def _managed_manager_pid(gateway):
+    try:
+        import psutil
+        from core.runtime_manager.process_identity import is_runtime_manager_process
+        from core.web.services.runtime_manager_control_service import current_runtime_manager_pid
+        pid = current_runtime_manager_pid(gateway.project_root)
+        # The pid file and an alive PID alone cannot distinguish PID reuse.
+        # Reuse the daemon's role check and its canonical launch cwd; this
+        # remains observation only and must never ensure/start a manager.
+        if (type(pid) is not int or pid <= 0 or not is_runtime_manager_process(pid)
+                or Path(psutil.Process(pid).cwd()).resolve() != gateway.project_root):
+            return 0
+    except Exception:
+        return 0
+    return pid
+
+
+def _managed_metadata(gateway, native_kind, row, *, manager_pid=None):
+    pid = _managed_manager_pid(gateway) if manager_pid is None else manager_pid
+    control = row.get("runtimeManagerControl")
+    control = control if isinstance(control, dict) else {}
+    owner_pid = control.get("ownerPid")
+    return {**row, "_liveControl": (pid > 0 and type(owner_pid) is int and owner_pid == pid
+                                    and control.get("kind") == native_kind)}
+
+
 def _managed_runs(gateway, kind):
     native_kind = {"supervised_run": "supervised", "self_evolution_run": "self"}[kind]
-    store = _work_store(gateway)
-    rows, _ = _scan(store.runs_dir(native_kind), key="runId")
+    store = _managed_store(gateway)
+    folder = store.runs_dir(native_kind)
+    rows, _ = _scan(folder, key="runId") if _managed_directory(folder) else ([], False)
+    pid = _managed_manager_pid(gateway)
     # A backend's durable directory cannot certify the manager's live slots.
-    return rows, False
+    return [_managed_metadata(gateway, native_kind, row, manager_pid=pid) for row in rows], False
 
 
 def _research_store(gateway):
@@ -605,9 +666,13 @@ def _point_operation(gateway, kind, resource_id, refs):
         row = _point_json(root / refs["team_id"] / "generic-workflows" / "runs" / (resource_id + ".json"), "id", resource_id)
         snapshot.verify_workspace()
         return row
-    store = _work_store(gateway)
+    store = _managed_store(gateway)
     native_kind = "supervised" if kind == "supervised_run" else "self"
-    return _point_json(store.runs_dir(native_kind) / (resource_id + ".json"), "runId", resource_id)
+    folder = store.runs_dir(native_kind)
+    if not _managed_directory(folder):
+        raise ManagementError("OPERATION_UNAVAILABLE", 404)
+    row = _point_json(folder / (resource_id + ".json"), "runId", resource_id)
+    return _managed_metadata(gateway, native_kind, row)
 
 
 def read_operation(gateway, kind, resource_id, **refs):
@@ -729,7 +794,8 @@ def command(gateway, parameters, *, request_id=""):
                 raise ManagementError("OPERATION_UNAVAILABLE", 404) from None
             except invalid:
                 raise ManagementError("INVALID_INPUT", 422) from None
-            after = _project(kind, raw)
+            native_kind = "supervised" if kind == "supervised_run" else "self"
+            after = _project(kind, _managed_metadata(gateway, native_kind, raw))
             stop_requested = action == "stop" and (raw.get("stopRequested") is True or raw.get("status") in {"stopping", "cancelled"})
         if any(after.get(key) != before.get(key) for key in ("kind", "resourceId", "agentId", "sessionId", "teamId", "flowId")):
             raise ManagementError("OPERATION_UNCONFIRMED", 503)

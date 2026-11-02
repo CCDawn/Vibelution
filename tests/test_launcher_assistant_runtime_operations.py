@@ -21,6 +21,10 @@ def env(tmp_path, monkeypatch):
     import vibelution_storage
     from core.infrastructure import developer_sandbox
     from core.runtime_manager.work_run_store import WorkRunStore
+    from core.runtime_manager import constants, evolution_store
+    from core.runtime_manager import process_identity
+    import psutil
+    from core.web.services import runtime_manager_control_service
     from core.web.services import runtime_task_registry, session_service, team_service
     from core.web.services.external_management.native import NativeAgentGateway
     from core.web.services.team import team_store
@@ -36,15 +40,20 @@ def env(tmp_path, monkeypatch):
     directory = SimpleNamespace(CONFIG_PATH=config)
     gateway = NativeAgentGateway(project)
     monkeypatch.setattr(gateway, "_owners", lambda: directory)
-    for owner in (runtime_task_registry, session_service, team_service):
+    for owner in (runtime_task_registry, session_service, team_service, constants):
         monkeypatch.setattr(owner, "PROJECT_ROOT", project)
     monkeypatch.setattr(vibelution_storage, "resolve_project_runtime_home", lambda root: runtime_home)
     monkeypatch.setattr(runtime_task_registry, "resolve_project_runtime_home", lambda root: runtime_home)
     monkeypatch.setattr(developer_sandbox, "is_developer_mode_enabled", lambda: False)
     monkeypatch.setattr(developer_sandbox, "formal_workspace_path", lambda root, *parts: workspace.joinpath(*parts))
     work = WorkRunStore(runtime_home / "runtime-manager" / "work_runs")
-    for kind in ("chat_turn", "supervised", "self"):
-        work.runs_dir(kind).mkdir(parents=True)
+    work.runs_dir("chat_turn").mkdir(parents=True)
+    managed = WorkRunStore(runtime_home / "runtime-manager" / "evolution")
+    monkeypatch.setattr(evolution_store, "EVOLUTION_DIR", managed.root)
+    monkeypatch.setattr(evolution_store, "_WORK_RUN_STORE", managed)
+    monkeypatch.setattr(runtime_manager_control_service, "current_runtime_manager_pid", lambda root: 0)
+    monkeypatch.setattr(process_identity, "is_runtime_manager_process", lambda pid: pid == 4321)
+    monkeypatch.setattr(psutil, "Process", lambda pid: SimpleNamespace(cwd=lambda: str(project)))
     monkeypatch.setattr(session_service, "_WORK_RUN_STORE", work)
     monkeypatch.setattr(session_service, "_RUNNING_SESSION_IDS", set())
     monkeypatch.setattr(session_service, "_SESSION_ACTIVE_TURN_IDS", {})
@@ -60,7 +69,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(service, "_wake", lambda: None)
     monkeypatch.setattr(runtime, "_ADMITTING", True)
     monkeypatch.setattr(runtime, "_STOP", threading.Event())
-    return SimpleNamespace(project=project, gateway=gateway, work=work, tasks=tasks, external=external,
+    return SimpleNamespace(project=project, gateway=gateway, work=work, managed=managed, tasks=tasks, external=external,
                            workspace=workspace, config=config, sessions=session_service, monkeypatch=monkeypatch)
 
 
@@ -182,7 +191,8 @@ def test_real_registry_stop_is_not_reported_as_worker_completion(env):
 
 def test_source_failure_preserves_other_operations_and_corruption_is_not_quarantined(env, monkeypatch):
     native_run(env)
-    broken = env.work.runs_dir("supervised") / "bad.json"
+    broken = env.managed.runs_dir("supervised") / "bad.json"
+    broken.parent.mkdir(parents=True)
     broken.write_text("{", encoding="utf-8")
     before = broken.read_bytes(), broken.stat().st_mtime_ns
     monkeypatch.setattr(operations, "_external_tasks", lambda gateway: (_ for _ in ()).throw(OSError("SECRET path")))
@@ -344,14 +354,17 @@ def test_formal_research_ledger_metadata_read_has_no_operator_commands(env, tmp_
     ("self_evolution_run", "self", "self_evolution_control_service", "request_pause_self_evolution_run")])
 def test_managed_controls_use_exported_owner_with_non_atomic_revision_label(env, monkeypatch, kind, native_kind, module, method):
     import importlib
+    from core.web.services import runtime_manager_control_service
     owner = importlib.import_module("core.web.services." + module)
     monkeypatch.setattr(owner, "PROJECT_ROOT", env.project)
-    path = env.work.runs_dir(native_kind) / "managed-a.json"
-    write(path, {"runId": "managed-a", "status": "running", "summary": "SECRET body"})
+    monkeypatch.setattr(runtime_manager_control_service, "current_runtime_manager_pid", lambda root: 4321)
+    control = {"ownerPid": 4321, "kind": native_kind}
+    path = env.managed.runs_dir(native_kind) / "managed-a.json"
+    write(path, {"runId": "managed-a", "status": "running", "summary": "SECRET body", "runtimeManagerControl": control})
     calls = []
     def pause(rid):
         calls.append(rid)
-        row = {"runId": rid, "status": "paused", "pauseRequested": True, "goal": "SECRET prompt"}
+        row = {"runId": rid, "status": "paused", "pauseRequested": True, "goal": "SECRET prompt", "runtimeManagerControl": control}
         write(path, row)
         return row
     monkeypatch.setattr(owner, method, pause)
@@ -362,6 +375,165 @@ def test_managed_controls_use_exported_owner_with_non_atomic_revision_label(env,
     assert "SECRET" not in json.dumps(result)
     page = operations.read_operations(env.gateway, {"kind": kind})
     assert page["coverage"] == [{"source": kind, "state": "partial", "complete": False}]
+
+
+@pytest.mark.parametrize("kind,native_kind", [("supervised_run", "supervised"), ("self_evolution_run", "self")])
+def test_managed_list_and_point_read_use_evolution_authority_without_index_repairs(env, monkeypatch, kind, native_kind):
+    from core.runtime_manager.work_run_store import WorkRunStore
+    from core.web.services import self_evolution_control_service, supervised_control_service
+    monkeypatch.setattr(WorkRunStore, "load_active_run_ids", lambda *args: pytest.fail("read repaired the active index"))
+    monkeypatch.setattr(operations, "_work_store", lambda gateway: pytest.fail("managed read used Session authority"))
+    monkeypatch.setattr(supervised_control_service, "get_active_supervised_run", lambda: pytest.fail("read reconciled supervised state"))
+    monkeypatch.setattr(self_evolution_control_service, "get_active_self_evolution_run", lambda: pytest.fail("read reconciled self state"))
+    write(env.managed.runs_dir(native_kind) / "shared-id.json", {"runId": "shared-id", "status": "paused", "summary": "SECRET body"})
+    write(env.work.runs_dir(native_kind) / "shared-id.json", {"runId": "shared-id", "status": "running"})
+    index = env.managed.index_path(native_kind)
+    write(index, {"activeRunId": "missing-id"})
+    before = index.read_bytes()
+    page = operations.read_operations(env.gateway, {"kind": kind})
+    row = detail(env, kind, "shared-id")
+    assert page["operations"] == [row] and row["status"] == "paused" and row["commands"] == []
+    assert page["coverage"] == [{"source": kind, "state": "partial", "complete": False}]
+    assert index.read_bytes() == before and "SECRET" not in json.dumps(page)
+
+
+@pytest.mark.parametrize("kind,native_kind", [("supervised_run", "supervised"), ("self_evolution_run", "self")])
+def test_managed_wrong_store_record_is_never_a_managed_target(env, kind, native_kind):
+    write(env.work.runs_dir(native_kind) / "wrong-store.json", {"runId": "wrong-store", "status": "running"})
+    page = operations.read_operations(env.gateway, {"kind": kind})
+    assert page["operations"] == [] and page["coverage"][0]["state"] == "partial"
+    with pytest.raises(ManagementError, match="OPERATION_UNAVAILABLE"):
+        detail(env, kind, "wrong-store")
+
+
+@pytest.mark.parametrize("kind,native_kind", [("supervised_run", "supervised"), ("self_evolution_run", "self")])
+@pytest.mark.parametrize("initialized", [False, True])
+def test_managed_uninitialized_or_missing_kind_is_empty_without_mkdir(env, kind, native_kind, initialized):
+    if initialized:
+        env.managed.root.mkdir()
+    before = sorted(path.relative_to(env.managed.root.parent) for path in env.managed.root.parent.rglob("*"))
+    page = operations.read_operations(env.gateway, {"kind": kind})
+    assert page["operations"] == [] and page["coverage"][0]["state"] == "partial"
+    with pytest.raises(ManagementError, match="OPERATION_UNAVAILABLE"):
+        detail(env, kind, "absent-run")
+    assert sorted(path.relative_to(env.managed.root.parent) for path in env.managed.root.parent.rglob("*")) == before
+
+
+@pytest.mark.parametrize("kind,native_kind", [("supervised_run", "supervised"), ("self_evolution_run", "self")])
+def test_managed_corrupt_record_stays_untouched_and_does_not_hide_valid_metadata(env, kind, native_kind):
+    folder = env.managed.runs_dir(native_kind)
+    write(folder / "valid.json", {"runId": "valid", "status": "running"})
+    corrupt = folder / "broken.json"
+    corrupt.write_bytes(b"{not-json")
+    before = {path.name: path.read_bytes() for path in folder.iterdir()}
+    page = operations.read_operations(env.gateway, {"kind": kind})
+    assert [row["resourceId"] for row in page["operations"]] == ["valid"]
+    assert page["coverage"][0]["state"] == "partial"
+    with pytest.raises(ManagementError, match="OPERATION_SOURCE_UNAVAILABLE"):
+        detail(env, kind, "broken")
+    with pytest.raises(ManagementError, match="OPERATION_UNAVAILABLE"):
+        detail(env, kind, "missing")
+    assert {path.name: path.read_bytes() for path in folder.iterdir()} == before
+
+
+@pytest.mark.parametrize("binding", ["project", "store", "owner-path"])
+def test_managed_foreign_binding_is_unavailable_even_with_matching_run_id(env, tmp_path, monkeypatch, binding):
+    from core.runtime_manager import constants, evolution_store
+    write(env.managed.runs_dir("supervised") / "managed-a.json", {"runId": "managed-a", "status": "running"})
+    write(env.work.runs_dir("supervised") / "managed-a.json", {"runId": "managed-a", "status": "running"})
+    if binding == "project":
+        monkeypatch.setattr(constants, "PROJECT_ROOT", tmp_path / "foreign-project")
+    elif binding == "store":
+        monkeypatch.setattr(evolution_store, "_WORK_RUN_STORE", env.work)
+    else:
+        monkeypatch.setattr(evolution_store, "EVOLUTION_DIR", tmp_path / "foreign-evolution")
+    page = operations.read_operations(env.gateway, {"kind": "supervised_run"})
+    assert page["operations"] == [] and page["coverage"][0]["state"] == "unavailable"
+    with pytest.raises(ManagementError, match="TARGET_BINDING_CHANGED|OPERATION_SOURCE_UNAVAILABLE"):
+        detail(env, "supervised_run", "managed-a")
+
+
+@pytest.mark.parametrize("kind,native_kind", [("supervised_run", "supervised"), ("self_evolution_run", "self")])
+@pytest.mark.parametrize("pid,control", [(0, {"ownerPid": 4321}), (4321, {"ownerPid": 9999}),
+    (4321, {}), (4321, {"ownerPid": True}), (4321, {"ownerPid": 4321, "kind": "foreign"})])
+def test_managed_historical_status_cannot_advertise_or_submit_controls(env, monkeypatch, kind, native_kind, pid, control):
+    from core.web.services import runtime_manager_control_service, self_evolution_control_service, supervised_control_service
+    monkeypatch.setattr(runtime_manager_control_service, "current_runtime_manager_pid", lambda root: pid)
+    owner = supervised_control_service if kind == "supervised_run" else self_evolution_control_service
+    method = "request_stop_supervised_run" if kind == "supervised_run" else "request_stop_self_evolution_run"
+    monkeypatch.setattr(owner, method, lambda rid: pytest.fail("historical record sent a manager command"))
+    write(env.managed.runs_dir(native_kind) / "managed-a.json", {"runId": "managed-a", "status": "running",
+        "_liveControl": True, "runtimeManagerControl": {"kind": native_kind, **control}})
+    row = detail(env, kind, "managed-a")
+    assert row["commands"] == []
+    with pytest.raises(ManagementError, match="COMMAND_UNAVAILABLE"):
+        invoke(env, row, "stop")
+
+
+@pytest.mark.parametrize("location", ["folder", "file"])
+def test_managed_unreadable_source_is_distinct_from_an_uninitialized_store(env, monkeypatch, location):
+    from pathlib import Path
+    folder = env.managed.runs_dir("supervised")
+    path = folder / "managed-a.json"
+    write(path, {"runId": "managed-a", "status": "running"})
+    original_stat = Path.lstat
+    def denied(target, *args, **kwargs):
+        if target == (folder if location == "folder" else path):
+            raise PermissionError("test managed source denied")
+        return original_stat(target, *args, **kwargs)
+    monkeypatch.setattr(Path, "lstat", denied)
+    page = operations.read_operations(env.gateway, {"kind": "supervised_run"})
+    assert page["operations"] == []
+    assert page["coverage"][0]["state"] == ("unavailable" if location == "folder" else "partial")
+    with pytest.raises(ManagementError, match="OPERATION_SOURCE_UNAVAILABLE"):
+        detail(env, "supervised_run", "managed-a")
+
+
+@pytest.mark.parametrize("failed_probe", [False, True])
+def test_managed_manager_loss_revokes_controls_without_repairing_durable_state(env, monkeypatch, failed_probe):
+    from core.web.services import runtime_manager_control_service, supervised_control_service
+    path = env.managed.runs_dir("supervised") / "managed-a.json"
+    write(path, {"runId": "managed-a", "status": "running", "runtimeManagerControl": {"ownerPid": 4321, "kind": "supervised"}})
+    before = path.read_bytes()
+    monkeypatch.setattr(runtime_manager_control_service, "current_runtime_manager_pid", lambda root: 4321)
+    row = detail(env, "supervised_run", "managed-a")
+    assert row["commands"] == ["stop", "pause"]
+    def unavailable(root):
+        if failed_probe:
+            raise OSError("test manager unavailable")
+        return 0
+    monkeypatch.setattr(runtime_manager_control_service, "current_runtime_manager_pid", unavailable)
+    monkeypatch.setattr(supervised_control_service, "request_stop_supervised_run", lambda rid: pytest.fail("lost manager was commanded"))
+    assert detail(env, "supervised_run", "managed-a")["commands"] == []
+    page = operations.read_operations(env.gateway, {"kind": "supervised_run"})
+    assert page["operations"][0]["resourceId"] == "managed-a" and page["coverage"][0]["state"] == "partial"
+    with pytest.raises(ManagementError, match="STATE_CONFLICT"):
+        invoke(env, row, "stop")
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("identity", ["reused", "foreign-project", "unknown"])
+def test_managed_live_pid_does_not_authorize_a_reused_or_foreign_process(env, monkeypatch, identity):
+    import psutil
+    from core.runtime_manager import process_identity
+    from core.web.services import runtime_manager_control_service, supervised_control_service
+    path = env.managed.runs_dir("supervised") / "managed-a.json"
+    write(path, {"runId": "managed-a", "status": "running",
+        "runtimeManagerControl": {"ownerPid": 4321, "kind": "supervised"}})
+    before = path.read_bytes()
+    monkeypatch.setattr(runtime_manager_control_service, "current_runtime_manager_pid", lambda root: 4321)
+    if identity == "reused":
+        monkeypatch.setattr(process_identity, "is_runtime_manager_process", lambda pid: False)
+    elif identity == "foreign-project":
+        monkeypatch.setattr(psutil, "Process", lambda pid: SimpleNamespace(cwd=lambda: str(env.project / "foreign")))
+    else:
+        monkeypatch.setattr(psutil, "Process", lambda pid: (_ for _ in ()).throw(PermissionError("identity unavailable")))
+    monkeypatch.setattr(supervised_control_service, "request_stop_supervised_run", lambda rid: pytest.fail("unowned manager received a command"))
+    row = detail(env, "supervised_run", "managed-a")
+    assert row["commands"] == []
+    with pytest.raises(ManagementError, match="COMMAND_UNAVAILABLE"):
+        invoke(env, row, "stop")
+    assert path.read_bytes() == before
 
 
 def test_registry_terminal_race_returns_false_receipt_instead_of_replay_error(env, monkeypatch):
