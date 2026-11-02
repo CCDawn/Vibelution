@@ -124,6 +124,35 @@ def test_web_route_contract_rule_avoids_static_python_fallback() -> None:
     ]
 
 
+@pytest.mark.parametrize(
+    ("source", "regressions"),
+    [
+        ("scripts/project_storage_owner.py", (
+            "tests/test_storage_owner_handoff.py",
+            "tests/test_storage_owner_handoff_knowledge.py",
+            "tests/test_launcher_assistant_knowledge_directory.py",
+        )),
+        ("core/infrastructure/storage_migration.py", (
+            "tests/test_storage_migration.py",
+        )),
+        ("core/web/services/external_agent/service.py", (
+            "tests/test_external_agent_dispatch_admission.py",
+            "tests/test_external_management_dispatch_access.py",
+        )),
+        ("config/operator_config_transaction.py", (
+            "tests/test_operator_config_native_outcome.py",
+            "tests/test_external_agent_dispatch_access_client.py",
+        )),
+    ],
+)
+def test_owner_and_dispatch_source_edits_select_native_regressions(source, regressions):
+    result = select_tests.select_tests([source], select_tests.load_matrix())
+
+    assert result["coverageGaps"] == []
+    for regression in regressions:
+        assert any(regression in command for command in result["commands"])
+
+
 def test_pytest_configuration_is_owned_by_test_tooling() -> None:
     result = select_tests.select_tests(["pytest.ini"], select_tests.load_matrix())
 

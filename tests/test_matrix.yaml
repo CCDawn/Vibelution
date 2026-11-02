@@ -91,6 +91,40 @@ rules:
       - "tests/test_assistant_*"
     commands:
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_assistant_autonomy_transport.py tests/test_assistant_runtime_snapshot.py tests/test_assistant_research_control.py tests/test_assistant_knowledge_owner_catalog.py tests/test_assistant_operation_reconciliation.py tests/test_assistant_authorization_reduction.py tests/test_assistant_delegation.py tests/test_assistant_delegation_directory.py tests/test_assistant_delegation_journal.py tests/test_assistant_platform_watch.py tests/test_assistant_management_watch.py tests/test_assistant_patrol_recovery.py tests/test_assistant_configuration_protocol.py tests/test_assistant_configuration_contexts.py tests/test_assistant_configuration_control.py tests/test_assistant_global_model_references.py tests/test_launcher_assistant_tool_description.py -q"
+  - id: assistant-dispatch-access
+    description: "Per-Agent dispatch policy, durable config receipts and concurrent admission."
+    executionLayers:
+      - "focused"
+    paths:
+      - "config/operator_config_transaction.py"
+      - "core/web/services/external_management/dispatch_access.py"
+      - "core/web/services/external_agent/service.py"
+      - "core/web/services/agent_operation_service.py"
+      - "core/external_agent/backend_client.py"
+      - "core/assistant_runtime/management.py"
+      - "core/assistant_runtime/platform_approval.py"
+      - "tests/test_assistant_dispatch_access_actions.py"
+      - "tests/test_configured_agent_creation.py"
+      - "tests/test_external_agent_dispatch_access_client.py"
+      - "tests/test_external_agent_dispatch_admission.py"
+      - "tests/test_external_management_dispatch_access.py"
+      - "tests/test_operator_config_native_outcome.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_assistant_dispatch_access_actions.py tests/test_assistant_agent_cleanup_approval.py tests/test_launcher_platform_approval.py tests/test_configured_agent_creation.py tests/test_external_agent_dispatch_access_client.py tests/test_external_agent_dispatch_admission.py tests/test_external_management_dispatch_access.py tests/test_operator_config_native_outcome.py -q"
+  - id: configured-data-owner-handoff
+    description: "Physical configured-owner proof, existing-only knowledge reads and safe inventory traversal."
+    executionLayers:
+      - "focused"
+    paths:
+      - "core/infrastructure/storage_owner_handoff.py"
+      - "core/infrastructure/storage_migration.py"
+      - "core/web/services/external_management/knowledge_directory.py"
+      - "scripts/project_storage_owner.py"
+      - "tests/test_storage_owner_handoff.py"
+      - "tests/test_storage_owner_handoff_knowledge.py"
+      - "tests/test_storage_migration.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_storage_owner_handoff.py tests/test_storage_owner_handoff_knowledge.py tests/test_storage_migration.py tests/test_launcher_assistant_knowledge_directory.py tests/test_assistant_knowledge_owner_catalog.py tests/test_storage_paths.py -q"
   - id: owned-runtime-shutdown
     description: "Physical worker retirement and bounded backend shutdown/reopen."
     executionLayers:
