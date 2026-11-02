@@ -1,7 +1,7 @@
 import "../../design/route-css/desktop-pet.tailwind.css";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { MessageCircle, RefreshCw, X } from "lucide-react";
-import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import {
   getLauncherAssistantDetail, getLauncherAssistantDispatches, getLauncherAssistantStatus,
   hideLauncherAssistant, sendLauncherAssistantMessage, setLauncherAssistantExpanded,
@@ -55,6 +55,7 @@ const COPY = {
     receipts: "任务状态暂不可用", checking: "正在连接 Launcher…",
     statusStale: "个人助理状态轮询暂不可用，会话内容可能未更新",
     pendingQuestion: "待你回答",
+    answerBelow: "去回答", answerHint: "请在下方输入回答，再点击发送。",
   },
   en: {
     title: "Personal assistant", expand: "Open assistant chat", chat: "Chat", hide: "Hide assistant",
@@ -64,6 +65,7 @@ const COPY = {
     receipts: "Task status unavailable", checking: "Connecting to Launcher…",
     statusStale: "Assistant status polling is unavailable; conversation content may be stale",
     pendingQuestion: "Waiting for your answer",
+    answerBelow: "Answer below", answerHint: "Type your answer below, then send it.",
   },
 } as const;
 
@@ -125,6 +127,10 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   const resizing = useRef(false);
   const outstanding = useRef<LauncherAssistantSubmission | null>(null);
   const [draft, setDraft] = useState("");
+  const [answerFocus, setAnswerFocus] = useState<{ sessionId: string; questionId: string; signal: string } | null>(null);
+  const settleAnswerFocus = useCallback((signal: string) => {
+    setAnswerFocus(current => current?.signal === signal ? null : current);
+  }, []);
   const [attachments, setAttachments] = useState<ComposerImageAttachment[]>([]);
   const [visibleMessageIds, setVisibleMessageIds] = useState<string[]>([]);
   const attachmentsRef = useRef<ComposerImageAttachment[]>([]);
@@ -910,6 +916,8 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       // paddings stay exclusive to the 400px floating window.
       density={embedded ? "default" : "compact"} composerVariant="codex"
       composerValue={draft} composerPlaceholder={copy.placeholder} composerDisabled={sendPending || sendUnconfirmed || controlPending}
+      composerFocusSignal={answerFocus?.sessionId === sessionId && answerFocus.questionId === pendingQuestion?.id ? answerFocus.signal : ""}
+      onComposerFocusRequestSettled={settleAnswerFocus}
       composerPending={sendPending || controlPending || stopping} composerActionMode={actionMode}
       composerAttachmentInputDisabled={status.data?.attachmentVersion !== 1 || sendPending || sendUnconfirmed || controlPending}
       composerAttachments={attachments}
@@ -921,7 +929,15 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       onComposerChange={changeDraft} onSubmit={() => void submit()}
       onStop={() => void stopTurn()} onContinueTurn={() => void continueTurn()}
       composerPrecedingContent={<>{pendingQuestion ? <VStateSurface density="compact" tone="info" title={copy.pendingQuestion}
-        data-launcher-assistant-pending-question={pendingQuestion.id}>{pendingQuestion.questionText}</VStateSurface> : null}
+        data-launcher-assistant-pending-question={pendingQuestion.id}
+        actions={<VButton isDisabled={sendPending || sendUnconfirmed || controlPending} onClick={event => {
+          // This explicit handoff releases button focus so the shared scheduler
+          // can focus the composer without overriding another active control.
+          event.currentTarget.blur();
+          setAnswerFocus({ sessionId, questionId: pendingQuestion.id, signal: crypto.randomUUID() });
+        }}>{copy.answerBelow}</VButton>}>
+        {pendingQuestion.questionText}<br />{copy.answerHint}
+      </VStateSurface> : null}
       {entryIntent && dismissedEntry !== entryIntent.key ? <VStateSurface density="compact" tone="empty" title={entryIntent.title}
         actions={<><VButton isDisabled={sendPending || controlPending || sendUnconfirmed} onClick={() => {
           void submit({ message: entryIntent.message, requestId: crypto.randomUUID(), preserveDraft: true }).then(attempted => {

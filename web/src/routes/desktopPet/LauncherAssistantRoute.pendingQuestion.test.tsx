@@ -1,19 +1,31 @@
 // @vitest-environment happy-dom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, createElement } from "react";
+import { act, createElement, useEffect, useRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConversationViewProps } from "../../components/conversation/conversationViewTypes";
 import { LauncherAssistantEmbeddedRoute } from "./LauncherAssistantRoute";
+import { scheduleComposerFocusAttempts } from "../../components/conversation/conversationComposerFocusSchedule";
 
 vi.mock("./DesktopPetCharacter", () => ({ DesktopPetCharacter: () => null }));
 // Only the transcript renderer is replaced with its public composer contract.
 let conversation: ConversationViewProps | undefined;
 vi.mock("../../components/conversation/LazyConversationView", () => ({
   LazyConversationView: (props: ConversationViewProps) => {
+    const input = useRef<HTMLTextAreaElement>(null);
+    useEffect(() => {
+      if (!props.composerFocusSignal) return;
+      return scheduleComposerFocusAttempts({
+        getInput: () => input.current,
+        isDisabled: () => props.composerDisabled,
+        onSuccess: () => props.onComposerFocusRequestSettled?.(props.composerFocusSignal!),
+      });
+    }, [props.composerFocusSignal, props.composerDisabled, props.onComposerFocusRequestSettled]);
     conversation = props;
     return createElement("div", { "data-testid": "native-conversation" },
-      props.composerPrecedingContent ?? null);
+      props.composerPrecedingContent ?? null,
+      createElement("textarea", { ref: input, "aria-label": "回答输入框", value: props.composerValue,
+        disabled: props.composerDisabled, onChange: event => props.onComposerChange(event.currentTarget.value) }));
   },
 }));
 
@@ -73,6 +85,25 @@ describe("Launcher assistant pending question banner", () => {
     expect(banner?.getAttribute("data-launcher-assistant-pending-question")).toBe("q-1");
     expect(banner?.textContent).toContain("待你回答");
     expect(banner?.textContent).toContain("要继续部署吗？");
+    expect(banner?.textContent).toContain("请在下方输入回答，再点击发送。");
+    expect([...banner!.querySelectorAll("button")].map(button => button.textContent)).toContain("去回答");
+  });
+
+  it("focuses the answer field repeatedly without replacing the draft or sending", async () => {
+    await renderEmbedded(detailWith());
+    await act(async () => conversation!.onComposerChange("先保留这份草稿"));
+    const answer = [...container.querySelectorAll("button")].find(button => button.textContent === "去回答");
+    expect(answer).toBeTruthy();
+    const input = container.querySelector("textarea")!;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await act(async () => { answer!.focus(); answer!.click(); });
+      await settle(); await settle();
+      expect(document.activeElement).toBe(input);
+      expect(input.value).toBe("先保留这份草稿");
+      expect(input.selectionStart).toBe(input.value.length);
+    }
+    expect(invoke.mock.calls.some(([request]) => ["send", "continue", "resolveApproval"].includes(request.operation))).toBe(false);
+    expect(container.querySelector("[data-launcher-assistant-pending-question]")).toBeTruthy();
   });
 
   it("hides the banner while the session owns execution", async () => {

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from core.infrastructure import git_process
+from core.infrastructure.git_fileread import read_git_identity
 from core.runtime_manager.constants import PROJECT_ROOT
 
 _started: dict[str, str] | None = None
@@ -74,6 +75,17 @@ def get_launcher_freshness() -> dict[str, Any]:
 
 
 def _git_identity() -> dict[str, str]:
+    # Zero-subprocess fast path: .git/HEAD plus the loose ref file carry the
+    # same facts as `rev-parse HEAD` + `branch --show-current`. A detached HEAD
+    # reads branchName="" and maps to "HEAD" exactly like the git path below;
+    # any unresolvable state (packed-refs-only, invalid pointer, read race)
+    # returns None and keeps paying the authoritative git commands.
+    file_identity = read_git_identity(PROJECT_ROOT)
+    if file_identity is not None:
+        return {
+            "commit": str(file_identity.get("headCommit") or "").strip(),
+            "branch": str(file_identity.get("branchName") or "").strip() or "HEAD",
+        }
     try:
         commit = git_process.run_git(
             ["rev-parse", "HEAD"],
