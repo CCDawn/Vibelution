@@ -164,22 +164,31 @@ def _person_resting_entry_anchor(events: list[Any]) -> Any | None:
     resumable settlement never arms the wait and never moves the anchor, so
     scanning past it keeps an earlier person anchor alive — a machine turn
     can never dissolve an already-armed wait.
+
+    Single reverse pass (O(n)): ``pending`` carries the newest resumable
+    settlement whose driver has not been classified yet. The next
+    ``user_message`` found going backward is, for every candidate after it,
+    exactly the nearest preceding driver — a person driver returns the newest
+    pending candidate, a machine driver dissolves every candidate it drove,
+    and older candidates re-anchor on their own driver.
     """
 
     from core.chat.turn_journal import TERMINAL_EVENTS
 
+    pending: Any | None = None
     for index in range(len(events) - 1, -1, -1):
         event = events[index]
-        if str(getattr(event, "event_type", "") or "").strip() not in TERMINAL_EVENTS:
-            continue
-        if not _event_settled_resumable_phase(event):
-            continue
-        driver = None
-        for earlier in events[:index]:
-            if str(getattr(earlier, "event_type", "") or "").strip() == EVENT_USER_MESSAGE:
-                driver = earlier
-        if driver is not None and _journal_user_event_is_person_message(driver):
-            return event
+        event_type = str(getattr(event, "event_type", "") or "").strip()
+        if pending is not None and event_type == EVENT_USER_MESSAGE:
+            if _journal_user_event_is_person_message(event):
+                return pending
+            pending = None
+        if (
+            pending is None
+            and event_type in TERMINAL_EVENTS
+            and _event_settled_resumable_phase(event)
+        ):
+            pending = event
     return None
 
 

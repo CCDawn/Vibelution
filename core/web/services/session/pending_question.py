@@ -13,14 +13,16 @@ verdict). One-time consumption: the next person message consumes the slot
 submissions and ``queued_turns.enqueue_session_queued_turn`` wires it on
 accepted queued user rows.
 
-Writer status (batch 4): no PA direct-session ask_user-class tool or
-settlement-layer "ended on a question" signal exists today
+Writer status (batch 5): the settlement-layer "ended on a question" fact is
+the turn's own final visible text — ``persist.py``'s successful-turn
+collection point calls :func:`stamp_turn_pending_question` with it, so a
+completed turn whose reply ends asking its person freezes that question into
+the slot (``session_waits_for_person`` then holds the floor for the person).
+No PA direct-session ask_user-class tool exists yet
 (``virtual_human_life``'s ``ask_user`` act lives in the plugin's own plan
-store; chat_room ``nextAction=clarify`` is room-domain; text heuristics are
-explicitly out of scope). Phase 1 therefore ships storage + predicate +
-consume + clear only. TODO(batch-5+): wire a writer once the assistant
-settlement layer exposes a structured "asked the user X" fact — the setter
-below is the only sanctioned entry point.
+store; chat_room ``nextAction=clarify`` is room-domain), so the text
+heuristic on the settled reply IS the writer signal — ``set_...`` stays the
+sanctioned direct entry point, the stamp is the settlement-side one.
 
 Field style mirrors the frozen approval-pending shape
 (``tool_approvals._ApprovalRequest``): explicit camelCase fields, a
@@ -33,12 +35,20 @@ functions) so any session-side module can import this one safely.
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from typing import Any
 
 PENDING_QUESTION_STATE_KEY = "pendingQuestion"
 
 _MAX_QUESTION_TEXT_CHARS = 4000
+
+# Writer-side cap (persist.py settlement hook): the slot carries the frozen
+# question for surfacing, not the whole reply — 200 chars keeps the tail (the
+# actual question ending) without storing a paragraph.
+_WRITER_MAX_QUESTION_TEXT_CHARS = 200
+
+_QUESTION_ENDINGS = ("?", "？")
 
 
 def _service():
@@ -49,6 +59,87 @@ def _service():
 
 def _new_pending_question_id() -> str:
     return f"pq-{uuid.uuid4().hex[:12]}"
+
+
+def pending_question_id_for_turn(session_id: str, turn_id: str) -> str:
+    """Deterministic slot id derived from the settling turn and session.
+
+    A replayed settlement stamps the same id again, so the write stays
+    idempotent; a turn without an id falls back to a random id rather than
+    letting every turnless settlement share one identity.
+    """
+
+    normalized_turn_id = str(turn_id or "").strip()
+    if not normalized_turn_id:
+        return _new_pending_question_id()
+    digest = hashlib.sha1(
+        f"{str(session_id or '').strip()}\x1f{normalized_turn_id}".encode()
+    ).hexdigest()[:12]
+    return f"pq-{digest}"
+
+
+def trailing_question_text(visible_text: str) -> str:
+    """The question an assistant reply ended on, or ``""`` when it did not ask.
+
+    Reads the final visible assistant text (thinking/tool segments already
+    removed upstream): the last non-empty paragraph must end — after trim —
+    with ``?``/``？``. Anything else (statement, tool-only note) is not the
+    assistant holding its floor for an answer, so no slot is written.
+    """
+
+    for paragraph in reversed(
+        str(visible_text or "").replace("\r\n", "\n").split("\n\n")
+    ):
+        candidate = paragraph.strip()
+        if not candidate:
+            continue
+        return candidate if candidate.endswith(_QUESTION_ENDINGS) else ""
+    return ""
+
+
+def _writer_slot(session_id: str, turn_id: str, question_text: str) -> dict[str, Any]:
+    from core.web.services import session_service
+
+    return {
+        "id": pending_question_id_for_turn(session_id, turn_id),
+        "questionText": question_text[-_WRITER_MAX_QUESTION_TEXT_CHARS:],
+        "askedAt": session_service._now_timestamp(),
+        "consumedAt": "",
+    }
+
+
+def stamp_turn_pending_question(
+    conversation: dict[str, Any] | None,
+    *,
+    session_id: str,
+    turn_id: str,
+    visible_text: str,
+) -> dict[str, Any] | None:
+    """Writer entry: freeze a question-ending turn's question into its slot.
+
+    Called from the single successful-turn collection point
+    (``persist._persist_session_turn_result``) with the turn's final visible
+    assistant text, mutating the in-flight conversation dict so the slot lands
+    in the SAME atomic chat-state commit that stamps ``last_turn_status`` —
+    no second write, no extra lock window. Single-slot semantics: a fresh
+    question overwrites whatever occupied the slot; non-question endings and
+    failed/aborted turns write nothing and leave an existing slot untouched
+    (clearing stays the person-message consume side's job). Never raises —
+    persistence must not break turn finalization. Returns the slot written,
+    or None when nothing was written.
+    """
+
+    try:
+        if not isinstance(conversation, dict):
+            return None
+        question_text = trailing_question_text(visible_text)
+        if not question_text:
+            return None
+        slot = _writer_slot(session_id, turn_id, question_text)
+        conversation[PENDING_QUESTION_STATE_KEY] = slot
+        return dict(slot)
+    except Exception:  # noqa: BLE001 - the slot write must never break settlement
+        return None
 
 
 def _slot_is_pending(slot: Any) -> bool:
@@ -184,6 +275,9 @@ __all__ = [
     "clear_session_pending_question",
     "consume_session_pending_question",
     "conversation_pending_question",
+    "pending_question_id_for_turn",
     "session_pending_question",
     "set_session_pending_question",
+    "stamp_turn_pending_question",
+    "trailing_question_text",
 ]

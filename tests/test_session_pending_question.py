@@ -5,9 +5,14 @@ Batch-4 human-slot lane. The slot is the structured "the assistant asked its
 person something" fact: set once, consumed by the next accepted person
 message (``consumedAt`` stamp, idempotent), or dropped by the explicit clear
 action. While a slot is pending, ``session_waits_for_person`` reports the
-session as waiting for its person regardless of the resting phase. No writer
-exists yet (see the module docstring in ``pending_question.py``) — these
-tests pin the storage contract the future writer must keep.
+session as waiting for its person regardless of the resting phase.
+
+Batch-5 writer: the settlement layer (``persist._persist_session_turn_result``)
+now freezes a completed turn whose final visible reply ends on a question into
+the slot — the tests below pin the writer contract (question-ending completed
+turns write, statement endings / failed / aborted / pure-tool turns do not,
+fresh questions overwrite, person submissions consume) plus the pure helpers
+behind it.
 """
 
 from __future__ import annotations
@@ -156,3 +161,197 @@ def test_rail_off_disables_predicate_contribution_and_consume_hooks(
         seeded_session, "继续", client_submission_id="sub-rail-off-1",
     )
     _assert_pending(pending_question.session_pending_question(seeded_session))
+
+
+# ---------------------------------------------------------------------------
+# Batch-5 writer: the settlement layer freezes question-ending turns
+# ---------------------------------------------------------------------------
+
+
+def _persist_turn(session_id: str, turn_id: str, result: dict[str, Any]) -> Any:
+    """Drive the single settlement collection point like the worker does."""
+
+    session_service._set_session_running(session_id, True, turn_id=turn_id)
+    try:
+        return session_service._persist_session_turn_result(
+            session_id, result, turn_id=turn_id
+        )
+    finally:
+        session_service._set_session_running(session_id, False, turn_id=turn_id)
+
+
+def _completed_result(summary: str, **overrides: Any) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "status": "completed",
+        "summary": summary,
+        "raw_output": summary,
+    }
+    result.update(overrides)
+    return result
+
+
+def _stored_slot(session_id: str) -> dict[str, Any] | None:
+    return pending_question.session_pending_question(session_id)
+
+
+def test_question_ending_completed_turn_writes_pending_slot(seeded_session):
+    receipt = _persist_turn(
+        seeded_session,
+        "turn-ask-1",
+        _completed_result("前三份摘要已经完成。\n\n要把剩余两份并入今晚的批处理吗？"),
+    )
+    assert receipt is not None and receipt.get("finalStatus") == "completed"
+    slot = _stored_slot(seeded_session)
+    _assert_pending(slot)
+    assert slot["questionText"] == "要把剩余两份并入今晚的批处理吗？"
+    assert str(slot["id"]).startswith("pq-")
+    # The writer arms the waitsForPerson predicate on its own.
+    assert managed_continuation.session_waits_for_person(session_service, seeded_session) is True
+
+
+def test_statement_ending_completed_turn_writes_no_slot(seeded_session):
+    _persist_turn(
+        seeded_session,
+        "turn-done-1",
+        _completed_result("三份摘要全部完成，已写入简报。"),
+    )
+    assert _stored_slot(seeded_session) is None
+
+
+def test_english_question_ending_also_writes(seeded_session):
+    _persist_turn(
+        seeded_session,
+        "turn-ask-en",
+        _completed_result("Analysis is done.\n\nDo you want me to merge the reports?"),
+    )
+    slot = _stored_slot(seeded_session)
+    _assert_pending(slot)
+    assert slot["questionText"] == "Do you want me to merge the reports?"
+
+
+def test_failed_turn_never_writes_pending_slot(seeded_session):
+    # Even a question-shaped failure text must not arm the wait: the turn did
+    # not settle into a completed reply.
+    _persist_turn(
+        seeded_session,
+        "turn-fail-1",
+        {"status": "failed", "summary": "上游模型调用失败，要重试吗？", "raw_output": "上游模型调用失败，要重试吗？"},
+    )
+    assert _stored_slot(seeded_session) is None
+
+
+def test_aborted_and_paused_turns_never_write_pending_slot(seeded_session):
+    # Challenge-deadline cancellation (adapter-owned abort): settles cancelled,
+    # never a completed reply — no slot even with a question-shaped text.
+    _persist_turn(
+        seeded_session,
+        "turn-stop-1",
+        _completed_result(
+            "已按请求停止本轮工作，要继续吗？",
+            stop_requested=True,
+            stop_reason="challenge_logical_task_deadline_exhausted",
+        ),
+    )
+    assert _stored_slot(seeded_session) is None
+
+    _persist_turn(
+        seeded_session,
+        "turn-pause-1",
+        _completed_result("配额到限暂停，恢复后要继续吗？", status="needs_continue"),
+    )
+    assert _stored_slot(seeded_session) is None
+
+
+def test_pure_tool_turn_writes_no_slot(seeded_session):
+    # completed + no visible reply + tool calls settles into needs_continue —
+    # the tool-only turn is not the assistant asking its person.
+    receipt = _persist_turn(
+        seeded_session,
+        "turn-tools-1",
+        _completed_result("", tool_calls=[{"name": "run_shell", "arguments": {"command": "ls"}}]),
+    )
+    assert receipt is not None and receipt.get("finalStatus") == "needs_continue"
+    assert _stored_slot(seeded_session) is None
+
+
+def test_fresh_question_overwrites_previous_slot(seeded_session):
+    _persist_turn(seeded_session, "turn-ask-1", _completed_result("结论如下。\n\n要写成简报吗？"))
+    first = _stored_slot(seeded_session)
+    _assert_pending(first)
+
+    _persist_turn(seeded_session, "turn-ask-2", _completed_result("更新后的结论如下。\n\n要把简报发给全员吗？"))
+    second = _stored_slot(seeded_session)
+    _assert_pending(second)
+    assert second["questionText"] == "要把简报发给全员吗？"
+    assert second["id"] != first["id"]
+    assert str(second["askedAt"]) >= str(first["askedAt"])
+
+
+def test_written_slot_is_consumed_by_accepted_person_submit(seeded_session, monkeypatch):
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
+    _persist_turn(seeded_session, "turn-ask-1", _completed_result("已完成。\n\n要写成简报吗？"))
+    _assert_pending(_stored_slot(seeded_session))
+
+    session_service.submit_session_message_lightweight(
+        seeded_session, "好，写成简报", client_submission_id="sub-consume-written",
+    )
+    consumed = _stored_slot(seeded_session)
+    assert consumed is not None and str(consumed["consumedAt"] or "").strip()
+    assert managed_continuation.session_waits_for_person(session_service, seeded_session) is False
+
+
+# ---------------------------------------------------------------------------
+# Writer helpers: pure text/id/stamp contract
+# ---------------------------------------------------------------------------
+
+
+def test_trailing_question_text_contract():
+    assert pending_question.trailing_question_text("第一段。\n\n要继续吗？") == "要继续吗？"
+    assert pending_question.trailing_question_text("结尾提问?") == "结尾提问?"
+    assert pending_question.trailing_question_text("结尾提问？  \n") == "结尾提问？"
+    assert pending_question.trailing_question_text("已完成。") == ""
+    assert pending_question.trailing_question_text("要继续吗？\n\n（说明段。）") == ""
+    # An empty/pure-tool reply has no question to freeze.
+    assert pending_question.trailing_question_text("") == ""
+    assert pending_question.trailing_question_text("  \n  ") == ""
+    assert pending_question.trailing_question_text(None) == ""
+
+
+def test_pending_question_id_for_turn_is_stable_and_scoped():
+    first = pending_question.pending_question_id_for_turn("session-a", "turn-1")
+    assert first == pending_question.pending_question_id_for_turn("session-a", "turn-1")
+    assert first != pending_question.pending_question_id_for_turn("session-b", "turn-1")
+    assert first != pending_question.pending_question_id_for_turn("session-a", "turn-2")
+    assert first.startswith("pq-")
+    # Turnless settlements never share one identity.
+    assert (
+        pending_question.pending_question_id_for_turn("session-a", "")
+        != pending_question.pending_question_id_for_turn("session-a", "")
+    )
+
+
+def test_stamp_caps_question_text_and_never_raises():
+    conversation: dict[str, Any] = {}
+    long_question = "长" * 260 + "？"
+    slot = pending_question.stamp_turn_pending_question(
+        conversation,
+        session_id="session-a",
+        turn_id="turn-1",
+        visible_text=f"分析完成。\n\n{long_question}",
+    )
+    assert slot is not None
+    assert len(slot["questionText"]) == 200
+    # Tail truncation keeps the actual question ending.
+    assert slot["questionText"].endswith("？")
+    assert conversation["pendingQuestion"]["id"] == slot["id"]
+
+    # Non-question text and hostile inputs are no-ops, never exceptions.
+    assert pending_question.stamp_turn_pending_question(
+        {}, session_id="s", turn_id="t", visible_text="已完成。"
+    ) is None
+    assert pending_question.stamp_turn_pending_question(
+        None, session_id="s", turn_id="t", visible_text="要继续吗？"
+    ) is None
+    assert pending_question.stamp_turn_pending_question(
+        {}, session_id="s", turn_id="t", visible_text=None
+    ) is None

@@ -878,6 +878,222 @@ def test_rail_off_restores_legacy_last_speaker_predicate(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Batch-5 anchor scan: single reverse pass, same verdicts as the O(k·n) scan
+# ---------------------------------------------------------------------------
+
+
+def _journal_event(
+    event_type: str,
+    *,
+    status: str = "",
+    payload: dict[str, Any] | None = None,
+    source: str = "submit_session_message",
+    source_kind: str = "",
+    visible_in_model: bool = True,
+) -> Any:
+    """Synthetic journal event shaped like the real ledger rows."""
+
+    return SimpleNamespace(
+        event_type=event_type,
+        status=status,
+        payload=payload or {},
+        sequence=0,
+        source=source,
+        source_kind=source_kind,
+        visible_in_model=visible_in_model,
+    )
+
+
+def _person_user_event() -> Any:
+    return _journal_event(
+        EVENT_USER_MESSAGE,
+        payload={"content": "推进任务", "source": "raw", "metadata": {}},
+    )
+
+
+def _machine_user_event() -> Any:
+    return _journal_event(
+        EVENT_USER_MESSAGE,
+        source="agent_inbox",
+        payload={"content": "机器通知", "source": "agent_inbox", "metadata": {"kind": "agent_inbox_message"}},
+    )
+
+
+def _resumable_settlement(final_status: str = "needs_continue") -> Any:
+    return _journal_event(
+        "turn_completed",
+        status=final_status,
+        payload={"resultStatus": final_status, "finalStatus": final_status},
+        source="persist_session_turn_result",
+    )
+
+
+def _terminal(final_status: str = "ready") -> Any:
+    return _journal_event(
+        "turn_completed",
+        status=final_status,
+        payload={"resultStatus": final_status, "finalStatus": final_status},
+        source="persist_session_turn_result",
+    )
+
+
+def test_anchor_person_driven_settlement_arms_the_wait():
+    events = [_person_user_event(), _resumable_settlement()]
+    anchor = managed_continuation._person_resting_entry_anchor(events)
+    assert anchor is events[-1]
+
+
+def test_anchor_machine_driven_settlement_never_arms():
+    events = [_machine_user_event(), _resumable_settlement()]
+    assert managed_continuation._person_resting_entry_anchor(events) is None
+
+
+def test_anchor_machine_settlement_keeps_earlier_person_anchor():
+    # A machine turn can never dissolve an already-armed wait: scanning past
+    # its settlement must keep the earlier person anchor alive (the O(k·n)
+    # scan's "machine settlement never moves the anchor" verdict).
+    events = [
+        _person_user_event(),
+        _resumable_settlement(),
+        _machine_user_event(),
+        _resumable_settlement("paused_limit"),
+    ]
+    anchor = managed_continuation._person_resting_entry_anchor(events)
+    assert anchor is events[1]
+
+
+def test_anchor_non_resumable_terminal_never_anchors():
+    events = [_person_user_event(), _terminal("ready"), _resumable_settlement()]
+    anchor = managed_continuation._person_resting_entry_anchor(events)
+    assert anchor is events[-1]
+    assert managed_continuation._person_resting_entry_anchor([_person_user_event(), _terminal()]) is None
+
+
+def test_anchor_driver_must_precede_settlement():
+    # The driver is the nearest strictly-preceding user_message: a person
+    # message AFTER the settlement does not retro-arm it.
+    events = [_resumable_settlement(), _person_user_event()]
+    assert managed_continuation._person_resting_entry_anchor(events) is None
+
+
+def test_anchor_newest_person_settlement_wins():
+    events = [
+        _person_user_event(),
+        _resumable_settlement(),
+        _person_user_event(),
+        _resumable_settlement("paused_limit"),
+    ]
+    anchor = managed_continuation._person_resting_entry_anchor(events)
+    assert anchor is events[-1]
+
+
+def test_anchor_machine_driver_only_dissolves_candidates_it_drives():
+    # [U_person, T_res, U_machine, T_res, U_person2, non-terminal]: the machine
+    # driver dissolves only its own candidate; the older person anchor stays.
+    events = [
+        _person_user_event(),
+        _resumable_settlement(),
+        _machine_user_event(),
+        _resumable_settlement("paused_limit"),
+        _person_user_event(),
+        _terminal("ready"),
+    ]
+    anchor = managed_continuation._person_resting_entry_anchor(events)
+    assert anchor is events[1]
+
+
+def test_anchor_without_any_user_event_returns_none():
+    assert managed_continuation._person_resting_entry_anchor([_resumable_settlement()]) is None
+    assert managed_continuation._person_resting_entry_anchor([]) is None
+    assert managed_continuation._person_resting_entry_anchor([_machine_user_event()]) is None
+
+
+def _pre_batch5_anchor_reference(events: list[Any]) -> Any | None:
+    """The batch-4 O(k·n) scan, inlined verbatim as the equivalence reference.
+
+    The batch-5 single reverse pass must return exactly this anchor for every
+    journal shape: for each candidate the driver is the last strictly
+    preceding ``user_message``, and the newest person-driven candidate wins.
+    """
+
+    from core.chat.turn_journal import TERMINAL_EVENTS
+
+    for index in range(len(events) - 1, -1, -1):
+        event = events[index]
+        if str(getattr(event, "event_type", "") or "").strip() not in TERMINAL_EVENTS:
+            continue
+        if not managed_continuation._event_settled_resumable_phase(event):
+            continue
+        driver = None
+        for earlier in events[:index]:
+            if str(getattr(earlier, "event_type", "") or "").strip() == EVENT_USER_MESSAGE:
+                driver = earlier
+        if driver is not None and managed_continuation._journal_user_event_is_person_message(driver):
+            return event
+    return None
+
+
+def _random_journal_stream(rng: Any, length: int) -> list[Any]:
+    kinds = [
+        _person_user_event,
+        _machine_user_event,
+        _resumable_settlement,
+        lambda: _resumable_settlement("paused_limit"),
+        _terminal,
+        lambda: _terminal("failed"),
+        lambda: _journal_event("turn_failed", status="needs_continue"),
+        lambda: _journal_event("turn_interrupted", status="needs_continue"),
+        lambda: _journal_event("assistant_partial", payload={"content": "部分输出"}),
+        lambda: _journal_event("assistant_message", status="completed"),
+        lambda: _journal_event(
+            EVENT_USER_MESSAGE,
+            payload={"content": "hi", "source": "queued_turn", "metadata": {}},
+        ),
+        lambda: _journal_event(
+            EVENT_USER_MESSAGE,
+            source="schedule_proactive",
+            payload={"content": "hi", "source": "raw", "metadata": {"proactive": True}},
+        ),
+    ]
+    return [rng.choice(kinds)() for _ in range(length)]
+
+
+def test_anchor_single_pass_matches_pre_batch5_reference_on_random_journals():
+    """优化前后行为等价：单遍倒扫与批四 O(k·n) 参考实现在随机日志形状上一致。"""
+
+    import random
+
+    rng = random.Random(20261102)
+    streams: list[list[Any]] = [[]]
+    for _ in range(64):
+        streams.append(_random_journal_stream(rng, rng.randint(1, 40)))
+    # Hand-built corner shapes on top of the random corpus.
+    streams.extend(
+        [
+            [_person_user_event(), _resumable_settlement()],
+            [_machine_user_event(), _resumable_settlement()],
+            [_resumable_settlement(), _person_user_event()],
+            [
+                _person_user_event(),
+                _resumable_settlement(),
+                _machine_user_event(),
+                _resumable_settlement("paused_limit"),
+                _person_user_event(),
+                _terminal("ready"),
+            ],
+            [_journal_event(EVENT_USER_MESSAGE, status="needs_continue")],
+        ]
+    )
+    for events in streams:
+        expected = _pre_batch5_anchor_reference(events)
+        actual = managed_continuation._person_resting_entry_anchor(events)
+        assert actual is expected, (
+            f"anchor divergence on {len(events)}-event stream: "
+            f"reference={id(expected)} actual={id(actual)}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Batch-4 held marker on machine notices enqueued while waiting
 # ---------------------------------------------------------------------------
 

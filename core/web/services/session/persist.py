@@ -961,6 +961,28 @@ def _persist_session_turn_result(
             result=result if isinstance(result, dict) else None,
             stop_requested=stop_requested,
         )
+    if final_status == "completed":
+        # waitsForPerson writer (batch 5): the single settlement collection
+        # point. A completed turn whose final visible reply ends on a question
+        # is the assistant holding its floor for its person — freeze that
+        # question into the pendingQuestion slot so
+        # ``managed_continuation.session_waits_for_person`` reports waiting
+        # and the machine wake surfaces (inbox wake, queued auto-continue)
+        # stay blocked until a person message consumes the slot. The stamp
+        # mutates this conversation dict, so it lands in the same atomic
+        # chat-state commit as ``last_turn_status``; failed/aborted/stopped
+        # turns and non-question endings write nothing.
+        try:
+            from . import pending_question
+
+            pending_question.stamp_turn_pending_question(
+                conversation,
+                session_id=session_id,
+                turn_id=turn_id,
+                visible_text=visible_assistant_text,
+            )
+        except Exception:  # noqa: BLE001, S110 - the slot write must never break settlement
+            pass
     conversation["updated_at"] = assistant_entry["timestamp"]
     if not _commit_session_turn_runtime_state(
         session_id,
