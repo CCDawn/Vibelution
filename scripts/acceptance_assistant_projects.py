@@ -90,6 +90,7 @@ def assert_checkout_layout(home: Path, source: Path, roots: dict[str, Path], env
 
 
 def prepare_projects(fixture: AssistantAcceptanceFixture) -> list[ProjectSlot]:
+    from core.launcher.frontend_build import resolve_active_frontend_dist
     require(not fixture.backends and fixture.host_process is None, "project_fixture_requires_unused_runtime")
     generation = secrets.token_hex(6)
     parent = fixture.home / "checkouts"
@@ -134,7 +135,7 @@ def prepare_projects(fixture: AssistantAcceptanceFixture) -> list[ProjectSlot]:
         slot.snapshot()
         require(not fixture_git(slot.root, "status", "--porcelain", env=fixture.env), "project_fixture_not_clean")
         # Static assets are a physical copy, never a node_modules/venv link.
-        built = fixture.source / "web" / "dist"
+        built = resolve_active_frontend_dist(fixture.source)
         if built.is_dir():
             shutil.copytree(built, slot.root / "web" / "dist", dirs_exist_ok=True)
     project_ids = [base.read_json(roots[name] / ".vibelution" / "project.json")["projectId"] for name in ("A", "A1", "B")]

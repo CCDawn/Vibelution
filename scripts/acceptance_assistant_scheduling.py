@@ -177,7 +177,7 @@ def main() -> int:
     parser.add_argument("--timeout", type=float, default=1200)
     parser.add_argument("--readiness-timeout", type=float, default=120)
     parser.add_argument("--launcher-phase", action="store_true",
-        help="Also await real native-frame UI lifecycle requests in an isolated Electron instance.")
+        help="Await real native-frame lifecycle requests; requires matching built desktop and frontend assets.")
     parser.add_argument("--electron", type=Path)
     parser.add_argument("--desktop-dist", type=Path)
     parser.add_argument("--pythonw", type=Path)
