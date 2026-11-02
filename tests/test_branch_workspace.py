@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from core.infrastructure import branch_workspace as workspace
+from core.infrastructure.git_fileread import read_git_identity, read_git_layout
 from core.infrastructure.branch_workspace import (
     BranchWorkspaceError,
     allocate_worktree_path,
@@ -531,3 +532,131 @@ def test_dirty_scan_skips_foreign_worktrees_and_reports_dirty_unknown(tmp_path):
     assert foreign_item["dirtyUnknown"] is True
     assert foreign_item["promotable"] is False
     assert by_branch["main"]["dirtyUnknown"] is False
+
+
+# --- pure file-read layout fast path ---------------------------------------
+
+
+def _clear_git_discovery_env(monkeypatch) -> None:
+    for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR"):
+        monkeypatch.delenv(name, raising=False)
+
+
+def _forbid_git_children(monkeypatch) -> None:
+    _clear_git_discovery_env(monkeypatch)
+
+    def no_git(*_args, **_kwargs):
+        raise AssertionError("the file-read fast path must not spawn a git child")
+
+    monkeypatch.setattr(workspace.git_process, "run_git", no_git)
+
+
+def _git_common_dir(root: Path) -> Path:
+    raw = Path(_git(root, "rev-parse", "--git-common-dir"))
+    return (raw if raw.is_absolute() else root / raw).resolve()
+
+
+def test_resolve_layout_from_files_matches_git_for_main_and_linked_worktree(tmp_path, monkeypatch):
+    project = _init_repo(tmp_path / "OtherApp")
+    in_pool = project / ".worktrees" / "feat-task"
+    in_pool.parent.mkdir(parents=True)
+    _git(project, "worktree", "add", "-b", "codex/feat-task", str(in_pool))
+    # A linked worktree keeps a `.git` pointer file + `commondir`, the main
+    # checkout a `.git` directory: both shapes must resolve from files alone.
+    assert (in_pool / ".git").is_file()
+    assert (project / ".git").is_dir()
+    expected = {
+        start: (
+            Path(_git(start, "rev-parse", "--show-toplevel")).resolve(),
+            _git_common_dir(start),
+        )
+        for start in (project, project / "pkg", in_pool)
+    }
+    task_commit = _git(in_pool, "rev-parse", "HEAD")
+    _forbid_git_children(monkeypatch)
+
+    for start, (toplevel, common_dir) in expected.items():
+        layout = resolve_branch_workspace(start)
+        assert layout.worktree_root == toplevel
+        assert layout.git_common_dir == common_dir
+        assert layout.integration_root == project.resolve()
+        assert layout.branch_pool == project.resolve() / ".worktrees"
+    assert resolve_branch_workspace(project).role == "main"
+    assert resolve_branch_workspace(in_pool).role == "task"
+    assert resolve_branch_workspace(in_pool).slug == "feat-task"
+    # The linked worktree's branch ref lives in the common dir, not in its own
+    # per-worktree Git dir: the identity read must follow `commondir`.
+    assert read_git_identity(in_pool) == {"headCommit": task_commit, "branchName": "codex/feat-task"}
+
+
+def test_resolve_layout_from_files_survives_packed_only_refs(tmp_path, monkeypatch):
+    project = _init_repo(tmp_path / "OtherApp")
+    expected_commit = _git(project, "rev-parse", "HEAD")
+    _git(project, "pack-refs", "--all")
+    loose_ref = project / ".git" / "refs" / "heads" / "main"
+    if loose_ref.exists():
+        loose_ref.unlink()
+    _clear_git_discovery_env(monkeypatch)
+
+    # Layout needs no ref at all, so the fast path still hits; the identity
+    # read cannot see a packed-only ref and steps aside for git.
+    assert read_git_identity(project) is None
+    assert _git(project, "rev-parse", "HEAD") == expected_commit
+    _forbid_git_children(monkeypatch)
+    layout = resolve_branch_workspace(project)
+    assert layout.role == "main"
+    assert layout.worktree_root == project.resolve()
+    assert layout.git_common_dir == (project / ".git").resolve()
+
+
+def test_resolve_layout_from_files_detached_head_has_empty_branch_name(tmp_path, monkeypatch):
+    project = _init_repo(tmp_path / "OtherApp")
+    _git(project, "checkout", "--detach", "HEAD")
+    expected_commit = _git(project, "rev-parse", "HEAD")
+    assert _git(project, "branch", "--show-current") == ""
+    _forbid_git_children(monkeypatch)
+
+    layout = resolve_branch_workspace(project)
+    assert layout.role == "main"
+    assert layout.worktree_root == project.resolve()
+    assert read_git_identity(project) == {"headCommit": expected_commit, "branchName": ""}
+
+
+def test_git_env_overrides_step_aside_to_the_git_fallback(tmp_path, monkeypatch):
+    project = _init_repo(tmp_path / "OtherApp")
+    _clear_git_discovery_env(monkeypatch)
+    monkeypatch.setenv("GIT_DIR", str(project / ".git"))
+
+    # GIT_DIR changes git's own discovery; the file walk refuses to answer and
+    # the authoritative git commands still resolve the same layout.
+    assert read_git_layout(project) is None
+    assert read_git_identity(project) is None
+    layout = resolve_branch_workspace(project)
+    assert layout.worktree_root == project.resolve()
+    assert layout.git_common_dir == (project / ".git").resolve()
+    assert layout.role == "main"
+
+
+@pytest.mark.parametrize(
+    "shape",
+    ["missing", "plain_dir", "garbage_pointer", "empty_pointer", "dir_without_head", "inside_git_dir"],
+)
+def test_git_fileread_reports_unknown_instead_of_raising(tmp_path, monkeypatch, shape):
+    _clear_git_discovery_env(monkeypatch)
+    target = tmp_path / "checkout"
+    if shape == "plain_dir":
+        target.mkdir()
+    elif shape == "garbage_pointer":
+        target.mkdir()
+        (target / ".git").write_text("not a gitdir pointer\n", encoding="utf-8")
+    elif shape == "empty_pointer":
+        target.mkdir()
+        (target / ".git").write_text("gitdir: \n", encoding="utf-8")
+    elif shape == "dir_without_head":
+        (target / ".git").mkdir(parents=True)
+    elif shape == "inside_git_dir":
+        project = _init_repo(tmp_path / "OtherApp")
+        target = project / ".git" / "refs"
+
+    assert read_git_layout(target) is None
+    assert read_git_identity(target) is None

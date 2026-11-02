@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from core.infrastructure import git_process
+from core.infrastructure.git_fileread import read_git_layout
 from vibelution_storage import resolve_project_runtime_home
 from core.infrastructure.instance_display_name import (
     assign_instance_display_names,
@@ -62,8 +63,17 @@ def resolve_branch_workspace(checkout: Path | str) -> BranchWorkspaceLayout:
     if not raw.exists():
         raise BranchWorkspaceError(f"checkout 不存在：{raw}")
     start = raw.resolve() if raw.is_dir() else raw.parent.resolve()
-    worktree_root = _git_path(start, "rev-parse", "--show-toplevel")
-    git_common_dir = _resolve_git_common_dir(start)
+    # Fast path: the worktree root and common dir are plain ``.git`` entries,
+    # so a normal or linked-worktree checkout resolves with zero git children.
+    # Anything not derivable from files (env overrides, invalid pointer, cwd
+    # inside a Git dir) keeps the authoritative git-command path below.
+    file_layout = read_git_layout(start)
+    if file_layout is not None:
+        worktree_root = file_layout.worktree_root
+        git_common_dir = file_layout.git_common_dir
+    else:
+        worktree_root = _git_path(start, "rev-parse", "--show-toplevel")
+        git_common_dir = _resolve_git_common_dir(start)
     integration_root = (
         git_common_dir.parent if git_common_dir.name == ".git" else git_common_dir
     )
