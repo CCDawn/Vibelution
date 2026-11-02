@@ -52,6 +52,200 @@ def test_ordinary_development_commands_can_continue(tmp_path, command):
 
 
 @pytest.mark.parametrize("command", [
+    "git status --short && git diff --stat",
+    "python -m pytest tests -q&&git status --short",
+    "git diff --stat && npm run build && npx --no-install tsc -b",
+])
+def test_each_ordinary_segment_in_an_and_sequence_can_continue(tmp_path, command):
+    assert policy.normal_development_call("exec_command", {"cmd": command}, tmp_path)
+
+
+def test_double_quoted_apostrophe_is_literal_but_shell_single_quotes_are_not_supported(tmp_path):
+    assert policy.normal_development_call(
+        "exec_command", {"cmd": 'git commit -m "Don\'t change scope" && git status'}, tmp_path)
+    for command in ("git commit -m 'change scope'", "git -C 'nested path' status"):
+        assert not policy.normal_development_call("exec_command", {"cmd": command}, tmp_path)
+
+
+def test_command_sequences_have_a_bounded_number_of_segments(tmp_path):
+    assert policy.normal_development_call(
+        "exec_command", {"cmd": " && ".join(["git status"] * 16)}, tmp_path)
+    assert not policy.normal_development_call(
+        "exec_command", {"cmd": " && ".join(["git status"] * 17)}, tmp_path)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="cmd directory builtins")
+def test_cmd_worktree_inspection_sequence_tracks_quoted_directory(tmp_path):
+    nested = tmp_path / "task with spaces"
+    nested.mkdir()
+    command = f'cd /d "{nested}" && git status --short && dir /b'
+    assert policy.normal_development_call("exec_command", {"cmd": command}, tmp_path)
+    assert policy.normal_development_call("cli_tool", {"command": command}, tmp_path)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="real cmd route and windowless execution")
+@pytest.mark.parametrize("first_segment", ["cd", "git"])
+def test_cmd_inspection_sequence_executes_through_the_existing_windowless_route(tmp_path, first_segment):
+    import subprocess
+
+    from core.infrastructure.codex_sandbox.process import sandbox_popen_command, sandbox_popen_kwargs
+    from core.infrastructure.codex_sandbox.shell import create_shell_adapter
+    from core.infrastructure.git_process import run_git
+    from core.infrastructure.no_console_git import apply_no_console_git_env
+    from scripts.local_quality_gate import git_hook_isolated_environment
+    from tools.shell_tools import classify_shell_command
+
+    nested = tmp_path / "task with spaces"
+    nested.mkdir()
+    env = git_hook_isolated_environment()
+    initialized = run_git(["init", "--quiet"], cwd=nested, env=env, capture_output=True, text=True)
+    assert initialized.returncode == 0, initialized.stderr
+    (nested / "sequence-marker.txt").write_text("inspection fixture", encoding="utf-8")
+    command = f'cd /d "{nested}" && git status --short && dir /b'
+    if first_segment == "git":
+        initialized = run_git(["init", "--quiet"], cwd=tmp_path, env=env, capture_output=True, text=True)
+        assert initialized.returncode == 0, initialized.stderr
+        command = "git status --short && " + command
+    assert policy.normal_development_call("exec_command", {"cmd": command}, tmp_path)
+    route = classify_shell_command(command)
+    assert route.route == ("cmd" if first_segment == "cd" else "git_bash")
+    adapter = create_shell_adapter(platform="windows")
+    argv = adapter.sandbox_argv("", route, sandbox_mode="danger_full_access")
+    is_native, command_env, _ = adapter.describe_route(route)
+    if is_native:
+        env[command_env] = route.command
+    process_kwargs = sandbox_popen_kwargs(platform="windows")
+    assert process_kwargs["creationflags"] & subprocess.CREATE_NO_WINDOW
+    result = subprocess.run(
+        sandbox_popen_command(argv, platform="windows"), cwd=tmp_path,
+        env=apply_no_console_git_env(env), stdin=subprocess.DEVNULL,
+        capture_output=True, text=True, encoding="mbcs", errors="replace", timeout=15,
+        check=False, **process_kwargs)
+    assert result.returncode == 0, result.stderr
+    assert "?? sequence-marker.txt" in result.stdout
+    assert result.stdout.splitlines().count("sequence-marker.txt") == 1
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="cmd directory builtins")
+@pytest.mark.parametrize("command", [
+    "cd", "cd .", "CD /D .", "dir", "dir /b", "dir /a:d .",
+    "dir /b tests", "dir /b tests core", "cd tests && cd .. && dir /b core",
+    "cd /d tests && python -m pytest test_sample.py -q && dir /b .",
+])
+def test_cmd_directory_checks_stay_in_the_task(tmp_path, command):
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "core").mkdir()
+    assert policy.normal_development_call("exec_command", {"cmd": command}, tmp_path)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="cmd builtin identity")
+@pytest.mark.parametrize("command", [
+    '"cd" && dir /b', '"dir" /b', 'd"ir" /b', 'c"d" . && git status',
+    'git status && "dir" /b',
+])
+def test_quoted_or_spliced_builtin_names_cannot_bypass_executable_identity(tmp_path, command):
+    assert not policy.normal_development_call("exec_command", {"cmd": command}, tmp_path)
+
+
+@pytest.mark.parametrize("command", [
+    "&& git status", "git status &&", "git status && && git diff",
+    "git status & git diff", "git status &&& git diff", "git status || git diff",
+    "git status && git push", "git push && git status", "git status && python -c print(1)",
+    "git status && pytest --rootdir=../outside", "git status && npm run test --prefix=../outside",
+    'git commit -m "literal && git push"', "git commit -m 'literal && git push'",
+    "git commit -m 'literal && git status'", 'git commit -m "broken && git status',
+    'git commit -m "escaped\\" && git status',
+    "git status && pytest\n", "git status && pytest\r", "git status && pytest\t-q",
+    "git status && pytest | other", "git status && pytest > result", "git status && pytest 2>&1",
+    "git status && pytest %EVIL%", "git status && pytest !EVIL!", "git status && pytest ^& other",
+    "git status && pytest $(other)", "git status && pytest `other`", "git status && (pytest)",
+])
+def test_uninterpreted_or_risky_sequence_segments_keep_approval(tmp_path, command):
+    assert not policy.normal_development_call("exec_command", {"cmd": command}, tmp_path)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="cmd directory builtins")
+@pytest.mark.parametrize("command", [
+    "cd /d .. && git status", "cd /d missing && git status", "cd /d file && git status",
+    "cd /d . /extra && git status", "cd /unknown . && git status", "cd /d && git status",
+    "dir /b ..", "dir /b . ../outside", "dir /b C:/outside", "dir /b .git",
+    "dir /b *", "dir /b tests/*", "dir /s", "dir /unknown",
+])
+def test_directory_switches_and_listing_paths_cannot_escape(tmp_path, command):
+    (tmp_path / "file").write_text("not a directory", encoding="utf-8")
+    assert not policy.normal_development_call("exec_command", {"cmd": command}, tmp_path)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="cmd directory builtins")
+def test_commands_after_cd_use_the_new_cwd_for_paths_and_tool_shadows(tmp_path):
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    (nested / "git.cmd").write_text("untrusted wrapper", encoding="utf-8")
+    assert not policy.normal_development_call(
+        "exec_command", {"cmd": "cd /d nested && git status"}, tmp_path)
+    assert policy.normal_development_call(
+        "exec_command", {"cmd": "cd /d nested && cd .. && git status"}, tmp_path)
+    assert policy.normal_development_call(
+        "exec_command", {"cmd": "cd /d nested && pytest ../test_sample.py"}, tmp_path)
+    assert not policy.normal_development_call(
+        "exec_command", {"cmd": "cd /d nested && pytest ../../outside/test.py"}, tmp_path)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="cmd directory builtins")
+def test_directory_symlink_escape_keeps_approval(tmp_path):
+    workspace = tmp_path / "task"
+    workspace.mkdir()
+    try:
+        (workspace / "outside").symlink_to(tmp_path, target_is_directory=True)
+    except OSError:
+        pytest.skip("Host does not permit symlink creation")
+    for command in ("cd /d outside && git status", "dir /b outside"):
+        assert not policy.normal_development_call("exec_command", {"cmd": command}, workspace)
+
+
+@pytest.fixture
+def trusted_directory_tools(tmp_path, monkeypatch):
+    workspace = tmp_path / "task"
+    workspace.mkdir()
+    installed = tmp_path / "installed"
+    installed.mkdir()
+    for name in ("ls", "pwd"):
+        (installed / f"{name}.exe").write_text("trusted identity fixture", encoding="utf-8")
+    original_lookup = shutil.which
+    monkeypatch.setattr(shutil, "which", lambda name: str(installed / f"{name}.exe")
+                        if name in {"ls", "pwd"} else original_lookup(name))
+    return workspace
+
+
+@pytest.mark.parametrize("command", ["pwd", "pwd -P", "ls", "ls -al .", "ls --directory ."])
+def test_trusted_standalone_directory_tools_are_read_only_and_scoped(trusted_directory_tools, command):
+    assert policy.normal_development_call("exec_command", {"cmd": command}, trusted_directory_tools)
+
+
+@pytest.mark.parametrize("command", [
+    "pwd ../outside", "pwd --unknown", "ls ..", "ls ../outside", "ls *", "ls tests/*.py",
+    "ls -R .", "ls -L .", "ls -H .", "ls --dereference .", "ls --unknown .",
+])
+def test_standalone_directory_tools_cannot_expand_or_dereference_outside(trusted_directory_tools, command):
+    assert not policy.normal_development_call("exec_command", {"cmd": command}, trusted_directory_tools)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="cmd and Bash route distinction")
+@pytest.mark.parametrize("command", [
+    "git status && ls", "ls && git status", "cd /d . && pwd", "pwd && dir /b",
+    "git status && ls.exe", "git status && pwd.cmd",
+])
+def test_mixed_cmd_and_unix_tool_sequences_keep_approval(trusted_directory_tools, command):
+    assert not policy.normal_development_call("exec_command", {"cmd": command}, trusted_directory_tools)
+
+
+@pytest.mark.parametrize("name", ["ls", "pwd"])
+def test_directory_tool_cwd_shadow_is_not_trusted(trusted_directory_tools, name):
+    (trusted_directory_tools / f"{name}.cmd").write_text("untrusted wrapper", encoding="utf-8")
+    assert not policy.normal_development_call("exec_command", {"cmd": name}, trusted_directory_tools)
+
+
+@pytest.mark.parametrize("command", [
     "git push origin main", "git reset --hard", "git clean -fd", "git rm core/example.py",
     "git branch -D main", "git switch --discard-changes main", "git config user.email x@y.test",
     "git -c core.hooksPath=outside commit -m test", "git --git-dir=../other status",

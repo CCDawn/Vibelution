@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import PureWindowsPath
 import signal
 import subprocess
 from typing import Any
@@ -10,6 +11,21 @@ from typing import Any
 from core.infrastructure.codex_sandbox.platform import host_platform
 from core.runtime_manager.process_inventory import terminate_process_descendants
 from scripts.windowless_subprocess import no_window_subprocess_kwargs
+
+
+def sandbox_popen_command(argv: list[str], *, platform: str | None = None) -> list[str] | str:
+    """Preserve cmd's raw /s /c payload at the Windows CreateProcess boundary.
+
+    Python's list2cmdline applies CRT backslash escaping to embedded quotes;
+    cmd does not use that grammar. Only a direct, known cmd invocation needs
+    raw serialization. Codex-prefixed and other executable argv stay intact.
+    """
+    system = (platform or host_platform()).lower()
+    if (system != "windows" or len(argv) != 5
+            or PureWindowsPath(argv[0]).name.casefold() != "cmd.exe"
+            or [argument.casefold() for argument in argv[1:4]] != ["/d", "/s", "/c"]):
+        return argv
+    return subprocess.list2cmdline(argv[:4]) + ' "' + argv[4] + '"'
 
 
 def sandbox_popen_kwargs(*, platform: str | None = None) -> dict[str, Any]:
