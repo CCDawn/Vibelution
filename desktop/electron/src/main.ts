@@ -6114,7 +6114,13 @@ async function runIsolatedRegistryMutation(input: {
   const payload = input.branchExecution?.branchInstances ?? launcherStateStore.projectBranchInstances();
   const target = resolveIsolatedClaimTarget(payload, input.instanceId);
   input.branchExecution?.check();
-  if (input.branchExecution && target?.projectRoot !== input.branchExecution.workspaceRoot) throw new Error("BRANCH_REGISTRATION_CHANGED");
+  if (input.branchExecution) {
+    const workspaceRoot = input.branchExecution.workspaceRoot;
+    const registeredRootMatches = target && (process.platform === "win32"
+      ? sameProjectRoot(target.projectRoot, workspaceRoot)
+      : target.projectRoot === workspaceRoot);
+    if (!registeredRootMatches) throw new Error("BRANCH_REGISTRATION_CHANGED");
+  }
 
   if (input.operation === "start" || input.operation === "restart") {
     if (input.admission && !target) throw new Error("PROJECT_ADMISSION_UNKNOWN");

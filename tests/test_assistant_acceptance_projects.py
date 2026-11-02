@@ -108,7 +108,36 @@ def test_launcher_bootstraps_keep_each_private_projects_reserved_ports(tmp_path)
     assert b["VIBELUTION_PORT"] == b["AGENT_WORKBENCH_BACKEND_PORT"] == "23222"
     assert (a["VIBELUTION_FRONTEND_PORT"], b["VIBELUTION_FRONTEND_PORT"]) == ("43111", "43222")
     assert a["LOCALAPPDATA"] == b["LOCALAPPDATA"] == "private"
+    assert a["PYTHONIOENCODING"] == b["PYTHONIOENCODING"] == "utf-8"
     assert controller.env["VIBELUTION_PORT"] == "8000"
+
+
+def test_reused_checkout_runtime_bounds_exclude_other_projects(tmp_path):
+    controller = object.__new__(case.IsolatedLauncherController)
+    controller.fixture = SimpleNamespace(home=tmp_path / "new-runtime")
+    root, other = tmp_path / "previous-private-checkouts" / "A", tmp_path / "other-project"
+    controller.slots = {"A": case.ProjectSlot("A", "A", root, "A", 1)}
+    assert controller._private_runtime_path(root / ".runtime", root)
+    assert controller._private_runtime_path(root / ".runtime/runtime-manager", root)
+    assert controller._private_runtime_path(controller.fixture.home / "projects/runtime", root)
+    assert not controller._private_runtime_path(other / ".runtime", root)
+    assert not controller._private_runtime_path(root / "unexpected-runtime", root)
+    assert not controller._private_runtime_path(other / ".runtime", other)
+
+
+def test_reused_checkout_runtime_bounds_reject_external_directory_links(tmp_path):
+    controller = object.__new__(case.IsolatedLauncherController)
+    controller.fixture = SimpleNamespace(home=tmp_path / "new-runtime")
+    root, outside = tmp_path / "checkout", tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    controller.slots = {"A": case.ProjectSlot("A", "A", root, "A", 1)}
+    try:
+        (root / ".runtime").symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory links are unavailable in this test environment")
+    assert not controller._private_runtime_path(root / ".runtime", root)
+    assert not controller._private_runtime_path(root / ".runtime/runtime-manager", root)
 
 
 def lifecycle_inputs(tmp_path, branch=False):

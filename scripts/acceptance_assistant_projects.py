@@ -548,7 +548,7 @@ class IsolatedLauncherController:
         ports = self.ports["A" if name == "A1" else name]
         return {**self.env, "VIBELUTION_PORT": str(ports["backend"]),
                 "AGENT_WORKBENCH_BACKEND_PORT": str(ports["backend"]),
-                "VIBELUTION_FRONTEND_PORT": str(ports["frontend"])}
+                "VIBELUTION_FRONTEND_PORT": str(ports["frontend"]), "PYTHONIOENCODING": "utf-8"}
 
     def start(self, timeout: float = 120, *, root: Path | None = None) -> dict:
         import subprocess
@@ -640,13 +640,24 @@ class IsolatedLauncherController:
         self._save()
         return rows
 
+    def _private_runtime_path(self, path: Path, root: Path) -> bool:
+        path, root = path.resolve(), root.resolve()
+        if base.inside(path, self.fixture.home):
+            return True
+        # A reused private checkout can retain its pre-migration runtime.
+        # Only its own .runtime subtree is admitted, never a sibling project
+        # or a junction resolving outside that verified checkout.
+        legacy = root / ".runtime"
+        return (root in {slot.root.resolve() for slot in self.slots.values()}
+                and base.inside(path, root) and (path == legacy or base.inside(path, legacy)))
+
     def backend_identity(self, root: Path) -> dict:
         import psutil
         from vibelution_storage import resolve_project_runtime_home
 
         with base.environment(self.env):
             runtime = resolve_project_runtime_home(root)
-        require(base.inside(runtime, self.fixture.home), "launcher_runtime_outside_fixture")
+        require(self._private_runtime_path(runtime, root), "launcher_runtime_outside_fixture")
         path = runtime / "launcher" / "state.json"
         state = base.read_json(path) if path.is_file() else {}
         pid = state.get("backendPid", 0)
@@ -690,7 +701,7 @@ class IsolatedLauncherController:
                     time.sleep(1)
                     continue
                 manager = Path(str(binding.get("runtimeManagerDir") or ""))
-                require(base.inside(manager, self.fixture.home), "launcher_native_manager_outside_fixture")
+                require(self._private_runtime_path(manager, Path(expected["root"])), "launcher_native_manager_outside_fixture")
                 command_id = str(command.get("commandId") or "")
                 require(command_id and all(char.isalnum() or char in "_-" for char in command_id),
                         "launcher_native_command_id_invalid")

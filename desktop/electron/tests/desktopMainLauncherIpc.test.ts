@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { applyObserve, type RegistryPayload } from "../src/lifecycle/instanceRegistryStore.js";
 import { LauncherLifecycleSupervisor } from "../src/lifecycle/launcherLifecycleSupervisor.js";
 import { superviseIsolatedInstanceStart } from "../src/process/isolatedInstanceSupervisor.js";
+import { sameProjectRoot } from "../src/process/workbenchBackend.js";
 
 const mainSource = readFileSync(fileURLToPath(new URL("../src/main.ts", import.meta.url)), "utf8");
 const preloadSource = readFileSync(fileURLToPath(new URL("../src/preload.ts", import.meta.url)), "utf8");
@@ -95,6 +96,81 @@ describe("Electron main Launcher IPC facade", () => {
     });
     await expect(mutate({ operation: "start", instanceId: "worktree:task" })).rejects.toBe(buildBoundary);
     expect(build).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    {
+      platform: "win32",
+      projectRoot: "C:\\Users\\Administrator\\worktrees\\Task",
+      workspaceRoot: "c:\\users\\administrator\\worktrees\\task"
+    },
+    { platform: "linux", projectRoot: "/worktrees/Task", workspaceRoot: "/worktrees/Task" }
+  ])("allows $platform branch execution for the same root to reach the real build boundary", async ({
+    platform, projectRoot, workspaceRoot
+  }) => {
+    const buildBoundary = new Error("reached actual start build");
+    const build = vi.fn(async () => { throw buildBoundary; });
+    const checkExecution = vi.fn();
+    const checkAdmission = vi.fn();
+    const prepareStart = vi.fn();
+    const spawnBackend = vi.fn();
+    const target = { projectRoot, preferredBackend: 8003, preferredControl: 8768 };
+    const branchInstances = { items: [target] };
+    const resolveTarget = vi.fn(() => target);
+    const mutate = isolatedMutationForTest({
+      process: { platform }, sameProjectRoot,
+      resolveIsolatedClaimTarget: resolveTarget,
+      inspectIsolatedStartReuse: async () => ({ kind: "start" }),
+      runWithFrontendBuildGate: build,
+      prepareIsolatedStart: prepareStart,
+      spawnWorkbenchBackend: spawnBackend
+    });
+    await expect(mutate({
+      operation: "start", instanceId: "worktree:task",
+      branchExecution: { workspaceRoot, branchInstances, check: checkExecution },
+      admission: { check: checkAdmission }
+    })).rejects.toBe(buildBoundary);
+    expect(resolveTarget).toHaveBeenCalledWith(branchInstances, "worktree:task");
+    expect(checkExecution).toHaveBeenCalledOnce();
+    expect(checkAdmission).toHaveBeenCalledWith(projectRoot);
+    expect(build).toHaveBeenCalledOnce();
+    expect(prepareStart).not.toHaveBeenCalled();
+    expect(spawnBackend).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { platform: "win32", projectRoot: "C:/worktrees/other", workspaceRoot: "c:/worktrees/task" },
+    { platform: "linux", projectRoot: "/worktrees/Task", workspaceRoot: "/worktrees/task" },
+    { platform: "win32", projectRoot: undefined, workspaceRoot: "c:/worktrees/task" },
+    { platform: "linux", projectRoot: undefined, workspaceRoot: "/worktrees/task" }
+  ])("rejects a changed or missing $platform branch root: $projectRoot", async ({
+    platform, projectRoot, workspaceRoot
+  }) => {
+    const checkExecution = vi.fn();
+    const checkAdmission = vi.fn();
+    const inspectReuse = vi.fn();
+    const build = vi.fn();
+    const prepareStart = vi.fn();
+    const spawnBackend = vi.fn();
+    const mutate = isolatedMutationForTest({
+      process: { platform }, sameProjectRoot,
+      resolveIsolatedClaimTarget: () => projectRoot === undefined ? null : { projectRoot },
+      inspectIsolatedStartReuse: inspectReuse,
+      runWithFrontendBuildGate: build,
+      prepareIsolatedStart: prepareStart,
+      spawnWorkbenchBackend: spawnBackend
+    });
+    await expect(mutate({
+      operation: "start", instanceId: "worktree:task",
+      branchExecution: { workspaceRoot, branchInstances: {}, check: checkExecution },
+      admission: { check: checkAdmission }
+    })).rejects.toThrow("BRANCH_REGISTRATION_CHANGED");
+    expect(checkExecution).toHaveBeenCalledOnce();
+    expect(checkAdmission).not.toHaveBeenCalled();
+    expect(inspectReuse).not.toHaveBeenCalled();
+    expect(build).not.toHaveBeenCalled();
+    expect(prepareStart).not.toHaveBeenCalled();
+    expect(spawnBackend).not.toHaveBeenCalled();
   });
 
   it("returns the verified existing generation instead of inventing a reuse command", async () => {
