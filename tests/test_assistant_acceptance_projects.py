@@ -97,6 +97,20 @@ def test_launcher_handoff_does_not_claim_runtime_evidence(tmp_path):
     assert not any(word in str(plan).lower() for word in ("token", "capability", "authorization"))
 
 
+def test_launcher_bootstraps_keep_each_private_projects_reserved_ports(tmp_path):
+    controller = object.__new__(case.IsolatedLauncherController)
+    controller.slots = {name: case.ProjectSlot(name, name, tmp_path / name, name, 1) for name in ("A", "A1", "B")}
+    controller.env = {"VIBELUTION_PORT": "8000", "VIBELUTION_FRONTEND_PORT": "5173", "LOCALAPPDATA": "private"}
+    controller.ports = {"A": {"backend": 23111, "frontend": 43111}, "B": {"backend": 23222, "frontend": 43222}}
+    a = controller._target_environment(tmp_path / "A")
+    b = controller._target_environment(tmp_path / "B")
+    assert a["VIBELUTION_PORT"] == a["AGENT_WORKBENCH_BACKEND_PORT"] == "23111"
+    assert b["VIBELUTION_PORT"] == b["AGENT_WORKBENCH_BACKEND_PORT"] == "23222"
+    assert (a["VIBELUTION_FRONTEND_PORT"], b["VIBELUTION_FRONTEND_PORT"]) == ("43111", "43222")
+    assert a["LOCALAPPDATA"] == b["LOCALAPPDATA"] == "private"
+    assert controller.env["VIBELUTION_PORT"] == "8000"
+
+
 def lifecycle_inputs(tmp_path, branch=False):
     expected = {"slot": "A1" if branch else "A", "root": str(tmp_path), "projectId": "native-project-id",
                 "operation": "restart", "requestId": "stable-restart-id"}

@@ -70,10 +70,24 @@ class LocalAssistantBackendClient(ManagedAgentBackendClient):
             # Persist the capability and its immutable transport together before
             # the base implementation can send the first idempotent POST.
             self._save_state_locked()
-        return await super().start_task(
-            agent_id=agent_id, task=task, permission_profile=permission_profile,
-            client_request_id=request_id, title=title, require_existing_capability=True,
-        )
+            local_request = namespaces.get(hashlib.sha256(capability.encode()).hexdigest()) == "local"
+        try:
+            return await super().start_task(
+                agent_id=agent_id, task=task, permission_profile=permission_profile,
+                client_request_id=request_id, title=title, require_existing_capability=True,
+            )
+        except BackendClientError as start_error:
+            if (not local_request or not self._launcher_capability
+                    or start_error.code not in {"BACKEND_TIMEOUT", "BACKEND_UNAVAILABLE"}):
+                raise
+            # A slow checkout or lost acknowledgement can leave an accepted
+            # queued task behind. Recover that exact authenticated request once;
+            # never replay the POST or mint another capability/task identity.
+            try:
+                return await self.get_task_for_request(client_request_id=request_id)
+            except BackendClientError:
+                pass
+            raise
 
     async def _request_json(
         self,

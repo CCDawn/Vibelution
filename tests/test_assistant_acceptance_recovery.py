@@ -278,6 +278,18 @@ def test_proxy_loses_only_first_real_success_and_forwards_lookup_bytes_unchanged
         assert proxy.closed and seen == {"posts": 2, "lookups": 1, "credentialMatched": True}
 
 
+@pytest.mark.parametrize("method,path", [("GET", "/api/v1/launcher-assistant-management/directory/agents"),
+                                       ("POST", "/api/v1/launcher-assistant-management/binding")])
+def test_proxy_preserves_native_management_discovery_without_injecting_another_fault(method, path):
+    with _ack_upstream() as (upstream, seen, raw):
+        with recovery.LostAcknowledgementProxy(upstream, "probe") as proxy:
+            status, body = _proxy_request(proxy, method, path, {} if method == "POST" else None)
+            assert status == 200 and body == raw and seen["credentialMatched"]
+            proof = proxy.evidence()
+            assert proof["forwardedRequestCount"] == 1
+            assert proof["proxyErrorCount"] == proof["droppedAckCount"] == proof["taskPostAttempts"] == 0
+
+
 def test_proxy_does_not_claim_dropped_ack_for_rejected_post():
     with _ack_upstream(status=409) as (upstream, _, raw):
         with recovery.LostAcknowledgementProxy(upstream, "probe") as proxy:

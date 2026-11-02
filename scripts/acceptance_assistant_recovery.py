@@ -75,6 +75,8 @@ class LostAcknowledgementProxy:
             return False
         if method == "GET" and parsed.path in {"/api/control-token", "/api/v1/external-agent/info"}:
             return True
+        if method in {"GET", "POST"} and parsed.path.startswith("/api/v1/launcher-assistant-management/"):
+            return True  # Preserve native discovery/auth traffic; backend still enforces its scopes.
         if not parsed.path.startswith(LOCAL_TASK_PREFIX):
             return False
         suffix = parsed.path[len(LOCAL_TASK_PREFIX):]
@@ -551,8 +553,9 @@ def _run_lost_ack(fixture: AssistantAcceptanceFixture, record: dict, deadline: f
                     "只用receipt查询原dispatch_id，或等待原生host恢复原引用，不修改配置、权限或创建Agent。"
                     "如果你是目标Agent：只调用一次真实read_file_tool，"
                     f"file_path={json.dumps(str(readme), ensure_ascii=False)}，offset=0，max_lines=5。"
-                    "不要执行命令、写文件、创建子Agent或访问网络。读取成功后只回答标记"
-                    f" {ACK_SUCCESS_MARKER}。"
+                    "不要执行命令、写文件、创建子Agent或访问网络。读取成功后明确说明本次只读任务"
+                    "已完成、已真实读取README前5行且没有剩余工作，并在最终回复保留标记"
+                    f" {ACK_SUCCESS_MARKER}；不要只回一个无法判断完成状态的短标记。"
                 )
                 fixture.send(message, request_id=dispatch_id)
                 record["status"] = "waiting_for_original_request_lookup"

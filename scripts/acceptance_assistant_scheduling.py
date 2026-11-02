@@ -170,7 +170,7 @@ def run(args: argparse.Namespace) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scenario", choices=("multitask", "recovery", "projects", "all"), default="all")
+    parser.add_argument("--scenario", choices=("multitask", "recovery", "acknowledgement", "projects", "all"), default="all")
     parser.add_argument("--runtime-home", type=Path, required=True)
     parser.add_argument("--source-config", type=Path, required=True)
     parser.add_argument("--model-id", required=True)

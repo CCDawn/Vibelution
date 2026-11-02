@@ -489,6 +489,22 @@ class IsolatedLauncherController:
             self.env.pop(key, None)
         self.python = pythonw.with_name("python.exe")
         self.profile = Path(self.plan["userDataRoot"]) / "assistant" / "profile"
+        self.ports = fixture.record.setdefault("launcherPorts", {})
+        for name in ("A", "B"):
+            if name not in self.ports:
+                self.ports[name] = {kind: base.acceptance_runtime._allocate_port(
+                    lease_root=fixture.home / "launcher-port-leases", kind=kind, instance_id="launcher-" + name,
+                    candidates=range(start, start + 1000))
+                    for kind, start in (("backend", 20000 + secrets.randbelow(10000)),
+                                        ("frontend", 40000 + secrets.randbelow(10000)))}
+        from core.launcher.frontend_build import inspect_frontend_build
+        builds = []
+        with base.environment(fixture.env):
+            for name, slot in self.slots.items():
+                build = inspect_frontend_build(slot.root)
+                require(build["current"], "launcher_matching_frontend_build_required")
+                builds.append({"slot": name, "dist": build["dist"], "buildKey": build["buildKey"],
+                               "frontendTree": build["buildInputs"]["frontendTree"]})
         self.process = None
         self.create_time = None
         self._children = {}
@@ -500,6 +516,7 @@ class IsolatedLauncherController:
              nativeOpenLauncherBridge="window.vibelutionLauncherAssistant.invoke({operation:'openLauncher'})",
             nativeExitBridge="window.vibelutionLauncher.requestDesktopShellExit()",
              nativeExitInstruction="Open the Launcher from the assistant bridge, rediscover that owned Launcher page, then use its exit bridge.",
+             privatePorts=self.ports, frontendBuilds=builds,
             registrationInstruction="Use ordinary CLI status for each private workspace; read actual projects.json registrations. Never write registry IDs.")
         self._save()
 
@@ -523,17 +540,32 @@ class IsolatedLauncherController:
         args[args.index("--project") + 1] = str(root or self.slots["A"].root)
         return [*args, operation]
 
+    def _target_environment(self, root: Path) -> dict:
+        name = next(name for name, slot in self.slots.items() if slot.root.resolve() == root.resolve())
+        ports = self.ports["A" if name == "A1" else name]
+        return {**self.env, "VIBELUTION_PORT": str(ports["backend"]),
+                "AGENT_WORKBENCH_BACKEND_PORT": str(ports["backend"]),
+                "VIBELUTION_FRONTEND_PORT": str(ports["frontend"])}
+
     def start(self, timeout: float = 120, *, root: Path | None = None) -> dict:
         import subprocess
+        import tomllib
+        from config.toml_writer import dumps_public_config
         from scripts.windowless_subprocess import no_window_subprocess_kwargs
 
         require(self.process is None and self.fixture.cleanup.get("assistantStopped")
                 and self.fixture.cleanup.get("backendsStopped"), "standalone_runtime_must_stop_first")
         target = (root or self.slots["A"].root).resolve()
         require(target in {slot.root.resolve() for slot in self.slots.values()}, "launcher_start_target_outside_fixture")
+        child_env = self._target_environment(target)
+        config_path = Path(self.env["VIBELUTION_CONFIG_PATH"])
+        config = tomllib.loads(config_path.read_text(encoding="utf-8"))
+        config.setdefault("workbench", {}).update(backend_port=int(child_env["VIBELUTION_PORT"]),
+                                                 frontend_port=int(child_env["VIBELUTION_FRONTEND_PORT"]))
+        config_path.write_text(dumps_public_config(config), encoding="utf-8")
         with (self.stage / "electron.stdout.log").open("ab", buffering=0) as stdout, \
                 (self.stage / "electron.stderr.log").open("ab", buffering=0) as stderr:
-            self.process = subprocess.Popen(self._argv("start", root=target), cwd=target, env=self.env,
+            self.process = subprocess.Popen(self._argv("start", root=target), cwd=target, env=child_env,
                 stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr, **no_window_subprocess_kwargs())
         self.create_time = base.acceptance_runtime._process_create_time(self.process.pid)
         self.fixture.cleanup["launcherElectronStopped"] = False
@@ -543,12 +575,27 @@ class IsolatedLauncherController:
         while time.monotonic() < deadline:
             require(self.process.poll() is None, "isolated_electron_exited_before_ready")
             result = subprocess.run([str(self.python), str(target / "scripts" / "desktop_debug.py"),
-                "--project", str(target)], cwd=target, env=self.env,
+                "--project", str(target)], cwd=target, env=child_env,
                 stdin=subprocess.DEVNULL, capture_output=True, timeout=10, **no_window_subprocess_kwargs())
             if result.returncode == 0:
                 debug = json.loads(result.stdout)
                 require(debug.get("pid") == self.process.pid, "isolated_electron_debug_pid_mismatch")
                 self.plan.update(status="ready_for_native_operator", cdp=debug)
+                backend = self.backend_identity(target)
+                if not backend["alive"] or backend["port"] != int(child_env["VIBELUTION_PORT"]):
+                    self.plan["status"] = "waiting_for_bootstrap_backend"
+                    self._save()
+                    time.sleep(1)
+                    continue
+                try:
+                    health = base.request(f"http://127.0.0.1:{backend['port']}", "/api/health", token="", timeout=5)
+                    require(health.get("status") == "ok" and health.get("routesReady") is True
+                            and Path(str(health.get("workspaceRoot") or "")).resolve() == target,
+                            "launcher_bootstrap_health_not_ready")
+                except AcceptanceFailure:
+                    time.sleep(1)
+                    continue
+                self.plan["bootstrapBackend"] = backend
                 self.refresh_registrations()
                 self._capture_children()
                 self._save()
@@ -566,7 +613,7 @@ class IsolatedLauncherController:
         require(target in {slot.root.resolve() for slot in self.slots.values()}, "launcher_cli_target_outside_fixture")
         with (self.stage / "cli.stdout.log").open("ab", buffering=0) as stdout, \
                 (self.stage / "cli.stderr.log").open("ab", buffering=0) as stderr:
-            result = subprocess.run(self._argv(operation, root=target), cwd=target, env=self.env,
+            result = subprocess.run(self._argv(operation, root=target), cwd=target, env=self._target_environment(target),
                 stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr, timeout=timeout, **no_window_subprocess_kwargs())
         return result.returncode
 
@@ -605,7 +652,8 @@ class IsolatedLauncherController:
         if alive:
             require(Path(psutil.Process(pid).cwd()).resolve() == root.resolve(), "launcher_backend_process_root_mismatch")
             create_time = psutil.Process(pid).create_time()
-        return {"root": str(root), "runtimeRoot": str(runtime), "pid": pid, "createTime": create_time, "alive": alive}
+        return {"root": str(root), "runtimeRoot": str(runtime), "pid": pid, "createTime": create_time, "alive": alive,
+                "port": state.get("backendPort", state.get("port"))}
 
     def prepare_operation(self, slot_name: str, operation: str) -> dict:
         require(operation in {"start", "restart", "stop"}, "invalid_launcher_operation")

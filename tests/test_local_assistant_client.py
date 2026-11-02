@@ -175,7 +175,8 @@ async def test_old_request_retry_with_launcher_authority_never_starts_in_new_nam
 
 
 @pytest.mark.anyio
-async def test_new_local_start_persists_namespace_before_post_and_recovers_after_lost_response(tmp_path, monkeypatch):
+@pytest.mark.parametrize("error_type", [httpx.ReadTimeout, httpx.RemoteProtocolError])
+async def test_new_local_start_persists_namespace_before_post_and_recovers_after_lost_response(tmp_path, monkeypatch, error_type):
     natives = {}
     lost_response = True
     def responder(request):
@@ -191,14 +192,14 @@ async def test_new_local_start_persists_namespace_before_post_and_recovers_after
             natives.setdefault(key, "local-task")
             if lost_response:
                 lost_response = False
-                raise httpx.ReadTimeout("lost acknowledgement", request=request)
+                raise error_type("lost acknowledgement", request=request)
         else:
             key = (request.url.params["client_request_id"], task_cap)
         return httpx.Response(200, json={"taskId": natives[key], "_leaseId": "local-lease", "status": "running"})
     first, _, first_business = _client(tmp_path, monkeypatch, responder=responder)
-    with pytest.raises(sdk.BackendClientError) as lost:
-        await _start(first, "new-request")
-    assert lost.value.code == "BACKEND_UNAVAILABLE"
+    assert (await _start(first, "new-request"))["taskId"] == "local-task"
+    assert [r.method for r in first_business] == ["POST", "GET"]
+    assert [r.url.path for r in first_business] == [LOCAL + "/tasks", LOCAL + "/task-request"]
     original_cap = first_business[0].headers[sdk.TASK_CAPABILITY_HEADER]
     resumed, _, resumed_business = _client(tmp_path, monkeypatch, responder=responder)
     assert (await resumed.get_task_for_request(client_request_id="new-request"))["taskId"] == "local-task"
@@ -206,6 +207,46 @@ async def test_new_local_start_persists_namespace_before_post_and_recovers_after
     assert len(natives) == 1
     assert [r.url.path for r in resumed_business] == [LOCAL + "/task-request", LOCAL + "/tasks"]
     assert all(r.headers[sdk.TASK_CAPABILITY_HEADER] == original_cap for r in resumed_business)
+
+
+@pytest.mark.anyio
+async def test_failed_start_lookup_retains_original_ambiguous_error_and_credential(tmp_path, monkeypatch):
+    def responder(request):
+        if request.method == "POST":
+            raise httpx.ReadTimeout("private timeout detail", request=request)
+        return httpx.Response(404, json={"detail": {"code": "TASK_NOT_FOUND"}})
+
+    client, _, business = _client(tmp_path, monkeypatch, responder=responder)
+    with pytest.raises(sdk.BackendClientError) as failure:
+        await _start(client, "stable-request")
+    assert failure.value.code == "BACKEND_TIMEOUT"
+    assert [r.method for r in business] == ["POST", "GET"]
+    assert client._state["requests"]["stable-request"]["taskCapability"]
+    assert not client._state["tasks"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("legacy", [False, True])
+async def test_ambiguous_external_start_keeps_sdk_behavior_without_local_recovery(tmp_path, monkeypatch, legacy):
+    if legacy:
+        _write_state(tmp_path, requests={"stable-request": {"taskCapability": "legacy-cap"}})
+    def responder(request):
+        raise httpx.ReadTimeout("lost external acknowledgement", request=request)
+    client, _, business = _client(tmp_path, monkeypatch, capability=TOKEN if legacy else "", responder=responder)
+    with pytest.raises(sdk.BackendClientError) as failure:
+        await _start(client, "stable-request")
+    assert failure.value.code == "BACKEND_TIMEOUT"
+    assert len(business) == 1 and business[0].url.path == EXTERNAL + "/tasks"
+
+
+@pytest.mark.anyio
+async def test_explicit_local_start_rejection_does_not_query_or_replay(tmp_path, monkeypatch):
+    client, _, business = _client(tmp_path, monkeypatch,
+        responder=lambda request: httpx.Response(403, json={"detail": {"code": "AGENT_NOT_FOUND"}}))
+    with pytest.raises(sdk.BackendClientError) as failure:
+        await _start(client, "stable-request")
+    assert failure.value.code == "AGENT_NOT_FOUND"
+    assert len(business) == 1 and business[0].method == "POST"
 
 
 @pytest.mark.anyio
