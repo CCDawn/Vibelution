@@ -1469,8 +1469,8 @@ def test_web_fetch_host_grant_does_not_cross_hosts_or_agents(
     assert foreign_box["value"].allowed is False
 
 
-def test_approval_timeout_message_declares_terminal_rejection(monkeypatch):
-    """Timeout is a terminal fail-closed denial; the model must not retry blind."""
+def test_approval_timeout_message_offers_retryable_resend(_agent_directory_state):
+    """超时分轨：拒绝当次调用，但文案必须引导同参原样重发，不得禁止重试。"""
     outcome = tool_approvals.authorize_or_wait(
         session_id="session-a",
         turn_id="turn-a",
@@ -1482,16 +1482,122 @@ def test_approval_timeout_message_declares_terminal_rejection(monkeypatch):
         risk="network",
         decision_fingerprint="decision-a",
         config_revision=3,
-        config_hash="config-hash-a",
+        config_hash="config-hash-agent-a",
         permission_preset="request_approval",
         timeout_seconds=0.2,
     )
 
     assert outcome.allowed is False
     assert outcome.code == "approval_timeout"
-    assert "终态拒绝" in outcome.message
-    assert "禁止以相同参数重试" in outcome.message
-    assert "结束回合" in outcome.message
+    assert "超时" in outcome.message
+    assert "非用户拒绝" in outcome.message
+    assert "重新进入审批等待" in outcome.message
+    assert "禁止以相同参数重试" not in outcome.message
+    assert "终态拒绝" not in outcome.message
+
+
+def test_approval_timeout_resend_reenters_approval_wait(_agent_directory_state):
+    """契约：超时 → 同参同 callId 原样重发可重新进入审批等待并被用户决议放行。
+
+    重发必须仍走逐次审批（同一 request 重回 pending、再次等待真人决议），
+    不得掉进「已取消」死路，也不得自动放行。
+    """
+    common = dict(
+        session_id="session-a",
+        turn_id="turn-a",
+        agent_id="agent-a",
+        call_id="call-timeout-retry",
+        tool_name="web_fetch_tool",
+        tool_args={"url": "https://docs.example.com/slow"},
+        approval="on_request",
+        risk="network",
+        decision_fingerprint="decision-a",
+        config_revision=3,
+        config_hash="config-hash-agent-a",
+        permission_preset="request_approval",
+    )
+    first = tool_approvals.authorize_or_wait(**common, timeout_seconds=0.2)
+    assert first.allowed is False
+    assert first.code == "approval_timeout"
+    first_request_id = first.request_id
+    assert tool_approvals.list_tool_approval_requests("session-a", status="pending") == []
+
+    resend_box = {}
+    worker = threading.Thread(
+        target=lambda: resend_box.setdefault(
+            "value",
+            tool_approvals.authorize_or_wait(**common, timeout_seconds=30),
+        )
+    )
+    worker.start()
+    requeued = _wait_for_pending()
+    # 同一 request 重回 pending：仍需用户逐次审批，而非新开或自动放行。
+    assert requeued["requestId"] == first_request_id
+    assert requeued["status"] == "pending"
+
+    tool_approvals.resolve_tool_approval_request(
+        "session-a",
+        first_request_id,
+        decision="accept",
+    )
+    worker.join(timeout=2)
+    assert not worker.is_alive()
+    resent = resend_box["value"]
+    assert resent.allowed is True
+    assert resent.code == "approved"
+    assert resent.request_id == first_request_id
+
+
+def test_approval_decline_same_call_resend_stays_terminal(_agent_directory_state):
+    """契约：用户主动拒绝（deny）→ 同参同 callId 重发仍被终态拒绝，不重开等待。"""
+    common = dict(
+        session_id="session-a",
+        turn_id="turn-a",
+        agent_id="agent-a",
+        call_id="call-deny-retry",
+        tool_name="web_fetch_tool",
+        tool_args={"url": "https://docs.example.com/denied"},
+        approval="on_request",
+        risk="network",
+        decision_fingerprint="decision-a",
+        config_revision=3,
+        config_hash="config-hash-agent-a",
+        permission_preset="request_approval",
+    )
+    first_box = {}
+    worker = threading.Thread(
+        target=lambda: first_box.setdefault(
+            "value",
+            tool_approvals.authorize_or_wait(**common, timeout_seconds=30),
+        )
+    )
+    worker.start()
+    request = _wait_for_pending()
+    tool_approvals.resolve_tool_approval_request(
+        "session-a",
+        request["requestId"],
+        decision="decline",
+    )
+    worker.join(timeout=2)
+    first = first_box["value"]
+    assert first.allowed is False
+    assert first.code == "approval_declined"
+
+    resend_box = {}
+    resend = threading.Thread(
+        target=lambda: resend_box.setdefault(
+            "value",
+            tool_approvals.authorize_or_wait(**common, timeout_seconds=30),
+        )
+    )
+    resend.start()
+    resend.join(timeout=2)
+    # 不挂起等待：立即按既有终态拒绝返回，且不产生新的 pending 审批。
+    assert not resend.is_alive()
+    resent = resend_box["value"]
+    assert resent.allowed is False
+    assert resent.code == "approval_declined"
+    assert tool_approvals.list_tool_approval_requests("session-a", status="pending") == []
 
 
 def _run_expiry_race(monkeypatch, *, cancel_reason: str, tag: str):

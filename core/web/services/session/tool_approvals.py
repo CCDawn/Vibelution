@@ -554,9 +554,11 @@ def authorize_or_wait(
                 False,
                 "approval_timeout",
                 (
-                    "[工具审批] 等待用户授权超时，已按 fail-closed 拒绝执行。"
-                    "该调用已被终态拒绝（审批等待超时）。禁止以相同参数重试；"
-                    "如需继续，改用其他来源或以文本说明阻塞原因并结束回合。"
+                    "[工具审批] 等待用户授权超时，本次调用已按 fail-closed 拒绝执行"
+                    "（审批等待超时，非用户拒绝）。允许以相同参数原样重发本调用，"
+                    "重发会重新进入审批等待、再次逐次请求用户授权；"
+                    "建议确认用户在场后再重发，或改用其他来源，"
+                    "并以文本说明阻塞原因结束回合。"
                 ),
                 request.request_id,
             )
@@ -696,6 +698,19 @@ def _get_or_create_request(
                 or existing.external_execution_arguments_json != external_execution_arguments_json
             ):
                 raise ToolApprovalConflictError("callId was reused with different approval facts")
+            if existing.status == "expired":
+                # 审批超时（timeout_rejected 类别）≠ 用户主动拒绝（user_denied）。
+                # 超时只否决当次调用：同参原样重发允许重新进入逐次审批等待。
+                # 重开不绕过任何授权检查——本函数只在全部冻结事实（tool、参数
+                # 哈希、指纹、config 身份）完全一致时才触达此分支，自动批准链
+                # 与授权守卫在调用方依旧先行；user_denied（declined）及取消等
+                # 其余终态维持禁同参重试。
+                existing.status = "pending"
+                existing.decision = ""
+                existing.resolved_at = ""
+                existing.expires_at = time.monotonic() + max(0.1, float(timeout_seconds))
+                existing.event.clear()
+                _record_approval_event("tool.approval.rerequested", existing, outcome="pending")
             return existing
         request = _ApprovalRequest(
             request_id=f"approval-{uuid4().hex}",
