@@ -4,6 +4,9 @@
   "version": "1.0.16",
   "type": "module",
   "main": "dist/main.js",
+  "engines": {
+    "node": ">=22.12.0 <25"
+  },
   "scripts": {
     "build": "node scripts/runDesktopPackage.js --mode unpackaged",
     "build:job": "node scripts/runDesktopPackage.js --mode unpackaged",

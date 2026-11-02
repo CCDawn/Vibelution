@@ -4,7 +4,6 @@ import {
   cpSync,
   existsSync,
   lstatSync,
-  mkdirSync,
   readFileSync,
   readdirSync,
   rmSync,
@@ -89,8 +88,9 @@ export function preparePackagedFrontend(input: {
     throw new Error("Desktop package frontend input must use a fresh, isolated build path.");
   }
 
-  mkdirSync(packageInputRoot, { recursive: true });
   try {
+    // Let cpSync create packageInputRoot itself: Node 25+ tightened fs.cp so a
+    // pre-created destination directory fails errorOnExist with ERR_FS_CP_EEXIST.
     cpSync(activeRelease, packageInputRoot, { recursive: true, errorOnExist: true, force: false });
     if (sha256DirectoryTree(packageInputRoot) !== frontendContentSha256) {
       throw new Error("Copied frontend package input does not match the verified active release.");

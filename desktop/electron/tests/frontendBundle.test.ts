@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -100,6 +100,41 @@ describe("packaged frontend input", () => {
       ensureBuild: () => ({ ok: true, release: fixture.release, buildKey: fixture.buildKey })
     })).toThrow("Desktop package frontend input cannot be written below shared electron/node_modules.");
     expect(existsSync(target)).toBe(false);
+  });
+
+  it("refuses a package input path that already exists", () => {
+    const fixture = createFixture();
+    mkdirSync(fixture.packageInputRoot, { recursive: true });
+    writeFileSync(join(fixture.packageInputRoot, "stale.txt"), "leftover", "utf8");
+
+    expect(() => preparePackagedFrontend({
+      ...fixture,
+      ensureBuild: () => ({ ok: true, release: fixture.release, buildKey: fixture.buildKey })
+    })).toThrow("Desktop package frontend input must use a fresh, isolated build path.");
+    expect(readFileSync(join(fixture.packageInputRoot, "stale.txt"), "utf8")).toBe("leftover");
+  });
+
+  it("pins the fs.cpSync destination semantics the packager relies on", () => {
+    const root = mkdtempSync(join(tmpdir(), "vibelution-cp-sync-semantics-"));
+    temporaryRoots.push(root);
+    const source = resolve(root, "release");
+    mkdirSync(join(source, "assets"), { recursive: true });
+    writeFileSync(join(source, "index.html"), "<main>v</main>\n", "utf8");
+    writeFileSync(join(source, "assets", "app.js"), "export{};\n", "utf8");
+    const destination = resolve(root, "nested/deeper/package-web-dist");
+    const copyOptions = { recursive: true, errorOnExist: true, force: false } as const;
+
+    // The destination must be created by cpSync itself: Node 25+ rejects a
+    // pre-created destination directory with ERR_FS_CP_EEXIST, and the release
+    // contents must land directly in the destination (no basename nesting).
+    cpSync(source, destination, copyOptions);
+    expect(readdirSync(destination).sort()).toEqual(["assets", "index.html"]);
+    expect(readFileSync(join(destination, "index.html"), "utf8")).toBe("<main>v</main>\n");
+    expect(existsSync(resolve(destination, "release"))).toBe(false);
+    expect(sha256DirectoryTree(destination)).toBe(sha256DirectoryTree(source));
+
+    // errorOnExist keeps guarding against copying over an existing destination.
+    expect(() => cpSync(source, destination, copyOptions)).toThrow(/exists/i);
   });
 
   it("binds the digest to relative paths as well as file contents", () => {
