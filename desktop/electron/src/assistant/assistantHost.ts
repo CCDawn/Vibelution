@@ -1500,7 +1500,7 @@ export class AssistantHost {
         if (generation.referenceLeases?.size || generation.referenceRecovery
             || uncertain?.some(request => isConfigurationReferenceRequest(request))) {
           // A dead Job's leases died with their writer: never reconnect to it.
-          if (this.jobExited(generation)) { if (!this.migrationAdmission) this.retireFailedGeneration(generation, true); return; }
+          if (this.jobExited(generation)) { this.concludeDeadReferenceRecovery(generation); return; }
           // Retain the exact native writer. Only the transport is replaced;
           // original deliveries are neither retried nor sent to another Job.
           generation.referenceRecovery = true;
@@ -1511,12 +1511,14 @@ export class AssistantHost {
                 || this.view.state !== "ready" || generation.controlPump !== pump) return;
             // The retry delay doubles as a settle window: never reconnect a
             // transport to a Job that died meanwhile.
-            if (this.jobExited(generation)) { if (!this.migrationAdmission) this.retireFailedGeneration(generation, true); return; }
+            if (this.jobExited(generation)) { this.concludeDeadReferenceRecovery(generation); return; }
             this.startMainControl(generation);
           }).catch(() => undefined);
           return;
         }
-        if (this.migrationAdmission) {
+        // A lifecycle admission always holds a migration admission today; the
+        // explicit check keeps that a local guarantee if they are ever split.
+        if (this.migrationAdmission || this.lifecycleAdmission) {
           // A failed control pump is not proof that its effects drained. Keep
           // the host and heartbeat alive; migration must remain unavailable.
           this.mainControlUncertain = true;
@@ -1550,11 +1552,21 @@ export class AssistantHost {
       for (let waited = 0; waited < CONTROL_FAILURE_SETTLE_MS; waited += CONTROL_FAILURE_SETTLE_POLL_MS) {
         await sleep(CONTROL_FAILURE_SETTLE_POLL_MS, generation.abort.signal);
         if (!owned()) return;
-        if (this.migrationAdmission) { this.mainControlUncertain = true; return; }
+        if (this.migrationAdmission || this.lifecycleAdmission) { this.mainControlUncertain = true; return; }
         if (this.jobExited(generation)) { this.retireFailedGeneration(generation, true); return; }
       }
       this.retireFailedGeneration(generation, false);
     })().catch(() => undefined);
+  }
+
+  /** A held admission owns a Job the pump saw dead during reference recovery:
+   * never abort, retire or classify it here; the liveness poll classifies it
+   * once the admission is released. Only a lifecycle hold marks control
+   * uncertain, so migration's own dead-Job retirement stays available. */
+  private concludeDeadReferenceRecovery(generation: Generation): void {
+    if (this.lifecycleAdmission) { this.mainControlUncertain = true; return; }
+    if (this.migrationAdmission) return;
+    this.retireFailedGeneration(generation, true);
   }
 
   /** abort, classify, then retire on the serialized Job owner. Classification

@@ -1708,4 +1708,45 @@ describe("AssistantHost liveness watch and bounded respawn", () => {
     warnSpy.mockRestore();
     await host.stop();
   });
+
+  it.each([
+    { path: "control-channel", lease: false },
+    { path: "reference-recovery", lease: true },
+  ])("leaves a $path pump-observed death under a held lifecycle admission to the liveness poll after release", async ({ lease }) => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const leases: Array<() => void> = [];
+    const { host, native, fetchImpl, active, root, inputs } = fixture({ graceful: true,
+      mainControl: async (_request, _signal, context) => { if (lease) leases.push(context!.retainLease()); return {}; } });
+    const channel = controlChannel(fetchImpl, lease ? { deliveryId: "c".repeat(32), action: "project_lifecycle", projectId: "project",
+      operation: "start", requestId: "lease-holder" } : undefined);
+    await host.start();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(leases).toHaveLength(lease ? 1 : 0);
+    const admission = host.beginLifecycleAdmission();
+    hostExitsAfter(active, 5);
+    channel.reset();
+    await vi.advanceTimersByTimeAsync(10_000);
+    // A controlled lifecycle operation owns the exit: no observer classifies,
+    // aborts, retires or reconnects while the admission is held.
+    expect(deathLines(warnSpy)).toHaveLength(0);
+    expect(deathForensics(root, inputs, 0)).toBeNull();
+    expect(native.terminate).not.toHaveBeenCalled();
+    expect(channel.deadRetries()).toBe(0);
+    expect(native.spawn).toHaveBeenCalledTimes(1);
+    expect(host.snapshot()).toEqual({ state: "ready", errorCode: null });
+    admission.release();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(deathLines(warnSpy)).toHaveLength(1);
+    expect(deathForensics(root, inputs, 0)).toMatchObject({ phase: "unexpected_exit", detectedBy: "liveness_poll", deathsInSession: 1 });
+    expect(host.snapshot()).toEqual({ state: "failed", errorCode: "ASSISTANT_EXITED" });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(native.spawn).toHaveBeenCalledTimes(2);
+    expect(host.snapshot()).toEqual({ state: "ready", errorCode: null });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(native.spawn).toHaveBeenCalledTimes(2);
+    expect(deathLines(warnSpy)).toHaveLength(1);
+    warnSpy.mockRestore();
+    await host.stop();
+  });
 });
