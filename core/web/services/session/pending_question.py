@@ -2,7 +2,9 @@
 
 Claim scope: the single-slot ``pendingQuestion`` chat-state object (set /
 consume / clear / read) plus the pending-shape read the waitsForPerson
-predicate consumes. No projection, no UI surface, no writer wiring yet.
+predicate consumes and the public detail-projection read
+(``detail_pending_question``) that surfaces the slot on the session detail
+response. UI surface itself (routes/models) lives elsewhere.
 
 Batch-4 human-slot lane: an unconsumed slot means the assistant ended (or
 paused) by asking its person something — the session is holding its floor
@@ -104,6 +106,10 @@ def _writer_slot(session_id: str, turn_id: str, question_text: str) -> dict[str,
         "id": pending_question_id_for_turn(session_id, turn_id),
         "questionText": question_text[-_WRITER_MAX_QUESTION_TEXT_CHARS:],
         "askedAt": session_service._now_timestamp(),
+        # The settling turn's id: ties the frozen question back to the reply
+        # that asked it. Optional in the stored shape so slots written before
+        # this field existed project with an empty turnId (optional read).
+        "turnId": str(turn_id or "").strip(),
         "consumedAt": "",
     }
 
@@ -155,6 +161,35 @@ def conversation_pending_question(conversation: dict[str, Any] | None) -> dict[s
     if not _slot_is_pending(slot):
         return None
     return dict(slot)
+
+
+def detail_pending_question(conversation: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Public detail-projection read: the pending slot or ``None``.
+
+    The conversation detail response always carries a ``pendingQuestion`` key;
+    this function is its value. ``None`` in exactly three cases: no slot, a
+    consumed slot (``conversation_pending_question`` only returns unconsumed
+    ones), or the waitsForPerson rail switched off. The projected shape is the
+    public four-field contract ``{id, questionText, askedAt, turnId}`` — the
+    internal consumption fields (``consumedAt``/``consumedBy``) never cross the
+    API boundary — and ``turnId`` defaults to ``""`` for legacy slots written
+    before the field existed. Reads the conversation dict already in hand at
+    the projection site: zero extra IO, no session-state reload.
+    """
+
+    from . import managed_continuation
+
+    if not managed_continuation.waits_for_person_rail_enabled():
+        return None
+    slot = conversation_pending_question(conversation)
+    if not isinstance(slot, dict):
+        return None
+    return {
+        "id": str(slot.get("id") or ""),
+        "questionText": str(slot.get("questionText") or ""),
+        "askedAt": str(slot.get("askedAt") or ""),
+        "turnId": str(slot.get("turnId") or ""),
+    }
 
 
 def session_pending_question(session_id: str) -> dict[str, Any] | None:
@@ -275,6 +310,7 @@ __all__ = [
     "clear_session_pending_question",
     "consume_session_pending_question",
     "conversation_pending_question",
+    "detail_pending_question",
     "pending_question_id_for_turn",
     "session_pending_question",
     "set_session_pending_question",

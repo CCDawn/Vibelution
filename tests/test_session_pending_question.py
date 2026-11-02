@@ -13,6 +13,13 @@ the slot — the tests below pin the writer contract (question-ending completed
 turns write, statement endings / failed / aborted / pure-tool turns do not,
 fresh questions overwrite, person submissions consume) plus the pure helpers
 behind it.
+
+Detail projection: the session detail response always carries
+``pendingQuestion`` as the public four-field shape (``{id, questionText,
+askedAt, turnId}``) or null; the tests at the bottom pin that contract
+(consumed slots read null with the key intact, no slot reads null, the
+lightweight poll path carries it, the rail switch blanks it, legacy slots
+project an empty ``turnId``).
 """
 
 from __future__ import annotations
@@ -355,3 +362,93 @@ def test_stamp_caps_question_text_and_never_raises():
     assert pending_question.stamp_turn_pending_question(
         {}, session_id="s", turn_id="t", visible_text=None
     ) is None
+
+
+# ---------------------------------------------------------------------------
+# Detail projection: the slot surfaces as the public four-field shape
+# ---------------------------------------------------------------------------
+
+
+def _raw_conversation(session_id: str) -> dict[str, Any]:
+    return session_service.load_session_chat_state(
+        session_service.PROJECT_ROOT, session_id
+    ) or {}
+
+
+def test_written_slot_projects_public_four_field_shape(seeded_session):
+    _persist_turn(
+        seeded_session,
+        "turn-ask-projection",
+        _completed_result("已完成。\n\n要把简报发给全员吗？"),
+    )
+    projected = pending_question.detail_pending_question(_raw_conversation(seeded_session))
+    assert projected is not None
+    # Exactly the public contract; consumption internals never cross it.
+    assert set(projected) == {"id", "questionText", "askedAt", "turnId"}
+    assert projected["questionText"] == "要把简报发给全员吗？"
+    assert str(projected["id"]).startswith("pq-")
+    assert str(projected["askedAt"]).strip()
+    # The writer carries the settling turn's id so the question can be tied
+    # back to the reply that asked it.
+    assert projected["turnId"] == "turn-ask-projection"
+
+
+def test_detail_keeps_null_pending_question_after_consumption(seeded_session):
+    _persist_turn(
+        seeded_session,
+        "turn-ask-consumed",
+        _completed_result("已完成。\n\n要继续吗？"),
+    )
+    assert pending_question.consume_session_pending_question(seeded_session) is not None
+    detail = session_service.get_session_detail(seeded_session)
+    # The key stays in the detail contract; the consumed slot never shows.
+    assert "pendingQuestion" in detail
+    assert detail["pendingQuestion"] is None
+
+
+def test_detail_carries_null_pending_question_without_slot(seeded_session):
+    assert pending_question.session_pending_question(seeded_session) is None
+    detail = session_service.get_session_detail(seeded_session)
+    assert "pendingQuestion" in detail
+    assert detail["pendingQuestion"] is None
+    assert pending_question.detail_pending_question(_raw_conversation(seeded_session)) is None
+
+
+def test_lightweight_detail_poll_still_carries_pending_question(seeded_session):
+    # The floating widget and SSE light polls run include_secondary=False;
+    # the key must ride along on that path too.
+    _persist_turn(
+        seeded_session,
+        "turn-ask-light",
+        _completed_result("已完成。\n\n要写入文档吗？"),
+    )
+    detail = session_service.get_session_detail(seeded_session, include_secondary=False)
+    projected = detail.get("pendingQuestion")
+    assert isinstance(projected, dict)
+    assert set(projected) == {"id", "questionText", "askedAt", "turnId"}
+    assert projected["turnId"] == "turn-ask-light"
+
+
+def test_rail_off_detail_projection_returns_null(seeded_session, monkeypatch):
+    _persist_turn(
+        seeded_session,
+        "turn-ask-rail-off",
+        _completed_result("已完成。\n\n要继续吗？"),
+    )
+    monkeypatch.setenv(managed_continuation.WAITS_FOR_PERSON_RAIL_ENV, "0")
+    assert pending_question.detail_pending_question(_raw_conversation(seeded_session)) is None
+    detail = session_service.get_session_detail(seeded_session)
+    assert detail.get("pendingQuestion") is None
+
+
+def test_legacy_slot_without_turn_id_projects_empty_turn_id(seeded_session):
+    # set_session_pending_question writes the legacy four-key shape (no
+    # turnId): the optional read back-fills "" instead of dropping the field.
+    pending_question.set_session_pending_question(
+        seeded_session, question_text="旧槽位也要继续吗？"
+    )
+    assert "turnId" not in _stored_slot(seeded_session)
+    projected = pending_question.detail_pending_question(_raw_conversation(seeded_session))
+    assert projected is not None
+    assert set(projected) == {"id", "questionText", "askedAt", "turnId"}
+    assert projected["turnId"] == ""

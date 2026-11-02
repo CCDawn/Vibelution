@@ -1761,3 +1761,83 @@ def test_session_detail_keeps_persisted_tool_only_assistant_message(tmp_path, mo
     assert "content" not in assistant
     assert "toolCalls" not in assistant
     assert [item["toolName"] for item in assistant["turnItems"] if item["type"] == "tool_call"] == ["read_file_tool"]
+
+
+_PENDING_QUESTION_CONTRACT_SLOT = {
+    "id": "pq-contract-1",
+    "questionText": "要把简报发给全员吗？",
+    "askedAt": "2026-05-18T11:58:00",
+    "turnId": "turn-ask-contract",
+    "consumedAt": "",
+}
+
+
+def _seed_pending_question_state(tmp_path) -> None:
+    _seed_chat_state(
+        tmp_path,
+        conversations=[
+            {
+                "conversation_id": "session-live",
+                "title": "待回答会话",
+                "updated_at": "2026-05-18T12:00:00",
+                "last_turn_status": "ready",
+                "pendingQuestion": dict(_PENDING_QUESTION_CONTRACT_SLOT),
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "继续",
+                        "timestamp": "2026-05-18T11:55:00",
+                    },
+                ],
+            }
+        ],
+    )
+
+
+def test_session_detail_projects_pending_question_contract(tmp_path, monkeypatch):
+    _seed_pending_question_state(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    detail = client.get("/api/sessions/session-live").json()
+    # The detail contract always carries the key; a pending slot surfaces as
+    # the public four-field shape only — consumption internals stay internal.
+    assert detail["pendingQuestion"] == {
+        "id": "pq-contract-1",
+        "questionText": "要把简报发给全员吗？",
+        "askedAt": "2026-05-18T11:58:00",
+        "turnId": "turn-ask-contract",
+    }
+    # The lightweight poll path (includeSecondary=false) carries it too.
+    light_detail = client.get("/api/sessions/session-live?includeSecondary=false").json()
+    assert light_detail["pendingQuestion"] == detail["pendingQuestion"]
+
+    # A consumed slot reads null; the key itself never disappears.
+    state = load_chat_state(tmp_path)
+    state["conversations"][0]["pendingQuestion"]["consumedAt"] = "2026-05-18T12:01:00"
+    save_chat_state(tmp_path, state)
+    consumed_detail = client.get("/api/sessions/session-live").json()
+    assert "pendingQuestion" in consumed_detail
+    assert consumed_detail["pendingQuestion"] is None
+
+
+def test_session_detail_pending_question_is_null_without_slot(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    detail = client.get("/api/sessions/session-live").json()
+
+    assert "pendingQuestion" in detail
+    assert detail["pendingQuestion"] is None
+
+
+def test_session_summary_projection_omits_pending_question(tmp_path, monkeypatch):
+    _seed_pending_question_state(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    agent_directory_service.ensure_agent_for_session("session-live", display_name="真实会话")
+
+    summaries = client.get("/api/sessions").json()
+    # The pendingQuestion key is detail-only: the summary whitelist (and with
+    # it the list cache and index stream patch) stays without it.
+    assert summaries
+    assert all("pendingQuestion" not in summary for summary in summaries)

@@ -28,6 +28,7 @@ from core.research.workflow.contracts.discussion_scope import (
 from core.web.services.session.signals_format import _current_session_route_fallback
 from core.web.services.session.timebase import parse_timestamp_utc
 from core.web.services.session import conversation_references
+from core.web.services.session import pending_question
 
 
 logger = logging.getLogger(__name__)
@@ -811,6 +812,11 @@ def _build_session_detail_from_summary(
             or conversation.get("lastTurnTerminalTurnId")
             or ""
         ).strip(),
+        # Detail always carries the key (the summary whitelist does not), even
+        # on lightweight polls: the normalized conversation already projected
+        # it, so this is a passthrough, not another state read. Unconditional —
+        # the floating widget and SSE light polls both run include_secondary=False.
+        "pendingQuestion": conversation.get("pendingQuestion"),
         "terminalReason": summary.get("terminalReason")
         or s._terminal_reason_from_conversation(conversation),
         "ledgerSeq": ledger_sequence,
@@ -1339,6 +1345,10 @@ def _normalize_conversation(
         "runtimeNotices": visible_runtime_notices,
         "queuedTurns": s._session_queued_turn_rows(raw),
         "lastTurnStatus": last_turn_status,
+        # Always-present detail contract key: the pending slot's public shape
+        # ({id, questionText, askedAt, turnId}) or null. Reads the raw row
+        # already in hand — no extra state load; summaries stay without it.
+        "pendingQuestion": pending_question.detail_pending_question(raw),
         "lastTurnTerminalTurnId": str(
             raw.get("last_turn_terminal_turn_id")
             or raw.get("lastTurnTerminalTurnId")
