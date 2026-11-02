@@ -4,6 +4,7 @@
 
 | 文档 | 关联 |
 | --- | --- |
+| [assistant-task-management.md](assistant-task-management.md) | 个人助理统一任务管理；团队启动、问题处理、开发修复、部署恢复及监督进化的分期产品契约 |
 | [agent-perception-control.md](agent-perception-control.md) | 控制中心的 Agent 感知管理；永久来源范围、三类独立触发、预算与原生运行记录 |
 | [2026-05-15-task-driven-agent-evolution-gym.md](2026-05-15-task-driven-agent-evolution-gym.md) | Gym / Evolution Engine；决策见 [ADR 0001](../adr/0001-gym-v1-uses-promotion-proposals-before-baseline-rewrite.md) |
 | [2026-08-27-virtual-human-life-plugin.md](2026-08-27-virtual-human-life-plugin.md) | 按 Agent 隔离的虚拟人生活插件；首版已实施，2026-08-29 已批准因果连续性拟人化二阶段与 AstrBot 授权切片复用 |

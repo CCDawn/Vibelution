@@ -1,0 +1,124 @@
+import { describe, expect, it } from "vitest";
+import type { LauncherAssistantDispatch } from "../../../api/launcherAssistant";
+import { projectAssistantDispatchTasks } from "./assistantDispatchTasks";
+
+function dispatch(overrides: Partial<LauncherAssistantDispatch> = {}): LauncherAssistantDispatch {
+  return { dispatchId: "dispatch-1", projectId: "project-1", agentId: "agent-1", nativeTaskId: "native-1",
+    receipt: { taskId: "native-1", status: "running", shouldPoll: true }, ...overrides };
+}
+
+describe("assistant task projection from native dispatch receipts", () => {
+  it("does not treat native success or a result summary as acceptance of the user's goal", () => {
+    const result = projectAssistantDispatchTasks([dispatch({ receipt: {
+      taskId: "native-1", status: "succeeded", shouldPoll: false, resultSummary: "所有目标已完成",
+    } })]);
+    expect(result.tasks[0]).toMatchObject({ state: "awaiting_verification", businessAcceptance: "not_evaluated" });
+    expect(result.counts).toMatchObject({ awaitingVerification: 1, inProgress: 0 });
+  });
+
+  it("retains a cached task as unknown when the source becomes unavailable", () => {
+    const result = projectAssistantDispatchTasks([dispatch()], { sourceAvailable: false });
+    expect(result.tasks[0]).toMatchObject({ state: "unknown", nativeStatus: "running", sourceAvailable: false });
+    expect(result.counts.inProgress).toBe(0);
+  });
+
+  it("does not read a last-known success as current after a receipt query failed", () => {
+    const result = projectAssistantDispatchTasks([dispatch({ receipt: { taskId: "native-1", status: "succeeded" },
+      lastError: { code: "BACKEND_UNAVAILABLE", message: "暂不可用" } })]);
+    expect(result.tasks[0].state).toBe("unknown");
+  });
+
+  it.each(["running", "awaiting_approval"])("requires an exact native task binding for approvals in %s", status => {
+    const approval = { approvalId: "approval-1", revision: "r1", toolName: "write", risk: "write",
+      targetSummary: {}, availableDecisions: ["accept", "decline"] };
+    const bound = dispatch({ receipt: { taskId: "native-1", status, pendingApprovals: [approval] } });
+    expect(projectAssistantDispatchTasks([bound]).tasks[0]).toMatchObject({ state: "waiting_user", pendingApprovalCount: 1 });
+    const mismatched = { ...bound, receipt: { ...bound.receipt, taskId: "another-task" } };
+    expect(projectAssistantDispatchTasks([mismatched]).tasks[0]).toMatchObject({ state: "unknown", pendingApprovalCount: 0 });
+  });
+
+  it("does not surface cached approvals after the native task has ended", () => {
+    const row = dispatch({ receipt: { taskId: "native-1", status: "succeeded", pendingApprovals: [{
+      approvalId: "approval-1", revision: "r1", toolName: "write", risk: "write", targetSummary: {}, availableDecisions: ["accept"],
+    }] } });
+    expect(projectAssistantDispatchTasks([row]).tasks[0]).toMatchObject({ state: "awaiting_verification", pendingApprovalCount: 0 });
+  });
+
+  it("keeps the card identity stable while waiting for native admission", () => {
+    const pending = dispatch({ nativeTaskId: undefined, receipt: null });
+    const before = projectAssistantDispatchTasks([pending]).tasks[0];
+    const after = projectAssistantDispatchTasks([dispatch()]).tasks[0];
+    expect(before.id).toBe(after.id);
+    expect(before).toMatchObject({ state: "unknown", sourceAvailable: true, receiptBound: false });
+    expect(after.state).toBe("running");
+  });
+
+  it("does not merge tasks from different projects or separator-shaped identities", () => {
+    const result = projectAssistantDispatchTasks([
+      dispatch(), dispatch({ projectId: "project-2" }),
+      dispatch({ projectId: "a:b", dispatchId: "c" }), dispatch({ projectId: "a", dispatchId: "b:c" }),
+    ]);
+    expect(new Set(result.tasks.map(task => task.id)).size).toBe(4);
+  });
+
+  it("deduplicates repeated observations but refuses conflicting observations without ordering evidence", () => {
+    const row = dispatch();
+    expect(projectAssistantDispatchTasks([row, structuredClone(row)]).tasks).toHaveLength(1);
+    const failed = dispatch({ receipt: { taskId: "native-1", status: "failed" } });
+    const result = projectAssistantDispatchTasks([row, failed]);
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0]).toMatchObject({ state: "unknown", conflictingObservations: true });
+  });
+
+  it("preserves unfamiliar owner states as unknown instead of guessing a terminal outcome", () => {
+    expect(projectAssistantDispatchTasks([dispatch({ receipt: { taskId: "native-1", status: "new_owner_state" } })])
+      .tasks[0]).toMatchObject({ state: "unknown", nativeStatus: "new_owner_state" });
+  });
+
+  it("exposes failure and cancellation without inventing replay permission or a successful closure", () => {
+    const failed = projectAssistantDispatchTasks([dispatch({ receipt: { taskId: "native-1", status: "failed" } })]).tasks[0];
+    const cancelled = projectAssistantDispatchTasks([dispatch({ receipt: { taskId: "native-1", status: "cancelled" } })]).tasks[0];
+    expect(failed).toMatchObject({ state: "failed", businessAcceptance: "not_evaluated" });
+    expect(cancelled).toMatchObject({ state: "stopped", businessAcceptance: "not_evaluated" });
+    expect(failed).not.toHaveProperty("canRetry");
+  });
+
+  it("shows a native approval wait without inventing an approvable payload", () => {
+    const result = projectAssistantDispatchTasks([dispatch({ receipt: { taskId: "native-1", status: "awaiting_approval" } })]);
+    expect(result.tasks[0]).toMatchObject({ state: "waiting_user", pendingApprovalCount: 0 });
+  });
+
+  it("distinguishes cancellation in flight from an unconfirmed stop and a cancelled terminal", () => {
+    const cancelling = projectAssistantDispatchTasks([dispatch({ receipt: { taskId: "native-1", status: "cancelling" } })]);
+    const uncertain = projectAssistantDispatchTasks([dispatch({ receipt: { taskId: "native-1", status: "stop_unconfirmed" } })]);
+    expect(cancelling.tasks[0].state).toBe("stopping");
+    expect(cancelling.counts.inProgress).toBe(1);
+    expect(uncertain.tasks[0].state).toBe("unknown");
+  });
+
+  it("does not present a bounded dispatch feed as a complete platform task inventory", () => {
+    const result = projectAssistantDispatchTasks([]);
+    expect(result).toMatchObject({ coverage: "bounded_dispatches", complete: false, tasks: [] });
+  });
+
+  it("distinguishes an unavailable initial feed from an available empty observation", () => {
+    expect(projectAssistantDispatchTasks([]).sourceAvailable).toBe(true);
+    expect(projectAssistantDispatchTasks([], { sourceAvailable: false }).sourceAvailable).toBe(false);
+  });
+
+  it("reports invalid source identities without making an empty scan look complete", () => {
+    const result = projectAssistantDispatchTasks([dispatch({ dispatchId: "" }), dispatch({ projectId: undefined })]);
+    expect(result.invalidRecords).toBe(1);
+    expect(result.tasks[0]).toMatchObject({ state: "unknown", receiptBound: false });
+    expect(result.complete).toBe(false);
+  });
+
+  it("does not mutate the input or expose the mutable receipt as the task record", () => {
+    const row = dispatch();
+    const before = structuredClone(row);
+    const task = projectAssistantDispatchTasks([row]).tasks[0];
+    expect(row).toEqual(before);
+    expect(task).not.toHaveProperty("receipt");
+    expect(task).not.toHaveProperty("pendingApprovals");
+  });
+});
