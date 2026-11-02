@@ -1,4 +1,4 @@
-import type { LauncherAssistantDispatch } from "../../api/launcherAssistant";
+import type { LauncherAssistantDispatch, LauncherAssistantSessionEvent } from "../../api/launcherAssistant";
 import type { PetActivityTone, PetAnimationState } from "../../api/types/petActivity";
 import type { SessionDetail, SessionQueuedTurn } from "../../api/types";
 import { exactAcceptedSubmitTurnId, findSubmitAcceptanceEvidence } from "../chat/chatSubmitAcceptanceReadback";
@@ -72,18 +72,44 @@ export function launcherAssistantActivity(source: SessionActivitySource = {}): {
   return { tone: "idle", animationState: "idle" };
 }
 
-export function launcherAssistantPollInterval(visible: boolean, source?: LauncherAssistantActivitySource, acceptedTurnId?: string, queuedAcceptance?: LauncherAssistantQueuedAcceptance | null, pendingRequestIds: readonly string[] = []): number | false {
+/** Any pushed session event (heartbeats included, ~15s cadence) seen inside this
+ * window proves the push channel alive; two missed heartbeats mark it dead. */
+export const LAUNCHER_ASSISTANT_SSE_HEALTH_WINDOW_MS = 35_000;
+
+/** Active polling cadence without a push channel, and the safety-net cadence
+ * once events drive detail refreshes. Idle sessions never poll either way. */
+const ACTIVE_POLL_MS = 2_000;
+const SSE_FALLBACK_POLL_MS = 10_000;
+
+export function launcherAssistantSseHealthy(lastEventAt: number | null | undefined, now: number): boolean {
+  return typeof lastEventAt === "number" && Number.isFinite(lastEventAt) && now - lastEventAt <= LAUNCHER_ASSISTANT_SSE_HEALTH_WINDOW_MS;
+}
+
+/** Only an authoritative snapshot frame, or a delta that explicitly reports
+ * `done === true`, for this very session re-reads detail. Heartbeats, foreign
+ * sessions, unfinished deltas and unknown types only prove the channel alive;
+ * `done` is outside the frozen envelope, so it is probed and never inferred. */
+export function launcherAssistantSessionEventRefreshesDetail(event: LauncherAssistantSessionEvent, sessionId: string): boolean {
+  if (!sessionId || event.sessionId !== sessionId) return false;
+  if (event.type === "session_detail") return true;
+  return event.type === "assistant_delta" && (event as { done?: unknown }).done === true;
+}
+
+export function launcherAssistantPollInterval(visible: boolean, source?: LauncherAssistantActivitySource, acceptedTurnId?: string, queuedAcceptance?: LauncherAssistantQueuedAcceptance | null, pendingRequestIds: readonly string[] = [], options: { sseHealthy?: boolean } = {}): number | false {
   if (!visible) return false;
+  // Every "keep reading" branch below shares one cadence: a healthy push channel
+  // already refreshes detail on events, so polling only backstops it.
+  const active = options.sseHealthy ? SSE_FALLBACK_POLL_MS : ACTIVE_POLL_MS;
   for (const requestId of pendingRequestIds) {
     const recovered = launcherAssistantRequestReadback(source, requestId);
-    if (!recovered || (recovered.turnId && source?.activeTurnId !== recovered.turnId && source?.lastTurnTerminalTurnId !== recovered.turnId)) return 2_000;
+    if (!recovered || (recovered.turnId && source?.activeTurnId !== recovered.turnId && source?.lastTurnTerminalTurnId !== recovered.turnId)) return active;
   }
-  if (queuedAcceptance && !queuedAcceptance.observed) return 2_000;
-  if (source?.queuedTurns?.some(row => row.status === "queued" || row.status === "starting")) return 2_000;
+  if (queuedAcceptance && !queuedAcceptance.observed) return active;
+  if (source?.queuedTurns?.some(row => row.status === "queued" || row.status === "starting")) return active;
   // Acceptance precedes the detail projection. A stale ready/previous terminal
   // must not retire the newly accepted Turn before it becomes authoritative.
-  if (acceptedTurnId && source?.activeTurnId !== acceptedTurnId && source?.lastTurnTerminalTurnId !== acceptedTurnId) return 2_000;
-  if (!source || hasExecutionOwnership(resolveSessionActivity(source).execution)) return 2_000;
+  if (acceptedTurnId && source?.activeTurnId !== acceptedTurnId && source?.lastTurnTerminalTurnId !== acceptedTurnId) return active;
+  if (!source || hasExecutionOwnership(resolveSessionActivity(source).execution)) return active;
   return false;
 }
 

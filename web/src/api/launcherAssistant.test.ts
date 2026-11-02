@@ -7,6 +7,7 @@ import {
   previewLauncherDispatchApproval, decideLauncherDispatchApproval, declineLauncherDispatchSummary,
   stopLauncherAssistantTurn, continueLauncherAssistantTurn,
   getLauncherOperatorAsset, getLauncherAssistantAvatar, openLauncherFromAssistant,
+  subscribeLauncherAssistantSessionEvent,
 } from "./launcherAssistant";
 import type { SessionToolApprovalRequest } from "./types";
 
@@ -402,5 +403,52 @@ describe("Launcher assistant bridge", () => {
   it.each([[], null, {}, { language: "fr" }])("rejects invalid native bootstrap data: %j", async value => {
     vi.stubGlobal("vibelutionLauncherAssistant", { invoke: vi.fn().mockResolvedValue(value) });
     await expect(launcherConversationApi.fetchConfigBootstrap()).rejects.toThrow("Launcher 配置");
+  });
+});
+
+describe("Launcher session event subscription", () => {
+  it("returns null without throwing when the bridge or its push verb is absent", () => {
+    vi.stubGlobal("vibelutionLauncherAssistant", undefined);
+    expect(subscribeLauncherAssistantSessionEvent(() => {})).toBeNull();
+    // An older shell exposes only `invoke`: capability detection, never a throw.
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke: vi.fn() });
+    expect(subscribeLauncherAssistantSessionEvent(() => {})).toBeNull();
+    expect(subscribeLauncherAssistantSessionEvent(() => {}, null)).toBeNull();
+    expect(subscribeLauncherAssistantSessionEvent(() => {}, {})).toBeNull();
+    expect(subscribeLauncherAssistantSessionEvent(() => {}, { vibelutionLauncherAssistant: { onSessionEvent: "not callable" } })).toBeNull();
+  });
+
+  it("subscribes through the preload verb, forwards only well-formed frames and hands back its unsubscribe", () => {
+    const unsubscribe = vi.fn();
+    let handler: ((event: unknown) => void) | undefined;
+    const onSessionEvent = vi.fn((next: (event: unknown) => void) => { handler = next; return unsubscribe; });
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke: vi.fn(), onSessionEvent });
+    const listener = vi.fn();
+    const stop = subscribeLauncherAssistantSessionEvent(listener);
+    expect(stop).toBeTypeOf("function");
+    expect(onSessionEvent).toHaveBeenCalledTimes(1);
+    const snapshot = { type: "session_detail", sessionId: "s", ledgerSeq: 7, at: 1 };
+    const heartbeat = { type: "heartbeat", sessionId: "s", at: 2 };
+    handler?.(snapshot);
+    handler?.(heartbeat);
+    for (const malformed of [null, undefined, "text", 3, { type: 1, sessionId: "s", at: 3 }, { type: "session_detail", at: 4 }, { sessionId: "s", at: 5 }]) handler?.(malformed);
+    expect(listener.mock.calls).toEqual([[snapshot], [heartbeat]]);
+    expect(unsubscribe).not.toHaveBeenCalled();
+    stop?.();
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats a throwing subscribe as no channel and never lets teardown throw", () => {
+    vi.stubGlobal("vibelutionLauncherAssistant", { onSessionEvent: () => { throw new Error("bridge gone"); } });
+    expect(subscribeLauncherAssistantSessionEvent(() => {})).toBeNull();
+    vi.stubGlobal("vibelutionLauncherAssistant", { onSessionEvent: () => undefined });
+    const noUnsubscribe = subscribeLauncherAssistantSessionEvent(() => {});
+    expect(noUnsubscribe).toBeTypeOf("function");
+    expect(() => noUnsubscribe?.()).not.toThrow();
+    const unsubscribe = vi.fn(() => { throw new Error("channel already closed"); });
+    vi.stubGlobal("vibelutionLauncherAssistant", { onSessionEvent: () => unsubscribe });
+    const throwingUnsubscribe = subscribeLauncherAssistantSessionEvent(() => {});
+    expect(() => throwingUnsubscribe?.()).not.toThrow();
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 });

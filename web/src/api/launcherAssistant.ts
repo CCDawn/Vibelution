@@ -84,6 +84,39 @@ function record(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object";
 }
 
+/** Session event pushed by the Launcher host (frozen preload contract).
+ * `session_detail` is an authoritative snapshot frame, `assistant_delta` an
+ * incremental frame, `heartbeat` a ~15s channel-health signal; unknown types
+ * are ignored by consumers. Any extra field (such as a delta's `done`) is not
+ * part of the contract and must be probed, never assumed. */
+export type LauncherAssistantSessionEvent = { type: string; sessionId: string; ledgerSeq?: number; at: number };
+
+/** Progressive enhancement over the preload bridge: an older or degraded shell
+ * exposes no `onSessionEvent`, in which case this returns null without throwing
+ * so callers keep today's polling behaviour untouched. Malformed frames are
+ * dropped at this trust boundary rather than handed to the page. */
+export function subscribeLauncherAssistantSessionEvent(
+  listener: (event: LauncherAssistantSessionEvent) => void,
+  source: unknown = globalThis,
+): (() => void) | null {
+  const bridge = (source as { vibelutionLauncherAssistant?: { onSessionEvent?: unknown } } | null)?.vibelutionLauncherAssistant;
+  const subscribe = bridge?.onSessionEvent;
+  if (typeof subscribe !== "function") return null;
+  const guarded = (event: unknown) => {
+    if (!record(event) || typeof event.type !== "string" || typeof event.sessionId !== "string") return;
+    listener(event as LauncherAssistantSessionEvent);
+  };
+  try {
+    const unsubscribe: unknown = subscribe.call(bridge, guarded);
+    if (typeof unsubscribe !== "function") return () => {};
+    // Teardown runs inside React cleanup; a shell that is already gone must not
+    // turn an unmount into an error.
+    return () => { try { unsubscribe(); } catch { /* channel already closed */ } };
+  } catch {
+    return null;
+  }
+}
+
 export type LauncherOperatorAssetKind = "avatar" | "background";
 export type LauncherOperatorAsset = {
   schemaVersion: 1;
