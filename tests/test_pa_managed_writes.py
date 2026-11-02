@@ -8,7 +8,9 @@ transaction; any unknown or forbidden key rejects the whole request.
 
 from __future__ import annotations
 
+import asyncio
 import copy
+import inspect
 import json
 import tomllib
 from pathlib import Path
@@ -432,3 +434,217 @@ def test_manage_dispatch_end_to_end_config_update(finance_env, assistant_runtime
         )
     )
     assert rejected["ok"] is False
+
+
+# ---------------------------------------------------------------------------
+# Launcher canonical routing (dedicated assistant host process)
+#
+# The launcher PA never reaches the platform adapter dispatch table; it routes
+# through core.assistant_runtime.actions.execute_action. These tests pin the
+# canonical contract source, the per-call approval gate and the single
+# executor mapping so neither surface can drift away from pa_managed_writes.
+# team_create is not one of them: the canonical face sources it from the
+# native TEAM_LIFECYCLE remote management registry, and the guard tests below
+# pin both the single source and the ACTION_MODELS/PA registry disjointness.
+# ---------------------------------------------------------------------------
+
+CANONICAL_MANAGED_WRITES = ("knowledge_ingest", "config_update")
+
+
+def test_launcher_contracts_stay_aligned_with_pa_managed_writes_executors():
+    from core.assistant_runtime.actions import _management_contracts
+    from core.web.services.external_management.contracts import (
+        PA_MANAGED_WRITE_MODELS,
+        pa_managed_write_contracts,
+    )
+
+    assert set(PA_MANAGED_WRITE_MODELS) == set(pa_managed_writes.LAUNCHER_MANAGED_WRITE_ACTIONS) == set(CANONICAL_MANAGED_WRITES)
+    for name, executor in pa_managed_writes.LAUNCHER_MANAGED_WRITE_ACTIONS.items():
+        assert executor is getattr(pa_managed_writes, f"{name}_tool")
+        signature = inspect.signature(executor)
+        adapter_required = {item.name for item in signature.parameters.values() if item.default is inspect.Parameter.empty}
+        # Registry layer: pure adapter-face shape; the tool functions remain the
+        # content validation authority.
+        schema = pa_managed_write_contracts()[name]["parameters"]
+        assert set(schema["properties"]) == set(signature.parameters)
+        assert set(schema["required"]) == adapter_required
+        for item in signature.parameters.values():
+            if item.default is not inspect.Parameter.empty:
+                assert schema["properties"][item.name]["default"] == item.default
+        assert pa_managed_write_contracts()[name]["governed"] is True
+        # Canonical layer: the same shape plus the injected project_id/request_id
+        # envelope, exactly like every remote management action.
+        launcher_schema = _management_contracts()[name][0].model_json_schema()
+        assert set(launcher_schema["properties"]) == set(signature.parameters) | {"project_id", "request_id"}
+        assert set(launcher_schema["required"]) == adapter_required | {"project_id", "request_id"}
+
+
+def test_pa_managed_writes_and_action_models_stay_disjoint():
+    """One action name must never live in both canonical registries.
+
+    _management_contracts merges ACTION_MODELS and PA_MANAGED_WRITE_MODELS
+    into the same canonical index dict; a duplicate key would silently
+    overwrite whichever contract was registered first. team_create in
+    particular is owned by TEAM_LIFECYCLE_ACTION_MODELS (native remote
+    management authority), so it must stay out of the PA registry.
+    """
+    from core.web.services.external_management.contracts import ACTION_MODELS, PA_MANAGED_WRITE_MODELS
+
+    overlap = set(ACTION_MODELS) & set(PA_MANAGED_WRITE_MODELS)
+    assert overlap == set(), f"dual-registered canonical actions: {sorted(overlap)}"
+    assert set(ACTION_MODELS).isdisjoint(pa_managed_writes.LAUNCHER_MANAGED_WRITE_ACTIONS)
+
+
+def test_team_create_is_owned_by_the_native_team_lifecycle_registry(monkeypatch):
+    """Canonical team_create has exactly one source: TEAM_LIFECYCLE/ACTION_MODELS.
+
+    The external team-management flow registers team_create as a full remote
+    management action (scope=teams:create, idempotency marker,
+    OPERATION_UNCONFIRMED semantics); the PA managed-write layer keeps only
+    the adapter-face tool for the platform dispatch table.
+    """
+    from core.assistant_runtime import actions
+    from core.assistant_runtime.actions import _management_contracts
+    from core.web.services.external_management.contracts import ACTION_MODELS
+    from core.web.services.external_management.team_lifecycle_contracts import TeamCreate
+
+    assert ACTION_MODELS["team_create"] is TeamCreate
+    assert "team_create" not in pa_managed_writes.LAUNCHER_MANAGED_WRITE_ACTIONS
+    monkeypatch.setattr(actions, "_binding", (object(), object(), None))
+    page = actions.execute_action("index", {"query": "team_create"})
+    rows = [item for item in page["actions"] if item["action"] == "team_create"]
+    assert len(rows) == 1 and rows[0]["governed"] is True and rows[0]["scope"] == "teams:create"
+    detail = actions.execute_action("describe", {"action": "team_create"})
+    assert detail["governed"] is True and detail["scope"] == "teams:create"
+    assert {"name", "description", "purpose", "members"} <= set(detail["parameters"]["properties"])
+    assert "templateId" not in detail["parameters"]["properties"]
+    launcher_schema = _management_contracts()["team_create"][0].model_json_schema()
+    assert {"purpose", "members"} <= set(launcher_schema["properties"])
+    assert {"project_id", "request_id"} <= set(launcher_schema["required"])
+
+
+def test_launcher_index_and_describe_surface_canonical_managed_writes(monkeypatch):
+    from core.assistant_runtime import actions
+    from core.web.services.external_management.contracts import ACTION_MODELS
+
+    # The canonical PA writes must never leak into the remotely invocable
+    # management registry: project dispatch has no implementation for them.
+    for name in CANONICAL_MANAGED_WRITES:
+        assert name not in ACTION_MODELS
+    monkeypatch.setattr(actions, "_binding", (object(), object(), None))
+    for name in CANONICAL_MANAGED_WRITES:
+        page = actions.execute_action("index", {"query": name})
+        row = next(item for item in page["actions"] if item["action"] == name)
+        assert row["governed"] is True
+        detail = actions.execute_action("describe", {"action": name})
+        assert detail["governed"] is True and detail["action"] == name
+        assert {"project_id", "request_id"} <= set(detail["parameters"]["required"])
+        assert detail["parameters"]["additionalProperties"] is False
+
+
+@pytest.mark.anyio
+async def test_launcher_routing_reaches_pa_managed_writes_only_after_approval(tmp_path, monkeypatch):
+    from core.assistant_runtime.actions import bind_actions, execute_action, unbind_actions
+    from tests.test_assistant_runtime_dispatch import ClientProbe, adapter
+
+    service = adapter(tmp_path, ClientProbe())
+    bind_actions(service, asyncio.get_running_loop())
+    executed = []
+
+    def _executor(name, payload):
+        def _run(**kwargs):
+            executed.append((name, kwargs))
+            return json.dumps(payload)
+        return _run
+
+    receipts = {
+        "knowledge_ingest": {"ok": True, "status": "ingested", "message": "知识来源已入库。", "inboxSourceId": "isrc-1"},
+        "config_update": {"ok": True, "status": "completed", "message": "已更新：ui.language。"},
+    }
+    request_parameters = {
+        "knowledge_ingest": {"inboxSourceId": "isrc-1", "ownerType": "team", "ownerId": "team-1"},
+        "config_update": {"updates": [{"section": "ui", "key": "language", "value": "en"}]},
+    }
+    expected_kwargs = {
+        "knowledge_ingest": {"inboxSourceId": "isrc-1", "ownerType": "team", "ownerId": "team-1",
+                             "knowledgeBaseId": "", "title": "", "summary": "", "tags": ""},
+        "config_update": {"updates": [{"section": "ui", "key": "language", "value": "en"}]},
+    }
+    for name in CANONICAL_MANAGED_WRITES:
+        monkeypatch.setitem(pa_managed_writes.LAUNCHER_MANAGED_WRITE_ACTIONS, name, _executor(name, receipts[name]))
+    runtime = {"agentId": "assistant", "sessionId": "own"}
+    try:
+        for name in CANONICAL_MANAGED_WRITES:
+            before = len(executed)
+            request = {"project_id": "project-a", "request_id": "req-1", **request_parameters[name]}
+            unapproved = await asyncio.to_thread(execute_action, name, request)
+            assert unapproved == {"ok": False, "status": "approval_required", "action": name,
+                                  "tool": "personal_assistant_manage_tool"}
+            assert len(executed) == before
+            result = await asyncio.to_thread(execute_action, name, request, runtime=runtime, governed=True)
+            assert result == receipts[name]
+            # The executor receives exactly the adapter-face parameters; the
+            # canonical envelope is consumed by the authorization gate.
+            assert len(executed) == before + 1
+            assert executed[-1] == (name, expected_kwargs[name])
+        # Unregistered projects never reach the executor.
+        with pytest.raises(ValueError, match="Project is not authorized"):
+            await asyncio.to_thread(execute_action, "config_update",
+                                    {"project_id": "other-project", "request_id": "req-2",
+                                     "updates": [{"section": "ui", "key": "language", "value": "zh"}]},
+                                    runtime=runtime, governed=True)
+        assert len(executed) == 2
+    finally:
+        unbind_actions(service)
+
+
+@pytest.mark.anyio
+async def test_launcher_canonical_team_create_routes_to_the_native_management_service(tmp_path):
+    """team_create on the canonical face must dispatch, never run a local tool."""
+    from core.assistant_runtime.actions import bind_actions, execute_action, unbind_actions
+    from tests.test_assistant_runtime_dispatch import ClientProbe, adapter
+
+    service = adapter(tmp_path, ClientProbe())
+    bind_actions(service, asyncio.get_running_loop())
+    invoked = []
+
+    class _ProbeManagement:
+        def invoke(self, project_id, *, action, request_id, parameters):
+            invoked.append((project_id, action, request_id, parameters))
+            async def _noop():
+                return {"status": "completed", "requestId": request_id}
+            return _noop()
+
+    original = service.management
+    service.management = _ProbeManagement()
+    runtime = {"agentId": "assistant", "sessionId": "own"}
+    try:
+        result = await asyncio.to_thread(
+            execute_action, "team_create",
+            {"project_id": "project-a", "request_id": "req-team-1", "name": "正本托管团队", "purpose": "协同"},
+            runtime=runtime, governed=True)
+        assert result == {"status": "completed", "requestId": "req-team-1"}
+        assert invoked == [("project-a", "team_create", "req-team-1",
+                            {"name": "正本托管团队", "description": "", "purpose": "协同", "members": []})]
+    finally:
+        service.management = original
+        unbind_actions(service)
+
+
+@pytest.mark.anyio
+async def test_launcher_canonical_config_update_runs_real_transaction(operator_config, tmp_path):
+    from core.assistant_runtime.actions import bind_actions, execute_action, unbind_actions
+    from tests.test_assistant_runtime_dispatch import ClientProbe, adapter
+
+    service = adapter(tmp_path, ClientProbe())
+    bind_actions(service, asyncio.get_running_loop())
+    try:
+        result = await asyncio.to_thread(
+            execute_action, "config_update",
+            {"project_id": "project-a", "request_id": "req-cfg-1",
+             "updates": [{"section": "ui", "key": "language", "value": "en"}]},
+            runtime={"agentId": "assistant", "sessionId": "own"}, governed=True)
+        assert result["ok"] is True, result
+        assert _read_config(operator_config)["ui"]["language"] == "en"
+    finally:
+        unbind_actions(service)

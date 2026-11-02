@@ -1,14 +1,21 @@
 """Managed write actions delegated to the personal assistant manage tool.
 
-Three closed, high-risk write actions reached only through
-``personal_assistant_manage_tool``'s dispatch table (per-call approval):
+Closed, high-risk write actions reached only through
+``personal_assistant_manage_tool`` (per-call approval):
 
-- ``team_create``: create an empty Team or materialize a Team template.
+- ``team_create``: create an empty Team or materialize a Team template
+  (platform adapter dispatch only; the canonical Launcher face sources
+  team_create from the native TEAM_LIFECYCLE remote management contracts).
 - ``knowledge_ingest``: direct-ingest one screened owner inbox source as a
   formal knowledge item (staged document content only; the PA never authors
   knowledge content and the human per-call approval is the review gate).
 - ``config_update``: a closed operator-config preference whitelist applied
   through the optimistic-hash operator config transaction.
+
+The platform adapter routes all three through the closed dispatch table in
+``personal_assistant_manage_tool``; the dedicated Launcher assistant host
+executes ``knowledge_ingest`` and ``config_update`` canonically via
+``LAUNCHER_MANAGED_WRITE_ACTIONS`` (see the bottom of this module).
 
 None of these accept arbitrary API paths, TOML text, credential material, or
 provider/gateway configuration. Unknown keys fail closed: one invalid entry
@@ -427,3 +434,21 @@ def config_update_tool(updates: list) -> str:
         "status": str(transaction.get("status") or "completed"),
         "message": f"已更新：{applied}。",
     })
+
+
+# --- Launcher canonical dispatch ---------------------------------------------
+# The dedicated Launcher assistant host routes these actions through
+# core/assistant_runtime/actions.py and must run exactly this implementation:
+# one closed mapping, reused by the platform adapter dispatch table in
+# personal_assistant_manage_tool. Keys must stay aligned with
+# PA_MANAGED_WRITE_MODELS in external_management.contracts (contract test
+# asserts the equality and ACTION_MODELS disjointness), and each executor
+# keeps the adapter-face signature.
+# team_create stays adapter-face only: the canonical face sources it from
+# TEAM_LIFECYCLE_ACTION_MODELS (native remote management authority), so it
+# must never appear here too.
+
+LAUNCHER_MANAGED_WRITE_ACTIONS = {
+    "knowledge_ingest": knowledge_ingest_tool,
+    "config_update": config_update_tool,
+}

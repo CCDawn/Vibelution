@@ -212,6 +212,20 @@ class SessionPin(Closed):
     pinned: bool
 
 
+class KnowledgeIngest(Closed):
+    inboxSourceId: str = Field(min_length=1, max_length=160)
+    ownerType: str = Field(min_length=1, max_length=64)
+    ownerId: str = Field(min_length=1, max_length=160)
+    knowledgeBaseId: str = Field(default="", max_length=160)
+    title: str = Field(default="", max_length=200)
+    summary: str = Field(default="", max_length=400)
+    tags: str = Field(default="", max_length=2000)
+
+
+class ConfigUpdate(Closed):
+    updates: list
+
+
 ACTION_MODELS = {"agent_create": AgentCreate, "agent_update": AgentUpdate, "agent_avatar": AgentAvatar, "agent_archive": AgentArchive, "agent_purge": AgentPurge, "team_run": TeamRun, "session_pin": SessionPin, "authorization_upgrade": AuthorizationUpgrade, "runtime_command": RuntimeCommand}
 ACTION_SCOPES = {"agent_create": "agents:create", "agent_update": "agents:update", "agent_avatar": "agents:avatar", "agent_archive": "agents:archive", "agent_purge": "agents:purge", "team_run": "teams:run", "session_pin": "sessions:pin", "authorization_upgrade": None, "runtime_command": "operations:control"}
 ACTION_MODELS.update(ASSET_ACTION_MODELS)
@@ -245,6 +259,34 @@ def contracts() -> dict:
     descriptions["research_command"] = "使用research_get返回的精确run/team/flow/node/task/checkpoint引用与revision推进研究任务；支持失败节点重试、人工任务裁决及运行对账。沿用真实operator、operations:control和原生CAS/稳定request_id；unknown只读原management_receipt，不换ID重放。人工裁决须有明确依据，受理不等于业务完成。"
     return {name: {"action": name, "description": descriptions[name], "parameters": model.model_json_schema(),
                    "governed": name in {"team_run", "session_pin", "agent_archive", "agent_purge", "authorization_upgrade", "runtime_command", "research_command", *ASSET_ACTION_MODELS, *TEAM_LIFECYCLE_ACTION_MODELS, *FLOW_ACTION_MODELS, *AUTHORIZATION_REDUCTION_MODELS}, "scope": ACTION_SCOPES[name] or "operator:control"} for name, model in ACTION_MODELS.items()}
+
+
+# --- Launcher-canonical PA managed writes ------------------------------------
+# These per-call-approval writes are reachable only from the dedicated Launcher
+# assistant host: core/assistant_runtime/actions.py validates the injected
+# project_id/request_id and executes them in-process by reusing the same
+# tools/pa_managed_writes.py functions as the platform adapter dispatch table.
+# They deliberately stay out of ACTION_MODELS/ACTION_SCOPES: no project-side
+# management dispatch exists for them, so registering them there would
+# advertise a remotely invocable action that ManagementService.invoke cannot
+# implement (and would regress the platform adapter face).
+# team_create is excluded on purpose: TEAM_LIFECYCLE_ACTION_MODELS already
+# registers it as a full remote management action (scope=teams:create,
+# idempotency marker, OPERATION_UNCONFIRMED) and _management_contracts merges
+# both registries into one canonical index, so a second registration here
+# would silently overwrite the native contract. A guard test pins the two
+# registries disjoint.
+
+PA_MANAGED_WRITE_MODELS = {"knowledge_ingest": KnowledgeIngest, "config_update": ConfigUpdate}
+
+
+def pa_managed_write_contracts() -> dict:
+    descriptions = {
+        "knowledge_ingest": "将已暂存的 owner 收件箱来源按 source_document 模式原样入库为正式知识，不代写或改写知识内容；逐次人工审批即复核闸。inboxSourceId、ownerType、ownerId 必填；review 状态、权限与查重由知识服务把关，错误原样返回，不提供任意正文写入。",
+        "config_update": "按白名单更新操作者偏好：user_profile 文本与偏好、ui 语言/限额/开关、llm profiles.<id>.model_ref。白名单外或禁写键（含密钥、providers、外部网关）整体拒绝；乐观哈希冲突时 status=blocked，请重读最新配置后用原参数重试。每次调用都经原生逐次审批。",
+    }
+    return {name: {"action": name, "description": descriptions[name], "parameters": model.model_json_schema(),
+                   "governed": True, "scope": "operator:control"} for name, model in PA_MANAGED_WRITE_MODELS.items()}
 
 
 class BindingResponse(Closed):

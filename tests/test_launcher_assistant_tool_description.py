@@ -40,7 +40,19 @@ async def test_launcher_actual_tool_descriptions_agree_with_native_describe(tool
         assert "需要提供project_id、request_id、display_name、model_id" in manage.description
         assert create["governed"] is False
         assert execute_action("describe", {"action": "knowledge_acl_grant"})["governed"] is True
-        for name in ("workspace_list", "session_create", "session_delete", "room_update", "knowledge_ingest", "config_update", "workflow_recovery_bind"):
+        # knowledge_ingest/config_update are launcher-canonical PA managed
+        # writes: discoverable per call, still absent from the static tool
+        # descriptor text. team_create is owned by the native TEAM_LIFECYCLE
+        # management registry, so describe must resolve it from ACTION_MODELS.
+        for name in ("knowledge_ingest", "config_update"):
+            assert name not in action.description and name not in manage.description
+            assert execute_action("describe", {"action": name})["governed"] is True
+        team_create = execute_action("describe", {"action": "team_create"})
+        assert team_create["governed"] is True and team_create["scope"] == "teams:create"
+        assert {"name", "description", "purpose", "members"} <= set(team_create["parameters"]["properties"])
+        assert not any(name in action.description or name in manage.description
+                       for name in ("templateId", "inboxSourceId", "ownerType"))
+        for name in ("workspace_list", "session_create", "session_delete", "room_update", "workflow_recovery_bind"):
             assert name not in action.description and name not in manage.description
             with pytest.raises(ValueError, match="Unknown Launcher action"):
                 execute_action("describe", {"action": name})

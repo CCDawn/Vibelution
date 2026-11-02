@@ -328,13 +328,18 @@ class LegacyReceipts(LegacyObservers):
 
 
 def _management_contracts():
-    from core.web.services.external_management.contracts import ACTION_MODELS, contracts
+    from core.web.services.external_management.contracts import (
+        ACTION_MODELS, PA_MANAGED_WRITE_MODELS, contracts, pa_managed_write_contracts)
     result = {}
-    for name, model in ACTION_MODELS.items():
-        schema = create_model(f"Launcher_{model.__name__}", __base__=model,
-            project_id=(str, Field(min_length=1, max_length=160)),
-            request_id=(str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$")))
-        result[name] = (schema, {**contracts()[name], "parameters": schema.model_json_schema()})
+    # Remote management actions and the Launcher-canonical PA managed writes
+    # share the same injected project_id/request_id envelope; only their
+    # executors differ (project dispatch vs. in-process pa_managed_writes).
+    for registry, contract_source in ((ACTION_MODELS, contracts), (PA_MANAGED_WRITE_MODELS, pa_managed_write_contracts)):
+        for name, model in registry.items():
+            schema = create_model(f"Launcher_{model.__name__}", __base__=model,
+                project_id=(str, Field(min_length=1, max_length=160)),
+                request_id=(str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$")))
+            result[name] = (schema, {**contract_source()[name], "parameters": schema.model_json_schema()})
     result["dispatch_write"] = (DispatchWrite, {
         "action": "dispatch_write", "governed": True,
         "description": "按原生审批策略派遣单个已有 Agent 修改项目，仅申请 workspace_write，实际权限以目标项目回执为准。task 必须是当前用户消息去除首尾空白后的完整正文，不得截取、改写或追加；过长时请用户重新提供完整消息，不截断。使用稳定 dispatch_id，未知时查询原回执，不换 ID 重派。",
@@ -367,6 +372,12 @@ def agent_archive_approval_summary(parameters: dict) -> dict:
         "project_id": values["project_id"], "agent_id": values["agent_id"],
         "expected_config_revision": str(values["expected_config_revision"]), "request_id": values["request_id"]},
         "assistantDetailsOmitted": False}
+
+
+def _pa_managed_write_actions() -> frozenset:
+    """Launcher-canonical writes executed in this process (never project dispatch)."""
+    from core.web.services.external_management.contracts import PA_MANAGED_WRITE_MODELS
+    return frozenset(PA_MANAGED_WRITE_MODELS)
 
 
 def agent_purge_approval_summary(parameters: dict) -> dict:
@@ -878,6 +889,21 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
         if not runtime:
             raise ValueError("Launcher native tool identity is required")
         coroutine = service.cancel(args["dispatch_id"], project_id=args["project_id"], expected_task_id=args["native_task_id"])
+    elif action in _pa_managed_write_actions():
+        # Launcher-canonical PA managed writes: after the same schema/project
+        # authorization gate, they run in this process on the single closed
+        # executor mapping; the tool's JSON receipt is returned verbatim.
+        if governed is not True:
+            return {"ok": False, "status": "approval_required", "action": action, "tool": "personal_assistant_manage_tool"}
+        if not runtime:
+            raise ValueError("Launcher native tool identity is required")
+        args.pop("project_id")
+        args.pop("request_id")
+        from tools import pa_managed_writes
+        executor = pa_managed_writes.LAUNCHER_MANAGED_WRITE_ACTIONS.get(action)
+        if executor is None:
+            raise ValueError("Unknown Launcher action; use index for supported operations")
+        return json.loads(executor(**args))
     elif action in managed:
         if (managed[action][1]["governed"] or action == "agent_create" and args.get("capability_preset") is not None) and governed is not True:
             return {"ok": False, "status": "approval_required", "action": action, "tool": "personal_assistant_manage_tool"}
