@@ -450,6 +450,37 @@ describe("chatSessionState", () => {
     expect(merged.currentPhase).toBe("running");
   });
 
+  it("lets every detail frame overwrite the cached pending question (backend always ships the key)", () => {
+    const cached = makeDetail({
+      pendingQuestion: { id: "q-old", questionText: "旧问题", askedAt: "2026-05-22T10:00:00Z", turnId: "turn-old" },
+    });
+    const consumed = makeDetail({ pendingQuestion: null });
+    expect(mergeSessionDetailMessageWindow(cached, consumed).pendingQuestion).toBeNull();
+    // A fresh question replaces the previous slot value the same way.
+    const refreshed = makeDetail({
+      pendingQuestion: { id: "q-new", questionText: "新问题", askedAt: "2026-05-22T10:05:00Z", turnId: "turn-new" },
+    });
+    expect(mergeSessionDetailMessageWindow(cached, refreshed).pendingQuestion).toEqual({
+      id: "q-new", questionText: "新问题", askedAt: "2026-05-22T10:05:00Z", turnId: "turn-new",
+    });
+  });
+
+  it("keeps a light poll from resurrecting a cleared pending question", () => {
+    const cached = makeDetail({
+      secondaryHydrated: true,
+      pendingQuestion: { id: "q-old", questionText: "旧问题", askedAt: "2026-05-22T10:00:00Z", turnId: "turn-old" },
+    });
+    const light = makeDetail({
+      secondaryHydrated: false,
+      pendingQuestion: null,
+      agentInboxMessages: [],
+      pendingToolGovernanceRequests: [],
+      nextStateSignals: [],
+      groupContextEvents: [],
+    });
+    expect(mergeSessionDetailMessageWindow(cached, light).pendingQuestion).toBeNull();
+  });
+
   it("drops a transient live overlay that the newest authoritative window no longer carries", () => {
     const user: ConversationMessage = {
       id: "session-live-message-1",

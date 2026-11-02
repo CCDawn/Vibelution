@@ -1016,6 +1016,15 @@ export type SessionRuntimeNotice = {
   previousStatus?: string;
 };
 
+/** A question the assistant asked that still waits on the user's answer. */
+export type SessionPendingQuestion = {
+  id: string;
+  questionText: string;
+  askedAt: string;
+  /** Turn that wrote this slot; stale questions from earlier turns are dropped client-side. */
+  turnId: string;
+};
+
 export type SessionToolApprovalRequest = {
   requestId: string;
   sessionId: string;
@@ -1292,6 +1301,12 @@ export type SessionDetail = SessionSummary & {
   lastCacheComposition?: SessionCacheComposition | null;
   handoffContext?: SessionChildHandoffContext | null;
   lastTurnError?: SessionTurnError | null;
+  /**
+   * Question the assistant asked and is waiting on the user to answer; null
+   * when the slot is empty. Always present on detail payloads (backend clears
+   * it on consumption) so every frame overwrites any cached stale value.
+   */
+  pendingQuestion?: SessionPendingQuestion | null;
   nextStateSignals?: ChatNextStateSignalSummary[];
   groupContextEvents?: GroupContextEvent[];
   agentInboxMessages?: AgentInboxMessage[];

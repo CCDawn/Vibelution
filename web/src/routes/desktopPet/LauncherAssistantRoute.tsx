@@ -54,6 +54,7 @@ const COPY = {
     unknownSend: "尚未确认消息是否收到。输入已保留，重试会核对同一条消息。",
     receipts: "任务状态暂不可用", checking: "正在连接 Launcher…",
     statusStale: "个人助理状态轮询暂不可用，会话内容可能未更新",
+    pendingQuestion: "待你回答",
   },
   en: {
     title: "Personal assistant", expand: "Open assistant chat", chat: "Chat", hide: "Hide assistant",
@@ -62,6 +63,7 @@ const COPY = {
     unknownSend: "Delivery is unconfirmed. Your input is retained; retry checks the same message.",
     receipts: "Task status unavailable", checking: "Connecting to Launcher…",
     statusStale: "Assistant status polling is unavailable; conversation content may be stale",
+    pendingQuestion: "Waiting for your answer",
   },
 } as const;
 
@@ -757,6 +759,16 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   const stopping = Boolean(detail.data?.stopRequested);
   const canContinue = !draft.trim() && !attachments.length && !sendUnconfirmed && Boolean(resolveConversationContinuation(detail.data, sessionId));
   const actionMode = busy || stopping ? "stop" : canContinue ? "continue" : "send";
+  // "待你回答" banner above the composer. Same gates as the chat page: a
+  // running turn (execution ownership) or an unfinished send hides the banner,
+  // and only the question written by the last terminal turn stays fresh.
+  const pendingQuestion = (() => {
+    const question = detail.data?.pendingQuestion ?? null;
+    if (!question) return null;
+    if (question.turnId !== "" && question.turnId !== (detail.data?.lastTurnTerminalTurnId ?? "")) return null;
+    if (busy || sendPending || sendUnconfirmed) return null;
+    return question;
+  })();
   const queueRow = detail.data?.queuedTurns?.find(row => row.id === queuedAcceptance?.id) || detail.data?.queuedTurns?.[0];
   const waitingQueueText = lang === "zh" ? "已排队，正在读取原生队列…" : "Queued; reading the native queue…";
   const removedQueueText = lang === "zh" ? "排队消息已移除" : "Queued message removed";
@@ -907,7 +919,9 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       composerActionDisabled={sendPending || controlPending || (attachments.length > 0 && status.data?.attachmentVersion !== 1) || (actionMode === "stop" ? stopping || !resolveSessionStopTurnId(detail.data, acceptedTurnId) : actionMode === "send" && !sendUnconfirmed && !draft.trim() && !attachments.length)}
       onComposerChange={changeDraft} onSubmit={() => void submit()}
       onStop={() => void stopTurn()} onContinueTurn={() => void continueTurn()}
-      composerPrecedingContent={<>{entryIntent && dismissedEntry !== entryIntent.key ? <VStateSurface density="compact" tone="empty" title={entryIntent.title}
+      composerPrecedingContent={<>{pendingQuestion ? <VStateSurface density="compact" tone="info" title={copy.pendingQuestion}
+        data-launcher-assistant-pending-question={pendingQuestion.id}>{pendingQuestion.questionText}</VStateSurface> : null}
+      {entryIntent && dismissedEntry !== entryIntent.key ? <VStateSurface density="compact" tone="empty" title={entryIntent.title}
         actions={<><VButton isDisabled={sendPending || controlPending || sendUnconfirmed} onClick={() => {
           void submit({ message: entryIntent.message, requestId: crypto.randomUUID(), preserveDraft: true }).then(attempted => {
             if (attempted) setDismissedEntry(entryIntent.key);

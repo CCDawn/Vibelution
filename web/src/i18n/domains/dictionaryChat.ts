@@ -1,4 +1,4 @@
-/** Route/domain dictionary slice: chat (191 keys). */
+/** Route/domain dictionary slice: chat (192 keys). */
 export const dictionaryChat = {
   zh: {
     navChat: "对话",
@@ -178,6 +178,7 @@ export const dictionaryChat = {
     reconnectStream: "重新连接",
     chatStreamNoOutputStalled: "长时间无输出，可停止",
     chatRouteFallbackSwitched: "已切换备用模型路由（{from} → {to}）继续生成",
+    pendingQuestionLabel: "待你回答",
     todoChecklistTitle: "任务清单",
     todoProgressTitle: "任务",
     todoProgressRunning: "进行中",
@@ -421,6 +422,7 @@ export const dictionaryChat = {
     reconnectStream: "Reconnect",
     chatStreamNoOutputStalled: "No output for a while. You can stop the turn",
     chatRouteFallbackSwitched: "Switched to fallback model route ({from} → {to}); generation continues",
+    pendingQuestionLabel: "Waiting for your answer",
     todoChecklistTitle: "Todo checklist",
     todoProgressTitle: "Tasks",
     todoProgressRunning: "In progress",

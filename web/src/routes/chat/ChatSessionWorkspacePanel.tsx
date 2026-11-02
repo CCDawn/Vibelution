@@ -2,10 +2,13 @@ import { lazy, Suspense, useMemo, type ReactNode } from "react";
 
 import type {
   FileContent,
+  SessionPendingQuestion,
   SessionRuntimeNotice,
   SessionToolApprovalRequest,
 } from "../../api/types";
 import { VStateSurface } from "../../components/vui";
+import { dictionaryChat } from "../../i18n/domains/dictionaryChat";
+import { hasExecutionOwnership, resolveSessionActivity } from "../sessionActivityState";
 import {
   ActiveTurnStreamStateContext,
   type ActiveTurnStreamState,
@@ -73,6 +76,11 @@ export type ChatSessionWorkspaceConversationFrame = {
   notices: SessionRuntimeNotice[];
   /** Guarded-stream transport state projected into the active-turn status note. */
   activeTurnStreamState?: ActiveTurnStreamState;
+  /**
+   * Question the assistant asked that still waits on the user's answer; null
+   * when the slot is empty. Rendered as a banner above the composer.
+   */
+  pendingQuestion?: SessionPendingQuestion | null;
 };
 
 export type ChatSessionWorkspaceToolApproval = {
@@ -138,6 +146,7 @@ export function ChatSessionWorkspacePanel({
     hideExportControl = false,
     notices,
     activeTurnStreamState,
+    pendingQuestion,
   } = conversationFrame;
   // Stable ReactNode/object identities so the memoized
   // ChatConversationComposerBridge below only re-renders when content changes.
@@ -179,6 +188,33 @@ export function ChatSessionWorkspacePanel({
     lang,
     toolApproval,
   ]);
+  // "待你回答" banner above the composer. Three gates before showing:
+  // turnId freshness (the slot must belong to the last terminal turn — older
+  // turns' questions are stale), execution ownership (a running turn may be
+  // about to consume or supersede the slot), and an unfinished send.
+  const pendingQuestionSurface = useMemo(() => {
+    if (!pendingQuestion || !conversation) return null;
+    const authority = conversation.transcript.activeTurnAuthority ?? null;
+    if (pendingQuestion.turnId !== "" && pendingQuestion.turnId !== authority?.lastTurnTerminalTurnId) {
+      return null;
+    }
+    const execution = authority
+      ? resolveSessionActivity(authority).execution
+      : conversation.transcript.phase;
+    if (hasExecutionOwnership(execution) || conversation.composerChrome.composer.pending) {
+      return null;
+    }
+    return (
+      <VStateSurface
+        density="compact"
+        tone="info"
+        title={dictionaryChat[lang].pendingQuestionLabel}
+        data-chat-pending-question={pendingQuestion.id}
+      >
+        {pendingQuestion.questionText}
+      </VStateSurface>
+    );
+  }, [conversation, lang, pendingQuestion]);
 
   if (!activeSessionId && !sessionsPending) {
     return <VStateSurface className={styles.emptyConversationSurface} tone="empty" title={noSessionsLabel} />;
@@ -246,6 +282,7 @@ export function ChatSessionWorkspacePanel({
                   {...conversation.participants}
                   {...conversation.composerChrome}
                   {...conversation.turnActions}
+                  composerPrecedingContent={pendingQuestionSurface ?? undefined}
                   toolApproval={approvalSurface}
                   fallback={conversationLoadingFallback}
                 />

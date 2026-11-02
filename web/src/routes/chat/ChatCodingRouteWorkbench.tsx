@@ -3225,6 +3225,7 @@ export function ChatCodingRouteWorkbench() {
                 hideExportControl: verifiedCompanionMode || headerExportVisible,
                 notices: activeRuntimeNotices,
                 activeTurnStreamState,
+                pendingQuestion: detail?.pendingQuestion ?? null,
               }}
               toolApproval={toolApproval}
             />
