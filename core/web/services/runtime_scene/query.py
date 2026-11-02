@@ -1262,10 +1262,14 @@ def _runtime_scene_user_action_signal_line(scene_dir: Path, *, event_cap: int = 
 
 
 def list_runtime_scenes(limit: int = 80) -> list[dict]:
-    """Return runtime scene summaries sorted by most recent first."""
+    """Return runtime scene summaries sorted by most recent first.
+
+    Read-only by design: retention pruning is not performed here. Callers rely
+    on the explicit hooks (web/runtime-manager startup sweeps and the
+    POST /logs/runtime-scenes/delete endpoint) to enforce retention.
+    """
     s = _service()
 
-    s._enforce_runtime_scene_retention()
     scenes: list[dict] = []
     for scene_dir in s._scene_dirs():
         manifest = s._load_scene_manifest(scene_dir)

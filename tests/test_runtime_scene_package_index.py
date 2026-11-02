@@ -1020,7 +1020,7 @@ def test_runtime_scene_list_returns_search_text_without_cached_feedback_loop(tmp
     assert scene_dir.joinpath("manifest.json").read_text(encoding="utf-8") == manifest_before
 
 
-def test_runtime_scene_list_prunes_old_packages_to_retention_limit(tmp_path, monkeypatch):
+def test_runtime_scene_list_read_keeps_all_packages_and_explicit_enforce_prunes_to_retention_limit(tmp_path, monkeypatch):
     root = tmp_path / "logs" / "runtime_scenes"
     other_log = tmp_path / "logs" / "keep.log"
     other_log.parent.mkdir(parents=True, exist_ok=True)
@@ -1037,8 +1037,16 @@ def test_runtime_scene_list_prunes_old_packages_to_retention_limit(tmp_path, mon
     scenes = runtime_scene_service.list_runtime_scenes(limit=80)
 
     remaining_dirs = sorted(path.name for path in root.iterdir() if path.is_dir())
+    assert len(remaining_dirs) == 35
+    assert len(scenes) == 35
+    assert (root / "20260501T000000Z__scene-00").exists()
+    assert other_log.exists()
+
+    result = runtime_scene_service._enforce_runtime_scene_retention()
+
+    remaining_dirs = sorted(path.name for path in root.iterdir() if path.is_dir())
+    assert result["deletedCount"] == 5
     assert len(remaining_dirs) == 30
-    assert len(scenes) == 30
     assert not (root / "20260501T000000Z__scene-00").exists()
     assert not (root / "20260501T000100Z__scene-01").exists()
     assert not (root / "20260501T000400Z__scene-04").exists()
@@ -1047,7 +1055,7 @@ def test_runtime_scene_list_prunes_old_packages_to_retention_limit(tmp_path, mon
     assert other_log.exists()
 
 
-def test_runtime_scene_retention_protects_current_package_inside_thirty_total(tmp_path, monkeypatch):
+def test_runtime_scene_explicit_enforce_protects_current_package_inside_thirty_total(tmp_path, monkeypatch):
     root = tmp_path / "logs" / "runtime_scenes"
     current_dir = _write_runtime_scene_for_retention(root, tmp_path, 0, status="running")
     for index in range(1, 32):
@@ -1064,8 +1072,16 @@ def test_runtime_scene_retention_protects_current_package_inside_thirty_total(tm
     scenes = runtime_scene_service.list_runtime_scenes(limit=80)
 
     remaining_dirs = sorted(path.name for path in root.iterdir() if path.is_dir())
+    assert len(remaining_dirs) == 32
+    assert len(scenes) == 32
+    assert current_dir.exists()
+
+    result = runtime_scene_service._enforce_runtime_scene_retention()
+
+    remaining_dirs = sorted(path.name for path in root.iterdir() if path.is_dir())
+    assert result["deletedCount"] == 2
+    assert result["protectedCount"] == 1
     assert len(remaining_dirs) == 30
-    assert len(scenes) == 30
     assert current_dir.exists()
     assert not (root / "20260501T000100Z__scene-01").exists()
     assert not (root / "20260501T000200Z__scene-02").exists()

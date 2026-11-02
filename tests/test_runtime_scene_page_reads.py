@@ -38,7 +38,7 @@ def _write_scene(root: Path, project_root: Path, index: int) -> Path:
         (FileNotFoundError, True, 30),
     ],
 )
-def test_runtime_scene_list_survives_retention_delete_races(
+def test_runtime_scene_list_read_does_not_prune_and_explicit_enforce_survives_delete_races(
     tmp_path,
     monkeypatch,
     delete_error,
@@ -99,9 +99,14 @@ def test_runtime_scene_list_survives_retention_delete_races(
         response = client.get("/api/logs/runtime-scenes")
 
     assert response.status_code == 200, response.text
-    assert len(response.json()) == expected_kept_count
+    assert len(response.json()) == 31
+    assert delete_attempts == []
+    assert retention_results == []
+    assert oldest_scene.exists()
+
+    result = runtime_scene_service._enforce_runtime_scene_retention()
+
     assert delete_attempts == [oldest_scene]
-    result = retention_results[-1]
     assert result["deletedCount"] == 0
     assert result["deletedSceneIds"] == []
     assert result["keptCount"] == expected_kept_count
