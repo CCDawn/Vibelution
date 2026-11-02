@@ -623,11 +623,18 @@ def _without_pinned_git_env():
         os.environ.update(saved)
 
 
-def _git_at(checkout: Path, args: list[str], *, timeout: float = 30.0):
+def _git_at(
+    checkout: Path,
+    args: list[str],
+    *,
+    timeout: float = 30.0,
+    own_process_tree: bool = False,
+):
     return git_process.run_git(
         args,
         cwd=str(checkout),
         timeout=timeout,
+        own_process_tree=own_process_tree,
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -644,7 +651,13 @@ def _branch_exists(root: Path, branch: str) -> bool:
     return f"refs/heads/{branch}" in str(result.stdout or "").split()
 
 
-def _materialize_worktree(root: Path, absolute: Path, branch: str) -> None:
+def _materialize_worktree(
+    root: Path,
+    absolute: Path,
+    branch: str,
+    *,
+    timeout_seconds: float = _WORKTREE_ADD_TIMEOUT_SECONDS,
+) -> None:
     if absolute.exists():
         if not absolute.is_dir():
             raise DevTaskBoardError(_WORKSPACE_FAILURE)
@@ -658,7 +671,8 @@ def _materialize_worktree(root: Path, absolute: Path, branch: str) -> None:
         added = _git_at(
             root,
             ["worktree", "add", str(absolute), branch],
-            timeout=_WORKTREE_ADD_TIMEOUT_SECONDS,
+            timeout=timeout_seconds,
+            own_process_tree=True,
         )
     else:
         if not _branch_exists(root, "main"):
@@ -666,7 +680,8 @@ def _materialize_worktree(root: Path, absolute: Path, branch: str) -> None:
         added = _git_at(
             root,
             ["worktree", "add", str(absolute), "-b", branch, "main"],
-            timeout=_WORKTREE_ADD_TIMEOUT_SECONDS,
+            timeout=timeout_seconds,
+            own_process_tree=True,
         )
     if added.returncode != 0 or not absolute.is_dir():
         raise DevTaskBoardError(_WORKSPACE_FAILURE)

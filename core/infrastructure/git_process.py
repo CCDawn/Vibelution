@@ -8,12 +8,14 @@ from collections.abc import Sequence
 from typing import Any
 
 from core.infrastructure import no_console_git
+from core.infrastructure.owned_process import OwnedProcess
 from core.logging import debug as _debug_logger
 
 DEFAULT_GIT_TIMEOUT_SECONDS = 30.0
 DEFAULT_GIT_LOCK_RETRIES = 2
 GIT_PROCESS_OUTPUT_LOG_LIMIT = 500
 GIT_PROCESS_CWD_LOG_LIMIT = 160
+GIT_PROCESS_CLEANUP_TIMEOUT_SECONDS = 2.0
 
 
 def resolve_git_executable() -> str:
@@ -57,8 +59,11 @@ def run_git(
     timeout: float | None = DEFAULT_GIT_TIMEOUT_SECONDS,
     check: bool = False,
     retries: int = DEFAULT_GIT_LOCK_RETRIES,
+    own_process_tree: bool = False,
     **kwargs: Any,
 ) -> subprocess.CompletedProcess[Any]:
+    """Run Git, optionally retaining tree ownership for commands that spawn workers."""
+
     run_kwargs = dict(kwargs)
     # Always force no-console kwargs last so callers cannot strip CREATE_NO_WINDOW.
     run_kwargs.update(no_console_subprocess_kwargs())
@@ -76,13 +81,18 @@ def run_git(
     attempts = max(0, int(retries or 0)) + 1
     for attempt in range(attempts):
         try:
-            result = subprocess.run(
-                command,
-                cwd=cwd_text or None,
-                timeout=timeout,
-                check=False,
-                **run_kwargs,
-            )
+            if own_process_tree:
+                result = _run_owned_git(
+                    command, cwd=cwd_text or None, timeout=timeout, **run_kwargs,
+                )
+            else:
+                result = subprocess.run(
+                    command,
+                    cwd=cwd_text or None,
+                    timeout=timeout,
+                    check=False,
+                    **run_kwargs,
+                )
         except subprocess.TimeoutExpired as exc:
             _observe_git_process_result(
                 "timeout",
@@ -142,6 +152,65 @@ def run_git(
             )
         return result
     raise RuntimeError("run_git retry loop exhausted unexpectedly")
+
+
+def _run_owned_git(
+    command: list[str],
+    *,
+    cwd: str | None,
+    timeout: float | None,
+    **kwargs: Any,
+) -> subprocess.CompletedProcess[Any]:
+    """Run a tree-owned command without subprocess.run's unbounded timeout drain."""
+
+    input_data = kwargs.pop("input", None)
+    if input_data is not None:
+        if "stdin" in kwargs:
+            raise ValueError("stdin and input arguments may not both be used.")
+        kwargs["stdin"] = subprocess.PIPE
+    if kwargs.pop("capture_output", False):
+        if "stdout" in kwargs or "stderr" in kwargs:
+            raise ValueError("stdout and stderr arguments may not be used with capture_output.")
+        kwargs.update(stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    owner = OwnedProcess.spawn(command, cwd=cwd, **kwargs)
+    process = owner.process
+    # Popen.__exit__ and subprocess.run's Windows timeout handler can wait for
+    # inherited pipes forever. Retire the Job (even if its root already exited)
+    # before draining, and keep that final drain bounded as well.
+    try:
+        stdout, stderr = process.communicate(input=input_data, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        cleanup_unconfirmed = False
+        try:
+            owner.close(timeout=GIT_PROCESS_CLEANUP_TIMEOUT_SECONDS)
+        except Exception as cleanup_error:
+            cleanup_unconfirmed = True
+            # Keep ownership available to the caller if even abort cannot release it.
+            exc.git_process_owner = owner
+            exc.add_note(f"Git process tree cleanup is unconfirmed ({type(cleanup_error).__name__}).")
+            _abort_timed_out_git(owner, exc, timeout=GIT_PROCESS_CLEANUP_TIMEOUT_SECONDS)
+        try:
+            exc.stdout, exc.stderr = process.communicate(timeout=GIT_PROCESS_CLEANUP_TIMEOUT_SECONDS)
+        except Exception as drain_error:
+            # Do not close a pipe while a reader may hold its buffered-I/O lock.
+            exc.add_note(f"Git output drain did not finish ({type(drain_error).__name__}).")
+        finally:
+            if cleanup_unconfirmed:
+                _abort_timed_out_git(owner, exc, timeout=0.0)
+        raise
+    except BaseException:
+        owner.close(timeout=GIT_PROCESS_CLEANUP_TIMEOUT_SECONDS)
+        raise
+    owner.close(timeout=GIT_PROCESS_CLEANUP_TIMEOUT_SECONDS)
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+
+
+def _abort_timed_out_git(owner: OwnedProcess, error: subprocess.TimeoutExpired, *, timeout: float) -> None:
+    try:
+        owner.abort(timeout=timeout)
+    except Exception as abort_error:
+        error.add_note(f"Git process abort failed; cleanup remains unconfirmed ({type(abort_error).__name__}).")
 
 
 _CREDENTIAL_URL_PATTERN = re.compile(

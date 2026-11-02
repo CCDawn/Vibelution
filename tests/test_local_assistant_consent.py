@@ -5,6 +5,19 @@ import pytest
 from core.web.services.local_assistant import consent
 
 
+def test_long_terminal_wait_requires_active_verified_local_task(monkeypatch):
+    calls = []
+    monkeypatch.setattr(consent, "_task_runtime", lambda runtime: calls.append(runtime) or {"taskId": "owned"})
+    for source in ("", "external_agent_task:workspace_write", "launcher_assistant_task_forged"):
+        assert not consent.local_terminal_wait_allowed({"runtimeToolSource": source})
+    assert calls == []
+    native = {"runtimeToolSource": "launcher_assistant_task:workspace_write"}
+    assert consent.local_terminal_wait_allowed(native)
+    assert calls == [native]
+    monkeypatch.setattr(consent, "_task_runtime", lambda runtime: None)
+    assert not consent.local_terminal_wait_allowed(native)
+
+
 def test_authenticated_launcher_dispatch_needs_no_second_approval(monkeypatch):
     monkeypatch.setattr(consent, "_native_launcher", lambda runtime: True)
     args = {"action": "dispatch_write", "arguments_json": json.dumps({"project_id": "p", "agent_id": "a",

@@ -52,6 +52,12 @@ def _task_runtime(runtime):
         return None
 
 
+def local_terminal_wait_allowed(runtime):
+    """An active native task may wait until its command/deadline, not eight polls."""
+    return (str(runtime.get("runtimeToolSource", "")).startswith(LOCAL_RUNTIME_SOURCE_PREFIX)
+            and _task_runtime(runtime) is not None)
+
+
 def local_approval_policy(runtime, tool_name, args, requirement, permission_preset):
     if _native_launcher(runtime) and tool_name == "personal_assistant_manage_tool":
         try:

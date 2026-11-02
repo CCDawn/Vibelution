@@ -448,6 +448,83 @@ def test_empty_terminal_wait_has_a_turn_bound_across_session_ids(monkeypatch):
     assert results[-1].code == "terminal_wait_turn_budget_exhausted"
 
 
+def test_verified_local_task_can_wait_past_both_caps_but_revocation_restores_limits(monkeypatch):
+    from core.web.services.local_assistant import consent
+
+    _runtime(monkeypatch, allowed_tools=("write_stdin",), max_calls_per_turn=1)
+    _install(tools=("write_stdin",))
+    active = [True]
+    monkeypatch.setattr(consent, "local_terminal_wait_allowed", lambda runtime: active[0])
+    results = [tool_authorization_service.authorize_tool_execution(
+        tool_name="write_stdin", tool_call_id=f"local-wait-{index}",
+        tool_args={"session_id": "sandbox-a", "chars": ""}) for index in range(40)]
+    assert all(result.allowed and result.code == "allowed_terminal_wait" for result in results)
+    context = tool_authorization_service.current_execution_authorization()
+    assert context.call_count == 0
+    active[0] = False
+    result = tool_authorization_service.authorize_tool_execution(
+        tool_name="write_stdin", tool_call_id="revoked-wait",
+        tool_args={"session_id": "sandbox-a", "chars": ""})
+    assert not result.allowed
+    assert result.code == "terminal_wait_turn_budget_exhausted"
+
+
+def test_local_nonempty_stdin_keeps_general_call_budget(monkeypatch):
+    from core.web.services.local_assistant import consent
+
+    _runtime(monkeypatch, allowed_tools=("write_stdin",), max_calls_per_turn=1)
+    _install(tools=("write_stdin",))
+    monkeypatch.setattr(consent, "local_terminal_wait_allowed", lambda runtime: pytest.fail("nonempty input is not a wait"))
+    context = tool_authorization_service.current_execution_authorization()
+    context.call_count = 1
+    result = tool_authorization_service.authorize_tool_execution(
+        tool_name="write_stdin", tool_call_id="input-over-budget",
+        tool_args={"session_id": "sandbox-a", "chars": "y\n"})
+    assert not result.allowed and result.code == "call_budget_exhausted"
+
+
+@pytest.mark.parametrize("revocation", [
+    {"leaseExpiresAt": "2000-01-01T00:00:00Z"},
+    {"stopRequestedAt": "2026-11-02T00:00:00Z"},
+    {"localAuthorityFingerprint": "b" * 64},
+])
+def test_long_wait_rechecks_real_registered_task_authority(monkeypatch, tmp_path, revocation):
+    from core.infrastructure import launcher_assistant_authority
+    from core.web.services.external_agent.approval_binding import (
+        freeze_arguments, register_external_session, unregister_external_session,
+    )
+    from core.web.services.local_assistant import service as local
+    from tests.test_local_assistant_tasks import local_service, start
+
+    service, _, _, _ = local_service(tmp_path)
+    task_id = start(service)["taskId"]
+    register_external_session(task_id=task_id, session_id="session-1", agent_id="coder")
+    try:
+        _runtime(monkeypatch, agent_id="coder", allowed_tools=("write_stdin",), max_calls_per_turn=1)
+        runtime = agent_directory_service.current_agent_runtime()
+        runtime.update(sessionId="session-1", runtimeToolSource="launcher_assistant_task:workspace_write")
+        monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: runtime)
+        monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(local, "task_store", lambda root: service.store)
+        monkeypatch.setattr(launcher_assistant_authority, "launcher_authority_fingerprint", lambda: "a" * 64)
+        _install(agent_id="coder", tools=("write_stdin",))
+        args = {"session_id": "sandbox-a", "chars": ""}
+        frozen = freeze_arguments(args)
+
+        def poll(index):
+            return tool_authorization_service.authorize_tool_execution(
+                tool_name="write_stdin", tool_call_id=f"real-local-wait-{index}", tool_args=args,
+                external_arguments_json=frozen, external_execution_arguments_json=frozen)
+
+        assert all(poll(index).allowed for index in range(40))
+        record = service.store.get_task(task_id)
+        service.store.transition(task_id, status=record["status"], fields=revocation)
+        result = poll(40)
+        assert not result.allowed and result.code == "terminal_wait_turn_budget_exhausted"
+    finally:
+        unregister_external_session(task_id=task_id, session_id="session-1", agent_id="coder")
+
+
 def test_delegation_constraint_is_enforced_by_canonical_authorization(monkeypatch):
     _runtime(monkeypatch, allowed_tools=("spawn_agent_tool",))
     monkeypatch.setattr(

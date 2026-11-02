@@ -19,6 +19,7 @@ class OwnedProcess:
         self._job = job
         self._lock = threading.Lock()
         self._closed = False
+        self._aborted = False
 
     @classmethod
     def spawn(cls, args: Any, **kwargs: Any) -> "OwnedProcess":
@@ -60,6 +61,9 @@ class OwnedProcess:
             raise
 
     def _active(self) -> bool:
+        if self._aborted:
+            # A released Job can no longer confirm descendant retirement.
+            return True
         if self._job is not None:
             return self._job.active_count() > 0
         try:
@@ -74,6 +78,8 @@ class OwnedProcess:
         if not self._lock.acquire(timeout=max(0.0, timeout)):
             return False
         try:
+            if self._aborted:
+                return False
             if self._closed:
                 return True
             if self._job is not None:
@@ -98,6 +104,39 @@ class OwnedProcess:
                 time.sleep(min(0.02, max(0.0, deadline - time.monotonic())))
         except OSError:
             return False
+        finally:
+            self._lock.release()
+
+    def abort(self, *, timeout: float = 2.0) -> None:
+        """Release a failed owner's Job without claiming its tree has retired.
+
+        Closing the kill-on-close Job requests forced tree termination. This
+        non-waiting fallback remains unconfirmed even after the Job is closed.
+        Repeating it after a bounded drain releases the root handle once poll
+        confirms exit; it never waits for a pipe reader or root process.
+        """
+
+        if not self._lock.acquire(timeout=max(0.0, timeout)):
+            raise RuntimeError("Owned process abort is still in progress")
+        try:
+            if self._closed:
+                return
+            self._aborted = True
+            try:
+                if self._job is not None:
+                    self._job.terminate()
+                else:
+                    try:
+                        os.killpg(self.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+            finally:
+                try:
+                    if self._job is not None:
+                        self._job.close()
+                finally:
+                    if self.process.poll() is not None and self._job is not None:
+                        self.process._handle.Close()
         finally:
             self._lock.release()
 

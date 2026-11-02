@@ -1,0 +1,11 @@
+{
+  "proof": "scheduling-beta-v1",
+  "rows": [
+    {"quantity": 7, "unit_value": 13},
+    {"quantity": 4, "unit_value": 31},
+    {"quantity": 2, "unit_value": 19},
+    {"quantity": 3, "unit_value": 43},
+    {"quantity": 5, "unit_value": 23},
+    {"quantity": 4, "unit_value": 11}
+  ]
+}

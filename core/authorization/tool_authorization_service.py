@@ -967,9 +967,17 @@ def authorize_tool_execution(
             runtime_agent_id, runtime_turn_id, context, tool_name=normalized_tool,
         )
     terminal_wait_session_id = _empty_terminal_wait_session_id(normalized_tool, tool_args)
+    local_terminal_wait = False
+    if terminal_wait_session_id:
+        from core.web.services.local_assistant.consent import local_terminal_wait_allowed
+
+        # Empty reads cannot extend command execution. A native task is already
+        # bounded by its verified lease/deadline; recheck that authority on every
+        # poll. Ordinary and third-party sessions keep the independent caps.
+        local_terminal_wait = local_terminal_wait_allowed(runtime)
     with context.call_count_lock:
         if terminal_wait_session_id:
-            if context.terminal_wait_count >= MAX_TERMINAL_WAITS_PER_TURN:
+            if not local_terminal_wait and context.terminal_wait_count >= MAX_TERMINAL_WAITS_PER_TURN:
                 return _execution_denial(
                     "terminal_wait_turn_budget_exhausted",
                     "当前回合的终端轮询次数已用尽。",
@@ -979,7 +987,7 @@ def authorize_tool_execution(
                     tool_name=normalized_tool,
                 )
             count = context.terminal_wait_counts.get(terminal_wait_session_id, 0)
-            if count >= MAX_TERMINAL_WAITS_PER_SESSION:
+            if not local_terminal_wait and count >= MAX_TERMINAL_WAITS_PER_SESSION:
                 return _execution_denial(
                     "terminal_wait_budget_exhausted",
                     "当前终端会话的轮询次数已用尽。",

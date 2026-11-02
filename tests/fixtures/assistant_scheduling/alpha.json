@@ -1,0 +1,11 @@
+{
+  "proof": "scheduling-alpha-v1",
+  "rows": [
+    {"quantity": 3, "unit_value": 17},
+    {"quantity": 2, "unit_value": 29},
+    {"quantity": 5, "unit_value": 11},
+    {"quantity": 4, "unit_value": 37},
+    {"quantity": 6, "unit_value": 23},
+    {"quantity": 2, "unit_value": 41}
+  ]
+}

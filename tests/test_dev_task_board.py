@@ -1,4 +1,5 @@
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -34,6 +35,7 @@ from core.web.services.team.dev_task_board import (
     read_dev_task_changes,
 )
 from core.web.services.team.ephemeral_team_service import create_ephemeral_team
+from core.web.services.team import dev_task_board
 from tests.helpers.system_agent_state import _mark_config_agent_instances_present
 
 
@@ -504,6 +506,72 @@ def test_claim_opens_a_task_worktree_and_reuses_it(tmp_path, monkeypatch):
     )
     assert restored == opened
     assert (tmp_path / opened["workspacePath"] / ".git").exists()
+
+
+@pytest.mark.parametrize("branch_exists", [False, True])
+@pytest.mark.parametrize("timeout_seconds", [None, 600.0])
+def test_materialize_worktree_owns_only_the_add_process_tree(
+    tmp_path, monkeypatch, branch_exists, timeout_seconds,
+):
+    branch = "codex/owned-add"
+    absolute = tmp_path / ".worktrees" / "owned-add"
+    calls = []
+
+    def run_git(args, **kwargs):
+        calls.append((args, kwargs))
+        stdout = ""
+        if args[0] == "for-each-ref":
+            ref = args[-1]
+            if ref == "refs/heads/main" or branch_exists:
+                stdout = ref + "\n"
+        elif args[:2] == ["worktree", "add"]:
+            absolute.mkdir(parents=True)
+        elif args[0] == "rev-parse":
+            stdout = branch + "\n"
+        return subprocess.CompletedProcess(args, 0, stdout, "")
+
+    monkeypatch.setattr(dev_task_board.git_process, "run_git", run_git)
+    timeout_kwargs = {} if timeout_seconds is None else {"timeout_seconds": timeout_seconds}
+    dev_task_board._materialize_worktree(tmp_path, absolute, branch, **timeout_kwargs)
+
+    additions = [(args, kwargs) for args, kwargs in calls if args[:2] == ["worktree", "add"]]
+    assert len(additions) == 1
+    add_args, add_kwargs = additions[0]
+    expected_suffix = [branch] if branch_exists else ["-b", branch, "main"]
+    assert add_args == ["worktree", "add", str(absolute), *expected_suffix]
+    assert add_kwargs["own_process_tree"] is True
+    expected_timeout = dev_task_board._WORKTREE_ADD_TIMEOUT_SECONDS if timeout_seconds is None else timeout_seconds
+    assert add_kwargs["timeout"] == expected_timeout
+    assert all(
+        kwargs["own_process_tree"] is False
+        for args, kwargs in calls if args[:2] != ["worktree", "add"]
+    )
+    assert all(kwargs["timeout"] == 30.0 for args, kwargs in calls if args[:2] != ["worktree", "add"])
+
+
+def test_materialize_worktree_custom_timeout_failure_propagates_without_a_head_probe(tmp_path, monkeypatch):
+    branch = "codex/owned-timeout"
+    calls = []
+    timeout_error = subprocess.TimeoutExpired(["git.exe", "worktree", "add"], 600.0)
+
+    def run_git(args, **kwargs):
+        calls.append((args, kwargs))
+        if args[:2] == ["worktree", "add"]:
+            assert kwargs["timeout"] == 600.0
+            assert kwargs["own_process_tree"] is True
+            raise timeout_error
+        stdout = args[-1] + "\n" if args[0] == "for-each-ref" else ""
+        return subprocess.CompletedProcess(args, 0, stdout, "")
+
+    monkeypatch.setattr(dev_task_board.git_process, "run_git", run_git)
+    with pytest.raises(subprocess.TimeoutExpired) as raised:
+        dev_task_board._materialize_worktree(
+            tmp_path, tmp_path / ".worktrees" / "owned-timeout", branch, timeout_seconds=600.0,
+        )
+    assert raised.value is timeout_error
+    assert [args[:2] for args, _kwargs in calls] == [
+        ["for-each-ref", "--format=%(refname)"], ["worktree", "prune"], ["worktree", "add"],
+    ]
 
 
 def test_claim_without_main_does_not_stay_in_progress(tmp_path, monkeypatch):

@@ -1,9 +1,11 @@
 """Launcher-owned tasks reuse the native owner with a separate access policy."""
 from contextvars import ContextVar
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
-from core.web.services.external_agent.service import ExternalAgentAccessError, ExternalAgentTaskService
+from core.external_agent.contracts import TASK_TERMINAL_STATUSES
+from core.web.services.external_agent.service import ExternalAgentAccessError, ExternalAgentTaskService, _parse_iso
 from core.web.services.external_agent.store import ExternalAgentTaskStore
 from vibelution_storage import resolve_project_runtime_home
 
@@ -20,7 +22,7 @@ def materialize_workspace(project_root, task_id):
     from core.web.services.team.dev_task_board import _materialize_worktree
     slug = "assistant-" + task_id
     workspace = allocate_worktree_path(project_root, slug)
-    _materialize_worktree(Path(project_root), workspace, "codex/" + slug)
+    _materialize_worktree(Path(project_root), workspace, "codex/" + slug, timeout_seconds=600)
     return workspace
 
 
@@ -57,23 +59,86 @@ class LocalAssistantTaskService(ExternalAgentTaskService):
             raise ExternalAgentAccessError("Agent is protected", code="AGENT_NOT_FOUND")
         super()._require_eligible(agent)
 
+    def _request_cancel_locked(self, record, *, terminal_status, reason_code, strict_confirmation=False):
+        # A checkout can outlive its lease before any native session exists.
+        # Follow the store's cancellation path rather than inventing a direct
+        # queued -> timed_out edge shared with third-party tasks.
+        if (record["status"] == "queued" and not record.get("sessionId")
+                and terminal_status == "timed_out"):
+            record = self._transition(record["taskId"], status="cancelling",
+                expected_revision=record["revision"], reason_code=reason_code,
+                fields={"cancellationTerminalStatus": terminal_status})
+        return super()._request_cancel_locked(record, terminal_status=terminal_status,
+            reason_code=reason_code, strict_confirmation=strict_confirmation)
+
+    def _preparation_stop_reason(self, record, fingerprint):
+        if (not fingerprint or self.authority_fingerprint() != fingerprint
+                or record.get("localAuthorityFingerprint") not in (None, fingerprint)):
+            return "local_authority_revoked"
+        if self._native_start_admission is not None:
+            from config.settings import get_config
+            self.denied_agent_ids = frozenset(get_config().external_agent_gateway.denied_agent_ids)
+        try:
+            self._require_eligible(self.dependencies.get_agent(record["agentId"], include_archived=False))
+        except ExternalAgentAccessError:
+            return "agent_eligibility_revoked"
+        now = datetime.now(timezone.utc)
+        for field, code in (("deadlineAt", "task_deadline_exceeded"), ("leaseExpiresAt", "lease_expired")):
+            expires = _parse_iso(record.get(field, ""))
+            if expires is None or expires <= now:
+                return code
+        return ""
+
+    def _stop_preparation(self, record, reason):
+        status = "timed_out" if reason in {"task_deadline_exceeded", "lease_expired"} else "cancelled"
+        return self._request_cancel(record, terminal_status=status, reason_code=reason)
+
     def _start_native_task(self, record, **kwargs):
-        with self._task_lock(record["taskId"]):
-            current = self.store.get_task(record["taskId"])
-            fingerprint = self.request_authority_fingerprint or self.authority_fingerprint()
-            if self.authority_fingerprint() != fingerprint:
-                raise ExternalAgentAccessError("Local assistant authorization changed", code="LOCAL_ASSISTANT_DISABLED")
-            if current.get("localAuthorityFingerprint") not in (None, fingerprint) or not fingerprint:
-                raise ExternalAgentAccessError("Local assistant authorization changed", code="LOCAL_ASSISTANT_DISABLED")
-            if not current.get("localAuthorityFingerprint"):
-                workspace = (self.workspace_factory(record["taskId"])
-                             if kwargs["effective"] == "workspace_write" else self.project_root)
-                current = self.store.transition(current["taskId"], status=current["status"],
-                    expected_revision=current["revision"], fields={
-                        "localAuthorityFingerprint": fingerprint,
-                        "localWorkspacePath": str(Path(workspace).resolve()),
-                    })
-            return super()._start_native_task(current, **kwargs)
+        task_id = record["taskId"]
+        # Provisioning is serialized separately: request lookup, renewal and
+        # cancellation must remain available while Git creates the checkout.
+        with self._task_lock("local-workspace:" + task_id):
+            with self._task_lock(task_id):
+                current = self.store.get_task(task_id)
+                if current["status"] in TASK_TERMINAL_STATUSES:
+                    return self._public_task(current, include_private=kwargs["include_private"])
+                fingerprint = self.request_authority_fingerprint or self.authority_fingerprint()
+                reason = self._preparation_stop_reason(current, fingerprint)
+                if reason:
+                    current = self._stop_preparation(current, reason)
+                    return self._public_task(current, include_private=kwargs["include_private"])
+                needs_workspace = not current.get("localAuthorityFingerprint")
+            if needs_workspace:
+                try:
+                    workspace = (self.workspace_factory(task_id)
+                                 if kwargs["effective"] == "workspace_write" else self.project_root)
+                except Exception:
+                    # This preparation precedes the native owner's own startup
+                    # try/except. Persist failure on the original idempotent row
+                    # so lookup/heartbeat cannot leave it queued indefinitely.
+                    with self._task_lock(task_id):
+                        latest = self.store.get_task(task_id)
+                        if latest["status"] not in TASK_TERMINAL_STATUSES:
+                            self._transition(task_id, status="failed",
+                                expected_revision=latest["revision"], reason_code="workspace_setup_failed",
+                                fields={"error": {"code": "WORKSPACE_SETUP_FAILED",
+                                                  "message": "Agent task workspace could not be prepared."}})
+                    raise
+            with self._task_lock(task_id):
+                current = self.store.get_task(task_id)
+                if current["status"] in TASK_TERMINAL_STATUSES:
+                    return self._public_task(current, include_private=kwargs["include_private"])
+                reason = self._preparation_stop_reason(current, fingerprint)
+                if reason:
+                    current = self._stop_preparation(current, reason)
+                    return self._public_task(current, include_private=kwargs["include_private"])
+                if needs_workspace:
+                    current = self.store.transition(task_id, status=current["status"],
+                        expected_revision=current["revision"], fields={
+                            "localAuthorityFingerprint": fingerprint,
+                            "localWorkspacePath": str(Path(workspace).resolve()),
+                        })
+                return super()._start_native_task(current, **kwargs)
 
 
 @contextmanager

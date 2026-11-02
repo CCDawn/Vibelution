@@ -48,6 +48,138 @@ def test_local_development_works_while_third_party_remains_disabled(tmp_path):
     assert external.store.list_nonterminal() == []
 
 
+def test_workspace_failure_becomes_terminal_without_resubmission(tmp_path):
+    service, _, runtime, _ = local_service(tmp_path)
+    attempts = []
+
+    def fail(task_id):
+        attempts.append(task_id)
+        raise TimeoutError("private workspace diagnostic must not enter the receipt")
+
+    service.workspace_factory = fail
+    with pytest.raises(TimeoutError):
+        start(service)
+    record = service.store.get_task(attempts[0])
+    assert record["status"] == "failed"
+    assert record["reasonCode"] == "workspace_setup_failed"
+    assert record["error"] == {"code": "WORKSPACE_SETUP_FAILED",
+                               "message": "Agent task workspace could not be prepared."}
+    assert runtime.create_calls == runtime.submit_calls == []
+    repeated = start(service)
+    assert repeated["taskId"] == record["taskId"] and repeated["status"] == "failed"
+    assert len(attempts) == 1
+    assert service.store.list_nonterminal() == []
+
+
+@pytest.mark.parametrize("operation", ["heartbeat", "cancel", "expiry"])
+def test_workspace_io_does_not_block_original_request_lookup_renewal_or_cancel(tmp_path, operation):
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+
+    service, _, runtime, workspace = local_service(tmp_path)
+    entered, release = threading.Event(), threading.Event()
+
+    def prepare(task_id):
+        entered.set()
+        assert release.wait(10), "test must release owned workspace preparation"
+        return workspace
+
+    service.workspace_factory = prepare
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        started = pool.submit(start, service)
+        try:
+            assert entered.wait(5)
+            lookup = pool.submit(service.get_task_for_request, owner_id="private-task-owner",
+                                 client_request_id="request-1", include_private=True).result(timeout=3)
+            assert lookup["status"] == "queued"
+            record = service.store.get_task(lookup["taskId"])
+            if operation == "heartbeat":
+                response = pool.submit(service.heartbeat, owner_id="private-task-owner", task_id=record["taskId"],
+                    lease_id=record["leaseId"], adapter_connection_id="private-connection").result(timeout=3)
+                assert response["status"] == "queued"
+                assert service.store.get_task(record["taskId"])["revision"] > record["revision"]
+            elif operation == "cancel":
+                response = pool.submit(service.cancel_task, owner_id="private-task-owner",
+                    task_id=record["taskId"]).result(timeout=3)
+                assert response["status"] == "cancelled"
+            else:
+                response = pool.submit(service.reconcile, now_iso="2999-01-01T00:00:00Z").result(timeout=3)
+                assert response[0]["status"] == "timed_out"
+        finally:
+            release.set()
+        result = started.result(timeout=5)
+    if operation != "heartbeat":
+        assert result["status"] == ("cancelled" if operation == "cancel" else "timed_out")
+        assert runtime.create_calls == runtime.submit_calls == []
+    else:
+        assert result["status"] == "running" and len(runtime.submit_calls) == 1
+
+
+@pytest.mark.parametrize("change", ["authority", "lease", "deadline"])
+def test_workspace_completion_rechecks_authority_and_time_before_session_admission(tmp_path, change):
+    service, _, runtime, workspace = local_service(tmp_path)
+
+    def prepare(task_id):
+        if change == "authority":
+            service.authority_fingerprint = lambda: "b" * 64
+        else:
+            record = service.store.get_task(task_id)
+            field = "leaseExpiresAt" if change == "lease" else "deadlineAt"
+            service.store.transition(task_id, status=record["status"], fields={field: "2000-01-01T00:00:00Z"})
+        return workspace
+
+    service.workspace_factory = prepare
+    result = start(service)
+    assert result["status"] == ("cancelled" if change == "authority" else "timed_out")
+    assert runtime.create_calls == runtime.submit_calls == []
+    assert not service.store.list_nonterminal()
+
+
+def test_workspace_completion_honors_new_explicit_operator_deny(tmp_path, monkeypatch):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+    from config import settings
+    from core.web.services import agent_directory_service as directory
+    from core.web.services.local_assistant.service import _local_start_admission
+
+    service, _, runtime, workspace = local_service(tmp_path)
+    gateway = SimpleNamespace(denied_agent_ids=[])
+    monkeypatch.setattr(settings, "get_config", lambda: SimpleNamespace(external_agent_gateway=gateway))
+    monkeypatch.setattr(directory, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(directory, "_active_project_root", lambda: tmp_path)
+    monkeypatch.setattr(directory, "agent_session_lifecycle_transaction", nullcontext)
+    service._native_start_admission = lambda: _local_start_admission(service)
+
+    def prepare(task_id):
+        gateway.denied_agent_ids.append("coder")
+        return workspace
+
+    service.workspace_factory = prepare
+    result = start(service)
+    assert result["status"] == "cancelled"
+    assert service.store.get_task(result["taskId"])["reasonCode"] == "agent_eligibility_revoked"
+    assert runtime.create_calls == runtime.submit_calls == []
+
+
+@pytest.mark.parametrize("field", ["leaseExpiresAt", "deadlineAt"])
+def test_expired_task_does_not_begin_workspace_preparation(tmp_path, field):
+    service, _, runtime, _ = local_service(tmp_path)
+    original = service._admit_start_task
+    prepared = []
+
+    def admit(**kwargs):
+        admitted = original(**kwargs)
+        record = admitted[0]
+        service.store.transition(record["taskId"], status=record["status"], fields={field: "2000-01-01T00:00:00Z"})
+        return admitted
+
+    service._admit_start_task = admit
+    service.workspace_factory = lambda task_id: prepared.append(task_id)
+    result = start(service)
+    assert result["status"] == "timed_out"
+    assert prepared == runtime.create_calls == runtime.submit_calls == []
+
+
 def test_explicit_local_deny_still_blocks_new_tasks(tmp_path):
     service, _, runtime, _ = local_service(tmp_path, denied_agent_ids=["coder"])
     with pytest.raises(ExternalAgentAccessError):
