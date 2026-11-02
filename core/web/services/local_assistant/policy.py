@@ -32,6 +32,8 @@ _FORBIDDEN_TAGS = frozenset({
 _MANAGE_ACTIONS = frozenset({"dispatch_write", "dispatch_derived", "delegation_goal_create",
                             "delegation_goal_get", "delegation_goal_revoke", "dispatch_cancel"})
 _SHELL_SYNTAX = re.compile(r"[\x00-\x1f\x7f;&|<>`$%!^(){}#]")
+_COMMAND_SYNTAX = re.compile(r"[\x00-\x1f\x7f;|<>`$%!^(){}#]")
+_MAX_COMMAND_SEGMENTS = 16
 _PATCH_PATH = re.compile(r"^\*\*\* (?:Add File|Update File|Move to): (.+)$", re.MULTILINE)
 _GIT_READ = frozenset({"status", "diff", "log", "show", "ls-files", "ls-tree", "rev-parse",
                        "grep", "blame", "shortlog", "describe"})
@@ -151,12 +153,67 @@ def _simple_argv(command: Any) -> list[str]:
     return tokens if all(tokens) else []
 
 
+def _command_sequence(command: Any) -> list[tuple[list[str], frozenset[int]]]:
+    """Parse the common cmd/native argv subset, never a general shell program.
+
+    Only unquoted ``&&`` separates commands. Single-quote shell quoting and
+    backslash-escaped double quotes differ between cmd, CRT and Bash, so these
+    ambiguous spellings retain approval. Literal operators inside quotes do too.
+    ``_simple_argv`` is reserved for pytest's nested ini argument language.
+    """
+    if not isinstance(command, str) or _COMMAND_SYNTAX.search(command):
+        return []
+    segments: list[tuple[list[str], frozenset[int]]] = []
+    argv: list[str] = []
+    token: list[str] = []
+    quoted, started = False, False
+    quoted_arguments: set[int] = set()
+    index = 0
+    while index < len(command):
+        character = command[index]
+        if character == '"':
+            if index and command[index - 1] == "\\":
+                return []
+            quoted_arguments.add(len(argv))
+            quoted = not quoted
+            started = True
+        elif character == "&":
+            if quoted or command[index:index + 2] != "&&":
+                return []
+            if started:
+                argv.append("".join(token))
+                token, started = [], False
+            if not argv or not all(argv):
+                return []
+            segments.append((argv, frozenset(quoted_arguments)))
+            if len(segments) >= _MAX_COMMAND_SEGMENTS:
+                return []
+            argv = []
+            quoted_arguments = set()
+            index += 1
+        elif character == "'" and not quoted:
+            return []
+        elif character.isspace() and not quoted:
+            if started:
+                argv.append("".join(token))
+                token, started = [], False
+        else:
+            token.append(character)
+            started = True
+        index += 1
+    if quoted:
+        return []
+    if started:
+        argv.append("".join(token))
+    return [*segments, (argv, frozenset(quoted_arguments))] if argv and all(argv) else []
+
+
 def _trusted_tool(executable: str, cwd: Path, root: Path) -> str | None:
     leaf = executable.replace("\\", "/").rsplit("/", 1)[-1].lower()
     suffix = Path(leaf).suffix
     name = leaf[:-len(suffix)] if suffix in {".exe", ".cmd", ".bat", ".com", ".ps1"} else leaf
     python = bool(re.fullmatch(r"python(?:\d+(?:\.\d+)*)?", name))
-    if name not in {"git", "pytest", "npm", "npx", "node"} and not python:
+    if name not in {"git", "pytest", "npm", "npx", "node", "ls", "pwd"} and not python:
         return None
     trusted: set[Path] = set()
     found = shutil.which(name)
@@ -365,13 +422,23 @@ def _local_node_tool(name: str, cwd: Path, root: Path) -> bool:
     return False
 
 
-def _development_command(command: Any, cwd: Path, root: Path) -> bool:
-    argv = _simple_argv(command)
-    if not argv:
-        return False
-    executable = _trusted_tool(argv.pop(0), cwd, root)
+def _development_argv(argv: list[str], cwd: Path, root: Path) -> bool:
+    executable = _trusted_tool(argv[0], cwd, root)
+    argv = argv[1:]
     if executable is None:
         return False
+    if executable == "pwd":
+        return not argv or len(argv) == 1 and argv[0] in {"-L", "-P", "--logical", "--physical"}
+    if executable == "ls":
+        # No shell globs, recursion or symlink dereferencing. Resolve each
+        # concrete listing target before the executable receives it.
+        if any(any(character in token for character in "*?[]") for token in argv):
+            return False
+        schema = {**dict.fromkeys(("-" + flag for flag in "aAldhnrtSU1FpQis"), "flag"),
+                  **dict.fromkeys(("--all", "--almost-all", "--directory", "--human-readable",
+                                   "--numeric-uid-gid", "--reverse", "--size", "--inode",
+                                   "--classify"), "flag")}
+        return _scoped_arguments(argv, schema, cwd, root)
     if executable == "git":
         return _git_development(argv, cwd, root)
     if re.fullmatch(r"python(?:\d+(?:\.\d+)*)?", executable):
@@ -411,6 +478,66 @@ def _development_command(command: Any, cwd: Path, root: Path) -> bool:
         if parts[-4:] == ("node_modules", "typescript", "bin", "tsc"):
             return _tsc_build(argv[1:], cwd, root)
     return False
+
+
+def _cmd_directory_check(argv: list[str], cwd: Path, root: Path,
+                         quoted_arguments: frozenset[int]) -> Path | None:
+    if argv[0].casefold() == "cd":
+        arguments = argv[1:]
+        change_drive = bool(arguments and arguments[0].casefold() == "/d")
+        if change_drive:
+            if 1 in quoted_arguments:
+                return None
+            arguments = arguments[1:]
+        if not arguments:
+            return None if change_drive else cwd
+        if len(arguments) != 1 or arguments[0].startswith("/"):
+            return None
+        target = _contained_path(arguments[0], cwd, root)
+        if (target is None or not target.is_dir()
+                or not change_drive and target.drive.casefold() != cwd.drive.casefold()):
+            return None
+        return target
+    flags = {"/a", "/b", "/w", "/d", "/l", "/n", "/q", "/r", "/x", "/4", "/c", "/-c", "/o"}
+    for index, argument in enumerate(argv[1:], 1):
+        lowered = argument.casefold()
+        if lowered.startswith("/"):
+            # Unlike external CRT argv, quoted /flags are literal rooted
+            # paths for dir, not switches (e.g. dir "/b" lists C:\b).
+            if index in quoted_arguments:
+                return None
+            if lowered not in flags and not re.fullmatch(r"/(?:a:?-?[drahsiol]+|o:?-?[negsd]+|t:[caw])", lowered):
+                return None
+        elif (any(character in argument for character in "*?[]")
+              or _contained_path(argument, cwd, root) is None):
+            return None
+    return cwd
+
+
+def _development_command(command: Any, cwd: Path, root: Path) -> bool:
+    segments = _command_sequence(command)
+    if not segments:
+        return False
+    if os.name == "nt" and len(segments) > 1:
+        # The executor routes mixed native/Unix-tool chains to Bash depending
+        # on the first segment. Do not apply cmd's cd/path rules to that route.
+        for argv, _ in segments:
+            leaf = argv[0].replace("\\", "/").rsplit("/", 1)[-1].casefold()
+            if re.fullmatch(r"(?:ls|pwd)(?:\.(?:exe|cmd|bat|com|ps1))?", leaf):
+                return False
+    for argv, quoted_arguments in segments:
+        if os.name == "nt" and argv[0].casefold() in {"cd", "dir"}:
+            # cmd only recognizes the original, unquoted builtin spelling;
+            # otherwise it may search for an external same-name executable.
+            if 0 in quoted_arguments:
+                return False
+            next_cwd = _cmd_directory_check(argv, cwd, root, quoted_arguments)
+            if next_cwd is None:
+                return False
+            cwd = next_cwd
+        elif not _development_argv(argv, cwd, root):
+            return False
+    return True
 
 
 def normal_development_call(tool_name: str, args: Mapping[str, Any], workspace_root: Path | str) -> bool:

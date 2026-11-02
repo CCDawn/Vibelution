@@ -366,6 +366,8 @@ def task_message(project_id: str, agent_id: str, dispatch_id: str) -> str:
         "等待期间可间隔查询。不要创建 Agent、修改权限或配置。若遇到审批或错误，如实报告。"
         "如果你是被派遣的目标项目 Agent：只在系统为本任务绑定的专属 Git worktree 内工作；"
         "文件工具总是使用该 workspace 的绝对路径，不要把相对路径解释为父源码目录。"
+        "开始先用真实 exec_command 检查现场：将专属 worktree 的绝对路径填入双引号，"
+        "运行 cd /d \"<专属worktree绝对路径>\" && git status --short && dir /b；不要保留占位符。"
         "只新建 isolated_demo.py 和 test_isolated_demo.py 两个文件，不修改任何其他文件，不提交 Git。"
         "isolated_demo.py 实现 add(a, b)，返回两整数之和。test_isolated_demo.py 使用 stdlib unittest，"
         "恰好三个 test 方法，分别断言 add(2, 3)==5、add(-2, -3)==-5、add(0, 0)==0。"
@@ -419,6 +421,7 @@ def run(args: argparse.Namespace, evidence: dict[str, Any]) -> None:
         require(acceptance_runtime.status_instance(instance_id=instance_id, runtime_home=home)["status"] == "running",
                 "backend_not_running")
         agent = request(backend["backendUrl"], "/api/agents", token=env["VIBELUTION_WEB_CONTROL_TOKEN"], backend=True,
+            timeout=args.readiness_timeout,
             payload={"displayName": "Local development acceptance target", "primaryMode": "chat",
                 "roleKey": "assistant_worker", "promptTemplateId": "prompt-chat-default",
                 "llmBindings": {"dialogue": {"modelId": args.model_id}},

@@ -28,6 +28,7 @@ from core.infrastructure.codex_sandbox.environment import (
 )
 from core.infrastructure.codex_sandbox.platform import host_platform as _host_platform
 from core.infrastructure.codex_sandbox.process import (
+    sandbox_popen_command as _sandbox_popen_command,
     sandbox_popen_kwargs as _sandbox_popen_kwargs,
     terminate_process_tree as _adapter_terminate_process_tree,
 )
@@ -641,7 +642,7 @@ def start_codex_sandbox_terminal_session(
             except Exception:
                 pass
         process = subprocess.Popen(
-            argv,
+            _sandbox_popen_command(argv, platform=_host_platform()),
             shell=False,
             cwd=str(workdir),
             env=environment,
@@ -849,7 +850,7 @@ def execute_codex_sandbox_command(
             except Exception:
                 pass
         process = subprocess.Popen(
-            argv,
+            _sandbox_popen_command(argv, platform=_host_platform()),
             shell=False,
             cwd=str(workdir),
             env=environment,

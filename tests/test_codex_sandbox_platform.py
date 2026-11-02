@@ -333,6 +333,63 @@ def test_linux_sandbox_temp_dir_is_0700(monkeypatch, tmp_path):
 # Process start/termination: no console and no taskkill
 # ---------------------------------------------------------------------------
 
+def test_direct_cmd_popen_command_preserves_payload_quotes_without_crt_escaping():
+    command = r'cd /d "C:\task with spaces" && git status --short && dir /b'
+    argv = [r"C:\Windows\System32\cmd.exe", "/d", "/s", "/c", command]
+
+    serialized = process_module.sandbox_popen_command(argv, platform="windows")
+
+    assert serialized == r'C:\Windows\System32\cmd.exe /d /s /c "' + command + '"'
+    assert '\\"' not in serialized
+    assert argv[-1] == command
+
+
+@pytest.mark.parametrize("platform,argv", [
+    ("linux", ["cmd.exe", "/d", "/s", "/c", 'echo "quoted"']),
+    ("windows", ["codex.exe", "sandbox", "--", "cmd.exe", "/d", "/s", "/c", 'echo "quoted"']),
+    ("windows", ["powershell.exe", "-NoProfile", "-Command", 'Write-Output "quoted"']),
+    ("windows", ["git.exe", "status", "--short"]),
+    ("windows", ["bash.exe", "-c", 'echo "quoted"']),
+    ("windows", ["cmd.exe", "/d", "/v:off", "/s", "/c", "call", "%COMMAND%"]),
+    ("windows", ["cmd.exe", "/d", "/s", "/k", 'echo "quoted"']),
+])
+def test_popen_command_keeps_other_executable_and_sandbox_argv_intact(platform, argv):
+    assert process_module.sandbox_popen_command(argv, platform=platform) is argv
+
+
+@pytest.mark.parametrize("streaming", [False, True])
+def test_both_command_entrypoints_serialize_direct_cmd_at_the_windowless_spawn_boundary(
+    monkeypatch, tmp_path, streaming,
+):
+    from tools import shell_tools
+
+    command = r'cd /d "C:\task with spaces" && dir /b'
+    recorded = {}
+    monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "windows")
+    monkeypatch.setattr(codex_cli_sandbox, "_current_agent_sandbox_mode", lambda: "danger_full_access")
+    monkeypatch.setattr(codex_cli_sandbox, "_resolve_cwd", lambda cwd: tmp_path)
+    monkeypatch.setattr(codex_cli_sandbox, "_windows_command_interpreter", lambda: r"C:\Windows\System32\cmd.exe")
+    monkeypatch.setattr(codex_cli_sandbox, "_sandbox_process_environment",
+                        lambda *args, **kwargs: (dict(os.environ), tmp_path / "sandbox-temp"))
+    monkeypatch.setattr(codex_cli_sandbox, "_sandbox_popen_kwargs",
+                        lambda **kwargs: {"creationflags": 0x08000000})
+    monkeypatch.setattr(shell_tools, "classify_shell_command", lambda value: SimpleNamespace(
+        route="cmd", command=value, blocked=False))
+
+    def fake_popen(argv, **kwargs):
+        recorded.update(argv=argv, **kwargs)
+        raise FileNotFoundError("spawn boundary fixture")
+
+    monkeypatch.setattr(codex_cli_sandbox.subprocess, "Popen", fake_popen)
+    entrypoint = (codex_cli_sandbox.start_codex_sandbox_terminal_session if streaming
+                  else codex_cli_sandbox.execute_codex_sandbox_command)
+    entrypoint(command=command, cwd=str(tmp_path))
+
+    assert recorded["argv"] == r'C:\Windows\System32\cmd.exe /d /s /c "' + command + '"'
+    assert recorded["shell"] is False
+    assert recorded["creationflags"] == 0x08000000
+
+
 def test_sandbox_popen_kwargs_windows_keeps_no_window_flags(monkeypatch):
     monkeypatch.setattr(process_module, "host_platform", lambda: "windows")
     monkeypatch.setattr(
