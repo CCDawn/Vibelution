@@ -3110,7 +3110,10 @@ def _build_key_tools() -> List[BaseTool]:
         projects定位已授权项目，agents/agent_list发现目标。用户只要求读取源码时先source_search/source_read。
         dispatch使用project_id、agent_id、稳定dispatch_id；优先task_source的start_after/end_before唯一短锚点提取用户原文，
         两锚点为空时使用整条用户消息；task使用精确原文子串，不能添加目标或改写任务。
-        其他委派入口、任务目标管理与派遣参数以当前index/describe为准，不自行拼接旧适配器动作。
+        多轮需求、需要整理或拆分的开发任务，优先delegation_goal_create绑定用户目标，再用dispatch_derived派遣你整理的任务，申请workspace_write。
+        不要因直派的原文约束要求用户重新替你编写工具参数；保留原目标和限制，只有真实缺少需求才提问。
+        已建立本机授权的普通派工会按任务连续执行；目标任务临时获得开发工具和专属worktree，不改变第三方MCP权限或Agent永久工具策略。
+        其他委派入口与参数以当前index/describe为准，不自行拼接旧适配器动作。
         receipt/dispatch_list恢复原任务；management_requests分页发现已保存管理请求，unknown只查原management_receipt。
         runtime_list/runtime_get读取来源、coverage、精确对象、commands与revision；仅执行available的原生命令。
         knowledge_list按owner_type、owner_id、query发现已有知识库元数据，续页原样携expected_digest；partial/unavailable不等于空库。

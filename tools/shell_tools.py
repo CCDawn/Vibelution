@@ -1404,7 +1404,14 @@ def _is_command_dangerous(command: str) -> tuple[bool, str]:
 
 def _resolve_project_path(path_str: str) -> Path:
     """相对路径一律锚定到项目根目录。"""
-    return _resolve_tool_path(path_str, base_dir=PROJECT_ROOT)
+    base = PROJECT_ROOT
+    override = get_workspace_root_override()
+    if override is not None:
+        from core.web.services.agent_directory_service import current_agent_runtime
+        runtime = current_agent_runtime()
+        if str((runtime or {}).get("runtimeToolSource", "")).startswith("launcher_assistant_task:"):
+            base = override
+    return _resolve_tool_path(path_str, base_dir=base)
 
 
 def _resolve_workspace_path(path_str: str) -> Path:

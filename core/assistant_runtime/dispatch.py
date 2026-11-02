@@ -233,7 +233,7 @@ class DispatchService:
         profile_root: Path,
         projects: Mapping[str, Path],
         *,
-        client_factory: Callable[..., Any] = ManagedAgentBackendClient,
+        client_factory: Callable[..., Any] | None = None,
         projects_suspended: bool = False,
     ) -> None:
         self._root = Path(profile_root).expanduser().resolve() / "assistant_dispatch"
@@ -250,6 +250,9 @@ class DispatchService:
         self._registry_gate_generation = 0
         self._seen_projects = dict(self._projects)
         self._revoked_projects: set[str] = set()
+        if client_factory is None:
+            from .local_project_client import LocalAssistantBackendClient
+            client_factory = LocalAssistantBackendClient
         self._client_factory = client_factory
         # Main may narrow admission while native recovery/tool threads exist.
         # Keep this synchronous and independent of an asyncio loop or SDK.
