@@ -306,6 +306,12 @@ def final_answer(events: list[dict]) -> str:
     return "\n".join(texts)
 
 
+def reports_exit_zero(answer: str) -> bool:
+    """Allow presentation markup; real success still requires the tool exit code."""
+    plain = re.sub(r"[`*_]", "", answer)
+    return re.search(r"(?:exitCode|退出码)\s*[=:：]?\s*0(?![\w.])", plain, re.IGNORECASE) is not None
+
+
 def model_requests(home: Path) -> dict[str, int]:
     counts = {"assistant": 0, "target": 0}
     paths = list(home.rglob("conversation_*.jsonl"))
@@ -475,7 +481,7 @@ def run(args: argparse.Namespace, evidence: dict[str, Any]) -> None:
                         require(task["status"] == "succeeded", "native_task_failed")
                         assistant_events = journal_events(profile, session_id)
                         answer = final_answer(assistant_events)
-                        if SUCCESS_MARKER in answer and TEST_COMMAND in answer and re.search(r"(?:exitCode|退出码)\s*[=:：]?\s*0", answer):
+                        if SUCCESS_MARKER in answer and TEST_COMMAND in answer and reports_exit_zero(answer):
                             break
             # A genuine follow-up can ask the real assistant to continue receipt
             # checks after it returned early. No driver-generated tool result.
