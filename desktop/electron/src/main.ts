@@ -129,7 +129,7 @@ import {
 import { createLocalLauncherStatusSnapshot } from "./protocol/launcherStatusSnapshot.js";
 import { createReconcileDeadlineScheduler } from "./state/reconcileDeadlineScheduler.js";
 import { createLauncherStateFileHintGate, createLauncherStateHintBackoff, type LauncherStateFileHintGate } from "./state/launcherStateFileHintGate.js";
-import { LauncherStateStore, unwrapSource, type LauncherWindowTruth } from "./state/launcherStateStore.js";
+import { LauncherStateStore, unwrapSource, type LauncherStateSnapshotV1, type LauncherWindowTruth } from "./state/launcherStateStore.js";
 import {
   LAUNCHER_APP_PROTOCOL,
   launcherAppOriginFor,
@@ -4428,18 +4428,70 @@ async function resolveLauncherUpdateActiveWork(refreshBranches = false): Promise
     const main = activeWorkStatusFromLauncherStatus(
       typeof payload === "object" && payload !== null ? payload as Record<string, unknown> : {}
     );
-    if (main.state === "unknown") return main;
-    const slots = parseBranchInstanceRecords(launcherStateStore.projectBranchInstances())
-      .filter((item) => !item.current && item.path && item.alive);
-    const isolated = slots.flatMap((slot) => listActiveWorkRuns(slot.path));
-    const count = (main.count ?? 0) + isolated.length;
-    return { state: count ? "active" : "idle", message: "", count, items: [...(main.items ?? []), ...isolated].slice(0, 8) };
+    return combineLauncherActiveWorkStatus(main, launcherStateStore.projectBranchInstances());
   } catch {
     return { state: "unknown", message: "Launcher task status is unavailable." };
   }
 }
 
+function combineLauncherActiveWorkStatus(main: ActiveWorkStatus, branchInstances: unknown): ActiveWorkStatus {
+  if (main.state === "unknown") return main;
+  const slots = parseBranchInstanceRecords(branchInstances)
+    .filter((item) => !item.current && item.path && item.alive);
+  const isolated = slots.flatMap((slot) => listActiveWorkRuns(slot.path));
+  const count = (main.count ?? 0) + isolated.length;
+  return { state: count ? "active" : "idle", message: "", count, items: [...(main.items ?? []), ...isolated].slice(0, 8) };
+}
+
+function launcherActiveWorkFromSnapshot(): ActiveWorkStatus {
+  try {
+    const status = launcherStateStore.projectStatus();
+    const main = activeWorkStatusFromLauncherStatus(
+      typeof status === "object" && status !== null ? status as Record<string, unknown> : {}
+    );
+    return combineLauncherActiveWorkStatus(main, launcherStateStore.projectBranchInstances());
+  } catch {
+    return { state: "unknown", message: "Launcher task status is unavailable." };
+  }
+}
+
+/**
+ * The workbench renderer polls freshness on a 60s cadence, and every fallback
+ * read below spawns a short-lived Python process plus several git children.
+ * The state-refresh snapshot already carries a freshness source and stays
+ * current through file events while the workspace is active, so a snapshot
+ * observed within this window answers the poll without spawning anything.
+ * The window deliberately matches the poll interval: during idle stretches no
+ * state-refresh publishes, the age check fails, and each poll falls back to
+ * the real read, so this only removes redundant spawns during active periods.
+ */
+const LAUNCHER_FRESHNESS_SNAPSHOT_MAX_AGE_MS = 60_000;
+
+function launcherFreshnessSnapshotUsable(snapshot: LauncherStateSnapshotV1, rawFreshness: unknown, nowMs: number): boolean {
+  // "refreshing" or "stale" means the store has no settled observation (a
+  // refresh is in flight or a lifecycle change tainted the last one); only a
+  // settled "fresh" snapshot may stand in for the launcher CLI read.
+  if (snapshot.freshness !== "fresh") return false;
+  if (typeof rawFreshness !== "object" || rawFreshness === null) return false;
+  const observedAt = Date.parse(snapshot.observedAt);
+  return Number.isFinite(observedAt) && nowMs - observedAt <= LAUNCHER_FRESHNESS_SNAPSHOT_MAX_AGE_MS;
+}
+
 async function currentLauncherUpdateFreshness(): Promise<Record<string, unknown>> {
+  // Snapshot-first: answer from the event-driven launcherStateStore while its
+  // freshness source is recent enough; the spawn-heavy read below stays the
+  // authority for missing or stale snapshots.
+  const snapshot = launcherStateStore.snapshot();
+  const snapshotRawFreshness = launcherStateStore.projectFreshness();
+  if (launcherFreshnessSnapshotUsable(snapshot, snapshotRawFreshness, Date.now())) {
+    return projectLauncherUpdateFreshness({
+      raw: snapshotRawFreshness,
+      shell: app.isPackaged ? lastKnownDesktopShell : undefined,
+      activeWork: launcherActiveWorkFromSnapshot(),
+      packaged: app.isPackaged,
+      updating: shellRefreshInFlight
+    });
+  }
   const [rawResult, shellResult, activeWorkResult] = await Promise.allSettled([
     orchestrateLauncherApi("freshness", { schemaVersion: 1, path: "freshness" }),
     app.isPackaged ? inspectCurrentDesktopShell() : Promise.resolve(undefined),

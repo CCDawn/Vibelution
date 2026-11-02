@@ -4,7 +4,8 @@ import { createSourceFile, isFunctionDeclaration, ScriptTarget, transpileModule 
 import { describe, expect, it, vi } from "vitest";
 import { executeLauncherUpdate, projectLauncherUpdateFreshness, retainKnownDesktopShell } from "../src/process/launcherUpdate.js";
 import { decidePackagedDesktopShellRefresh } from "../src/process/desktopShellFreshness.js";
-import type { ActiveWorkStatus } from "../src/shutdown/shutdownCoordinator.js";
+import { parseBranchInstanceRecords } from "../src/protocol/launcherControlClient.js";
+import { activeWorkStatusFromLauncherStatus, type ActiveWorkStatus } from "../src/shutdown/shutdownCoordinator.js";
 
 function updateInputs(state: ActiveWorkStatus = { state: "idle", message: "" }) {
   return {
@@ -427,5 +428,86 @@ describe("Launcher freshness is based on the real packaged shell", () => {
     const newer = { ...known, stale: false, reason: "current", currentElectronTree: "e".repeat(40) };
     expect(retainKnownDesktopShell(known, newer)).toBe(newer);
     expect(projectLauncherUpdateFreshness({ ...input, shell: retainKnownDesktopShell(known, missed) })).toMatchObject({ current: false, updateAvailable: true });
+  });
+});
+
+describe("Launcher freshness serves the settled state-refresh snapshot before spawning", () => {
+  type SnapshotStoreOverrides = { observedAt?: Date; snapshotFreshness?: string; freshnessSource?: unknown };
+
+  function settledSnapshotStore(overrides: SnapshotStoreOverrides = {}) {
+    return {
+      snapshot: () => ({
+        schemaVersion: 1,
+        revision: 7,
+        observedAt: (overrides.observedAt ?? new Date()).toISOString(),
+        freshness: overrides.snapshotFreshness ?? "fresh",
+        main: { id: "main", kind: "main", current: true },
+        instances: [],
+        cleanup: { reconciliation: { active: false, reason: "" }, cleanedCount: 0, skippedCount: 0, failedCount: 0, classifications: [], portConflicts: [], removedInstanceIds: [], worktreeDryRun: [], orphanCriteria: [] }
+      }),
+      projectFreshness: () => "freshnessSource" in overrides ? overrides.freshnessSource : { current: true, reason: "current" },
+      projectStatus: () => ({ lifecycleProof: { activeWorkRuns: { count: 0, items: [] } } }),
+      projectBranchInstances: () => ({ schemaVersion: 1, items: [] }),
+    };
+  }
+
+  function snapshotFreshnessHarness(launcherStateStore: ReturnType<typeof settledSnapshotStore>) {
+    const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+    const region = main.slice(main.indexOf("async function resolveLauncherUpdateActiveWork"), main.indexOf("async function exitAndRelaunchLauncherShell"));
+    const sandbox = {
+      app: { isPackaged: false },
+      shellRefreshInFlight: false,
+      lastKnownDesktopShell: undefined,
+      projectLauncherUpdateFreshness,
+      retainKnownDesktopShell,
+      activeWorkStatusFromLauncherStatus,
+      parseBranchInstanceRecords,
+      listActiveWorkRuns: vi.fn(() => []),
+      // The extracted region declares the real resolveLauncherUpdateActiveWork,
+      // so the fallback's task probe flows through this path-aware bridge mock.
+      orchestrateLauncherApi: vi.fn(async (path: string, _payload?: unknown) => path === "status"
+        ? { lifecycleProof: { activeWorkRuns: { count: 0, items: [] } } }
+        : { current: false, reason: "backend_behind_local_code" }),
+      inspectCurrentDesktopShell: vi.fn(),
+      launcherStateStore,
+      readFreshness: undefined as unknown as () => Promise<Record<string, unknown>>,
+    };
+    const code = transpileModule(`${region}\nglobalThis.readFreshness = currentLauncherUpdateFreshness;`, {
+      compilerOptions: { target: ScriptTarget.ES2022 },
+    }).outputText;
+    runInNewContext(code, sandbox);
+    return sandbox;
+  }
+
+  it("answers a recent settled snapshot without spawning the launcher CLI", async () => {
+    const input = snapshotFreshnessHarness(settledSnapshotStore({ observedAt: new Date(Date.now() - 5_000) }));
+    expect(await input.readFreshness()).toMatchObject({
+      current: true,
+      label: "Launcher 已是最新",
+      shellStale: false,
+      updateAvailable: false,
+      activeWorkState: "idle",
+      activeWorkCount: 0,
+      updateInProgress: false
+    });
+    expect(input.orchestrateLauncherApi).not.toHaveBeenCalled();
+    expect(input.inspectCurrentDesktopShell).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["an idle-stale observation", { observedAt: new Date(Date.now() - 10 * 60_000) }],
+    ["a mid-refresh snapshot", { snapshotFreshness: "refreshing" }],
+    ["a missing freshness source", { freshnessSource: undefined }]
+  ] as Array<[string, SnapshotStoreOverrides]>)("falls back to the launcher read for %s", async (_reason, overrides) => {
+    const input = snapshotFreshnessHarness(settledSnapshotStore(overrides));
+    expect(await input.readFreshness()).toMatchObject({
+      current: false,
+      label: "Launcher 落后本地代码",
+      updateAvailable: true,
+      activeWorkState: "idle"
+    });
+    const freshnessCalls = input.orchestrateLauncherApi.mock.calls.filter(([path]) => path === "freshness");
+    expect(freshnessCalls).toHaveLength(1);
+    expect(freshnessCalls[0][1]).toMatchObject({ path: "freshness", schemaVersion: 1 });
   });
 });
