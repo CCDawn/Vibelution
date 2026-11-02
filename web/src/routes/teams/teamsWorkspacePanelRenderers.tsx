@@ -28,6 +28,13 @@ export type TeamsWorkspacePanelRenderContext = {
   [key: string]: any;
 };
 
+/** 装配断言兜底：handler 未注入时不抛错、不炸生产，但调用时 console.error 一次，避免“点击无任何反馈”的无声降级。 */
+function missingHandlerFallback(handlerName: string) {
+  return () => {
+    console.error(`[teamsWorkspacePanelRenderers] ${handlerName} 装配缺失：ctx 未注入该 handler，本次操作已降级为 no-op`);
+  };
+}
+
 export function createTeamsWorkspacePanelRenderers(ctx: TeamsWorkspacePanelRenderContext) {
     function renderResearchStageAgentSummary(stageType: ResearchStageType) {
       const {
@@ -204,6 +211,7 @@ export function createTeamsWorkspacePanelRenderers(ctx: TeamsWorkspacePanelRende
       } = ctx;
 
       // Defensive no-ops: missing binders must not crash canvas completion-flow slot.
+      // Value getters degrade silently; action handlers degrade via missingHandlerFallback (logs 装配缺失).
       const stagePrimaryBinding =
         typeof sourceCollectionStagePrimaryAgentBinding === "function"
           ? sourceCollectionStagePrimaryAgentBinding
@@ -215,7 +223,7 @@ export function createTeamsWorkspacePanelRenderers(ctx: TeamsWorkspacePanelRende
       const openStageAgentChat =
         typeof openSourceCollectionStageAgentChat === "function"
           ? openSourceCollectionStageAgentChat
-          : () => {};
+          : missingHandlerFallback("openSourceCollectionStageAgentChat");
       const stepClassName =
         typeof sourceCollectionStepClassName === "function"
           ? sourceCollectionStepClassName
@@ -248,7 +256,7 @@ export function createTeamsWorkspacePanelRenderers(ctx: TeamsWorkspacePanelRende
           runKnowledgeCollectionCompletionAction={
             typeof runKnowledgeCollectionCompletionAction === "function"
               ? runKnowledgeCollectionCompletionAction
-              : () => {}
+              : missingHandlerFallback("runKnowledgeCollectionCompletionAction")
           }
           sourceCollectionCompletionActionDisabled={Boolean(sourceCollectionCompletionActionDisabled)}
           selectedTeamKnowledgeCollectionIngestPending={Boolean(selectedTeamKnowledgeCollectionIngestPending)}

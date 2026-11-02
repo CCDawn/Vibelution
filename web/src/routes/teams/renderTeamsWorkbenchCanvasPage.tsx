@@ -143,7 +143,10 @@ function TeamsWorkbenchCanvasPage(p: TeamsWorkbenchCanvasPageProps) {
           nodeActiveClassName={p.styles.nodeActive}
           nodeReadOnlyClassName={p.styles.nodeReadOnly}
           styles={p.styles}
-          completionFlowSlot={p.researchCanvasReadOnly ? null : p.completionFlowSlot}
+          // Pass through unconditionally: visibility is owned by TeamKnowledgeCollectionCompletionFlowPanel
+          // (research workflow team + read-only canvas). Gating on researchCanvasReadOnly here is always
+          // mutually exclusive with that inner condition and silently killed the panel (f03478a8d regression).
+          completionFlowSlot={p.completionFlowSlot}
           teamWorkspaceRoute={teamWorkspaceRoute}
           teamChatRoomRoute={teamChatRoomRoute}
           onSelectNode={(id) => { p.onSelectNode(id); setSelectionRevision((revision) => revision + 1); }}
