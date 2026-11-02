@@ -393,8 +393,9 @@ class ManagementAdapter:
         from .management_projection import ManagementAssetView, project_management_asset
         view = ManagementAssetView.model_validate({key: parameters.pop(key) for key in tuple(parameters)
             if key in ManagementAssetView.model_fields})
-        result = await self._call(project_id, lambda client: client.management_asset(operation, **parameters))
-        action = {"team": "team_asset_get", "tool-policy": "agent_tool_policy_get", "knowledge-acl": "knowledge_acl_get"}[operation]
+        result = await self._bound_read(project_id, lambda client: client.management_asset(operation, **parameters))
+        result = {key: value for key, value in result.items() if key != "projectId"}
+        action = {"team": "team_asset_get", "team-archive": "team_archive_preview", "tool-policy": "agent_tool_policy_get", "knowledge-acl": "knowledge_acl_get"}[operation]
         return project_management_asset(action, result, project_id, view.model_dump())
 
     async def flow(self, project_id: str, operation: str, **parameters):

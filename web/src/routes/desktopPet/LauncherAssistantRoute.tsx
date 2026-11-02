@@ -32,6 +32,7 @@ import { DEFAULT_PET_PREFERENCES } from "./desktopPetPreferences";
 import { ChatToolApprovalDialog } from "../chat/ChatToolApprovalDialog";
 import { toolApprovalRiskLabel } from "../chat/toolApprovalLabels";
 import { agentPurgePreviewIsValid, autonomyActionIsKnown, autonomyApprovalPreviewIsValid, authorizationUpgradePreviewIsValid, browserInteractPreviewIsValid, dispatchWritePreviewIsValid, launcherAgentCreatePreviewIsValid, operatorImageUploadPreviewIsValid, preferenceProposalPreviewIsValid, projectLifecyclePreviewIsValid, recoveryPreviewIsValid, managementApprovalActionIsKnown, platformManagementActionIsKnown, platformManagementPreviewIsValid, toolApprovalActionPreview, toolApprovalDisplayName } from "../chat/toolApprovalPreview";
+import { launcherTeamActionIsKnown, launcherTeamPreviewIsValid, launcherTeamActionPreview, launcherTeamActionTitle } from "./teamManagementApprovalPreview";
 import { useLauncherThemeControl } from "./useLauncherThemeControl";
 import { readStoredWorkbenchTheme, requestWorkbenchTheme, subscribeWorkbenchThemeSync, useAuthorityTheme } from "../../app/themePreference";
 import { PersonalAssistantComputerPanel } from "../personalAssistant/PersonalAssistantComputerPanel";
@@ -75,9 +76,10 @@ const LAUNCHER_ASSISTANT_DISPATCH_LIMIT = 50;
 
 function approvalAcceptDisabled(request: SessionToolApprovalRequest): boolean {
   const summary = request.argumentSummary;
-  return request.toolName === "personal_assistant_manage_tool" && (!managementApprovalActionIsKnown(summary?.assistantAction) || Boolean(summary.assistantArgumentsInvalid)
+  return request.toolName === "personal_assistant_manage_tool" && (!(managementApprovalActionIsKnown(summary?.assistantAction) || launcherTeamActionIsKnown(summary?.assistantAction)) || Boolean(summary.assistantArgumentsInvalid)
     || (autonomyActionIsKnown(summary?.assistantAction) || Object.hasOwn(summary || {}, "assistantAutonomyPreviewVersion")) && !autonomyApprovalPreviewIsValid(summary)
     || platformManagementActionIsKnown(summary?.assistantAction) && !platformManagementPreviewIsValid(summary)
+    || launcherTeamActionIsKnown(summary?.assistantAction) && !launcherTeamPreviewIsValid(summary)
     || summary?.assistantAction === "agent_create" && !launcherAgentCreatePreviewIsValid(summary)
     || summary?.assistantAction === "agent_purge" && !agentPurgePreviewIsValid(summary)
     || summary?.assistantAction === "authorization_upgrade" && !authorizationUpgradePreviewIsValid(summary)
@@ -825,11 +827,13 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   const approvalPrompt = approval || dispatchApproval ? <div className={petStyles.approvalDock} data-launcher-assistant-approval-dock>
     {approval ? <ChatToolApprovalDialog lang={lang} variant="composer"
       pending={approvalPending || !approval.availableDecisions.includes("accept") || !approval.availableDecisions.includes("decline")}
-      argumentSummary={approval.argumentSummary} rawTitle={approval.toolName} riskLabel={approval.argumentSummary?.assistantAction === "browser_interact" ? (lang === "zh" ? "网页操作" : "Webpage action") : toolApprovalRiskLabel(approval.risk, lang)}
+      argumentSummary={approval.argumentSummary} rawTitle={approval.toolName === "personal_assistant_manage_tool" && launcherTeamActionIsKnown(approval.argumentSummary?.assistantAction)
+        ? launcherTeamActionTitle(approval.argumentSummary.assistantAction, lang) : approval.toolName} riskLabel={approval.argumentSummary?.assistantAction === "browser_interact" ? (lang === "zh" ? "网页操作" : "Webpage action") : toolApprovalRiskLabel(approval.risk, lang)}
       scopeLabel={lang === "zh" ? "仅本次调用" : "This call only"}
       toolLabels={[{ id: approval.toolName, label: toolApprovalDisplayName(approval.toolName, lang) }]}
-      toolName={approval.toolName} actionPreview={toolApprovalActionPreview(approval.argumentSummary, approval.toolName, lang)}
-      fullActionPreview={approval.toolName === "personal_assistant_manage_tool" && (autonomyActionIsKnown(approval.argumentSummary?.assistantAction) || platformManagementActionIsKnown(approval.argumentSummary?.assistantAction) || ["agent_create", "agent_purge", "authorization_upgrade", "dispatch_write", "project_lifecycle", "operator_image_upload", "reminder_handoff_recover", "browser_interact"].includes(String(approval.argumentSummary?.assistantAction)))}
+      toolName={approval.toolName} actionPreview={approval.toolName === "personal_assistant_manage_tool" && launcherTeamActionIsKnown(approval.argumentSummary?.assistantAction)
+        ? launcherTeamActionPreview(approval.argumentSummary, lang) : toolApprovalActionPreview(approval.argumentSummary, approval.toolName, lang)}
+      fullActionPreview={approval.toolName === "personal_assistant_manage_tool" && (launcherTeamActionIsKnown(approval.argumentSummary?.assistantAction) || autonomyActionIsKnown(approval.argumentSummary?.assistantAction) || platformManagementActionIsKnown(approval.argumentSummary?.assistantAction) || ["agent_create", "agent_purge", "authorization_upgrade", "dispatch_write", "project_lifecycle", "operator_image_upload", "reminder_handoff_recover", "browser_interact"].includes(String(approval.argumentSummary?.assistantAction)))}
       approveDisabled={approvalAcceptDisabled(approval)}
       onApprove={() => void decide(approval, "accept")} onReject={() => void decide(approval, "decline")} /> : null}
     {dispatchApproval ? <ChatToolApprovalDialog lang={lang} variant="composer"

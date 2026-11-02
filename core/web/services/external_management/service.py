@@ -296,9 +296,12 @@ class ManagementService:
         from .asset_contracts import (TeamAssetQuery, TeamAssetResponse, ToolPolicyQuery, ToolPolicyResponse,
             KnowledgeACLQuery, KnowledgeACLResponse)
         from .asset_control import AssetControl
+        from .team_lifecycle_contracts import TeamArchivePreviewResponse
+        from .team_lifecycle_control import TeamLifecycleControl
         control = AssetControl(self.native)
         scope, query_type, response_type, reader = {
             "team": ("teams:manage:read", TeamAssetQuery, TeamAssetResponse, control.read_team),
+            "team-archive": ("teams:manage:read", TeamAssetQuery, TeamArchivePreviewResponse, TeamLifecycleControl(self.native).read_archive_preview),
             "tool-policy": ("agents:tool-policy:read", ToolPolicyQuery, ToolPolicyResponse, control.read_tool_policy),
             "knowledge-acl": ("knowledge:acl:read", KnowledgeACLQuery, KnowledgeACLResponse, control.read_knowledge_acl),
         }[operation]
@@ -604,6 +607,8 @@ class ManagementService:
             raise ManagementError("INVALID_INPUT", 422) from None
         if action == "agent_create" and parameters.get("capability_preset") is not None:
             self._authorize(subject, capability, "agents:create:files", envelope.expected_binding.model_dump())
+        if action == "team_archive":
+            self._authorize(subject, capability, "agents:archive", envelope.expected_binding.model_dump())
         key = self._request_key(subject, action, envelope.request_id)
         if action == "authorization_upgrade":
             return self._authorization_upgrades().invoke(subject, capability, envelope.request_id,

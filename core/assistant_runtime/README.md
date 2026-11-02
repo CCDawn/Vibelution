@@ -29,6 +29,7 @@ for source ownership and recovery rules.
 | Runtime observation and control | `runtime_list`, `runtime_get`, `runtime_command`, native patrol | Authorized project metadata and per-source coverage; only commands offered by the current native object |
 | Unknown management outcomes | `management_requests`, `management_reconcile`, `management_receipt` | Original action/request association and native evidence; reads never replay a write |
 | Research | `research_get`, `research_command` | Formal Research Ledger metadata; exact run/team/flow references, native revision CAS and returned node/task/checkpoint choices |
+| Team lifecycle and members | `team_create`, `team_member_add`, `team_member_remove`, `team_archive_preview`, `team_archive` | Native custom-Team CRUD and roster ownership; original Team fingerprint, stable request ID and causal receipts; create/archive scopes require explicit upgrade |
 | Knowledge discovery and ACL | `knowledge_list`, `knowledge_acl_get`, governed ACL actions | Agent and manageable system-Team owners; stable scoped IDs, real operator ACL, metadata only |
 | Delegated goals and derived tasks | `delegation_goal_*`, `dispatch_derived`, `receipt` | Current native user source, finite target/permission/task/expiry envelope; every task retains native approval and target authorization |
 | Grant reduction and revocation | `authorization_status`, `authorization_reduce`, `authorization_revoke` | Current subject only, exact scope/revision CAS; revocation rejects business calls and permits only its original revoke receipt recovery |
@@ -40,6 +41,22 @@ completion. Ordinary Session admission, Journal, worker, persistence and SSE
 remain native; these capabilities add no generic Session or HTTP authority.
 Source implementation and isolated regression evidence do not establish fresh
 packaged-Electron, real-provider or live-project acceptance of this combined set.
+
+Team member removal detaches membership while retaining the Agent and its Session
+history; it does not revoke explicit knowledge ACL grants. Team deletion follows
+the native archive operation: it archives the Team and its member Agents, seals
+their Sessions, and removes all Team-owned chat rooms and the members' other room
+associations. Native cleanup also dissolves other rooms left empty by this change;
+the Team record's main linked-room ID is not the complete impact boundary. Team knowledge
+and flow records remain. `team_archive_preview` is a read-only, project-bound view
+of the exact roster, linked room and Team fingerprint; pass these values unchanged
+to the governed archive action. Archive requires both `teams:archive` and
+`agents:archive`, and cannot target a system-managed Team. Membership changes use
+the existing `teams:write`; creating a Team requires `teams:create`. New powers do
+not widen existing operator grants. Unknown or partially applied native operations
+require the original receipt/reconciliation, never a new request or automatic replay.
+Launcher renders these effects in its existing approval card without changing
+ordinary chat's legacy Team tools or conversation layout.
 
 ## Assistant discovery actions
 

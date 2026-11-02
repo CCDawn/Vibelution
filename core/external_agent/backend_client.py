@@ -581,7 +581,9 @@ class ManagedAgentBackendClient:
         from pydantic import ValidationError
         from core.web.services.external_management.asset_contracts import (
             TeamAssetQuery, TeamAssetResponse, ToolPolicyQuery, ToolPolicyResponse, KnowledgeACLQuery, KnowledgeACLResponse)
+        from core.web.services.external_management.team_lifecycle_contracts import TeamArchivePreviewResponse
         choices = {"team": (TeamAssetQuery, TeamAssetResponse, "team_id", "teamId"),
+            "team-archive": (TeamAssetQuery, TeamArchivePreviewResponse, "team_id", "teamId"),
             "tool-policy": (ToolPolicyQuery, ToolPolicyResponse, "agent_id", "agentId"),
             "knowledge-acl": (KnowledgeACLQuery, KnowledgeACLResponse, "knowledge_base_id", "knowledgeBaseId")}
         if operation not in choices:

@@ -31,6 +31,14 @@
 
 `management_requests` 发现原请求引用；`management_receipt` / `management_reconcile` 按原 action/request ID 只读核对管理应答或原生结果，权限仍按原动作独立 scope。`requires_review` / `unavailable` 必须如实保留；确认管理应答不证明业务完成。超时、丢失确认或重启后继续查询原稳定 ID，不换 ID 重放。需要人工复核时报告证据和对象引用，不能无限轮询同一 unknown。
 
+## 团队与成员
+
+`team_create` 创建自定义团队，`team_member_add` / `team_member_remove` 按原团队 fingerprint 增删一个成员；后者保留 Agent 和会话历史，不撤销显式知识 ACL。创建需要独立 `teams:create`，成员维护沿用 `teams:write`。新增写权只通过当前主体的显式授权升级获得，旧授权不自动扩大。
+
+删除团队使用 `team_archive`，沿用原生归档及级联。先用只读 `team_archive_preview` 取得原 fingerprint、全部 `memberAgentIds`、主关联 `linkedChatRoomId`，经审批后原样提交；需要 `teams:archive` 和 `agents:archive` 两项授权。审批说明归档团队及成员、封存成员全部会话、删除团队全部归属群聊，并移除成员在其他群聊的关联、解散因此变空的群聊。主关联群聊 ID 不是全部影响范围；知识和流程记录保留，不执行永久 purge。系统团队、过期版本和原生忙碌状态仍由 native owner 拒绝。
+
+归档预览复用 `teams:manage:read`、项目绑定和有界 JSON 节点读取，不 hydrate 或修复数据。四个写动作复用原持久意图和因果回执；部分级联或成员被跳过时保持 `OPERATION_UNCONFIRMED`，只查询原 action/request ID，不换 ID 重放。Launcher 在现有审批卡片显示这些影响，普通会话的旧团队工具和布局不变。
+
 ## Research 与知识库
 
 `research_get` 需要 `operations:read`，读取 formal Research Ledger 的节点与人工任务元数据，不输出任务 Prompt。`research_command` 需要 `operations:control` 及原生审批，以精确 run/team/flow、revision CAS、稳定 request ID 执行 `retry_node`、`resolve_human_task` 或 `reconcile_run`。人工决策只选任务当前返回的选项，`revise` 绑定返回的 checkpoint；命令回执不代替运行终态。

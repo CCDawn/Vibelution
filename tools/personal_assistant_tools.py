@@ -232,7 +232,9 @@ def personal_assistant_manage_tool(action: str, arguments_json: str) -> str:
     workflow_recovery_bind, workflow_recovery_revoke, workflow_start,
     team_create, knowledge_ingest, config_update.
     Arguments use the corresponding canonical tool's named parameters.
-    Launcher also supports bounded runtime commands, existing team/Flow edits,
+    Launcher also supports Team creation/archive, member add/remove and read-only
+    team_archive_preview; archive follows the full native Agent/Session/room cascade.
+    It also supports bounded runtime commands, existing team/Flow edits,
     Agent tool policy and knowledge ACL changes through its live describe
     contracts, plus agent_purge after agent_purge_preview for archived targets.
     Other adapters accept no purge, arbitrary API, command, restore,
@@ -254,6 +256,8 @@ def personal_assistant_manage_tool(action: str, arguments_json: str) -> str:
             required_scopes = [required_scope] if required_scope else []
             if action == "agent_create" and args.get("capability_preset") == "project_files_v1":
                 required_scopes.append("agents:create:files")
+            if action == "team_archive":
+                required_scopes.append("agents:archive")
             if required_scopes and result.get("code") == "SCOPE_DENIED":
                 result = {**result, "requiredScopes": required_scopes,
                     **({"requiredScope": required_scope} if len(required_scopes) == 1 else {}), "nextStep": (

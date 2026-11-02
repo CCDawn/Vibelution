@@ -7,9 +7,10 @@ import re
 import unicodedata
 
 from pydantic import ValidationError
+from .team_management_approval import TEAM_MANAGEMENT_ACTIONS, team_management_approval_summary
 
 PLATFORM_MANAGEMENT_ACTIONS = frozenset({"dispatch_cancel", "runtime_command", "team_update",
-    "agent_tool_policy_update", "knowledge_acl_grant", "knowledge_acl_revoke", "flow_save", "flow_start"})
+    "agent_tool_policy_update", "knowledge_acl_grant", "knowledge_acl_revoke", "flow_save", "flow_start", *TEAM_MANAGEMENT_ACTIONS})
 
 
 def _digest(value):
@@ -44,6 +45,8 @@ def platform_management_approval_summary(action, parameters):
     The former remains reviewable; the latter disables manual acceptance. This
     function does not add an approval requirement or alter full_access policy.
     """
+    if action in TEAM_MANAGEMENT_ACTIONS:
+        return team_management_approval_summary(action, parameters)
     if action not in PLATFORM_MANAGEMENT_ACTIONS:
         raise ValueError("Unknown platform management action")
     from .actions import _management_contracts

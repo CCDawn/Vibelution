@@ -54,7 +54,9 @@ def _require_settled_workflows(s, team_id: str) -> None:
 
 
 @contextmanager
-def archive_admission(team_id: str, *, protected_agent_ids: tuple[str, ...] = ()):
+def archive_admission(
+    team_id: str, *, protected_agent_ids: tuple[str, ...] = (), expected_fingerprint: str | None = None,
+):
     """Reserve a canonical roster before any cascade; release even on failure."""
     s = _service()
     with s._TEAM_LOCK:
@@ -64,6 +66,10 @@ def archive_admission(team_id: str, *, protected_agent_ids: tuple[str, ...] = ()
         team = s._find_team(s._load_index(), team_id)
         if team is None:
             raise s.TeamNotFoundError("Team not found.")
+        if expected_fingerprint is not None:
+            from .team_crud import TeamStateConflictError, team_record_fingerprint
+            if team_record_fingerprint(team) != expected_fingerprint:
+                raise TeamStateConflictError("Team changed; refresh its fingerprint.")
         members = _member_ids(team)
         if members.intersection(protected_agent_ids):
             raise s.TeamLockedError("Protected caller Agent is a member of this Team.")

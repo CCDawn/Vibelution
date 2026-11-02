@@ -488,12 +488,15 @@ def restore_removed_agents_to_teams(restore_token: dict[str, Any] | None) -> dic
     return {"restoredTeamIds": restored_ids}
 
 
-def archive_team(team_id: str, *, protected_agent_ids: tuple[str, ...] = ()) -> dict[str, Any]:
+def archive_team(
+    team_id: str, *, protected_agent_ids: tuple[str, ...] = (), expected_fingerprint: str | None = None,
+) -> dict[str, Any]:
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
     if not isinstance(protected_agent_ids, tuple) or any(not isinstance(item, str) or not item.strip() for item in protected_agent_ids):
         raise s.TeamServiceError("Protected Agent identifiers must be a tuple of nonempty strings.")
-    with team_admission.archive_admission(normalized_team_id, protected_agent_ids=protected_agent_ids):
+    with team_admission.archive_admission(normalized_team_id, protected_agent_ids=protected_agent_ids,
+                                         expected_fingerprint=expected_fingerprint):
         return _archive_team_admitted(normalized_team_id)
 
 

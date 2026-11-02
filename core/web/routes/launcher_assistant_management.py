@@ -34,6 +34,7 @@ from core.web.services.external_management.runtime_contracts import (
 from core.web.services.external_management.asset_contracts import (
     TeamAssetQuery, TeamAssetResponse, ToolPolicyQuery, ToolPolicyResponse, KnowledgeACLQuery, KnowledgeACLResponse,
 )
+from core.web.services.external_management.team_lifecycle_contracts import TeamArchivePreviewResponse
 from core.web.services.external_management.flow_contracts import FlowListQuery, FlowListResponse, FlowReadQuery, FlowReadResponse
 from core.web.services.external_management.platform_actions import PLATFORM_ACTIONS
 from core.web.services.external_management.service import (
@@ -171,6 +172,13 @@ async def research_operation(request: Request):
     _require_control(request)
     query = _closed_query(request, ResearchReadQuery)
     return await _operator_call(request, lambda: _service().read_research(*_credentials(request), query))
+
+
+@router.get("/assets/team-archive", response_model=TeamArchivePreviewResponse)
+async def team_archive_preview(request: Request, team_id: str = ""):
+    _require_control(request)
+    query = _closed_query(request, TeamAssetQuery)
+    return await _operator_call(request, lambda: _service().read_asset(*_credentials(request), "team-archive", query))
 
 
 @router.get("/assets/team", response_model=TeamAssetResponse)

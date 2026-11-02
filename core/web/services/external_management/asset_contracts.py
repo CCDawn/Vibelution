@@ -170,7 +170,7 @@ class KnowledgeACLResponse(Closed):
 
 
 class AssetMutationResponse(Closed):
-    action: Literal["team_update", "agent_tool_policy_update", "knowledge_acl_grant", "knowledge_acl_revoke"]
+    action: Literal["team_update", "agent_tool_policy_update", "knowledge_acl_grant", "knowledge_acl_revoke", "team_create", "team_member_add", "team_member_remove", "team_archive"]
     resourceId: str
     revision: int | None = None
     fingerprint: Fingerprint
