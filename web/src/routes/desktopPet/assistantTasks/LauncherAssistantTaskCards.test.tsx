@@ -3,7 +3,7 @@ import React, { act } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { LauncherAssistantDispatch, LauncherAssistantStatus } from "../../../api/launcherAssistant";
+import type { LauncherAssistantDispatch, LauncherAssistantStatus, LauncherAssistantTeamRun, LauncherAssistantTeamRunsPage } from "../../../api/launcherAssistant";
 import { LauncherAssistantTaskCards } from "./LauncherAssistantTaskCards";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -13,9 +13,23 @@ function row(overrides: Partial<LauncherAssistantDispatch> = {}): LauncherAssist
     receipt: { taskId: "native-1", status: "running", shouldPoll: true }, ...overrides };
 }
 
+function teamRun(overrides: Partial<LauncherAssistantTeamRun> = {}): LauncherAssistantTeamRun {
+  return { projectId: "project-1", requestId: "request-1", originAction: "team_run", teamId: "team-1", flowId: "flow-1",
+    runId: "run-1", status: "completed", revision: "r1", title: "团队周报", readState: "ready",
+    observedAt: "2026-11-02T01:00:00Z", businessAcceptance: "not_evaluated", ...overrides };
+}
+
+function teamPage(teamRuns: LauncherAssistantTeamRun[], overrides: Partial<LauncherAssistantTeamRunsPage> = {}): LauncherAssistantTeamRunsPage {
+  return { schemaVersion: 1, assistant: { agentId: status.assistant.agentId, directSessionId: status.assistant.directSessionId },
+    teamRuns, offset: 0, total: teamRuns.length, nextCursor: null,
+    coverage: { kind: "local_associations", historyComplete: false, legacyUnrecoverable: 0, invalidRecords: 0 },
+    state: "ready", ...overrides };
+}
+
 let root: Root | null, container: HTMLDivElement, client: QueryClient;
 let rows: LauncherAssistantDispatch[], status: LauncherAssistantStatus;
 let dispatchReply: () => Promise<LauncherAssistantDispatch[]>;
+let teamReply: (cursor?: string) => Promise<LauncherAssistantTeamRunsPage>;
 let visibility: DocumentVisibilityState;
 let invoke: ReturnType<typeof vi.fn>, onReview: ReturnType<typeof vi.fn>, onApproval: ReturnType<typeof vi.fn>;
 
@@ -26,9 +40,11 @@ beforeEach(() => {
   rows = [row()];
   status = { assistant: { agentId: "assistant-1", directSessionId: "session-1", displayName: "助理" } };
   dispatchReply = async () => rows;
-  invoke = vi.fn(async (request: { operation: string }) => {
+  teamReply = async () => teamPage([]);
+  invoke = vi.fn(async (request: { operation: string; cursor?: string }) => {
     if (request.operation === "status") return status;
     if (request.operation === "dispatches") return { dispatches: await dispatchReply() };
+    if (request.operation === "teamRuns") return teamReply(request.cursor);
     throw new Error(`Unexpected mutation: ${request.operation}`);
   });
   vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
@@ -61,7 +77,8 @@ async function click(label: string, within: ParentNode = container) {
   await act(async () => { button(label, within).click(); }); await settle();
 }
 function dispatchReads() { return invoke.mock.calls.filter(([request]) => request.operation === "dispatches").length; }
-function onlyReads() { expect(invoke.mock.calls.every(([request]) => ["status", "dispatches"].includes(request.operation))).toBe(true); }
+function teamReads() { return invoke.mock.calls.filter(([request]) => request.operation === "teamRuns").length; }
+function onlyReads() { expect(invoke.mock.calls.every(([request]) => ["status", "dispatches", "teamRuns"].includes(request.operation))).toBe(true); }
 
 describe("Launcher assistant task cards", () => {
   it("localizes the card, fallback title, details, and navigation when Launcher uses English", async () => {
@@ -254,5 +271,291 @@ describe("Launcher assistant task cards", () => {
     await settle();
     expect(container.textContent).toContain("当前身份的任务");
     expect(container.textContent).not.toContain("旧身份的任务");
+  });
+
+  it("keeps older hosts on the dispatch source without requesting team runs", async () => {
+    await render();
+    expect(dispatchReads()).toBe(1);
+    expect(teamReads()).toBe(0);
+  });
+
+  it("shares the card layout and keeps team completion awaiting actual verification", async () => {
+    status.teamRunsVersion = 1;
+    teamReply = async () => teamPage([teamRun()]);
+    await render();
+    const card = container.querySelector('article[data-task-kind="team_run"]')!;
+    expect(card.getAttribute("data-task-state")).toBe("awaiting_verification");
+    expect(card.textContent).toContain("待验收");
+    expect(card.textContent).not.toContain("run-1");
+    expect(container.textContent).toContain("关联团队运行");
+    await click("详情", card);
+    expect(card.textContent).toContain("团队编号：team-1");
+    expect(card.textContent).toContain("流程编号：flow-1");
+    expect(card.textContent).toContain("运行编号：run-1");
+    await click("去对话核对", card);
+    expect(onReview).toHaveBeenCalledWith(expect.objectContaining({ kind: "team_run", projectId: "project-1",
+      runId: "run-1", state: "awaiting_verification", businessAcceptance: "not_evaluated" }));
+    expect(onApproval).not.toHaveBeenCalled();
+    onlyReads();
+  });
+
+  it("treats a team input wait as review in chat without offering authorization", async () => {
+    status.teamRunsVersion = 1;
+    rows = [];
+    teamReply = async () => teamPage([teamRun({ status: "waiting", title: "" })]);
+    await render("en");
+    expect(container.textContent).toContain("Team run");
+    expect(container.textContent).toContain("Waiting for input");
+    expect(container.textContent).not.toContain("authorization");
+    expect(container.textContent).not.toMatch(/[\u4e00-\u9fff]/);
+    await click("Review in chat");
+    expect(onReview).toHaveBeenCalledWith(expect.objectContaining({ kind: "team_run", state: "waiting_input" }));
+    expect(onApproval).not.toHaveBeenCalled();
+    onlyReads();
+  });
+
+  it("keeps dispatch cards current when the independent team source fails and does not retry that source", async () => {
+    status.teamRunsVersion = 1;
+    teamReply = async () => { throw new Error("team offline"); };
+    await render();
+    expect(container.textContent).toContain("团队运行状态暂不可用");
+    expect(container.querySelector('article[data-task-kind="dispatch"]')?.getAttribute("data-task-state")).toBe("running");
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); }); await settle();
+    expect(teamReads()).toBe(1);
+    expect(dispatchReads()).toBe(2);
+    teamReply = async () => teamPage([teamRun()]);
+    await click("刷新");
+    expect(teamReads()).toBe(2);
+    expect(container.querySelector('article[data-task-kind="team_run"]')?.getAttribute("data-task-state")).toBe("awaiting_verification");
+  });
+
+  it("retains team cards as unknown after a failed active poll while leaving dispatch receipts intact", async () => {
+    status.teamRunsVersion = 1;
+    teamReply = async () => teamPage([teamRun({ status: "running" })]);
+    await render();
+    teamReply = async () => { throw new Error("team offline"); };
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); }); await settle();
+    expect(teamReads()).toBe(2);
+    expect(container.querySelector('article[data-task-kind="team_run"]')?.getAttribute("data-task-state")).toBe("unknown");
+    expect(container.querySelector('article[data-task-kind="dispatch"]')?.getAttribute("data-task-state")).toBe("running");
+    await click("去对话核对", container.querySelector('article[data-task-kind="team_run"]')!);
+    expect(onReview).toHaveBeenCalledWith(expect.objectContaining({ runId: null, teamId: null, flowId: null,
+      nativeStatus: null, revision: null, observedAt: null, receiptBound: false, lastKnown: expect.objectContaining({ runId: "run-1" }) }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(9_000); }); await settle();
+    expect(teamReads()).toBe(2);
+  });
+
+  it("keeps partial unknown observations manual and suspends known active team reads when hidden", async () => {
+    status.teamRunsVersion = 1;
+    rows = [];
+    teamReply = async () => teamPage([teamRun({ status: null, observedAt: null, readState: "unknown" })], { state: "partial" });
+    await render();
+    expect(container.textContent).toContain("部分团队运行待核对");
+    await act(async () => { await vi.advanceTimersByTimeAsync(9_000); });
+    expect(teamReads()).toBe(1);
+    teamReply = async () => teamPage([teamRun({ status: "running" })]);
+    await click("刷新");
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); }); await settle();
+    expect(teamReads()).toBe(3);
+    visibility = "hidden";
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(9_000); });
+    expect(teamReads()).toBe(3);
+  });
+
+  it("uses the existing show-more action for local cards and then cursor pagination", async () => {
+    status.teamRunsVersion = 1;
+    rows = [];
+    const runs = Array.from({ length: 17 }, (_, index) => teamRun({ requestId: `request-${index}`, runId: `run-${index}` }));
+    const cursor = btoa(JSON.stringify({ snapshot: "a".repeat(64), offset: 16 })).replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
+    teamReply = async value => value === cursor
+      ? teamPage(runs.slice(16), { offset: 16, total: 17 })
+      : teamPage(runs.slice(0, 16), { total: 17, nextCursor: cursor });
+    await render();
+    expect(container.querySelectorAll("article")).toHaveLength(10);
+    expect(teamReads()).toBe(1);
+    await click("显示更多");
+    expect(container.querySelectorAll("article")).toHaveLength(16);
+    expect(teamReads()).toBe(1);
+    await click("显示更多");
+    expect(container.querySelectorAll("article")).toHaveLength(17);
+    expect(teamReads()).toBe(2);
+    expect(invoke).toHaveBeenCalledWith({ operation: "teamRuns", cursor });
+    expect(container.textContent).toContain("历史记录可能不完整");
+  });
+
+  it("hides cached team cards until identity confirmation and discards a late old-identity response", async () => {
+    status.teamRunsVersion = 1;
+    client.setQueryData(["launcher-assistant", "status"], status);
+    client.setQueryData(["launcher-assistant", "team-task-cards", "assistant-1", "session-1"], {
+      pages: [teamPage([teamRun({ title: "旧团队缓存" })])], pageParams: [undefined],
+    });
+    let resolveStatus!: (value: LauncherAssistantStatus) => void;
+    let resolveTeam!: (value: LauncherAssistantTeamRunsPage) => void;
+    invoke.mockImplementation(async (request: { operation: string }) => {
+      if (request.operation === "status") return new Promise<LauncherAssistantStatus>(resolve => { resolveStatus = resolve; });
+      if (request.operation === "dispatches") return { dispatches: [] };
+      if (request.operation === "teamRuns") return teamReply();
+      throw new Error(`Unexpected mutation: ${request.operation}`);
+    });
+    teamReply = () => new Promise(resolve => { resolveTeam = resolve; });
+    await render();
+    expect(container.textContent).not.toContain("旧团队缓存");
+    expect(teamReads()).toBe(0);
+    await act(async () => { resolveStatus(status); }); await settle();
+    const oldPage = teamPage([teamRun({ title: "过期团队返回" })]);
+    status = { teamRunsVersion: 1, assistant: { agentId: "assistant-2", directSessionId: "session-2", displayName: "新助理" } };
+    teamReply = async () => teamPage([teamRun({ title: "新身份团队" })]);
+    await act(async () => { client.setQueryData(["launcher-assistant", "status"], status); }); await settle();
+    expect(container.textContent).toContain("新身份团队");
+    await act(async () => { resolveTeam(oldPage); }); await settle();
+    expect(container.textContent).not.toContain("过期团队返回");
+    expect(container.textContent).not.toContain("旧团队缓存");
+    expect(onReview).not.toHaveBeenCalled();
+  });
+
+  it("does not describe a partial zero-row team read as an available empty task list", async () => {
+    status.teamRunsVersion = 1;
+    rows = [];
+    teamReply = async () => teamPage([], { state: "partial",
+      coverage: { kind: "local_associations", historyComplete: false, legacyUnrecoverable: 1, invalidRecords: 1 } });
+    await render();
+    expect(container.textContent).toContain("部分团队运行待核对");
+    expect(container.textContent).not.toContain("暂无助理任务");
+    expect(container.textContent).not.toContain("暂无助理派遣任务");
+  });
+
+  it("retains both confirmed-identity sources as unknown if shared identity refresh fails", async () => {
+    status.teamRunsVersion = 1;
+    teamReply = async () => teamPage([teamRun({ status: "running" })]);
+    await render();
+    invoke.mockImplementation(async (request: { operation: string }) => {
+      if (request.operation === "status") throw new Error("identity offline");
+      if (request.operation === "dispatches") return { dispatches: rows };
+      if (request.operation === "teamRuns") return teamReply();
+      throw new Error(`Unexpected mutation: ${request.operation}`);
+    });
+    await click("刷新");
+    expect(container.querySelectorAll('article[data-task-state="unknown"]')).toHaveLength(2);
+    expect(container.textContent).toContain("团队周报");
+    const dispatchCount = dispatchReads(), teamCount = teamReads();
+    await act(async () => { await vi.advanceTimersByTimeAsync(9_000); });
+    expect(dispatchReads()).toBe(dispatchCount);
+    expect(teamReads()).toBe(teamCount);
+    expect(button("去对话核对").disabled).toBe(true);
+    expect(onReview).not.toHaveBeenCalled();
+    invoke.mockImplementation(async (request: { operation: string }) => {
+      if (request.operation === "status") return status;
+      if (request.operation === "dispatches") return { dispatches: rows };
+      if (request.operation === "teamRuns") return teamReply();
+      throw new Error(`Unexpected mutation: ${request.operation}`);
+    });
+    await click("刷新");
+    expect(dispatchReads()).toBeGreaterThan(dispatchCount);
+    expect(teamReads()).toBeGreaterThan(teamCount);
+    expect(container.querySelectorAll('article[data-task-state="running"]')).toHaveLength(2);
+  });
+
+  it("keeps last-verified display facts across a successful unknown read, updates on recovery and drops deleted requests", async () => {
+    status.teamRunsVersion = 1;
+    rows = [];
+    teamReply = async () => teamPage([teamRun({ status: "running" })]);
+    await render();
+    const original = container.querySelector('article[data-task-kind="team_run"]')!;
+    await click("详情", original);
+    const unknown = teamRun({ teamId: null, flowId: null, runId: null, status: null, revision: null,
+      title: "", observedAt: null, readState: "unknown" });
+    teamReply = async () => teamPage([unknown], { state: "partial" });
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); }); await settle();
+    const card = container.querySelector('article[data-task-kind="team_run"]')!;
+    expect(card).toBe(original);
+    expect(card.getAttribute("data-task-state")).toBe("unknown");
+    expect(card.textContent).toContain("团队周报");
+    expect(card.textContent).toContain("以下为上次核验的信息");
+    expect(card.textContent).toContain("运行编号：run-1");
+    expect(card.textContent).toContain("版本：r1");
+    expect(card.textContent).toContain("2026-11-02T01:00:00Z");
+    await click("去对话核对", card);
+    expect(onReview).toHaveBeenCalledWith(expect.objectContaining({ teamId: null, flowId: null, runId: null,
+      nativeStatus: null, revision: null, observedAt: null, receiptBound: false, shouldPoll: false,
+      lastKnown: expect.objectContaining({ runId: "run-1" }) }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(9_000); });
+    expect(teamReads()).toBe(2);
+    await click("刷新");
+    expect(card.textContent).toContain("团队周报");
+    teamReply = async () => teamPage([teamRun({ title: "更新后的周报", status: "completed", revision: "r2", observedAt: "2026-11-02T02:00:00Z" })]);
+    await click("刷新");
+    expect(container.querySelector('article[data-task-kind="team_run"]')).toBe(card);
+    expect(card.getAttribute("data-task-state")).toBe("awaiting_verification");
+    expect(card.textContent).toContain("更新后的周报");
+    expect(card.textContent).toContain("版本：r2");
+    expect(card.textContent).not.toContain("上次核验的信息");
+    teamReply = async () => teamPage([]);
+    await click("刷新");
+    expect(container.querySelector("article")).toBeNull();
+    teamReply = async () => teamPage([unknown], { state: "partial" });
+    await click("刷新");
+    expect(container.textContent).not.toContain("更新后的周报");
+    expect(container.textContent).not.toContain("上次核验的信息");
+  });
+
+  it("does not borrow last-verified display facts from another assistant with the same source request", async () => {
+    status.teamRunsVersion = 1;
+    rows = [];
+    teamReply = async () => teamPage([teamRun({ title: "仅旧助理可见" })]);
+    await render();
+    status = { teamRunsVersion: 1, assistant: { agentId: "assistant-2", directSessionId: "session-2", displayName: "新助理" } };
+    teamReply = async () => teamPage([teamRun({ title: "", teamId: null, flowId: null, runId: null,
+      status: null, revision: null, observedAt: null, readState: "unknown" })], { state: "partial" });
+    await act(async () => { client.setQueryData(["launcher-assistant", "status"], status); }); await settle();
+    expect(container.textContent).not.toContain("仅旧助理可见");
+    await click("详情");
+    expect(container.textContent).not.toContain("上次核验的信息");
+    expect(container.textContent).not.toContain("run-1");
+    await click("去对话核对");
+    expect(onReview).toHaveBeenCalledWith(expect.objectContaining({ state: "unknown", runId: null, lastKnown: null }));
+  });
+
+  it("keeps two aliases as one unknown card and removes a revoked alias from the next read", async () => {
+    status.teamRunsVersion = 1;
+    rows = [];
+    const alias = { requestId: "request-2", originAction: "flow_start" as const };
+    teamReply = async () => teamPage([teamRun(), teamRun(alias)]);
+    await render();
+    expect(container.querySelectorAll("article")).toHaveLength(1);
+    const unknown = { title: "", teamId: null, flowId: null, runId: null, status: null, revision: null,
+      observedAt: null, readState: "unknown" as const };
+    teamReply = async () => teamPage([teamRun(unknown), teamRun({ ...unknown, ...alias })], { state: "partial" });
+    await click("刷新");
+    expect(container.querySelectorAll("article")).toHaveLength(1);
+    await click("去对话核对");
+    expect(onReview.mock.lastCall?.[0].sourceRefs).toHaveLength(2);
+    teamReply = async () => teamPage([teamRun({ ...unknown, ...alias })], { state: "partial" });
+    await click("刷新");
+    expect(container.querySelectorAll("article")).toHaveLength(1);
+    await click("去对话核对");
+    expect(onReview.mock.lastCall?.[0].sourceRefs).toEqual([alias]);
+  });
+
+  it.each(["hidden", "unmounted"] as const)("does not continue manual source reads if the view is %s while identity refresh is pending", async disposition => {
+    status.teamRunsVersion = 1;
+    teamReply = async () => teamPage([teamRun()]);
+    await render();
+    let resolveStatus!: (value: LauncherAssistantStatus) => void;
+    invoke.mockImplementation(async (request: { operation: string }) => {
+      if (request.operation === "status") return new Promise<LauncherAssistantStatus>(resolve => { resolveStatus = resolve; });
+      if (request.operation === "dispatches") return { dispatches: rows };
+      if (request.operation === "teamRuns") return teamReply();
+      throw new Error(`Unexpected mutation: ${request.operation}`);
+    });
+    await click("刷新");
+    if (disposition === "hidden") {
+      visibility = "hidden";
+      await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    } else await act(async () => { root!.unmount(); root = null; });
+    const dispatchCount = dispatchReads(), teamCount = teamReads();
+    await act(async () => { resolveStatus(status); }); await settle();
+    expect(dispatchReads()).toBe(dispatchCount);
+    expect(teamReads()).toBe(teamCount);
   });
 });

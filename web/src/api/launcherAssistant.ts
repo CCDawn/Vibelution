@@ -8,6 +8,7 @@ export type LauncherOperatorProfile = {
 };
 
 export type LauncherAssistantStatus = {
+  teamRunsVersion?: 1;
   assistantAvatarVersion?: 1;
   assistantAvatarRevision?: string | null;
   operatorAssetsVersion?: 1;
@@ -50,6 +51,7 @@ export type LauncherDispatchApprovalPreview = {
 };
 
 export type LauncherAssistantRequest =
+  | { operation: "teamRuns"; cursor?: string }
   | { operation: "status" | "detail" | "dispatches" | "hide" | "approvals" | "openLauncher" | "assistantAvatar" }
   | { operation: "resolveApproval"; requestId: string; decision: "accept" | "decline" }
   | { operation: "previewDispatchApproval"; dispatchId: string; taskId: string; approvalId: string }
@@ -151,6 +153,7 @@ export async function getLauncherAssistantStatus(): Promise<LauncherAssistantSta
     || ![result.assistant.agentId, result.assistant.directSessionId, result.assistant.displayName].every(value => typeof value === "string" && value.trim())) {
     throw new Error("Launcher 个人助理身份不可用。");
   }
+  if (result.teamRunsVersion !== undefined && result.teamRunsVersion !== 1) throw new Error("Launcher 团队运行版本不可用。");
   if (Object.prototype.hasOwnProperty.call(result, "operatorAssetsVersion") && result.operatorAssetsVersion !== 1) {
     throw new Error("Launcher 图片资源版本不可用。");
   }
@@ -309,6 +312,86 @@ export async function resolveLauncherAssistantApproval(request: SessionToolAppro
   const result = normalizeApprovalSummary(await launcherAssistantBridge().invoke({ operation: "resolveApproval", requestId: request.requestId, decision }));
   if (!isApproval(result, request.sessionId) || result.requestId !== request.requestId || result.turnId !== request.turnId || result.agentId !== request.agentId) throw new Error("Launcher 未确认本次授权结果。");
   return result;
+}
+
+export type LauncherAssistantTeamRun = {
+  projectId: string;
+  requestId: string;
+  originAction: "team_run" | "flow_start";
+  teamId: string | null;
+  flowId: string | null;
+  runId: string | null;
+  status: string | null;
+  revision: string | null;
+  title: string;
+  readState: "ready" | "unknown";
+  observedAt: string | null;
+  businessAcceptance: "not_evaluated";
+};
+
+export type LauncherAssistantTeamRunsPage = {
+  schemaVersion: 1;
+  assistant: { agentId: string; directSessionId: string };
+  teamRuns: LauncherAssistantTeamRun[];
+  offset: number;
+  total: number;
+  nextCursor: string | null;
+  coverage: { kind: "local_associations"; historyComplete: false; legacyUnrecoverable: number; invalidRecords: number };
+  state: "ready" | "partial";
+};
+
+function teamRunsCursor(value: unknown): { snapshot: string; offset: number } | null {
+  if (typeof value !== "string" || !/^[A-Za-z0-9_-]{1,256}$/.test(value)) return null;
+  try {
+    const decoded: unknown = JSON.parse(atob(value.replace(/-/g, "+").replace(/_/g, "/")));
+    if (!exactFields(decoded, ["snapshot", "offset"]) || typeof decoded.snapshot !== "string"
+      || !/^[a-f0-9]{64}$/.test(decoded.snapshot) || !Number.isSafeInteger(decoded.offset)
+      || (decoded.offset as number) < 0) return null;
+    return decoded as { snapshot: string; offset: number };
+  } catch { return null; }
+}
+
+/** A closed, identity-bound read. Run names are display metadata, never instructions. */
+export async function getLauncherAssistantTeamRuns(
+  expectedIdentity: { agentId: string; directSessionId: string }, cursor?: string,
+): Promise<LauncherAssistantTeamRunsPage> {
+  const invalid = () => new Error("Launcher 团队运行暂不可用，请刷新核对。");
+  const previous = cursor === undefined ? null : teamRunsCursor(cursor);
+  if (!expectedIdentity.agentId || !expectedIdentity.directSessionId || cursor !== undefined && !previous) throw invalid();
+  const result = await launcherAssistantBridge().invoke(cursor === undefined ? { operation: "teamRuns" } : { operation: "teamRuns", cursor });
+  const count = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
+  const id = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(value);
+  if (!exactFields(result, ["schemaVersion", "assistant", "teamRuns", "offset", "total", "nextCursor", "coverage", "state"])
+    || result.schemaVersion !== 1 || !exactFields(result.assistant, ["agentId", "directSessionId"])
+    || result.assistant.agentId !== expectedIdentity.agentId || result.assistant.directSessionId !== expectedIdentity.directSessionId
+    || !Array.isArray(result.teamRuns) || result.teamRuns.length > 16 || !count(result.offset) || !count(result.total)
+    || result.offset !== (previous?.offset ?? 0) || result.offset + result.teamRuns.length > result.total
+    || !exactFields(result.coverage, ["kind", "historyComplete", "legacyUnrecoverable", "invalidRecords"])
+    || result.coverage.kind !== "local_associations" || result.coverage.historyComplete !== false
+    || !count(result.coverage.legacyUnrecoverable) || !count(result.coverage.invalidRecords)
+    || !["ready", "partial"].includes(String(result.state))) throw invalid();
+  const next = result.nextCursor === null ? null : teamRunsCursor(result.nextCursor);
+  if (result.offset + result.teamRuns.length < result.total
+    ? !next || !result.teamRuns.length || next.offset !== result.offset + result.teamRuns.length
+      || previous !== null && next.snapshot !== previous.snapshot
+    : result.nextCursor !== null) throw invalid();
+  const keys = ["projectId", "requestId", "originAction", "teamId", "flowId", "runId", "status", "revision", "title", "readState", "observedAt", "businessAcceptance"];
+  for (const row of result.teamRuns) {
+    if (!exactFields(row, keys) || !id(row.projectId) || typeof row.requestId !== "string"
+      || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$/.test(row.requestId) || !["team_run", "flow_start"].includes(String(row.originAction))
+      || [row.teamId, row.flowId, row.runId].some(value => value !== null && !id(value))
+      || row.status !== null && !id(row.status)
+      || row.revision !== null && (typeof row.revision !== "string" || !row.revision.length || row.revision.length > 160 || /[\u0000-\u001f\u007f-\u009f]/.test(row.revision))
+      || !["ready", "unknown"].includes(String(row.readState)) || row.businessAcceptance !== "not_evaluated"
+      || row.observedAt !== null && (typeof row.observedAt !== "string" || !/^\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|\+00:00)$/.test(row.observedAt) || !Number.isFinite(Date.parse(row.observedAt)))
+      || row.readState === "ready" && (!row.teamId || !row.flowId || !row.runId || !row.status || !row.observedAt)
+      || row.readState === "unknown" && (row.status !== null || row.observedAt !== null)) throw invalid();
+  }
+  // A bad optional label cannot hide an otherwise usable native run reference.
+  return { ...result, teamRuns: result.teamRuns.map(row => ({ ...row,
+    title: typeof row.title === "string" && Array.from(row.title).length <= 160
+      ? row.title.replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, " ") : "",
+  })) } as LauncherAssistantTeamRunsPage;
 }
 
 export async function getLauncherAssistantDispatches(): Promise<LauncherAssistantDispatch[]> {

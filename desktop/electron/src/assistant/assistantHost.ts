@@ -19,6 +19,7 @@ export type AssistantHostSnapshot = {
   errorCode: string | null;
 };
 export type AssistantHostRequest =
+  | { operation: "teamRuns"; cursor?: string }
   | { operation: "status" | "detail" | "dispatches" | "config" | "approvals" | "assistantAvatar" }
   | { operation: "resolveApproval"; requestId: string; decision: "accept" | "decline" }
   | { operation: "previewDispatchApproval"; dispatchId: string; taskId: string; approvalId: string }
@@ -665,7 +666,7 @@ export class AssistantHost {
     const captured = structuredClone(payload);
     while (this.migrationAdmission) {
       const admission = this.migrationAdmission;
-      const safeWhileWaiting = ["status", "detail", "dispatches", "config", "approvals", "curation", "operatorAsset", "assistantAvatar", "resolveApproval", "previewDispatchApproval", "decideDispatchApproval", "declineDispatchApproval", "stop", "computerState"]
+      const safeWhileWaiting = ["status", "detail", "dispatches", "teamRuns", "config", "approvals", "curation", "operatorAsset", "assistantAvatar", "resolveApproval", "previewDispatchApproval", "decideDispatchApproval", "declineDispatchApproval", "stop", "computerState"]
         .includes(captured.operation);
       // Confirmation only settles an existing native waiter; it remains a
       // counted writer in the host barrier even after admission is sealed.
@@ -694,6 +695,17 @@ export class AssistantHost {
     }
     if (!object(payload)) throw new HostError("ASSISTANT_REQUEST_INVALID");
     switch (payload.operation) {
+      case "teamRuns": {
+        if (!ownKeys(payload, ["operation", "cursor"])
+          || Object.prototype.hasOwnProperty.call(payload, "cursor") && (typeof payload.cursor !== "string"
+            || !/^[A-Za-z0-9_-]{1,256}(?![\s\S])/.test(payload.cursor))) throw new HostError("ASSISTANT_REQUEST_INVALID");
+        const path = "/api/assistant/team-runs" + (payload.cursor === undefined ? "" : `?cursor=${encodeURIComponent(payload.cursor)}`);
+        const result = await this.rpc(generation, path, "GET");
+        if (identity(result) !== generation.sessionId
+          || (result as { assistant: { agentId: string } }).assistant.agentId !== generation.agentId)
+          throw new HostError("ASSISTANT_IDENTITY_INVALID");
+        return result;
+      }
       case "status":
       case "detail":
       case "dispatches":

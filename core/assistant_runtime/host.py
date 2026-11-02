@@ -17,7 +17,7 @@ from contextlib import nullcontext
 from functools import partial
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -1164,7 +1164,32 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
     def assistant():
         result = native.identity() if callable(getattr(native, "identity", None)) else app.state.assistant
         patrol_status = getattr(app.state, "patrol_status", None)
-        return {**result, "patrol": patrol_status} if isinstance(result, dict) and patrol_status is not None else result
+        if isinstance(result, dict):
+            supported = callable(getattr(getattr(dispatch, "management", None), "list_requests", None))
+            return {**result, **({"teamRunsVersion": 1} if supported else {}),
+                    **({"patrol": patrol_status} if patrol_status is not None else {})}
+        return result
+
+    from .team_task_cards import TeamTaskCardsError, TeamTaskCardsPage, read_team_task_cards
+
+    @app.get("/api/assistant/team-runs", response_model=TeamTaskCardsPage)
+    async def team_runs(request: Request, response: Response):
+        if (set(request.query_params) - {"cursor"}
+                or len(request.query_params.getlist("cursor")) > 1):
+            raise HTTPException(422, detail="team_runs_cursor_invalid")
+        try:
+            identity = getattr(native, "assistant", None)
+            if not isinstance(identity, dict):
+                bootstrapped = getattr(app.state, "assistant", {})
+                identity = bootstrapped.get("assistant") if isinstance(bootstrapped, dict) else None
+            if not isinstance(identity, dict) or any(not isinstance(identity.get(key), str)
+                    for key in ("agentId", "directSessionId")):
+                raise HTTPException(503, detail="team_runs_unavailable")
+            result = await read_team_task_cards(dispatch, identity, cursor=request.query_params.get("cursor"))
+            response.headers["Cache-Control"] = "no-store"
+            return result
+        except TeamTaskCardsError as exc:
+            raise HTTPException(exc.status_code, detail=exc.code) from None
 
     @app.get("/api/assistant/approvals")
     def approvals():

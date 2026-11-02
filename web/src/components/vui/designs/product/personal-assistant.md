@@ -159,17 +159,17 @@ Launcher 的单一助理工作区默认完整显示原生对话，需要网页�
 
 ### 功能
 
-在 Launcher 助理内用简短卡片呈现已登记派遣的状态和需要用户处理的事项。
+在 Launcher 助理内用简短卡片呈现已登记派遣、已关联团队运行的状态和需要用户处理的事项。
 
 ### 适用范围
 
-仅由 `LauncherAssistantWorkspaceRoute` 的任务弹层按需挂载。普通平台会话、其左栏与消息中心不消费此组件。当前来源为助理派遣回执，不能当作全部项目或团队的完整任务目录。
+仅由 `LauncherAssistantWorkspaceRoute` 的任务弹层按需挂载。普通平台会话、其左栏与消息中心不消费此组件。来源为助理派遣回执及助理已关联的 `team_run` / `flow_start` 原生运行，不能当作全部项目或团队的完整任务目录。
 
 ### 使用方式
 
 Launcher 自身导航的“任务”进入 `?panel=tasks`，在现有 `VDialog` 内展示纵向卡片。默认只呈现标题、状态、一句进展和必要操作；详情使用 `VButton` 按需展开，不引入三栏页、搜索、统计或第二套布局。
 
-`onReview(task)` 返回原助理对话，提供绑定原项目和派遣标识的只读核对入口；不自动发送或重放任务。`onApproval(task)` 返回已有审批所在的原对话，不产生审批决议。关闭任务弹层不会卸载底层助理对话，保留输入草稿和原生浏览器页；浏览器既有浮层检测负责隐藏被弹层遮挡的原生视图。
+`onReview(task)` 返回原助理对话，提供绑定原项目及派遣或团队请求标识的只读核对入口；不自动发送或重放任务。`onApproval(task)` 返回已有审批所在的原对话，不产生审批决议。团队 `waiting` 显示“待输入”并回到对话核对，不冒充工具授权。关闭任务弹层不会卸载底层助理对话，保留输入草稿和原生浏览器页；浏览器既有浮层检测负责隐藏被弹层遮挡的原生视图。
 
 ### 非职责
 
@@ -177,11 +177,11 @@ Launcher 自身导航的“任务”进入 `?panel=tasks`，在现有 `VDialog` 
 
 ### 视觉与状态
 
-复用 `VSurface`、`VChip`、`VButton` 和 `VStateSurface` 的现有密度、token、焦点与禁用状态。标题和摘要为有界纯文本。加载、合法空、首次失联、保留旧卡但回执失联、身份缺失分别表达；失联不能显示为空或完成。仅在视图可见且原生回执明确需要观察时轮询；关闭、隐藏或读取失败后停止自动读，保留手动刷新。卡片在窄屏自然换行，编号只在详情中展示。
+复用 `VSurface`、`VChip`、`VButton` 和 `VStateSurface` 的现有密度、token、焦点与禁用状态。标题和摘要为有界纯文本，团队名称仅在既有目录权限允许时读取。加载、合法空、首次失联、保留旧卡但回执失联、身份缺失分别表达；失联不能显示为空或完成。同一助理和请求的最后已知团队信息只作历史显示，不恢复为当前运行凭据。仅在视图可见且原生回执明确需要观察时轮询；关闭、隐藏或读取失败后停止自动读，保留手动刷新。团队来源有界分页，复用“显示更多”；单来源失败不阻塞另一来源。卡片在窄屏自然换行，编号只在详情中展示。
 
 ### 实现落点
 
-`routes/desktopPet/assistantTasks/LauncherAssistantTaskCards.tsx` 与 `assistantDispatchTasks.ts`；来源为现有 `api/launcherAssistant.ts` 的封闭 IPC 读取。
+`routes/desktopPet/assistantTasks/LauncherAssistantTaskCards.tsx`、`assistantDispatchTasks.ts` 与 `assistantTeamRunTasks.ts`；来源为现有 `api/launcherAssistant.ts` 的封闭 IPC 读取。
 
 ### 反冗余
 

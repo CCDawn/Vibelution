@@ -66,6 +66,49 @@ function fixture(options: { stale?: boolean; noReadyFirst?: boolean; graceful?: 
 }
 
 describe("AssistantHost", () => {
+  it("binds read-only team pages to the current identity and a fixed endpoint", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    const cursor = Buffer.from(JSON.stringify({ snapshot: "a".repeat(64), offset: 16 })).toString("base64url");
+    const result = { schemaVersion: 1, assistant: { agentId: "a", directSessionId: "s" }, teamRuns: [], offset: 16 };
+    fetchImpl.mockResolvedValueOnce(Response.json(result));
+    await expect(host.request({ operation: "teamRuns", cursor })).resolves.toEqual(result);
+    const call = fetchImpl.mock.calls.at(-1)!;
+    expect(String(call[0])).toBe(`http://127.0.0.1:12345/api/assistant/team-runs?cursor=${cursor}`);
+    expect(call[1]?.method).toBe("GET");
+    expect(call[1]?.body).toBeUndefined();
+    for (const assistant of [{ agentId: "other", directSessionId: "s" }, { agentId: "a", directSessionId: "other" }]) {
+      fetchImpl.mockResolvedValueOnce(Response.json({ ...result, assistant }));
+      await expect(host.request({ operation: "teamRuns" })).rejects.toThrow("ASSISTANT_IDENTITY_INVALID");
+    }
+    await host.stop();
+  });
+
+  it("rejects team page URL, identity and cursor extensions before network access", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    const reads = fetchImpl.mock.calls.length;
+    for (const request of [
+      { operation: "teamRuns", url: "https://example.com" },
+      { operation: "teamRuns", projectId: "other" },
+      { operation: "teamRuns", agentId: "other" },
+      ...[undefined, null, "", "../private", "x\n", "x".repeat(257)].map(cursor => ({ operation: "teamRuns", cursor })),
+    ]) await expect(host.request(request as unknown as AssistantHostRequest)).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    expect(fetchImpl).toHaveBeenCalledTimes(reads);
+    await host.stop();
+  });
+
+  it("passes team reads through the same owned-frame bridge gate", async () => {
+    const contents = { mainFrame: { url: LAUNCHER_ASSISTANT_URL }, isDestroyed: () => false };
+    const owner = { contents, host: { start: vi.fn().mockResolvedValue(undefined), request: vi.fn().mockResolvedValue({ teamRuns: [] }) },
+      setExpanded: vi.fn(), hide: vi.fn() };
+    const request = { operation: "teamRuns", cursor: "bounded" };
+    await expect(invokeAssistant({ sender: contents, senderFrame: contents.mainFrame }, request, owner)).resolves.toEqual({ teamRuns: [] });
+    expect(owner.host.request).toHaveBeenCalledExactlyOnceWith(request);
+    await expect(invokeAssistant({ sender: {}, senderFrame: contents.mainFrame }, request, owner)).rejects.toThrow("ASSISTANT_SENDER_FORBIDDEN");
+    expect(owner.host.request).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects the retired panel operations without reaching the panels endpoint", async () => {
     const { host, fetchImpl } = fixture({ graceful: true });
     await host.start();

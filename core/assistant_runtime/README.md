@@ -121,6 +121,19 @@ stored registrations, including inactive entries and the native assistant root.
 
 - `GET /health`: protocol and role only.
 - `GET /api/assistant`: native assistant identity.
+- `GET /api/assistant/team-runs`: read-only card projection for locally associated
+  `team_run` and `flow_start` requests, advertised by `teamRunsVersion:1` on status.
+  Pages contain at most 16 references within a four-second native-read budget.
+  The opaque `cursor` binds the association inventory, coverage and project
+  bindings; changed inventories reject continuation with 409. Failed reads retain
+  unknown request rows; unavailable inventories return 503 rather than an empty
+  success. Coverage is `local_associations`, never complete platform history.
+  Flow start acknowledgements require a fresh native run read. Prompts, result
+  bodies, credentials and paths stay private. Execution success always retains
+  `businessAcceptance:not_evaluated`.
+  An optional public team name uses the existing directory permission and exact
+  project/team binding, with a 0.2-second limit inside the same page budget;
+  unavailable names never discard verified run progress.
 - `GET /api/assistant/session`: its own native Session detail.
 - `POST /api/assistant/messages`: `{message, requestId}`; native acceptance and
   journal idempotency, with no new transcript or queue.

@@ -102,6 +102,15 @@ class TeamPatrolObserver:
         # Includes both the registry generation and the exact admitted root.
         return self.dispatch._project_read_binding(project_id)
 
+    async def _read_receipt(self, row):
+        """Read the original request without replay, rejecting mismatched refs."""
+        result = await self.dispatch.management.receipt(row["projectId"], action=row["action"],
+                                                        request_id=row["requestId"])
+        if (not isinstance(result, dict) or result.get("projectId") != row["projectId"]
+                or result.get("requestId") != row["requestId"] or result.get("action") != row["action"]):
+            raise ValueError("team_patrol_receipt_invalid")
+        return result
+
     def current(self, event):
         try:
             with self._lock:
@@ -146,11 +155,7 @@ class TeamPatrolObserver:
                 key = _key(row)
                 try:
                     binding = self._binding(row["projectId"])
-                    result = await self.dispatch.management.receipt(row["projectId"], action=row["action"],
-                                                                    request_id=row["requestId"])
-                    if (not isinstance(result, dict) or result.get("projectId") != row["projectId"]
-                            or result.get("requestId") != row["requestId"] or result.get("action") != row["action"]):
-                        raise ValueError("team_patrol_receipt_invalid")
+                    result = await self._read_receipt(row)
                     run = result.get("teamRun")
                     if result.get("status") == "unknown" or result.get("verified") is not True:
                         failed = True
@@ -203,4 +208,5 @@ class TeamPatrolObserver:
                 or operation.get("resourceId") != ack["runId"]
                 or operation.get("teamId") != ack["teamId"] or operation.get("flowId") != ack["flowId"]):
             raise ValueError("team_patrol_flow_status_invalid")
-        return {**{key: ack[key] for key in ("teamId", "flowId", "runId")}, "status": operation.get("status")}
+        return {**{key: ack[key] for key in ("teamId", "flowId", "runId")},
+                "status": operation.get("status"), "revision": operation.get("revision")}

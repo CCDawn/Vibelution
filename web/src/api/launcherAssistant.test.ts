@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  getLauncherAssistantDetail, getLauncherAssistantDispatches, getLauncherAssistantStatus,
+  getLauncherAssistantDetail, getLauncherAssistantDispatches, getLauncherAssistantStatus, getLauncherAssistantTeamRuns,
   hideLauncherAssistant, launcherAssistantBridge, launcherConversationApi,
   sendLauncherAssistantMessage, setLauncherAssistantExpanded,
   getLauncherAssistantApprovals, resolveLauncherAssistantApproval,
@@ -11,6 +11,64 @@ import {
 import type { SessionToolApprovalRequest } from "./types";
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe("Launcher team run reads", () => {
+  const assistant = { agentId: "pa", directSessionId: "session" };
+  const row = { projectId: "project-a", requestId: "request-1", originAction: "team_run", teamId: "team-1",
+    flowId: "flow-1", runId: "run-1", status: "running", revision: null, title: "", readState: "ready",
+    observedAt: "2026-11-02T06:00:00+00:00", businessAcceptance: "not_evaluated" };
+  const page = () => ({ schemaVersion: 1, assistant, teamRuns: [{ ...row }], offset: 0, total: 1, nextCursor: null,
+    coverage: { kind: "local_associations", historyComplete: false, legacyUnrecoverable: 0, invalidRecords: 0 }, state: "ready" });
+  const cursor = (offset: number, snapshot = "a".repeat(64)) => btoa(JSON.stringify({ snapshot, offset })).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+
+  it("reads only the fixed IPC verb and preserves native running after launch acceptance", async () => {
+    const invoke = vi.fn().mockResolvedValue(page());
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    await expect(getLauncherAssistantTeamRuns(assistant)).resolves.toEqual(page());
+    expect(invoke).toHaveBeenCalledExactlyOnceWith({ operation: "teamRuns" });
+  });
+
+  it("binds pagination to the same inventory and exact offset", async () => {
+    const nextCursor = cursor(1);
+    const invoke = vi.fn().mockResolvedValueOnce({ ...page(), total: 2, nextCursor })
+      .mockResolvedValueOnce({ ...page(), offset: 1, total: 2 });
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    await expect(getLauncherAssistantTeamRuns(assistant)).resolves.toMatchObject({ nextCursor });
+    await expect(getLauncherAssistantTeamRuns(assistant, nextCursor)).resolves.toMatchObject({ offset: 1 });
+    expect(invoke.mock.calls[1]).toEqual([{ operation: "teamRuns", cursor: nextCursor }]);
+  });
+
+  it.each([
+    () => ({ ...page(), assistant: { ...assistant, directSessionId: "other" } }),
+    () => ({ ...page(), teamRuns: [{ ...row, teamId: null }] }),
+    () => ({ ...page(), teamRuns: [{ ...row, readState: "unknown" }] }),
+    () => ({ ...page(), teamRuns: [{ ...row, businessAcceptance: "completed" }] }),
+    () => ({ ...page(), teamRuns: [{ ...row, privatePrompt: "not part of DTO" }] }),
+    () => ({ ...page(), total: 2 }),
+    () => ({ ...page(), total: 2, nextCursor: cursor(9) }),
+    () => ({ ...page(), coverage: { ...page().coverage, historyComplete: true } }),
+    () => ({ ...page(), offset: 1, total: 2 }),
+  ])("rejects unbound, cross-identity or inconsistent pages", async makeResult => {
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke: vi.fn().mockResolvedValue(makeResult()) });
+    await expect(getLauncherAssistantTeamRuns(assistant)).rejects.toThrow("团队运行暂不可用");
+  });
+
+  it("retains an unknown request without turning an unavailable read into an empty list", async () => {
+    const result = { ...page(), state: "partial", teamRuns: [{ ...row, teamId: null, flowId: null, runId: null,
+      readState: "unknown", status: null, observedAt: null, title: {} }] };
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke: vi.fn().mockResolvedValue(result) });
+    await expect(getLauncherAssistantTeamRuns(assistant)).resolves.toMatchObject({ state: "partial",
+      teamRuns: [{ requestId: "request-1", readState: "unknown", title: "" }] });
+  });
+
+  it("does not send malformed cursors to the host", async () => {
+    const invoke = vi.fn();
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    await expect(getLauncherAssistantTeamRuns(assistant, "../private")).rejects.toThrow();
+    await expect(getLauncherAssistantTeamRuns(assistant, cursor(-1))).rejects.toThrow();
+    expect(invoke).not.toHaveBeenCalled();
+  });
+});
 
 describe("Launcher window entry", () => {
   it("uses only the closed IPC verb and accepts native cancellation", async () => {
