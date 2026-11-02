@@ -470,8 +470,16 @@ class ManagementService:
     def _receipt(self, record: dict, *, reused: bool) -> dict:
         if record.get("receipt"):
             return {**record["receipt"], "reused": reused}
-        return {"status": "unknown", "action": record["action"], "requestId": record["requestId"],
-                "verified": False, "reused": reused, "code": "OPERATION_UNCONFIRMED"}
+        receipt = {"status": "unknown", "action": record["action"], "requestId": record["requestId"],
+                   "verified": False, "reused": reused, "code": "OPERATION_UNCONFIRMED"}
+        if record["action"] == "agent_purge_batch":
+            # Unknown batches still report every durably recorded item outcome.
+            try:
+                from .contracts import AgentPurgeBatchResult
+                receipt["purgeBatch"] = AgentPurgeBatchResult.model_validate(record.get("nativeResult")).model_dump()
+            except Exception:  # noqa: BLE001 -- an unreadable partial batch stays a bare unknown
+                pass
+        return receipt
 
     def _verify(self, record: dict, agent: dict | None) -> bool:
         if not isinstance(agent, dict) or not agent.get("agentId") or agent.get("status") != "active":
@@ -535,6 +543,20 @@ class ManagementService:
                     return False
                 record["receipt"] = {"status": "completed", "action": "agent_purge", "requestId": record["requestId"],
                     "verified": True, "purge": result.model_dump()}
+                return True
+            except Exception:  # noqa: BLE001 -- recovery never replays deletion or invents native proof
+                return False
+        if record["action"] == "agent_purge_batch":
+            try:
+                from .contracts import AgentPurgeBatchResult
+                batch = AgentPurgeBatchResult.model_validate(record.get("nativeResult"))
+                if len(batch.results) != len(record["parameters"]["purges"]):
+                    return False  # An interrupted batch never claims completion.
+                for item in batch.results:
+                    if item.outcome == "unknown" or item.outcome == "purged" and self.native.read_archive_state(item.agentId) is not None:
+                        return False
+                record["receipt"] = {"status": "completed", "action": "agent_purge_batch", "requestId": record["requestId"],
+                    "verified": True, "purgeBatch": batch.model_dump()}
                 return True
             except Exception:  # noqa: BLE001 -- recovery never replays deletion or invents native proof
                 return False
@@ -645,12 +667,30 @@ class ManagementService:
                     if result.agentId != parameters["agent_id"]:
                         raise ValueError("Mismatched native purge acknowledgement")
                     record["nativeResult"] = result.model_dump()
+                elif action == "agent_purge_batch":
+                    from .agent_purge_batch import prevalidate, purge_item
+                    rejections = prevalidate(self.native, parameters)
+                    if rejections:
+                        # All-or-nothing admission: one rejected target blocks
+                        # every deletion in this batch, and each item keeps its
+                        # own recorded reason for the operator.
+                        record["nativeResult"] = {"results": [
+                            {"agentId": item["agent_id"], "outcome": "rejected",
+                             "code": rejections.get(item["agent_id"], "BATCH_REJECTED")}
+                            for item in parameters["purges"]]}
+                    else:
+                        record["nativeResult"] = {"results": []}
+                        for item in parameters["purges"]:
+                            record["nativeResult"]["results"].append(purge_item(self.native, item, marker))
+                            # Per-item progress is durable before the next
+                            # deletion; replay never re-executes a recorded item.
+                            self.store.write(path, record)
                 elif action in PLATFORM_ACTIONS:
                     record["nativeResult"] = execute_platform_action(self.native, action, parameters, marker)
                 else:
                     agent = getattr(self.native, {"agent_create": "create", "agent_update": "update", "agent_avatar": "avatar", "agent_archive": "archive"}[action])(parameters, marker)
             except ManagementError as exc:
-                if (action in {"agent_purge", *PLATFORM_ACTIONS} and exc.code == "OPERATION_UNCONFIRMED"
+                if (action in {"agent_purge", "agent_purge_batch", *PLATFORM_ACTIONS} and exc.code == "OPERATION_UNCONFIRMED"
                     or action in {"flow_save", "flow_start"} and exc.code in {"FLOW_SAVE_UNCONFIRMED", "FLOW_START_UNCONFIRMED"}):
                     return self._receipt(record, reused=False)
                 record["failure"] = {"code": exc.code, "status_code": exc.status_code}
@@ -658,7 +698,7 @@ class ManagementService:
                 raise
             except Exception:  # noqa: BLE001 -- lost native acknowledgement remains an unknown durable intent
                 return self._receipt(record, reused=False)
-            if action not in {"session_pin", "agent_purge", *PLATFORM_ACTIONS}:
+            if action not in {"session_pin", "agent_purge", "agent_purge_batch", *PLATFORM_ACTIONS}:
                 record["agentId"] = agent.get("agentId", "")
             self.store.write(path, record)
             self._confirm(record)

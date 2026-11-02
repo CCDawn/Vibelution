@@ -237,7 +237,8 @@ def personal_assistant_manage_tool(action: str, arguments_json: str) -> str:
     team_archive_preview; archive follows the full native Agent/Session/room cascade.
     It also supports bounded runtime commands, existing team/Flow edits,
     Agent tool policy and knowledge ACL changes through its live describe
-    contracts, plus agent_purge after agent_purge_preview for archived targets.
+    contracts, plus agent_purge and bounded agent_purge_batch after
+    agent_purge_preview for archived targets.
     Other adapters accept no purge, arbitrary API, command, restore,
     or private data read.
     """

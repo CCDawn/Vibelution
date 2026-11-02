@@ -164,9 +164,25 @@ class AgentArchive(Closed):
     expected_config_revision: int = Field(ge=0)
 
 
+# One batch admission replaces the per-agent approve/preview/invoke round
+# trips. The bound is an availability constant, not a permission change: every
+# item still needs the same agents:purge scope and per-item native CAS.
+AGENT_PURGE_BATCH_LIMIT = 50
+
+
 class AgentPurge(Closed):
     agent_id: str = Field(min_length=1, max_length=128)
     expected_config_revision: int = Field(ge=0)
+
+
+class AgentPurgeBatch(Closed):
+    purges: list[AgentPurge] = Field(min_length=1, max_length=AGENT_PURGE_BATCH_LIMIT)
+
+    @model_validator(mode="after")
+    def unique_targets(self):
+        if len({item.agent_id for item in self.purges}) != len(self.purges):
+            raise ValueError("Duplicate Agent purge targets are not accepted")
+        return self
 
 
 class AuthorizationUpgrade(Closed):
@@ -226,8 +242,8 @@ class ConfigUpdate(Closed):
     updates: list
 
 
-ACTION_MODELS = {"agent_create": AgentCreate, "agent_update": AgentUpdate, "agent_avatar": AgentAvatar, "agent_archive": AgentArchive, "agent_purge": AgentPurge, "team_run": TeamRun, "session_pin": SessionPin, "authorization_upgrade": AuthorizationUpgrade, "runtime_command": RuntimeCommand}
-ACTION_SCOPES = {"agent_create": "agents:create", "agent_update": "agents:update", "agent_avatar": "agents:avatar", "agent_archive": "agents:archive", "agent_purge": "agents:purge", "team_run": "teams:run", "session_pin": "sessions:pin", "authorization_upgrade": None, "runtime_command": "operations:control"}
+ACTION_MODELS = {"agent_create": AgentCreate, "agent_update": AgentUpdate, "agent_avatar": AgentAvatar, "agent_archive": AgentArchive, "agent_purge": AgentPurge, "agent_purge_batch": AgentPurgeBatch, "team_run": TeamRun, "session_pin": SessionPin, "authorization_upgrade": AuthorizationUpgrade, "runtime_command": RuntimeCommand}
+ACTION_SCOPES = {"agent_create": "agents:create", "agent_update": "agents:update", "agent_avatar": "agents:avatar", "agent_archive": "agents:archive", "agent_purge": "agents:purge", "agent_purge_batch": "agents:purge", "team_run": "teams:run", "session_pin": "sessions:pin", "authorization_upgrade": None, "runtime_command": "operations:control"}
 ACTION_MODELS.update(ASSET_ACTION_MODELS)
 ACTION_SCOPES.update(ASSET_ACTION_SCOPES)
 ACTION_MODELS.update(TEAM_LIFECYCLE_ACTION_MODELS)
@@ -248,6 +264,7 @@ def contracts() -> dict:
         "agent_avatar": "按原生 updatedAt 使用已有头像候选或恢复默认；不接收 URL、文件上传或任意路径。",
         "agent_archive": "每次经原生审批，按 configRevision 归档普通 Agent 并封存关联 Session；protected 或关联 Session 忙时拒绝。稳定 request_id，未知结果只查询原回执，不提供 purge、reset、restore 或 force。verified 表示首次原生回读已归档，完成回执保留历史状态。",
         "agent_purge": "agent_purge（永久删除）：先用 agent_purge_preview 读取归档对象与版本。按助理当前原生权限策略删除已归档且非 protected 的 Agent；full_access 可能自动批准。需独立 agents:purge，缺少时查 authorization_status 并通过 authorization_upgrade 仅增加此权限。删除不可恢复，级联删除绑定会话、私有工作区并清理团队、群聊和模式引用；忙碌或版本变化时拒绝。不支持 force 或删除活跃对象。稳定 request_id，unknown 只查询原回执，不能换 ID 重放。verified 需明确原生成功应答和登记记录缺失，cleanupPending=true 表示仍有清理未完成，不得宣称全部清理完成。完成回执为历史证明。",
+        "agent_purge_batch": "agent_purge_batch（批量永久删除）：一次提交显式 purges 清单（≤50 项，禁止通配或全选），每项先用 agent_purge_preview 读取 agentId 与 configRevision 原样回传；一次审批覆盖整批，删除语义与 agent_purge 完全相同，需同一独立 agents:purge。先全检后执行：任一项不存在、非 archived、版本不符或超上限，整批拒绝、零删除，完成回执逐项给出 rejected 及原因（其余项 code=BATCH_REJECTED），不部分执行。执行阶段逐项回执：purged 附 cleanupPending、rejected 附拒绝码、unknown 表示原生结果未确认；unknown 项与整批 unknown 一样只读原回执，不得换 ID 重放或补删。同 request_id 重放不重复删除；部分失败不影响已成功项回执。",
         "team_run": "创建内置 dev-team 并受理原生工作流运行；稳定 request_id，未知结果查询原回执，只有 resumeAllowed 才可用原参数续接。",
         "session_pin": "经原生审批置顶或取消置顶普通可见 Session；不改变当前选择。verified 表示首次确认时原生元数据符合目标状态，不证明某次调用的因果；完成回执保留历史状态，当前状态用 session_get 查询。未知结果查询原 action/request_id，不能换 ID 重放。",
         "authorization_upgrade": "通过 personal_assistant_manage_tool 按助理当前原生权限策略显式增加当前Launcher原主体的指定缺失权限；full_access 可能自动批准。先authorization_status读取当前scopes，expected_scopes和add_scopes必须分别排序、唯一、不重叠。不能默认升级到全部权限，查询只选所需读取权；写权另行明确选择。保留client/subject/capability和任务关联，不支持撤销或换主体。unknown或异常保持同一request_id查询management_receipt(action=authorization_upgrade)，不更换ID重试。需要operator control，旧读取scope本身不授予升级权。完成回执为历史证明，当前状态另查。",
@@ -258,7 +275,7 @@ def contracts() -> dict:
     descriptions.update(AUTHORIZATION_REDUCTION_HELP)
     descriptions["research_command"] = "使用research_get返回的精确run/team/flow/node/task/checkpoint引用与revision推进研究任务；支持失败节点重试、人工任务裁决及运行对账。沿用真实operator、operations:control和原生CAS/稳定request_id；unknown只读原management_receipt，不换ID重放。人工裁决须有明确依据，受理不等于业务完成。"
     return {name: {"action": name, "description": descriptions[name], "parameters": model.model_json_schema(),
-                   "governed": name in {"team_run", "session_pin", "agent_archive", "agent_purge", "authorization_upgrade", "runtime_command", "research_command", *ASSET_ACTION_MODELS, *TEAM_LIFECYCLE_ACTION_MODELS, *FLOW_ACTION_MODELS, *AUTHORIZATION_REDUCTION_MODELS}, "scope": ACTION_SCOPES[name] or "operator:control"} for name, model in ACTION_MODELS.items()}
+                   "governed": name in {"team_run", "session_pin", "agent_archive", "agent_purge", "agent_purge_batch", "authorization_upgrade", "runtime_command", "research_command", *ASSET_ACTION_MODELS, *TEAM_LIFECYCLE_ACTION_MODELS, *FLOW_ACTION_MODELS, *AUTHORIZATION_REDUCTION_MODELS}, "scope": ACTION_SCOPES[name] or "operator:control"} for name, model in ACTION_MODELS.items()}
 
 
 # --- Launcher-canonical PA managed writes ------------------------------------
@@ -454,6 +471,26 @@ class AgentPurgeResult(Closed):
     agentId: str
     status: Literal["purged"]
     cleanupPending: StrictBool
+
+
+class AgentPurgeBatchItemResult(Closed):
+    agentId: str
+    outcome: Literal["purged", "rejected", "unknown"]
+    cleanupPending: StrictBool | None = None
+    code: str | None = None
+
+    @model_validator(mode="after")
+    def outcome_fields(self):
+        if self.outcome == "purged":
+            if self.code is not None or self.cleanupPending is None:
+                raise ValueError("Purged items carry cleanup state without a denial code")
+        elif self.cleanupPending is not None or not self.code:
+            raise ValueError("Rejected and unknown items carry their recorded code only")
+        return self
+
+
+class AgentPurgeBatchResult(Closed):
+    results: list[AgentPurgeBatchItemResult] = Field(min_length=1, max_length=AGENT_PURGE_BATCH_LIMIT)
 
 
 class DirectoryQuery(Closed):
@@ -1096,7 +1133,7 @@ class AuthorizationStateResponse(Closed):
 
 class ReceiptResponse(Closed):
     status: Literal["completed", "unknown"]
-    action: Literal["agent_create", "agent_update", "agent_avatar", "agent_archive", "agent_purge", "team_run", "session_pin", "authorization_upgrade", "runtime_command", "team_update", "agent_tool_policy_update", "knowledge_acl_grant", "knowledge_acl_revoke", "flow_save", "flow_start", "research_command", "authorization_reduce", "authorization_revoke", "agent_dispatch_access_set", "team_create", "team_member_add", "team_member_remove", "team_archive"]
+    action: Literal["agent_create", "agent_update", "agent_avatar", "agent_archive", "agent_purge", "agent_purge_batch", "team_run", "session_pin", "authorization_upgrade", "runtime_command", "team_update", "agent_tool_policy_update", "knowledge_acl_grant", "knowledge_acl_revoke", "flow_save", "flow_start", "research_command", "authorization_reduce", "authorization_revoke", "agent_dispatch_access_set", "team_create", "team_member_add", "team_member_remove", "team_archive"]
     requestId: str
     verified: bool
     reused: bool
@@ -1104,6 +1141,7 @@ class ReceiptResponse(Closed):
     session: SessionView | None = None
     authorization: AuthorizationView | AuthorizationReductionResult | None = None
     purge: AgentPurgeResult | None = None
+    purgeBatch: AgentPurgeBatchResult | None = None
     operation: RuntimeCommandResponse | None = None
     asset: AssetMutationResponse | None = None
     flow: FlowMutationResponse | None = None

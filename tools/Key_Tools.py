@@ -3134,6 +3134,8 @@ def _build_key_tools() -> List[BaseTool]:
         agent_create需要提供project_id、request_id、display_name、model_id，mission可选；不会自动选择默认模型或隐式授予工具。
         团队、工具权限、知识ACL、流程和运行控制均使用目录中各自读取/写入契约，不混用旧适配器参数。
         agent_purge先agent_purge_preview，使用已归档对象版本和独立agents:purge；不可恢复，cleanupPending仍表示清理未结束。
+        agent_purge_batch一次提交显式purges清单（≤50项，每项用agent_purge_preview的agentId和configRevision原样回传），一次审批覆盖整批；
+        任一项不存在、非archived、版本不符或超上限则整批拒绝零删除，完成回执逐项给出rejected原因；unknown项只读原回执，不换ID补删。
         authorization_upgrade先authorization_status，只申请当前请求缺失的scope，遵循当前原生审批策略；目录发现不等于获权。
         dispatch_cancel严格绑定原project_id、dispatch_id、native_task_id；控制受理后继续查原任务实际终态。
         unknown只查原management_receipt，不换ID重放；完成回执是历史证明，当前状态按实时读取动作核验。

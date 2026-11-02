@@ -1395,7 +1395,7 @@ def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
             except (ValueError, TypeError, KeyError, RuntimeError, RecursionError):
                 return {"assistantAction": action, "assistantArgumentsInvalid": True}
     from core.infrastructure.native_runtime import is_launcher_assistant_process
-    if action == "agent_purge" or action == "agent_archive" and is_launcher_assistant_process():
+    if action in {"agent_purge", "agent_purge_batch"} or action == "agent_archive" and is_launcher_assistant_process():
         if not is_launcher_assistant_process():
             return {"assistantAction": action, "assistantArgumentsInvalid": True}
         try:
@@ -1403,8 +1403,10 @@ def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
             values = json.loads(raw) if isinstance(raw, str) and len(raw) <= 16000 else None
             if not isinstance(values, dict):
                 raise ValueError("Invalid Agent cleanup arguments")
-            from core.assistant_runtime.actions import agent_archive_approval_summary, agent_purge_approval_summary
-            summary = agent_archive_approval_summary if action == "agent_archive" else agent_purge_approval_summary
+            from core.assistant_runtime.actions import (agent_archive_approval_summary, agent_purge_approval_summary,
+                agent_purge_batch_approval_summary)
+            summary = {"agent_archive": agent_archive_approval_summary, "agent_purge": agent_purge_approval_summary,
+                "agent_purge_batch": agent_purge_batch_approval_summary}[action]
             return summary(values)
         except (ValueError, TypeError, KeyError, RuntimeError, RecursionError):
             return {"assistantAction": action, "assistantArgumentsInvalid": True}

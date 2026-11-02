@@ -220,7 +220,7 @@ class ManagementAdapter:
 
     async def invoke(self, project_id: str, *, action: str, request_id: str, parameters: dict):
         from core.web.services.external_management.platform_actions import PLATFORM_ACTIONS
-        never_replay = action in PLATFORM_ACTIONS or action == "agent_purge"
+        never_replay = action in PLATFORM_ACTIONS or action in {"agent_purge", "agent_purge_batch"}
         key = self._key(project_id, action, request_id)
         fingerprint = hashlib.sha256(json.dumps(parameters, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
         path = self._root / (key + ".json")

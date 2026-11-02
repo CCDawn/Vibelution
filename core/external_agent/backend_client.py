@@ -35,7 +35,7 @@ CONTROL_TOKEN_HEADER = "X-Vibelution-Control-Token"
 TASK_CAPABILITY_HEADER = "X-Vibelution-External-Agent-Task-Capability"
 ADAPTER_CONNECTION_HEADER = "X-Vibelution-External-Agent-Connection"
 _MANAGEMENT_PREFIX = "/api/v1/launcher-assistant-management"
-_MANAGEMENT_ACTIONS = frozenset({"agent_create", "agent_update", "agent_avatar", "agent_archive", "agent_purge", "team_run", "session_pin", "authorization_upgrade", "authorization_reduce", "authorization_revoke"}) | _PLATFORM_ACTIONS
+_MANAGEMENT_ACTIONS = frozenset({"agent_create", "agent_update", "agent_avatar", "agent_archive", "agent_purge", "agent_purge_batch", "team_run", "session_pin", "authorization_upgrade", "authorization_reduce", "authorization_revoke"}) | _PLATFORM_ACTIONS
 _MANAGEMENT_SCOPES = ["agents:archive", "agents:avatar", "agents:create", "agents:read", "agents:update", "legacy:receipts:read", "platform:describe", "rooms:read", "sessions:parameters:read", "sessions:pin", "sessions:read", "teams:directory:read", "teams:read", "teams:run"]
 # Historical grants without persisted scopes predate pin and archive. Freeze
 # their actual eight scopes; deriving this list from fresh scopes expands power.
@@ -270,7 +270,7 @@ class ManagedAgentBackendClient:
                                 require_existing_subject: bool = False) -> dict[str, Any]:
         if action not in _MANAGEMENT_ACTIONS or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,95}", request_id):
             raise BackendClientError("Unsupported management request.", code="INVALID_MANAGEMENT_REQUEST")
-        if action in {"session_pin", "agent_archive", "agent_purge", "authorization_upgrade", "authorization_reduce", "authorization_revoke", *_PLATFORM_ACTIONS}:
+        if action in {"session_pin", "agent_archive", "agent_purge", "agent_purge_batch", "authorization_upgrade", "authorization_reduce", "authorization_revoke", *_PLATFORM_ACTIONS}:
             from pydantic import ValidationError
             from core.web.services.external_management.contracts import ACTION_MODELS
             try:
@@ -960,6 +960,18 @@ class ManagedAgentBackendClient:
                 return receipt.model_dump(exclude_none=True)
             except (ValidationError, ValueError) as exc:
                 raise BackendClientError("Invalid Agent purge receipt.", code="BACKEND_PROTOCOL_ERROR") from exc
+        if action == "agent_purge_batch":
+            from pydantic import ValidationError
+            from core.web.services.external_management.contracts import ReceiptResponse
+            try:
+                receipt = ReceiptResponse.model_validate(payload)
+                if (receipt.status == "completed" and (receipt.purgeBatch is None or receipt.verified is not True or receipt.code is not None)
+                    or receipt.status == "unknown" and (receipt.verified is not False or receipt.code != "OPERATION_UNCONFIRMED")
+                    or any(getattr(receipt, key) is not None for key in ("agent", "session", "authorization", "purge", "teamRun", "phase", "resumeAllowed"))):
+                    raise ValueError("Invalid purge batch receipt state")
+                return receipt.model_dump(exclude_none=True)
+            except (ValidationError, ValueError) as exc:
+                raise BackendClientError("Invalid Agent purge batch receipt.", code="BACKEND_PROTOCOL_ERROR") from exc
         if action == "authorization_upgrade":
             from pydantic import ValidationError
             from core.web.services.external_management.contracts import ReceiptResponse

@@ -298,7 +298,7 @@ class AgentRead(Project):
 
 
 class ManagementReceipt(Project):
-    action: str = Field(pattern=r"^(?:agent_(create|update|avatar|archive|purge|tool_policy_update)|team_(run|update)|session_pin|authorization_upgrade|runtime_command|knowledge_acl_(grant|revoke)|flow_(save|start))$")
+    action: str = Field(pattern=r"^(?:agent_(create|update|avatar|archive|purge|purge_batch|tool_policy_update)|team_(run|update)|session_pin|authorization_upgrade|runtime_command|knowledge_acl_(grant|revoke)|flow_(save|start))$")
     request_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$")
 
 
@@ -393,6 +393,28 @@ def agent_purge_approval_summary(parameters: dict) -> dict:
         "project_id": values["project_id"], "agent_id": values["agent_id"],
         "expected_config_revision": str(values["expected_config_revision"]), "request_id": values["request_id"]},
         "assistantPurgeIrreversible": True,
+        "assistantPurgeEffects": ["agent", "sessions", "private_workspace", "team_room_mode_references"]}
+
+
+def agent_purge_batch_approval_summary(parameters: dict) -> dict:
+    """One approval covers the whole manifest; every target stays visible."""
+    try:
+        values = _management_contracts()["agent_purge_batch"][0].model_validate(parameters).model_dump()
+    except (ValidationError, TypeError) as exc:
+        raise ValueError("Invalid Agent purge batch request") from exc
+    for key, maximum in (("project_id", 160), ("request_id", 96)):
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0," + str(maximum - 1) + "}", values[key]) is None:
+            raise ValueError("Purge batch identity cannot be displayed safely")
+    items = []
+    for item in values["purges"]:
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", item["agent_id"]) is None:
+            raise ValueError("Purge identity cannot be displayed safely")
+        items.append({"agent_id": item["agent_id"],
+                      "expected_config_revision": str(item["expected_config_revision"])})
+    return {"assistantAction": "agent_purge_batch", "assistantTargets": {
+        "project_id": values["project_id"], "request_id": values["request_id"],
+        "batchCount": str(len(items))},
+        "assistantPurgeItems": items, "assistantPurgeIrreversible": True,
         "assistantPurgeEffects": ["agent", "sessions", "private_workspace", "team_room_mode_references"]}
 
 
@@ -788,6 +810,8 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
         authorization_upgrade_approval_summary(args)
     if action == "agent_purge":
         agent_purge_approval_summary(args)
+    if action == "agent_purge_batch":
+        agent_purge_batch_approval_summary(args)
     from .platform_approval import PLATFORM_MANAGEMENT_ACTIONS, platform_management_approval_summary
     if action in PLATFORM_MANAGEMENT_ACTIONS:
         platform_management_approval_summary(action, args)
