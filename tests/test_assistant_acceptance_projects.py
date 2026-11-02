@@ -140,6 +140,21 @@ def test_reused_checkout_runtime_bounds_reject_external_directory_links(tmp_path
     assert not controller._private_runtime_path(root / ".runtime/runtime-manager", root)
 
 
+@pytest.mark.parametrize("change", [{}, {"workspaceRoot": "foreign"}, {"routesReady": False}])
+def test_lifecycle_requires_healthy_routes_on_the_same_real_workspace(tmp_path, monkeypatch, change):
+    controller = object.__new__(case.IsolatedLauncherController)
+    health = {"status": "ok", "routesReady": True, "workspaceRoot": str(tmp_path), **change}
+    calls = []
+    def request(url, path, **kwargs):
+        calls.append((url, path))
+        return health
+    monkeypatch.setattr(case.base, "request", request)
+    assert controller._backend_ready({"alive": True, "port": 22345}, tmp_path) is (not change)
+    assert calls == [("http://127.0.0.1:22345", "/api/health")]
+    assert not controller._backend_ready({"alive": False, "port": 22345}, tmp_path)
+    assert len(calls) == 1
+
+
 def lifecycle_inputs(tmp_path, branch=False):
     expected = {"slot": "A1" if branch else "A", "root": str(tmp_path), "projectId": "native-project-id",
                 "operation": "restart", "requestId": "stable-restart-id"}

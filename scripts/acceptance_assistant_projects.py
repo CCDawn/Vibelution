@@ -585,17 +585,9 @@ class IsolatedLauncherController:
                 require(debug.get("pid") == self.process.pid, "isolated_electron_debug_pid_mismatch")
                 self.plan.update(status="ready_for_native_operator", cdp=debug)
                 backend = self.backend_identity(target)
-                if not backend["alive"] or backend["port"] != int(child_env["VIBELUTION_PORT"]):
+                if backend["port"] != int(child_env["VIBELUTION_PORT"]) or not self._backend_ready(backend, target):
                     self.plan["status"] = "waiting_for_bootstrap_backend"
                     self._save()
-                    time.sleep(1)
-                    continue
-                try:
-                    health = base.request(f"http://127.0.0.1:{backend['port']}", "/api/health", token="", timeout=5)
-                    require(health.get("status") == "ok" and health.get("routesReady") is True
-                            and Path(str(health.get("workspaceRoot") or "")).resolve() == target,
-                            "launcher_bootstrap_health_not_ready")
-                except AcceptanceFailure:
                     time.sleep(1)
                     continue
                 self.plan["bootstrapBackend"] = backend
@@ -669,6 +661,17 @@ class IsolatedLauncherController:
         return {"root": str(root), "runtimeRoot": str(runtime), "pid": pid, "createTime": create_time, "alive": alive,
                 "port": state.get("backendPort", state.get("port"))}
 
+    def _backend_ready(self, identity: dict, root: Path) -> bool:
+        port = identity.get("port")
+        if not identity.get("alive") or type(port) is not int or not 0 < port < 65536:
+            return False
+        try:
+            health = base.request(f"http://127.0.0.1:{port}", "/api/health", token="", timeout=5)
+        except AcceptanceFailure:
+            return False
+        return (isinstance(health, dict) and health.get("status") == "ok" and health.get("routesReady") is True
+                and Path(str(health.get("workspaceRoot") or "")).resolve() == root.resolve())
+
     def prepare_operation(self, slot_name: str, operation: str) -> dict:
         require(operation in {"start", "restart", "stop"}, "invalid_launcher_operation")
         rows = [row for row in self.refresh_registrations() if row["slot"] == slot_name]
@@ -721,6 +724,8 @@ class IsolatedLauncherController:
                                 and (operation != "restart" or before["alive"] and not old_alive
                                      and (after["pid"], after["createTime"]) != (before["pid"], before["createTime"])),
                                 "launcher_process_transition_not_observed")
+                        if operation in {"start", "restart"}:
+                            require(self._backend_ready(after, Path(expected["root"])), "launcher_backend_health_not_ready")
                     except AcceptanceFailure as exc:
                         last_failure = str(exc)
                     else:
