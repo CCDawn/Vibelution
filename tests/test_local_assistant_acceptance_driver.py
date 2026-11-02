@@ -5,6 +5,24 @@ import pytest
 from scripts.acceptance_local_assistant_development import reports_exit_zero
 
 
+@pytest.mark.parametrize("terminal_id,exit_code,expected", [
+    ("test-session", 0, 0), ("other-session", 0, None), ("test-session", 1, None),
+])
+def test_streamed_test_output_is_bound_to_its_terminal_exit(terminal_id, exit_code, expected):
+    from scripts.acceptance_local_assistant_development import TEST_COMMAND, tool_evidence
+
+    def result(name, args, value):
+        return {"eventType": "tool_result", "payload": {"toolCall": {
+            "name": name, "arguments": args, "result": value}}}
+
+    events = [result("exec_command", {"cmd": TEST_COMMAND}, {
+        "terminalSessionId": "test-session", "status": "running",
+        "stderr": "Ran 3 tests in 0.001s\n\nOK\n"}),
+        result("write_stdin", {"session_id": terminal_id}, {
+            "terminalSessionId": terminal_id, "status": "completed", "exitCode": exit_code})]
+    assert tool_evidence(events)["testExitCode"] == expected
+
+
 @pytest.mark.parametrize("answer", [
     "退出码：`0`（Ran 3 tests OK）",
     "- **退出码**：**0**",

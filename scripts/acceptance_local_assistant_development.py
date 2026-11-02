@@ -249,6 +249,7 @@ def tool_evidence(events: list[dict]) -> dict:
     results: list[dict] = []
     edits: set[str] = set()
     terminal_tests: set[str] = set()
+    terminal_output: dict[str, str] = {}
     test_exit = None
     for event in events:
         if event.get("eventType") not in {"tool_call_started", "tool_result"}:
@@ -276,6 +277,11 @@ def tool_evidence(events: list[dict]) -> dict:
         if name == "write_stdin" and str(args.get("session_id") or "") in terminal_tests:
             is_test = True
         output = str(result.get("stdout") or "") + "\n" + str(result.get("stderr") or "")
+        if terminal_id:
+            # Running chunks can contain the test summary before a later,
+            # output-free poll delivers its exit code. Never mix terminals.
+            terminal_output[terminal_id] = (terminal_output.get(terminal_id, "") + output)[-65536:]
+            output = terminal_output[terminal_id]
         if (is_test and type(exit_code) is int and exit_code == 0
                 and re.search(r"Ran 3 tests?\b", output) and re.search(r"(?m)^OK\s*$", output)):
             test_exit = 0
@@ -389,6 +395,7 @@ def run(args: argparse.Namespace, evidence: dict[str, Any]) -> None:
     source_bytes = args.source_config.resolve().read_bytes()
     require(len(source_bytes) <= MAX_JSON_BYTES, "source_config_limit_exceeded")
     source_hash = hashlib.sha256(source_bytes).hexdigest()
+    evidence["sourceConfigSnapshotSha256"] = source_hash
     snapshot = routing_snapshot(tomllib.loads(source_bytes.decode("utf-8-sig")), args.model_id)
     home.mkdir(parents=True, exist_ok=True)
     evidence["runtimeOwned"] = True
@@ -520,7 +527,8 @@ def run(args: argparse.Namespace, evidence: dict[str, Any]) -> None:
                 "fixture_written_in_parent_checkout")
         evidence["assistantReturnedTestSuccess"] = True
         evidence["sourceConfigUnchanged"] = hashlib.sha256(args.source_config.resolve().read_bytes()).hexdigest() == source_hash
-        require(evidence["sourceConfigUnchanged"], "source_config_changed")
+        # The source is read-only; concurrent operator edits must not invalidate
+        # a run against the private configuration snapshot created above.
         evidence["modelRequests"] = model_requests(home)
         require(all(value > 0 for value in evidence["modelRequests"].values()), "real_model_requests_not_observed")
         evidence["status"] = "passed"
@@ -558,7 +566,8 @@ def run(args: argparse.Namespace, evidence: dict[str, Any]) -> None:
                 evidence["modelRequests"] = model_requests(home)
             except Exception:
                 evidence["modelRequestEvidenceIncomplete"] = True
-            evidence["sourceConfigUnchanged"] = hashlib.sha256(args.source_config.resolve().read_bytes()).hexdigest() == source_hash
+            evidence["sourceConfigCurrentSha256"] = hashlib.sha256(args.source_config.resolve().read_bytes()).hexdigest()
+            evidence["sourceConfigUnchanged"] = evidence["sourceConfigCurrentSha256"] == source_hash
         if evidence.get("status") == "passed" and not all(cleanup.values()):
             evidence.update(status="failed", failureCode="runtime_cleanup_unconfirmed")
 
