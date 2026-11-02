@@ -91,6 +91,27 @@ rules:
       - "tests/test_assistant_*"
     commands:
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_assistant_autonomy_transport.py tests/test_assistant_runtime_snapshot.py tests/test_assistant_research_control.py tests/test_assistant_knowledge_owner_catalog.py tests/test_assistant_operation_reconciliation.py tests/test_assistant_authorization_reduction.py tests/test_assistant_delegation.py tests/test_assistant_delegation_directory.py tests/test_assistant_delegation_journal.py tests/test_assistant_platform_watch.py tests/test_assistant_management_watch.py tests/test_assistant_patrol_recovery.py tests/test_assistant_configuration_protocol.py tests/test_assistant_configuration_contexts.py tests/test_assistant_configuration_control.py tests/test_assistant_global_model_references.py tests/test_launcher_assistant_tool_description.py -q"
+  - id: assistant-team-lifecycle
+    description: "Launcher Team creation, membership, archive effects, authority and original native receipts."
+    executionLayers:
+      - "focused"
+    paths:
+      - "core/web/services/external_management/team_lifecycle_*.py"
+      - "core/assistant_runtime/team_management_approval.py"
+      - "core/web/services/external_management/contracts.py"
+      - "core/web/services/external_management/platform_actions.py"
+      - "core/web/services/external_management/service.py"
+      - "core/web/routes/launcher_assistant_management.py"
+      - "core/external_agent/backend_client.py"
+      - "core/assistant_runtime/actions.py"
+      - "core/assistant_runtime/management.py"
+      - "core/assistant_runtime/platform_approval.py"
+      - "tests/test_assistant_team_*.py"
+      - "tests/test_team_archive_fingerprint.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_assistant_team_lifecycle.py tests/test_assistant_team_management_protocol.py tests/test_assistant_team_approval.py tests/test_team_archive_fingerprint.py -q"
+    notes:
+      - "Broad assistant ownership must not suppress new Team contract tests; native Team owners keep their existing adjacent regressions."
   - id: assistant-dispatch-access
     description: "Per-Agent dispatch policy, durable config receipts and concurrent admission."
     executionLayers:

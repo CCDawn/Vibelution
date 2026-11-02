@@ -13,6 +13,8 @@
 
 项目 scope 与真实 operator 身份分别校验。全局引用保护内部检查未开放业务访问的登记项目，只输出覆盖与计数，不授予这些项目的正文、Prompt 或任务权限。
 
+`agent_dispatch_access_get` 的 `gatewayEnabled` 和 allowlist 表示第三方派遣网关策略，不能据此断言 Launcher 本地助理不可派遣；MCP enable 也不授予本地助理 authority。两条通道共享单 Agent deny，因此停用守卫须在同一原生管理边界内完整检查 MCP 与本地两个 namespace 的活动任务；不能遗漏尚无 Session 的本地 queued 任务。
+
 ## 模型 / provider 删除与停用
 
 `configuration_references` 覆盖完整 stored registrations，包括 inactive、离线登记和 native assistant 自身。它绑定实际项目身份与已有存储，检查 formal/sandbox 的 Agent、room、Team、历史 Session compiled pin、活动 supervised 绑定及 operator 模型引用；sandbox workspace 必须配自己的 runtime。缺失、损坏、离线、绑定不明或实际引用解析失败均阻止零引用证明，未知不能显示为 `0`。

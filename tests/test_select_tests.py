@@ -1759,3 +1759,20 @@ def test_cli_import_fallback_cap_hint_is_explicit_on_commands_only(
     assert "python-import-fallback" in hint
     assert "exceeding the 12-file cap" in hint
     assert "Add focused matrix entries" in hint
+
+
+@pytest.mark.parametrize("changed_file", [
+    "core/web/services/external_management/team_lifecycle_contracts.py",
+    "core/web/services/external_management/team_lifecycle_control.py",
+    "core/assistant_runtime/team_management_approval.py",
+    "core/external_agent/backend_client.py",
+    "core/assistant_runtime/actions.py",
+    "core/web/services/external_management/service.py",
+])
+def test_team_lifecycle_changes_select_complete_native_and_approval_contracts(changed_file):
+    result = select_tests.select_tests([changed_file], select_tests.load_matrix(), include_always=False)
+    assert "assistant-team-lifecycle" in {rule["id"] for rule in result["matchedRules"]}
+    commands = "\n".join(result["commands"])
+    for path in ("tests/test_assistant_team_lifecycle.py", "tests/test_assistant_team_management_protocol.py",
+                 "tests/test_assistant_team_approval.py", "tests/test_team_archive_fingerprint.py"):
+        assert path in commands
