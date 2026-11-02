@@ -364,6 +364,31 @@ def _session_command(*, fixed_identity_only: bool = False):
             raise AssistantSessionError("SESSION_INVALID") from None
 
 
+def _assert_session_idle(sessions, session_id):
+    from core.chat.turn_journal import latest_open_turn_id
+    from core.web.services.session import journal_bridge, tool_approvals
+    from core.web.services.session.admission_lock import session_has_active_work_run
+    from core.web.services.session.queued_turns import QUEUED_TURN_STATE_KEY, session_queued_turn_rows
+    conversation = sessions.load_session_chat_state(sessions.PROJECT_ROOT, session_id)
+    if not isinstance(conversation, dict):
+        raise AssistantSessionError("ASSISTANT_QUIESCENCE_UNKNOWN")
+    raw_queue = conversation.get(QUEUED_TURN_STATE_KEY, [])
+    if not isinstance(raw_queue, list) or len(raw_queue) != len(session_queued_turn_rows(conversation)):
+        raise AssistantSessionError("ASSISTANT_QUIESCENCE_UNKNOWN")
+    events = journal_bridge.load_session_conversation_events_snapshot(session_id, project_root=sessions.PROJECT_ROOT)
+    approvals = tool_approvals.list_tool_approval_requests(session_id)
+    settled = {"accepted", "accepted_for_session", "accepted_for_session_tool", "accepted_with_action_window",
+               "accepted_always", "declined", "cancelled", "expired"}
+    with sessions._RUNNING_SESSIONS_LOCK:
+        active_turn = bool(sessions._SESSION_ACTIVE_TURN_IDS.get(session_id))
+    if (sessions._is_session_running(session_id) or active_turn or latest_open_turn_id(events) or raw_queue
+            or session_has_active_work_run(sessions, session_id)
+            or any(not isinstance(row, dict) or row.get("status") not in settled for row in approvals)):
+        raise AssistantSessionError("ASSISTANT_QUIESCENCE_BUSY")
+    if _STOP_REQUESTED.is_set():
+        raise AssistantSessionError("ASSISTANT_QUIESCENCE_UNAVAILABLE")
+
+
 @contextmanager
 def session_quiescence():
     """Fence assistant commands while observing the fixed native Session.
@@ -375,10 +400,7 @@ def session_quiescence():
     admission lock must be entered and exited by the same thread.
     """
     global _QUIESCING
-    from core.chat.turn_journal import latest_open_turn_id
-    from core.web.services.session import journal_bridge, tool_approvals
-    from core.web.services.session.admission_lock import SessionAdmissionLock, session_has_active_work_run
-    from core.web.services.session.queued_turns import QUEUED_TURN_STATE_KEY, session_queued_turn_rows
+    from core.web.services.session.admission_lock import SessionAdmissionLock
 
     with _LOCK:
         if _STOP_REQUESTED.is_set() or not _STARTED or _OFFLINE_MIGRATION or _QUIESCING:
@@ -402,31 +424,7 @@ def session_quiescence():
         except sessions.SessionBusyError:
             raise AssistantSessionError("ASSISTANT_QUIESCENCE_BUSY") from None
         try:
-            conversation = sessions.load_session_chat_state(sessions.PROJECT_ROOT, session_id)
-            if not isinstance(conversation, dict):
-                raise AssistantSessionError("ASSISTANT_QUIESCENCE_UNKNOWN")
-            raw_queue = conversation.get(QUEUED_TURN_STATE_KEY, [])
-            if not isinstance(raw_queue, list) or len(raw_queue) != len(session_queued_turn_rows(conversation)):
-                raise AssistantSessionError("ASSISTANT_QUIESCENCE_UNKNOWN")
-            events = journal_bridge.load_session_conversation_events_snapshot(
-                session_id, project_root=sessions.PROJECT_ROOT,
-            )
-            approvals = tool_approvals.list_tool_approval_requests(session_id)
-            settled_approvals = {"accepted", "accepted_for_session", "accepted_for_session_tool",
-                                 "accepted_with_action_window", "accepted_always", "declined",
-                                 "cancelled", "expired"}
-            with sessions._RUNNING_SESSIONS_LOCK:
-                active_turn = bool(sessions._SESSION_ACTIVE_TURN_IDS.get(session_id))
-            if (sessions._is_session_running(session_id)
-                    or active_turn
-                    or latest_open_turn_id(events)
-                    or raw_queue
-                    or session_has_active_work_run(sessions, session_id)
-                    or any(not isinstance(row, dict) or row.get("status") not in settled_approvals
-                           for row in approvals)):
-                raise AssistantSessionError("ASSISTANT_QUIESCENCE_BUSY")
-            if _STOP_REQUESTED.is_set():
-                raise AssistantSessionError("ASSISTANT_QUIESCENCE_UNAVAILABLE")
+            _assert_session_idle(sessions, session_id)
             yield
         finally:
             lock.release()
@@ -434,6 +432,43 @@ def session_quiescence():
         with _LOCK:
             with _QUIESCENCE_STATE_LOCK:
                 _QUIESCING = False
+
+
+def commit_quiescent_shutdown() -> None:
+    """Transfer held native admission to stopping before releasing its fence."""
+    with _QUIESCENCE_STATE_LOCK:
+        if not _STARTED or not _QUIESCING:
+            raise AssistantSessionError("ASSISTANT_QUIESCENCE_UNAVAILABLE")
+        _STOP_REQUESTED.set()
+
+
+def lifecycle_status() -> dict[str, Any]:
+    """Bounded native-only observation; final shutdown still needs a held fence."""
+    from core.web.services.session.admission_lock import SessionAdmissionLock
+    try:
+        # Unlike a held shutdown proof, polling must not toggle _QUIESCING and
+        # reject a concurrent user's command. It waits behind normal admission.
+        with _LOCK:
+            if _STOP_REQUESTED.is_set() or not _STARTED or _OFFLINE_MIGRATION or _QUIESCING:
+                return {"schemaVersion": 1, "state": "unknown"}
+            assistant = _projection()["assistant"]
+            if not _SESSION_ID or not _AGENT_ID or assistant.get("directSessionId") != _SESSION_ID or assistant.get("agentId") != _AGENT_ID:
+                return {"schemaVersion": 1, "state": "unknown"}
+            _, _, sessions, _ = _services()
+            lock = SessionAdmissionLock(sessions.PROJECT_ROOT, _SESSION_ID)
+            try:
+                lock.acquire(timeout=0.1)
+            except sessions.SessionBusyError:
+                return {"schemaVersion": 1, "state": "active"}
+            try:
+                _assert_session_idle(sessions, _SESSION_ID)
+                return {"schemaVersion": 1, "state": "idle"}
+            finally:
+                lock.release()
+    except AssistantSessionError as error:
+        return {"schemaVersion": 1, "state": "active" if error.code == "ASSISTANT_QUIESCENCE_BUSY" else "unknown"}
+    except Exception:
+        return {"schemaVersion": 1, "state": "unknown"}
 
 
 @contextmanager

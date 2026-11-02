@@ -40,6 +40,9 @@ afterEach(async () => {
   root = undefined;
   container?.remove();
   client?.clear();
+  for (const key of Object.keys(localStorage)) {
+    if (key.startsWith("vibelution.launcher-assistant.composer.")) localStorage.removeItem(key);
+  }
   conversation = undefined;
   vi.clearAllMocks();
   // clearAllMocks keeps implementations; put the push channel back to "absent".
@@ -97,6 +100,35 @@ function changedAppearance() {
 }
 
 describe("Launcher assistant state", () => {
+  it("restores a draft after a fresh renderer without sending it", async () => {
+    await renderAssistant(undefined, undefined, undefined, { embedded: true });
+    await act(async () => conversation?.onComposerChange("重开后保留的草稿"));
+    await act(async () => root?.unmount());
+    container?.remove();
+    client?.clear();
+    await renderAssistant(undefined, undefined, undefined, { embedded: true });
+    expect(conversation?.composerValue).toBe("重开后保留的草稿");
+    expect(bridge.sendLauncherAssistantMessage).not.toHaveBeenCalled();
+  });
+  it("restores an unconfirmed request after a fresh renderer and retries only its original ID", async () => {
+    bridge.sendLauncherAssistantMessage.mockRejectedValueOnce(new Error("ASSISTANT_LIFECYCLE_CLOSING"));
+    await renderAssistant(undefined, undefined, undefined, { embedded: true });
+    await act(async () => conversation?.onComposerChange("请求 A"));
+    await act(async () => conversation?.onSubmit());
+    const original = bridge.sendLauncherAssistantMessage.mock.calls[0];
+    await act(async () => conversation?.onComposerChange("新的草稿 B"));
+    await act(async () => root?.unmount());
+    container?.remove();
+    client?.clear();
+    await renderAssistant(undefined, undefined, undefined, { embedded: true });
+    expect(conversation?.composerValue).toBe("新的草稿 B");
+    expect(bridge.sendLauncherAssistantMessage).toHaveBeenCalledTimes(1);
+    bridge.sendLauncherAssistantMessage.mockResolvedValueOnce({ turnId: "restored-request" });
+    await act(async () => conversation?.onSubmit());
+    expect(bridge.sendLauncherAssistantMessage).toHaveBeenCalledTimes(2);
+    expect(bridge.sendLauncherAssistantMessage.mock.calls[1]).toEqual(original);
+    expect(conversation?.composerValue).toBe("新的草稿 B");
+  });
   it("sends an explicit contextual request without consuming the user's draft", async () => {
     const entryIntent = { key: "affairs", title: "在对话里管理待办与提醒", label: "查看我的待办与提醒", message: "请查看我的待办与提醒，先不要修改。" };
     bridge.sendLauncherAssistantMessage.mockResolvedValue({ turnId: "accepted-context" });

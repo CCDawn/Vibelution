@@ -416,6 +416,14 @@ class NativeFacade:
         from . import native
         return native.session_quiescence()
 
+    def lifecycle_status(self):
+        from . import native
+        return native.lifecycle_status()
+
+    def commit_quiescent_shutdown(self):
+        from . import native
+        return native.commit_quiescent_shutdown()
+
     def config(self):
         from core.web.services.config_service import get_config_bootstrap
         return get_config_bootstrap()
@@ -703,6 +711,23 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                 migration["writers"] -= 1
                 migration["changed"].set()
 
+    @app.get("/api/assistant/lifecycle-status")
+    async def lifecycle_status(request: Request):
+        if request.query_params:
+            raise HTTPException(422, detail="Invalid lifecycle status request")
+        observe = getattr(native, "lifecycle_status", None)
+        if not callable(observe):
+            return {"schemaVersion": 1, "state": "unknown"}
+        try:
+            result = await asyncio.to_thread(observe)
+            if (type(result) is dict and set(result) == {"schemaVersion", "state"}
+                    and type(result["schemaVersion"]) is int and result["schemaVersion"] == 1
+                    and result["state"] in {"idle", "active", "unknown"}):
+                return result
+        except Exception:
+            pass
+        return {"schemaVersion": 1, "state": "unknown"}
+
     @app.get("/health")
     def health():
         return {"status": "ok", "role": "launcher_assistant", "protocolVersion": 1,
@@ -903,6 +928,10 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
             if migration["gate"]:
                 if migration["state"] != "ready":
                     raise HTTPException(409, detail="Migration barrier not ready")
+                commit_stop = getattr(native, "commit_quiescent_shutdown", None)
+                if not callable(commit_stop):
+                    raise HTTPException(503, detail="Native admission handoff unavailable")
+                await asyncio.to_thread(commit_stop)
                 migration["committing"] = True
                 migration["release"].set()
                 await migration["task"]

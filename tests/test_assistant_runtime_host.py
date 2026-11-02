@@ -64,6 +64,63 @@ def test_host_denies_missing_credentials_origins_and_wrong_host():
         assert client.get("/docs", headers=headers).status_code == 404
 
 
+@pytest.mark.parametrize("result", [{"schemaVersion": 1, "state": "idle"}, {"schemaVersion": 1, "state": "active"},
+                                   {"schemaVersion": 1, "state": "unknown"}, {"schemaVersion": True, "state": "idle"},
+                                   {"schemaVersion": 1, "state": "idle", "extra": "private"}, None])
+def test_lifecycle_status_is_private_closed_and_never_assumes_idle(result):
+    class Owner(Native):
+        def lifecycle_status(self):
+            return result
+    with TestClient(create_app(native=Owner(), token="private-test-token"), base_url="http://127.0.0.1") as client:
+        path = "/api/assistant/lifecycle-status"
+        headers = {"Authorization": "Bearer private-test-token"}
+        assert client.get(path).status_code == 401
+        assert client.get(path, headers={**headers, "Origin": "https://evil.invalid"}).status_code == 403
+        assert client.get(path + "?sessionId=other", headers=headers).status_code == 422
+        valid = type(result) is dict and set(result) == {"schemaVersion", "state"} and type(result["schemaVersion"]) is int
+        assert client.get(path, headers=headers).json() == (result if valid else {"schemaVersion": 1, "state": "unknown"})
+
+
+def test_shutdown_commits_native_admission_before_releasing_the_joint_barrier(tmp_path):
+    import time
+    from contextlib import contextmanager
+    from tests.test_assistant_runtime_dispatch import ClientProbe, adapter
+    order = []
+    class Owner(Native):
+        held = False
+
+        @contextmanager
+        def session_quiescence(self):
+            self.held = True
+            order.append("held")
+            try:
+                yield
+            finally:
+                self.held = False
+                order.append("released")
+
+        def commit_quiescent_shutdown(self):
+            assert self.held
+            order.append("committed")
+
+        def shutdown(self):
+            return {"closed": True}
+
+    owner = Owner()
+    service = adapter(tmp_path, ClientProbe())
+    app = create_app(native=owner, token="private-test-token", dispatch=service, on_shutdown=lambda: order.append("shutdown"))
+    with TestClient(app, base_url="http://127.0.0.1", headers={"Authorization": "Bearer private-test-token"}) as client:
+        assert client.post("/api/assistant/migration-barrier/prepare").status_code == 200
+        for _ in range(100):
+            state = client.get("/api/assistant/migration-barrier/status").json()["state"]
+            if state != "probing":
+                break
+            time.sleep(0.01)
+        assert state == "ready"
+        assert client.post("/api/assistant/shutdown").status_code == 200
+        assert order.index("held") < order.index("committed") < order.index("released") < order.index("shutdown")
+
+
 def test_dispatch_approval_endpoint_is_private_and_bound():
     class Dispatch:
         calls = []

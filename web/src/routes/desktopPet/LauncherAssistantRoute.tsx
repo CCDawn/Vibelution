@@ -48,6 +48,7 @@ import {
   launcherAssistantSessionEventRefreshesDetail, launcherAssistantSseHealthy,
   type LauncherAssistantSubmission, type LauncherAssistantQueuedAcceptance,
 } from "./launcherAssistantModel";
+import { loadLauncherComposer, saveLauncherComposer } from "./launcherAssistantComposerStorage";
 
 const COPY = {
   zh: {
@@ -222,13 +223,21 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   const composerKey = ["launcher-assistant", "composer", sessionId];
   function saveComposer(patch: Partial<ComposerSnapshot>) {
     client.setQueryDefaults(composerKey, { gcTime: Infinity });
-    client.setQueryData<ComposerSnapshot>(composerKey, previous => ({
-      draft: "", outstanding: null, acceptedTurnId: "", queuedAcceptance: null, ...previous, ...patch,
-    }));
+    client.setQueryData<ComposerSnapshot>(composerKey, previous => {
+      const next = { draft: "", outstanding: null, acceptedTurnId: "", queuedAcceptance: null, ...previous, ...patch };
+      saveLauncherComposer(sessionId, embedded ? "embedded" : "floating", next);
+      return next;
+    });
   }
   useEffect(() => {
     if (!sessionId) return;
-    const saved = client.getQueryData<ComposerSnapshot>(["launcher-assistant", "composer", sessionId]);
+    const key = ["launcher-assistant", "composer", sessionId];
+    const cached = client.getQueryData<ComposerSnapshot>(key);
+    const saved: ComposerSnapshot | null = cached ?? loadLauncherComposer(sessionId, embedded ? "embedded" : "floating");
+    if (!cached && saved) {
+      client.setQueryDefaults(key, { gcTime: Infinity });
+      client.setQueryData<ComposerSnapshot>(key, saved);
+    }
     draftRef.current = saved?.draft || "";
     setDraft(draftRef.current);
     attachmentsRef.current = (saved?.attachments || []).map(item => item.uploadStatus === "uploading" ? { ...item, uploadStatus: "pending" } : item);
@@ -237,7 +246,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     setSendUnconfirmed(Boolean(saved?.outstanding));
     setAcceptedTurnId(saved?.acceptedTurnId || "");
     setQueuedAcceptance(saved?.queuedAcceptance || null);
-  }, [client, sessionId]);
+  }, [client, sessionId, embedded]);
   // Last host-pushed session event (any type, heartbeats included). A ref, not
   // state: react-query reads it on each interval computation and an event must
   // never re-render the page by itself. Null when no push channel ever spoke,

@@ -298,7 +298,7 @@ class AgentRead(Project):
 
 
 class ManagementReceipt(Project):
-    action: str = Field(pattern=r"^(?:agent_(create|update|avatar|archive|purge|purge_batch|tool_policy_update)|team_(run|update)|session_pin|authorization_upgrade|runtime_command|knowledge_acl_(grant|revoke)|flow_(save|start))$")
+    action: str = Field(pattern=r"^(?:agent_(create|update|avatar|archive|purge|purge_batch|tool_policy_update|dispatch_access_set)|team_(run|update)|session_pin|authorization_upgrade|runtime_command|knowledge_acl_(grant|revoke)|flow_(save|start))$")
     request_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$")
 
 

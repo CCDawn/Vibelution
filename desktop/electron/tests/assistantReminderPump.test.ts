@@ -19,6 +19,36 @@ function fixture(recoveredFallback = false) {
 }
 
 describe("Launcher assistant reminders", () => {
+  it("pauses an idle sender for automatic lifecycle and resumes the same owner", async () => {
+    vi.useFakeTimers();
+    const { host } = fixture();
+    const pump = startAssistantReminderPump({ host, available: () => true, notify: vi.fn(), openAssistant: vi.fn(), onError: vi.fn() });
+    const paused = pump.tryDrainForLifecycle();
+    expect(paused).not.toBeNull();
+    await paused;
+    expect(pump.tryDrainForLifecycle()).toBeNull();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(host.nextReminder).not.toHaveBeenCalled();
+    pump.resumeAfterMigration();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(host.nextReminder).toHaveBeenCalled();
+    await pump();
+  });
+
+  it("refuses an automatic pause during an admitted reminder without cancelling it", async () => {
+    vi.useFakeTimers();
+    const { host } = fixture();
+    let complete!: () => void;
+    const notify = vi.fn(() => new Promise<"system_notification">(resolve => { complete = () => resolve("system_notification"); }));
+    const pump = startAssistantReminderPump({ host, available: () => true, notify, openAssistant: vi.fn(), onError: vi.fn() });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(pump.tryDrainForLifecycle()).toBeNull();
+    complete();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(host.settleReminder).toHaveBeenCalled();
+    await pump();
+  });
+
   it("waits for the dialog and preserves a later click until migration resumes", async () => {
     vi.useFakeTimers();
     const { event, host } = fixture();

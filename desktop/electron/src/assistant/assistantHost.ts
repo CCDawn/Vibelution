@@ -158,6 +158,7 @@ export class AssistantHost {
   private startingRevision = -1;
   private stopping?: Promise<AssistantHostSnapshot>;
   private migrationAdmission: { release: () => void; released: Promise<void>; sealed: boolean } | null = null;
+  private lifecycleAdmission: { arrival: boolean; committed: boolean } | null = null;
   private rendererRequests = 0;
   private mainControlRequests = 0;
   private mainControlUncertain = false;
@@ -510,6 +511,13 @@ export class AssistantHost {
   }
 
   start(): Promise<AssistantHostSnapshot> {
+    // The bridge calls start() before request(). Lifecycle requests must reach
+    // that owner to veto replacement or receive CLOSING, never wait invisibly.
+    if (this.lifecycleAdmission) {
+      if (this.view.state === "ready" && this.current && !this.current.abort.signal.aborted)
+        return Promise.resolve(this.snapshot());
+      return Promise.reject(new HostError("ASSISTANT_LIFECYCLE_CLOSING"));
+    }
     if (this.migrationAdmission) {
       if (!this.migrationAdmission.sealed && this.view.state === "ready" && this.current && !this.current.abort.signal.aborted)
         return Promise.resolve(this.snapshot());
@@ -632,6 +640,37 @@ export class AssistantHost {
     this.projectsSuspended = projectsSuspended;
   }
 
+  /** Read-only native observation; this is not a held shutdown proof. */
+  async lifecycleStatus(): Promise<"idle" | "active" | "unknown"> {
+    const generation = this.current;
+    if (!generation && this.view.state === "stopped" && !this.starting) return "idle";
+    if (!generation || generation.closed || generation.abort.signal.aborted || this.view.state !== "ready"
+      || this.migrationAdmission || this.mainControlUncertain || this.rendererRequests || this.mainControlRequests) return "unknown";
+    try {
+      const result = await this.rpc(generation, "/api/assistant/lifecycle-status", "GET", undefined, 2_000, false, 8192);
+      if (this.current !== generation || generation.abort.signal.aborted || this.view.state !== "ready") return "unknown";
+      if (!object(result) || Object.keys(result).length !== 2 || result.schemaVersion !== 1
+        || !["idle", "active", "unknown"].includes(String(result.state))) return "unknown";
+      return result.state as "idle" | "active" | "unknown";
+    } catch { return "unknown"; }
+  }
+
+  /** Refuse an in-flight producer instead of waiting while an automatic exit is armed. */
+  beginLifecycleAdmission(): ReturnType<AssistantHost["beginMigrationAdmission"]> & { check(): void; commit(): void } {
+    if (this.view.state !== "ready" || this.rendererRequests || this.mainControlRequests || this.mainControlUncertain)
+      throw new HostError("ASSISTANT_LIFECYCLE_BUSY");
+    const admission = this.beginMigrationAdmission();
+    const lifecycle = { arrival: false, committed: false };
+    this.lifecycleAdmission = lifecycle;
+    const check = () => {
+      if (this.lifecycleAdmission !== lifecycle || lifecycle.arrival) throw new HostError("ASSISTANT_LIFECYCLE_BUSY");
+    };
+    return { ...admission, check, commit: () => { check(); lifecycle.committed = true; }, release: () => {
+      if (this.lifecycleAdmission === lifecycle) this.lifecycleAdmission = null;
+      admission.release();
+    } };
+  }
+
   /** Caller owns the external producer fences throughout this private probe. */
   async migrationBarrier(operation: "prepare" | "status" | "release"): Promise<"idle" | "probing" | "ready" | "busy" | "released"> {
     const generation = this.current;
@@ -676,6 +715,13 @@ export class AssistantHost {
     const captured = structuredClone(payload);
     while (this.migrationAdmission) {
       const admission = this.migrationAdmission;
+      const lifecycle = this.lifecycleAdmission;
+      if (lifecycle && !["status", "detail", "dispatches", "teamRuns", "config", "approvals", "curation", "operatorAsset", "assistantAvatar", "computerState", "readAttachment"].includes(captured.operation)) {
+        // Before commit, preserve the original request and veto replacement.
+        // Afterwards it was never admitted: the persistent composer retains it.
+        if (lifecycle.committed) throw new HostError("ASSISTANT_LIFECYCLE_CLOSING");
+        lifecycle.arrival = true;
+      }
       const safeWhileWaiting = ["status", "detail", "dispatches", "teamRuns", "config", "approvals", "curation", "operatorAsset", "assistantAvatar", "resolveApproval", "previewDispatchApproval", "decideDispatchApproval", "declineDispatchApproval", "stop", "computerState"]
         .includes(captured.operation);
       // Confirmation only settles an existing native waiter; it remains a

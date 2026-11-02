@@ -29,6 +29,7 @@ import {
 } from "./cli/desktopCli.js";
 import { IPC_CHANNELS } from "./ipc.js";
 import { AssistantHost } from "./assistant/assistantHost.js";
+import { acquireAssistantLifecycleLease, combineAssistantActiveWork, type AssistantLifecycleLease } from "./assistant/lifecycleGuard.js";
 import { startAssistantEventPump } from "./assistant/assistantEventPump.js";
 import { InitialMigrationResults } from "./assistant/initialMigrationResults.js";
 import { AssistantProjectLifecycleRequestStore } from "./assistant/projectLifecycleRequestStore.js";
@@ -616,6 +617,7 @@ const themeAuthority = new ThemeAuthority(join(app.getPath("userData"), "appeara
 let launcherAssistantExitReady = false;
 let launcherAssistantStarting: Promise<void> | null = null;
 let launcherAssistantStopping: Promise<void> | null = null;
+let acquireResidentAssistantLifecycleLease: (() => Promise<AssistantLifecycleLease>) | null = null;
 let initialMigrationReceiptFence: Promise<void> | null = null;
 const launcherAssistantStartupAbort = new AbortController();
 let launcherAssistantProjects: AssistantProjectRegistryConnection | null = null;
@@ -1565,6 +1567,31 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
         scheduleInitialMigration();
       }
     };
+    acquireResidentAssistantLifecycleLease = async () => {
+      const host = launcherAssistantHost, reminders = stopLauncherAssistantReminders;
+      if (!host || !reminders || shutdownApproved || migrationRunning || assistantMigrationPending)
+        throw new Error("ASSISTANT_LIFECYCLE_UNAVAILABLE");
+      migrationRunning = true;
+      return acquireAssistantLifecycleLease({ host, projects: projectConnection, reminders,
+        current: () => !shutdownApproved && launcherAssistantHost === host && stopLauncherAssistantReminders === reminders,
+        reopen: () => !shutdownApproved && launcherAssistantHost === host,
+        releaseOwner: () => { migrationRunning = false; scheduleInitialMigration(); },
+        drainQueues: async () => {
+          const drains = Object.values(projectConnection.snapshot().projects).map(root => {
+            const queue = existingMainLineCommandQueueForProject(root);
+            if (!queue) return Promise.resolve();
+            if (!queue.captureExecutionDrain) throw new Error("ASSISTANT_EXECUTION_DRAIN_UNKNOWN");
+            return queue.captureExecutionDrain();
+          });
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          try {
+            const drained = await Promise.race([Promise.all(drains).then(() => true),
+              new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), 1000); })]);
+            if (!drained) throw new Error("ASSISTANT_LIFECYCLE_BUSY");
+          } finally { if (timer) clearTimeout(timer); }
+        },
+      });
+    };
     if (shutdownApproved) return;
     await new Promise<void>((windowOpened, startupFailed) => {
       void projectConnection.start((snapshot, projectsSuspended) => {
@@ -1715,6 +1742,19 @@ async function stopLauncherAssistant(): Promise<void> {
 async function exitDesktopShellProcess(): Promise<void> {
   await stopLauncherAssistant();
   app.exit(0);
+}
+
+async function residentAssistantActiveWork(): Promise<ActiveWorkStatus> {
+  const state = launcherAssistantHost ? await launcherAssistantHost.lifecycleStatus()
+    : launcherAssistantStarting ? "unknown" : "idle";
+  return { state, message: state === "idle" ? "" : "个人助理仍有对话、排队消息或待确认操作。",
+    ...(state === "active" ? { count: 1, items: [{ kind: "launcher_assistant" }] } : {}) };
+}
+
+async function acquireResidentAssistantShutdownGuard(): Promise<AssistantLifecycleLease> {
+  if (!launcherAssistantHost && !launcherAssistantStarting) return { release: async () => undefined, commit: () => undefined };
+  if (!acquireResidentAssistantLifecycleLease) throw new Error("ASSISTANT_LIFECYCLE_UNAVAILABLE");
+  return acquireResidentAssistantLifecycleLease();
 }
 
 ipcMain.handle(IPC_CHANNELS.assistantThemeResult, (event,payload:unknown) => {
@@ -4183,21 +4223,24 @@ async function requestDesktopShellExit(
                   "resolve launcher active work status for quit"
                 );
               };
-              return await resolveQuitActiveWorkStatus({
+              const workspace = await resolveQuitActiveWorkStatus({
                 probe: () => probeQuitActiveWork(false),
                 recoverAndRetry: () => probeQuitActiveWork(true)
               });
+              return combineAssistantActiveWork(workspace, await residentAssistantActiveWork());
           },
           // The launcher probe rides on the workbench backend. When that backend
           // is dead or wedged the probe times out and quit used to fail with
           // "无法确认是否有进行中的任务" forever; the same file-based scan the
           // main-line stop command trusts keeps quit possible instead.
-          localActiveWorkStatus: () => localQuitActiveWorkStatus()
+          localActiveWorkStatus: async () => combineAssistantActiveWork(localQuitActiveWorkStatus(), await residentAssistantActiveWork())
         }),
         onDenied: (decision) => {
           notifyDesktopTray("Vibelution", decision.message || "有进行中的任务，暂时无法退出。可先用托盘“退出壳并停止全部任务”。", "warning");
         },
         runApproved: async (decision) => {
+          const assistantGuard = await acquireResidentAssistantShutdownGuard();
+          try {
           pendingWorkbenchCloseAck = null;
           await withDesktopShellExitTimeout(async (signal) => {
             signal.throwIfAborted();
@@ -4224,6 +4267,7 @@ async function requestDesktopShellExit(
                 : (signal) => stopMainRuntimeForApprovedShutdown(false, signal),
               stopPythonLauncher: stopOwnedPythonLauncherService,
               approveShutdown: () => {
+                assistantGuard.commit();
                 shutdownApproved = true;
               },
               stopDesktopActionLoop,
@@ -4240,6 +4284,7 @@ async function requestDesktopShellExit(
               );
             }
           }, deadline, "desktop shell exit");
+          } finally { if (!shutdownApproved) void assistantGuard.release().catch(() => undefined); }
         },
         onApprovedFailure: async (_decision, error) => {
           const message = error instanceof Error ? error.message : String(error);
@@ -4401,6 +4446,7 @@ async function performLauncherUpdate(
     const result = await executeLauncherUpdate({
       interruptActiveWork,
       activeWork: () => resolveLauncherUpdateActiveWork(true),
+      ...(!interruptActiveWork ? { acquireShutdownGuard: acquireResidentAssistantShutdownGuard } : {}),
       prepare: () => ensureLatestLauncher({
         workspaceRoot: createDesktopPathsForApp().workspaceRoot,
         pythonPath: desktopPythonPath(),
@@ -4442,7 +4488,8 @@ async function resolveLauncherUpdateActiveWork(refreshBranches = false): Promise
     const main = activeWorkStatusFromLauncherStatus(
       typeof payload === "object" && payload !== null ? payload as Record<string, unknown> : {}
     );
-    return combineLauncherActiveWorkStatus(main, launcherStateStore.projectBranchInstances());
+    return combineAssistantActiveWork(combineLauncherActiveWorkStatus(main, launcherStateStore.projectBranchInstances()),
+      await residentAssistantActiveWork());
   } catch {
     return { state: "unknown", message: "Launcher task status is unavailable." };
   }
@@ -4501,7 +4548,7 @@ async function currentLauncherUpdateFreshness(): Promise<Record<string, unknown>
     return projectLauncherUpdateFreshness({
       raw: snapshotRawFreshness,
       shell: app.isPackaged ? lastKnownDesktopShell : undefined,
-      activeWork: launcherActiveWorkFromSnapshot(),
+      activeWork: combineAssistantActiveWork(launcherActiveWorkFromSnapshot(), await residentAssistantActiveWork()),
       packaged: app.isPackaged,
       updating: shellRefreshInFlight
     });

@@ -11,6 +11,8 @@ export async function executeLauncherUpdate(input: {
   prepare: () => Promise<unknown>;
   stopWorkspaces: () => Promise<void>;
   scheduleReplacement: () => Promise<void>;
+  /** Hold native assistant admission from the final idle proof through exit. */
+  acquireShutdownGuard?: () => Promise<{ release(): Promise<void>; commit?(): void }>;
 }): Promise<OrchestratedLifecycleResult> {
   const check = async (): Promise<OrchestratedLifecycleResult | null> => {
     let status: ActiveWorkStatus;
@@ -39,8 +41,17 @@ export async function executeLauncherUpdate(input: {
   await input.prepare();
   const after = await check();
   if (after) return after;
-  await input.stopWorkspaces();
-  await input.scheduleReplacement();
+  const guard = await input.acquireShutdownGuard?.();
+  try {
+    await input.stopWorkspaces();
+    guard?.commit?.();
+    await input.scheduleReplacement();
+  } catch (error) {
+    // Failed preparation/stops keep the same live assistant usable. An
+    // accepted replacement retains admission until the captured host exits.
+    void guard?.release().catch(() => undefined);
+    throw error;
+  }
   return { schemaVersion: 1, accepted: true, operation: "restart-latest-shell", message: "准备完成，正在退出并在后台完成 Launcher 换版。" };
 }
 

@@ -66,6 +66,59 @@ function fixture(options: { stale?: boolean; noReadyFirst?: boolean; graceful?: 
 }
 
 describe("AssistantHost", () => {
+  it("vetoes lifecycle commit for an arriving message and admits the original request once after release", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    const admission = host.beginLifecycleAdmission();
+    await admission.seal();
+    const request = { operation: "send" as const, message: "arriving user", requestId: "original-lifecycle-message" };
+    const contents = { mainFrame: { url: LAUNCHER_ASSISTANT_URL }, isDestroyed: () => false };
+    const sent = invokeAssistant({ sender: contents, senderFrame: contents.mainFrame }, request,
+      { contents, host, setExpanded: vi.fn(), hide: vi.fn() });
+    await Promise.resolve();
+    expect(() => admission.commit()).toThrow("ASSISTANT_LIFECYCLE_BUSY");
+    expect(fetchImpl.mock.calls.filter(call => String(call[0]).endsWith("/messages"))).toHaveLength(0);
+    fetchImpl.mockResolvedValueOnce(Response.json({ accepted: true, sessionId: "s", clientSubmissionId: request.requestId, turnId: "s-turn" }));
+    admission.release();
+    await sent;
+    const writes = fetchImpl.mock.calls.filter(call => String(call[0]).endsWith("/messages"));
+    expect(writes).toHaveLength(1);
+    expect(JSON.parse(String(writes[0][1]?.body))).toMatchObject({ message: request.message, requestId: request.requestId });
+    await host.stop();
+  });
+
+  it("rejects a post-commit message before native admission so the persisted composer can retry its original ID", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    const admission = host.beginLifecycleAdmission();
+    await admission.seal(); admission.commit();
+    const before = fetchImpl.mock.calls.length;
+    const contents = { mainFrame: { url: LAUNCHER_ASSISTANT_URL }, isDestroyed: () => false };
+    await expect(invokeAssistant({ sender: contents, senderFrame: contents.mainFrame },
+      { operation: "send", message: "new draft", requestId: "after-commit" },
+      { contents, host, setExpanded: vi.fn(), hide: vi.fn() })).rejects.toThrow("ASSISTANT_LIFECYCLE_CLOSING");
+    expect(fetchImpl.mock.calls.length).toBe(before);
+    admission.release();
+    await host.stop();
+  });
+
+  it.each(["idle", "active", "unknown"] as const)("observes native %s privately and closes lifecycle admission before its final proof", async state => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    expect(await host.lifecycleStatus()).toBe("idle");
+    await host.start();
+    fetchImpl.mockResolvedValueOnce(Response.json({ schemaVersion: 1, state }));
+    expect(await host.lifecycleStatus()).toBe(state);
+    expect(String(fetchImpl.mock.calls.at(-1)![0])).toBe("http://127.0.0.1:12345/api/assistant/lifecycle-status");
+    const admission = host.beginLifecycleAdmission();
+    await admission.seal();
+    expect(await host.lifecycleStatus()).toBe("unknown");
+    expect(() => host.beginLifecycleAdmission()).toThrow("ASSISTANT_MIGRATION_BUSY");
+    admission.release();
+    fetchImpl.mockResolvedValueOnce(Response.json({ schemaVersion: 1, state: "idle", extra: true }));
+    expect(await host.lifecycleStatus()).toBe("unknown");
+    await host.stop();
+  });
+
   it("binds read-only team pages to the current identity and a fixed endpoint", async () => {
     const { host, fetchImpl } = fixture({ graceful: true });
     await host.start();

@@ -388,6 +388,15 @@ def test_native_model_worker_keeps_default_stores_in_profile(tmp_path, developer
         from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
         from pathlib import Path
 
+        # This checks the real worker's storage ownership, not SDK cold-start
+        # latency. Load provider dependencies before native background probes
+        # compete for their module locks and before the 30s worker deadline.
+        # Match core.llm.client's offline default when importing LiteLLM first.
+        os.environ.setdefault('LITELLM_LOCAL_MODEL_COST_MAP', 'True')
+        import openai
+        import httpx
+        import litellm
+
         requests = []
         class Provider(BaseHTTPRequestHandler):
             def log_message(self, *_args):
@@ -589,6 +598,7 @@ def test_assistant_quiescence_will_not_stop_running_or_queued_turns(assistant_co
                                 mental_model_enabled=None, runtime_status_enabled=None,
                                 turn_mode="chat", write_intent=None, client_submission_id="queued-original")
     before_state = sessions.load_session_chat_state(tmp_path, sid)
+    assert native.lifecycle_status() == {"schemaVersion": 1, "state": "active"}
     with pytest.raises(native.AssistantSessionError, match="ASSISTANT_QUIESCENCE_BUSY"):
         with native.session_quiescence():
             pytest.fail("queued session entered quiescence")
@@ -623,6 +633,51 @@ def test_assistant_quiescence_refuses_pending_or_unknown_approval(assistant_comm
         with native.session_quiescence():
             pytest.fail("unsettled approval entered quiescence")
     assert not native._QUIESCING
+
+
+@pytest.mark.parametrize("approval", [None, "pending", "unknown"])
+def test_lifecycle_status_preserves_session_and_unsettled_approvals(assistant_command_session, monkeypatch, approval):
+    from core.web.services.session import tool_approvals
+    native, sessions, sid, _, _, _ = assistant_command_session
+    monkeypatch.setattr(tool_approvals, "list_tool_approval_requests", lambda _: [] if approval is None else [{"status": approval}])
+    before = sessions.load_session_chat_state(sessions.PROJECT_ROOT, sid)
+    assert native.lifecycle_status() == {"schemaVersion": 1, "state": "idle" if approval is None else "active"}
+    assert not native._QUIESCING
+    assert sessions.load_session_chat_state(sessions.PROJECT_ROOT, sid) == before
+    sessions._set_session_running(sid, True)
+    try:
+        assert native.lifecycle_status() == {"schemaVersion": 1, "state": "active"}
+        assert sessions._is_session_running(sid)
+    finally:
+        sessions._set_session_running(sid, False)
+
+
+def test_lifecycle_status_is_unknown_when_native_observation_fails(assistant_command_session, monkeypatch):
+    native, *_ = assistant_command_session
+    monkeypatch.setattr(native, "_services", lambda: (_ for _ in ()).throw(OSError("private details")))
+    assert native.lifecycle_status() == {"schemaVersion": 1, "state": "unknown"}
+    assert not native._QUIESCING
+
+
+def test_production_facade_transfers_quiescence_to_stopping_without_reopening(assistant_command_session, tmp_path):
+    from core.assistant_runtime.host import NativeFacade
+    from core.chat.conversation_ledger import load_conversation_events
+    native, sessions, sid, *_ = assistant_command_session
+    facade = NativeFacade(tmp_path)
+    assert facade.lifecycle_status() == {"schemaVersion": 1, "state": "idle"}
+    before = load_conversation_events(tmp_path, sid)
+    with pytest.raises(native.AssistantSessionError, match="QUIESCENCE_UNAVAILABLE"):
+        facade.commit_quiescent_shutdown()
+    with facade.session_quiescence():
+        facade.commit_quiescent_shutdown()
+        assert native._STOP_REQUESTED.is_set()
+    assert not native._QUIESCING
+    with pytest.raises(native.AssistantSessionError, match="ASSISTANT_STOPPING"):
+        native.submit("late user command", "lifecycle-late-user")
+    with pytest.raises(native.AssistantSessionError, match="ASSISTANT_STOPPING"):
+        with native._source_command():
+            pytest.fail("late proactive producer reopened")
+    assert load_conversation_events(tmp_path, sid) == before
 
 
 def test_assistant_quiescence_waits_for_command_already_in_admission(assistant_command_session, monkeypatch):

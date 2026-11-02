@@ -15,6 +15,14 @@ WRITE = {**READ, "request_id": "access-a", "enabled": True,
     "expected_public_config_hash": "a" * 64, "expected_eligibility_fingerprint": "b" * 64}
 
 
+def test_native_receipt_query_accepts_dispatch_access_original_request():
+    from core.assistant_runtime.actions import ManagementReceipt
+    parameters = {"project_id": "project-a", "action": "agent_dispatch_access_set", "request_id": "access-original"}
+    assert ManagementReceipt.model_validate(parameters).model_dump() == parameters
+    with pytest.raises(ValidationError):
+        ManagementReceipt.model_validate({**parameters, "action": "agent_arbitrary_config_replace"})
+
+
 def test_launcher_dispatch_access_contract_is_target_only_and_explicitly_governed():
     read = _project_read_contracts()["agent_dispatch_access_get"]
     assert read.model_validate(READ).model_dump() == READ

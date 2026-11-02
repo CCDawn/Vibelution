@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { executeLauncherUpdate, projectLauncherUpdateFreshness, retainKnownDesktopShell } from "../src/process/launcherUpdate.js";
 import { decidePackagedDesktopShellRefresh } from "../src/process/desktopShellFreshness.js";
 import { parseBranchInstanceRecords } from "../src/protocol/launcherControlClient.js";
+import { combineAssistantActiveWork } from "../src/assistant/lifecycleGuard.js";
 import { activeWorkStatusFromLauncherStatus, type ActiveWorkStatus } from "../src/shutdown/shutdownCoordinator.js";
 
 function updateInputs(state: ActiveWorkStatus = { state: "idle", message: "" }) {
@@ -25,10 +26,16 @@ function desktopExitHelper(mainSource: string): string {
 }
 
 describe("guarded local Launcher update", () => {
+  // Parse/transpile the large main module once during collection. The tests
+  // below measure controlled shutdown promises, not a cold TypeScript JIT.
+  const automaticMain = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+  const automaticRefresh = automaticMain.slice(automaticMain.indexOf("async function refreshPackagedDesktopShellIfStale("), automaticMain.indexOf("async function runSmokeAndQuit("));
+  const automaticRestart = automaticMain.slice(automaticMain.indexOf("async function restartLauncherToLatestBuild("), automaticMain.indexOf("async function resolveLauncherUpdateActiveWork("));
+  const automaticCode = transpileModule(desktopExitHelper(automaticMain) + automaticRefresh + automaticRestart
+    + "\nglobalThis.refresh = refreshPackagedDesktopShellIfStale;\nglobalThis.restartLatest = restartLauncherToLatestBuild;\nglobalThis.exitDesktop = exitDesktopShellProcess;", {
+    compilerOptions: { target: ScriptTarget.ES2022 },
+  }).outputText;
   function automaticRefreshHarness() {
-    const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
-    const refresh = main.slice(main.indexOf("async function refreshPackagedDesktopShellIfStale("), main.indexOf("async function runSmokeAndQuit("));
-    const restart = main.slice(main.indexOf("async function restartLauncherToLatestBuild("), main.indexOf("async function resolveLauncherUpdateActiveWork("));
     const sandbox = {
       app: { isPackaged: true, exit: vi.fn() },
       desktopCliArgs: {}, shellRefreshInFlight: false, shellRefreshRequest: null, shutdownApproved: false,
@@ -37,6 +44,7 @@ describe("guarded local Launcher update", () => {
       inspectCurrentDesktopShell: vi.fn().mockResolvedValue({ stale: true, launchBlocking: true }),
       notifyDesktopTray: vi.fn(), executeLauncherUpdate,
       resolveLauncherUpdateActiveWork: vi.fn().mockResolvedValue({ state: "idle", message: "" }),
+      acquireResidentAssistantShutdownGuard: vi.fn().mockResolvedValue({ release: vi.fn().mockResolvedValue(undefined) }),
       ensureLatestLauncher: vi.fn().mockResolvedValue({}),
       createDesktopPathsForApp: () => ({ workspaceRoot: "test-workspace" }),
       desktopPythonPath: () => "pythonw.exe",
@@ -54,11 +62,7 @@ describe("guarded local Launcher update", () => {
       bestEffortStopIsolatedInstancesForShutdown: sandbox.stopIsolatedInstancesForApprovedShutdown,
       stopManagedRuntime: sandbox.stopMainRuntimeForApprovedShutdown,
     });
-    const code = transpileModule(desktopExitHelper(main) + refresh + restart
-      + "\nglobalThis.refresh = refreshPackagedDesktopShellIfStale;\nglobalThis.restartLatest = restartLauncherToLatestBuild;\nglobalThis.exitDesktop = exitDesktopShellProcess;", {
-      compilerOptions: { target: ScriptTarget.ES2022 },
-    }).outputText;
-    runInNewContext(code, sandbox);
+    runInNewContext(automaticCode, sandbox);
     return sandbox;
   }
 
@@ -146,6 +150,50 @@ describe("guarded local Launcher update", () => {
     expect(input.stopMainRuntimeForApprovedShutdown).not.toHaveBeenCalled();
     expect(input.scheduleCurrentDesktopShellRefresh).not.toHaveBeenCalled();
     expect(input.app.exit).not.toHaveBeenCalled();
+  });
+
+  it("does not stop or replace when native admission becomes busy after preparation", async () => {
+    const input = automaticRefreshHarness();
+    input.acquireResidentAssistantShutdownGuard.mockRejectedValue(new Error("ASSISTANT_LIFECYCLE_BUSY"));
+    expect(await input.refresh("")).toBe(false);
+    expect(input.ensureLatestLauncher).toHaveBeenCalledOnce();
+    expect(input.stopMainRuntimeForApprovedShutdown).not.toHaveBeenCalled();
+    expect(input.stopIsolatedInstancesForApprovedShutdown).not.toHaveBeenCalled();
+    expect(input.scheduleCurrentDesktopShellRefresh).not.toHaveBeenCalled();
+    expect(input.stopLauncherAssistant).not.toHaveBeenCalled();
+    expect(input.app.exit).not.toHaveBeenCalled();
+  });
+
+  it("releases the captured native guard when a workspace stop fails", async () => {
+    const input = automaticRefreshHarness();
+    const release = vi.fn().mockResolvedValue(undefined);
+    input.acquireResidentAssistantShutdownGuard.mockResolvedValue({ release });
+    input.stopMainRuntimeForApprovedShutdown.mockRejectedValue(new Error("stop refused"));
+    expect(await input.refresh("")).toBe(false);
+    expect(release).toHaveBeenCalledOnce();
+    expect(input.scheduleCurrentDesktopShellRefresh).not.toHaveBeenCalled();
+  });
+
+  it("vetoes replacement when a new native request arrives while workspaces stop", async () => {
+    const input = automaticRefreshHarness();
+    const release = vi.fn().mockResolvedValue(undefined);
+    const commit = vi.fn(() => { throw new Error("ASSISTANT_LIFECYCLE_BUSY"); });
+    input.acquireResidentAssistantShutdownGuard.mockResolvedValue({ release, commit });
+    expect(await input.refresh("")).toBe(false);
+    expect(input.stopMainRuntimeForApprovedShutdown).toHaveBeenCalledOnce();
+    expect(release).toHaveBeenCalledOnce();
+    expect(input.scheduleCurrentDesktopShellRefresh).not.toHaveBeenCalled();
+    expect(input.app.exit).not.toHaveBeenCalled();
+  });
+
+  it("allows a later explicit update while the failed automatic guard is reconciling release", async () => {
+    const input = automaticRefreshHarness();
+    const release = vi.fn(() => new Promise<void>(() => undefined));
+    input.acquireResidentAssistantShutdownGuard.mockResolvedValue({ release });
+    input.stopMainRuntimeForApprovedShutdown.mockRejectedValueOnce(new Error("stop refused"));
+    expect(await input.refresh("")).toBe(false);
+    expect(await input.restartLatest()).toMatchObject({ accepted: true });
+    expect(input.scheduleCurrentDesktopShellRefresh).toHaveBeenCalledOnce();
   });
 
   it.each(["main", "isolated"])("retains the shell if the %s runtime refuses automatic shutdown", async (target) => {
@@ -462,6 +510,8 @@ describe("Launcher freshness serves the settled state-refresh snapshot before sp
       retainKnownDesktopShell,
       activeWorkStatusFromLauncherStatus,
       parseBranchInstanceRecords,
+      combineAssistantActiveWork,
+      residentAssistantActiveWork: vi.fn().mockResolvedValue({ state: "idle", message: "" }),
       listActiveWorkRuns: vi.fn(() => []),
       // The extracted region declares the real resolveLauncherUpdateActiveWork,
       // so the fallback's task probe flows through this path-aware bridge mock.
@@ -492,6 +542,13 @@ describe("Launcher freshness serves the settled state-refresh snapshot before sp
     });
     expect(input.orchestrateLauncherApi).not.toHaveBeenCalled();
     expect(input.inspectCurrentDesktopShell).not.toHaveBeenCalled();
+  });
+
+  it.each(["active", "unknown"] as const)("retains native %s in the actual main update aggregator with an idle backend", async state => {
+    const input = snapshotFreshnessHarness(settledSnapshotStore({ observedAt: new Date(0) }));
+    input.residentAssistantActiveWork.mockResolvedValue({ state, message: "native" });
+    expect(await input.readFreshness()).toMatchObject({ activeWorkState: state });
+    expect(input.residentAssistantActiveWork).toHaveBeenCalledOnce();
   });
 
   it.each([

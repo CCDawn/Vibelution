@@ -7,6 +7,8 @@ export type AssistantReminderPump = (() => Promise<void>) & {
   drainForMigration(): Promise<void>;
   /** Resume only after the previous drain completed. */
   resumeAfterMigration(): void;
+  /** Automatic shutdown may pause only an already idle sender. */
+  tryDrainForLifecycle(): Promise<void> | null;
 };
 
 /** One main-process sender. Unknown outcomes pause it rather than replaying. */
@@ -188,5 +190,9 @@ export function startAssistantReminderPump(options: {
     for (const callback of deferredCallbacks.splice(0)) callback();
     schedule(0);
   };
-  return Object.assign(stop, { drainForMigration, resumeAfterMigration });
+  const tryDrainForLifecycle = () => {
+    if (stopped || migrationDrain || active || claiming || pendingDialogs.size || pendingClicks.size) return null;
+    return drainForMigration();
+  };
+  return Object.assign(stop, { drainForMigration, resumeAfterMigration, tryDrainForLifecycle });
 }
