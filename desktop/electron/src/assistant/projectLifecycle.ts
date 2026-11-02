@@ -10,6 +10,7 @@ import { resolveRuntimeManagerDir } from "../lifecycle/projectStoragePaths.js";
 import { runWorkbenchLifecycle, type RunWorkbenchLifecycleInput, type WorkbenchLifecycleResult } from "../process/workbenchLifecycle.js";
 import type { AssistantProjectRegistrySnapshot } from "./projectRegistry.js";
 import type { ProjectAdmission, ProjectAdmissionTicket } from "../lifecycle/projectAdmission.js";
+import type { BranchLifecycleCommand } from "../lifecycle/branchLifecycleCommands.js";
 
 export type AssistantProjectLifecycleOperation = "status" | "start" | "stop" | "restart";
 export type AssistantProjectLifecycleTarget = { projectId: string; workspaceRoot: string };
@@ -54,7 +55,7 @@ type Context = AssistantProjectRuntimeContext & { queue: MainLineCommandQueue };
 export type AssistantProjectLifecycleExecution = {
   signal?: AbortSignal;
   /** Main-owned request association, never supplied by an agent or renderer. */
-  onCommand?: (binding: LifecycleRequestBinding, command: MainLineQueuedCommand) => Promise<void>;
+  onCommand?: (binding: LifecycleRequestBinding, command: MainLineQueuedCommand | BranchLifecycleCommand) => Promise<void>;
 };
 const nativeCodes = new Set<ResultCode>(["active_work_blocked", "restart_queued", "lifecycle_intent_superseded", "backend_retire_incomplete", "close_backoff_coalesced"]);
 export function projectLifecycleResultCode(accepted: boolean, code: unknown): ResultCode {
@@ -71,7 +72,7 @@ function canonical(path: string): string { const result = resolve(path); return 
 function absolute(value: unknown): value is string { return typeof value === "string" && value === value.trim() && !value.includes("\0") && isAbsolute(value); }
 
 /** Capture data descriptors once: accessors, symbols and extra capabilities are rejected. */
-function request(value: unknown): Request {
+export function normalizeAssistantProjectLifecycleRequest(value: unknown): Request {
   if (!record(value) || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) return fail("invalid_request");
   const descriptors = Object.getOwnPropertyDescriptors(value);
   if (Reflect.ownKeys(value).length !== 2 || !Object.hasOwn(descriptors, "projectId") || !Object.hasOwn(descriptors, "operation")) return fail("invalid_request");
@@ -80,6 +81,7 @@ function request(value: unknown): Request {
     || typeof op.value !== "string" || !operations.has(op.value)) return fail("invalid_request");
   return { projectId: id.value, operation: op.value as AssistantProjectLifecycleOperation };
 }
+const request = normalizeAssistantProjectLifecycleRequest;
 
 /**
  * An Electron-main capability boundary over the existing native lifecycle owner.

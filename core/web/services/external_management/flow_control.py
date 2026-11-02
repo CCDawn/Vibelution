@@ -270,7 +270,13 @@ class FlowControl:
         except PermissionError:
             raise ManagementError("OPERATOR_REQUIRED", 403) from None
 
-    def save_flow(self, parameters):
+    def _acknowledge(self, action, parameters, marker, result):
+        if marker is None:
+            return result
+        from .operation_receipts import record_success
+        return record_success(self.native, action, parameters, marker, result)
+
+    def save_flow(self, parameters, marker=None):
         request = _request(FlowSave, parameters)
         self._operator()
         try:
@@ -306,8 +312,9 @@ class FlowControl:
                         self._verify(request.team_id, context)
                     except ManagementError:
                         raise ManagementError("FLOW_SAVE_UNCONFIRMED", 409) from None
-            return FlowMutationResponse(action="flow_save", teamId=request.team_id, flowId=request.flow_id,
-                revision=actual["revision"], status="saved", verified=True).model_dump()
+            return self._acknowledge("flow_save", parameters, marker,
+                FlowMutationResponse(action="flow_save", teamId=request.team_id, flowId=request.flow_id,
+                    revision=actual["revision"], status="saved", verified=True).model_dump())
         except ManagementError:
             raise
         except store.Conflict:
@@ -315,7 +322,7 @@ class FlowControl:
         except (OSError, ValueError, TypeError):
             raise ManagementError("FLOW_SAVE_UNCONFIRMED", 409) from None
 
-    def start_flow(self, parameters, *, request_id):
+    def start_flow(self, parameters, *, request_id, marker=None):
         request = _request(FlowStart, parameters)
         self._operator()
         if not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,159}", request_id):
@@ -339,11 +346,45 @@ class FlowControl:
                 self._verify(request.team_id, context)
             except ManagementError:
                 raise ManagementError("FLOW_START_UNCONFIRMED", 409) from None
-            return FlowMutationResponse(action="flow_start", teamId=request.team_id, flowId=request.flow_id,
-                runId=expected_run, revision=result["revision"], status=result["status"], verified=True).model_dump()
+            return self._acknowledge("flow_start", parameters, marker,
+                FlowMutationResponse(action="flow_start", teamId=request.team_id, flowId=request.flow_id,
+                    runId=expected_run, revision=result["revision"], status=result["status"], verified=True).model_dump())
         except ManagementError:
             raise
         except store.Conflict:
             raise ManagementError("STATE_CONFLICT", 409) from None
         except (OSError, ValueError, TypeError):
             raise ManagementError("FLOW_START_UNCONFIRMED", 409) from None
+
+    def read_start_receipt(self, parameters, *, request_id):
+        """Read the native deterministic admission identity, without start_run.
+
+        The private create fingerprint binds the frozen revision and values;
+        current status or a matching Flow alone cannot establish this cause.
+        """
+        request = _request(FlowStart, parameters)
+        if not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,159}", request_id):
+            raise ManagementError("INVALID_INPUT", 422)
+        try:
+            context = self._context(request.team_id)
+            key = "ops-flow-" + digest([str(self.native.project_root), "flow_start", request_id])
+            run_id = "run-" + workflows.digest([request.flow_id, key])[:40]
+            path = context[2] / "runs" / (run_id + ".json")
+            path.lstat()
+            check_path(path)
+            record = ExistingStateSnapshot.read_json(path, strict=True, max_bytes=_MAX_FILE)
+            frozen = Flow.model_validate(record.get("flow")).model_dump()
+            if (record.get("id") != run_id or record.get("teamId") != request.team_id
+                    or frozen["id"] != request.flow_id or frozen["revision"] != request.expectedRevision
+                    or record.get("values") != request.values
+                    or record.get("_createFingerprint") != workflows.digest(
+                        [request.flow_id, request.expectedRevision, request.values])):
+                raise ManagementError("OPERATION_UNCONFIRMED", 503)
+            result = FlowMutationResponse(action="flow_start", teamId=request.team_id, flowId=request.flow_id,
+                runId=run_id, revision=record["revision"], status=record["status"], verified=True).model_dump()
+            self._verify(request.team_id, context)
+            return result
+        except ManagementError:
+            raise
+        except (OSError, ValueError, TypeError, KeyError):
+            raise ManagementError("OPERATION_UNCONFIRMED", 503) from None

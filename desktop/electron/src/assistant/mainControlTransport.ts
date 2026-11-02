@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { isAppearanceAction, parseAppearanceClaim, appearanceControlResult, type AppearanceMainControlRequest } from "./appearanceControlProtocol.js";
 import { isBrowserAction, parseBrowserClaim, browserControlResult, type BrowserMainControlRequest } from "../browser/browserControlProtocol.js";
+import { isConfigurationReferenceRequest, parseConfigurationReferenceRequest, configurationReferenceResult, type ConfigurationReferenceRequest } from "./configurationReferenceProtocol.js";
 /** Closed, generation-scoped transport over the existing private host connection.
  * It has no credentials, paths, scheduler, transcript or business-state writer.
  */
@@ -21,7 +22,7 @@ export type InitialMigrationMainControlRequest = Omit<HistoryMainControlRequest,
 };
 export type InitialMigrationReceiptRequest = { deliveryId: string; action: "initial_migration_receipt"; projectId: string;
   category: "personal" | "knowledge" | "reminder_handoff"; operationId: string };
-export type MainControlRequest = ProjectMainControlRequest | AppearanceMainControlRequest | BrowserMainControlRequest | HistoryMainControlRequest | HistoryReceiptRequest | AffairsSyncMainControlRequest | EpisodicSyncMainControlRequest | InitialMigrationMainControlRequest | InitialMigrationReceiptRequest;
+export type MainControlRequest = ProjectMainControlRequest | AppearanceMainControlRequest | BrowserMainControlRequest | HistoryMainControlRequest | HistoryReceiptRequest | AffairsSyncMainControlRequest | EpisodicSyncMainControlRequest | InitialMigrationMainControlRequest | InitialMigrationReceiptRequest | ConfigurationReferenceRequest;
 type PublicResult = Record<string, unknown>;
 function isBrowserRequest(request: MainControlRequest): request is BrowserMainControlRequest { return isBrowserAction(request.action); }
 const ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/;
@@ -41,6 +42,7 @@ export function parseMainControlClaim(value: unknown): MainControlRequest | null
   if (!closed(value, ["schemaVersion", "request"]) || value.schemaVersion !== 1) return invalid();
   if (value.request === null) return null;
   const row = value.request;
+  if (row && typeof row === "object" && isConfigurationReferenceRequest({ action: Object.getOwnPropertyDescriptor(row, "action")?.value })) return parseConfigurationReferenceRequest(row);
   if (row && typeof row === "object" && isBrowserAction(Object.getOwnPropertyDescriptor(row, "action")?.value)) return parseBrowserClaim(row);
   if (row && typeof row === "object" && isAppearanceAction(Object.getOwnPropertyDescriptor(row,"action")?.value)) return parseAppearanceClaim(row);
   if (row && typeof row === "object" && Object.getOwnPropertyDescriptor(row, "action")?.value === "history_import_receipt") {
@@ -146,6 +148,7 @@ export function parseEpisodicSyncResult(input: { projectId: string; previewId: s
 }
 /** Fail closed rather than relay arbitrary errors, native rows, paths or messages. */
 export function projectMainControlResult(request: MainControlRequest, value: unknown): PublicResult {
+  if (isConfigurationReferenceRequest(request)) return configurationReferenceResult(request, value);
   if (isBrowserRequest(request)) return browserControlResult(request, value);
   if (request.action === "launcher_theme_get" || request.action === "launcher_theme_set" || request.action === "operator_image_upload") return appearanceControlResult(request,value);
   if (request.action === "initial_migration_receipt") {
@@ -249,39 +252,51 @@ export async function runMainControlPump(options: {
   isCurrent: () => boolean;
   invoke: (path: string, method: "GET" | "POST", body?: object) => Promise<unknown>;
   onRequest: (request: MainControlRequest, signal?: AbortSignal) => Promise<unknown>;
-  onFailure: () => void;
+  /** Private native admission owners distinguish rejected from unknown ACKs. */
+  onSettled?: (request: MainControlRequest, result: PublicResult, accepted: boolean | undefined) => void | Promise<void>;
+  onProgress?: () => void;
+  onFailure: (uncertainRequests?: readonly MainControlRequest[]) => void;
 }): Promise<void> {
   let failed = false;
-  const active = new Set<string>();
+  const active = new Map<string, MainControlRequest>();
   const current = () => !failed && !options.signal.aborted && options.isCurrent();
   const worker = async () => {
+    let uncertain: MainControlRequest | undefined;
     try {
       while (current()) {
         const claimed = await options.invoke("/api/assistant/main-control/next", "GET");
         if (!current()) return;
         const request = parseMainControlClaim(claimed);
+        options.onProgress?.();
         if (!request) continue; // The host bounds empty long polls to ten seconds.
         if (active.has(request.deliveryId)) throw new Error("ASSISTANT_MAIN_CONTROL_DUPLICATE");
-        active.add(request.deliveryId);
+        active.set(request.deliveryId, request); uncertain = request;
         try {
           let value: unknown;
           try {
             if (request.action === "operator_image_upload" || request.action === "history_import" || request.action === "affairs_sync" || request.action === "episodic_sync" || request.action === "initial_migration_queue") value = await options.onRequest(request, AbortSignal.any([options.signal,AbortSignal.timeout(request.timeoutMs)]));
-            else if (isBrowserRequest(request) || request.action === "launcher_theme_get" || request.action === "launcher_theme_set") value = await options.onRequest(request,options.signal);
+            else if (isBrowserRequest(request) || isConfigurationReferenceRequest(request) || request.action === "launcher_theme_get" || request.action === "launcher_theme_set") value = await options.onRequest(request,options.signal);
             else value = await options.onRequest(request);
           }
           catch { /* Unknown result is queried by the same request ID, never re-executed here. */ }
-          if (!current()) return;
           const result = projectMainControlResult(request, value);
-          const acknowledgement = await options.invoke("/api/assistant/main-control/settle", "POST",
-            { schemaVersion: 1, deliveryId: request.deliveryId, result });
-          if (!closed(acknowledgement, ["schemaVersion", "accepted"]) || acknowledgement.schemaVersion !== 1
-            || typeof acknowledgement.accepted !== "boolean") throw new Error("ASSISTANT_MAIN_CONTROL_INVALID");
+          if (!current()) { await options.onSettled?.(request, result, undefined); return; }
+          try {
+            const acknowledgement = await options.invoke("/api/assistant/main-control/settle", "POST",
+              { schemaVersion: 1, deliveryId: request.deliveryId, result });
+            if (!closed(acknowledgement, ["schemaVersion", "accepted"]) || acknowledgement.schemaVersion !== 1
+              || typeof acknowledgement.accepted !== "boolean") throw new Error("ASSISTANT_MAIN_CONTROL_INVALID");
+            await options.onSettled?.(request, result, acknowledgement.accepted);
+            uncertain = undefined;
+          } catch (error) {
+            await options.onSettled?.(request, result, undefined);
+            throw error;
+          }
           // accepted:false is an expired waiter, not permission to repeat an effect.
         } finally { active.delete(request.deliveryId); }
       }
     } catch {
-      if (current()) { failed = true; options.onFailure(); }
+      if (current()) { failed = true; options.onFailure([...active.values(), ...(uncertain ? [uncertain] : [])]); }
     }
   };
   await Promise.all(Array.from({ length: 4 }, worker));

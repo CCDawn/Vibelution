@@ -94,6 +94,8 @@ class ManagementService:
             index = self.store.read(client_path)
             if index is not None:
                 grant = self.store.read(self.store.path("subjects", index["subject_id"]))
+                if grant and grant.get("revoked") is True:
+                    raise ManagementError("SUBJECT_REVOKED")
                 if (not grant or grant.get("binding") != current.binding or grant.get("authority") != current.signature
                     or grant.get("scopes") != scopes):
                     raise ManagementError("SUBJECT_GRANT_CONFLICT", 409)
@@ -114,6 +116,8 @@ class ManagementService:
         grant = self.store.read(self.store.path("subjects", subject))
         if not grant or not secrets.compare_digest(str(grant.get("subject_capability") or ""), capability):
             raise ManagementError("SUBJECT_DENIED")
+        if grant.get("revoked") is True:
+            raise ManagementError("SUBJECT_REVOKED")
         current = self.identity()
         if grant.get("binding") != current.binding or grant.get("authority") != current.signature:
             raise ManagementError("TARGET_BINDING_CHANGED", 409)
@@ -133,6 +137,11 @@ class ManagementService:
     def authorization_status(self, subject, capability):
         from .contracts import AuthorizationStateResponse
         return AuthorizationStateResponse.model_validate(self._authorization_upgrades().current_subject(subject, capability)).model_dump()
+
+    def _authorization_reductions(self):
+        from .authorization_reduction import ReductionOwner
+        return ReductionOwner(self.store,
+            lambda subject, capability, expected=None: self._authorize(subject, capability, None, expected), self.identity)
 
     def _legacy_observations(self):
         from .legacy_observation import LegacyObservationOwner
@@ -230,7 +239,7 @@ class ManagementService:
         except ValidationError:
             raise ManagementError("SOURCE_UNAVAILABLE", 503) from None
 
-    def read_runtime(self, subject, capability, operation, parameters):
+    def read_runtime(self, subject, capability, operation, parameters, *, legacy=False):
         from .runtime_contracts import (RuntimeOperationsQuery, RuntimeOperationsResponse,
             RuntimeOperationQuery, RuntimeOperationResponse)
         grant = self._authorize(subject, capability, "operations:read")
@@ -243,9 +252,42 @@ class ManagementService:
         except ValidationError:
             raise ManagementError("INVALID_INPUT", 422) from None
         try:
-            result = response_type.model_validate(reader(query)).model_dump()
+            raw = response_type.model_validate(reader(query)).model_dump()
+            if legacy:
+                from .runtime_legacy_contracts import legacy_runtime_result
+                result = legacy_runtime_result(raw, operation)
+            else:
+                result = raw
         except (ValidationError, ValueError, TypeError, OSError):
             raise ManagementError("OPERATION_SOURCE_UNAVAILABLE", 503) from None
+        if self._authorize(subject, capability, "operations:read") != grant:
+            raise ManagementError("AUTHORIZATION_CONFLICT", 409)
+        return result
+
+    def read_knowledge_catalog(self, subject, capability, parameters):
+        from .knowledge_catalog_contracts import KnowledgeCatalogQuery, KnowledgeCatalogResponse
+        grant = self._authorize(subject, capability, "knowledge:catalog:read")
+        try:
+            query = KnowledgeCatalogQuery.model_validate(parameters)
+        except ValidationError:
+            raise ManagementError("INVALID_INPUT", 422) from None
+        try:
+            result = KnowledgeCatalogResponse.model_validate(self.native.read_knowledge_catalog(query)).model_dump()
+        except (ValidationError, ValueError, OSError, TypeError):
+            raise ManagementError("KNOWLEDGE_DIRECTORY_UNAVAILABLE", 503) from None
+        if self._authorize(subject, capability, "knowledge:catalog:read") != grant:
+            raise ManagementError("AUTHORIZATION_CONFLICT", 409)
+        return result
+
+    def read_research(self, subject, capability, parameters):
+        from .research_contracts import ResearchReadQuery, ResearchReadResponse
+        from .research_control import read
+        grant = self._authorize(subject, capability, "operations:read")
+        try:
+            query = ResearchReadQuery.model_validate(parameters)
+        except ValidationError:
+            raise ManagementError("INVALID_INPUT", 422) from None
+        result = ResearchReadResponse.model_validate(read(self.native, query.model_dump())).model_dump()
         if self._authorize(subject, capability, "operations:read") != grant:
             raise ManagementError("AUTHORIZATION_CONFLICT", 409)
         return result
@@ -464,8 +506,13 @@ class ManagementService:
     def _confirm(self, record: dict) -> bool:
         if record["action"] in PLATFORM_ACTIONS:
             try:
+                if not record.get("nativeResult"):
+                    from .platform_actions import reconcile
+                    proof = reconcile(self.native, record["action"], record["parameters"], record["marker"])
+                    if proof["state"] == "confirmed":
+                        record["nativeResult"] = proof["result"]
                 result = native_result(record["action"], record.get("nativeResult"))
-                verify_target(record["action"], result, record["parameters"])
+                verify_target(record["action"], result, record["parameters"], record["marker"])
                 record["receipt"] = {"status": "completed", "action": record["action"], "requestId": record["requestId"],
                     "verified": True, RESULT_FIELDS[record["action"]]: result}
                 return True
@@ -537,6 +584,13 @@ class ManagementService:
             envelope = Envelope.model_validate(payload)
         except ValidationError:
             raise ManagementError("INVALID_INPUT", 422) from None
+        if action in {"authorization_reduce", "authorization_revoke"}:
+            try:
+                parameters = ACTION_MODELS[action].model_validate(envelope.parameters).model_dump()
+            except ValidationError:
+                raise ManagementError("INVALID_INPUT", 422) from None
+            return self._authorization_reductions().invoke(subject, capability, action, envelope.request_id,
+                expected_binding=envelope.expected_binding.model_dump(), **parameters)
         grant = self._authorize(subject, capability, ACTION_SCOPES[action], envelope.expected_binding.model_dump())
         try:
             from json import dumps
@@ -608,6 +662,8 @@ class ManagementService:
             raise ManagementError("UNKNOWN_ACTION", 404)
         if action == "authorization_upgrade":
             return self._authorization_upgrades().receipt(subject, capability, request_id)
+        if action in {"authorization_reduce", "authorization_revoke"}:
+            return self._authorization_reductions().receipt(subject, capability, action, request_id)
         if action == "team_run":
             return self.team_receipt(subject, capability, request_id)
         self._authorize(subject, capability, ACTION_SCOPES[action])
@@ -629,6 +685,45 @@ class ManagementService:
         grant = self._authorize(subject, capability, "teams:read")
         self._request_key(subject, "team_run", request_id)
         return self._team_intents(grant).receipt(request_id)
+
+    def reconcile_request(self, subject, capability, action, request_id):
+        from .reconciliation_contracts import ReconciliationQuery, ReconciliationResponse, PUBLIC_REFERENCE_FIELDS
+        from .platform_actions import reconcile
+        try:
+            query = ReconciliationQuery(action=action, request_id=request_id)
+        except ValidationError:
+            raise ManagementError("INVALID_INPUT", 422) from None
+        if action not in ACTION_MODELS or action in {"team_run", "authorization_upgrade", "authorization_reduce", "authorization_revoke"}:
+            raise ManagementError("RECONCILIATION_UNAVAILABLE", 409)
+        grant = self._authorize(subject, capability, ACTION_SCOPES[action])
+        key = self._request_key(subject, query.action, query.request_id)
+        path = self.store.path("requests", key)
+        with self.store.lock("requests", key):
+            record = self.store.read(path)
+            if record is None:
+                raise ManagementError("REQUEST_UNAVAILABLE", 404)
+            if (record.get("binding") != grant["binding"] or record.get("action") != action
+                    or record.get("requestId") != request_id or not isinstance(record.get("parameters"), dict)
+                    or not isinstance(record.get("marker"), dict) or record["marker"].get("subjectId") != subject
+                    or record["marker"].get("requestKey") != key
+                    or record["marker"].get("requestFingerprint") != digest(record["parameters"])):
+                raise ManagementError("TARGET_BINDING_CHANGED", 409)
+            if record.get("failure"):
+                raise ManagementError(record["failure"]["code"], record["failure"]["status_code"])
+            if action == "agent_create" and record.get("parameters", {}).get("capability_preset"):
+                self._authorize(subject, capability, "agents:create:files")
+            proof = (reconcile(self.native, action, record["parameters"], record["marker"]) if action in PLATFORM_ACTIONS else
+                {"state": "requires_review", "evidence": "none", "code": "NATIVE_OUTCOME_REQUIRES_REVIEW"})
+            if not record.get("receipt") and self._confirm(record):
+                self.store.write(path, record)
+            if (record.get("receipt") or {}).get("status") == "completed" and proof["state"] != "confirmed":
+                proof = {"state": "confirmed", "evidence": "management_receipt", "code": "MANAGEMENT_RECEIPT_CONFIRMED"}
+            result = ReconciliationResponse(action=action, requestId=request_id, state=proof["state"], evidence=proof["evidence"],
+                code=proof["code"], verified=proof["state"] == "confirmed", requiresReview=proof["state"] != "confirmed",
+                target={k: str(v) for k, v in record["parameters"].items() if k in PUBLIC_REFERENCE_FIELDS and v}, untrustedContent=True).model_dump()
+        if self._authorize(subject, capability, ACTION_SCOPES[action]) != grant:
+            raise ManagementError("AUTHORIZATION_CONFLICT", 409)
+        return result
 
     def team_result(self, subject: str, capability: str, request_id: str) -> dict:
         from .contracts import TeamResultResponse

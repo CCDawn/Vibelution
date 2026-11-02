@@ -1,5 +1,5 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
@@ -65,6 +65,7 @@ export type PortIsFree = (port: number, host: string) => boolean | Promise<boole
 export type ClaimStartInput = {
   instanceId: string;
   projectRoot: string;
+  expectedProjectRoot?: string;
   branch?: string;
   operation?: "start" | "restart";
   commandId: string;
@@ -420,6 +421,17 @@ async function allocateControl(
   return chosen;
 }
 
+function assertExpectedProjectRoot(payload: RegistryPayload, input: { instanceId: string; projectRoot?: string; expectedProjectRoot?: string }): void {
+  if (input.expectedProjectRoot === undefined) return;
+  const key = (root: string) => process.platform === "win32" ? resolve(root).toLowerCase() : resolve(root);
+  const expected = input.expectedProjectRoot;
+  const entry = payload.instances[input.instanceId];
+  if (!expected || !input.projectRoot || key(input.projectRoot) !== key(expected)
+      || entry && (typeof entry.projectRoot !== "string" || key(entry.projectRoot) !== key(expected))) {
+    throw new Error("INSTANCE_PROJECT_ROOT_MISMATCH");
+  }
+}
+
 export async function applyClaimStart(
   payload: RegistryPayload,
   input: ClaimStartInput
@@ -428,6 +440,7 @@ export async function applyClaimStart(
   if (!instanceId) {
     throw new Error("instance_id must not be empty");
   }
+  assertExpectedProjectRoot(payload, input);
   const entry = ensureEntry(payload, instanceId);
   const currentStatus = statusOf(entry);
   if (Boolean(entry.cleanupInProgress)) {
@@ -501,12 +514,13 @@ export async function applyClaimStart(
 
 export function applyClaimStop(
   payload: RegistryPayload,
-  input: { instanceId: string; projectRoot?: string; nowMs?: number; commandId?: string }
+  input: { instanceId: string; projectRoot?: string; expectedProjectRoot?: string; nowMs?: number; commandId?: string }
 ): { ok: true; entry: RegistryEntry } {
   const instanceId = String(input.instanceId || "").trim();
   if (!instanceId) {
     throw new Error("instance_id must not be empty");
   }
+  assertExpectedProjectRoot(payload, input);
   const entry = ensureEntry(payload, instanceId);
   const generation = positiveInt(entry.generation) + 1;
   // A stop claim must not inherit an already elapsed start deadline. Without
@@ -551,6 +565,7 @@ export function applyClaimStopIfGeneration(
     expectedGeneration: number;
     expectedCommandId?: string;
     projectRoot?: string;
+    expectedProjectRoot?: string;
     nowMs?: number;
     commandId?: string;
   }
@@ -560,6 +575,7 @@ export function applyClaimStopIfGeneration(
     throw new Error("instance_id must not be empty");
   }
   const entry = payload.instances[instanceId];
+  assertExpectedProjectRoot(payload, input);
   if (!entry || positiveInt(entry.generation) !== positiveInt(input.expectedGeneration)) {
     return { applied: false, entry: entry ? { ...entry } : {} };
   }
@@ -843,6 +859,7 @@ export async function claimStart(
   return mutateRegistry(
     registryPath,
     async (payload) => {
+      assertExpectedProjectRoot(payload, input);
       applyReclaimStaleInFlightStart(payload, {
         instanceId: input.instanceId,
         nowMs: input.nowMs,
@@ -861,7 +878,7 @@ export async function claimStart(
 
 export async function claimStop(
   registryPath: string,
-  input: { instanceId: string; projectRoot?: string; nowMs?: number; commandId?: string },
+  input: { instanceId: string; projectRoot?: string; expectedProjectRoot?: string; nowMs?: number; commandId?: string },
   options: RegistryStoreOptions = {}
 ): Promise<{ ok: true; entry: RegistryEntry }> {
   return mutateRegistry(registryPath, (payload) => applyClaimStop(payload, input), options);
@@ -874,6 +891,7 @@ export async function claimStopIfGeneration(
     expectedGeneration: number;
     expectedCommandId?: string;
     projectRoot?: string;
+    expectedProjectRoot?: string;
     nowMs?: number;
     commandId?: string;
   },

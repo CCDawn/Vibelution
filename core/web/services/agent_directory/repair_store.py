@@ -2866,6 +2866,8 @@ def save_state(state: dict[str, Any]) -> dict[str, Any]:
             materialize_agent_config_identity(agent)
         payload = s._build_agent_registry_payload_for_storage(state)
         s._guard_against_suspicious_registry_shrink(payload)
-        s._atomic_write_json(s.registry_path(), payload)
+        from core.infrastructure.model_reference_fence import commit_reference_metadata
+        target = s.registry_path()
+        commit_reference_metadata(target, payload, surface="agents", write=lambda: s._atomic_write_json(target, payload))
         s._invalidate_repaired_state_cache()
         return payload

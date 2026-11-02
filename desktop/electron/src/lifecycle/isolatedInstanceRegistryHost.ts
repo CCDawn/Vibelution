@@ -85,6 +85,7 @@ type IsolatedStartRetireDependencies = {
       expectedGeneration: number;
       expectedCommandId?: string;
       projectRoot?: string;
+      expectedProjectRoot?: string;
       nowMs?: number;
       commandId?: string;
     }
@@ -310,6 +311,7 @@ async function claimResolvedIsolatedStart(
   input: {
     operation?: "start" | "restart";
     commandId: string;
+    expectedProjectRoot?: string;
     ownerPid?: number;
     ownerId?: string;
     registryPath?: string;
@@ -324,6 +326,7 @@ async function claimResolvedIsolatedStart(
     {
       instanceId: target.instanceId,
       projectRoot: target.projectRoot,
+      expectedProjectRoot: input.expectedProjectRoot,
       branch: target.branch,
       slotFields: {
         slotKey: normalizeInstanceKey(target.projectRoot),
@@ -352,6 +355,7 @@ export async function prepareIsolatedStart(input: {
   branchInstances: unknown;
   operation?: "start" | "restart";
   commandId: string;
+  expectedProjectRoot?: string;
   ownerPid?: number;
   ownerId?: string;
   registryPath?: string;
@@ -379,6 +383,7 @@ export async function prepareIsolatedStart(input: {
   const retired = await retireIsolatedRuntimeBeforeStart({
     instanceId: target.instanceId,
     workspaceRoot: target.projectRoot,
+    expectedProjectRoot: input.expectedProjectRoot,
     registryPath: input.registryPath,
     nowMs,
     signal: input.signal,
@@ -467,6 +472,7 @@ function isolatedRetireIncompleteMessage(input: {
 export async function retireIsolatedRuntimeBeforeStart(input: {
   instanceId: string;
   workspaceRoot: string;
+  expectedProjectRoot?: string;
   registryPath?: string;
   nowMs?: number;
   signal?: AbortSignal;
@@ -492,6 +498,9 @@ export async function retireIsolatedRuntimeBeforeStart(input: {
   }
   const current = await dependencies.readRegistry(registryPath);
   const existing = current.instances[input.instanceId];
+  if (input.expectedProjectRoot && existing && !sameProjectRoot(String(existing.projectRoot || ""), input.expectedProjectRoot)) {
+    throw new Error("INSTANCE_PROJECT_ROOT_MISMATCH");
+  }
   if (!entryHasRegisteredRuntime(existing)) {
     return { ok: true };
   }
@@ -521,6 +530,7 @@ export async function retireIsolatedRuntimeBeforeStart(input: {
     expectedGeneration: positiveInt(existing.generation),
     expectedCommandId: String(existing.commandId || "").trim() || undefined,
     projectRoot: String(existing.projectRoot || input.workspaceRoot || "").trim(),
+    expectedProjectRoot: input.expectedProjectRoot,
     commandId: `retire-before-start:${randomUUID()}`,
     nowMs: input.nowMs
   });
@@ -749,6 +759,7 @@ export async function claimIsolatedStop(input: {
   instanceId: string;
   branchInstances?: unknown;
   projectRoot?: string;
+  expectedProjectRoot?: string;
   commandId?: string;
   registryPath?: string;
   storeOptions?: RegistryStoreOptions;
@@ -761,6 +772,7 @@ export async function claimIsolatedStop(input: {
     {
       instanceId: input.instanceId,
       projectRoot: input.projectRoot || target?.projectRoot || "",
+      expectedProjectRoot: input.expectedProjectRoot,
       commandId: input.commandId
     },
     input.storeOptions

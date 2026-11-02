@@ -598,6 +598,17 @@ def apply_operator_config_transaction(
     *,
     participants: Sequence[TransactionParticipant] = (),
 ) -> dict[str, Any]:
+    from core.infrastructure.model_reference_fence import model_reference_fence
+    # One lock order for every operator-config writer and reference writer.
+    with model_reference_fence(prepared.config_path):
+        return _apply_operator_config_transaction(prepared, participants=participants)
+
+
+def _apply_operator_config_transaction(
+    prepared: PreparedOperatorConfigTransaction,
+    *,
+    participants: Sequence[TransactionParticipant] = (),
+) -> dict[str, Any]:
     participant_list = _validate_participants(participants)
     applied: list[TransactionParticipant] = []
     rollback_errors: list[str] = []

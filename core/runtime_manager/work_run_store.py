@@ -8,6 +8,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass, field
+from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -390,6 +391,13 @@ def _record_work_run_event(
         return
 
 
+def _reference_fence_for_kind(run_kind):
+    if normalize_run_kind(run_kind) != "supervised":
+        return nullcontext()
+    from core.infrastructure.model_reference_fence import model_reference_fence
+    return model_reference_fence()
+
+
 @dataclass(frozen=True)
 class WorkRunStore:
     root: Path = field(default_factory=default_work_runs_dir)
@@ -433,6 +441,23 @@ class WorkRunStore:
         default.update(payload)
         return default
 
+    def _validate_model_reference_transition(self, run_kind, before_ids, after_ids, *, candidate=None):
+        if normalize_run_kind(run_kind) != "supervised":
+            return
+        from core.infrastructure.model_reference_fence import (
+            unavailable_retired_models, metadata_binding_reference_keys, assert_model_reference_additions,
+        )
+        if not unavailable_retired_models():
+            return
+        def keys(ids, replacement=None):
+            result = set()
+            for run_id in ids:
+                payload = replacement if replacement is not None and snapshot_run_id(replacement) == run_id else self.load_snapshot(run_kind, run_id)
+                if isinstance(payload, dict) and resolve_work_run_activity(payload)["blocksLifecycle"]:
+                    result.update((run_id, *entry) for entry in metadata_binding_reference_keys(payload, surface="supervised"))
+            return result
+        assert_model_reference_additions(keys(before_ids), keys(after_ids, candidate))
+
     def save_run_index(
         self,
         run_kind: str,
@@ -443,7 +468,7 @@ class WorkRunStore:
         active_run_ids: Iterable[str] | None = None,
         emit_event: bool = True,
     ) -> dict[str, Any]:
-        with _STORE_LOCK, self._index_lock(run_kind):
+        with _STORE_LOCK, self._index_lock(run_kind), _reference_fence_for_kind(run_kind):
             payload = self.load_run_index(run_kind)
             next_latest_run_id = str(latest_run_id or "").strip()
             next_recent_run_ids = _bounded_recent_run_ids(
@@ -460,6 +485,7 @@ class WorkRunStore:
             )
             next_active_run_ids = _bounded_active_run_ids(raw_active_run_ids)
             next_active_run_id = next_active_run_ids[-1] if next_active_run_ids else ""
+            self._validate_model_reference_transition(run_kind, _index_active_run_ids(payload), next_active_run_ids)
             payload.update(
                 {
                     "updatedAt": _now_iso(),
@@ -528,7 +554,7 @@ class WorkRunStore:
         effective_active_run_id = requested_active_run_id
         if requested_active_run_id == run_id and not _snapshot_blocks_active_index(snapshot):
             effective_active_run_id = ""
-        with _STORE_LOCK, self._index_lock(run_kind):
+        with _STORE_LOCK, self._index_lock(run_kind), _reference_fence_for_kind(run_kind):
             previous_payload = self.load_snapshot(run_kind, run_id)
             previous_signature = (
                 _snapshot_lifecycle_signature(previous_payload, active_run_id=effective_active_run_id)
@@ -551,6 +577,7 @@ class WorkRunStore:
             if effective_active_run_id and effective_active_run_id != run_id and effective_active_run_id not in next_active_run_ids:
                 next_active_run_ids.append(effective_active_run_id)
             next_active_run_id = next_active_run_ids[-1] if next_active_run_ids else ""
+            self._validate_model_reference_transition(run_kind, current_active_run_ids, next_active_run_ids, candidate=payload)
             current_recent_run_ids = _bounded_recent_run_ids(current_index.get("recentRunIds"))
             index_already_current = (
                 current_active_run_ids == next_active_run_ids
@@ -626,7 +653,7 @@ class WorkRunStore:
         # The snapshot patch is itself a cross-process RMW; the per-kind index
         # lock keeps it from reverting a concurrent persist_snapshot's fuller
         # write (last stale touch would otherwise clobber the new snapshot).
-        with _STORE_LOCK, self._index_lock(run_kind):
+        with _STORE_LOCK, self._index_lock(run_kind), _reference_fence_for_kind(run_kind):
             path = self.runs_dir(run_kind) / f"{normalized}.json"
             payload = _load_json(path)
             if not payload:
@@ -653,7 +680,7 @@ class WorkRunStore:
         which makes the prune safe; latest/history entries stay untouched.
         """
 
-        with _STORE_LOCK, self._index_lock(run_kind):
+        with _STORE_LOCK, self._index_lock(run_kind), _reference_fence_for_kind(run_kind):
             active_run_ids = _bounded_active_run_ids(_index_active_run_ids(self.load_run_index(run_kind)))
             if not active_run_ids:
                 return []
@@ -855,7 +882,7 @@ class WorkRunStore:
         normalized = normalize_run_id(run_id)
         runs_dir = self.runs_dir(run_kind)
         target = runs_dir / f"{normalized}.json"
-        with _STORE_LOCK, self._index_lock(run_kind):
+        with _STORE_LOCK, self._index_lock(run_kind), _reference_fence_for_kind(run_kind):
             index = self.load_run_index(run_kind)
             active_run_ids = _bounded_active_run_ids(_index_active_run_ids(index))
             latest_run_id = str(index.get("latestRunId") or "").strip()

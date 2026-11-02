@@ -104,6 +104,224 @@ def _load_json(path: Path) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def read_existing_model_reference_metadata(workspace_root: Path, runtime_root: Path) -> dict[str, Any]:
+    """Strict metadata-only collector for an already-proven owner route.
+
+    Unlike the legacy best-effort presentation index, unreadable/malformed
+    authorities never become empty success. The caller supplies trusted native
+    routes, not model-selected paths. No Prompt files, transcript, journal,
+    source documents or SQLite Prompt/config bodies are selected. Native JSON
+    metadata is decoded, then only declared model-binding fields are retained.
+    """
+    from core.assistant_runtime.migration_io import check_path, read_stable_file, strict_json
+    from core.chat.conversation_store import runtime as native_sqlite
+    from core.web.services.external_management.store import digest
+
+    workspace, runtime = Path(workspace_root), Path(runtime_root)
+    references, stamps, issues = [], [], set()
+    remaining = 64 * 1024 * 1024
+    maximum = 100_000
+
+    def load(path, *, required=False):
+        nonlocal remaining
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            stamps.append((str(path), "missing"))
+            if required:
+                raise ValueError("Required reference authority missing")
+            return None
+        snapshot = read_stable_file(path, min(8 * 1024 * 1024, remaining))
+        remaining -= len(snapshot.raw)
+        stamps.append((str(path), snapshot.sha256))
+        value = strict_json(snapshot.raw)
+        if not isinstance(value, dict):
+            raise ValueError("Invalid reference metadata")
+        return value
+
+    def bindings(payload, source, owner_type, owner_id):
+        if not isinstance(payload, dict):
+            raise ValueError("Invalid reference binding")
+        values = []
+        for field in ("modelId", "dialogueModelId", "agentTemplateLabel"):
+            if field in payload:
+                if not isinstance(payload[field], str):
+                    raise ValueError("Invalid model identity")
+                values.append((field, payload[field]))
+        if "llmBindings" in payload:
+            if not isinstance(payload["llmBindings"], dict) or len(payload["llmBindings"]) > 64:
+                raise ValueError("Invalid binding slots")
+            for slot, binding in payload["llmBindings"].items():
+                if not isinstance(binding, dict) or not isinstance(binding.get("modelId", ""), str):
+                    raise ValueError("Invalid model binding")
+                values.append((f"llmBindings.{slot}.modelId", binding.get("modelId", "")))
+        for field, raw in values:
+            value = raw.strip()
+            if value:
+                if len(value) > 320 or len(references) >= maximum:
+                    raise ValueError("Reference metadata exceeds limit")
+                references.append({"modelId": value, "source": source, "ownerType": owner_type,
+                    "ownerId": owner_id, "field": field})
+
+    def rows(payload, field):
+        value = payload.get(field)
+        if not isinstance(value, list) or len(value) > maximum or any(not isinstance(row, dict) for row in value):
+            raise ValueError("Invalid reference owner registry")
+        return value
+
+    try:
+        check_path(workspace)
+    except (OSError, ValueError):
+        return {"complete": False, "references": [], "digest": digest([str(workspace), "unavailable"]),
+                "issues": ["workspace_unavailable"]}
+    try:
+        registry = load(workspace / "agents" / "agents.json")
+        if registry is not None:
+            seen = set()
+            for row in rows(registry, "agents"):
+                identity = row.get("agentId")
+                if not isinstance(identity, str) or not identity or identity in seen:
+                    raise ValueError("Invalid Agent owner")
+                seen.add(identity)
+                bindings(row, "agent_registry", "agent", identity)
+    except (OSError, ValueError, TypeError, KeyError):
+        issues.add("agent_registry_unavailable")
+    try:
+        path = check_path(workspace / "chat" / "conversations.sqlite3")
+        def sqlite_sources():
+            result = []
+            for candidate in (path, Path(str(path) + "-wal")):
+                try:
+                    info = candidate.lstat()
+                except FileNotFoundError:
+                    result.append(None)
+                else:
+                    check_path(candidate)
+                    result.append((info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns))
+            return result
+        sources = sqlite_sources()
+        # SQLite may create WAL/SHM sidecars even for mode=ro. A quiescent
+        # main file needs immutable=1 to avoid that side effect. Live WAL is
+        # read only when its native SHM already exists. A writer creating WAL
+        # during this read invalidates coverage instead of hiding its pins.
+        if sources[1] is not None:
+            check_path(Path(str(path) + "-shm"))
+        query = "?mode=ro" if sources[1] is not None else "?mode=ro&immutable=1"
+        connection = native_sqlite.connect(path.as_uri() + query, uri=True, timeout=0.5)
+        try:
+            connection.execute("BEGIN")
+            from core.chat.conversation_store.schema import SCHEMA_VERSION
+            schema = connection.execute("SELECT schema_version FROM conversation_store_meta WHERE id=1").fetchone()
+            if schema is None or type(schema[0]) is not int or schema[0] != SCHEMA_VERSION:
+                raise ValueError("Compiled store schema is not current")
+            count = connection.execute("SELECT COUNT(*) FROM agents").fetchone()[0]
+            if type(count) is not int or count > maximum:
+                raise ValueError("Too many Agent references")
+            sql = """WITH pins(owner_type, owner_id, agent_id, revision_id) AS (
+                SELECT 'agent',agent_id,agent_id,current_config_revision_id FROM agents
+                UNION ALL SELECT 'session',session_id,agent_id,agent_config_revision_id FROM sessions
+                UNION ALL SELECT 'admission',turn_id,agent_id,agent_config_revision_id FROM session_admissions
+                    WHERE state IN ('reserved','journaled','projected')
+            ) SELECT p.owner_type,p.owner_id,p.agent_id,p.revision_id,r.agent_id AS revision_owner,
+                r.config_hash,json_type(r.config_json) AS config_type,
+                json_extract(r.config_json,'$.modelId') AS model_id,
+                json_extract(r.config_json,'$.dialogueModelId') AS dialogue_id,
+                json_extract(r.config_json,'$.llmBindings') AS bindings,
+                json_type(r.config_json,'$.llmBindings') AS bindings_type,
+                (SELECT COUNT(*) FROM (SELECT key FROM json_each(r.config_json)
+                    WHERE key IN ('modelId','dialogueModelId','llmBindings') GROUP BY key HAVING COUNT(*)>1)) AS ambiguous_fields
+                FROM pins AS p LEFT JOIN agent_config_revisions AS r
+                ON r.agent_id=p.agent_id AND r.revision_id=p.revision_id
+                ORDER BY p.owner_type,p.owner_id LIMIT 100001"""
+            data = connection.execute(sql)
+            selected = []
+            for index, row in enumerate(data):
+                if index >= maximum:
+                    raise ValueError("Too many compiled pins")
+                if (not row[1] or not row[2] or not row[3] or row[4] != row[2] or row[6] != "object"
+                        or row[10] not in {None, "object"} or row[11] != 0):
+                    raise ValueError("Missing or malformed compiled pin")
+                projected = [row[position] for position in range(12)]
+                remaining -= len(json.dumps(projected, ensure_ascii=False).encode("utf-8"))
+                if remaining < 0:
+                    raise ValueError("Compiled reference metadata exceeds byte limit")
+                payload = {}
+                if row[7] is not None:
+                    payload["modelId"] = row[7]
+                if row[8] is not None:
+                    payload["dialogueModelId"] = row[8]
+                if row[9] is not None:
+                    payload["llmBindings"] = strict_json(row[9])
+                bindings(payload, "compiled_pin", row[0], row[1])
+                selected.append(projected)
+            stamps.append((str(path), digest(selected)))
+            connection.rollback()
+        finally:
+            connection.close()
+        if sqlite_sources() != sources:
+            raise ValueError("Compiled reference source changed during read")
+    except (OSError, ValueError, TypeError, KeyError, native_sqlite.Error):
+        issues.add("compiled_pins_unavailable")
+    try:
+        rooms = load(workspace / "chat_rooms" / "chat_rooms.json")
+        if rooms is not None:
+            for room in rows(rooms, "rooms"):
+                identity = room.get("roomId")
+                if not isinstance(identity, str) or not identity:
+                    raise ValueError("Invalid room owner")
+                for index, participant in enumerate(rows(room, "participants")):
+                    bindings(participant, "chat_room_registry", "room_participant", f"{identity}:{index}")
+    except (OSError, ValueError, TypeError, KeyError):
+        issues.add("room_registry_unavailable")
+    try:
+        parent = workspace / "teams"
+        if parent.exists():
+            check_path(parent)
+            paths = []
+            for entry in parent.iterdir():
+                if len(paths) >= 10_000:
+                    raise ValueError("Too many Team references")
+                if entry.is_dir():
+                    check_path(entry)
+                    paths.append(entry / "workflow_orchestration.json")
+            for path in sorted(paths):
+                payload = load(path)
+                if payload is not None and "promptCachePolicy" in payload:
+                    bindings(payload["promptCachePolicy"], "team_live_policy", "team", path.parent.name)
+    except (OSError, ValueError, TypeError, KeyError):
+        issues.add("team_policy_unavailable")
+    try:
+        base = runtime / "runtime-manager" / "work_runs" / "supervised"
+        index = load(base / "index.json")
+        if index is not None:
+            ids = index.get("activeRunIds", [])
+            if not isinstance(ids, list) or len(ids) > 1000 or any(not isinstance(value, str) for value in ids):
+                raise ValueError("Invalid supervised active index")
+            legacy = index.get("activeRunId", "")
+            if not isinstance(legacy, str):
+                raise ValueError("Invalid supervised active identity")
+            for identity in sorted(set(ids + ([legacy] if legacy else []))):
+                if not identity or any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:-" for char in identity):
+                    raise ValueError("Unsafe supervised identity")
+                payload = load(base / "runs" / (identity + ".json"), required=True)
+                from core.runtime_manager.work_run_status import resolve_work_run_activity
+                activity = resolve_work_run_activity(payload)
+                if activity["execution"] == "unknown":
+                    issues.add("supervised_activity_unknown")
+                if activity["blocksLifecycle"]:
+                    if "currentAgentBinding" in payload:
+                        bindings(payload["currentAgentBinding"], "active_supervised_run", "supervised_run", identity)
+                    if "agentBindings" in payload:
+                        if not isinstance(payload["agentBindings"], dict):
+                            raise ValueError("Invalid supervised binding map")
+                        for role, binding in payload["agentBindings"].items():
+                            bindings(binding, "active_supervised_run", "supervised_role", f"{identity}:{role}")
+    except (OSError, ValueError, TypeError, KeyError):
+        issues.add("supervised_registry_unavailable")
+    return {"complete": not issues, "references": references,
+            "digest": digest([sorted(stamps), sorted(issues)]), "issues": sorted(issues)}
+
+
 def _persist_agent_registry(path: Path, payload: dict[str, Any], project_root: Path) -> None:
     """Persist agents.json through the agent_directory registry surface.
 

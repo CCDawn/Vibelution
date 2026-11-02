@@ -113,7 +113,7 @@ def _closed_query(request, model):
     if set(values) - model.model_fields.keys() or len(values.multi_items()) != len(values):
         raise HTTPException(status_code=422, detail={"code": "INVALID_INPUT"})
     result = dict(values)
-    for key in ("offset", "limit"):
+    for key in ("offset", "limit", "node_offset", "human_task_offset"):
         if key in result:
             if not re.fullmatch(r"[0-9]{1,7}", result[key]):
                 raise HTTPException(status_code=422, detail={"code": "INVALID_INPUT"})
@@ -121,20 +121,56 @@ def _closed_query(request, model):
     return result
 
 
-@router.get("/runtime/operations", response_model=RuntimeOperationsResponse)
+from core.web.services.external_management.runtime_legacy_contracts import (
+    LegacyRuntimeOperationsQuery, LegacyRuntimeOperationsResponse, LegacyRuntimeOperationResponse)
+
+
+@router.get("/runtime/operations", response_model=LegacyRuntimeOperationsResponse)
 async def runtime_operations(request: Request, kind: RuntimeKind | None = None,
                              state: Literal["active", "terminal", "all"] = "active", offset: int = 0, limit: int = 3):
+    _require_control(request)
+    query = _closed_query(request, LegacyRuntimeOperationsQuery)
+    return await _operator_call(request, lambda: _service().read_runtime(*_credentials(request), "list", query, legacy=True))
+
+
+@router.get("/runtime/operation", response_model=LegacyRuntimeOperationResponse)
+async def runtime_operation(request: Request, kind: RuntimeKind, resource_id: str,
+                            session_id: str = "", team_id: str = "", flow_id: str = ""):
+    _require_control(request)
+    query = _closed_query(request, RuntimeOperationQuery)
+    return await _operator_call(request, lambda: _service().read_runtime(*_credentials(request), "get", query, legacy=True))
+
+
+@router.get("/runtime/inventory", response_model=RuntimeOperationsResponse)
+async def runtime_inventory(request: Request):
     _require_control(request)
     query = _closed_query(request, RuntimeOperationsQuery)
     return await _operator_call(request, lambda: _service().read_runtime(*_credentials(request), "list", query))
 
 
-@router.get("/runtime/operation", response_model=RuntimeOperationResponse)
-async def runtime_operation(request: Request, kind: RuntimeKind, resource_id: str,
-                            session_id: str = "", team_id: str = "", flow_id: str = ""):
+@router.get("/runtime/item", response_model=RuntimeOperationResponse)
+async def runtime_item(request: Request):
     _require_control(request)
     query = _closed_query(request, RuntimeOperationQuery)
     return await _operator_call(request, lambda: _service().read_runtime(*_credentials(request), "get", query))
+
+
+from core.web.services.external_management.knowledge_catalog_contracts import KnowledgeCatalogQuery, KnowledgeCatalogResponse
+from core.web.services.external_management.research_contracts import ResearchReadQuery, ResearchReadResponse
+
+
+@router.get("/knowledge-bases", response_model=KnowledgeCatalogResponse)
+async def knowledge_catalog(request: Request):
+    _require_control(request)
+    query = _closed_query(request, KnowledgeCatalogQuery)
+    return await _operator_call(request, lambda: _service().read_knowledge_catalog(*_credentials(request), query))
+
+
+@router.get("/research/operation", response_model=ResearchReadResponse)
+async def research_operation(request: Request):
+    _require_control(request)
+    query = _closed_query(request, ResearchReadQuery)
+    return await _operator_call(request, lambda: _service().read_research(*_credentials(request), query))
 
 
 @router.get("/assets/team", response_model=TeamAssetResponse)
@@ -340,10 +376,11 @@ async def read_room(room_id: str, request: Request):
 @router.post("/actions/{action}", response_model=ReceiptResponse, response_model_exclude_none=True)
 async def invoke(action: str, request: Request):
     _require_control(request)
-    if action in PLATFORM_ACTIONS and request.query_params:
+    operator_actions = {"authorization_reduce", "authorization_revoke", *PLATFORM_ACTIONS}
+    if action in operator_actions and request.query_params:
         raise HTTPException(status_code=422, detail={"code": "INVALID_INPUT"})
-    payload = await _body(request, unique_keys=action in {"authorization_upgrade", *PLATFORM_ACTIONS})
-    if action in PLATFORM_ACTIONS:
+    payload = await _body(request, unique_keys=action in {"authorization_upgrade", *operator_actions})
+    if action in operator_actions:
         return await _operator_call(request, lambda: _service().invoke(*_credentials(request), action, payload))
     return await _call(lambda: _service().invoke(*_credentials(request), action, payload))
 
@@ -394,9 +431,22 @@ async def read_session_parameters(session_id: str, request: Request):
 @router.get("/actions/{action}/requests/{request_id}", response_model=ReceiptResponse, response_model_exclude_none=True)
 async def receipt(action: str, request_id: str, request: Request):
     _require_control(request)
-    if action == "authorization_upgrade" and request.query_params:
+    if action in {"authorization_upgrade", "authorization_reduce", "authorization_revoke", *PLATFORM_ACTIONS} and request.query_params:
         raise HTTPException(status_code=422, detail={"code": "INVALID_INPUT"})
+    if action in {"authorization_reduce", "authorization_revoke", *PLATFORM_ACTIONS}:
+        return await _operator_call(request, lambda: _service().receipt(*_credentials(request), action, request_id))
     return await _call(lambda: _service().receipt(*_credentials(request), action, request_id))
+
+
+from core.web.services.external_management.reconciliation_contracts import ReconciliationResponse
+
+
+@router.get("/actions/{action}/requests/{request_id}/reconciliation", response_model=ReconciliationResponse)
+async def reconcile_request(action: str, request_id: str, request: Request):
+    _require_control(request)
+    if request.query_params:
+        raise HTTPException(status_code=422, detail={"code": "INVALID_INPUT"})
+    return await _operator_call(request, lambda: _service().reconcile_request(*_credentials(request), action, request_id))
 
 
 @router.get("/team-runs/requests/{original_request_id}", response_model=ReceiptResponse, response_model_exclude_none=True)

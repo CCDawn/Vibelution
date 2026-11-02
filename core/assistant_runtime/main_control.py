@@ -21,6 +21,7 @@ from dataclasses import dataclass
 
 from . import appearance_protocol as appearance
 from . import browser_protocol as browser
+from . import configuration_protocol as configuration
 
 
 _OPERATIONS = {"start", "stop", "restart"}
@@ -80,6 +81,8 @@ def initial_model_env_unavailable():
 
 
 def _request(action, request):
+    if type(action) is str and action in configuration.ACTIONS:
+        return configuration.validate_request(action, request)
     if type(action) is str and action in appearance.APPEARANCE_ACTIONS:
         return appearance.validate_request(action, request)
     if type(action) is str and action in browser.BROWSER_ACTIONS:
@@ -143,6 +146,8 @@ def _request(action, request):
 
 def _result(action, request, result):
     """Reject unknown fields rather than copying errors, paths or credentials."""
+    if action in configuration.ACTIONS:
+        return configuration.validate_result(action, request, result)
     if action in appearance.APPEARANCE_ACTIONS:
         return appearance.validate_result(action, request, result)
     if action in browser.BROWSER_ACTIONS:
@@ -358,7 +363,7 @@ def _revoke_initial(entry):
 
 
 class MainControlBroker:
-    def __init__(self, project_ids: Callable, *, timeout_seconds=20, claim_seconds=10, max_pending=32, appearance_enabled=False, browser_enabled=False, image_timeout_seconds=appearance.IMAGE_SELECTION_SECONDS, initial_migration_enabled=False):
+    def __init__(self, project_ids: Callable, *, timeout_seconds=20, claim_seconds=10, max_pending=32, appearance_enabled=False, browser_enabled=False, image_timeout_seconds=appearance.IMAGE_SELECTION_SECONDS, initial_migration_enabled=False, configuration_enabled=False):
         if (not callable(project_ids) or type(max_pending) is not int or not 1 <= max_pending <= 128
                 or any(type(value) not in {int, float} or not math.isfinite(value) or value <= 0
                        for value in (timeout_seconds, claim_seconds))
@@ -373,6 +378,9 @@ class MainControlBroker:
         if type(initial_migration_enabled) is not bool:
             raise ValueError("Invalid initial migration capability")
         self.initial_migration_enabled = initial_migration_enabled
+        if type(configuration_enabled) is not bool:
+            raise ValueError("Invalid configuration reference capability")
+        self.configuration_enabled = configuration_enabled
         self._image_timeout = image_timeout_seconds
         self._project_ids = project_ids
         self._timeout = timeout_seconds
@@ -414,12 +422,16 @@ class MainControlBroker:
             return False
 
     def _authorized_request(self, entry):
+        if entry.action in configuration.ACTIONS:
+            return self.configuration_enabled
         if entry.action in browser.BROWSER_ACTIONS:
             return self.browser_enabled
         return self.appearance_enabled if entry.action in appearance.APPEARANCE_ACTIONS else self._authorized(entry.request["projectId"])
 
     @staticmethod
     def _unavailable(entry, code="control_unavailable"):
+        if entry.action in configuration.ACTIONS:
+            return configuration.unavailable(entry.action, entry.request, busy=code == "control_busy")
         if entry.action in browser.BROWSER_ACTIONS:
             if entry.claimed:
                 return {"schemaVersion": 1, "operation": entry.action.removeprefix("browser_"),
@@ -477,7 +489,10 @@ class MainControlBroker:
             raise ValueError("Initial migration capability is unavailable")
         if action == "initial_migration_queue" and initial_model_env_unavailable():
             raise ValueError("Initial migration source model configuration unavailable")
-        if action in browser.BROWSER_ACTIONS:
+        if action in configuration.ACTIONS:
+            if not self.configuration_enabled:
+                raise ValueError("Configuration reference control is not enabled by Launcher")
+        elif action in browser.BROWSER_ACTIONS:
             if not self.browser_enabled:
                 raise ValueError("Browser control is not enabled by Launcher")
         elif action in appearance.APPEARANCE_ACTIONS:

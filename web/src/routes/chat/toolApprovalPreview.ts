@@ -1,4 +1,6 @@
 import { TOOL_APPROVAL_LABELS } from "./toolApprovalLabels";
+import { AUTONOMY_APPROVAL_LABELS, autonomyActionIsKnown, autonomyApprovalText } from "./autonomyApprovalPreview";
+export { autonomyActionIsKnown, autonomyApprovalPreviewIsValid } from "./autonomyApprovalPreview";
 
 const PLATFORM_MANAGE_ACTIONS = new Set(["dispatch_cancel", "runtime_command", "team_update", "agent_tool_policy_update",
   "knowledge_acl_grant", "knowledge_acl_revoke", "flow_save", "flow_start"]);
@@ -304,7 +306,8 @@ export function preferenceProposalPreviewIsValid(summary: Record<string, unknown
   return kind === "address" ? value.trim().replace(/\s+/gu, " ") === value : (Object.hasOwn(enums, kind) && enums[kind].includes(value));
 }
 
-const MANAGE_ACTIONS: Record<string, [string, string]> = {
+const MANAGE_ACTIONS: Record<string, readonly [string, string]> = {
+      ...AUTONOMY_APPROVAL_LABELS,
       dispatch_cancel: ["停止原派遣任务", "Stop original dispatched task"], runtime_command: ["控制原生运行", "Control native run"],
       agent_tool_policy_update: ["修改 Agent 工具权限", "Update agent tool permissions"],
       knowledge_acl_revoke: ["撤销知识访问权限", "Revoke knowledge access"],
@@ -366,6 +369,9 @@ export function toolApprovalActionPreview(
     const title = MANAGE_ACTIONS[action]?.[lang === "zh" ? 0 : 1] ?? toolApprovalDisplayName(toolName, lang);
     if (summary.assistantArgumentsInvalid || !managementApprovalActionIsKnown(action)) {
       return `${title}\n${lang === "zh" ? "参数无法核对，请拒绝并重新发起。" : "Arguments cannot be verified. Decline and request again."}`;
+    }
+    if (autonomyActionIsKnown(action) || Object.hasOwn(summary, "assistantAutonomyPreviewVersion")) {
+      return autonomyApprovalText(summary, lang);
     }
     const targets = summary.assistantTargets;
     if (platformManagementActionIsKnown(action) && (summary.assistantPlatformPreviewVersion !== undefined

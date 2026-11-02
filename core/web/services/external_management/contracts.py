@@ -8,6 +8,9 @@ import unicodedata
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
 from .runtime_contracts import RuntimeCommand, RuntimeCommandResponse
+from .research_contracts import ResearchCommand, ResearchCommandResponse
+from .authorization_reduction_contracts import (AUTHORIZATION_REDUCTION_MODELS, AUTHORIZATION_REDUCTION_SCOPES,
+    AUTHORIZATION_REDUCTION_HELP, AuthorizationReductionResult)
 from .asset_contracts import ASSET_ACTION_MODELS, ASSET_ACTION_SCOPES, ASSET_ACTION_HELP, AssetMutationResponse
 from .flow_contracts import FLOW_ACTION_MODELS, FLOW_ACTION_SCOPES, FLOW_ACTION_HELP, FLOW_SCOPES, FlowMutationResponse
 
@@ -212,6 +215,10 @@ ACTION_MODELS.update(ASSET_ACTION_MODELS)
 ACTION_SCOPES.update(ASSET_ACTION_SCOPES)
 ACTION_MODELS.update(FLOW_ACTION_MODELS)
 ACTION_SCOPES.update(FLOW_ACTION_SCOPES)
+ACTION_MODELS["research_command"] = ResearchCommand
+ACTION_SCOPES["research_command"] = "operations:control"
+ACTION_MODELS.update(AUTHORIZATION_REDUCTION_MODELS)
+ACTION_SCOPES.update(AUTHORIZATION_REDUCTION_SCOPES)
 
 
 def contracts() -> dict:
@@ -228,8 +235,10 @@ def contracts() -> dict:
     }
     descriptions.update(ASSET_ACTION_HELP)
     descriptions.update(FLOW_ACTION_HELP)
+    descriptions.update(AUTHORIZATION_REDUCTION_HELP)
+    descriptions["research_command"] = "使用research_get返回的精确run/team/flow/node/task/checkpoint引用与revision推进研究任务；支持失败节点重试、人工任务裁决及运行对账。沿用真实operator、operations:control和原生CAS/稳定request_id；unknown只读原management_receipt，不换ID重放。人工裁决须有明确依据，受理不等于业务完成。"
     return {name: {"action": name, "description": descriptions[name], "parameters": model.model_json_schema(),
-                   "governed": name in {"team_run", "session_pin", "agent_archive", "agent_purge", "authorization_upgrade", "runtime_command", *ASSET_ACTION_MODELS, *FLOW_ACTION_MODELS}, "scope": ACTION_SCOPES[name] or "operator:control"} for name, model in ACTION_MODELS.items()}
+                   "governed": name in {"team_run", "session_pin", "agent_archive", "agent_purge", "authorization_upgrade", "runtime_command", "research_command", *ASSET_ACTION_MODELS, *FLOW_ACTION_MODELS, *AUTHORIZATION_REDUCTION_MODELS}, "scope": ACTION_SCOPES[name] or "operator:control"} for name, model in ACTION_MODELS.items()}
 
 
 class BindingResponse(Closed):
@@ -1039,17 +1048,18 @@ class AuthorizationStateResponse(Closed):
 
 class ReceiptResponse(Closed):
     status: Literal["completed", "unknown"]
-    action: Literal["agent_create", "agent_update", "agent_avatar", "agent_archive", "agent_purge", "team_run", "session_pin", "authorization_upgrade", "runtime_command", "team_update", "agent_tool_policy_update", "knowledge_acl_grant", "knowledge_acl_revoke", "flow_save", "flow_start"]
+    action: Literal["agent_create", "agent_update", "agent_avatar", "agent_archive", "agent_purge", "team_run", "session_pin", "authorization_upgrade", "runtime_command", "team_update", "agent_tool_policy_update", "knowledge_acl_grant", "knowledge_acl_revoke", "flow_save", "flow_start", "research_command", "authorization_reduce", "authorization_revoke"]
     requestId: str
     verified: bool
     reused: bool
     agent: AgentView | None = None
     session: SessionView | None = None
-    authorization: AuthorizationView | None = None
+    authorization: AuthorizationView | AuthorizationReductionResult | None = None
     purge: AgentPurgeResult | None = None
     operation: RuntimeCommandResponse | None = None
     asset: AssetMutationResponse | None = None
     flow: FlowMutationResponse | None = None
+    research: ResearchCommandResponse | None = None
     code: Literal["OPERATION_UNCONFIRMED"] | None = None
     phase: Literal["materialization_pending", "materialized", "flow_saved", "started"] | None = None
     resumeAllowed: bool | None = None
@@ -1105,10 +1115,15 @@ class DocumentationDescribeQuery(Closed):
         return value.strip()
 
 
-DocumentationAction = Literal["runtime_list", "runtime_get", "runtime_command", "team_asset_get", "team_update", "agent_tool_policy_get", "agent_tool_policy_update", "knowledge_acl_get", "knowledge_acl_grant", "knowledge_acl_revoke", "flow_list", "flow_get", "flow_save", "flow_start", "session_list", "agent_create", "agent_update", "agent_avatar", "agent_archive", "agent_purge", "session_config_get", "session_config_compare", "session_parameters_get", "session_pin", "team_list", "team_get", "room_list", "room_get", "authorization_status", "legacy_observers", "legacy_receipts"]
+DocumentationAction = Literal["runtime_list", "runtime_get", "runtime_command", "team_asset_get", "team_update", "agent_tool_policy_get", "agent_tool_policy_update", "knowledge_acl_get", "knowledge_acl_grant", "knowledge_acl_revoke", "flow_list", "flow_get", "flow_save", "flow_start", "session_list", "agent_create", "agent_update", "agent_avatar", "agent_archive", "agent_purge", "session_config_get", "session_config_compare", "session_parameters_get", "session_pin", "team_list", "team_get", "room_list", "room_get", "authorization_status", "legacy_observers", "legacy_receipts", "knowledge_list", "research_get", "research_command", "management_reconcile"]
 # This maps documentation to already-migrated semantic actions. It grants no
 # HTTP execution and deliberately advertises no other registered API operation.
 DOCUMENTATION_ACTIONS = {
+    ("GET", "/api/v1/launcher-assistant-management/actions/{action}/requests/{request_id}/reconciliation"): "management_reconcile",
+    ("GET", "/api/v1/launcher-assistant-management/runtime/inventory"): "runtime_list",
+    ("GET", "/api/v1/launcher-assistant-management/runtime/item"): "runtime_get",
+    ("GET", "/api/v1/launcher-assistant-management/knowledge-bases"): "knowledge_list",
+    ("GET", "/api/v1/launcher-assistant-management/research/operation"): "research_get",
     ("GET", "/api/v1/launcher-assistant-management/runtime/operations"): "runtime_list",
     ("GET", "/api/v1/launcher-assistant-management/runtime/operation"): "runtime_get",
     ("GET", "/api/v1/launcher-assistant-management/assets/team"): "team_asset_get",

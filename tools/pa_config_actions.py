@@ -257,11 +257,17 @@ def _duplicate(config: dict, provider: dict, *, exclude: str = "") -> str:
 
 
 def _assert_model_unused(config: dict, model_id: str) -> None:
+    from core.assistant_runtime.configuration_references import has_active_reference_permit
+    if has_active_reference_permit("model", model_id, public_config=config):
+        return
     from core.web.services.model_reference_service import assert_model_delete_safe
     assert_model_delete_safe(model_id, public_config=config)
 
 
 def _assert_provider_unused(provider_id: str) -> None:
+    from core.assistant_runtime.configuration_references import has_active_reference_permit
+    if has_active_reference_permit("provider", provider_id):
+        return
     from core.web.services.model_reference_service import scan_provider_live_references
     if scan_provider_live_references(provider_id).get("liveReferenceCount"):
         raise PermissionError("live_references")

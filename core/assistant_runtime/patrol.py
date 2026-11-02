@@ -21,6 +21,7 @@ from core.external_agent.contracts import TASK_ACTIVE_STATUSES, TASK_TERMINAL_ST
 from core.infrastructure.atomic_io import atomic_write_json
 from .migration_io import check_path, pinned_target_directory
 from .team_patrol import TeamPatrolObserver, team_event
+from .runtime_watch import RuntimeWatchObserver, runtime_event, management_event
 
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}\Z")
 _DISPATCH = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,119}\Z")
@@ -31,11 +32,16 @@ _MAX_PER_HOUR = 2
 _MAX_ENTRIES = 4096
 _RECHECK_INTERVAL = 60.0
 _RECHECK_BATCH = 16
+_MAX_REPORT_RECOVERIES = 2
 _OWNER = None
 _OWNER_LOCK = threading.RLock()
 
 
-def _event(row: dict[str, Any]) -> dict[str, str] | None:
+def _event(row: dict[str, Any]) -> dict[str, Any] | None:
+    if row.get("kind") == "management_request":
+        return management_event(row)
+    if row.get("kind") == "platform_runtime":
+        return runtime_event(row)
     if row.get("kind") == "team_run":
         return team_event(row)
     receipt = row.get("receipt")
@@ -78,7 +84,7 @@ class LauncherPatrol:
             self._stack.enter_context(pinned_target_directory(directory, create=fresh))
             self._path = directory / "deliveries.json"
             if fresh:
-                self._state = {"schemaVersion": 1, "agentId": agent_id, "sessionId": session_id, "entries": []}
+                self._state = {"schemaVersion": 2, "agentId": agent_id, "sessionId": session_id, "entries": []}
                 self._save()
             else:
                 paths = [self._path, *sorted(directory.glob("deliveries.[0-9]*.json"))]
@@ -90,7 +96,7 @@ class LauncherPatrol:
                     if path.stat().st_size > 4 * 1024 * 1024:
                         raise RuntimeError("patrol_state_invalid")
                     segment = json.loads(path.read_text(encoding="utf-8"))
-                    if (not isinstance(segment, dict) or segment.get("schemaVersion") != 1
+                    if (not isinstance(segment, dict) or segment.get("schemaVersion") not in {1, 2}
                             or segment.get("agentId") != agent_id or segment.get("sessionId") != session_id
                             or set(segment) != {"schemaVersion", "agentId", "sessionId", "entries"}
                             or not isinstance(segment.get("entries"), list)
@@ -99,8 +105,9 @@ class LauncherPatrol:
                         raise RuntimeError("patrol_state_invalid")
                     all_entries.extend(segment["entries"])
                     self._persisted[index] = self._encoded(segment)
-                self._state = {"schemaVersion": 1, "agentId": agent_id, "sessionId": session_id, "entries": all_entries}
+                self._state = {"schemaVersion": 2, "agentId": agent_id, "sessionId": session_id, "entries": all_entries}
                 self._validate()
+            self._runtime = RuntimeWatchObserver(dispatch, directory)
             global _OWNER
             with _OWNER_LOCK:
                 if _OWNER is not None:
@@ -113,13 +120,14 @@ class LauncherPatrol:
     def _validate(self):
         state = self._state
         if (not isinstance(state, dict) or set(state) != {"schemaVersion", "agentId", "sessionId", "entries"}
-                or state["schemaVersion"] != 1 or state["agentId"] != self.agent_id
+                or state["schemaVersion"] != 2 or state["agentId"] != self.agent_id
                 or state["sessionId"] != self.session_id or not isinstance(state["entries"], list)):
             raise RuntimeError("patrol_state_invalid")
         seen_events, seen_tokens = set(), set()
         for item in state["entries"]:
             if (not isinstance(item, dict) or not {"event", "token", "state", "createdAt"}.issubset(item)
-                    or set(item) - {"event", "token", "state", "createdAt", "attempts", "cancelProof", "priorTurnId"}
+                    or set(item) - {"event", "token", "state", "createdAt", "attempts", "cancelProof", "priorTurnId",
+                                   "history", "visibleReport", "escalation", "projectBinding"}
                     or not isinstance(item["event"], dict) or not isinstance(item["token"], str)
                     or not _TOKEN.fullmatch(item["token"])
                     or item["state"] not in {"reserved", "accepted", "completed", "cancelled", "unknown", "observed",
@@ -129,6 +137,26 @@ class LauncherPatrol:
             attempts = item.get("attempts", [item["createdAt"]])
             if (not isinstance(attempts, list) or not attempts or len(attempts) > 1000
                     or any(type(stamp) not in (int, float) or not math.isfinite(stamp) for stamp in attempts)):
+                raise RuntimeError("patrol_state_invalid")
+            if "visibleReport" in item and type(item["visibleReport"]) is not bool:
+                raise RuntimeError("patrol_state_invalid")
+            if "projectBinding" in item and (not isinstance(item["projectBinding"], str) or not _TOKEN.fullmatch(item["projectBinding"])):
+                raise RuntimeError("patrol_state_invalid")
+            if "priorTurnId" in item and (not isinstance(item["priorTurnId"], str) or len(item["priorTurnId"]) > 256):
+                raise RuntimeError("patrol_state_invalid")
+            history = item.get("history", [])
+            if not isinstance(history, list) or len(history) > _MAX_REPORT_RECOVERIES:
+                raise RuntimeError("patrol_state_invalid")
+            for prior in history:
+                if (not isinstance(prior, dict) or set(prior) != {"token", "state", "turnId"}
+                        or not isinstance(prior["token"], str) or not _TOKEN.fullmatch(prior["token"])
+                        or prior["state"] not in {"failed", "interrupted"}
+                        or not isinstance(prior["turnId"], str) or not 1 <= len(prior["turnId"]) <= 256
+                        or prior["token"] in seen_tokens or prior["token"] == item["token"]):
+                    raise RuntimeError("patrol_state_invalid")
+                seen_tokens.add(prior["token"])
+            if "escalation" in item and item["escalation"] not in {
+                    "delivery_outcome_unknown", "recovery_exhausted", "delivery_already_visible"}:
                 raise RuntimeError("patrol_state_invalid")
             if item["state"] == "cancelled_pre_admission" and (
                     item.get("cancelProof") not in {"not_submitted", "context_cancelled"}
@@ -185,6 +213,8 @@ class LauncherPatrol:
                     return False
                 if event.get("kind") == "team_run":
                     return self._teams.current(event)
+                if event.get("kind") in {"platform_runtime", "management_request"}:
+                    return self._runtime.current(event)
                 return any(_event(row) == event for row in self.dispatch.list_dispatches(event["projectId"]))
         except Exception:
             return False
@@ -196,7 +226,8 @@ class LauncherPatrol:
             return bool(is_pa_patrol_enabled() and is_pa_patrol_wake_enabled()
                         and not getattr(self, "_broken", False) and agent_id == self.agent_id
                         and revision == 1 and token in self._active and item
-                        and item["state"] in {"reserved", "accepted"} and self._eligible(item["event"]))
+                        and item["state"] in {"reserved", "accepted"} and self._entry_authorized(item)
+                        and self._eligible(item["event"]))
 
     async def refresh_stale_terminals(self, rows, *, now=None):
         """Re-read error-marked terminal tasks through their authorized native owner.
@@ -260,7 +291,7 @@ class LauncherPatrol:
                 if event.get("kind") != "team_run":
                     continue
                 key = event["projectId"], event.get("originAction", "team_run"), event["requestId"]
-                if item["state"] != "cancelled_pre_admission":
+                if item["state"] != "cancelled_pre_admission" and not self._recoverable(item):
                     settled.add(key)
                 if item["token"] in self._active:
                     priority.add(key)
@@ -269,6 +300,43 @@ class LauncherPatrol:
     @property
     def team_observation(self):
         return self._teams.status
+
+    async def refresh_platform_runs(self):
+        from core.web.services.personal_assistant_patrol_service import is_pa_patrol_enabled, is_pa_patrol_wake_enabled
+        if not is_pa_patrol_enabled() or not is_pa_patrol_wake_enabled():
+            return []
+        return await self._runtime.refresh(dispatch_rows=self.dispatch.list_dispatches())
+
+    @property
+    def platform_observation(self):
+        return self._runtime.status
+
+    def _project_binding(self, project):
+        with self.dispatch._dispatch_state:
+            self.dispatch._check_dispatch_unfenced()
+            projects = self.dispatch._admitted_projects()
+            if project not in projects:
+                raise RuntimeError("patrol_project_not_authorized")
+            return hashlib.sha256(str(projects[project]).encode()).hexdigest()
+
+    def _entry_authorized(self, item):
+        try:
+            return item.get("projectBinding") == self._project_binding(item["event"]["projectId"])
+        except Exception:
+            return False
+
+    @property
+    def delivery_escalations(self):
+        with self._lock:
+            count = sum(bool(item.get("escalation")) and self._entry_authorized(item)
+                        for item in self._state["entries"])
+            return {"state": "requires_review" if count else "clear", "unresolved": count,
+                    "notice": "有自动汇报结果尚未确认，请查看现有会话；不会重放未知操作。" if count else ""}
+
+    @staticmethod
+    def _recoverable(item):
+        return (item["state"] in {"failed", "interrupted"} and item.get("visibleReport") is False
+                and bool(item.get("priorTurnId")) and len(item.get("history", [])) < _MAX_REPORT_RECOVERIES)
 
     def inspect(self, rows, *, now=None):
         """Inspect current native snapshots, attempting at most one receipt wake."""
@@ -283,6 +351,7 @@ class LauncherPatrol:
                          and row["receipt"].get("status") in TASK_ACTIVE_STATUSES),
                    "terminal": len(events), "wake": "none"}
         summary["deliveryStates"] = self.reconcile()
+        summary["deliveryEscalations"] = self.delivery_escalations
         if not is_pa_patrol_enabled() or not is_pa_patrol_wake_enabled():
             return summary
         with self._lock:
@@ -290,7 +359,9 @@ class LauncherPatrol:
                 raise RuntimeError("patrol_state_unknown")
             known = {item["event"]["eventId"]: item for item in self._state["entries"]}
             eligible = [event for event in events if (event["eventId"] not in known
-                        or known[event["eventId"]]["state"] == "cancelled_pre_admission")
+                        or known[event["eventId"]]["state"] == "cancelled_pre_admission"
+                        or self._recoverable(known[event["eventId"]]))
+                        and (event["eventId"] not in known or self._entry_authorized(known[event["eventId"]]))
                         and self._eligible(event)]
             recent = [stamp for item in self._state["entries"]
                       for stamp in item.get("attempts", [item["createdAt"]])
@@ -300,10 +371,16 @@ class LauncherPatrol:
             event = eligible[0]
             item = known.get(event["eventId"])
             if item is not None:
-                # Reconcile has proved the old context released and no turn
-                # entered the Journal; preserve its original delivery token.
+                # A pre-admission cancellation preserves its token. A proved
+                # failed report receives a new token only after full release.
                 if item["token"] in self._active or not self._pre_admission_released(item):
                     return summary
+                if self._recoverable(item):
+                    item.setdefault("history", []).append({"token": item["token"], "state": item["state"],
+                                                          "turnId": item["priorTurnId"]})
+                    item["token"] = secrets.token_hex(32)
+                    item.pop("visibleReport", None)
+                    item.pop("escalation", None)
                 item["attempts"] = [stamp for stamp in item.get("attempts", [item["createdAt"]])
                                     if stamp > observed - _HOUR] + [observed]
                 item["state"] = "reserved"
@@ -313,7 +390,7 @@ class LauncherPatrol:
             else:
                 token = secrets.token_hex(32)
                 item = {"event": event, "token": token, "state": "reserved", "createdAt": observed,
-                        "attempts": [observed]}
+                        "attempts": [observed], "projectBinding": self._project_binding(event["projectId"])}
                 self._state["entries"].append(item)
             self._save()  # Commit before any native scheduling.
             self._active.add(token)
@@ -450,15 +527,21 @@ class LauncherPatrol:
         if len(terminal) != 1:
             return "unknown"
         kind = terminal[0].event_type
-        if kind == "turn_failed":
-            return "failed"
-        if kind == "turn_interrupted":
-            return "interrupted"
-        visible = any(getattr(e, "visible_in_model", False) and (
+        visible = any((
             e.event_type == "assistant_message" and str(e.payload.get("content") or "").strip()
             or e.event_type == "assistant_item_committed" and e.payload.get("kind") == "assistant_message"
             and e.payload.get("channel") == "answer" and e.payload.get("phase") == "final_answer"
             and str(e.payload.get("text") or "").strip()) for e in turn_events)
+        any_visible = visible or any(
+            e.event_type == "assistant_delta_committed" and str(e.payload.get("content") or "").strip()
+            or e.event_type == "assistant_item_committed" and e.payload.get("kind") == "assistant_message"
+            and e.payload.get("channel") == "answer" and str(e.payload.get("text") or "").strip()
+            for e in turn_events)
+        item["priorTurnId"], item["visibleReport"] = turn, bool(any_visible)
+        if kind == "turn_failed":
+            return "failed"
+        if kind == "turn_interrupted":
+            return "interrupted"
         return "completed" if visible else "unknown"
 
     @staticmethod
@@ -467,12 +550,16 @@ class LauncherPatrol:
         with proactive._PROACTIVE_CONTEXTS_LOCK:
             if item["token"] in proactive._PROACTIVE_CONTEXTS:
                 return False
-        if item["state"] != "cancelled_pre_admission":
+        if item["state"] not in {"cancelled_pre_admission", "failed", "interrupted"}:
             return True
-        if item.get("cancelProof") == "not_submitted":
+        if item["state"] == "cancelled_pre_admission" and item.get("cancelProof") == "not_submitted":
             return True
         turn = item.get("priorTurnId")
-        if item.get("cancelProof") != "context_cancelled" or not turn:
+        if not turn and item["state"] in {"failed", "interrupted"}:
+            # Version 1 records need one Journal classification to recover the
+            # original turn. _recoverable still refuses them without that proof.
+            return True
+        if not turn or item["state"] == "cancelled_pre_admission" and item.get("cancelProof") != "context_cancelled":
             return False
         # Native releases the proactive registry just before releasing its
         # scheduler slot. Check both, under the scheduler's own condition.
@@ -490,7 +577,14 @@ class LauncherPatrol:
             journal = None
             changed = False
             for item in self._state["entries"]:
-                if item["state"] not in {"reserved", "accepted", "unknown", "observed", "cancelled_pre_admission"}:
+                if "projectBinding" not in item and self._eligible(item["event"]):
+                    # Legacy records may bind only after a fresh original-object
+                    # read. Project ID alone cannot authorize old metadata.
+                    item["projectBinding"] = self._project_binding(item["event"]["projectId"])
+                    changed = True
+                if not self._entry_authorized(item):
+                    continue
+                if item["state"] not in {"reserved", "accepted", "unknown", "observed", "cancelled_pre_admission", "failed", "interrupted"}:
                     continue
                 token = item["token"]
                 if token in self._submitting or not self._pre_admission_released(item):
@@ -498,13 +592,25 @@ class LauncherPatrol:
                 self._active.discard(token)
                 if journal is None:
                     journal = load_session_conversation_events_cached(self.session_id, project_root=self.root)
+                before = self._encoded(item)
                 state = self._journal_state(item, journal)
                 if state != item["state"]:
                     item["state"] = state
                     changed = True
+                if state == "unknown":
+                    item["escalation"] = "delivery_outcome_unknown"
+                elif state in {"failed", "interrupted"}:
+                    if item.get("visibleReport"):
+                        item["escalation"] = "delivery_already_visible"
+                    elif len(item.get("history", [])) >= _MAX_REPORT_RECOVERIES:
+                        item["escalation"] = "recovery_exhausted"
+                elif state == "completed":
+                    item.pop("escalation", None)
+                changed = changed or before != self._encoded(item)
             if changed:
                 self._save()
-            return {state: sum(item["state"] == state for item in self._state["entries"])
+            return {state: sum(item["state"] == state and self._entry_authorized(item)
+                               for item in self._state["entries"])
                     for state in ("unknown", "observed", "failed", "interrupted", "completed", "cancelled_pre_admission")}
 
     def prompt(self, agent_id, session_id, run_id):
@@ -521,6 +627,23 @@ class LauncherPatrol:
                     and self.current(agent_id, metadata.get("bindingRevision"), token)
                     and metadata.get("triggerId") == self._entry(token)["event"]["eventId"]):
                 event = self._entry(token)["event"]
+                if event.get("kind") == "management_request":
+                    return ("收到授权项目的原管理请求未决信号。请先用以下原 project_id、action、request_id 查询 "
+                            "management_reconcile 和 management_receipt，核实持久原生证据；"
+                            "对账或历史受理状态不代表业务目标完成，没有可确认的原生对象时只汇报原请求结果未决。"
+                            "请简要汇报事实和仍不确定的部分，不要自动重试写操作、重派或换 ID 重放。\n"
+                            f"project_id={event['projectId']} action={event['action']} request_id={event['requestId']}")
+                if event.get("kind") == "platform_runtime":
+                    ref = " ".join(f"{key}={event[field]}" for key, field in (("session_id", "sessionId"),
+                        ("team_id", "teamId"), ("flow_id", "flowId")) if event[field])
+                    return ("收到授权项目的原生运行监护信号。source-coverage 只代表来源覆盖，请用 runtime_list 核实；"
+                            "其他引用请先使用 runtime_get 核实当前原生对象。"
+                            "状态或控制受理回执不等于业务目标完成，消失也不等于完成。"
+                            "no_progress 仅表示长期缺少可核实进展、需核查，不证明卡死；"
+                            "attention_required 请区分等待人工/审批和阻塞，不要把正常人工等待当失败。请简要汇报事实和不确定性；"
+                            "没有新的控制授权，不要自动重启、重派、重试写操作或换 ID 重放未知操作。\n"
+                            f"project_id={event['projectId']} kind={event['runtimeKind']} "
+                            f"resource_id={event['resourceId']} {ref} issue={event['issue']} status={event['status']}")
                 if event.get("kind") == "team_run":
                     if event.get("originAction") == "flow_start":
                         return ("收到 Launcher 发起的既有 Flow 运行终态回执。请用原 project_id、request_id "

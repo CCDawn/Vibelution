@@ -552,9 +552,12 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                     # durable native projection so delayed wakeups survive.
                     await patrol.refresh_stale_terminals(dispatch.list_dispatches())
                     teams = await patrol.refresh_team_runs()
-                    result = await patrol_call(patrol.inspect, [*dispatch.list_dispatches(), *teams])
+                    platform = await patrol.refresh_platform_runs()
+                    result = await patrol_call(patrol.inspect, [*dispatch.list_dispatches(), *teams, *platform])
                     app.state.patrol_status = {"state": "ready", "deliveryStates": result.get("deliveryStates", {}),
-                                              "teamRuns": patrol.team_observation}
+                                              "teamRuns": patrol.team_observation,
+                                              "platform": patrol.platform_observation,
+                                              "deliveryEscalations": patrol.delivery_escalations}
             except Exception:  # noqa: BLE001 - private backend data stays out of logs.
                 # Native IDs and credentials remain durable. A failed poll is
                 # not permission to repeat a task or cancel it.
@@ -596,7 +599,8 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                                                  native.assistant["directSessionId"], dispatch)
                     state = await patrol_call(patrol.reconcile)
                     app.state.patrol = patrol
-                    app.state.patrol_status = {"state": "ready", "deliveryStates": state}
+                    app.state.patrol_status = {"state": "ready", "deliveryStates": state,
+                                              "deliveryEscalations": patrol.delivery_escalations}
                 except Exception:  # noqa: BLE001 - corrupted patrol state must not block chat startup.
                     if patrol is not None:
                         await asyncio.to_thread(patrol.close)
@@ -686,7 +690,8 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
         # native waiter remains part of the barrier until settlement finishes.
         settling_control = path in {"/api/assistant/main-control/settle", "/api/assistant/legacy-reminders/settle",
                                    "/api/assistant/legacy-reminders/abandon", "/api/assistant/legacy-reminders/permit/release",
-                                   "/api/assistant/computer/confirm"}
+                                   "/api/assistant/computer/confirm"} or (
+            path.startswith("/api/assistant/configuration-reference/contexts/") and path.endswith("/ack"))
         if writing and migration["gate"] and not settling_control:
             return JSONResponse({"error": "assistant_migration_wait"}, status_code=503)
         if writing:
@@ -791,7 +796,10 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                 raise HTTPException(422, detail="Invalid main control protocol")
             body = bytearray()
             async for chunk in request.stream():
-                if len(body) + len(chunk) > (128 * 1024 if getattr(main_control, "browser_enabled", False) else 4096):
+                limit = (4 * 1024 * 1024 if getattr(main_control, "configuration_enabled", False)
+                         and request.url.path.endswith("/settle") else
+                         128 * 1024 if getattr(main_control, "browser_enabled", False) else 4096)
+                if len(body) + len(chunk) > limit:
                     raise HTTPException(413, detail="Main control payload is too large")
                 body.extend(chunk)
             return body
@@ -824,6 +832,36 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
             except (ValueError, UnicodeDecodeError, RecursionError):
                 raise HTTPException(422, detail="Invalid main control protocol") from None
             return {"schemaVersion": 1, "accepted": accepted}
+
+    if main_control is not None and getattr(main_control, "configuration_enabled", False):
+        from . import configuration_contexts
+
+        async def configuration_context_body(context_id, request):
+            if not configuration_contexts.valid_context_id(context_id):
+                raise HTTPException(422, detail="Invalid configuration context")
+            body = await main_control_body(request)
+            if request.method == "GET":
+                if body:
+                    raise HTTPException(422, detail="Invalid configuration context")
+            else:
+                # Exact closed protocol; duplicate keys and boolean versions
+                # must not become a completion acknowledgement.
+                try:
+                    pairs = json.loads(body, object_pairs_hook=lambda items: items)
+                except (ValueError, UnicodeDecodeError, RecursionError):
+                    raise HTTPException(422, detail="Invalid configuration context") from None
+                if pairs != [("schemaVersion", 1)] or type(pairs[0][1]) is not int:
+                    raise HTTPException(422, detail="Invalid configuration context")
+
+        @app.get("/api/assistant/configuration-reference/contexts/{context_id}")
+        async def configuration_context_state(context_id: str, request: Request):
+            await configuration_context_body(context_id, request)
+            return configuration_contexts.state(main_control, context_id)
+
+        @app.post("/api/assistant/configuration-reference/contexts/{context_id}/ack")
+        async def configuration_context_ack(context_id: str, request: Request):
+            await configuration_context_body(context_id, request)
+            return configuration_contexts.acknowledge(main_control, context_id)
 
     if on_shutdown is not None:
         @app.post("/api/assistant/migration-barrier/prepare")

@@ -30,6 +30,12 @@ class AssetControl:
     def __init__(self, native):
         self.native = native
 
+    def _acknowledge(self, action, parameters, marker, result):
+        if marker is None:
+            return result
+        from .operation_receipts import record_success
+        return record_success(self.native, action, parameters, marker, result)
+
     def _owners(self):
         from core.web.services.team_workflow.research_runtime.operator_authorization import current_server_operator
         from core.web.services.team_workflow.research_runtime.operator_permissions import operator_has_privileged_role
@@ -119,8 +125,9 @@ class AssetControl:
             # The roster may already be durable when linked room/session or
             # canvas follow-up fails. Never label that a no-write rejection.
             raise _error("OPERATION_UNCONFIRMED") from None
-        return AssetMutationResponse(action="team_update", resourceId=args.team_id,
-            fingerprint=_fingerprint(after), verified=True).model_dump()
+        return self._acknowledge("team_update", parameters, marker,
+            AssetMutationResponse(action="team_update", resourceId=args.team_id,
+                fingerprint=_fingerprint(after), verified=True).model_dump())
 
     def _policy_snapshot(self, directory, agent_id):
         from core.web.services import tool_policy_configuration_service as policies
@@ -221,9 +228,10 @@ class AssetControl:
                     kind=raw["kind"], status=raw["status"], config=canonical_agent_config_payload(raw),
                     source="external_operator_management").result(timeout=3)
                 current, detail, _store, _compiled, matches = self._policy_snapshot(directory, args.agent_id)
-                return AssetMutationResponse(action="agent_tool_policy_update", resourceId=args.agent_id,
+                result = AssetMutationResponse(action="agent_tool_policy_update", resourceId=args.agent_id,
                     revision=int(current["configRevision"]), fingerprint=detail["policyFingerprint"],
                     verified=bool(matches and detail["policyFingerprint"] == preview["proposedPolicyFingerprint"])).model_dump()
+                return self._acknowledge("agent_tool_policy_update", parameters, marker, result)
         except policies.ToolPolicyConfigurationConflictError:
             raise _error("STATE_CONFLICT") from None
         except Exception as exc:
@@ -259,7 +267,7 @@ class AssetControl:
         except (OSError, ValueError, TypeError):
             raise _error("KNOWLEDGE_BASE_UNAVAILABLE", 503) from None
 
-    def _mutate_acl(self, parameters, *, revoke):
+    def _mutate_acl(self, parameters, *, revoke, marker=None):
         args = _validate(KnowledgeACLMutation, parameters)
         owner = self._knowledge_owner()
         snapshot = self.read_knowledge_acl(args.knowledge_base_id)
@@ -274,11 +282,12 @@ class AssetControl:
             raise _error("KNOWLEDGE_BASE_UNAVAILABLE", 404) from None
         except owner.TeamKnowledgeError:
             raise _error("INVALID_INPUT", 422) from None
-        return AssetMutationResponse(action="knowledge_acl_revoke" if revoke else "knowledge_acl_grant",
-            resourceId=result["scopedKnowledgeBaseId"], fingerprint=result["fingerprint"], verified=True).model_dump()
+        action = "knowledge_acl_revoke" if revoke else "knowledge_acl_grant"
+        return self._acknowledge(action, parameters, marker, AssetMutationResponse(action=action,
+            resourceId=result["scopedKnowledgeBaseId"], fingerprint=result["fingerprint"], verified=True).model_dump())
 
     def grant_knowledge_acl(self, parameters, marker=None):
-        return self._mutate_acl(parameters, revoke=False)
+        return self._mutate_acl(parameters, revoke=False, marker=marker)
 
     def revoke_knowledge_acl(self, parameters, marker=None):
-        return self._mutate_acl(parameters, revoke=True)
+        return self._mutate_acl(parameters, revoke=True, marker=marker)

@@ -86,7 +86,8 @@ class ChatRoomStore:
         payload["updatedAt"] = utc_now_iso()
         rooms = payload.get("rooms")
         payload["rooms"] = list(rooms or []) if isinstance(rooms, list) else []
-        _atomic_write_json(self.state_path, payload)
+        from core.infrastructure.model_reference_fence import commit_reference_metadata
+        commit_reference_metadata(self.state_path, payload, surface="rooms", write=lambda: _atomic_write_json(self.state_path, payload))
         return payload
 
 

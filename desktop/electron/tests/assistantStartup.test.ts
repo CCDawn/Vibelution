@@ -18,6 +18,9 @@ import { planProjectSlot, projectSlotWindowAction } from "../src/protocol/applyP
 import { parseBranchInstanceRecords } from "../src/protocol/launcherControlClient.js";
 import { ProjectAdmission, registeredInstancesForPhysicalRoot } from "../src/lifecycle/projectAdmission.js";
 import { startManagedLegacyReminderRetirement } from "../src/notifications/managedLegacyReminderRetirement.js";
+import { createBranchLifecycleCommandOwner } from "../src/lifecycle/branchLifecycleCommands.js";
+import { ConfigurationReferenceLeaseBroker } from "../src/assistant/configurationReferenceLease.js";
+import { isConfigurationReferenceRequest } from "../src/assistant/configurationReferenceProtocol.js";
 
 const ownedRoots: string[] = [];
 afterEach(() => { for (const root of ownedRoots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -74,6 +77,7 @@ function fixture() {
     desktopLaunchSettings: () => ({ configPath: "private-config" }),
     process: { env: {}, resourcesPath: "resources" },
     createAssistantProjectMainControl: vi.fn(() => async () => ({ state: "unknown" })),
+    createBranchLifecycleCommandOwner, ConfigurationReferenceLeaseBroker, isConfigurationReferenceRequest,
     createAssistantAppearanceMainControl: vi.fn(() => async () => ({ code: "unavailable" })),
     existingMainLineCommandQueueForProject: vi.fn(() => undefined),
     withProjectAdmission: async (_root: () => string, work: () => Promise<unknown>) => work(),
@@ -248,6 +252,25 @@ describe("resident assistant followed by an ordinary project entry", () => {
 });
 
 describe("resident assistant startup", () => {
+  it("wires reference snapshots only through the private native host context and forwards a known negative ACK", async () => {
+    const { context, projects, paths } = fixture();
+    const document = { snapshot: { schemaVersion: 1, revision: 0, complete: true, projects: [] }, check: vi.fn(), release: vi.fn() };
+    Object.assign(projects, { acquireRegistryDocumentAdmission: vi.fn(async () => document) });
+    await context.start(paths);
+    const options = context.AssistantHost.mock.calls[0][0];
+    const request = { deliveryId: "1".repeat(32), action: "configuration_reference_acquire", contextId: `cfg-${"a".repeat(32)}` };
+    expect(await options.mainControl(request)).toMatchObject({ complete: false });
+    const hostContext = { generationId: "native-generation", agentId: "native-agent", sessionId: "native-session",
+      nativeAssistantRoot: join(tmpdir(), "native-profile"), signal: new AbortController().signal, check: vi.fn(), drain: vi.fn(async () => {}),
+      retainLease: vi.fn(() => vi.fn()), readWorkComplete: vi.fn(async () => true), ackWorkComplete: vi.fn(async () => {}) };
+    const result = await options.mainControl(request, undefined, hostContext);
+    expect(result).toMatchObject({ complete: true, nativeAssistantRoot: hostContext.nativeAssistantRoot });
+    expect(document.release).not.toHaveBeenCalled();
+    await options.mainControlSettled(request, result, false, hostContext);
+    expect(document.release).toHaveBeenCalledOnce();
+    await context.stop();
+  });
+
   it("uses a fresh inventory and one sealed verifier for the original recovery ID before starting the host", async () => {
     const { context, projects, paths } = fixture();
     const operationId = "initial-" + "b".repeat(40), projectId = "project";

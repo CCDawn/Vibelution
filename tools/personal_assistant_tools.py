@@ -132,6 +132,7 @@ def personal_assistant_action_tool(action: str = "index", parameters: dict | Non
                 "team_list": ["teams:directory:read"], "team_get": ["teams:directory:read"],
                 "team_result": ["teams:results:read"],
                 "runtime_list": ["operations:read"], "runtime_get": ["operations:read"],
+                "research_get": ["operations:read"], "knowledge_list": ["knowledge:catalog:read"],
                 "team_asset_get": ["teams:manage:read"],
                 "agent_tool_policy_get": ["agents:tool-policy:read"],
                 "knowledge_acl_get": ["knowledge:acl:read"],
@@ -250,8 +251,12 @@ def personal_assistant_manage_tool(action: str, arguments_json: str) -> str:
             result = execute_action(action, args, runtime=runtime, governed=True)
             from core.web.services.external_management.contracts import ACTION_SCOPES
             required_scope = ACTION_SCOPES.get(action)
-            if required_scope and result.get("code") == "SCOPE_DENIED":
-                result = {**result, "requiredScopes": [required_scope], "requiredScope": required_scope, "nextStep": (
+            required_scopes = [required_scope] if required_scope else []
+            if action == "agent_create" and args.get("capability_preset") == "project_files_v1":
+                required_scopes.append("agents:create:files")
+            if required_scopes and result.get("code") == "SCOPE_DENIED":
+                result = {**result, "requiredScopes": required_scopes,
+                    **({"requiredScope": required_scope} if len(required_scopes) == 1 else {}), "nextStep": (
                     "先用 authorization_status 查询，再通过 personal_assistant_manage_tool 的 "
                     "authorization_upgrade 仅增加 requiredScopes 中缺失的权限；沿用原 request_id 和参数继续，"
                     "不修改其他权限。拒绝或结果未知时保留原请求并说明，不更换 ID 重复执行。"

@@ -8,6 +8,7 @@ import time
 from collections import deque
 from collections.abc import Callable
 from concurrent.futures import Future
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any, Generic, TypeVar
 
@@ -34,6 +35,7 @@ class _Envelope(Generic[T]):
     future: Future[T]
     enqueued_at: float
     force_flush: bool = False
+    model_references: bool = False
 
 
 @dataclass
@@ -105,13 +107,23 @@ class ConversationWriter:
         *,
         timeout: float | None = 0.25,
         force_flush: bool = False,
+        model_references: bool = False,
     ) -> Future[T]:
         future: Future[T] = Future()
+        if model_references:
+            from core.infrastructure.model_reference_fence import model_reference_fence_owned
+            if model_reference_fence_owned():
+                # Cross-thread ownership is not reentrancy. No production
+                # config participant queues a reference mutation; reject an
+                # unsupported nested writer before it can wait on this caller.
+                future.set_exception(RuntimeError("Reference writer cannot be queued while its caller owns the model reference fence"))
+                return future
         envelope = _Envelope(
             mutation=mutation,
             future=future,
             enqueued_at=time.perf_counter(),
             force_flush=force_flush,
+            model_references=model_references,
         )
         self._enqueue(envelope, timeout=timeout)
         return future
@@ -253,23 +265,43 @@ class ConversationWriter:
             self._max_batch_observed = max(self._max_batch_observed, len(batch))
             for envelope in batch:
                 self._queue_wait_ms.append((now - envelope.enqueued_at) * 1000)
+        from core.infrastructure.model_reference_fence import model_reference_fence
+        from core.infrastructure.model_reference_fence import unavailable_retired_models, assert_model_reference_additions
+        has_reference_mutation = any(item.model_references for item in batch)
+        fence = model_reference_fence() if has_reference_mutation else nullcontext()
         try:
-            connection.execute("BEGIN IMMEDIATE")
-            for index, envelope in enumerate(batch):
-                savepoint = f"conversation_mutation_{index}"
-                unit_of_work = ConversationUnitOfWork(connection)
-                connection.execute(f"SAVEPOINT {savepoint}")
+            with fence:
                 try:
-                    result = envelope.mutation(unit_of_work)
-                    connection.execute(f"RELEASE SAVEPOINT {savepoint}")
-                    successful.append(
-                        (envelope, result, unit_of_work.take_after_commit())
-                    )
-                except Exception as exc:  # noqa: BLE001 - mutation failures are isolated by savepoint.
-                    connection.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
-                    connection.execute(f"RELEASE SAVEPOINT {savepoint}")
-                    failures.append((envelope, exc))
-            connection.commit()
+                    connection.execute("BEGIN IMMEDIATE")
+                    for index, envelope in enumerate(batch):
+                        savepoint = f"conversation_mutation_{index}"
+                        unit_of_work = ConversationUnitOfWork(connection)
+                        connection.execute(f"SAVEPOINT {savepoint}")
+                        try:
+                            blocked = unavailable_retired_models() if envelope.model_references else frozenset()
+                            before_refs = _retired_binding_keys(connection, blocked) if blocked else set()
+                            result = envelope.mutation(unit_of_work)
+                            if blocked:
+                                assert_model_reference_additions(before_refs, _retired_binding_keys(connection, blocked))
+                            connection.execute(f"RELEASE SAVEPOINT {savepoint}")
+                            successful.append(
+                                (envelope, result, unit_of_work.take_after_commit())
+                            )
+                        except Exception as exc:  # noqa: BLE001 - mutation failures are isolated by savepoint.
+                            connection.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
+                            connection.execute(f"RELEASE SAVEPOINT {savepoint}")
+                            failures.append((envelope, exc))
+                    connection.commit()
+                except BaseException:
+                    # Retain the reference fence through transaction rollback.
+                    if has_reference_mutation:
+                        try:
+                            connection.rollback()
+                        except sqlite3.Error:
+                            # BEGIN may itself fail. Keep the original native
+                            # lock/busy error as the diagnostic authority.
+                            pass
+                    raise
         except Exception as exc:  # noqa: BLE001 - every queued future needs a terminal outcome.
             normalized_error = (
                 classify_sqlite_error(exc)
@@ -365,3 +397,32 @@ def _percentile(values: list[float], quantile: float) -> float:
         return 0.0
     index = min(len(values) - 1, max(0, int((len(values) - 1) * quantile)))
     return round(float(values[index]), 3)
+
+
+def _retired_binding_keys(connection, retired):
+    """Only closed compiled binding fields; no Prompt or transcript selection."""
+    import json
+    rows = connection.execute("""WITH pins(kind,owner,agent,revision) AS (
+        SELECT 'agent',agent_id,agent_id,current_config_revision_id FROM agents
+        UNION ALL SELECT 'session',session_id,agent_id,agent_config_revision_id FROM sessions
+        UNION ALL SELECT 'admission',turn_id,agent_id,agent_config_revision_id FROM session_admissions
+            WHERE state IN ('reserved','journaled','projected')
+    ) SELECT p.kind,p.owner,json_extract(r.config_json,'$.modelId'),
+        json_extract(r.config_json,'$.dialogueModelId'),json_extract(r.config_json,'$.llmBindings')
+        FROM pins p JOIN agent_config_revisions r ON r.agent_id=p.agent AND r.revision_id=p.revision
+        LIMIT 100001""").fetchall()
+    if len(rows) > 100_000:
+        raise ValueError("Compiled reference metadata exceeds limit")
+    result = set()
+    for row in rows:
+        for field, value in (("modelId", row[2]), ("dialogueModelId", row[3])):
+            if value in retired:
+                result.add((row[0], row[1], field, value))
+        bindings = json.loads(row[4]) if row[4] else {}
+        if not isinstance(bindings, dict):
+            raise ValueError("Invalid compiled binding metadata")
+        for slot, binding in bindings.items():
+            value = binding.get("modelId") if isinstance(binding, dict) else None
+            if value in retired:
+                result.add((row[0], row[1], "llmBindings." + slot, value))
+    return result

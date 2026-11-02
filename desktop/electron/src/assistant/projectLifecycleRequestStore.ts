@@ -9,7 +9,8 @@ import { isAbsolute, join, parse, resolve } from "node:path";
 export type LifecycleWriteOperation = "start" | "stop" | "restart";
 export type LifecycleRequestIdentity = { requestId: string; projectId: string; operation: LifecycleWriteOperation };
 export type LifecycleRequestBinding = { workspaceRoot: string; runtimeManagerDir: string; registryFingerprint: string };
-export type LifecycleNativeCommand = { commandId: string; type: "open" | "close" | "restart"; operation: LifecycleWriteOperation };
+export type LifecycleNativeCommand = { commandId: string; type: "open" | "close" | "restart"; operation: LifecycleWriteOperation;
+  owner?: "branch"; instanceId?: string };
 export type LifecycleRequestRecord = {
   schemaVersion: 1;
   request: LifecycleRequestIdentity;
@@ -76,13 +77,17 @@ function bindingValue(value: unknown, code = "request_invalid"): LifecycleReques
     registryFingerprint: input.registryFingerprint };
 }
 function commandValue(value: unknown, request: LifecycleRequestIdentity, code = "request_invalid"): LifecycleNativeCommand {
-  const input = closed(value, ["commandId", "type", "operation"], code);
+  const branch = !!value && typeof value === "object" && Object.hasOwn(value, "owner");
+  const input = closed(value, branch ? ["commandId", "type", "operation", "owner", "instanceId"] : ["commandId", "type", "operation"], code);
   if (typeof input.commandId !== "string" || !COMMAND_ID.test(input.commandId)
     || typeof input.operation !== "string" || !OPERATIONS.has(input.operation)
     || input.type !== TYPES[input.operation as LifecycleWriteOperation]
     || (input.operation !== request.operation && !(request.operation === "start" && input.operation === "restart"))) return fail(code);
+  if (branch && (input.owner !== "branch" || typeof input.instanceId !== "string" || !input.instanceId.trim()
+      || input.instanceId.length > 512 || input.instanceId.includes("\0"))) return fail(code);
   return { commandId: input.commandId, type: input.type as LifecycleNativeCommand["type"],
-    operation: input.operation as LifecycleWriteOperation };
+    operation: input.operation as LifecycleWriteOperation,
+    ...(branch ? { owner: "branch" as const, instanceId: input.instanceId as string } : {}) };
 }
 function publicRecord(row: StoredRecord): LifecycleRequestRecord {
   return { schemaVersion: 1, request: { ...row.request }, binding: row.binding && { ...row.binding }, command: row.command && { ...row.command } };

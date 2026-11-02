@@ -1338,6 +1338,27 @@ def _argument_summary(tool_name: str, tool_args: Mapping[str, Any]) -> dict[str,
 def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
     """Approval-only projection; never expose nested prompt/policy values."""
     action = args.get("action")
+    from core.assistant_runtime.autonomy_approval import AUTONOMY_ACTIONS
+    if isinstance(action, str) and action in AUTONOMY_ACTIONS:
+        from core.infrastructure.native_runtime import is_launcher_assistant_process
+        if not is_launcher_assistant_process():
+            return {"assistantAction": action, "assistantArgumentsInvalid": True}
+        try:
+            def unique_goal_arguments(pairs):
+                result = {}
+                for key, value in pairs:
+                    if key in result:
+                        raise ValueError("Duplicate delegation argument")
+                    result[key] = value
+                return result
+            raw = args.get("arguments_json")
+            values = json.loads(raw, object_pairs_hook=unique_goal_arguments) if isinstance(raw, str) and len(raw) <= 16000 else None
+            if not isinstance(values, dict):
+                raise ValueError("Invalid delegation arguments")
+            from core.assistant_runtime.autonomy_approval import approval_summary
+            return approval_summary(action, values)
+        except (ValueError, TypeError, KeyError, RuntimeError, RecursionError):
+            return {"assistantAction": action, "assistantArgumentsInvalid": True}
     from core.assistant_runtime.platform_approval import PLATFORM_MANAGEMENT_ACTIONS
     if isinstance(action, str) and action in PLATFORM_MANAGEMENT_ACTIONS:
         from core.infrastructure.native_runtime import is_launcher_assistant_process

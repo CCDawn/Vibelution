@@ -83,6 +83,39 @@ def _operator_context():
     return operator if operator and operator.operator_id and operator_has_privileged_role(operator.roles) else None
 
 
+def _progress_fingerprint(kind, raw):
+    """Hash only existing owner progress facts; heartbeat/CAS is not progress."""
+    def counter(value):
+        return type(value) is int and 0 <= value <= 2**63 - 1
+
+    if kind == "team_run" and counter(raw.get("current")):
+        attempts = raw.get("attempts")
+        if not isinstance(attempts, list) or len(attempts) > 10000:
+            return None
+        facts = []
+        for attempt in attempts:
+            if (not isinstance(attempt, dict) or not counter(attempt.get("number"))
+                    or attempt["number"] < 1 or attempt.get("status") not in {
+                        "dispatching", "running", "completed", "failed", "stopped"}):
+                return None
+            try:
+                facts.append([_token(attempt.get("nodeId")), attempt["number"], attempt["status"]])
+            except ValueError:
+                return None
+        return _fingerprint([kind, raw["current"], facts])
+    if kind == "research_run" and counter(raw.get("lastEventSequence")):
+        node = raw.get("activeNodeId") or ""
+        try:
+            if node:
+                _token(node)
+        except ValueError:
+            return None
+        return _fingerprint([kind, raw["lastEventSequence"], node])
+    # The remaining owner snapshots do not carry a verified business-progress
+    # cursor. Do not upgrade arbitrary progress-shaped fields into authority.
+    return None
+
+
 def _project(kind, raw):
     """Closed projection: even values in metadata columns must satisfy grammar."""
     key = "taskId" if kind in {"runtime_task", "external_task"} else "id" if kind == "team_run" else "runId"
@@ -149,6 +182,7 @@ def _project(kind, raw):
         # Include control-changing facts, never a prompt, summary, or transcript.
         result["revision"] = _fingerprint([result, {key: raw.get(key) for key in (
             "updatedAt", "pauseRequested", "stopRequested", "stopInitiator", "finishedAt")}])
+    result["progressFingerprint"] = _progress_fingerprint(kind, raw)
     return result
 
 
@@ -344,10 +378,13 @@ def _research_metadata(gateway, resource_id=None):
     # Repository-owned read connection; fixed columns contain no content.
     suffix = " ORDER BY run_id LIMIT ?" if resource_id is None else " WHERE run_id=? LIMIT 2"
     parameters = (_MAX_FILES + 1,) if resource_id is None else (resource_id,)
-    rows = store.read(lambda repo: repo.execute(
-        "SELECT run_id,team_id,workflow_id,status,run_version,"
-        "EXISTS(SELECT 1 FROM node_attempts a WHERE a.run_id=workflow_runs.run_id) "
-        "FROM workflow_runs" + suffix, parameters).fetchall())
+    def metadata(repo):
+        columns = {row[1] for row in repo.execute("PRAGMA table_info(workflow_runs)").fetchall()}
+        progress = "last_event_sequence,active_node_id" if {"last_event_sequence", "active_node_id"} <= columns else "NULL,NULL"
+        return repo.execute("SELECT run_id,team_id,workflow_id,status,run_version,"
+            "EXISTS(SELECT 1 FROM node_attempts a WHERE a.run_id=workflow_runs.run_id)," + progress +
+            " FROM workflow_runs" + suffix, parameters).fetchall()
+    rows = store.read(metadata)
     control = False
     if _operator_context() is not None:
         try:
@@ -356,7 +393,8 @@ def _research_metadata(gateway, resource_id=None):
         except Exception:
             pass  # Read coverage is independent of a configured write runtime.
     return [{"runId": row[0], "teamId": row[1], "flowId": row[2], "status": row[3], "revision": row[4]}
-            | {"_hasAttempts": bool(row[5]), "_operatorControl": control}
+            | {"_hasAttempts": bool(row[5]), "_operatorControl": control,
+               "lastEventSequence": row[6], "activeNodeId": row[7]}
             for row in rows]
 
 
@@ -459,18 +497,29 @@ def read_operations(gateway, query):
     query = _parameters(query)
     kind, offset, limit = query.get("kind"), query.get("offset", 0), query.get("limit", 3)
     filter_state = query.get("state", "active")
-    if (set(query) - {"kind", "state", "offset", "limit"} or kind not in (None, "", *KINDS)
+    expected_snapshot = query.get("expected_snapshot")
+    if (set(query) - {"kind", "state", "offset", "limit", "expected_snapshot"} or kind not in (None, "", *KINDS)
             or filter_state not in {"active", "terminal", "all"}
+            or expected_snapshot is not None and (not isinstance(expected_snapshot, str)
+                or re.fullmatch(r"[a-f0-9]{64}", expected_snapshot) is None)
             or type(offset) is not int or not 0 <= offset <= 1000000 or type(limit) is not int or not 1 <= limit <= 3):
         raise ManagementError("INVALID_INPUT", 422)
-    operations, coverage = [], []
+    operations, coverage, observed = [], [], []
     for selected in (kind,) if kind else KINDS:
         rows, source_state = _snapshot(gateway, selected)
+        observed.extend(rows)
         operations.extend(row for row in rows if filter_state == "all" or
             (row["status"] in _TERMINAL_BY_KIND.get(selected, _TERMINAL)) == (filter_state == "terminal"))
         coverage.append(source_state)
     operations.sort(key=lambda row: (row["kind"], row["resourceId"]))
-    result = {"operations": [], "offset": offset, "total": len(operations), "nextOffset": None, "coverage": coverage,
+    # Bind the entire admitted observation, including rows outside this page and
+    # the state filter. A digest of partial coverage never proves an unseen tail.
+    # This is a consistency fence between scans, not a frozen native snapshot.
+    observed.sort(key=lambda row: (row["kind"], row["resourceId"], row["sessionId"], row["teamId"], row["flowId"]))
+    snapshot = _fingerprint({"kind": kind or None, "state": filter_state, "operations": observed, "coverage": coverage})
+    if expected_snapshot is not None and expected_snapshot != snapshot:
+        raise ManagementError("RUNTIME_SNAPSHOT_CHANGED", 409)
+    result = {"snapshot": snapshot, "operations": [], "offset": offset, "total": len(operations), "nextOffset": None, "coverage": coverage,
         "complete": all(state["complete"] for state in coverage), "untrustedContent": True}
     for row in operations[offset:offset + limit]:
         candidate = {**result, "operations": [*result["operations"], row], "nextOffset": offset + limit}

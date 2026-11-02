@@ -1,11 +1,12 @@
 /** Launcher-owned source-host lifecycle; packaged host distribution is a separate boundary. */
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { loadWorkbenchJobNative, type WorkbenchJobHandle, type WorkbenchJobNative } from "../process/workbenchJob.js";
 import { resolveNoConsolePython } from "../process/workbenchBackend.js";
 import { MAX_ASSISTANT_PROJECTS, type AssistantProjectRegistrySnapshot } from "./projectRegistry.js";
 import { parseAffairsSyncResult, parseEpisodicSyncResult, runMainControlPump, unknownAffairsSyncResult, unknownEpisodicSyncResult, type InitialMigrationMainControlRequest, type MainControlRequest } from "./mainControlTransport.js";
+import { isConfigurationReferenceRequest, type ConfigurationReferenceHostContext } from "./configurationReferenceProtocol.js";
 
 const STARTUP_MS = 60_000;
 const REQUEST_MS = 15_000;
@@ -66,7 +67,9 @@ export type AssistantHostOptions = {
   native?: WorkbenchJobNative;
   fetch?: typeof globalThis.fetch;
   /** Main-only native lifecycle capability; deliberately absent from renderer IPC. */
-  mainControl?: (request: MainControlRequest, signal?: AbortSignal) => Promise<unknown>;
+  mainControl?: (request: MainControlRequest, signal?: AbortSignal, hostContext?: ConfigurationReferenceHostContext) => Promise<unknown>;
+  mainControlSettled?: (request: MainControlRequest, result: Record<string, unknown>, accepted: boolean | undefined,
+    hostContext?: ConfigurationReferenceHostContext) => void | Promise<void>;
   appearanceControl?: boolean;
   browserControl?: boolean;
   initialMigrationControl?: boolean;
@@ -85,6 +88,13 @@ type Generation = {
   closed: boolean;
   projectRevision: number;
   migrationRetirementRequested?: boolean;
+  referenceDrained?: boolean;
+  nativeAssistantRoot: string;
+  profileIdentity: string;
+  referenceLeases?: Set<symbol>;
+  referenceRecovery?: boolean;
+  controlRetryMs?: number;
+  controlPump?: AbortController;
 };
 
 class HostError extends Error {
@@ -574,6 +584,7 @@ export class AssistantHost {
       if (generation.native.activeCount(generation.job) !== 0
         || typeof generation.native.exitCode !== "function" || generation.native.exitCode(generation.job) === null
         || !generation.native.drainStatus(generation.job).complete) return false;
+      generation.referenceDrained = this.configurationReferenceJobDrained(generation);
       generation.native.close(generation.job);
       generation.closed = true;
       generation.token = "";
@@ -927,6 +938,7 @@ export class AssistantHost {
       if (this.options.mainControl) environment.VIBELUTION_ASSISTANT_MAIN_CONTROL = "1";
       if (this.options.mainControl && this.options.appearanceControl) environment.VIBELUTION_ASSISTANT_APPEARANCE_CONTROL = "1";
       if (this.options.mainControl && this.options.initialMigrationControl) environment.VIBELUTION_ASSISTANT_INITIAL_MIGRATION_CONTROL = "1";
+      const nativeAssistantRoot = realpathSync.native(this.options.profileRoot), profileIdentity = this.configurationReferenceProfileIdentity();
       const spawned = native.spawn({
         executable: python,
         arguments: [...this.options.pythonArguments!, join(this.options.sourceRoot, "scripts", "assistant_host.py"), "--profile-root", this.options.profileRoot,
@@ -938,7 +950,7 @@ export class AssistantHost {
         containDescendants: true, maxLogBytes: MAX_LOG_BYTES,
       });
       generation = { id, token, directory, native, job: spawned.job, abort: new AbortController(), closed: false,
-        projectRevision: this.projectSnapshot.revision };
+        projectRevision: this.projectSnapshot.revision, nativeAssistantRoot, profileIdentity };
       this.current = generation;
       if (!positiveInteger(spawned.pid)) throw new HostError("ASSISTANT_SPAWN_INVALID");
       const deadline = Date.now() + STARTUP_MS;
@@ -1197,13 +1209,19 @@ export class AssistantHost {
 
   private startMainControl(generation: Generation): void {
     const onRequest = this.options.mainControl!;
-    this.mainControlUncertain = false;
+    const contexts = new Map<string, ConfigurationReferenceHostContext>();
+    if (!generation.controlPump) this.mainControlUncertain = false;
+    const pump = new AbortController();
+    generation.controlPump = pump;
+    const current = () => this.current === generation && !generation.closed && this.view.state === "ready"
+      && !generation.abort.signal.aborted && generation.controlPump === pump && !pump.signal.aborted;
     void runMainControlPump({
       signal: generation.abort.signal,
-      isCurrent: () => this.current === generation && !generation.closed && this.view.state === "ready",
-      invoke: (path, method, body) => this.rpc(generation, path, method, body, REQUEST_MS, false, 8_192),
+      isCurrent: current,
+      invoke: (path, method, body) => this.rpc(generation, path, method, body, REQUEST_MS, false, 8_192, pump.signal),
       onRequest: async (request, signal) => {
-        while (this.migrationAdmission) {
+        const referenceSettlement = isConfigurationReferenceRequest(request) && request.action !== "configuration_reference_acquire";
+        while (this.migrationAdmission && !referenceSettlement) {
           const admission = this.migrationAdmission;
           const aborted = AbortSignal.any([generation.abort.signal, ...(signal ? [signal] : [])]);
           if (aborted.aborted) throw new HostError("ASSISTANT_STOPPED");
@@ -1215,11 +1233,37 @@ export class AssistantHost {
         }
         if (generation.abort.signal.aborted || signal?.aborted) throw new HostError("ASSISTANT_STOPPED");
         this.mainControlRequests += 1;
-        try { return await onRequest(request, signal); }
+        try {
+          const context = this.configurationReferenceContext(generation);
+          if (isConfigurationReferenceRequest(request) && request.action === "configuration_reference_acquire") contexts.set(request.deliveryId, context);
+          return await onRequest(request, signal, context);
+        }
         finally { this.mainControlRequests -= 1; this.settleMigrationAdmissionDrain(); }
       },
-      onFailure: () => {
+      onSettled: async (request, result, accepted) => {
+        if (accepted === undefined && !isConfigurationReferenceRequest(request) && this.current === generation)
+          this.mainControlUncertain = true;
+        try { await this.options.mainControlSettled?.(request, result, accepted, contexts.get(request.deliveryId)); }
+        finally { contexts.delete(request.deliveryId); }
+      },
+      onProgress: () => { if (current()) { generation.referenceRecovery = false; generation.controlRetryMs = 100; } },
+      onFailure: uncertain => {
         if (this.current !== generation || generation.abort.signal.aborted) return;
+        if (uncertain?.some(request => !isConfigurationReferenceRequest(request))) this.mainControlUncertain = true;
+        pump.abort();
+        if (generation.referenceLeases?.size || generation.referenceRecovery
+            || uncertain?.some(request => isConfigurationReferenceRequest(request))) {
+          // Retain the exact native writer. Only the transport is replaced;
+          // original deliveries are neither retried nor sent to another Job.
+          generation.referenceRecovery = true;
+          const retry = generation.controlRetryMs ?? 100;
+          generation.controlRetryMs = Math.min(1000, retry * 2);
+          void sleep(retry, generation.abort.signal).then(() => {
+            if (this.current === generation && !generation.closed && !generation.abort.signal.aborted
+                && this.view.state === "ready" && generation.controlPump === pump) this.startMainControl(generation);
+          }).catch(() => undefined);
+          return;
+        }
         if (this.migrationAdmission) {
           // A failed control pump is not proof that its effects drained. Keep
           // the host and heartbeat alive; migration must remain unavailable.
@@ -1253,6 +1297,68 @@ export class AssistantHost {
       || !positiveInteger(ready.pid) || !positiveInteger(ready.port, 65_535)) throw new HostError("ASSISTANT_READY_INVALID");
     // A venv pythonw redirector can have a different root PID; Job ownership is authoritative.
     return { port: ready.port };
+  }
+
+  private configurationReferenceContext(generation: Generation): ConfigurationReferenceHostContext {
+    const agentId = generation.agentId, sessionId = generation.sessionId;
+    const check = () => {
+      if (this.current !== generation || generation.closed || generation.abort.signal.aborted || this.view.state !== "ready"
+          || !agentId || !sessionId || generation.agentId !== agentId || generation.sessionId !== sessionId
+          || realpathSync.native(this.options.profileRoot) !== generation.nativeAssistantRoot
+          || this.configurationReferenceProfileIdentity() !== generation.profileIdentity)
+        throw new HostError("ASSISTANT_NOT_READY");
+    };
+    check();
+    const contextPath = (contextId: string) => {
+      if (!/^cfg-[a-f0-9-]{32,64}$/.test(contextId)) throw new HostError("ASSISTANT_REQUEST_INVALID");
+      return `/api/assistant/configuration-reference/contexts/${contextId}`;
+    };
+    return Object.freeze({ generationId: generation.id, agentId: agentId!, sessionId: sessionId!,
+      nativeAssistantRoot: generation.nativeAssistantRoot, signal: generation.abort.signal, check,
+      retainLease: () => {
+        check(); const retention = Symbol();
+        (generation.referenceLeases ??= new Set()).add(retention);
+        return () => { generation.referenceLeases?.delete(retention); };
+      },
+      readWorkComplete: async (contextId: string) => {
+        check();
+        const result = await this.rpc(generation, contextPath(contextId), "GET", undefined, 1_000, false, 8192);
+        check();
+        if (!object(result) || Object.keys(result).length !== 4 || !ownKeys(result, ["schemaVersion", "contextId", "known", "workComplete"])
+            || result.schemaVersion !== 1 || result.contextId !== contextId || typeof result.known !== "boolean"
+            || typeof result.workComplete !== "boolean" || !result.known && result.workComplete)
+          throw new HostError("ASSISTANT_RESPONSE_INVALID");
+        return result.known && result.workComplete;
+      },
+      ackWorkComplete: async (contextId: string) => {
+        check();
+        const result = await this.rpc(generation, `${contextPath(contextId)}/ack`, "POST", { schemaVersion: 1 }, 1_000, false, 8192);
+        check();
+        if (!object(result) || Object.keys(result).length !== 3 || !ownKeys(result, ["schemaVersion", "contextId", "acknowledged"])
+            || result.schemaVersion !== 1 || result.contextId !== contextId || result.acknowledged !== true)
+          throw new HostError("ASSISTANT_RESPONSE_INVALID");
+      },
+      drain: async (signal?: AbortSignal) => {
+        while (!generation.referenceDrained) {
+          if (signal?.aborted) throw new HostError("ASSISTANT_STOPPED");
+          if (this.configurationReferenceJobDrained(generation)) { generation.referenceDrained = true; break; }
+          await new Promise<void>(done => { const timer = setTimeout(done, 20); timer.unref?.(); });
+        }
+      } });
+  }
+
+  private configurationReferenceProfileIdentity(): string {
+    const stat = statSync(this.options.profileRoot, { bigint: true });
+    if (!stat.isDirectory()) throw new HostError("ASSISTANT_NOT_READY");
+    return JSON.stringify([stat.dev.toString(), stat.ino.toString(), stat.birthtimeNs.toString()]);
+  }
+
+  private configurationReferenceJobDrained(generation: Generation): boolean {
+    try {
+      const exit = generation.native.exitCode?.(generation.job);
+      return generation.native.activeCount(generation.job) === 0 && generation.native.drainStatus(generation.job).complete === true
+        && typeof exit === "number" && Number.isSafeInteger(exit);
+    } catch { return false; }
   }
 
   private async rpc(generation: Generation, path: string, method: "GET" | "POST" | "PUT", body?: object,
@@ -1345,7 +1451,10 @@ export class AssistantHost {
   private async waitDrain(generation: Generation, timeoutMs: number): Promise<boolean> {
     const deadline = Date.now() + timeoutMs;
     do {
-      if (generation.native.activeCount(generation.job) === 0 && generation.native.drainStatus(generation.job).complete) return true;
+      if (generation.native.activeCount(generation.job) === 0 && generation.native.drainStatus(generation.job).complete) {
+        if (this.configurationReferenceJobDrained(generation)) generation.referenceDrained = true;
+        return true;
+      }
       if (Date.now() >= deadline) return false;
       await sleep(20);
     } while (true);

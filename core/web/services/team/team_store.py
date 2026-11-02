@@ -80,7 +80,12 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     # Atomic temp+replace write, same standard as agents.json: a crash mid-write
     # must never leave a truncated teams.json behind.
     path.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_json(path, payload, sort_keys=True, strict_replace=True)
+    if path.name == "workflow_orchestration.json":
+        from core.infrastructure.model_reference_fence import commit_reference_metadata
+        commit_reference_metadata(path, payload, surface="team_policy",
+            write=lambda: atomic_write_json(path, payload, sort_keys=True, strict_replace=True))
+    else:
+        atomic_write_json(path, payload, sort_keys=True, strict_replace=True)
 
 
 def _teams_root(*, seed: bool = True) -> Path:

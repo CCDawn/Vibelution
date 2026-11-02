@@ -7,7 +7,9 @@ import copy
 import hashlib
 import json
 import os
+import re
 import sqlite3
+import stat
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -511,6 +513,53 @@ def open_sqlite_checkpointer(path: Path | str | None = None) -> Any:
             connection.close()
 
     return _saver()
+
+
+def read_latest_checkpoint_id(path: Path | str, thread_id: str) -> str:
+    """Read one checkpoint identity without creating files or loading state.
+
+    SQLite's ordinary read-only mode may create WAL shared-memory sidecars.
+    Immutable mode avoids that write, but ignores a WAL. Therefore an active
+    WAL/rollback journal or a changing database makes this optional identity
+    unavailable. Never mistake the main file's older checkpoint for the latest.
+    """
+    if not isinstance(thread_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}", thread_id):
+        return ""
+    target = Path(path).absolute()
+
+    def observation() -> tuple[int, ...]:
+        for entry in (target, *target.parents):
+            info = entry.lstat()
+            if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+                raise OSError("checkpoint path is linked")
+        info = target.stat()
+        if not stat.S_ISREG(info.st_mode):
+            raise OSError("checkpoint database is not a file")
+        for suffix in ("-wal", "-journal"):
+            try:
+                target.with_name(target.name + suffix).lstat()
+            except FileNotFoundError:
+                continue
+            raise OSError("checkpoint database has an active journal")
+        return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+    connection = None
+    try:
+        before = observation()
+        connection = sqlite3.connect(target.as_uri() + "?mode=ro&immutable=1", uri=True)
+        row = connection.execute(
+            "SELECT checkpoint_id FROM checkpoints WHERE thread_id=? AND checkpoint_ns='' "
+            "ORDER BY checkpoint_id DESC LIMIT 1", (thread_id,),
+        ).fetchone()
+        if observation() != before or row is None:
+            return ""
+        value = row[0]
+        return value if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}", value) else ""
+    except (OSError, sqlite3.Error, ValueError):
+        return ""
+    finally:
+        if connection is not None:
+            connection.close()
 
 
 def assert_not_memory_saver(checkpointer: Any) -> None:

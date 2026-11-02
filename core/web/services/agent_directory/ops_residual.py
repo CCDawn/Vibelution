@@ -2086,7 +2086,9 @@ def save_registry_payload(
         with s._STATE_LOCK:
             if enforce_shrink_guard:
                 s._guard_against_suspicious_registry_shrink(payload)
-            s._atomic_write_json(s.registry_path(), payload)
+            from core.infrastructure.model_reference_fence import commit_reference_metadata
+            target = s.registry_path()
+            commit_reference_metadata(target, payload, surface="agents", write=lambda: s._atomic_write_json(target, payload))
             s._invalidate_repaired_state_cache()
             return payload
 

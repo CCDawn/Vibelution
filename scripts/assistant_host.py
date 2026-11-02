@@ -128,7 +128,7 @@ def main():
     if main_control_enabled:
         from core.assistant_runtime.main_control import MainControlBroker
         main_control = MainControlBroker(dispatch.project_ids, appearance_enabled=appearance_enabled, browser_enabled=True,
-                                         initial_migration_enabled=initial_migration_enabled)
+                                         initial_migration_enabled=initial_migration_enabled, configuration_enabled=True)
 
     ready = args.runtime_dir / "ready.json"
     # A second Launcher cannot open another writer over the same profile.

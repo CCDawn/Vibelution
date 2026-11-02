@@ -680,7 +680,7 @@ def build_workflow_runtime(
     from .adapter_dispatch_worker import AdapterDispatchWorker
     from .adapters.domain_adapters import register_default_adapters
     from .checkpoint_fork_worker import CheckpointForkWorker
-    from .checkpoint_lifecycle import latest_checkpoint_id
+    from .checkpoint_lifecycle import latest_checkpoint_metadata_id
     from .cancel_run_cleanup import CancelRunCleanupWorker
     from .command_service import WorkflowCommandService
     from .delivery_worker import DeliveryOrchestrationWorker
@@ -746,7 +746,7 @@ def build_workflow_runtime(
         store=store,
         readiness_service=readiness,
         readiness_context=lambda: readiness_context,
-        revise_checkpoint_resolver=lambda thread_id: latest_checkpoint_id(
+        revise_checkpoint_resolver=lambda thread_id: latest_checkpoint_metadata_id(
             str(checkpoint), thread_id
         ),
     )

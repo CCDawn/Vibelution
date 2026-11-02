@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any
 from urllib.parse import urlencode
 
@@ -108,6 +109,45 @@ class WorkflowQueryService:
             return str(self._revise_checkpoint_resolver(run.thread_id) or "").strip() or None
         except Exception:  # noqa: BLE001 - snapshot reads must fail soft
             return None
+
+    def get_revise_checkpoint_ref(
+        self, *, team_id: str, run_id: str, workflow_id: str, node_id: str,
+        task_id: str, expected_run_version: int,
+    ) -> dict[str, str] | None:
+        """Scoped human-task fork identity, with no prompt or checkpoint body.
+
+        The configured resolver owns the checkpoint path. The composition root
+        supplies the metadata-only resolver; absence/concurrent activity leaves
+        revision unavailable rather than constructing a runtime on this read.
+        """
+        scoped_team = _require_team_id(team_id)
+
+        def binding(repo):
+            row = repo.execute(
+                "SELECT r.team_id,r.workflow_id,r.run_version,r.thread_id,r.forked_from_checkpoint_id,"
+                "r.status FROM workflow_runs r JOIN human_tasks h ON h.run_id=r.run_id "
+                "JOIN node_attempts n ON n.node_run_id=h.node_run_id AND n.run_id=h.run_id "
+                "WHERE r.run_id=? AND h.task_id=? AND n.node_id=? AND h.status='pending' LIMIT 1",
+                (run_id, task_id, node_id),
+            ).fetchone()
+            if row is None or row[:2] != (scoped_team, workflow_id):
+                raise WorkflowQueryError("human task not found", code="task_not_found")
+            if type(expected_run_version) is not int or row[2] != expected_run_version:
+                raise WorkflowQueryError("run version changed", code="run_version_conflict")
+            if row[5] in {"succeeded", "failed", "cancelled", "archived"}:
+                raise WorkflowQueryError("run is terminal", code="command_not_allowed")
+            return row
+
+        before = self._store.read(binding)
+        run = SimpleNamespace(thread_id=before[3], forked_from_checkpoint_id=before[4])
+        checkpoint_id = str(before[4] or self._resolve_revise_checkpoint_id(run) or "")
+        if self._store.read(binding) != before:
+            raise WorkflowQueryError("run binding changed", code="run_version_conflict")
+        if not checkpoint_id:
+            return None
+        return {"runId": run_id, "teamId": scoped_team, "flowId": workflow_id,
+                "nodeId": node_id, "taskId": task_id, "revision": str(expected_run_version),
+                "checkpointId": checkpoint_id}
 
     def list_runs(self, *, team_id: str, workflow_id: str) -> dict[str, Any]:
         scoped_team = _require_team_id(team_id)

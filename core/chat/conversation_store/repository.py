@@ -1425,7 +1425,7 @@ class ConversationRepository:
         self._writer = writer
 
     def create_agent(self, **values: Any) -> Future[dict[str, Any]]:
-        return self._writer.submit(lambda unit_of_work: unit_of_work.agents.create(**values))
+        return self._writer.submit(lambda unit_of_work: unit_of_work.agents.create(**values), model_references=True)
 
     def import_agent_config_snapshots(
         self,
@@ -1440,6 +1440,7 @@ class ConversationRepository:
                 for snapshot in frozen_snapshots
             ],
             force_flush=True,
+            model_references=True,
         )
 
     def compare_and_swap_agent_config(self, **values: Any) -> Future[dict[str, Any]]:
@@ -1448,6 +1449,7 @@ class ConversationRepository:
                 **values
             ),
             force_flush=True,
+            model_references=True,
         )
 
     def create_session(self, **values: Any) -> Future[dict[str, Any]]:
@@ -1464,7 +1466,7 @@ class ConversationRepository:
                 )
             return result
 
-        return self._writer.submit(create_with_parent_edge, force_flush=True)
+        return self._writer.submit(create_with_parent_edge, force_flush=True, model_references=True)
 
     def ensure_session_control_plane(
         self,
@@ -1526,7 +1528,7 @@ class ConversationRepository:
                 "sessionCreated": bool(session["createdAtMs"] == session["updatedAtMs"]),
             }
 
-        return self._writer.submit(ensure_control_plane, force_flush=True)
+        return self._writer.submit(ensure_control_plane, force_flush=True, model_references=True)
 
     def link_sessions(self, **values: Any) -> Future[dict[str, Any]]:
         return self._writer.submit(
@@ -1538,6 +1540,7 @@ class ConversationRepository:
         return self._writer.submit(
             lambda unit_of_work: unit_of_work.admissions.reserve(**values),
             force_flush=True,
+            model_references=True,
         )
 
     def mark_submission_journaled(self, **values: Any) -> Future[dict[str, Any]]:
@@ -1613,7 +1616,7 @@ class ConversationRepository:
                 )
             return result
 
-        return self._writer.submit(upsert_with_parent_edge, force_flush=True)
+        return self._writer.submit(upsert_with_parent_edge, force_flush=True, model_references=True)
 
     def repair_archived_directory_owner(self, **values: Any) -> Future[dict[str, str]]:
         """CAS-rebind a sealed legacy session to its payload-proven Agent."""
@@ -1626,6 +1629,7 @@ class ConversationRepository:
                 unit_of_work.sessions._connection, **frozen, now_ms=_now_ms(),
             ),
             force_flush=True,
+            model_references=True,
         )
 
     def touch_directory_session(self, **values: Any) -> Future[dict[str, Any] | None]:

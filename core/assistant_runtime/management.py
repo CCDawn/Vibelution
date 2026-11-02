@@ -366,10 +366,26 @@ class ManagementAdapter:
         return {**result, "projectId": project_id}
 
     async def runtime(self, project_id: str, operation: str, **parameters):
+        return await self._bound_read(project_id, lambda client: client.management_runtime(operation, **parameters))
+
+    async def _bound_read(self, project_id, reader):
         if project_id not in self._projects:
             raise DispatchError("Project is not authorized.", code="PROJECT_NOT_AUTHORIZED")
-        result = await self._call(project_id, lambda client: client.management_runtime(operation, **parameters))
+        before = self._read_binding(project_id) if self._read_binding else self._projects[project_id]
+        result = await self._call(project_id, reader)
+        after = self._read_binding(project_id) if self._read_binding else self._projects.get(project_id)
+        if project_id not in self._projects or before != after:
+            raise DispatchError("Project authorization changed.", code="PROJECT_BINDING_CHANGED")
         return {**result, "projectId": project_id}
+
+    async def knowledge_catalog(self, project_id: str, **parameters):
+        return await self._bound_read(project_id, lambda client: client.management_knowledge_catalog(**parameters))
+
+    async def reconciliation(self, project_id: str, **parameters):
+        return await self._bound_read(project_id, lambda client: client.management_reconciliation(**parameters))
+
+    async def research(self, project_id: str, **parameters):
+        return await self._bound_read(project_id, lambda client: client.management_research(**parameters))
 
     async def asset(self, project_id: str, operation: str, **parameters):
         if project_id not in self._projects:

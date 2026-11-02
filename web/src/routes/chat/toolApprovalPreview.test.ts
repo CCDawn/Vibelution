@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 
 import {
   agentPurgePreviewIsValid,
+  autonomyActionIsKnown,
+  autonomyApprovalPreviewIsValid,
   platformManagementActionIsKnown,
   platformManagementPreviewIsValid,
   preferenceProposalPreviewIsValid,
@@ -18,6 +21,47 @@ import {
   toolApprovalDisplayName,
   toolApprovalSessionGrantDescription,
 } from "./toolApprovalPreview";
+
+describe("Launcher autonomy approvals use the existing complete VUI preview", () => {
+  const actions = ["delegation_goal_create", "delegation_goal_revoke", "dispatch_derived", "research_command", "authorization_reduce", "authorization_revoke"];
+  it.each(actions)("registers the exact native action %s and rejects incomplete previews", action => {
+    expect(autonomyActionIsKnown(action)).toBe(true);
+    expect(managementApprovalActionIsKnown(action)).toBe(true);
+    expect(autonomyApprovalPreviewIsValid({ assistantAction: action })).toBe(false);
+    expect(toolApprovalActionPreview({ assistantAction: action }, "personal_assistant_manage_tool", "zh")).toContain("无法核对");
+  });
+  it("renders the entire derived task through the ordinary formatter in both languages", () => {
+    const task = "🧭".repeat(11999) + "终";
+    const summary = { assistantAction: "dispatch_derived", assistantAutonomyPreviewVersion: 1, assistantParametersDigest: "a".repeat(64),
+      assistantDetailsOmitted: false, assistantTargets: { goal_id: "goal-a", project_id: "project-a", agent_id: "agent-a",
+        dispatch_id: "dispatch-a", permission_profile: "workspace_write" }, assistantTask: task, assistantTaskChars: "12000",
+      assistantTaskDigest: "b".repeat(64), assistantRequestedPermission: "workspace_write" };
+    for (const lang of ["zh", "en"] as const) {
+      const text = toolApprovalActionPreview(summary, "personal_assistant_manage_tool", lang);
+      expect(text).toContain(task);
+      for (const value of ["goal-a", "project-a", "agent-a", "dispatch-a", "workspace_write"]) expect(text).toContain(value);
+      expect(text).not.toContain("[object Object]");
+    }
+  });
+  it("cannot disguise autonomy metadata as a legacy action or invent an action alias", () => {
+    for (const action of ["agent_update", "delegated_goal_create"]) {
+      const text = toolApprovalActionPreview({ assistantAction: action, assistantAutonomyPreviewVersion: 1,
+        assistantTargets: { goal_id: "SECRET" } }, "personal_assistant_manage_tool", "zh");
+      expect(text).toContain("无法核对");
+      expect(text).not.toContain("SECRET");
+    }
+    expect(managementApprovalActionIsKnown("delegated_goal_create")).toBe(false);
+  });
+  it("wires completeness into the manual accept gate and full-action surface without altering native policy", () => {
+    const source = readFileSync(new URL("../desktopPet/LauncherAssistantRoute.tsx", import.meta.url), "utf8");
+    const guard = source.slice(source.indexOf("function approvalAcceptDisabled"), source.indexOf("// Decode only JSON string tokens"));
+    expect(guard).toContain("autonomyActionIsKnown(summary?.assistantAction)");
+    expect(guard).toContain('Object.hasOwn(summary || {}, "assistantAutonomyPreviewVersion")');
+    expect(guard).toContain("!autonomyApprovalPreviewIsValid(summary)");
+    expect(source).toContain("fullActionPreview={approval.toolName === \"personal_assistant_manage_tool\" && (autonomyActionIsKnown(");
+    expect(source).toContain("approveDisabled={approvalAcceptDisabled(approval)}");
+  });
+});
 
 describe("Launcher platform approval metadata", () => {
   const summary = { assistantPlatformPreviewVersion: 1, assistantAction: "dispatch_cancel",

@@ -20,6 +20,7 @@ class RuntimeOperationsQuery(RuntimeClosed):
     state: Literal["active", "terminal", "all"] = "active"
     offset: int = Field(default=0, ge=0, le=1_000_000)
     limit: int = Field(default=3, ge=1, le=3)
+    expected_snapshot: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
 
 
 class RuntimeOperationQuery(RuntimeClosed):
@@ -59,6 +60,7 @@ class RuntimeOperation(RuntimeClosed):
     teamId: str = Field(default="", pattern=_OPTIONAL_ID)
     flowId: str = Field(default="", pattern=_OPTIONAL_ID)
     commands: list[RuntimeCommandName] = Field(max_length=5)
+    progressFingerprint: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
 
     @field_validator("commands")
     @classmethod
@@ -92,6 +94,7 @@ class RuntimeUntrusted(RuntimeClosed):
 
 
 class RuntimeOperationsResponse(RuntimeUntrusted):
+    snapshot: str = Field(pattern=r"^[a-f0-9]{64}$")
     operations: list[RuntimeOperation] = Field(max_length=3)
     offset: int = Field(ge=0, le=1_000_000)
     total: int = Field(ge=0, le=1_000_000)

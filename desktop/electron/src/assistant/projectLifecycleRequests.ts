@@ -1,6 +1,7 @@
 import { constants, closeSync, fstatSync, lstatSync, openSync, readSync, realpathSync, type Stats } from "node:fs";
 import { dirname, parse } from "node:path";
 import { mainLineCommandResultPath } from "../lifecycle/mainLine/commandEvidence.js";
+import { branchCommandResultPath } from "../lifecycle/branchLifecycleCommands.js";
 import { projectLifecycleResultCode, type createAssistantProjectLifecycle } from "./projectLifecycle.js";
 import {
   AssistantProjectLifecycleRequestStoreError, normalizeLifecycleRequest,
@@ -26,7 +27,8 @@ const same = (a: Stats, b: Stats) => a.dev === b.dev && a.ino === b.ino && a.nli
  */
 function nativeReceipt(row: LifecycleRequestRecord): Record<string, unknown> | null {
   if (!row.binding || !row.command) return null;
-  const path = mainLineCommandResultPath(row.binding.runtimeManagerDir, row.command.commandId);
+  const branch = row.command.owner === "branch";
+  const path = (branch ? branchCommandResultPath : mainLineCommandResultPath)(row.binding.runtimeManagerDir, row.command.commandId);
   try {
     const ancestors: Array<{ path: string; info: Stats; physical: string }> = [];
     for (let current = dirname(path); ; current = dirname(current)) {
@@ -61,7 +63,8 @@ function nativeReceipt(row: LifecycleRequestRecord): Record<string, unknown> | n
     const text = raw.toString("utf8");
     if (!Buffer.from(text, "utf8").equals(raw)) return null;
     const result: unknown = JSON.parse(text);
-    if (!object(result) || result.schemaVersion !== 1 || result.source !== "electron_main"
+    if (!object(result) || result.schemaVersion !== 1 || result.source !== (branch ? "electron_branch" : "electron_main")
+      || branch && (result.owner !== "branch" || result.instanceId !== row.command.instanceId || result.workspaceRoot !== row.binding.workspaceRoot)
       || result.commandId !== row.command.commandId || result.operation !== row.command.operation || result.type !== row.command.type
       || typeof result.accepted !== "boolean" || result.ok !== result.accepted || result.completed !== true
       || (result.timedOut !== undefined && result.timedOut !== false)
@@ -133,6 +136,7 @@ export function createAssistantProjectLifecycleRequests(options: {
             await options.store.bind(captured, token, binding, {
               commandId: command.commandId, type: command.type as "open" | "close" | "restart",
               operation: command.operation as LifecycleRequestIdentity["operation"],
+              ...("owner" in command && command.owner === "branch" ? { owner: "branch" as const, instanceId: command.instanceId } : {}),
             });
           },
         });

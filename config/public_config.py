@@ -2802,6 +2802,14 @@ def _replace_config_file_atomically(temp_path: Path, target_path: Path) -> None:
 
 @contextmanager
 def _config_edit_lock(config_path: Path, *, timeout_seconds: float = 10.0, stale_seconds: float = 300.0):
+    from core.infrastructure.model_reference_fence import model_reference_fence
+    with model_reference_fence(config_path):
+        with _config_edit_lock_unfenced(config_path, timeout_seconds=timeout_seconds, stale_seconds=stale_seconds):
+            yield
+
+
+@contextmanager
+def _config_edit_lock_unfenced(config_path: Path, *, timeout_seconds: float = 10.0, stale_seconds: float = 300.0):
     lock_path = resolve_config_lock_path(config_path)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     token = f"{os.getpid()}:{uuid.uuid4().hex}"

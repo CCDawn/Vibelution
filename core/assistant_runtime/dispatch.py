@@ -265,6 +265,8 @@ class DispatchService:
         from .management import ManagementAdapter
         self.management = ManagementAdapter(profile_root, self._admitted_projects, self._call,
                                             read_binding=self._project_read_binding)
+        from .delegation import DelegationManager
+        self.delegation = DelegationManager(self)
 
     def _project_read_binding(self, project_id: str) -> tuple[int, Path]:
         """Capture a content read's current registry generation and target."""
@@ -560,6 +562,7 @@ class DispatchService:
         title: str = "",
         permission_profile: str = "read_only",
         source_ref: dict | None = None,
+        derived_ref: dict | None = None,
     ) -> dict[str, Any]:
         """Persist the idempotency ref before sending, without storing the prompt.
 
@@ -583,6 +586,14 @@ class DispatchService:
                 raise DispatchError("Invalid native task source reference.", code="INVALID_DISPATCH") from None
             if source_ref["spanHash"] != _digest(task):
                 raise DispatchError("Native task source hash changed.", code="DISPATCH_CONFLICT")
+        if derived_ref is not None:
+            from .delegation import DerivedReference
+            try:
+                derived_ref = DerivedReference.model_validate(derived_ref).model_dump()
+            except ValueError:
+                raise DispatchError("Invalid derived source reference.", code="DISPATCH_CONFLICT") from None
+            if source_ref is not None or derived_ref["taskHash"] != _digest(task):
+                raise DispatchError("Derived source reference changed.", code="DISPATCH_CONFLICT")
         request_digest = _digest(json.dumps({
             "projectId": project_id, "agentId": agent_id, "task": task,
             "title": title, "permissionProfile": permission_profile,
@@ -597,6 +608,8 @@ class DispatchService:
                     raise DispatchError("Dispatch ID already belongs to another request.", code="DISPATCH_CONFLICT")
                 if source_ref is not None and record.get("sourceRef") != source_ref:
                     raise DispatchError("Dispatch source reference changed.", code="DISPATCH_CONFLICT")
+                if derived_ref is not None and record.get("derivedSourceRef") != derived_ref:
+                    raise DispatchError("Derived source reference changed.", code="DISPATCH_CONFLICT")
                 if record.get("nativeTaskId"):
                     return self._public(record)
             else:
@@ -616,6 +629,8 @@ class DispatchService:
                 }
                 if source_ref is not None:
                     record["sourceRef"] = deepcopy(source_ref)
+                if derived_ref is not None:
+                    record["derivedSourceRef"] = deepcopy(derived_ref)
                 self._save(record)
             return await self._update(record, lambda client: client.start_task(
                 agent_id=agent_id, task=task, permission_profile=permission_profile,
@@ -1129,7 +1144,7 @@ class DispatchService:
 
     @staticmethod
     def _public(record: dict[str, Any]) -> dict[str, Any]:
-        result = {key: deepcopy(value) for key, value in record.items() if key not in {"requestDigest", "projectBinding", "schemaVersion", "sourceRef"}}
+        result = {key: deepcopy(value) for key, value in record.items() if key not in {"requestDigest", "projectBinding", "schemaVersion", "sourceRef", "derivedSourceRef"}}
         receipt = record.get("receipt") or {}
         result["completionEvidence"] = {
             "source": "native_external_agent_task",

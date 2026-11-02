@@ -13,7 +13,7 @@ from typing import Any
 
 from langgraph.constants import START
 
-from core.research.workflow.checkpoint_store import open_sqlite_checkpointer
+from core.research.workflow.checkpoint_store import open_sqlite_checkpointer, read_latest_checkpoint_id
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
 from core.research.workflow.models import WorkflowDefinition
 
@@ -67,6 +67,11 @@ def latest_checkpoint_id(
         return str(configurable.get("checkpoint_id") or "").strip()
     except Exception:  # noqa: BLE001 - offer building must fail soft
         return ""
+
+
+def latest_checkpoint_metadata_id(checkpoint_path: str, thread_id: str) -> str:
+    """Optional current identity only; never open a saver or decode graph state."""
+    return read_latest_checkpoint_id(checkpoint_path, thread_id)
 
 
 def advance_checkpoint(

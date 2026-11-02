@@ -21,6 +21,12 @@ export type AssistantProjectRegistration = {
   registrationUuid: string;
   active: boolean;
 };
+export type AssistantRegistryDocumentLease = Readonly<{
+  snapshot: { schemaVersion: 1; revision: number; complete: true;
+    projects: Array<{ registrationId: string; baseProjectId: string; root: string; active: boolean }> };
+  check(): void;
+  release(): void;
+}>;
 type StoredRegistry = { schemaVersion: 1; revision: number; registrations: AssistantProjectRegistration[] };
 export type AssistantProjectRegistryOptions = {
   filePath: string;
@@ -82,6 +88,7 @@ export class AssistantProjectRegistry {
   private stored: StoredRegistry;
   private raw: string | null;
   private serial: Promise<void> = Promise.resolve();
+  private documentReservation: object | null = null;
 
   constructor(options: AssistantProjectRegistryOptions) {
     this.filePath = absolutePath(options.filePath, process.platform);
@@ -96,6 +103,36 @@ export class AssistantProjectRegistry {
   snapshot(): AssistantProjectRegistrySnapshot {
     this.assertDiskUnchanged();
     return this.project(this.stored);
+  }
+
+  /** Hold the existing document writer queue, including inactive registrations.
+   * No active-root projection can establish completeness of this document.
+   */
+  acquireDocumentAdmission(): Promise<AssistantRegistryDocumentLease> {
+    if (this.documentReservation) return Promise.reject(new AssistantProjectRegistryError("PROJECT_REGISTRY_DOCUMENT_BUSY"));
+    const reservation = {};
+    this.documentReservation = reservation;
+    const before = this.serial;
+    let done!: () => void;
+    const held = new Promise<void>(resolve => { done = resolve; });
+    const release = () => {
+      if (this.documentReservation !== reservation) return;
+      this.documentReservation = null; done();
+    };
+    this.serial = before.then(() => held);
+    return before.then(() => {
+      this.assertDiskUnchanged();
+      const snapshot = { schemaVersion: 1 as const, revision: this.stored.revision, complete: true as const,
+        projects: this.stored.registrations.map(row => ({ registrationId: `${row.baseProjectId}:${row.registrationUuid}`,
+          baseProjectId: row.baseProjectId, root: row.root, active: row.active })) };
+      const captured = JSON.stringify(snapshot);
+      return { snapshot,
+        check: () => {
+          if (this.documentReservation !== reservation || JSON.stringify(snapshot) !== captured) fail("PROJECT_REGISTRY_DOCUMENT_CHANGED");
+          this.assertDiskUnchanged();
+          if (this.stored.revision !== snapshot.revision) fail("PROJECT_REGISTRY_DOCUMENT_CHANGED");
+        }, release };
+    }).catch(error => { release(); throw error; });
   }
 
   /** Startup retains the full authority table; unavailable roots only gate project access. */

@@ -449,7 +449,7 @@ def _authorized_flow_management(env, root):
 @pytest.mark.parametrize("action", ["flow_save", "flow_start"])
 @pytest.mark.parametrize("failure", ["lost_ack", "readback", "owner_changed"])
 def test_management_flow_post_write_failures_are_unknown_and_never_replayed(env, tmp_path, monkeypatch, action, failure):
-    """Real Flow writes cannot turn a lost proof into a retryable rejection."""
+    """Historical admission proof may recover; missing proof never permits replay."""
     from core.web.services.external_management.service import ManagementService
     from core.web.services.team import team_store
 
@@ -498,8 +498,19 @@ def test_management_flow_post_write_failures_are_unknown_and_never_replayed(env,
     assert first == {"status": "unknown", "action": action, "requestId": payload["request_id"],
                      "verified": False, "reused": False, "code": "OPERATION_UNCONFIRMED"}
     restarted = ManagementService(management.root, identity=management.identity, native=env.gateway)
-    expected = {**first, "reused": True}
-    assert restarted.receipt(*credentials, action, payload["request_id"]) == expected
+    historical_admission = action == "flow_start" and failure in {"lost_ack", "owner_changed"}
+    expected = restarted.receipt(*credentials, action, payload["request_id"])
+    if historical_admission:
+        assert expected["status"] == "completed" and expected["verified"] is True and expected["reused"] is True
+        assert expected["action"] == action and expected["requestId"] == payload["request_id"]
+        proof = expected["flow"]
+        assert proof["teamId"] == "team-a" and proof["flowId"] == "flow-a"
+        assert proof["runId"] == native_results[0]["id"]
+        # This proves the original request's admission, not current-owner
+        # reauthorization or completion of the business workflow.
+        assert proof["status"] == "running" and proof["verified"] is True
+    else:
+        assert expected == {**first, "reused": True}
     assert restarted.invoke(*credentials, action, payload) == expected
     assert management.invoke(*credentials, action, payload) == expected
     assert len(native_results) == 1
@@ -510,4 +521,8 @@ def test_management_flow_post_write_failures_are_unknown_and_never_replayed(env,
         assert runs[0]["id"] == native_results[0]["id"]
     key = management._request_key(credentials[0], action, payload["request_id"])
     record = management.store.read(management.store.path("requests", key))
-    assert "failure" not in record and "receipt" not in record
+    assert "failure" not in record and ("receipt" in record) == historical_admission
+    reconciliation = restarted.reconcile_request(*credentials, action, payload["request_id"])
+    assert reconciliation["state"] == ("confirmed" if historical_admission else "requires_review")
+    assert reconciliation["verified"] is historical_admission
+    assert reconciliation["requiresReview"] is not historical_admission

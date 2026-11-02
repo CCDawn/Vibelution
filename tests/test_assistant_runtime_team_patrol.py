@@ -484,10 +484,11 @@ finally:
 ''', config_text=TEST_MODEL_CONFIG)
 
 
-def test_host_heartbeat_passes_dispatch_and_team_snapshots_to_same_patrol(tmp_path, monkeypatch):
+def test_host_heartbeat_passes_dispatch_team_and_platform_snapshots_to_same_patrol(tmp_path, monkeypatch):
     from core.assistant_runtime import host, reminders, legacy_reminder_receipts
 
     dispatch_row, team_row, calls = {"dispatchId": "dispatch-1"}, {"requestId": "request-1"}, []
+    platform_row = {"kind": "platform_runtime", "resourceId": "external-1"}
 
     class Store:
         def __init__(self, *args):
@@ -513,6 +514,8 @@ def test_host_heartbeat_passes_dispatch_and_team_snapshots_to_same_patrol(tmp_pa
 
     class Patrol:
         team_observation = {"state": "partial"}
+        platform_observation = {"state": "partial"}
+        delivery_escalations = {"state": "requires_review", "unresolved": 1}
 
         def __init__(self, *args):
             pass
@@ -528,8 +531,12 @@ def test_host_heartbeat_passes_dispatch_and_team_snapshots_to_same_patrol(tmp_pa
             calls.append("team")
             return [team_row]
 
+        async def refresh_platform_runs(self):
+            calls.append("platform")
+            return [platform_row]
+
         def inspect(self, rows):
-            assert rows == [dispatch_row, team_row]
+            assert rows == [dispatch_row, team_row, platform_row]
             calls.append("inspect")
             return {"deliveryStates": {}}
 
@@ -547,6 +554,8 @@ def test_host_heartbeat_passes_dispatch_and_team_snapshots_to_same_patrol(tmp_pa
                 while not (app.state.patrol_status or {}).get("teamRuns"):
                     await asyncio.sleep(0.001)
             assert app.state.patrol_status["teamRuns"] == {"state": "partial"}
+            assert app.state.patrol_status["platform"] == {"state": "partial"}
+            assert app.state.patrol_status["deliveryEscalations"]["unresolved"] == 1
 
     asyncio.run(run())
-    assert calls == ["heartbeat", "dispatch", "team", "inspect"]
+    assert calls == ["heartbeat", "dispatch", "team", "platform", "inspect"]

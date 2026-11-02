@@ -15,6 +15,32 @@ with project transport decided by [ADR 0013](../../docs/adr/0013-launcher-assist
 | `dispatch.py` | Native task associations and bounded receipts; separate native credentials per project |
 | `external_management` | Project-bound neutral operator grants, native Agent/Team intents and untrusted API documentation |
 
+## Platform management
+
+The current implementation exposes the following closed capabilities. Runtime
+`index` / `describe` remains authoritative for the running version, prerequisites,
+parameters and native approval policy; the legacy platform adapter has a different
+action catalog. See the [platform management guide](../../docs/guides/assistant-platform-management.md)
+for source ownership and recovery rules.
+
+| Capability | Entry points | Boundary |
+| --- | --- | --- |
+| Model / provider configuration | `configuration_references`, native model/provider remove or disable actions | Full stored registrations, including inactive projects, plus native assistant; complete proof, registry lease, writer fence and config transaction required |
+| Runtime observation and control | `runtime_list`, `runtime_get`, `runtime_command`, native patrol | Authorized project metadata and per-source coverage; only commands offered by the current native object |
+| Unknown management outcomes | `management_requests`, `management_reconcile`, `management_receipt` | Original action/request association and native evidence; reads never replay a write |
+| Research | `research_get`, `research_command` | Formal Research Ledger metadata; exact run/team/flow references, native revision CAS and returned node/task/checkpoint choices |
+| Knowledge discovery and ACL | `knowledge_list`, `knowledge_acl_get`, governed ACL actions | Agent and manageable system-Team owners; stable scoped IDs, real operator ACL, metadata only |
+| Delegated goals and derived tasks | `delegation_goal_*`, `dispatch_derived`, `receipt` | Current native user source, finite target/permission/task/expiry envelope; every task retains native approval and target authorization |
+| Grant reduction and revocation | `authorization_status`, `authorization_reduce`, `authorization_revoke` | Current subject only, exact scope/revision CAS; revocation rejects business calls and permits only its original revoke receipt recovery |
+| Project and branch lifecycle | `project_status`, `project_lifecycle`, `project_lifecycle_receipt` | Registered physical root and native main queue or branch instance supervisor; no force, arbitrary path or alternate executor |
+
+An unavailable source is not an empty inventory, a zero-reference proof or a
+successful operation. Admission/receipt confirmation is distinct from business
+completion. Ordinary Session admission, Journal, worker, persistence and SSE
+remain native; these capabilities add no generic Session or HTTP authority.
+Source implementation and isolated regression evidence do not establish fresh
+packaged-Electron, real-provider or live-project acceptance of this combined set.
+
 ## Assistant discovery actions
 
 `projects` checks registered backends through the existing native SDK identity
@@ -74,7 +100,7 @@ Every endpoint requires the bearer value. Browser Origins are rejected. The
 renderer receives neither the URL nor the credential. Main accepts a closed
 operation union from the exact owned main frame at `/launcher-assistant`.
 
-`--projects-file` contains the complete private snapshot
+`--projects-file` contains the private active dispatch/management projection
 `{schemaVersion:1,revision,projects:{opaqueRegistrationId:absoluteRoot}}`.
 Its version is installed before native startup recovery. Main persists UUID
 epochs/tombstones and supplies at most 128 active registrations. A main-only
@@ -89,6 +115,9 @@ inventory failure or malformed rows cannot become an empty permission table.
 Actual dynamic lifecycle/Git-freshness acceptance is still pending; an
 assistant-only startup validates persisted roots rather than claiming a new
 Git inventory scan.
+This projection is not the all-registration authority for global configuration
+removal. That guard obtains a separate main-owned registry lease over the full
+stored registrations, including inactive entries and the native assistant root.
 
 - `GET /health`: protocol and role only.
 - `GET /api/assistant`: native assistant identity.
@@ -231,14 +260,15 @@ The trusted child directly reuses the closed native project SDK and holds
 private per-project capabilities, as the settled transport design in ADR 0013.
 Electron supplies the registered-root and permission snapshot; credentials
 never enter renderer/model results. There is no generic HTTP capability or
-additional forwarding worker. Offline project lifecycle remains pending and
-must reuse Electron's native lifecycle engine with a queue and context per
-registered project. Stable native command association and recovery are required
-before that bridge becomes model-executable. The process-wide default queue or
-a Python lifecycle implementation cannot substitute for it. Installing an
-independent assistant does not itself start or stop registered projects.
+additional forwarding worker. Registered project lifecycle uses Electron's
+native target owner, including when a backend is offline. Main projects reuse
+their canonical queue/context; registered branch instances reuse their native
+instance supervisor. A missing or ambiguous target remains unavailable. Stable
+native command association owns recovery; neither a process-wide default queue
+nor a Python lifecycle executor substitutes for it. Installing an independent
+assistant does not itself start or stop registered projects.
 
-Electron's source-only `projectLifecycleRequests` controller now reserves a
+Electron's `projectLifecycleRequests` controller reserves a
 durable request reference before dispatch, then binds it to the actual native
 command before intent persistence or execution. The existing queue still owns
 join, supersede and close backoff. Joined requests bind to that original command,
@@ -283,12 +313,14 @@ commands. A fresh host queries the original main request association.
 Only a main-provisioned capability exposes `project_status`, governed
 `project_lifecycle` and `project_lifecycle_receipt` through the existing native
 action/manage tools. Assistant start, stop and restart dispatch through the
-main-owned native lifecycle queue; stop and restart additionally hold the
+main-owned target lifecycle owner. Main stop and restart additionally hold the
 main-line exclusive fence, so they refuse to run while another lifecycle command
-or its settlement evidence is outstanding. Branch instances still return
-`prerequisite_required`. Main-project status reports state, not an active-work
-count, and cannot prove the project is idle. Branch instances remain owned by
-their existing instance supervisor.
+or its settlement evidence is outstanding. Branch start/stop/restart use
+`branchLifecycle` and the existing instance supervisor, with occupied-lane and
+native active-work checks; they never create a second main queue. Unproved branch
+identity or missing prerequisites still return `prerequisite_required`. Native
+command receipts bind the original physical root, instance and command source.
+Project status reports state, not an active-work count, and cannot prove idleness.
 There is no force, interrupt, path, URL or generic command parameter.
 
 Earlier temporary verification covered an actual Python HTTP host, Node
@@ -407,9 +439,16 @@ The package builder copies validated distribution RECORD files and static
 source resources; no development venv or test dependencies are included. Main
 resolves the fixed payload using pinned provenance, hashes its tree in a
 Worker, and starts Python with isolated search paths. Tokenizer/Hugging Face
-caches belong to the native profile. Global model/Provider deletion and
-disabling remain unavailable until a complete cross-project reference guard
-and its write coordination boundary are implemented.
+caches belong to the native profile. Global model/provider deletion and disabling
+are implemented behind `configuration_control`: the full stored-registration
+lease and metadata collector cover inactive projects, the native assistant,
+formal/sandbox owners and historical Session pins. Missing or corrupt sources
+block the operation. Deletion rechecks inside the shared native reference-writer
+fence and commits through the operator-config owner; a prior read-only zero count
+cannot authorize a later write. Public alias chains resolve by native semantics,
+and durable retirement lineage prevents queued old model/alias bindings from
+being introduced after removal. Hosts without the trusted main capability retain
+the unavailable guard. New-package/live-project acceptance remains separate.
 
 The current collapsed-window frontend has also passed real-provider acceptance
 in the managed Electron package: name, Live2D character and hidden status apply
@@ -655,11 +694,22 @@ The existing Store owns intent and receipt persistence. A subject mutation adds
 an immutable proof and increments its grant revision atomically. After lost ACK
 or SDK restart, `management_receipt` reads the original request; it never reruns
 the grant mutation. A missing proof stays unknown. Historical receipts preserve
-their original scope union even after later upgrades. The SDK updates only its
+their original scope union and grant revision even after later grant changes;
+reading or replaying one never restores a scope removed afterward. The SDK updates only its
 saved scope list after a completed receipt and current-subject verification.
 Transport, stored-grant, restart, competing-process and native model-output
 budget tests run in isolated environments; real DeepSeek/package acceptance
 for these new actions is still pending funding confirmation.
+
+`authorization_reduce` and `authorization_revoke` use the same native subject
+record, lock and durable receipt. They require real operator control, the current
+capability, exact `expected_scopes` / `expected_grant_revision`, a stable
+`request_id`, and the native manage approval policy. Reduction removes a proper
+nonempty subset; removing all access requires explicit revocation. No external
+subject, actor or force parameter is accepted. A revoked subject immediately
+loses business access, including further upgrades/reductions; its original
+credential may recover only this revocation's original receipt. Historical
+receipts and task associations are retained, without reactivating the subject.
 
 Source inventory also fingerprints the selected old PA's own dispatch events
 and default private knowledge namespace without exporting their contents.

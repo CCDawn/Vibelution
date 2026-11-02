@@ -92,7 +92,7 @@ def api(tmp_path, monkeypatch):
         def read_runtime_operations(self, query):
             observe("runtime_list", query.model_dump())
             rows = [deepcopy(OPERATION)] if query.offset == 0 else []
-            return {"operations": rows, "offset": query.offset, "total": 1, "nextOffset": None,
+            return {"snapshot": DIGEST, "operations": rows, "offset": query.offset, "total": 1, "nextOffset": None,
                 "coverage": [{"source": "research_run", "state": "available", "complete": True}],
                 "complete": True, "untrustedContent": True}
         def read_runtime_operation(self, query):
@@ -145,8 +145,8 @@ def api(tmp_path, monkeypatch):
         def read_flow(self, query):
             observe("flow_get", query.model_dump())
             return _flow_page("get", query.model_dump())
-        def save_flow(self, parameters): return mutate("flow_save", parameters)
-        def start_flow(self, parameters, *, request_id): return mutate("flow_start", parameters)
+        def save_flow(self, parameters, *, marker=None): return mutate("flow_save", parameters)
+        def start_flow(self, parameters, *, request_id, marker=None): return mutate("flow_start", parameters)
     native, binding = Native(), {"projectId": "project-a", "instanceId": "instance-a"}
     service = ManagementService(tmp_path / "target-management", identity=lambda: TargetIdentity(binding, "authority"), native=native)
     grant = service.bind({"client_id": "integration-client", "expected_binding": binding, "scopes": ["agents:read"]})

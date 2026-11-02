@@ -10,6 +10,8 @@ import { AssistantProjectLifecycleRequestStore } from "./projectLifecycleRequest
 import type { AssistantProjectRegistryConnection } from "./projectRegistryConnection.js";
 import { parseMainControlClaim, type MainControlRequest } from "./mainControlTransport.js";
 import type { ProjectAdmission } from "../lifecycle/projectAdmission.js";
+import type { BranchLifecycleCommandOwner } from "../lifecycle/branchLifecycleCommands.js";
+import { createAssistantBranchLifecycle } from "./branchLifecycle.js";
 
 /** Production composition for the existing main-owned native lifecycle engine.
  * No assistant Python fallback, global environment switching, bootstrap or SDK.
@@ -23,6 +25,7 @@ export function createAssistantProjectMainControl(options: {
   runLifecycle?: (input: RunWorkbenchLifecycleInput) => Promise<WorkbenchLifecycleResult>;
   readStatusSummary?: typeof readRuntimeManagerLauncherStatusSummary;
   resolveDataHome?: (root: string) => string;
+  branchOwner?: BranchLifecycleCommandOwner;
 }): (request: MainControlRequest) => Promise<unknown> {
   const launch = { ...options.launch, env: { ...options.launch.env }, cliArgs: { ...options.launch.cliArgs } };
   const registry = options.registry;
@@ -72,7 +75,22 @@ export function createAssistantProjectMainControl(options: {
     },
     ...(options.runLifecycle ? { runLifecycle: options.runLifecycle } : {}),
   });
-  const requests = createAssistantProjectLifecycleRequests({ facade,
+  const branch = options.branchOwner ? createAssistantBranchLifecycle({ owner: options.branchOwner,
+    getPermissionSnapshot: () => registry.snapshot(), admission: options.admission,
+    integrationRootFor: projectId => registry.registration(projectId)?.integrationRoot }) : null;
+  const targetFacade = (projectId: string) => {
+    const registration = registry.registration(projectId);
+    if (!registration) throw new Error("ASSISTANT_PROJECT_UNAVAILABLE");
+    if (registration.root === registration.integrationRoot) return facade;
+    if (!branch) throw new Error("ASSISTANT_BRANCH_UNAVAILABLE");
+    return branch;
+  };
+  const combined = { bindingFor: (projectId: string) => targetFacade(projectId).bindingFor(projectId),
+    dispatch: (input: unknown, execution?: Parameters<typeof facade.dispatch>[1]) => {
+      const projectId = (input as { projectId: string }).projectId;
+      return targetFacade(projectId).dispatch(input, execution);
+    } };
+  const requests = createAssistantProjectLifecycleRequests({ facade: combined,
     store: new AssistantProjectLifecycleRequestStore({ directory: options.directory }) });
   return async input => {
     const request = parseMainControlClaim({ schemaVersion: 1, request: input })!;
@@ -81,11 +99,11 @@ export function createAssistantProjectMainControl(options: {
     try {
       const registered = registry.registration(request.projectId);
       if (!registered) code = "project_unavailable";
-      else if (registered.root !== registered.integrationRoot) code = "prerequisite_required";
+      else if (registered.root !== registered.integrationRoot && !branch) code = "prerequisite_required";
     } catch { code = "project_unavailable"; }
     if (code) return { schemaVersion: 1, projectId: request.projectId, operation: request.operation, code,
       ...(request.action === "project_status" ? { accepted: false } : { requestId: request.requestId, state: "rejected" }) };
-    if (request.action === "project_status") return facade.dispatch({ projectId: request.projectId, operation: "status" });
+    if (request.action === "project_status") return combined.dispatch({ projectId: request.projectId, operation: "status" });
     const identity = { requestId: request.requestId, projectId: request.projectId, operation: request.operation };
     return request.action === "project_lifecycle" ? requests.dispatch(identity) : requests.receipt(identity);
   };

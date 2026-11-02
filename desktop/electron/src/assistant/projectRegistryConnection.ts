@@ -5,7 +5,7 @@ import { isAbsolute, resolve } from "node:path";
 import { tryAcquireReminderSourceMutex, type ReminderSourceMutexLease } from "../notifications/reminderSourceMutex.js";
 import { readProjectId } from "../lifecycle/projectStoragePaths.js";
 import { writeLauncherStateFile } from "../process/workbenchBackend.js";
-import { AssistantProjectRegistry, type AssistantProjectRegistrySnapshot, type AssistantProjectRegistration } from "./projectRegistry.js";
+import { AssistantProjectRegistry, type AssistantProjectRegistrySnapshot, type AssistantProjectRegistration, type AssistantRegistryDocumentLease } from "./projectRegistry.js";
 import { PrehostRecoveryDrainedUnknown } from "./prehostRecoveryJob.js";
 
 type ProjectHost = {
@@ -100,6 +100,7 @@ export class AssistantProjectRegistryConnection {
   private recoveryCommit: { revoke(): void } | null = null;
   private readonly acquireRecoveryCommitGate: (key: string) => ReminderSourceMutexLease | null;
   private migrationGate: { released: Promise<void>; release: () => void } | null = null;
+  private documentAdmission: { released: Promise<void>; release(): void } | null = null;
 
   constructor(filePath: string, options?: { writeRecoveryMarker?: typeof writeLauncherStateFile;
     acquireRecoveryCommitGate?: (key: string) => ReminderSourceMutexLease | null }) {
@@ -162,10 +163,32 @@ export class AssistantProjectRegistryConnection {
   snapshot(): AssistantProjectRegistrySnapshot { this.assertOpen(); return this.registry.snapshot(); }
   registration(projectId: string): AssistantProjectRegistration | null { this.assertOpen(); return this.registry.registration(projectId); }
 
+  /** Freeze this connection's writers before draining the existing serial lane.
+   * The underlying registry document queue is held until explicit release too.
+   * Stop deliberately remains admitted so the captured host can really drain.
+   */
+  acquireRegistryDocumentAdmission(): Promise<AssistantRegistryDocumentLease> {
+    this.assertOpen();
+    if (this.documentAdmission || this.migrationGate) throw new Error("ASSISTANT_REGISTRY_DOCUMENT_BUSY");
+    let done!: () => void;
+    const released = new Promise<void>(resolve => { done = resolve; });
+    const gate = { released, release: () => { if (this.documentAdmission === gate) { this.documentAdmission = null; done(); } } };
+    this.documentAdmission = gate;
+    return this.enqueue(async () => {
+      let document: AssistantRegistryDocumentLease | undefined;
+      try {
+        this.assertOpen(); document = await this.registry.acquireDocumentAdmission(); this.assertOpen();
+        return { snapshot: document.snapshot,
+          check: () => { this.assertOpen(); if (this.documentAdmission !== gate) throw new Error("ASSISTANT_REGISTRY_DOCUMENT_CHANGED"); document!.check(); },
+          release: () => { document!.release(); gate.release(); } };
+      } catch (error) { document?.release(); gate.release(); throw error; }
+    });
+  }
+
   /** Serialize registry observers and live-host writers around a migration. */
   beginMigrationTransition(): { drained: Promise<void>; release: () => void } {
     this.assertOpen();
-    if (this.migrationGate) throw new Error("ASSISTANT_MIGRATION_BUSY");
+    if (this.migrationGate || this.documentAdmission) throw new Error("ASSISTANT_MIGRATION_BUSY");
     let resolve!: () => void;
     const released = new Promise<void>(done => { resolve = done; });
     const gate = { released, release: () => {
@@ -186,6 +209,7 @@ export class AssistantProjectRegistryConnection {
   withPreHostSource<T>(projectId: string, operation: (lease: PreHostSourceLease) => Promise<T>, options?: {
     operationId: string; receiptConfirmed(result: T): boolean;
   }): Promise<T> {
+    if (this.documentAdmission) return this.documentAdmission.released.then(() => this.withPreHostSource(projectId, operation, options));
     return this.enqueue(async () => {
       this.assertOpen();
       if (this.host || this.projectsSuspended) throw new Error("ASSISTANT_PROJECT_UNAVAILABLE");
@@ -326,6 +350,7 @@ export class AssistantProjectRegistryConnection {
 
   /** Main-only lease: reconciliation and retirement wait until import settles. */
   withHistoryImport<T>(projectId: string, operation: (revision: number) => Promise<T>): Promise<T> {
+    if (this.documentAdmission) return this.documentAdmission.released.then(() => this.withHistoryImport(projectId, operation));
     if (this.migrationGate) return this.migrationGate.released.then(() => this.withHistoryImport(projectId, operation));
     return this.enqueue(async () => {
       this.assertOpen();
@@ -352,6 +377,7 @@ export class AssistantProjectRegistryConnection {
 
   start<T extends ProjectHost>(createHost: (snapshot: AssistantProjectRegistrySnapshot, projectsSuspended: boolean) => T,
     options?: { migration?: boolean; recovery?: boolean }): Promise<T> {
+    if (this.documentAdmission) return this.documentAdmission.released.then(() => this.start(createHost, options));
     if (this.migrationGate && !options?.migration) return this.migrationGate.released.then(() => this.start(createHost, options));
     return this.enqueue(async () => {
       this.assertNotClosed();
@@ -455,7 +481,8 @@ export class AssistantProjectRegistryConnection {
         } catch { this.recovery.reconciled = false; }
       }
     });
-    return this.migrationGate ? this.migrationGate.released.then(apply) : apply();
+    return this.documentAdmission ? this.documentAdmission.released.then(apply)
+      : this.migrationGate ? this.migrationGate.released.then(apply) : apply();
   }
 
   /** Admission revocation must be ordered against the same verifier commit gate. */

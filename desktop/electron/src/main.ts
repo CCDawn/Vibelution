@@ -40,6 +40,11 @@ import { startAssistantReminderPump, type AssistantReminderPump } from "./assist
 import { AssistantProjectRegistryConnection } from "./assistant/projectRegistryConnection.js";
 import { createAssistantAppearanceMainControl } from "./assistant/appearanceMainControl.js";
 import { createAssistantProjectMainControl } from "./assistant/projectMainControl.js";
+import { ConfigurationReferenceLeaseBroker } from "./assistant/configurationReferenceLease.js";
+import { isConfigurationReferenceRequest } from "./assistant/configurationReferenceProtocol.js";
+import { createBranchLifecycleCommandOwner, resolveBranchLifecycleTarget, assertBranchLifecycleIdle, type BranchLifecycleExecution } from "./lifecycle/branchLifecycleCommands.js";
+import { readNativeBranchInstanceInventory } from "./process/branchInstanceInventory.js";
+import { sameProjectRoot } from "./process/workbenchBackend.js";
 import { AssistantWindow } from "./assistant/assistantWindow.js";
 import { invokeAssistant } from "./assistant/assistantBridge.js";
 import { publishAssistantTheme, ThemeProjectionTracker, workbenchThemeScope } from "./assistant/workbenchThemeSync.js";
@@ -763,6 +768,24 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
       directory: join(paths.userDataRoot, "assistant", "lifecycle-requests"), registry: projectConnection,
       operatorConfigPath: desktopLaunchSettings().configPath,
       launch: { env: process.env, cliArgs: desktopCliArgs, resourcesRoot: process.resourcesPath, userDataRoot: app.getPath("userData") },
+      branchOwner: createBranchLifecycleCommandOwner({
+        resolveTarget: async (root, integrationRoot) => {
+          if (!integrationRoot) return null;
+          const config = desktopLaunchSettings().configPath;
+          const resolved = resolveDeferredProjectLaunchSettings({ env: process.env, cliArgs: desktopCliArgs,
+            resourcesRoot: process.resourcesPath, userDataRoot: app.getPath("userData") }, integrationRoot, config);
+          if (resolved.workspaceRoot !== integrationRoot || !resolved.pythonPath || !resolved.configPath) return null;
+          const inventory = await readNativeBranchInstanceInventory({ integrationRoot, pythonPath: resolved.pythonPath, operatorConfigPath: resolved.configPath });
+          const target = resolveBranchLifecycleTarget(inventory, root);
+          if (!target) return null;
+          const registered = (await readRegistry(instancesRegistryPath())).instances[target.instanceId];
+          if (registered && !sameProjectRoot(String(registered.projectRoot || ""), root)) return null;
+          return { ...target, runtimeContext: { pythonPath: resolved.pythonPath, operatorConfigPath: resolved.configPath } };
+        },
+        run: input => orchestrateBranchInstanceLifecycle(input.operation, { schemaVersion: 1,
+          path: `branch-instances/${input.operation}`, init: { method: "POST", body: { instanceId: input.target.instanceId, hiddenPresentation: true } } },
+          "assistant", input.signal, input.execution),
+      }),
     });
     const appearanceMainControl = createAssistantAppearanceMainControl({
       chooseImage: async (kind,signal) => {
@@ -795,7 +818,9 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
           ...(request.operation === "set" ? { authorityStatus: "committed", assistantSync: "applied", workbenchSync: await themeProjection.wait(result.snapshot, "workbench") } : {}) };
       },
     });
-    const mainControl: NonNullable<ConstructorParameters<typeof AssistantHost>[0]["mainControl"]> = (request,signal) => {
+    const configurationReferences = new ConfigurationReferenceLeaseBroker(projectConnection);
+    const mainControl: NonNullable<ConstructorParameters<typeof AssistantHost>[0]["mainControl"]> = (request,signal,hostContext) => {
+      if (isConfigurationReferenceRequest(request)) return configurationReferences.handle(request, hostContext);
       if (request.action.startsWith("browser_"))
         return createBrowserMainControl({ browser: assistantBrowserOwner, ensureWorkspace: requestOpenAssistantBrowserWorkspace })(request as BrowserMainControlRequest, signal);
       if (request.action === "launcher_theme_get" || request.action === "launcher_theme_set" || request.action === "operator_image_upload")
@@ -1547,7 +1572,9 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
           runtimeRoot: join(paths.userDataRoot, "assistant", "runtime"),
           sourceRoot: resources.sourceRoot, pythonPath: resources.pythonPath, pythonArguments: resources.pythonArguments,
           env: resources.env, projects: snapshot.projects, projectSnapshot: snapshot, projectsSuspended,
-          mainControl, appearanceControl: true, browserControl: true, initialMigrationControl,
+          mainControl, mainControlSettled: (request, result, accepted, hostContext) => {
+            if (isConfigurationReferenceRequest(request)) configurationReferences.settled(request, result, accepted, hostContext);
+          }, appearanceControl: true, browserControl: true, initialMigrationControl,
         });
         launcherAssistantHost = host;
         launcherAssistantWindow = new AssistantWindow(paths, host, () => shutdownApproved, requestOpenLauncherFromAssistant);
@@ -5583,7 +5610,7 @@ function supersededLifecycleResult(operation: string, commandId = ""): Orchestra
  * in-flight restart (2026-08-29: a forwarded stop kept superseding a CLI
  * restart 1-5s in, so the restart never settled and the backend stayed down).
  */
-type LauncherLifecycleProvenance = "operator" | "operator-restart" | "window-close" | "forwarded";
+type LauncherLifecycleProvenance = "operator" | "operator-restart" | "window-close" | "forwarded" | "assistant";
 
 type LauncherLifecycleStopJoinDecision = {
   /**
@@ -5954,12 +5981,16 @@ async function runIsolatedRegistryMutation(input: {
   isCurrent?: () => boolean;
   interruptActiveWork?: boolean;
   admission?: ProjectAdmissionTicket;
+  commandId?: string;
+  branchExecution?: BranchLifecycleExecution;
 }): Promise<OrchestratedBranchInstanceResult> {
   if (input.operation === "observe-error" || input.operation === "observe-ready") {
     throw new Error("isolated observe must use instanceRegistryStore, not the Python bridge");
   }
-  const payload = launcherStateStore.projectBranchInstances();
+  const payload = input.branchExecution?.branchInstances ?? launcherStateStore.projectBranchInstances();
   const target = resolveIsolatedClaimTarget(payload, input.instanceId);
+  input.branchExecution?.check();
+  if (input.branchExecution && target?.projectRoot !== input.branchExecution.workspaceRoot) throw new Error("BRANCH_REGISTRATION_CHANGED");
 
   if (input.operation === "start" || input.operation === "restart") {
     if (input.admission && !target) throw new Error("PROJECT_ADMISSION_UNKNOWN");
@@ -5969,7 +6000,7 @@ async function runIsolatedRegistryMutation(input: {
         target, pythonPath: input.pythonPath, signal: input.signal
       });
       let reuse = await inspectReuse();
-      if (reuse.kind === "pending") {
+      if (reuse.kind === "pending" && !input.branchExecution) {
         await scheduleRegistryReconciliation(payload);
         reuse = await inspectReuse();
       }
@@ -6009,12 +6040,14 @@ async function runIsolatedRegistryMutation(input: {
         })
       );
       input.signal?.throwIfAborted();
+      input.branchExecution?.check();
       input.admission?.check(target.projectRoot);
       const claimed = await prepareIsolatedStart({
         instanceId: input.instanceId,
         branchInstances: payload,
         operation: input.operation,
-        commandId: randomUUID(),
+        commandId: input.commandId || randomUUID(),
+        expectedProjectRoot: input.branchExecution?.workspaceRoot,
         pythonPath: input.pythonPath,
         signal: input.signal,
         isCurrent: input.isCurrent,
@@ -6034,7 +6067,7 @@ async function runIsolatedRegistryMutation(input: {
       const port = Number(claimed.entry.port || target.preferredBackend || 0);
       const controlPort = Number(claimed.entry.controlPort || target.preferredControl || 0);
       const dataHome = String(claimed.entry.dataHome || "").trim() || resolveDataHomeForProject(target.projectRoot);
-      try { input.admission?.check(target.projectRoot); }
+      try { input.branchExecution?.check(); input.admission?.check(target.projectRoot); }
       catch (error) {
         const failed = await upsert(instancesRegistryPath(), input.instanceId, {
           status: "failed", phase: "failed", desiredState: "closed",
@@ -6188,11 +6221,13 @@ async function runIsolatedRegistryMutation(input: {
   }
 
   if (input.operation === "stop" || input.operation === "force-stop") {
-    const stopCommandId = randomUUID();
+    input.branchExecution?.check();
+    const stopCommandId = input.commandId || randomUUID();
     const claimed = await claimIsolatedStop({
       instanceId: input.instanceId,
       branchInstances: payload,
-      commandId: stopCommandId
+      commandId: stopCommandId,
+      expectedProjectRoot: input.branchExecution?.workspaceRoot
     });
     const stopWorkspaceRoot = String(
       target?.projectRoot
@@ -6242,15 +6277,22 @@ async function orchestrateBranchInstanceLifecycle(
   operation: string,
   payload: LauncherIpcInvokePayload,
   provenance: LauncherLifecycleProvenance = "operator",
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  branchExecution?: BranchLifecycleExecution
 ): Promise<OrchestratedBranchInstanceResult> {
   const body = payload.init?.body;
   const instanceId = typeof body === "object" && body !== null ? String((body as Record<string, unknown>).instanceId ?? "").trim() : "";
-  if (!instanceId) return orchestrateBranchInstanceLifecycleImpl(operation, payload, provenance, signal);
+  if (!instanceId) return orchestrateBranchInstanceLifecycleImpl(operation, payload, provenance, signal, undefined, branchExecution);
+  if (branchExecution) {
+    branchExecution.check();
+    assertBranchLifecycleIdle(launcherLifecycleSupervisor, instanceId);
+    await launcherLifecycleSupervisor.captureExecutionDrain(instanceId);
+    branchExecution.check();
+  }
   const execute = (ticket?: ProjectAdmissionTicket) => launcherLifecycleSupervisor.trackObservation(instanceId,
-    () => orchestrateBranchInstanceLifecycleImpl(operation, payload, provenance, signal, ticket));
+    () => orchestrateBranchInstanceLifecycleImpl(operation, payload, provenance, signal, ticket, branchExecution));
   return ["start", "restart", "rebuild-and-start"].includes(operation.trim().toLowerCase())
-    ? withProjectAdmission(() => instanceAdmissionRoot(instanceId), execute) : execute();
+    ? withProjectAdmission(() => branchExecution ? registeredAdmissionRoot(branchExecution.workspaceRoot) : instanceAdmissionRoot(instanceId), execute) : execute();
 }
 
 async function orchestrateBranchInstanceLifecycleImpl(
@@ -6258,13 +6300,14 @@ async function orchestrateBranchInstanceLifecycleImpl(
   payload: LauncherIpcInvokePayload,
   provenance: LauncherLifecycleProvenance = "operator",
   signal?: AbortSignal,
-  admission?: ProjectAdmissionTicket
+  admission?: ProjectAdmissionTicket,
+  branchExecution?: BranchLifecycleExecution
 ): Promise<OrchestratedBranchInstanceResult> {
-  if (launcherBootstrap === null) {
+  if (launcherBootstrap === null && !branchExecution) {
     throw new Error("Launcher backend is not available.");
   }
   const desktopEnv = desktopEnvironment();
-  const pythonPath = String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
+  const pythonPath = branchExecution?.runtimeContext?.pythonPath || String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
   if (!pythonPath) {
     throw new Error("VIBELUTION_PYTHON_PATH or PYTHON is required to orchestrate branch instances");
   }
@@ -6278,7 +6321,7 @@ async function orchestrateBranchInstanceLifecycleImpl(
   if (!instanceId) {
     throw new Error("branch instance id is required");
   }
-  if (isCurrentCheckoutInstance(instanceId)) {
+  if (!branchExecution && isCurrentCheckoutInstance(instanceId)) {
     const mainResult = await orchestrateLauncherLifecycle(operation, payload, provenance, signal);
     return { ...mainResult, instanceId };
   }
@@ -6289,6 +6332,8 @@ async function orchestrateBranchInstanceLifecycleImpl(
     operatorIntent: payload.path || operation
   });
   signal?.throwIfAborted();
+  branchExecution?.check();
+  if (branchExecution) assertBranchLifecycleIdle(launcherLifecycleSupervisor, instanceId);
   const supervisedOperation = normalizeSupervisedLifecycleOperation(operation);
   const desiredState = desiredStateForLifecycleOperation(supervisedOperation);
   admission?.check();
@@ -6300,26 +6345,31 @@ async function orchestrateBranchInstanceLifecycleImpl(
   const lifecycleSignal = signal
     ? AbortSignal.any([signal, intentLease.signal])
     : intentLease.signal;
-  const paths = createDesktopPathsForApp();
+  const paths = branchExecution ? { workspaceRoot: branchExecution.workspaceRoot } : createDesktopPathsForApp();
   const mutation = await launcherLifecycleSupervisor.executeMutation({
     lease: intentLease,
-    mutate: async () => await runIsolatedRegistryMutation({
+    mutate: async () => {
+      if (branchExecution) { await branchExecution.onCommand(); branchExecution.check(); }
+      return await runIsolatedRegistryMutation({
       operation: operation as BranchInstanceOperation,
       instanceId,
       workspaceRoot: paths.workspaceRoot,
       pythonPath,
       operatorConfigPath:
-        launcherBootstrap?.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
+        branchExecution?.runtimeContext?.operatorConfigPath || launcherBootstrap?.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
       signal: lifecycleSignal,
-      isCurrent: () => launcherLifecycleSupervisor.isCurrent(intentLease),
+      isCurrent: () => {
+        try { branchExecution?.check(); return launcherLifecycleSupervisor.isCurrent(intentLease); } catch { return false; }
+      },
       interruptActiveWork: provenance === "operator-restart" || (operation === "restart" && provenance === "operator")
-      , admission
-    }),
+      , admission, commandId: branchExecution?.command.commandId, branchExecution
+    }); },
     reconcile: async () => {
       scheduleLauncherStatusCliRefresh();
     }
   });
   if (mutation.outcome === "failed") {
+    if (branchExecution) launcherLifecycleSupervisor.clearSlotIfCurrent(intentLease);
     throw mutation.error;
   }
   if (mutation.outcome === "uncertain") {
@@ -6356,6 +6406,7 @@ async function orchestrateBranchInstanceLifecycleImpl(
         deadlineAt: result.deadlineAt,
         waitForHttp: (target, timeoutMs, signal) => waitForWorkbenchHttp({ url: target, timeoutMs, signal }),
         openWindow: async () => {
+          branchExecution?.check();
           if (provider === null) {
             throw new Error("window provider is unavailable");
           }
@@ -6456,8 +6507,10 @@ async function orchestrateBranchInstanceLifecycleImpl(
     && result.commandId
     && launcherLifecycleSupervisor.isCurrent(lease)
   ) {
+    branchExecution?.check();
     await closeOrchestratedWorkbenchWindow(instanceId);
   }
+  if (branchExecution && !result.accepted) launcherLifecycleSupervisor.clearSlotIfCurrent(intentLease);
   return {
     ...result,
     ...(forceAuthorization ? { requestId: forceAuthorization.requestId } : {})

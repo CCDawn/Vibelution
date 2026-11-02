@@ -260,7 +260,9 @@ def test_terminal_failure_and_completed_without_visible_message_are_not_success(
                         journal_events(token, event_id, "turn_failed"))
     assert runtime.reconcile()["failed"] == 1
     assert token not in runtime._active
-    assert runtime.inspect([row], now=20000)["wake"] == "none"
+    assert runtime.inspect([row], now=20000)["wake"] == "accepted"
+    assert item["token"] != token and len(item["history"]) == 1
+    token = item["token"]
     item["state"] = "unknown"
     monkeypatch.setattr(journal_bridge, "load_session_conversation_events_cached", lambda *a, **kw:
                         journal_events(token, event_id, "turn_completed", False))
@@ -548,7 +550,9 @@ try:
     sessions._append_session_conversation_event(sid, trigger.turn_id, sessions.EVENT_TURN_FAILED,
         status='failed', payload={'errorType': 'synthetic_failure'}, source='test')
     assert runtime.reconcile()['failed'] == 1
-    assert runtime.inspect([row], now=20000)['wake'] == 'none'
+    assert runtime.inspect([row], now=20000)['wake'] == 'accepted'
+    assert runtime._state['entries'][0]['token'] != token
+    assert runtime._state['entries'][0]['history'][0]['token'] == token
 finally:
     runtime.close()
     native.shutdown()

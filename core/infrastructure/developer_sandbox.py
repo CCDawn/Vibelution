@@ -427,6 +427,52 @@ def seeded_sandbox_workspace_path(project_root: Path, *parts: str) -> Path:
     if sandbox_path is None:
         return formal_workspace_path(project_root, *parts)
     formal_path = formal_workspace_path(project_root, *parts)
+    segments = tuple(segment for part in parts for segment in Path(part).parts)
+    reference_seed = not segments or (
+        segments[0] == "agents" and (len(segments) == 1 or segments[1] == "agents.json")
+        or segments[0] == "chat" and (len(segments) == 1 or segments[1].startswith("conversations.sqlite3"))
+        or segments[0] == "chat_rooms" and (len(segments) == 1 or segments[1] == "chat_rooms.json")
+        or segments[0] == "teams" and (len(segments) <= 2 or segments[-1] == "workflow_orchestration.json"))
+    if reference_seed and not sandbox_path.exists() and formal_path.exists():
+        from core.infrastructure.model_reference_fence import model_reference_fence
+        # Resolve/copy the source only after all canonical reference writers
+        # are fenced. Stage privately; a failed copy cannot look like ready
+        # sandbox metadata to the next request.
+        with model_reference_fence():
+            formal_path = formal_workspace_path(project_root, *parts)
+            if not sandbox_path.exists() and formal_path.exists():
+                if formal_path.name in {"conversations.sqlite3-wal", "conversations.sqlite3-shm"}:
+                    return sandbox_path
+                sandbox_path.parent.mkdir(parents=True, exist_ok=True)
+                stage = sandbox_path.with_name("." + sandbox_path.name + ".seed-" + uuid.uuid4().hex)
+                try:
+                    if formal_path.is_dir():
+                        shutil.copytree(_filesystem_path(formal_path), _filesystem_path(stage),
+                            copy_function=_copy_reference_seed_file,
+                            ignore=shutil.ignore_patterns("conversations.sqlite3-wal", "conversations.sqlite3-shm"))
+                    else:
+                        _copy_reference_seed_file(formal_path, stage)
+                    if sandbox_path.exists() or sandbox_path.is_symlink():
+                        raise FileExistsError("Sandbox seed target already exists")
+                    if stage.is_dir():
+                        # Native Windows rename never replaces an existing
+                        # directory. The entire metadata seed appears at once.
+                        os.rename(_filesystem_path(stage), _filesystem_path(sandbox_path))
+                    else:
+                        # Atomically publish a new file without ever replacing
+                        # a concurrent existing DB. UUID stage is a sibling.
+                        os.link(_filesystem_path(stage), _filesystem_path(sandbox_path))
+                finally:
+                    if stage.exists():
+                        # The UUID sibling was created only by this seed. Never
+                        # follow a replacement link while cleaning a failed copy.
+                        if stage.is_symlink() or stage.resolve().parent != sandbox_path.parent.resolve():
+                            raise ValueError("Sandbox seed staging authority changed")
+                        if stage.is_dir():
+                            shutil.rmtree(_filesystem_path(stage))
+                        else:
+                            stage.unlink()
+        return sandbox_path
     if not sandbox_path.exists() and formal_path.exists():
         sandbox_path.parent.mkdir(parents=True, exist_ok=True)
         if formal_path.is_dir():
@@ -434,6 +480,29 @@ def seeded_sandbox_workspace_path(project_root: Path, *parts: str) -> Path:
         else:
             shutil.copy2(_filesystem_path(formal_path), _filesystem_path(sandbox_path))
     return sandbox_path
+
+
+def _copy_reference_seed_file(source: str | Path, target: str | Path) -> str:
+    source_path = Path(source)
+    if source_path.name != "conversations.sqlite3":
+        return shutil.copy2(source, target)
+    from core.chat.conversation_store import runtime as sqlite_runtime
+    def logical(path):
+        text = str(path)
+        if os.name == "nt" and text.startswith("\\\\?\\"):
+            text = "\\\\" + text[8:] if text.startswith("\\\\?\\UNC\\") else text[4:]
+        return Path(text)
+    source_path, target_path = logical(source_path), logical(target)
+    if target_path.exists():
+        raise ValueError("Sandbox database seed target already exists")
+    connection = sqlite_runtime.connect(source_path.as_uri() + "?mode=ro", uri=True)
+    try:
+        # SQLite's own read snapshot includes committed live WAL frames. Never
+        # copy only main.db, checkpoint the source, or retry via a raw copy.
+        connection.execute("VACUUM INTO ?", (str(target_path),))
+    finally:
+        connection.close()
+    return str(target)
 
 
 def _filesystem_path(path: Path) -> Path:

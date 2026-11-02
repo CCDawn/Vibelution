@@ -69,8 +69,8 @@ class UpgradeOwner:
         try:
             self.authorize(subject, capability, expected_binding)
         except ManagementError as exc:
-            if exc.code in {"SUBJECT_DENIED", "TARGET_BINDING_CHANGED"}:
-                _error(exc.code, 403 if exc.code == "SUBJECT_DENIED" else 409)
+            if exc.code in {"SUBJECT_DENIED", "SUBJECT_REVOKED", "TARGET_BINDING_CHANGED"}:
+                _error(exc.code, 409 if exc.code == "TARGET_BINDING_CHANGED" else 403)
             _error("AUTHORIZATION_UNAVAILABLE", 503)
         current = self.identity()
         grant = self._read(self.store.path("subjects", subject))
@@ -78,6 +78,8 @@ class UpgradeOwner:
             or not isinstance(grant.get("subject_capability"), str)
             or not secrets.compare_digest(grant["subject_capability"], capability)):
             _error("SUBJECT_DENIED", 403)
+        if grant.get("revoked", False) is not False:
+            _error("SUBJECT_REVOKED", 403)
         try:
             bound = _binding(grant.get("binding"))
             if not isinstance(grant.get("authority"), str) or not grant["authority"] or not isinstance(current.signature, str) or not current.signature:
@@ -91,6 +93,8 @@ class UpgradeOwner:
                 raise ValueError("Invalid grant state")
             for key, proof in proofs.items():
                 self._proof(subject, grant, key, proof)
+            from .authorization_reduction import validate_reduction_state
+            validate_reduction_state(subject, grant)
         except (ValidationError, ValueError, TypeError, KeyError):
             _error()
         return grant
@@ -110,7 +114,7 @@ class UpgradeOwner:
         previous, additions, scopes = (_scopes(authorization[key]) for key in ("previousScopes", "addedScopes", "scopes"))
         revision = authorization["grantRevision"]
         if (set(previous) & set(additions) or scopes != sorted(set(previous) | set(additions))
-            or not set(scopes).issubset(grant["scopes"])
+            or (not grant.get("scopeReductions") and not set(scopes).issubset(grant["scopes"]))
             or type(revision) is not int or revision < 1 or revision > grant.get("grantRevision", 0)
             or proof["fingerprint"] != _fingerprint(subject, proof["binding"], proof["authority"], previous, additions)):
             raise ValueError("Conflicting upgrade proof")

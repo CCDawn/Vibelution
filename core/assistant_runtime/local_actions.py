@@ -58,7 +58,12 @@ def contracts() -> dict:
         "governed": False, "parameters": pa_platform_actions.Arguments.model_json_schema(),
     }
     for name in _REFERENCE_DELETIONS:
-        result[name] = {**result[name], "available": False, "unavailableReason": _REFERENCE_GUARD_MESSAGE}
+        from .configuration_control import available
+        result[name] = {**result[name], "available": available(), "unavailableReason": "" if available() else _REFERENCE_GUARD_MESSAGE}
+    from .configuration_control import ReferenceQuery
+    result["configuration_references"] = {"action": "configuration_references", "governed": False,
+        "parameters": ReferenceQuery.model_json_schema(),
+        "description": "只读核对全部已登记项目及助理自身对model/provider的元数据引用；仅返回覆盖与计数，不返回路径/提示词。缺失、离线或损坏来源明确未知；零引用还须原生删除临界区重新核验，不授予写权。"}
     return result
 
 
@@ -67,6 +72,9 @@ def execute(action: str, parameters: dict, runtime: dict, *, governed: bool = Fa
     contract = contracts().get(action)
     if contract is None:
         raise ValueError("未知的 Launcher 本地操作，请先 index/describe 查询。")
+    if action == "configuration_references":
+        from .configuration_control import inspect
+        return inspect(parameters, runtime)
     if action in {"preference_proposals", "preference_proposal_accept", "preference_proposal_reject", "dispatch_list", "management_requests"}:
         from .discovery_actions import execute as execute_discovery
         return execute_discovery(action, parameters, runtime, governed=governed)
@@ -92,6 +100,9 @@ def execute(action: str, parameters: dict, runtime: dict, *, governed: bool = Fa
         action == "model_update" and isinstance(parameters.get("updates"), dict)
         and parameters["updates"].get("enabled") is False)
     if action in _REFERENCE_DELETIONS or disabling:
+        from .configuration_control import available, mutate
+        if available():
+            return mutate(action, parameters, runtime, governed=governed)
         return {"ok": False, "status": "unavailable", "action": action,
                 "error": "cross_project_reference_validation_unavailable", "message": _REFERENCE_GUARD_MESSAGE}
     from tools import pa_platform_actions

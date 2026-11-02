@@ -487,6 +487,25 @@ def promote_agent_model(
     confirmed: bool,
     config_path: Path | str = CONFIG_PATH,
 ) -> dict[str, Any]:
+    # The one composite State participant owns State before Config's reference
+    # fence. Apply, verify and rollback all retain this same native envelope.
+    from . import agent_directory_service as directory
+    with directory._STATE_LOCK:
+        return _promote_agent_model_locked(agent_id, slot=slot, model_ref=model_ref,
+            expected_base_hash=expected_base_hash, expected_agent_updated_at=expected_agent_updated_at,
+            confirmed=confirmed, config_path=config_path)
+
+
+def _promote_agent_model_locked(
+    agent_id: str,
+    *,
+    slot: str,
+    model_ref: str,
+    expected_base_hash: str,
+    expected_agent_updated_at: str,
+    confirmed: bool,
+    config_path: Path | str = CONFIG_PATH,
+) -> dict[str, Any]:
     """Promote one candidate and bind it without leaving partial state."""
 
     source = ""
