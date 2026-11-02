@@ -1159,6 +1159,115 @@ def test_ledger_wake_skipped_is_retryable_without_quota(monkeypatch, personal_en
     assert _receipt_digested_at("r-1") is not None
 
 
+def test_wake_failure_phase_discriminator_separates_pre_submit_from_submission():
+    """异常边界判别表：帧标志优先，类型白名单只做提交前的正向判别。
+
+    - 裸 RuntimeError（无提交帧、类型不在白名单）→ 保守按提交后未知；
+    - TimeoutError/OSError/ValueError 且无提交帧 → 可证提交前，可重试；
+    - 带提交帧（函数名或模块文件命中）的任意类型（含白名单类型）→
+      已进入提交流程，结果不可证，保守按未知——journal append 中途的
+      OSError 绝不因类型而被误判成可重试。
+    """
+
+    def _bare_runtime_error() -> Exception:
+        try:
+            raise RuntimeError("kernel exploded")
+        except RuntimeError as exc:
+            return exc
+
+    def _timeout_pre_submit() -> Exception:
+        try:
+            raise TimeoutError("session admit lock timed out")
+        except TimeoutError as exc:
+            return exc
+
+    def _raised_inside_submit(exc_type, message) -> Exception:
+        def submit_session_message(*_args, **_kwargs):
+            raise exc_type(message)
+
+        try:
+            submit_session_message()
+        except exc_type as exc:
+            return exc
+        raise AssertionError("unreachable")
+
+    assert patrol._is_pre_submit_wake_failure(_bare_runtime_error()) is False
+    assert patrol._is_pre_submit_wake_failure(_timeout_pre_submit()) is True
+    assert (
+        patrol._is_pre_submit_wake_failure(_raised_inside_submit(OSError, "journal gone"))
+        is False
+    )
+    assert (
+        patrol._is_pre_submit_wake_failure(_raised_inside_submit(RuntimeError, "mid-journal"))
+        is False
+    )
+
+
+def test_ledger_wake_pre_submit_failure_is_retryable_without_quota(monkeypatch, personal_env):
+    """契约①：提交前失败（如锁超时）→ cancelled_pre_admission。
+
+    一次瞬时故障不再永久静默整批回执：下轮巡逻自然再唤醒并成功消化；
+    与 skipped_* 同轨，不吃节流配额、不落提交戳。
+    """
+
+    _seed_ledger_agents(personal_env)
+    _seed_dispatch_and_receipts(personal_env, ["r-1"])
+    harness = _LedgerHarness(monkeypatch)
+
+    def _lock_timeout(message):
+        raise TimeoutError("session admit lock timed out")
+
+    monkeypatch.setattr(patrol, "_wake_pa", _lock_timeout)
+    result = patrol.patrol_once(now=NOW)
+    assert result["wake"]["delivery"]["wakeStatus"] == "error"
+    assert [(row[0], row[1]) for row in _wake_attempt_rows()] == [
+        ("cancelled_pre_admission", None)
+    ]
+
+    from core.web.services import personal_assistant_dispatch_ledger as ledger
+
+    assert ledger.recent_wake_submissions(
+        window_ms=int(patrol.WAKE_HOUR_WINDOW_SECONDS * 1000), now_ms=int(NOW * 1000)
+    ) == []  # 提交前失败不吃配额
+
+    def _started(message):
+        harness.wake_calls.append({"message": message})
+        return {"wakeStatus": "started", "turnId": "turn-1", "targetSessionId": ""}
+
+    monkeypatch.setattr(patrol, "_wake_pa", _started)
+    result = patrol.patrol_once(now=NOW + 60.0)
+    assert result["wake"]["attempted"] is True
+    assert result["wake"]["digestedReceiptIds"] == ["r-1"]
+    assert _receipt_digested_at("r-1") is not None
+
+
+def test_ledger_wake_post_submit_unknown_still_never_retries(monkeypatch, personal_env):
+    """契约②：已进入提交流程（异常带 submit_session_message 帧）→ 仍 unknown。
+
+    计配额（真实提交与否不可证）、盖回执；冷却过后也不为它再唤醒，
+    保守语义与改动前一致。
+    """
+
+    _seed_ledger_agents(personal_env)
+    _seed_dispatch_and_receipts(personal_env, ["r-1"])
+    _LedgerHarness(monkeypatch)
+
+    def _kernel_explodes_mid_journal(message):
+        def submit_session_message(*_args, **_kwargs):
+            raise RuntimeError("kernel exploded mid-journal")
+
+        submit_session_message()  # 异常带着提交帧逃逸 → 结果不可证
+
+    monkeypatch.setattr(patrol, "_wake_pa", _kernel_explodes_mid_journal)
+    result = patrol.patrol_once(now=NOW)
+    assert result["wake"]["delivery"]["wakeStatus"] == "error"
+    assert [(row[0], row[1] is not None) for row in _wake_attempt_rows()] == [("unknown", True)]
+
+    # r-1 被不可重试意图覆盖：冷却过后也不再为它唤醒。
+    assert patrol.patrol_once(now=NOW + patrol.WAKE_COOLDOWN_SECONDS + 1)["wake"] is None
+    assert _receipt_digested_at("r-1") is None  # 仍未消化，摘要卡可见
+
+
 def test_ledger_wake_skipped_waiting_for_person_keeps_receipts_undigested(monkeypatch, personal_env):
     """批四语义变更：patrol 例外唤醒撞上等人会话 → skipped_waiting_for_person。
 

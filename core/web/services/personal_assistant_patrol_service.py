@@ -64,6 +64,7 @@ import hashlib
 import json
 import logging
 import os
+import sqlite3
 import threading
 import time
 from datetime import datetime, timezone
@@ -615,6 +616,70 @@ def _merged_wake_message(
     return message
 
 
+# Wake exceptions escaping ``wake_agent_for_inbox_message`` before its
+# ``submit_session_message`` call are provably pre-submission (directory
+# state reads, prompt formatting, lock waits): transient by nature, so they
+# map to the retryable ``cancelled_pre_admission`` family like skipped_* —
+# no quota, receipts re-wake on the next patrol pass. Only once the
+# submission pipeline was entered is the outcome unprovable.
+_WAKE_PRE_SUBMIT_RETRYABLE_TYPES: tuple[type[BaseException], ...] = (
+    TimeoutError,   # 锁等待/读超时
+    OSError,        # 目录态损坏、注册表/收件箱 IO 瞬断（含其子类）
+    sqlite3.Error,  # 台账/目录 sqlite 瞬断（非 OSError 子类，单列）
+    ValueError,     # 目录身份/prompt 格式化失败
+    TypeError,      # 同上：消息形状损坏
+    KeyError,       # 同上
+)
+
+
+def _wake_exception_entered_submission(exc: BaseException) -> bool:
+    """提交阶段标志：异常是否从 ``submit_session_message`` 执行途中逃逸。
+
+    逐帧走 ``exc.__traceback__``：任一帧属于 ``submit_session_message``
+    （按函数名，或按其所属模块文件定位）即证明提交流程已被进入——此后
+    结果不可证（journal append 可能已部分落地），必须保守记 ``unknown``
+    永不重试。没有该帧 → 异常必然发生在调用 submit 之前（目录读取、
+    prompt 格式化、等人/运行态检查等），可证为提交前失败。
+
+    模块定位失败时按“已进入提交”处理（保守侧：全部记 unknown，与改动前
+    行为一致）。
+    """
+
+    module_file = ""
+    try:
+        from core.web.services.session import submit as _submit_module
+
+        module_file = os.path.normcase(
+            os.path.abspath(str(_submit_module.__file__ or ""))
+        )
+    except Exception:  # noqa: BLE001 - 定位失败按保守侧处理
+        return True
+    tb = exc.__traceback__
+    while tb is not None:
+        code = tb.tb_frame.f_code
+        if (
+            code.co_name == "submit_session_message"
+            or (module_file and os.path.normcase(os.path.abspath(code.co_filename)) == module_file)
+        ):
+            return True
+        tb = tb.tb_next
+    return False
+
+
+def _is_pre_submit_wake_failure(exc: BaseException) -> bool:
+    """可证提交前失败 → 可重试；其余一律按提交后未知（保守不重试）。
+
+    帧标志优先且完备：异常若从 submit 途中抛出，traceback 必含提交帧，
+    无论类型都归 unknown——journal append 中途的 OSError/sqlite 错误绝不
+    会误判成可重试。类型白名单只在“无提交帧”这一可证提交前的前提下收
+    紧，避免把任意未知异常（含测试 mock 的裸 RuntimeError）盲目当可重试。
+    """
+
+    if _wake_exception_entered_submission(exc):
+        return False
+    return isinstance(exc, _WAKE_PRE_SUBMIT_RETRYABLE_TYPES)
+
+
 def _attempt_merged_wake(
     state: _PatrolState,
     wake_eligible: list[dict[str, Any]],
@@ -629,9 +694,13 @@ def _attempt_merged_wake(
     started — the whole batch is digest-marked in one transaction and the
     non-carrier receipts are consumed) and ``unknown`` (outcome unprovable —
     never retried) consume quota; ``cancelled_pre_admission`` (skipped —
-    provably no turn) is retryable and consumes nothing. Without a
-    reservation (ledger off or reserve failed) the legacy single-receipt
-    wake runs unchanged.
+    provably no turn) is retryable and consumes nothing. Exceptions that
+    provably never reached the submission call (directory read, prompt
+    formatting, lock wait — no submit frame plus a known pre-submit type)
+    settle as ``cancelled_pre_admission`` so a transient failure no longer
+    permanently silences the whole receipt batch; the next pass re-wakes on
+    the existing throttle. Without a reservation (ledger off or reserve
+    failed) the legacy single-receipt wake runs unchanged.
     """
 
     carrier = max(
@@ -660,16 +729,28 @@ def _attempt_merged_wake(
     except Exception as exc:  # noqa: BLE001 - wake failure must not kill the pass
         logger.warning("PA patrol wake failed (%s).", type(exc).__name__)
         delivery = {"wakeStatus": "error", "reason": type(exc).__name__}
-        # Unprovable outcome: quota consumed, receipts never re-woken.
-        recorded = False
-        if attempt_id:
-            recorded = _ledger_complete_wake(
-                attempt_id,
-                state="unknown",
-                reason=str(delivery["reason"]),
-                submitted_at_ms=now,
-            )
-        _record_wake_submission(state, now=now, ledger_recorded=recorded)
+        if _is_pre_submit_wake_failure(exc):
+            # Provably never reached the submission call: same rail as the
+            # skipped_* deliveries — retryable terminal state, no quota, no
+            # coverage; the batch re-wakes on the next patrol pass.
+            if attempt_id:
+                _ledger_complete_wake(
+                    attempt_id,
+                    state="cancelled_pre_admission",
+                    reason=f"pre_submit:{type(exc).__name__}",
+                )
+        else:
+            # Unprovable outcome (submission entered, or unrecognized):
+            # quota consumed, receipts never re-woken.
+            recorded = False
+            if attempt_id:
+                recorded = _ledger_complete_wake(
+                    attempt_id,
+                    state="unknown",
+                    reason=str(delivery["reason"]),
+                    submitted_at_ms=now,
+                )
+            _record_wake_submission(state, now=now, ledger_recorded=recorded)
     else:
         wake_status = _text(delivery, "wakeStatus")
         if wake_status.startswith("started"):

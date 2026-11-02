@@ -628,6 +628,36 @@ def test_reserved_rows_survive_restart_and_unknown_consumes_quota(seeded):
     assert ledger.wake_covered_receipt_ids() == {"receipt-1": "unknown"}
 
 
+def test_complete_wake_cancelled_strips_submission_stamp(seeded):
+    """提交前失败落 cancelled_pre_admission：即使上游误传提交戳也强制清空。
+
+    前置失败与 skipped_* 同轨——不吃节流配额、不盖回执。防的是调用方把
+    submitted_at_ms 顺手传进来，让一次目录读失败静默吃掉唤醒配额。
+    """
+
+    _seed_live_dispatch(seeded)
+    reserved_ms = int(time.time() * 1000) - 1000
+    token = ledger.reserve_wake(
+        ["receipt-1"], reserved_at="2026-11-01T00:00:00+00:00", reserved_at_ms=reserved_ms
+    )
+    assert ledger.complete_wake(
+        token, state="cancelled_pre_admission", submitted_at_ms=reserved_ms
+    ) is True
+    connection = sqlite3.connect(str(ledger.ledger_database_path()))
+    try:
+        row = connection.execute(
+            "SELECT state, submitted_at_ms FROM wake_attempts WHERE attempt_id=?",
+            (token,),
+        ).fetchone()
+    finally:
+        connection.close()
+    assert row == ("cancelled_pre_admission", None)
+    assert ledger.recent_wake_submissions(
+        window_ms=3_600_000, now_ms=reserved_ms + 1
+    ) == []
+    assert ledger.wake_covered_receipt_ids() == {}
+
+
 def test_reserve_prunes_old_cancelled_rows(seeded):
     _seed_live_dispatch(seeded)
     now_ms = int(time.time() * 1000)
