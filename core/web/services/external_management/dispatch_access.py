@@ -61,7 +61,7 @@ class DispatchAccessControl:
         from core.web.services import session_service as sessions
         from core.web.services.session.admission_lock import session_has_active_work_run
         from core.external_agent.contracts import TASK_TERMINAL_STATUSES
-        from .runtime_operations import _external_tasks
+        from .runtime_operations import _external_tasks, _scan
         from .archive_state import ArchiveState
         from vibelution_storage import resolve_project_runtime_home
         from core.assistant_runtime.migration_io import check_path
@@ -98,28 +98,31 @@ class DispatchAccessControl:
                         if (sessions._is_session_busy_for_delete(session_id, row)
                                 or session_has_active_work_run(sessions, session_id)):
                             raise _error("AGENT_BUSY")
-                    folder = resolve_project_runtime_home(self.native.project_root) / "external_agents" / "tasks"
-                    try:
-                        folder.lstat()
-                    except FileNotFoundError:
-                        ancestor = folder.parent
-                        while True:
-                            try:
-                                ancestor.lstat()
-                                break
-                            except FileNotFoundError:
-                                ancestor = ancestor.parent
-                        check_path(ancestor)
-                        records, complete = [], True
-                    else:
-                        records, complete = _external_tasks(self.native)
-                    if not complete:
-                        raise _error("STATE_UNAVAILABLE", 503)
-                    for row in records:
-                        if not isinstance(row.get("agentId"), str) or not row["agentId"]:
+                    runtime = resolve_project_runtime_home(self.native.project_root)
+                    for namespace in ("external_agents", "local_assistant_tasks"):
+                        folder = runtime / namespace / "tasks"
+                        try:
+                            folder.lstat()
+                        except FileNotFoundError:
+                            ancestor = folder.parent
+                            while True:
+                                try:
+                                    ancestor.lstat()
+                                    break
+                                except FileNotFoundError:
+                                    ancestor = ancestor.parent
+                            check_path(ancestor)
+                            records, complete = [], True
+                        else:
+                            records, complete = (_external_tasks(self.native) if namespace == "external_agents"
+                                else _scan(folder, key="taskId", prefix="eat-"))
+                        if not complete:
                             raise _error("STATE_UNAVAILABLE", 503)
-                        if row["agentId"] == args.agent_id and row.get("status") not in TASK_TERMINAL_STATUSES:
-                            raise _error("AGENT_BUSY")
+                        for row in records:
+                            if not isinstance(row.get("agentId"), str) or not row["agentId"]:
+                                raise _error("STATE_UNAVAILABLE", 503)
+                            if row["agentId"] == args.agent_id and row.get("status") not in TASK_TERMINAL_STATUSES:
+                                raise _error("AGENT_BUSY")
                     yield directory
         except (sessions.SessionBusyError, TimeoutError):
             raise _error("AGENT_BUSY") from None

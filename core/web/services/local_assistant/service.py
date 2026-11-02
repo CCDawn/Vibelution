@@ -1,5 +1,6 @@
 """Launcher-owned tasks reuse the native owner with a separate access policy."""
 from contextvars import ContextVar
+from contextlib import contextmanager
 from pathlib import Path
 
 from core.web.services.external_agent.service import ExternalAgentAccessError, ExternalAgentTaskService
@@ -75,11 +76,35 @@ class LocalAssistantTaskService(ExternalAgentTaskService):
             return super()._start_native_task(current, **kwargs)
 
 
+@contextmanager
+def _local_start_admission(service):
+    from config.settings import get_config
+    from core.web.services import agent_directory_service as directory
+    if (Path(directory.PROJECT_ROOT).resolve() != service.project_root
+            or Path(directory._active_project_root()).resolve() != service.project_root):
+        raise ExternalAgentAccessError("Native local Agent owner changed", code="LOCAL_ASSISTANT_DISABLED")
+    with directory.agent_session_lifecycle_transaction():
+        if Path(directory._active_project_root()).resolve() != service.project_root:
+            raise ExternalAgentAccessError("Native local Agent owner changed", code="LOCAL_ASSISTANT_DISABLED")
+        service._require_gateway_enabled()  # Fresh Launcher authority, never MCP enabled.
+        current = service.authority_fingerprint()
+        if not current:
+            raise ExternalAgentAccessError("Local assistant authorization is unavailable", code="LOCAL_ASSISTANT_DISABLED")
+        if not service.request_authority_fingerprint:
+            service.request_authority_fingerprint = current
+        # A service selected before waiting for Life must honor a later explicit
+        # target deny. MCP enabled/allowlist/ceilings do not configure this lane.
+        service.denied_agent_ids = frozenset(get_config().external_agent_gateway.denied_agent_ids)
+        yield None
+
+
 def build_local_service(project_root):
     from config.settings import get_config
     gateway = get_config().external_agent_gateway
-    return LocalAssistantTaskService(task_store(project_root), project_root=project_root,
+    service = LocalAssistantTaskService(task_store(project_root), project_root=project_root,
         denied_agent_ids=gateway.denied_agent_ids, max_task_seconds=7200,
         lease_seconds=gateway.lease_seconds,
         max_concurrent_tasks_per_owner=gateway.max_concurrent_tasks_per_owner,
         max_concurrent_tasks_per_agent=gateway.max_concurrent_tasks_per_agent)
+    service._native_start_admission = lambda: _local_start_admission(service)
+    return service

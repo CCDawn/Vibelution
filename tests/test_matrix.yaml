@@ -99,6 +99,7 @@ rules:
       - "config/operator_config_transaction.py"
       - "core/web/services/external_management/dispatch_access.py"
       - "core/web/services/external_agent/service.py"
+      - "core/web/services/local_assistant/service.py"
       - "core/web/services/agent_operation_service.py"
       - "core/external_agent/backend_client.py"
       - "core/assistant_runtime/management.py"
@@ -109,8 +110,10 @@ rules:
       - "tests/test_external_agent_dispatch_admission.py"
       - "tests/test_external_management_dispatch_access.py"
       - "tests/test_operator_config_native_outcome.py"
+      - "tests/test_local_assistant_tasks.py"
+      - "tests/test_local_dispatch_access_admission.py"
     commands:
-      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_assistant_dispatch_access_actions.py tests/test_assistant_agent_cleanup_approval.py tests/test_launcher_platform_approval.py tests/test_configured_agent_creation.py tests/test_external_agent_dispatch_access_client.py tests/test_external_agent_dispatch_admission.py tests/test_external_management_dispatch_access.py tests/test_operator_config_native_outcome.py -q"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_assistant_dispatch_access_actions.py tests/test_assistant_agent_cleanup_approval.py tests/test_launcher_platform_approval.py tests/test_configured_agent_creation.py tests/test_external_agent_dispatch_access_client.py tests/test_external_agent_dispatch_admission.py tests/test_external_management_dispatch_access.py tests/test_operator_config_native_outcome.py tests/test_local_assistant_tasks.py tests/test_local_dispatch_access_admission.py -q"
   - id: configured-data-owner-handoff
     description: "Physical configured-owner proof, existing-only knowledge reads and safe inventory traversal."
     executionLayers:

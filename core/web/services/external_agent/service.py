@@ -277,7 +277,11 @@ class ExternalAgentTaskService:
             str(agent_id or "").strip(), include_archived=False
         )
         try:
-            self._require_eligible(agent, gateway=gateway)
+            if gateway is None:
+                # Non-MCP subclasses retain their independent virtual policy.
+                self._require_eligible(agent)
+            else:
+                self._require_eligible(agent, gateway=gateway)
         except ExternalAgentAccessError as exc:
             self._record_gateway_event(
                 "external_agent.execution.denied",
