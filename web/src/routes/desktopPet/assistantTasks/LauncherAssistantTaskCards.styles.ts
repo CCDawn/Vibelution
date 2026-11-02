@@ -20,9 +20,6 @@ const styles = {
   scope: "text-xs text-vui-fg-secondary",
   list: "grid min-w-0 gap-3",
   more: "flex flex-wrap items-center gap-2 text-xs text-vui-fg-secondary",
-  cleanupBody: "grid min-w-0 gap-3 text-sm leading-relaxed text-vui-fg-secondary",
-  cleanupList: "grid min-w-0 gap-3",
-  cleanupItem: "grid min-w-0 gap-1 break-words border-t border-vui-border-subtle pt-2 text-xs",
 };
 
 export default styles;

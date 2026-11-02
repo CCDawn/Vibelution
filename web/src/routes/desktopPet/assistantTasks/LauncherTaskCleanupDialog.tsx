@@ -1,6 +1,6 @@
 import { VButton, VDialog } from "../../../components/vui";
 import type { AssistantCleanupDialogState } from "./assistantTaskCleanup";
-import styles from "./LauncherAssistantTaskCards.styles";
+import styles from "./LauncherTaskCleanupDialog.styles";
 
 export function LauncherTaskCleanupDialog({ state, onClose, onConfirm, onRetry, lang }: {
   state: AssistantCleanupDialogState | null; onClose: () => void; onConfirm: () => void; onRetry: () => void; lang: "zh" | "en";
