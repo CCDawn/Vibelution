@@ -1,7 +1,7 @@
 import { statSync } from "node:fs";
 import { dirname } from "node:path";
 import { resolveDeferredProjectLaunchSettings, type DesktopLaunchSettingsInput } from "../launch/desktopLaunchSettings.js";
-import { resolveDataHomeForProject, resolveRuntimeManagerDir } from "../lifecycle/projectStoragePaths.js";
+import { resolveRuntimeManagerDir } from "../lifecycle/projectStoragePaths.js";
 import { readRuntimeManagerLauncherStatusSummary } from "../lifecycle/runtimeManagerStatusSnapshot.js";
 import type { RunWorkbenchLifecycleInput, WorkbenchLifecycleResult } from "../process/workbenchLifecycle.js";
 import { createAssistantProjectLifecycle } from "./projectLifecycle.js";
@@ -24,7 +24,6 @@ export function createAssistantProjectMainControl(options: {
   operatorConfigPath: string;
   runLifecycle?: (input: RunWorkbenchLifecycleInput) => Promise<WorkbenchLifecycleResult>;
   readStatusSummary?: typeof readRuntimeManagerLauncherStatusSummary;
-  resolveDataHome?: (root: string) => string;
   branchOwner?: BranchLifecycleCommandOwner;
 }): (request: MainControlRequest) => Promise<unknown> {
   const launch = { ...options.launch, env: { ...options.launch.env }, cliArgs: { ...options.launch.cliArgs } };
@@ -55,7 +54,9 @@ export function createAssistantProjectMainControl(options: {
       environment.VIBELUTION_WORKSPACE_ROOT = target.workspaceRoot;
       environment.VIBELUTION_CONFIG_PATH = resolved.configPath;
       environment.VIBELUTION_CONFIG_HOME = dirname(resolved.configPath);
-      environment.VIBELUTION_DATA_HOME = (options.resolveDataHome ?? resolveDataHomeForProject)(target.workspaceRoot);
+      // The native target resolves its configured/active data owner. Injecting
+      // the canonical instance directory here overrides [storage].data_home
+      // and breaks the existing subject's authority under the same binding.
       environment.VIBELUTION_PYTHON_PATH = resolved.pythonPath;
       environment.PYTHON = resolved.pythonPath;
       return { workspaceRoot: target.workspaceRoot, pythonPath: resolved.pythonPath, operatorConfigPath: resolved.configPath,

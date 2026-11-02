@@ -1,6 +1,8 @@
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AssistantProjectRegistryConnection } from "../src/assistant/projectRegistryConnection.js";
 import { createAssistantProjectMainControl } from "../src/assistant/projectMainControl.js";
@@ -20,7 +22,8 @@ async function setup() {
   const project = join(root, "project"), branch = join(root, "branch"); mkdirSync(project); mkdirSync(branch);
   mkdirSync(join(project, ".venv", "Scripts"), { recursive: true });
   const pythonPath = join(project, ".venv", "Scripts", "python.exe"); writeFileSync(pythonPath, "fake");
-  const configPath = join(root, "operator.toml"); writeFileSync(configPath, "");
+  const configPath = join(root, "operator.toml");
+  writeFileSync(configPath, `[storage]\ndata_home = ${JSON.stringify(join(root, "target-data"))}\n`);
   const registry = new AssistantProjectRegistryConnection(join(root, "registry.json"));
   await registry.reconcile({ schemaVersion: 1, integrationRoot: project, items: [
     { id: "main", path: project, checkedOut: true }, { id: "branch", path: branch, checkedOut: true },
@@ -32,13 +35,31 @@ async function setup() {
   const launch = { env: { VIBELUTION_PORT: "19500", VIBELUTION_DATA_HOME: join(root, "other-project-data"), VIBELUTION_WEB_CONTROL_TOKEN: "synthetic-secret", PYTHON: "other-python" },
     cliArgs: parseDesktopCliArgs(["--assistant"]), userDataRoot: join(root, "user"), resourcesRoot: join(root, "resources"), readTextFile: () => null };
   const create = () => createAssistantProjectMainControl({ directory: join(root, "requests"), registry, launch, operatorConfigPath: configPath,
-    runLifecycle: execute, readStatusSummary: () => ({ backendHealthy: false, backendPortListening: false, observedState: "closed", overallState: "idle", lifecycleConsistency: "aligned", phase: "idle", stateVersion: 1, lifecycleResults: [] }),
-    resolveDataHome: () => join(root, "target-data") });
+    runLifecycle: execute, readStatusSummary: () => ({ backendHealthy: false, backendPortListening: false, observedState: "closed", overallState: "idle", lifecycleConsistency: "aligned", phase: "idle", stateVersion: 1, lifecycleResults: [] }) });
   const request = { deliveryId: "a".repeat(32), action: "project_lifecycle" as const, projectId: mainId, operation: "start" as const, requestId: "synthetic-request" };
   return { root, project, branch, registry, mainId, branchId, configPath, pythonPath, execute, create, request };
 }
 
 describe("production main control composition", () => {
+  it.skipIf(process.platform !== "win32")("preserves the configured native data owner when starting a registered project", async () => {
+    const f = await setup();
+    mkdirSync(join(f.project, ".vibelution"));
+    writeFileSync(join(f.project, ".vibelution", "project.json"), JSON.stringify({ schemaVersion: 1, projectId: "synthetic-data-owner" }));
+    await f.create()(f.request);
+    const input = f.execute.mock.calls[0][0];
+    const sourceRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+    const inherited = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.toUpperCase().startsWith("GIT_")
+      && !key.toUpperCase().startsWith("VIBELUTION_") && !["PYTHONPATH", "PYTHONHOME"].includes(key.toUpperCase())));
+    const common = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+      { cwd: sourceRoot, env: inherited, encoding: "utf8", windowsHide: true }).trim();
+    const python = join(dirname(common), ".venv", "Scripts", "python.exe");
+    const observed = execFileSync(python, ["-X", "utf8", "-c",
+      "import sys; from vibelution_storage import resolve_project_data_home; print(resolve_project_data_home(sys.argv[1]))", f.project],
+      { cwd: sourceRoot, env: { ...inherited, ...input.targetEnvironment }, encoding: "utf8", windowsHide: true }).trim();
+    expect(resolve(observed).toLowerCase()).toBe(resolve(f.root, "target-data").toLowerCase());
+    expect(input.targetEnvironment?.VIBELUTION_DATA_HOME).toBeUndefined();
+    expect(input.targetEnvironment?.VIBELUTION_CONFIG_PATH).toBe(f.configPath);
+  });
   it("recovers the original native start after a real unrelated inventory refresh and facade restart", async () => {
     const f = await setup();
     f.execute.mockImplementationOnce(input => input.queue!.submit({ operation: input.operation, execute: async command => {
@@ -84,7 +105,7 @@ describe("production main control composition", () => {
     expect(input.workspaceRoot).toBe(f.project); expect(input.pythonPath).toBe(f.pythonPath);
     expect(input.operatorConfigPath).toBe(f.configPath);
     expect(input.targetEnvironment?.VIBELUTION_CONFIG_PATH).toBe(f.configPath);
-    expect(input.targetEnvironment?.VIBELUTION_DATA_HOME).toBe(join(f.root, "target-data"));
+    expect(input.targetEnvironment?.VIBELUTION_DATA_HOME).toBeUndefined();
     expect(input.targetEnvironment?.VIBELUTION_PORT).toBeUndefined();
     expect(input.targetEnvironment?.VIBELUTION_WEB_CONTROL_TOKEN).toBeUndefined();
     expect(process.env.VIBELUTION_WORKSPACE_ROOT).toBe(before);

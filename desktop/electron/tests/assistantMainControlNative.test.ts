@@ -48,7 +48,7 @@ describe.skipIf(process.platform !== "win32")("real private main-control transpo
       const launch = { env, cliArgs: parseDesktopCliArgs(["--assistant"]), resourcesRoot: fixtureRoot, userDataRoot: join(root, "user"), readTextFile: () => null };
       const makeHost = () => new AssistantHost({ profileRoot: join(root, "profile"), runtimeRoot: join(root, "runtime"), sourceRoot: fixtureRoot, pythonPath: python,
         env, projects: snapshot.projects, projectSnapshot: snapshot,
-        mainControl: createAssistantProjectMainControl({ directory: join(root, "requests"), registry, launch, operatorConfigPath: config, runLifecycle: nativeRun, resolveDataHome: () => join(root, "target-data") }) });
+        mainControl: createAssistantProjectMainControl({ directory: join(root, "requests"), registry, launch, operatorConfigPath: config, runLifecycle: nativeRun }) });
       const send = async (action: string, operation: string, requestId: string) => host!.request({ operation: "send", requestId: `message-${requestId}`,
         message: JSON.stringify({ action, parameters: { project_id: projectId, operation, request_id: requestId } }) });
       host = makeHost(); await host.start();
