@@ -1,9 +1,11 @@
 import { BrowserWindow, dialog, screen } from "electron";
 import type { DesktopPaths } from "../paths.js";
+import { IPC_CHANNELS } from "../ipc.js";
 import { createPetWindow } from "../windows/petWindow.js";
 import { desktopPetWindowExpandedBounds } from "../windows/petWindowBounds.js";
 import { isTrustedLauncherControlFrame } from "../windows/launcherWindow.js";
 import type { AssistantHost } from "./assistantHost.js";
+import type { AssistantSessionEventEnvelope } from "./assistantEventPump.js";
 import { assertAssistantSender, invokeAssistant, LAUNCHER_ASSISTANT_URL, type WorkbenchSenderGate } from "./assistantBridge.js";
 import type { ThemeSnapshot } from "./themeAuthority.js";
 import { AssistantThemeControl, type AssistantThemeInput, type AssistantThemeResult } from "./assistantThemeControl.js";
@@ -75,6 +77,14 @@ export class AssistantWindow {
     const window = this.window;
     if (!window || window.isDestroyed() || window.webContents.getURL() !== LAUNCHER_ASSISTANT_URL) return false;
     try { window.webContents.send("workbench:assistant-theme-changed", { snapshot, explicit }); return true; } catch { return false; }
+  }
+
+  /** Session-event envelopes go to the float whenever it exists; a closed or
+   * unloaded float silently drops the push. */
+  publishSessionEvent(envelope: AssistantSessionEventEnvelope): boolean {
+    const window = this.window;
+    if (!window || window.isDestroyed() || window.webContents.getURL() !== LAUNCHER_ASSISTANT_URL) return false;
+    try { window.webContents.send(IPC_CHANNELS.assistantSessionEvent, envelope); return true; } catch { return false; }
   }
 
   /** Show a native fallback on the resident assistant, including when hidden. */

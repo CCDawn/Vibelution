@@ -1397,11 +1397,18 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
         else ""
     )
     external_runtime_permission_profile = _external_agent_runtime_permission_profile(context)
+    from core.web.services.local_assistant.runtime import verified_task_runtime
+    local_assistant_task = verified_task_runtime(project_root=s.PROJECT_ROOT, session_id=session_id,
+        agent_id=agent_id, metadata=context.get("message_metadata"))
     if external_runtime_permission_profile:
         from core.web.services.external_agent.policy import external_runtime_tool_grants
 
         runtime_tool_grants = list(external_runtime_tool_grants(external_runtime_permission_profile))
         runtime_tool_source = f"external_agent_task:{external_runtime_permission_profile}"
+    if local_assistant_task:
+        from core.web.services.local_assistant.policy import local_runtime_tool_grants, LOCAL_RUNTIME_SOURCE_PREFIX
+        runtime_tool_grants = list(local_runtime_tool_grants(local_assistant_task["profile"]))
+        runtime_tool_source = LOCAL_RUNTIME_SOURCE_PREFIX + local_assistant_task["profile"]
     runtime_metadata: dict[str, Any] = {}
     from core.agent_plugins.runtime_extensions import (
         agent_plugin_proactive_runtime_metadata,
@@ -1572,7 +1579,10 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
     )
     supervised_workspace_override = s._supervised_workspace_override_path(context)
     stage_started_at = s._perf_counter()
-    if supervised_workspace_override is not None:
+    if local_assistant_task is not None:
+        workspace_decision = None
+        tool_workspace = local_assistant_task["workspace"]
+    elif supervised_workspace_override is not None:
         workspace_decision = None
         tool_workspace = supervised_workspace_override
     else:
@@ -2229,6 +2239,19 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                         for part in (dynamic_runtime_context_block, supervised_workspace_context_block)
                         if str(part or "").strip()
                     ).strip()
+                if local_assistant_task is not None:
+                    local_workspace_context = "\n".join([
+                        "## Authorized Local Development Workspace",
+                        f"RepositoryRoot: {local_assistant_task['workspace']}",
+                        f"ToolWorkspace: {local_assistant_task['workspace']}",
+                        "This native task is authorized for ordinary development in this worktree.",
+                        "Use absolute paths inside ToolWorkspace for every file tool and use it as CLI cwd.",
+                        "Normal file edits and local tests/builds do not need repeated confirmation.",
+                        "Preserve the original user constraints. Do not publish, delete unrelated data, change permissions or write to the integration checkout.",
+                        "Run real tests and report their command, exit code, changed files and worktree path.",
+                    ])
+                    dynamic_runtime_context_block = "\n\n".join(filter(None,
+                        (dynamic_runtime_context_block, local_workspace_context)))
                 runtime_context_block = "\n\n".join(
                     part
                     for part in (static_runtime_context_block, dynamic_runtime_context_block)

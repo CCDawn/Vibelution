@@ -5,7 +5,11 @@ import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ConversationViewProps } from "../../components/conversation/conversationViewTypes";
 import type { SessionDetail, SessionToolApprovalRequest } from "../../api/types";
-import { launcherAssistantActivity, launcherAssistantPollInterval, launcherAssistantSubmission, launcherDispatchLabel, launcherAssistantQueueReadback, launcherAssistantQueueLabel, launcherAssistantRequestReadback } from "./launcherAssistantModel";
+import type { LauncherAssistantSessionEvent } from "../../api/launcherAssistant";
+import {
+  launcherAssistantActivity, launcherAssistantPollInterval, launcherAssistantSubmission, launcherDispatchLabel, launcherAssistantQueueReadback, launcherAssistantQueueLabel, launcherAssistantRequestReadback,
+  launcherAssistantSessionEventRefreshesDetail, launcherAssistantSseHealthy, LAUNCHER_ASSISTANT_SSE_HEALTH_WINDOW_MS,
+} from "./launcherAssistantModel";
 import { LauncherAssistantRoute } from "./LauncherAssistantRoute";
 
 const bridge = vi.hoisted(() => ({
@@ -15,6 +19,8 @@ const bridge = vi.hoisted(() => ({
   launcherConversationApi: { cacheKey: "launcher-test" },
   getLauncherAssistantApprovals: vi.fn(), resolveLauncherAssistantApproval: vi.fn(),
   stopLauncherAssistantTurn: vi.fn(), continueLauncherAssistantTurn: vi.fn(),
+  // Default: no push channel, exactly like a shell without `onSessionEvent`.
+  subscribeLauncherAssistantSessionEvent: vi.fn((): (() => void) | null => null),
 }));
 vi.mock("../../api/launcherAssistant", () => bridge);
 vi.mock("../../i18n/useShellI18n", () => ({ useShellI18n: () => ({ lang: "zh" }) }));
@@ -36,6 +42,8 @@ afterEach(async () => {
   client?.clear();
   conversation = undefined;
   vi.clearAllMocks();
+  // clearAllMocks keeps implementations; put the push channel back to "absent".
+  bridge.subscribeLauncherAssistantSessionEvent.mockImplementation(() => null);
 });
 
 async function renderAssistant(initialDetail?: Record<string, unknown>, initialStatus?: Record<string, unknown>, statusRequest?: () => Promise<unknown>, routeProps: Partial<ComponentProps<typeof LauncherAssistantRoute>> = {}) {
@@ -331,6 +339,108 @@ describe("Launcher assistant state", () => {
     expect(launcherAssistantPollInterval(true, { status: "queued" })).toBe(2_000);
     expect(launcherAssistantPollInterval(true, { status: "ready" })).toBe(false);
   });
+
+  it("keeps every active branch at 2s without a push channel and backs off to 10s only while it is healthy", () => {
+    const quiet = { sseHealthy: false };
+    const healthy = { sseHealthy: true };
+    const unrecovered = { status: "ready", messages: [] } as unknown as SessionDetail;
+    const receipt = { id: "q", clientSubmissionId: "r", observed: false };
+    // Regression: an explicit false (and an empty options bag) match today's values branch by branch.
+    expect(launcherAssistantPollInterval(true, undefined, "", null, [], {})).toBe(2_000);
+    expect(launcherAssistantPollInterval(true, { status: "running" }, "", null, [], quiet)).toBe(2_000);
+    expect(launcherAssistantPollInterval(true, { status: "ready", lastTurnTerminalTurnId: "old" }, "new", null, [], quiet)).toBe(2_000);
+    expect(launcherAssistantPollInterval(true, { status: "ready" }, "", receipt, [], quiet)).toBe(2_000);
+    expect(launcherAssistantPollInterval(true, { status: "ready", queuedTurns: [{ id: "q", status: "queued" }] }, "", null, [], quiet)).toBe(2_000);
+    expect(launcherAssistantPollInterval(true, unrecovered, "", null, ["missing"], quiet)).toBe(2_000);
+    expect(launcherAssistantPollInterval(true, { status: "ready" }, "", null, [], quiet)).toBe(false);
+    expect(launcherAssistantPollInterval(false, { status: "running" }, "", null, [], quiet)).toBe(false);
+    // Healthy push channel: each former 2s branch becomes the 10s safety net.
+    expect(launcherAssistantPollInterval(true, undefined, "", null, [], healthy)).toBe(10_000);
+    expect(launcherAssistantPollInterval(true, { status: "running" }, "", null, [], healthy)).toBe(10_000);
+    expect(launcherAssistantPollInterval(true, { status: "queued" }, "", null, [], healthy)).toBe(10_000);
+    expect(launcherAssistantPollInterval(true, { status: "ready", lastTurnTerminalTurnId: "old" }, "new", null, [], healthy)).toBe(10_000);
+    expect(launcherAssistantPollInterval(true, { status: "ready" }, "", receipt, [], healthy)).toBe(10_000);
+    expect(launcherAssistantPollInterval(true, { status: "ready", queuedTurns: [{ id: "q", status: "starting" }] }, "", null, [], healthy)).toBe(10_000);
+    expect(launcherAssistantPollInterval(true, unrecovered, "", null, ["missing"], healthy)).toBe(10_000);
+    // Idle, settled and hidden branches stay off no matter how healthy the channel is.
+    expect(launcherAssistantPollInterval(true, { status: "ready" }, "", null, [], healthy)).toBe(false);
+    expect(launcherAssistantPollInterval(true, { status: "ready", lastTurnTerminalTurnId: "new", terminalReason: "success" }, "new", null, [], healthy)).toBe(false);
+    expect(launcherAssistantPollInterval(false, { status: "running" }, "", null, [], healthy)).toBe(false);
+    expect(launcherAssistantPollInterval(false, undefined, "", null, ["missing"], healthy)).toBe(false);
+  });
+
+  it("calls the push channel healthy only for an event inside the 35s window", () => {
+    const now = 1_000_000;
+    expect(LAUNCHER_ASSISTANT_SSE_HEALTH_WINDOW_MS).toBe(35_000);
+    expect(launcherAssistantSseHealthy(null, now)).toBe(false);
+    expect(launcherAssistantSseHealthy(undefined, now)).toBe(false);
+    expect(launcherAssistantSseHealthy(Number.NaN, now)).toBe(false);
+    expect(launcherAssistantSseHealthy(now, now)).toBe(true);
+    expect(launcherAssistantSseHealthy(now + 5, now)).toBe(true);
+    expect(launcherAssistantSseHealthy(now - LAUNCHER_ASSISTANT_SSE_HEALTH_WINDOW_MS, now)).toBe(true);
+    expect(launcherAssistantSseHealthy(now - LAUNCHER_ASSISTANT_SSE_HEALTH_WINDOW_MS - 1, now)).toBe(false);
+  });
+
+  it("re-reads detail only for this session's snapshot frame or an explicitly finished delta", () => {
+    const at = 1;
+    const frame = (patch: Record<string, unknown>) => ({ type: "assistant_delta", sessionId: "s", at, ...patch }) as LauncherAssistantSessionEvent;
+    expect(launcherAssistantSessionEventRefreshesDetail({ type: "session_detail", sessionId: "s", at }, "s")).toBe(true);
+    expect(launcherAssistantSessionEventRefreshesDetail({ type: "session_detail", sessionId: "other", at }, "s")).toBe(false);
+    expect(launcherAssistantSessionEventRefreshesDetail({ type: "session_detail", sessionId: "s", at }, "")).toBe(false);
+    expect(launcherAssistantSessionEventRefreshesDetail({ type: "heartbeat", sessionId: "s", at }, "s")).toBe(false);
+    expect(launcherAssistantSessionEventRefreshesDetail({ type: "unknown_frame", sessionId: "s", at }, "s")).toBe(false);
+    // `done` is outside the frozen envelope: absent, falsy or non-boolean never counts as finished.
+    expect(launcherAssistantSessionEventRefreshesDetail(frame({}), "s")).toBe(false);
+    expect(launcherAssistantSessionEventRefreshesDetail(frame({ done: false }), "s")).toBe(false);
+    expect(launcherAssistantSessionEventRefreshesDetail(frame({ done: "true" }), "s")).toBe(false);
+    expect(launcherAssistantSessionEventRefreshesDetail(frame({ done: true }), "s")).toBe(true);
+    expect(launcherAssistantSessionEventRefreshesDetail(frame({ done: true, sessionId: "other" }), "s")).toBe(false);
+  });
+
+  it("re-reads detail from a pushed authoritative frame, leaves other frames read-only and unsubscribes on unmount", async () => {
+    let push: ((event: LauncherAssistantSessionEvent) => void) | undefined;
+    const unsubscribe = vi.fn();
+    bridge.subscribeLauncherAssistantSessionEvent.mockImplementation((listener: (event: LauncherAssistantSessionEvent) => void) => { push = listener; return unsubscribe; });
+    await renderAssistant();
+    expect(bridge.subscribeLauncherAssistantSessionEvent).toHaveBeenCalledTimes(1);
+    expect(push).toBeTypeOf("function");
+    const reads = bridge.getLauncherAssistantDetail.mock.calls.length;
+    const deliver = async (event: LauncherAssistantSessionEvent) => {
+      await act(async () => { push?.(event); });
+      await settle(); await settle();
+    };
+    await deliver({ type: "heartbeat", sessionId: "s", at: Date.now() });
+    await deliver({ type: "session_detail", sessionId: "other", at: Date.now() });
+    await deliver({ type: "assistant_delta", sessionId: "s", at: Date.now() });
+    await deliver({ type: "unknown_frame", sessionId: "s", at: Date.now() });
+    expect(bridge.getLauncherAssistantDetail).toHaveBeenCalledTimes(reads);
+    await deliver({ type: "session_detail", sessionId: "s", ledgerSeq: 3, at: Date.now() });
+    expect(bridge.getLauncherAssistantDetail).toHaveBeenCalledTimes(reads + 1);
+    await deliver({ type: "assistant_delta", sessionId: "s", at: Date.now(), done: true } as LauncherAssistantSessionEvent);
+    expect(bridge.getLauncherAssistantDetail).toHaveBeenCalledTimes(reads + 2);
+    expect(unsubscribe).not.toHaveBeenCalled();
+    await act(async () => root?.unmount());
+    root = undefined;
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it("backs an active session's polling off to the 10s safety net once the push channel proves healthy", async () => {
+    let push: ((event: LauncherAssistantSessionEvent) => void) | undefined;
+    bridge.subscribeLauncherAssistantSessionEvent.mockImplementation((listener: (event: LauncherAssistantSessionEvent) => void) => { push = listener; return () => {}; });
+    await renderAssistant({ id: "s", status: "running", activeTurnId: "t", messages: [], defaultFileContext: "" });
+    // No frame has arrived: the active session keeps today's 2s cadence.
+    const silent = bridge.getLauncherAssistantDetail.mock.calls.length;
+    await pollCycle();
+    expect(bridge.getLauncherAssistantDetail.mock.calls.length).toBeGreaterThan(silent);
+    // An authoritative frame re-reads detail at once; with the channel now
+    // healthy the following 2s window passes without a single poll.
+    const before = bridge.getLauncherAssistantDetail.mock.calls.length;
+    await act(async () => { push?.({ type: "session_detail", sessionId: "s", at: Date.now() }); });
+    await settle(); await settle();
+    expect(bridge.getLauncherAssistantDetail).toHaveBeenCalledTimes(before + 1);
+    await pollCycle();
+    expect(bridge.getLauncherAssistantDetail).toHaveBeenCalledTimes(before + 1);
+  }, 10_000);
 
   it("does not animate ready as successful completion", () => {
     expect(launcherAssistantActivity({ status: "ready" })).toEqual({ tone: "idle", animationState: "idle" });

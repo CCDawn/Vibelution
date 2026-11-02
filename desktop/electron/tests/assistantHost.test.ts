@@ -84,6 +84,20 @@ describe("AssistantHost", () => {
     await host.stop();
   });
 
+  it("leases the ready generation for the event pump and voids the lease on stop", async () => {
+    const { host } = fixture({ graceful: true });
+    expect(host.eventPumpLease()).toBeNull();
+    await host.start();
+    const lease = host.eventPumpLease();
+    expect(lease).not.toBeNull();
+    expect(lease!.origin).toBe("http://127.0.0.1:12345");
+    expect(lease!.sessionId).toBe("s");
+    expect(lease!.token).toMatch(/^[0-9a-f]{64}$/);
+    expect(lease!.signal.aborted).toBe(false);
+    await host.stop();
+    expect(host.eventPumpLease()).toBeNull();
+  });
+
   it("rejects team page URL, identity and cursor extensions before network access", async () => {
     const { host, fetchImpl } = fixture({ graceful: true });
     await host.start();

@@ -1043,6 +1043,9 @@ def authorize_tool_execution(
         # Collaboration may permit ordinary calls automatically; source
         # reauthorization still requires this exact native operator decision.
         approval_requirement = ("always", "destructive")
+    from core.web.services.local_assistant.consent import local_approval_policy
+    approval_requirement, approval_permission_preset = local_approval_policy(
+        runtime, normalized_tool, tool_args or {}, approval_requirement, context.permission_preset)
     if approval_requirement is not None:
         from core.web.services.session.tool_approvals import (
             ToolApprovalError,
@@ -1068,7 +1071,7 @@ def authorize_tool_execution(
                 decision_fingerprint=context.decision_fingerprint,
                 config_revision=context.config_revision,
                 config_hash=context.config_hash,
-                permission_preset=context.permission_preset,
+                permission_preset=approval_permission_preset,
                 cancel_checker=cancel_checker,
                 **approval_options,
             )

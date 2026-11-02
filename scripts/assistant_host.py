@@ -134,6 +134,8 @@ def main():
     # A second Launcher cannot open another writer over the same profile.
     # OS locking releases on crashes; no PID-age heuristic transfers ownership.
     with cross_process_file_lock(root / "host-owner", timeout=0), _initial_owner_lifetime() as initial_owner_check:
+        from core.infrastructure.launcher_assistant_authority import ensure_launcher_authority, install_launcher_authority
+        install_launcher_authority(ensure_launcher_authority(root))
         history_control = None
         if main_control_enabled:
             from core.assistant_runtime.history_host import HistoryHost
