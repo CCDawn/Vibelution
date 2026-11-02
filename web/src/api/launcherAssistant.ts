@@ -25,6 +25,7 @@ export type LauncherAssistantAcceptance =
 
 export type LauncherAssistantDispatch = {
   dispatchId: string;
+  title?: string;
   projectId?: string;
   agentId?: string;
   nativeTaskId?: string;
@@ -329,7 +330,13 @@ export async function getLauncherAssistantDispatches(): Promise<LauncherAssistan
     })) {
     throw new Error("Launcher 派发回执暂不可用。");
   }
-  return result.dispatches;
+  // Titles are optional display metadata. A legacy or malformed title must not
+  // hide otherwise valid task identities and receipts.
+  return result.dispatches.map(row => {
+    if (row.title === undefined || typeof row.title === "string" && row.title.length <= 160) return row;
+    const { title: _title, ...reference } = row;
+    return reference;
+  });
 }
 
 export async function previewLauncherDispatchApproval(row: LauncherAssistantDispatch, approval: LauncherDispatchApproval): Promise<LauncherDispatchApprovalPreview> {

@@ -14,7 +14,11 @@ vi.mock("../../api/launcher", () => ({
   isLauncherProjectNotSelected: (error: unknown) => error instanceof Error && error.message === "not-selected",
 }));
 vi.mock("../../api/launcherAssistant", () => ({ getLauncherAssistantStatus: vi.fn(), getLauncherAssistantDetail: vi.fn(), getLauncherAssistantDispatches: vi.fn() }));
-vi.mock("./LauncherAssistantRoute", () => ({ LauncherAssistantRoute: (props: any) => <div data-computer-requested={String(Boolean(props.computerRequested))}>native dialogue<input aria-label="对话草稿" />{props.entryIntent ? <button>{props.entryIntent.label}</button> : null}</div> }));
+vi.mock("./LauncherAssistantRoute", () => ({ LauncherAssistantRoute: (props: any) => <div data-computer-requested={String(Boolean(props.computerRequested))}>native dialogue<input aria-label="对话草稿" />{props.entryIntent ? <><button>{props.entryIntent.label}</button><output data-task-entry>{props.entryIntent.message}</output></> : null}</div> }));
+vi.mock("./assistantTasks/LauncherAssistantTaskCards", () => ({ LauncherAssistantTaskCards: ({ onReview, onApproval }: any) => <>
+  <button onClick={() => onReview({ projectId: "project-1", dispatchId: "dispatch-1" })}>核对示例任务</button>
+  <button onClick={() => onApproval()}>处理示例授权</button>
+</> }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let root: Root, container: HTMLDivElement, client: QueryClient;
@@ -40,6 +44,32 @@ async function render(panel: string) {
 }
 
 describe("Launcher assistant workspace", () => {
+  it("opens task cards without replacing the conversation or losing its draft", async () => {
+    await render("dialogue");
+    const draft = container.querySelector<HTMLInputElement>('input[aria-label="对话草稿"]')!;
+    draft.value = "保留当前输入";
+    await act(async () => { await navigate("/launcher/assistant?panel=tasks"); });
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("核对示例任务");
+    expect(container.querySelector('input[aria-label="对话草稿"]')).toBe(draft);
+    await act(async () => { [...document.querySelectorAll("button")].find(node => node.textContent === "核对示例任务")!.click(); });
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(container.querySelector('input[aria-label="对话草稿"]')).toBe(draft);
+    expect(draft.value).toBe("保留当前输入");
+    expect(container.querySelector("[data-task-entry]")?.textContent).toContain('"dispatchId":"dispatch-1"');
+    expect(container.querySelector("[data-task-entry]")?.textContent).toContain("不要重试、重派、停止、重启、部署或修改任何内容");
+    expect(getLauncherAssistantDetail).not.toHaveBeenCalled();
+    expect(selectLauncherProject).not.toHaveBeenCalled();
+  });
+
+  it("returns to the existing approval conversation without submitting a decision", async () => {
+    await render("tasks");
+    await act(async () => { [...document.querySelectorAll("button")].find(node => node.textContent === "处理示例授权")!.click(); });
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(container.textContent).toContain("native dialogue");
+    expect(container.querySelector("[data-task-entry]")).toBeNull();
+    expect(getLauncherAssistantDispatches).not.toHaveBeenCalled();
+  });
+
   it("uses one mounted conversation across dialogue and legacy browser URLs", async () => {
     await render("dialogue");
     const draft = container.querySelector<HTMLInputElement>('input[aria-label="对话草稿"]')!;

@@ -60,6 +60,10 @@ const previewExemptDesignSections = new Set([
   // Workspace route depends on the selected native assistant/session, project
   // queries and router search state; its panels and routing have interaction tests.
   "LauncherAssistantWorkspaceRoute",
+  // Launcher-owned cards consume identity-bound IPC rather than static props.
+  // Their read/interaction tests and isolated real-component fixture cover the
+  // composition; packaged visual acceptance remains a separate check.
+  "LauncherAssistantTaskCards",
   // Route composition uses the live Launcher browser bridge and native view;
   // interaction tests and the approved isolated preview cover its UI.
   "LauncherAssistantBrowserWorkspace",

@@ -11,7 +11,10 @@ export type AssistantDispatchTask = {
   agentId: string | null;
   nativeTaskId: string | null;
   nativeStatus: string | null;
+  title: string;
+  resultSummary: string;
   state: AssistantDispatchTaskState;
+  shouldPoll: boolean;
   sourceAvailable: boolean;
   receiptBound: boolean;
   conflictingObservations: boolean;
@@ -37,6 +40,13 @@ function identity(value: unknown): string | null {
   return typeof value === "string" && value.trim() && value.length <= 256 ? value : null;
 }
 
+function boundedText(value: unknown, limit: number): string {
+  if (typeof value !== "string") return "";
+  const text = value.replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, " ").replace(/\s+/g, " ").trim();
+  const characters = Array.from(text);
+  return characters.length > limit ? `${characters.slice(0, limit - 1).join("")}…` : text;
+}
+
 function projectRow(row: LauncherAssistantDispatch, sourceAvailable: boolean): AssistantDispatchTask {
   const projectId = identity(row.projectId);
   const agentId = identity(row.agentId);
@@ -60,6 +70,9 @@ function projectRow(row: LauncherAssistantDispatch, sourceAvailable: boolean): A
     // Tuple encoding avoids delimiter collisions and cross-project conflation.
     id: JSON.stringify([projectId, "dispatch", row.dispatchId]),
     dispatchId: row.dispatchId, projectId, agentId, nativeTaskId, nativeStatus,
+    title: boundedText(row.title, 100),
+    resultSummary: bound ? boundedText(row.receipt?.resultSummary, 600) : "",
+    shouldPoll: current && row.receipt?.shouldPoll === true && ["running", "stopping", "waiting_user"].includes(state),
     state, sourceAvailable: sourceAvailable && !row.lastError, receiptBound: bound, conflictingObservations: false,
     pendingApprovalCount: pending.size, businessAcceptance: "not_evaluated",
   };
@@ -67,7 +80,7 @@ function projectRow(row: LauncherAssistantDispatch, sourceAvailable: boolean): A
 
 function fingerprint(task: AssistantDispatchTask): string {
   return JSON.stringify([task.agentId, task.nativeTaskId, task.nativeStatus, task.state,
-    task.sourceAvailable, task.receiptBound, task.pendingApprovalCount]);
+    task.sourceAvailable, task.receiptBound, task.pendingApprovalCount, task.title, task.resultSummary, task.shouldPoll]);
 }
 
 export function projectAssistantDispatchTasks(
@@ -84,7 +97,7 @@ export function projectAssistantDispatchTasks(
       // The feed has no revision/timestamp ordering contract. Never guess which
       // duplicate observation won, including whether an approval is still live.
       indexed.set(task.id, { ...previous, nativeStatus: null, state: "unknown", sourceAvailable: false, receiptBound: false,
-        conflictingObservations: true, pendingApprovalCount: 0 });
+        conflictingObservations: true, pendingApprovalCount: 0, resultSummary: "", shouldPoll: false });
     }
   }
   const tasks = [...indexed.values()];

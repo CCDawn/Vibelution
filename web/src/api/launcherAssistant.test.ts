@@ -300,6 +300,20 @@ describe("Launcher assistant bridge", () => {
     await expect(getLauncherAssistantDispatches()).rejects.toThrow("暂不可用");
   });
 
+  it("reads optional bounded task titles while accepting legacy title-less receipts", async () => {
+    const invoke = vi.fn().mockResolvedValueOnce({ dispatches: [{ dispatchId: "d", title: "整理资料" }] })
+      .mockResolvedValueOnce({ dispatches: [{ dispatchId: "legacy" }] });
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    await expect(getLauncherAssistantDispatches()).resolves.toEqual([{ dispatchId: "d", title: "整理资料" }]);
+    await expect(getLauncherAssistantDispatches()).resolves.toEqual([{ dispatchId: "legacy" }]);
+    expect(invoke.mock.calls).toEqual([[{ operation: "dispatches" }], [{ operation: "dispatches" }]]);
+  });
+
+  it.each([null, {}, "x".repeat(161)])("retains a task when optional title metadata is invalid", async title => {
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke: vi.fn().mockResolvedValue({ dispatches: [{ dispatchId: "d", title }] }) });
+    await expect(getLauncherAssistantDispatches()).resolves.toEqual([{ dispatchId: "d" }]);
+  });
+
   it("only declines a matching summary with a nonempty revision", async () => {
     const approval = { approvalId: "a", toolName: "exec_command", risk: "write", targetSummary: {}, revision: "policy-1", availableDecisions: ["decline"] };
     const row = { dispatchId: "d", nativeTaskId: "t", receipt: { taskId: "t", pendingApprovals: [approval] } };

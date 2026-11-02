@@ -1,14 +1,15 @@
 import { useRef, useState } from "react";
-import { Activity, ArrowDownRight, ArrowUpCircle, Folder, MessageCircle, Settings2, Wrench } from "lucide-react";
+import { Activity, ArrowDownRight, ArrowUpCircle, Folder, ListTodo, MessageCircle, Settings2, Wrench } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import type { LauncherBranchInstance } from "../api/launcher";
 import { returnLauncherToDesktop } from "../api/launcher";
 import { VButton, VDropdownMenu, VRouteLinkButton } from "../components/vui";
-import { launcherAssistantPanelLabel, launcherAssistantPanelPath } from "./launcherNavigationModel";
+import { launcherAssistantPanelLabel, launcherAssistantPanelPath, resolveLauncherAssistantPanel } from "./launcherNavigationModel";
 import styles from "./LauncherNavigation.styles";
 
 const assistantEntries = [
   ["dialogue", MessageCircle],
+  ["tasks", ListTodo],
 ] as const;
 const settingsEntries = [
   { id:"diagnostics", zh:"诊断", en:"Diagnostics", to:"/launcher/tools?view=diagnostics", Icon:Activity },
@@ -24,6 +25,7 @@ export function LauncherNavigation({ lang, onNavigate, updateAvailable = false, 
   const returnGate = useRef(false);
   const [error,setError] = useState("");
   const assistant = pathname.endsWith("/assistant");
+  const assistantPanel = resolveLauncherAssistantPanel(location.search) === "tasks" ? "tasks" : "dialogue";
   const view = new URLSearchParams(location.search).get("view");
   const selected = pathname.endsWith("/updates") ? "updates" : pathname.endsWith("/tools") ? view === "maintenance" ? "maintenance" : "diagnostics" : view === "settings" ? "settings" : "branches";
   async function returnToDesktop() {
@@ -35,7 +37,7 @@ export function LauncherNavigation({ lang, onNavigate, updateAvailable = false, 
   return <nav aria-label={lang === "zh" ? "Launcher 功能导航" : "Launcher navigation"} className={styles.root}>
     <div className={styles.scroll}>
       <div className={styles.group} aria-label={lang === "zh" ? "个人助理功能" : "Assistant features"}><p className={styles.groupLabel}>{lang === "zh" ? "个人助理" : "Personal assistant"}</p>
-        {assistantEntries.map(([id,Icon]) => <VRouteLinkButton key={id} to={launcherAssistantPanelPath(id)} chrome="shell-nav" aria-current={assistant ? "page" : undefined} className={`${styles.link} ${assistant ? styles.selectedLink : styles.idleLink}`} icon={<Icon size={17} aria-hidden="true"/>} onClick={onNavigate}>{launcherAssistantPanelLabel(id,lang)}</VRouteLinkButton>)}
+        {assistantEntries.map(([id,Icon]) => <VRouteLinkButton key={id} to={launcherAssistantPanelPath(id)} chrome="shell-nav" aria-current={assistant && assistantPanel === id ? "page" : undefined} className={`${styles.link} ${assistant && assistantPanel === id ? styles.selectedLink : styles.idleLink}`} icon={<Icon size={17} aria-hidden="true"/>} onClick={onNavigate}>{launcherAssistantPanelLabel(id,lang)}</VRouteLinkButton>)}
       </div>
       <div className={styles.group}><p className={styles.groupLabel}>Launcher</p><VRouteLinkButton to="/launcher" chrome="shell-nav" aria-current={!assistant && selected === "branches" ? "page" : undefined} className={`${styles.link} ${!assistant && selected === "branches" ? styles.selectedLink : styles.idleLink}`} icon={<Folder size={17} aria-hidden="true"/>} onClick={onNavigate}>{lang === "zh" ? "项目与分支" : "Projects & branches"}</VRouteLinkButton></div>
     </div>

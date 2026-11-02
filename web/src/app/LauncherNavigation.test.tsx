@@ -35,8 +35,8 @@ describe("Launcher navigation", () => {
     expect(nav.textContent).not.toContain("平台概览");
     expect(nav.textContent).not.toContain("派遣与回执");
     for (const label of ["浏览器", "事务", "待办与提醒", "电脑操作", "对话偏好", "助理设置", "诊断", "维护", "启动设置", "版本更新"]) expect(nav.textContent).not.toContain(label);
-    expect([...nav.querySelectorAll("a")].map(node => node.textContent?.trim())).toEqual(["对话", "项目与分支"]);
-    for (const [label, path] of [["项目与分支", "/launcher"], ["对话", "/launcher/assistant"]]) {
+    expect([...nav.querySelectorAll("a")].map(node => node.textContent?.trim())).toEqual(["对话", "任务", "项目与分支"]);
+    for (const [label, path] of [["任务", "/launcher/assistant?panel=tasks"], ["项目与分支", "/launcher"], ["对话", "/launcher/assistant"]]) {
       await act(async () => link(label).dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })));
       expect(router.state.location.pathname + router.state.location.search).toBe(path);
       expect(link(label).getAttribute("aria-current")).toBe("page");
@@ -46,7 +46,7 @@ describe("Launcher navigation", () => {
   it("selects the single conversation entry for legacy browser URLs", async () => {
     await render({}, "/launcher/assistant?panel=browser");
     expect(link("对话").getAttribute("aria-current")).toBe("page");
-    expect([...host.querySelectorAll("a")].map(node => node.textContent?.trim())).toEqual(["对话", "项目与分支"]);
+    expect([...host.querySelectorAll("a")].map(node => node.textContent?.trim())).toEqual(["对话", "任务", "项目与分支"]);
   });
 
   it("opens settings from the keyboard and keeps every destination reachable", async () => {

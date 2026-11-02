@@ -121,4 +121,26 @@ describe("assistant task projection from native dispatch receipts", () => {
     expect(task).not.toHaveProperty("receipt");
     expect(task).not.toHaveProperty("pendingApprovals");
   });
+
+  it("bounds plain-text presentation fields and does not copy an unbound receipt summary", () => {
+    const task = projectAssistantDispatchTasks([dispatch({ title: `任务\u202e${"长".repeat(150)}`,
+      receipt: { taskId: "native-1", status: "running", resultSummary: `摘要\n${"长".repeat(700)}` } })]).tasks[0];
+    expect(Array.from(task.title)).toHaveLength(100);
+    expect(task.title).not.toContain("\u202e");
+    expect(Array.from(task.resultSummary)).toHaveLength(600);
+    expect(task.resultSummary).not.toContain("\n");
+    const unbound = projectAssistantDispatchTasks([dispatch({ receipt: { taskId: "another", resultSummary: "wrong task" } })]).tasks[0];
+    expect(unbound.resultSummary).toBe("");
+  });
+
+  it("only polls explicitly requested known active and bound receipts", () => {
+    expect(projectAssistantDispatchTasks([dispatch()]).tasks[0].shouldPoll).toBe(true);
+    for (const row of [dispatch({ receipt: { taskId: "native-1", status: "succeeded", shouldPoll: true } }),
+      dispatch({ receipt: { taskId: "other", status: "running", shouldPoll: true } }),
+      dispatch({ receipt: { taskId: "native-1", status: "new_state", shouldPoll: true } }),
+      dispatch({ lastError: { message: "offline" } })]) {
+      expect(projectAssistantDispatchTasks([row]).tasks[0].shouldPoll).toBe(false);
+    }
+    expect(projectAssistantDispatchTasks([dispatch()], { sourceAvailable: false }).tasks[0].shouldPoll).toBe(false);
+  });
 });
