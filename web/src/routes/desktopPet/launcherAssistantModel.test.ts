@@ -397,10 +397,50 @@ describe("Launcher assistant state", () => {
     expect(launcherAssistantSessionEventRefreshesDetail(frame({ done: true, sessionId: "other" }), "s")).toBe(false);
   });
 
-  // Route-level push tests ("re-reads detail from a pushed authoritative
-  // frame…" / "backs an active session's polling off to the 10s safety net…")
-  // are quarantined until the route wiring lands; they subscribe through the
-  // real route and stay red without its consumer. Restore them with the wiring.
+  it("re-reads detail from a pushed authoritative frame, leaves other frames read-only and unsubscribes on unmount", async () => {
+    let push: ((event: LauncherAssistantSessionEvent) => void) | undefined;
+    const unsubscribe = vi.fn();
+    bridge.subscribeLauncherAssistantSessionEvent.mockImplementation((listener: (event: LauncherAssistantSessionEvent) => void) => { push = listener; return unsubscribe; });
+    await renderAssistant();
+    expect(bridge.subscribeLauncherAssistantSessionEvent).toHaveBeenCalledTimes(1);
+    expect(push).toBeTypeOf("function");
+    const reads = bridge.getLauncherAssistantDetail.mock.calls.length;
+    const deliver = async (event: LauncherAssistantSessionEvent) => {
+      await act(async () => { push?.(event); });
+      await settle(); await settle();
+    };
+    await deliver({ type: "heartbeat", sessionId: "s", at: Date.now() });
+    await deliver({ type: "session_detail", sessionId: "other", at: Date.now() });
+    await deliver({ type: "assistant_delta", sessionId: "s", at: Date.now() });
+    await deliver({ type: "unknown_frame", sessionId: "s", at: Date.now() });
+    expect(bridge.getLauncherAssistantDetail).toHaveBeenCalledTimes(reads);
+    await deliver({ type: "session_detail", sessionId: "s", ledgerSeq: 3, at: Date.now() });
+    expect(bridge.getLauncherAssistantDetail).toHaveBeenCalledTimes(reads + 1);
+    await deliver({ type: "assistant_delta", sessionId: "s", at: Date.now(), done: true } as LauncherAssistantSessionEvent);
+    expect(bridge.getLauncherAssistantDetail).toHaveBeenCalledTimes(reads + 2);
+    expect(unsubscribe).not.toHaveBeenCalled();
+    await act(async () => root?.unmount());
+    root = undefined;
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it("backs an active session's polling off to the 10s safety net once the push channel proves healthy", async () => {
+    let push: ((event: LauncherAssistantSessionEvent) => void) | undefined;
+    bridge.subscribeLauncherAssistantSessionEvent.mockImplementation((listener: (event: LauncherAssistantSessionEvent) => void) => { push = listener; return () => {}; });
+    await renderAssistant({ id: "s", status: "running", activeTurnId: "t", messages: [], defaultFileContext: "" });
+    // No frame has arrived: the active session keeps today's 2s cadence.
+    const silent = bridge.getLauncherAssistantDetail.mock.calls.length;
+    await pollCycle();
+    expect(bridge.getLauncherAssistantDetail.mock.calls.length).toBeGreaterThan(silent);
+    // An authoritative frame re-reads detail at once; with the channel now
+    // healthy the following 2s window passes without a single poll.
+    const before = bridge.getLauncherAssistantDetail.mock.calls.length;
+    await act(async () => { push?.({ type: "session_detail", sessionId: "s", at: Date.now() }); });
+    await settle(); await settle();
+    expect(bridge.getLauncherAssistantDetail).toHaveBeenCalledTimes(before + 1);
+    await pollCycle();
+    expect(bridge.getLauncherAssistantDetail).toHaveBeenCalledTimes(before + 1);
+  }, 10_000);
 
   it("does not animate ready as successful completion", () => {
     expect(launcherAssistantActivity({ status: "ready" })).toEqual({ tone: "idle", animationState: "idle" });

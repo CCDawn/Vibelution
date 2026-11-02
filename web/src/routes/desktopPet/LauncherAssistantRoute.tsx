@@ -10,6 +10,7 @@ import {
   previewLauncherDispatchApproval, decideLauncherDispatchApproval, declineLauncherDispatchSummary, launcherDispatchDeclineRevisionIsValid, type LauncherDispatchApprovalPreview,
   stopLauncherAssistantTurn, continueLauncherAssistantTurn,
   getLauncherOperatorAsset, getLauncherAssistantAvatar, openLauncherFromAssistant, uploadLauncherAttachment,
+  subscribeLauncherAssistantSessionEvent,
 } from "../../api/launcherAssistant";
 import type { SessionContinuationExpectation } from "../../api/chat";
 import { queryKeys } from "../../api/queryKeys";
@@ -44,6 +45,7 @@ import { classifyComposerFiles, mergeComposerAttachmentsWithRejections, type Com
 import {
   launcherAssistantActivity, launcherAssistantPollInterval, launcherAssistantSubmission,
   launcherAssistantQueueReadback, launcherAssistantQueueLabel, launcherAssistantRequestReadback,
+  launcherAssistantSessionEventRefreshesDetail, launcherAssistantSseHealthy,
   type LauncherAssistantSubmission, type LauncherAssistantQueuedAcceptance,
 } from "./launcherAssistantModel";
 
@@ -236,6 +238,11 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     setAcceptedTurnId(saved?.acceptedTurnId || "");
     setQueuedAcceptance(saved?.queuedAcceptance || null);
   }, [client, sessionId]);
+  // Last host-pushed session event (any type, heartbeats included). A ref, not
+  // state: react-query reads it on each interval computation and an event must
+  // never re-render the page by itself. Null when no push channel ever spoke,
+  // which keeps the 2s active cadence bit-for-bit identical to a shell without it.
+  const sseAliveAt = useRef<number | null>(null);
   const detail = useQuery({
     queryKey: ["launcher-assistant", "detail", sessionId, epoch],
     queryFn: async ({ signal }) => {
@@ -251,10 +258,28 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       // The enabled query supplies one recovery read. Missing data alone is
       // not a reason for an idle/error loop without known outstanding work.
       if (!query.state.data && !acceptedTurnId && !queuedAcceptance && !requests.length) return false;
-      return launcherAssistantPollInterval(observingOwnSession, query.state.data, acceptedTurnId, queuedAcceptance, requests);
+      return launcherAssistantPollInterval(observingOwnSession, query.state.data, acceptedTurnId, queuedAcceptance, requests,
+        { sseHealthy: launcherAssistantSseHealthy(sseAliveAt.current, Date.now()) });
     },
     refetchIntervalInBackground: false,
   });
+  useEffect(() => {
+    if (!observingOwnSession) return;
+    let active = true;
+    // Capability-detected: an older shell yields null and nothing changes. Any
+    // frame proves the channel alive; only this session's authoritative snapshot
+    // (or a delta that explicitly finished) invalidates detail, after which the
+    // existing full-detail readback effects below re-run unchanged. Bursts are
+    // left to react-query's own dedupe; the host already throttles snapshots.
+    const unsubscribe = subscribeLauncherAssistantSessionEvent(event => {
+      if (!active) return;
+      sseAliveAt.current = Date.now();
+      if (!launcherAssistantSessionEventRefreshesDetail(event, sessionId)) return;
+      void client.invalidateQueries({ queryKey: ["launcher-assistant", "detail", sessionId] });
+    });
+    if (!unsubscribe) return;
+    return () => { active = false; unsubscribe(); };
+  }, [client, observingOwnSession, sessionId]);
   useEffect(() => {
     const submission = outstanding.current;
     const recovered = submission && launcherAssistantRequestReadback(detail.data, submission.requestId);
