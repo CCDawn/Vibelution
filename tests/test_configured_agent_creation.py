@@ -34,6 +34,7 @@ def configured_env(tmp_path, monkeypatch):
 
 def test_configured_creation_publishes_every_field_before_first_session_sync(configured_env, monkeypatch):
     from core.web.services import agent_operation_service as operations
+    from core.web.services.external_agent.policy import list_externally_callable_agents
     env = configured_env
     directory, sessions, store = env["directory"], env["sessions"], env["store"]
     create = operations.create_configured_agent_with_session
@@ -44,6 +45,8 @@ def test_configured_creation_publishes_every_field_before_first_session_sync(con
         result = save(state)
         for row in state.get("agents", []):
             if row.get("createdBy") == "configured-test":
+                assert row["metadata"]["conversationIndexKind"] == directory.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
+                assert row["metadata"]["conversationIndexVisibility"] == directory.CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE
                 policy = row["toolPolicy"]
                 assert policy["allowedTools"] == []
                 assert policy["networkAccess"] == "none" and policy["mutationAccess"] == "none"
@@ -71,6 +74,15 @@ def test_configured_creation_publishes_every_field_before_first_session_sync(con
     row = store.repository.get_session(agent["directSessionId"])
     assert row["agentId"] == agent["agentId"] and row["agentConfigRevisionId"] == snapshot["configRevisionId"]
     assert agent["avatarImagePath"] == avatar
+    persisted = directory.get_agent(agent["agentId"])
+    assert persisted["conversationIndexKind"] == directory.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
+    assert persisted["conversationIndexErrors"] == []
+    candidates = list_externally_callable_agents([persisted],
+        active_team_lookup=lambda _agent_id: None, operator_enabled=lambda _agent_id: True,
+        operator_explicitly_enabled=lambda _agent_id: False)
+    assert [item["agentId"] for item in candidates] == [agent["agentId"]]
+    assert list_externally_callable_agents([persisted],
+        active_team_lookup=lambda _agent_id: None, operator_enabled=lambda _agent_id: False) == []
 
 
 def test_failed_session_ack_does_not_reenter_agent_or_session_creation(configured_env, monkeypatch):
@@ -96,6 +108,7 @@ def test_failed_session_ack_does_not_reenter_agent_or_session_creation(configure
     assert calls == ["agent", "session"]
     targets = [row for row in env["directory"].load_state()["agents"] if row.get("createdBy") == "configured-test"]
     assert len(targets) == 1 and not targets[0].get("directSessionId")
+    assert targets[0]["metadata"]["conversationIndexKind"] == env["directory"].CONVERSATION_INDEX_KIND_PERSONAL_AGENT
 
 
 def test_roleless_chat_rejects_profiles_before_any_creation(configured_env, monkeypatch):
