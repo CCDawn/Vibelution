@@ -19,7 +19,7 @@ export function AgentMessageChatRail({ children, sessionId, agentsById, lang, di
   const sidebarRef = useRef<AgentMessageSidebarHandle>(null);
   const previousSession = useRef(sessionId);
   const selectedId = useAgentMessageSelection();
-  const model = useAgentMessageRecords({ enabled: !disabled && !catalogOpen, sessionId: sessionId || "", agentsById });
+  const model = useAgentMessageRecords({ enabled: !disabled && center && !catalogOpen, sessionId: sessionId || "", agentsById });
   const current = currentConversationMessages(model.records, sessionId || "");
   const visible = center ? model.records : current;
   const selected = model.records.find((record) => record.id === selectedId || record.aliases?.includes(selectedId || ""));
@@ -29,9 +29,11 @@ export function AgentMessageChatRail({ children, sessionId, agentsById, lang, di
   useEffect(() => { setCatalogOpen(false); setDetailOpen(false); }, [center]);
   useEffect(() => { if (revealConversations) setCatalogOpen(true); }, [revealConversations]);
   useEffect(() => {
-    if (!selectedId && visible.length) selectAgentMessage(visible[0].id);
-  }, [selectedId, visible]);
-  if (disabled) return <>{children}</>;
+    if (center && !selectedId && visible.length) selectAgentMessage(visible[0].id);
+  }, [center, selectedId, visible]);
+  // The message index belongs only to its explicit center route. Ordinary
+  // conversations retain their original catalog and do not fetch this feed.
+  if (disabled || !center) return <>{children}</>;
   if (catalogOpen) return <>
     <VButton className={styles.backButton} onPress={() => setCatalogOpen(false)}><MessagesSquare size={14} />{lang === "zh" ? "跨 Agent 消息" : "Agent messages"}</VButton>
     {children}
