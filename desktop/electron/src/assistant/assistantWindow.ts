@@ -118,6 +118,19 @@ export class AssistantWindow {
     if (this.window && !this.window.isDestroyed()) this.window.hide();
   }
 
+  /**
+   * Toast-click surfacing: show and focus the resident float. Returns false
+   * when the float does not exist — this verb never provisions a window or a
+   * native host (that is `open()`'s, and the assistant host's, job), so
+   * callers can fall back to the workbench focus instead.
+   */
+  async focus(): Promise<boolean> {
+    if (this.isQuitting() || !this.window || this.window.isDestroyed()) return false;
+    this.window.show();
+    this.window.focus();
+    return true;
+  }
+
   setFloatExpanded(expanded: boolean): { expanded: boolean; width: number; height: number } {
     const window = this.window;
     if (!window || window.isDestroyed()) return { expanded, width: 0, height: 0 };

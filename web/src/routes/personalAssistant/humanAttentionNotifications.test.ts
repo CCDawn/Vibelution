@@ -6,6 +6,7 @@ import {
   buildHumanAttentionNotificationPayload,
   createHumanAttentionLedger,
   emitNewHumanAttentionNotifications,
+  focusHumanAttentionSurface,
   humanAttentionBridge,
   humanAttentionTargetFor,
   isHumanAttentionKind,
@@ -13,6 +14,7 @@ import {
   normalizeHumanAttentionSeverity,
   parseHumanAttentionEvent,
   sanitizeHumanAttentionTargetUrl,
+  subscribeHumanAttentionEvents,
 } from "./humanAttentionNotifications";
 
 type MemoryStorage = Pick<Storage, "getItem" | "setItem">;
@@ -463,5 +465,117 @@ describe("human attention emission failure reporting", () => {
       reportFailure,
     });
     expect(reportFailure).not.toHaveBeenCalled();
+  });
+});
+
+describe("PA toast click assistant float focus", () => {
+  const floatBridge = (focus: {
+    focusAssistantWindow?: (payload: { id: string; targetUrl?: string }) => Promise<unknown>;
+    focusWorkbenchWindow?: () => Promise<unknown>;
+  }) => ({
+    notifyHumanAttention: vi.fn().mockResolvedValue({ delivered: "system_notification" }),
+    ...focus,
+  });
+
+  it.each(["affair_reminder", "dispatch_receipt", "assistant_digest"])(
+    "surfaces the assistant float for a retired-deep-link %s click",
+    async kind => {
+      const focusAssistantWindow = vi.fn().mockResolvedValue(true);
+      const focusWorkbenchWindow = vi.fn().mockResolvedValue(true);
+      const focused = await focusHumanAttentionSurface({
+        kind,
+        targetUrl: "",
+        bridge: floatBridge({ focusAssistantWindow, focusWorkbenchWindow }) as never,
+      });
+      expect(focused).toBe(true);
+      expect(focusAssistantWindow).toHaveBeenCalledTimes(1);
+      expect(focusWorkbenchWindow).not.toHaveBeenCalled();
+    }
+  );
+
+  it("falls back to the workbench focus when the float is absent", async () => {
+    const focusAssistantWindow = vi.fn().mockResolvedValue(false);
+    const focusWorkbenchWindow = vi.fn().mockResolvedValue(true);
+    const focused = await focusHumanAttentionSurface({
+      kind: "dispatch_receipt",
+      bridge: floatBridge({ focusAssistantWindow, focusWorkbenchWindow }) as never,
+    });
+    expect(focused).toBe(true);
+    expect(focusAssistantWindow).toHaveBeenCalledTimes(1);
+    expect(focusWorkbenchWindow).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to the workbench focus when the float verb rejects", async () => {
+    const focusAssistantWindow = vi.fn().mockRejectedValue(new Error("ipc rejected"));
+    const focusWorkbenchWindow = vi.fn().mockResolvedValue(true);
+    const focused = await focusHumanAttentionSurface({
+      kind: "assistant_digest",
+      bridge: floatBridge({ focusAssistantWindow, focusWorkbenchWindow }) as never,
+    });
+    expect(focused).toBe(true);
+    expect(focusWorkbenchWindow).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to the workbench focus when the bridge lacks the float verb", async () => {
+    const focusWorkbenchWindow = vi.fn().mockResolvedValue(true);
+    const focused = await focusHumanAttentionSurface({
+      kind: "affair_reminder",
+      bridge: floatBridge({ focusWorkbenchWindow }) as never,
+    });
+    expect(focused).toBe(true);
+    expect(focusWorkbenchWindow).toHaveBeenCalledTimes(1);
+  });
+
+  it("stays a no-op without a bridge (browser environments)", async () => {
+    await expect(focusHumanAttentionSurface({ kind: "affair_reminder", bridge: undefined })).resolves.toBe(false);
+    await expect(focusHumanAttentionSurface({ kind: "affair_reminder", bridge: {} as never })).resolves.toBe(false);
+  });
+
+  it("keeps deep links and non-PA kinds on their existing paths", async () => {
+    const focusAssistantWindow = vi.fn().mockResolvedValue(true);
+    const focusWorkbenchWindow = vi.fn().mockResolvedValue(true);
+    const bridge = floatBridge({ focusAssistantWindow, focusWorkbenchWindow }) as never;
+    await expect(focusHumanAttentionSurface({
+      kind: "affair_reminder", targetUrl: "/personal-affairs/1", bridge,
+    })).resolves.toBe(false);
+    await expect(focusHumanAttentionSurface({ kind: "knowledge_review", bridge })).resolves.toBe(false);
+    await expect(focusHumanAttentionSurface({ kind: undefined, bridge })).resolves.toBe(false);
+    expect(focusAssistantWindow).not.toHaveBeenCalled();
+    expect(focusWorkbenchWindow).not.toHaveBeenCalled();
+  });
+
+  it("resolves the PA kind for an opened click emitted earlier in this window", async () => {
+    emitNewHumanAttentionNotifications({
+      rows: [attentionRow({ id: "pa-opened", kind: "affair_reminder" })],
+      bridge: { notifyHumanAttention: vi.fn().mockResolvedValue({ delivered: "system_notification" }) },
+      ledger: createHumanAttentionLedger(memoryStorage(), "2026-10-18"),
+    });
+    const focusAssistantWindow = vi.fn().mockResolvedValue(true);
+    const bridge = {
+      ...floatBridge({ focusAssistantWindow }),
+      onHumanAttentionOpened: (listener: (payload: unknown) => void) => {
+        listener({ id: "pa-opened", targetUrl: "" });
+        return () => undefined;
+      },
+    } as never;
+    const onEvent = vi.fn();
+    subscribeHumanAttentionEvents(bridge, onEvent);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(focusAssistantWindow).toHaveBeenCalledTimes(1);
+    expect(onEvent).toHaveBeenCalledWith({ type: "opened", payload: { id: "pa-opened" } });
+  });
+
+  it("does not focus from an opened click whose kind this window never emitted", async () => {
+    const focusAssistantWindow = vi.fn().mockResolvedValue(true);
+    const bridge = {
+      ...floatBridge({ focusAssistantWindow }),
+      onHumanAttentionOpened: (listener: (payload: unknown) => void) => {
+        listener({ id: "never-emitted" });
+        return () => undefined;
+      },
+    } as never;
+    subscribeHumanAttentionEvents(bridge, vi.fn());
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(focusAssistantWindow).not.toHaveBeenCalled();
   });
 });

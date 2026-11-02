@@ -66,6 +66,10 @@ export type HumanAttentionBridge = {
   notifyHumanAttention?: (payload: HumanAttentionNotificationPayload) => Promise<unknown>;
   getHumanAttentionCapabilities?: () => Promise<unknown>;
   onHumanAttentionOpened?: (listener: (payload: unknown) => void) => () => void;
+  /** Surface and focus the resident assistant float; resolves truthy when it exists. */
+  focusAssistantWindow?: () => Promise<unknown>;
+  /** Legacy fallback: surface and focus the workbench window. */
+  focusWorkbenchWindow?: () => Promise<unknown>;
 };
 
 const ATTENTION_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
@@ -86,6 +90,16 @@ export const HUMAN_ATTENTION_KINDS = new Set<string>([
   "assistant_digest",
 ]);
 const SEVERITIES = new Set<string>(["critical", "high", "medium", "info"]);
+/**
+ * PA kinds whose workbench deep links were retired (default targetUrl ""):
+ * their empty-target toast clicks surface the assistant float instead of the
+ * workbench.
+ */
+export const PA_ASSISTANT_FLOAT_KINDS: ReadonlySet<HumanAttentionKind> = new Set([
+  "affair_reminder",
+  "dispatch_receipt",
+  "assistant_digest",
+]);
 const MAX_TITLE_LENGTH = 120;
 const MAX_BODY_LENGTH = 400;
 const MAX_TARGET_LENGTH = 500;
@@ -212,11 +226,56 @@ export function humanAttentionBridge(globalLike: unknown = globalThis): HumanAtt
   if (!notify && !subscribe) {
     return undefined;
   }
+  const focusAssistant = typeof candidate.focusAssistantWindow === "function"
+    ? candidate.focusAssistantWindow.bind(bridge) : undefined;
+  const focusWorkbench = typeof candidate.focusWorkbenchWindow === "function"
+    ? candidate.focusWorkbenchWindow.bind(bridge) : undefined;
   return {
     ...(notify ? { notifyHumanAttention: notify } : {}),
     ...(capabilities ? { getHumanAttentionCapabilities: capabilities } : {}),
     ...(subscribe ? { onHumanAttentionOpened: subscribe } : {}),
+    ...(focusAssistant ? { focusAssistantWindow: focusAssistant } : {}),
+    ...(focusWorkbench ? { focusWorkbenchWindow: focusWorkbench } : {}),
   };
+}
+
+/**
+ * Toast-click surfacing for the retired-deep-link PA kinds: try the assistant
+ * float focus first; fall back to the workbench focus when the float verb is
+ * missing, fails, or reports the float absent. Without a bridge (browser) this
+ * is a no-op. Resolves true only when a surface actually took the focus.
+ */
+export async function focusHumanAttentionSurface(input: {
+  targetUrl?: unknown;
+  kind?: unknown;
+  bridge: HumanAttentionBridge | undefined;
+}): Promise<boolean> {
+  if (sanitizeHumanAttentionTargetUrl(input.targetUrl)) {
+    return false;
+  }
+  if (!isHumanAttentionKind(input.kind) || !PA_ASSISTANT_FLOAT_KINDS.has(input.kind)) {
+    return false;
+  }
+  const bridge = input.bridge;
+  const focusAssistant = bridge?.focusAssistantWindow;
+  if (typeof focusAssistant === "function") {
+    try {
+      if (await Promise.resolve(focusAssistant.call(bridge))) {
+        return true;
+      }
+    } catch {
+      // Float absent or the verb failed: keep the workbench fallback.
+    }
+  }
+  const focusWorkbench = bridge?.focusWorkbenchWindow;
+  if (typeof focusWorkbench !== "function") {
+    return false;
+  }
+  try {
+    return Boolean(await Promise.resolve(focusWorkbench.call(bridge)));
+  } catch {
+    return false;
+  }
 }
 
 /** Attention row → bridge payload; null for non-human-attention kinds or invalid ids. */
@@ -303,10 +362,34 @@ export function subscribeHumanAttentionEvents(
   }
   return bridge.onHumanAttentionOpened(raw => {
     const event = parseHumanAttentionEvent(raw);
-    if (event) {
-      onEvent(event);
+    if (!event) {
+      return;
     }
+    if (event.type === "opened") {
+      const kind = emittedAttentionKinds.get(event.payload.id);
+      const target = humanAttentionTargetFor({ targetUrl: event.payload.targetUrl, kind });
+      if (!target) {
+        // Retired deep link (PA kinds): surface the assistant float, falling
+        // back to the workbench focus; no-op without a bridge (browser).
+        void focusHumanAttentionSurface({ targetUrl: event.payload.targetUrl, kind, bridge });
+      }
+    }
+    onEvent(event);
   });
+}
+
+/** Bounded id→kind memory so opened clicks can resolve the PA kinds after delivery. */
+const emittedAttentionKinds = new Map<string, HumanAttentionKind>();
+const MAX_EMITTED_ATTENTION_KINDS = 400;
+
+function rememberEmittedKind(payload: HumanAttentionNotificationPayload): void {
+  emittedAttentionKinds.set(payload.id, payload.kind);
+  if (emittedAttentionKinds.size <= MAX_EMITTED_ATTENTION_KINDS) {
+    return;
+  }
+  for (const id of [...emittedAttentionKinds.keys()].slice(0, emittedAttentionKinds.size - MAX_EMITTED_ATTENTION_KINDS)) {
+    emittedAttentionKinds.delete(id);
+  }
 }
 
 /** Resolve the navigation target: sanitized targetUrl, else the kind default, else "". */
@@ -457,6 +540,7 @@ export function emitNewHumanAttentionNotifications(input: {
       if (!pending) { pending = new Set(); mainOwnedInflight.set(input.ledger, pending); }
       if (pending.has(payload.id)) continue;
       pending.add(payload.id);
+      rememberEmittedKind(payload);
       emitted.push(payload);
       let result: Promise<unknown>;
       try { result = Promise.resolve(notify(payload)); }
@@ -488,6 +572,7 @@ export function emitNewHumanAttentionNotifications(input: {
       continue;
     }
     input.ledger.add(payload.id);
+    rememberEmittedKind(payload);
     emitted.push(payload);
     void Promise.resolve(notify(payload)).then(
       (result) => {

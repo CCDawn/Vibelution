@@ -2264,6 +2264,7 @@ describe("IPC channels", () => {
       "browserShow",
       "conversationNotificationOpened",
       "endDesktopPetWindowDrag",
+      "focusAssistantWindow",
       "focusWorkbenchWindow",
       "getDesktopShellSummary",
       "getLauncherFreshness",

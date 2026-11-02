@@ -63,6 +63,12 @@ function makeService(
     notificationSupported?: boolean;
     failNotificationCreation?: boolean;
     focusWorkbenchRejects?: boolean;
+    /** Expose the optional assistant-float verb on the bridge (progressive enhancement). */
+    assistantFocusAvailable?: boolean;
+    /** What the exposed verb resolves to: true (focused) or false (float absent). */
+    assistantFocusResult?: boolean;
+    /** Make the exposed verb reject (focus failure). */
+    assistantFocusRejects?: boolean;
     dedupWindowMs?: number;
   } = {}
 ) {
@@ -90,7 +96,16 @@ function makeService(
         ? Promise.reject(new Error("workbench focus failed"))
         : Promise.resolve({ role: "workbench", open: true })
     ),
-    setWorkbenchAttention: vi.fn()
+    setWorkbenchAttention: vi.fn(),
+    ...(options.assistantFocusAvailable
+      ? {
+          focusAssistantWindow: vi.fn(() =>
+            options.assistantFocusRejects
+              ? Promise.reject(new Error("assistant focus failed"))
+              : Promise.resolve(options.assistantFocusResult ?? true)
+          )
+        }
+      : {})
   };
   const service = createHumanAttentionNotificationService({
     windowBridge: bridge,
@@ -303,6 +318,77 @@ describe("human attention notification service", () => {
     await harness.service.notify(attention());
     expect(() => harness.notifications[0].clicked()).not.toThrow();
     expect(harness.workbenchMessages).toHaveLength(1);
+  });
+
+  it("surfaces the assistant float for a retired-deep-link PA kind toast click", async () => {
+    const harness = makeService({
+      assistantOpen: false,
+      assistantFocusAvailable: true,
+      assistantFocusResult: true
+    });
+
+    await harness.service.notify(attention({ kind: "affair_reminder", targetUrl: undefined }));
+    harness.notifications[0].clicked();
+    await vi.waitFor(() => expect(harness.bridge.focusWorkbench).not.toHaveBeenCalled());
+
+    expect(harness.bridge.focusAssistantWindow).toHaveBeenCalledTimes(1);
+    expect(harness.workbenchMessages).toEqual([
+      { channel: OPENED_CHANNEL, payload: { id: "ha-1" } }
+    ]);
+  });
+
+  it("falls back to the workbench focus when the float is absent", async () => {
+    const harness = makeService({
+      assistantOpen: false,
+      assistantFocusAvailable: true,
+      assistantFocusResult: false
+    });
+
+    await harness.service.notify(attention({ kind: "dispatch_receipt", targetUrl: undefined }));
+    harness.notifications[0].clicked();
+    await vi.waitFor(() => expect(harness.bridge.focusWorkbench).toHaveBeenCalledTimes(1));
+
+    expect(harness.bridge.focusAssistantWindow).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to the workbench focus when the float verb rejects", async () => {
+    const harness = makeService({
+      assistantOpen: false,
+      assistantFocusAvailable: true,
+      assistantFocusRejects: true
+    });
+
+    await harness.service.notify(attention({ kind: "assistant_digest", targetUrl: undefined }));
+    harness.notifications[0].clicked();
+    await vi.waitFor(() => expect(harness.bridge.focusWorkbench).toHaveBeenCalledTimes(1));
+  });
+
+  it("keeps the legacy workbench focus when the bridge lacks the float verb", async () => {
+    const harness = makeService({ assistantOpen: false });
+
+    await harness.service.notify(attention({ kind: "affair_reminder", targetUrl: undefined }));
+    harness.notifications[0].clicked();
+    await vi.waitFor(() => expect(harness.bridge.focusWorkbench).toHaveBeenCalledTimes(1));
+
+    expect(harness.bridge.focusAssistantWindow).toBeUndefined();
+  });
+
+  it("keeps the workbench focus for deep-linked PA kinds and non-PA kinds", async () => {
+    const harness = makeService({
+      assistantOpen: false,
+      assistantFocusAvailable: true,
+      assistantFocusResult: true
+    });
+
+    await harness.service.notify(attention({ kind: "affair_reminder", targetUrl: "/personal-affairs/1" }));
+    harness.notifications[0].clicked();
+    await vi.waitFor(() => expect(harness.bridge.focusWorkbench).toHaveBeenCalledTimes(1));
+    expect(harness.bridge.focusAssistantWindow).not.toHaveBeenCalled();
+
+    await harness.service.notify(attention({ id: "ha-2", kind: "knowledge_review", targetUrl: undefined }));
+    harness.notifications[1].clicked();
+    await vi.waitFor(() => expect(harness.bridge.focusWorkbench).toHaveBeenCalledTimes(2));
+    expect(harness.bridge.focusAssistantWindow).not.toHaveBeenCalled();
   });
 
   it("keeps telemetry fields free of title and body content", async () => {

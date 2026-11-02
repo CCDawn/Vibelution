@@ -77,6 +77,8 @@ contextBridge.exposeInMainWorld("vibelutionLauncher", {
     showLauncherWindow: () => ipcRenderer.invoke(IPC_CHANNELS.showLauncherWindow)
   } : {}),
   focusWorkbenchWindow: () => ipcRenderer.invoke(IPC_CHANNELS.focusWorkbenchWindow),
+  /** PA toast click chain: surface and focus the resident float; false when absent. */
+  focusAssistantWindow: () => ipcRenderer.invoke(IPC_CHANNELS.focusAssistantWindow),
   requestDesktopShellExit: () => ipcRenderer.invoke(IPC_CHANNELS.requestDesktopShellExit),
   notifyConversationCompleted: (payload: unknown) =>
     ipcRenderer.invoke(IPC_CHANNELS.notifyConversationCompleted, payload),

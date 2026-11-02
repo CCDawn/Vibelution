@@ -2154,6 +2154,8 @@ function resolveHumanAttentionNotificationService(): HumanAttentionNotificationS
       isAssistantWindowVisible: () => false,
       sendToWorkbench: (channel, payload) =>
         windowProvider?.sendToWorkbench(channel, payload) === true,
+      focusAssistantWindow: () =>
+        launcherAssistantWindow ? launcherAssistantWindow.focus() : Promise.resolve(false),
       focusWorkbench: () => windowProvider?.focusWorkbench() ?? Promise.resolve(),
       setWorkbenchAttention: (attention) => windowProvider?.setWorkbenchAttention(attention)
     },
@@ -5015,6 +5017,15 @@ ipcMain.handle(IPC_CHANNELS.getDesktopShellSummary, (event) => {
 ipcMain.handle(IPC_CHANNELS.focusWorkbenchWindow, async (event) => {
   assertTrustedIpcSender(event, trustedIpcOrigins());
   return await windowProvider?.focusWorkbench();
+});
+
+// Narrow verb behind the PA human-attention toast click: surface and focus the
+// resident assistant float only. It never provisions a window or native host —
+// a false answer means "float absent" so the caller falls back to the
+// workbench focus.
+ipcMain.handle(IPC_CHANNELS.focusAssistantWindow, async (event) => {
+  assertTrustedIpcSender(event, trustedIpcOrigins());
+  return launcherAssistantWindow ? launcherAssistantWindow.focus() : false;
 });
 
 ipcMain.handle(IPC_CHANNELS.openConversationFromPet, async (event, rawSessionId: unknown) => {

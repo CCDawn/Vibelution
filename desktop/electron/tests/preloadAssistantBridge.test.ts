@@ -49,6 +49,7 @@ describe("preload assistant bridge injection by window role", () => {
     const { exposed } = await loadPreload("workbench-main");
     const bridge = exposed.get("vibelutionLauncher")!;
     expect(bridge.requestWindowClose).toBeTypeOf("function");
+    expect(bridge.focusAssistantWindow).toBeTypeOf("function");
     expect(bridge.controlDesktopPet).toBeUndefined();
     expect(bridge.setDesktopPetExpanded).toBeUndefined();
     expect(bridge.beginDesktopPetWindowDrag).toBeUndefined();
@@ -60,6 +61,7 @@ describe("preload assistant bridge injection by window role", () => {
       ["vibelutionLauncher", "vibelutionLauncherAssistant", "vibelutionLauncherTheme"]);
     const bridge = exposed.get("vibelutionLauncher")!;
     expect(bridge.beginDesktopPetWindowDrag).toBeTypeOf("function");
+    expect(bridge.focusAssistantWindow).toBeUndefined();
     expect(bridge.setDesktopPetExpanded).toBeUndefined();
     expect(bridge.controlDesktopPet).toBeUndefined();
     expect(bridge.requestWindowClose).toBeUndefined();

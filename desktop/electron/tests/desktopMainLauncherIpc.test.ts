@@ -663,6 +663,37 @@ describe("Electron main Launcher IPC facade", () => {
     expect(preloadSource).not.toContain("isDesktopPetWindow");
   });
 
+  it("registers a narrow assistant float focus verb for the PA toast click chain", () => {
+    const ipcSource = readFileSync(fileURLToPath(new URL("../src/ipc.ts", import.meta.url)), "utf8");
+    expect(ipcSource).toContain('focusAssistantWindow: "launcher:focus-assistant-window"');
+
+    const start = mainSource.indexOf("IPC_CHANNELS.focusAssistantWindow");
+    const end = mainSource.indexOf("});", start);
+    const handler = mainSource.slice(start, end);
+    // The workbench and launcher-control origins are trusted for this verb;
+    // the panel-only Launcher list must stay out of it.
+    expect(handler).toContain("assertTrustedIpcSender(event, trustedIpcOrigins())");
+    expect(handler).not.toContain("launcherIpcTrustedOrigins()");
+    // Focus only: no provisioning of windows or native hosts — an absent float
+    // resolves false so the caller falls back to the workbench focus.
+    expect(handler).toContain("launcherAssistantWindow.focus()");
+    expect(handler).not.toContain("openLauncher");
+    expect(handler).not.toContain("startLauncherAssistant");
+  });
+
+  it("exposes focusAssistantWindow only outside the assistant float window", () => {
+    // Exactly one exposure site: the shared non-assistant branch (workbench +
+    // launcher control). The float's pet-subset bridge must not carry it.
+    const exposure = "focusAssistantWindow: () => ipcRenderer.invoke(IPC_CHANNELS.focusAssistantWindow)";
+    expect(preloadSource).toContain(exposure);
+    expect(preloadSource.split("focusAssistantWindow").length - 1).toBe(2);
+    const assistantBranchStart = preloadSource.indexOf("if (isLauncherAssistantWindow) {");
+    const assistantBranchEnd = preloadSource.indexOf("if (!isLauncherAssistantWindow)", assistantBranchStart);
+    const assistantBranch = preloadSource.slice(assistantBranchStart, assistantBranchEnd);
+    expect(assistantBranch).toContain("beginDesktopPetWindowDrag");
+    expect(assistantBranch).not.toContain("focusAssistantWindow");
+  });
+
   it("routes the workbench update banner to shell replacement", () => {
     const ipcSource = readFileSync(fileURLToPath(new URL("../src/ipc.ts", import.meta.url)), "utf8");
     expect(ipcSource).toContain('requestWorkbenchShellUpdate: "launcher:request-workbench-shell-update"');

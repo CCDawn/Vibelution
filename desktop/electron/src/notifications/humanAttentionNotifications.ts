@@ -77,6 +77,13 @@ export type HumanAttentionWindowBridge = {
    */
   isAssistantWindowVisible?(): boolean;
   sendToWorkbench(channel: string, payload: unknown): boolean;
+  /**
+   * Toast-click surfacing for the PA kinds: show and focus the resident
+   * assistant float, resolving truthy when it exists. Optional for backwards
+   * compatibility: absent (or falsy/throwing) means the click keeps the
+   * legacy workbench focus.
+   */
+  focusAssistantWindow?(): Promise<unknown>;
   focusWorkbench(): Promise<unknown>;
   setWorkbenchAttention(options: {
     unreadCount: number;
@@ -133,6 +140,15 @@ const KINDS: ReadonlySet<string> = new Set([
   "assistant_digest"
 ]);
 const SEVERITIES: ReadonlySet<string> = new Set(["critical", "high", "medium", "info"]);
+/**
+ * The PA kinds whose workbench deep links were retired (empty targetUrl):
+ * their toast clicks surface the assistant float instead of the workbench.
+ */
+const ASSISTANT_FLOAT_KINDS: ReadonlySet<string> = new Set([
+  "affair_reminder",
+  "dispatch_receipt",
+  "assistant_digest"
+]);
 const DEFAULT_DEDUP_WINDOW_MS = 60_000;
 const MAX_TRACKED_IDS = 500;
 const MAX_ID_LENGTH = 128;
@@ -337,10 +353,7 @@ export function createHumanAttentionNotificationService(
   function handleNotificationClick(notification: DesktopHumanAttentionNotification, source?: HumanAttentionSource): void {
     try {
       const target = source?.target ?? options.windowBridge;
-      void Promise.resolve(target.focusWorkbench()).then(
-        () => undefined,
-        () => undefined
-      );
+      void focusNotificationSurface(notification, target);
       const opened = {
         id: notification.id,
         ...(notification.targetUrl ? { targetUrl: notification.targetUrl } : {})
@@ -349,6 +362,31 @@ export function createHumanAttentionNotificationService(
       if (!source || source.allowAssistantWindow()) options.windowBridge.sendToAssistantWindow(options.openedChannel, opened);
     } catch {
       // A toast click must never crash the main process.
+    }
+  }
+
+  /**
+   * Click target selection: PA kinds with no deep link surface the assistant
+   * float when the bridge offers it (resolving truthy — false means the float
+   * is absent); every other click, and any absent/failed float focus, keeps
+   * the legacy workbench focus.
+   */
+  async function focusNotificationSurface(
+    notification: DesktopHumanAttentionNotification,
+    target: Pick<HumanAttentionWindowBridge, "focusWorkbench">
+  ): Promise<void> {
+    if (!notification.targetUrl && ASSISTANT_FLOAT_KINDS.has(notification.kind)
+      && typeof options.windowBridge.focusAssistantWindow === "function") {
+      try {
+        if (await Promise.resolve(options.windowBridge.focusAssistantWindow.call(options.windowBridge))) return;
+      } catch {
+        // Fall through to the workbench focus.
+      }
+    }
+    try {
+      await Promise.resolve(target.focusWorkbench());
+    } catch {
+      // A focus failure must never crash the main process.
     }
   }
 
