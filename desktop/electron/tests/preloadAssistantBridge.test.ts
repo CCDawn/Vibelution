@@ -110,4 +110,24 @@ describe("preload assistant bridge injection by window role", () => {
     await bridge.invoke({ operation: "state" });
     expect(invoke).toHaveBeenCalledWith(IPC_CHANNELS.browserInvoke, { operation: "state" });
   });
+
+  it.each(["launcher-assistant", "launcher-control"] as const)
+    ("exposes assistant session-event subscribe and unsubscribe on role %s", async role => {
+      const { exposed, listeners } = await loadPreload(role);
+      const bridge = exposed.get("vibelutionLauncherAssistant") as unknown as {
+        onSessionEvent: (listener: (envelope: unknown) => void) => () => void;
+      };
+      expect(bridge.onSessionEvent).toBeTypeOf("function");
+      const received: unknown[] = [];
+      const unsubscribe = bridge.onSessionEvent(envelope => received.push(envelope));
+      const wrapped = listeners.get(IPC_CHANNELS.assistantSessionEvent)!;
+      expect(wrapped).toBeTypeOf("function");
+      const first = { type: "heartbeat", sessionId: "s", at: 1 };
+      wrapped({}, first);
+      expect(received).toEqual([first]);
+      unsubscribe();
+      // Unsubscribing removes exactly this channel's wrapped listener registration.
+      expect(listeners.has(IPC_CHANNELS.assistantSessionEvent)).toBe(false);
+      expect(received).toEqual([first]);
+    });
 });

@@ -29,6 +29,7 @@ import {
 } from "./cli/desktopCli.js";
 import { IPC_CHANNELS } from "./ipc.js";
 import { AssistantHost } from "./assistant/assistantHost.js";
+import { startAssistantEventPump } from "./assistant/assistantEventPump.js";
 import { InitialMigrationResults } from "./assistant/initialMigrationResults.js";
 import { AssistantProjectLifecycleRequestStore } from "./assistant/projectLifecycleRequestStore.js";
 import { runReminderOfflineJob } from "./assistant/reminderOfflineJob.js";
@@ -1578,6 +1579,19 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
         });
         launcherAssistantHost = host;
         launcherAssistantWindow = new AssistantWindow(paths, host, () => shutdownApproved, requestOpenLauncherFromAssistant);
+        // Resident host session-event pump: light envelopes only, fanned out to
+        // the float and the launcher control window. Host retirement aborts the
+        // leased generation signal and the pump re-leases the next generation;
+        // the shell stop signal ends it without any new exit-path await.
+        const assistantEventPump = startAssistantEventPump({
+          lease: () => (!shutdownApproved && launcherAssistantHost === host ? host.eventPumpLease() : null),
+          stop: launcherAssistantStartupAbort.signal,
+          publish: envelope => {
+            launcherAssistantWindow?.publishSessionEvent(envelope);
+            windowProvider?.sendToLauncher(IPC_CHANNELS.assistantSessionEvent, envelope);
+          },
+        });
+        assistantEventPump.done.catch(() => console.warn("ASSISTANT_EVENT_PUMP_FAILED"));
         let reminderDialogTail: Promise<unknown> = Promise.resolve();
         const showReminderFallback = (notice: { title: string; body: string }) => {
           const shown = reminderDialogTail.then(() => {

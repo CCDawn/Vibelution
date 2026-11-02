@@ -38,6 +38,11 @@ if (isLauncherAssistantWindow || isWorkbenchMainWindow || isLauncherControlWindo
   contextBridge.exposeInMainWorld("vibelutionLauncherTheme", createAssistantThemePreload(ipcRenderer));
   contextBridge.exposeInMainWorld("vibelutionLauncherAssistant", {
     invoke: (payload: unknown) => ipcRenderer.invoke(IPC_CHANNELS.assistantInvoke, payload),
+    onSessionEvent: (listener: (envelope: unknown) => void) => {
+      const wrapped = (_event: unknown, envelope: unknown) => listener(envelope);
+      ipcRenderer.on(IPC_CHANNELS.assistantSessionEvent, wrapped);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.assistantSessionEvent, wrapped);
+    },
   });
 }
 

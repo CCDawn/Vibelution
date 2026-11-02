@@ -2256,6 +2256,7 @@ describe("IPC channels", () => {
     expect(IPC_CHANNELS.humanAttentionCapabilities).toBe("launcher:human-attention-capabilities");
     expect(Object.keys(IPC_CHANNELS).sort()).toEqual([
       "assistantInvoke",
+      "assistantSessionEvent",
       "assistantThemeChanged",
       "assistantThemeResult",
       "beginDesktopPetWindowDrag",

@@ -1,5 +1,6 @@
 export const IPC_CHANNELS = {
   assistantInvoke: "assistant:invoke",
+  assistantSessionEvent: "assistant:session-event",
   browserInvoke: "assistant-browser:invoke",
   browserChanged: "assistant-browser:changed",
   browserShow: "assistant-browser:show",

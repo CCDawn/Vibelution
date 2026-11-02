@@ -178,6 +178,16 @@ export class AssistantHost {
 
   snapshot(): AssistantHostSnapshot { return { ...this.view }; }
 
+  /** Main-process lease for the session event pump. The bearer token is handed
+   * to the pump only inside this process; retirement aborts the leased signal. */
+  eventPumpLease(): { generationId: string; origin: string; token: string; sessionId: string; signal: AbortSignal } | null {
+    const generation = this.current;
+    if (this.view.state !== "ready" || !generation || generation.closed || generation.abort.signal.aborted
+      || !generation.origin || !generation.sessionId) return null;
+    return { generationId: generation.id, origin: generation.origin, token: generation.token,
+      sessionId: generation.sessionId, signal: generation.abort.signal };
+  }
+
   async nextReminder(): Promise<AssistantReminder | null> {
     const generation = this.current;
     if (this.view.state !== "ready" || !generation || generation.closed || generation.abort.signal.aborted) throw new HostError("ASSISTANT_NOT_READY");

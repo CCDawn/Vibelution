@@ -87,6 +87,7 @@ function fixture() {
     AssistantHost: vi.fn(function () { return host; }), AssistantWindow: vi.fn(function () { return window; }),
     AssistantProjectLifecycleRequestStore: vi.fn(function () { return { get: vi.fn(async () => null) }; }),
     startAssistantReminderPump: vi.fn(() => vi.fn(async () => undefined)),
+    startAssistantEventPump: vi.fn(() => ({ done: Promise.resolve() })),
     AssistantProjectRegistryConnection: vi.fn(function () { return projects; }),
     createAssistantTray: vi.fn(() => ({ destroy: vi.fn() })), requestDesktopShellExit: vi.fn(),
     requestOpenLauncherFromAssistant: vi.fn(async () => ({ opened: true })),
