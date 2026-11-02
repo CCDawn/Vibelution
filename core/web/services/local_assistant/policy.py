@@ -153,7 +153,7 @@ def _simple_argv(command: Any) -> list[str]:
     return tokens if all(tokens) else []
 
 
-def _command_sequence(command: Any) -> list[tuple[list[str], bool]]:
+def _command_sequence(command: Any) -> list[tuple[list[str], frozenset[int]]]:
     """Parse the common cmd/native argv subset, never a general shell program.
 
     Only unquoted ``&&`` separates commands. Single-quote shell quoting and
@@ -163,18 +163,18 @@ def _command_sequence(command: Any) -> list[tuple[list[str], bool]]:
     """
     if not isinstance(command, str) or _COMMAND_SYNTAX.search(command):
         return []
-    segments: list[tuple[list[str], bool]] = []
+    segments: list[tuple[list[str], frozenset[int]]] = []
     argv: list[str] = []
     token: list[str] = []
-    quoted, started, executable_quoted = False, False, False
+    quoted, started = False, False
+    quoted_arguments: set[int] = set()
     index = 0
     while index < len(command):
         character = command[index]
         if character == '"':
             if index and command[index - 1] == "\\":
                 return []
-            if not argv:
-                executable_quoted = True
+            quoted_arguments.add(len(argv))
             quoted = not quoted
             started = True
         elif character == "&":
@@ -185,11 +185,11 @@ def _command_sequence(command: Any) -> list[tuple[list[str], bool]]:
                 token, started = [], False
             if not argv or not all(argv):
                 return []
-            segments.append((argv, executable_quoted))
+            segments.append((argv, frozenset(quoted_arguments)))
             if len(segments) >= _MAX_COMMAND_SEGMENTS:
                 return []
             argv = []
-            executable_quoted = False
+            quoted_arguments = set()
             index += 1
         elif character == "'" and not quoted:
             return []
@@ -205,7 +205,7 @@ def _command_sequence(command: Any) -> list[tuple[list[str], bool]]:
         return []
     if started:
         argv.append("".join(token))
-    return [*segments, (argv, executable_quoted)] if argv and all(argv) else []
+    return [*segments, (argv, frozenset(quoted_arguments))] if argv and all(argv) else []
 
 
 def _trusted_tool(executable: str, cwd: Path, root: Path) -> str | None:
@@ -480,11 +480,14 @@ def _development_argv(argv: list[str], cwd: Path, root: Path) -> bool:
     return False
 
 
-def _cmd_directory_check(argv: list[str], cwd: Path, root: Path) -> Path | None:
+def _cmd_directory_check(argv: list[str], cwd: Path, root: Path,
+                         quoted_arguments: frozenset[int]) -> Path | None:
     if argv[0].casefold() == "cd":
         arguments = argv[1:]
         change_drive = bool(arguments and arguments[0].casefold() == "/d")
         if change_drive:
+            if 1 in quoted_arguments:
+                return None
             arguments = arguments[1:]
         if not arguments:
             return None if change_drive else cwd
@@ -496,9 +499,13 @@ def _cmd_directory_check(argv: list[str], cwd: Path, root: Path) -> Path | None:
             return None
         return target
     flags = {"/a", "/b", "/w", "/d", "/l", "/n", "/q", "/r", "/x", "/4", "/c", "/-c", "/o"}
-    for argument in argv[1:]:
+    for index, argument in enumerate(argv[1:], 1):
         lowered = argument.casefold()
         if lowered.startswith("/"):
+            # Unlike external CRT argv, quoted /flags are literal rooted
+            # paths for dir, not switches (e.g. dir "/b" lists C:\b).
+            if index in quoted_arguments:
+                return None
             if lowered not in flags and not re.fullmatch(r"/(?:a:?-?[drahsiol]+|o:?-?[negsd]+|t:[caw])", lowered):
                 return None
         elif (any(character in argument for character in "*?[]")
@@ -518,13 +525,13 @@ def _development_command(command: Any, cwd: Path, root: Path) -> bool:
             leaf = argv[0].replace("\\", "/").rsplit("/", 1)[-1].casefold()
             if re.fullmatch(r"(?:ls|pwd)(?:\.(?:exe|cmd|bat|com|ps1))?", leaf):
                 return False
-    for argv, executable_quoted in segments:
+    for argv, quoted_arguments in segments:
         if os.name == "nt" and argv[0].casefold() in {"cd", "dir"}:
             # cmd only recognizes the original, unquoted builtin spelling;
             # otherwise it may search for an external same-name executable.
-            if executable_quoted:
+            if 0 in quoted_arguments:
                 return False
-            next_cwd = _cmd_directory_check(argv, cwd, root)
+            next_cwd = _cmd_directory_check(argv, cwd, root, quoted_arguments)
             if next_cwd is None:
                 return False
             cwd = next_cwd

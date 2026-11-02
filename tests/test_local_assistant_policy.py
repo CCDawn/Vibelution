@@ -147,6 +147,14 @@ def test_quoted_or_spliced_builtin_names_cannot_bypass_executable_identity(tmp_p
     assert not policy.normal_development_call("exec_command", {"cmd": command}, tmp_path)
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="cmd quoted switch/path distinction")
+@pytest.mark.parametrize("command", [
+    'dir "/b"', 'dir "/a"', 'dir /"b"', 'cd "/d" .', 'cd /"d" .',
+])
+def test_quoted_builtin_switches_cannot_hide_a_rooted_path(tmp_path, command):
+    assert not policy.normal_development_call("exec_command", {"cmd": command}, tmp_path)
+
+
 @pytest.mark.parametrize("command", [
     "&& git status", "git status &&", "git status && && git diff",
     "git status & git diff", "git status &&& git diff", "git status || git diff",

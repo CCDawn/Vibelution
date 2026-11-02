@@ -8,6 +8,7 @@
   host-owner 锁的真实助理 bootstrap 初始化。后端只读验证，不使用客户端自报来源提权。
 - `local_assistant_tasks` 复用现有 route 和任务生命周期；每次请求验证控制凭据和
   助理凭据，原生任务记录只保存凭据摘要。禁用、撤销或轮转后旧摘要失效。
+  本机传输使用五分钟续约窗口，容纳模型慢响应；第三方租约不变，到期巡检仍停止任务。
 - `service` 为普通写任务创建 `codex/assistant-*` worktree，保留用户明确拒绝、
   团队/Companion/受保护身份边界。任务完成后保留变更供审查，不自动发布。
 - `runtime` 从后端拥有的 task→session→agent 关系解析临时工具与工作目录；消息

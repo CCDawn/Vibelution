@@ -6,9 +6,15 @@ from core.infrastructure.launcher_assistant_authority import verify_launcher_aut
 from core.web.routes import external_agent
 from core.web.services.local_assistant.service import build_local_service, route_service
 
+LOCAL_ASSISTANT_LEASE_SECONDS = 300
+
 
 def local_service():
-    return build_local_service(external_agent.PROJECT_ROOT)
+    service = build_local_service(external_agent.PROJECT_ROOT)
+    # The resident host can spend a full model turn between renewal cycles;
+    # its transport must not inherit a short-lived third-party MCP lease.
+    service.lease_seconds = LOCAL_ASSISTANT_LEASE_SECONDS
+    return service
 
 
 async def _local_principal(request: Request):

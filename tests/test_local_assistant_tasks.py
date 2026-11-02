@@ -55,6 +55,21 @@ def test_explicit_local_deny_still_blocks_new_tasks(tmp_path):
     assert runtime.create_calls == []
 
 
+def test_native_transport_lease_survives_a_slow_model_without_widening_mcp(tmp_path, monkeypatch):
+    from datetime import datetime
+    from core.web.routes import local_assistant_tasks
+
+    service, external, _, _ = local_service(tmp_path)
+    external_lease = external.lease_seconds
+    monkeypatch.setattr(local_assistant_tasks, "build_local_service", lambda root: service)
+    native = local_assistant_tasks.local_service()
+    result = start(native)
+    record = native.store.get_task(result["taskId"])
+    parse = lambda value: datetime.fromisoformat(value.replace("Z", "+00:00"))
+    assert (parse(record["leaseExpiresAt"]) - parse(record["createdAt"])).total_seconds() == 300
+    assert external.lease_seconds == external_lease
+
+
 def test_only_backend_record_can_enable_local_execution(tmp_path):
     from core.web.services.local_assistant.runtime import verified_task_runtime
     service, _, runtime, workspace = local_service(tmp_path)
