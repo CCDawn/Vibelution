@@ -1,6 +1,6 @@
 /** Launcher-owned source-host lifecycle; packaged host distribution is a separate boundary. */
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { loadWorkbenchJobNative, type WorkbenchJobHandle, type WorkbenchJobNative } from "../process/workbenchJob.js";
 import { resolveNoConsolePython } from "../process/workbenchBackend.js";
@@ -13,6 +13,14 @@ const REQUEST_MS = 15_000;
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_LOG_BYTES = 4 * 1024 * 1024;
 const READY_MAX_BYTES = 4_096;
+/** The native Job binding exposes no exit event; poll alive-ness at a low rate. */
+const LIVENESS_POLL_MS = 2_000;
+const RESPAWN_BASE_DELAY_MS = 2_000;
+const RESPAWN_MAX_DELAY_MS = 60_000;
+/** Automatic respawns per rolling window before the host is declared unavailable. */
+const RESPAWN_MAX_ATTEMPTS = 5;
+const RESPAWN_WINDOW_MS = 600_000;
+const FORENSICS_STDERR_TAIL_BYTES = 2_048;
 
 export type AssistantHostSnapshot = {
   state: "stopped" | "starting" | "ready" | "stopping" | "failed";
@@ -96,6 +104,10 @@ type Generation = {
   referenceRecovery?: boolean;
   controlRetryMs?: number;
   controlPump?: AbortController;
+  /** Job root pid captured at spawn; forensics only, never an ownership proof. */
+  pid?: number;
+  /** Wall clock when this generation reached the ready view; uptime source. */
+  readyAt?: number;
 };
 
 class HostError extends Error {
@@ -165,6 +177,13 @@ export class AssistantHost {
   private rendererDrainWaiters = new Set<() => void>();
   private projectSnapshot: AssistantProjectRegistrySnapshot;
   private projectsSuspended: boolean;
+  private livenessTimer: ReturnType<typeof setInterval> | null = null;
+  private livenessWatch: Generation | null = null;
+  private respawnTimer: ReturnType<typeof setTimeout> | null = null;
+  private respawnAttempts = 0;
+  private respawnWindowStart = 0;
+  private respawnRevision = -1;
+  private respawnSuspended = false;
 
   constructor(options: AssistantHostOptions) {
     for (const path of [options.profileRoot, options.runtimeRoot, options.sourceRoot, options.pythonPath, ...Object.values(options.projects)]) {
@@ -533,6 +552,9 @@ export class AssistantHost {
 
   private startOwned(migration: boolean): Promise<AssistantHostSnapshot> {
     if (this.starting && this.startingRevision === this.revision) return this.starting;
+    // Respawn budget exhausted: fail observably instead of hanging or spawning.
+    // An in-flight start above is still joined; migration startup stays allowed.
+    if (this.respawnSuspended && !migration) return Promise.reject(new HostError("ASSISTANT_HOST_UNAVAILABLE"));
     const revision = this.revision;
     const operation = this.serial.then(() => this.startGeneration(revision, migration));
     this.serial = operation.catch(() => undefined);
@@ -546,6 +568,8 @@ export class AssistantHost {
     if (this.stopping) return this.stopping;
     this.revision += 1;
     this.current?.abort.abort();
+    this.endLivenessWatch();
+    if (this.respawnTimer !== null) { clearTimeout(this.respawnTimer); this.respawnTimer = null; }
     const operation = this.serial.then(async () => {
       this.view = { state: "stopping", errorCode: null };
       const generation = this.current;
@@ -566,6 +590,125 @@ export class AssistantHost {
     this.stopping = operation;
     void operation.finally(() => { if (this.stopping === operation) this.stopping = undefined; }).catch(() => undefined);
     return operation;
+  }
+
+  /**
+   * Continuous alive-ness watch for one ready generation. The native Job
+   * binding exposes no exit event, so this polls activeCount at a low fixed
+   * rate; a zero count with no shell-initiated retirement in flight and no
+   * held lifecycle admission is an unexpected death and arms the bounded
+   * respawn path.
+   */
+  private beginLivenessWatch(generation: Generation): void {
+    this.endLivenessWatch();
+    this.livenessWatch = generation;
+    this.livenessTimer = setInterval(() => this.livenessTick(generation), LIVENESS_POLL_MS);
+    this.livenessTimer.unref?.();
+  }
+
+  private endLivenessWatch(): void {
+    if (this.livenessTimer !== null) { clearInterval(this.livenessTimer); this.livenessTimer = null; }
+    this.livenessWatch = null;
+  }
+
+  private livenessTick(generation: Generation): void {
+    if (this.livenessWatch !== generation || generation.closed) { this.endLivenessWatch(); return; }
+    let active: number;
+    try { active = generation.native.activeCount(generation.job); }
+    catch { this.endLivenessWatch(); return; }
+    if (active !== 0) return;
+    // A held lifecycle admission is a controlled lifecycle operation, like stop
+    // and migration: an exit under it is never an unexpected death and never
+    // respawns. Keep watching so a death that outlives a released (cancelled)
+    // admission is still handled once the host reopens.
+    if (this.lifecycleAdmission) return;
+    this.endLivenessWatch();
+    // Every shell-initiated path (stop, retire, migration retirement, registry
+    // rejection) aborts the generation signal or requests retirement before or
+    // while the Job ends; an un-aborted, unretired current generation that
+    // reached zero is an unexpected death.
+    if (generation.abort.signal.aborted || generation.migrationRetirementRequested
+      || this.current !== generation || this.stopping) return;
+    this.handleUnexpectedDeath(generation);
+  }
+
+  private handleUnexpectedDeath(generation: Generation): void {
+    this.recordHostDeathForensics(generation);
+    this.view = { state: "failed", errorCode: "ASSISTANT_EXITED" };
+    this.scheduleRespawn();
+  }
+
+  /** One greppable shell-log line carrying every attribution input. */
+  private recordHostDeathForensics(generation: Generation): void {
+    let exitCode: number | null = null;
+    try { exitCode = typeof generation.native.exitCode === "function" ? generation.native.exitCode(generation.job) : null; }
+    catch { exitCode = null; }
+    const uptimeMs = typeof generation.readyAt === "number" ? Math.max(0, Date.now() - generation.readyAt) : null;
+    console.warn(`ASSISTANT_HOST_DEATH phase=unexpected_exit exitCode=${exitCode ?? "unknown"} `
+      + `instanceId=${generation.id} pid=${generation.pid ?? "unknown"} uptimeMs=${uptimeMs ?? "unknown"} `
+      + `stderrTail=${JSON.stringify(this.stderrTail(generation))}`);
+  }
+
+  /** Bounded best-effort tail of this generation's stderr log; never throws. */
+  private stderrTail(generation: Generation): string {
+    try {
+      const path = join(generation.directory, "stderr.log");
+      const size = statSync(path).size;
+      const start = Math.max(0, size - FORENSICS_STDERR_TAIL_BYTES);
+      const length = size - start;
+      if (length === 0) return "";
+      const handle = openSync(path, "r");
+      try {
+        const buffer = Buffer.alloc(length);
+        const read = readSync(handle, buffer, 0, length, start);
+        return buffer.toString("utf8", 0, read).slice(-FORENSICS_STDERR_TAIL_BYTES);
+      } finally { closeSync(handle); }
+    } catch { return ""; }
+  }
+
+  /** Exponential backoff 2s..60s, at most RESPAWN_MAX_ATTEMPTS spawns per
+   * rolling window; success resets the budget. Exhaustion leaves the host
+   * observably unavailable instead of retrying forever. */
+  private scheduleRespawn(): void {
+    if (this.respawnSuspended) return;
+    const now = Date.now();
+    if (this.respawnAttempts === 0 || now - this.respawnWindowStart >= RESPAWN_WINDOW_MS) {
+      this.respawnWindowStart = now;
+      this.respawnAttempts = 0;
+    }
+    this.respawnAttempts += 1;
+    this.respawnRevision = this.revision;
+    if (this.respawnAttempts > RESPAWN_MAX_ATTEMPTS) {
+      this.respawnSuspended = true;
+      this.view = { state: "failed", errorCode: "ASSISTANT_HOST_UNAVAILABLE" };
+      console.warn("ASSISTANT_HOST_RESPAWN phase=exhausted "
+        + `attempts=${RESPAWN_MAX_ATTEMPTS} windowMs=${RESPAWN_WINDOW_MS}`);
+      return;
+    }
+    const delay = Math.min(RESPAWN_MAX_DELAY_MS, RESPAWN_BASE_DELAY_MS * 2 ** (this.respawnAttempts - 1));
+    if (this.respawnTimer !== null) clearTimeout(this.respawnTimer);
+    this.respawnTimer = setTimeout(() => { this.respawnTimer = null; this.beginRespawn(); }, delay);
+    this.respawnTimer.unref?.();
+  }
+
+  /** Reuses the renderer start path: an in-flight start is joined instead of
+   * spawning a competing generation. The migration barrier and a held lifecycle
+   * admission forbid automatic respawns entirely; their owners own recovery.
+   * A start invalidated by stop() never re-arms: stop is final. */
+  private beginRespawn(): void {
+    if (this.respawnSuspended || this.revision !== this.respawnRevision || this.migrationAdmission
+      || this.lifecycleAdmission) return;
+    const revision = this.revision;
+    this.startOwned(false).then(snapshot => {
+      if (snapshot.state === "ready") this.resetRespawnState();
+    }).catch(() => { if (this.revision === revision) this.scheduleRespawn(); });
+  }
+
+  private resetRespawnState(): void {
+    if (this.respawnTimer !== null) { clearTimeout(this.respawnTimer); this.respawnTimer = null; }
+    this.respawnAttempts = 0;
+    this.respawnWindowStart = 0;
+    this.respawnSuspended = false;
   }
 
   /**
@@ -605,6 +748,7 @@ export class AssistantHost {
         || !generation.native.drainStatus(generation.job).complete) return false;
       generation.referenceDrained = this.configurationReferenceJobDrained(generation);
       generation.native.close(generation.job);
+      if (this.livenessWatch === generation) this.endLivenessWatch();
       generation.closed = true;
       generation.token = "";
       if (this.current === generation) this.current = null;
@@ -1021,6 +1165,7 @@ export class AssistantHost {
         projectRevision: this.projectSnapshot.revision, nativeAssistantRoot, profileIdentity };
       this.current = generation;
       if (!positiveInteger(spawned.pid)) throw new HostError("ASSISTANT_SPAWN_INVALID");
+      generation.pid = spawned.pid;
       const deadline = Date.now() + STARTUP_MS;
       while (Date.now() < deadline) {
         if (revision !== this.revision || generation.abort.signal.aborted) throw new HostError("ASSISTANT_STOPPED");
@@ -1042,6 +1187,9 @@ export class AssistantHost {
             if (revision !== this.revision || generation.abort.signal.aborted) throw new HostError("ASSISTANT_STOPPED");
             this.view = { state: "ready", errorCode: null };
             if (this.options.mainControl) this.startMainControl(generation);
+            generation.readyAt = Date.now();
+            this.resetRespawnState();
+            this.beginLivenessWatch(generation);
             return this.snapshot();
           } catch (error) {
             if (!(error instanceof HostError) || !["ASSISTANT_TRANSPORT_FAILED", "ASSISTANT_REQUEST_TIMEOUT"].includes(error.code)) throw error;

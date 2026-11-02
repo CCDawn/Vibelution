@@ -1405,3 +1405,154 @@ describe("AssistantHost", () => {
     expect(native.close).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("AssistantHost liveness watch and bounded respawn", () => {
+  function killCurrentGeneration(active: Map<WorkbenchJobHandle, number>): void {
+    const job = [...active.keys()].at(-1)!;
+    active.set(job, 0);
+  }
+
+  it("records exit forensics and respawns an unexpectedly dead generation with 2s/4s/8s backoff", async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { host, native, inputs, active, root } = fixture({ graceful: true });
+    Object.assign(native, { exitCode: vi.fn(() => 3) });
+    await host.start();
+    const instanceId = inputs[0]!.arguments[inputs[0]!.arguments.indexOf("--instance-id") + 1]!;
+    const stderrPath = join(root, "runtime", instanceId, "stderr.log");
+    writeFileSync(stderrPath, `${"x".repeat(3000)}\nFINAL-stderr-LINE`);
+    killCurrentGeneration(active);
+    native.spawn.mockImplementation(() => { throw new Error("spawn refused"); });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(native.spawn).toHaveBeenCalledTimes(1);
+    const deathLine = warnSpy.mock.calls.map(([line]) => String(line)).find(line => line.includes("ASSISTANT_HOST_DEATH"));
+    expect(deathLine).toContain("phase=unexpected_exit");
+    expect(deathLine).toContain("exitCode=3");
+    expect(deathLine).toContain(`instanceId=${instanceId}`);
+    expect(deathLine).toContain("pid=100");
+    expect(deathLine).toMatch(/uptimeMs=\d+/);
+    const tail = JSON.parse(deathLine!.match(/stderrTail=(.*)$/)![1]!) as string;
+    expect(tail.length).toBeLessThanOrEqual(2048);
+    expect(tail.endsWith("FINAL-stderr-LINE")).toBe(true);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(native.spawn).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(native.spawn).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(8_000);
+    expect(native.spawn).toHaveBeenCalledTimes(4);
+    expect(host.snapshot()).toEqual({ state: "failed", errorCode: "ASSISTANT_HOST_FAILED" });
+    warnSpy.mockRestore();
+    await host.stop();
+    expect(native.spawn).toHaveBeenCalledTimes(4);
+  });
+
+  it("stops retrying and reports the host unavailable after five failed respawns in the window", async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { host, native, active } = fixture({ graceful: true });
+    await host.start();
+    killCurrentGeneration(active);
+    native.spawn.mockImplementation(() => { throw new Error("spawn refused"); });
+    await vi.advanceTimersByTimeAsync(64_000);
+    expect(native.spawn).toHaveBeenCalledTimes(6);
+    expect(host.snapshot()).toEqual({ state: "failed", errorCode: "ASSISTANT_HOST_UNAVAILABLE" });
+    await expect(host.start()).rejects.toThrow("ASSISTANT_HOST_UNAVAILABLE");
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(native.spawn).toHaveBeenCalledTimes(6);
+    warnSpy.mockRestore();
+  });
+
+  it("does not respawn after a shell-initiated stop", async () => {
+    vi.useFakeTimers();
+    const { host, native, active } = fixture({ graceful: true });
+    await host.start();
+    killCurrentGeneration(active);
+    await vi.advanceTimersByTimeAsync(2_000);
+    await host.stop();
+    expect(host.snapshot()).toEqual({ state: "stopped", errorCode: null });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(native.spawn).toHaveBeenCalledTimes(1);
+  });
+
+  it("joins an in-flight respawn instead of spawning a second generation", async () => {
+    vi.useFakeTimers();
+    const { host, native, fetchImpl, active } = fixture({ graceful: true });
+    await host.start();
+    killCurrentGeneration(active);
+    let releaseHealth!: () => void;
+    const gate = new Promise<void>(done => { releaseHealth = done; });
+    fetchImpl.mockImplementationOnce(async () => { await gate; return Response.json({ status: "ok", protocolVersion: 1, role: "launcher_assistant" }); });
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(native.spawn).toHaveBeenCalledTimes(2);
+    const joined = host.start();
+    expect(joined).toBe(host.start());
+    releaseHealth();
+    await expect(joined).resolves.toMatchObject({ state: "ready" });
+    expect(native.spawn).toHaveBeenCalledTimes(2);
+    await host.stop();
+  });
+
+  it("resets the respawn budget once a generation is ready again", async () => {
+    vi.useFakeTimers();
+    const { host, native, active } = fixture({ graceful: true });
+    await host.start();
+    killCurrentGeneration(active);
+    native.spawn.mockImplementationOnce(() => { throw new Error("spawn refused"); });
+    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(native.spawn).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(native.spawn).toHaveBeenCalledTimes(3);
+    expect(host.snapshot()).toEqual({ state: "ready", errorCode: null });
+    killCurrentGeneration(active);
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(native.spawn).toHaveBeenCalledTimes(4);
+    expect(host.snapshot()).toEqual({ state: "ready", errorCode: null });
+    await host.stop();
+  });
+
+  it("treats an exit under a held lifecycle admission as controlled and resumes the watch after release", async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const deathLines = () => warnSpy.mock.calls.map(([line]) => String(line)).filter(line => line.includes("ASSISTANT_HOST_DEATH"));
+    const { host, native, active } = fixture({ graceful: true });
+    await host.start();
+    const admission = host.beginLifecycleAdmission();
+    killCurrentGeneration(active);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(deathLines()).toHaveLength(0);
+    expect(native.spawn).toHaveBeenCalledTimes(1);
+    expect(host.snapshot()).toEqual({ state: "ready", errorCode: null });
+    // A cancelled shutdown reopens the same host: a death that outlived the
+    // admission is then an ordinary unexpected exit with bounded respawn.
+    admission.release();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(deathLines()).toHaveLength(1);
+    expect(host.snapshot()).toEqual({ state: "failed", errorCode: "ASSISTANT_EXITED" });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(native.spawn).toHaveBeenCalledTimes(2);
+    expect(host.snapshot()).toEqual({ state: "ready", errorCode: null });
+    warnSpy.mockRestore();
+    await host.stop();
+  });
+
+  it("does not respawn when stop lands while a respawn start is in flight", async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { host, native, fetchImpl, active } = fixture({ graceful: true });
+    await host.start();
+    killCurrentGeneration(active);
+    let releaseHealth!: () => void;
+    const gate = new Promise<void>(done => { releaseHealth = done; });
+    fetchImpl.mockImplementationOnce(async () => { await gate; return Response.json({ status: "ok", protocolVersion: 1, role: "launcher_assistant" }); });
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(native.spawn).toHaveBeenCalledTimes(2);
+    const stopped = host.stop();
+    releaseHealth();
+    await expect(stopped).resolves.toEqual({ state: "stopped", errorCode: null });
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(native.spawn).toHaveBeenCalledTimes(2);
+    expect(host.snapshot()).toEqual({ state: "stopped", errorCode: null });
+    warnSpy.mockRestore();
+  });
+});
