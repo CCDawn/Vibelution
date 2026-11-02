@@ -35,6 +35,12 @@ CONTROL_TOKEN_HEADER = "X-Vibelution-Control-Token"
 TASK_CAPABILITY_HEADER = "X-Vibelution-External-Agent-Task-Capability"
 ADAPTER_CONNECTION_HEADER = "X-Vibelution-External-Agent-Connection"
 _MANAGEMENT_PREFIX = "/api/v1/launcher-assistant-management"
+# Approved management writes are durable (the server stores the receipt under
+# the request_id before acknowledging), so their POST gets a wider read window
+# than the 5s default. It must stay strictly below the assistant dispatch
+# layer's 30s outer bound so a timeout is raised here - where the request_id
+# is known and the receipt can be reconciled read-only - not by the outer layer.
+_MANAGEMENT_WRITE_TIMEOUT_SECONDS = 25.0
 _MANAGEMENT_ACTIONS = frozenset({"agent_create", "agent_update", "agent_avatar", "agent_archive", "agent_purge", "agent_purge_batch", "team_run", "session_pin", "authorization_upgrade", "authorization_reduce", "authorization_revoke"}) | _PLATFORM_ACTIONS
 _MANAGEMENT_SCOPES = ["agents:archive", "agents:avatar", "agents:create", "agents:read", "agents:update", "legacy:receipts:read", "platform:describe", "rooms:read", "sessions:parameters:read", "sessions:pin", "sessions:read", "teams:directory:read", "teams:read", "teams:run"]
 # Historical grants without persisted scopes predate pin and archive. Freeze
@@ -280,9 +286,20 @@ class ManagedAgentBackendClient:
                 raise BackendClientError("Invalid management parameters.", code="INVALID_MANAGEMENT_REQUEST") from None
         grant = (await self._original_management_grant(require_original=True) if action in {"authorization_upgrade", "authorization_reduce", "authorization_revoke"}
             else await self._management_grant(require_existing=require_existing_subject))
-        result = await self._request_json("POST", f"{_MANAGEMENT_PREFIX}/actions/{action}",
-            management_auth=(grant["subjectId"], grant["capability"]), json_payload={
-                "request_id": request_id, "expected_binding": grant["binding"], "parameters": parameters})
+        try:
+            result = await self._request_json("POST", f"{_MANAGEMENT_PREFIX}/actions/{action}",
+                management_auth=(grant["subjectId"], grant["capability"]), json_payload={
+                    "request_id": request_id, "expected_binding": grant["binding"], "parameters": parameters},
+                timeout_seconds=_MANAGEMENT_WRITE_TIMEOUT_SECONDS)
+        except BackendClientError as exc:
+            # Once the POST was sent, a timeout leaves the outcome ambiguous:
+            # the server may have executed the action and stored its receipt
+            # under this request_id. Tag the error so the dispatch layer can
+            # reconcile read-only (management_receipt) without replaying.
+            if exc.code == "BACKEND_TIMEOUT":
+                exc.management_action = action
+                exc.management_request_id = request_id
+            raise
         public = self._management_public_receipt(result, action=action, request_id=request_id)
         if action in _PLATFORM_ACTIONS and public["status"] == "completed":
             try:
@@ -1369,6 +1386,22 @@ class ManagedAgentBackendClient:
                             if len(chunks) > max_response_bytes:
                                 raise BackendClientError("managed backend response exceeds preview limit", code="BACKEND_RESPONSE_TOO_LARGE")
                         response = httpx.Response(stream.status_code, headers=stream.headers, content=bytes(chunks), request=stream.request)
+            except httpx.TimeoutException as exc:
+                if isinstance(exc, httpx.ConnectTimeout):
+                    # The connection was never established: nothing was sent,
+                    # so this is plain unreachability, not an ambiguous write.
+                    raise BackendClientError(
+                        f"managed backend is unreachable: {type(exc).__name__}",
+                        code="BACKEND_UNAVAILABLE",
+                    ) from exc
+                # ReadTimeout/WriteTimeout/PoolTimeout mean the request was
+                # already sent (or the pool it waits on holds such requests);
+                # the backend may still execute it. Callers must reconcile by
+                # request_id instead of assuming failure.
+                raise BackendClientError(
+                    f"managed backend did not answer in time; the request may have been executed: {type(exc).__name__}",
+                    code="BACKEND_TIMEOUT",
+                ) from exc
             except httpx.HTTPError as exc:
                 raise BackendClientError(
                     f"managed backend is unreachable: {type(exc).__name__}",

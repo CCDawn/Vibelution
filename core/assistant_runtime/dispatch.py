@@ -47,6 +47,7 @@ _BACKEND_ERROR_MESSAGES = {
 }
 _BACKEND_CODE_MESSAGES = {
     "AGENT_DIRECTORY_UNAVAILABLE": "目标项目暂不支持完整 Agent 目录，请通过 Launcher 更新并重启后再查；这不表示目录为空。",
+    "BACKEND_TIMEOUT": "项目后端未在时限内回应，操作可能已执行：请用原 request_id 查询回执确认，不要更换 ID 重发或重新发起审批。",
     "BACKEND_UNAVAILABLE": "无法连接该项目后端。请检查 Launcher 中该项目的运行状态；已有任务引用已保留。",
     "RUNTIME_IDENTITY_MISMATCH": "项目后端的版本或项目身份校验失败。" + _IDENTITY_RECOVERY_HINT + "已有任务引用已保留。",
 }
@@ -1064,6 +1065,9 @@ class DispatchService:
             # Reconstructing re-reads the native credential ledger and Launcher
             # descriptor, including changed token/URL/revision after a restart.
             # No MCP lifecycle or shutdown is entered when this object expires.
+            # ``None`` only if the factory itself raised; the timeout reconcile
+            # branch below must never see an unbound name.
+            client: Any = None
             client = self._client_factory(
                 project_root,
                 state_path=self._root / "credentials" / f"{_digest(project_id + self._binding(project_root))}.json",
@@ -1107,10 +1111,37 @@ class DispatchService:
                                 slot.closing = False
             except BackendClientError as exc:
                 code = re.sub(r"[^A-Z0-9_]", "_", str(exc.code).upper())[:80] or "BACKEND_ERROR"
+                if code == "BACKEND_TIMEOUT" and client is not None:
+                    receipt = await self._reconcile_after_timeout(client, exc)
+                    if receipt is not None:
+                        return receipt
                 raise DispatchError(
                     _backend_error_message(exc), code=code,
                     recovery=_identity_recovery(exc, project_id),
                 ) from None
+
+    @staticmethod
+    async def _reconcile_after_timeout(client: Any, exc: BackendClientError) -> dict[str, Any] | None:
+        """Read-only receipt check after an ambiguous management write timeout.
+
+        The POST carried a request_id and may have been executed server-side.
+        Never replay or re-issue the write here: only an authenticated receipt
+        proves the outcome. A completed receipt is returned (with
+        ``reconciledAfterTimeout``) as the action's success result; missing,
+        unknown, or unreadable receipts keep the original BACKEND_TIMEOUT
+        failure so the PA retries the receipt query, not the approval.
+        """
+        action = str(getattr(exc, "management_action", "") or "")
+        request_id = str(getattr(exc, "management_request_id", "") or "")
+        if not action or not request_id:
+            return None
+        try:
+            receipt = await client.management_receipt(action=action, request_id=request_id)
+        except BackendClientError:
+            return None
+        if not isinstance(receipt, dict) or receipt.get("status") != "completed":
+            return None
+        return {**receipt, "reconciledAfterTimeout": True}
 
     async def _update(self, record: dict[str, Any], action: Callable[[Any], Awaitable[dict[str, Any]]]) -> dict[str, Any]:
         try:

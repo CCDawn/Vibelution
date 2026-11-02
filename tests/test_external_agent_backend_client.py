@@ -1454,3 +1454,63 @@ async def test_client_business_403_does_not_trigger_token_reconnect(tmp_path) ->
     # A business 403 must surface immediately, with no reconnect or replay.
     assert state["agentsCalls"] == 1
     assert state["tokenFetches"] == 1
+
+
+@pytest.mark.anyio
+async def test_management_action_post_uses_dedicated_write_timeout_below_dispatch_bound(tmp_path, monkeypatch):
+    _runtime_state(tmp_path)
+    from core.external_agent.backend_client import _MANAGEMENT_WRITE_TIMEOUT_SECONDS
+    from core.assistant_runtime.dispatch import _NATIVE_REQUEST_TIMEOUT
+    client = ManagedAgentBackendClient(tmp_path, state_path=tmp_path / "credentials.json")
+    seen = {}
+    async def grant(**kwargs):
+        return {"subjectId": "subject", "capability": "capability", "binding": {"projectId": "p", "instanceId": "i"}}
+    async def request(method, path, **kwargs):
+        seen.update(method=method, path=path, kwargs=kwargs)
+        return {"status": "completed", "action": "agent_create", "requestId": "create-1", "verified": True,
+                "reused": False, "agent": {"agentId": "native-agent"}}
+    monkeypatch.setattr(client, "_management_grant", grant)
+    monkeypatch.setattr(client, "_request_json", request)
+    await client.management_action(action="agent_create", request_id="create-1", parameters={"display_name": "Worker"})
+    assert seen["method"] == "POST" and seen["path"].endswith("/actions/agent_create")
+    assert seen["kwargs"]["timeout_seconds"] == 25.0
+    # The client-layer write timeout must fire before the dispatch outer bound
+    # so the error carries the request_id and the receipt can be reconciled.
+    assert 0.5 <= _MANAGEMENT_WRITE_TIMEOUT_SECONDS == 25.0 < _NATIVE_REQUEST_TIMEOUT
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("transport_error,expected_code", [
+    (httpx.ReadTimeout("slow body"), "BACKEND_TIMEOUT"),
+    (httpx.WriteTimeout("slow upload"), "BACKEND_TIMEOUT"),
+    (httpx.PoolTimeout("pool exhausted"), "BACKEND_TIMEOUT"),
+    (httpx.ConnectTimeout("never connected"), "BACKEND_UNAVAILABLE"),
+    (httpx.ConnectError("connection refused"), "BACKEND_UNAVAILABLE"),
+])
+async def test_sent_request_timeouts_split_from_unreachable_on_management_writes(tmp_path, transport_error, expected_code):
+    _runtime_state(tmp_path)
+    calls = []
+    ordinary = _transport(tmp_path, calls)
+    binding = {"projectId": "project-1", "instanceId": "instance-1"}
+    capability = "private-capability-" + "a" * 40
+    prefix = "/api/v1/launcher-assistant-management"
+    def handler(request):
+        if request.url.path == prefix + "/binding":
+            return httpx.Response(200, json={"protocolVersion": 1, "binding": binding})
+        if request.url.path == prefix + "/subjects/bind":
+            body = json.loads(request.content)
+            return httpx.Response(200, json={"protocolVersion": 1, "subject_id": "ops-1234567890abcdef",
+                "subject_capability": capability, "binding": binding, "scopes": body["scopes"]})
+        if request.url.path.startswith(prefix + "/actions/") and request.method == "POST":
+            raise transport_error
+        return ordinary.handle_request(request)
+    client = ManagedAgentBackendClient(
+        tmp_path, state_path=tmp_path / "credentials.json", transport=httpx.MockTransport(handler))
+    with pytest.raises(BackendClientError) as failure:
+        await client.management_action(action="agent_create", request_id="create-1", parameters={"display_name": "Worker"})
+    assert failure.value.code == expected_code
+    if expected_code == "BACKEND_TIMEOUT":
+        # The request was sent, so the dispatch layer can reconcile read-only
+        # through management_receipt with this exact identity.
+        assert failure.value.management_action == "agent_create"
+        assert failure.value.management_request_id == "create-1"

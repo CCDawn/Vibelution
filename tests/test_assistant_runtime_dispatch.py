@@ -1217,3 +1217,91 @@ async def test_project_suspension_allows_already_admitted_transaction_to_settle(
         await admitted.wait()
         service.suspend_projects()
         settle.set()
+
+
+def _timeout_management_client(calls: list, receipt):
+    class Client:
+        async def diagnostics(self):
+            return {"status": "healthy"}
+
+        async def management_action(self, **kwargs):
+            calls.append(("POST", kwargs))
+            error = BackendClientError(
+                "managed backend did not answer in time; the request may have been executed: ReadTimeout",
+                code="BACKEND_TIMEOUT")
+            # Mirror ManagedAgentBackendClient.management_action, which tags
+            # sent-but-unacknowledged writes with their reconciliation identity.
+            error.management_action = kwargs["action"]
+            error.management_request_id = kwargs["request_id"]
+            raise error
+
+        async def management_receipt(self, **kwargs):
+            calls.append(("GET", kwargs))
+            if isinstance(receipt, Exception):
+                raise receipt
+            return receipt
+    return Client()
+
+
+@pytest.mark.anyio
+async def test_management_write_timeout_reconciles_completed_receipt_without_new_approval(tmp_path):
+    from core.assistant_runtime.dispatch import _BACKEND_CODE_MESSAGES
+    calls = []
+    receipt = {"status": "completed", "action": "agent_create", "requestId": "create-1",
+               "verified": True, "reused": False, "agent": {"agentId": "native-agent"}}
+    service = DispatchService(tmp_path / "profile", {"project-a": tmp_path / "project"},
+                              client_factory=lambda *args, **kwargs: _timeout_management_client(calls, receipt))
+    result = await service.management.invoke("project-a", action="agent_create", request_id="create-1", parameters={})
+    assert result["reconciledAfterTimeout"] is True
+    assert result["status"] == "completed" and result["requestId"] == "create-1"
+    assert result["projectId"] == "project-a"
+    # Exactly one approved write and one read-only receipt query; the write is
+    # never replayed and the request_id never changes.
+    assert [name for name, _ in calls] == ["POST", "GET"]
+    assert calls[1][1] == {"action": "agent_create", "request_id": "create-1"}
+    assert _BACKEND_CODE_MESSAGES["BACKEND_TIMEOUT"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("receipt", [
+    BackendClientError("Original request receipt is unavailable.", code="REQUEST_UNAVAILABLE"),
+    {"status": "unknown", "action": "agent_create", "requestId": "create-1",
+     "verified": False, "code": "OPERATION_UNCONFIRMED"},
+], ids=["missing", "unknown"])
+async def test_management_write_timeout_without_confirmed_receipt_raises_timeout_with_guidance(tmp_path, receipt):
+    from core.assistant_runtime.dispatch import _BACKEND_CODE_MESSAGES
+    calls = []
+    service = DispatchService(tmp_path / "profile", {"project-a": tmp_path / "project"},
+                              client_factory=lambda *args, **kwargs: _timeout_management_client(calls, receipt))
+    with pytest.raises(DispatchError) as failure:
+        await service.management.invoke("project-a", action="agent_create", request_id="create-1", parameters={})
+    assert failure.value.code == "BACKEND_TIMEOUT"
+    assert str(failure.value) == _BACKEND_CODE_MESSAGES["BACKEND_TIMEOUT"]
+    assert "请用原 request_id 查询回执确认" in str(failure.value)
+    assert "不要更换 ID 重发" in str(failure.value)
+    # Even on an unconfirmed outcome the write itself is never replayed here.
+    assert [name for name, _ in calls] == ["POST", "GET"]
+
+
+@pytest.mark.anyio
+async def test_backend_timeout_without_management_identity_is_not_reconciled(tmp_path):
+    from core.assistant_runtime.dispatch import _BACKEND_CODE_MESSAGES
+    calls = []
+    class Client:
+        async def diagnostics(self):
+            return {"status": "healthy"}
+
+        async def list_agents(self, **kwargs):
+            calls.append("list")
+            raise BackendClientError("native request timed out.", code="BACKEND_TIMEOUT")
+
+        async def management_receipt(self, **kwargs):
+            calls.append("receipt")
+            return {"status": "completed"}
+    service = DispatchService(tmp_path / "profile", {"project-a": tmp_path / "project"},
+                              client_factory=lambda *args, **kwargs: Client())
+    with pytest.raises(DispatchError) as failure:
+        await service.discover("project-a")
+    assert failure.value.code == "BACKEND_TIMEOUT"
+    assert str(failure.value) == _BACKEND_CODE_MESSAGES["BACKEND_TIMEOUT"]
+    assert calls == ["list"]
