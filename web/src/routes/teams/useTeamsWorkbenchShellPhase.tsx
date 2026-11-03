@@ -279,6 +279,14 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     if (!isChallengeCupCanonicalizationTeamOwned(effectiveTeamId, searchParams)) {
       return;
     }
+    // teamView / workflowWorkspace are live in-app navigation params (the
+    // generic workspace model keeps both active): the team discussion and
+    // records buttons write them after the detail query resolves, so
+    // absorbing them as retired deep links would bounce the fresh navigation
+    // straight back to the workflow shell.
+    if (searchParams.has("teamView") || searchParams.has("workflowWorkspace")) {
+      return;
+    }
     const canonicalHref = canonicalChallengeCupWorkspaceRouteForEffectiveTeam(effectiveTeamId, searchParams);
     const currentHref = `/teams?${searchParams.toString()}`;
     if (canonicalHref !== currentHref) {
