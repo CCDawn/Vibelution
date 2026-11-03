@@ -32,6 +32,7 @@ export { VPopover, type VPopoverProps } from "./primitives/VPopover";
 export { VSelectionToolbar, type VSelectionToolbarProps } from "./primitives/VSelectionToolbar";
 export { VNativeButton, type VNativeButtonProps } from "./primitives/VNativeButton";
 export { VPanel, type VPanelProps } from "./primitives/VPanel";
+export { VScrollRegion, type VScrollRegionProps } from "./primitives/VScrollRegion";
 export {
   VSurface,
   type VSurfaceElevation,

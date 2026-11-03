@@ -3,7 +3,7 @@ import { Activity, ArrowDownRight, ArrowUpCircle, Folder, ListTodo, MessageCircl
 import { useLocation, useNavigate } from "react-router-dom";
 import type { LauncherBranchInstance } from "../api/launcher";
 import { openLauncherModelConnection, returnLauncherToDesktop } from "../api/launcher";
-import { VButton, VDropdownMenu, VRouteLinkButton } from "../components/vui";
+import { VButton, VDropdownMenu, VRouteLinkButton, VScrollRegion } from "../components/vui";
 import { launcherAssistantPanelLabel, launcherAssistantPanelPath, resolveLauncherAssistantPanel } from "./launcherNavigationModel";
 import styles from "./LauncherNavigation.styles";
 
@@ -36,12 +36,12 @@ export function LauncherNavigation({ lang, onNavigate, updateAvailable = false, 
     try { await returnLauncherToDesktop(); } catch(error) { setError(error instanceof Error ? error.message : String(error)); } finally { returnGate.current = false; setReturning(false); }
   }
   return <nav aria-label={lang === "zh" ? "Launcher 功能导航" : "Launcher navigation"} className={styles.root}>
-    <div className={styles.scroll}>
+    <VScrollRegion className={styles.scroll} role="region" aria-label={lang === "zh" ? "Launcher 导航列表" : "Launcher navigation list"} tabIndex={0}>
       <div className={styles.group} aria-label={lang === "zh" ? "个人助理功能" : "Assistant features"}><p className={styles.groupLabel}>{lang === "zh" ? "个人助理" : "Personal assistant"}</p>
         {assistantEntries.map(([id,Icon]) => <VRouteLinkButton key={id} to={launcherAssistantPanelPath(id)} chrome="shell-nav" aria-current={assistant && assistantPanel === id ? "page" : undefined} className={`${styles.link} ${assistant && assistantPanel === id ? styles.selectedLink : styles.idleLink}`} icon={<Icon size={17} aria-hidden="true"/>} onClick={onNavigate}>{launcherAssistantPanelLabel(id,lang)}</VRouteLinkButton>)}
       </div>
       <div className={styles.group}><p className={styles.groupLabel}>Launcher</p><VRouteLinkButton to="/launcher" chrome="shell-nav" aria-current={!assistant && selected === "branches" ? "page" : undefined} className={`${styles.link} ${!assistant && selected === "branches" ? styles.selectedLink : styles.idleLink}`} icon={<Folder size={17} aria-hidden="true"/>} onClick={onNavigate}>{lang === "zh" ? "项目与分支" : "Projects & branches"}</VRouteLinkButton></div>
-    </div>
+    </VScrollRegion>
     <div className={styles.footer}>
       {updateAvailable || updateFailed ? <VRouteLinkButton to="/launcher/updates" chrome="shell-nav" aria-current={selected === "updates" ? "page" : undefined} className={`${styles.link} ${styles.updateLink} ${selected === "updates" ? styles.selectedLink : styles.idleLink}`} icon={<ArrowUpCircle size={17} aria-hidden="true"/>} trailingIcon={<span className={styles.updateBadge}>{updateFailed ? (lang === "zh" ? "失败" : "Failed") : (lang === "zh" ? "有新版" : "New")}</span>} onClick={onNavigate}>{lang === "zh" ? "更新" : "Update"}</VRouteLinkButton> : null}
       <VDropdownMenu side="top" align="start" aria-label={lang === "zh" ? "设置" : "Settings"}

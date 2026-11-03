@@ -6,6 +6,7 @@ import {
   VIconButton,
   VMetricChip,
   VPanel,
+  VScrollRegion,
   VStatusChip,
   VSurface,
 } from "../../../components/vui";
@@ -33,6 +34,11 @@ export function FoundationCatalog() {
       <VuiPreviewCard name="VSurface / VPanel">
         <VSurface tone="inset" className="w-full max-w-44 py-4 font-medium text-vui-fg-primary">Card</VSurface>
         <VPanel className="w-full max-w-44 py-4 font-medium text-vui-fg-primary">Panel</VPanel>
+      </VuiPreviewCard>
+      <VuiPreviewCard name="VScrollRegion">
+        <VScrollRegion tabIndex={0} aria-label="暂显滚动条示例" className="h-32 w-full max-w-60 rounded-md border border-vui-border-subtle p-3">
+          {Array.from({ length: 12 }, (_, index) => <p key={index} className="m-0 py-2">滚动查看任务 {index + 1}</p>)}
+        </VScrollRegion>
       </VuiPreviewCard>
     </VuiPreviewSection>
   );

@@ -5,7 +5,7 @@ import {
   MessageCircleHeart,
   UsersRound,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type Ref, type SetStateAction } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type ReactNode, type Ref, type SetStateAction } from "react";
 
 import type {
   AgentInstance,
@@ -22,6 +22,7 @@ import {
   VContextualHint,
   VNativeButton,
   VNativeInput,
+  VScrollRegion,
   VStateSurface,
   VStringSelect,
   VTabs,
@@ -211,30 +212,6 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [optionsOpen, setOptionsOpen] = useState(false);
-  const [indexScrolling, setIndexScrolling] = useState(false);
-  const [indexScrollbarDragging, setIndexScrollbarDragging] = useState(false);
-  const indexScrollTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-
-  const onIndexScroll = () => {
-    setIndexScrolling(true);
-    clearTimeout(indexScrollTimer.current);
-    indexScrollTimer.current = setTimeout(() => setIndexScrolling(false), 800);
-  };
-
-  useEffect(() => () => clearTimeout(indexScrollTimer.current), []);
-  useEffect(() => {
-    if (!indexScrollbarDragging) return;
-    const stopDragging = () => setIndexScrollbarDragging(false);
-    window.addEventListener("pointerup", stopDragging);
-    window.addEventListener("pointercancel", stopDragging);
-    window.addEventListener("blur", stopDragging);
-    return () => {
-      window.removeEventListener("pointerup", stopDragging);
-      window.removeEventListener("pointercancel", stopDragging);
-      window.removeEventListener("blur", stopDragging);
-    };
-  }, [indexScrollbarDragging]);
-
   const createItems = useMemo<VDropdownMenuItem[]>(() => [
     {
       id: "new-session",
@@ -533,23 +510,11 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
             )
           ) : (
             <div className={styles.conversationIndexLayout}>
-            <div
+            <VScrollRegion
               className={styles.conversationIndexScrollRegion}
               role="region"
               aria-label={lang === "zh" ? "会话目录" : "Conversation directory"}
               tabIndex={0}
-              data-scroll-active={indexScrolling ? "true" : undefined}
-              data-scroll-dragging={indexScrollbarDragging ? "true" : undefined}
-              onScroll={onIndexScroll}
-              onPointerDown={(event) => {
-                if (event.pointerType !== "mouse" || event.button !== 0) return;
-                const region = event.currentTarget;
-                if (region.scrollHeight <= region.clientHeight) return;
-                const bounds = region.getBoundingClientRect();
-                if (event.clientX >= bounds.right - (region.offsetWidth - region.clientWidth)) {
-                  setIndexScrollbarDragging(true);
-                }
-              }}
             >
             {conversationIndexPanel}
             {groupComposerOpen ? (
@@ -649,7 +614,7 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
                 </VButton>
               </section>
             ) : null}
-            </div>
+            </VScrollRegion>
             </div>
           )}
           </div>

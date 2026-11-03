@@ -75,6 +75,7 @@
 | `VRouteLinkButton` | [primitives/actions.md](./primitives/actions.md#vroutelinkbutton) |
 | `VSurface` | [primitives/surfaces.md](./primitives/surfaces.md#vsurface) |
 | `VPanel` | [primitives/surfaces.md](./primitives/surfaces.md#vpanel) |
+| `VScrollRegion` | [primitives/scroll-region.md](./primitives/scroll-region.md#vscrollregion) |
 | `VChip` | [primitives/feedback.md](./primitives/feedback.md#vchip) |
 | `VTooltip` | [primitives/feedback.md](./primitives/feedback.md#vtooltip) |
 | `VContextualHint` | [primitives/feedback.md](./primitives/feedback.md#vcontextualhint) |
