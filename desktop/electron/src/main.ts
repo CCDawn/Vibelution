@@ -2426,6 +2426,12 @@ async function openWorkbenchAtCurrentLauncherUrlImpl(
     // uses to acknowledge actions, report window state, and close atomically.
     const payloadUrl = typeof payload.workbenchUrl === "string" ? payload.workbenchUrl.trim() : "";
     workbenchUrl = resolveWorkbenchUrl(desktopEnvironment(), payloadUrl || bootstrap.workbenchUrl);
+    // Fixed deep-link for the Launcher's model-connection recovery entry: only
+    // the literal /config is accepted, so neither the renderer nor a desktop
+    // action can aim the Workbench at any other path through this flow.
+    if (payload.workbenchPath === "/config") {
+      workbenchUrl = new URL("/config", workbenchUrl).toString();
+    }
     currentWorkbenchUrl = workbenchUrl;
     // A stale resolution can still name port 8000 after the backend died
     // (2026-09-29: "open window" created a Workbench window against a dead
@@ -5170,6 +5176,19 @@ ipcMain.handle(IPC_CHANNELS.getDesktopShellSummary, (event) => {
 ipcMain.handle(IPC_CHANNELS.focusWorkbenchWindow, async (event) => {
   assertTrustedIpcSender(event, trustedIpcOrigins());
   return await windowProvider?.focusWorkbench();
+});
+
+// Narrow verb behind the Launcher settings menu "模型连接" entry: ensure the
+// managed Workbench window is open and load the fixed /config model-connection
+// page, so model connectivity stays recoverable while the assistant is down.
+// Only the Launcher control frame may call this and no path is accepted from
+// the renderer — a compromised frame cannot aim the Workbench at another URL.
+ipcMain.handle(IPC_CHANNELS.openWorkbenchConfig, async (event) => {
+  if (!isTrustedLauncherControlFrame(event)) throw new Error("blocked launcher window sender");
+  if (launcherBootstrap === null || windowProvider === null) {
+    throw new Error("Launcher control plane is not ready.");
+  }
+  return await openWorkbenchAtCurrentLauncherUrl(createDesktopPathsForApp(), launcherBootstrap, windowProvider, { workbenchPath: "/config" });
 });
 
 // Narrow verb behind the PA human-attention toast click: surface and focus the

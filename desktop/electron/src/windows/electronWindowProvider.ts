@@ -374,8 +374,14 @@ export class ElectronWindowProvider {
     }
   }
 
-  /** Navigate/report normally; present=false only suppresses this call's restore/show/focus. */
-  async openOrFocusWorkbench(workbenchUrl = this.workbenchUrl, options: { present?: boolean } = {}): Promise<ManagedWindowState> {
+  /**
+   * Navigate/report normally; present=false only suppresses this call's
+   * restore/show/focus. loadTarget=true marks a deliberate deep-link: same-origin
+   * path differences then load the target (mirroring the instance-window
+   * readyUrl comparison) instead of the SCI-049 open/focus convergence that
+   * keeps the user's current page.
+   */
+  async openOrFocusWorkbench(workbenchUrl = this.workbenchUrl, options: { present?: boolean; loadTarget?: boolean } = {}): Promise<ManagedWindowState> {
     const generation = this.workbenchCloseGeneration;
     this.assertWorkbenchOpenAllowed(generation);
     const safeUrl = localWorkbenchUrl(workbenchUrl);
@@ -386,7 +392,7 @@ export class ElectronWindowProvider {
       return this.openOrFocusWorkbench(safeUrl, options);
     }
 
-    const navigation = Promise.resolve().then(() => this.navigateWorkbench(safeUrl, options.present !== false, generation));
+    const navigation = Promise.resolve().then(() => this.navigateWorkbench(safeUrl, options.present !== false, generation, options.loadTarget === true));
     this.workbenchNavigation = navigation;
     try {
       return await navigation;
@@ -1126,7 +1132,7 @@ export class ElectronWindowProvider {
     window.on("session-end", () => this.onOsSessionEnd("session-end", role));
   }
 
-  private async navigateWorkbench(safeUrl: string, present = true, generation = this.workbenchCloseGeneration): Promise<ManagedWindowState> {
+  private async navigateWorkbench(safeUrl: string, present = true, generation = this.workbenchCloseGeneration, loadTarget = false): Promise<ManagedWindowState> {
     this.assertWorkbenchOpenAllowed(generation);
     let workbenchWindow = this.reconcileCurrentWorkbenchWindow();
     if (!workbenchWindow || workbenchWindow.isDestroyed()) {
@@ -1137,7 +1143,7 @@ export class ElectronWindowProvider {
     }
     this.discardExtraWorkbenchWindows(this.listLiveWorkbenchWindows(), workbenchWindow);
 
-    if (this.shouldReloadWorkbenchWindow(safeUrl)) {
+    if (loadTarget ? this.workbenchReadyUrl !== safeUrl : this.shouldReloadWorkbenchWindow(safeUrl)) {
       this.workbenchReadyUrl = null;
       workbenchWindow.hide();
       try {

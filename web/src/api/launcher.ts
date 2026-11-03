@@ -36,7 +36,7 @@ export class LauncherProjectNotSelectedError extends Error {
 export function isLauncherProjectNotSelected(error: unknown): boolean {
   return error instanceof LauncherProjectNotSelectedError || (error instanceof Error && error.message === "LAUNCHER_PROJECT_NOT_SELECTED");
 }
-type LauncherWindowActions = { returnToDesktop?: () => Promise<void>; selectProject?: () => Promise<{ connected: boolean }> };
+type LauncherWindowActions = { returnToDesktop?: () => Promise<void>; selectProject?: () => Promise<{ connected: boolean }>; openWorkbenchConfig?: () => Promise<unknown> };
 function launcherWindowActions(): LauncherWindowActions {
   const bridge = (globalThis as { vibelutionLauncher?: LauncherWindowActions }).vibelutionLauncher;
   if (!bridge) throw new Error("请在桌面 Launcher 中使用此操作。");
@@ -51,6 +51,17 @@ export function selectLauncherProject(): Promise<{ connected: boolean }> {
   const bridge = launcherWindowActions();
   if (!bridge.selectProject) return Promise.reject(new Error("当前 Launcher 需要更新后才能选择项目。"));
   return bridge.selectProject();
+}
+/**
+ * Open the managed Workbench window on the fixed /config model-connection page.
+ * The settings entry must stay usable while the assistant model is down, so it
+ * never routes through the assistant conversation; older desktop shells without
+ * the bridge degrade to an explicit update prompt like returnToDesktop.
+ */
+export function openLauncherModelConnection(): Promise<void> {
+  const bridge = launcherWindowActions();
+  if (!bridge.openWorkbenchConfig) return Promise.reject(new Error("当前 Launcher 需要更新后才能打开模型连接。"));
+  return bridge.openWorkbenchConfig().then(() => undefined);
 }
 
 /**

@@ -217,6 +217,20 @@ describe("Electron main Launcher IPC facade", () => {
     expect(handlerSource).not.toContain("trustedIpcOrigins()");
   });
 
+  it("registers the launcher-control-only workbench config verb with a fixed /config target", () => {
+    const handlerStart = mainSource.indexOf("IPC_CHANNELS.openWorkbenchConfig");
+    const handlerEnd = mainSource.indexOf("});", handlerStart);
+    const handlerSource = mainSource.slice(handlerStart, handlerEnd);
+    expect(handlerSource).toContain("isTrustedLauncherControlFrame(event)");
+    expect(handlerSource).toContain('workbenchPath: "/config"');
+    expect(handlerSource).not.toContain("payload.workbenchPath");
+    const implStart = mainSource.indexOf("payload.workbenchPath");
+    expect(implStart).toBeGreaterThan(-1);
+    const implSource = mainSource.slice(implStart, mainSource.indexOf("currentWorkbenchUrl = workbenchUrl;", implStart));
+    expect(implSource).toContain('payload.workbenchPath === "/config"');
+    expect(preloadSource).toContain("openWorkbenchConfig: () => ipcRenderer.invoke(IPC_CHANNELS.openWorkbenchConfig)");
+  });
+
   it("keeps the workbench sender away from Launcher control IPC", () => {
     expect(launcherWindowSource).toContain('"--vibelution-window-role=launcher-control"');
     expect(preloadSource).toContain('process.argv.includes("--vibelution-window-role=launcher-control")');

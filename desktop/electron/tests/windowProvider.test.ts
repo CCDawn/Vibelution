@@ -283,6 +283,21 @@ describe("main Workbench hidden presentation", () => {
     expect(state.focused).toBe(true);
   });
 
+  it("loads a deliberate deep-link target on the same origin, converges without loadTarget and stays idempotent", async () => {
+    const h = harness();
+    await h.provider.openOrFocusWorkbench("http://127.0.0.1:8000/");
+    expect(h.window.loadedUrls).toEqual(["http://127.0.0.1:8000/"]);
+    const state = await h.provider.openOrFocusWorkbench("http://127.0.0.1:8000/config", { loadTarget: true });
+    expect(h.window.loadedUrls).toEqual(["http://127.0.0.1:8000/", "http://127.0.0.1:8000/config"]);
+    expect(state.open).toBe(true);
+    // Same-target deep link does not reload the page the user is already on.
+    await h.provider.openOrFocusWorkbench("http://127.0.0.1:8000/config", { loadTarget: true });
+    expect(h.window.loadedUrls).toHaveLength(2);
+    // Plain open/focus convergence keeps the current deep-link page (SCI-049).
+    await h.provider.openOrFocusWorkbench("http://127.0.0.1:8000/");
+    expect(h.window.loadedUrls).toHaveLength(2);
+  });
+
   it("keeps a failed hidden navigation and its waiting page unpresented, with normal retry still presenting", async () => {
     const h = harness(new FakeWindow(42, "", 4242, true, new Error("ERR_CONNECTION_REFUSED")));
     await expect(h.provider.openOrFocusWorkbench("http://127.0.0.1:8002/", { present: false })).rejects.toThrow("ERR_CONNECTION_REFUSED");
@@ -2507,6 +2522,7 @@ describe("IPC channels", () => {
       "openConversationFromPet",
       "openExternalUrl",
       "openPath",
+      "openWorkbenchConfig",
       "readThemeAuthority",
       "refreshLauncherState",
       "requestDesktopShellExit",
