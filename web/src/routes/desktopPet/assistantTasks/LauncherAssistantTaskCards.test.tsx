@@ -179,6 +179,40 @@ describe("task card facts and cleanup confirmation", () => {
     await act(async () => { resolveRows(rows); }); await settle();
   });
 
+  it("keeps public Agent names when task and team observations open together", async () => {
+    status.teamRunsVersion = 1;
+    let teamReading = false;
+    let finishTeam!: () => void;
+    teamReply = () => {
+      teamReading = true;
+      return new Promise(resolve => { finishTeam = () => { teamReading = false; resolve(teamPage([])); }; });
+    };
+    // Native optional names yield while a team read owns the project reader.
+    dispatchReply = async () => {
+      await Promise.resolve();
+      return [row({ title: "", agentName: teamReading ? undefined : "报告 Agent",
+        receipt: { taskId: "native-1", status: "failed" } })];
+    };
+    await render();
+    await act(async () => { finishTeam(); }); await settle();
+    expect(container.querySelector("article")?.textContent).toContain("报告 Agent · 执行失败");
+  });
+
+  it("does not start a queued native read after the task view becomes hidden", async () => {
+    status.teamRunsVersion = 1;
+    let finishTeam!: () => void;
+    teamReply = () => new Promise(resolve => { finishTeam = () => resolve(teamPage([])); });
+    await render();
+    // A running dispatch poll can queue while a slow team read is pending.
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_001); });
+    expect(client.getQueryState(["launcher-assistant", "task-cards", "assistant-1", "session-1"])?.fetchStatus).toBe("fetching");
+    const readsBeforeHide = dispatchReads();
+    visibility = "hidden";
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    await act(async () => { finishTeam(); }); await settle();
+    expect(dispatchReads()).toBe(readsBeforeHide);
+  });
+
   it("previews actual bytes and retention before confirmation; cancel sends no deletion", async () => {
     terminal(); await render();
     await previewCleanup();

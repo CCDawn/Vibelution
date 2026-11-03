@@ -8,6 +8,7 @@ import { LauncherTaskCleanupDialog } from "./LauncherTaskCleanupDialog";
 import { LauncherAssistantTaskDetail } from "./LauncherAssistantTaskDetail";
 import { LauncherTaskContext, type TaskReviewRequest } from "./LauncherTaskContext";
 import { LauncherAssistantTaskSidebar } from "./LauncherAssistantTaskSidebar";
+import { readLauncherAssistantTaskSource } from "../launcherAssistantTaskReads";
 
 const PAGE_SIZE=10;
 type Props={lang?:"zh"|"en";routePath?:string;children?:ReactNode;onReview?:(task:AssistantTask)=>void;onApproval?:(task:AssistantDispatchTask)=>void;onOpenConversation?:()=>void};
@@ -64,6 +65,8 @@ export function LauncherAssistantTaskCards({onReview,onApproval,onOpenConversati
   const reading = visible && status.isSuccess && identityConfirmed;
   activeView.current.identity = identityConfirmed ? identity : "";
   activeView.current.canAct = reading;
+  const canReadSource = () => document.visibilityState !== "hidden" && activeView.current.mounted
+    && activeView.current.canAct && activeView.current.identity === identity;
   useEffect(()=>{if(!identityConfirmed){setSelection(null);setReviewRequest(null);}},[identityConfirmed,identity]);
   const teamSupported = identityConfirmed && status.data?.teamRunsVersion === 1;
   const teamEnabled = reading && teamSupported;
@@ -72,7 +75,7 @@ export function LauncherAssistantTaskCards({onReview,onApproval,onOpenConversati
     queryKey: ["launcher-assistant", "task-cards", agentId, sessionId],
     queryFn: async ({ signal }) => {
       signal.throwIfAborted();
-      const result = await getLauncherAssistantDispatches();
+      const result = await readLauncherAssistantTaskSource(identity, signal, getLauncherAssistantDispatches, canReadSource);
       signal.throwIfAborted();
       return result;
     },
@@ -86,7 +89,8 @@ export function LauncherAssistantTaskCards({onReview,onApproval,onOpenConversati
     queryKey: teamQueryKey,
     queryFn: async ({ signal, pageParam }) => {
       signal.throwIfAborted();
-      const result = await getLauncherAssistantTeamRuns({ agentId, directSessionId: sessionId }, pageParam);
+      const result = await readLauncherAssistantTaskSource(identity, signal,
+        () => getLauncherAssistantTeamRuns({ agentId, directSessionId: sessionId }, pageParam), canReadSource);
       signal.throwIfAborted();
       const previous = queryClient.getQueryData<InfiniteData<AssistantTeamRunObservationPage>>(teamQueryKey);
       return retainAssistantTeamRunDisplay(result, previous?.pages ?? []);

@@ -56,6 +56,7 @@ import { activeTurnLayerToConversationMessage, createLauncherAssistantStream } f
 import type { ActiveTurnLayerState } from "../chatActiveTurnLayer";
 import { mergeSessionDetailMessageWindow } from "../chatSessionState";
 import { loadLauncherComposer, restoreLauncherComposerAttachments, saveLauncherComposer } from "./launcherAssistantComposerStorage";
+import { readLauncherAssistantTaskSource } from "./launcherAssistantTaskReads";
 
 const COPY = {
   zh: {
@@ -453,10 +454,15 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     setAcceptedTurnId(turnId);
     setFeedback("");
   }, [client, detail.data, sessionId]);
+  const dispatchReadIdentity = JSON.stringify([assistantAgentId, sessionId, epoch]);
+  const readableDispatch = useRef("");
+  readableDispatch.current = reading ? dispatchReadIdentity : "";
   const dispatches = useQuery({
     queryKey: ["launcher-assistant", "dispatches", epoch],
     queryFn: async ({ signal }) => {
-      const result = await getLauncherAssistantDispatches();
+      const result = await readLauncherAssistantTaskSource(JSON.stringify([assistantAgentId, sessionId]), signal,
+        getLauncherAssistantDispatches, () => mounted.current && document.visibilityState !== "hidden"
+          && readableDispatch.current === dispatchReadIdentity);
       signal.throwIfAborted();
       // Same 50-row ceiling as the personal-assistant dispatch feed; the host
       // request shape owns no limit field, so the route bounds what it retains.
