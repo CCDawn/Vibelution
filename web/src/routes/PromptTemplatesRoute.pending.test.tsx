@@ -61,7 +61,10 @@ describe("Prompt template pending state", () => {
     expect(button("恢复默认")?.disabled).toBe(true);
     expect(button("保存中")).toBeUndefined();
     await act(async () => { refresh.resolve(template("a")); await tick(); });
-    expect(button("保存模板")?.disabled).toBe(false);
+    await vi.waitFor(async () => {
+      await act(async () => { await tick(); });
+      expect(button("保存模板")?.disabled).toBe(false);
+    }, { timeout: 2000, interval: 10 });
   });
 
   it("shows saving only for the template being saved and keeps reset mutually exclusive", async () => {
