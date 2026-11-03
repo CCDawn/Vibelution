@@ -311,18 +311,32 @@ def existing_migration_file_lock(path: Path, *, timeout=0):
 
 
 def read_stable_file(path: Path, max_bytes: int, expected: tuple | None = None) -> FileSnapshot:
+    return _read_stable_file(path, max_bytes, expected)
+
+
+def _pinned_child_identity(path: Path) -> tuple:
+    value = path.lstat()
+    if stat.S_ISLNK(value.st_mode) or getattr(value, "st_file_attributes", 0) & 0x400:
+        raise MigrationIOError("linked_source")
+    return _stamp(value)
+
+
+def _read_stable_file(path: Path, max_bytes: int, expected: tuple | None = None, *, source_reader=None) -> FileSnapshot:
     if type(max_bytes) is not int or not 0 <= max_bytes <= 16 * 1024 * 1024:
         raise MigrationIOError("invalid_source_budget")
     try:
-        path = check_path(path)
-        before = path_identity(path)
+        path = check_path(path) if source_reader is None else validate_path(path)
+        identity = path_identity if source_reader is None else _pinned_child_identity
+        before = identity(path)
         if not stat.S_ISREG(before[5]) or before[6] != 1:
             raise MigrationIOError("source_type_or_link_invalid")
         if expected is not None and before != expected:
             raise MigrationIOError("source_changed")
         if before[2] > max_bytes:
             raise MigrationIOError("file_byte_limit")
-        if os.name == "nt":
+        if source_reader is not None:
+            raw = source_reader(path, max_bytes)
+        elif os.name == "nt":
             from core.web.services.personal_assistant_project.windows_read import read_source_bytes
             raw = read_source_bytes(Path(path.anchor), path, max_bytes)
         else:
@@ -332,14 +346,45 @@ def read_stable_file(path: Path, max_bytes: int, expected: tuple | None = None) 
                 raw = stream.read(max_bytes + 1)
                 if _stamp(os.fstat(stream.fileno())) != before:
                     raise MigrationIOError("source_changed")
-        check_path(path)
-        if len(raw) != before[2] or len(raw) > max_bytes or path_identity(path) != before:
+        if source_reader is None:
+            check_path(path)
+        if len(raw) != before[2] or len(raw) > max_bytes or identity(path) != before:
             raise MigrationIOError("source_changed")
     except (OSError, ValueError) as error:
         if isinstance(error, MigrationIOError):
             raise
         raise MigrationIOError("source_unavailable_or_changed") from None
     return FileSnapshot(path, raw, hashlib.sha256(raw).hexdigest(), before)
+
+
+@contextmanager
+def stable_directory_reader(directory: Path):
+    """Read immediate children with a scope-bound Windows ancestor lease.
+
+    Per-file identity, expected stamp, digest and byte limits retain the stable
+    reader contract. Collection completeness remains the caller's non-atomic
+    observation; files may change between separate reads.
+    """
+    directory = check_path(Path(directory))
+    with ExitStack() as stack:
+        source_reader = None
+        if os.name == "nt":
+            from core.web.services.personal_assistant_project.windows_read import source_directory_reader
+            source_reader = stack.enter_context(source_directory_reader(Path(directory.anchor), directory))
+        active = True
+
+        def read(path: Path, max_bytes: int, expected: tuple | None = None) -> FileSnapshot:
+            if not active:
+                raise MigrationIOError("source_reader_scope_closed")
+            path = validate_path(path)
+            if path.parent != directory:
+                raise MigrationIOError("source_not_immediate_child")
+            return _read_stable_file(path, max_bytes, expected, source_reader=source_reader)
+
+        try:
+            yield read
+        finally:
+            active = False
 
 
 def verify_snapshot(snapshot: FileSnapshot) -> None:

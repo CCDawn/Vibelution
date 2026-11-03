@@ -12,7 +12,7 @@ import ctypes
 from ctypes import wintypes
 import os
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 
 
 _DIRECTORY = 0x10
@@ -167,23 +167,63 @@ def read_source_bytes(root: Path, path: Path, max_bytes: int) -> bytes:
     # directories only need rename protection; unrelated directory writers must
     # not make the requested file transiently unreadable.
     with _locked_source(root, path, directory=False, allow_child_replacement=True) as (api, handle, info):
-        size = (info.size_high << 32) | info.size_low
-        if size > max_bytes:
+        return _read_handle_bytes(api, handle, info, path, max_bytes)
+
+
+def _read_handle_bytes(api, handle, info, path: Path, max_bytes: int) -> bytes:
+    size = (info.size_high << 32) | info.size_low
+    if size > max_bytes:
+        raise ValueError("Source file exceeds the byte budget.")
+    chunks = []
+    total = 0
+    while True:
+        buffer = ctypes.create_string_buffer(min(65536, max_bytes - total + 1))
+        count = wintypes.DWORD()
+        if not api.ReadFile(handle, buffer, len(buffer), ctypes.byref(count), None):
+            raise ctypes.WinError(ctypes.get_last_error())
+        if not count.value:
+            break
+        total += count.value
+        if total > max_bytes:
             raise ValueError("Source file exceeds the byte budget.")
-        chunks = []
-        total = 0
-        while True:
-            buffer = ctypes.create_string_buffer(min(65536, max_bytes - total + 1))
-            count = wintypes.DWORD()
-            if not api.ReadFile(handle, buffer, len(buffer), ctypes.byref(count), None):
+        chunks.append(buffer.raw[:count.value])
+    final = _verify(api, handle, Path(path), directory=False)
+    if ((final.size_high << 32) | final.size_low) != size or total != size:
+        raise ValueError("Source changed during its verified read.")
+    return b"".join(chunks)
+
+
+@contextmanager
+def source_directory_reader(root: Path, directory: Path) -> Iterator[Callable[[Path, int], bytes]]:
+    """Reuse one pinned ancestor chain for immediate-child reads in this scope.
+
+    Child replacement between reads remains allowed. Each opened file retains
+    the single-file reader's deny-write/delete sharing and physical checks;
+    this lease does not create an atomic directory or content snapshot.
+    """
+    root, directory = _validated_paths(root, directory)
+    with _locked_source(root, directory, directory=True, allow_child_replacement=True) as (api, _handle, _info):
+        active = True
+
+        def read(path: Path, max_bytes: int) -> bytes:
+            if not active:
+                raise ValueError("Source directory reader scope has ended.")
+            if type(max_bytes) is not int or not 0 <= max_bytes <= 16 * 1024 * 1024:
+                raise ValueError("Invalid source byte budget.")
+            _, path = _validated_paths(directory, path)
+            if path.parent != directory:
+                raise ValueError("Source must be an immediate child of the pinned directory.")
+            handle = api.CreateFileW(str(path), _GENERIC_READ, _SHARE_READ, None, _OPEN_EXISTING,
+                                     _OPEN_REPARSE_POINT | _BACKUP_SEMANTICS, None)
+            if handle == _INVALID_HANDLE or handle is None:
                 raise ctypes.WinError(ctypes.get_last_error())
-            if not count.value:
-                break
-            total += count.value
-            if total > max_bytes:
-                raise ValueError("Source file exceeds the byte budget.")
-            chunks.append(buffer.raw[:count.value])
-        final = _verify(api, handle, Path(path), directory=False)
-        if ((final.size_high << 32) | final.size_low) != size or total != size:
-            raise ValueError("Source changed during its verified read.")
-        return b"".join(chunks)
+            try:
+                info = _verify(api, handle, path, directory=False)
+                return _read_handle_bytes(api, handle, info, path, max_bytes)
+            finally:
+                api.CloseHandle(handle)
+
+        try:
+            yield read
+        finally:
+            active = False

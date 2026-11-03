@@ -10,41 +10,51 @@ import { refreshUpdateFreshness, UPDATE_FRESHNESS_INTERVAL_MS, UPDATE_FRESHNESS_
 
 export function LauncherUpdateTopbar({ lang }: { lang: "zh" | "en" }) {
   const zh = lang === "zh";
-  const [accepted, setAccepted] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const updateLock = useRef(false);
   const queryClient = useQueryClient();
-  useUpdateFreshnessFocus(queryClient, !confirming && !accepted);
+  const updateAttempts = useMutationState({ filters: { mutationKey: LAUNCHER_UPDATE_MUTATION_KEY }, select: (mutation) => mutation.state });
+  const lastAttempt = updateAttempts.at(-1);
+  const acceptedAt = lastAttempt?.status === "success"
+    ? (lastAttempt.data as { acceptedAt?: number } | undefined)?.acceptedAt ?? lastAttempt.submittedAt : null;
+  useUpdateFreshnessFocus(queryClient, !confirming && !updateLock.current);
   const freshnessQuery = useQuery({
     ...UPDATE_FRESHNESS_QUERY_OPTIONS,
     queryKey: queryKeys.launcherFreshness(),
     queryFn: getLauncherFreshness,
-    refetchInterval: confirming || accepted || updateLock.current ? false : UPDATE_FRESHNESS_INTERVAL_MS,
-    refetchOnWindowFocus: confirming || accepted ? false : "always",
+    // Acceptance schedules the replacement; only a later native read can
+    // establish that it finished or returned to idle without replacing us.
+    refetchInterval: (query) => confirming || updateLock.current ? false
+      : acceptedAt !== null && (query.state.dataUpdatedAt <= acceptedAt || query.state.data?.updateInProgress !== false)
+        ? 5_000 : UPDATE_FRESHNESS_INTERVAL_MS,
+    refetchOnWindowFocus: confirming || updateLock.current ? false : "always",
     retry: false,
   });
-  const updateAttempts = useMutationState({ filters: { mutationKey: LAUNCHER_UPDATE_MUTATION_KEY }, select: (mutation) => mutation.state });
-  const lastAttempt = updateAttempts.at(-1);
   const updateMutation = useMutation({
     mutationKey: LAUNCHER_UPDATE_MUTATION_KEY,
     mutationFn: async () => {
       const result = await restartLatestLauncher();
       if (!result.accepted) throw new Error(result.message || (zh ? "更新未被接受，请重新检测。" : "Update was not accepted. Check again."));
-      return result;
+      return { ...result, acceptedAt: Date.now() };
     },
-    onSuccess: () => setAccepted(true),
     onSettled: () => { updateLock.current = false; void refreshUpdateFreshness(queryClient); },
   });
 
   const freshness = freshnessQuery.data;
   const hasUpdate = isLauncherUpdateAvailable(freshness);
-  const busy = updateMutation.isPending || accepted || lastAttempt?.status === "pending" || lastAttempt?.status === "success" || freshness?.updateInProgress === true;
-  const failure = (lastAttempt?.status === "error" && lastAttempt.error instanceof Error ? lastAttempt.error.message : "") || freshness?.refreshError || "";
+  const settledAfterAcceptance = acceptedAt !== null && !freshnessQuery.isError
+    && freshnessQuery.dataUpdatedAt > acceptedAt && freshness?.updateInProgress === false;
+  const awaitingReplacement = acceptedAt !== null && !settledAfterAcceptance;
+  const busy = updateMutation.isPending || lastAttempt?.status === "pending" || awaitingReplacement || freshness?.updateInProgress === true;
+  const failure = (lastAttempt?.status === "error" && lastAttempt.error instanceof Error ? lastAttempt.error.message : "") || freshness?.refreshError
+    || (awaitingReplacement && freshnessQuery.isError ? (zh ? "暂时无法确认更新状态，请重新检测。" : "Update status is unavailable. Please check again.") : "")
+    || (settledAfterAcceptance && hasUpdate ? (zh ? "更新未完成，Launcher 仍在运行旧版本。请重试。" : "The update did not finish. Launcher is still running the previous version. Please retry.") : "");
   const unknown = freshnessQuery.isError || (!hasUpdate && freshness?.current !== true);
   const checking = freshnessQuery.isFetching && unknown;
   const active = freshness?.activeWorkState === "active";
   const taskUnknown = freshness?.activeWorkState !== "idle" && !active;
-  const status = busy ? (zh ? "准备中" : "Preparing")
+  const status = awaitingReplacement && freshnessQuery.isError ? (zh ? "无法确认更新状态" : "Update status unavailable")
+    : busy ? (zh ? "准备中" : "Preparing")
     : checking ? (zh ? "正在检测" : "Checking")
       : unknown ? (zh ? "无法确认版本" : "Version unavailable")
         : failure ? (zh ? "更新失败" : "Update failed")
@@ -66,10 +76,11 @@ export function LauncherUpdateTopbar({ lang }: { lang: "zh" | "en" }) {
       {busy || (!unknown && (hasUpdate || failure))
         ? <VButton variant="primary" isPending={busy} isDisabled={busy} onPress={() => setConfirming(true)}>{busy ? (zh ? "准备中…" : "Preparing…") : failure ? (zh ? "重试更新" : "Retry update") : (zh ? "更新并重启" : "Update and restart")}</VButton>
         : <VButton variant="primary" isPending={freshnessQuery.isFetching} onPress={() => { void refreshUpdateFreshness(queryClient); }}>{zh ? "重新检测" : "Check again"}</VButton>}
+      {awaitingReplacement && freshnessQuery.isError ? <VButton isPending={freshnessQuery.isFetching} onPress={() => { void refreshUpdateFreshness(queryClient); }}>{zh ? "重新检测" : "Check again"}</VButton> : null}
     </div>
     <VConfirmDialog open={confirming} onOpenChange={setConfirming} title={zh ? "更新并重启？" : "Update and restart?"} description={notice} confirmLabel={zh ? "确认更新" : "Confirm update"} cancelLabel={zh ? "取消" : "Cancel"} onConfirm={() => {
       setConfirming(false);
-      if (updateLock.current || accepted || lastAttempt?.status === "pending" || lastAttempt?.status === "success") return;
+      if (updateLock.current || busy) return;
       updateLock.current = true;
       updateMutation.mutate();
     }} />

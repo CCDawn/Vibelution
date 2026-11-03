@@ -700,12 +700,87 @@ def test_corrupt_records_consume_the_source_byte_budget(env, monkeypatch):
         path.write_bytes(b"{" * 12)
     original = operations._json
     reads = []
-    def counted(path, max_bytes=2 * 1024 * 1024):
+    def counted(path, max_bytes=2 * 1024 * 1024, **kwargs):
         reads.append(path.name)
-        return original(path, max_bytes)
+        return original(path, max_bytes, **kwargs)
     monkeypatch.setattr(operations, "_json", counted)
     page = operations.read_operations(env.gateway, {"kind": "runtime_task"})
     assert reads == ["bad-a.json"] and page["coverage"][0]["state"] == "partial"
+
+
+def test_scan_reuses_one_directory_scope_without_repair_or_index_filter(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+    from core.assistant_runtime import migration_io
+    folder = tmp_path / "runs"
+    folder.mkdir()
+    expected = [{"runId": f"turn-{number}", "status": "completed"} for number in range(3)]
+    for row in expected:
+        write(folder / (row["runId"] + ".json"), row)
+    real_scope = migration_io.stable_directory_reader
+    entered, reads, escaped = [], [], []
+
+    @contextmanager
+    def counted(directory):
+        entered.append(directory)
+        with real_scope(directory) as reader:
+            escaped.append(reader)
+            def read(path, max_bytes, expected=None):
+                reads.append(path.name)
+                return reader(path, max_bytes, expected)
+            yield read
+
+    monkeypatch.setattr(migration_io, "stable_directory_reader", counted)
+    rows, complete = operations._scan(folder, key="runId")
+    assert rows == expected and complete is True
+    assert entered == [folder]
+    assert reads == [f"turn-{number}.json" for number in range(3)]
+    assert sorted(path.name for path in folder.iterdir()) == reads
+    with pytest.raises(migration_io.MigrationIOError, match="source_reader_scope_closed"):
+        escaped[0](folder / "turn-0.json", 32)
+
+
+def test_scan_directory_change_preserves_valid_rows_with_partial_coverage(tmp_path, monkeypatch):
+    from core.assistant_runtime import migration_io
+    folder = tmp_path / "runs"
+    folder.mkdir()
+    write(folder / "turn-a.json", {"runId": "turn-a"})
+    real_json, real_identity = operations._json, migration_io.path_identity
+    changed = []
+
+    def read_then_change(path, max_bytes, **kwargs):
+        row = real_json(path, max_bytes, **kwargs)
+        write(folder / "turn-late.json", {"runId": "turn-late"})
+        changed.append(True)
+        return row
+
+    def identity(path):
+        value = real_identity(path)
+        # Model the existing directory-stamp change deterministically, without
+        # adding any new cross-file snapshot guarantee to the scan.
+        return (*value, bool(changed)) if path == folder else value
+
+    monkeypatch.setattr(operations, "_json", read_then_change)
+    monkeypatch.setattr(migration_io, "path_identity", identity)
+    rows, complete = operations._scan(folder, key="runId")
+    assert rows == [{"runId": "turn-a"}] and complete is False
+
+
+def test_batch_scan_preserves_all_active_pagination_and_snapshot_fence(env, monkeypatch):
+    install_queue_inventory(env, monkeypatch)
+    folder = env.work.runs_dir("chat_turn")
+    write(folder / "turn-a.json", {"runId": "turn-a", "sessionId": "session-a", "status": "completed"})
+    write(folder / "turn-b.json", {"runId": "turn-b", "sessionId": "session-b", "status": "running"})
+    first = operations.read_operations(env.gateway, {"kind": "session_turn", "state": "all", "limit": 1})
+    next_page = operations.read_operations(env.gateway, {"kind": "session_turn", "state": "all", "limit": 1,
+        "offset": 1, "expected_snapshot": first["snapshot"]})
+    assert first["total"] == next_page["total"] == 2
+    assert [first["operations"][0]["resourceId"], next_page["operations"][0]["resourceId"]] == ["turn-a", "turn-b"]
+    active = operations.read_operations(env.gateway, {"kind": "session_turn", "state": "active"})
+    assert active["total"] == 1 and active["operations"][0]["resourceId"] == "turn-b"
+    write(folder / "turn-b.json", {"runId": "turn-b", "sessionId": "session-b", "status": "completed"})
+    with pytest.raises(ManagementError, match="RUNTIME_SNAPSHOT_CHANGED"):
+        operations.read_operations(env.gateway, {"kind": "session_turn", "state": "all", "limit": 1,
+            "offset": 1, "expected_snapshot": first["snapshot"]})
 
 
 def test_stale_session_revision_and_native_turn_replacement_cannot_stop_new_turn(env, monkeypatch):
