@@ -295,6 +295,229 @@ async def test_management_legacy_subject_retains_original_scope_set(tmp_path, mo
     assert "sessions:pin" not in client._state["management"]["scopes"]
 
 
+@pytest.fixture
+def management_agent_client(tmp_path, monkeypatch):
+    _runtime_state(tmp_path)
+    binding = {"projectId": "project-1", "instanceId": "instance-1"}
+    saved = {"clientId": "saved_client_1234567890", "binding": binding,
+        "subjectId": "ops-1234567890abcdef", "capability": "a" * 48,
+        "scopes": ["agents:read", "agents:update"]}
+    path = tmp_path / "credentials.json"
+    path.write_text(json.dumps({"projectRoot": str(tmp_path.resolve()), "management": saved}), encoding="utf-8")
+    state = {"calls": [], "saves": [], "binding": deepcopy(binding), "status": 200,
+        "payload": {"agent": {"agentId": "agent-1", "name": "Visible"}}}
+    ordinary = _transport(tmp_path, [])
+
+    def handler(request):
+        if not request.url.path.startswith("/api/v1/launcher-assistant-management/"):
+            return ordinary.handle_request(request)
+        state["calls"].append(request)
+        if request.url.path.endswith("/binding"):
+            if "binding_error" in state:
+                return httpx.Response(403, json={"detail": {"code": state["binding_error"]}})
+            return httpx.Response(200, json=state.get("binding_response", {"protocolVersion": 1, "binding": state["binding"]}))
+        if request.url.path.endswith("/subjects/bind"):
+            body = json.loads(request.content)
+            return httpx.Response(200, json={"protocolVersion": 1, "binding": state["binding"],
+                "subject_id": saved["subjectId"], "subject_capability": saved["capability"], "scopes": body["scopes"]})
+        assert request.url.path.endswith("/agents/agent-1")
+        assert request.headers["X-Vibelution-Management-Subject"] == saved["subjectId"]
+        assert request.headers["X-Vibelution-Management-Capability"] == saved["capability"]
+        return httpx.Response(state["status"], json=state["payload"])
+
+    client = ManagedAgentBackendClient(tmp_path, state_path=path, transport=httpx.MockTransport(handler))
+    save = client._save_state_locked
+
+    def record_save():
+        state["saves"].append(deepcopy(client._state["management"]))
+        save()
+
+    monkeypatch.setattr(client, "_save_state_locked", record_save)
+    return client, state
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("legacy_scopes", [False, True])
+async def test_management_agent_reuses_saved_grant_without_bind_or_save(management_agent_client, legacy_scopes):
+    client, state = management_agent_client
+    if legacy_scopes:
+        client._state["management"].pop("scopes")
+        client.state_path.write_text(json.dumps(client._state), encoding="utf-8")
+    original = deepcopy(client._state["management"])
+    persisted = client.state_path.read_bytes()
+
+    for _ in range(2):
+        result = await client.management_agent(agent_id="agent-1")
+        assert result["agent"]["agentId"] == "agent-1"
+
+    assert [(request.method, request.url.path.rsplit("/", 1)[-1]) for request in state["calls"]] == [
+        ("GET", "binding"), ("GET", "agent-1"), ("GET", "binding"), ("GET", "agent-1")]
+    assert state["saves"] == []
+    assert client._state["management"] == original
+    assert client.state_path.read_bytes() == persisted
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("missing", ["fresh", "clientId", "binding", "capability", "legacy-capability"])
+async def test_management_agent_incomplete_grant_keeps_original_bind_flow(management_agent_client, missing):
+    from core.external_agent.backend_client import _LEGACY_MANAGEMENT_SCOPES, _MANAGEMENT_SCOPES
+    client, state = management_agent_client
+    original = deepcopy(client._state["management"])
+    if missing == "fresh":
+        client._state["management"] = {}
+    elif missing == "legacy-capability":
+        client._state["management"].pop("capability")
+        client._state["management"].pop("scopes")
+    else:
+        client._state["management"].pop(missing)
+
+    assert (await client.management_agent(agent_id="agent-1"))["agent"]["agentId"] == "agent-1"
+    assert [(request.method, request.url.path.rsplit("/", 1)[-1]) for request in state["calls"]] == [
+        ("GET", "binding"), ("POST", "bind"), ("GET", "agent-1")]
+    body = json.loads(state["calls"][1].content)
+    assert body["expected_binding"] == original["binding"]
+    if missing in {"fresh", "clientId"}:
+        assert body["client_id"] != original["clientId"]
+    else:
+        assert body["client_id"] == original["clientId"]
+    assert body["scopes"] == (_MANAGEMENT_SCOPES if missing == "fresh" else
+        _LEGACY_MANAGEMENT_SCOPES if missing == "legacy-capability" else original["scopes"])
+    assert len(state["saves"]) == 2
+    assert state["saves"][0]["clientId"] == state["saves"][1]["clientId"] == body["client_id"]
+    assert json.loads(client.state_path.read_text(encoding="utf-8"))["management"] == client._state["management"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("complete", [False, True])
+async def test_management_agent_known_revoked_grant_never_remints(management_agent_client, complete):
+    client, state = management_agent_client
+    client._state["management"]["revoked"] = True
+    if not complete:
+        client._state["management"].pop("capability")
+    original = deepcopy(client._state["management"])
+    with pytest.raises(BackendClientError) as denied:
+        await client.management_agent(agent_id="agent-1")
+    assert denied.value.code == "SUBJECT_REVOKED"
+    assert state["calls"] == state["saves"] == []
+    assert client._state["management"] == original
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("patch,code", [
+    ({"clientId": "short"}, "UNKNOWN_MANAGEMENT_SUBJECT"),
+    ({"clientId": "invalid!client_1234567890"}, "UNKNOWN_MANAGEMENT_SUBJECT"),
+    *[({"scopes": scopes}, "UNKNOWN_MANAGEMENT_SUBJECT") for scopes in (
+        None, [], "agents:read", [1], ["unknown:scope"], ["agents:read", "agents:read"], ["agents:update", "agents:read"])],
+    ({"subjectId": "invalid-subject"}, "MANAGEMENT_IDENTITY_ROTATED"),
+    ({"capability": "invalid-capability"}, "MANAGEMENT_IDENTITY_ROTATED"),
+    ({"binding": {"projectId": "project-1"}}, "MANAGEMENT_IDENTITY_ROTATED"),
+])
+async def test_management_agent_malformed_grant_never_remints(management_agent_client, patch, code):
+    client, state = management_agent_client
+    client._state["management"].update(deepcopy(patch))
+    original = deepcopy(client._state["management"])
+    persisted = client.state_path.read_bytes()
+    with pytest.raises(BackendClientError) as denied:
+        await client.management_agent(agent_id="agent-1")
+    assert denied.value.code == code
+    assert state["calls"] == state["saves"] == []
+    assert client._state["management"] == original
+    assert client.state_path.read_bytes() == persisted
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("fault", ["invalid-json", "foreign-root", "invalid-management"])
+async def test_management_agent_unreadable_credentials_never_remints(management_agent_client, fault):
+    client, state = management_agent_client
+    payload = deepcopy(client._state)
+    if fault == "foreign-root":
+        payload["projectRoot"] = str(client.project_root / "foreign")
+    elif fault == "invalid-management":
+        payload["management"] = []
+    client.state_path.write_text("{" if fault == "invalid-json" else json.dumps(payload), encoding="utf-8")
+    persisted = client.state_path.read_bytes()
+    reloaded = ManagedAgentBackendClient(client.project_root, state_path=client.state_path, transport=client.transport)
+    with pytest.raises(BackendClientError) as denied:
+        await reloaded.management_agent(agent_id="agent-1")
+    assert denied.value.code == "UNKNOWN_MANAGEMENT_SUBJECT"
+    assert state["calls"] == state["saves"] == []
+    assert client.state_path.read_bytes() == persisted
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("field", ["projectId", "instanceId"])
+async def test_management_agent_binding_rotation_keeps_original_credentials(management_agent_client, field):
+    client, state = management_agent_client
+    original = deepcopy(client._state["management"])
+    persisted = client.state_path.read_bytes()
+    state["binding"][field] = "rotated"
+    with pytest.raises(BackendClientError) as denied:
+        await client.management_agent(agent_id="agent-1")
+    assert denied.value.code == "MANAGEMENT_IDENTITY_ROTATED"
+    assert "management_reset_credentials" in str(denied.value)
+    assert len(state["calls"]) == 1 and state["calls"][0].url.path.endswith("/binding")
+    assert state["saves"] == [] and client._state["management"] == original
+    assert client.state_path.read_bytes() == persisted
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("operation", ["agent", "original"])
+@pytest.mark.parametrize("response", [
+    {"protocolVersion": 2, "binding": {"projectId": "project-1", "instanceId": "instance-1"}},
+    {"binding": {"projectId": "project-1", "instanceId": "instance-1"}},
+    *[{"protocolVersion": 1, "binding": binding} for binding in (
+        None, [], {"projectId": "project-1"},
+        {"projectId": "project-1", "instanceId": "instance-1", "extra": "invalid"},
+        {"projectId": "", "instanceId": "instance-1"}, {"projectId": 1, "instanceId": "instance-1"},
+        {"projectId": "x" * 161, "instanceId": "instance-1"})],
+])
+async def test_management_agent_malformed_live_binding_keeps_error_semantics(management_agent_client, operation, response):
+    client, state = management_agent_client
+    original = deepcopy(client._state["management"])
+    state["binding_response"] = response
+    with pytest.raises(BackendClientError) as denied:
+        if operation == "agent":
+            await client.management_agent(agent_id="agent-1")
+        else:
+            await client._original_management_grant(require_original=False)
+    assert denied.value.code == ("BACKEND_PROTOCOL_ERROR" if operation == "agent" else "MANAGEMENT_IDENTITY_ROTATED")
+    assert len(state["calls"]) == 1 and state["calls"][0].url.path.endswith("/binding")
+    assert state["saves"] == [] and client._state["management"] == original
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("stage", ["binding", "agent"])
+@pytest.mark.parametrize("code", ["SUBJECT_REVOKED", "UNKNOWN_MANAGEMENT_SUBJECT", "SCOPE_DENIED", "RUNTIME_IDENTITY_MISMATCH"])
+async def test_management_agent_server_denial_never_rebinds(management_agent_client, stage, code):
+    client, state = management_agent_client
+    original = deepcopy(client._state["management"])
+    persisted = client.state_path.read_bytes()
+    if stage == "binding":
+        state["binding_error"] = code
+    else:
+        state.update(status=403, payload={"detail": {"code": code}})
+    with pytest.raises(BackendClientError) as denied:
+        await client.management_agent(agent_id="agent-1")
+    assert denied.value.code == code
+    assert len(state["calls"]) == (1 if stage == "binding" else 2)
+    assert all(request.method == "GET" for request in state["calls"])
+    assert state["saves"] == [] and client._state["management"] == original
+    assert client.state_path.read_bytes() == persisted
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("payload", [{}, {"agent": []}, {"agent": {"agentId": "other-agent"}}, []])
+async def test_management_agent_invalid_response_never_rebinds(management_agent_client, payload):
+    client, state = management_agent_client
+    original = deepcopy(client._state["management"])
+    state["payload"] = payload
+    with pytest.raises(BackendClientError) as denied:
+        await client.management_agent(agent_id="agent-1")
+    assert denied.value.code == "BACKEND_PROTOCOL_ERROR"
+    assert len(state["calls"]) == 2 and all(request.method == "GET" for request in state["calls"])
+    assert state["saves"] == [] and client._state["management"] == original
+
+
 @pytest.mark.anyio
 async def test_explicit_file_scope_is_accepted_only_as_saved_grant(tmp_path, monkeypatch):
     from core.external_agent.backend_client import _MANAGEMENT_SCOPES

@@ -364,7 +364,7 @@ class ManagedAgentBackendClient:
             self._save_state_locked()
         return {"reset": True}
 
-    async def _original_management_grant(self, *, require_original, require_complete=False):
+    async def _original_management_grant(self, *, require_original, require_complete=False, strict_binding_response=False):
         """Keep original credentials when an explicit upgrade changed server scopes.
 
         Rebinding an old scope list would conflict before its receipt could be
@@ -387,7 +387,12 @@ class ManagedAgentBackendClient:
                 or not isinstance(saved["capability"], str) or not re.fullmatch(r"[A-Za-z0-9_-]{32,256}", saved["capability"])):
                 raise ValueError("Invalid credentials")
             info = await self._request_json("GET", _MANAGEMENT_PREFIX + "/binding")
-            if info.get("protocolVersion") != 1 or Binding.model_validate(info.get("binding")).model_dump() != binding:
+            current_binding = info.get("binding")
+            if strict_binding_response and (info.get("protocolVersion") != 1 or not isinstance(current_binding, dict)
+                or set(current_binding) != {"projectId", "instanceId"} or any(
+                    not isinstance(value, str) or not value or len(value) > 160 for value in current_binding.values())):
+                raise BackendClientError("Invalid management binding.", code="BACKEND_PROTOCOL_ERROR")
+            if info.get("protocolVersion") != 1 or Binding.model_validate(current_binding).model_dump() != binding:
                 raise ValueError("Binding changed")
         except (ValidationError, ValueError, KeyError):
             raise BackendClientError(
@@ -443,7 +448,23 @@ class ManagedAgentBackendClient:
     async def management_agent(self, *, agent_id: str) -> dict[str, Any]:
         if not isinstance(agent_id, str) or not 1 <= len(agent_id) <= 128:
             raise BackendClientError("Invalid Agent identifier.", code="INVALID_MANAGEMENT_REQUEST")
-        grant = await self._management_grant(require_existing=False)
+        saved = self._state.get("management") or {}
+        if all(saved.get(key) for key in ("clientId", "binding", "subjectId", "capability")):
+            # Read with the original grant without persisting or rebinding it.
+            # Keep the ordinary handshake's local credential fences; the
+            # original-grant helper also serves revoked-receipt reconciliation.
+            if saved.get("revoked") is True:
+                raise BackendClientError("The original management subject was revoked.", code="SUBJECT_REVOKED")
+            if not re.fullmatch(r"[A-Za-z0-9_-]{20,128}", str(saved["clientId"])):
+                raise BackendClientError("Invalid management credential state.", code="UNKNOWN_MANAGEMENT_SUBJECT")
+            scopes = saved.get("scopes", _LEGACY_MANAGEMENT_SCOPES)
+            if (not isinstance(scopes, list) or not scopes
+                or any(not isinstance(scope, str) or scope not in _supported_management_scopes() for scope in scopes)
+                or scopes != sorted(set(scopes))):
+                raise BackendClientError("Invalid management scopes.", code="UNKNOWN_MANAGEMENT_SUBJECT")
+            grant = await self._original_management_grant(require_original=False, require_complete=True, strict_binding_response=True)
+        else:
+            grant = await self._management_grant(require_existing=False)
         result = await self._request_json("GET", f"{_MANAGEMENT_PREFIX}/agents/{quote(agent_id, safe='')}",
             management_auth=(grant["subjectId"], grant["capability"]))
         agent = result.get("agent")
