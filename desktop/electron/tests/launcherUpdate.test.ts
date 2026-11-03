@@ -56,7 +56,8 @@ describe("guarded local Launcher update", () => {
       // Exiting is simulated; no real windows or child processes are touched.
       setTimeout: (callback: () => void) => { callback(); },
       refresh: undefined as unknown as (operation: string) => Promise<boolean>,
-      restartLatest: undefined as unknown as (interrupt?: boolean, operation?: string, options?: { shellKind?: "packaged" | "unpackaged" }) => Promise<unknown>,
+      restartLatest: undefined as unknown as (interrupt?: boolean, operation?: string, options?: { shellKind?: "packaged" | "unpackaged";
+        launchRequest?: { launchRequestId: string; launchRequestOperation: string; receipt: { handoff(operation: string): void } } }) => Promise<unknown>,
       exitDesktop: undefined as unknown as () => Promise<void>,
     };
     Object.assign(sandbox, {
@@ -298,6 +299,42 @@ describe("guarded local Launcher update", () => {
     expect(await input.restartLatest()).toMatchObject({ accepted: true });
     expect(input.ensureLatestLauncher).toHaveBeenCalledTimes(2);
     expect(input.scheduleCurrentDesktopShellRefresh).toHaveBeenCalledOnce();
+  });
+
+  it("carries the original request through the helper without claiming READY on schedule", async () => {
+    const input = automaticRefreshHarness();
+    const launchRequest = { launchRequestId: "launch_" + "a".repeat(32), launchRequestOperation: "restart",
+      receipt: { handoff: vi.fn() } };
+    expect(await input.restartLatest(true, "start", { shellKind: "packaged", launchRequest })).toMatchObject({ accepted: true });
+    expect(launchRequest.receipt.handoff).toHaveBeenCalledExactlyOnceWith("start");
+    expect(input.scheduleCurrentDesktopShellRefresh).toHaveBeenCalledExactlyOnceWith("start", {
+      force: true, shellKind: "packaged", launchRequest
+    });
+  });
+
+  it.each(["write", "rename"])("keeps the original shell when durable handoff %s fails", async stage => {
+    const input = automaticRefreshHarness();
+    const launchRequest = { launchRequestId: "launch_" + "c".repeat(32), launchRequestOperation: "restart",
+      receipt: { handoff: vi.fn(() => { throw new Error(`LAUNCH_REQUEST_RECEIPT_PERSISTENCE_FAILED: handoff ${stage}`); }) } };
+    await expect(input.restartLatest(true, "restart", { shellKind: "packaged", launchRequest }))
+      .rejects.toThrow("LAUNCH_REQUEST_RECEIPT_PERSISTENCE_FAILED");
+    expect(input.scheduleCurrentDesktopShellRefresh).not.toHaveBeenCalled();
+    expect(input.app.exit).not.toHaveBeenCalled();
+    expect(input.shutdownApproved).toBe(false);
+    expect(input.shellRefreshInFlight).toBe(false);
+  });
+
+  it("does not attach an independent identified restart to an existing update", async () => {
+    const input = automaticRefreshHarness(); let finish!: () => void;
+    input.ensureLatestLauncher.mockImplementation(() => new Promise<void>(resolve => { finish = resolve; }));
+    const first = input.restartLatest(true, "restart");
+    await vi.waitFor(() => expect(input.ensureLatestLauncher).toHaveBeenCalledOnce());
+    const receipt = { handoff: vi.fn() };
+    expect(await input.restartLatest(true, "restart", { launchRequest: {
+      launchRequestId: "launch_" + "b".repeat(32), launchRequestOperation: "restart", receipt
+    } })).toMatchObject({ accepted: false, code: "launcher_update_in_progress" });
+    expect(receipt.handoff).not.toHaveBeenCalled();
+    finish(); await first;
   });
 
   it.each([

@@ -278,6 +278,66 @@ def test_verifier_resolves_the_admitted_root_once(package_fixture, monkeypatch, 
     assert resolutions == 1
 
 
+def test_builder_resolves_the_admitted_output_root_once(package_fixture, monkeypatch):
+    from scripts import build_assistant_runtime as builder
+
+    root = builder._io_path(package_fixture[-1])
+    original = Path.resolve
+    resolutions = 0
+
+    def resolve(path, *args, **kwargs):
+        nonlocal resolutions
+        if path == root:
+            resolutions += 1
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", resolve)
+    _build(package_fixture)
+    assert resolutions == 1
+
+
+@pytest.mark.parametrize("phase", ["copy", "verify"])
+def test_builder_rejects_output_ancestor_redirection_after_admission(
+    package_fixture, tmp_path, monkeypatch, phase,
+):
+    from scripts import build_assistant_runtime as builder
+
+    if builder.os.name != "nt":
+        pytest.skip("Directory junctions require Windows")
+    import _winapi
+
+    parent = tmp_path / "admitted-output-parent"
+    output = parent / "payload"
+    fixture = (*package_fixture[:3], output)
+    root = builder._io_path(output)
+    redirected = tmp_path / "redirected-output-parent"
+    original_checked, original_verify = builder._checked, builder._verify_files
+    changed = False
+
+    def redirect():
+        nonlocal changed
+        parent.rename(redirected)
+        _winapi.CreateJunction(str(redirected), str(parent))
+        changed = True
+
+    def checked(path, relative, **kwargs):
+        if phase == "copy" and path == root and not changed:
+            redirect()
+        return original_checked(path, relative, **kwargs)
+
+    def verify(path, manifest, **kwargs):
+        if phase == "verify" and path == root and not changed:
+            redirect()
+        return original_verify(path, manifest, **kwargs)
+
+    monkeypatch.setattr(builder, "_checked", checked)
+    monkeypatch.setattr(builder, "_verify_files", verify)
+    with pytest.raises(ValueError, match="path escapes its root"):
+        _build(fixture)
+    assert changed
+    assert not (output / "manifest.json").exists()
+
+
 @pytest.mark.parametrize("verify_content", [False, True])
 def test_verifier_rejects_ancestor_redirection_after_root_admission(
     package_fixture, tmp_path, monkeypatch, verify_content,

@@ -40,6 +40,7 @@ describe("Electron main startup sequence", () => {
     const open = vi.fn(async () => undefined);
     const sandbox = {
       desktopCliArgs,
+      startupMainLineLaunchRequest: undefined,
       pendingOpenWorkbenchRequest: desktopCliArgs.openWorkbench,
       pendingProjectRoot: "",
       windowProvider: {},
@@ -166,6 +167,7 @@ describe("initial workbench discovery and shell readiness", () => {
       paths: { workspaceRoot: "C:/repo" },
       desktopCliArgs: {},
       allowShellRefresh: true,
+      startupMainLineLaunchRequest: undefined,
       desktopEnvironment: () => ({ VIBELUTION_PYTHON_PATH: "C:/repo/python.exe" }),
       resolveWorkbenchUrlFromBridge: vi.fn((input: { signal: AbortSignal }) => {
         signal = input.signal;
@@ -341,6 +343,7 @@ describe("passive startup inventory", () => {
     const gate = new Promise<void>(resolve => { release = resolve; });
     const sandbox = {
       desktopCliArgs: parseDesktopCliArgs(command ? [command] : []),
+      startupMainLineLaunchRequest: undefined,
       pendingOpenWorkbenchRequest: false,
       pendingProjectRoot: "",
       windowProvider: {}, launcherBootstrap: {}, shutdownApproved: false,

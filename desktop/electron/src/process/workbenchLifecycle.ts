@@ -68,6 +68,8 @@ export type RunWorkbenchLifecycleInput = {
   /** Trusted in-process checks; not supplied by renderer payloads. */
   beforeExecute?: () => void;
   beforeSpawn?: () => void;
+  /** Feedback from the existing queue's trusted admission boundary. */
+  onCommand?: (commandId: string) => void;
   signal?: AbortSignal;
   queue?: MainLineCommandQueue;
   /**
@@ -141,6 +143,7 @@ export async function runWorkbenchLifecycle(input: RunWorkbenchLifecycleInput): 
     operation: input.operation,
     signal: input.signal,
     noBrowser: true,
+    ...(input.onCommand ? { onCommand: async (command) => { input.onCommand?.(command.commandId); } } : {}),
     execute: async (command) => {
       if (input.signal?.aborted) {
         throw new PythonJsonBridgeError("aborted", "workbench lifecycle was aborted before spawn");

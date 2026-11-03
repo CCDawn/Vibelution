@@ -196,7 +196,7 @@ def _checked(root: Path, relative: str, *, resolved_root: Path | None = None) ->
         target = target / part
         _reject_link(target)
     resolved_target = target.resolve()
-    # Verification passes the canonical root admitted by _trusted_root. Keep
+    # Build and verification pass the canonical root admitted by _trusted_root. Keep
     # that boundary fixed if a parent is redirected while files are checked.
     boundary = root.resolve() if resolved_root is None else resolved_root
     if not resolved_target.is_relative_to(boundary):
@@ -432,7 +432,7 @@ def build_launcher_assistant_payload(
     if sys.platform != "win32":
         raise ValueError("assistant runtime packaging currently requires a Windows build host")
     source_files = _source_files(project)
-    requirements_hash = _file_sha256(_checked(project, "requirements.txt"))
+    requirements_hash = _file_sha256(_checked(project, "requirements.txt", resolved_root=project))
     selected = _distributions(_runtime_requirements(project / "requirements.txt"), site)
     entries: dict[str, dict] = {}
     owners: dict[str, str] = {}
@@ -451,7 +451,7 @@ def build_launcher_assistant_payload(
             raise ValueError(f"payload input missing for {owner}: {relative}")
         if path.suffix == ".pth":
             _validate_pth(path, site, owner)
-        destination = _checked(output, relative)
+        destination = _checked(output, relative, resolved_root=output)
         destination.parent.mkdir(parents=True, exist_ok=True)
         digest = hashlib.sha256()
         record_hash, record_size = record if record is not None else ("", None)
@@ -486,17 +486,17 @@ def build_launcher_assistant_payload(
         copy(path, "source/" + path.relative_to(project).as_posix(), "product_source")
     required_binaries = ("python.exe", "pythonw.exe", "python3.dll", f"{python_name}.dll", "vcruntime140.dll")
     for name in required_binaries:
-        copy(_checked(base, name), "python/" + name, "cpython")
+        copy(_checked(base, name, resolved_root=base), "python/" + name, "cpython")
     for path in sorted(base.glob("*.dll")):
         if path.name not in required_binaries:
-            copy(_checked(base, path.name), "python/" + path.name, "cpython")
+            copy(_checked(base, path.name, resolved_root=base), "python/" + path.name, "cpython")
     licenses = sorted(path for path in base.glob("LICENSE*") if path.is_file())
     if not licenses:
         raise ValueError("required CPython LICENSE is missing")
     for path in licenses:
         copy(path, "python/" + path.name, "cpython_license")
     for name in ("Lib", "DLLs", "tcl"):
-        directory = _checked(base, name)
+        directory = _checked(base, name, resolved_root=base)
         if not directory.is_dir():
             if name == "tcl":
                 continue
@@ -504,7 +504,7 @@ def build_launcher_assistant_payload(
         for path in _walk(directory, skip={"site-packages", "__pycache__"}, skip_bytecode=True):
             copy(path, "python/" + path.relative_to(base).as_posix(), "cpython")
     for name, distribution, info in selected:
-        record_path = _checked(site, (info / "RECORD").relative_to(site).as_posix())
+        record_path = _checked(site, (info / "RECORD").relative_to(site).as_posix(), resolved_root=site)
         if not record_path.is_file():
             raise ValueError(f"installed distribution has no complete RECORD: {name}")
         records, duplicates = _coalesced_records(
@@ -551,10 +551,11 @@ def build_launcher_assistant_payload(
             record_size = int(size) if size else None
             if record_size is not None and record_size < 0:
                 raise ValueError(f"invalid RECORD size: {name}")
-            copy(_checked(site, relative), "python/Lib/site-packages/" + relative, name, (record_hash, record_size))
+            copy(_checked(site, relative, resolved_root=site), "python/Lib/site-packages/" + relative, name,
+                 (record_hash, record_size))
     pth_name = f"python/{python_name}._pth"
     pth = _PTH_CONTENT
-    _checked(output, pth_name).write_bytes(pth)
+    _checked(output, pth_name, resolved_root=output).write_bytes(pth)
     entries[pth_name] = {"path": pth_name, "size": len(pth), "sha256": _sha(pth)}
     files = [entries[key] for key in sorted(entries)]
     # A source writer may run during the longer dependency copy. Do not publish
@@ -582,7 +583,7 @@ def build_launcher_assistant_payload(
         "payloadContentSha256": _content_hash(files),
         "contractsSha256": contracts_entry["sha256"], "files": files,
     }
-    _verify_files(output, manifest)
+    _verify_files(output, manifest, resolved_root=output)
     content = _json_bytes(manifest)
     with (output / "manifest.json").open("xb") as handle:
         handle.write(content)

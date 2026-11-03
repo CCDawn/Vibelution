@@ -1445,9 +1445,8 @@ DEFAULT_LIFECYCLE_SETTLE_TIMEOUT_SECONDS = 90.0
 # reserves a separate 30s retry and 60s launch/exit margin within 900s.
 # Stop operations retain the shorter wait.
 DEFAULT_START_LIFECYCLE_SETTLE_TIMEOUT_SECONDS = 810.0
-# A second-instance signal can be dropped while the primary shell is stalled;
-# one bounded re-forward keeps the total inside the native bridge deadline.
-LAUNCH_SETTLEMENT_RETRY_TIMEOUT_SECONDS = 30.0
+MAIN_LINE_LAUNCH_ACK_TIMEOUT_SECONDS = 30.0
+# An unacknowledged forward is uncertain, never permission to run it again.
 _LIFECYCLE_REUSE_GRACE_SECONDS = 12.0
 _LIFECYCLE_SETTLE_POLL_SECONDS = 0.5
 _LIFECYCLE_SETTLE_EXIT_FAILED = 3
@@ -1529,6 +1528,7 @@ def _settlement_payload(
         "observed": observed,
         "settled": observed in {
             "launch_request_failed",
+            "launch_request_completed",
             "queue_settlement",
             "instance_registry_settlement",
             "reuse_backend_healthy",
@@ -1557,7 +1557,8 @@ def _launch_request_receipt_path(workspace_root: Path, request_id: str) -> Path 
     return _runtime_manager_dir_for(shell_root).parent / "launcher" / "launch-requests" / f"{request_id}.json"
 
 
-def _read_launch_request_receipt(workspace_root: Path, request_id: str, operation: str, *, receipt_path: Path | None = None) -> dict[str, object]:
+def _read_launch_request_receipt(workspace_root: Path, request_id: str, operation: str, *, receipt_path: Path | None = None,
+                                 not_before_epoch: float = 0.0) -> dict[str, object]:
     path = receipt_path or _launch_request_receipt_path(workspace_root, request_id)
     if path is None:
         return {}
@@ -1568,25 +1569,17 @@ def _read_launch_request_receipt(workspace_root: Path, request_id: str, operatio
         if (
             receipt.get("schemaVersion") != 1 or receipt.get("requestId") != request_id
             or receipt.get("operation") != operation
-            or receipt.get("status") not in {"received", "dispatched", "failed"}
+            or not str(receipt.get("projectRoot") or "").strip()
+            or receipt.get("status") not in {"received", "dispatched", "handoff", "completed", "failed"}
             or os.path.normcase(str(Path(str(receipt.get("projectRoot") or "")).resolve()))
             != os.path.normcase(str(workspace_root.resolve()))
         ):
             return {}
+        if not_before_epoch > 0.0 and _intent_updated_at_epoch(receipt) < not_before_epoch:
+            return {}
         return receipt
     except (OSError, ValueError):
         return {}
-
-
-@contextlib.contextmanager
-def _launch_request_receipt_scope(workspace_root: Path, request_id: str) -> Iterator[None]:
-    path = _launch_request_receipt_path(workspace_root, request_id) if request_id else None
-    try:
-        yield
-    finally:
-        if path is not None:
-            with contextlib.suppress(OSError):
-                path.unlink(missing_ok=True)
 
 
 def _capture_lifecycle_settlement_baseline(workspace_root: Path) -> dict[str, object]:
@@ -1779,7 +1772,7 @@ def wait_for_lifecycle_settlement(
         command_id = str(intent.get("commandId") or "").strip()
         intent_operation = str(intent.get("operation") or "").strip().lower()
         intent_epoch = _intent_updated_at_epoch(intent)
-        intent_is_fresh = not_before_epoch <= 0.0 or intent_epoch <= 0.0 or intent_epoch >= not_before_epoch - 2.0
+        intent_is_fresh = not_before_epoch <= 0.0 or intent_epoch >= not_before_epoch
         if command_id and command_id != baseline_command_id and intent_operation in variants and intent_is_fresh:
             results_path = runtime_manager_dir / "results" / f"{command_id}.json"
             while True:
@@ -1863,6 +1856,52 @@ def wait_for_lifecycle_settlement(
         sleep(_LIFECYCLE_SETTLE_POLL_SECONDS)
 
 
+def wait_for_main_line_launch_request(
+    workspace_root: Path, operation: str, request_id: str, *, baseline_command_id: str = "",
+    not_before_epoch: float, timeout_seconds: float, sleep=time.sleep, monotonic=time.monotonic,
+    acknowledgement_timeout_seconds: float = MAIN_LINE_LAUNCH_ACK_TIMEOUT_SECONDS,
+) -> dict[str, object]:
+    """Observe only this request; feedback never authorizes a lifecycle retry."""
+    path = _launch_request_receipt_path(workspace_root, request_id)
+    started_at = monotonic()
+    deadline = started_at + max(1.0, float(timeout_seconds))
+    acknowledgement_deadline = min(deadline, started_at + max(0.0, float(acknowledgement_timeout_seconds)))
+    received = False
+    last_receipt: dict[str, object] = {}
+    while True:
+        receipt = _read_launch_request_receipt(workspace_root, request_id, operation,
+            receipt_path=path, not_before_epoch=not_before_epoch)
+        if receipt:
+            received = True
+            last_receipt = receipt
+            status = str(receipt.get("status") or "")
+            if status == "failed":
+                return _settlement_payload(operation=operation, observed="launch_request_failed", accepted=False,
+                    code=str(receipt.get("code") or "launch_preparation_failed"),
+                    message=str(receipt.get("message") or "Launcher 生命周期请求失败。"))
+            if status == "completed":
+                command_id = str(receipt.get("commandId") or "")
+                completion = receipt.get("completion")
+                starts = operation in {"start", "restart", "rebuild-and-start"}
+                if (isinstance(completion, dict) and command_id and command_id != baseline_command_id
+                    and re.fullmatch(r"[A-Za-z0-9_-]+", command_id)
+                    and completion.get("commandId") == command_id
+                    and type(completion.get("ownerPid")) is int and completion["ownerPid"] > 0
+                    and completion.get("ownerPid") == receipt.get("shellPid")
+                    and (not starts or completion.get("ready") is True)
+                    and _intent_updated_at_epoch({"updatedAt": completion.get("readyAt")}) >= not_before_epoch
+                    and receipt.get("accepted") is True):
+                    return _settlement_payload(operation=operation, observed="launch_request_completed", accepted=True,
+                        command_id=command_id, message="Launcher 已完成本次请求并确认目标状态。")
+        if monotonic() >= deadline or (not received and monotonic() >= acknowledgement_deadline):
+            waited = timeout_seconds if received else min(timeout_seconds, acknowledgement_timeout_seconds)
+            return _settlement_payload(operation=operation,
+                observed="launch_request_unsettled" if received else "launch_request_unacknowledged", accepted=False,
+                command_id=str(last_receipt.get("commandId") or ""),
+                message=f"Launcher 请求 {request_id} 在 {int(waited)}s 内{'未完成' if received else '未收到确认，结果未知'}；未重新执行该请求。")
+        sleep(_LIFECYCLE_SETTLE_POLL_SECONDS)
+
+
 def _await_launch_lifecycle_settlement(
     args: argparse.Namespace,
     payload: dict[str, object],
@@ -1899,9 +1938,12 @@ def _await_launch_lifecycle_settlement(
             )} if request_id else {}),
         )
     else:
-        settlement = wait_for_lifecycle_settlement(
+        request_id = str(captured.get("launchRequestId") or "")
+        wait = wait_for_main_line_launch_request if request_id else wait_for_lifecycle_settlement
+        settlement = wait(
             workspace_root,
             lifecycle,
+            **({"request_id": request_id} if request_id else {}),
             baseline_command_id=str(captured.get("commandId") or ""),
             not_before_epoch=not_before_epoch,
             timeout_seconds=settle_timeout,
@@ -2148,6 +2190,9 @@ def _schedule_desktop_shell_refresh_bridge(args: argparse.Namespace) -> dict[str
         project_root=_workspace_root(args),
         python_executable=str(args.python_exe or sys.executable),
         force=bool(getattr(args, "force_refresh", False)),
+        shell_kind=str(getattr(args, "shell_kind", "") or ""),
+        **({"launch_request_id": args.launch_request_id,
+            "launch_request_operation": args.launch_request_operation} if args.launch_request_id else {}),
     )
     _append_log(
         "desktop_entry_python.desktop_shell.refresh_scheduled",
@@ -2166,6 +2211,8 @@ def _refresh_desktop_shell_bridge(args: argparse.Namespace) -> dict[str, object]
         then_lifecycle=str(args.then_lifecycle or ""),
         project_root=_workspace_root(args),
         shell_kind=str(getattr(args, "shell_kind", "") or ""),
+        **({"launch_request_id": args.launch_request_id,
+            "launch_request_operation": args.launch_request_operation} if args.launch_request_id else {}),
     )
     _append_log(
         "desktop_entry_python.desktop_shell.refreshed",
@@ -2222,81 +2269,33 @@ def _launch_desktop_shell_bridge(args: argparse.Namespace) -> dict[str, object]:
     baseline = _capture_lifecycle_settlement_baseline(workspace_root)
     request_id = (
         f"launch_{uuid.uuid4().hex}"
-        if baseline.get("kind") == "branch_instance" and str(args.then_lifecycle or "") in _LIFECYCLE_SETTLEMENT_OPERATION_VARIANTS
+        if str(args.then_lifecycle or "") in _LIFECYCLE_SETTLEMENT_OPERATION_VARIANTS
         else ""
     )
     if request_id:
         baseline["launchRequestId"] = request_id
-    with _launch_request_receipt_scope(workspace_root, request_id):
-        payload = launch_desktop_shell(
-            project_root=workspace_root,
-            then_lifecycle=str(args.then_lifecycle or ""),
-            open_workbench=bool(getattr(args, "open_workbench", False)),
-            hidden_presentation=bool(getattr(args, "hidden_presentation", False)),
-            **({"launch_request_id": request_id} if request_id else {}),
-        )
-        _append_log(
-            "desktop_entry_python.desktop_shell.launched",
-            kind=str(payload.get("kind") or ""),
-            pid=int(payload.get("pid") or 0),
-            then_lifecycle=str(payload.get("thenLifecycle") or ""),
-            open_workbench=bool(payload.get("openWorkbench")),
-        )
-        payload = _await_launch_lifecycle_settlement(
-            args,
-            payload,
-            baseline=baseline,
-            not_before_epoch=not_before_epoch,
-        )
-        settlement = payload.get("lifecycleSettlement")
-        if isinstance(settlement, dict) and str(settlement.get("observed") or "") == "intent_not_consumed":
-            # The forwarded second-instance signal never reached the main-line
-            # queue. A dropped signal is retryable (unlike an unsettled intent that
-            # was already accepted into the queue), so re-forward once with a short
-            # bounded window; the native bridge deadline covers both attempts.
-            _append_log(
-                "desktop_entry_python.desktop_shell.launch_retry",
-                level="warning",
-                operation=str(settlement.get("operation") or ""),
-                timeout_seconds=LAUNCH_SETTLEMENT_RETRY_TIMEOUT_SECONDS,
-            )
-            retry_not_before_epoch = time.time()
-            retry_baseline = _capture_lifecycle_settlement_baseline(workspace_root)
-            if request_id:
-                retry_baseline["launchRequestId"] = request_id
-            try:
-                retry_payload = launch_desktop_shell(
-                    project_root=workspace_root,
-                    then_lifecycle=str(args.then_lifecycle or ""),
-                    open_workbench=bool(getattr(args, "open_workbench", False)),
-                    hidden_presentation=bool(getattr(args, "hidden_presentation", False)),
-                    **({"launch_request_id": request_id} if request_id else {}),
-                )
-            except Exception as exc:  # noqa: BLE001 - keep the first visible failure
-                _append_log(
-                    "desktop_entry_python.desktop_shell.launch_retry_failed",
-                    level="error",
-                    error=str(exc),
-                )
-                return payload
-            _append_log(
-                "desktop_entry_python.desktop_shell.launched",
-                kind=str(retry_payload.get("kind") or ""),
-                pid=int(retry_payload.get("pid") or 0),
-                then_lifecycle=str(retry_payload.get("thenLifecycle") or ""),
-                open_workbench=bool(retry_payload.get("openWorkbench")),
-                retry=True,
-            )
-            payload = _await_launch_lifecycle_settlement(
-                args,
-                retry_payload,
-                baseline=retry_baseline,
-                not_before_epoch=retry_not_before_epoch,
-                timeout_seconds=LAUNCH_SETTLEMENT_RETRY_TIMEOUT_SECONDS,
-            )
-            payload["settlementAttempts"] = 2
-        return payload
-
+    # Retain feedback for cross-owner deduplication; the owner sweeps expired records.
+    payload = launch_desktop_shell(
+        project_root=workspace_root,
+        then_lifecycle=str(args.then_lifecycle or ""),
+        open_workbench=bool(getattr(args, "open_workbench", False)),
+        hidden_presentation=bool(getattr(args, "hidden_presentation", False)),
+        **({"launch_request_id": request_id} if request_id else {}),
+    )
+    _append_log(
+        "desktop_entry_python.desktop_shell.launched",
+        kind=str(payload.get("kind") or ""),
+        pid=int(payload.get("pid") or 0),
+        then_lifecycle=str(payload.get("thenLifecycle") or ""),
+        open_workbench=bool(payload.get("openWorkbench")),
+    )
+    payload = _await_launch_lifecycle_settlement(
+        args,
+        payload,
+        baseline=baseline,
+        not_before_epoch=not_before_epoch,
+    )
+    return payload
 
 def _ensure_latest_launcher_bridge(args: argparse.Namespace) -> dict[str, object]:
     from core.launcher.desktop_shell import ensure_latest_launcher
@@ -2369,6 +2368,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--wait-pid", type=int, default=0)
     parser.add_argument("--then-lifecycle", default="")
+    parser.add_argument("--launch-request-id", default="")
+    parser.add_argument("--launch-request-operation", default="")
     parser.add_argument(
         "--open-workbench",
         action="store_true",

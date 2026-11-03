@@ -1174,6 +1174,34 @@ def _inspect_desktop_shell_package(
         except Exception:
             # A failure to inspect current source cannot establish package freshness.
             frontend_build_current = None
+
+    def frontend_block_reason() -> str:
+        if not packaged_frontend_path.is_dir() or not expected_frontend_hash or not packaged_frontend_tree:
+            return "missing_frontend_provenance"
+        if not packaged_frontend_hash or packaged_frontend_hash != expected_frontend_hash:
+            return "frontend_package_content_mismatch"
+        if frontend_build_current is not True:
+            return "frontend_source_stale" if frontend_build_current is False else "frontend_inspection_failed"
+        if not current_frontend_tree:
+            return "current_frontend_tree_unavailable"
+        if not current_frontend_hash or current_frontend_hash != packaged_frontend_hash:
+            return "frontend_release_mismatch"
+        if current_frontend_tree and packaged_frontend_tree != current_frontend_tree:
+            return "frontend_source_mismatch"
+        if for_reuse and (
+            not re.fullmatch(r"[0-9a-f]{64}", current_frontend_build_key)
+            or packaged_frontend_build_key != current_frontend_build_key
+            or frontend_provenance.get("buildKey") != current_frontend_build_key
+        ):
+            return "frontend_build_key_mismatch"
+        if for_reuse and (
+            frontend_provenance.get("frontendTree") != current_frontend_tree
+            or not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", str(frontend_provenance.get("sourceCommit") or ""))
+            or provenance.get("frontendSourceCommit") != frontend_provenance.get("sourceCommit")
+        ):
+            return "frontend_source_commit_mismatch"
+        return ""
+
     package_block_reason = _electron_package_block_reason(
         root, current_tree=current_tree, packaged_tree=packaged_tree, source_newer=source_newer,
         package_root=package_root,
@@ -1183,42 +1211,18 @@ def _inspect_desktop_shell_package(
             package_block_reason = "source_commit_mismatch"
         elif not _electron_package_sources_clean(root):
             package_block_reason = "electron_source_unverified"
+    if not package_block_reason and for_reuse:
+        # Already-stale frontend inputs cannot become reusable by reading the
+        # assistant payload. This early rejection never establishes freshness.
+        package_block_reason = frontend_block_reason()
     if not package_block_reason:
         package_block_reason = _assistant_package_block_reason(root, exe_path.parent, full=for_reuse)
+    if not package_block_reason:
+        # Preserve the live inspection order and the post-verification checks;
+        # package directories and the active release can change during reads.
+        package_block_reason = frontend_block_reason()
     if package_block_reason:
         reason = package_block_reason
-        stale = True
-    elif not packaged_frontend_path.is_dir() or not expected_frontend_hash or not packaged_frontend_tree:
-        reason = "missing_frontend_provenance"
-        stale = True
-    elif not packaged_frontend_hash or packaged_frontend_hash != expected_frontend_hash:
-        reason = "frontend_package_content_mismatch"
-        stale = True
-    elif frontend_build_current is not True:
-        reason = "frontend_source_stale" if frontend_build_current is False else "frontend_inspection_failed"
-        stale = True
-    elif not current_frontend_tree:
-        reason = "current_frontend_tree_unavailable"
-        stale = True
-    elif not current_frontend_hash or current_frontend_hash != packaged_frontend_hash:
-        reason = "frontend_release_mismatch"
-        stale = True
-    elif current_frontend_tree and packaged_frontend_tree != current_frontend_tree:
-        reason = "frontend_source_mismatch"
-        stale = True
-    elif for_reuse and (
-        not re.fullmatch(r"[0-9a-f]{64}", current_frontend_build_key)
-        or packaged_frontend_build_key != current_frontend_build_key
-        or frontend_provenance.get("buildKey") != current_frontend_build_key
-    ):
-        reason = "frontend_build_key_mismatch"
-        stale = True
-    elif for_reuse and (
-        frontend_provenance.get("frontendTree") != current_frontend_tree
-        or not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", str(frontend_provenance.get("sourceCommit") or ""))
-        or provenance.get("frontendSourceCommit") != frontend_provenance.get("sourceCommit")
-    ):
-        reason = "frontend_source_commit_mismatch"
         stale = True
     elif for_reuse and (
         not _usable_active_frontend_release(root)
@@ -1326,10 +1330,13 @@ def schedule_desktop_shell_refresh(
     python_executable: str | None = None,
     force: bool = False,
     shell_kind: str = "",
+    launch_request_id: str = "",
+    launch_request_operation: str = "",
 ) -> dict[str, Any]:
     """Start a detached helper that rebuilds the shell after ``wait_pid`` exits."""
 
     root = Path(project_root)
+    request_args = _desktop_launch_request_args(launch_request_id, launch_request_operation)
     if not _retry_pending_scheduled_helper_retirements(root):
         return {
             "schemaVersion": 1,
@@ -1379,6 +1386,7 @@ def schedule_desktop_shell_refresh(
     kind = str(shell_kind or "").strip().lower()
     if kind:
         args.extend(["--shell-kind", kind])
+    args.extend(request_args)
     helper_pid = _start_scheduled_desktop_shell_helper(
         args,
         project_root=root,
@@ -1401,6 +1409,8 @@ def run_desktop_shell_refresh(
     project_root: Path | str = PROJECT_ROOT,
     wait_timeout_seconds: float = 180.0,
     shell_kind: str = "",
+    launch_request_id: str = "",
+    launch_request_operation: str = "",
 ) -> dict[str, Any]:
     """Wait for the old shell to exit, verify the owner lock is free, rebuild, relaunch.
 
@@ -1413,6 +1423,9 @@ def run_desktop_shell_refresh(
     """
 
     root = Path(project_root)
+    request_options = ({"launch_request_id": launch_request_id,
+        "launch_request_operation": launch_request_operation,
+        "launch_request_handoff_pid": int(wait_pid)} if launch_request_id else {})
     try:
         _append_refresh_log(root, "refresh.started", wait_pid=int(wait_pid), then_lifecycle=str(then_lifecycle or ""))
         if int(wait_pid) > 0:
@@ -1434,6 +1447,7 @@ def run_desktop_shell_refresh(
                     open_workbench=True,
                     prefer="unpackaged",
                     expect_primary=True,
+                    **request_options,
                 )
                 return _finish_refresh_launch(root, launched, wait_pid=int(wait_pid), kind="unpackaged", rebuilt=rebuilt)
             current = inspect_desktop_shell(root) if kind == "packaged" else None
@@ -1461,6 +1475,7 @@ def run_desktop_shell_refresh(
                         then_lifecycle=then_lifecycle,
                         open_workbench=True,
                         expect_primary=True,
+                        **request_options,
                     )
                 except Exception as launch_exc:
                     fallback_error = str(launch_exc)
@@ -1499,6 +1514,7 @@ def run_desktop_shell_refresh(
                 then_lifecycle=then_lifecycle,
                 open_workbench=True,
                 expect_primary=True,
+                **request_options,
             )
         except Exception as exc:
             detail = str(exc)
@@ -1705,6 +1721,9 @@ def run_desktop_shell_prebuild(project_root: Path | str = PROJECT_ROOT) -> dict[
             _clear_shell_failure_marker(_prebuild_failure_path(root))
             _append_refresh_log(root, "prebuild.reused", electronTreeHash=staged_tree)
             return {"schemaVersion": 1, "ok": True, "staged": True, "electronTreeHash": staged_tree}
+        _append_refresh_log(
+            root, "prebuild.reuse_rejected", reason=str(staged_status.get("reason") or "inspection_failed")[:120],
+        )
         try:
             staged = _stage_desktop_shell(root, deadline=deadline)
         except Exception as exc:
@@ -2416,6 +2435,21 @@ def resolve_desktop_shell_launch(
     }
 
 
+def _desktop_launch_request_args(request_id: str, operation: str = "", handoff_pid: int = 0) -> list[str]:
+    if not request_id:
+        return []
+    if not re.fullmatch(r"launch_[a-f0-9]{32}", request_id):
+        raise ValueError("invalid desktop launch request id")
+    args = ["--launch-request-id", request_id]
+    if operation:
+        if operation not in {"start", "restart", "rebuild-and-start", "stop", "force-stop"}:
+            raise ValueError("invalid desktop launch request operation")
+        args.extend(["--launch-request-operation", operation])
+    if handoff_pid > 0:
+        args.extend(["--launch-request-handoff-pid", str(int(handoff_pid))])
+    return args
+
+
 def launch_desktop_shell(
     *,
     project_root: Path | str = PROJECT_ROOT,
@@ -2424,6 +2458,8 @@ def launch_desktop_shell(
     hidden_presentation: bool = False,
     prefer: str = "",
     launch_request_id: str = "",
+    launch_request_operation: str = "",
+    launch_request_handoff_pid: int = 0,
     expect_primary: bool = False,
 ) -> dict[str, Any]:
     """Start Electron main for the current checkout without hiding the GUI.
@@ -2447,10 +2483,7 @@ def launch_desktop_shell(
         prefer=prefer,
     )
     args = list(spec["args"])
-    if launch_request_id:
-        if not re.fullmatch(r"launch_[a-f0-9]{32}", launch_request_id):
-            raise ValueError("invalid desktop launch request id")
-        args.extend(["--launch-request-id", launch_request_id])
+    args.extend(_desktop_launch_request_args(launch_request_id, launch_request_operation, launch_request_handoff_pid))
     shell_root = Path(str(spec["cwd"]))
     base = {
         **spec,
@@ -2472,6 +2505,9 @@ def launch_packaged_desktop_shell(
     then_lifecycle: str = "",
     open_workbench: bool = False,
     expect_primary: bool = False,
+    launch_request_id: str = "",
+    launch_request_operation: str = "",
+    launch_request_handoff_pid: int = 0,
 ) -> dict[str, Any]:
     """Spawn the packaged exe; same confirmation contract as launch_desktop_shell."""
 
@@ -2487,6 +2523,7 @@ def launch_packaged_desktop_shell(
         args.append("--open-workbench")
     if lifecycle:
         args.append(lifecycle)
+    args.extend(_desktop_launch_request_args(launch_request_id, launch_request_operation, launch_request_handoff_pid))
     base = {"thenLifecycle": lifecycle, "openWorkbench": bool(open_workbench)}
     pre_owner = _verified_live_desktop_shell_owner(root)
     if expect_primary and pre_owner is not None:

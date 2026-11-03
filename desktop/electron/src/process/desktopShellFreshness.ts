@@ -496,6 +496,8 @@ export async function scheduleDesktopShellRefresh(input: {
   pythonPath: string;
   waitPid: number;
   thenLifecycle?: string;
+  launchRequestId?: string;
+  launchRequestOperation?: string;
   force?: boolean;
   shellKind?: "packaged" | "unpackaged" | "";
   spawnImpl?: PythonJsonBridgeSpawn;
@@ -505,6 +507,10 @@ export async function scheduleDesktopShellRefresh(input: {
   const lifecycle = String(input.thenLifecycle || "").trim().toLowerCase();
   if (lifecycle) {
     extra.push("--then-lifecycle", lifecycle);
+  }
+  if (input.launchRequestId) {
+    extra.push("--launch-request-id", input.launchRequestId,
+      "--launch-request-operation", input.launchRequestOperation || lifecycle);
   }
   if (input.force) {
     extra.push("--force-refresh");

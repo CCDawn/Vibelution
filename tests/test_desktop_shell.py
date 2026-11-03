@@ -1033,6 +1033,49 @@ def test_run_desktop_shell_refresh_default_kind_keeps_packaged_promotion(tmp_pat
     assert calls == ["rebuild", "launch_packaged::True:True"]
 
 
+@pytest.mark.parametrize("shell_kind", ["packaged", "unpackaged"])
+def test_refresh_preserves_request_operation_and_explicit_handoff_owner(tmp_path, monkeypatch, shell_kind):
+    launches = []
+    request_id = "launch_" + "a" * 32
+    monkeypatch.setattr(desktop_shell, "_wait_for_pid_exit", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(desktop_shell, "_expected_create_time_for_pid", lambda *_args: 1)
+    monkeypatch.setattr(desktop_shell, "_verified_live_desktop_shell_owner", lambda *_args: None)
+    monkeypatch.setattr(desktop_shell, "inspect_desktop_shell", lambda *_args: {"stale": False, "reason": "current"})
+    monkeypatch.setattr(desktop_shell, "ensure_unpackaged_electron", lambda *_args: {})
+    monkeypatch.setattr(desktop_shell, "launch_packaged_desktop_shell", lambda **kwargs: launches.append(kwargs) or {"launched": True, "pid": 22})
+    monkeypatch.setattr(desktop_shell, "launch_desktop_shell", lambda **kwargs: launches.append(kwargs) or {"launched": True, "pid": 22})
+    result = desktop_shell.run_desktop_shell_refresh(project_root=tmp_path, wait_pid=11,
+        shell_kind=shell_kind, then_lifecycle="start", launch_request_id=request_id, launch_request_operation="restart")
+    assert result["refreshed"] is True
+    assert launches[0]["then_lifecycle"] == "start"
+    assert launches[0]["launch_request_id"] == request_id
+    assert launches[0]["launch_request_operation"] == "restart"
+    assert launches[0]["launch_request_handoff_pid"] == 11
+
+
+def test_desktop_request_cli_args_keep_request_separate_from_restored_lifecycle():
+    request_id = "launch_" + "b" * 32
+    assert desktop_shell._desktop_launch_request_args(request_id, "restart", 123) == [
+        "--launch-request-id", request_id, "--launch-request-operation", "restart", "--launch-request-handoff-pid", "123"]
+    with pytest.raises(ValueError):
+        desktop_shell._desktop_launch_request_args("../../escape", "restart", 123)
+
+
+def test_refresh_scheduler_forwards_request_metadata_to_the_existing_helper(tmp_path, monkeypatch):
+    captured = []
+    request_id = "launch_" + "c" * 32
+    monkeypatch.setattr(desktop_shell, "_retry_pending_scheduled_helper_retirements", lambda *_args: True)
+    monkeypatch.setattr(desktop_shell, "recent_desktop_shell_refresh_failure", lambda *_args: None)
+    monkeypatch.setattr(desktop_shell, "_acquire_desktop_shell_refresh_lock", lambda *_args: True)
+    monkeypatch.setattr(desktop_shell, "_start_scheduled_desktop_shell_helper", lambda args, **_kwargs: captured.extend(args) or 88)
+    result = desktop_shell.schedule_desktop_shell_refresh(project_root=tmp_path, wait_pid=123,
+        then_lifecycle="start", launch_request_id=request_id, launch_request_operation="restart")
+    assert result["scheduled"] is True
+    assert captured[captured.index("--wait-pid") + 1] == "123"
+    assert captured[captured.index("--launch-request-id") + 1] == request_id
+    assert captured[captured.index("--launch-request-operation") + 1] == "restart"
+
+
 def test_run_desktop_shell_refresh_unpackaged_kind_keeps_unpackaged_relaunch(tmp_path, monkeypatch):
     """Plain unpackaged relaunch semantics stay pinned (restart keeps its kind)."""
     calls: list[str] = []
@@ -2913,6 +2956,15 @@ def test_prebuild_reuses_current_staging_without_touching_live_or_building(tmp_p
     assert not desktop_shell._refresh_lock_path(tmp_path, desktop_shell.PREBUILD_LOCK_RELATIVE).exists()
 
 
+def test_live_inspection_keeps_assistant_rejection_before_frontend_rejection(tmp_path, monkeypatch):
+    _write_packaged_shell(tmp_path, tree_hash="a" * 40, asar_mtime=2_000_000_000)
+    _mock_frontend_inspection(monkeypatch, tmp_path)
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda *_args: "a" * 40)
+    (tmp_path / "core/__init__.py").write_bytes(b"changed source")
+    (desktop_shell.packaged_frontend_dist(tmp_path) / "index.html").write_bytes(b"tampered frontend")
+    assert desktop_shell.inspect_desktop_shell(tmp_path)["reason"] == "assistant_source_mismatch"
+
+
 @pytest.mark.parametrize("fault", [
     "exe_missing", "asar_missing", "provenance_missing", "electron_tree", "electron_tree_unavailable",
     "native_source_commit", "native_source_commit_missing", "electron_dirty", "electron_source_dirty", "electron_status_unavailable",
@@ -2966,6 +3018,16 @@ def test_prebuild_rebuilds_staging_when_current_package_cannot_be_proven(tmp_pat
         raise AssertionError(fault)
     before_live = _shell_tree_snapshot(live)
     builds = []
+    verifications = []
+    events = []
+    original_verify = assistant_builder.verify_launcher_assistant_payload
+
+    def verify(payload, **kwargs):
+        verifications.append(Path(payload))
+        return original_verify(payload, **kwargs)
+
+    monkeypatch.setattr(assistant_builder, "verify_launcher_assistant_payload", verify)
+    monkeypatch.setattr(desktop_shell, "_append_refresh_log", lambda _root, event, **fields: events.append((event, fields)))
 
     def build(root, **_kwargs):
         assert desktop_shell._desktop_shell_lock_owned_by_current_process(
@@ -2978,8 +3040,69 @@ def test_prebuild_rebuilds_staging_when_current_package_cannot_be_proven(tmp_pat
     result = desktop_shell.run_desktop_shell_prebuild(tmp_path)
     assert builds == [tmp_path]
     assert result["ok"] is False and "fixture rebuild required" in result["message"]
+    assert len(verifications) == (1 if fault == "assistant_bytes" else 0)
+    assert events[0][0] == "prebuild.reuse_rejected"
+    assert set(events[0][1]) == {"reason"}
+    frontend_reasons = {
+        "frontend_bytes": "frontend_package_content_mismatch", "frontend_tree": "frontend_source_mismatch",
+        "frontend_build_key": "frontend_build_key_mismatch", "frontend_source_commit": "frontend_source_commit_mismatch",
+        "frontend_source_stale": "frontend_source_stale", "active_frontend_bytes": "frontend_release_mismatch",
+    }
+    if fault in frontend_reasons:
+        assert events[0][1]["reason"] == frontend_reasons[fault]
     assert _shell_tree_snapshot(live) == before_live
     assert not desktop_shell._refresh_lock_path(tmp_path, desktop_shell.PREBUILD_LOCK_RELATIVE).exists()
+
+
+@pytest.mark.parametrize("mutation", ["unusable", "path_changed"])
+def test_prebuild_rechecks_active_release_after_full_assistant_verification(tmp_path, monkeypatch, mutation):
+    _live, staged = _write_current_staging_beside_stale_live(tmp_path, monkeypatch)
+    active = tmp_path / "web/.vibelution-builds/release-current"
+    original_verify = assistant_builder.verify_launcher_assistant_payload
+    verifications = []
+    events = []
+
+    def verify(payload, **kwargs):
+        result = original_verify(payload, **kwargs)
+        verifications.append(Path(payload))
+        if mutation == "unusable":
+            (active / "index.html").unlink()
+        else:
+            replacement = active.with_name("release-replaced")
+            shutil.copytree(active, replacement)
+            (active.parent / "active.json").write_text(
+                json.dumps({"release": replacement.name, "buildKey": "e" * 64}), encoding="utf-8",
+            )
+        return result
+
+    def build(*_args, **_kwargs):
+        raise RuntimeError("fixture rebuild required")
+
+    monkeypatch.setattr(assistant_builder, "verify_launcher_assistant_payload", verify)
+    monkeypatch.setattr(desktop_shell, "_run_desktop_shell_package_build", build)
+    monkeypatch.setattr(desktop_shell, "_append_refresh_log", lambda _root, event, **fields: events.append((event, fields)))
+    result = desktop_shell.run_desktop_shell_prebuild(tmp_path)
+    assert result["ok"] is False and "fixture rebuild required" in result["message"]
+    assert verifications == [assistant_builder._trusted_root(staged / "resources/launcher-assistant")]
+    assert events[0] == ("prebuild.reuse_rejected", {"reason": "frontend_release_mismatch"})
+    assert not desktop_shell._refresh_lock_path(tmp_path, desktop_shell.PREBUILD_LOCK_RELATIVE).exists()
+
+
+@pytest.mark.parametrize("reason", ["frontend_source_mismatch", "x" * 500, "", None])
+def test_prebuild_logs_a_bounded_reuse_rejection_reason(tmp_path, monkeypatch, reason):
+    events = []
+
+    def inspect(*_args, **_kwargs):
+        if reason is None:
+            raise ValueError("private inspection error detail")
+        return {"stale": True, "reason": reason}
+
+    monkeypatch.setattr(desktop_shell, "inspect_desktop_shell", lambda _root: {"stale": True})
+    monkeypatch.setattr(desktop_shell, "_inspect_desktop_shell_package", inspect)
+    monkeypatch.setattr(desktop_shell, "_stage_desktop_shell", lambda *_args, **_kwargs: {"electronTreeHash": "a" * 40})
+    monkeypatch.setattr(desktop_shell, "_append_refresh_log", lambda _root, event, **fields: events.append((event, fields)))
+    assert desktop_shell.run_desktop_shell_prebuild(tmp_path)["ok"] is True
+    assert events[0] == ("prebuild.reuse_rejected", {"reason": (reason or "inspection_failed")[:120]})
 
 
 def test_run_desktop_shell_prebuild_skips_while_refresh_lock_held(tmp_path, monkeypatch):

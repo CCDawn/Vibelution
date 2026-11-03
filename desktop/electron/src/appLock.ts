@@ -1,5 +1,5 @@
 import { join, posix } from "node:path";
-import { normalizeLaunchRequestId } from "./lifecycle/launchRequestReceipt.js";
+import { normalizeLaunchRequestId, type LaunchRequestMetadata } from "./lifecycle/launchRequestReceipt.js";
 
 export type SingleInstanceDecision =
   | { action: "continue_as_primary" }
@@ -7,7 +7,7 @@ export type SingleInstanceDecision =
 
 export type SingleInstanceLifecycleProvenance = "operator" | "forwarded";
 
-export type SingleInstanceLifecycleEnvelope = {
+export type SingleInstanceLifecycleEnvelope = LaunchRequestMetadata & {
   assistant?: boolean;
   workspaceRoot?: string;
   schemaVersion: 1;
@@ -30,7 +30,7 @@ export type SingleInstanceLifecycleEnvelope = {
   };
 };
 
-export type SingleInstanceLifecycleEnvelopeInput = {
+export type SingleInstanceLifecycleEnvelopeInput = LaunchRequestMetadata & {
   assistant?: boolean;
   workspaceRoot?: string;
   launchRequestId?: string;
@@ -52,7 +52,7 @@ export type SecondInstanceIntent =
   | { action: "open_workbench" }
   | { action: "focus_existing_shell" };
 
-export type SingleInstanceCliIntent = {
+export type SingleInstanceCliIntent = LaunchRequestMetadata & {
   assistant?: boolean;
   workspaceRoot?: string;
   launchRequestId?: string;
@@ -103,6 +103,8 @@ export function createSingleInstanceEnvelope(
     openWorkbench: input.openWorkbench === true,
     hiddenPresentation: input.hiddenPresentation === true,
     ...(normalizeLaunchRequestId(input.launchRequestId) ? { launchRequestId: input.launchRequestId } : {}),
+    ...(input.launchRequestOperation ? { launchRequestOperation: input.launchRequestOperation } : {}),
+    ...(input.launchRequestHandoffPid ? { launchRequestHandoffPid: input.launchRequestHandoffPid } : {}),
     lifecycle: {
       command,
       provenance: explicitlyForwarded ? "forwarded" : "operator",
@@ -140,6 +142,10 @@ export function resolveSingleInstanceCliIntent(value: unknown): SingleInstanceCl
     openWorkbench: value.openWorkbench === true,
     hiddenPresentation: value.hiddenPresentation === true,
     ...(normalizeLaunchRequestId(value.launchRequestId) ? { launchRequestId: value.launchRequestId } : {}),
+    ...(typeof value.launchRequestOperation === "string" && ["start", "restart", "rebuild-and-start", "stop", "force-stop"].includes(value.launchRequestOperation)
+      ? { launchRequestOperation: value.launchRequestOperation } : {}),
+    ...(Number.isSafeInteger(value.launchRequestHandoffPid) && Number(value.launchRequestHandoffPid) > 0
+      ? { launchRequestHandoffPid: value.launchRequestHandoffPid } : {}),
     lifecycleCommand: value.lifecycle.command.trim().toLowerCase()
   };
 }

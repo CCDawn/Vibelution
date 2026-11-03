@@ -87,6 +87,23 @@ describe("runWorkbenchLifecycle command settlement evidence", () => {
     }
   });
 
+  it("associates the exact admitted command before frontend or backend effects", async () => {
+    const { root } = makeWorkspace();
+    let abortBuild!: (reason: Error) => void;
+    const admitted: string[] = [];
+    try {
+      const queue = createMainLineCommandQueue();
+      const ensureFrontend = vi.fn(() => new Promise<void>((_resolve, reject) => { abortBuild = reject; }));
+      const pending = runWorkbenchLifecycle({ ...baseInput(root), operation: "restart", queue,
+        onCommand: commandId => { admitted.push(commandId); expect(ensureFrontend).not.toHaveBeenCalled(); }, ensureFrontend });
+      await vi.waitFor(() => expect(ensureFrontend).toHaveBeenCalledOnce());
+      expect(admitted).toEqual([queue.snapshot().active?.commandId]);
+      const failure = expect(pending).rejects.toThrow("test build failure");
+      abortBuild(new Error("test build failure")); await failure;
+      await queue.captureExecutionDrain!();
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
   it("aborts a command that exceeds its execution deadline and records the timeout", async () => {
     const { root, runtimeManagerDir } = makeWorkspace();
     try {

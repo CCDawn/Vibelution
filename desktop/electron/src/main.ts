@@ -99,7 +99,7 @@ import { waitForWorkbenchBackendSettledForWindowClose } from "./lifecycle/workbe
 import type { WorkbenchCloseTiming } from "./process/fastWorkbenchClose.js";
 import { getBackgroundWorkbenchRetirement, hasBackgroundWorkbenchRetirement } from "./process/backgroundWorkbenchRetirement.js";
 import { runWithFrontendBuildGate } from "./lifecycle/frontendBuildState.js";
-import { beginLaunchRequestReceipt } from "./lifecycle/launchRequestReceipt.js";
+import { beginLaunchRequestReceipt, type LaunchRequestMetadata, type LaunchRequestReceipt } from "./lifecycle/launchRequestReceipt.js";
 import { readRuntimeManagerLauncherStatusSummary } from "./lifecycle/runtimeManagerStatusSnapshot.js";
 import {
   createConversationNotificationService,
@@ -526,6 +526,8 @@ const desktopLifecycleLaunchMetadata = parseDesktopLifecycleLaunchMetadata(deskt
 const singleInstanceEnvelope = createSingleInstanceEnvelope({
   assistant: desktopCliArgs.assistant,
   launchRequestId: desktopCliArgs.launchRequestId,
+  launchRequestOperation: desktopCliArgs.launchRequestOperation,
+  launchRequestHandoffPid: desktopCliArgs.launchRequestHandoffPid,
   workspaceRoot: desktopCliArgs.workspaceRoot,
   projectRoot: desktopCliArgs.projectRoot,
   openWorkbench: desktopCliArgs.openWorkbench,
@@ -558,7 +560,9 @@ let workbenchOpenRequestedAtMs: number | null = null;
 let trayRestartAllInFlight = false;
 let trayQuitAllInFlight = false;
 let trayRestartLauncherInFlight = false;
+type MainLineLaunchRequest = LaunchRequestMetadata & { receipt: LaunchRequestReceipt };
 let shellRefreshInFlight = false;
+let startupMainLineLaunchRequest: MainLineLaunchRequest | undefined;
 let shellRefreshRequest: {
   result: Promise<OrchestratedLifecycleResult>;
   operationToRestore: string;
@@ -3765,7 +3769,7 @@ async function inspectCurrentDesktopShellLaunchReadiness(signal?: AbortSignal): 
 
 async function scheduleCurrentDesktopShellRefresh(
   thenLifecycle: string,
-  options: { force?: boolean; shellKind?: "packaged" | "unpackaged" } = {}
+  options: { force?: boolean; shellKind?: "packaged" | "unpackaged"; launchRequest?: MainLineLaunchRequest } = {}
 ): Promise<void> {
   const pythonPath = desktopPythonPath();
   if (!pythonPath) {
@@ -3777,6 +3781,10 @@ async function scheduleCurrentDesktopShellRefresh(
     pythonPath,
     waitPid: process.pid,
     thenLifecycle,
+    ...(options.launchRequest ? {
+      launchRequestId: options.launchRequest.launchRequestId,
+      launchRequestOperation: options.launchRequest.launchRequestOperation
+    } : {}),
     force: options.force === true,
     shellKind: options.shellKind
   });
@@ -3786,7 +3794,7 @@ async function scheduleCurrentDesktopShellRefresh(
   }
 }
 
-async function refreshPackagedDesktopShellIfStale(thenLifecycle: string): Promise<boolean> {
+async function refreshPackagedDesktopShellIfStale(thenLifecycle: string, launchRequest?: MainLineLaunchRequest): Promise<boolean> {
   if (
     decidePackagedDesktopShellRefresh({
       isPackaged: app.isPackaged,
@@ -3847,7 +3855,9 @@ async function refreshPackagedDesktopShellIfStale(thenLifecycle: string): Promis
     // forceRefresh stays off so the refresh cooldown is respected: after a
     // failed rebuild the automatic path must not stop the workspace again
     // during the cooldown window (explicit operator updates still bypass).
-    const result = await restartLauncherToLatestBuild(false, thenLifecycle, { forceRefresh: false });
+    const result = await restartLauncherToLatestBuild(false, thenLifecycle, {
+      forceRefresh: false, ...(launchRequest ? { launchRequest } : {})
+    });
     if (!result.accepted && result.message) {
       notifyDesktopTray("Vibelution", result.message, "warning");
     }
@@ -4417,7 +4427,7 @@ async function stopAllManagedRuntimeTrees(): Promise<void> {
 async function restartLauncherToLatestBuild(
   interruptActiveWork = true,
   operationToRestore = "open",
-  options: { shellKind?: "packaged" | "unpackaged"; forceRefresh?: boolean } = {}
+  options: { shellKind?: "packaged" | "unpackaged"; forceRefresh?: boolean; launchRequest?: MainLineLaunchRequest } = {}
 ): Promise<OrchestratedLifecycleResult> {
   // A manual update can overlap an automatic freshness refresh. Both callers
   // observe the same preparation/result rather than reporting a false failure.
@@ -4425,12 +4435,13 @@ async function restartLauncherToLatestBuild(
   const existing = shellRefreshRequest;
   const compatibleOperation = existing !== null && (operationToRestore === existing.operationToRestore
     || (operationToRestore === "open" && ["start", "restart", "rebuild-and-start"].includes(existing.operationToRestore)));
-  if (existing !== null && compatibleOperation && shellKind === existing.shellKind) return await existing.result;
+  if (!options.launchRequest && existing !== null && compatibleOperation && shellKind === existing.shellKind) return await existing.result;
   if (shellRefreshInFlight) {
     return {
       schemaVersion: 1,
       accepted: false,
       operation: "restart-latest-shell",
+      code: "launcher_update_in_progress",
       message: "桌面壳已经在更新，请稍候。"
     };
   }
@@ -4454,7 +4465,7 @@ async function restartLauncherToLatestBuild(
 async function performLauncherUpdate(
   interruptActiveWork: boolean,
   operationToRestore: string,
-  options: { shellKind?: "packaged" | "unpackaged"; forceRefresh?: boolean }
+  options: { shellKind?: "packaged" | "unpackaged"; forceRefresh?: boolean; launchRequest?: MainLineLaunchRequest }
 ): Promise<OrchestratedLifecycleResult> {
   try {
     const result = await executeLauncherUpdate({
@@ -4471,7 +4482,9 @@ async function performLauncherUpdate(
         await stopMainRuntimeForApprovedShutdown(interruptActiveWork);
         await stopIsolatedInstancesForApprovedShutdown(interruptActiveWork);
       },
-      scheduleReplacement: () => scheduleCurrentDesktopShellRefresh(operationToRestore, {
+      scheduleReplacement: async () => {
+        options.launchRequest?.receipt.handoff(operationToRestore);
+        await scheduleCurrentDesktopShellRefresh(operationToRestore, {
         // Only an explicit operator update may bypass the refresh cooldown.
         // Automatic freshness refreshes keep force off, so a repeatedly
         // failing rebuild cannot keep clearing its own cooldown and
@@ -4479,8 +4492,9 @@ async function performLauncherUpdate(
         force: options.forceRefresh !== false,
         // Callers that need a real promotion (rebuild-and-start) force the
         // packaged helper path; everyone else keeps the current shell kind.
-        shellKind: options.shellKind ?? (app.isPackaged ? "packaged" : "unpackaged")
-      })
+        shellKind: options.shellKind ?? (app.isPackaged ? "packaged" : "unpackaged"),
+        ...(options.launchRequest ? { launchRequest: options.launchRequest } : {})
+      }); }
     });
     if (!result.accepted) {
       shellRefreshInFlight = false;
@@ -5380,10 +5394,11 @@ async function orchestrateLauncherLifecycle(
   signal?: AbortSignal,
   fastCloseTiming?: WorkbenchCloseTiming,
   nativeColdStart = false,
-  lifecycleCurrent?: () => boolean
+  lifecycleCurrent?: () => boolean,
+  launchRequest?: MainLineLaunchRequest
 ): Promise<OrchestratedLifecycleResult> {
   const execute = (ticket?: ProjectAdmissionTicket) => launcherLifecycleSupervisor.trackObservation("main", () => orchestrateLauncherLifecycleImpl(
-    operation, payload, provenance, signal, fastCloseTiming, nativeColdStart, lifecycleCurrent, ticket
+    operation, payload, provenance, signal, fastCloseTiming, nativeColdStart, lifecycleCurrent, ticket, launchRequest
   ));
   return ["start", "restart", "rebuild-and-start"].includes(operation.trim().toLowerCase())
     ? withProjectAdmission(() => registeredAdmissionRoot(createDesktopPathsForApp().workspaceRoot), execute)
@@ -5398,7 +5413,8 @@ async function orchestrateLauncherLifecycleImpl(
   fastCloseTiming?: WorkbenchCloseTiming,
   nativeColdStart = false,
   lifecycleCurrent?: () => boolean,
-  admission?: ProjectAdmissionTicket
+  admission?: ProjectAdmissionTicket,
+  launchRequest?: MainLineLaunchRequest
 ): Promise<OrchestratedLifecycleResult> {
   if (launcherBootstrap === null) {
     throw new Error("Launcher backend is not available.");
@@ -5639,7 +5655,7 @@ async function orchestrateLauncherLifecycleImpl(
         lifecycleOperation,
         // The helper must promote and relaunch the packaged shell even when
         // the current running shell is unpackaged.
-        { shellKind: "packaged" }
+        { shellKind: "packaged", ...(launchRequest ? { launchRequest } : {}) }
       );
     } finally {
       launcherLifecycleSupervisor.clearSlotIfCurrent(intentLease);
@@ -5663,6 +5679,7 @@ async function orchestrateLauncherLifecycleImpl(
       operatorConfigPath:
         launcherBootstrap?.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
       operation: lifecycleOperation,
+      ...(launchRequest ? { onCommand: (commandId: string) => launchRequest.receipt.dispatched(commandId) } : {}),
       ...(admission ? { beforeExecute: () => admission.check(), beforeSpawn: () => admission.check() } : {}),
       interruptActiveWork: provenance === "operator-restart" || (operation === "restart" && provenance === "operator"),
       ...(fastCloseTiming && preconfirmedCloseAuthorization("main", payload)
@@ -5702,6 +5719,7 @@ async function orchestrateLauncherLifecycleImpl(
   const result = mutation.value.accepted && !mutation.value.commandId?.trim()
     ? { ...mutation.value, commandId: randomUUID() }
     : mutation.value;
+  if (result.commandId) launchRequest?.receipt.dispatched(result.commandId);
   if (mutation.outcome === "superseded") {
     return supersededLifecycleResult(operation, result.commandId);
   }
@@ -5711,6 +5729,8 @@ async function orchestrateLauncherLifecycleImpl(
   if (lease === null || !launcherLifecycleSupervisor.isCurrent(lease)) {
     return supersededLifecycleResult(operation, result.commandId);
   }
+  if (launchRequest && result.accepted
+    && (result.code === "restart_queued" || result.code === "joined_in_flight_restart")) return result;
   if (
     result.accepted
     && (lifecycleOperation === "start" || lifecycleOperation === "restart" || lifecycleOperation === "rebuild-and-start")
@@ -5721,19 +5741,22 @@ async function orchestrateLauncherLifecycleImpl(
       const readyWaitMs = lifecycleOperation === "rebuild-and-start"
         ? WORKBENCH_REBUILD_READY_WAIT_MS
         : WORKBENCH_START_READY_WAIT_MS;
-      void launcherLifecycleSupervisor.trackObservation("main", () => openWorkbenchAfterLifecycleReady(
+      const ready = launcherLifecycleSupervisor.trackObservation("main", () => openWorkbenchAfterLifecycleReady(
         paths,
         bootstrap,
         provider,
         lease,
         readyWaitMs,
         preMutationBackendIdentity
-      )).catch((error: unknown) => {
+      ));
+      if (launchRequest) {
+        if (!await ready || !launcherLifecycleSupervisor.isCurrent(lease)) return supersededLifecycleResult(operation, result.commandId);
+      } else void ready.catch((error: unknown) => {
         if (!lease.signal.aborted) {
           console.warn(error instanceof Error ? error.message : String(error));
         }
       });
-    }
+    } else if (launchRequest) throw new Error("LAUNCH_REQUEST_READY_OWNER_UNAVAILABLE");
   }
   if (
     result.accepted
@@ -6076,12 +6099,12 @@ async function openWorkbenchAfterLifecycleReady(
   _timeoutMs: number,
   previousBackendIdentity?: ServingProcessIdentity | null,
   presentation: { present?: boolean } = {}
-): Promise<void> {
+): Promise<boolean> {
   // I4b already waited for backend health before returning. Do not poll Python
   // runtime-manager result files: Electron main-line never writes them, so a
   // 90s wait used to block the workbench window after a successful start.
   if (!launcherLifecycleSupervisor.isCurrent(lease)) {
-    return;
+    return false;
   }
   // Post-start build verification: never reopen the workbench on a stale or
   // unreplaced serving process (2026-09-11 freshness-gate incident).
@@ -6106,7 +6129,7 @@ async function openWorkbenchAfterLifecycleReady(
   const url = rememberLiveWorkbenchUrl(workbenchLoopbackUrl(verifiedPort));
   await resolveDesktopActionLoopContext(bootstrap, { signal: lease.signal });
   if (!launcherLifecycleSupervisor.isCurrent(lease) || !launcherLifecycleSupervisor.claimReady(lease)) {
-    return;
+    return false;
   }
   try {
     await openWorkbenchAtCurrentLauncherUrl(paths, bootstrap, provider, {
@@ -6118,7 +6141,7 @@ async function openWorkbenchAfterLifecycleReady(
   }
   if (!launcherLifecycleSupervisor.isCurrent(lease)) {
     await closeWindowIfSupersededByClosedIntent(lease.instanceId);
-    return;
+    return false;
   }
   if (!launcherLifecycleSupervisor.completeReady(lease)) {
     if (launcherLifecycleSupervisor.isCurrent(lease)) {
@@ -6127,7 +6150,9 @@ async function openWorkbenchAfterLifecycleReady(
       throw new Error(`Launcher lifecycle READY completion failed for ${lease.instanceId}.`);
     }
     await closeWindowIfSupersededByClosedIntent(lease.instanceId);
+    return false;
   }
+  return true;
 }
 
 async function retireIsolatedBackendAfterStartFailure(input: {
@@ -7252,7 +7277,7 @@ async function applyPendingProjectSlot(
   projectRoot: string,
   lifecycleCommand = "",
   provenance: LauncherLifecycleProvenance = "operator",
-  options: { hiddenPresentation?: boolean; launchRequestId?: string; workspaceRoot?: string } = {}
+  options: LaunchRequestMetadata & { hiddenPresentation?: boolean; workspaceRoot?: string } = {}
 ): Promise<void> {
   const operation = lifecycleCommand.trim().toLowerCase();
   if (["stop", "force-stop", "shutdown", "close"].includes(operation))
@@ -7265,7 +7290,7 @@ async function applyPendingProjectSlotImpl(
   projectRoot: string,
   lifecycleCommand = "",
   provenance: LauncherLifecycleProvenance = "operator",
-  options: { hiddenPresentation?: boolean; launchRequestId?: string; workspaceRoot?: string } = {},
+  options: LaunchRequestMetadata & { hiddenPresentation?: boolean; workspaceRoot?: string } = {},
   admission?: ProjectAdmissionTicket
 ): Promise<void> {
   const hiddenPresentation = options.hiddenPresentation === true;
@@ -7280,7 +7305,8 @@ async function applyPendingProjectSlotImpl(
     if (!await ensureProjectControlPlane(options.workspaceRoot || "")) throw new Error("PROJECT_CONTROL_PLANE_UNAVAILABLE");
     receipt = beginLaunchRequestReceipt({
       shellRoot: createDesktopPathsForApp().workspaceRoot,
-      projectRoot: wanted, operation: lifecycleCommand, requestId: options.launchRequestId
+      projectRoot: wanted, operation: options.launchRequestOperation || lifecycleCommand, requestId: options.launchRequestId,
+      handoffFromPid: options.launchRequestHandoffPid
     });
     if (receipt.duplicate) return;
     if (windowProvider === null || launcherBootstrap === null) {
@@ -7301,6 +7327,10 @@ async function applyPendingProjectSlotImpl(
       && normalizeInstanceKey(wanted) === normalizeInstanceKey(createDesktopPathsForApp().workspaceRoot)) {
       // The shell already owns this exact project. Its lifecycle verifies the
       // backend and opens the window; unrelated inventory cannot admit it.
+      if (options.launchRequestId) {
+        await handleMainLineLaunchRequest(requested, provenance, options, receipt, wanted);
+        return;
+      }
       const result = await orchestrateLauncherLifecycle(requested, {
         schemaVersion: 1,
         path: "project-slot"
@@ -7339,6 +7369,10 @@ async function applyPendingProjectSlotImpl(
     if (plan.operation) {
       let result: { accepted: boolean; code?: string; message?: string };
       if (plan.isMain) {
+        if (options.launchRequestId) {
+          await handleMainLineLaunchRequest(plan.operation, provenance, options, receipt, wanted);
+          return;
+        }
         result = await orchestrateLauncherLifecycle(plan.operation, {
           schemaVersion: 1,
           path: "project-slot"
@@ -7468,7 +7502,7 @@ async function bootstrapProjectControlPlane(paths: DesktopPaths, allowShellRefre
   const initialWorkbenchUrl = resolveInitialWorkbenchUrl(paths, initialWorkbenchUrlController.signal);
   let deepLinkRegistration: ReturnType<typeof registerPackagedDeepLinks>;
   try {
-    if (allowShellRefresh && await refreshPackagedDesktopShellIfStale(thenLifecycleFromDesktopCli(desktopCliArgs))) {
+    if (allowShellRefresh && await refreshPackagedDesktopShellIfStale(thenLifecycleFromDesktopCli(desktopCliArgs), startupMainLineLaunchRequest)) {
       return;
     }
     deepLinkRegistration = registerPackagedDeepLinks(paths);
@@ -7629,6 +7663,13 @@ app.whenReady()
       schemaVersion: 1, desktopBundleRoot: resolveDesktopBundleRoot(import.meta.url), resourcesRoot: process.resourcesPath,
       userDataRoot: app.getPath("userData"), workspaceRoot: "",
     };
+    if (workspaceRoot && desktopCliArgs.launchRequestId && !desktopCliArgs.projectRoot) {
+      const operation = desktopCliArgs.launchRequestOperation || desktopCliArgs.lifecycleCommand;
+      const receipt = beginLaunchRequestReceipt({ shellRoot: workspaceRoot, projectRoot: workspaceRoot,
+        operation, requestId: desktopCliArgs.launchRequestId, handoffFromPid: desktopCliArgs.launchRequestHandoffPid });
+      if (receipt.duplicate) { shutdownApproved = true; app.quit(); return; }
+      startupMainLineLaunchRequest = { ...desktopCliArgs, launchRequestOperation: operation, receipt };
+    }
     if (workspaceRoot) claimElectronDesktopShellOwner(paths.workspaceRoot);
     if (localDebuggingEnabled) {
       try {
@@ -7684,10 +7725,15 @@ app.whenReady()
     if (pendingProjectRoot) {
       await applyPendingProjectSlot(pendingProjectRoot, firstLifecycle, desktopLifecycleProvenance, {
         launchRequestId: desktopCliArgs.launchRequestId,
+        launchRequestOperation: desktopCliArgs.launchRequestOperation,
+        launchRequestHandoffPid: desktopCliArgs.launchRequestHandoffPid,
         hiddenPresentation: desktopCliArgs.hiddenPresentation
       });
     } else if (firstLifecycle && firstLifecycle !== "status" && windowProvider !== null) {
-      if (firstLifecycle === "open") {
+      if (startupMainLineLaunchRequest) {
+        await handleMainLineLaunchRequest(firstLifecycle, desktopLifecycleProvenance,
+          desktopCliArgs, startupMainLineLaunchRequest.receipt);
+      } else if (firstLifecycle === "open") {
         pendingOpenWorkbenchRequest = false;
         markWorkbenchOpenRequested();
         await startOrFocusWorkbenchFromProductEntryOnShell().catch((error: unknown) => {
@@ -7715,6 +7761,8 @@ app.whenReady()
     startProjectControlPlaneObservers();
   })
   .catch(async (error: unknown) => {
+    startupMainLineLaunchRequest?.receipt.failed("launch_preparation_failed",
+      error instanceof Error ? error.message : String(error));
     await drainTelemetryWithDeadline(() =>
       recordElectronStartupSummaryOnce(launcherBootstrap, {
         outcome: "failed",
@@ -7754,6 +7802,8 @@ app.on("second-instance", (_event, argv, _workingDirectory, additionalData) => {
     if (intent.action === "apply_project") {
       void applyPendingProjectSlot(intent.projectRoot, intent.lifecycleCommand, secondInstanceProvenance, {
         launchRequestId: secondCli.launchRequestId,
+        launchRequestOperation: secondCli.launchRequestOperation,
+        launchRequestHandoffPid: secondCli.launchRequestHandoffPid,
         workspaceRoot: secondCli.workspaceRoot,
         hiddenPresentation: intent.hiddenPresentation
       }).catch((error: unknown) => {
@@ -7762,8 +7812,10 @@ app.on("second-instance", (_event, argv, _workingDirectory, additionalData) => {
       return;
     }
     if (intent.action === "lifecycle") {
-      void ensureProjectControlPlane(secondCli.workspaceRoot).then(ready => ready
-        ? handleSecondInstanceLifecycleCommand(intent.command, secondInstanceProvenance) : undefined).finally(() => {
+      void (secondCli.launchRequestId
+        ? handleSecondInstanceLifecycleCommand(intent.command, secondInstanceProvenance, secondCli)
+        : ensureProjectControlPlane(secondCli.workspaceRoot).then(ready => ready
+          ? handleSecondInstanceLifecycleCommand(intent.command, secondInstanceProvenance) : undefined)).finally(() => {
           startProjectControlPlaneObservers();
         }).catch((error: unknown) => {
         console.warn(error instanceof Error ? error.message : String(error));
@@ -7789,8 +7841,13 @@ app.on("second-instance", (_event, argv, _workingDirectory, additionalData) => {
 
 async function handleSecondInstanceLifecycleCommand(
   command: string,
-  provenance: LauncherLifecycleProvenance = "operator"
+  provenance: LauncherLifecycleProvenance = "operator",
+  launchRequest?: LaunchRequestMetadata & { workspaceRoot?: string }
 ): Promise<void> {
+  if (launchRequest?.launchRequestId) {
+    await handleMainLineLaunchRequest(command, provenance, launchRequest);
+    return;
+  }
   if (assistantOnly) { focusExistingDesktopShell(); return; }
   if (launcherBootstrap === null || windowProvider === null) {
     // Electron emits second-instance after ready, but the primary app may not
@@ -7840,6 +7897,50 @@ async function handleSecondInstanceLifecycleCommand(
   } catch (error: unknown) {
     const detail = error instanceof Error ? error.message : String(error);
     notifyDesktopTray("Vibelution", `Launcher 命令失败：${detail.slice(0, 300)}`, "warning");
+  }
+}
+
+/** Observe the existing owner all the way to READY, including pre-queue rejects. */
+async function handleMainLineLaunchRequest(
+  command: string,
+  provenance: LauncherLifecycleProvenance,
+  metadata: LaunchRequestMetadata & { workspaceRoot?: string },
+  existingReceipt?: LaunchRequestReceipt,
+  requestedProjectRoot?: string
+): Promise<void> {
+  const workspaceRoot = metadata.workspaceRoot || createDesktopPathsForApp().workspaceRoot;
+  const operation = metadata.launchRequestOperation || command;
+  const executionOperation = command === "open" ? "start" : command;
+  let receipt = existingReceipt;
+  try {
+    receipt ??= beginLaunchRequestReceipt({
+      shellRoot: workspaceRoot, projectRoot: workspaceRoot, operation,
+      requestId: metadata.launchRequestId, handoffFromPid: metadata.launchRequestHandoffPid
+    });
+    if (receipt.duplicate) return;
+    if (!await ensureProjectControlPlane(workspaceRoot)) throw new Error("PROJECT_CONTROL_PLANE_UNAVAILABLE");
+    const currentRoot = normalizeInstanceKey(realpathSync.native(createDesktopPathsForApp().workspaceRoot));
+    if (normalizeInstanceKey(realpathSync.native(workspaceRoot)) !== currentRoot
+      || (requestedProjectRoot && normalizeInstanceKey(realpathSync.native(requestedProjectRoot)) !== currentRoot)) {
+      receipt.failed("launcher_workspace_mismatch", "请求工作区与当前 Launcher 绑定的工作区不一致，未执行请求。");
+      return;
+    }
+    const result = await orchestrateLauncherLifecycle(executionOperation, { schemaVersion: 1, path: command }, provenance,
+      undefined, undefined, false, undefined, { ...metadata, launchRequestOperation: operation, receipt });
+    if (!result.accepted) {
+      receipt.failed(result.code || "lifecycle_rejected", result.message || "Launcher 拒绝了生命周期请求。");
+    } else if (!receipt.handedOff()) {
+      // Queue acknowledgement and queued automatic restarts are not READY.
+      if (!result.commandId) throw new Error("LAUNCH_REQUEST_COMMAND_ID_MISSING");
+      if (result.code === "restart_queued" || result.code === "joined_in_flight_restart") {
+        receipt.dispatched(result.commandId);
+      } else {
+        receipt.completed(result.commandId, ["start", "restart", "rebuild-and-start"].includes(operation));
+      }
+    }
+  } catch (error: unknown) {
+    receipt?.failed("launch_preparation_failed", error instanceof Error ? error.message : String(error));
+    if (!receipt) console.warn("LAUNCH_REQUEST_RECEIPT_PERSISTENCE_FAILED");
   }
 }
 

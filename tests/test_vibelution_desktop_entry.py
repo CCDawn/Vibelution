@@ -814,7 +814,7 @@ def test_launch_desktop_shell_action_dispatches_to_desktop_shell(monkeypatch, ca
     captured: dict[str, object] = {}
     order: list[str] = []
 
-    def fake_launch(*, project_root, then_lifecycle, open_workbench, hidden_presentation=False):
+    def fake_launch(*, project_root, then_lifecycle, open_workbench, hidden_presentation=False, launch_request_id=""):
         order.append("launch")
         captured["project_root"] = project_root
         captured["then_lifecycle"] = then_lifecycle
@@ -844,7 +844,7 @@ def test_launch_desktop_shell_action_dispatches_to_desktop_shell(monkeypatch, ca
         "_capture_lifecycle_settlement_baseline",
         lambda _root: order.append("baseline") or {"kind": "main_line", "commandId": "cmd_before_launch"},
     )
-    monkeypatch.setattr(desktop_entry, "wait_for_lifecycle_settlement", fake_wait)
+    monkeypatch.setattr(desktop_entry, "wait_for_main_line_launch_request", fake_wait)
     result = desktop_entry.main(
         [
             "--action",
@@ -876,7 +876,7 @@ def test_launch_desktop_shell_action_dispatches_to_desktop_shell(monkeypatch, ca
 def test_launch_desktop_shell_bridge_forwards_hidden_presentation_flag(monkeypatch, capsys, tmp_path):
     captured: dict[str, object] = {}
 
-    def fake_launch(*, project_root, then_lifecycle, open_workbench, hidden_presentation=False):
+    def fake_launch(*, project_root, then_lifecycle, open_workbench, hidden_presentation=False, launch_request_id=""):
         captured["hidden_presentation"] = hidden_presentation
         return {"schemaVersion": 1, "kind": "unpackaged", "pid": 9, "thenLifecycle": then_lifecycle, "openWorkbench": open_workbench}
 
@@ -888,7 +888,7 @@ def test_launch_desktop_shell_bridge_forwards_hidden_presentation_flag(monkeypat
     )
     monkeypatch.setattr(
         desktop_entry,
-        "wait_for_lifecycle_settlement",
+        "wait_for_main_line_launch_request",
         lambda _root, _op, **_kwargs: {
             "operation": _op, "observed": "queue_settlement", "settled": True, "accepted": True,
             "ok": True, "commandId": "cmd_test_settled", "code": "", "message": "", "resultsPath": "",
@@ -973,11 +973,11 @@ def test_resolve_workbench_port_owner_flags_unmanaged_occupant_as_residual(monke
     assert payload["conflict"] is False
 
 
-def test_launch_desktop_shell_retries_once_when_intent_not_consumed(monkeypatch, capsys, tmp_path):
+def test_identified_launch_does_not_reexecute_an_unacknowledged_request(monkeypatch, capsys, tmp_path):
     launches: list[dict[str, object]] = []
     wait_kwargs: list[dict[str, object]] = []
 
-    def fake_launch(*, project_root, then_lifecycle, open_workbench, hidden_presentation=False):
+    def fake_launch(*, project_root, then_lifecycle, open_workbench, hidden_presentation=False, launch_request_id=""):
         launches.append({"then_lifecycle": then_lifecycle})
         return {
             "schemaVersion": 1,
@@ -1014,7 +1014,7 @@ def test_launch_desktop_shell_retries_once_when_intent_not_consumed(monkeypatch,
         }
 
     monkeypatch.setattr("core.launcher.desktop_shell.launch_desktop_shell", fake_launch)
-    monkeypatch.setattr(desktop_entry, "wait_for_lifecycle_settlement", fake_wait)
+    monkeypatch.setattr(desktop_entry, "wait_for_main_line_launch_request", fake_wait)
 
     result = desktop_entry.main(
         [
@@ -1028,20 +1028,17 @@ def test_launch_desktop_shell_retries_once_when_intent_not_consumed(monkeypatch,
             str(tmp_path),
         ]
     )
-    assert result == 0
-    assert len(launches) == 2
-    assert wait_kwargs[1]["timeout_seconds"] == desktop_entry.LAUNCH_SETTLEMENT_RETRY_TIMEOUT_SECONDS
+    assert result == desktop_entry._LIFECYCLE_SETTLE_EXIT_FAILED
+    assert len(launches) == 1
     payload = json.loads(capsys.readouterr().out)
-    assert payload["settlementAttempts"] == 2
-    assert payload["pid"] == 102
-    assert payload["lifecycleSettlement"]["observed"] == "queue_settlement"
-    assert payload["lifecycleSettlement"]["accepted"] is True
+    assert "settlementAttempts" not in payload
+    assert payload["lifecycleSettlement"]["accepted"] is False
 
 
 def test_launch_desktop_shell_does_not_retry_an_unsettled_intent(monkeypatch, capsys, tmp_path):
     launches: list[dict[str, object]] = []
 
-    def fake_launch(*, project_root, then_lifecycle, open_workbench, hidden_presentation=False):
+    def fake_launch(*, project_root, then_lifecycle, open_workbench, hidden_presentation=False, launch_request_id=""):
         launches.append({"then_lifecycle": then_lifecycle})
         return {
             "schemaVersion": 1,
@@ -1065,7 +1062,7 @@ def test_launch_desktop_shell_does_not_retry_an_unsettled_intent(monkeypatch, ca
         }
 
     monkeypatch.setattr("core.launcher.desktop_shell.launch_desktop_shell", fake_launch)
-    monkeypatch.setattr(desktop_entry, "wait_for_lifecycle_settlement", fake_wait)
+    monkeypatch.setattr(desktop_entry, "wait_for_main_line_launch_request", fake_wait)
 
     result = desktop_entry.main(
         [
@@ -1333,6 +1330,7 @@ def test_wait_for_lifecycle_settlement_ignores_stale_intent_and_matches_fresh_on
     _write_intent(runtime_manager_dir, operation="start", command_id="cmd_stale")
     clock = [0.0]
     replaced = {"done": False}
+    request_epoch = datetime(2026, 11, 3, 8, 11, tzinfo=timezone.utc).timestamp()
 
     def sleep_then_replace(_seconds):
         clock[0] += 0.5
@@ -1347,7 +1345,7 @@ def test_wait_for_lifecycle_settlement_ignores_stale_intent_and_matches_fresh_on
                     "desiredState": "open",
                     "operation": "start",
                     "commandId": "cmd_fresh",
-                    "updatedAt": datetime.now(timezone.utc).isoformat(),
+                    "updatedAt": datetime.fromtimestamp(request_epoch + 1, timezone.utc).isoformat(),
                 }
             )
             + "\n",
@@ -1359,7 +1357,7 @@ def test_wait_for_lifecycle_settlement_ignores_stale_intent_and_matches_fresh_on
         tmp_path,
         "start",
         baseline_command_id="cmd_baseline",
-        not_before_epoch=time.time(),
+        not_before_epoch=request_epoch,
         timeout_seconds=10.0,
         sleep=sleep_then_replace,
         monotonic=lambda: clock[0],
@@ -1367,6 +1365,107 @@ def test_wait_for_lifecycle_settlement_ignores_stale_intent_and_matches_fresh_on
 
     assert settlement["commandId"] == "cmd_fresh"
     assert settlement["accepted"] is True
+
+
+def _main_request_receipt(monkeypatch, tmp_path, **overrides):
+    request_id = "launch_" + "c" * 32
+    path = tmp_path / "request.json"
+    monkeypatch.setattr(desktop_entry, "_launch_request_receipt_path", lambda *_args: path)
+    receipt = {"schemaVersion": 1, "requestId": request_id, "projectRoot": str(tmp_path),
+               "operation": "restart", "status": "completed", "shellPid": 456, "accepted": True,
+               "updatedAt": "2026-11-03T08:14:31Z", "commandId": "cmd_exact_request",
+               "completion": {"ownerPid": 456, "commandId": "cmd_exact_request", "ready": True,
+                              "readyAt": "2026-11-03T08:14:31Z"}}
+    path.write_text(json.dumps({**receipt, **overrides}), encoding="utf-8")
+    return request_id, path
+
+
+def _wait_main_request(tmp_path, request_id, **kwargs):
+    clock = [0.0]
+    return desktop_entry.wait_for_main_line_launch_request(tmp_path, "restart", request_id,
+        not_before_epoch=datetime(2026, 11, 3, 8, 11, tzinfo=timezone.utc).timestamp(),
+        timeout_seconds=2, monotonic=lambda: clock[0], sleep=_advance_clock(clock), **kwargs)
+
+
+def test_main_line_request_requires_its_exact_completed_ready_owner(monkeypatch, tmp_path):
+    request_id, _path = _main_request_receipt(monkeypatch, tmp_path)
+    result = _wait_main_request(tmp_path, request_id, baseline_command_id="cmd_old")
+    assert result["accepted"] is True
+    assert result["observed"] == "launch_request_completed"
+    assert result["commandId"] == "cmd_exact_request"
+
+
+@pytest.mark.parametrize("override", [
+    {"status": "received"}, {"status": "dispatched"}, {"status": "handoff"},
+    {"requestId": "launch_" + "d" * 32}, {"operation": "start"}, {"updatedAt": ""},
+    {"updatedAt": "2026-11-03T08:10:59Z"}, {"completion": {}},
+    {"completion": {"ownerPid": 123, "commandId": "cmd_exact_request", "ready": True, "readyAt": "2026-11-03T08:14:31Z"}},
+    {"completion": {"ownerPid": 456, "commandId": "cmd_other", "ready": True, "readyAt": "2026-11-03T08:14:31Z"}},
+    {"completion": {"ownerPid": 456, "commandId": "cmd_exact_request", "ready": False, "readyAt": "2026-11-03T08:14:31Z"}},
+    {"completion": {"ownerPid": 456, "commandId": "cmd_exact_request", "ready": True, "readyAt": ""}},
+])
+def test_main_line_request_does_not_accept_handoff_old_or_unrelated_success(monkeypatch, tmp_path, override):
+    request_id, path = _main_request_receipt(monkeypatch, tmp_path, **override)
+    result = _wait_main_request(tmp_path, request_id)
+    assert result["accepted"] is False
+    assert result["observed"] != "intent_not_consumed"
+    assert path.exists()  # Timeout cannot destroy the replacement's handoff evidence.
+
+
+def test_main_line_request_rejection_is_immediate_and_keeps_original_message(monkeypatch, tmp_path):
+    request_id, _path = _main_request_receipt(monkeypatch, tmp_path,
+        status="failed", code="active_work_blocked", message=_ACTIVE_WORK_RESTART_BLOCK_MESSAGE)
+    result = _wait_main_request(tmp_path, request_id)
+    assert result["accepted"] is False
+    assert result["settled"] is True
+    assert result["code"] == "active_work_blocked"
+    assert result["message"] == _ACTIVE_WORK_RESTART_BLOCK_MESSAGE
+
+
+def test_main_line_request_rejects_baseline_command_even_with_fresh_ready(monkeypatch, tmp_path):
+    request_id, _path = _main_request_receipt(monkeypatch, tmp_path)
+    assert _wait_main_request(tmp_path, request_id, baseline_command_id="cmd_exact_request")["accepted"] is False
+
+
+@pytest.mark.parametrize("unrelated_operation", ["start", "restart"])
+def test_unacknowledged_old_owner_exits_short_window_without_accepting_global_intent(monkeypatch, tmp_path, unrelated_operation):
+    runtime = _make_settlement_runtime(monkeypatch, tmp_path)
+    _write_intent(runtime, operation=unrelated_operation, command_id="cmd_other_request")
+    intent_path = runtime / "main_line_intent.json"
+    intent = json.loads(intent_path.read_text(encoding="utf-8"))
+    intent_path.write_text(json.dumps({**intent, "updatedAt": datetime.now(timezone.utc).isoformat()}), encoding="utf-8")
+    _write_settlement(runtime, "cmd_other_request", accepted=True, message="An unrelated request succeeded.")
+    request_id = "launch_" + "e" * 32
+    monkeypatch.setattr(desktop_entry, "_launch_request_receipt_path", lambda *_args: tmp_path / "missing.json")
+    clock = [0.0]
+    result = desktop_entry.wait_for_main_line_launch_request(tmp_path, "restart", request_id,
+        not_before_epoch=time.time() - 1, timeout_seconds=810, monotonic=lambda: clock[0], sleep=_advance_clock(clock))
+    assert clock[0] == desktop_entry.MAIN_LINE_LAUNCH_ACK_TIMEOUT_SECONDS
+    assert result["observed"] == "launch_request_unacknowledged"
+    assert result["accepted"] is False
+    assert "结果未知" in result["message"]
+    assert "未重新执行" in result["message"]
+
+
+def test_acknowledged_request_keeps_full_prepare_and_ready_deadline(monkeypatch, tmp_path):
+    request_id, path = _main_request_receipt(monkeypatch, tmp_path)
+    completed = json.loads(path.read_text(encoding="utf-8"))
+    path.unlink()
+    clock = [0.0]
+
+    def prepare_then_ready(_seconds):
+        clock[0] += 0.5
+        if clock[0] == 10:
+            path.write_text(json.dumps({**completed, "status": "received"}), encoding="utf-8")
+        elif clock[0] == 60:
+            path.write_text(json.dumps(completed), encoding="utf-8")
+
+    result = desktop_entry.wait_for_main_line_launch_request(tmp_path, "restart", request_id,
+        not_before_epoch=datetime(2026, 11, 3, 8, 11, tzinfo=timezone.utc).timestamp(), timeout_seconds=100,
+        monotonic=lambda: clock[0], sleep=prepare_then_ready)
+    assert clock[0] == 60
+    assert result["observed"] == "launch_request_completed"
+    assert result["accepted"] is True
 
 
 def test_wait_for_branch_instance_settlement_requires_a_fresh_ready_generation(monkeypatch, tmp_path):
@@ -1616,7 +1715,7 @@ def test_received_launch_without_ready_generation_is_unsettled_not_retryable(mon
     assert result["settled"] is False
 
 
-def test_bridge_reports_preparation_failure_without_relaunch_and_cleans_receipt(monkeypatch, tmp_path):
+def test_bridge_reports_preparation_failure_without_relaunch_and_preserves_dedupe(monkeypatch, tmp_path):
     calls = []
     path = tmp_path / "receipt.json"
     monkeypatch.setattr(desktop_entry, "_launch_request_receipt_path", lambda *_args: path)
@@ -1639,10 +1738,10 @@ def test_bridge_reports_preparation_failure_without_relaunch_and_cleans_receipt(
     assert len(calls) == 1
     assert result["ok"] is False
     assert result["lifecycleSettlement"]["code"] == "frontend_preparation_failed"
-    assert not path.exists()
+    assert path.exists()
 
 
-def test_dropped_branch_launch_retries_once_with_same_request_id(monkeypatch, tmp_path):
+def test_unacknowledged_branch_launch_does_not_reexecute(monkeypatch, tmp_path):
     calls = []
     monkeypatch.setattr(desktop_entry, "_capture_lifecycle_settlement_baseline", lambda _root: {"kind": "branch_instance", "generation": 0})
     monkeypatch.setattr(desktop_entry, "_launch_request_receipt_path", lambda *_args: tmp_path / "missing.json")
@@ -1651,9 +1750,8 @@ def test_dropped_branch_launch_retries_once_with_same_request_id(monkeypatch, tm
     monkeypatch.setattr(desktop_entry, "_await_launch_lifecycle_settlement", lambda *_args, **_kwargs: {"lifecycleSettlement": {"observed": "intent_not_consumed"}})
     args = desktop_entry.parse_args(["--workspace", str(tmp_path), "--action", "launch-desktop-shell", "--then-lifecycle", "start"])
     result = desktop_entry._launch_desktop_shell_bridge(args)
-    assert len(calls) == 2
-    assert calls[0]["launch_request_id"] == calls[1]["launch_request_id"]
-    assert result["settlementAttempts"] == 2
+    assert len(calls) == 1
+    assert "settlementAttempts" not in result
 
 
 @pytest.mark.parametrize("override", [
@@ -1682,7 +1780,7 @@ def test_launch_desktop_shell_waits_for_settlement_and_reports_visible_failure(m
     )
     monkeypatch.setattr(
         desktop_entry,
-        "wait_for_lifecycle_settlement",
+        "wait_for_main_line_launch_request",
         lambda workspace_root, operation, **_kwargs: {
             "operation": operation,
             "observed": "queue_settlement",

@@ -337,6 +337,8 @@ describe("desktop shell freshness", () => {
       pythonPath: "C:/repo/.venv/Scripts/python.exe",
       waitPid: 12,
       thenLifecycle: "start",
+      launchRequestId: "launch_" + "a".repeat(32),
+      launchRequestOperation: "restart",
       spawnImpl
     });
     expect(result.helperPid).toBe(88);
@@ -344,6 +346,8 @@ describe("desktop shell freshness", () => {
     expect(args).toContain("schedule-desktop-shell-refresh");
     expect(args[args.indexOf("--wait-pid") + 1]).toBe("12");
     expect(args[args.indexOf("--then-lifecycle") + 1]).toBe("start");
+    expect(args[args.indexOf("--launch-request-id") + 1]).toBe("launch_" + "a".repeat(32));
+    expect(args[args.indexOf("--launch-request-operation") + 1]).toBe("restart");
   });
 
   it("passes force refresh when the tray restart-all path retries after a failure", async () => {
