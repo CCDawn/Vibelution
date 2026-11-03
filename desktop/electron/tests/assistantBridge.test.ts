@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { invokeAssistant, LAUNCHER_ASSISTANT_URL } from "../src/assistant/assistantBridge.js";
 
 function setup() {
@@ -10,6 +10,8 @@ function setup() {
 }
 
 describe("Launcher assistant private bridge", () => {
+  afterEach(() => { vi.useRealTimers(); });
+
   it("admits a closed model change from the float and rejects identity injection before host start", async () => {
     const { owner, event } = setup();
     for (const payload of [{ operation: "setModel", modelId: "" }, { operation: "setModel", modelId: "local/model\n" },
@@ -99,6 +101,43 @@ describe("Launcher assistant private bridge", () => {
     expect(owner.host.request).toHaveBeenCalledWith(payload);
     await invokeAssistant(event, { operation: "status" }, owner);
     expect(owner.host.request).toHaveBeenCalledTimes(2);
+  });
+  it("bounds a read invoke's wait on host start so a restarting host fails fast instead", async () => {
+    vi.useFakeTimers();
+    const { owner, event } = setup();
+    let releaseStart!: (value: unknown) => void;
+    owner.host.start.mockImplementation(() => new Promise(resolve => { releaseStart = resolve; }));
+    owner.host.request.mockRejectedValue(new Error("ASSISTANT_NOT_READY"));
+    let failure = "";
+    const read = invokeAssistant(event, { operation: "status" }, owner)
+      .catch((error: unknown) => { failure = error instanceof Error ? error.message : ""; });
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(failure).toBe("");
+    expect(owner.host.request).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await read;
+    expect(failure).toBe("ASSISTANT_NOT_READY");
+    // The recovery start itself was still triggered and stays in flight.
+    expect(owner.host.start).toHaveBeenCalledTimes(1);
+    expect(owner.host.request).toHaveBeenCalledExactlyOnceWith({ operation: "status" });
+    releaseStart({});
+    await Promise.resolve();
+  });
+  it("keeps a write invoke waiting on the full host start", async () => {
+    vi.useFakeTimers();
+    const { owner, event } = setup();
+    let releaseStart!: (value: unknown) => void;
+    owner.host.start.mockImplementation(() => new Promise(resolve => { releaseStart = resolve; }));
+    let settled = false;
+    const write = invokeAssistant(event, { operation: "send", message: "m", requestId: "r" }, owner)
+      .then(() => { settled = true; }, () => { settled = true; });
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(settled).toBe(false);
+    expect(owner.host.request).not.toHaveBeenCalled();
+    releaseStart({});
+    await write;
+    expect(settled).toBe(true);
+    expect(owner.host.request).toHaveBeenCalledExactlyOnceWith({ operation: "send", message: "m", requestId: "r" });
   });
 });
 

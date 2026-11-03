@@ -22,6 +22,19 @@ export type AssistantBridgeOwner = {
   isLauncherControlSender?: WorkbenchSenderGate;
 };
 
+/** Read views wait this long for host.start() before falling through to the
+ * host's ASSISTANT_NOT_READY fast path; writes still await the full recovery. */
+const START_GRACE_READ_MS = 2_000;
+/** Renderer read views that keep polling while a generation is starting. */
+const READ_OPERATIONS = new Set(["status", "detail", "dispatches", "teamRuns", "config", "approvals", "curation", "assistantAvatar"]);
+
+function delay(ms: number): Promise<void> {
+  return new Promise(done => {
+    const timer: ReturnType<typeof setTimeout> = setTimeout(done, ms);
+    timer.unref?.();
+  });
+}
+
 export function assertAssistantSender(event: Sender, contents: Contents | undefined,
   isWorkbenchSender?: WorkbenchSenderGate, isLauncherControlSender?: WorkbenchSenderGate): void {
   if (contents && !contents.isDestroyed() && event.sender === contents
@@ -77,7 +90,16 @@ export async function invokeAssistant(event: Sender, payload: unknown, owner: As
     // Confirmation can only settle an existing native waiter. Starting a new
     // host here would also wait behind migration admission and deadlock it.
     if (request.operation !== "computerConfirm"
-      && !(request.operation === "computerState" && owner.host.snapshot?.().state === "ready")) await owner.host.start();
+      && !(request.operation === "computerState" && owner.host.snapshot?.().state === "ready")) {
+      const starting = owner.host.start();
+      if (READ_OPERATIONS.has(String(request.operation))) {
+        // Reads still trigger the same recovery but wait on it for a bounded
+        // grace: a still-starting host fails fast below with ASSISTANT_NOT_READY
+        // (the renderer's cold-start waiting state) instead of parking the
+        // renderer on an unbudgeted start. The abandoned start keeps running.
+        await Promise.race([starting, delay(START_GRACE_READ_MS)]);
+      } else await starting;
+    }
     return await owner.host.request(payload as AssistantHostRequest);
   } catch (error) {
     const code = error instanceof Error && /^ASSISTANT_[A-Z_]+$/.test(error.message)
