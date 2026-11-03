@@ -1171,6 +1171,27 @@ describe("AssistantHost", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(before + 1);
     await host.stop();
   });
+  it("switches the conversation version head once and rejects extra authority", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    fetchImpl.mockResolvedValueOnce(Response.json({ id: "s", messages: [] }));
+    await host.request({ operation: "switchHead", nodeId: "target-node" } as AssistantHostRequest);
+    expect(fetchImpl.mock.calls.at(-1)?.[0]).toContain("/api/assistant/head");
+    expect(fetchImpl.mock.calls.at(-1)?.[1]?.method).toBe("POST");
+    expect(fetchImpl.mock.calls.at(-1)?.[1]?.body).toBe(JSON.stringify({ nodeId: "target-node" }));
+    const before = fetchImpl.mock.calls.length;
+    for (const value of [
+      { operation: "switchHead", nodeId: "target-node", sessionId: "other" },
+      { operation: "switchHead", nodeId: "   " },
+      { operation: "switchHead", nodeId: 7 },
+    ]) await expect(host.request(value as AssistantHostRequest)).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    expect(fetchImpl).toHaveBeenCalledTimes(before);
+    fetchImpl.mockResolvedValueOnce(Response.json({ id: "other-session", messages: [] }));
+    await expect(host.request({ operation: "switchHead", nodeId: "target-node" } as AssistantHostRequest)).rejects.toThrow("ASSISTANT_IDENTITY_INVALID");
+    fetchImpl.mockRejectedValueOnce(new Error("ack lost"));
+    await expect(host.request({ operation: "switchHead", nodeId: "target-node" } as AssistantHostRequest)).rejects.toThrow("ASSISTANT_TRANSPORT_FAILED");
+    await host.stop();
+  });
   it("does not reintroduce inherited Python search paths for the isolated packaged runtime", async () => {
     vi.stubEnv("PYTHONPATH", "foreign-source");
     vi.stubEnv("PYTHONHOME", "foreign-runtime");

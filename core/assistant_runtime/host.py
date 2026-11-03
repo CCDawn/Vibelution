@@ -157,6 +157,11 @@ class StopTurn(BaseModel):
     turnId: str = Field(min_length=1, max_length=160, pattern=r"\S", strict=True)
 
 
+class SwitchHead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    nodeId: str = Field(min_length=1, max_length=200, pattern=r"\S", strict=True)
+
+
 class Continuation(BaseModel):
     model_config = ConfigDict(extra="forbid")
     turnId: str = Field(min_length=1, max_length=160, pattern=r"\S", strict=True)
@@ -513,6 +518,10 @@ class NativeFacade:
     def continue_turn(self, request_id, continuation):
         from . import native
         return native.continue_turn(request_id, continuation)
+
+    def switch_head(self, node_id):
+        from . import native
+        return native.switch_head(node_id)
 
     def shutdown(self):
         from . import native
@@ -1491,6 +1500,10 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
     @app.post("/api/assistant/continue", status_code=202)
     def continue_turn(payload: ContinueTurn):
         return native.continue_turn(payload.requestId, payload.continuation.model_dump())
+
+    @app.post("/api/assistant/head", status_code=202)
+    def switch_head(payload: SwitchHead):
+        return native.switch_head(payload.nodeId)
 
     @app.get("/api/assistant/events")
     async def events(request: Request):

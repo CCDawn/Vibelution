@@ -682,6 +682,21 @@ def continue_turn(request_id: str, continuation: dict[str, Any]) -> dict[str, An
         )
 
 
+def switch_head(node_id: str) -> dict[str, Any]:
+    """Point the fixed assistant Session's active branch head at a version leaf.
+
+    The shared service layer owns the append-only branch rebase and republishes
+    the full detail snapshot; this wrapper only binds it to the fixed identity
+    and reuses the session-command admission and error mapping.
+    """
+    if not isinstance(node_id, str) or not node_id.strip() or len(node_id) > 200:
+        raise AssistantSessionError("SESSION_INVALID")
+    with _session_command() as (sessions, session_id):
+        from core.web.services.session.branch_head import switch_session_head
+
+        return switch_session_head(session_id, node_id.strip())
+
+
 def shutdown(*, timeout: float = 8.0) -> dict[str, Any]:
     """Stop owned native work and drain it before closing its directory store."""
     global _STARTED, _SESSION_ID, _AGENT_ID, _OFFLINE_MIGRATION

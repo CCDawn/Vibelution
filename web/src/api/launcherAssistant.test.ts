@@ -5,7 +5,7 @@ import {
   sendLauncherAssistantMessage, setLauncherAssistantExpanded, setLauncherAssistantModel,
   getLauncherAssistantApprovals, resolveLauncherAssistantApproval,
   previewLauncherDispatchApproval, decideLauncherDispatchApproval, declineLauncherDispatchSummary,
-  stopLauncherAssistantTurn, continueLauncherAssistantTurn,
+  stopLauncherAssistantTurn, continueLauncherAssistantTurn, switchLauncherAssistantHead,
   getLauncherOperatorAsset, getLauncherAssistantAvatar, openLauncherFromAssistant,
   subscribeLauncherAssistantSessionEvent,
 } from "./launcherAssistant";
@@ -272,6 +272,19 @@ describe("Launcher assistant bridge", () => {
       [{ operation: "continue", requestId: "same-request", continuation }]]);
     invoke.mockResolvedValueOnce({ accepted: true, status: "queued", turnId: "", queuedTurnId: "queue" });
     await expect(continueLauncherAssistantTurn(continuation, "same-request")).rejects.toThrow("继续");
+  });
+  it("switches the head with a trimmed node id and verifies the returned session", async () => {
+    const invoke = vi.fn().mockResolvedValueOnce({ id: "s", messages: [{ id: "m1" }] })
+      .mockResolvedValueOnce({ id: "other", messages: [] });
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    await expect(switchLauncherAssistantHead("s", "  target-node  ")).resolves.toMatchObject({ id: "s" });
+    expect(invoke.mock.calls[0]).toEqual([{ operation: "switchHead", nodeId: "target-node" }]);
+    await expect(switchLauncherAssistantHead("s", "x")).rejects.toThrow("未确认版本切换所属会话");
+    await expect(switchLauncherAssistantHead("s", "   ")).rejects.toThrow("版本标识无效");
+    await expect(switchLauncherAssistantHead("s", "x".repeat(201))).rejects.toThrow("版本标识无效");
+    // Only the two well-formed attempts reached the bridge; blank and oversized
+    // node ids are refused renderer-side without any transport use.
+    expect(invoke.mock.calls).toHaveLength(2);
   });
   it("requires the dedicated Launcher bridge without a browser HTTP fallback", async () => {
     vi.stubGlobal("vibelutionLauncherAssistant", undefined);

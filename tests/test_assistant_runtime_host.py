@@ -345,13 +345,19 @@ def test_fixed_session_stop_and_continue_forward_once_without_renderer_session_s
             calls.append(("continue", request_id, continuation))
             return super().continue_turn(request_id, continuation)
 
+        def switch_head(self, node_id):
+            calls.append(("head", node_id))
+            return {"id": "native-session", "messages": []}
+
     with TestClient(create_app(native=Owner(), token="private-test-token"), base_url="http://127.0.0.1",
                     headers={"Authorization": "Bearer private-test-token"}) as client:
         result = client.post("/api/assistant/stop", json={"turnId": "old-turn"})
         assert result.status_code == 202 and result.json()["stopRequested"] is True
         result = client.post("/api/assistant/continue", json={"requestId": "continue-1", "continuation": CONTINUATION})
         assert result.status_code == 202 and result.json()["turnId"] == "continued-turn"
-    assert calls == [("stop", "old-turn"), ("continue", "continue-1", CONTINUATION)]
+        result = client.post("/api/assistant/head", json={"nodeId": "target-node"})
+        assert result.status_code == 202 and result.json()["id"] == "native-session"
+    assert calls == [("stop", "old-turn"), ("continue", "continue-1", CONTINUATION), ("head", "target-node")]
 
 
 @pytest.mark.parametrize("path,payload", [
@@ -365,6 +371,9 @@ def test_fixed_session_stop_and_continue_forward_once_without_renderer_session_s
     ("continue", {"requestId": "c", "continuation": {**CONTINUATION, "headId": " "}}),
     ("continue", {"requestId": "c", "continuation": {**CONTINUATION, "sessionId": "other"}}),
     ("continue", {"requestId": "c", "continuation": {key: value for key, value in CONTINUATION.items() if key != "agentId"}}),
+    ("head", {}), ("head", {"nodeId": " "}), ("head", {"nodeId": 1}), ("head", {"nodeId": ""}),
+    ("head", {"nodeId": "x", "sessionId": "other"}),
+    ("head", {"nodeId": "x" * 201}),
 ])
 def test_session_commands_reject_invalid_payload_before_native_call(path, payload):
     class Owner(Native):
@@ -373,6 +382,9 @@ def test_session_commands_reject_invalid_payload_before_native_call(path, payloa
 
         def continue_turn(self, *args):
             pytest.fail("invalid continuation reached native owner")
+
+        def switch_head(self, *args):
+            pytest.fail("invalid head switch reached native owner")
 
     with TestClient(create_app(native=Owner(), token="private-test-token"), base_url="http://127.0.0.1",
                     headers={"Authorization": "Bearer private-test-token"}) as client:
@@ -384,7 +396,7 @@ def test_session_commands_reject_invalid_payload_before_native_call(path, payloa
     ("ASSISTANT_IDENTITY_INVALID", 409), ("SESSION_NOT_FOUND", 404),
     ("SESSION_CONFLICT", 409), ("SESSION_INVALID", 422),
 ])
-@pytest.mark.parametrize("path", ["stop", "continue"])
+@pytest.mark.parametrize("path", ["stop", "continue", "head"])
 def test_session_command_errors_have_bounded_codes(code, status, path):
     from core.assistant_runtime.native import AssistantSessionError
 
@@ -395,7 +407,11 @@ def test_session_command_errors_have_bounded_codes(code, status, path):
         def continue_turn(self, *args):
             raise AssistantSessionError(code)
 
-    payload = {"turnId": "old-turn"} if path == "stop" else {"requestId": "c", "continuation": CONTINUATION}
+        def switch_head(self, *args):
+            raise AssistantSessionError(code)
+
+    payload = {"turnId": "old-turn"} if path == "stop" else (
+        {"requestId": "c", "continuation": CONTINUATION} if path == "continue" else {"nodeId": "target"})
     with TestClient(create_app(native=Owner(), token="private-test-token"), base_url="http://127.0.0.1",
                     headers={"Authorization": "Bearer private-test-token"}) as client:
         response = client.post(f"/api/assistant/{path}", json=payload)
@@ -410,10 +426,12 @@ def test_native_facade_forwards_commands_to_fixed_native_owner(monkeypatch):
     calls = []
     monkeypatch.setattr(native, "stop", lambda turn: calls.append(("stop", turn)) or {"stopRequested": True})
     monkeypatch.setattr(native, "continue_turn", lambda request, expected: calls.append(("continue", request, expected)) or {"turnId": "new"})
+    monkeypatch.setattr(native, "switch_head", lambda node: calls.append(("head", node)) or {"id": "s"})
     facade = NativeFacade(None)
     assert facade.stop("old")["stopRequested"]
     assert facade.continue_turn("c", CONTINUATION)["turnId"] == "new"
-    assert calls == [("stop", "old"), ("continue", "c", CONTINUATION)]
+    assert facade.switch_head("target")["id"] == "s"
+    assert calls == [("stop", "old"), ("continue", "c", CONTINUATION), ("head", "target")]
 
 
 def test_main_only_project_snapshot_updates_same_owner_and_rejects_browser_origin(tmp_path):

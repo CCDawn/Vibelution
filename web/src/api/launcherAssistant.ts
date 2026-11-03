@@ -89,6 +89,7 @@ export type LauncherAssistantRequest =
   | { operation: "readAttachment"; artifactId: string }
   | { operation: "stop"; turnId: string }
   | { operation: "continue"; requestId: string; continuation: SessionContinuationExpectation }
+  | { operation: "switchHead"; nodeId: string }
   | { operation: "config" }
   | { operation: "operatorAsset"; kind: LauncherOperatorAssetKind }
   | { operation: "computerState" | "computerWindows" }
@@ -425,6 +426,16 @@ export async function continueLauncherAssistantTurn(continuation: SessionContinu
   if (!record(result) || result.accepted !== true || result.status === "queued" || result.queuedTurnId !== undefined
     || typeof result.turnId !== "string" || !result.turnId.trim()) throw new Error("Launcher 尚未确认继续请求，请核对同一请求。");
   return { turnId: result.turnId };
+}
+
+/** Switch the fixed native conversation to a version leaf. The host returns the
+ * republished full snapshot; identity mismatch fails closed like stop. */
+export async function switchLauncherAssistantHead(sessionId: string, nodeId: string): Promise<SessionDetail> {
+  const normalized = String(nodeId || "").trim();
+  if (!normalized || normalized.length > 200) throw new Error("对话版本标识无效。");
+  const result = await launcherAssistantBridge().invoke({ operation: "switchHead", nodeId: normalized });
+  if (!record(result) || result.id !== sessionId || !Array.isArray(result.messages)) throw new Error("Launcher 未确认版本切换所属会话。");
+  return result as SessionDetail;
 }
 
 function isApproval(value: unknown, sessionId: string): value is SessionToolApprovalRequest {

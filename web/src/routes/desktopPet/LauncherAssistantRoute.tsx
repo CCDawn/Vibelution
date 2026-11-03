@@ -8,7 +8,7 @@ import {
   launcherConversationApi,
   getLauncherAssistantApprovals, resolveLauncherAssistantApproval,
   previewLauncherDispatchApproval, decideLauncherDispatchApproval, declineLauncherDispatchSummary, launcherDispatchDeclineRevisionIsValid, type LauncherDispatchApprovalPreview,
-  stopLauncherAssistantTurn, continueLauncherAssistantTurn,
+  stopLauncherAssistantTurn, continueLauncherAssistantTurn, switchLauncherAssistantHead,
   getLauncherOperatorAsset, getLauncherAssistantAvatar, openLauncherFromAssistant, uploadLauncherAttachment,
   readLauncherAttachment, subscribeLauncherAssistantSessionEvent,
 } from "../../api/launcherAssistant";
@@ -950,6 +950,31 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     }
   }
 
+  const [switchHeadPending, setSwitchHeadPending] = useState(false);
+  async function switchMessageVersion(message: ConversationMessage, targetNodeId: string) {
+    if (controlGate.current || !detail.data || !sessionId) return;
+    const nodeId = String(targetNodeId || "").trim();
+    if (!nodeId || nodeId === String(message.nodeId || "").trim()) return;
+    // Same busy gate as the chat baseline: a running or stopping turn owns the
+    // head, and the native service would refuse the switch with a conflict.
+    if (busy || stopping) return;
+    controlGate.current = true;
+    setSwitchHeadPending(true);
+    setFeedback("");
+    try {
+      const next = await switchLauncherAssistantHead(sessionId, nodeId);
+      if (!mounted.current || sessionIdRef.current !== sessionId) return;
+      // A head switch republishes the whole active path; replace the cached
+      // window wholesale instead of merging earlier pages from the old branch.
+      client.setQueryData<SessionDetail>(["launcher-assistant", "detail", sessionId], next);
+    } catch (error) {
+      if (mounted.current) setFeedback(errorMessage(error));
+    } finally {
+      controlGate.current = false;
+      if (mounted.current) { setSwitchHeadPending(false); void detail.refetch(); }
+    }
+  }
+
   const identity = status.data?.assistant;
   const avatarImage = readingAssets && !avatar.isError ? avatar.data?.image : null;
   const assistantAvatarImage = readingAssistantAvatar && !assistantAvatar.isError && !assistantAvatar.isFetching ? assistantAvatar.data?.image : null;
@@ -1177,6 +1202,8 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       onEditUserMessage={editMessageToComposer}
       editUserMessageLabel={copy.editAsNew}
       editUserMessageDisabled={sendPending || sendUnconfirmed || controlPending || busy || stopping}
+      onSwitchMessageVersion={switchMessageVersion}
+      branchVersionSwitchDisabled={busy || stopping || switchHeadPending}
       composerLeadingControl={<ChatComposerPlusMenu lang={lang} showCapabilities={false} showReferences={false}
         sessionReferences={[]} onAddAttachments={addAttachments}
         attachmentDisabled={status.data?.attachmentVersion !== 1 || sendPending || sendUnconfirmed || controlPending} />}

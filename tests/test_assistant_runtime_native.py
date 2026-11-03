@@ -1418,3 +1418,72 @@ def test_identity_entry_reports_a_slow_critical_section(monkeypatch, caplog):
         assert native.identity() == {"assistant": {}}
     messages = [record.getMessage() for record in caplog.records if record.levelno == logging.WARNING]
     assert any("assistant_native_lock_hold" in message and "operation=identity" in message for message in messages)
+
+
+def test_fixed_session_head_switch_rebases_the_active_path(assistant_command_session, tmp_path, monkeypatch):
+    from core.chat.conversation_branches import analyze_conversation_branches
+    from core.chat.conversation_ledger import append_conversation_event, load_conversation_events
+
+    native, sessions, sid, _, scheduled, _ = assistant_command_session
+    # A real fork first: regenerate old-turn the way the shared service does —
+    # an append-only regenerate marker, then the rerun turn events.
+    events = load_conversation_events(tmp_path, sid)
+    old_start_index = next(index for index, event in enumerate(events) if event.turn_id == "old-turn")
+    fork_event_id = events[old_start_index - 1].event_id
+    replaced_user_event_id = next(event.event_id for event in events if event.turn_id == "old-turn"
+                                  and event.event_type == "user_message")
+    append_conversation_event(tmp_path, sid, "new-turn", "branch_rebase", status="recorded",
+                              payload={"operation": "regenerate", "branchId": "branch-regen-1",
+                                       "fromEventId": fork_event_id, "replacedTurnIds": ["old-turn"],
+                                       "baseMessageId": replaced_user_event_id},
+                              parent_event_id=fork_event_id, visible_in_model=False,
+                              projection_kind="session_branch_rebase")
+    for kind, payload in (("turn_started", {}), ("user_message", {"content": "follow-up"}),
+                          ("assistant_message", {"content": "second answer"}), ("turn_completed", {})):
+        append_conversation_event(tmp_path, sid, "new-turn", kind, payload=payload, status="")
+    events = load_conversation_events(tmp_path, sid)
+    view = analyze_conversation_branches(events)
+    # The head-select target is the superseded answer's node, exactly the node
+    # id a version chip carries in the projection.
+    superseded_answer = next(event.event_id for event in events if event.turn_id == "old-turn"
+                             and event.event_type == "assistant_message")
+    superseded_node = view.node_id_by_event[superseded_answer]
+    superseded_leaf = view.default_leaf_ids[superseded_node]
+    assert view.nodes.get(superseded_leaf) is not None
+    assert view.active_leaf_id != superseded_leaf
+    result = native.switch_head(superseded_answer)
+    assert result["id"] == sid and result["messages"]
+    # The rebase truncates the follow-up turn: no projected message may still
+    # come from new-turn, while seeded fixture rows keep their own turn ids.
+    assert all(message.get("turnId") != "new-turn" for message in result["messages"])
+    rebased = analyze_conversation_branches(load_conversation_events(tmp_path, sid))
+    assert rebased.active_leaf_id == superseded_leaf
+    rebases = [event for event in load_conversation_events(tmp_path, sid)
+               if event.event_type == "branch_rebase" and (event.payload or {}).get("operation") == "head_select"]
+    assert len(rebases) == 1
+    assert not scheduled
+
+
+def test_fixed_session_head_switch_validates_input_and_busy_state(assistant_command_session, monkeypatch):
+    native, sessions, sid, _, scheduled, _ = assistant_command_session
+    for bad in ("", "   ", "x" * 201, 7, None):
+        with pytest.raises(native.AssistantSessionError) as error:
+            native.switch_head(bad)
+        assert error.value.code == "SESSION_INVALID"
+    monkeypatch.setattr(sessions, "_is_session_running", lambda _: True)
+    with pytest.raises(native.AssistantSessionError) as error:
+        native.switch_head("missing-node")
+    assert error.value.code == "SESSION_CONFLICT"
+    assert not scheduled
+
+
+@pytest.mark.parametrize("changed", ["directSessionId", "agentId"])
+def test_fixed_session_head_switch_refuses_identity_rebinding(assistant_command_session, monkeypatch, changed):
+    native, sessions, _, _, scheduled, identity = assistant_command_session
+    identity[changed] = "replacement"
+    monkeypatch.setattr(sessions, "load_session_chat_state",
+                        lambda *_: pytest.fail("rebound head switch admitted"))
+    with pytest.raises(native.AssistantSessionError) as error:
+        native.switch_head("any-node")
+    assert error.value.code == "ASSISTANT_IDENTITY_INVALID"
+    assert not scheduled
