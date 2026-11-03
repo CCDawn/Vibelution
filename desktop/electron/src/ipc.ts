@@ -12,6 +12,7 @@ export const IPC_CHANNELS = {
   getVersion: "launcher:get-version",
   getDesktopShellSummary: "launcher:get-desktop-shell-summary",
   focusWorkbenchWindow: "launcher:focus-workbench-window",
+  openWorkbenchConfig: "launcher:open-workbench-config",
   focusAssistantWindow: "launcher:focus-assistant-window",
   openConversationFromPet: "pet:open-conversation",
   beginDesktopPetWindowDrag: "pet:window-drag-begin",

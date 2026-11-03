@@ -17,7 +17,7 @@ from contextlib import nullcontext
 from functools import partial
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -138,6 +138,11 @@ class Message(BaseModel):
 class AttachmentRead(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     artifactId: str = Field(min_length=1, max_length=255, pattern=r"^[A-Za-z0-9_.-]+$")
+
+
+class SetModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    modelId: str = Field(min_length=1, max_length=200, pattern=r"^[^\s\x00-\x1f\x7f]+$")
 
 
 class StopTurn(BaseModel):
@@ -341,6 +346,27 @@ def _operator_profile() -> dict[str, str] | None:
     return {"displayName": name, "avatarPreset": preset}
 
 
+def _model_image_input_support(agent_id: str) -> bool | None:
+    """Best-effort image-input capability of the assistant's dialogue model.
+
+    Same source as the chat page's submit preflight. ``None`` means unknown
+    (catalog, snapshot or service unavailable): the renderer stays quiet and
+    never blocks a send on unknown capability. Failures here must not degrade
+    the lightweight status read."""
+    if not isinstance(agent_id, str) or not agent_id.strip():
+        return None
+    try:
+        from core.web.services import agent_directory_service, session_service
+
+        agent = agent_directory_service.get_agent_parameter_snapshot(agent_id, include_archived=False)
+        if not isinstance(agent, dict) or agent.get("agentId") != agent_id:
+            return None
+        value = session_service._resolve_image_attachment_capability(agent_instance=agent).get("supports_image_input")
+        return value if isinstance(value, bool) else None
+    except Exception:  # noqa: BLE001 - a capability read failure only means "unknown".
+        return None
+
+
 class NativeFacade:
     """Bind the narrow host API to one immutable native assistant identity."""
 
@@ -354,13 +380,12 @@ class NativeFacade:
         self.assistant = result["assistant"]
         return result
 
-    def get_detail(self):
+    def get_detail(self, before_message_index=None):
         from . import native
-        return native.get_detail(self.assistant["directSessionId"])
+        return native.get_detail(self.assistant["directSessionId"], **(
+            {"before_message_index": before_message_index} if before_message_index is not None else {}))
 
     def identity(self):
-        from tools import pa_assistant_actions
-
         from . import native, operator_assets
         result = native.identity()
         result["operatorAssetsVersion"] = 1
@@ -368,11 +393,19 @@ class NativeFacade:
         result["assistantAvatarVersion"] = 1
         result["assistantAvatarRevision"] = native.assistant_avatar_revision()
         result["attachmentVersion"] = 1
-        result["settings"] = pa_assistant_actions.execute("assistant_settings", {}, {}, governed=False)
+        result["settings"] = native.assistant_settings()
+        # Additive capability hint for the renderer's attach gate; the tool
+        # contract's own settings payload stays untouched.
+        result["settings"]["supportsImageInput"] = _model_image_input_support(
+            str((result.get("assistant") or {}).get("agentId") or ""))
         profile = _operator_profile()
         if profile is not None:
             result["operatorProfile"] = profile
         return result
+
+    def set_model(self, model_id):
+        from . import native
+        return native.set_model(model_id)
 
     def avatar(self):
         from . import native
@@ -678,6 +711,9 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
             "SESSION_NOT_FOUND": (404, "Native assistant session not found"),
             "SESSION_CONFLICT": (409, "Native session changed; refresh before retrying"),
             "SESSION_INVALID": (422, "Native session command is invalid"),
+            "ASSISTANT_MODEL_BUSY": (409, "Wait for the assistant to finish before changing its model"),
+            "ASSISTANT_MODEL_INVALID": (422, "The assistant model is not available for selection"),
+            "ASSISTANT_MODEL_UNAVAILABLE": (503, "The assistant model settings are unavailable"),
         }
         status, message = errors.get(error.code, (500, "Native session command failed"))
         code = error.code if error.code in errors else "SESSION_OPERATION_FAILED"
@@ -1199,6 +1235,12 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                     **({"patrol": patrol_status} if patrol_status is not None else {})}
         return result
 
+    @app.post("/api/assistant/model")
+    def set_model(payload: SetModel, request: Request):
+        if request.query_params:
+            raise HTTPException(422, detail="Invalid assistant model request")
+        return native.set_model(payload.modelId)
+
     from .team_task_cards import TeamTaskCardsError, TeamTaskCardsPage, read_team_task_cards
 
     @app.get("/api/assistant/team-runs", response_model=TeamTaskCardsPage)
@@ -1241,8 +1283,8 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
             raise HTTPException(422, detail="Native approval could not be resolved") from None
 
     @app.get("/api/assistant/session")
-    def detail():
-        return native.get_detail()
+    def detail(before_message_index: int | None = Query(default=None, ge=1, le=2_147_483_647)):
+        return native.get_detail() if before_message_index is None else native.get_detail(before_message_index=before_message_index)
 
     @app.get("/api/assistant/config")
     def config():

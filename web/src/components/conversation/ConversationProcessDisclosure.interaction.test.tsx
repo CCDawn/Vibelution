@@ -35,7 +35,7 @@ it("keeps the work clock through thinking/tool stage switches and freezes at set
   }
 });
 
-it("makes a collapsed streaming trail inert and restores focus when it settles", async () => {
+it("keeps a user-opened streaming trail open after settle and restores focus on collapse", async () => {
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
@@ -59,8 +59,53 @@ it("makes a collapsed streaming trail inert and restores focus when it settles",
     await act(async () => new Promise((resolve) => setTimeout(resolve, 40)));
     host.querySelector("button")!.focus();
     await act(async () => render(false));
+    expect(summary.getAttribute("aria-expanded")).toBe("true");
+    expect(document.activeElement).toBe(host.querySelector("button"));
+    await act(async () => summary.click());
     expect(document.activeElement).toBe(summary);
     expect(host.querySelector('div[aria-hidden="true"]')?.hasAttribute("inert")).toBe(true);
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+  }
+});
+
+it("keeps an explicit collapsed choice through settled and running state changes", async () => {
+  const host = document.createElement("div");
+  const root = createRoot(host);
+  const render = (streaming: boolean) => root.render(
+    <ConversationProcessDisclosure cells={[]} language="en" turnStreaming={streaming}>
+      <span>Tool activity</span>
+    </ConversationProcessDisclosure>,
+  );
+  try {
+    await act(async () => render(true));
+    const summary = host.querySelector("summary")!;
+    await act(async () => summary.click());
+    await act(async () => render(false));
+    expect(summary.getAttribute("aria-expanded")).toBe("false");
+    await act(async () => render(true));
+    expect(summary.getAttribute("aria-expanded")).toBe("false");
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
+
+it("still auto-collapses an untouched running trail when it settles", async () => {
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const render = (streaming: boolean) => root.render(
+    <ConversationProcessDisclosure cells={[]} language="en" turnStreaming={streaming}>
+      <button type="button">Tool action</button>
+    </ConversationProcessDisclosure>,
+  );
+  try {
+    await act(async () => render(true));
+    host.querySelector("button")!.focus();
+    await act(async () => render(false));
+    expect(host.querySelector("summary")!.getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(host.querySelector("summary"));
   } finally {
     await act(async () => root.unmount());
     host.remove();

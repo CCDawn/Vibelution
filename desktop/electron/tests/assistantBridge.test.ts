@@ -10,6 +10,16 @@ function setup() {
 }
 
 describe("Launcher assistant private bridge", () => {
+  it("admits a closed model change from the float and rejects identity injection before host start", async () => {
+    const { owner, event } = setup();
+    for (const payload of [{ operation: "setModel", modelId: "" }, { operation: "setModel", modelId: "local/model\n" },
+      { operation: "setModel", modelId: "local/model", agentId: "foreign" },
+      { operation: "setModel", modelId: "local/model", directSessionId: "foreign" }])
+      await expect(invokeAssistant(event, payload, owner)).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    expect(owner.host.start).not.toHaveBeenCalled();
+    await expect(invokeAssistant(event, { operation: "setModel", modelId: "local/model" }, owner)).resolves.toEqual({ accepted: true });
+    expect(owner.host.request).toHaveBeenCalledExactlyOnceWith({ operation: "setModel", modelId: "local/model" });
+  });
   it("admits only the fixed assistant avatar operation from the owned frame", async () => {
     const { owner, event } = setup();
     await expect(invokeAssistant({ ...event, sender: {} }, { operation: "assistantAvatar" }, owner)).rejects.toThrow("SENDER_FORBIDDEN");
@@ -111,6 +121,8 @@ describe("Workbench main window sender admission", () => {
     expect(owner.host.start).toHaveBeenCalledTimes(1);
     await expect(invokeAssistant(event, { operation: "hide" }, owner)).resolves.toEqual({ hidden: true });
     expect(owner.hide).toHaveBeenCalledExactlyOnceWith();
+    await invokeAssistant(event, { operation: "setModel", modelId: "local/model" }, owner);
+    expect(owner.host.request).toHaveBeenLastCalledWith({ operation: "setModel", modelId: "local/model" });
   });
 
   it.each<[string, (s: ReturnType<typeof workbenchSenderSetup>) => void]>([

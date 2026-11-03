@@ -3,10 +3,10 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { returnLauncherToDesktop } from "../api/launcher";
+import { openLauncherModelConnection, returnLauncherToDesktop } from "../api/launcher";
 import { LauncherNavigation } from "./LauncherNavigation";
 
-vi.mock("../api/launcher", () => ({ returnLauncherToDesktop: vi.fn() }));
+vi.mock("../api/launcher", () => ({ returnLauncherToDesktop: vi.fn(), openLauncherModelConnection: vi.fn() }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let root: Root, host: HTMLDivElement;
@@ -67,6 +67,50 @@ describe("Launcher navigation", () => {
       if (label !== "版本更新") expect(trigger.getAttribute("aria-current")).toBe("page");
     }
     expect(onNavigate).toHaveBeenCalledTimes(4);
+  });
+
+  it("lists model connection first and opens it through the workbench bridge without navigating", async () => {
+    const onNavigate = vi.fn();
+    vi.mocked(openLauncherModelConnection).mockResolvedValueOnce(undefined);
+    const router = await render({ onNavigate });
+    const trigger = [...host.querySelectorAll("button")].find(node => node.textContent?.trim() === "设置")!;
+    await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
+    const items = await vi.waitFor(() => {
+      const found = [...document.querySelectorAll('[role="menuitem"]')].map(node => node.textContent?.trim());
+      if (!found.includes("模型连接")) throw new Error("Missing menu item 模型连接");
+      return found;
+    });
+    expect(items.indexOf("模型连接")).toBeLessThan(items.indexOf("诊断"));
+    const item = [...document.querySelectorAll('[role="menuitem"]')].find(node => node.textContent?.trim() === "模型连接") as HTMLElement;
+    await act(async () => item.click());
+    expect(openLauncherModelConnection).toHaveBeenCalledTimes(1);
+    expect(router.state.location.pathname + router.state.location.search).toBe("/launcher/assistant");
+    expect(onNavigate).toHaveBeenCalledTimes(1);
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it("reports a stale-shell failure for model connection and allows retry", async () => {
+    let reject!: (error: Error) => void;
+    vi.mocked(openLauncherModelConnection).mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
+    await render();
+    const openMenu = async () => {
+      const trigger = [...host.querySelectorAll("button")].find(node => node.textContent?.trim() === "设置")!;
+      await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
+      return await vi.waitFor(() => {
+        const found = [...document.querySelectorAll('[role="menuitem"]')].find(node => node.textContent?.trim() === "模型连接");
+        if (!found) throw new Error("Missing menu item 模型连接");
+        return found as HTMLElement;
+      });
+    };
+    const item = await openMenu();
+    await act(async () => item.click());
+    await act(async () => reject(new Error("当前 Launcher 需要更新后才能打开模型连接。")));
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain("需要更新");
+    vi.mocked(openLauncherModelConnection).mockResolvedValueOnce(undefined);
+    const retryItem = await openMenu();
+    await act(async () => retryItem.click());
+    expect(openLauncherModelConnection).toHaveBeenCalledTimes(2);
+    expect(host.querySelector('[role="alert"]')).toBeNull();
   });
 
   it("provides a direct update link for failed updates", async () => {

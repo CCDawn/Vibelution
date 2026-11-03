@@ -1,23 +1,25 @@
 import "../../design/route-css/desktop-pet.tailwind.css";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { MessageCircle, RefreshCw, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { Bot, MessageCircle, RefreshCw, SlidersHorizontal, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import {
-  getLauncherAssistantDetail, getLauncherAssistantDispatches, getLauncherAssistantStatus,
+  getLauncherAssistantDetail, getLauncherAssistantDispatches, getLauncherAssistantStatus, setLauncherAssistantModel,
   hideLauncherAssistant, sendLauncherAssistantMessage, setLauncherAssistantExpanded,
   launcherConversationApi,
   getLauncherAssistantApprovals, resolveLauncherAssistantApproval,
   previewLauncherDispatchApproval, decideLauncherDispatchApproval, declineLauncherDispatchSummary, launcherDispatchDeclineRevisionIsValid, type LauncherDispatchApprovalPreview,
   stopLauncherAssistantTurn, continueLauncherAssistantTurn,
   getLauncherOperatorAsset, getLauncherAssistantAvatar, openLauncherFromAssistant, uploadLauncherAttachment,
-  subscribeLauncherAssistantSessionEvent,
+  readLauncherAttachment, subscribeLauncherAssistantSessionEvent,
 } from "../../api/launcherAssistant";
+import { openLauncherModelConnection } from "../../api/launcher";
+import type { ConversationMessage, SessionDetail } from "../../api/types";
 import type { SessionContinuationExpectation } from "../../api/chat";
 import { queryKeys } from "../../api/queryKeys";
 import type { SessionToolApprovalRequest } from "../../api/types";
 import { LazyConversationView } from "../../components/conversation/LazyConversationView";
 import { LauncherAssistantWelcome } from "./LauncherAssistantWelcome";
-import { VButton, VDenseOpsPage, VNativeButton, VStateSurface } from "../../components/vui";
+import { VButton, VDenseOpsPage, VNativeButton, VNativeSelect, VStateSurface } from "../../components/vui";
 import { useShellI18n } from "../../i18n/useShellI18n";
 import { hasExecutionOwnership, resolveSessionActivity, sessionActivityStatusLabel } from "../sessionActivityState";
 import { continuationSnapshotKey, resolveConversationContinuation } from "../chat/conversationContinuationModel";
@@ -43,12 +45,17 @@ import petStyles from "./DesktopAssistantRoute.styles";
 import { useLauncherAttachmentHistory } from "./useLauncherAttachmentHistory";
 import { classifyComposerFiles, mergeComposerAttachmentsWithRejections, type ComposerImageAttachment } from "../chat/chatComposerSubmitModel";
 import {
-  launcherAssistantActivity, launcherAssistantPollInterval, launcherAssistantSubmission,
+  launcherAssistantActivity, launcherAssistantMessageOverLimit, launcherAssistantPollInterval, launcherAssistantSubmission,
   launcherAssistantQueueReadback, launcherAssistantQueueLabel, launcherAssistantRequestReadback,
-  launcherAssistantSessionEventRefreshesDetail, launcherAssistantSseHealthy, launcherAssistantWaitInterval,
+  launcherAssistantSendDefinitelyRejected, launcherAssistantSessionEventRefreshesDetail, launcherAssistantSseHealthy,
+  launcherAssistantWaitInterval, launcherAssistantContextRing, launcherAssistantModelDisplay,
+  launcherAssistantEditBackfillDraft,
   type LauncherAssistantSubmission, type LauncherAssistantQueuedAcceptance,
 } from "./launcherAssistantModel";
-import { loadLauncherComposer, saveLauncherComposer } from "./launcherAssistantComposerStorage";
+import { activeTurnLayerToConversationMessage, createLauncherAssistantStream } from "./launcherAssistantStream";
+import type { ActiveTurnLayerState } from "../chatActiveTurnLayer";
+import { mergeSessionDetailMessageWindow } from "../chatSessionState";
+import { loadLauncherComposer, restoreLauncherComposerAttachments, saveLauncherComposer } from "./launcherAssistantComposerStorage";
 
 const COPY = {
   zh: {
@@ -56,22 +63,32 @@ const COPY = {
     collapse: "收起聊天", loading: "正在打开对话…", unavailable: "个人助理暂不可用",
     retry: "重试", refresh: "刷新", placeholder: "和个人助理聊一聊…", send: "发送", sending: "正在发送…",
     unknownSend: "尚未确认消息是否收到。输入已保留，重试会核对同一条消息。",
+    sendRejected: "本次发送已被拒绝，未进入对话；请修改后重新发送。",
+    tooLong: "消息超出 64,000 字上限，请精简后再发送。",
+    imageUnsupported: "当前模型不支持图片输入，请移除图片附件后再发送。",
     receipts: "任务状态暂不可用", checking: "正在连接 Launcher…",
     waitingBackend: "正在等待工作台后端启动…",
     statusStale: "个人助理状态轮询暂不可用，会话内容可能未更新",
     pendingQuestion: "待你回答",
     answerBelow: "去回答", answerHint: "请在下方输入回答，再点击发送。",
+    modelSettings: "模型设置", currentModel: "当前模型",
+    editAsNew: "编辑为新消息",
   },
   en: {
     title: "Personal assistant", expand: "Open assistant chat", chat: "Chat", hide: "Hide assistant",
     collapse: "Collapse chat", loading: "Opening conversation…", unavailable: "Assistant unavailable",
     retry: "Retry", refresh: "Refresh", placeholder: "Chat with your assistant…", send: "Send", sending: "Sending…",
     unknownSend: "Delivery is unconfirmed. Your input is retained; retry checks the same message.",
+    sendRejected: "This send was rejected and never entered the conversation; edit and send again.",
+    tooLong: "Message exceeds the 64,000-character limit; shorten it before sending.",
+    imageUnsupported: "The current model does not support image input; remove image attachments before sending.",
     receipts: "Task status unavailable", checking: "Connecting to Launcher…",
     waitingBackend: "Waiting for the workbench backend…",
     statusStale: "Assistant status polling is unavailable; conversation content may be stale",
     pendingQuestion: "Waiting for your answer",
     answerBelow: "Answer below", answerHint: "Type your answer below, then send it.",
+    modelSettings: "Model settings", currentModel: "Current model",
+    editAsNew: "Edit as new message",
   },
 } as const;
 
@@ -251,7 +268,10 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     if (!sessionId) return;
     const key = ["launcher-assistant", "composer", sessionId];
     const cached = client.getQueryData<ComposerSnapshot>(key);
-    const saved: ComposerSnapshot | null = cached ?? loadLauncherComposer(sessionId, embedded ? "embedded" : "floating");
+    const stored = cached ? null : loadLauncherComposer(sessionId, embedded ? "embedded" : "floating");
+    const saved: ComposerSnapshot | null = cached ?? (stored
+      ? { ...stored, attachments: restoreLauncherComposerAttachments(stored.attachments) }
+      : null);
     if (!cached && saved) {
       client.setQueryDefaults(key, { gcTime: Infinity });
       client.setQueryData<ComposerSnapshot>(key, saved);
@@ -265,17 +285,42 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     setAcceptedTurnId(saved?.acceptedTurnId || "");
     setQueuedAcceptance(saved?.queuedAcceptance || null);
   }, [client, sessionId, embedded]);
+  // Restored chips start with an empty preview (the blob: URL is unrecoverable);
+  // refill each from its already-uploaded artifact through the read IPC, so a
+  // reload keeps the tray usable without re-uploading anything.
+  useEffect(() => {
+    if (!sessionId || status.data?.attachmentVersion !== 1) return;
+    const targets = attachmentsRef.current.flatMap(item =>
+      item.uploadStatus === "uploaded" && item.artifactId && !item.previewUrl ? [{ id: item.id, artifactId: item.artifactId }] : []);
+    if (!targets.length) return;
+    let active = true;
+    void (async () => {
+      for (const target of targets) {
+        try {
+          const previewUrl = await readLauncherAttachment(target.artifactId);
+          if (!active || sessionIdRef.current !== sessionId) return;
+          if (!attachmentsRef.current.some(item => item.id === target.id && !item.previewUrl)) continue;
+          updateAttachments(attachmentsRef.current.map(item => item.id === target.id ? { ...item, previewUrl } : item));
+        } catch { /* a chip keeps its filename without a thumbnail; sending still works */ }
+      }
+    })();
+    return () => { active = false; };
+  }, [sessionId, status.data?.attachmentVersion]);
   // Last host-pushed session event (any type, heartbeats included). A ref, not
   // state: react-query reads it on each interval computation and an event must
   // never re-render the page by itself. Null when no push channel ever spoke,
   // which keeps the 2s active cadence bit-for-bit identical to a shell without it.
   const sseAliveAt = useRef<number | null>(null);
+  // The key deliberately excludes the visibility/epoch counter: swapping the key
+  // drops the cached conversation for a frame, `{detail.data ? ...}` flips to
+  // the loading shell and unmounts the chat view (resetting its expansion
+  // state). A visibility restore refreshes this query in place instead.
   const detail = useQuery({
-    queryKey: ["launcher-assistant", "detail", sessionId, epoch],
+    queryKey: ["launcher-assistant", "detail", sessionId],
     queryFn: async ({ signal }) => {
       const result = await getLauncherAssistantDetail(sessionId);
       signal.throwIfAborted();
-      return result;
+      return mergeSessionDetailMessageWindow(client.getQueryData<SessionDetail>(["launcher-assistant", "detail", sessionId]), result);
     },
     enabled: observingOwnSession, retry: false,
     refetchInterval: query => {
@@ -290,6 +335,25 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     },
     refetchIntervalInBackground: false,
   });
+  const sessionStream = useMemo(() => createLauncherAssistantStream(sessionId), [sessionId]);
+  const [activeLayer, setActiveLayer] = useState<ActiveTurnLayerState>();
+  const latestDetail = useRef(detail.data);
+  latestDetail.current = detail.data;
+  const historyGate = useRef(false);
+  const [earlierMessagesLoading, setEarlierMessagesLoading] = useState(false);
+  async function loadEarlierMessages() {
+    const cursor = latestDetail.current?.messageWindow?.nextBeforeMessageIndex;
+    if (historyGate.current || !sessionId || !cursor) return;
+    historyGate.current = true;
+    setEarlierMessagesLoading(true);
+    try {
+      const page = await getLauncherAssistantDetail(sessionId, cursor);
+      if (mounted.current && sessionIdRef.current === sessionId) {
+        client.setQueryData<SessionDetail>(["launcher-assistant", "detail", sessionId], previous => mergeSessionDetailMessageWindow(previous, page));
+      }
+    } catch (error) { if (mounted.current && sessionIdRef.current === sessionId) setFeedback(errorMessage(error)); }
+    finally { historyGate.current = false; if (mounted.current) setEarlierMessagesLoading(false); }
+  }
   useEffect(() => {
     if (!observingOwnSession) return;
     let active = true;
@@ -301,12 +365,17 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     const unsubscribe = subscribeLauncherAssistantSessionEvent(event => {
       if (!active) return;
       sseAliveAt.current = Date.now();
-      if (!launcherAssistantSessionEventRefreshesDetail(event, sessionId)) return;
+      const result = sessionStream.apply(event, latestDetail.current);
+      setActiveLayer(result.layer);
+      if (!result.needsRefresh && !launcherAssistantSessionEventRefreshesDetail(event, sessionId)) return;
       void client.invalidateQueries({ queryKey: ["launcher-assistant", "detail", sessionId] });
     });
     if (!unsubscribe) return;
     return () => { active = false; unsubscribe(); };
-  }, [client, observingOwnSession, sessionId]);
+  }, [client, observingOwnSession, sessionId, sessionStream]);
+  useEffect(() => {
+    setActiveLayer(detail.data ? sessionStream.reconcile(detail.data) : undefined);
+  }, [detail.data, detail.dataUpdatedAt, sessionStream]);
   useEffect(() => {
     const submission = outstanding.current;
     const recovered = submission && launcherAssistantRequestReadback(detail.data, submission.requestId);
@@ -433,7 +502,14 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     function visibilityChanged() {
       const next = document.visibilityState !== "hidden";
       setVisible(next);
-      if (next) void status.refetch();
+      if (next) {
+        void status.refetch();
+        // Refresh content in place: the detail key stays stable, because a key
+        // swap drops the cached conversation for a frame and unmounts the chat
+        // view (expansion state reset with it). The counter below only retires
+        // in-flight transport ACKs and refreshes the small auxiliary queries.
+        void client.invalidateQueries({ queryKey: ["launcher-assistant", "detail"] });
+      }
       if (outstanding.current) setSendUnconfirmed(true);
       epochRef.current += 1;
       setEpoch(epochRef.current);
@@ -593,6 +669,30 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     finally { launcherGate.current = false; if (mounted.current) setLauncherPending(false); }
   }
 
+  const modelConfigGate = useRef(false);
+  const [modelConfigPending, setModelConfigPending] = useState(false);
+  async function openModelConnection() {
+    if (modelConfigGate.current) return;
+    modelConfigGate.current = true;
+    setModelConfigPending(true);
+    setFeedback("");
+    try { await openLauncherModelConnection(); }
+    catch (error) { if (mounted.current) setFeedback(errorMessage(error)); }
+    finally { modelConfigGate.current = false; if (mounted.current) setModelConfigPending(false); }
+  }
+  async function changeModel(modelId: string) {
+    if (modelConfigGate.current || !modelId || hasExecutionOwnership(resolveSessionActivity(latestDetail.current || {}).execution)) return;
+    modelConfigGate.current = true;
+    setModelConfigPending(true);
+    setFeedback("");
+    try {
+      await setLauncherAssistantModel(modelId);
+      await status.refetch();
+      void client.invalidateQueries({ queryKey: [launcherConversationApi.cacheKey, "config"], exact: true });
+    } catch (error) { if (mounted.current) setFeedback(errorMessage(error)); }
+    finally { modelConfigGate.current = false; if (mounted.current) setModelConfigPending(false); }
+  }
+
   const historyAttachments = useLauncherAttachmentHistory(detail.data?.messages || [], sessionId, reading && status.data?.attachmentVersion === 1, visibleMessageIds);
 
   function updateAttachments(next: ComposerImageAttachment[]) {
@@ -661,6 +761,19 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     if (sending.current || uploadGate.current || controlGate.current || !sessionId
       || (prepared && outstanding.current)
       || (!prepared && attachmentsRef.current.length > 0 && status.data?.attachmentVersion !== 1)) return false;
+    // Pre-flight checks only gate a NEW submission: an unconfirmed retry resends
+    // its original, already-validated request verbatim. They run before any
+    // upload so a doomed send never consumes attachment uploads.
+    if (!outstanding.current) {
+      if (launcherAssistantMessageOverLimit(prepared ? prepared.message : draftRef.current.trim())) {
+        setFeedback(copy.tooLong);
+        return false;
+      }
+      if (!prepared && attachmentsRef.current.some(item => item.kind === "image") && status.data?.settings?.supportsImageInput === false) {
+        setFeedback(copy.imageUnsupported);
+        return false;
+      }
+    }
     if (!prepared && !outstanding.current && attachmentsRef.current.length && !(await uploadAttachments())) return false;
     const snapshot = attachmentsRef.current;
     const submission = prepared ?? launcherAssistantSubmission(outstanding.current, draftRef.current, undefined,
@@ -690,8 +803,20 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       void detail.refetch();
       void dispatches.refetch();
       void approvals.refetch();
-    } catch {
-      if (mounted.current && requestEpoch === epochRef.current && sending.current === flight && outstanding.current === submission) setSendUnconfirmed(true);
+    } catch (error) {
+      if (mounted.current && requestEpoch === epochRef.current && sending.current === flight && outstanding.current === submission) {
+        if (launcherAssistantSendDefinitelyRejected(error)) {
+          // A provable pre-admission refusal left nothing queued, so the
+          // conservative unconfirmed lock would only dead-end the composer.
+          // Draft and tray stay editable for an immediate corrected resend.
+          outstanding.current = null;
+          saveComposer({ outstanding: null });
+          setSendUnconfirmed(false);
+          setFeedback(copy.sendRejected);
+        } else {
+          setSendUnconfirmed(true);
+        }
+      }
     } finally {
       // Native readback can retire this flight before its RPC returns. A late
       // callback owns neither that acceptance nor a newer request's busy flag.
@@ -840,6 +965,11 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   // waiting state (kept probing by the backoff interval above) instead of a
   // dead-end unavailable error.
   const waitingForBackend = status.isError && !status.data;
+  // Read-only context-usage ring from the native detail's usage projections.
+  // Null before the first usage frame; diagnostics handoff and the auto-compaction
+  // countdown are absent because this surface mounts neither dialog nor setting.
+  const composerContextRing = useMemo(() => launcherAssistantContextRing(detail.data, lang), [detail.data, lang]);
+  const modelDisplay = launcherAssistantModelDisplay(status.data?.settings?.modelId, lang);
   const statusText = feedback || queueStatusText || (status.isError ? (waitingForBackend ? copy.waitingBackend : copy.unavailable) : status.isPending ? copy.checking
     : detail.data ? !detail.isError && !approval && !stopping && !acceptedTurnId && !sendPending && !sendUnconfirmed && preferences.idleMessage
         && (activity.execution === "idle" || (activity.execution === "settled" && activity.outcome === "completed"))
@@ -931,6 +1061,15 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   const showWelcome = navigationOwned && Boolean(detail.data && !detail.isError && !detail.data.messages.length
     && !detail.data.activeTurnId && !detail.data.queuedTurns?.length && !approval && !dispatchApproval && !sendUnconfirmed);
   function changeDraft(value: string) { draftRef.current = value; setDraft(value); saveComposer({ draft: value }); }
+  // Assistant edit affordance: backfill the composer with a previous user
+  // message's text for a NEW send. The native facade owns no edit-resubmit
+  // verb, so history is never replaced and the button copy says "edit as new".
+  function editMessageToComposer(message: ConversationMessage) {
+    if (sendPending || sendUnconfirmed || controlPending || busy || stopping) return;
+    const backfill = launcherAssistantEditBackfillDraft(message);
+    if (backfill === null) return;
+    changeDraft(backfill);
+  }
   return <VDenseOpsPage hideHeader ariaLabel={displayName}
     className={embedded ? petStyles.launcherChatEmbedded : petStyles.launcherChatWindow} bodyClassName={`${petStyles.chatBody} ${navigationOwned ? petStyles.unifiedChatBody : ""}`} style={backgroundStyle}
     data-vui-domain-recipe="launcher-assistant" data-assistant-chat={embedded ? "embedded" : "compact"} data-expanded="true" data-tone={tone}
@@ -971,6 +1110,9 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       runtimeApi={launcherConversationApi}
       sessionId={detail.data.id} title={detail.data.title || identity?.displayName || copy.title}
       phase={resolveSessionActivity(detail.data).execution} messages={historyAttachments.messages}
+      activeTurnMessage={activeLayer?.sessionId === sessionId ? activeTurnLayerToConversationMessage(activeLayer) : undefined}
+      hasEarlierMessages={Boolean(detail.data.messageWindow?.hasEarlier)} earlierMessagesLoading={earlierMessagesLoading}
+      onLoadEarlierMessages={() => void loadEarlierMessages()}
       onVisibleTimelineMessageIds={setVisibleMessageIds}
       turnError={detail.data.lastTurnError}
       defaultFileContext={detail.data.defaultFileContext} assistantDisplayName={displayName}
@@ -989,12 +1131,33 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       composerAttachments={attachments}
       onAddComposerAttachments={addAttachments} onRemoveComposerAttachment={removeAttachment}
       onRetryComposerAttachment={id => void uploadAttachments(id)} onRetryComposerAttachmentUploads={() => void uploadAttachments()}
-      composerError={sendUnconfirmed ? copy.unknownSend : attachments.some(item => item.uploadStatus === "failed") ? (lang === "zh" ? "附件上传失败，请重试。" : "Attachment upload failed; retry.") : ""}
+      composerError={sendUnconfirmed ? copy.unknownSend
+        : attachments.some(item => item.kind === "image") && status.data?.settings?.supportsImageInput === false ? copy.imageUnsupported
+        : attachments.some(item => item.uploadStatus === "failed") ? (lang === "zh" ? "附件上传失败，请重试。" : "Attachment upload failed; retry.") : ""}
       submitLabel={sendUnconfirmed ? copy.retry : copy.send} submitPendingLabel={copy.sending}
       composerActionDisabled={sendPending || controlPending || (attachments.length > 0 && status.data?.attachmentVersion !== 1) || (actionMode === "stop" ? stopping || !resolveSessionStopTurnId(detail.data, acceptedTurnId) : actionMode === "send" && !sendUnconfirmed && !draft.trim() && !attachments.length)}
       onComposerChange={changeDraft} onSubmit={() => void submit()}
       onStop={() => void stopTurn()} onContinueTurn={() => void continueTurn()}
-      composerPrecedingContent={<>{pendingQuestion ? <VStateSurface density="compact" tone="info" title={copy.pendingQuestion}
+      composerContextRing={composerContextRing}
+      onEditUserMessage={editMessageToComposer}
+      editUserMessageLabel={copy.editAsNew}
+      editUserMessageDisabled={sendPending || sendUnconfirmed || controlPending || busy || stopping}
+      composerPrecedingContent={<>{status.data ? <div className={petStyles.modelRow}
+        data-launcher-assistant-model-row aria-label={copy.currentModel}>
+        <Bot size={12} aria-hidden="true" />
+        {status.data.settings?.modelChoices?.length ? <VNativeSelect aria-label={lang === "zh" ? "助理模型" : "Assistant model"}
+          value={status.data.settings.modelId} disabled={modelConfigPending || busy || stopping || sendPending || sendUnconfirmed || controlPending}
+          onChange={event => void changeModel(event.currentTarget.value)} className={petStyles.modelSelect}>
+          {!status.data.settings.modelChoices.some(choice => choice.modelId === status.data?.settings?.modelId)
+            ? <option value={status.data.settings.modelId}>{modelDisplay}</option> : null}
+          {status.data.settings.modelChoices.map(choice => <option key={choice.modelId} value={choice.modelId}
+            disabled={choice.providerHealthy === false || choice.missingApiKey === true}>{choice.label || choice.modelId}</option>)}
+        </VNativeSelect> : <span className={petStyles.modelName}>{modelDisplay}</span>}
+        {embedded ? <VButton density="compact" variant="ghost" className={petStyles.modelSettingsButton} isPending={modelConfigPending} isDisabled={modelConfigPending}
+          icon={<SlidersHorizontal size={12} aria-hidden="true" />}
+          onClick={() => void openModelConnection()}>{copy.modelSettings}</VButton> : null}
+      </div> : null}
+      {pendingQuestion ? <VStateSurface density="compact" tone="info" title={copy.pendingQuestion}
         data-launcher-assistant-pending-question={pendingQuestion.id}
         actions={<VButton isDisabled={sendPending || sendUnconfirmed || controlPending} onClick={event => {
           // This explicit handoff releases button focus so the shared scheduler

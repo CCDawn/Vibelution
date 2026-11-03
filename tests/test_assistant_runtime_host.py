@@ -482,26 +482,95 @@ def test_operator_profile_missing_file_is_not_initialized(tmp_path, monkeypatch)
 def test_native_status_rereads_operator_profile_and_keeps_identity_on_read_failure(tmp_path, monkeypatch):
     from core.assistant_runtime import native, host
     from config import public_config
-    from tools import pa_assistant_actions
 
     path = tmp_path / "profile.toml"
     path.write_text('[user_profile]\ndisplay_name = "First"\navatar_preset = "circle"\n', encoding="utf-8")
     monkeypatch.setenv("VIBELUTION_CONFIG_PATH", str(path))
     assistant = {"agentId": "a", "directSessionId": "s", "displayName": "Assistant"}
     monkeypatch.setattr(native, "identity", lambda: {"assistant": dict(assistant)})
-    monkeypatch.setattr(pa_assistant_actions, "execute", lambda *args, **kwargs: {"ok": True})
+    monkeypatch.setattr(native, "assistant_settings", lambda: {"ok": True})
+    monkeypatch.setattr(host, "_model_image_input_support", lambda agent_id: True if agent_id == "a" else None)
     facade = host.NativeFacade(None)
     assert facade.identity()["operatorProfile"] == {"displayName": "First", "avatarPreset": "circle"}
     path.write_text('[user_profile]\ndisplay_name = "Second"\navatar_preset = "codex"\n', encoding="utf-8")
     result = facade.identity()
     assert result["assistant"] == assistant
     assert result["operatorProfile"] == {"displayName": "Second", "avatarPreset": "codex"}
+    assert result["settings"] == {"ok": True, "supportsImageInput": True}
     assert result["operatorAssetsVersion"] == 1
     assert result["assistantAvatarVersion"] == 1
     assert result["assistantAvatarRevision"] is None
     def unavailable(*args):
         raise ValueError("PRIVATE_PATH_OR_CONFIG_SENTINEL")
     monkeypatch.setattr(public_config, "read_existing_config_snapshot", unavailable)
-    assert facade.identity() == {"assistant": assistant, "settings": {"ok": True}, "operatorAssetsVersion": 1,
+    assert facade.identity() == {"assistant": assistant, "settings": {"ok": True, "supportsImageInput": True},
+                                 "operatorAssetsVersion": 1,
                                  "operatorAssetRevisions": {"avatar": None, "background": None}, "attachmentVersion": 1,
                                  "assistantAvatarVersion": 1, "assistantAvatarRevision": None}
+
+
+def test_model_image_input_support_degrades_to_unknown_without_touching_services(monkeypatch):
+    from core.assistant_runtime import host
+    from core.web.services import agent_directory_service, session_service
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("capability read must not initialize owners")
+    monkeypatch.setattr(agent_directory_service, "get_agent_parameter_snapshot", forbidden)
+    assert host._model_image_input_support("") is None
+    assert host._model_image_input_support(None) is None  # type: ignore[arg-type]
+
+    monkeypatch.setattr(agent_directory_service, "get_agent_parameter_snapshot",
+                        lambda agent_id, *, include_archived: {"agentId": agent_id})
+    monkeypatch.setattr(session_service, "_resolve_image_attachment_capability",
+                        lambda *, agent_instance: {"supports_image_input": False, "model_id": "m"})
+    assert host._model_image_input_support("a") is False
+    monkeypatch.setattr(session_service, "_resolve_image_attachment_capability",
+                        lambda *, agent_instance: {"supports_image_input": "unknown", "model_id": "m"})
+    assert host._model_image_input_support("a") is None
+
+    def broken_snapshot(*args, **kwargs):
+        raise RuntimeError("SERVICE_UNAVAILABLE_SENTINEL")
+    monkeypatch.setattr(agent_directory_service, "get_agent_parameter_snapshot", broken_snapshot)
+    assert host._model_image_input_support("a") is None
+
+
+def test_model_route_is_private_closed_and_preserves_bounded_failures():
+    from core.assistant_runtime.native import AssistantSessionError
+
+    calls = []
+    class Owner(Native):
+        def set_model(self, model_id):
+            calls.append(model_id)
+            if model_id == "busy":
+                raise AssistantSessionError("ASSISTANT_MODEL_BUSY")
+            if model_id == "unknown":
+                raise AssistantSessionError("ASSISTANT_MODEL_INVALID")
+            return {"modelId": model_id}
+    with TestClient(create_app(native=Owner(), token="private-test-token"), base_url="http://127.0.0.1") as client:
+        path = "/api/assistant/model"
+        auth = {"Authorization": "Bearer private-test-token"}
+        assert client.post(path, json={"modelId": "local/other"}).status_code == 401
+        assert client.post(path, json={"modelId": "local/other"}, headers={**auth, "Origin": "https://evil.invalid"}).status_code == 403
+        for body in ({"modelId": ""}, {"modelId": 1}, {"modelId": "local/other\n"},
+                     {"modelId": "local/other", "agentId": "foreign"},
+                     {"modelId": "local/other", "sessionId": "foreign"}):
+            assert client.post(path, json=body, headers=auth).status_code == 422
+        assert client.post(path + "?agentId=foreign", json={"modelId": "local/other"}, headers=auth).status_code == 422
+        assert not calls
+        assert client.post(path, json={"modelId": "busy"}, headers=auth).status_code == 409
+        assert client.post(path, json={"modelId": "unknown"}, headers=auth).status_code == 422
+        assert client.post(path, json={"modelId": "local/other"}, headers=auth).json() == {"modelId": "local/other"}
+
+
+def test_host_history_cursor_is_bounded_and_stays_on_the_owned_session():
+    class PagedNative(Native):
+        def get_detail(self, before_message_index=None):
+            return {"id": "native-session", "messages": [], "before": before_message_index}
+
+    with TestClient(create_app(native=PagedNative(), token="private-test-token"), base_url="http://127.0.0.1") as client:
+        headers = {"Authorization": "Bearer private-test-token"}
+        response = client.get("/api/assistant/session?before_message_index=61", headers=headers)
+        assert response.status_code == 200
+        assert response.json() == {"id": "native-session", "messages": [], "before": 61}
+        for invalid in ("0", "-1", "1.5", "2147483648"):
+            assert client.get(f"/api/assistant/session?before_message_index={invalid}", headers=headers).status_code == 422

@@ -4,13 +4,15 @@ export const TOOL_EXPAND_MAX_ENTRIES = 512;
 export type StoredToolExpandEntry = {
   sessionId: string;
   key: string;
+  /** Missing on legacy entries, which always meant explicitly open. */
+  open?: boolean;
 };
 
 /**
  * Tool-row expand persistence: the user's explicit expand choices survive a
  * reload/restart via localStorage, scoped per session (mirrors the robustness
- * style of routes/chat/chatDraftPersistence.ts). Only OPEN rows are stored —
- * collapsed is the default, so a collapse is a removal, not a write. Bounded
+ * style of routes/chat/chatDraftPersistence.ts). Both explicit choices are
+ * stored, so a default-open failure scene can remember a manual collapse. Bounded
  * to an LRU window of entries with silent reset on corrupted storage; storage
  * failures never break the row UI.
  */
@@ -42,6 +44,7 @@ export function capToolExpandEntries(
     const normalized: StoredToolExpandEntry = {
       sessionId: normalizeScope(entry.sessionId),
       key: normalizeScope(entry.key),
+      ...(entry.open === false ? { open: false } : {}),
     };
     deduped.set(entryIdentity(normalized), normalized);
   }
@@ -56,6 +59,7 @@ export function upsertToolExpandEntry(
   entries: StoredToolExpandEntry[],
   sessionId: string,
   key: string,
+  open = true,
 ): StoredToolExpandEntry[] {
   const normalizedSessionId = normalizeScope(sessionId);
   const normalizedKey = normalizeScope(key);
@@ -65,7 +69,7 @@ export function upsertToolExpandEntry(
   const identity = entryIdentity({ sessionId: normalizedSessionId, key: normalizedKey });
   return capToolExpandEntries([
     ...entries.filter((entry) => entryIdentity(entry) !== identity),
-    { sessionId: normalizedSessionId, key: normalizedKey },
+    { sessionId: normalizedSessionId, key: normalizedKey, ...(open ? {} : { open: false }) },
   ]);
 }
 
@@ -93,7 +97,7 @@ export function openToolKeysForEntries(
     return keys;
   }
   for (const entry of entries) {
-    if (entry.sessionId === normalizedSessionId) {
+    if (entry.sessionId === normalizedSessionId && entry.open !== false) {
       keys.add(entry.key);
     }
   }
@@ -130,8 +134,9 @@ function readStoredEntries(): StoredToolExpandEntry[] {
       }
       const sessionId = normalizeScope((item as { sessionId?: unknown }).sessionId);
       const key = normalizeScope((item as { key?: unknown }).key);
-      if (sessionId && key) {
-        entries.push({ sessionId, key });
+      const open = (item as { open?: unknown }).open;
+      if (sessionId && key && (open === undefined || typeof open === "boolean")) {
+        entries.push({ sessionId, key, ...(open === false ? { open: false } : {}) });
       }
     }
     cachedEntries = capToolExpandEntries(entries);
@@ -160,18 +165,27 @@ export function readOpenToolKeys(sessionId: string): Set<string> {
   return openToolKeysForEntries(readStoredEntries(), sessionId);
 }
 
-/** Record one user expand/collapse choice; collapses free their entry. */
+/** Undefined means untouched; legacy entries without `open` remain explicitly open. */
+export function readToolRowOpen(sessionId: string, key: string): boolean | undefined {
+  const normalizedSessionId = normalizeScope(sessionId);
+  const normalizedKey = normalizeScope(key);
+  if (!normalizedSessionId || !normalizedKey) {
+    return undefined;
+  }
+  const entry = readStoredEntries().find((candidate) => (
+    candidate.sessionId === normalizedSessionId && candidate.key === normalizedKey
+  ));
+  return entry ? entry.open !== false : undefined;
+}
+
+/** Record one explicit user choice in the shared bounded store. */
 export function setToolRowOpen(sessionId: string, key: string, open: boolean) {
   const normalizedSessionId = normalizeScope(sessionId);
   const normalizedKey = normalizeScope(key);
   if (!normalizedSessionId || !normalizedKey) {
     return;
   }
-  if (open) {
-    writeStoredEntries(upsertToolExpandEntry(readStoredEntries(), normalizedSessionId, normalizedKey));
-    return;
-  }
-  writeStoredEntries(removeToolExpandEntry(readStoredEntries(), normalizedSessionId, normalizedKey));
+  writeStoredEntries(upsertToolExpandEntry(readStoredEntries(), normalizedSessionId, normalizedKey, open));
 }
 
 /** Test hook: drop the module cache so a test file starts from clean storage. */

@@ -5,6 +5,7 @@ import {
   capToolExpandEntries,
   openToolKeysForEntries,
   readOpenToolKeys,
+  readToolRowOpen,
   removeToolExpandEntry,
   resetToolExpandPersistenceForTests,
   setToolRowOpen,
@@ -44,7 +45,7 @@ describe("conversationToolExpandPersistence pure helpers", () => {
     expect(capped.some((item) => !item.sessionId || !item.key)).toBe(false);
   });
 
-  it("upsert touches the entry to the newest position and collapse removes exactly one pair", () => {
+  it("upsert touches the entry to the newest position and removal deletes exactly one pair", () => {
     let entries: StoredToolExpandEntry[] = [entry("s1", "a"), entry("s1", "b"), entry("s2", "a")];
     entries = upsertToolExpandEntry(entries, "s1", "a");
     expect(entries.at(-1)).toEqual(entry("s1", "a"));
@@ -83,12 +84,33 @@ describe("conversationToolExpandPersistence storage", () => {
     ]);
   });
 
-  it("frees the stored entry on collapse", () => {
+  it("remembers an explicit closed choice separately from an untouched row after reload", () => {
     setToolRowOpen("session-1", "tool-a", true);
     expect(readOpenToolKeys("session-1").has("tool-a")).toBe(true);
     setToolRowOpen("session-1", "tool-a", false);
     expect(readOpenToolKeys("session-1").size).toBe(0);
-    expect(localStorage.getItem(TOOL_EXPAND_STORAGE_KEY)).toBe("[]");
+    resetToolExpandPersistenceForTests();
+    expect(readToolRowOpen("session-1", "tool-a")).toBe(false);
+    expect(readToolRowOpen("session-1", "untouched")).toBeUndefined();
+    expect(readToolRowOpen("session-2", "tool-a")).toBeUndefined();
+    expect(JSON.parse(localStorage.getItem(TOOL_EXPAND_STORAGE_KEY)!)).toEqual([
+      { sessionId: "session-1", key: "tool-a", open: false },
+    ]);
+    setToolRowOpen("session-1", "tool-a", true);
+    expect(readToolRowOpen("session-1", "tool-a")).toBe(true);
+  });
+
+  it("reads legacy open-only entries alongside explicit closed entries", () => {
+    localStorage.setItem(TOOL_EXPAND_STORAGE_KEY, JSON.stringify([
+      entry("session-1", "legacy-open"),
+      { sessionId: "session-1", key: "closed", open: false },
+      { sessionId: "session-1", key: "invalid", open: "false" },
+    ]));
+    resetToolExpandPersistenceForTests();
+    expect(readToolRowOpen("session-1", "legacy-open")).toBe(true);
+    expect(readToolRowOpen("session-1", "closed")).toBe(false);
+    expect(readToolRowOpen("session-1", "invalid")).toBeUndefined();
+    expect([...readOpenToolKeys("session-1")]).toEqual(["legacy-open"]);
   });
 
   it("skips persistence without a session scope", () => {
@@ -126,11 +148,11 @@ describe("conversationToolExpandPersistence storage", () => {
 
   it("caps persisted entries at the LRU limit", () => {
     for (let index = 0; index < TOOL_EXPAND_MAX_ENTRIES + 10; index += 1) {
-      setToolRowOpen("session-1", `tool-${index}`, true);
+      setToolRowOpen("session-1", `tool-${index}`, index % 2 === 0);
     }
     const stored: StoredToolExpandEntry[] = JSON.parse(localStorage.getItem(TOOL_EXPAND_STORAGE_KEY)!);
     expect(stored).toHaveLength(TOOL_EXPAND_MAX_ENTRIES);
     expect(stored[0]).toEqual(entry("session-1", "tool-10"));
-    expect(stored.at(-1)).toEqual(entry("session-1", `tool-${TOOL_EXPAND_MAX_ENTRIES + 9}`));
+    expect(stored.at(-1)).toEqual({ ...entry("session-1", `tool-${TOOL_EXPAND_MAX_ENTRIES + 9}`), open: false });
   });
 });

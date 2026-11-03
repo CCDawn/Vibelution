@@ -584,3 +584,216 @@ expect(projection.messages).toHaveLength(1);
     expect(signal.startsWith("session-1-message-active-turn-signal:")).toBe(true);
   });
 });
+
+describe("projectAgentMessageTimelineMessages retiredOverlayAliases", () => {
+  it("aliases a settled live overlay to the durable row that replaced it", () => {
+    const turnId = "turn-retire";
+    const live = assistantMessage("session-1-message-live-turn-retire", {
+      turnId,
+      status: "running",
+      timestamp: "2026-10-17T12:00:00Z",
+      turnItems: [{
+        id: "live-answer:1",
+        itemId: "live-answer",
+        version: 3,
+        sessionId: "session-1",
+        turnId,
+        type: "agent_message",
+        phase: "final_answer",
+        status: "running",
+        revision: 1,
+        sequence: 1,
+        terminal: false,
+        text: "在途回答",
+      }],
+      metadata: { kind: "session_live_overlay", turnId },
+    });
+    const durable = assistantMessage("session-1-message-42", {
+      turnId,
+      status: "completed",
+      timestamp: "2026-10-17T12:00:02Z",
+      turnItems: [{
+        id: "answer:1",
+        itemId: "answer",
+        version: 3,
+        sessionId: "session-1",
+        turnId,
+        type: "agent_message",
+        phase: "final_answer",
+        status: "completed",
+        revision: 2,
+        sequence: 1,
+        terminal: true,
+        text: "最终回答",
+      }],
+      metadata: { turnId, messageIndex: 42 },
+    });
+
+    const projection = projectAgentMessageTimelineMessages({ timelineMessages: [durable, live] });
+    expect(projection.messages.map((message) => message.id)).toEqual(["session-1-message-42"]);
+    expect(projection.retiredOverlayAliases).toEqual([{
+      fromMessageId: "session-1-message-live-turn-retire",
+      toMessageId: "session-1-message-42",
+    }]);
+  });
+
+  it("aliases to the durable fold winner when one turn has several durable segments", () => {
+    const turnId = "turn-segments-retire";
+    const itemBase = {
+      version: 3 as const,
+      sessionId: "session-1",
+      turnId,
+      revision: 1,
+      status: "completed" as const,
+      terminal: true,
+    };
+    const toolItem: SessionTurnItem = {
+      ...itemBase, id: "tool-1:1", itemId: "tool-1", sequence: 1,
+      type: "tool_call", toolName: "read_file_tool",
+    };
+    const answerItem: SessionTurnItem = {
+      ...itemBase, id: "answer:1", itemId: "answer", sequence: 2,
+      type: "agent_message", phase: "final_answer", text: "最终回答",
+    };
+    const toolSegment = assistantMessage("session-1-message-10", {
+      turnId,
+      status: "completed",
+      timestamp: "2026-10-17T11:59:58Z",
+      turnItems: [toolItem],
+      metadata: { turnId, messageIndex: 10 },
+    });
+    const answerSegment = assistantMessage("session-1-message-12", {
+      turnId,
+      status: "completed",
+      timestamp: "2026-10-17T12:00:02Z",
+      turnItems: [answerItem],
+      metadata: { turnId, messageIndex: 12 },
+    });
+    const live = assistantMessage("session-1-message-live-turn-segments-retire", {
+      turnId,
+      status: "running",
+      timestamp: "2026-10-17T12:00:00Z",
+      turnItems: [],
+      metadata: { kind: "session_live_overlay", turnId },
+    });
+
+    const projection = projectAgentMessageTimelineMessages({
+      timelineMessages: [toolSegment, answerSegment, live],
+    });
+    // Both durable segments fold into one row and the later terminal segment
+    // keeps its id, so the overlay must alias there.
+    expect(projection.messages.map((message) => message.id)).toEqual(["session-1-message-12"]);
+    expect(projection.retiredOverlayAliases).toEqual([{
+      fromMessageId: "session-1-message-live-turn-segments-retire",
+      toMessageId: "session-1-message-12",
+    }]);
+  });
+
+  it("chains a rank-swapped overlay onto the winning overlay until the turn settles", () => {
+    const turnId = "turn-swap";
+    const overlay = (id: string, kind: string, timestamp: string) => assistantMessage(id, {
+      turnId,
+      status: "running",
+      timestamp,
+      turnItems: [{
+        id: `${id}:1`,
+        itemId: id,
+        version: 3,
+        sessionId: "session-1",
+        turnId,
+        type: "agent_message",
+        phase: "final_answer",
+        status: "running",
+        revision: 1,
+        sequence: 1,
+        terminal: false,
+        text: "同一在途回答",
+      }],
+      metadata: { kind, turnId },
+    });
+    const live = overlay("session-1-message-live-turn-swap", "session_live_overlay", "2026-10-17T12:00:00Z");
+    const active = overlay("session-1-message-active-turn-swap", "session_active_turn_layer", "2026-10-17T12:00:01Z");
+
+    const streaming = projectAgentMessageTimelineMessages({ timelineMessages: [live], activeTurnMessage: active });
+    expect(streaming.messages.map((message) => message.id)).toEqual(["session-1-message-active-turn-swap"]);
+    expect(streaming.retiredOverlayAliases).toEqual([{
+      fromMessageId: "session-1-message-live-turn-swap",
+      toMessageId: "session-1-message-active-turn-swap",
+    }]);
+
+    const durable = assistantMessage("session-1-message-44", {
+      turnId,
+      status: "completed",
+      timestamp: "2026-10-17T12:00:03Z",
+      turnItems: [{
+        id: "answer:1",
+        itemId: "answer",
+        version: 3,
+        sessionId: "session-1",
+        turnId,
+        type: "agent_message",
+        phase: "final_answer",
+        status: "completed",
+        revision: 2,
+        sequence: 1,
+        terminal: true,
+        text: "最终回答",
+      }],
+      metadata: { turnId, messageIndex: 44 },
+    });
+    const settled = projectAgentMessageTimelineMessages({ timelineMessages: [durable, live], activeTurnMessage: active });
+    expect(settled.messages.map((message) => message.id)).toEqual(["session-1-message-44"]);
+    expect(settled.retiredOverlayAliases).toEqual([
+      { fromMessageId: "session-1-message-live-turn-swap", toMessageId: "session-1-message-44" },
+      { fromMessageId: "session-1-message-active-turn-swap", toMessageId: "session-1-message-44" },
+    ]);
+  });
+
+  it("reports no aliases when nothing retired or an overlay still wins the turn", () => {
+    const durableOnly = projectAgentMessageTimelineMessages({
+      timelineMessages: [assistantMessage("session-1-message-7", {
+        turnId: "turn-plain",
+        status: "completed",
+        metadata: { turnId: "turn-plain", messageIndex: 7 },
+      })],
+    });
+    expect(durableOnly.retiredOverlayAliases).toEqual([]);
+
+    const winnerStays = projectAgentMessageTimelineMessages({
+      timelineMessages: [assistantMessage("session-1-message-live-turn-shell-2", {
+        turnId: "turn-shell-2",
+        status: "running",
+        turnItems: [{
+          id: "live-text:1",
+          itemId: "live-text",
+          version: 3,
+          sessionId: "session-1",
+          turnId: "turn-shell-2",
+          type: "agent_message",
+          phase: "final_answer",
+          status: "running",
+          revision: 1,
+          sequence: 1,
+          terminal: false,
+          text: "后端投影正文",
+        }],
+        metadata: { kind: "session_live_overlay", turnId: "turn-shell-2" },
+      })],
+      activeTurnMessage: assistantMessage("session-1-message-active-turn-shell-2", {
+        turnId: "turn-shell-2",
+        status: "pending",
+        turnItems: [],
+        metadata: { kind: "session_active_turn_layer", turnId: "turn-shell-2", processStage: "user_submit" },
+      }),
+    });
+    expect(winnerStays.messages.map((message) => message.id)).toEqual([
+      "session-1-message-live-turn-shell-2",
+    ]);
+    // The empty shell overlay still retires in the winner's favor, so it is
+    // reported as a retired alias onto the winning overlay row.
+    expect(winnerStays.retiredOverlayAliases).toEqual([{
+      fromMessageId: "session-1-message-active-turn-shell-2",
+      toMessageId: "session-1-message-live-turn-shell-2",
+    }]);
+  });
+});
