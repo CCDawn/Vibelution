@@ -490,18 +490,46 @@ def test_native_status_rereads_operator_profile_and_keeps_identity_on_read_failu
     assistant = {"agentId": "a", "directSessionId": "s", "displayName": "Assistant"}
     monkeypatch.setattr(native, "identity", lambda: {"assistant": dict(assistant)})
     monkeypatch.setattr(pa_assistant_actions, "execute", lambda *args, **kwargs: {"ok": True})
+    monkeypatch.setattr(host, "_model_image_input_support", lambda agent_id: True if agent_id == "a" else None)
     facade = host.NativeFacade(None)
     assert facade.identity()["operatorProfile"] == {"displayName": "First", "avatarPreset": "circle"}
     path.write_text('[user_profile]\ndisplay_name = "Second"\navatar_preset = "codex"\n', encoding="utf-8")
     result = facade.identity()
     assert result["assistant"] == assistant
     assert result["operatorProfile"] == {"displayName": "Second", "avatarPreset": "codex"}
+    assert result["settings"] == {"ok": True, "supportsImageInput": True}
     assert result["operatorAssetsVersion"] == 1
     assert result["assistantAvatarVersion"] == 1
     assert result["assistantAvatarRevision"] is None
     def unavailable(*args):
         raise ValueError("PRIVATE_PATH_OR_CONFIG_SENTINEL")
     monkeypatch.setattr(public_config, "read_existing_config_snapshot", unavailable)
-    assert facade.identity() == {"assistant": assistant, "settings": {"ok": True}, "operatorAssetsVersion": 1,
+    assert facade.identity() == {"assistant": assistant, "settings": {"ok": True, "supportsImageInput": True},
+                                 "operatorAssetsVersion": 1,
                                  "operatorAssetRevisions": {"avatar": None, "background": None}, "attachmentVersion": 1,
                                  "assistantAvatarVersion": 1, "assistantAvatarRevision": None}
+
+
+def test_model_image_input_support_degrades_to_unknown_without_touching_services(monkeypatch):
+    from core.assistant_runtime import host
+    from core.web.services import agent_directory_service, session_service
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("capability read must not initialize owners")
+    monkeypatch.setattr(agent_directory_service, "get_agent_parameter_snapshot", forbidden)
+    assert host._model_image_input_support("") is None
+    assert host._model_image_input_support(None) is None  # type: ignore[arg-type]
+
+    monkeypatch.setattr(agent_directory_service, "get_agent_parameter_snapshot",
+                        lambda agent_id, *, include_archived: {"agentId": agent_id})
+    monkeypatch.setattr(session_service, "_resolve_image_attachment_capability",
+                        lambda *, agent_instance: {"supports_image_input": False, "model_id": "m"})
+    assert host._model_image_input_support("a") is False
+    monkeypatch.setattr(session_service, "_resolve_image_attachment_capability",
+                        lambda *, agent_instance: {"supports_image_input": "unknown", "model_id": "m"})
+    assert host._model_image_input_support("a") is None
+
+    def broken_snapshot(*args, **kwargs):
+        raise RuntimeError("SERVICE_UNAVAILABLE_SENTINEL")
+    monkeypatch.setattr(agent_directory_service, "get_agent_parameter_snapshot", broken_snapshot)
+    assert host._model_image_input_support("a") is None

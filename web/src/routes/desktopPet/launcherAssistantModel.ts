@@ -61,6 +61,31 @@ export function launcherAssistantSubmission(
     : { message, requestId: createId(), draftSnapshot: draft };
 }
 
+/** Matches the native host's Pydantic `Message.message` max_length and the
+ * desktop bridge's pre-admission length check, both 64,000 characters. The
+ * composer pre-checks locally so an over-long draft can never dead-end in a
+ * rejection loop. Callers pass the exact string that would be sent. */
+export const LAUNCHER_ASSISTANT_MAX_MESSAGE_CHARS = 64_000;
+
+export function launcherAssistantMessageOverLimit(message: string): boolean {
+  return message.length > LAUNCHER_ASSISTANT_MAX_MESSAGE_CHARS;
+}
+
+/** A refusal that provably happened before any admission (renderer-side payload
+ * validation, or the desktop bridge rejecting the envelope before the host RPC)
+ * leaves nothing queued: the composer may unlock immediately. Everything else —
+ * transport loss, timeouts, an unconfirmed host response — keeps the
+ * conservative unconfirmed lock because the outcome is genuinely unknown.
+ * Classification is structural (name/message) because Electron re-creates the
+ * error across the context bridge. */
+export function launcherAssistantSendDefinitelyRejected(error: unknown): boolean {
+  return error instanceof Error
+    && (error.name === "LauncherAssistantRejectedError"
+      // The desktop bridge's pre-admission HostError code, surfaced as the
+      // caught Error's message; thrown only before the send RPC leaves main.
+      || error.message === "ASSISTANT_REQUEST_INVALID");
+}
+
 export function launcherAssistantActivity(source: SessionActivitySource = {}): {
   tone: PetActivityTone; animationState: PetAnimationState;
 } {

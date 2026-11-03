@@ -16,13 +16,26 @@ export type LauncherAssistantStatus = {
   attachmentVersion?: 1;
   operatorProfile?: LauncherOperatorProfile;
   assistant: { agentId: string; directSessionId: string; displayName: string };
-  settings?: { ok: boolean; preferences: DesktopPetPreferences; displayName: string; modelId: string };
+  settings?: { ok: boolean; preferences: DesktopPetPreferences; displayName: string; modelId: string;
+    /** Dialogue-model image-input capability for the attach gate; null or
+     * absent means unknown, which never blocks a send (chat-page parity). */
+    supportsImageInput?: boolean | null };
   patrol?: { state: "ready" | "unavailable"; deliveryStates: Record<string, number> };
 };
 
 export type LauncherAssistantAcceptance =
   | { turnId: string; queuedTurnId?: never; clientSubmissionId?: never }
   | { turnId: ""; queuedTurnId: string; clientSubmissionId: string };
+
+/** Renderer-side send validation refused the request before any transport or
+ * queue use: nothing was sent, so the composer may unlock immediately instead
+ * of entering the conservative unconfirmed lock. */
+export class LauncherAssistantRejectedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LauncherAssistantRejectedError";
+  }
+}
 
 export type LauncherAssistantDispatch = {
   dispatchId: string;
@@ -98,12 +111,28 @@ function record(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object";
 }
 
-/** Session event pushed by the Launcher host (frozen preload contract).
- * `session_detail` is an authoritative snapshot frame, `assistant_delta` an
- * incremental frame, `heartbeat` a ~15s channel-health signal; unknown types
- * are ignored by consumers. Any extra field (such as a delta's `done`) is not
- * part of the contract and must be probed, never assumed. */
-export type LauncherAssistantSessionEvent = { type: string; sessionId: string; ledgerSeq?: number; at: number };
+/** Session event pushed by the Launcher host (preload contract, additively
+ * extended). `session_detail` is an authoritative snapshot frame,
+ * `assistant_delta` an incremental frame, `heartbeat` a ~15s channel-health
+ * signal; unknown types are ignored by consumers. The assistant_delta
+ * enhancement fields below are optional and additive: identity-only envelopes
+ * (older shell, oversized-frame fallback) stay valid, so absence always means
+ * "unknown" — probe, never assume.
+ * - `done`: the delta's terminal flag. Only `true` proves the turn finished;
+ *   absent or false is no evidence either way.
+ * - `turnId`: the turn the delta belongs to; correlate previews per turn.
+ * - `textPreview`: newest assistant answer text from that frame's turnItems
+ *   projection (`agent_message` body), tail-capped by the pump — may be cut
+ *   mid-sentence. Display hint only; session detail stays the authority. */
+export type LauncherAssistantSessionEvent = {
+  type: string;
+  sessionId: string;
+  ledgerSeq?: number;
+  at: number;
+  done?: boolean;
+  turnId?: string;
+  textPreview?: string;
+};
 
 /** Progressive enhancement over the preload bridge: an older or degraded shell
  * exposes no `onSessionEvent`, in which case this returns null without throwing
@@ -256,7 +285,7 @@ export async function getLauncherAssistantDetail(sessionId: string): Promise<Ses
 }
 
 export async function sendLauncherAssistantMessage(message: string, requestId: string, attachmentIds: string[] = []): Promise<LauncherAssistantAcceptance> {
-  if ((!message.trim() && !attachmentIds.length) || !attachmentIds.every(validArtifactId) || !/^[A-Za-z0-9_.:-]{1,128}$/.test(requestId)) throw new Error("消息或请求标识无效。");
+  if ((!message.trim() && !attachmentIds.length) || !attachmentIds.every(validArtifactId) || !/^[A-Za-z0-9_.:-]{1,128}$/.test(requestId)) throw new LauncherAssistantRejectedError("消息或请求标识无效。");
   const result = await launcherAssistantBridge().invoke(attachmentIds.length
     ? { operation: "send", message, requestId, attachmentIds } : { operation: "send", message, requestId });
   if (record(result) && (result.status === "queued" || result.queuedTurnId !== undefined)) {

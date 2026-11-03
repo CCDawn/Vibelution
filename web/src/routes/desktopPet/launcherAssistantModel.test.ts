@@ -7,9 +7,9 @@ import type { ConversationViewProps } from "../../components/conversation/conver
 import type { SessionDetail, SessionToolApprovalRequest } from "../../api/types";
 import type { LauncherAssistantSessionEvent } from "../../api/launcherAssistant";
 import {
-  launcherAssistantActivity, launcherAssistantPollInterval, launcherAssistantSubmission, launcherDispatchLabel, launcherAssistantQueueReadback, launcherAssistantQueueLabel, launcherAssistantRequestReadback,
+  launcherAssistantActivity, launcherAssistantMessageOverLimit, launcherAssistantPollInterval, launcherAssistantSendDefinitelyRejected, launcherAssistantSubmission, launcherDispatchLabel, launcherAssistantQueueReadback, launcherAssistantQueueLabel, launcherAssistantRequestReadback,
   launcherAssistantSessionEventRefreshesDetail, launcherAssistantSseHealthy, launcherAssistantWaitInterval,
-  LAUNCHER_ASSISTANT_SSE_HEALTH_WINDOW_MS, LAUNCHER_ASSISTANT_WAIT_POLL_FIRST_MS, LAUNCHER_ASSISTANT_WAIT_POLL_MAX_MS,
+  LAUNCHER_ASSISTANT_MAX_MESSAGE_CHARS, LAUNCHER_ASSISTANT_SSE_HEALTH_WINDOW_MS, LAUNCHER_ASSISTANT_WAIT_POLL_FIRST_MS, LAUNCHER_ASSISTANT_WAIT_POLL_MAX_MS,
 } from "./launcherAssistantModel";
 import { LauncherAssistantRoute } from "./LauncherAssistantRoute";
 
@@ -363,6 +363,22 @@ describe("Launcher assistant state", () => {
     expect(launcherAssistantSubmission(first, "changed draft", createId)).toBe(first);
     expect(createId).toHaveBeenCalledTimes(1);
     expect(launcherAssistantSubmission(null, "   ", createId)).toBeNull();
+  });
+
+  it("pre-checks the host message length bound without changing the retry contract", () => {
+    expect(LAUNCHER_ASSISTANT_MAX_MESSAGE_CHARS).toBe(64_000);
+    expect(launcherAssistantMessageOverLimit("x".repeat(64_000))).toBe(false);
+    expect(launcherAssistantMessageOverLimit("x".repeat(64_001))).toBe(true);
+  });
+
+  it("unlocks only on provable pre-admission refusals, never on unknown outcomes", () => {
+    const rejected = Object.assign(new Error("消息或请求标识无效。"), { name: "LauncherAssistantRejectedError" });
+    const bridgeRefused = new Error("ASSISTANT_REQUEST_INVALID");
+    const unknown = [new Error("ASSISTANT_HTTP_FAILED"), new Error("ASSISTANT_NOT_READY"),
+      new Error("Launcher 尚未确认消息所属轮次。"), new Error("network down"), "string failure", undefined];
+    expect(launcherAssistantSendDefinitelyRejected(rejected)).toBe(true);
+    expect(launcherAssistantSendDefinitelyRejected(bridgeRefused)).toBe(true);
+    for (const error of unknown) expect(launcherAssistantSendDefinitelyRejected(error)).toBe(false);
   });
 
   it("polls only a visible initial or active native session", () => {

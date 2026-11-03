@@ -341,6 +341,27 @@ def _operator_profile() -> dict[str, str] | None:
     return {"displayName": name, "avatarPreset": preset}
 
 
+def _model_image_input_support(agent_id: str) -> bool | None:
+    """Best-effort image-input capability of the assistant's dialogue model.
+
+    Same source as the chat page's submit preflight. ``None`` means unknown
+    (catalog, snapshot or service unavailable): the renderer stays quiet and
+    never blocks a send on unknown capability. Failures here must not degrade
+    the lightweight status read."""
+    if not isinstance(agent_id, str) or not agent_id.strip():
+        return None
+    try:
+        from core.web.services import agent_directory_service, session_service
+
+        agent = agent_directory_service.get_agent_parameter_snapshot(agent_id, include_archived=False)
+        if not isinstance(agent, dict) or agent.get("agentId") != agent_id:
+            return None
+        value = session_service._resolve_image_attachment_capability(agent_instance=agent).get("supports_image_input")
+        return value if isinstance(value, bool) else None
+    except Exception:  # noqa: BLE001 - a capability read failure only means "unknown".
+        return None
+
+
 class NativeFacade:
     """Bind the narrow host API to one immutable native assistant identity."""
 
@@ -369,6 +390,10 @@ class NativeFacade:
         result["assistantAvatarRevision"] = native.assistant_avatar_revision()
         result["attachmentVersion"] = 1
         result["settings"] = pa_assistant_actions.execute("assistant_settings", {}, {}, governed=False)
+        # Additive capability hint for the renderer's attach gate; the tool
+        # contract's own settings payload stays untouched.
+        result["settings"]["supportsImageInput"] = _model_image_input_support(
+            str((result.get("assistant") or {}).get("agentId") or ""))
         profile = _operator_profile()
         if profile is not None:
             result["operatorProfile"] = profile
