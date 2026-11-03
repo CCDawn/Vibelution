@@ -1,14 +1,14 @@
 {
   "comment": "Baseline for visualTokenEscalationContract.test.ts. Ratchet: counts may only shrink. Regenerate with: npm run tokens:baseline-update (web/).",
-  "updatedAt": "2026-10-21",
-  "scannedFileCount": 1799,
+  "updatedAt": "2026-11-03",
+  "scannedFileCount": 1847,
   "exemptFiles": [
     "routes/chat/CliAgentRunTerminalPanel.tsx",
     "routes/teams/challenge-cup/questionArchiveExport.ts"
   ],
   "categories": {
     "builtinFontSize": {
-      "total": 214,
+      "total": 211,
       "files": {
         "routes/agentConfigForm.styles.ts": 4,
         "routes/AgentConfigPolicyPanePanel.styles.ts": 1,
@@ -46,9 +46,6 @@
         "routes/finance/FinanceWalkForward.styles.ts": 1,
         "routes/finance/FinanceWorkspaceInspector.styles.ts": 3,
         "routes/finance/FinanceWorkspaceSidebar.styles.ts": 7,
-        "routes/LauncherBranchInstancesPanel.styles.ts": 1,
-        "routes/LauncherRoute.styles.ts": 1,
-        "routes/LauncherToolsRoute.styles.ts": 1,
         "routes/MemoryAgentMemoryPanel.styles.ts": 17
       }
     },
@@ -76,9 +73,8 @@
       }
     },
     "arbitraryRadius": {
-      "total": 29,
+      "total": 28,
       "files": {
-        "app/LauncherShell.styles.ts": 1,
         "app/PageFrameLoadingShell.styles.ts": 3,
         "components/conversation/AgentUserContentSectionView.styles.ts": 1,
         "components/conversation/ConversationShareExportButton.styles.ts": 1,
