@@ -131,6 +131,36 @@ export function launcherAssistantSseHealthy(lastEventAt: number | null | undefin
   return typeof lastEventAt === "number" && Number.isFinite(lastEventAt) && now - lastEventAt <= LAUNCHER_ASSISTANT_SSE_HEALTH_WINDOW_MS;
 }
 
+/** Status-poll degradation thresholds: the red banner requires the failure to
+ * persist (two consecutive failed polls, or no successful read for 30s) AND
+ * the push channel to be dead. A single failed poll stays a weak hint. */
+export const LAUNCHER_ASSISTANT_STATUS_DEGRADE_FAILURES = 2;
+export const LAUNCHER_ASSISTANT_STATUS_DEGRADE_MAX_SILENCE_MS = 30_000;
+
+export type LauncherAssistantStatusDegradeTone = "quiet" | "soft" | "error";
+
+/** Debounced tone for a status poll whose session content is mounted. The
+ * never-succeeded cold boot is owned by the backend-wait surface (quiet). A
+ * silence gap alone proves nothing while the poller is paused (no error and
+ * no attempt in flight): absence of asks is not failure evidence. While push
+ * events keep arriving the conversation still updates live, so a healthy
+ * push channel caps the tone at the weak hint no matter how long the poll
+ * has been failing. */
+export function launcherAssistantStatusDegradeTone(input: {
+  isError: boolean; isFetching: boolean; hasData: boolean;
+  consecutiveFailures: number; lastSuccessAt: number;
+  now: number; sseHealthy: boolean;
+}): LauncherAssistantStatusDegradeTone {
+  if (!input.hasData) return "quiet";
+  const silenceExceeded = Number.isFinite(input.lastSuccessAt)
+    && input.now - input.lastSuccessAt > LAUNCHER_ASSISTANT_STATUS_DEGRADE_MAX_SILENCE_MS;
+  const failing = input.isError || input.isFetching && silenceExceeded;
+  if (!failing) return "quiet";
+  if (input.sseHealthy) return "soft";
+  const escalated = input.consecutiveFailures >= LAUNCHER_ASSISTANT_STATUS_DEGRADE_FAILURES || silenceExceeded;
+  return escalated ? "error" : "soft";
+}
+
 /** Only an authoritative snapshot frame, or a delta that explicitly reports
  * `done === true`, for this very session re-reads detail. Heartbeats, foreign
  * sessions, unfinished deltas and unknown types only prove the channel alive;

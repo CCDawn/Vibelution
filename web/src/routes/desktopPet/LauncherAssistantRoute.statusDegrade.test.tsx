@@ -59,8 +59,10 @@ async function settle() {
 }
 async function renderEmbedded(options: {
   status?: () => Promise<unknown>;
+  detail?: () => Promise<unknown>;
   dispatches?: Array<Record<string, unknown>>;
   onDecide?: (request: Record<string, unknown>) => Promise<unknown>;
+  onSessionEvent?: (listener: (value: unknown) => void) => (() => void) | void;
 } = {}) {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   vi.stubGlobal("fetch", vi.fn(() => { throw new Error("HTTP is forbidden in this window"); }));
@@ -68,7 +70,7 @@ async function renderEmbedded(options: {
     switch (request.operation) {
       case "status": return options.status ? options.status() : STATUS;
       case "config": return { language: "zh" };
-      case "detail": return DETAIL;
+      case "detail": return options.detail ? options.detail() : DETAIL;
       case "approvals": return [];
       case "dispatches": return { dispatches: options.dispatches ?? [] };
       case "operatorAsset": return { schemaVersion: 1, kind: request.kind, image: null, readability: "standard" };
@@ -79,7 +81,12 @@ async function renderEmbedded(options: {
       default: throw new Error("unexpected_operation");
     }
   });
-  vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+  vi.stubGlobal("vibelutionLauncherAssistant", {
+    invoke,
+    ...(options.onSessionEvent
+      ? { onSessionEvent: (listener: (value: unknown) => void) => options.onSessionEvent?.(listener) }
+      : {}),
+  });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 30_000 } } });
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
   await act(async () => root!.render(createElement(QueryClientProvider, { client }, createElement(LauncherAssistantEmbeddedRoute))));
@@ -90,31 +97,110 @@ function button(text: string) {
 }
 
 describe("Launcher assistant status degradation", () => {
-  it("keeps transcript and composer mounted behind a recovery banner when status fails after load", async () => {
+  it("keeps transcript and composer mounted behind a weak hint on a single failed status poll", async () => {
     let statusFails = false;
     await renderEmbedded({ status: async () => { if (statusFails) throw new Error("host restarting"); return STATUS; } });
     expect(conversation?.composerPlaceholder).toBe("和个人助理聊一聊…");
-    // A visibility flip refetches status, which now fails (host restarting).
+    // A visibility flip refetches status, which now fails once (host restarting).
     statusFails = true;
     await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
     await settle(); await settle();
-    // The session page is not replaced by a full-page error surface.
+    // The session page is not replaced by a full-page error surface and the
+    // conversation stays mounted.
     expect(container.querySelector('[data-assistant-embedded="true"]')).toBeTruthy();
     expect(container.querySelector('[data-vui="state-surface"][data-fill="true"]')).toBeNull();
     expect(container.querySelector('[data-testid="native-conversation"]')).toBeTruthy();
     expect(conversation?.composerPlaceholder).toBe("和个人助理聊一聊…");
-    // One compact banner explains the degraded status and offers a retry.
+    // One failed poll never raises a red banner; it stays a compact non-error hint.
+    expect(container.querySelector('[data-vui="state-surface"][data-tone="error"]')).toBeNull();
+    const hint = container.querySelector('section[data-vui="state-surface"][data-density="compact"][data-tone="unavailable"]');
+    expect(hint?.textContent).toContain("状态刷新延迟");
+    // The header keeps the normal session status line for a weak degradation.
+    expect(container.textContent).toContain("在的，随时吩咐。");
+    expect(container.textContent).not.toContain("个人助理暂不可用");
+  });
+
+  it("raises the red banner after a second consecutive failure over a dead push channel, and recovers", async () => {
+    let statusFails = false;
+    await renderEmbedded({ status: async () => { if (statusFails) throw new Error("host restarting"); return STATUS; } });
+    // No onSessionEvent bridge was stubbed: the push channel never spoke, so it
+    // counts as dead. First failure stays at the weak hint.
+    statusFails = true;
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    await settle(); await settle();
+    expect(container.querySelector('[data-vui="state-surface"][data-tone="error"]')).toBeNull();
+    // Second consecutive failure: one compact red banner explains the degraded
+    // status and offers a retry.
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    await settle(); await settle();
     const banner = container.querySelector('section[data-vui="state-surface"][data-density="compact"][data-tone="error"]');
     expect(banner?.textContent).toContain("个人助理状态轮询暂不可用");
     expect(banner?.textContent).toContain("host restarting");
     const retry = banner && [...banner.querySelectorAll("button")].find(candidate => candidate.textContent === "重试");
     expect(retry).toBeTruthy();
-    // Retrying once status recovers removes the banner again.
+    // The header reports unavailable too, while the conversation stays mounted.
+    expect(container.textContent).toContain("个人助理暂不可用");
+    expect(container.querySelector('[data-testid="native-conversation"]')).toBeTruthy();
+    expect(conversation?.composerPlaceholder).toBe("和个人助理聊一聊…");
+    // Retrying once status recovers clears the whole degradation again.
     statusFails = false;
     await act(async () => retry!.click());
-    await settle();
-    expect(container.querySelector('section[data-vui="state-surface"][data-density="compact"][data-tone="error"]')).toBeNull();
+    await settle(); await settle();
+    expect(container.querySelector('[data-vui="state-surface"][data-tone="error"]')).toBeNull();
+    expect(container.querySelector('section[data-vui="state-surface"][data-density="compact"][data-tone="unavailable"]')).toBeNull();
+    expect(container.textContent).not.toContain("个人助理暂不可用");
+    expect(container.textContent).toContain("在的，随时吩咐。");
     expect(container.querySelector('[data-testid="native-conversation"]')).toBeTruthy();
+    expect(conversation?.composerPlaceholder).toBe("和个人助理聊一聊…");
+  });
+
+  it("keeps the weak hint while push events prove the conversation is still live", async () => {
+    let statusFails = false;
+    let emitEvent: ((value: unknown) => void) | undefined;
+    await renderEmbedded({
+      status: async () => { if (statusFails) throw new Error("host restarting"); return STATUS; },
+      onSessionEvent: listener => { emitEvent = value => listener(value); },
+    });
+    // A heartbeat inside the health window proves the push channel alive.
+    await act(async () => emitEvent?.({ type: "heartbeat", sessionId: "s", at: Date.now() }));
+    statusFails = true;
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    await settle(); await settle();
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    await settle(); await settle();
+    // Two consecutive failures with a live push channel never escalate: the
+    // session content is still updating, so only the weak hint shows.
+    expect(container.querySelector('[data-vui="state-surface"][data-tone="error"]')).toBeNull();
+    expect(container.querySelector('section[data-vui="state-surface"][data-density="compact"][data-tone="unavailable"]')?.textContent).toContain("状态刷新延迟");
+    expect(container.textContent).not.toContain("个人助理暂不可用");
+    expect(container.querySelector('[data-testid="native-conversation"]')).toBeTruthy();
+    expect(conversation?.composerPlaceholder).toBe("和个人助理聊一聊…");
+  });
+
+  it("keeps one red story: the detail banner stands down while the status banner is red", async () => {
+    let statusFails = false;
+    let detailFails = false;
+    await renderEmbedded({
+      status: async () => { if (statusFails) throw new Error("host restarting"); return STATUS; },
+      detail: async () => { if (detailFails) throw new Error("detail read failed"); return DETAIL; },
+    });
+    statusFails = true;
+    detailFails = true;
+    // First flip: status fails once (weak hint) while the detail read fails
+    // outright — the detail failure is the only red, with its own retry.
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    await settle(); await settle();
+    expect(container.querySelector('section[data-vui="state-surface"][data-density="compact"][data-tone="error"]')).toBeNull();
+    const detailBanner = container.querySelector('section[data-vui="state-surface"][data-tone="error"]');
+    expect(detailBanner?.textContent).toContain("个人助理暂不可用");
+    expect(detailBanner?.textContent).toContain("detail read failed");
+    // Second flip: the status banner turns red and the detail banner stands
+    // down, so the jitter shows exactly one red surface.
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    await settle(); await settle();
+    expect(container.querySelector('section[data-vui="state-surface"][data-density="compact"][data-tone="error"]')?.textContent).toContain("个人助理状态轮询暂不可用");
+    expect(container.textContent).not.toContain("detail read failed");
+    expect(container.querySelector('section[data-vui="state-surface"][data-tone="error"][data-density="default"]')).toBeNull();
   });
 
   it("waits for the backend on a first-load failure with no session content", async () => {

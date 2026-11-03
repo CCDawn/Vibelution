@@ -48,7 +48,7 @@ import {
   launcherAssistantActivity, launcherAssistantMessageOverLimit, launcherAssistantPollInterval, launcherAssistantSubmission,
   launcherAssistantQueueReadback, launcherAssistantQueueLabel, launcherAssistantRequestReadback,
   launcherAssistantSendDefinitelyRejected, launcherAssistantSessionEventRefreshesDetail, launcherAssistantSseHealthy,
-  launcherAssistantWaitInterval, launcherAssistantContextRing, launcherAssistantModelDisplay,
+  launcherAssistantStatusDegradeTone, launcherAssistantWaitInterval, launcherAssistantContextRing, launcherAssistantModelDisplay,
   launcherAssistantEditBackfillDraft,
   type LauncherAssistantSubmission, type LauncherAssistantQueuedAcceptance,
 } from "./launcherAssistantModel";
@@ -70,6 +70,7 @@ const COPY = {
     receipts: "任务状态暂不可用", checking: "正在连接 Launcher…",
     waitingBackend: "正在等待工作台后端启动…",
     statusStale: "个人助理状态轮询暂不可用，会话内容可能未更新",
+    statusDelayed: "状态刷新延迟，会话内容可能未更新",
     pendingQuestion: "待你回答",
     answerBelow: "去回答", answerHint: "请在下方输入回答，再点击发送。",
     modelSettings: "模型设置", currentModel: "当前模型",
@@ -86,6 +87,7 @@ const COPY = {
     receipts: "Task status unavailable", checking: "Connecting to Launcher…",
     waitingBackend: "Waiting for the workbench backend…",
     statusStale: "Assistant status polling is unavailable; conversation content may be stale",
+    statusDelayed: "Status refresh is delayed; conversation content may be stale",
     pendingQuestion: "Waiting for your answer",
     answerBelow: "Answer below", answerHint: "Type your answer below, then send it.",
     modelSettings: "Model settings", currentModel: "Current model",
@@ -205,6 +207,18 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       ? backendWaitStartedAt.current ?? Date.now()
       : null;
   }, [status.isError, status.data]);
+  // Consecutive failed status polls. react-query resets its own failure counter
+  // on every new fetch attempt, so the debounce count lives here: each new
+  // error timestamp bumps it, any success resets it, and the state update
+  // re-renders the banner region so the degrade tone tracks the current count.
+  const [statusFailures, setStatusFailures] = useState(0);
+  const statusOutcome = useRef("");
+  useEffect(() => {
+    const outcome = status.isError ? `e${status.errorUpdatedAt}` : `s${status.dataUpdatedAt}`;
+    if (outcome === statusOutcome.current) return;
+    statusOutcome.current = outcome;
+    setStatusFailures(current => status.isError ? current + 1 : 0);
+  }, [status.isError, status.errorUpdatedAt, status.dataUpdatedAt]);
   const sessionId = status.data?.assistant.directSessionId || "";
   const sessionIdRef = useRef(sessionId);
   sessionIdRef.current = sessionId;
@@ -971,12 +985,26 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   // waiting state (kept probing by the backoff interval above) instead of a
   // dead-end unavailable error.
   const waitingForBackend = status.isError && !status.data;
+  // Debounced degradation of the status poll over the mounted conversation: a
+  // single failed poll is a weak hint; red requires persistence (two failures
+  // or a 30s silence gap) AND a dead push channel, because live push events
+  // keep the conversation updating no matter how the poll is doing.
+  const statusDegradeTone = launcherAssistantStatusDegradeTone({
+    isError: status.isError, isFetching: status.isFetching, hasData: Boolean(status.data),
+    consecutiveFailures: statusFailures, lastSuccessAt: status.dataUpdatedAt,
+    now: Date.now(), sseHealthy: launcherAssistantSseHealthy(sseAliveAt.current, Date.now()),
+  });
+  const statusHardDown = statusDegradeTone === "error";
   // Read-only context-usage ring from the native detail's usage projections.
   // Null before the first usage frame; diagnostics handoff and the auto-compaction
   // countdown are absent because this surface mounts neither dialog nor setting.
   const composerContextRing = useMemo(() => launcherAssistantContextRing(detail.data, lang), [detail.data, lang]);
   const modelDisplay = launcherAssistantModelDisplay(status.data?.settings?.modelId, lang);
-  const statusText = feedback || queueStatusText || (status.isError ? (waitingForBackend ? copy.waitingBackend : copy.unavailable) : status.isPending ? copy.checking
+  // The header keeps the normal session status line for a weakly degraded poll;
+  // "unavailable" is reserved for the hard-down case (persistent failure AND a
+  // dead push channel), and the cold-boot wait keeps its own wording.
+  const statusText = feedback || queueStatusText || (waitingForBackend ? copy.waitingBackend : statusHardDown ? copy.unavailable
+    : status.isPending ? copy.checking
     : detail.data ? !detail.isError && !approval && !stopping && !acceptedTurnId && !sendPending && !sendUnconfirmed && preferences.idleMessage
         && (activity.execution === "idle" || (activity.execution === "settled" && activity.outcome === "completed"))
       ? preferences.idleMessage : sessionActivityStatusLabel(activity, lang)
@@ -1004,7 +1032,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     data-waiting={waitingForBackend ? "backend" : undefined}>
     <div className={petStyles.stage}>
       <div className={petStyles.toolbar}>
-        <span className={petStyles.status} role="status" aria-live="polite" hidden={!preferences.showStatus && !feedback && !status.isError}>
+        <span className={petStyles.status} role="status" aria-live="polite" hidden={!preferences.showStatus && !feedback && !(waitingForBackend || statusHardDown)}>
           <span className={petStyles.statusDot} aria-hidden="true" />{statusText}
         </span>
         <VNativeButton className={petStyles.close} aria-label={copy.hide} onClick={() => void hide()}><X size={14} /></VNativeButton>
@@ -1109,8 +1137,9 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     {themeSyncState !== "applied" ? <VStateSurface tone="error" title={themeSyncState === "unknown" ? (lang === "zh" ? "主题变更结果未确认" : "Theme change is unconfirmed") : themeSyncState === "conflict" ? (lang === "zh" ? "助理主题与全局主题不同" : "Assistant and global themes differ") : (lang === "zh" ? "主题尚未同步" : "Theme is not synchronized")}
       actions={<><VButton isDisabled={themePending} onClick={() => { if (themeGate.current) return; themeGate.current = true; setThemePending(true); void requestWorkbenchTheme(readStoredWorkbenchTheme()).then(result => { if (result !== "superseded") setThemeSyncState(result); }).finally(() => { themeGate.current = false; setThemePending(false); }); }}>{lang === "zh" ? "使用助理主题" : "Use assistant theme"}</VButton>
         <VButton isDisabled={themePending} onClick={() => { if (themeGate.current) return; themeGate.current = true; setThemePending(true); void useAuthorityTheme().then(result => { if (result !== "superseded") setThemeSyncState(result); }).finally(() => { themeGate.current = false; setThemePending(false); }); }}>{lang === "zh" ? "使用全局主题" : "Use global theme"}</VButton></>} /> : null}
-    {status.isError ? <VStateSurface density="compact" tone="error" title={copy.statusStale}
-      actions={<VButton onClick={() => void status.refetch()}>{copy.retry}</VButton>}>{status.error.message}</VStateSurface> : null}
+    {status.isError && statusDegradeTone === "error" ? <VStateSurface density="compact" tone="error" title={copy.statusStale}
+      actions={<VButton onClick={() => void status.refetch()}>{copy.retry}</VButton>}>{status.error.message}</VStateSurface>
+      : statusDegradeTone === "soft" ? <VStateSurface density="compact" tone="unavailable" title={copy.statusDelayed} /> : null}
     {showWelcome ? <LauncherAssistantWelcome lang={lang} onPrompt={changeDraft}/> : null}
     {detail.data ? <LazyConversationView
       runtimeApi={launcherConversationApi}
@@ -1209,7 +1238,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     </section> : null}
     {sendUnconfirmed ? <VStateSurface tone="error" title={copy.unknownSend}
       actions={<VButton onClick={() => void submit()} isDisabled={sendPending || controlPending || stopping}>{copy.retry}</VButton>} /> : null}
-    {detail.isError && detail.data ? <VStateSurface tone="error" title={copy.unavailable}
+    {detail.isError && detail.data && statusDegradeTone !== "error" ? <VStateSurface tone="error" title={copy.unavailable}
       actions={<VButton onClick={() => void detail.refetch()}>{copy.retry}</VButton>}>{detail.error.message}</VStateSurface> : null}
     {dispatches.isError ? <VStateSurface tone="error" title={copy.receipts}
       actions={<VButton onClick={() => void dispatches.refetch()}>{copy.retry}</VButton>}>{dispatches.error.message}</VStateSurface> : null}
