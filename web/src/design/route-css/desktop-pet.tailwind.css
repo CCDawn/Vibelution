@@ -199,6 +199,16 @@ body[data-vibelution-desktop-pet="true"] #root {
   [data-vui-domain-recipe="launcher-assistant"][data-expanded="false"] .desktop-pet-stage:not(:hover):not(:focus-within) :is(.desktop-pet-status, .desktop-pet-close, .desktop-assistant-chat-cue) {
     pointer-events: none;
   }
+
+  /* A float waiting for the workbench backend keeps its status pill visible
+     without hover: this is exactly the moment the window must explain itself. */
+  [data-vui-domain-recipe="launcher-assistant"][data-expanded="false"][data-waiting="backend"] .desktop-pet-stage:not(:hover):not(:focus-within) .desktop-pet-toolbar {
+    opacity: 1;
+  }
+
+  [data-vui-domain-recipe="launcher-assistant"][data-expanded="false"][data-waiting="backend"] .desktop-pet-stage:not(:hover):not(:focus-within) .desktop-pet-status {
+    pointer-events: auto;
+  }
 }
 
 .desktop-pet-toolbar {

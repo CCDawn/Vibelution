@@ -8,7 +8,8 @@ import type { SessionDetail, SessionToolApprovalRequest } from "../../api/types"
 import type { LauncherAssistantSessionEvent } from "../../api/launcherAssistant";
 import {
   launcherAssistantActivity, launcherAssistantPollInterval, launcherAssistantSubmission, launcherDispatchLabel, launcherAssistantQueueReadback, launcherAssistantQueueLabel, launcherAssistantRequestReadback,
-  launcherAssistantSessionEventRefreshesDetail, launcherAssistantSseHealthy, LAUNCHER_ASSISTANT_SSE_HEALTH_WINDOW_MS,
+  launcherAssistantSessionEventRefreshesDetail, launcherAssistantSseHealthy, launcherAssistantWaitInterval,
+  LAUNCHER_ASSISTANT_SSE_HEALTH_WINDOW_MS, LAUNCHER_ASSISTANT_WAIT_POLL_FIRST_MS, LAUNCHER_ASSISTANT_WAIT_POLL_MAX_MS,
 } from "./launcherAssistantModel";
 import { LauncherAssistantRoute } from "./LauncherAssistantRoute";
 
@@ -411,6 +412,26 @@ describe("Launcher assistant state", () => {
     expect(launcherAssistantSseHealthy(now + 5, now)).toBe(true);
     expect(launcherAssistantSseHealthy(now - LAUNCHER_ASSISTANT_SSE_HEALTH_WINDOW_MS, now)).toBe(true);
     expect(launcherAssistantSseHealthy(now - LAUNCHER_ASSISTANT_SSE_HEALTH_WINDOW_MS - 1, now)).toBe(false);
+  });
+
+  it("backs the cold-boot backend wait off from 2s to a 16s cap", () => {
+    const start = 1_000_000;
+    expect(LAUNCHER_ASSISTANT_WAIT_POLL_FIRST_MS).toBe(2_000);
+    expect(LAUNCHER_ASSISTANT_WAIT_POLL_MAX_MS).toBe(16_000);
+    // Before the first failure is stamped, and inside the first 4s window, probe every 2s.
+    expect(launcherAssistantWaitInterval(null, start)).toBe(2_000);
+    expect(launcherAssistantWaitInterval(start, start)).toBe(2_000);
+    expect(launcherAssistantWaitInterval(start, start + 1_999)).toBe(2_000);
+    expect(launcherAssistantWaitInterval(start, start - 5)).toBe(2_000);
+    // One doubling per elapsed 4s window.
+    expect(launcherAssistantWaitInterval(start, start + 4_000)).toBe(4_000);
+    expect(launcherAssistantWaitInterval(start, start + 8_000)).toBe(8_000);
+    expect(launcherAssistantWaitInterval(start, start + 16_000)).toBe(16_000);
+    // A long outage never grows past the cap.
+    expect(launcherAssistantWaitInterval(start, start + 10 * 60_000)).toBe(16_000);
+    // Non-finite clocks degrade to the first window instead of throwing.
+    expect(launcherAssistantWaitInterval(Number.NaN, start)).toBe(2_000);
+    expect(launcherAssistantWaitInterval(start, Number.NaN)).toBe(2_000);
   });
 
   it("re-reads detail only for this session's snapshot frame or an explicitly finished delta", () => {
