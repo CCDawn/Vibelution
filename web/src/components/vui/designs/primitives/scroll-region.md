@@ -33,6 +33,7 @@ import { VScrollRegion } from "@/components/vui";
 - 鼠标主键在真实纵向 gutter 内按下：持续显示到 window `pointerup`、`pointercancel` 或失焦，随后再延迟 800ms 隐藏；按住超过 800ms 也不隐藏，兼容左侧 RTL gutter。
 - Chromium 原生滑块拖动可能不派发 DOM pointer 事件；`::-webkit-scrollbar-thumb:active` 直接提供相同主题色作为原生拖动保障，此时随原生 active 结束隐藏。
 - 程序触发的 `scroll`（包括流式自动 follow）只透传事件，不触发或延长显示。
+- 卡片通过 React portal 插入滚动宿主时，按实际 DOM 容器捕获滚轮、触摸和滚动键；React 正常传播路径仍保留消费回调。未走该路径的输入在事件传播结束后补充暂显，已取消的默认动作不触发，卸载时清除待处理任务。
 - Chromium 使用 6px WebKit 伪元素样式并隐藏原生箭头，`!important` 只用于覆盖全局 native scrollbar reset；仅不支持 WebKit 伪元素的浏览器使用标准 `scrollbar-width: thin` fallback。
 - 沿用滑块 150ms 颜色过渡，减少动态效果偏好下关闭过渡。
 

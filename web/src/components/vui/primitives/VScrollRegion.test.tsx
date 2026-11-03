@@ -1,6 +1,7 @@
 /** @vitest-environment happy-dom */
 import React, { act, createRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { createPortal } from "react-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { VScrollRegion, type VScrollRegionProps } from "./VScrollRegion";
@@ -10,13 +11,13 @@ import { VScrollRegion, type VScrollRegionProps } from "./VScrollRegion";
 let root: Root | null = null;
 let host: HTMLDivElement;
 
-function renderRegion(props: VScrollRegionProps = {}, ref?: React.Ref<HTMLDivElement>) {
+function renderRegion(props: VScrollRegionProps = {}, ref?: React.Ref<HTMLDivElement>, portal?: React.ReactNode) {
   if (!root) {
     host = document.createElement("div");
     document.body.append(host);
     root = createRoot(host);
   }
-  act(() => root?.render(<VScrollRegion {...props} ref={ref} />));
+  act(() => root?.render(<><VScrollRegion {...props} ref={ref} />{portal}</>));
   const element = host.querySelector<HTMLDivElement>('[data-vui="scroll-region"]');
   if (!element) throw new Error("Scroll region missing");
   Object.defineProperties(element, {
@@ -66,6 +67,45 @@ afterEach(() => {
 });
 
 describe("VScrollRegion", () => {
+  it.each(["wheel", "touchmove", "keydown"])("observes physical %s from a sibling React portal", (type) => {
+    const element = renderRegion();
+    renderRegion({}, undefined, createPortal(<button>portaled task</button>, element));
+    const button = element.querySelector("button")!;
+    const event = type === "wheel" ? new WheelEvent(type, { bubbles: true, deltaY: 40 })
+      : type === "keydown" ? new KeyboardEvent(type, { bubbles: true, key: "PageDown" })
+        : new Event(type, { bubbles: true });
+    dispatch(button, event);
+    advance(0);
+    expectState(element, true);
+    advance(800);
+    expectState(element, false);
+  });
+
+  it("respects cancelled input and editing keys inside a sibling portal", () => {
+    const element = renderRegion();
+    renderRegion({}, undefined, createPortal(<input />, element));
+    const input = element.querySelector("input")!;
+    input.addEventListener("wheel", event => event.preventDefault());
+    dispatch(input, new WheelEvent("wheel", { bubbles: true, cancelable: true }));
+    dispatch(input, new KeyboardEvent("keydown", { bubbles: true, key: "Home" }));
+    advance(0);
+    expectState(element, false);
+  });
+
+  it("cancels deferred portal input on unmount and preserves React callback cancellation", () => {
+    const element = renderRegion({ onWheel: event => event.preventDefault() });
+    dispatch(element, new WheelEvent("wheel", { bubbles: true, cancelable: true }));
+    advance(0);
+    expectState(element, false);
+    renderRegion({}, undefined, createPortal(<span>task</span>, element));
+    dispatch(element.querySelector("span")!, new WheelEvent("wheel", { bubbles: true }));
+    expect(vi.getTimerCount()).toBe(1);
+    act(() => root?.unmount());
+    root = null;
+    expect(vi.getTimerCount()).toBe(0);
+    advance(800);
+  });
+
   it("shows on wheel, extends from the last user input, and hides after 800ms", () => {
     const element = renderRegion();
     expectState(element, false);

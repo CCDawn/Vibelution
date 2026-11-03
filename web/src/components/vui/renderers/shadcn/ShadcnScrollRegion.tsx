@@ -2,14 +2,15 @@ import {
   forwardRef,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ComponentPropsWithoutRef,
-  type KeyboardEvent,
   type PointerEvent,
 } from "react";
 
 import { cn } from "../../lib/cn";
+import { composeRefs } from "../../../../vendor/radixComposeRefs";
 import styles from "./ShadcnScrollRegion.styles";
 
 type Props = ComponentPropsWithoutRef<"div"> & { "data-vui"?: string };
@@ -20,7 +21,7 @@ function hasVerticalOverflow(element: HTMLDivElement) {
   return element.clientHeight > 0 && element.scrollHeight > element.clientHeight;
 }
 
-function isScrollKey(event: KeyboardEvent<HTMLDivElement>) {
+function isScrollKey(event: Pick<KeyboardEvent, "key" | "target" | "altKey" | "ctrlKey" | "metaKey">) {
   if (!scrollKeys.has(event.key) || event.altKey || event.ctrlKey || event.metaKey) return false;
   const target = event.target;
   if (!(target instanceof HTMLElement)) return true;
@@ -63,6 +64,10 @@ export const ShadcnScrollRegion = forwardRef<HTMLDivElement, Props>(function Sha
   const hideTimer = useRef<number | undefined>(undefined);
   const draggingRef = useRef(false);
   const dragPointerId = useRef<number | undefined>(undefined);
+  const hostRef = useRef<HTMLDivElement>(null);
+  const composedRef = useMemo(() => composeRefs(hostRef, ref), [ref]);
+  const handledInputs = useRef(new WeakSet<Event>());
+  const pendingInputs = useRef(new Map<Event, number>());
 
   const hideAfterIdle = useCallback(() => {
     window.clearTimeout(hideTimer.current);
@@ -72,11 +77,40 @@ export const ShadcnScrollRegion = forwardRef<HTMLDivElement, Props>(function Sha
     }, 800);
   }, []);
 
-  const showForUserScroll = (element: HTMLDivElement) => {
+  const showForUserScroll = useCallback((element: HTMLDivElement) => {
     if (!hasVerticalOverflow(element)) return;
     setActive(true);
     if (!draggingRef.current) hideAfterIdle();
+  }, [hideAfterIdle]);
+
+  const handledByReact = (event: Event) => {
+    handledInputs.current.add(event);
+    window.clearTimeout(pendingInputs.current.get(event));
+    pendingInputs.current.delete(event);
   };
+
+  useEffect(() => {
+    const element = hostRef.current;
+    if (!element) return;
+    const pending = pendingInputs.current;
+    // Portals bubble through their React owners rather than this physical host.
+    // Wait until propagation finishes so React consumers can still cancel input.
+    const observeInput = (event: Event) => {
+      if (handledInputs.current.has(event)
+        || event.type === "keydown" && !isScrollKey(event as KeyboardEvent)) return;
+      pending.set(event, window.setTimeout(() => {
+        pending.delete(event);
+        if (!event.defaultPrevented && !handledInputs.current.has(event)) showForUserScroll(element);
+      }, 0));
+    };
+    const options = { capture: true, passive: true };
+    for (const type of ["wheel", "touchmove", "keydown"]) element.addEventListener(type, observeInput, options);
+    return () => {
+      for (const type of ["wheel", "touchmove", "keydown"]) element.removeEventListener(type, observeInput, true);
+      for (const timer of pending.values()) window.clearTimeout(timer);
+      pending.clear();
+    };
+  }, [showForUserScroll]);
 
   useEffect(() => () => window.clearTimeout(hideTimer.current), []);
 
@@ -101,19 +135,22 @@ export const ShadcnScrollRegion = forwardRef<HTMLDivElement, Props>(function Sha
   return (
     <div
       {...props}
-      ref={ref}
+      ref={composedRef}
       className={cn(styles.root, className)}
       data-scroll-active={active ? "true" : "false"}
       data-scroll-dragging={dragging ? "true" : "false"}
       onWheel={(event) => {
+        handledByReact(event.nativeEvent);
         onWheel?.(event);
         if (!event.defaultPrevented) showForUserScroll(event.currentTarget);
       }}
       onTouchMove={(event) => {
+        handledByReact(event.nativeEvent);
         onTouchMove?.(event);
         if (!event.defaultPrevented) showForUserScroll(event.currentTarget);
       }}
       onKeyDown={(event) => {
+        handledByReact(event.nativeEvent);
         onKeyDown?.(event);
         if (!event.defaultPrevented && isScrollKey(event)) showForUserScroll(event.currentTarget);
       }}
