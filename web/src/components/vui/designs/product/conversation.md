@@ -1153,7 +1153,28 @@ live 尾部段落（流式未落定的最后一段文本）经 `renderConversati
 ### 反冗余
 - 禁止为 live tail 另开第二套行内渲染或样式 map；新增行内语法只在 `conversationInlineMarkdown` 一处扩展。
 
+## LauncherAssistantModelControl
+
+### 功能
+
+- Launcher 对话继续完整复用 `ConversationView` 的消息渲染、Codex 输入框、附件预览及发送／停止／继续按钮；嵌入页面沿用标准对话密度，外壳和左栏不重画。
+- 模型入口位于输入框内部右下角、上下文用量环左侧，复用 `ConversationTurnModelControl.styles` 的紧凑模型按钮及上方悬浮面板。按钮显示可读模型名，长名截断，悬浮面板保留完整名称；不再使用框外通栏选择框。
+- 面板内切换模型仍走 Launcher 原生 `setModel`，模型设置仍走原有 Launcher 设置入口。忙碌时锁定模型选择，但保留设置查看入口；配置请求中锁定整个入口。不可用模型禁选，当前模型不在目录中仍保留当前值。
+- 左下角直接复用 `ChatComposerPlusMenu`。Launcher 只接原生附件回调，显式关闭无原生接口的 references 和 capabilities；不传假保存回调、不调用平台普通 Session API。普通会话默认菜单内容与能力回调保持不变。
+- 待回答、原生审批、附件失败重试和草稿继续使用原有 Launcher 接线；不因视觉对齐改变发送或授权语义。
+- 原生 `runtimeApi` 宿主不请求普通 Session 的开场示例或输入建议接口；继续使用本地默认文案，普通会话的默认建议读取不变。
+
+### 适用范围
+
+Launcher 嵌入对话与浮窗的原生模型入口。普通平台会话继续使用 `ConversationTurnModelControl` 的 Agent 参数编辑契约。
+
+### 使用方式
+
+Launcher route 将此适配器传入 `ConversationView.composerModelControl`，注入真实模型目录、忙碌状态、原生切换与设置回调。样式模块直接重导出标准模型控件的 recipe，不另建视觉值。
+
 ## ConversationTurnModelControl
+
+普通会话默认使用此控件；`ConversationView.composerModelControl` 未提供时渲染路径不变。原生宿主可通过该可选插槽在相同工具栏位置接入其模型操作，不改用普通会话的参数 API。
 
 只读会话不显示此模型参数控件，也不读取当前模型或预算参数；必须先取得当前会话的完整、可写详情后才启用这些请求。所属助手已归档时，输入区说明“所属助手已归档，此会话仅供查看”。打开历史不解除归档、不修改会话记录，普通可写会话保持原有操作。
 

@@ -133,6 +133,8 @@ export type UseConversationComposerInput = {
   composerReferenceOptions: ReferenceTypeaheadOption[];
   composerAttachmentInputDisabled?: boolean;
   composerLeadingControl?: ReactNode;
+  composerModelControl?: ReactNode;
+  composerExamplesEnabled?: boolean;
   permissionControl?: ConversationPermissionControl;
   llmControl?: ConversationLlmControl;
   turnModelControl?: ConversationTurnModelControlModel;
@@ -220,6 +222,8 @@ export function useConversationComposer({
   composerReferenceOptions,
   composerAttachmentInputDisabled,
   composerLeadingControl,
+  composerModelControl,
+  composerExamplesEnabled = true,
   permissionControl,
   llmControl,
   turnModelControl,
@@ -288,7 +292,7 @@ export function useConversationComposer({
       language: lang,
       suggestionEnabled: !transcriptPending && promptSuggestionEnabled && !composerDisabled && !editingMessageId,
       // An unhydrated transcript is unknown, rather than an empty session.
-      starterEnabled: !transcriptPending && !composerDisabled && !editingMessageId,
+      starterEnabled: composerExamplesEnabled && !transcriptPending && !composerDisabled && !editingMessageId,
       busy: resolvedActionMode === "stop" || composerPending,
       draft: composerValue,
       hasConversation: messages.length > 0,
@@ -1465,7 +1469,7 @@ export function useConversationComposer({
               ) : null}
             </div>
             <div className={styles.composerToolbarEnd}>
-              {turnModelControl ? <ConversationTurnModelControl {...turnModelControl} /> : null}
+              {composerModelControl ?? (turnModelControl ? <ConversationTurnModelControl {...turnModelControl} /> : null)}
               {llmControl ? <ConversationInferenceControl {...llmControl} /> : null}
               {composerContextRing ? (
                 <ComposerContextRing

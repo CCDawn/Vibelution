@@ -174,6 +174,9 @@ export type ConversationViewProps = {
   composerAttachmentInputDisabled?: boolean;
   /** Route-owned leading composer control, such as the formal Chat plus menu. */
   composerLeadingControl?: ReactNode;
+  /** Host-owned model control in the same toolbar position as the Agent model.
+   * Omitted hosts retain the native turnModelControl unchanged. */
+  composerModelControl?: ReactNode;
   /** Route-owned panel mounted directly above the composer surface (e.g. the
    * embedded assistant page's collapsible dispatch receipts). */
   composerPrecedingContent?: ReactNode;

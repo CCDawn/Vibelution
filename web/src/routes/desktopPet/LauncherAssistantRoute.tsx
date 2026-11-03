@@ -1,6 +1,6 @@
 import "../../design/route-css/desktop-pet.tailwind.css";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, MessageCircle, RefreshCw, SlidersHorizontal, X } from "lucide-react";
+import { MessageCircle, RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import {
   getLauncherAssistantDetail, getLauncherAssistantDispatches, getLauncherAssistantStatus, setLauncherAssistantModel,
@@ -19,7 +19,9 @@ import { queryKeys } from "../../api/queryKeys";
 import type { SessionToolApprovalRequest } from "../../api/types";
 import { LazyConversationView } from "../../components/conversation/LazyConversationView";
 import { LauncherAssistantWelcome } from "./LauncherAssistantWelcome";
-import { VButton, VDenseOpsPage, VNativeButton, VNativeSelect, VStateSurface } from "../../components/vui";
+import { VButton, VDenseOpsPage, VNativeButton, VStateSurface } from "../../components/vui";
+import { ChatComposerPlusMenu } from "../chat/ChatComposerPlusMenu";
+import { LauncherAssistantModelControl } from "./LauncherAssistantModelControl";
 import { useShellI18n } from "../../i18n/useShellI18n";
 import { hasExecutionOwnership, resolveSessionActivity, sessionActivityStatusLabel } from "../sessionActivityState";
 import { continuationSnapshotKey, resolveConversationContinuation } from "../chat/conversationContinuationModel";
@@ -73,7 +75,6 @@ const COPY = {
     statusDelayed: "状态刷新延迟，会话内容可能未更新",
     pendingQuestion: "待你回答",
     answerBelow: "去回答", answerHint: "请在下方输入回答，再点击发送。",
-    modelSettings: "模型设置", currentModel: "当前模型",
     editAsNew: "编辑为新消息",
   },
   en: {
@@ -90,7 +91,6 @@ const COPY = {
     statusDelayed: "Status refresh is delayed; conversation content may be stale",
     pendingQuestion: "Waiting for your answer",
     answerBelow: "Answer below", answerHint: "Type your answer below, then send it.",
-    modelSettings: "Model settings", currentModel: "Current model",
     editAsNew: "Edit as new message",
   },
 } as const;
@@ -1177,21 +1177,16 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       onEditUserMessage={editMessageToComposer}
       editUserMessageLabel={copy.editAsNew}
       editUserMessageDisabled={sendPending || sendUnconfirmed || controlPending || busy || stopping}
-      composerPrecedingContent={<>{status.data ? <div className={petStyles.modelRow}
-        data-launcher-assistant-model-row aria-label={copy.currentModel}>
-        <Bot size={12} aria-hidden="true" />
-        {status.data.settings?.modelChoices?.length ? <VNativeSelect aria-label={lang === "zh" ? "助理模型" : "Assistant model"}
-          value={status.data.settings.modelId} disabled={modelConfigPending || busy || stopping || sendPending || sendUnconfirmed || controlPending}
-          onChange={event => void changeModel(event.currentTarget.value)} className={petStyles.modelSelect}>
-          {!status.data.settings.modelChoices.some(choice => choice.modelId === status.data?.settings?.modelId)
-            ? <option value={status.data.settings.modelId}>{modelDisplay}</option> : null}
-          {status.data.settings.modelChoices.map(choice => <option key={choice.modelId} value={choice.modelId}
-            disabled={choice.providerHealthy === false || choice.missingApiKey === true}>{choice.label || choice.modelId}</option>)}
-        </VNativeSelect> : <span className={petStyles.modelName}>{modelDisplay}</span>}
-        {embedded ? <VButton density="compact" variant="ghost" className={petStyles.modelSettingsButton} isPending={modelConfigPending} isDisabled={modelConfigPending}
-          icon={<SlidersHorizontal size={12} aria-hidden="true" />}
-          onClick={() => void openModelConnection()}>{copy.modelSettings}</VButton> : null}
-      </div> : null}
+      composerLeadingControl={<ChatComposerPlusMenu lang={lang} showCapabilities={false} showReferences={false}
+        sessionReferences={[]} onAddAttachments={addAttachments}
+        attachmentDisabled={status.data?.attachmentVersion !== 1 || sendPending || sendUnconfirmed || controlPending} />}
+      composerModelControl={status.data ? <LauncherAssistantModelControl key={sessionId} lang={lang}
+        modelId={status.data.settings?.modelId || ""} modelDisplay={modelDisplay}
+        choices={status.data.settings?.modelChoices} pending={modelConfigPending}
+        selectionDisabled={busy || stopping || sendPending || sendUnconfirmed || controlPending}
+        onModelChange={modelId => void changeModel(modelId)}
+        onOpenSettings={embedded ? () => void openModelConnection() : undefined} /> : undefined}
+      composerPrecedingContent={<>
       {pendingQuestion ? <VStateSurface density="compact" tone="info" title={copy.pendingQuestion}
         data-launcher-assistant-pending-question={pendingQuestion.id}
         actions={<VButton isDisabled={sendPending || sendUnconfirmed || controlPending} onClick={event => {

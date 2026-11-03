@@ -272,6 +272,7 @@ export const ConversationView = React.memo(function ConversationView({
   composerReferenceOptions = [],
   composerAttachmentInputDisabled,
   composerLeadingControl,
+  composerModelControl,
   permissionControl,
   toolApproval = null,
   llmControl,
@@ -964,7 +965,7 @@ export const ConversationView = React.memo(function ConversationView({
     composerValue,
     composerPlaceholder,
     composerDisabled,
-    promptSuggestionEnabled,
+    promptSuggestionEnabled: promptSuggestionEnabled && !runtimeApi,
     composerFocusSignal,
     onComposerFocusRequestSettled,
     composerActionDisabled,
@@ -982,6 +983,10 @@ export const ConversationView = React.memo(function ConversationView({
     composerReferenceOptions,
     composerAttachmentInputDisabled,
     composerLeadingControl,
+    composerModelControl,
+    // Native hosts supply scoped reads; they have no ordinary Session prompt
+    // endpoint. Keep examples local until the runtime API supports that read.
+    composerExamplesEnabled: !runtimeApi,
     permissionControl,
     llmControl,
     turnModelControl,
