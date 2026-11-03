@@ -13,7 +13,8 @@ import {
   type ElectronWindowOpenDecision,
   type ElectronWindowOpenHandler
 } from "../src/windows/electronWindowProvider.js";
-import { isWorkbenchErrorPageUrl } from "../src/windows/workbenchErrorPage.js";
+import { isWorkbenchErrorPageUrl, isWorkbenchWaitingPageUrl } from "../src/windows/workbenchErrorPage.js";
+import type { WorkbenchWaitingRecoveryResult } from "../src/windows/workbenchWaitingRecovery.js";
 import { closedWindowState } from "../src/windows/windowProviderTypes.js";
 import type { DesktopPaths } from "../src/paths.js";
 
@@ -22,6 +23,27 @@ vi.mock("electron", () => ({
     handle: vi.fn()
   }
 }));
+
+/**
+ * Controllable stand-in for waitForWorkbenchHttp: every call stays pending
+ * until the test resolves or rejects it, and an abort from the provider
+ * rejects it the way the real abortable wait does. No test ever reaches the
+ * network through the waiting-recovery run.
+ */
+function deferredWaitForHttp() {
+  type Deferred = { url: string; signal: AbortSignal | undefined; resolve: () => void; reject: (error: unknown) => void };
+  const calls: Deferred[] = [];
+  const fn = vi.fn((input: { url: string; signal?: AbortSignal }) =>
+    new Promise<void>((resolve, reject) => {
+      input.signal?.addEventListener("abort", () => reject(new Error(`aborted: ${input.url}`)), { once: true });
+      calls.push({ url: input.url, signal: input.signal, resolve: () => resolve(), reject: (error) => reject(error) });
+    }));
+  return { fn, calls };
+}
+
+function decodeDataUrl(url: string): string {
+  return decodeURIComponent(url.slice(url.indexOf(",") + 1));
+}
 
 class FakeWindow implements ElectronWindowLike {
   readonly id: number;
@@ -196,11 +218,13 @@ describe("main Workbench hidden presentation", () => {
   function harness(window = new FakeWindow(42, "", 4242)) {
     const create = vi.fn(() => window);
     const report = vi.fn();
+    const wait = deferredWaitForHttp();
     const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
       createWorkbenchWindow: create,
-      reportState: report
+      reportState: report,
+      waitForWorkbenchHttp: wait.fn
     });
-    return { provider, window, create, report };
+    return { provider, window, create, report, wait };
   }
 
   it("loads and reports a ready hidden window without restore/show/focus, then presents a normal open", async () => {
@@ -259,16 +283,18 @@ describe("main Workbench hidden presentation", () => {
     expect(state.focused).toBe(true);
   });
 
-  it("keeps a failed hidden navigation and its error page unpresented, with normal retry still presenting", async () => {
+  it("keeps a failed hidden navigation and its waiting page unpresented, with normal retry still presenting", async () => {
     const h = harness(new FakeWindow(42, "", 4242, true, new Error("ERR_CONNECTION_REFUSED")));
     await expect(h.provider.openOrFocusWorkbench("http://127.0.0.1:8002/", { present: false })).rejects.toThrow("ERR_CONNECTION_REFUSED");
     expect(h.window.loadedUrls).toHaveLength(2);
-    expect(isWorkbenchErrorPageUrl(h.window.loadedUrls[1])).toBe(true);
+    expect(isWorkbenchWaitingPageUrl(h.window.loadedUrls[1])).toBe(true);
     expect(h.window.showCount).toBe(0);
     expect(h.window.focusCount).toBe(0);
     expect(h.window.destroyCount).toBe(0);
     expect(h.report).toHaveBeenCalledWith(expect.objectContaining({ open: true, focused: false }));
     expect(h.provider.sendToWorkbench("not-ready", {})).toBe(false);
+    // The background recovery polls the real origin the open was aiming at.
+    expect(h.wait.calls.map((call) => call.url)).toEqual(["http://127.0.0.1:8002/"]);
     h.window.navigationError = null;
     await h.provider.openOrFocusWorkbench();
     expect(h.window.showCount).toBe(1);
@@ -276,16 +302,17 @@ describe("main Workbench hidden presentation", () => {
     expect(h.window.loadedUrls[2]).toBe("http://127.0.0.1:8002/");
   });
 
-  it("allows an explicitly hidden error status without changing the default error presentation", async () => {
+  it("allows an explicitly hidden waiting status without changing the default presentation", async () => {
     const h = harness();
     const input = { origin: "http://127.0.0.1:8000", detail: "backend is not ready" };
     const state = await h.provider.presentWorkbenchErrorStatus({ ...input, present: false });
-    expect(isWorkbenchErrorPageUrl(h.window.loadedUrls[0])).toBe(true);
+    expect(isWorkbenchWaitingPageUrl(h.window.loadedUrls[0])).toBe(true);
     expect(state).toMatchObject({ open: true, focused: false });
     expect(h.report).toHaveBeenCalledWith(state);
     expect(h.window.showCount).toBe(0);
     expect(h.window.focusCount).toBe(0);
     await h.provider.presentWorkbenchErrorStatus(input);
+    expect(isWorkbenchWaitingPageUrl(h.window.loadedUrls[1])).toBe(true);
     expect(h.window.showCount).toBe(1);
     expect(h.window.focusCount).toBe(1);
   });
@@ -1175,11 +1202,13 @@ describe("Electron window provider state", () => {
     expect(workbenchWindow.loadedUrls).toEqual(["http://127.0.0.1:8002/teams?questionId=Q-1"]);
   });
 
-  it("keeps the window alive with a bilingual error status when navigation fails, and retries in place", async () => {
+  it("keeps the window alive through the waiting status when navigation fails, falls back to the error page, and retries in place", async () => {
     const failedWindow = new FakeWindow(42, "", 0, true, new Error("ERR_CONNECTION_REFUSED"));
+    const wait = deferredWaitForHttp();
     const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
       createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
-      createWorkbenchWindow: () => failedWindow
+      createWorkbenchWindow: () => failedWindow,
+      waitForWorkbenchHttp: wait.fn
     });
 
     // The original failure still surfaces to the caller (the desktop action
@@ -1187,19 +1216,34 @@ describe("Electron window provider state", () => {
     await expect(provider.openOrFocusWorkbench("http://127.0.0.1:8002/")).rejects.toThrow("ERR_CONNECTION_REFUSED");
 
     // The window is never destroyed out from under the user: it presents the
-    // bilingual error document instead of flashing away.
+    // bilingual waiting document instead of flashing away, and a bounded
+    // recovery poll targets the real origin in the background.
     expect(failedWindow.destroyCount).toBe(0);
     expect(failedWindow.showCount).toBe(1);
     expect(failedWindow.loadedUrls).toHaveLength(2);
-    const errorUrl = failedWindow.loadedUrls[1];
+    const waitingUrl = failedWindow.loadedUrls[1];
+    expect(isWorkbenchWaitingPageUrl(waitingUrl)).toBe(true);
+    const waitingHtml = decodeDataUrl(waitingUrl);
+    expect(waitingHtml).toContain("正在等待工作台后端启动");
+    expect(waitingHtml).toContain("Waiting for the Workbench backend");
+    expect(waitingHtml).toContain("127.0.0.1:8002");
+    expect(provider.snapshot().workbench).toMatchObject({ open: true });
+    expect(wait.calls.map((call) => call.url)).toEqual(["http://127.0.0.1:8002/"]);
+
+    // The waiting window is not a ready workbench page: sends stay disabled.
+    expect(provider.sendToWorkbench("channel", {})).toBe(false);
+
+    // The budget runs out: the window swaps to the terminal bilingual error
+    // page that carries the original cause, still without being destroyed.
+    wait.calls[0].reject(new Error("workbench HTTP was not reachable at http://127.0.0.1:8002/"));
+    await vi.waitFor(() => expect(failedWindow.loadedUrls).toHaveLength(3));
+    const errorUrl = failedWindow.loadedUrls[2];
     expect(isWorkbenchErrorPageUrl(errorUrl)).toBe(true);
-    const errorHtml = decodeURIComponent(errorUrl.slice(errorUrl.indexOf(",") + 1));
+    const errorHtml = decodeDataUrl(errorUrl);
     expect(errorHtml).toContain("工作台暂时无法连接");
     expect(errorHtml).toContain("The Workbench backend is not ready");
     expect(errorHtml).toContain("ERR_CONNECTION_REFUSED");
-    expect(provider.snapshot().workbench).toMatchObject({ open: true });
-
-    // The error window is not a ready workbench page: sends stay disabled.
+    expect(failedWindow.destroyCount).toBe(0);
     expect(provider.sendToWorkbench("channel", {})).toBe(false);
 
     // The next open action reuses the same window and reloads the real origin.
@@ -1208,15 +1252,17 @@ describe("Electron window provider state", () => {
       open: true,
       url: "http://127.0.0.1:8002/"
     });
-    expect(failedWindow.loadedUrls).toHaveLength(3);
-    expect(failedWindow.loadedUrls[2]).toBe("http://127.0.0.1:8002/");
+    expect(failedWindow.loadedUrls).toHaveLength(4);
+    expect(failedWindow.loadedUrls[3]).toBe("http://127.0.0.1:8002/");
   });
 
-  it("presents the backend-unavailable status on demand without a navigation failure", async () => {
+  it("presents the backend-unavailable waiting status on demand without a navigation failure", async () => {
     const workbenchWindow = new FakeWindow(42, "", 0);
+    const wait = deferredWaitForHttp();
     const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
       createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
-      createWorkbenchWindow: () => workbenchWindow
+      createWorkbenchWindow: () => workbenchWindow,
+      waitForWorkbenchHttp: wait.fn
     });
 
     const state = await provider.presentWorkbenchErrorStatus({
@@ -1226,9 +1272,10 @@ describe("Electron window provider state", () => {
 
     expect(workbenchWindow.destroyCount).toBe(0);
     expect(workbenchWindow.showCount).toBe(1);
-    expect(isWorkbenchErrorPageUrl(workbenchWindow.loadedUrls[0])).toBe(true);
+    expect(isWorkbenchWaitingPageUrl(workbenchWindow.loadedUrls[0])).toBe(true);
     expect(state).toMatchObject({ role: "workbench", open: true });
     expect(provider.sendToWorkbench("channel", {})).toBe(false);
+    expect(wait.calls.map((call) => call.url)).toEqual(["http://127.0.0.1:8000"]);
   });
 
   it("cancels same-origin in-page workbench navigations after the first load", async () => {
@@ -1927,6 +1974,185 @@ describe("Electron window provider state", () => {
     workbenchWindow.emit("focus");
 
     expect(onWorkbenchFocusAttentionClear).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("workbench waiting status with auto recovery", () => {
+  const origin = "http://127.0.0.1:8000";
+
+  function harness(window = new FakeWindow(42, "", 4242)) {
+    const wait = deferredWaitForHttp();
+    const outcomes: WorkbenchWaitingRecoveryResult[] = [];
+    const create = vi.fn(() => window);
+    const report = vi.fn();
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", origin, {
+      createWorkbenchWindow: create,
+      reportState: report,
+      waitForWorkbenchHttp: wait.fn,
+      workbenchWaitingRecoveryTimeoutMs: 60_000,
+      workbenchWaitingRecoveryPollIntervalMs: 1,
+      onWorkbenchWaitingRecovery: (result) => outcomes.push(result)
+    });
+    const outcomeNames = () => outcomes.map((result) => result.outcome);
+    return { provider, window, create, report, wait, outcomes, outcomeNames };
+  }
+
+  it("loads the waiting page after a gate-style failure, starts one bounded poll, and stays out of the ready state", async () => {
+    const h = harness();
+
+    await h.provider.presentWorkbenchErrorStatus({ origin, detail: "workbench backend start did not settle within 30000ms" });
+
+    expect(isWorkbenchWaitingPageUrl(h.window.loadedUrls[0])).toBe(true);
+    expect(isWorkbenchErrorPageUrl(h.window.loadedUrls[0])).toBe(false);
+    expect(h.wait.fn).toHaveBeenCalledTimes(1);
+    expect(h.wait.fn).toHaveBeenCalledWith(expect.objectContaining({
+      url: origin,
+      timeoutMs: 60_000,
+      pollIntervalMs: 1
+    }));
+    // Not a ready workbench page: sends, attention, and focus tracking stay off.
+    expect(h.provider.sendToWorkbench("channel", {})).toBe(false);
+    expect(h.provider.isWorkbenchFocused()).toBe(false);
+    h.window.focus();
+    expect(h.provider.isWorkbenchFocused()).toBe(false);
+    expect(h.provider.snapshot().workbench).toMatchObject({ open: true });
+    expect(h.provider.sendToWorkbench("channel", {})).toBe(false);
+  });
+
+  it("reloads the real origin exactly once when the poll reports the backend healthy", async () => {
+    const h = harness();
+    await h.provider.presentWorkbenchErrorStatus({ origin, detail: "backend down" });
+    expect(h.window.loadedUrls).toHaveLength(1);
+
+    h.wait.calls[0].resolve();
+    await vi.waitFor(() => expect(h.outcomeNames()).toContain("recovered"));
+
+    expect(h.window.loadedUrls).toEqual([h.window.loadedUrls[0], `${origin}/`]);
+    expect(h.window.loadedUrls.filter((url) => url === `${origin}/`)).toHaveLength(1);
+    // Back in the ready state: the real document is on screen again.
+    expect(h.provider.sendToWorkbench("channel", {})).toBe(true);
+    expect(h.window.showCount).toBeGreaterThanOrEqual(1);
+    // One run, one poll, one reload: nothing is re-polled or re-reloaded.
+    expect(h.wait.fn).toHaveBeenCalledTimes(1);
+    expect(h.outcomes).toHaveLength(1);
+  });
+
+  it("keeps a hidden presentation hidden through the recovery reload", async () => {
+    const h = harness();
+    await h.provider.presentWorkbenchErrorStatus({ origin, detail: "backend down", present: false });
+    expect(h.window.showCount).toBe(0);
+
+    h.wait.calls[0].resolve();
+    await vi.waitFor(() => expect(h.outcomeNames()).toContain("recovered"));
+
+    expect(h.window.loadedUrls[1]).toBe(`${origin}/`);
+    expect(h.window.showCount).toBe(0);
+    expect(h.window.focusCount).toBe(0);
+  });
+
+  it("switches to the terminal error page carrying the original cause when the poll times out", async () => {
+    const h = harness();
+    await h.provider.presentWorkbenchErrorStatus({ origin, detail: "workbench backend readiness exceeded 30000ms" });
+
+    h.wait.calls[0].reject(new Error("workbench HTTP was not reachable at http://127.0.0.1:8000"));
+    await vi.waitFor(() => expect(h.outcomeNames()).toContain("timed-out"));
+
+    expect(h.window.loadedUrls).toHaveLength(2);
+    expect(isWorkbenchErrorPageUrl(h.window.loadedUrls[1])).toBe(true);
+    const html = decodeDataUrl(h.window.loadedUrls[1]);
+    expect(html).toContain("工作台暂时无法连接");
+    expect(html).toContain("workbench backend readiness exceeded 30000ms");
+    expect(h.provider.sendToWorkbench("channel", {})).toBe(false);
+    expect(h.window.destroyCount).toBe(0);
+    expect(h.wait.fn).toHaveBeenCalledTimes(1);
+    // The mirror sees the terminal page too.
+    expect(h.report).toHaveBeenLastCalledWith(expect.objectContaining({ open: true, url: h.window.loadedUrls[1] }));
+  });
+
+  it("never stacks a second poll: a newer status presentation supersedes the running one", async () => {
+    const h = harness();
+    await h.provider.presentWorkbenchErrorStatus({ origin, detail: "first" });
+    await h.provider.presentWorkbenchErrorStatus({ origin, detail: "second" });
+
+    expect(h.wait.fn).toHaveBeenCalledTimes(2);
+    expect(h.wait.calls[0].signal?.aborted).toBe(true);
+    expect(h.wait.calls[1].signal?.aborted).toBe(false);
+    await vi.waitFor(() => expect(h.outcomeNames()).toEqual(["superseded"]));
+    // The superseded run never touched the window; only the live one may.
+    expect(h.window.loadedUrls.every((url) => isWorkbenchWaitingPageUrl(url))).toBe(true);
+
+    h.wait.calls[1].resolve();
+    await vi.waitFor(() => expect(h.outcomeNames()).toEqual(["superseded", "recovered"]));
+    expect(h.window.loadedUrls.filter((url) => url === `${origin}/`)).toHaveLength(1);
+  });
+
+  it("steps aside when the user retried by hand before the poll came back", async () => {
+    const h = harness();
+    await h.provider.presentWorkbenchErrorStatus({ origin, detail: "backend down" });
+
+    await h.provider.openOrFocusWorkbench(`${origin}/`);
+    expect(h.window.loadedUrls[1]).toBe(`${origin}/`);
+    h.wait.calls[0].resolve();
+    await vi.waitFor(() => expect(h.outcomeNames()).toEqual(["superseded"]));
+
+    // No second reload on top of the live document.
+    expect(h.window.loadedUrls).toHaveLength(2);
+    expect(h.provider.sendToWorkbench("channel", {})).toBe(true);
+  });
+
+  it("cancels the poll when the window closes instead of reloading into a closed window", async () => {
+    const h = harness();
+    await h.provider.presentWorkbenchErrorStatus({ origin, detail: "backend down" });
+
+    h.window.close();
+    await vi.waitFor(() => expect(h.outcomeNames()).toEqual(["superseded"]));
+
+    expect(h.wait.calls[0].signal?.aborted).toBe(true);
+    expect(h.window.loadedUrls).toHaveLength(1);
+    expect(h.create).toHaveBeenCalledTimes(1);
+    expect(h.provider.snapshot().workbench).toMatchObject({ open: false });
+  });
+
+  it("falls back to the terminal page when the recovery reload itself fails, without starting another poll", async () => {
+    const h = harness(new FakeWindow(42, "", 4242, true, new Error("ERR_CONNECTION_REFUSED")));
+    await h.provider.presentWorkbenchErrorStatus({ origin, detail: "backend down" });
+    expect(isWorkbenchWaitingPageUrl(h.window.loadedUrls[0])).toBe(true);
+
+    h.wait.calls[0].resolve();
+    await vi.waitFor(() => expect(h.outcomeNames()).toEqual(["failed"]));
+
+    // waiting → attempted real origin → terminal error page; never a second waiting page.
+    expect(h.window.loadedUrls).toHaveLength(3);
+    expect(h.window.loadedUrls[1]).toBe(`${origin}/`);
+    expect(isWorkbenchErrorPageUrl(h.window.loadedUrls[2])).toBe(true);
+    expect(decodeDataUrl(h.window.loadedUrls[2])).toContain("ERR_CONNECTION_REFUSED");
+    expect(h.wait.fn).toHaveBeenCalledTimes(1);
+    expect(h.provider.sendToWorkbench("channel", {})).toBe(false);
+    expect(h.window.destroyCount).toBe(0);
+  });
+
+  it("does not load anything when the poll settles while a close transaction blocks opens", async () => {
+    let blocked = false;
+    const window = new FakeWindow(43, "", 4343);
+    const wait = deferredWaitForHttp();
+    const outcomes: WorkbenchWaitingRecoveryResult[] = [];
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", origin, {
+      createWorkbenchWindow: () => window,
+      waitForWorkbenchHttp: wait.fn,
+      shouldBlockWorkbenchOpen: () => blocked,
+      onWorkbenchWaitingRecovery: (result) => outcomes.push(result)
+    });
+    await provider.presentWorkbenchErrorStatus({ origin, detail: "backend down" });
+    blocked = true;
+
+    wait.calls[0].resolve();
+    await vi.waitFor(() => expect(outcomes.map((result) => result.outcome)).toEqual(["failed"]));
+
+    // The reload was refused by the open gate and the terminal swap honours
+    // the same gate: the window keeps its waiting document untouched.
+    expect(window.loadedUrls).toHaveLength(1);
+    expect(isWorkbenchWaitingPageUrl(window.loadedUrls[0])).toBe(true);
+    expect(window.destroyCount).toBe(0);
   });
 });
 
