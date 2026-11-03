@@ -434,7 +434,7 @@ describe("hidden presentation forwarding", () => {
       "...(hiddenPresentation ? { present: false } : {})",
       "...(payload.present === false ? { present: false } : {})",
       "...(presentation.present === false ? { present: false } : {})",
-      "? await provider.openOrFocusWorkbench(workbenchUrl, { present: false })",
+      '? await provider.openOrFocusWorkbench(workbenchUrl, { present: false, ...(payload.workbenchPath === "/config" ? { loadTarget: true } : {}) })',
     ];
     const gated = gates.reduce((total, gate) => total + source.split(gate).length - 1, 0);
     expect(occurrences).toBeGreaterThan(0);
