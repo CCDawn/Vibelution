@@ -35,10 +35,6 @@ const styles = {
   unifiedChatBody: "relative",
   approvalDock: "mb-3 min-w-0 shrink-0",
   computerNotice: "shrink-0 px-4 py-2 text-vui-xs text-[var(--fg-secondary)]",
-  modelRow: "flex min-w-0 shrink-0 items-center gap-2 px-4 py-1 text-vui-xs text-[var(--fg-secondary)]",
-  modelSelect: "min-w-0 flex-1",
-  modelName: "truncate",
-  modelSettingsButton: "shrink-0",
   receiptPanel: "max-h-28 shrink-0 overflow-auto border-t border-[var(--vui-border-subtle)] px-3 py-2 text-vui-micro-11",
 } as const;
 

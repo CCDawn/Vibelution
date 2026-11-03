@@ -57,18 +57,7 @@ export type ChatComposerPlusMenuLabels = {
   composerBudgetHint: string;
 } & ChatComposerBudgetPanelLabels;
 
-export type ChatComposerPlusMenuProps = {
-  lang: "zh" | "en";
-  labels?: ChatComposerPlusMenuLabels;
-  showAddReference?: boolean;
-  showCapabilities?: boolean;
-  attachmentDisabled: boolean;
-  onAddAttachments?: (files: FileList | File[]) => void;
-  sessionReferences: ChatComposerSessionReferenceOption[];
-  onAddSessionReference?: (reference: SessionReferenceAttachment) => void;
-  knowledgeReferenceOptions?: ChatComposerSessionReferenceOption[];
-  knowledgeReferenceState?: ChatComposerKnowledgeReferenceState;
-  onAddKnowledgeReference?: (reference: SessionReferenceAttachment) => void;
+type ChatComposerCapabilities = {
   mentalModelEnabled: boolean;
   runtimeStatusEnabled: boolean;
   promptSuggestionEnabled: boolean;
@@ -76,6 +65,24 @@ export type ChatComposerPlusMenuProps = {
   onMentalModelEnabledChange: (enabled: boolean) => void;
   onRuntimeStatusEnabledChange: (enabled: boolean) => void;
   onPromptSuggestionEnabledChange: (enabled: boolean) => void;
+};
+
+type ChatComposerCapabilityProps = ({ showCapabilities?: true } & ChatComposerCapabilities)
+  | ({ showCapabilities: false } & Partial<ChatComposerCapabilities>);
+
+export type ChatComposerPlusMenuProps = ChatComposerCapabilityProps & {
+  lang: "zh" | "en";
+  labels?: ChatComposerPlusMenuLabels;
+  showAddReference?: boolean;
+  /** Native hosts can reuse the attachment menu without unsupported references. */
+  showReferences?: boolean;
+  attachmentDisabled: boolean;
+  onAddAttachments?: (files: FileList | File[]) => void;
+  sessionReferences: ChatComposerSessionReferenceOption[];
+  onAddSessionReference?: (reference: SessionReferenceAttachment) => void;
+  knowledgeReferenceOptions?: ChatComposerSessionReferenceOption[];
+  knowledgeReferenceState?: ChatComposerKnowledgeReferenceState;
+  onAddKnowledgeReference?: (reference: SessionReferenceAttachment) => void;
   /** Per-session budget/quota control; omitted surfaces get no menu entry. */
   budget?: ChatComposerBudgetControl | null;
   directSession?: {
@@ -114,7 +121,7 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
     lang,
     labels,
     showAddReference = true,
-    showCapabilities = true,
+    showReferences = true,
     attachmentDisabled,
     onAddAttachments,
     sessionReferences: defaultSessionReferences,
@@ -122,13 +129,6 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
     knowledgeReferenceOptions,
     knowledgeReferenceState,
     onAddKnowledgeReference,
-    mentalModelEnabled,
-    runtimeStatusEnabled,
-    promptSuggestionEnabled,
-    capabilityDisabled,
-    onMentalModelEnabledChange,
-    onRuntimeStatusEnabledChange,
-    onPromptSuggestionEnabledChange,
     budget,
     directSession,
     group,
@@ -414,7 +414,7 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
                 disabledReason: attachmentUnavailableReason,
                 onSelect: () => attachmentInputRef.current?.click(),
               })}
-              {renderAction({
+              {showReferences ? renderAction({
                 id: "reference-session",
                 label: lang === "zh" ? "引用会话" : "Reference session",
                 icon: <MessageSquare size={16} />,
@@ -424,8 +424,8 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
                   setReferenceQuery("");
                   setReferenceDialogOpen(true);
                 },
-              })}
-              {renderAction({
+              }) : null}
+              {showReferences ? renderAction({
                 id: "reference-knowledge",
                 label: t("composerReferenceKnowledgeFiles"),
                 icon: <BookOpen size={16} />,
@@ -436,37 +436,37 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
                   setKnowledgeQuery("");
                   setKnowledgeDialogOpen(true);
                 },
-              })}
+              }) : null}
             </>
           )) : null}
-          {showCapabilities ? renderSection(capabilitiesSection, (
+          {props.showCapabilities !== false ? renderSection(capabilitiesSection, (
             <>
               {renderToggle({
                 id: "mental-model",
                 label: lang === "zh" ? "心智模型" : "Mental model",
                 hint: lang === "zh" ? "下轮生效" : "Applies next turn",
                 icon: <BrainCircuit size={16} />,
-                checked: mentalModelEnabled,
-                disabled: capabilityDisabled,
-                onChange: onMentalModelEnabledChange,
+                checked: props.mentalModelEnabled,
+                disabled: props.capabilityDisabled,
+                onChange: props.onMentalModelEnabledChange,
               })}
               {renderToggle({
                 id: "runtime-status",
                 label: lang === "zh" ? "运行状态注入" : "Runtime status injection",
                 hint: lang === "zh" ? "把预算与进度注入上下文" : "Inject budget and progress into context",
                 icon: <Activity size={16} />,
-                checked: runtimeStatusEnabled,
-                disabled: capabilityDisabled,
-                onChange: onRuntimeStatusEnabledChange,
+                checked: props.runtimeStatusEnabled,
+                disabled: props.capabilityDisabled,
+                onChange: props.onRuntimeStatusEnabledChange,
               })}
               {renderToggle({
                 id: "prompt-suggestion",
                 label: lang === "zh" ? "输入建议" : "Prompt suggestions",
                 hint: lang === "zh" ? "回答后提示下一句，Tab 补全" : "Suggests the next prompt after a reply, Tab to complete",
                 icon: <Sparkles size={16} />,
-                checked: promptSuggestionEnabled,
-                disabled: capabilityDisabled,
-                onChange: onPromptSuggestionEnabledChange,
+                checked: props.promptSuggestionEnabled,
+                disabled: props.capabilityDisabled,
+                onChange: props.onPromptSuggestionEnabledChange,
               })}
               {budget ? (
                 <ChatComposerBudgetPopover
@@ -488,7 +488,7 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
                       contentLayout="plain"
                       className={styles.menuItem}
                       variant="ghost"
-                      isDisabled={capabilityDisabled}
+                      isDisabled={props.capabilityDisabled}
                     >
                       <ItemIcon><Gauge size={16} /></ItemIcon>
                       <span className={styles.itemLabel}>{t("composerBudgetEntry")}</span>

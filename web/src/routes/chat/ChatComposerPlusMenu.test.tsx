@@ -93,6 +93,25 @@ describe("lazy knowledge picker", () => {
     container?.remove();
     root = null;
   });
+  it("reuses the attachment menu in native hosts without phantom capabilities or references", async () => {
+    container = document.createElement("div"); document.body.append(container);
+    root = createRoot(container);
+    const onAddAttachments = vi.fn();
+    await act(async () => root!.render(<ChatComposerPlusMenu lang="zh" showCapabilities={false}
+      showReferences={false} attachmentDisabled={false} sessionReferences={[]} onAddAttachments={onAddAttachments} />));
+    const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="更多操作"]')!;
+    await act(async () => trigger.click());
+    const menu = document.querySelector('[role="menu"]')!;
+    expect(menu.textContent).toContain("附件");
+    expect(menu.textContent).not.toContain("引用会话");
+    expect(menu.textContent).not.toContain("知识");
+    expect(menu.querySelector('[role="menuitemcheckbox"]')).toBeNull();
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const file = new File(["notes"], "notes.txt", { type: "text/plain" });
+    Object.defineProperty(input, "files", { configurable: true, value: [file] });
+    await act(async () => input.dispatchEvent(new Event("change", { bubbles: true })));
+    expect(onAddAttachments).toHaveBeenCalledExactlyOnceWith([file]);
+  });
   it("opens before candidates arrive, shows loading and retry, then selects a reference", async () => {
     container = document.createElement("div"); document.body.append(container);
     root = createRoot(container);

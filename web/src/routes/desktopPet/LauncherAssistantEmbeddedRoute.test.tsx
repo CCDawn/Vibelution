@@ -16,7 +16,8 @@ vi.mock("../../components/conversation/LazyConversationView", () => ({
     // Honor the composer-preceding slot contract so route-owned panels land
     // in the DOM the same place the real composer surface would put them.
     return createElement("div", { "data-testid": "native-conversation" },
-      props.composerPrecedingContent ?? null);
+      props.composerPrecedingContent ?? null,
+      createElement("div", { "data-testid": "composer-toolbar" }, props.composerLeadingControl, props.composerModelControl));
   },
 }));
 
@@ -34,15 +35,19 @@ async function settle() {
 async function renderEmbedded(options: { dispatches?: Array<Record<string, unknown>>; navigationOwned?: boolean } = {}) {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   vi.stubGlobal("fetch", vi.fn(() => { throw new Error("HTTP is forbidden in this window"); }));
+  let selectedModel = "model-1";
   invoke = vi.fn(async request => {
     switch (request.operation) {
       case "status": return {
         assistant: { agentId: "a", directSessionId: "s", displayName: "助理" },
         operatorAssetsVersion: 1,
-        settings: { ok: true, displayName: "助理", modelId: "model-1",
+        settings: { ok: true, displayName: "助理", modelId: selectedModel,
+          modelChoices: ["model-1", "model-2"].map(modelId => ({ modelId, label: modelId === "model-1" ? "当前对话模型" : "备用对话模型",
+            providerLabel: "官方", isDefault: modelId === "model-1", providerHealthy: true, missingApiKey: false, availability: "ready" })),
           preferences: { characterId: "dafeiyu", showStatus: true, showTitles: true, showCompletion: true, idleMessage: "在的，随时吩咐。" } },
       };
       case "config": return { language: "zh" };
+      case "setModel": selectedModel = request.modelId; return { modelId: selectedModel };
       case "detail": return { id: "s", agentId: "a", status: "ready", messages: [] };
       case "approvals": return [];
       case "dispatches": return { dispatches: options.dispatches ?? [] };
@@ -60,6 +65,19 @@ async function renderEmbedded(options: { dispatches?: Array<Record<string, unkno
 }
 
 describe("Launcher embedded assistant page", () => {
+  it("switches models through the original native bridge from the shared toolbar", async () => {
+    await renderEmbedded();
+    const httpCallsBefore = vi.mocked(fetch).mock.calls.length;
+    const model = container.querySelector<HTMLButtonElement>('[data-launcher-assistant-model-control] button')!;
+    await act(async () => model.click());
+    const select = document.querySelector<HTMLSelectElement>('select[aria-label="切换助理模型"]')!;
+    await act(async () => { select.value = "model-2"; select.dispatchEvent(new Event("change", { bubbles: true })); });
+    await settle();
+    expect(invoke.mock.calls.filter(([request]) => request.operation === "setModel").map(([request]) => request))
+      .toEqual([{ operation: "setModel", modelId: "model-2" }]);
+    expect(container.querySelector('[data-launcher-assistant-model-control] button')?.textContent).toBe("备用对话模型");
+    expect(vi.mocked(fetch).mock.calls).toHaveLength(httpCallsBefore);
+  });
   it("renders the full-size session page without floating-window chrome", async () => {
     await renderEmbedded();
     const page = container.querySelector<HTMLElement>('[data-assistant-embedded="true"]');
@@ -72,6 +90,11 @@ describe("Launcher embedded assistant page", () => {
     expect(container.querySelector('[data-testid="native-conversation"]')).toBeTruthy();
     expect(conversation?.composerPlaceholder).toBe("和个人助理聊一聊…");
     expect(conversation?.composerActionMode).toBe("send");
+    expect(conversation?.composerVariant).toBe("codex");
+    expect(conversation?.density).toBe("default");
+    expect(container.querySelector('[data-launcher-assistant-model-row]')).toBeNull();
+    expect(container.querySelector('[data-testid="composer-toolbar"] [data-launcher-assistant-model-control]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="composer-toolbar"] button[aria-label="更多操作"]')).toBeTruthy();
     expect(conversation?.showHeader).toBe(false);
     const labels = [...container.querySelectorAll("button")]
       .map(button => button.textContent || button.getAttribute("aria-label"));
