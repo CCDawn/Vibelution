@@ -40,10 +40,10 @@ export function taskMetadata(value: unknown): AssistantTaskMetadata {
   };
 }
 
-export function taskDisplayTitle(title: string, shortId: string, lang: "zh" | "en"): string {
+export function taskDisplayTitle(title: string, _shortId: string, lang: "zh" | "en"): string {
   // Never synthesize a title from prompt, instructions, code or result bodies.
-  const generic = /^(?:助理任务|团队运行|Assistant task|Team run)$/i.test(title.trim());
-  const usable = title && !generic && !/^\s*(?:```|<script\b|(?:system|user|assistant)\s*:)/i.test(title);
-  const suffix = shortId.replace(/[^\p{L}\p{N}]/gu, "").slice(-6) || "?";
-  return usable ? displayText(title, 60) : `${lang === "zh" ? "未命名任务" : "Untitled task"} · ${suffix}`;
+  const generic = /^(?:助理任务|团队运行|Assistant task|Team run|未命名任务(?:\s*[·#-].*)?|Untitled task(?:\s*[·#-].*)?)$/i.test(title.trim());
+  const opaque = /^(?:\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.test(title.trim());
+  const usable = title && !generic && !opaque && !/^\s*(?:```|<script\b|(?:system|user|assistant)\s*:)/i.test(title);
+  return usable ? displayText(title, 60) : lang === "zh" ? "委派任务" : "Delegated task";
 }
