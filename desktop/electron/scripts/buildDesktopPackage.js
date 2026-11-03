@@ -49,26 +49,62 @@ export function createIsolatedBuilderConfig(input) {
   return config;
 }
 
-export function resolveInstalledElectronDistribution(packageRoot, mode, platform = process.platform) {
+export function resolveInstalledElectronDistribution(packageRoot, mode, platform = process.platform, input = {}) {
   // A cross-build must download its target runtime, not copy the host runtime.
   if (mode === "linux-arm64") return {};
   const installed = join(packageRoot, "node_modules", "electron");
   const metadata = readJsonFile(join(installed, "package.json"));
   const electronDist = join(installed, "dist");
+  const executable = platform === "win32" ? "electron.exe"
+    : platform === "darwin" ? "Electron.app/Contents/MacOS/Electron" : "electron";
+  ensureElectronDistribution(installed, electronDist, executable, input);
   const version = readFileSync(join(electronDist, "version"), "utf8").trim();
   const declaredVersion = readJsonFile(join(packageRoot, "package.json")).devDependencies?.electron;
   if (typeof declaredVersion !== "string" || !/^\d+\.\d+\.\d+$/.test(declaredVersion)
       || version !== declaredVersion) {
     throw new Error("Installed Electron does not match the project's exact declared Electron version; refresh task-local dependencies before packaging.");
   }
-  const executable = platform === "win32" ? "electron.exe"
-    : platform === "darwin" ? "Electron.app/Contents/MacOS/Electron" : "electron";
   if (!version || version !== metadata.version || !existsSync(join(electronDist, executable))) {
     throw new Error("Installed Electron distribution is incomplete or its version does not match its package.");
   }
   // electron-builder supports an unpacked distribution. Copying it avoids a
   // second download/extraction and Windows EPERM on win-unpacked.tmp rename.
   return { electronDist, electronVersion: version };
+}
+
+const electronInstallTimeoutMs = 600_000;
+const electronInstallRescue = "Run `node node_modules/electron/install.js` inside desktop/electron to download the Electron"
+  + " runtime (set ELECTRON_MIRROR to a reachable mirror when the default download is blocked), then rerun packaging.";
+
+// The electron npm package ships no postinstall script, so `npm ci` exits 0
+// without ever downloading node_modules/electron/dist. Its install.js is
+// idempotent and honours ELECTRON_MIRROR, so run it once before giving up.
+function ensureElectronDistribution(installed, electronDist, executable, input) {
+  const isPresent = () => existsSync(join(electronDist, "version")) && existsSync(join(electronDist, executable));
+  if (isPresent()) return;
+  const installer = join(installed, "install.js");
+  console.warn(`Electron runtime is missing from ${electronDist}; running ${installer} to download it.`);
+  const run = input.run ?? spawnSync;
+  const result = run(process.execPath, [installer], {
+    cwd: installed,
+    env: process.env,
+    encoding: "utf8",
+    stdio: "pipe",
+    shell: false,
+    timeout: electronInstallTimeoutMs,
+    maxBuffer: 64 * 1024 * 1024,
+    windowsHide: true
+  });
+  if (!result.error && result.status === 0 && isPresent()) return;
+  const reason = result.error?.code === "ETIMEDOUT"
+    ? `timed out after ${electronInstallTimeoutMs / 1000}s`
+    : result.error ? `failed to run (${result.error.message})`
+      : result.status !== 0 ? `exited with ${result.status === null ? `signal ${result.signal}` : `code ${result.status}`}`
+        : "exited successfully but left the distribution incomplete";
+  const tail = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim().slice(-2000);
+  throw new Error(`Installed Electron distribution is incomplete: ${electronDist} lacks version or ${executable},`
+    + ` and the automatic download via install.js ${reason}. ${electronInstallRescue}`
+    + (tail ? `\nInstaller output (tail):\n${tail}` : ""));
 }
 
 export function runDesktopPackageBuild(input = {}) {
@@ -131,7 +167,7 @@ export function runDesktopPackageBuild(input = {}) {
 
     const builderConfig = createIsolatedBuilderConfig({
       baseConfig: input.baseConfig ?? readJsonFile(join(packageRoot, "electron-builder.json")),
-      electronDistribution: resolveInstalledElectronDistribution(packageRoot, mode),
+      electronDistribution: resolveInstalledElectronDistribution(packageRoot, mode, process.platform, input),
       electronRoot: packageRoot,
       appRoot,
       outputRoot,
