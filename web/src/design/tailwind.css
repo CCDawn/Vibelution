@@ -3,6 +3,9 @@
 
 /* Shell + shared UI (always loaded). */
 @source "../app/**/*.{ts,tsx}";
+/* Launcher task navigation is mounted by the eager shell, including project pages. */
+@source "../routes/desktopPet/assistantTasks/**/*.{ts,tsx}";
+@source not "../routes/desktopPet/assistantTasks/**/*.test.{ts,tsx}";
 @source "../agent-thread/**/*.{ts,tsx}";
 @source "../components/**/*.{ts,tsx}";
 /*

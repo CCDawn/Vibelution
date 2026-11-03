@@ -16,6 +16,8 @@ import { applyWorkbenchDocumentLanguage } from "./documentLanguage";
 import { currentInstanceWindowTitle } from "./instanceWindowTitle";
 import { LauncherTitlebar } from "./LauncherTitlebar";
 import { LauncherNavigation } from "./LauncherNavigation";
+import {LauncherAssistantTaskCards} from "../routes/desktopPet/assistantTasks/LauncherAssistantTaskCards";
+import {LauncherTaskNavigationSlot} from "../routes/desktopPet/assistantTasks/LauncherTaskNavigationSlot";
 import { VDialog, VSplitWorkspace, VSurface } from "../components/vui";
 import styles from "./LauncherShell.styles";
 import { applyWorkbenchDocumentTheme, readStoredWorkbenchTheme, subscribeStoredWorkbenchTheme } from "./themePreference";
@@ -102,6 +104,7 @@ export function LauncherShell() {
   }, []);
 
   return (
+   <LauncherAssistantTaskCards lang={lang} routePath={location.pathname} onOpenConversation={()=>{setNavigationOpen(false);void navigate("/launcher/assistant");}}>
     <div
       className={styles.root}
       data-theme={theme}
@@ -113,12 +116,13 @@ export function LauncherShell() {
       <VSplitWorkspace
         className={styles.workspace}
         columnsClassName={styles.columns}
-        sidebar={<div className={styles.navigation}><LauncherNavigation lang={lang} items={branchInstancesQuery.data?.items ?? []} updateAvailable={updateAvailable} updateFailed={updateFailed}/></div>}
+        sidebar={<div className={styles.navigation}><LauncherTaskNavigationSlot lang={lang}><LauncherNavigation lang={lang} items={branchInstancesQuery.data?.items ?? []} updateAvailable={updateAvailable} updateFailed={updateFailed}/></LauncherTaskNavigationSlot></div>}
         main={<VSurface as="div" tone="panel" padding="none" className={styles.main}>{routeContent}</VSurface>}
       />
       <VDialog open={navigationOpen} onOpenChange={setNavigationOpen} title={lang === "zh" ? "功能导航" : "Navigation"} size="sm">
-        <div className={styles.mobileNavigation}><LauncherNavigation lang={lang} items={branchInstancesQuery.data?.items ?? []} onNavigate={() => setNavigationOpen(false)} updateAvailable={updateAvailable} updateFailed={updateFailed}/></div>
+        <div className={styles.mobileNavigation}><LauncherTaskNavigationSlot lang={lang} onNavigate={()=>setNavigationOpen(false)}><LauncherNavigation lang={lang} items={branchInstancesQuery.data?.items ?? []} onNavigate={() => setNavigationOpen(false)} updateAvailable={updateAvailable} updateFailed={updateFailed}/></LauncherTaskNavigationSlot></div>
       </VDialog>
     </div>
+   </LauncherAssistantTaskCards>
   );
 }

@@ -1024,8 +1024,11 @@ def _usable_active_frontend_release(root: Path) -> bool:
 
 def _electron_package_block_reason(
     root: Path, *, current_tree: str, packaged_tree: str, source_newer: bool,
+    package_root: Path | None = None,
 ) -> str:
-    if not packaged_desktop_exe(root).is_file() or not packaged_asar_path(root).is_file():
+    exe = packaged_desktop_exe(root) if package_root is None else package_root / "Vibelution.exe"
+    asar = packaged_asar_path(root) if package_root is None else package_root / "resources/app.asar"
+    if not exe.is_file() or not asar.is_file():
         return "missing_package"
     if not packaged_tree:
         return "missing_provenance"
@@ -1102,15 +1105,28 @@ def _assert_assistant_package(root: Path, package: Path, *, deadline: float) -> 
 def inspect_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, Any]:
     """Return whether the packaged Electron shell and Launcher frontend are current."""
 
-    root = Path(project_root)
+    return _inspect_desktop_shell_package(Path(project_root))
+
+
+def _inspect_desktop_shell_package(
+    root: Path, package_root: Path | None = None, *, for_reuse: bool = False,
+) -> dict[str, Any]:
+    """Inspect live or staged bytes using the same source and frontend owners.
+
+    Reuse requires full assistant verification and clean Electron sources: the
+    existing provenance cannot prove which dirty source bytes a build consumed.
+    Live inspection retains its timestamp compatibility and public payload.
+    """
+
     current_tree = _git_tree_hash(root, "HEAD:desktop/electron")
     current_commit = _git_tree_hash(root, "HEAD")
-    provenance = _read_json(packaged_provenance_path(root))
+    provenance_path = packaged_provenance_path(root) if package_root is None else package_root / "resources/app.asar.unpacked/package-provenance.json"
+    provenance = _read_json(provenance_path)
     packaged_tree = str(provenance.get("electronTreeHash") or "").strip()
-    exe_path = packaged_desktop_exe(root)
-    asar_path = packaged_asar_path(root)
-    source_newer = _electron_sources_newer_than_asar(root)
-    packaged_frontend_path = packaged_frontend_dist(root)
+    exe_path = packaged_desktop_exe(root) if package_root is None else package_root / "Vibelution.exe"
+    asar_path = packaged_asar_path(root) if package_root is None else package_root / "resources/app.asar"
+    source_newer = _electron_sources_newer_than_asar(root) if package_root is None else _electron_sources_newer_than(root, asar_path)
+    packaged_frontend_path = packaged_frontend_dist(root) if package_root is None else package_root / "resources/web-dist"
     packaged_frontend_hash = _frontend_directory_content_sha256(packaged_frontend_path)
     expected_frontend_hash = str(provenance.get("frontendContentSha256") or "").strip().lower()
     packaged_frontend_tree = str(provenance.get("frontendTreeHash") or "").strip()
@@ -1121,6 +1137,7 @@ def inspect_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, 
     current_frontend_source_commit = ""
     current_frontend_build_key = ""
     current_frontend_dist = ""
+    frontend_provenance: dict[str, Any] = {}
     frontend_build_current: bool | None = None
     if exe_path.is_file() and asar_path.is_file():
         try:
@@ -1150,9 +1167,15 @@ def inspect_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, 
             frontend_build_current = None
     package_block_reason = _electron_package_block_reason(
         root, current_tree=current_tree, packaged_tree=packaged_tree, source_newer=source_newer,
+        package_root=package_root,
     )
+    if not package_block_reason and for_reuse:
+        if not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", current_commit) or packaged_source_commit != current_commit:
+            package_block_reason = "source_commit_mismatch"
+        elif not _electron_package_sources_clean(root):
+            package_block_reason = "electron_source_unverified"
     if not package_block_reason:
-        package_block_reason = _assistant_package_block_reason(root, exe_path.parent)
+        package_block_reason = _assistant_package_block_reason(root, exe_path.parent, full=for_reuse)
     if package_block_reason:
         reason = package_block_reason
         stale = True
@@ -1173,6 +1196,26 @@ def inspect_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, 
         stale = True
     elif current_frontend_tree and packaged_frontend_tree != current_frontend_tree:
         reason = "frontend_source_mismatch"
+        stale = True
+    elif for_reuse and (
+        not re.fullmatch(r"[0-9a-f]{64}", current_frontend_build_key)
+        or packaged_frontend_build_key != current_frontend_build_key
+        or frontend_provenance.get("buildKey") != current_frontend_build_key
+    ):
+        reason = "frontend_build_key_mismatch"
+        stale = True
+    elif for_reuse and (
+        frontend_provenance.get("frontendTree") != current_frontend_tree
+        or not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", str(frontend_provenance.get("sourceCommit") or ""))
+        or provenance.get("frontendSourceCommit") != frontend_provenance.get("sourceCommit")
+    ):
+        reason = "frontend_source_commit_mismatch"
+        stale = True
+    elif for_reuse and (
+        not _usable_active_frontend_release(root)
+        or Path(current_frontend_dist).resolve() != resolve_active_frontend_dist(root).resolve()
+    ):
+        reason = "frontend_release_mismatch"
         stale = True
     else:
         reason = "current"
@@ -1643,6 +1686,16 @@ def run_desktop_shell_prebuild(project_root: Path | str = PROJECT_ROOT) -> dict[
         status = inspect_desktop_shell(root)
         if not status["stale"]:
             return {"schemaVersion": 1, "ok": True, "skipped": "current"}
+        try:
+            staged_status = _inspect_desktop_shell_package(root, root / STAGING_WIN_UNPACKED_RELATIVE, for_reuse=True)
+        except Exception:
+            # Missing or unreadable proof cannot justify reusing the old tree.
+            staged_status = {"stale": True, "reason": "inspection_failed"}
+        if not staged_status["stale"]:
+            staged_tree = str(staged_status["packagedElectronTree"])
+            _clear_shell_failure_marker(_prebuild_failure_path(root))
+            _append_refresh_log(root, "prebuild.reused", electronTreeHash=staged_tree)
+            return {"schemaVersion": 1, "ok": True, "staged": True, "electronTreeHash": staged_tree}
         try:
             staged = _stage_desktop_shell(root, deadline=deadline)
         except Exception as exc:
@@ -2733,6 +2786,19 @@ def _frontend_directory_content_sha256(path: Path) -> str:
 
 def _electron_sources_newer_than_asar(project_root: Path) -> bool:
     return _electron_sources_newer_than(project_root, packaged_asar_path(project_root))
+
+
+def _electron_package_sources_clean(project_root: Path) -> bool:
+    """Prove all Electron package inputs match HEAD without relying on mtimes."""
+
+    try:
+        result = run_git(
+            ["status", "--porcelain", "--untracked-files=all", "--", ELECTRON_PACKAGE_DIR.as_posix()],
+            cwd=project_root, timeout=10.0,
+        )
+        return result.returncode == 0 and not str(result.stdout or "").strip()
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 def _electron_worktree_dirty(project_root: Path) -> bool | None:

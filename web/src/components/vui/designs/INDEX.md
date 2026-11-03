@@ -4,7 +4,6 @@
 | --- | --- |
 | `LauncherAssistantBrowserWorkspace` | [product/personal-assistant.md](./product/personal-assistant.md#launcherassistantbrowserworkspace) |
 | `LauncherAssistantRoute` | [product/personal-assistant.md](./product/personal-assistant.md#launcherassistantroute) |
-| `LauncherAssistantTaskCards` | [product/personal-assistant.md](./product/personal-assistant.md#launcherassistanttaskcards) |
 | `LauncherAssistantWorkspaceRoute` / `LauncherAssistantWelcome` | [product/personal-assistant.md](./product/personal-assistant.md#launcherassistantworkspaceroute) |
 | `LauncherShell` / `LauncherNavigation` / `LauncherTitlebar` / `LauncherProjectRoute` | [product/personal-assistant.md](./product/personal-assistant.md#launchershell--launchernavigation) |
 | `LauncherUpdatesRoute` / `LauncherUpdateTopbar` | [product/personal-assistant.md](./product/personal-assistant.md#launcherupdatesroute--launcherupdatetopbar) |
@@ -245,6 +244,9 @@
 | 组件 | 设计说明 |
 | --- | --- |
 | `LauncherAssistantTaskCards` | [product/launcher-assistant-task-cards.md](./product/launcher-assistant-task-cards.md#launcherassistanttaskcards) |
+| `LauncherAssistantTaskSidebar` | [product/launcher-assistant-task-cards.md](./product/launcher-assistant-task-cards.md#launcherassistanttasksidebar) |
+| `LauncherAssistantTaskDetail` | [product/launcher-assistant-task-cards.md](./product/launcher-assistant-task-cards.md#launcherassistanttaskdetail) |
+| `LauncherTaskNavigationSlot` | [product/launcher-assistant-task-cards.md](./product/launcher-assistant-task-cards.md#launchertasknavigationslot) |
 | `LauncherTaskCleanupDialog` | [product/launcher-assistant-task-cards.md](./product/launcher-assistant-task-cards.md#launchertaskcleanupdialog) |
 
 ## Provider
