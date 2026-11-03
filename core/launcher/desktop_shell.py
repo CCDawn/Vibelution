@@ -69,6 +69,19 @@ DESKTOP_SHELL_BUILD_DEADLINE_SECONDS = 15 * 60
 DESKTOP_SHELL_BUILD_CLEANUP_RESERVE_SECONDS = 5.0
 DESKTOP_SHELL_BUILD_LOCK_POLL_SECONDS = 0.1
 DESKTOP_SHELL_BUILD_CLOSE_RETRIES = 3
+# Launch confirmation: Electron is single-instance per shared userData, so a
+# spawned shell that finds a live owner forwards its argv and exits 0 within a
+# second. ``launched`` is therefore only true once the child is observed holding
+# the owner lock (or publishing its CDP record), not merely because Popen worked.
+LAUNCH_CONFIRMATION_TIMEOUT_SECONDS = 5.0
+LAUNCH_CONFIRMATION_POLL_SECONDS = 0.5
+DESKTOP_DEBUG_FILE_NAME = "desktop_debug.json"
+LAUNCH_ERROR_BOWED_OUT_TO_LIVE_OWNER = "BOWED_OUT_TO_LIVE_OWNER"
+LAUNCH_ERROR_LAUNCH_CRASHED = "LAUNCH_CRASHED"
+LAUNCH_ERROR_LIVE_OWNER_HOLDING_LOCK = "LIVE_OWNER_HOLDING_LOCK"
+# PID reuse guard: a create-time drift beyond this means the pid now names a
+# different process. Mirrors desktop_shell_owner.CREATE_TIME_TOLERANCE_SECONDS.
+PID_IDENTITY_CREATE_TIME_TOLERANCE_SECONDS = 2.0
 
 
 class BuildProcessRetirementError(RuntimeError):
@@ -1337,13 +1350,28 @@ def run_desktop_shell_refresh(
     wait_timeout_seconds: float = 180.0,
     shell_kind: str = "",
 ) -> dict[str, Any]:
-    """Wait for the old shell to exit, rebuild from checkout, then relaunch."""
+    """Wait for the old shell to exit, verify the owner lock is free, rebuild, relaunch.
+
+    Every launch here must become the new primary. The owner lock is checked
+    after the pid wait (or immediately with ``wait_pid`` 0) before any build,
+    and again inside each launch (``expect_primary``) so neither the normal
+    relaunch, the rebuild-failure fallback nor the unpackaged relaunch can spawn
+    an instance that would only bow out to a still-live shell. ``refreshed`` is
+    true only when the launch was confirmed (see ``_launch_result_replaces_shell``).
+    """
 
     root = Path(project_root)
     try:
         _append_refresh_log(root, "refresh.started", wait_pid=int(wait_pid), then_lifecycle=str(then_lifecycle or ""))
         if int(wait_pid) > 0:
-            _wait_for_pid_exit(int(wait_pid), timeout_seconds=wait_timeout_seconds)
+            _wait_for_pid_exit(
+                int(wait_pid),
+                timeout_seconds=wait_timeout_seconds,
+                expected_create_time=_expected_create_time_for_pid(root, int(wait_pid)),
+            )
+        holder = _verified_live_desktop_shell_owner(root)
+        if holder is not None:
+            return _refresh_blocked_by_live_owner(root, holder, wait_pid=int(wait_pid))
         kind = str(shell_kind or "").strip().lower()
         try:
             if kind == "unpackaged":
@@ -1353,21 +1381,9 @@ def run_desktop_shell_refresh(
                     then_lifecycle=then_lifecycle,
                     open_workbench=True,
                     prefer="unpackaged",
+                    expect_primary=True,
                 )
-                clear_desktop_shell_refresh_failure(root)
-                _append_refresh_log(
-                    root,
-                    "refresh.finished",
-                    wait_pid=int(wait_pid),
-                    helper_launch_pid=int(launched.get("pid") or 0),
-                )
-                return {
-                    "schemaVersion": 1,
-                    "refreshed": True,
-                    "kind": "unpackaged",
-                    "rebuild": rebuilt,
-                    "launch": launched,
-                }
+                return _finish_refresh_launch(root, launched, wait_pid=int(wait_pid), kind="unpackaged", rebuilt=rebuilt)
             current = inspect_desktop_shell(root) if kind == "packaged" else None
             if current is not None and not current["stale"]:
                 # Preparation can legitimately find an already-current package
@@ -1382,6 +1398,8 @@ def run_desktop_shell_refresh(
             # The old shell has already exited, so a failed rebuild must not
             # leave the workspace without one: relaunch whatever packaged exe
             # still exists (even a stale package). Only a missing exe aborts.
+            # The launch still demands a primary: a shell that came up during
+            # the build must not receive a bow-out instance.
             fallback: dict[str, Any] | None = None
             fallback_error = ""
             if packaged_desktop_exe(root).is_file():
@@ -1390,6 +1408,7 @@ def run_desktop_shell_refresh(
                         project_root=root,
                         then_lifecycle=then_lifecycle,
                         open_workbench=True,
+                        expect_primary=True,
                     )
                 except Exception as launch_exc:
                     fallback_error = str(launch_exc)
@@ -1398,8 +1417,8 @@ def run_desktop_shell_refresh(
                     root,
                     "refresh.fallback_launch",
                     wait_pid=int(wait_pid),
-                    helper_launch_pid=int(fallback.get("pid") or 0),
                     detail=detail[-800:],
+                    **_launch_log_fields(fallback),
                 )
                 return {
                     "schemaVersion": 1,
@@ -1407,6 +1426,7 @@ def run_desktop_shell_refresh(
                     "reason": "rebuild_failed",
                     "message": detail[-800:],
                     "fallbackLaunch": fallback,
+                    **_launch_pid_fields(fallback),
                 }
             _append_refresh_log(
                 root,
@@ -1426,6 +1446,7 @@ def run_desktop_shell_refresh(
                 project_root=root,
                 then_lifecycle=then_lifecycle,
                 open_workbench=True,
+                expect_primary=True,
             )
         except Exception as exc:
             detail = str(exc)
@@ -1438,21 +1459,127 @@ def run_desktop_shell_refresh(
                 "message": detail[-800:],
                 "rebuild": rebuilt,
             }
-        clear_desktop_shell_refresh_failure(root)
-        _append_refresh_log(
-            root,
-            "refresh.finished",
-            wait_pid=int(wait_pid),
-            helper_launch_pid=int(launched.get("pid") or 0),
-        )
-        return {
-            "schemaVersion": 1,
-            "refreshed": True,
-            "rebuild": rebuilt,
-            "launch": launched,
-        }
+        return _finish_refresh_launch(root, launched, wait_pid=int(wait_pid), kind="", rebuilt=rebuilt)
     finally:
         _release_desktop_shell_refresh_lock(root)
+
+
+def _launch_pid_fields(launched: dict[str, Any]) -> dict[str, Any]:
+    """Explicit pid semantics for refresh results: the spawn vs. the lock owner."""
+
+    return {
+        "launchPid": int(launched.get("launchPid") or launched.get("pid") or 0),
+        "ownerPid": int(launched.get("ownerPid") or 0),
+    }
+
+
+def _launch_log_fields(launched: dict[str, Any]) -> dict[str, Any]:
+    pids = _launch_pid_fields(launched)
+    confirmation = launched.get("confirmation")
+    state = str(confirmation.get("state") or "") if isinstance(confirmation, dict) else ""
+    fields: dict[str, Any] = {
+        "helper_launch_pid": pids["launchPid"],
+        "owner_pid": pids["ownerPid"],
+        "launch_confirmed": _launch_result_replaces_shell(launched),
+    }
+    if state:
+        fields["confirmation_state"] = state
+    if launched.get("errorCode"):
+        fields["error_code"] = str(launched["errorCode"])
+    return fields
+
+
+def _launch_result_replaces_shell(launched: dict[str, Any]) -> bool:
+    """True when a launch result stands for a new primary shell.
+
+    ``launched`` false (bow-out, crash, refused) is not a replacement; neither
+    is a child that is alive while a different process verifiably holds the
+    owner lock. Results without the confirmation fields (legacy callers) keep
+    their historical "spawned means launched" reading.
+    """
+
+    if "launched" in launched and not launched["launched"]:
+        return False
+    pids = _launch_pid_fields(launched)
+    if pids["ownerPid"] and pids["launchPid"] and pids["ownerPid"] != pids["launchPid"]:
+        return False
+    return True
+
+
+def _finish_refresh_launch(
+    root: Path,
+    launched: dict[str, Any],
+    *,
+    wait_pid: int,
+    kind: str,
+    rebuilt: dict[str, Any],
+) -> dict[str, Any]:
+    pids = _launch_pid_fields(launched)
+    kind_fields = {"kind": kind} if kind else {}
+    if not _launch_result_replaces_shell(launched):
+        code = str(launched.get("errorCode") or "launch_not_confirmed")
+        confirmation = launched.get("confirmation")
+        state = str(confirmation.get("state") or "") if isinstance(confirmation, dict) else ""
+        detail = f"{code}: launchPid={pids['launchPid']} ownerPid={pids['ownerPid']} state={state or 'unknown'}"
+        # A cooldown marker here is what breaks the idle restart loop: the
+        # shell was not replaced, so the next automatic refresh must not
+        # immediately spawn another bow-out.
+        record_desktop_shell_refresh_failure(root, reason="launch_not_confirmed", detail=detail)
+        _append_refresh_log(root, "refresh.launch_not_confirmed", wait_pid=wait_pid, **_launch_log_fields(launched))
+        return {
+            "schemaVersion": 1,
+            "refreshed": False,
+            "reason": "launch_not_confirmed",
+            "errorCode": code,
+            "message": detail,
+            **kind_fields,
+            "rebuild": rebuilt,
+            "launch": launched,
+            **pids,
+        }
+    clear_desktop_shell_refresh_failure(root)
+    _append_refresh_log(root, "refresh.finished", wait_pid=wait_pid, **_launch_log_fields(launched))
+    return {
+        "schemaVersion": 1,
+        "refreshed": True,
+        **kind_fields,
+        "rebuild": rebuilt,
+        "launch": launched,
+        **pids,
+    }
+
+
+def _refresh_blocked_by_live_owner(root: Path, holder: dict[str, Any], *, wait_pid: int) -> dict[str, Any]:
+    """The pre-launch lock gate: a verifiably live owner means nothing to replace.
+
+    Records the cooldown marker so a scheduler that still believes the shell is
+    stale cannot spin helpers against a shell that never exited.
+    """
+
+    owner_pid = int(holder.get("pid") or 0)
+    detail = (
+        f"owner pid={owner_pid} identity={holder.get('identityStatus', '')} "
+        f"executable={holder.get('executable', '')}"
+    )
+    record_desktop_shell_refresh_failure(root, reason="live_owner_holding_lock", detail=detail)
+    _append_refresh_log(
+        root,
+        "refresh.blocked_live_owner",
+        wait_pid=wait_pid,
+        owner_pid=owner_pid,
+        identity_status=str(holder.get("identityStatus") or ""),
+        detail=detail,
+    )
+    return {
+        "schemaVersion": 1,
+        "refreshed": False,
+        "reason": "live_owner_holding_lock",
+        "errorCode": LAUNCH_ERROR_LIVE_OWNER_HOLDING_LOCK,
+        "message": detail,
+        "owner": holder,
+        "launchPid": 0,
+        "ownerPid": owner_pid,
+    }
 
 
 def schedule_desktop_shell_prebuild(
@@ -2235,8 +2362,20 @@ def launch_desktop_shell(
     hidden_presentation: bool = False,
     prefer: str = "",
     launch_request_id: str = "",
+    expect_primary: bool = False,
 ) -> dict[str, Any]:
-    """Start Electron main for the current checkout without hiding the GUI."""
+    """Start Electron main for the current checkout without hiding the GUI.
+
+    The result reports what the spawn actually became (see
+    ``_confirm_desktop_shell_launch``): ``launched`` is true only once the child
+    holds the shell owner lock or kept running without any owner record;
+    ``launchPid`` is the spawned process and ``ownerPid`` the confirmed holder.
+    A second instance that bowed out to a live owner is reported as
+    ``BOWED_OUT_TO_LIVE_OWNER`` (``forwarded`` when that owner was already live
+    before the spawn, i.e. a lifecycle forward). With ``expect_primary`` the
+    caller needs a replacement primary, so a verifiably live owner refuses the
+    spawn with ``LIVE_OWNER_HOLDING_LOCK`` instead of launching a bow-out.
+    """
 
     spec = resolve_desktop_shell_launch(
         project_root,
@@ -2250,15 +2389,19 @@ def launch_desktop_shell(
         if not re.fullmatch(r"launch_[a-f0-9]{32}", launch_request_id):
             raise ValueError("invalid desktop launch request id")
         args.extend(["--launch-request-id", launch_request_id])
-    process = _spawn_visible_electron(args, cwd=Path(str(spec["cwd"])))
-    return {
+    shell_root = Path(str(spec["cwd"]))
+    base = {
         **spec,
-        "launched": True,
-        "pid": int(getattr(process, "pid", 0) or 0),
         "thenLifecycle": str(then_lifecycle or "").strip().lower(),
         "openWorkbench": bool(open_workbench),
         **({"launchRequestId": launch_request_id} if launch_request_id else {}),
     }
+    pre_owner = _verified_live_desktop_shell_owner(shell_root)
+    if expect_primary and pre_owner is not None:
+        return {**base, **_refused_launch_payload(pre_owner)}
+    process = _spawn_visible_electron(args, cwd=shell_root)
+    confirmation = _confirm_desktop_shell_launch(process, shell_root=shell_root)
+    return {**base, **_launch_result_payload(process, confirmation, pre_owner=pre_owner)}
 
 
 def launch_packaged_desktop_shell(
@@ -2266,7 +2409,10 @@ def launch_packaged_desktop_shell(
     project_root: Path | str = PROJECT_ROOT,
     then_lifecycle: str = "",
     open_workbench: bool = False,
+    expect_primary: bool = False,
 ) -> dict[str, Any]:
+    """Spawn the packaged exe; same confirmation contract as launch_desktop_shell."""
+
     root = Path(project_root)
     exe = packaged_desktop_exe(root)
     if not exe.is_file():
@@ -2279,12 +2425,250 @@ def launch_packaged_desktop_shell(
         args.append("--open-workbench")
     if lifecycle:
         args.append(lifecycle)
+    base = {"thenLifecycle": lifecycle, "openWorkbench": bool(open_workbench)}
+    pre_owner = _verified_live_desktop_shell_owner(root)
+    if expect_primary and pre_owner is not None:
+        return {**base, **_refused_launch_payload(pre_owner)}
     process = _spawn_visible_electron(args, cwd=root)
+    confirmation = _confirm_desktop_shell_launch(process, shell_root=root)
+    return {**base, **_launch_result_payload(process, confirmation, pre_owner=pre_owner)}
+
+
+def _owner_identity_payload(record: dict[str, Any], status: str) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "owner": str(record.get("owner") or ""),
+        "pid": int(record.get("pid") or 0),
+        "identityStatus": status,
+    }
+    for key in ("createTime", "executable", "updatedAt"):
+        if record.get(key):
+            payload[key] = record[key]
+    return payload
+
+
+def _verified_live_desktop_shell_owner(shell_root: Path) -> dict[str, Any] | None:
+    """Return the owner record only when the recorded process is verifiably alive.
+
+    A ``dead`` or recycled-pid (``mismatch``) record is residue, not a holder,
+    and must never block or misclassify a launch. ``unknown`` (record without
+    createTime/executable) falls back to pid existence, as
+    ``electron_owns_desktop_tray`` does.
+    """
+
+    from core.launcher.desktop_shell_owner import _identity_status, is_pid_alive, read_desktop_shell_owner
+
+    record = read_desktop_shell_owner(shell_root)
+    if not record:
+        return None
+    status = _identity_status(record)
+    if status == "match":
+        return _owner_identity_payload(record, status)
+    if status == "unknown" and is_pid_alive(int(record.get("pid") or 0)):
+        return _owner_identity_payload(record, status)
+    return None
+
+
+def _desktop_debug_record_path(shell_root: Path) -> Path:
+    from core.launcher.desktop_shell_owner import desktop_shell_owner_path
+
+    return desktop_shell_owner_path(shell_root).with_name(DESKTOP_DEBUG_FILE_NAME)
+
+
+def _read_desktop_debug_identity(shell_root: Path) -> dict[str, Any] | None:
+    """Only the primary instance publishes desktop_debug.json with its identity."""
+
+    record = _read_json(_desktop_debug_record_path(shell_root))
+    try:
+        pid = int(record.get("pid") or 0)
+    except (TypeError, ValueError):
+        return None
+    if pid <= 0:
+        return None
+    try:
+        create_time = float(record.get("createTime") or 0)
+    except (TypeError, ValueError):
+        create_time = 0.0
+    return {"pid": pid, "createTime": create_time, "executable": str(record.get("executable") or "")}
+
+
+def _create_times_align(first: Any, second: Any) -> bool:
+    try:
+        left = float(first or 0)
+        right = float(second or 0)
+    except (TypeError, ValueError):
+        return True
+    if left <= 0 or right <= 0:
+        # One side has no identity to compare; do not fabricate a mismatch.
+        return True
+    return abs(left - right) <= PID_IDENTITY_CREATE_TIME_TOLERANCE_SECONDS
+
+
+def _capture_launch_identity(pid: int) -> dict[str, Any]:
+    from core.runtime_manager.process_identity import capture_process_identity
+
+    try:
+        return dict(capture_process_identity(int(pid)) or {})
+    except Exception:
+        return {}
+
+
+def _launched_process_alive(process: Any, identity: dict[str, Any]) -> bool:
+    """Liveness of our own child: the Popen handle first, then pid identity.
+
+    ``poll`` on a handle we own cannot be fooled by pid reuse (Windows keeps the
+    pid reserved while the handle is open), so its answer is final. The
+    create-time identity check only serves objects that expose a bare pid.
+    """
+
+    poll = getattr(process, "poll", None)
+    if callable(poll):
+        try:
+            return poll() is None
+        except Exception:
+            pass
+    pid = int(getattr(process, "pid", 0) or 0)
+    try:
+        expected = float(identity.get("createTime") or 0)
+    except (TypeError, ValueError):
+        expected = 0.0
+    return _pid_alive_with_identity(pid, expected or None)
+
+
+def _launched_process_exit_code(process: Any) -> int | None:
+    code = getattr(process, "returncode", None)
+    return int(code) if isinstance(code, int) else None
+
+
+def _confirm_desktop_shell_launch(
+    process: Any,
+    *,
+    shell_root: Path,
+    timeout_seconds: float | None = None,
+    poll_seconds: float | None = None,
+) -> dict[str, Any]:
+    """Watch a freshly spawned shell until it is the owner, bowed out, or crashed.
+
+    Three outcomes, polled every ``poll_seconds`` for at most ``timeout_seconds``:
+
+    * ``confirmed``: the owner file (preferred) or desktop_debug.json names the
+      child pid -> ``launched`` true, ``ownerPid`` = child.
+    * ``bowed_out``: the child exited while another verified-live process holds
+      the owner lock -> ``BOWED_OUT_TO_LIVE_OWNER`` with that owner's identity.
+    * ``crashed``: the child exited and nobody live holds the lock ->
+      ``LAUNCH_CRASHED`` with the exit code.
+
+    Without any owner record the protocol degrades to "child still alive at the
+    deadline" (``weak_alive``, ``degraded`` true) so a shell build that predates
+    owner publication is never reported as permanently failed. A child alive at
+    the deadline while a different live owner holds the lock is
+    ``alive_unconfirmed`` (``degraded`` true, foreign ``ownerPid``).
+    """
+
+    timeout = LAUNCH_CONFIRMATION_TIMEOUT_SECONDS if timeout_seconds is None else float(timeout_seconds)
+    interval = LAUNCH_CONFIRMATION_POLL_SECONDS if poll_seconds is None else float(poll_seconds)
+    pid = int(getattr(process, "pid", 0) or 0)
+    identity = _capture_launch_identity(pid)
+    started = time.monotonic()
+    deadline = started + max(0.0, timeout)
+
+    def _finish(state: str, **fields: Any) -> dict[str, Any]:
+        return {"state": state, "elapsedSeconds": round(time.monotonic() - started, 3), **fields}
+
+    owner: dict[str, Any] | None = None
+    while True:
+        owner = _verified_live_desktop_shell_owner(shell_root)
+        if owner is not None and int(owner.get("pid") or 0) == pid:
+            return _finish("confirmed", launched=True, degraded=False, ownerPid=pid, evidence="owner_file", owner=owner)
+        debug = _read_desktop_debug_identity(shell_root)
+        if debug is not None and debug["pid"] == pid and _create_times_align(debug.get("createTime"), identity.get("createTime")):
+            return _finish("confirmed", launched=True, degraded=False, ownerPid=pid, evidence="desktop_debug", owner=owner)
+        if not _launched_process_alive(process, identity):
+            exit_code = _launched_process_exit_code(process)
+            if owner is not None and int(owner.get("pid") or 0) != pid:
+                return _finish(
+                    "bowed_out",
+                    launched=False,
+                    degraded=False,
+                    errorCode=LAUNCH_ERROR_BOWED_OUT_TO_LIVE_OWNER,
+                    ownerPid=int(owner.get("pid") or 0),
+                    owner=owner,
+                    exitCode=exit_code,
+                    evidence="child_exited_owner_live",
+                )
+            return _finish(
+                "crashed",
+                launched=False,
+                degraded=False,
+                errorCode=LAUNCH_ERROR_LAUNCH_CRASHED,
+                ownerPid=0,
+                owner=None,
+                exitCode=exit_code,
+                evidence="child_exited_no_owner",
+            )
+        now = time.monotonic()
+        if now >= deadline:
+            break
+        time.sleep(max(0.0, min(interval, deadline - now)))
+    if owner is not None and int(owner.get("pid") or 0) != pid:
+        return _finish(
+            "alive_unconfirmed",
+            launched=True,
+            degraded=True,
+            ownerPid=int(owner.get("pid") or 0),
+            owner=owner,
+            evidence="child_alive_foreign_owner",
+        )
+    return _finish("weak_alive", launched=True, degraded=True, ownerPid=0, owner=None, evidence="child_alive_no_owner_record")
+
+
+def _confirmation_summary(confirmation: dict[str, Any]) -> dict[str, Any]:
+    summary = {key: confirmation[key] for key in ("state", "evidence", "degraded", "elapsedSeconds") if key in confirmation}
+    if confirmation.get("exitCode") is not None:
+        summary["exitCode"] = confirmation["exitCode"]
+    return summary
+
+
+def _launch_result_payload(process: Any, confirmation: dict[str, Any], *, pre_owner: dict[str, Any] | None) -> dict[str, Any]:
+    launch_pid = int(getattr(process, "pid", 0) or 0)
+    owner_pid = int(confirmation.get("ownerPid") or 0)
+    launched = bool(confirmation.get("launched"))
+    payload: dict[str, Any] = {
+        "launched": launched,
+        "launchPid": launch_pid,
+        "ownerPid": owner_pid,
+        # Legacy readers log ``pid``; it has always been the spawned process and
+        # never implied ownership. Prefer launchPid/ownerPid.
+        "pid": launch_pid,
+        "confirmation": _confirmation_summary(confirmation),
+    }
+    if confirmation.get("degraded"):
+        payload["degraded"] = True
+    owner = confirmation.get("owner")
+    if owner:
+        payload["owner"] = owner
+    if not launched:
+        payload["errorCode"] = str(confirmation.get("errorCode") or LAUNCH_ERROR_LAUNCH_CRASHED)
+        payload["exitCode"] = confirmation.get("exitCode")
+        if (
+            payload["errorCode"] == LAUNCH_ERROR_BOWED_OUT_TO_LIVE_OWNER
+            and pre_owner is not None
+            and int(pre_owner.get("pid") or 0) == owner_pid
+        ):
+            # The owner was already live before we spawned: this instance was a
+            # lifecycle forward, not an unexpected loss of the primary.
+            payload["forwarded"] = True
+    return payload
+
+
+def _refused_launch_payload(owner: dict[str, Any]) -> dict[str, Any]:
     return {
-        "launched": True,
-        "pid": int(getattr(process, "pid", 0) or 0),
-        "thenLifecycle": lifecycle,
-        "openWorkbench": bool(open_workbench),
+        "launched": False,
+        "launchPid": 0,
+        "ownerPid": int(owner.get("pid") or 0),
+        "pid": 0,
+        "errorCode": LAUNCH_ERROR_LIVE_OWNER_HOLDING_LOCK,
+        "owner": owner,
+        "confirmation": {"state": "refused", "evidence": "owner_file", "degraded": False},
     }
 
 
@@ -2580,15 +2964,67 @@ def _write_unpackaged_provenance(project_root: Path, tree_hash: str, *, dist: Pa
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def _wait_for_pid_exit(pid: int, *, timeout_seconds: float) -> None:
+def _wait_for_pid_exit(
+    pid: int,
+    *,
+    timeout_seconds: float,
+    expected_create_time: float | None = None,
+) -> None:
+    """Block until ``pid`` (as the process it names now) has exited.
+
+    The identity is pinned at entry (caller-supplied create time, usually from
+    the owner record, else captured now) so a pid recycled by an unrelated
+    process is treated as "exited", not as the shell still running.
+    """
+
+    expected = float(expected_create_time or 0) or _process_create_time(pid)
     deadline = time.monotonic() + max(1.0, float(timeout_seconds))
     while time.monotonic() < deadline:
-        if not _pid_alive(pid):
+        if not _pid_alive_with_identity(pid, expected):
             time.sleep(1.2)
             return
         time.sleep(0.2)
-    if _pid_alive(pid):
+    if _pid_alive_with_identity(pid, expected):
         raise TimeoutError(f"desktop shell pid {pid} did not exit before rebuild")
+
+
+def _pid_alive_with_identity(pid: int, expected_create_time: float | None) -> bool:
+    """Existence plus create-time identity: a recycled pid is not the original.
+
+    Falls back to bare existence when no expected create time is known or the
+    current one cannot be read (psutil missing, access denied).
+    """
+
+    if not _pid_alive(pid):
+        return False
+    try:
+        expected = float(expected_create_time or 0)
+    except (TypeError, ValueError):
+        expected = 0.0
+    if expected > 0:
+        actual = _process_create_time(pid)
+        if actual is not None and abs(actual - expected) > PID_IDENTITY_CREATE_TIME_TOLERANCE_SECONDS:
+            return False
+    return True
+
+
+def _expected_create_time_for_pid(project_root: Path, pid: int) -> float | None:
+    """Prefer the owner record's create time for the shell pid we wait on."""
+
+    from core.launcher.desktop_shell_owner import read_desktop_shell_owner
+
+    try:
+        record = read_desktop_shell_owner(project_root)
+    except Exception:
+        record = None
+    if record and int(record.get("pid") or 0) == int(pid):
+        try:
+            create_time = float(record.get("createTime") or 0)
+        except (TypeError, ValueError):
+            create_time = 0.0
+        if create_time > 0:
+            return create_time
+    return _process_create_time(pid)
 
 
 def _pid_alive(pid: int) -> bool:

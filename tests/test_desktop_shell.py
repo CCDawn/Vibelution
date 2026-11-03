@@ -49,6 +49,26 @@ def _write_assistant_package(root: Path, package: Path) -> dict:
                                              "contractsSha256", "pythonVersion")}}
 
 
+def _confirm_spawn_as_owner(monkeypatch) -> list[dict]:
+    """Pin the post-launch confirmation to "child became the owner".
+
+    Launch argument/flag tests only care about the spawn; without this stub the
+    real confirmation window would probe whatever process happens to hold the
+    fake pid on the test machine.
+    """
+
+    confirmations: list[dict] = []
+
+    def confirm(process, *, shell_root, **_kwargs):
+        pid = int(getattr(process, "pid", 0) or 0)
+        confirmations.append({"pid": pid, "shellRoot": Path(shell_root)})
+        return {"state": "confirmed", "launched": True, "degraded": False, "ownerPid": pid,
+                "evidence": "owner_file", "owner": {"owner": "electron", "pid": pid, "identityStatus": "match"}}
+
+    monkeypatch.setattr(desktop_shell, "_confirm_desktop_shell_launch", confirm)
+    return confirmations
+
+
 def test_assistant_payload_build_reuses_owned_deadline_and_unique_session(tmp_path, monkeypatch):
     calls = []
     payload = tmp_path / "dist/.desktop-shell-build-fixture/launcher-assistant"
@@ -912,8 +932,8 @@ def test_run_desktop_shell_refresh_packaged_kind_promotes_even_from_unpackaged_s
         calls.append("rebuild")
         return {"rebuilt": True}
 
-    def fake_launch_packaged(*, project_root, then_lifecycle="", open_workbench=False):
-        calls.append(f"launch_packaged:{then_lifecycle}:{open_workbench}")
+    def fake_launch_packaged(*, project_root, then_lifecycle="", open_workbench=False, expect_primary=False):
+        calls.append(f"launch_packaged:{then_lifecycle}:{open_workbench}:{expect_primary}")
         return {"launched": True, "pid": 11}
 
     monkeypatch.setattr(desktop_shell, "ensure_unpackaged_electron", fail_unpackaged)
@@ -928,7 +948,8 @@ def test_run_desktop_shell_refresh_packaged_kind_promotes_even_from_unpackaged_s
         shell_kind="packaged",
     )
     assert result["refreshed"] is True
-    assert calls == ["rebuild", "launch_packaged:rebuild-and-start:True"]
+    # The refresh relaunch must demand a primary shell, never a bow-out instance.
+    assert calls == ["rebuild", "launch_packaged:rebuild-and-start:True:True"]
 
 
 def test_run_desktop_shell_refresh_default_kind_keeps_packaged_promotion(tmp_path, monkeypatch):
@@ -939,8 +960,8 @@ def test_run_desktop_shell_refresh_default_kind_keeps_packaged_promotion(tmp_pat
         calls.append("rebuild")
         return {"rebuilt": True}
 
-    def fake_launch_packaged(*, project_root, then_lifecycle="", open_workbench=False):
-        calls.append(f"launch_packaged:{then_lifecycle}:{open_workbench}")
+    def fake_launch_packaged(*, project_root, then_lifecycle="", open_workbench=False, expect_primary=False):
+        calls.append(f"launch_packaged:{then_lifecycle}:{open_workbench}:{expect_primary}")
         return {"launched": True, "pid": 12}
 
     monkeypatch.setattr(desktop_shell, "rebuild_desktop_shell", fake_rebuild)
@@ -948,7 +969,7 @@ def test_run_desktop_shell_refresh_default_kind_keeps_packaged_promotion(tmp_pat
 
     result = desktop_shell.run_desktop_shell_refresh(wait_pid=0, project_root=tmp_path)
     assert result["refreshed"] is True
-    assert calls == ["rebuild", "launch_packaged::True"]
+    assert calls == ["rebuild", "launch_packaged::True:True"]
 
 
 def test_run_desktop_shell_refresh_unpackaged_kind_keeps_unpackaged_relaunch(tmp_path, monkeypatch):
@@ -1012,7 +1033,9 @@ def test_run_desktop_shell_refresh_rebuild_failure_still_launches_packaged_shell
     assert result["refreshed"] is False
     assert result["reason"] == "rebuild_failed"
     assert result["fallbackLaunch"]["pid"] == 21
-    assert launches == [{"project_root": tmp_path, "then_lifecycle": "start", "open_workbench": True}]
+    # Even the recovery launch demands a primary: a shell that came up during
+    # the failed build must not receive a bow-out instance.
+    assert launches == [{"project_root": tmp_path, "then_lifecycle": "start", "open_workbench": True, "expect_primary": True}]
     names = [name for name, _fields in events]
     assert "refresh.aborted" in names
     assert "refresh.fallback_launch" in names
@@ -1068,7 +1091,7 @@ def test_run_desktop_shell_refresh_packaged_relaunch_opens_workbench(tmp_path, m
 
     result = desktop_shell.run_desktop_shell_refresh(wait_pid=0, project_root=tmp_path)
     assert result["refreshed"] is True
-    assert launches == [{"project_root": tmp_path, "then_lifecycle": "", "open_workbench": True}]
+    assert launches == [{"project_root": tmp_path, "then_lifecycle": "", "open_workbench": True, "expect_primary": True}]
 
 
 def test_launch_packaged_desktop_shell_appends_open_workbench_flag(tmp_path, monkeypatch):
@@ -1084,6 +1107,7 @@ def test_launch_packaged_desktop_shell_appends_open_workbench_flag(tmp_path, mon
             self.pid = 78
 
     monkeypatch.setattr(desktop_shell.subprocess, "Popen", FakePopen)
+    _confirm_spawn_as_owner(monkeypatch)
     result = desktop_shell.launch_packaged_desktop_shell(project_root=tmp_path, open_workbench=True)
     args = captured["args"]
     assert args[0] == str(exe)
@@ -1154,6 +1178,7 @@ def test_launch_packaged_desktop_shell_does_not_hide_gui(tmp_path, monkeypatch):
             self.pid = 77
 
     monkeypatch.setattr(desktop_shell.subprocess, "Popen", FakePopen)
+    _confirm_spawn_as_owner(monkeypatch)
     result = desktop_shell.launch_packaged_desktop_shell(project_root=tmp_path, then_lifecycle="start")
     args = captured["args"]
     assert args[0] == str(exe)
@@ -1398,6 +1423,7 @@ def test_launch_desktop_shell_rechecks_release_before_spawning_packaged(tmp_path
         spawned.append(args) or types.SimpleNamespace(pid=88)
     ))
 
+    _confirm_spawn_as_owner(monkeypatch)
     result = desktop_shell.launch_desktop_shell(project_root=tmp_path, then_lifecycle="restart")
 
     assert result["kind"] == "unpackaged"
@@ -1846,6 +1872,7 @@ def test_launch_desktop_shell_does_not_hide_unpackaged_gui(tmp_path, monkeypatch
         "core.infrastructure.branch_workspace.resolve_branch_workspace",
         missing_git,
     )
+    _confirm_spawn_as_owner(monkeypatch)
     result = desktop_shell.launch_desktop_shell(project_root=tmp_path, open_workbench=True)
     assert result["kind"] == "unpackaged"
     assert captured["args"][0] == str(electron_exe)
@@ -1936,6 +1963,7 @@ def test_launch_desktop_shell_forwards_hidden_presentation_to_electron_argv(tmp_
         "core.infrastructure.branch_workspace.resolve_branch_workspace",
         lambda _requested: (_ for _ in ()).throw(BranchWorkspaceError("not a git checkout")),
     )
+    _confirm_spawn_as_owner(monkeypatch)
     result = desktop_shell.launch_desktop_shell(
         project_root=tmp_path, open_workbench=True, hidden_presentation=True,
         launch_request_id="launch_" + "a" * 32,
@@ -3056,3 +3084,547 @@ def test_rebuild_desktop_shell_promote_sharing_violation_falls_back_to_npm(tmp_p
     assert not (tmp_path / desktop_shell.PREVIOUS_WIN_UNPACKED_RELATIVE).exists()
     # The promotion lock must not outlive the failed promote either.
     assert not desktop_shell._refresh_lock_path(tmp_path, desktop_shell.PREBUILD_LOCK_RELATIVE).is_file()
+
+
+# ---------------------------------------------------------------------------
+# Launch confirmation protocol: post-launch owner confirmation window,
+# pre-launch lock-empty gate and launchPid/ownerPid pid semantics.
+# ---------------------------------------------------------------------------
+
+
+class _FakeShellProcess:
+    """A spawned shell that stays alive for ``alive_polls`` polls, then exits."""
+
+    def __init__(self, pid: int, *, alive_polls: int | None = 0, exit_code: int = 0) -> None:
+        self.pid = int(pid)
+        self.returncode: int | None = None
+        self.exit_code = int(exit_code)
+        self._alive_polls = alive_polls
+        self.polls = 0
+
+    def poll(self) -> int | None:
+        self.polls += 1
+        if self._alive_polls is None or self.polls <= self._alive_polls:
+            return None
+        self.returncode = self.exit_code
+        return self.returncode
+
+
+def _fast_confirmation_window(monkeypatch) -> None:
+    monkeypatch.setattr(desktop_shell, "LAUNCH_CONFIRMATION_TIMEOUT_SECONDS", 0.2)
+    monkeypatch.setattr(desktop_shell, "LAUNCH_CONFIRMATION_POLL_SECONDS", 0.01)
+    monkeypatch.setattr(
+        desktop_shell,
+        "_capture_launch_identity",
+        lambda pid: {"pid": int(pid), "createTime": 1000.0, "executable": "shell.exe"},
+    )
+
+
+def _patch_owner_reader(monkeypatch, records: list, *, status: str = "match") -> list:
+    """Owner reads consume ``records`` in order, repeating the last entry.
+
+    ``records`` entries may be ``None`` (no record) or an owner dict; ``status``
+    is what ``_identity_status`` answers for every read.
+    """
+
+    from core.launcher import desktop_shell_owner
+
+    reads: list[int] = []
+
+    def read(_root):
+        index = min(len(reads), len(records) - 1)
+        reads.append(index)
+        return records[index]
+
+    monkeypatch.setattr(desktop_shell_owner, "read_desktop_shell_owner", read)
+    monkeypatch.setattr(desktop_shell_owner, "_identity_status", lambda record: status)
+    return reads
+
+
+def _live_owner(pid: int = 999) -> dict:
+    return {"owner": "electron", "pid": int(pid), "createTime": 500.0, "executable": "C:/old/Vibelution.exe"}
+
+
+def test_launch_confirmation_confirms_child_holding_owner_file(tmp_path, monkeypatch):
+    _fast_confirmation_window(monkeypatch)
+    _patch_owner_reader(monkeypatch, [{"owner": "electron", "pid": 4242, "createTime": 1000.0, "executable": "shell.exe"}])
+    process = _FakeShellProcess(4242, alive_polls=1)
+
+    confirmation = desktop_shell._confirm_desktop_shell_launch(process, shell_root=tmp_path)
+
+    assert confirmation["state"] == "confirmed"
+    assert confirmation["launched"] is True
+    assert confirmation["degraded"] is False
+    assert confirmation["ownerPid"] == 4242
+    assert confirmation["evidence"] == "owner_file"
+
+
+def test_launch_confirmation_confirms_child_via_desktop_debug_when_owner_file_lags(tmp_path, monkeypatch):
+    _fast_confirmation_window(monkeypatch)
+    _patch_owner_reader(monkeypatch, [None])
+    record_path = desktop_shell._desktop_debug_record_path(tmp_path)
+    record_path.parent.mkdir(parents=True)
+    record_path.write_text(json.dumps({"pid": 4242, "createTime": 1000.0, "executable": "shell.exe"}), encoding="utf-8")
+    process = _FakeShellProcess(4242, alive_polls=1)
+
+    confirmation = desktop_shell._confirm_desktop_shell_launch(process, shell_root=tmp_path)
+
+    assert confirmation["state"] == "confirmed"
+    assert confirmation["evidence"] == "desktop_debug"
+    assert confirmation["ownerPid"] == 4242
+
+
+def test_launch_confirmation_confirmed_owner_file_takes_priority(tmp_path, monkeypatch):
+    _fast_confirmation_window(monkeypatch)
+    _patch_owner_reader(monkeypatch, [{"owner": "electron", "pid": 4242}])
+    record_path = desktop_shell._desktop_debug_record_path(tmp_path)
+    record_path.parent.mkdir(parents=True)
+    record_path.write_text(json.dumps({"pid": 4242, "createTime": 7.0}), encoding="utf-8")
+    process = _FakeShellProcess(4242)
+
+    confirmation = desktop_shell._confirm_desktop_shell_launch(process, shell_root=tmp_path)
+
+    assert confirmation["evidence"] == "owner_file"
+
+
+def test_launch_confirmation_reports_bow_out_to_live_owner(tmp_path, monkeypatch):
+    _fast_confirmation_window(monkeypatch)
+    _patch_owner_reader(monkeypatch, [_live_owner(999)])
+    process = _FakeShellProcess(4242, exit_code=0)
+
+    confirmation = desktop_shell._confirm_desktop_shell_launch(process, shell_root=tmp_path)
+
+    assert confirmation["state"] == "bowed_out"
+    assert confirmation["launched"] is False
+    assert confirmation["errorCode"] == "BOWED_OUT_TO_LIVE_OWNER"
+    assert confirmation["ownerPid"] == 999
+    assert confirmation["exitCode"] == 0
+    assert confirmation["owner"]["pid"] == 999
+    assert confirmation["owner"]["executable"] == "C:/old/Vibelution.exe"
+
+
+def test_launch_confirmation_reports_crash_when_no_live_owner(tmp_path, monkeypatch):
+    _fast_confirmation_window(monkeypatch)
+    _patch_owner_reader(monkeypatch, [None])
+    process = _FakeShellProcess(4242, exit_code=3)
+
+    confirmation = desktop_shell._confirm_desktop_shell_launch(process, shell_root=tmp_path)
+
+    assert confirmation["state"] == "crashed"
+    assert confirmation["launched"] is False
+    assert confirmation["errorCode"] == "LAUNCH_CRASHED"
+    assert confirmation["exitCode"] == 3
+    assert confirmation["ownerPid"] == 0
+
+
+def test_launch_confirmation_ignores_dead_owner_record(tmp_path, monkeypatch):
+    """A dead-record lock holder must not turn a crash into a bow-out."""
+    _fast_confirmation_window(monkeypatch)
+    _patch_owner_reader(monkeypatch, [_live_owner(999)], status="dead")
+    process = _FakeShellProcess(4242, exit_code=1)
+
+    confirmation = desktop_shell._confirm_desktop_shell_launch(process, shell_root=tmp_path)
+
+    assert confirmation["state"] == "crashed"
+    assert confirmation["errorCode"] == "LAUNCH_CRASHED"
+
+
+def test_launch_confirmation_ignores_recycled_owner_record(tmp_path, monkeypatch):
+    """A mismatched (recycled-pid) owner record is residue, not a live holder."""
+    _fast_confirmation_window(monkeypatch)
+    _patch_owner_reader(monkeypatch, [_live_owner(999)], status="mismatch")
+    process = _FakeShellProcess(4242, exit_code=2)
+
+    confirmation = desktop_shell._confirm_desktop_shell_launch(process, shell_root=tmp_path)
+
+    assert confirmation["state"] == "crashed"
+    assert confirmation["errorCode"] == "LAUNCH_CRASHED"
+
+
+def test_launch_confirmation_degrades_to_weak_alive_without_owner_record(tmp_path, monkeypatch):
+    """No owner record anywhere: child alive at the deadline is a weak success."""
+    _fast_confirmation_window(monkeypatch)
+    _patch_owner_reader(monkeypatch, [None])
+    process = _FakeShellProcess(4242, alive_polls=None)
+
+    confirmation = desktop_shell._confirm_desktop_shell_launch(process, shell_root=tmp_path)
+
+    assert confirmation["state"] == "weak_alive"
+    assert confirmation["launched"] is True
+    assert confirmation["degraded"] is True
+    assert confirmation["ownerPid"] == 0
+
+
+def test_launch_confirmation_alive_child_with_foreign_live_owner_is_unconfirmed(tmp_path, monkeypatch):
+    _fast_confirmation_window(monkeypatch)
+    _patch_owner_reader(monkeypatch, [_live_owner(999)])
+    process = _FakeShellProcess(4242, alive_polls=None)
+
+    confirmation = desktop_shell._confirm_desktop_shell_launch(process, shell_root=tmp_path)
+
+    assert confirmation["state"] == "alive_unconfirmed"
+    assert confirmation["launched"] is True
+    assert confirmation["degraded"] is True
+    assert confirmation["ownerPid"] == 999
+
+
+def test_launch_confirmation_treats_unknown_identity_owner_as_live(tmp_path, monkeypatch):
+    """An identity-less owner record with a live pid still holds the lock."""
+    from core.launcher import desktop_shell_owner
+
+    _fast_confirmation_window(monkeypatch)
+    _patch_owner_reader(monkeypatch, [{"owner": "electron", "pid": 999}], status="unknown")
+    monkeypatch.setattr(desktop_shell_owner, "is_pid_alive", lambda pid: pid == 999)
+    process = _FakeShellProcess(4242, exit_code=0)
+
+    confirmation = desktop_shell._confirm_desktop_shell_launch(process, shell_root=tmp_path)
+
+    assert confirmation["state"] == "bowed_out"
+    assert confirmation["owner"]["identityStatus"] == "unknown"
+
+
+def test_launch_packaged_desktop_shell_reports_bow_out_with_owner_identity(tmp_path, monkeypatch):
+    exe = desktop_shell.packaged_desktop_exe(tmp_path)
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"mz")
+    _fast_confirmation_window(monkeypatch)
+    _patch_owner_reader(monkeypatch, [_live_owner(999)])
+    monkeypatch.setattr(
+        desktop_shell, "_spawn_visible_electron",
+        lambda args, **kwargs: _FakeShellProcess(4242),
+    )
+
+    result = desktop_shell.launch_packaged_desktop_shell(project_root=tmp_path, then_lifecycle="start")
+
+    assert result["launched"] is False
+    assert result["errorCode"] == "BOWED_OUT_TO_LIVE_OWNER"
+    assert result["launchPid"] == 4242
+    assert result["pid"] == 4242  # legacy alias of launchPid
+    assert result["ownerPid"] == 999
+    assert result["forwarded"] is True  # the owner was already live: a forward, not a lost primary
+    assert result["exitCode"] == 0
+    assert result["confirmation"]["state"] == "bowed_out"
+
+
+def test_launch_desktop_shell_refuses_when_primary_expected_and_owner_live(tmp_path, monkeypatch):
+    spec = {"schemaVersion": 1, "kind": "packaged", "args": ["Vibelution.exe", "--workspace", str(tmp_path)],
+            "cwd": str(tmp_path), "reason": "current"}
+    monkeypatch.setattr(desktop_shell, "resolve_desktop_shell_launch", lambda *_args, **_kwargs: dict(spec))
+    _patch_owner_reader(monkeypatch, [_live_owner(999)])
+
+    def fail_spawn(args, **kwargs):
+        raise AssertionError("must not spawn into a verified live owner lock")
+
+    monkeypatch.setattr(desktop_shell, "_spawn_visible_electron", fail_spawn)
+
+    result = desktop_shell.launch_desktop_shell(project_root=tmp_path, then_lifecycle="restart", expect_primary=True)
+
+    assert result["launched"] is False
+    assert result["errorCode"] == "LIVE_OWNER_HOLDING_LOCK"
+    assert result["launchPid"] == 0
+    assert result["ownerPid"] == 999
+    assert result["owner"]["pid"] == 999
+    assert result["confirmation"]["state"] == "refused"
+
+
+def test_launch_packaged_desktop_shell_refuses_when_primary_expected_and_owner_live(tmp_path, monkeypatch):
+    exe = desktop_shell.packaged_desktop_exe(tmp_path)
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"mz")
+    _patch_owner_reader(monkeypatch, [_live_owner(999)])
+    monkeypatch.setattr(
+        desktop_shell, "_spawn_visible_electron",
+        lambda args, **kwargs: (_ for _ in ()).throw(AssertionError("must not spawn into a live owner lock")),
+    )
+
+    result = desktop_shell.launch_packaged_desktop_shell(project_root=tmp_path, expect_primary=True)
+
+    assert result["launched"] is False
+    assert result["errorCode"] == "LIVE_OWNER_HOLDING_LOCK"
+    assert result["ownerPid"] == 999
+
+
+def test_launch_desktop_shell_forwards_to_live_owner_without_primary_expectation(tmp_path, monkeypatch):
+    """The bridge forwards lifecycle commands through a bow-out; it must stay possible."""
+    spec = {"schemaVersion": 1, "kind": "unpackaged", "args": ["electron.exe", "main.js", "--workspace", str(tmp_path)],
+            "cwd": str(tmp_path), "reason": "forward_to_live_shell"}
+    monkeypatch.setattr(desktop_shell, "resolve_desktop_shell_launch", lambda *_args, **_kwargs: dict(spec))
+    _fast_confirmation_window(monkeypatch)
+    _patch_owner_reader(monkeypatch, [_live_owner(999)])
+    monkeypatch.setattr(desktop_shell, "_spawn_visible_electron", lambda args, **kwargs: _FakeShellProcess(4242))
+
+    result = desktop_shell.launch_desktop_shell(project_root=tmp_path, then_lifecycle="start")
+
+    assert result["launched"] is False
+    assert result["errorCode"] == "BOWED_OUT_TO_LIVE_OWNER"
+    assert result["forwarded"] is True
+    assert result["reason"] == "forward_to_live_shell"
+
+
+def test_launch_desktop_shell_confirms_new_primary_and_splits_pids(tmp_path, monkeypatch):
+    spec = {"schemaVersion": 1, "kind": "packaged", "args": ["Vibelution.exe", "--workspace", str(tmp_path)],
+            "cwd": str(tmp_path), "reason": "current"}
+    monkeypatch.setattr(desktop_shell, "resolve_desktop_shell_launch", lambda *_args, **_kwargs: dict(spec))
+    _fast_confirmation_window(monkeypatch)
+    # Pre-spawn the lock is free; the child claims it during the window.
+    _patch_owner_reader(monkeypatch, [None, {"owner": "electron", "pid": 4242, "createTime": 1000.0}])
+    monkeypatch.setattr(desktop_shell, "_spawn_visible_electron", lambda args, **kwargs: _FakeShellProcess(4242, alive_polls=1))
+
+    result = desktop_shell.launch_desktop_shell(project_root=tmp_path, then_lifecycle="start", expect_primary=True)
+
+    assert result["launched"] is True
+    assert result["launchPid"] == 4242
+    assert result["ownerPid"] == 4242
+    assert result["pid"] == 4242
+    assert result["confirmation"]["state"] == "confirmed"
+    assert result["confirmation"]["evidence"] == "owner_file"
+
+
+def test_refresh_blocks_after_pid_wait_when_live_owner_holds_lock(tmp_path, monkeypatch):
+    """Path 1: helper waited for a pid, but another live owner still holds the lock."""
+    calls: list[str] = []
+
+    def fail_rebuild(**_kwargs):
+        raise AssertionError("must not rebuild when a live owner holds the lock")
+
+    def fail_launch(**_kwargs):
+        raise AssertionError("must not launch when a live owner holds the lock")
+
+    def fake_wait(pid, **_kwargs):
+        calls.append(f"wait:{pid}")
+
+    monkeypatch.setattr(desktop_shell, "_wait_for_pid_exit", fake_wait)
+    _patch_owner_reader(monkeypatch, [_live_owner(999)])
+    monkeypatch.setattr(desktop_shell, "rebuild_desktop_shell", fail_rebuild)
+    monkeypatch.setattr(desktop_shell, "launch_packaged_desktop_shell", fail_launch)
+    monkeypatch.setattr(desktop_shell, "_append_refresh_log", lambda *_a, **_k: None)
+
+    result = desktop_shell.run_desktop_shell_refresh(wait_pid=123, project_root=tmp_path)
+
+    assert calls == ["wait:123"]
+    assert result["refreshed"] is False
+    assert result["reason"] == "live_owner_holding_lock"
+    assert result["errorCode"] == "LIVE_OWNER_HOLDING_LOCK"
+    assert result["ownerPid"] == 999
+    assert result["owner"]["executable"] == "C:/old/Vibelution.exe"
+    assert result["launchPid"] == 0
+    marker = desktop_shell.recent_desktop_shell_refresh_failure(tmp_path)
+    assert marker is not None and marker["reason"] == "live_owner_holding_lock"
+
+
+def test_refresh_blocks_with_wait_pid_zero_when_live_owner_holds_lock(tmp_path, monkeypatch):
+    """Path 2: --wait-pid 0 never waits, so the lock gate is the only defense."""
+
+    def fail_wait(*_args, **_kwargs):
+        raise AssertionError("wait_pid=0 must not wait")
+
+    def fail_launch(**_kwargs):
+        raise AssertionError("must not launch when a live owner holds the lock")
+
+    monkeypatch.setattr(desktop_shell, "_wait_for_pid_exit", fail_wait)
+    _patch_owner_reader(monkeypatch, [_live_owner(999)])
+    monkeypatch.setattr(desktop_shell, "rebuild_desktop_shell", lambda **_k: pytest.fail("must not rebuild"))
+    monkeypatch.setattr(desktop_shell, "launch_packaged_desktop_shell", fail_launch)
+    monkeypatch.setattr(desktop_shell, "_append_refresh_log", lambda *_a, **_k: None)
+
+    result = desktop_shell.run_desktop_shell_refresh(wait_pid=0, project_root=tmp_path)
+
+    assert result["refreshed"] is False
+    assert result["errorCode"] == "LIVE_OWNER_HOLDING_LOCK"
+
+
+def test_refresh_rebuild_fallback_refuses_launch_when_owner_appeared(tmp_path, monkeypatch):
+    """Path 3: the owner came up during the build; the recovery launch must refuse."""
+    exe = desktop_shell.packaged_desktop_exe(tmp_path)
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"mz")
+    _fast_confirmation_window(monkeypatch)
+    _patch_owner_reader(monkeypatch, [None, _live_owner(999)])
+    spawned: list = []
+    monkeypatch.setattr(desktop_shell, "_spawn_visible_electron",
+                        lambda args, **kwargs: spawned.append(args) or _FakeShellProcess(4242))
+
+    def fail_rebuild(**_kwargs):
+        raise RuntimeError("desktop shell is still stale after rebuild: frontend_source_mismatch")
+
+    monkeypatch.setattr(desktop_shell, "rebuild_desktop_shell", fail_rebuild)
+    monkeypatch.setattr(desktop_shell, "_append_refresh_log", lambda *_a, **_k: None)
+
+    result = desktop_shell.run_desktop_shell_refresh(wait_pid=0, project_root=tmp_path)
+
+    assert spawned == []
+    assert result["refreshed"] is False
+    assert result["reason"] == "rebuild_failed"
+    assert result["fallbackLaunch"]["launched"] is False
+    assert result["fallbackLaunch"]["errorCode"] == "LIVE_OWNER_HOLDING_LOCK"
+    assert result["launchPid"] == 0
+    assert result["ownerPid"] == 999
+
+
+def test_refresh_unpackaged_direct_launch_refuses_when_owner_appeared(tmp_path, monkeypatch):
+    """Path 4: the unpackaged direct relaunch must demand a primary shell."""
+    _fast_confirmation_window(monkeypatch)
+    _patch_owner_reader(monkeypatch, [None, _live_owner(999)])
+    spec = {"schemaVersion": 1, "kind": "unpackaged", "args": ["electron.exe", "main.js", "--workspace", str(tmp_path)],
+            "cwd": str(tmp_path), "reason": "current"}
+    monkeypatch.setattr(desktop_shell, "resolve_desktop_shell_launch", lambda *_a, **_k: dict(spec))
+    monkeypatch.setattr(desktop_shell, "ensure_unpackaged_electron", lambda root: {"rebuilt": False})
+    spawned: list = []
+    monkeypatch.setattr(desktop_shell, "_spawn_visible_electron",
+                        lambda args, **kwargs: spawned.append(args) or _FakeShellProcess(4242))
+    monkeypatch.setattr(desktop_shell, "_append_refresh_log", lambda *_a, **_k: None)
+
+    result = desktop_shell.run_desktop_shell_refresh(wait_pid=0, project_root=tmp_path, shell_kind="unpackaged")
+
+    assert spawned == []
+    assert result["refreshed"] is False
+    assert result["reason"] == "launch_not_confirmed"
+    assert result["errorCode"] == "LIVE_OWNER_HOLDING_LOCK"
+    assert result["launch"]["errorCode"] == "LIVE_OWNER_HOLDING_LOCK"
+    marker = desktop_shell.recent_desktop_shell_refresh_failure(tmp_path)
+    assert marker is not None and marker["reason"] == "launch_not_confirmed"
+
+
+def test_refresh_gate_ignores_dead_owner_record(tmp_path, monkeypatch):
+    """A dead owner record must not block the refresh: the lock is genuinely free."""
+    launches: list[dict] = []
+
+    def fake_launch(**kwargs):
+        launches.append(kwargs)
+        return {"launched": True, "pid": 31}
+
+    _patch_owner_reader(monkeypatch, [_live_owner(999)], status="dead")
+    monkeypatch.setattr(desktop_shell, "rebuild_desktop_shell", lambda **_k: {"rebuilt": True})
+    monkeypatch.setattr(desktop_shell, "launch_packaged_desktop_shell", fake_launch)
+
+    result = desktop_shell.run_desktop_shell_refresh(wait_pid=0, project_root=tmp_path)
+
+    assert result["refreshed"] is True
+    assert launches == [{"project_root": tmp_path, "then_lifecycle": "", "open_workbench": True, "expect_primary": True}]
+
+
+def test_refresh_reports_unconfirmed_launch_and_records_cooldown(tmp_path, monkeypatch):
+    """A bowed-out launch must fail the refresh and arm the idle-loop breaker."""
+
+    def fake_launch(**_kwargs):
+        return {
+            "launched": False,
+            "launchPid": 5,
+            "pid": 5,
+            "ownerPid": 999,
+            "errorCode": "BOWED_OUT_TO_LIVE_OWNER",
+            "exitCode": 0,
+            "confirmation": {"state": "bowed_out"},
+        }
+
+    monkeypatch.setattr(desktop_shell, "rebuild_desktop_shell", lambda **_k: {"rebuilt": True})
+    monkeypatch.setattr(desktop_shell, "launch_packaged_desktop_shell", fake_launch)
+    monkeypatch.setattr(desktop_shell, "_append_refresh_log", lambda *_a, **_k: None)
+
+    result = desktop_shell.run_desktop_shell_refresh(wait_pid=0, project_root=tmp_path)
+
+    assert result["refreshed"] is False
+    assert result["reason"] == "launch_not_confirmed"
+    assert result["errorCode"] == "BOWED_OUT_TO_LIVE_OWNER"
+    assert result["launchPid"] == 5
+    assert result["ownerPid"] == 999
+    marker = desktop_shell.recent_desktop_shell_refresh_failure(tmp_path)
+    assert marker is not None and marker["reason"] == "launch_not_confirmed"
+
+
+def test_refresh_result_carries_launch_and_owner_pids_not_bare_shell_pid(tmp_path, monkeypatch):
+    """The refresh return body splits launchPid/ownerPid and adds no bare pid."""
+
+    def fake_launch(**_kwargs):
+        return {
+            "launched": True,
+            "launchPid": 7,
+            "pid": 7,
+            "ownerPid": 7,
+            "confirmation": {"state": "confirmed", "evidence": "owner_file"},
+        }
+
+    monkeypatch.setattr(desktop_shell, "rebuild_desktop_shell", lambda **_k: {"rebuilt": True})
+    monkeypatch.setattr(desktop_shell, "launch_packaged_desktop_shell", fake_launch)
+
+    result = desktop_shell.run_desktop_shell_refresh(wait_pid=0, project_root=tmp_path)
+
+    assert result["refreshed"] is True
+    assert result["launchPid"] == 7
+    assert result["ownerPid"] == 7
+    assert "pid" not in result
+    assert result["launch"]["confirmation"]["state"] == "confirmed"
+
+
+def test_refresh_legacy_launch_result_still_counts_as_refreshed(tmp_path, monkeypatch):
+    """Results without confirmation fields (older callers) keep spawned-means-launched."""
+
+    monkeypatch.setattr(desktop_shell, "rebuild_desktop_shell", lambda **_k: {"rebuilt": True})
+    monkeypatch.setattr(desktop_shell, "launch_packaged_desktop_shell", lambda **_k: {"pid": 55})
+
+    result = desktop_shell.run_desktop_shell_refresh(wait_pid=0, project_root=tmp_path)
+
+    assert result["refreshed"] is True
+    assert result["launchPid"] == 55
+    assert result["ownerPid"] == 0
+
+
+def test_pid_alive_with_identity_rejects_recycled_pid(monkeypatch):
+    monkeypatch.setattr(desktop_shell, "_pid_alive", lambda pid: True)
+
+    def create_time(pid):
+        return {111: 1000.0, 222: 9000.0}.get(pid)
+
+    monkeypatch.setattr(desktop_shell, "_process_create_time", create_time)
+
+    assert desktop_shell._pid_alive_with_identity(111, 1000.0) is True
+    assert desktop_shell._pid_alive_with_identity(111, 1000.5) is True  # within tolerance
+    # The pid now names a process created at 9000: not the one we wait for.
+    assert desktop_shell._pid_alive_with_identity(111, 900.0) is False
+    # Unknown create time falls back to bare existence.
+    assert desktop_shell._pid_alive_with_identity(222, None) is True
+    assert desktop_shell._pid_alive_with_identity(222, 0) is True
+
+
+def test_wait_for_pid_exit_treats_recycled_pid_as_exited(monkeypatch):
+    """pid alive but create time moved: the original process is gone, stop waiting."""
+    reads: list[float | None] = [1000.0, 5000.0, 5000.0]
+    monkeypatch.setattr(desktop_shell, "_pid_alive", lambda pid: True)
+    monkeypatch.setattr(desktop_shell, "_process_create_time", lambda pid: reads.pop(0) if reads else 5000.0)
+    monkeypatch.setattr(desktop_shell, "time", types.SimpleNamespace(monotonic=time.monotonic, sleep=lambda _seconds: None))
+
+    desktop_shell._wait_for_pid_exit(4242, timeout_seconds=30.0)  # must not raise
+
+
+def test_wait_for_pid_exit_times_out_for_live_same_identity(monkeypatch):
+    monkeypatch.setattr(desktop_shell, "_pid_alive", lambda pid: True)
+    monkeypatch.setattr(desktop_shell, "_process_create_time", lambda pid: 1000.0)
+    now = {"value": 0.0}
+
+    def advancing_monotonic():
+        now["value"] += 0.5
+        return now["value"]
+
+    monkeypatch.setattr(desktop_shell, "time", types.SimpleNamespace(monotonic=advancing_monotonic, sleep=lambda _seconds: None))
+
+    with pytest.raises(TimeoutError):
+        desktop_shell._wait_for_pid_exit(4242, timeout_seconds=1.0)
+
+
+def test_expected_create_time_prefers_owner_record_for_wait_pid(tmp_path, monkeypatch):
+    from core.launcher import desktop_shell_owner
+
+    monkeypatch.setattr(desktop_shell, "_process_create_time", lambda pid: 4321.0)
+    monkeypatch.setattr(desktop_shell_owner, "read_desktop_shell_owner", lambda _root: _live_owner(123))
+    assert desktop_shell._expected_create_time_for_pid(tmp_path, 123) == 500.0
+    # A different pid falls through to the process probe.
+    monkeypatch.setattr(desktop_shell_owner, "read_desktop_shell_owner", lambda _root: _live_owner(999))
+    assert desktop_shell._expected_create_time_for_pid(tmp_path, 123) == 4321.0
+
+
+def test_launched_process_alive_uses_owned_handle_over_pid_probes(monkeypatch):
+    """A poll-capable child answers liveness from its handle, never from pid probes."""
+    monkeypatch.setattr(desktop_shell, "_pid_alive", lambda pid: pytest.fail("handle liveness must not probe pids"))
+
+    assert desktop_shell._launched_process_alive(_FakeShellProcess(4242, alive_polls=None), {}) is True
+    assert desktop_shell._launched_process_alive(_FakeShellProcess(4242), {}) is False
