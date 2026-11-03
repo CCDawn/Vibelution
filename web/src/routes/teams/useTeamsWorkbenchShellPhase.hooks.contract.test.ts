@@ -44,4 +44,26 @@ describe("useTeamsWorkbenchShellPhase hook order", () => {
     expect(guardIndex).toBeGreaterThan(-1);
     expect(navigateIndex).toBeGreaterThan(guardIndex);
   });
+
+  it("skips canonicalization for live team view navigation params", () => {
+    // The team discussion / records buttons write teamView / workflowWorkspace
+    // as in-app navigation after the detail query resolves; the generic
+    // workspace model treats both as live params, so the effect must not
+    // absorb them as retired deep links (that replace is the bounce-back bug).
+    expect(shellSource).toContain(
+      "if (searchParams.has(\"teamView\") || searchParams.has(\"workflowWorkspace\")) {",
+    );
+    // The guard sits after the teamConversation exemption and before the
+    // canonical route is built or navigated.
+    const exemptionIndex = shellSource.indexOf(
+      "searchParams.get(\"teamConversationTeamId\") === effectiveTeamId",
+    );
+    const guardIndex = shellSource.indexOf(
+      "if (searchParams.has(\"teamView\") || searchParams.has(\"workflowWorkspace\")) {",
+    );
+    const navigateIndex = shellSource.indexOf("navigate(canonicalHref, { replace: true })");
+    expect(exemptionIndex).toBeGreaterThan(-1);
+    expect(guardIndex).toBeGreaterThan(exemptionIndex);
+    expect(navigateIndex).toBeGreaterThan(guardIndex);
+  });
 });

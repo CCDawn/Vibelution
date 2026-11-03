@@ -6,6 +6,7 @@ import {
   canonicalChallengeCupWorkspaceRouteForEffectiveTeam,
   challengeQuestionDetailRoute,
   isChallengeCupCanonicalizationTeamOwned,
+  isChallengeCupWorkspaceCanonicalizationEligible,
   isSameChallengeCupWorkspaceTeam,
   parseResearchWorkspaceView,
   researchCanvasRoute,
@@ -135,5 +136,21 @@ describe("researchWorkspaceModel", () => {
         new URLSearchParams("teamId=research-team&team=ai-search-team"),
       ),
     ).toBe(false);
+  });
+
+  it("still absorbs retired-view deep links that carry no team navigation params", () => {
+    // A refresh / shared URL with a retired researchView (no teamView or
+    // workflowWorkspace present) stays canonicalization-eligible: discussion
+    // converges onto the single workflow shell instead of reviving a surface.
+    expect(isChallengeCupWorkspaceCanonicalizationEligible("discussion")).toBe(true);
+    expect(isChallengeCupWorkspaceCanonicalizationEligible(null)).toBe(true);
+    expect(isChallengeCupWorkspaceCanonicalizationEligible("workflow")).toBe(true);
+    const route = canonicalChallengeCupWorkspaceRouteForEffectiveTeam(
+      RESEARCH_TEAM_ID,
+      new URLSearchParams("teamId=research-team&researchView=discussion"),
+    );
+    expect(route).toContain("researchView=workflow");
+    expect(route).toContain("workflowId=challenge-cup-research");
+    expect(route).not.toContain("researchView=discussion");
   });
 });
