@@ -18,10 +18,13 @@ from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.services import (
     agent_directory_service,
+    config_service,
     self_evolution_control_service,
     session_service,
     supervised_control_service,
 )
+from core.web.services.session import directory_runtime
+from tests.test_agent_config_workspace_service import _fake_config_workspace, _use_tmp_project_root
 from tests.helpers.web_chat_state import _seed_chat_state
 
 
@@ -29,7 +32,18 @@ client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_tok
 
 
 @pytest.fixture(autouse=True)
-def disable_runtime_manager_live_control(monkeypatch: pytest.MonkeyPatch):
+def disable_runtime_manager_live_control(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    for name, path in {
+        "VIBELUTION_CONFIG_PATH": tmp_path / "config" / "config.toml",
+        "VIBELUTION_CONFIG_HOME": tmp_path / "config",
+        "VIBELUTION_DATA_HOME": tmp_path / "data",
+        "VIBELUTION_PROJECTS_HOME": tmp_path / "projects",
+        "USERPROFILE": tmp_path / "profile",
+        "LOCALAPPDATA": tmp_path / "local-app-data",
+    }.items():
+        monkeypatch.setenv(name, str(path))
+    monkeypatch.setattr(directory_runtime, "_STORE", None)
+    monkeypatch.setattr(directory_runtime, "_PROJECT_ROOT", None)
     monkeypatch.setattr(supervised_control_service, "_runtime_manager_live_control_enabled", lambda: False)
     monkeypatch.setattr(self_evolution_control_service, "_runtime_manager_live_control_enabled", lambda: False)
 
@@ -46,6 +60,14 @@ def _visible_conversation_message_text(message: dict) -> str:
 
 
 def test_session_detail_surfaces_missing_agent_placeholder(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    created = []
+    original_ensure = session_service.ensure_agent_for_session
+    monkeypatch.setattr(
+        session_service, "ensure_agent_for_session",
+        lambda *args, **kwargs: created.append(args) or original_ensure(*args, **kwargs),
+    )
     save_chat_state(
         tmp_path,
         {
@@ -87,6 +109,50 @@ def test_session_detail_surfaces_missing_agent_placeholder(tmp_path, monkeypatch
     assert detail["agentInboxMessages"] == []
     assert detail["toolPolicy"] is None
     assert detail["memoryPolicy"] is None
+    for _ in range(3):
+        select_response = client.post("/api/sessions/session-live/select")
+        assert select_response.status_code == 200
+        assert select_response.json()["agentMissing"] is True
+        session_service._load_conversations(repair=True)
+        reloaded = client.get("/api/sessions/session-live").json()
+        assert reloaded["agentMissing"] is True
+        assert reloaded["agentStatusCode"] == "missing_agent"
+        persisted = session_service.load_session_chat_state(tmp_path, "session-live")
+        assert persisted["agentMissingId"] == persisted["agent_missing_id"] == "agent-missing"
+        assert persisted["agent_id"] == persisted["agentId"] == ""
+    assert created == []
+
+
+def test_session_detail_does_not_project_another_agent_as_missing_identity(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    other = {
+        "agentId": "other-agent", "directSessionId": "session-live", "status": "active",
+        "displayName": "Other", "primaryMode": "chat",
+    }
+    monkeypatch.setattr(session_service, "_agent_lookup_for_conversations", lambda **kwargs: {"other-agent": other})
+    monkeypatch.setattr(
+        session_service, "ensure_agent_for_session",
+        lambda *args, **kwargs: pytest.fail("Detail must preserve the known missing identity"),
+    )
+    _seed_chat_state(tmp_path, conversations=[{
+        "conversation_id": "session-live", "agent_missing_id": "original-agent",
+        "agentMissing": True, "agentStatusCode": "missing_agent", "messages": [],
+    }])
+
+    for _ in range(3):
+        for response in (
+            client.get("/api/sessions/session-live"),
+            client.post("/api/sessions/session-live/select"),
+        ):
+            assert response.status_code == 200
+            detail = response.json()
+            identity = {key: detail[key] for key in ("agentId", "agentMissing", "agentStatusCode", "agentMissingId")}
+            assert identity == {
+                "agentId": "", "agentMissing": True,
+                "agentStatusCode": "missing_agent", "agentMissingId": "original-agent",
+            }, identity
+        session_service._load_conversations(repair=True)
 
 
 def test_session_detail_context_usage_comes_from_ledger_after_restart(tmp_path, monkeypatch):

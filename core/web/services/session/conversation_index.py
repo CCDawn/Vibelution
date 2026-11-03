@@ -818,15 +818,27 @@ def _ensure_conversation_agent_metadata(
             agent_id=deleted_agent_id,
         ) or changed
         return changed
+    # A missing binding still declares an identity. Clearing the public bound
+    # fields must not turn the next read into a new, masterless Session.
+    existing_agent_id = existing_agent_id or str(
+        conversation.get("agent_missing_id") or conversation.get("agentMissingId") or ""
+    ).strip()
+    if not existing_agent_id:
+        from . import directory_runtime
+
+        # Observe only the already-open control plane. A legacy/partial runtime
+        # payload cannot authorize minting a second owner for an existing row.
+        pin = directory_runtime.pin_open_directory_store(s.PROJECT_ROOT)
+        if pin is not None:
+            directory_session = pin.store.repository.get_session(conversation_id, include_archived=True)
+            if not directory_runtime.directory_store_pin_is_current(pin):
+                raise ValueError("Directory store binding changed during Session Agent metadata repair")
+            existing_agent_id = str((directory_session or {}).get("agentId") or "").strip()
     existing_agent = s._agent_from_lookup(agent_by_id, existing_agent_id) if existing_agent_id else None
-    if existing_agent is None:
+    if existing_agent is None and not existing_agent_id:
         recovered_agent = s._recover_active_direct_session_agent(
             conversation_id,
             agent_by_id=agent_by_id,
-            preferred_agent_id=(
-                existing_agent_id
-                or str(conversation.get("agent_missing_id") or conversation.get("agentMissingId") or "").strip()
-            ),
         )
         if recovered_agent is not None:
             existing_agent = recovered_agent

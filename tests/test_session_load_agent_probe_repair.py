@@ -21,7 +21,7 @@ from core.web.services import (
     config_service,
     session_service,
 )
-from core.web.services.session import conversation_index
+from core.web.services.session import conversation_index, directory_runtime
 from tests.test_agent_config_workspace_service import (
     _fake_config_workspace,
     _use_tmp_project_root,
@@ -31,7 +31,19 @@ _TEST_MODEL_ID = "relay_gpt_5_6_luna"
 
 
 @pytest.fixture(autouse=True)
-def _isolated_probe_cache():
+def _isolated_probe_cache(tmp_path, monkeypatch):
+    for name, path in {
+        "VIBELUTION_CONFIG_PATH": tmp_path / "config" / "config.toml",
+        "VIBELUTION_CONFIG_HOME": tmp_path / "config",
+        "VIBELUTION_DATA_HOME": tmp_path / "data",
+        "VIBELUTION_PROJECTS_HOME": tmp_path / "projects",
+        "USERPROFILE": tmp_path / "profile",
+        "LOCALAPPDATA": tmp_path / "local-app-data",
+    }.items():
+        monkeypatch.setenv(name, str(path))
+    # Never inherit a product store publication into these isolated repairs.
+    monkeypatch.setattr(directory_runtime, "_STORE", None)
+    monkeypatch.setattr(directory_runtime, "_PROJECT_ROOT", None)
     conversation_index._CONVERSATION_AGENT_PROBE_STATE.clear()
     yield
     conversation_index._CONVERSATION_AGENT_PROBE_STATE.clear()
@@ -111,6 +123,199 @@ def _seed_masterless_conversations(tmp_path, session_ids, *, extra: dict | None 
         ],
     }
     save_chat_state(tmp_path, payload)
+
+
+@pytest.mark.parametrize("identity_fields", [
+    {"agent_id": "original-agent", "agentId": "original-agent"},
+    {"agent_missing_id": "original-agent"},
+    {"agentMissingId": "original-agent"},
+])
+def test_missing_agent_identity_stays_quarantined_across_metadata_repairs(
+    tmp_path, monkeypatch, identity_fields,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    created = []
+    monkeypatch.setattr(session_service, "_normalize_session_agent_llm_bindings", lambda _: {})
+    monkeypatch.setattr(
+        session_service, "ensure_agent_for_session",
+        lambda *args, **kwargs: created.append(args) or {"agentId": "replacement-agent"},
+    )
+    conversation = {"conversation_id": "missing-session", **identity_fields}
+
+    assert session_service._ensure_conversation_agent_metadata(conversation, agent_by_id={}) is True
+    for _ in range(3):
+        assert session_service._ensure_conversation_agent_metadata(conversation, agent_by_id={}) is False
+
+    assert created == []
+    assert conversation["agent_id"] == conversation["agentId"] == ""
+    assert conversation["agent_missing_id"] == conversation["agentMissingId"] == "original-agent"
+    assert conversation["agentMissing"] is True
+    assert conversation["agentStatusCode"] == "missing_agent"
+
+
+def test_original_missing_agent_can_recover_without_materializing_an_identity(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    recovered = []
+    monkeypatch.setattr(
+        session_service, "_record_session_agent_binding_recovered_event",
+        lambda session_id, **kwargs: recovered.append((session_id, kwargs["agent_id"])),
+    )
+    monkeypatch.setattr(
+        session_service, "ensure_agent_for_session",
+        lambda *args, **kwargs: pytest.fail("Recovery must reuse the original Agent"),
+    )
+    conversation = {
+        "conversation_id": "missing-session", "agentMissingId": "original-agent",
+        "agentMissing": True, "agentStatusCode": "missing_agent",
+    }
+    original = {"agentId": "original-agent", "directSessionId": "missing-session", "status": "active"}
+
+    assert session_service._ensure_conversation_agent_metadata(
+        conversation, agent_by_id={"original-agent": original},
+    ) is True
+    assert conversation["agent_id"] == conversation["agentId"] == "original-agent"
+    assert not conversation["agentMissing"]
+    assert not conversation["agentStatusCode"]
+    assert not conversation["agentMissingId"]
+    assert recovered == [("missing-session", "original-agent")]
+
+
+@pytest.mark.parametrize("identity_field", ["agent_id", "agentMissingId"])
+def test_other_direct_session_agent_cannot_replace_known_missing_identity(tmp_path, monkeypatch, identity_field):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        session_service, "ensure_agent_for_session",
+        lambda *args, **kwargs: pytest.fail("A known identity must not mint a replacement"),
+    )
+    conversation = {"conversation_id": "missing-session", identity_field: "original-agent"}
+    other = {"agentId": "other-agent", "directSessionId": "missing-session", "status": "active"}
+
+    session_service._ensure_conversation_agent_metadata(conversation, agent_by_id={"other-agent": other})
+
+    assert conversation["agent_id"] == conversation["agentId"] == ""
+    assert conversation["agentMissingId"] == "original-agent"
+    assert conversation["agentStatusCode"] == "missing_agent"
+
+
+@pytest.mark.parametrize("deleted", [False, True])
+def test_metadata_repair_does_not_revive_archived_or_deleted_agent(tmp_path, monkeypatch, deleted):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        session_service, "ensure_agent_for_session",
+        lambda *args, **kwargs: pytest.fail("Archived/deleted identities cannot be rematerialized"),
+    )
+    conversation = {"conversation_id": "sealed-session", "agent_id": "original-agent"}
+    if deleted:
+        conversation["agentStatusCode"] = "deleted_agent"
+    original = {
+        "agentId": "original-agent", "directSessionId": "sealed-session",
+        "status": "active" if deleted else "archived",
+    }
+    for _ in range(3):
+        session_service._ensure_conversation_agent_metadata(conversation, agent_by_id={"original-agent": original})
+    assert conversation["agentId"] == ("" if deleted else "original-agent")
+    if deleted:
+        assert conversation["agentStatusCode"] == "deleted_agent"
+
+
+@pytest.mark.parametrize("archived", [False, True])
+def test_directory_owner_quarantines_empty_metadata_without_rebinding(tmp_path, monkeypatch, archived):
+    from core.chat.conversation_store import ConversationStore
+    from core.chat.conversation_store import database as store_database
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(store_database.sqlite3, "sqlite_version_info", (3, 51, 3))
+    monkeypatch.setattr(session_service, "_normalize_session_agent_llm_bindings", lambda _: {})
+    created = []
+    monkeypatch.setattr(
+        session_service, "ensure_agent_for_session",
+        lambda *args, **kwargs: created.append(args) or {"agentId": "replacement-agent"},
+    )
+    store = ConversationStore(tmp_path / "directory.sqlite3")
+    store.open()
+    try:
+        revision = store.repository.create_agent(
+            agent_id="original-agent", display_name="Original", kind="assistant", config={}, source="test",
+        ).result(timeout=5)["configRevisionId"]
+        store.repository.create_session(
+            session_id="directory-owned-session", agent_id="original-agent",
+            agent_config_revision_id=revision, title="Original", archived=archived,
+        ).result(timeout=5)
+        monkeypatch.setattr(directory_runtime, "_STORE", store)
+        monkeypatch.setattr(directory_runtime, "_PROJECT_ROOT", tmp_path.resolve())
+        original_row = store.repository.get_session("directory-owned-session", include_archived=True)
+        conversation = {"conversation_id": "directory-owned-session"}
+
+        for _ in range(3):
+            session_service._ensure_conversation_agent_metadata(conversation, agent_by_id={})
+
+        assert created == []
+        assert conversation["agent_id"] == conversation["agentId"] == ""
+        assert conversation["agentMissingId"] == "original-agent"
+        assert conversation["agentStatusCode"] == "missing_agent"
+        assert store.repository.get_session("directory-owned-session", include_archived=True) == original_row
+    finally:
+        store.close()
+
+
+def test_unbound_metadata_repair_rejects_other_project_directory_store(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(directory_runtime, "_STORE", SimpleNamespace(_open=True))
+    monkeypatch.setattr(directory_runtime, "_PROJECT_ROOT", tmp_path / "other-project")
+    monkeypatch.setattr(
+        session_service, "ensure_agent_for_session",
+        lambda *args, **kwargs: pytest.fail("A mismatched store must fail closed"),
+    )
+    with pytest.raises(ValueError, match="project binding mismatch"):
+        session_service._ensure_conversation_agent_metadata({"conversation_id": "session"}, agent_by_id={})
+
+
+@pytest.mark.parametrize("read_fails", [False, True])
+def test_directory_owner_observation_failure_cannot_materialize_an_agent(tmp_path, monkeypatch, read_fails):
+    from types import SimpleNamespace
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    def get_session(*args, **kwargs):
+        if read_fails:
+            raise OSError("Isolated directory read failed")
+        return {"agentId": "original-agent"}
+
+    store = SimpleNamespace(_open=True, repository=SimpleNamespace(get_session=get_session))
+    monkeypatch.setattr(directory_runtime, "_STORE", store)
+    monkeypatch.setattr(directory_runtime, "_PROJECT_ROOT", tmp_path.resolve())
+    monkeypatch.setattr(directory_runtime, "directory_store_pin_is_current", lambda _: False)
+    monkeypatch.setattr(
+        session_service, "ensure_agent_for_session",
+        lambda *args, **kwargs: pytest.fail("Failed directory observations cannot mint an Agent"),
+    )
+    with pytest.raises(OSError if read_fails else ValueError):
+        session_service._ensure_conversation_agent_metadata({"conversation_id": "session"}, agent_by_id={})
+
+
+def test_genuinely_masterless_session_materializes_with_open_empty_directory(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    store = SimpleNamespace(_open=True, repository=SimpleNamespace(get_session=lambda *args, **kwargs: None))
+    monkeypatch.setattr(directory_runtime, "_STORE", store)
+    monkeypatch.setattr(directory_runtime, "_PROJECT_ROOT", tmp_path.resolve())
+    monkeypatch.setattr(session_service, "_normalize_session_agent_llm_bindings", lambda _: {})
+    created = []
+    monkeypatch.setattr(
+        session_service, "ensure_agent_for_session",
+        lambda *args, **kwargs: created.append(kwargs) or {"agentId": "new-agent"},
+    )
+    conversation = {"conversation_id": "genuinely-new-session"}
+
+    session_service._ensure_conversation_agent_metadata(conversation, agent_by_id={})
+
+    assert conversation["agent_id"] == conversation["agentId"] == "new-agent"
+    assert len(created) == 1
+    assert created[0]["existing_agent_id"] == ""
+    assert created[0]["project_root"] == tmp_path.resolve()
 
 
 def test_masterless_probe_converges_and_never_projects_full_agent_list(tmp_path, monkeypatch):

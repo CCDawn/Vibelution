@@ -1207,12 +1207,16 @@ def _normalize_conversation(
     agent_direct_session_mismatch = bool(raw.get("agentDirectSessionMismatch"))
     agent_primary_direct_session_id = str(raw.get("agentPrimaryDirectSessionId") or "").strip()
     if agent_status_code != "deleted_agent" and agent is None:
+        expected_agent_id = agent_id or missing_agent_id
         recovered_agent = s._recover_active_direct_session_agent(
             conversation_id,
             agent_by_id=agent_by_id,
-            preferred_agent_id=agent_id or missing_agent_id,
+            preferred_agent_id=expected_agent_id,
         )
-        if recovered_agent is not None:
+        if recovered_agent is not None and (
+            not expected_agent_id
+            or str(recovered_agent.get("agentId") or "").strip() == expected_agent_id
+        ):
             agent = recovered_agent
             agent_id = str(recovered_agent.get("agentId") or "").strip()
             missing_agent_id = ""
