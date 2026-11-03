@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import ssl
 from copy import deepcopy
 from pathlib import Path
 
@@ -11,6 +12,117 @@ from core.external_agent.backend_client import (
     BackendClientError,
     ManagedAgentBackendClient,
 )
+
+
+@pytest.fixture
+def default_httpx_transport(tmp_path, monkeypatch):
+    """Exercise real HTTPX construction while replacing only network I/O."""
+    from httpx._transports import default
+
+    calls, contexts = [], []
+    wire = _transport(tmp_path, calls)
+    create_context = default.create_ssl_context
+
+    def record_context(*args, **kwargs):
+        context = create_context(*args, **kwargs)
+        contexts.append(context)
+        return context
+
+    async def send(_transport, request):
+        return await wire.handle_async_request(request)
+
+    monkeypatch.setattr(default, "create_ssl_context", record_context)
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", send)
+    return calls, contexts
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("url", ["http://127.0.0.1:8123", "http://localhost:8123", "http://[::1]:8123"])
+async def test_http_client_does_not_load_unused_ca_for_handshake_or_requests(
+    tmp_path, monkeypatch, default_httpx_transport, url,
+):
+    _runtime_state(tmp_path, url=url)
+    calls, contexts = default_httpx_transport
+
+    def unused_ca(*args, **kwargs):
+        raise AssertionError("plain HTTP must not load a TLS trust store")
+
+    monkeypatch.setattr(ssl, "create_default_context", unused_ca)
+    monkeypatch.setattr(ssl.SSLContext, "load_verify_locations", unused_ca)
+    monkeypatch.setenv("HTTP_PROXY", "http://foreign.invalid:9999")
+    client = ManagedAgentBackendClient(tmp_path, state_path=tmp_path / "state.json")
+    assert (await client.list_agents())["agents"] == []
+    assert (await client.list_agents())["agents"] == []
+    assert len(calls) == 4 and all(str(request.url).startswith(url + "/") for request in calls)
+    assert len(contexts) == 3 and len({id(context) for context in contexts}) == 3
+    # An unexpected TLS use would still fail closed, rather than disabling
+    # certificate or hostname checks for a transport that only needs HTTP.
+    assert all(context.verify_mode == ssl.CERT_REQUIRED and context.check_hostname
+               and context.cert_store_stats()["x509_ca"] == 0 for context in contexts)
+
+
+@pytest.mark.anyio
+async def test_https_client_keeps_default_ca_and_hostname_verification(
+    tmp_path, monkeypatch, default_httpx_transport,
+):
+    _runtime_state(tmp_path, url="https://127.0.0.1:8123")
+    calls, contexts = default_httpx_transport
+    create_context = ssl.create_default_context
+    trust_loads = []
+
+    def load_default_trust(*args, **kwargs):
+        trust_loads.append(kwargs)
+        return create_context(*args, **kwargs)
+
+    monkeypatch.setattr(ssl, "create_default_context", load_default_trust)
+    client = ManagedAgentBackendClient(tmp_path, state_path=tmp_path / "state.json")
+    assert (await client.list_agents())["agents"] == []
+    assert len(calls) == 3 and len(trust_loads) == len(contexts) == 2
+    assert all(load.get("cafile") for load in trust_loads)
+    assert all(context.verify_mode == ssl.CERT_REQUIRED and context.check_hostname
+               and context.cert_store_stats()["x509_ca"] > 0 for context in contexts)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("redirect_stage", ["control-token", "info", "agents"])
+@pytest.mark.parametrize("target", ["http://foreign.invalid/private", "https://127.0.0.1:8123/private"])
+async def test_http_client_never_follows_handshake_or_request_redirects(tmp_path, redirect_stage, target):
+    _runtime_state(tmp_path)
+    calls = []
+    ordinary = _transport(tmp_path, [])
+
+    def handler(request):
+        calls.append(request)
+        if request.url.path.rsplit("/", 1)[-1] == redirect_stage:
+            return httpx.Response(307, headers={"Location": target}, json={"agents": []})
+        assert request.url.host == "127.0.0.1" and request.url.path != "/private"
+        return ordinary.handle_request(request)
+
+    client = ManagedAgentBackendClient(
+        tmp_path, state_path=tmp_path / "state.json", transport=httpx.MockTransport(handler),
+    )
+    if redirect_stage == "agents":
+        assert await client.list_agents() == {"agents": []}
+    else:
+        with pytest.raises(BackendClientError):
+            await client.list_agents()
+    assert len(calls) == {"control-token": 1, "info": 2, "agents": 3}[redirect_stage]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("url", ["http://foreign.invalid:8123", "https://foreign.invalid:8123",
+                                  "http://127.0.0.1.foreign.invalid:8123", "ftp://127.0.0.1:8123"])
+async def test_foreign_runtime_descriptor_is_rejected_before_client_construction(tmp_path, monkeypatch, url):
+    _runtime_state(tmp_path, url=url)
+
+    def forbidden_client(*args, **kwargs):
+        raise AssertionError("untrusted runtime must be rejected before constructing a transport")
+
+    monkeypatch.setattr(httpx.AsyncClient, "__init__", forbidden_client)
+    client = ManagedAgentBackendClient(tmp_path, state_path=tmp_path / "state.json")
+    with pytest.raises(BackendClientError) as rejected:
+        await client.list_agents()
+    assert rejected.value.code == "RUNTIME_IDENTITY_MISMATCH"
 
 
 @pytest.mark.anyio

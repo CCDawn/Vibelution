@@ -8,6 +8,7 @@ import math
 import os
 import re
 import secrets
+import ssl
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -1312,6 +1313,23 @@ class ManagedAgentBackendClient:
             self._state.setdefault("tasks", {}).pop(task_id, None)
             self._save_state_locked()
 
+    def _http_client(self, *, timeout_seconds: float | None = None) -> httpx.AsyncClient:
+        parsed = urlparse(self._base_url)
+        verify: ssl.SSLContext | bool = True
+        if parsed.scheme == "http" and str(parsed.hostname or "").lower() in {"127.0.0.1", "localhost", "::1"}:
+            # The admitted HTTP origin never uses TLS, and redirects stay off.
+            # Avoid loading unused CAs while retaining fail-closed certificate
+            # and hostname checks. HTTPS keeps HTTPX's complete default trust.
+            verify = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        return httpx.AsyncClient(
+            base_url=self._base_url,
+            transport=self.transport,
+            timeout=self.timeout_seconds if timeout_seconds is None else max(0.5, min(float(timeout_seconds), 30.0)),
+            trust_env=False,
+            follow_redirects=False,
+            verify=verify,
+        )
+
     async def _request_json(
         self,
         method: str,
@@ -1369,12 +1387,7 @@ class ManagedAgentBackendClient:
             headers[TASK_CAPABILITY_HEADER] = task_capability
         if management_auth is not None:
             headers["X-Vibelution-Management-Subject"], headers["X-Vibelution-Management-Capability"] = management_auth
-        async with httpx.AsyncClient(
-            base_url=self._base_url,
-            transport=self.transport,
-            timeout=self.timeout_seconds if timeout_seconds is None else max(0.5, min(float(timeout_seconds), 30.0)),
-            trust_env=False,
-        ) as client:
+        async with self._http_client(timeout_seconds=timeout_seconds) as client:
             try:
                 if max_response_bytes is None:
                     response = await client.request(method, path, headers=headers, json=json_payload)
@@ -1440,12 +1453,7 @@ class ManagedAgentBackendClient:
             return
         descriptor = self._runtime_descriptor()
         self._base_url = descriptor["baseUrl"]
-        async with httpx.AsyncClient(
-            base_url=self._base_url,
-            transport=self.transport,
-            timeout=self.timeout_seconds,
-            trust_env=False,
-        ) as client:
+        async with self._http_client() as client:
             try:
                 token_response = await client.get("/api/control-token")
                 token_payload = token_response.json()
