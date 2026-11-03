@@ -83,10 +83,6 @@ const migrationTargets = [
     expectedPrimitive: "VRouteLinkButton",
   },
   {
-    path: "routes/MemoryReviewQueuePanel.tsx",
-    expectedPrimitive: "VRouteLinkButton",
-  },
-  {
     path: "routes/MemoryKnowledgeStewardPanel.tsx",
     expectedPrimitive: "VRouteLinkButton",
   },

@@ -91,7 +91,6 @@ import { MemoryItemListPanel } from "./MemoryItemListPanel";
 import { MemoryContentBrowsePanel } from "./MemoryContentBrowsePanel";
 import { MemoryGithubProjectIndexPanel } from "./MemoryGithubProjectIndexPanel";
 import { MemoryProjectMemoryQueuePanel } from "./MemoryProjectMemoryQueuePanel";
-import { MemoryReviewQueuePanel } from "./MemoryReviewQueuePanel";
 import { MemorySelectedConfigPanel } from "./MemorySelectedConfigPanel";
 import { MemoryItemPanel, MemorySourcePanel } from "./MemorySourceAndItemPanels";
 import { MemoryUserContentPanel } from "./MemoryUserContentPanel";
@@ -2298,34 +2297,6 @@ function memoryPairPriority(pair: MemoryPair) {
   return 5;
 }
 
-function memoryPairActionTarget(pair: MemoryPair) {
-  return pair.item.managedState?.editable
-    || pair.item.managedState?.deletable
-    || pair.item.managedState?.restorable
-    || pair.item.managedState?.userManaged
-    || pair.item.managedState?.disabled
-    || pair.item.managedState?.overridden
-    ? "manage"
-    : "sources";
-}
-
-function reviewReasonLabels(copy: Copy, item: MemoryItem) {
-  const reasons: string[] = [];
-  if (item.managedState?.disabled) {
-    reasons.push(copy.reasonDisabled);
-  }
-  if (item.managedState?.overridden) {
-    reasons.push(copy.reasonOverridden);
-  }
-  if (!item.exists) {
-    reasons.push(copy.reasonMissing);
-  }
-  if (item.contentTruncated) {
-    reasons.push(copy.reasonTruncated);
-  }
-  return reasons;
-}
-
 function actorAgentIdForKnowledgeBase(base: TeamKnowledgeBase | null) {
   if (!base) {
     return "";
@@ -2959,14 +2930,6 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
         .sort((left, right) => memoryPairPriority(left) - memoryPairPriority(right))
         .slice(0, 8),
     [allPairs],
-  );
-  const priorityReviewPairs = useMemo(
-    () =>
-      allPairs
-        .filter(({ item }) => reviewReasonLabels(copy, item).length > 0)
-        .sort((left, right) => memoryPairPriority(left) - memoryPairPriority(right))
-        .slice(0, 10),
-    [allPairs, copy],
   );
   const manageablePairs = useMemo(
     () => allPairs.filter(({ item }) => itemIsManageable(item)),
@@ -3721,14 +3684,6 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
     />
   );
 
-  const openReviewTarget = (pair: MemoryPair) => {
-    setActiveSectionId(pair.section.id);
-    setActiveItemId(pair.item.id);
-    setActiveFilter("all");
-    setActiveChannel("");
-    setSearchText("");
-  };
-
   const renderProjectMemoryProposalStatus = (status: string) => (
     <VStatusChip tone={memoryProposalStatusTone(status)}>{status || "-"}</VStatusChip>
   );
@@ -3766,43 +3721,6 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
       formatTimestamp={(value) => formatTimestamp(value ?? "", lang)}
       proposalAgentLabel={projectMemoryProposalAgentLabel}
       proposalResolverLabel={(resolvedBy) => projectMemoryProposalResolverLabel(resolvedBy, lang)}
-    />
-  );
-
-  const reviewQueueErrorText = showBlockingOverviewError
-    ? overviewQuery.error instanceof Error
-      ? overviewQuery.error.message
-      : String(overviewQuery.error)
-    : "";
-  const reviewQueueItems = priorityReviewPairs.map((pair, index) => {
-    const { section, item } = pair;
-    const itemId = pairSelectionKey(section.id, item.id);
-    const encodedSectionId = encodeURIComponent(section.id);
-    const encodedItemId = encodeURIComponent(item.id);
-    return {
-      id: itemId,
-      rank: index + 1,
-      title: item.title,
-      origin: sourceOriginLabel(section, item),
-      summary: item.summary,
-      reasons: reviewReasonLabels(copy, item),
-      updatedAt: formatTimestamp(item.updatedAt, lang),
-      auditHref: `/memory/sources?section=${encodedSectionId}&item=${encodedItemId}`,
-      manageHref: memoryPairActionTarget(pair) === "manage" ? `/memory/manage?section=${encodedSectionId}&item=${encodedItemId}` : undefined,
-    };
-  });
-  const reviewQueuePanel = (
-    <MemoryReviewQueuePanel
-      copy={copy}
-      isLoading={overviewQuery.isPending && !hasOverviewSections}
-      errorText={reviewQueueErrorText}
-      items={reviewQueueItems}
-      onOpenItem={(itemId) => {
-        const pair = priorityReviewPairs.find(({ section, item }) => pairSelectionKey(section.id, item.id) === itemId);
-        if (pair) {
-          openReviewTarget(pair);
-        }
-      }}
     />
   );
 

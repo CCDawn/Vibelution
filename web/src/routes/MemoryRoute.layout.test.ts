@@ -39,7 +39,6 @@ import overviewPanelStyles from "./MemoryOverviewPanel.styles";
 import githubProjectIndexPanelSource from "./MemoryGithubProjectIndexPanel.tsx?raw";
 import githubProjectIndexPanelStyles from "./MemoryGithubProjectIndexPanel.styles";
 import projectMemoryQueuePanelSource from "./MemoryProjectMemoryQueuePanel.tsx?raw";
-import reviewQueuePanelSource from "./MemoryReviewQueuePanel.tsx?raw";
 import selectedConfigPanelSource from "./MemorySelectedConfigPanel.tsx?raw";
 import selectedConfigPanelStyles from "./MemorySelectedConfigPanel.styles";
 import sourceAndItemPanelsSource from "./MemorySourceAndItemPanels.tsx?raw";
@@ -59,7 +58,6 @@ import agentMemoryPanelStyles from "./MemoryAgentMemoryPanel.styles";
 import cleanupPanelStyles from "./MemoryCleanupPanel.styles";
 import projectMemoryQueuePanelStyles from "./MemoryProjectMemoryQueuePanel.styles";
 import knowledgeSourceGovernancePanelStyles from "./MemoryKnowledgeSourceGovernancePanel.styles";
-import reviewQueuePanelStyles from "./MemoryReviewQueuePanel.styles";
 import knowledgeRagPanelStyles from "./MemoryKnowledgeRagPanel.styles";
 import knowledgeStewardPanelStyles from "./MemoryKnowledgeStewardPanel.styles";
 import styles from "./MemoryRoute.styles";
@@ -102,7 +100,6 @@ const memoryCssSource = [
     overviewPanelStyles,
     githubProjectIndexPanelStyles,
     projectMemoryQueuePanelStyles,
-    reviewQueuePanelStyles,
     selectedConfigPanelStyles,
     sourceAndItemPanelStyles,
     userContentPanelStyles,
@@ -426,8 +423,6 @@ describe("MemoryRoute layout contract", () => {
     expect(overviewPanelStyles.overviewStack).toContain("overviewStack");
     expect(overviewPanelStyles.overviewPanel).not.toContain("bg-[var(--vui-surface-glass)]");
     expect(overviewPanelStyles.reviewQueuePanel).not.toContain("bg-[var(--vui-surface-glass)]");
-    // Scrollport lives on overview parent (reviewQueueScroll); list itself is content-start.
-    expect(reviewQueuePanelStyles.reviewQueueList).toContain("content-start");
     expect(itemListPanelStyles.compactItemPrimary).toContain("flex");
     expect(itemListPanelStyles.compactItemPrimary).not.toContain("rounded-[var(--radius-control)]");
     expect(itemListPanelStyles.compactItemSummary).toContain("line-clamp-1");
@@ -454,6 +449,9 @@ describe("MemoryRoute layout contract", () => {
     expect(overviewPanelSource).toContain("VSurface");
     expect(overviewPanelSource).toContain("VPanelHeader");
     expect(overviewPanelSource).not.toContain("styles.summaryCard");
+    expect(overviewPanelSource).toContain("styles.reviewQueuePanel");
+    expect(overviewPanelSource).toContain("copy.reviewQueue");
+    expect(overviewPanelSource).toContain("copy.reviewQueueHint");
     expect(overviewPanelStyles.overviewPanel).not.toContain("rounded-[var(--radius-panel)]");
     expect(overviewPanelStyles.overviewPanel).not.toMatch(/bg-vui-surface-panel|bg-\[var\(--vui-surface-panel\)\]/);
     expect(overviewPanelStyles.reviewQueuePanel).not.toMatch(/bg-vui-surface-panel|bg-\[var\(--vui-surface-panel\)\]/);
@@ -576,7 +574,6 @@ describe("MemoryRoute layout contract", () => {
     expect(managePanelStyles.manageDetailStack).toContain("overflow-auto");
     expect(managePanelStyles.manageDetailStack).toContain("min-h-0");
     expect(managePanelStyles.manageDetailStack).toContain("[&>.detailPanel]:!h-auto");
-    expect(reviewQueuePanelStyles.reviewReasonList).toContain("flex");
   });
 
   it("lets routed Memory subviews fill the route slot before their own panels scroll", () => {
@@ -607,7 +604,6 @@ describe("MemoryRoute layout contract", () => {
     const restoredGridExpectations: Array<[string, string]> = [
       [matrixPanelStyles.matrixCard, "grid-cols-[minmax(0,1fr)_auto]"],
       [projectMemoryQueuePanelStyles.projectMemoryProposalTitleLine, "grid-cols-[minmax(0,1fr)_auto]"],
-      [reviewQueuePanelStyles.reviewQueueTitleLine, "grid-cols-[minmax(0,1fr)_auto]"],
       [managePanelStyles.manageSourceFilters, "grid-cols-[repeat(auto-fit,minmax(82px,1fr))]"],
       [sourceAndItemPanelStyles.sourceButton, "grid-cols-[24px_minmax(0,1fr)_auto]"],
       [knowledgeUsageContractPanelStyles.contractDomainRow, "grid-cols-[minmax(116px,1fr)_minmax(96px,0.8fr)_auto]"],
@@ -1010,43 +1006,6 @@ describe("MemoryRoute layout contract", () => {
     expect(knowledgeStewardPanelSource).toContain("copy.acceptanceChecklist");
   });
 
-  it("shows a priority review queue on the default memory overview", () => {
-    expect(routeSource).toContain("priorityReviewPairs");
-    expect(routeSource).toContain("memoryPairPriority");
-    expect(routeSource).toContain("reviewReasonLabels(copy, item)");
-    expect(routeSource).toContain("memoryPairActionTarget(pair)");
-    expect(routeSource).toContain('import { MemoryReviewQueuePanel } from "./MemoryReviewQueuePanel"');
-    expect(routeSource).toContain("<MemoryReviewQueuePanel");
-    expect(routeSource).not.toContain("const renderReviewQueue = () => {");
-    expect(reviewQueuePanelSource).toContain("export function MemoryReviewQueuePanel");
-    expect(reviewQueuePanelSource).toContain("className={styles.reviewQueueList}");
-    expect(overviewPanelSource).toContain("styles.reviewQueuePanel");
-    expect(reviewQueuePanelSource).toContain("styles.reviewQueueTitleLine");
-    expect(reviewQueuePanelSource).toContain("styles.reviewQueueSummary");
-    expect(reviewQueuePanelSource).toContain("styles.reviewQueueTime");
-    expect(reviewQueuePanelSource).toContain("styles.reviewReasonPill");
-    expect(reviewQueuePanelSource).not.toContain("useQuery");
-    expect(reviewQueuePanelSource).not.toContain("useMutation");
-    expect(reviewQueuePanelSource).not.toContain("fetchJson");
-    expect(overviewPanelSource).toContain("copy.reviewQueue");
-    expect(overviewPanelSource).toContain("copy.reviewQueueHint");
-    expect(reviewQueuePanelSource).toContain("copy.auditMemory");
-    expect(reviewQueuePanelSource).toContain("copy.manageMemoryAction");
-    expect(routeSource).toContain("reasonDisabled");
-    expect(routeSource).toContain("reasonOverridden");
-    expect(routeSource).toContain("reasonMissing");
-    expect(routeSource).toContain("reasonTruncated");
-    expect(routeSource).toContain("reasonInPrompt");
-    expect(routeSource).toContain("reasonAgentVisible");
-    expect(routeSource).toContain("reasonUserManaged");
-    expect(routeSource).not.toContain("reasons.push(copy.reasonInPrompt)");
-    expect(routeSource).not.toContain("reasons.push(copy.reasonAgentVisible)");
-    expect(routeSource).not.toContain("reasons.push(copy.reasonUserManaged)");
-    expect(overviewPanelSource).toContain('tooltip={copy.reviewQueueHint}');
-    expect(overviewPanelSource).not.toContain('title={copy.reviewQueueHint}');
-    expect(routeSource).not.toContain("<p className={styles.panelLead}>{copy.reviewQueueHint}</p>");
-  });
-
   it("makes memory management bulk selection and edit preview visible", () => {
     expect(routeSource).toContain("selectedMemoryKeys");
     expect(routeSource).toContain("bulkActionPending");
@@ -1324,10 +1283,6 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain('{ key: "personal", href: "/memory" }');
     expect(routeSource).toContain('{ key: "team", href: "/memory/team" }');
     expect(routeSource).toContain('{ key: "library", href: "/memory/library" }');
-    expect(routeSource).toContain("auditHref: `/memory/sources?section=");
-    expect(routeSource).toContain("manageHref: memoryPairActionTarget(pair) === \"manage\" ? `/memory/manage?section=");
-    expect(reviewQueuePanelSource).toContain("to={item.auditHref}");
-    expect(reviewQueuePanelSource).toContain("to={item.manageHref}");
     expect(routeSource).not.toContain("AgentManagementNav");
     expect(routeSource.indexOf("{renderSubnav()}")).toBeLessThan(routeSource.indexOf("className={viewStackClassName}"));
     expect(appShellSource).toContain('to="/memory"');
