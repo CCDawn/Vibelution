@@ -6,6 +6,7 @@ import copy
 import hashlib
 import json
 import re
+import time
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -1440,6 +1441,59 @@ def repair_prompt_templates(*, project_root: Path | None = None) -> dict[str, An
     return next_payload
 
 
+def prewarm_prompt_templates_cache(*, reason: str = "startup") -> dict[str, Any]:
+    """Warm the prompt template repair cache before the first page request.
+
+    ``GET /api/prompt-templates`` pays a multi-second cold repair on a fresh
+    process (full index read + builtin merge + possible workspace writes).
+    Running the exact production repair path once at startup fills the index
+    read cache (``_PROMPT_TEMPLATES_LOAD_CACHE``) so the first page request
+    replays the warm payload instead of the cold scan. Failures never raise:
+    they surface through the recorded scene event and the returned status so
+    startup prewarm cannot fail boot. Same worker contract as
+    ``config_service.prewarm_config_workspace``.
+    """
+
+    started = time.perf_counter()
+    normalized_reason = str(reason or "startup").strip() or "startup"
+    try:
+        payload = repair_prompt_templates()
+        duration_ms = round((time.perf_counter() - started) * 1000, 1)
+        timings = {
+            "status": "completed",
+            "totalMs": duration_ms,
+            "templateCount": len(payload.get("templates") or []),
+            "reason": normalized_reason,
+        }
+        _record_prompt_template_event(
+            "prompt_template.prewarm",
+            "",
+            outcome="completed",
+            fields=dict(timings),
+        )
+        return timings
+    except Exception as exc:  # noqa: BLE001 - startup prewarm is best effort
+        duration_ms = round((time.perf_counter() - started) * 1000, 1)
+        _record_prompt_template_event(
+            "prompt_template.prewarm",
+            "",
+            level="warning",
+            outcome="failed",
+            fields={
+                "totalMs": duration_ms,
+                "reason": normalized_reason,
+                "errorType": type(exc).__name__,
+                "errorMessage": str(exc)[:240],
+            },
+        )
+        return {
+            "status": "failed",
+            "totalMs": duration_ms,
+            "reason": normalized_reason,
+            "errorType": type(exc).__name__,
+        }
+
+
 def prompt_template_path(*, project_root: Path | None = None) -> Path:
     return _workspace_path("agent_config", "prompt_templates.json", project_root=project_root)
 
@@ -1684,10 +1738,31 @@ def _workspace_path(*parts: str, project_root: Path | None = None) -> Path:
     )
 
 
+# 进程级 default map 缓存：DEFAULT_PROMPT_TEMPLATES 是模块级常量元组（全仓无
+# 重赋值/就地修改），normalize 对 builtin 记录是纯常量派生 —— sourcePath 校验后
+# 原样返回相对字符串、不落 PROJECT_ROOT 绝对路径，其余字段全部来自常量或首次
+# 构建时间戳，产物可跨请求复用。此前每次调用对 39 条大 builtin 记录（单条
+# content 上限 80KB）全量 deepcopy：repair 每次调 1 次 + _template_to_api 每模板
+# 再调 1 次，单请求约 40 次结构遍历，是 /api/prompt-templates 的可省热点。
+# 每次调用返回一层拷贝（record dict + metadata dict 复制，content 等不可变值
+# 共享引用）：repair 会把返回记录直接交给 next_payload 且调用方可就地改写
+# （如测试改 content/builtinContentVersion），历史记录、reset 的 deepcopy 与
+# _template_to_api 的只读读取都必须只摸到拷贝，缓存原件不可暴露。
+_DEFAULT_TEMPLATE_MAP_CACHE: dict[str, dict[str, Any]] | None = None
+
+
 def _default_template_map() -> dict[str, dict[str, Any]]:
+    global _DEFAULT_TEMPLATE_MAP_CACHE
+    cached = _DEFAULT_TEMPLATE_MAP_CACHE
+    if cached is None:
+        cached = {
+            str(item["templateId"]): _normalize_template_record(copy.deepcopy(item))
+            for item in DEFAULT_PROMPT_TEMPLATES
+        }
+        _DEFAULT_TEMPLATE_MAP_CACHE = cached
     return {
-        str(item["templateId"]): _normalize_template_record(copy.deepcopy(item))
-        for item in DEFAULT_PROMPT_TEMPLATES
+        key: {**record, "metadata": dict(record.get("metadata") or {})}
+        for key, record in cached.items()
     }
 
 

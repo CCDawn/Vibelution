@@ -1908,3 +1908,124 @@ def test_memory_overview_section_cache_rebuilds_only_after_signature_changes(tmp
         item for item in sections["prompt-memory"]["items"] if item["title"] == "STATE_MEMORY.md"
     )
     assert state_item["content"] == "Signature probe after rewrite."
+
+
+_MEMORY_OVERVIEW_SECTION_IDS = {
+    "project-memory",
+    "runtime-memory",
+    "prompt-memory",
+    "workspace-database",
+    "research-memory",
+    "team-knowledge",
+    "git-memory",
+    "chat-session-memory",
+    "self-evolution-memory",
+    "supervised-evolution-memory",
+    "runtime-scene-evidence",
+    "github-projects",
+}
+
+
+def _stub_memory_overview_sections_for_prewarm(monkeypatch, calls):
+    """Replace every base section builder with a counting fake."""
+
+    def counting_project(root, warnings):
+        calls["count"] += 1
+        return {"id": "project-memory", "items": [{"id": f"project-{calls['count']}"}]}
+
+    monkeypatch.setattr(memory_service, "_project_memory_section", counting_project)
+    monkeypatch.setattr(memory_service, "_runtime_memory_section", lambda root: {"id": "runtime-memory", "items": []})
+    monkeypatch.setattr(memory_service, "_prompt_memory_section", lambda root: {"id": "prompt-memory", "items": []})
+    monkeypatch.setattr(memory_service, "_workspace_database_section", lambda root, sub_timings=None: {"id": "workspace-database", "items": []})
+    monkeypatch.setattr(memory_service, "_research_memory_section", lambda root: {"id": "research-memory", "items": []})
+    monkeypatch.setattr(memory_service, "_team_knowledge_memory_section", lambda root, sub_timings=None: {"id": "team-knowledge", "items": []})
+    monkeypatch.setattr(memory_service, "_git_memory_section", lambda root, sub_timings=None: {"id": "git-memory", "items": []})
+    monkeypatch.setattr(memory_service, "_chat_session_memory_section", lambda root, sub_timings=None: {"id": "chat-session-memory", "items": []})
+    monkeypatch.setattr(memory_service, "_self_evolution_memory_section", lambda root, sub_timings=None: {"id": "self-evolution-memory", "items": []})
+    monkeypatch.setattr(memory_service, "_supervised_evolution_memory_section", lambda root, sub_timings=None: {"id": "supervised-evolution-memory", "items": []})
+    monkeypatch.setattr(memory_service, "_runtime_scene_memory_section", lambda root, sub_timings=None: {"id": "runtime-scene-evidence", "items": []})
+    monkeypatch.setattr(memory_service, "_github_projects_memory_section", lambda root: {"id": "github-projects", "items": []})
+
+
+def test_memory_overview_prewarm_fills_section_cache_before_first_request(tmp_path, monkeypatch):
+    calls = {"count": 0}
+    recorded_events: list[dict] = []
+
+    def fake_record_runtime_scene_event(component, phase, event_code, **kwargs):
+        recorded_events.append({"component": component, "phase": phase, "eventCode": event_code, **kwargs})
+        return {"accepted": True, "runtimeSceneId": "scene-memory"}
+
+    monkeypatch.setattr(runtime_scene_service, "record_runtime_scene_event", fake_record_runtime_scene_event)
+    monkeypatch.setattr(memory_service.time, "monotonic", lambda: 500.0)
+    monkeypatch.setattr(memory_service, "MEMORY_OVERVIEW_SECTION_CACHE_TTL_SECONDS", 30.0)
+    monkeypatch.setattr(memory_service, "PROJECT_ROOT", tmp_path)
+    _stub_memory_overview_sections_for_prewarm(monkeypatch, calls)
+
+    memory_service._clear_memory_overview_section_cache()
+    result = memory_service.prewarm_memory_overview_cache(reason="prewarm-test")
+
+    assert result["status"] == "completed"
+    assert result["reason"] == "prewarm-test"
+    assert result["durationMs"] >= 0
+    # 12 个 base section + 1 个 user-managed section；section 缓存只存 base 部分。
+    assert result["sectionCount"] == len(_MEMORY_OVERVIEW_SECTION_IDS) + 1
+    assert result["itemCount"] == 1
+    assert len(recorded_events) == 1
+    assert recorded_events[0]["eventCode"] == "memory.overview.prewarm"
+    assert recorded_events[0]["outcome"] == "completed"
+    assert recorded_events[0]["fields"]["status"] == "completed"
+    with memory_service.MEMORY_OVERVIEW_SECTION_CACHE_LOCK:
+        cached_sections = set(memory_service.MEMORY_OVERVIEW_SECTION_CACHE.get("sections") or {})
+    assert cached_sections == _MEMORY_OVERVIEW_SECTION_IDS
+
+    # 预热已填满全部 section 缓存：首个请求全量 cacheHit，不再重建。
+    warnings: list[str] = []
+    _sections, timings = memory_service._timed_base_memory_sections(tmp_path, warnings)
+    assert calls["count"] == 1
+    assert all(timing["cacheHit"] is True for timing in timings)
+    assert warnings == []
+    memory_service._clear_memory_overview_section_cache()
+
+
+def test_memory_overview_prewarm_dedups_inflight_without_rebuilding(monkeypatch):
+    def fail_overview(*args, **kwargs):
+        raise AssertionError("inflight prewarm must not rebuild the overview")
+
+    monkeypatch.setattr(memory_service, "get_memory_overview", fail_overview)
+    monkeypatch.setattr(memory_service, "MEMORY_OVERVIEW_PREWARM_INFLIGHT", True)
+
+    result = memory_service.prewarm_memory_overview_cache(reason="inflight-test")
+
+    assert result["status"] == "skipped"
+    assert result["skipReason"] == "inflight"
+    assert result["durationMs"] >= 0
+
+
+def test_memory_overview_prewarm_records_failure_event(monkeypatch):
+    recorded_events: list[dict] = []
+
+    def fake_record_runtime_scene_event(component, phase, event_code, **kwargs):
+        recorded_events.append({"component": component, "phase": phase, "eventCode": event_code, **kwargs})
+        return {"accepted": True, "runtimeSceneId": "scene-memory"}
+
+    monkeypatch.setattr(runtime_scene_service, "record_runtime_scene_event", fake_record_runtime_scene_event)
+
+    def failing_overview(*args, **kwargs):
+        raise RuntimeError("injected overview failure")
+
+    monkeypatch.setattr(memory_service, "get_memory_overview", failing_overview)
+
+    result = memory_service.prewarm_memory_overview_cache(reason="failure-test")
+
+    assert result["status"] == "failed"
+    assert result["errorType"] == "RuntimeError"
+    assert result["durationMs"] >= 0
+    assert len(recorded_events) == 1
+    event = recorded_events[0]
+    assert event["component"] == "memory_service"
+    assert event["eventCode"] == "memory.overview.prewarm"
+    assert event["outcome"] == "failed"
+    assert event["level"] == "warning"
+    assert event["fields"]["status"] == "failed"
+    assert event["fields"]["reason"] == "failure-test"
+    assert event["fields"]["errorType"] == "RuntimeError"

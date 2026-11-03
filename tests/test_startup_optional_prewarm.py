@@ -209,7 +209,12 @@ def test_only_bulk_hypothesis_recovery_yields_the_startup_budget(monkeypatch, we
         assert result == "ready"
 
     asyncio.run(exercise())
-    assert calls == ([{"hypothesis_recovery_delay_s": delay}] if delay else [{}])
+    # StartupJobGroup 现在总会附带 should_stop 关停握手；预算断言只看启动延迟。
+    expected = [{"hypothesis_recovery_delay_s": delay}] if delay else [{}]
+    assert len(calls) == len(expected)
+    for observed, want in zip(calls, expected):
+        assert callable(observed.get("should_stop"))
+        assert {key: value for key, value in observed.items() if key != "should_stop"} == want
 
 
 def _stub_prewarm(monkeypatch):

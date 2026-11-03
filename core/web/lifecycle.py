@@ -577,6 +577,36 @@ async def _run_agent_registry_prewarm_after_routes_ready(
     )
 
 
+async def _run_memory_overview_prewarm_after_routes_ready(
+    app: FastAPI | None, *, startup_jobs: StartupJobGroup | None = None
+) -> dict[str, Any]:
+    from .services.session.directory_runtime import should_skip_directory_runtime_for_pytest
+
+    if should_skip_directory_runtime_for_pytest():
+        return {"skipped": "pytest"}
+    return await _run_prewarm_heavy_after_routes_ready(
+        app,
+        _prewarm_memory_overview_on_startup,
+        worker_name="memory-overview-prewarm-worker",
+        startup_jobs=startup_jobs,
+    )
+
+
+async def _run_prompt_templates_prewarm_after_routes_ready(
+    app: FastAPI | None, *, startup_jobs: StartupJobGroup | None = None
+) -> dict[str, Any]:
+    from .services.session.directory_runtime import should_skip_directory_runtime_for_pytest
+
+    if should_skip_directory_runtime_for_pytest():
+        return {"skipped": "pytest"}
+    return await _run_prewarm_heavy_after_routes_ready(
+        app,
+        _prewarm_prompt_templates_on_startup,
+        worker_name="prompt-templates-prewarm-worker",
+        startup_jobs=startup_jobs,
+    )
+
+
 def _llm_startup_warmup_worker(gate_timings: dict[str, Any] | None = None) -> Any:
     from core.llm.warmup import run_llm_startup_warmup
 
@@ -755,12 +785,29 @@ async def web_workbench_lifespan(app: FastAPI | None):
             "startup-config-workspace-prewarm",
             _run_config_workspace_prewarm_after_routes_ready(app, startup_jobs=startup_jobs),
         )
+        # Memory overview + prompt template prewarms pay multi-second cold
+        # scans on a fresh process while the frontend's startup volley does
+        # not read them; they ride the same deferred gate (ISS-006/007).
+        startup_memory_overview_prewarm_task = startup_jobs.start_async(
+            "startup-memory-overview-prewarm",
+            _run_memory_overview_prewarm_after_routes_ready(app, startup_jobs=startup_jobs),
+        )
+        startup_prompt_templates_prewarm_task = startup_jobs.start_async(
+            "startup-prompt-templates-prewarm",
+            _run_prompt_templates_prewarm_after_routes_ready(app, startup_jobs=startup_jobs),
+        )
     else:
         startup_agent_registry_prewarm_task = startup_jobs.start_thread(
             "startup-agent-registry-prewarm", _prewarm_agent_registry_on_startup
         )
         startup_config_workspace_prewarm_task = startup_jobs.start_thread(
             "startup-config-workspace-prewarm", _prewarm_config_workspace_on_startup
+        )
+        startup_memory_overview_prewarm_task = startup_jobs.start_thread(
+            "startup-memory-overview-prewarm", _prewarm_memory_overview_on_startup
+        )
+        startup_prompt_templates_prewarm_task = startup_jobs.start_thread(
+            "startup-prompt-templates-prewarm", _prewarm_prompt_templates_on_startup
         )
     startup_agent_inbox_recovery_task = startup_jobs.start_async(
         "startup-agent-inbox-recovery",
@@ -891,6 +938,16 @@ async def web_workbench_lifespan(app: FastAPI | None):
     startup_config_workspace_prewarm_task.add_done_callback(
         lambda task: consume_startup_task_result(
             task, message="Config workspace prewarm failed during startup."
+        )
+    )
+    startup_memory_overview_prewarm_task.add_done_callback(
+        lambda task: consume_startup_task_result(
+            task, message="Memory overview prewarm failed during startup."
+        )
+    )
+    startup_prompt_templates_prewarm_task.add_done_callback(
+        lambda task: consume_startup_task_result(
+            task, message="Prompt template prewarm failed during startup."
         )
     )
     startup_agent_inbox_recovery_task.add_done_callback(
@@ -1498,6 +1555,64 @@ def _prewarm_agent_registry_on_startup(gate_timings: dict[str, Any] | None = Non
         )
     except Exception:  # noqa: BLE001 - prewarm diagnostics are best effort
         pass
+    return timings
+
+
+def _prewarm_memory_overview_on_startup(gate_timings: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Warm the Memory overview section caches before the first Memory page request.
+
+    ``GET /api/memory/overview`` pays a multi-second cold scan on a fresh
+    process; ``memory_service.prewarm_memory_overview_cache`` runs the exact
+    production read path (``include_content=False``) once so the first poll
+    replays warm section caches. That function carries its own inflight
+    dedup and completed/failed scene events, so this worker only trails the
+    directory startup (bounded) and merges the shared gate timings into the
+    reported fields. Pytest skips like the directory runtime itself:
+    boot-time heavy work must never touch the real checkout.
+    """
+
+    from .services.session.directory_runtime import (
+        should_skip_directory_runtime_for_pytest,
+        wait_for_directory_startup,
+    )
+
+    if should_skip_directory_runtime_for_pytest():
+        return {"skipped": "pytest"}
+    wait_for_directory_startup()
+    from .services import memory_service
+
+    timings = memory_service.prewarm_memory_overview_cache(reason="startup")
+    if isinstance(gate_timings, dict) and gate_timings:
+        timings.update(gate_timings)
+    return timings
+
+
+def _prewarm_prompt_templates_on_startup(gate_timings: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Warm the prompt template repair cache before the first request.
+
+    ``GET /api/prompt-templates`` pays a multi-second cold repair on a fresh
+    process (full index read + builtin merge + possible workspace writes);
+    ``prompt_template_service.prewarm_prompt_templates_cache`` runs the exact
+    production repair path once, filling the index read cache so the first
+    page request replays warm payloads and reporting its own completed/failed
+    scene event. Trailing the directory startup (bounded) keeps this scan from
+    stacking on the directory work like the other prewarms. Pytest skips like
+    the directory runtime itself.
+    """
+
+    from .services.session.directory_runtime import (
+        should_skip_directory_runtime_for_pytest,
+        wait_for_directory_startup,
+    )
+
+    if should_skip_directory_runtime_for_pytest():
+        return {"skipped": "pytest"}
+    wait_for_directory_startup()
+    from .services import prompt_template_service
+
+    timings = prompt_template_service.prewarm_prompt_templates_cache()
+    if isinstance(gate_timings, dict) and gate_timings:
+        timings.update(gate_timings)
     return timings
 
 

@@ -26,6 +26,8 @@ from fastapi import FastAPI
 from core.web import lifecycle
 from core.web.services import code_freshness
 from core.web.services import config_service
+from core.web.services import memory_service
+from core.web.services import prompt_template_service
 from core.web.services.session import directory_runtime
 
 pytestmark = pytest.mark.serial
@@ -409,3 +411,186 @@ def test_lifespan_prewarm_gate_disabled_starts_prewarm_immediately(monkeypatch):
 
     assert entered.is_set()
     assert "config_workspace_prewarm" in observed["background_tasks"]
+
+
+def test_prewarm_memory_overview_worker_trails_directory_and_merges_gate_timings(monkeypatch):
+    monkeypatch.setattr(
+        directory_runtime,
+        "should_skip_directory_runtime_for_pytest",
+        lambda: False,
+    )
+    sequence: list[str] = []
+    monkeypatch.setattr(
+        directory_runtime,
+        "wait_for_directory_startup",
+        lambda *, timeout=None: sequence.append("dir_wait"),
+    )
+    monkeypatch.setattr(
+        memory_service,
+        "prewarm_memory_overview_cache",
+        lambda *, reason: sequence.append(f"prewarm:{reason}") or {"status": "completed", "durationMs": 1.0},
+    )
+
+    result = lifecycle._prewarm_memory_overview_on_startup({"waitedForRoutesMs": 5, "staggerMs": 10})
+
+    # 目录启动等待先于预热（与 config/registry 预热同一 trailing 纪律）。
+    assert sequence == ["dir_wait", "prewarm:startup"]
+    assert result["status"] == "completed"
+    assert result["waitedForRoutesMs"] == 5
+    assert result["staggerMs"] == 10
+
+
+def test_prewarm_memory_overview_worker_skips_under_pytest(monkeypatch):
+    monkeypatch.setattr(
+        directory_runtime,
+        "should_skip_directory_runtime_for_pytest",
+        lambda: True,
+    )
+    touched: list[str] = []
+    monkeypatch.setattr(
+        directory_runtime,
+        "wait_for_directory_startup",
+        lambda *a, **kw: touched.append("wait"),
+    )
+    monkeypatch.setattr(
+        memory_service,
+        "prewarm_memory_overview_cache",
+        lambda **kw: touched.append("build"),
+    )
+
+    result = lifecycle._prewarm_memory_overview_on_startup()
+
+    assert result == {"skipped": "pytest"}
+    assert touched == []
+
+
+def test_prewarm_prompt_templates_worker_trails_directory_and_merges_gate_timings(monkeypatch):
+    monkeypatch.setattr(
+        directory_runtime,
+        "should_skip_directory_runtime_for_pytest",
+        lambda: False,
+    )
+    sequence: list[str] = []
+    monkeypatch.setattr(
+        directory_runtime,
+        "wait_for_directory_startup",
+        lambda *, timeout=None: sequence.append("dir_wait"),
+    )
+    monkeypatch.setattr(
+        prompt_template_service,
+        "prewarm_prompt_templates_cache",
+        lambda: sequence.append("prewarm") or {"status": "completed", "totalMs": 2.0},
+    )
+
+    result = lifecycle._prewarm_prompt_templates_on_startup({"waitedForRoutesMs": 7, "staggerMs": 0})
+
+    assert sequence == ["dir_wait", "prewarm"]
+    assert result["status"] == "completed"
+    assert result["waitedForRoutesMs"] == 7
+    assert result["staggerMs"] == 0
+
+
+def test_prewarm_prompt_templates_worker_skips_under_pytest(monkeypatch):
+    monkeypatch.setattr(
+        directory_runtime,
+        "should_skip_directory_runtime_for_pytest",
+        lambda: True,
+    )
+    touched: list[str] = []
+    monkeypatch.setattr(
+        directory_runtime,
+        "wait_for_directory_startup",
+        lambda *a, **kw: touched.append("wait"),
+    )
+    monkeypatch.setattr(
+        prompt_template_service,
+        "prewarm_prompt_templates_cache",
+        lambda: touched.append("build"),
+    )
+
+    result = lifecycle._prewarm_prompt_templates_on_startup()
+
+    assert result == {"skipped": "pytest"}
+    assert touched == []
+
+
+def test_gated_memory_and_prompt_templates_prewarm_wait_for_routes_ready(monkeypatch):
+    """两个新预热都必须等 routes-ready + settle 后才动工；ready 前零副作用。"""
+
+    monkeypatch.setattr(
+        directory_runtime,
+        "should_skip_directory_runtime_for_pytest",
+        lambda: False,
+    )
+    monkeypatch.setenv("VIBELUTION_STARTUP_PREWARM_STAGGER_SECONDS", "0.01")
+    gate_waits: list[str] = []
+    memory_sequence: list[str] = []
+    prompts_sequence: list[str] = []
+    monkeypatch.setattr(
+        directory_runtime,
+        "wait_for_directory_startup",
+        lambda *, timeout=None: gate_waits.append("dir_wait"),
+    )
+    monkeypatch.setattr(
+        memory_service,
+        "prewarm_memory_overview_cache",
+        lambda *, reason: memory_sequence.append("build") or {"status": "completed"},
+    )
+    monkeypatch.setattr(
+        prompt_template_service,
+        "prewarm_prompt_templates_cache",
+        lambda: prompts_sequence.append("build") or {"status": "completed"},
+    )
+
+    app = FastAPI()
+    app.state.web_routes_ready_event = asyncio.Event()
+
+    async def exercise():
+        memory_task = asyncio.create_task(
+            lifecycle._run_memory_overview_prewarm_after_routes_ready(app)
+        )
+        prompts_task = asyncio.create_task(
+            lifecycle._run_prompt_templates_prewarm_after_routes_ready(app)
+        )
+        await asyncio.sleep(0.05)
+        assert memory_sequence == [] and prompts_sequence == [], "ready 前不得构建任一缓存"
+        assert gate_waits == [], "ready 前不得进入目录等待"
+        app.state.web_routes_ready_event.set()
+        await asyncio.wait_for(asyncio.gather(memory_task, prompts_task), timeout=5)
+
+    asyncio.run(exercise())
+
+    assert gate_waits == ["dir_wait", "dir_wait"]
+    assert memory_sequence == ["build"]
+    assert prompts_sequence == ["build"]
+
+
+def test_gated_memory_and_prompt_templates_prewarm_skip_under_pytest_before_waiting(monkeypatch):
+    """pytest 跳过必须在 ready 等待之前：事件永不 set 也必须立即返回。"""
+
+    monkeypatch.setattr(
+        directory_runtime,
+        "should_skip_directory_runtime_for_pytest",
+        lambda: True,
+    )
+
+    def fail_build(*args, **kwargs):
+        raise AssertionError("pytest skip must not build the caches")
+
+    monkeypatch.setattr(directory_runtime, "wait_for_directory_startup", fail_build)
+    monkeypatch.setattr(memory_service, "prewarm_memory_overview_cache", fail_build)
+    monkeypatch.setattr(prompt_template_service, "prewarm_prompt_templates_cache", fail_build)
+
+    app = FastAPI()
+    app.state.web_routes_ready_event = asyncio.Event()  # 永不 set
+
+    async def exercise():
+        return await asyncio.wait_for(
+            asyncio.gather(
+                lifecycle._run_memory_overview_prewarm_after_routes_ready(app),
+                lifecycle._run_prompt_templates_prewarm_after_routes_ready(app),
+            ),
+            timeout=2,
+        )
+
+    assert asyncio.run(exercise()) == [{"skipped": "pytest"}, {"skipped": "pytest"}]

@@ -1043,3 +1043,107 @@ def test_load_prompt_templates_caches_until_file_signature_changes(tmp_path, mon
         str(item.get("templateId") or "") == "prompt-cache-probe"
         for item in refreshed["templates"]
     )
+
+
+def test_prewarm_prompt_templates_cache_repairs_once_and_fills_load_cache(tmp_path, monkeypatch):
+    """预热用生产 repair 路径填索引读缓存：冷态写盘一次，温态不再重写。"""
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    prompt_template_service._PROMPT_TEMPLATES_LOAD_CACHE.clear()
+    monkeypatch.setattr(prompt_template_service, "_DEFAULT_TEMPLATE_MAP_CACHE", None)
+
+    save_calls = {"count": 0}
+    real_save = prompt_template_service._save_prompt_templates
+
+    def counting_save(payload, *, project_root=None):
+        save_calls["count"] += 1
+        return real_save(payload, project_root=project_root)
+
+    monkeypatch.setattr(prompt_template_service, "_save_prompt_templates", counting_save)
+
+    first = prompt_template_service.prewarm_prompt_templates_cache()
+
+    assert first["status"] == "completed"
+    assert first["templateCount"] == len(prompt_template_service.DEFAULT_PROMPT_TEMPLATES)
+    assert first["totalMs"] >= 0
+    assert save_calls["count"] == 1, "cold repair must persist the index exactly once"
+    assert prompt_template_service.prompt_template_path().exists()
+
+    second = prompt_template_service.prewarm_prompt_templates_cache()
+
+    assert second["status"] == "completed"
+    assert save_calls["count"] == 1, "warm prewarm must not rewrite the index"
+    assert second["templateCount"] == first["templateCount"]
+    assert prompt_template_service._PROMPT_TEMPLATES_LOAD_CACHE, "index read cache must be filled after the warm pass"
+
+
+def test_prewarm_prompt_templates_cache_records_failure_without_raising(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(prompt_template_service, "_DEFAULT_TEMPLATE_MAP_CACHE", None)
+    recorded_events: list[dict] = []
+
+    def fake_record(event_code, template_id, **kwargs):
+        recorded_events.append({"eventCode": event_code, **kwargs})
+
+    monkeypatch.setattr(prompt_template_service, "_record_prompt_template_event", fake_record)
+
+    def failing_repair(*args, **kwargs):
+        raise RuntimeError("injected repair failure")
+
+    monkeypatch.setattr(prompt_template_service, "repair_prompt_templates", failing_repair)
+
+    result = prompt_template_service.prewarm_prompt_templates_cache()
+
+    assert result["status"] == "failed"
+    assert result["errorType"] == "RuntimeError"
+    assert result["totalMs"] >= 0
+    assert len(recorded_events) == 1
+    assert recorded_events[0]["eventCode"] == "prompt_template.prewarm"
+    assert recorded_events[0]["outcome"] == "failed"
+    assert recorded_events[0]["fields"]["errorType"] == "RuntimeError"
+
+
+def test_default_template_map_cache_reuses_normalized_records(tmp_path, monkeypatch):
+    """纯常量派生的 default map 只构建一次：键级浅拷贝隔离 repair 赋值，内层记录共享。"""
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(prompt_template_service, "_DEFAULT_TEMPLATE_MAP_CACHE", None)
+
+    first = prompt_template_service._default_template_map()
+    second = prompt_template_service._default_template_map()
+
+    assert first is not second, "must return a fresh shallow copy so repair key writes do not leak"
+    expected_ids = {str(item["templateId"]) for item in prompt_template_service.DEFAULT_PROMPT_TEMPLATES}
+    assert set(first) == set(second) == expected_ids
+    # 一层拷贝：record/metadata dict 必须是独立对象，content 等不可变值共享引用。
+    assert first["prompt-chat-default"] is not second["prompt-chat-default"]
+    assert first["prompt-chat-default"]["metadata"] is not second["prompt-chat-default"]["metadata"]
+    assert first["prompt-chat-default"] == second["prompt-chat-default"]
+    assert first["prompt-chat-default"] is not prompt_template_service.DEFAULT_PROMPT_TEMPLATES[0]
+    assert first["prompt-chat-default"]["content"] == prompt_template_service.DEFAULT_CHAT_ROLE_PROMPT
+
+    # repair 的返回 payload 会直接携带 map 记录，调用方可就地改写：改写必须只落在拷贝上。
+    first["prompt-chat-default"]["content"] = "MUTATED_CONTENT"
+    first["prompt-chat-default"]["metadata"]["builtinContentVersion"] = 999
+    second["prompt-cache-probe"] = {"templateId": "prompt-cache-probe"}
+    third = prompt_template_service._default_template_map()
+    assert "prompt-cache-probe" not in third, "key-level mutations must not leak into the cache"
+    assert third["prompt-chat-default"]["content"] == prompt_template_service.DEFAULT_CHAT_ROLE_PROMPT
+    assert third["prompt-chat-default"]["metadata"]["builtinContentVersion"] != 999
+
+
+def test_repair_does_not_mutate_shared_default_records(tmp_path, monkeypatch):
+    """repair 只深拷贝 default 记录后合并：共享缓存记录不得被磁盘覆盖值就地污染。"""
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(prompt_template_service, "_DEFAULT_TEMPLATE_MAP_CACHE", None)
+    cached = prompt_template_service._default_template_map()
+    steward = cached["prompt-knowledge-steward"]
+    content_before = steward["content"]
+    metadata_before = dict(steward["metadata"])
+
+    payload = prompt_template_service.repair_prompt_templates()
+
+    assert payload["templates"], "repair must materialize the builtin defaults"
+    assert steward["content"] == content_before
+    assert steward["metadata"] == metadata_before
