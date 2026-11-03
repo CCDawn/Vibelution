@@ -72,10 +72,15 @@ export function resolveNativeBuildEnvironment({ env = process.env, run = spawnSy
   if (!exists(vswhere)) return env;
 
   try {
+    // Service contexts omit ProgramData, but vswhere reads its instance index
+    // from %ProgramData%\Microsoft\VisualStudio and silently returns an empty
+    // list without it, which would drop this whole vswhere path.
+    const programData = value("ProgramData") ?? join(value("SystemDrive") ?? "C:", "ProgramData");
+    const vswhereEnv = value("ProgramData") ? env : { ...env, ProgramData: programData };
     const result = run(vswhere, [
       "-sort", "-products", "*", "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
       "-format", "json", "-utf8", "-include", "packages"
-    ], { encoding: "utf8", maxBuffer: 8 * 1024 * 1024, shell: false, windowsHide: true, env });
+    ], { encoding: "utf8", maxBuffer: 8 * 1024 * 1024, shell: false, windowsHide: true, env: vswhereEnv });
     if (result.error || result.status !== 0) return env;
     const instances = JSON.parse(String(result.stdout).replace(/^\uFEFF/, ""));
     if (!Array.isArray(instances)) return env;

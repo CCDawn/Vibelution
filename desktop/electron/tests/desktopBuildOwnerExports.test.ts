@@ -96,6 +96,15 @@ describe("native build Visual Studio discovery", () => {
     expect(env).toEqual({ "ProgramFiles(x86)": programFiles, PATH: "original" });
   });
 
+  it("injects a ProgramData fallback into the vswhere child when the owner env omits it", () => {
+    const env = { "ProgramFiles(x86)": programFiles, SystemDrive: "D:" };
+    const run = vi.fn(() => ({ status: 0, stdout: JSON.stringify([instance]) }));
+    const result = resolveNativeBuildEnvironment({ env, run, exists: () => true });
+    expect(run.mock.calls[0][2].env).toEqual({ ...env, ProgramData: "D:\\ProgramData" });
+    expect(result).toMatchObject({ VCINSTALLDIR: join(installationPath, "VC") });
+    expect(env).not.toHaveProperty("ProgramData");
+  });
+
   it.each([
     { vcinstalldir: "existing" },
     { VSCMD_VER: "17.0" },
