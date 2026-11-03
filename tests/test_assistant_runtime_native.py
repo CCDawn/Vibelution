@@ -1377,3 +1377,44 @@ context_window = 8192
         assert journal_bridge.load_session_conversation_events_snapshot(sid, project_root=sessions.PROJECT_ROOT) == before
         native.shutdown()
     ''', config_text=config)
+
+
+def test_lock_hold_observation_warns_only_over_threshold(monkeypatch, caplog):
+    import logging
+    import time
+
+    from core.assistant_runtime import native
+
+    assert native.LOCK_HOLD_WARN_SECONDS == 1.0
+    monkeypatch.setattr(native, "LOCK_HOLD_WARN_SECONDS", 0.02)
+
+    def hold_warnings():
+        return [record for record in caplog.records
+                if record.levelno == logging.WARNING
+                and "assistant_native_lock_hold" in record.getMessage()]
+
+    with caplog.at_level(logging.WARNING, logger="core.assistant_runtime.native"):
+        with native._measured_lock("identity"):
+            pass  # a fast critical section stays quiet
+        assert hold_warnings() == []
+        with native._measured_lock("get_detail"):
+            time.sleep(0.05)
+    warnings = hold_warnings()
+    assert len(warnings) == 1
+    message = warnings[0].getMessage()
+    assert "operation=get_detail" in message
+    assert int(message.split("held_ms=")[1]) >= 20
+
+
+def test_identity_entry_reports_a_slow_critical_section(monkeypatch, caplog):
+    import logging
+    import time
+
+    from core.assistant_runtime import native
+
+    monkeypatch.setattr(native, "LOCK_HOLD_WARN_SECONDS", 0.02)
+    monkeypatch.setattr(native, "_projection", lambda: time.sleep(0.05) or {"assistant": {}})
+    with caplog.at_level(logging.WARNING, logger="core.assistant_runtime.native"):
+        assert native.identity() == {"assistant": {}}
+    messages = [record.getMessage() for record in caplog.records if record.levelno == logging.WARNING]
+    assert any("assistant_native_lock_hold" in message and "operation=identity" in message for message in messages)

@@ -10,6 +10,12 @@ import { isConfigurationReferenceRequest, type ConfigurationReferenceHostContext
 
 const STARTUP_MS = 60_000;
 const REQUEST_MS = 15_000;
+/** Light UI reads pay shorter RPC budgets than the write default: status is
+ * the most frequent and cheapest poll; the other read views return bounded
+ * page payloads and never mutate host state. Writes, computer control and
+ * the explicit long operations keep REQUEST_MS or their own budgets. */
+const STATUS_READ_MS = 5_000;
+const READ_MS = 8_000;
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_LOG_BYTES = 4 * 1024 * 1024;
 const READY_MAX_BYTES = 4_096;
@@ -953,7 +959,7 @@ export class AssistantHost {
           || Object.prototype.hasOwnProperty.call(payload, "cursor") && (typeof payload.cursor !== "string"
             || !/^[A-Za-z0-9_-]{1,256}(?![\s\S])/.test(payload.cursor))) throw new HostError("ASSISTANT_REQUEST_INVALID");
         const path = "/api/assistant/team-runs" + (payload.cursor === undefined ? "" : `?cursor=${encodeURIComponent(payload.cursor)}`);
-        const result = await this.rpc(generation, path, "GET");
+        const result = await this.rpc(generation, path, "GET", undefined, READ_MS);
         if (identity(result) !== generation.sessionId
           || (result as { assistant: { agentId: string } }).assistant.agentId !== generation.agentId)
           throw new HostError("ASSISTANT_IDENTITY_INVALID");
@@ -964,7 +970,7 @@ export class AssistantHost {
           && (!Number.isSafeInteger(payload.beforeMessageIndex) || payload.beforeMessageIndex < 1 || payload.beforeMessageIndex > 2_147_483_647))
           throw new HostError("ASSISTANT_REQUEST_INVALID");
         const path = "/api/assistant/session" + (payload.beforeMessageIndex === undefined ? "" : `?before_message_index=${payload.beforeMessageIndex}`);
-        const result = await this.rpc(generation, path, "GET");
+        const result = await this.rpc(generation, path, "GET", undefined, READ_MS);
         if (!object(result) || result.id !== generation.sessionId) throw new HostError("ASSISTANT_IDENTITY_INVALID");
         return result;
       }
@@ -974,7 +980,8 @@ export class AssistantHost {
       case "config": {
         if (!ownKeys(payload, ["operation"])) throw new HostError("ASSISTANT_REQUEST_INVALID");
         const paths = { status: "/api/assistant", detail: "/api/assistant/session", dispatches: "/api/assistant/dispatches", config: "/api/assistant/config", approvals: "/api/assistant/approvals" };
-        const result = await this.rpc(generation, paths[payload.operation], "GET");
+        const result = await this.rpc(generation, paths[payload.operation], "GET",
+          undefined, payload.operation === "status" ? STATUS_READ_MS : READ_MS);
         if (payload.operation === "status" && (identity(result) !== generation.sessionId || (result as { assistant: { agentId: string } }).assistant.agentId !== generation.agentId)) throw new HostError("ASSISTANT_IDENTITY_INVALID");
         return result;
       }
@@ -1007,7 +1014,7 @@ export class AssistantHost {
       }
       case "assistantAvatar": {
         if (Object.keys(payload).length !== 1 || !ownKeys(payload, ["operation"])) throw new HostError("ASSISTANT_REQUEST_INVALID");
-        const result = await this.rpc(generation, "/api/assistant/avatar", "GET");
+        const result = await this.rpc(generation, "/api/assistant/avatar", "GET", undefined, READ_MS);
         if (!object(result) || result.agentId !== generation.agentId) throw new HostError("ASSISTANT_IDENTITY_INVALID");
         return result;
       }
@@ -1141,7 +1148,7 @@ export class AssistantHost {
         if (payload.sessionId !== generation.sessionId) throw new HostError("ASSISTANT_SESSION_FORBIDDEN");
         if (payload.operation === "curation") {
           if (!ownKeys(payload, ["operation", "sessionId"])) throw new HostError("ASSISTANT_REQUEST_INVALID");
-          return await this.rpc(generation, "/api/assistant/curation", "GET");
+          return await this.rpc(generation, "/api/assistant/curation", "GET", undefined, READ_MS);
         }
         if (!ownKeys(payload, ["operation", "sessionId", "messageId", "action"])
           || typeof payload.messageId !== "string" || !payload.messageId.trim() || payload.messageId.length > 160

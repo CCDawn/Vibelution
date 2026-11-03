@@ -1408,6 +1408,70 @@ describe("AssistantHost", () => {
     await host.stop();
   });
 
+  it("gives light UI reads shorter RPC budgets than writes", async () => {
+    vi.useFakeTimers();
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    const expectTimeoutAt = async (request: AssistantHostRequest, budgetMs: number) => {
+      let timedOut = false;
+      fetchImpl.mockImplementationOnce(async (_url, init) => await new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new Error("hung")), { once: true });
+      }));
+      const pending = host.request(request).catch((error: unknown) => {
+        timedOut = error instanceof Error && error.message === "ASSISTANT_REQUEST_TIMEOUT";
+      });
+      await vi.advanceTimersByTimeAsync(budgetMs - 1);
+      expect(timedOut).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await pending;
+      expect(timedOut).toBe(true);
+    };
+    await expectTimeoutAt({ operation: "status" }, 5_000);
+    for (const operation of ["detail", "dispatches", "config", "approvals", "teamRuns"] as const) {
+      await expectTimeoutAt({ operation } as AssistantHostRequest, 8_000);
+    }
+    await expectTimeoutAt({ operation: "curation", sessionId: "s" }, 8_000);
+    await expectTimeoutAt({ operation: "assistantAvatar" }, 8_000);
+    // Writes keep the original request budget; the read tier never shortened them.
+    await expectTimeoutAt({ operation: "send", message: "hello", requestId: "write-budget" }, 15_000);
+    await host.stop();
+  });
+
+  it("bounds a read invoke's startup wait while a write keeps the full recovery", async () => {
+    vi.useFakeTimers();
+    const { host, inputs, fetchImpl } = fixture({ noReadyFirst: true, graceful: true });
+    const frame = { url: LAUNCHER_ASSISTANT_URL };
+    const contents = { mainFrame: frame, isDestroyed: () => false };
+    const owner = { contents, host, setExpanded: vi.fn(), hide: vi.fn() };
+    const event = { sender: contents, senderFrame: frame };
+    let readFailure = "";
+    const read = invokeAssistant(event, { operation: "status" }, owner)
+      .catch((error: unknown) => { readFailure = error instanceof Error ? error.message : ""; });
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(readFailure).toBe("");
+    await vi.advanceTimersByTimeAsync(1);
+    await read;
+    expect(readFailure).toBe("ASSISTANT_NOT_READY");
+    // A write invoke still owns the full recovery: it joins the same start and
+    // is delivered once readiness lands, never failing fast at the grace mark.
+    let writeSettled = "";
+    const write = invokeAssistant(event, { operation: "send", message: "during start", requestId: "start-write" }, owner)
+      .then(() => { writeSettled = "ok"; }, (error: unknown) => { writeSettled = error instanceof Error ? error.message : ""; });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(writeSettled).toBe("");
+    const input = inputs[0]!;
+    const runtime = input.arguments[input.arguments.indexOf("--runtime-dir") + 1] as string;
+    const generation = input.arguments[input.arguments.indexOf("--instance-id") + 1] as string;
+    writeFileSync(join(runtime, "ready.json"), JSON.stringify({ protocolVersion: 1, role: "launcher_assistant",
+      instanceId: generation, pid: 900, port: 12_345 }));
+    await vi.advanceTimersByTimeAsync(100);
+    await write;
+    expect(writeSettled).toBe("ok");
+    expect(host.snapshot()).toEqual({ state: "ready", errorCode: null });
+    expect(fetchImpl.mock.calls.filter(([url]) => String(url).endsWith("/messages"))).toHaveLength(1);
+    await host.stop();
+  });
+
   it("serializes start-stop-start without leaking a cancelled startup or duplicating replacement", async () => {
     const { host, native } = fixture({ noReadyFirst: true, graceful: true });
     const first = host.start();

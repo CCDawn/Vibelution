@@ -15,11 +15,18 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, suppress
 from contextlib import nullcontext
 from functools import partial
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+# The renderer polls /api/assistant at a multi-second cadence while chat detail
+# and submit hold native._LOCK for their own reads. Serving the lock-bound
+# identity reads from this snapshot bounds every status response without
+# holding the native lock; only background refreshes touch it, at most one
+# outstanding refresh per facade.
+IDENTITY_SNAPSHOT_TTL_SECONDS = 2.0
 
 
 _INITIAL_PREPARE_CODES = frozenset({
@@ -373,11 +380,25 @@ class NativeFacade:
     def __init__(self, root):
         self.root = root
         self.assistant = None
+        # The three native reads below all serialize on native._LOCK. The
+        # renderer's lightweight status poll used to queue behind chat detail
+        # and submit holds (observed >15s). The snapshot is served stale while
+        # one background refresh recomputes it, so status reads never wait on
+        # the native lock. Identity is immutable after bootstrap; set_model
+        # invalidates the one mutable part (settings.modelId). Lock-free reads
+        # (operator assets/profile, image-input capability) stay per-call.
+        self._snapshot_lock = threading.Lock()
+        self._identity_snapshot: dict[str, Any] | None = None
+        self._identity_refreshing = False
+        self._identity_generation = 0
 
     def bootstrap(self):
         from . import native
         result = native.bootstrap(self.root)
         self.assistant = result["assistant"]
+        with self._snapshot_lock:
+            self._identity_generation += 1
+            self._identity_snapshot = None
         return result
 
     def get_detail(self, before_message_index=None):
@@ -385,15 +406,61 @@ class NativeFacade:
         return native.get_detail(self.assistant["directSessionId"], **(
             {"before_message_index": before_message_index} if before_message_index is not None else {}))
 
+    def _identity_snapshot_refresh(self):
+        from . import native
+        with self._snapshot_lock:
+            generation = self._identity_generation
+        projection = native.identity()
+        settings = native.assistant_settings()
+        avatar_revision = native.assistant_avatar_revision()
+        with self._snapshot_lock:
+            # A write that invalidated mid-read (set_model) must not be undone
+            # by this older generation landing late.
+            if generation == self._identity_generation:
+                self._identity_snapshot = {"at": time.monotonic(), "projection": projection,
+                                           "settings": settings, "avatarRevision": avatar_revision}
+
+    def _identity_snapshot_for_read(self):
+        """A fresh-enough snapshot immediately; stale ones recompute in background."""
+        with self._snapshot_lock:
+            snapshot = self._identity_snapshot
+            stale = snapshot is not None and time.monotonic() - snapshot["at"] >= IDENTITY_SNAPSHOT_TTL_SECONDS
+            if stale and not self._identity_refreshing:
+                self._identity_refreshing = True
+            elif snapshot is not None:
+                stale = False
+        if snapshot is None:
+            self._identity_snapshot_refresh()
+            with self._snapshot_lock:
+                return self._identity_snapshot
+        if stale:
+            def refresh():
+                try:
+                    self._identity_snapshot_refresh()
+                except Exception:  # noqa: BLE001 - keep serving the last validated snapshot.
+                    pass
+                finally:
+                    with self._snapshot_lock:
+                        self._identity_refreshing = False
+            try:
+                threading.Thread(target=refresh, daemon=True,
+                                 name="assistant_identity_refresh").start()
+            except Exception:  # noqa: BLE001 - retry the refresh on the next read.
+                with self._snapshot_lock:
+                    self._identity_refreshing = False
+        return snapshot
+
     def identity(self):
-        from . import native, operator_assets
-        result = native.identity()
+        from . import operator_assets
+        snapshot = self._identity_snapshot_for_read()
+        result = dict(snapshot["projection"])
         result["operatorAssetsVersion"] = 1
         result["operatorAssetRevisions"] = operator_assets.operator_asset_revisions()
         result["assistantAvatarVersion"] = 1
-        result["assistantAvatarRevision"] = native.assistant_avatar_revision()
+        result["assistantAvatarRevision"] = snapshot["avatarRevision"]
         result["attachmentVersion"] = 1
-        result["settings"] = native.assistant_settings()
+        # Copies keep the stored snapshot untouched by response-level hints.
+        result["settings"] = dict(snapshot["settings"])
         # Additive capability hint for the renderer's attach gate; the tool
         # contract's own settings payload stays untouched.
         result["settings"]["supportsImageInput"] = _model_image_input_support(
@@ -405,7 +472,13 @@ class NativeFacade:
 
     def set_model(self, model_id):
         from . import native
-        return native.set_model(model_id)
+        result = native.set_model(model_id)
+        # settings.modelId changed; the next status read must observe it, and
+        # any refresh already reading old settings must not land afterwards.
+        with self._snapshot_lock:
+            self._identity_generation += 1
+            self._identity_snapshot = None
+        return result
 
     def avatar(self):
         from . import native

@@ -6,6 +6,7 @@ this module. No Workbench lifecycle or project assistant proxy is started here.
 
 from __future__ import annotations
 
+import logging
 import re
 import threading
 import time
@@ -15,7 +16,13 @@ from typing import Any
 
 from core.infrastructure.native_runtime import assistant_native_root
 
+_LOGGER = logging.getLogger(__name__)
 _LOCK = threading.RLock()
+# One lock serializes every native adapter entry point, so a single slow
+# critical section queues every lightweight status poll behind it. Hold-time
+# observations feed the future lock split; only over-threshold sections log,
+# keeping volume bounded and free of payload or path content.
+LOCK_HOLD_WARN_SECONDS = 1.0
 _STOP_REQUESTED = threading.Event()
 _STARTED = False
 _SESSION_ID = ""
@@ -24,6 +31,23 @@ _OFFLINE_MIGRATION = False
 _OFFLINE_DIRECTORY_CLOSE_UNCONFIRMED = False
 _QUIESCING = False
 _QUIESCENCE_STATE_LOCK = threading.Lock()
+
+
+@contextmanager
+def _measured_lock(operation: str):
+    """Hold _LOCK while recording the critical section duration."""
+    held_seconds = 0.0
+    try:
+        with _LOCK:
+            entered = time.monotonic()
+            try:
+                yield
+            finally:
+                held_seconds = time.monotonic() - entered
+    finally:
+        if held_seconds >= LOCK_HOLD_WARN_SECONDS:
+            _LOGGER.warning("assistant_native_lock_hold operation=%s held_ms=%d",
+                            operation, round(held_seconds * 1000))
 
 
 def _close_offline_directory(runtime, *, timeout: float) -> None:
@@ -117,7 +141,7 @@ def _bootstrap(root: Path | str, *, offline_migration: bool) -> dict[str, Any]:
     requested = Path(root)
     if not requested.is_absolute() or requested.resolve() != expected:
         raise ValueError("native assistant root differs from the process identity")
-    with _LOCK:
+    with _measured_lock("bootstrap"):
         if _STARTED:
             if _OFFLINE_MIGRATION != offline_migration:
                 raise RuntimeError("native lifecycle mode differs from the active owner")
@@ -242,7 +266,7 @@ def _bootstrap(root: Path | str, *, offline_migration: bool) -> dict[str, Any]:
 
 def get_detail(session_id: str, *, before_message_index: int | None = None) -> dict[str, Any]:
     """Only the current singleton's direct Session is visible to this adapter."""
-    with _LOCK:
+    with _measured_lock("get_detail"):
         assistant = _projection()["assistant"]
         _, _, sessions, _ = _services()
         if session_id != assistant["directSessionId"]:
@@ -266,13 +290,13 @@ def get_detail(session_id: str, *, before_message_index: int | None = None) -> d
 
 def identity() -> dict[str, Any]:
     """Refresh native settings without re-provisioning or changing identity."""
-    with _LOCK:
+    with _measured_lock("identity"):
         return _projection()
 
 
 def assistant_settings() -> dict[str, Any]:
     """Read the singleton owner's safe settings without model execution."""
-    with _LOCK:
+    with _measured_lock("assistant_settings"):
         _, personal, _, _ = _services()
         with personal._LOCK:
             assistant = _projection()["assistant"]
@@ -350,7 +374,7 @@ def _assistant_avatar_agent() -> dict[str, Any]:
 def assistant_avatar_revision() -> str | None:
     try:
         from .assistant_avatar import revision
-        with _LOCK:
+        with _measured_lock("avatar_revision"):
             return revision(_assistant_avatar_agent())
     except Exception:  # noqa: BLE001 - asset failures must not break lightweight status.
         return None
@@ -359,7 +383,7 @@ def assistant_avatar_revision() -> str | None:
 def read_assistant_avatar() -> dict[str, Any]:
     try:
         from .assistant_avatar import read
-        with _LOCK:
+        with _measured_lock("avatar_read"):
             agent = _assistant_avatar_agent()
             result = read(agent)
             if agent != _assistant_avatar_agent():
@@ -411,7 +435,7 @@ def read_attachment(artifact_id: str) -> tuple[bytes, str]:
 def _session_command(*, fixed_identity_only: bool = False):
     # Commands admitted here finish before shutdown closes native admission.
     # A command waiting for this lock observes shutdown's early stop flag.
-    with _LOCK:
+    with _measured_lock("session_command"):
         if _STOP_REQUESTED.is_set():
             raise AssistantSessionError("ASSISTANT_STOPPING")
         if not _STARTED:
@@ -481,7 +505,7 @@ def session_quiescence():
     global _QUIESCING
     from core.web.services.session.admission_lock import SessionAdmissionLock
 
-    with _LOCK:
+    with _measured_lock("quiescence_enter"):
         if _STOP_REQUESTED.is_set() or not _STARTED or _OFFLINE_MIGRATION or _QUIESCING:
             raise AssistantSessionError("ASSISTANT_QUIESCENCE_UNAVAILABLE")
         assistant = _projection()["assistant"]
@@ -508,7 +532,7 @@ def session_quiescence():
         finally:
             lock.release()
     finally:
-        with _LOCK:
+        with _measured_lock("quiescence_exit"):
             with _QUIESCENCE_STATE_LOCK:
                 _QUIESCING = False
 
@@ -527,7 +551,7 @@ def lifecycle_status() -> dict[str, Any]:
     try:
         # Unlike a held shutdown proof, polling must not toggle _QUIESCING and
         # reject a concurrent user's command. It waits behind normal admission.
-        with _LOCK:
+        with _measured_lock("lifecycle_status"):
             if _STOP_REQUESTED.is_set() or not _STARTED or _OFFLINE_MIGRATION or _QUIESCING:
                 return {"schemaVersion": 1, "state": "unknown"}
             assistant = _projection()["assistant"]
@@ -557,13 +581,18 @@ def _source_command():
         raise AssistantSessionError("ASSISTANT_STOPPING")
     if not _LOCK.acquire(blocking=False):
         raise AssistantSessionError("TASK_SOURCE_BUSY")
+    entered = time.monotonic()
     try:
         if _STOP_REQUESTED.is_set():
             raise AssistantSessionError("ASSISTANT_STOPPING")
         with _session_command(fixed_identity_only=True) as command:
             yield command
     finally:
+        held_seconds = time.monotonic() - entered
         _LOCK.release()
+        if held_seconds >= LOCK_HOLD_WARN_SECONDS:
+            _LOGGER.warning("assistant_native_lock_hold operation=%s held_ms=%d",
+                            "source_command", round(held_seconds * 1000))
 
 
 def read_task_source(runtime: dict, *, source_ref: dict | None = None) -> dict:
@@ -665,6 +694,7 @@ def shutdown(*, timeout: float = 8.0) -> dict[str, Any]:
     admitted = _LOCK.acquire(timeout=remaining) if remaining > 0 else _LOCK.acquire(blocking=False)
     if not admitted:
         return {"closed": False, "code": "NATIVE_SHUTDOWN_ADMISSION_BUSY"}
+    entered = time.monotonic()
     try:
         if _OFFLINE_MIGRATION and _OFFLINE_DIRECTORY_CLOSE_UNCONFIRMED:
             raise RuntimeError("offline_directory_close_unconfirmed")
@@ -692,4 +722,10 @@ def shutdown(*, timeout: float = 8.0) -> dict[str, Any]:
             _AGENT_ID = ""
         return result
     finally:
+        held_seconds = time.monotonic() - entered
         _LOCK.release()
+        # Shutdown holds admission across the whole drain: exactly the kind of
+        # long critical section the hold-time observation must surface.
+        if held_seconds >= LOCK_HOLD_WARN_SECONDS:
+            _LOGGER.warning("assistant_native_lock_hold operation=%s held_ms=%d",
+                            "shutdown", round(held_seconds * 1000))

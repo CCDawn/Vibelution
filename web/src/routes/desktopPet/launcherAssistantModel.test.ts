@@ -9,8 +9,10 @@ import type { LauncherAssistantSessionEvent } from "../../api/launcherAssistant"
 import {
   launcherAssistantActivity, launcherAssistantMessageOverLimit, launcherAssistantPollInterval, launcherAssistantSendDefinitelyRejected, launcherAssistantSubmission, launcherDispatchLabel, launcherAssistantQueueReadback, launcherAssistantQueueLabel, launcherAssistantRequestReadback,
   launcherAssistantSessionEventRefreshesDetail, launcherAssistantSseHealthy, launcherAssistantWaitInterval,
+  launcherAssistantStatusDegradeTone,
   launcherAssistantContextRing, launcherAssistantModelDisplay, launcherAssistantEditBackfillDraft,
   LAUNCHER_ASSISTANT_MAX_MESSAGE_CHARS, LAUNCHER_ASSISTANT_SSE_HEALTH_WINDOW_MS, LAUNCHER_ASSISTANT_WAIT_POLL_FIRST_MS, LAUNCHER_ASSISTANT_WAIT_POLL_MAX_MS,
+  LAUNCHER_ASSISTANT_STATUS_DEGRADE_FAILURES, LAUNCHER_ASSISTANT_STATUS_DEGRADE_MAX_SILENCE_MS,
 } from "./launcherAssistantModel";
 import { LauncherAssistantRoute } from "./LauncherAssistantRoute";
 
@@ -432,6 +434,39 @@ describe("Launcher assistant state", () => {
     expect(launcherAssistantSseHealthy(now - LAUNCHER_ASSISTANT_SSE_HEALTH_WINDOW_MS - 1, now)).toBe(false);
   });
 
+  it("debounces the status degrade: one failed poll is a hint, persistent failure over a dead channel is red", () => {
+    const mounted = { isError: true, isFetching: false, hasData: true, consecutiveFailures: 0, lastSuccessAt: 1_000, now: 1_000, sseHealthy: false };
+    expect(LAUNCHER_ASSISTANT_STATUS_DEGRADE_FAILURES).toBe(2);
+    expect(LAUNCHER_ASSISTANT_STATUS_DEGRADE_MAX_SILENCE_MS).toBe(30_000);
+    // The never-succeeded cold boot is owned by the backend-wait surface.
+    expect(launcherAssistantStatusDegradeTone({ ...mounted, hasData: false, consecutiveFailures: 5 })).toBe("quiet");
+    // A paused poller (no error, no attempt in flight) is not failure evidence,
+    // even when the last success is far back.
+    expect(launcherAssistantStatusDegradeTone({ ...mounted, isError: false, now: 1_000 + 10 * 60_000 })).toBe("quiet");
+    // A single failed poll stays at the weak hint.
+    expect(launcherAssistantStatusDegradeTone({ ...mounted, consecutiveFailures: 1 })).toBe("soft");
+    // Two consecutive failed polls over a dead push channel escalate…
+    expect(launcherAssistantStatusDegradeTone({ ...mounted, consecutiveFailures: 2 })).toBe("error");
+    // …and the 30s silence gap escalates strictly past its boundary.
+    expect(launcherAssistantStatusDegradeTone({ ...mounted, consecutiveFailures: 1,
+      now: 1_000 + LAUNCHER_ASSISTANT_STATUS_DEGRADE_MAX_SILENCE_MS })).toBe("soft");
+    expect(launcherAssistantStatusDegradeTone({ ...mounted, consecutiveFailures: 1,
+      now: 1_000 + LAUNCHER_ASSISTANT_STATUS_DEGRADE_MAX_SILENCE_MS + 1 })).toBe("error");
+  });
+
+  it("caps the status degrade at the weak hint while the push channel is alive", () => {
+    const mounted = { isError: true, isFetching: false, hasData: true, consecutiveFailures: 6, lastSuccessAt: 1_000, now: 1_000, sseHealthy: true };
+    expect(launcherAssistantStatusDegradeTone(mounted)).toBe("soft");
+    expect(launcherAssistantStatusDegradeTone({ ...mounted, now: 1_000 + LAUNCHER_ASSISTANT_STATUS_DEGRADE_MAX_SILENCE_MS + 1 })).toBe("soft");
+  });
+
+  it("treats a hung in-flight status read past the silence gap as degraded, not a paused poller", () => {
+    const mounted = { isError: false, isFetching: true, hasData: true, consecutiveFailures: 0, lastSuccessAt: 1_000, now: 1_000, sseHealthy: false };
+    expect(launcherAssistantStatusDegradeTone(mounted)).toBe("quiet");
+    expect(launcherAssistantStatusDegradeTone({ ...mounted, now: 1_000 + LAUNCHER_ASSISTANT_STATUS_DEGRADE_MAX_SILENCE_MS })).toBe("quiet");
+    expect(launcherAssistantStatusDegradeTone({ ...mounted, now: 1_000 + LAUNCHER_ASSISTANT_STATUS_DEGRADE_MAX_SILENCE_MS + 1 })).toBe("error");
+  });
+
   it("backs the cold-boot backend wait off from 2s to a 16s cap", () => {
     const start = 1_000_000;
     expect(LAUNCHER_ASSISTANT_WAIT_POLL_FIRST_MS).toBe(2_000);
@@ -703,13 +738,20 @@ describe("Launcher native turn controls", () => {
 });
 
 describe("Launcher assistant route lifecycle", () => {
-  it("shows a status read error despite a cached preference hiding ordinary pet status", async () => {
+  it("shows a persistent status read error despite a cached preference hiding ordinary pet status", async () => {
     await renderAssistant(undefined, { assistant: { agentId: "a", directSessionId: "s", displayName: "助理" },
       settings: { ok: true, displayName: "助理", modelId: "m", preferences: {
         characterId: "dafeiyu", showStatus: false, showTitles: true, showCompletion: true, idleMessage: "",
       } } });
     expect(container?.querySelector('[role="status"]')?.hasAttribute("hidden")).toBe(true);
-    bridge.getLauncherAssistantStatus.mockRejectedValueOnce(new Error("status unavailable"));
+    bridge.getLauncherAssistantStatus.mockRejectedValue(new Error("status unavailable"));
+    // One failed read stays a weak hint: the pill keeps obeying its preference.
+    await act(async () => { await client?.refetchQueries({ queryKey: ["launcher-assistant", "status"], exact: true }); });
+    await settle();
+    expect(container?.querySelector('[role="status"]')?.hasAttribute("hidden")).toBe(true);
+    expect(container?.textContent).not.toContain("个人助理暂不可用");
+    // A second consecutive failure over a dead push channel escalates: the hard
+    // degradation breaks through the hidden-status preference.
     await act(async () => { await client?.refetchQueries({ queryKey: ["launcher-assistant", "status"], exact: true }); });
     await settle();
     const status = container?.querySelector('[role="status"]');
