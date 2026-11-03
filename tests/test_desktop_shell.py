@@ -109,6 +109,66 @@ def test_packaged_assistant_source_changes_make_shell_stale(tmp_path, monkeypatc
     assert desktop_shell.inspect_desktop_shell(tmp_path)["reason"] == "assistant_source_mismatch"
 
 
+def test_full_assistant_verification_hashes_payload_in_the_existing_file_reads(tmp_path, monkeypatch):
+    _write_packaged_shell(tmp_path, tree_hash="a" * 40)
+    package = desktop_shell.packaged_desktop_exe(tmp_path).parent
+    payload = package / "resources/launcher-assistant"
+    evidence = json.loads(desktop_shell.packaged_provenance_path(tmp_path).read_text())["assistant"]
+    original_hash = desktop_shell._frontend_directory_content_sha256
+    original_verify = assistant_builder.verify_launcher_assistant_payload
+    calls = []
+
+    def directory_hash(path):
+        assert Path(assistant_builder._public_path(path)).resolve() != payload.resolve(), "payload must not be re-read"
+        return original_hash(path)
+
+    def verify(path, **kwargs):
+        calls.append(kwargs)
+        return original_verify(path, **kwargs)
+
+    monkeypatch.setattr(desktop_shell, "_frontend_directory_content_sha256", directory_hash)
+    monkeypatch.setattr(assistant_builder, "verify_launcher_assistant_payload", verify)
+    assert desktop_shell._assistant_package_block_reason(tmp_path, package, full=True) == ""
+    assert calls == [{"expected_manifest_sha256": evidence["manifestSha256"],
+                      "expected_content_sha256": evidence["contentSha256"]}]
+
+
+def test_stale_assistant_sources_skip_full_payload_verification(tmp_path, monkeypatch):
+    _write_packaged_shell(tmp_path, tree_hash="a" * 40)
+    (tmp_path / "core/__init__.py").write_bytes(b"source changed")
+
+    def unexpected_verify(*_args, **_kwargs):
+        pytest.fail("a source mismatch must refuse the package before full payload reads")
+
+    monkeypatch.setattr(assistant_builder, "verify_launcher_assistant_payload", unexpected_verify)
+    package = desktop_shell.packaged_desktop_exe(tmp_path).parent
+    assert desktop_shell._assistant_package_block_reason(tmp_path, package, full=True) == "assistant_source_mismatch"
+
+
+def test_full_assistant_verification_rejects_sources_changed_during_payload_read(tmp_path, monkeypatch):
+    _write_packaged_shell(tmp_path, tree_hash="a" * 40)
+    original_verify = assistant_builder.verify_launcher_assistant_payload
+
+    def verify_then_change_source(*args, **kwargs):
+        result = original_verify(*args, **kwargs)
+        (tmp_path / "core/__init__.py").write_bytes(b"source changed during verification")
+        return result
+
+    monkeypatch.setattr(assistant_builder, "verify_launcher_assistant_payload", verify_then_change_source)
+    package = desktop_shell.packaged_desktop_exe(tmp_path).parent
+    assert desktop_shell._assistant_package_block_reason(tmp_path, package, full=True) == "assistant_source_mismatch"
+
+
+def test_raw_assistant_content_mismatch_retains_its_diagnostic_reason(tmp_path):
+    _write_packaged_shell(tmp_path, tree_hash="a" * 40)
+    proof_path = desktop_shell.packaged_provenance_path(tmp_path)
+    proof = json.loads(proof_path.read_text(encoding="utf-8"))
+    proof["assistant"]["contentSha256"] = "0" * 64
+    proof_path.write_text(json.dumps(proof), encoding="utf-8")
+    package = desktop_shell.packaged_desktop_exe(tmp_path).parent
+    assert desktop_shell._assistant_package_block_reason(tmp_path, package, full=True) == "assistant_package_content_mismatch"
+
+
 @pytest.mark.parametrize("fault", ["missing", "tampered", "source_changed", "wrong_hash_domain"])
 def test_bad_staged_assistant_never_replaces_live_shell(tmp_path, monkeypatch, fault):
     live = _write_live_win_unpacked(tmp_path)

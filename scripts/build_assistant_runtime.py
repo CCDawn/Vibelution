@@ -56,6 +56,10 @@ _INSTALL_METADATA = {"direct_url.json", "origin.json", "provenance.json", "uv_ca
 _DEVELOPMENT_PTH = {"a1_coverage.pth", "distutils-precedence.pth"}
 
 
+class AssistantPayloadContentMismatch(ValueError):
+    """The verified payload bytes differ from the sealed raw-directory digest."""
+
+
 def _json_bytes(value: Any) -> bytes:
     return (json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
 
@@ -571,7 +575,14 @@ def build_launcher_assistant_payload(
             "sourceRoot": _public_path(output / "source"), "pythonRoot": _public_path(output / "python")}
 
 
-def _verify_files(root: Path, manifest: dict) -> None:
+def _directory_content_prefix(digest, relative: str, size: int) -> None:
+    path = relative.encode("utf-8")
+    digest.update(len(path).to_bytes(4, "big"))
+    digest.update(path)
+    digest.update(size.to_bytes(8, "big"))
+
+
+def _verify_files(root: Path, manifest: dict, *, directory_digest=None) -> None:
     if manifest.get("schemaVersion") != 1 or manifest.get("protocolVersion") != 1:
         raise ValueError("unsupported assistant payload manifest")
     python_name, abi = _python_names(manifest.get("pythonVersion", ""))
@@ -583,6 +594,7 @@ def _verify_files(root: Path, manifest: dict) -> None:
     if not isinstance(files, list) or not files or len(files) > 200_000:
         raise ValueError("invalid assistant file manifest")
     seen = set()
+    checked_entries = []
     for entry in files:
         if not isinstance(entry, dict) or set(entry) != {"path", "size", "sha256"}:
             raise ValueError("invalid assistant file entry")
@@ -592,15 +604,37 @@ def _verify_files(root: Path, manifest: dict) -> None:
         seen.add(relative.casefold())
         if type(entry["size"]) is not int or entry["size"] < 0 or not _HASH.fullmatch(str(entry["sha256"])):
             raise ValueError("invalid assistant file size/hash")
+        checked_entries.append((relative, entry))
+    if directory_digest is not None:
+        checked_entries.sort(key=lambda item: item[0].encode("utf-8"))
+    pth_relative = f"python/{python_name}._pth"
+    pth_content = None
+    for relative, entry in checked_entries:
         path = _checked(root, relative)
         if not path.is_file() or path.stat().st_size != entry["size"]:
             raise ValueError(f"assistant payload file missing or size mismatch: {relative}")
-        digest = _file_sha256(path, expected_size=entry["size"])
+        if directory_digest is None:
+            digest = _file_sha256(path, expected_size=entry["size"])
+        else:
+            # Preserve the sealed raw-directory domain without reading the payload
+            # a second time. The existing stable reader pins both digest inputs.
+            _directory_content_prefix(directory_digest, relative, entry["size"])
+            file_digest = hashlib.sha256()
+            capture_pth = relative.casefold() == pth_relative.casefold()
+            _, content = _read_stable_file(
+                path, expected_size=entry["size"], capture=capture_pth,
+                limit=len(_PTH_CONTENT) if capture_pth else None, digests=(file_digest, directory_digest),
+            )
+            if capture_pth:
+                pth_content = content
+            digest = file_digest.hexdigest()
         if digest != entry["sha256"]:
             raise ValueError(f"assistant payload hash mismatch: {relative}")
-    actual = {path.relative_to(root).as_posix().casefold() for path in _walk(root)
+    actual = {path.relative_to(root).as_posix() for path in _walk(root)
               if path.relative_to(root).as_posix() != "manifest.json"}
-    if actual != seen:
+    if {relative.casefold() for relative in actual} != seen or (
+        directory_digest is not None and actual != {relative for relative, _ in checked_entries}
+    ):
         raise ValueError("assistant payload contains unlisted or missing files")
     required = {"source/" + name for name in _REQUIRED_SOURCE} | {
         _PYTHON_ENTRYPOINT, "python/python.exe", "python/python3.dll", f"python/{python_name}.dll",
@@ -608,8 +642,11 @@ def _verify_files(root: Path, manifest: dict) -> None:
     }
     if not {path.casefold() for path in required} <= seen or not any(path.startswith("python/license") for path in seen):
         raise ValueError("required assistant payload files are missing")
-    _, pth_content = _read_stable_file(_checked(root, f"python/{python_name}._pth"),
-                                      limit=len(_PTH_CONTENT), capture=True)
+    pth_path = _checked(root, pth_relative)
+    if directory_digest is None:
+        _, pth_content = _read_stable_file(pth_path, limit=len(_PTH_CONTENT), capture=True)
+    elif not pth_path.is_file():
+        raise ValueError("required assistant payload files are missing")
     if pth_content != _PTH_CONTENT:
         raise ValueError("invalid isolated Python search paths")
     dependencies = manifest.get("dependencies")
@@ -645,8 +682,13 @@ def _verify_files(root: Path, manifest: dict) -> None:
 
 def verify_launcher_assistant_payload(
     payload_root: Path | str, *, expected_manifest_sha256: str | None = None,
+    expected_content_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Verify every listed byte and reject extra files; startup should pin SHA."""
+    if expected_content_sha256 is not None and (
+        not isinstance(expected_content_sha256, str) or not _HASH.fullmatch(expected_content_sha256)
+    ):
+        raise ValueError("assistant content SHA-256 mismatch")
     root = _trusted_root(payload_root)
     path = _checked(root, "manifest.json")
     if not path.is_file() or path.stat().st_size > _MANIFEST_MAX_BYTES:
@@ -663,5 +705,14 @@ def verify_launcher_assistant_payload(
         raise ValueError("invalid assistant payload manifest JSON") from exc
     if not isinstance(manifest, dict):
         raise ValueError("invalid assistant payload manifest shape")  # noqa: TRY004 -- malformed input, not a caller type error
-    _verify_files(root, manifest)
+    directory_digest = None
+    if expected_content_sha256 is not None:
+        directory_digest = hashlib.sha256()
+        # Every admitted manifest entry starts with python/ or source/, so the
+        # manifest itself precedes all of them in UTF-8 path order.
+        _directory_content_prefix(directory_digest, "manifest.json", len(content))
+        directory_digest.update(content)
+    _verify_files(root, manifest, directory_digest=directory_digest)
+    if directory_digest is not None and directory_digest.hexdigest() != expected_content_sha256:
+        raise AssistantPayloadContentMismatch("assistant content SHA-256 mismatch")
     return manifest

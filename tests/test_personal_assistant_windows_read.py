@@ -145,3 +145,121 @@ def test_directory_rename_blocked_and_failure_closes_handles(tmp_path, monkeypat
 def test_reject_ambiguous_windows_components(tmp_path, name):
     with pytest.raises(ValueError, match="unsafe"):
         source.read_source_bytes(tmp_path, tmp_path / name, 10)
+
+
+def test_directory_reader_verifies_ancestors_once_and_preserves_file_sharing(tmp_path, monkeypatch):
+    folder = tmp_path / "batch"
+    folder.mkdir()
+    first, second = folder / "first.json", folder / "second.json"
+    first.write_bytes(b"first")
+    second.write_bytes(b"second")
+    real_verify = source._verify
+    directory_checks, file_checks = [], []
+
+    def verify(api, handle, path, *, directory):
+        info = real_verify(api, handle, path, directory=directory)
+        (directory_checks if directory else file_checks).append(path)
+        if not directory:
+            with pytest.raises(OSError):
+                path.write_bytes(b"writer must be denied")
+            with pytest.raises(OSError):
+                path.rename(folder / "renamed.json")
+        return info
+
+    monkeypatch.setattr(source, "_verify", verify)
+    with source.source_directory_reader(tmp_path, folder) as read:
+        assert read(first, 32) == b"first"
+        assert read(second, 32) == b"second"
+        with pytest.raises(OSError):
+            folder.rename(tmp_path / "moved")
+        # The lease must allow ordinary unrelated writes and child replacement.
+        replacement = folder / "replacement.json"
+        replacement.write_bytes(b"new second")
+        replacement.replace(second)
+        assert read(second, 32) == b"new second"
+    assert directory_checks == [*reversed(folder.parents), folder]
+    assert len(file_checks) == 6  # Each file is verified before and after its read.
+    with pytest.raises(ValueError, match="scope"):
+        read(first, 32)
+    folder.rename(tmp_path / "moved")
+
+
+def test_directory_reader_rejects_nested_outside_ambiguous_and_hardlinked_children(tmp_path):
+    folder = tmp_path / "batch"
+    folder.mkdir()
+    nested = folder / "nested"
+    nested.mkdir()
+    target = folder / "file.json"
+    target.write_bytes(b"safe")
+    alias = folder / "alias.json"
+    os.link(target, alias)
+    with source.source_directory_reader(tmp_path, folder) as read:
+        with pytest.raises(ValueError, match="immediate"):
+            read(nested / "file.json", 32)
+        with pytest.raises(ValueError, match="outside"):
+            read(tmp_path / "outside.json", 32)
+        for name in ("file.json:stream", "trailing.", "trailing "):
+            with pytest.raises(ValueError, match="unsafe"):
+                read(folder / name, 32)
+        with pytest.raises(ValueError, match="hard link"):
+            read(alias, 32)
+    alias.unlink()
+    with source.source_directory_reader(tmp_path, folder) as read:
+        with pytest.raises(ValueError, match="budget"):
+            read(target, 3)
+
+
+def test_directory_reader_rejects_reparse_directory_and_file(tmp_path):
+    folder = tmp_path / "batch"
+    folder.mkdir()
+    target = folder / "file.json"
+    target.write_bytes(b"safe")
+    alias = tmp_path / "alias"
+    file_alias = folder / "alias.json"
+    try:
+        alias.symlink_to(folder, target_is_directory=True)
+        file_alias.symlink_to(target)
+    except OSError as exc:
+        pytest.skip(f"Symlink creation unavailable: {exc.winerror}")
+    with pytest.raises(ValueError):
+        with source.source_directory_reader(tmp_path, alias):
+            pytest.fail("Reparse directory must not be pinned")
+    with source.source_directory_reader(tmp_path, folder) as read:
+        with pytest.raises(ValueError):
+            read(file_alias, 32)
+
+
+@pytest.mark.parametrize("failure", ["verify", "read"])
+def test_directory_reader_failure_expires_callback_and_closes_all_handles(tmp_path, monkeypatch, failure):
+    folder = tmp_path / "batch"
+    folder.mkdir()
+    target = folder / "file.json"
+    target.write_bytes(b"safe")
+    real_verify = source._verify
+
+    def fail(api, handle, path, *, directory):
+        info = real_verify(api, handle, path, directory=directory)
+        if not directory and failure == "verify":
+            raise ValueError("Injected file validation failure")
+        return info
+
+    monkeypatch.setattr(source, "_verify", fail)
+    if failure == "read":
+        real_api = source._api()
+
+        class FailedReadAPI:
+            def __getattr__(self, name):
+                return getattr(real_api, name)
+
+            def ReadFile(self, *args):
+                ctypes.set_last_error(5)
+                return False
+
+        monkeypatch.setattr(source, "_api", lambda: FailedReadAPI())
+    with pytest.raises(ValueError if failure == "verify" else OSError):
+        with source.source_directory_reader(tmp_path, folder) as read:
+            read(target, 32)
+    with pytest.raises(ValueError, match="scope"):
+        read(target, 32)
+    target.write_bytes(b"released")
+    folder.rename(tmp_path / "moved")
