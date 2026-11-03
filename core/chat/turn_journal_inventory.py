@@ -147,7 +147,7 @@ def read_turn_journal_inventory(project_root: Path, *, max_directories: int = MA
     try:
         for folder in root.iterdir():
             visited += 1
-            if visited > max_directories:
+            if visited > max_directories or charged >= max_bytes:
                 result["truncated"] = True
                 break
             try:
@@ -163,9 +163,15 @@ def read_turn_journal_inventory(project_root: Path, *, max_directories: int = MA
                 path = check_path(path)
                 initial_identity = path_identity(path)
                 size = initial_identity[2]
-                if size > MAX_FILE_BYTES or size * 2 > max_bytes - charged:
+                if size > MAX_FILE_BYTES:
                     result["truncated"] = True
                     continue
+                if size * 2 > max_bytes - charged:
+                    # No more namespace I/O after the total source budget is
+                    # exhausted. Accepted Journals still get their reserved
+                    # verification read and the scan remains explicitly partial.
+                    result["truncated"] = True
+                    break
                 # Reserve both reads even if parsing rejects this file, so a
                 # corrupt namespace cannot bypass the total source budget.
                 charged += size * 2
