@@ -509,6 +509,127 @@ def test_native_status_rereads_operator_profile_and_keeps_identity_on_read_failu
                                  "assistantAvatarVersion": 1, "assistantAvatarRevision": None}
 
 
+def _identity_snapshot_test_facade(monkeypatch):
+    """A facade whose lock-bound native reads and lock-free extras are fixtures."""
+    import threading
+
+    from core.assistant_runtime import host, native, operator_assets
+    from core.assistant_runtime.host import NativeFacade
+
+    monkeypatch.setattr(operator_assets, "operator_asset_revisions",
+                        lambda: {"avatar": None, "background": None})
+    monkeypatch.setattr(host, "_model_image_input_support", lambda agent_id: None)
+    monkeypatch.setattr(host, "_operator_profile", lambda: None)
+    state = {"reads": [], "models": ["m1"], "gate": threading.Event(), "gate_open": True}
+
+    def identity():
+        assert state["gate_open"] or state["gate"].wait(5), "background identity refresh never ran"
+        state["reads"].append("identity")
+        return {"assistant": {"agentId": "a", "directSessionId": "s"}, "sessionId": "s"}
+
+    def settings():
+        state["reads"].append("settings")
+        return {"ok": True, "modelId": state["models"][-1]}
+
+    monkeypatch.setattr(native, "identity", identity)
+    monkeypatch.setattr(native, "assistant_settings", settings)
+    monkeypatch.setattr(native, "assistant_avatar_revision", lambda: state["reads"].append("avatar"))
+    return NativeFacade(None), state
+
+
+def test_identity_snapshot_serves_cached_status_without_native_lock_or_reads(monkeypatch):
+    import threading
+    import time
+
+    from core.assistant_runtime import host, native
+
+    monkeypatch.setattr(host, "IDENTITY_SNAPSHOT_TTL_SECONDS", 60.0)
+    facade, state = _identity_snapshot_test_facade(monkeypatch)
+    first = facade.identity()
+    assert state["reads"] == ["identity", "settings", "avatar"]
+    assert first["settings"]["modelId"] == "m1"
+    # A held native lock (polled chat detail, submit) must not delay a cached
+    # lightweight status read, and a cache hit performs no native reads at all.
+    locked = threading.Event()
+    release = threading.Event()
+
+    def hold_native_lock():
+        with native._LOCK:
+            locked.set()
+            assert release.wait(5)
+
+    holder = threading.Thread(target=hold_native_lock, daemon=True)
+    holder.start()
+    assert locked.wait(1)
+    try:
+        started = time.perf_counter()
+        second = facade.identity()
+        elapsed = time.perf_counter() - started
+    finally:
+        release.set()
+        holder.join(5)
+    assert elapsed < 1.0
+    assert second["assistant"] == first["assistant"]
+    assert second["settings"]["modelId"] == "m1"
+    assert state["reads"] == ["identity", "settings", "avatar"]
+
+
+def test_set_model_invalidates_the_identity_snapshot_only_after_success(monkeypatch):
+    from core.assistant_runtime import host
+    from core.assistant_runtime.native import AssistantSessionError
+
+    monkeypatch.setattr(host, "IDENTITY_SNAPSHOT_TTL_SECONDS", 60.0)
+    facade, state = _identity_snapshot_test_facade(monkeypatch)
+
+    def set_model(model_id):
+        if model_id == "busy":
+            raise AssistantSessionError("ASSISTANT_MODEL_BUSY")
+        state["models"].append(model_id)
+        return {"modelId": model_id}
+
+    from core.assistant_runtime import native
+    monkeypatch.setattr(native, "set_model", set_model)
+    assert facade.identity()["settings"]["modelId"] == "m1"
+    assert facade.identity()["settings"]["modelId"] == "m1"  # served from the snapshot
+    assert len(state["reads"]) == 3
+    with pytest.raises(AssistantSessionError):
+        facade.set_model("busy")
+    assert len(state["reads"]) == 3  # failed writes keep the validated snapshot
+    assert facade.set_model("m2") == {"modelId": "m2"}
+    assert facade.identity()["settings"]["modelId"] == "m2"
+    assert len(state["reads"]) == 6  # exactly one recompute after the successful write
+    assert facade.identity()["settings"]["modelId"] == "m2"
+    assert len(state["reads"]) == 6  # and the refreshed snapshot is cached again
+
+
+def test_stale_identity_snapshot_is_served_immediately_and_refreshed_in_background(monkeypatch):
+    import time
+
+    from core.assistant_runtime import host
+
+    monkeypatch.setattr(host, "IDENTITY_SNAPSHOT_TTL_SECONDS", 0.0)  # every read is stale
+    facade, state = _identity_snapshot_test_facade(monkeypatch)
+    assert facade.identity()["settings"]["modelId"] == "m1"
+    state["models"].append("m2")
+    state["gate_open"] = False
+    state["gate"].clear()  # the native read is now unreachable (simulated lock hold)
+    try:
+        started = time.perf_counter()
+        stale = facade.identity()
+        elapsed = time.perf_counter() - started
+    finally:
+        state["gate_open"] = True
+        state["gate"].set()
+    assert elapsed < 1.0
+    assert stale["settings"]["modelId"] == "m1"  # last validated snapshot, not a queue
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if facade.identity()["settings"]["modelId"] == "m2":
+            break
+        time.sleep(0.01)
+    assert facade.identity()["settings"]["modelId"] == "m2"
+
+
 def test_model_image_input_support_degrades_to_unknown_without_touching_services(monkeypatch):
     from core.assistant_runtime import host
     from core.web.services import agent_directory_service, session_service

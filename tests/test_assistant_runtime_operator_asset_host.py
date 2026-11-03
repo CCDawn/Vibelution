@@ -48,6 +48,10 @@ def test_status_exposes_only_opaque_asset_revisions(monkeypatch):
     from core.assistant_runtime import host, native, operator_assets
     from tools import pa_assistant_actions
     monkeypatch.setattr(native, "identity", lambda: {"assistant": {"agentId": "fixture", "directSessionId": "fixture"}})
+    # The facade's snapshot refresh also reads settings; the unbootstrapped
+    # native owner must never be initialized by this status-only test.
+    monkeypatch.setattr(native, "assistant_settings", lambda: {"ok": True})
+    monkeypatch.setattr(native, "assistant_avatar_revision", lambda: None)
     monkeypatch.setattr(pa_assistant_actions, "execute", lambda *args, **kwargs: {})
     monkeypatch.setattr(host, "_operator_profile", lambda: None)
     monkeypatch.setattr(operator_assets, "operator_asset_revisions", lambda: {"avatar": "a" * 64, "background": None})
