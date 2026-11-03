@@ -463,14 +463,19 @@ def _data_home_fingerprint(
     config_path: str | os.PathLike[str] | None,
 ) -> tuple[object, ...]:
     identity_signature = _file_signature(root / PROJECT_IDENTITY_RELATIVE_PATH)
-    config_signature = _file_signature(_resolve_config_path_cached(paths_mod, config_path))
+    resolved_config_path = _resolve_config_path_cached(paths_mod, config_path)
+    config_signature = _file_signature(resolved_config_path)
+    configured_data_home: Path | None = None
     try:
         target = resolve_project_storage_paths(root, projects_home=projects_home)
     except ProjectIdentityError:
         marker_signature: tuple[str, bool, int, int] | None = None
     else:
         marker_signature = _file_signature(storage_migration_state_path(target))
-    return (identity_signature, config_signature, marker_signature)
+        if not str(os.environ.get(paths_mod.DATA_HOME_ENV) or "").strip():
+            # A read/parse failure can recover without changing the file signature.
+            configured_data_home = paths_mod.resolve_configured_data_home(config_path=resolved_config_path)
+    return (identity_signature, config_signature, marker_signature, configured_data_home)
 
 
 def resolve_project_data_home(

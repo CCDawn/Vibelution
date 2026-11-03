@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -52,6 +53,12 @@ def _write_marker(paths: storage.ProjectStoragePaths, *, status: str = "complete
 def project_env(tmp_path, monkeypatch):
     """隔离的项目存储环境：identity + projects home 全部落在 tmp_path。"""
 
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[launcher]\ncontrol_port = 8765\n", encoding="utf-8")
+    monkeypatch.setenv("VIBELUTION_CONFIG_PATH", str(config_path))
+    monkeypatch.setenv("VIBELUTION_CONFIG_HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "user"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local-app-data"))
     projects_home = tmp_path / "projects"
     monkeypatch.setenv(storage.PROJECTS_HOME_ENV, str(projects_home))
     monkeypatch.delenv("VIBELUTION_DATA_HOME", raising=False)
@@ -166,6 +173,105 @@ def test_resolve_project_workspace_home_caches_final_resolve(project_env):
     second = storage.resolve_project_workspace_home(project_env)
     assert first is second
     assert first == (target.data / "workspace").resolve()
+
+
+@pytest.mark.parametrize("failure", ["read", "parse"])
+@pytest.mark.parametrize("first_resolver", ["data", "workspace"])
+def test_project_home_caches_recover_after_temporary_config_failure(
+    project_env, monkeypatch, failure, first_resolver
+):
+    config_path = project_env.parent / "config.toml"
+    config_path.write_text('[storage]\ndata_home = "operator-data"\n', encoding="utf-8")
+    monkeypatch.setenv("VIBELUTION_CONFIG_PATH", str(config_path))
+    monkeypatch.setenv("VIBELUTION_CONFIG_HOME", str(project_env.parent / "config-home"))
+    monkeypatch.setenv("USERPROFILE", str(project_env.parent / "user"))
+    monkeypatch.setattr(storage, "_CONFIG_PATHS_MODULE", None)
+    monkeypatch.setattr(storage, "_DATA_HOME_CACHE", {})
+    monkeypatch.setattr(storage, "_WORKSPACE_HOME_CACHE", {})
+    paths_mod = storage._load_config_paths_stdlib()
+    from config import paths
+
+    assert paths_mod is not paths
+    target = storage.resolve_project_storage_paths(project_env)
+    _write_marker(target)
+    initial_stat = config_path.stat()
+    initial_hash = hashlib.sha256(config_path.read_bytes()).digest()
+    original_read_text = Path.read_text
+    failing = True
+    reads = 0
+
+    def failing_read_text(self, *args, **kwargs):
+        nonlocal reads
+        if self == config_path:
+            reads += 1
+            if failing:
+                if failure == "read":
+                    raise OSError("temporary config read failure")
+                return "[storage\n"
+        return original_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", failing_read_text)
+    resolvers = {
+        "data": storage.resolve_project_data_home,
+        "workspace": storage.resolve_project_workspace_home,
+    }
+    order = [first_resolver, "workspace" if first_resolver == "data" else "data"]
+    fallback = {"data": target.data, "workspace": (target.data / "workspace").resolve()}
+    for _ in range(2):
+        for name in order:
+            assert resolvers[name](project_env, config_path=config_path) == fallback[name]
+
+    failing = False
+    current_stat = config_path.stat()
+    assert (current_stat.st_mtime_ns, current_stat.st_size) == (
+        initial_stat.st_mtime_ns, initial_stat.st_size
+    )
+    assert hashlib.sha256(config_path.read_bytes()).digest() == initial_hash
+    configured = project_env.parent / "operator-data"
+    expected = {"data": configured, "workspace": (configured / "workspace").resolve()}
+    recovered = {}
+    for name in order:
+        recovered[name] = resolvers[name](project_env, config_path=config_path)
+        assert recovered[name] == expected[name]
+    recovered_reads = reads
+    for name in order:
+        assert resolvers[name](project_env, config_path=config_path) is recovered[name]
+    assert reads == recovered_reads
+
+
+@pytest.mark.parametrize("binding", ["env", "missing-identity", "invalid-identity"])
+@pytest.mark.parametrize("failure", ["unreadable", "invalid-utf8"])
+def test_project_home_skips_config_read_for_existing_short_circuits(
+    project_env, monkeypatch, binding, failure
+):
+    config_path = project_env.parent / "config.toml"
+    config_path.write_bytes(b"\xff" if failure == "invalid-utf8" else b"[storage]\n")
+    monkeypatch.setattr(storage, "_CONFIG_PATHS_MODULE", None)
+    if binding == "env":
+        expected = project_env.parent / "explicit-data"
+        monkeypatch.setenv("VIBELUTION_DATA_HOME", str(expected))
+    else:
+        identity_path = project_env / ".vibelution" / "project.json"
+        if binding == "missing-identity":
+            identity_path.unlink()
+        else:
+            identity_path.write_text("{invalid json", encoding="utf-8")
+        expected = project_env
+    original_read_text = Path.read_text
+    config_reads = []
+
+    def unreadable_config(self, *args, **kwargs):
+        if self == config_path:
+            config_reads.append(self)
+            if failure == "unreadable":
+                raise OSError("config must not be read by this branch")
+        return original_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", unreadable_config)
+
+    assert storage.resolve_project_data_home(project_env) == expected
+    assert storage.resolve_project_workspace_home(project_env) == (expected / "workspace").resolve()
+    assert config_reads == []
 
 
 def test_storage_resolution_caches_are_thread_safe(project_env):
@@ -310,10 +416,15 @@ def agent_registry_env(tmp_path, monkeypatch):
     _write_identity(root)
     config_path = tmp_path / "config.toml"
     config_path.write_text("[launcher]\ncontrol_port = 8765\n", encoding="utf-8")
+    monkeypatch.setenv("VIBELUTION_CONFIG_PATH", str(config_path))
+    monkeypatch.setenv("VIBELUTION_CONFIG_HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "user"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local-app-data"))
     monkeypatch.setattr(developer_sandbox, "CONFIG_PATH", config_path)
     developer_sandbox._clear_developer_mode_config_cache()
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", root)
     agent_directory_service._invalidate_repaired_state_cache()
+    assert agent_directory_service.registry_path().is_relative_to(tmp_path)
     yield root, config_path
     agent_directory_service._invalidate_repaired_state_cache()
 

@@ -1,5 +1,8 @@
+import hashlib
 import json
 from pathlib import Path
+
+import pytest
 
 from config.paths import (
     CONFIG_META_SCHEMA_VERSION,
@@ -104,6 +107,78 @@ def test_resolve_data_home_caches_storage_config_until_file_changes(monkeypatch,
 
     assert resolve_data_home() == tmp_path / "operator-data-v2"
     assert len(reads) == 2
+
+
+@pytest.mark.parametrize("failure", ["read", "parse"])
+@pytest.mark.parametrize("failed_reads", [1, 3])
+def test_resolve_data_home_recovers_after_temporary_config_failure(
+    monkeypatch, tmp_path, failure, failed_reads
+):
+    from config import paths
+
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[storage]\ndata_home = "operator-data"\n', encoding="utf-8")
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "user"))
+    monkeypatch.setenv(CONFIG_PATH_ENV, str(config_path))
+    monkeypatch.delenv(DATA_HOME_ENV, raising=False)
+    monkeypatch.setattr(paths, "_CONFIGURED_DATA_HOME_CACHE", {})
+    initial_stat = config_path.stat()
+    initial_hash = hashlib.sha256(config_path.read_bytes()).digest()
+    original_read_text = Path.read_text
+    reads = 0
+
+    def failing_read_text(self, *args, **kwargs):
+        nonlocal reads
+        if self == config_path:
+            reads += 1
+            if reads <= failed_reads:
+                if failure == "read":
+                    raise OSError("temporary config read failure")
+                return "[storage\n"
+        return original_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", failing_read_text)
+
+    for _ in range(failed_reads):
+        assert resolve_data_home() == tmp_path / "user" / "Documents" / "Vibelution" / "data"
+
+    current_stat = config_path.stat()
+    assert (current_stat.st_mtime_ns, current_stat.st_size) == (
+        initial_stat.st_mtime_ns, initial_stat.st_size
+    )
+    assert hashlib.sha256(config_path.read_bytes()).digest() == initial_hash
+    assert resolve_data_home() == tmp_path / "operator-data"
+    assert resolve_data_home() == tmp_path / "operator-data"
+    assert reads == failed_reads + 1
+
+
+@pytest.mark.parametrize("config_text", ['[app]\nname = "demo"\n', "[storage]\n", '[storage]\ndata_home = ""\n'])
+def test_resolve_data_home_caches_valid_config_without_storage_override(
+    monkeypatch, tmp_path, config_text
+):
+    from config import paths
+
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(config_text, encoding="utf-8")
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "user"))
+    monkeypatch.setenv(CONFIG_PATH_ENV, str(config_path))
+    monkeypatch.delenv(DATA_HOME_ENV, raising=False)
+    monkeypatch.setattr(paths, "_CONFIGURED_DATA_HOME_CACHE", {})
+    original_read_text = Path.read_text
+    reads = 0
+
+    def counting_read_text(self, *args, **kwargs):
+        nonlocal reads
+        if self == config_path:
+            reads += 1
+        return original_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", counting_read_text)
+
+    assert paths.resolve_configured_data_home() is None
+    assert resolve_data_home() == tmp_path / "user" / "Documents" / "Vibelution" / "data"
+    assert paths.resolve_configured_data_home() is None
+    assert reads == 1
 
 
 def test_model_capability_cache_defaults_next_to_external_config(monkeypatch, tmp_path):

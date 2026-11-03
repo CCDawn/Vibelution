@@ -305,7 +305,7 @@ def _configured_data_home(*, config_path: str | os.PathLike[str] | None = None) 
 
         payload = tomllib.loads(path.read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError):
-        _CONFIGURED_DATA_HOME_CACHE[cache_key] = (stat.st_mtime_ns, stat.st_size, None)
+        _CONFIGURED_DATA_HOME_CACHE.pop(cache_key, None)
         return None
     storage = payload.get("storage") if isinstance(payload, dict) else None
     if not isinstance(storage, dict):
