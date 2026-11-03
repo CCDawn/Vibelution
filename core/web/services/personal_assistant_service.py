@@ -199,6 +199,14 @@ TASK = {**TASK, "responsibilities":
     "动作标记governed=true时，直接用manage，action保持同名，arguments_json是对应parameters的JSON，等待原生审批；"
     "普通动作直接用action_tool，不把用户引导去设置页。引用参数需先读session_parameters_get等原生选项，不猜模型或版本。"
     "drafted、accepted、running只表示草稿/受理/运行，只有verified或原生完成终态才称完成。\n" + TASK["responsibilities"]}
+_PRE_MANAGEMENT_PERMISSION_TASK = TASK
+TASK = {**TASK,
+    "responsibilities": TASK["responsibilities"].replace(
+        "用户明确提出平台操作就负责办完：普通Agent创建、改名、模型/档案、头像、用户名、壁纸和设置用personal_assistant_action_tool；",
+        "用户明确提出平台操作就负责办完：普通Agent创建、改名、模型/档案和头像等项目管理写入统一用personal_assistant_manage_tool，"
+        "由原生入口按用户选择的管理审批档位决定是否询问，不在工具审批之外重复要求确认；"
+        "用户名、壁纸和助理设置继续用personal_assistant_action_tool；"),
+}
 _LOCK = threading.RLock()
 COMPOSER_STARTERS = (
     {
@@ -500,6 +508,7 @@ def create_personal_assistant(display_name: str = "个人助理") -> dict:
                 directory.normalize_task_profile(_PRE_MESSAGES_TASK),
                 directory.normalize_task_profile(_PRE_ACTIONS_TASK),
                 directory.normalize_task_profile(_PRE_API_COVERAGE_TASK),
+                directory.normalize_task_profile(_PRE_MANAGEMENT_PERMISSION_TASK),
                 directory.normalize_task_profile({**_PRE_QUERY_TASK, "constraints": _LEGACY_DESKTOP_CONSTRAINTS}),
                 directory.normalize_task_profile({**_PRE_AFFAIRS_TASK, "constraints": _LEGACY_DESKTOP_CONSTRAINTS}),
                 directory.normalize_task_profile({**_PRE_MESSAGES_TASK, "constraints": _LEGACY_DESKTOP_CONSTRAINTS}),
@@ -730,6 +739,7 @@ def _model_settings(agent: dict) -> dict:
 
 
 def _settings_payload(agent: dict) -> dict:
+    from core.web.services.local_assistant.management_permissions import projection
     metadata = agent.get("metadata") or {}
     return {
         "displayName": agent["displayName"],
@@ -738,6 +748,7 @@ def _settings_payload(agent: dict) -> dict:
             metadata.get(PREFERENCES_METADATA_KEY), dict
         ),
         "model": _model_settings(agent),
+        "managementPermission": projection(agent),
     }
 
 

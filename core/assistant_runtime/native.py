@@ -315,7 +315,32 @@ def assistant_settings() -> dict[str, Any]:
                                     if key in personal.PREFERENCES_FIELDS},
                     "modelId": model.get("currentModelId", ""),
                     "modelChoices": [{key: row[key] for key in fields if key in row}
-                                     for row in model.get("choices", []) if isinstance(row, dict)]}
+                                     for row in model.get("choices", []) if isinstance(row, dict)],
+                    "managementPermission": settings["managementPermission"]}
+
+
+def set_management_permission(preset: str, expected_revision: int) -> dict[str, str | int]:
+    """Change only future management admissions; pending approvals stay pending."""
+    from core.web.services.local_assistant import management_permissions
+    if (not isinstance(preset, str) or preset not in management_permissions.PERMISSION_PRESETS
+            or not management_permissions._valid_revision(expected_revision)):
+        raise AssistantSessionError("ASSISTANT_PERMISSION_INVALID")
+    try:
+        with _session_command():
+            _, personal, _, _ = _services()
+            with personal._LOCK:
+                expected_agent_id, expected_session_id = _AGENT_ID, _SESSION_ID
+                # Recheck the same fixed Agent/Session while holding its owner
+                # lock. Deliberately do not require idle work or settle approvals.
+                assistant_settings()
+                return management_permissions.update(preset, expected_revision,
+                    expected_agent_id=expected_agent_id, expected_session_id=expected_session_id)
+    except management_permissions.ManagementPermissionError as exc:
+        raise AssistantSessionError(exc.code) from None
+    except AssistantSessionError:
+        raise AssistantSessionError("ASSISTANT_PERMISSION_UNAVAILABLE") from None
+    except Exception:
+        raise AssistantSessionError("ASSISTANT_PERMISSION_UNAVAILABLE") from None
 
 
 def set_model(model_id: str) -> dict[str, str]:

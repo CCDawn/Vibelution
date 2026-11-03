@@ -38,7 +38,7 @@ async def test_launcher_actual_tool_descriptions_agree_with_native_describe(tool
         assert {"project_id", "request_id", "display_name", "model_id"} <= set(create["parameters"]["required"])
         assert "需要提供project_id、request_id、display_name、model_id" in action.description
         assert "需要提供project_id、request_id、display_name、model_id" in manage.description
-        assert create["governed"] is False
+        assert create["governed"] is True
         assert execute_action("describe", {"action": "knowledge_acl_grant"})["governed"] is True
         # knowledge_ingest/config_update are launcher-canonical PA managed
         # writes: discoverable per call, still absent from the static tool

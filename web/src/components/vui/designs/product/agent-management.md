@@ -220,6 +220,11 @@ Agent 三区工作台组合（filter + list + detail 编排容器）。
 | Prop | 说明 | 设计注意 |
 | --- | --- | --- |
 | value / onChange | 预设枚举 | 浮层用 VPopover 族 |
+| context | 默认 `agent`；可选 `launcher` | 仅替换说明文案和菜单标题。Launcher 三档仅管理已授权项目，不扩大项目、ACL、toolPolicy 或全机文件/网络访问 |
+| side / align | 默认延续 composer 向下右对齐 / settings 向下左对齐 | Launcher 输入框外权限行使用向上左对齐 |
+| value=null | 尚无可信当前档位 | 禁用时显示「权限暂不可用」，不假定选中了任一档 |
+
+列表支持方向键循环以及 Home / End 定位，Enter / Space 沿用 VButton，Escape 和焦点返回沿用 VPopover。普通 Agent 调用不传新增参数，文案、位置和已选档位行为保持原样。确认提权、保存、冲突和版本收敛归各场景的 owning hook，不放在共享控件内。
 
 ### 非职责
 - 不做权限引擎。

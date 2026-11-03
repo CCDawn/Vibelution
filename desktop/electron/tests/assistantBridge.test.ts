@@ -12,6 +12,23 @@ function setup() {
 describe("Launcher assistant private bridge", () => {
   afterEach(() => { vi.useRealTimers(); });
 
+  it("admits only a closed management-permission CAS request before starting the host", async () => {
+    const { owner, event } = setup();
+    const request = { operation: "setManagementPermissionPreset", preset: "full_access", expectedRevision: 0 };
+    for (const payload of [
+      { ...request, preset: "custom" }, { ...request, preset: true }, { ...request, expectedRevision: true },
+      { ...request, expectedRevision: -1 }, { ...request, expectedRevision: 0.5 }, { ...request, expectedRevision: Number.MAX_SAFE_INTEGER + 1 },
+      { ...request, projectId: "foreign" }, { ...request, agentId: "foreign" }, { ...request, expectedRevision: undefined },
+    ]) await expect(invokeAssistant(event, payload, owner)).rejects.toThrow("ASSISTANT_PERMISSION_INVALID");
+    expect(owner.host.start).not.toHaveBeenCalled();
+    await expect(invokeAssistant({ ...event, sender: {} }, request, owner)).rejects.toThrow("ASSISTANT_SENDER_FORBIDDEN");
+    await invokeAssistant(event, request, owner);
+    expect(owner.host.request).toHaveBeenCalledExactlyOnceWith(request);
+    owner.host.request.mockRejectedValueOnce(new Error("ASSISTANT_PERMISSION_CONFLICT"));
+    await expect(invokeAssistant(event, request, owner)).rejects.toThrow("ASSISTANT_PERMISSION_CONFLICT");
+    expect(owner.host.request).toHaveBeenCalledTimes(2);
+  });
+
   it("admits a closed model change from the float and rejects identity injection before host start", async () => {
     const { owner, event } = setup();
     for (const payload of [{ operation: "setModel", modelId: "" }, { operation: "setModel", modelId: "local/model\n" },

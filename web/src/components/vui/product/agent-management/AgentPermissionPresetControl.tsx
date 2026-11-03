@@ -26,18 +26,36 @@ export type AgentPermissionPresetOption = {
 };
 
 export type AgentPermissionPresetControlProps = {
-  value: AgentPermissionPreset;
+  value: AgentPermissionPreset | null;
   lang: "zh" | "en";
   surface: AgentPermissionPresetControlSurface;
   disabled: boolean;
   pending: boolean;
   agentName?: string;
+  /** Launcher manages already-authorized projects; it never grants computer-wide access. */
+  context?: "agent" | "launcher";
+  side?: "top" | "bottom";
+  align?: "start" | "end";
   onChange: (value: AgentPermissionPreset) => void;
 };
 
 export function agentPermissionPresetOptions(
   lang: "zh" | "en",
+  context: "agent" | "launcher" = "agent",
 ): AgentPermissionPresetOption[] {
+  if (context === "launcher") {
+    const options = agentPermissionPresetOptions(lang);
+    const descriptions = lang === "zh" ? [
+      "创建团队、调整成员、启动任务等管理操作，执行前由你确认。",
+      "常规管理自动继续；永久删除、扩大权限等高风险操作仍需确认。",
+      "已授权项目内的管理操作直接执行，包括重启和永久删除；不会扩大访问范围。",
+    ] : [
+      "Ask before management actions such as creating teams, changing members, or starting tasks.",
+      "Continue routine management; ask before permanent deletion, permission expansion, or other high-risk actions.",
+      "Execute management in authorized projects, including restarts and permanent deletion, without expanding access.",
+    ];
+    return options.map((option, index) => ({ ...option, description: descriptions[index] }));
+  }
   if (lang === "zh") {
     return [
       {
@@ -89,18 +107,26 @@ export function AgentPermissionPresetControl({
   disabled,
   pending,
   agentName = "",
+  context = "agent",
+  side = "bottom",
+  align = surface === "settings" ? "start" : "end",
   onChange,
 }: AgentPermissionPresetControlProps) {
   const [open, setOpen] = useState(false);
-  const options = useMemo(() => agentPermissionPresetOptions(lang), [lang]);
+  const options = useMemo(() => agentPermissionPresetOptions(lang, context), [lang, context]);
   const current = options.find((option) => option.value === value) ?? options[0];
-  const CurrentIcon = current.icon;
+  const known = value !== null;
+  const CurrentIcon = known ? current.icon : ShieldQuestion;
+  const label = known ? current.label : lang === "zh" ? "权限暂不可用" : "Permissions unavailable";
+  const menuLabel = context === "launcher"
+    ? (lang === "zh" ? "选择助理操作权限" : "Select assistant management permissions")
+    : (lang === "zh" ? "选择 Agent 工具权限" : "Select Agent tool permissions");
 
   useEffect(() => {
-    if (disabled || pending) {
+    if (disabled || pending || !known) {
       setOpen(false);
     }
-  }, [disabled, pending]);
+  }, [disabled, pending, known]);
 
   return (
     <div
@@ -111,16 +137,16 @@ export function AgentPermissionPresetControl({
       <VPopover
         open={open}
         onOpenChange={(nextOpen) => {
-          if (disabled || pending) {
+          if (disabled || pending || !known) {
             setOpen(false);
             return;
           }
           setOpen(nextOpen);
         }}
-        side="bottom"
-        align={surface === "settings" ? "start" : "end"}
+        side={side}
+        align={align}
         sideOffset={6}
-        aria-label={lang === "zh" ? "选择 Agent 工具权限" : "Select Agent tool permissions"}
+        aria-label={menuLabel}
         contentClassName={styles.menu}
         data-vui="agent-permission-preset-menu"
         trigger={(
@@ -128,16 +154,16 @@ export function AgentPermissionPresetControl({
             type="button"
             contentLayout="plain"
             className={`${styles.trigger} ${surface === "settings" ? styles.triggerSettings : ""}`}
-            isDisabled={disabled || pending}
+            isDisabled={disabled || pending || !known}
             aria-haspopup="listbox"
             aria-expanded={open}
             data-open={open ? "true" : "false"}
-            data-preset={current.value}
-            title={`${current.label} · ${current.description}`}
+            data-preset={known ? current.value : undefined}
+            title={known ? `${current.label} · ${current.description}` : label}
           >
             <CurrentIcon className={styles.triggerIcon} aria-hidden />
             <span className={styles.triggerLabel}>
-              {pending ? (lang === "zh" ? "保存中…" : "Saving…") : current.label}
+              {pending ? (lang === "zh" ? "保存中…" : "Saving…") : label}
             </span>
             <ChevronDown className={styles.triggerChevron} data-open={open ? "true" : "false"} aria-hidden />
           </VButton>
@@ -145,15 +171,28 @@ export function AgentPermissionPresetControl({
       >
         <div
           role="listbox"
-          aria-label={lang === "zh" ? "选择 Agent 工具权限" : "Select Agent tool permissions"}
+          aria-label={menuLabel}
           data-testid="agent-permission-preset-menu"
+          onKeyDown={(event) => {
+            if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+            const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("[role='option']"));
+            if (!items.length) return;
+            event.preventDefault();
+            const index = items.findIndex(item => item === document.activeElement);
+            const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1
+              : event.key === "ArrowDown" ? (index + 1) % items.length
+              : (index < 0 ? items.length - 1 : (index - 1 + items.length) % items.length);
+            items[next]?.focus();
+          }}
         >
           <div className={styles.menuHeader}>
-            <span>{lang === "zh" ? "应如何批准 Agent 操作？" : "How should Agent actions be approved?"}</span>
-            {agentName ? <span title={agentName}>{agentName}</span> : null}
+            <span>{context === "launcher" ? (lang === "zh" ? "助理操作权限" : "Assistant management permissions")
+              : (lang === "zh" ? "应如何批准 Agent 操作？" : "How should Agent actions be approved?")}</span>
+            {context === "launcher" ? <span>{lang === "zh" ? "仅 Launcher 助理" : "Launcher assistant only"}</span>
+              : agentName ? <span title={agentName}>{agentName}</span> : null}
           </div>
           {options.map((option) => {
-            const selected = option.value === current.value;
+            const selected = known && option.value === current.value;
             const OptionIcon = option.icon;
             return (
               <VButton

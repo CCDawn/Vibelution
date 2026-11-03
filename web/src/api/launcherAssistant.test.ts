@@ -8,10 +8,50 @@ import {
   stopLauncherAssistantTurn, continueLauncherAssistantTurn,
   getLauncherOperatorAsset, getLauncherAssistantAvatar, openLauncherFromAssistant,
   subscribeLauncherAssistantSessionEvent,
+  setLauncherManagementPermissionPreset,
 } from "./launcherAssistant";
 import type { SessionToolApprovalRequest } from "./types";
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe("Launcher management-permission contract", () => {
+  it("writes through native CAS once and rejects invalid inputs and malformed receipts", async () => {
+    const invoke = vi.fn().mockResolvedValue({ preset: "full_access", revision: 4 });
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    await expect(setLauncherManagementPermissionPreset("full_access", 3)).resolves.toEqual({ preset: "full_access", revision: 4 });
+    expect(invoke).toHaveBeenCalledExactlyOnceWith({ operation: "setManagementPermissionPreset", preset: "full_access", expectedRevision: 3 });
+    for (const revision of [true, -1, 0.5, Number.MAX_SAFE_INTEGER + 1, NaN])
+      await expect(setLauncherManagementPermissionPreset("auto_review", revision as number)).rejects.toThrow("ASSISTANT_PERMISSION_INVALID");
+    expect(invoke).toHaveBeenCalledTimes(1);
+    for (const receipt of [{ preset: "auto_review", revision: 4 }, { preset: "full_access", revision: true },
+      { preset: "full_access", revision: 2 }, { preset: "full_access", revision: 5 }, { preset: "full_access", revision: 4, extra: true }]) {
+      invoke.mockResolvedValueOnce(receipt);
+      await expect(setLauncherManagementPermissionPreset("full_access", 3)).rejects.toThrow("ASSISTANT_RESPONSE_INVALID");
+    }
+    invoke.mockRejectedValueOnce(new Error("ASSISTANT_PERMISSION_CONFLICT"));
+    const calls = invoke.mock.calls.length;
+    await expect(setLauncherManagementPermissionPreset("full_access", 3)).rejects.toThrow("ASSISTANT_PERMISSION_CONFLICT");
+    expect(invoke).toHaveBeenCalledTimes(calls + 1);
+  });
+
+  it("requires exactly a known preset and safe nonnegative revision in status", async () => {
+    const status = { assistant: { agentId: "a", directSessionId: "s", displayName: "PA" }, settings: {
+      ok: true, preferences: { characterId: "dafeiyu", showStatus: true, showTitles: true, showCompletion: true, idleMessage: "" },
+      displayName: "PA", modelId: "model" } };
+    const invoke = vi.fn().mockResolvedValue(status);
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    await expect(getLauncherAssistantStatus()).resolves.toEqual(status);
+    for (const managementPermission of [null, {}, { preset: "custom", revision: 0 }, { preset: "auto_review", revision: true },
+      { preset: "auto_review", revision: -1 }, { preset: "auto_review", revision: 0.5 },
+      { preset: "auto_review", revision: Number.MAX_SAFE_INTEGER + 1 }, { preset: "auto_review", revision: 0, extra: true }]) {
+      invoke.mockResolvedValueOnce({ ...status, settings: { ...status.settings, managementPermission } });
+      await expect(getLauncherAssistantStatus()).rejects.toThrow("操作权限不可用");
+    }
+    const valid = { ...status, settings: { ...status.settings, managementPermission: { preset: "request_approval", revision: 0 } } };
+    invoke.mockResolvedValueOnce(valid);
+    await expect(getLauncherAssistantStatus()).resolves.toEqual(valid);
+  });
+});
 
 describe("Launcher assistant model controls", () => {
   it("switches through the closed invoke bridge and verifies the observed binding", async () => {

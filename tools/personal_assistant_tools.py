@@ -246,7 +246,12 @@ def personal_assistant_manage_tool(action: str, arguments_json: str) -> str:
         runtime = _identity()
         if len(arguments_json) > 16000:
             raise ValueError("管理参数过长。")
-        args = json.loads(arguments_json)
+        from core.infrastructure.native_runtime import is_launcher_assistant_process
+        if is_launcher_assistant_process():
+            from core.web.services.local_assistant.management_approval import parse_arguments
+            args = parse_arguments(arguments_json)
+        else:
+            args = json.loads(arguments_json)
         if not isinstance(args, dict):
             raise TypeError("管理参数必须是 JSON 对象。")
         from core.infrastructure.native_runtime import is_launcher_assistant_process

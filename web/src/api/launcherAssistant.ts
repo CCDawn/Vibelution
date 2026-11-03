@@ -1,4 +1,4 @@
-import type { ConfigBootstrap, SessionDetail, SessionMessageCurationAction, SessionMessageCurationMutationResponse, SessionMessageCurationResponse, SessionToolApprovalRequest } from "./types";
+import type { AgentPermissionPreset, ConfigBootstrap, SessionDetail, SessionMessageCurationAction, SessionMessageCurationMutationResponse, SessionMessageCurationResponse, SessionToolApprovalRequest } from "./types";
 import type { DesktopPetPreferences } from "../routes/desktopPet/desktopPetPreferences";
 import type { SessionContinuationExpectation } from "./chat";
 
@@ -12,6 +12,8 @@ export type LauncherAssistantModelChoice = {
   providerHealthy: boolean; missingApiKey: boolean; availability: string;
 };
 
+export type LauncherManagementPermission = { preset: AgentPermissionPreset; revision: number };
+
 export type LauncherAssistantStatus = {
   teamRunsVersion?: 1;
   assistantAvatarVersion?: 1;
@@ -23,6 +25,7 @@ export type LauncherAssistantStatus = {
   assistant: { agentId: string; directSessionId: string; displayName: string };
   settings?: { ok: boolean; preferences: DesktopPetPreferences; displayName: string; modelId: string;
     modelChoices?: LauncherAssistantModelChoice[];
+    managementPermission?: LauncherManagementPermission;
     /** Dialogue-model image-input capability for the attach gate; null or
      * absent means unknown, which never blocks a send (chat-page parity). */
     supportsImageInput?: boolean | null };
@@ -78,6 +81,7 @@ export type LauncherAssistantRequest =
   | { operation: "previewTaskCleanup" | "executeTaskCleanup"; agentId: string; directSessionId: string; targets: LauncherTaskCleanupTarget[]; fingerprint?: string }
   | { operation: "teamRuns"; cursor?: string }
   | { operation: "setModel"; modelId: string }
+  | { operation: "setManagementPermissionPreset"; preset: AgentPermissionPreset; expectedRevision: number }
   | { operation: "detail"; beforeMessageIndex?: number }
   | { operation: "status" | "dispatches" | "hide" | "approvals" | "openLauncher" | "assistantAvatar" }
   | { operation: "resolveApproval"; requestId: string; decision: "accept" | "decline" }
@@ -214,6 +218,12 @@ function exactFields(value: unknown, fields: string[]): value is Record<string, 
     && fields.every(field => Object.prototype.hasOwnProperty.call(value, field));
 }
 
+export function isLauncherManagementPermission(value: unknown): value is LauncherManagementPermission {
+  return exactFields(value, ["preset", "revision"])
+    && typeof value.preset === "string" && ["request_approval", "auto_review", "full_access"].includes(value.preset)
+    && Number.isSafeInteger(value.revision) && (value.revision as number) >= 0;
+}
+
 function parseImage(image: unknown, limit: number, allowedTypes: string[]): { url: string; sha256: string } {
   const invalid = () => new Error("Launcher 图片资源不可用，请重试。");
   if (!exactFields(image, ["contentType", "dataBase64", "sha256"])
@@ -303,6 +313,8 @@ export async function getLauncherAssistantStatus(): Promise<LauncherAssistantSta
         || typeof choice.modelId !== "string" || !choice.modelId.trim()))) {
       throw new Error("Launcher 个人助理模型列表不可用。");
     }
+    if (Object.prototype.hasOwnProperty.call(settings, "managementPermission") && !isLauncherManagementPermission(settings.managementPermission))
+      throw new Error("Launcher 助理操作权限不可用。");
   }
   if (result.operatorProfile !== undefined) {
     const profile = result.operatorProfile;
@@ -323,6 +335,16 @@ export async function getLauncherAssistantStatus(): Promise<LauncherAssistantSta
     }
   }
   return result as LauncherAssistantStatus;
+}
+
+/** A CAS write is sent once. Conflicts require a fresh explicit choice. */
+export async function setLauncherManagementPermissionPreset(preset: AgentPermissionPreset, expectedRevision: number): Promise<LauncherManagementPermission> {
+  if (!isLauncherManagementPermission({ preset, revision: expectedRevision })) throw new Error("ASSISTANT_PERMISSION_INVALID");
+  const result = await launcherAssistantBridge().invoke({ operation: "setManagementPermissionPreset", preset, expectedRevision });
+  if (!isLauncherManagementPermission(result) || result.preset !== preset
+    || result.revision !== expectedRevision && result.revision - expectedRevision !== 1)
+    throw new Error("ASSISTANT_RESPONSE_INVALID");
+  return result;
 }
 
 export async function setLauncherAssistantModel(modelId: string): Promise<{ modelId: string }> {

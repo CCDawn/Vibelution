@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { MessageCircle, RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import {
-  getLauncherAssistantDetail, getLauncherAssistantDispatches, getLauncherAssistantStatus, setLauncherAssistantModel,
+  getLauncherAssistantDetail, getLauncherAssistantDispatches, setLauncherAssistantModel,
   hideLauncherAssistant, sendLauncherAssistantMessage, setLauncherAssistantExpanded,
   launcherConversationApi,
   getLauncherAssistantApprovals, resolveLauncherAssistantApproval,
@@ -59,6 +59,9 @@ import type { ActiveTurnLayerState } from "../chatActiveTurnLayer";
 import { mergeSessionDetailMessageWindow } from "../chatSessionState";
 import { loadLauncherComposer, restoreLauncherComposerAttachments, saveLauncherComposer } from "./launcherAssistantComposerStorage";
 import { readLauncherAssistantTaskSource } from "./launcherAssistantTaskReads";
+import { readLauncherManagementStatus, useLauncherManagementPermission } from "./useLauncherManagementPermission";
+import { LauncherManagementPermissionControl } from "./LauncherManagementPermissionControl";
+import { agentPurgeBatchPreviewIsValid, launcherAgentPurgeBatchActionPreview } from "./launcherAgentPurgeBatchPreview";
 
 const COPY = {
   zh: {
@@ -101,12 +104,13 @@ const LAUNCHER_ASSISTANT_DISPATCH_LIMIT = 50;
 
 function approvalAcceptDisabled(request: SessionToolApprovalRequest): boolean {
   const summary = request.argumentSummary;
-  return request.toolName === "personal_assistant_manage_tool" && (!(managementApprovalActionIsKnown(summary?.assistantAction) || launcherTeamActionIsKnown(summary?.assistantAction)) || Boolean(summary.assistantArgumentsInvalid)
+  return request.toolName === "personal_assistant_manage_tool" && (!(managementApprovalActionIsKnown(summary?.assistantAction) || launcherTeamActionIsKnown(summary?.assistantAction) || summary?.assistantAction === "agent_purge_batch") || Boolean(summary.assistantArgumentsInvalid)
     || (autonomyActionIsKnown(summary?.assistantAction) || Object.hasOwn(summary || {}, "assistantAutonomyPreviewVersion")) && !autonomyApprovalPreviewIsValid(summary)
     || platformManagementActionIsKnown(summary?.assistantAction) && !platformManagementPreviewIsValid(summary)
     || launcherTeamActionIsKnown(summary?.assistantAction) && !launcherTeamPreviewIsValid(summary)
     || summary?.assistantAction === "agent_create" && !launcherAgentCreatePreviewIsValid(summary)
     || summary?.assistantAction === "agent_purge" && !agentPurgePreviewIsValid(summary)
+    || summary?.assistantAction === "agent_purge_batch" && !agentPurgeBatchPreviewIsValid(summary)
     || summary?.assistantAction === "agent_archive" && !agentArchivePreviewIsValid(summary)
     || summary?.assistantAction === "authorization_upgrade" && !authorizationUpgradePreviewIsValid(summary)
     || summary?.assistantAction === "dispatch_write" && !dispatchWritePreviewIsValid(summary)
@@ -192,7 +196,8 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   // the wait start is held here and reset once any status read succeeds.
   const backendWaitStartedAt = useRef<number | null>(null);
   const status = useQuery({
-    queryKey: ["launcher-assistant", "status"], queryFn: getLauncherAssistantStatus,
+    queryKey: ["launcher-assistant", "status"], queryFn: () => readLauncherManagementStatus(() =>
+      client.getQueryData(["launcher-assistant", "status"])),
     retry: false, staleTime: 0,
     refetchInterval: query => {
       // Cold boot: before the first successful status read, keep probing for the
@@ -202,6 +207,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       return expanded && visible ? 10_000 : false;
     },
   });
+  const managementPermission = useLauncherManagementPermission(status.data, lang);
   useEffect(() => {
     backendWaitStartedAt.current = status.isError && !status.data
       ? backendWaitStartedAt.current ?? Date.now()
@@ -1059,8 +1065,9 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       scopeLabel={lang === "zh" ? "仅本次调用" : "This call only"}
       toolLabels={[{ id: approval.toolName, label: toolApprovalDisplayName(approval.toolName, lang) }]}
       toolName={approval.toolName} actionPreview={approval.toolName === "personal_assistant_manage_tool" && launcherTeamActionIsKnown(approval.argumentSummary?.assistantAction)
-        ? launcherTeamActionPreview(approval.argumentSummary, lang) : toolApprovalActionPreview(approval.argumentSummary, approval.toolName, lang)}
-      fullActionPreview={approval.toolName === "personal_assistant_manage_tool" && (autonomyActionIsKnown(approval.argumentSummary?.assistantAction) || launcherTeamActionIsKnown(approval.argumentSummary?.assistantAction) || platformManagementActionIsKnown(approval.argumentSummary?.assistantAction) || ["agent_create", "agent_archive", "agent_purge", "authorization_upgrade", "dispatch_write", "project_lifecycle", "operator_image_upload", "reminder_handoff_recover", "browser_interact"].includes(String(approval.argumentSummary?.assistantAction)))}
+        ? launcherTeamActionPreview(approval.argumentSummary, lang) : approval.toolName === "personal_assistant_manage_tool" && approval.argumentSummary?.assistantAction === "agent_purge_batch"
+          ? launcherAgentPurgeBatchActionPreview(approval.argumentSummary, lang) : toolApprovalActionPreview(approval.argumentSummary, approval.toolName, lang)}
+      fullActionPreview={approval.toolName === "personal_assistant_manage_tool" && (autonomyActionIsKnown(approval.argumentSummary?.assistantAction) || launcherTeamActionIsKnown(approval.argumentSummary?.assistantAction) || platformManagementActionIsKnown(approval.argumentSummary?.assistantAction) || ["agent_create", "agent_archive", "agent_purge", "agent_purge_batch", "authorization_upgrade", "dispatch_write", "project_lifecycle", "operator_image_upload", "reminder_handoff_recover", "browser_interact"].includes(String(approval.argumentSummary?.assistantAction)))}
       approveDisabled={approvalAcceptDisabled(approval)}
       onApprove={() => void decide(approval, "accept")} onReject={() => void decide(approval, "decline")} /> : null}
     {dispatchApproval ? <ChatToolApprovalDialog lang={lang} variant="composer"
@@ -1210,6 +1217,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       fallback={<VStateSurface fill tone="loading" title={copy.loading} />}
     /> : <VStateSurface fill tone={detail.isError ? "error" : "loading"} title={detail.isError ? copy.unavailable : copy.loading}
       actions={detail.isError ? <VButton onClick={() => void detail.refetch()}>{copy.retry}</VButton> : undefined}>{detail.error?.message}</VStateSurface>}
+    {detail.data ? <LauncherManagementPermissionControl state={managementPermission} lang={lang} /> : null}
     {!detail.data ? approvalPrompt : null}
     {historyAttachments.missingGenerated ? <VStateSurface tone="error" title={lang === "zh" ? "历史图片缺少附件标识，暂不可查看" : "Historical image has no artifact ID"}
       actions={<VButton onClick={() => void detail.refetch()}>{copy.retry}</VButton>} /> : null}
