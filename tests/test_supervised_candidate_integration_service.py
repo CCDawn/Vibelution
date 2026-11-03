@@ -41,8 +41,10 @@ def install_validation_authority(monkeypatch, tmp_path):
 
 
 def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-    result = service.git_process.run_git(
-        list(args),
+    # Fixture setup keeps its original pytest-level budget. The production
+    # runner's separate 30s deadline is not part of this test helper's contract.
+    result = subprocess.run(
+        service.git_process.git_command(args),
         cwd=str(repo),
         capture_output=True,
         text=True,
@@ -51,6 +53,7 @@ def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProc
         stdin=subprocess.DEVNULL,
         check=False,
         env=service.local_quality_gate.git_hook_isolated_environment(),
+        **service.git_process.no_console_subprocess_kwargs(),
     )
     if check and result.returncode != 0:
         raise AssertionError(result.stderr or result.stdout)
