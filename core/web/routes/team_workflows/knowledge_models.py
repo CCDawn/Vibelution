@@ -21,7 +21,7 @@ class KnowledgeIngestionStatusResponse(BaseModel):
     teamId: str = ""
     workflowId: str = ""
     workflowKind: str = ""
-    scope: str = ""
+    scope: dict[str, Any] = Field(default_factory=dict)
     status: str = ""
     summary: dict[str, Any] = Field(default_factory=dict)
     stages: list[dict[str, Any]] = Field(default_factory=list)
@@ -114,7 +114,7 @@ class CoordinationStatusResponse(BaseModel):
     teamId: str = ""
     workflowId: str = ""
     workflowKind: str = ""
-    scope: str = ""
+    scope: dict[str, Any] = Field(default_factory=dict)
     status: str = ""
     ownerAgentId: str = ""
     summary: dict[str, Any] = Field(default_factory=dict)

@@ -2939,6 +2939,21 @@ def test_team_workflow_route_returns_knowledge_ingestion_status(tmp_path, monkey
     assert payload["officialBoundary"]["candidateGraphWritesOfficialGraph"] is False
 
 
+def test_team_workflow_route_knowledge_ingestion_status_serializes_aggregate_scope(tmp_path, monkeypatch):
+    """Real service payload must pass response_model validation through the route."""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "AI科研团队"}).json()
+
+    response = client.get(f"/api/teams/{team['teamId']}/workflow-orchestration/knowledge-ingestion/status")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["teamId"] == team["teamId"]
+    assert payload["scope"]["kind"] == "team_aggregate"
+    assert payload["scope"]["includesHistorical"] is True
+
+
 def test_team_workflow_route_runs_knowledge_ingestion_precheck(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     captured = {}
@@ -3051,6 +3066,21 @@ def test_team_workflow_route_returns_coordination_status(tmp_path, monkeypatch):
     assert payload["queues"]["pendingTransfers"][0]["communicationBrief"]["autoSendEnabled"] is False
     assert payload["communication"]["briefCount"] == 1
     assert payload["coordinationPolicy"]["autoTransferEnabled"] is False
+
+
+def test_team_workflow_route_coordination_status_serializes_aggregate_scope(tmp_path, monkeypatch):
+    """Real service payload must pass response_model validation through the route."""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "AI科研团队"}).json()
+
+    response = client.get(f"/api/teams/{team['teamId']}/workflow-orchestration/coordination/status")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["teamId"] == team["teamId"]
+    assert payload["scope"]["kind"] == "team_aggregate"
+    assert payload["scope"]["includesHistorical"] is True
 
 
 def test_team_workflow_routes_extract_candidate_source_pages(tmp_path, monkeypatch):
