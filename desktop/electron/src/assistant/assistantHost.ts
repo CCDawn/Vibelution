@@ -45,6 +45,7 @@ export type AssistantHostRequest =
   | { operation: "previewTaskCleanup" | "executeTaskCleanup"; agentId: string; directSessionId: string; targets: unknown[]; fingerprint?: string }
   | { operation: "teamRuns"; cursor?: string }
   | { operation: "setModel"; modelId: string }
+  | { operation: "setManagementPermissionPreset"; preset: "request_approval" | "auto_review" | "full_access"; expectedRevision: number }
   | { operation: "detail"; beforeMessageIndex?: number }
   | { operation: "status" | "dispatches" | "config" | "approvals" | "assistantAvatar" }
   | { operation: "resolveApproval"; requestId: string; decision: "accept" | "decline" }
@@ -907,7 +908,7 @@ export class AssistantHost {
         if (lifecycle.committed) throw new HostError("ASSISTANT_LIFECYCLE_CLOSING");
         lifecycle.arrival = true;
       }
-      const safeWhileWaiting = ["status", "detail", "dispatches", "teamRuns", "config", "approvals", "curation", "operatorAsset", "assistantAvatar", "resolveApproval", "previewDispatchApproval", "decideDispatchApproval", "declineDispatchApproval", "stop", "computerState"]
+      const safeWhileWaiting = ["status", "detail", "dispatches", "teamRuns", "config", "approvals", "curation", "operatorAsset", "assistantAvatar", "setManagementPermissionPreset", "resolveApproval", "previewDispatchApproval", "decideDispatchApproval", "declineDispatchApproval", "stop", "computerState"]
         .includes(captured.operation);
       // Confirmation only settles an existing native waiter; it remains a
       // counted writer in the host barrier even after admission is sealed.
@@ -936,6 +937,19 @@ export class AssistantHost {
     }
     if (!object(payload)) throw new HostError("ASSISTANT_REQUEST_INVALID");
     switch (payload.operation) {
+      case "setManagementPermissionPreset": {
+        if (Object.keys(payload).length !== 3 || !ownKeys(payload, ["operation", "preset", "expectedRevision"])
+          || typeof payload.preset !== "string" || !["request_approval", "auto_review", "full_access"].includes(payload.preset)
+          || !Number.isSafeInteger(payload.expectedRevision) || payload.expectedRevision < 0)
+          throw new HostError("ASSISTANT_PERMISSION_INVALID");
+        const result = await this.rpc(generation, "/api/assistant/management-permission", "POST",
+          { preset: payload.preset, expectedRevision: payload.expectedRevision }, REQUEST_MS, false, 8192);
+        if (!object(result) || Object.keys(result).length !== 2 || !ownKeys(result, ["preset", "revision"])
+          || result.preset !== payload.preset || !Number.isSafeInteger(result.revision)
+          || (result.revision !== payload.expectedRevision && (result.revision as number) - payload.expectedRevision !== 1))
+          throw new HostError("ASSISTANT_RESPONSE_INVALID");
+        return result;
+      }
       case "setModel": {
         if (Object.keys(payload).length !== 2 || !ownKeys(payload, ["operation", "modelId"])
           || typeof payload.modelId !== "string" || !/^[^\s\x00-\x1f\x7f]{1,200}(?![\s\S])/.test(payload.modelId))
@@ -986,6 +1000,14 @@ export class AssistantHost {
         const result = await this.rpc(generation, paths[payload.operation], "GET",
           undefined, payload.operation === "status" ? STATUS_READ_MS : READ_MS);
         if (payload.operation === "status" && (identity(result) !== generation.sessionId || (result as { assistant: { agentId: string } }).assistant.agentId !== generation.agentId)) throw new HostError("ASSISTANT_IDENTITY_INVALID");
+        if (payload.operation === "status" && object(result) && object(result.settings)
+          && Object.prototype.hasOwnProperty.call(result.settings, "managementPermission")) {
+          const permission = result.settings.managementPermission;
+          if (!object(permission) || Object.keys(permission).length !== 2 || !ownKeys(permission, ["preset", "revision"])
+            || typeof permission.preset !== "string" || !["request_approval", "auto_review", "full_access"].includes(permission.preset)
+            || !Number.isSafeInteger(permission.revision) || (permission.revision as number) < 0)
+            throw new HostError("ASSISTANT_RESPONSE_INVALID");
+        }
         return result;
       }
       case "resolveApproval":
@@ -1746,6 +1768,11 @@ export class AssistantHost {
       });
       if (!response.ok) {
         await response.body?.cancel().catch(() => undefined);
+        if (path === "/api/assistant/management-permission") {
+          if (response.status === 409) throw new HostError("ASSISTANT_PERMISSION_CONFLICT");
+          if (response.status === 422) throw new HostError("ASSISTANT_PERMISSION_INVALID");
+          if (response.status === 503 || response.status === 404) throw new HostError("ASSISTANT_PERMISSION_UNAVAILABLE");
+        }
         if (path === "/api/assistant/model") {
           if (response.status === 409) throw new HostError("ASSISTANT_MODEL_BUSY");
           if (response.status === 422) throw new HostError("ASSISTANT_MODEL_INVALID");

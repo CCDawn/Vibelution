@@ -35,6 +35,21 @@ def test_batch_summary_shows_every_target_for_one_approval(monkeypatch):
     assert result["assistantPurgeEffects"] == ["agent", "sessions", "private_workspace", "team_room_mode_references"]
 
 
+def test_batch_duplicate_json_keys_cannot_be_approved_or_executed(monkeypatch):
+    import tools.personal_assistant_tools as tools
+
+    monkeypatch.setattr("core.infrastructure.native_runtime.is_launcher_assistant_process", lambda: True)
+    monkeypatch.setattr(tools, "_identity", lambda: {"agentId": "native", "sessionId": "native-session"})
+    calls = []
+    monkeypatch.setattr("core.assistant_runtime.actions.execute_action", lambda *_a, **_kw: calls.append(True))
+    raw = json.dumps(PARAMETERS)[:-1] + ', "project_id": "another-project"}'
+    assert _assistant_management_summary({"action": "agent_purge_batch", "arguments_json": raw}) == {
+        "assistantAction": "agent_purge_batch", "assistantArgumentsInvalid": True}
+    result = tools.personal_assistant_manage_tool("agent_purge_batch", raw)
+    assert calls == []
+    assert "Duplicate" in result
+
+
 @pytest.mark.parametrize("change", [{"force": True}, {"approved": True},
     {"purges": [{"agent_id": "bad\nagent", "expected_config_revision": 1}]},
     {"purges": []}, {"purges": [{"agent_id": "agent-1", "expected_config_revision": True}]},

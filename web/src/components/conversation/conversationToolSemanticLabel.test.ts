@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import conversationTimelineItemsSource from "./conversationTimelineItems.tsx?raw";
 import { conversationToolSemanticLabel } from "./conversationToolSemanticLabel";
 
 describe("conversationToolSemanticLabel", () => {
@@ -40,5 +41,93 @@ describe("conversationToolSemanticLabel", () => {
     expect(conversationToolSemanticLabel({ toolName: "read_file_tool" })).toBe("读取文件");
     expect(conversationToolSemanticLabel({ toolName: "grep_search_tool" })).toBe("搜索");
     expect(conversationToolSemanticLabel({ toolName: "image2_generate_tool" })).toBe("生成图片");
+  });
+
+  it("labels known read actions of the assistant action tool specifically", () => {
+    expect(conversationToolSemanticLabel({
+      toolName: "personal_assistant_action_tool",
+      commandSource: { action: "source_search" },
+    })).toBe("搜索源码");
+    expect(conversationToolSemanticLabel({
+      toolName: "personal_assistant_action_tool",
+      commandSource: { action: "source_read" },
+    })).toBe("读取源码");
+    expect(conversationToolSemanticLabel({
+      toolName: "personal_assistant_action_tool",
+      commandSource: { action: "session_list" },
+    })).toBe("列出会话");
+    expect(conversationToolSemanticLabel({
+      toolName: "personal_assistant_action_tool",
+      commandSource: { action: "task_list" },
+    })).toBe("列出活跃任务");
+    expect(conversationToolSemanticLabel({
+      toolName: "personal_assistant_action_tool",
+      commandSource: { action: "agent_list" },
+    })).toBe("列出 Agent 目录");
+    expect(conversationToolSemanticLabel({
+      toolName: "personal_assistant_action_tool",
+      commandSource: { action: "projects" },
+    })).toBe("查询项目");
+    expect(conversationToolSemanticLabel({
+      toolName: "personal_assistant_action_tool",
+      commandSource: { action: "receipt" },
+    })).toBe("查询任务回执");
+  });
+
+  it("labels known manage actions of the assistant manage tool", () => {
+    expect(conversationToolSemanticLabel({
+      toolName: "personal_assistant_manage_tool",
+      commandSource: { action: "agent_create" },
+    })).toBe("创建 Agent");
+    expect(conversationToolSemanticLabel({
+      toolName: "personal_assistant_manage_tool",
+      commandSource: { action: "dispatch_write" },
+    })).toBe("派遣 Agent 修改项目");
+  });
+
+  it("falls back to the tool-level label when the action is missing or unknown", () => {
+    expect(conversationToolSemanticLabel({ toolName: "personal_assistant_action_tool" })).toBe("处理助理请求");
+    expect(conversationToolSemanticLabel({
+      toolName: "personal_assistant_action_tool",
+      commandSource: {},
+    })).toBe("处理助理请求");
+    expect(conversationToolSemanticLabel({
+      toolName: "personal_assistant_action_tool",
+      commandSource: { action: "totally_unknown_action" },
+    })).toBe("处理助理请求");
+    expect(conversationToolSemanticLabel({
+      toolName: "personal_assistant_manage_tool",
+      commandSource: { action: 42 },
+    })).toBe("执行助理操作");
+  });
+
+  it("reads the action from array-shaped command source like the native transcript path", () => {
+    expect(conversationToolSemanticLabel({
+      toolName: "personal_assistant_action_tool",
+      commandSource: [{ action: "source_search" }],
+    })).toBe("搜索源码");
+  });
+
+  it("keeps the other personal_assistant tools on their static labels", () => {
+    expect(conversationToolSemanticLabel({ toolName: "personal_assistant_query_tool" })).toBe("查询助理记录");
+    expect(conversationToolSemanticLabel({ toolName: "personal_assistant_overview_tool" })).toBe("查看项目概况");
+  });
+
+  it("respects the requested language for assistant action labels", () => {
+    expect(conversationToolSemanticLabel({
+      toolName: "personal_assistant_action_tool",
+      commandSource: { action: "source_search" },
+      lang: "en",
+    })).toBe("Search source");
+    expect(conversationToolSemanticLabel({
+      toolName: "personal_assistant_action_tool",
+      lang: "en",
+    })).toBe("Handle assistant request");
+  });
+
+  it("keeps the timeline wired to the action-aware labeler for assistant tools", () => {
+    expect(conversationTimelineItemsSource).toContain('from "./conversationToolSemanticLabel"');
+    expect(conversationTimelineItemsSource).toContain("commandSource: operation.arguments");
+    expect(conversationTimelineItemsSource).toContain('startsWith("personal_assistant_")');
   });
 });

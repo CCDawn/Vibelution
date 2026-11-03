@@ -33,7 +33,9 @@ async def test_create_file_preset_requires_native_management_approval(tmp_path):
         assert result["status"] == "unknown" and writes[0]["parameters"]["capability_preset"] == "project_files_v1"
         old = {key: value for key, value in parameters.items() if key != "capability_preset"}
         old["request_id"] = "legacy-create"
-        await asyncio.to_thread(execute_action, "agent_create", old)
+        denied = await asyncio.to_thread(execute_action, "agent_create", old)
+        assert denied["status"] == "approval_required" and len(writes) == 1
+        await asyncio.to_thread(execute_action, "agent_create", old, governed=True)
         assert "capability_preset" not in writes[1]["parameters"]
     finally:
         unbind_actions(service)
@@ -426,7 +428,7 @@ async def test_model_action_reuses_target_schema_and_no_caller_supplied_subject(
     bind_actions(service, asyncio.get_running_loop())
     try:
         params = {"project_id": "p", "request_id": "create-1", "display_name": "Worker", "model_id": "provider/model"}
-        result = await asyncio.to_thread(execute_action, "agent_create", params)
+        result = await asyncio.to_thread(execute_action, "agent_create", params, governed=True)
         assert result["agent"]["agentId"] == "ordinary-target"
         assert probe.writes[0]["parameters"]["mission"]
         assert "project_id" not in probe.writes[0]["parameters"]

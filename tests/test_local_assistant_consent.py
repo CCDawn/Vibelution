@@ -20,6 +20,8 @@ def test_long_terminal_wait_requires_active_verified_local_task(monkeypatch):
 
 def test_authenticated_launcher_dispatch_needs_no_second_approval(monkeypatch):
     monkeypatch.setattr(consent, "_native_launcher", lambda runtime: True)
+    monkeypatch.setattr("core.web.services.local_assistant.management_permissions.read",
+                        lambda agent_id: {"preset": "auto_review", "revision": 1})
     args = {"action": "dispatch_write", "arguments_json": json.dumps({"project_id": "p", "agent_id": "a",
         "dispatch_id": "d", "task": "Implement the agreed requirement"})}
     assert consent.local_approval_policy({}, "personal_assistant_manage_tool", args,

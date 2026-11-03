@@ -1,6 +1,6 @@
 const styles = {
   root:"flex h-full min-h-0 flex-col gap-4 bg-vui-surface-raised px-3 pb-3 pt-5",
-  scroll:"min-h-0 flex-1 overflow-y-auto [scrollbar-width:thin]",
+  scroll:"min-h-0 flex-1 overflow-y-auto",
   group:"mb-6 flex flex-col gap-1 last:mb-0",
   groupLabel:"m-0 px-3 pb-2 text-vui-micro-10 tracking-wide text-vui-fg-tertiary",
   link:"flex min-h-[38px] w-full items-center gap-3 rounded-lg px-3 text-vui-micro-13 font-normal max-[700px]:min-h-11",

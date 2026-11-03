@@ -75,6 +75,8 @@ Launcher 聊天复用 `ConversationView` 的发送、停止、继续、版本切
 ### 非职责
 不实现第二套 transcript、任务调度或 LLM 调用；不持有远程任务凭据；不把原生 succeeded 等同于业务验收通过。
 ### 视觉与状态
+Launcher 输入框圆角外下方紧接一行紧凑权限按钮与「仅 Launcher 助理」，复用 `AgentPermissionPresetControl` 的 Launcher 文案、向上左对齐浮层和三档选项，不改模型、加号与消息布局。`LauncherManagementPermissionControl` 仅组合既有 VUI 控件；`useLauncherManagementPermission` 持有确认/保存反馈，当前档位来自严格校验的 native status/回执。进入完全访问前用 `VConfirmDialog` 明确已授权项目内管理包括重启、永久删除，且不增加项目、ACL、toolPolicy 或全机文件/网络权限。新档位只影响随后进入审批的新调用，已有待审批仍需明确决定。
+保存可在对话忙碌或等待审批时进行，不锁定草稿、发送或任务卡片。保存中禁用重复选择；成功按 revision 单调收敛并失效原 status，晚到旧轮询不能覆盖新回执；冲突只回读，不重试提权。失败保留当前值并显示行内提示。旧宿主缺少管理权限字段时禁用并说明更新 Launcher，不假设任何默认选中档。
 展开聊天始终以 `--vui-surface-panel` 提供不透明的浅色/深色窗口底色，由 Launcher route 样式明确持有，不依赖 VUI 默认透明背景与工具类的加载顺序；自定义壁纸只叠加 background-image，透明图片、未加载或清除图片均保留该底色。原有圆角不变，收起形象仍使用透明根节点。
 聊天标题栏使用文本 VButton「打开 Launcher」，托盘提供同名入口；默认只显示助理，首次打开由 main 原生目录选择器选择现有项目，并复用项目管理窗口。renderer 不传入路径，打开入口不启动模型。
 Launcher 的“待你回答”提示在原问题下说明“请在下方输入回答，再点击发送”，并通过既有 `VStateSurface.actions` 提供 `VButton`「去回答」。点击只通过 `ConversationView.composerFocusSignal` 将焦点交给当前问题所属会话的输入框，保留草稿和附件，不自动发送、继续或作出审批。普通会话提示和后台追问识别规则不在此交互职责内。

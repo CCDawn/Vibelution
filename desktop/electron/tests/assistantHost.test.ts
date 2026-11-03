@@ -68,6 +68,71 @@ function fixture(options: { stale?: boolean; noReadyFirst?: boolean; graceful?: 
 }
 
 describe("AssistantHost", () => {
+  it("posts management presets once with closed CAS inputs and bounded verified receipts", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    const request = { operation: "setManagementPermissionPreset" as const, preset: "auto_review" as const, expectedRevision: 4 };
+    const before = fetchImpl.mock.calls.length;
+    for (const payload of [{ ...request, extra: true }, { ...request, preset: "custom" }, { ...request, expectedRevision: true },
+      { ...request, expectedRevision: -1 }, { ...request, expectedRevision: 0.5 }, { ...request, expectedRevision: Number.MAX_SAFE_INTEGER + 1 }])
+      await expect(host.request(payload as AssistantHostRequest)).rejects.toThrow("ASSISTANT_PERMISSION_INVALID");
+    expect(fetchImpl.mock.calls.length).toBe(before);
+    fetchImpl.mockResolvedValueOnce(Response.json({ preset: "auto_review", revision: 5 }));
+    await expect(host.request(request)).resolves.toEqual({ preset: "auto_review", revision: 5 });
+    expect(String(fetchImpl.mock.calls.at(-1)![0])).toBe("http://127.0.0.1:12345/api/assistant/management-permission");
+    expect(fetchImpl.mock.calls.at(-1)![1]?.method).toBe("POST");
+    expect(JSON.parse(String(fetchImpl.mock.calls.at(-1)![1]?.body))).toEqual({ preset: "auto_review", expectedRevision: 4 });
+    for (const reply of [{ preset: "full_access", revision: 5 }, { preset: "auto_review", revision: true },
+      { preset: "auto_review", revision: 3 }, { preset: "auto_review", revision: 6 }, { preset: "auto_review", revision: 5, extra: true }]) {
+      fetchImpl.mockResolvedValueOnce(Response.json(reply));
+      await expect(host.request(request)).rejects.toThrow("ASSISTANT_RESPONSE_INVALID");
+    }
+    for (const [status, code] of [[409, "CONFLICT"], [422, "INVALID"], [503, "UNAVAILABLE"], [404, "UNAVAILABLE"]] as const) {
+      fetchImpl.mockResolvedValueOnce(Response.json({ detail: "private" }, { status }));
+      const calls = fetchImpl.mock.calls.length;
+      await expect(host.request(request)).rejects.toThrow(`ASSISTANT_PERMISSION_${code}`);
+      expect(fetchImpl.mock.calls.length).toBe(calls + 1);
+    }
+    await host.stop();
+  });
+
+  it("permits a management change before migration sealing but preserves sealed and closing admission", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    const request = { operation: "setManagementPermissionPreset" as const, preset: "auto_review" as const, expectedRevision: 0 };
+    const admission = host.beginMigrationAdmission();
+    fetchImpl.mockResolvedValueOnce(Response.json({ preset: "auto_review", revision: 1 }));
+    await expect(host.request(request)).resolves.toEqual({ preset: "auto_review", revision: 1 });
+    await admission.seal();
+    const calls = fetchImpl.mock.calls.length;
+    let settled = false;
+    const held = host.request(request).then(result => { settled = true; return result; });
+    await Promise.resolve(); await Promise.resolve();
+    expect(settled).toBe(false); expect(fetchImpl.mock.calls.length).toBe(calls);
+    fetchImpl.mockResolvedValueOnce(Response.json({ preset: "auto_review", revision: 1 }));
+    admission.release();
+    await held;
+    const lifecycle = host.beginLifecycleAdmission();
+    await lifecycle.seal(); lifecycle.commit();
+    await expect(host.request(request)).rejects.toThrow("ASSISTANT_LIFECYCLE_CLOSING");
+    lifecycle.release();
+    await host.stop();
+  });
+
+  it("rejects malformed management-permission status projections while admitting an old host", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    const assistant = { agentId: "a", directSessionId: "s", displayName: "Assistant" };
+    for (const permission of [null, {}, { preset: "full_access", revision: true }, { preset: "custom", revision: 0 },
+      { preset: "auto_review", revision: 0, extra: true }, { preset: "auto_review", revision: Number.MAX_SAFE_INTEGER + 1 }]) {
+      fetchImpl.mockResolvedValueOnce(Response.json({ assistant, settings: { managementPermission: permission } }));
+      await expect(host.request({ operation: "status" })).rejects.toThrow("ASSISTANT_RESPONSE_INVALID");
+    }
+    fetchImpl.mockResolvedValueOnce(Response.json({ assistant }));
+    await expect(host.request({ operation: "status" })).resolves.toEqual({ assistant });
+    await host.stop();
+  });
+
   it("switches only the fixed assistant model and requires the verified model readback", async () => {
     const { host, fetchImpl } = fixture({ graceful: true });
     await host.start();

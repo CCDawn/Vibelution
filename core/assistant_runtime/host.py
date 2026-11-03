@@ -153,6 +153,18 @@ class SetModel(BaseModel):
     modelId: str = Field(min_length=1, max_length=200, pattern=r"^[^\s\x00-\x1f\x7f]+$")
 
 
+class SetManagementPermission(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    preset: Literal["request_approval", "auto_review", "full_access"]
+    expectedRevision: int = Field(ge=0, le=2**53 - 1)
+
+
+class ManagementPermission(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    preset: Literal["request_approval", "auto_review", "full_access"]
+    revision: int = Field(ge=0, le=2**53 - 1)
+
+
 class StopTurn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     turnId: str = Field(min_length=1, max_length=160, pattern=r"\S", strict=True)
@@ -408,8 +420,8 @@ class NativeFacade:
         # renderer's lightweight status poll used to queue behind chat detail
         # and submit holds (observed >15s). The snapshot is served stale while
         # one background refresh recomputes it, so status reads never wait on
-        # the native lock. Identity is immutable after bootstrap; set_model
-        # invalidates the one mutable part (settings.modelId). Lock-free reads
+        # the native lock. Identity is immutable after bootstrap; settings
+        # setters invalidate their mutable projection. Lock-free reads
         # (operator assets/profile, image-input capability) stay per-call.
         self._snapshot_lock = threading.Lock()
         self._identity_snapshot: dict[str, Any] | None = None
@@ -438,7 +450,7 @@ class NativeFacade:
         settings = native.assistant_settings()
         avatar_revision = native.assistant_avatar_revision()
         with self._snapshot_lock:
-            # A write that invalidated mid-read (set_model) must not be undone
+            # A settings write that invalidated mid-read must not be undone
             # by this older generation landing late.
             if generation == self._identity_generation:
                 self._identity_snapshot = {"at": time.monotonic(), "projection": projection,
@@ -454,9 +466,17 @@ class NativeFacade:
             elif snapshot is not None:
                 stale = False
         if snapshot is None:
-            self._identity_snapshot_refresh()
-            with self._snapshot_lock:
-                return self._identity_snapshot
+            # A setter can invalidate the generation while a cold read is in
+            # flight. Retry once without holding the publication lock across
+            # native reads; persistent contention stays a bounded 503.
+            for _attempt in range(2):
+                self._identity_snapshot_refresh()
+                with self._snapshot_lock:
+                    snapshot = self._identity_snapshot
+                if snapshot is not None:
+                    return snapshot
+            from .native import AssistantSessionError
+            raise AssistantSessionError("ASSISTANT_NOT_READY")
         if stale:
             def refresh():
                 try:
@@ -499,6 +519,14 @@ class NativeFacade:
         result = native.set_model(model_id)
         # settings.modelId changed; the next status read must observe it, and
         # any refresh already reading old settings must not land afterwards.
+        with self._snapshot_lock:
+            self._identity_generation += 1
+            self._identity_snapshot = None
+        return result
+
+    def set_management_permission(self, preset, expected_revision):
+        from . import native
+        result = native.set_management_permission(preset, expected_revision)
         with self._snapshot_lock:
             self._identity_generation += 1
             self._identity_snapshot = None
@@ -811,6 +839,16 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
 
     from .native import AssistantSessionError
 
+    from fastapi.exceptions import RequestValidationError
+    from fastapi.exception_handlers import request_validation_exception_handler
+
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_error(request: Request, error: RequestValidationError):
+        if request.url.path == "/api/assistant/management-permission":
+            return JSONResponse({"detail": {"code": "ASSISTANT_PERMISSION_INVALID",
+                "message": "The management permission request is invalid"}}, status_code=422)
+        return await request_validation_exception_handler(request, error)
+
     @app.exception_handler(AssistantSessionError)
     async def session_command_error(_request: Request, error: AssistantSessionError):
         errors = {
@@ -823,6 +861,9 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
             "ASSISTANT_MODEL_BUSY": (409, "Wait for the assistant to finish before changing its model"),
             "ASSISTANT_MODEL_INVALID": (422, "The assistant model is not available for selection"),
             "ASSISTANT_MODEL_UNAVAILABLE": (503, "The assistant model settings are unavailable"),
+            "ASSISTANT_PERMISSION_INVALID": (422, "The management permission request is invalid"),
+            "ASSISTANT_PERMISSION_CONFLICT": (409, "Management permission changed; refresh before retrying"),
+            "ASSISTANT_PERMISSION_UNAVAILABLE": (503, "Management permission settings are unavailable"),
         }
         status, message = errors.get(error.code, (500, "Native session command failed"))
         code = error.code if error.code in errors else "SESSION_OPERATION_FAILED"
@@ -1349,6 +1390,16 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
         if request.query_params:
             raise HTTPException(422, detail="Invalid assistant model request")
         return native.set_model(payload.modelId)
+
+    @app.post("/api/assistant/management-permission", response_model=ManagementPermission)
+    def set_management_permission(payload: SetManagementPermission, request: Request, response: Response):
+        if request.query_params:
+            raise AssistantSessionError("ASSISTANT_PERMISSION_INVALID")
+        setter = getattr(native, "set_management_permission", None)
+        if not callable(setter):
+            raise AssistantSessionError("ASSISTANT_PERMISSION_UNAVAILABLE")
+        response.headers["Cache-Control"] = "no-store"
+        return setter(payload.preset, payload.expectedRevision)
 
     from .team_task_cards import TeamTaskCardsError, TeamTaskCardsPage, read_team_task_cards
 

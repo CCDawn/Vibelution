@@ -44,6 +44,20 @@ def _service():
     return agent_directory_service
 
 
+def _validate_launcher_management_metadata(agent_id: str, metadata: dict | None) -> None:
+    if metadata is None:
+        return
+    if not isinstance(metadata, dict):
+        raise _service().AgentDirectoryError("Agent metadata must be an object.")
+    from ..local_assistant.management_permissions import assert_metadata_write_allowed, ManagementPermissionError
+    try:
+        assert_metadata_write_allowed(agent_id, metadata)
+    except ManagementPermissionError:
+        raise _service().AgentDirectoryError(
+            "Launcher management permissions must be changed through the native operator control."
+        ) from None
+
+
 def _record_compression_parameter_update(agent: dict[str, Any], *, refreshed: bool, started: float) -> None:
     s = _service()
     try:
@@ -108,6 +122,7 @@ def update_agent_instance(
     confirm_shared_tool_policy: bool = False,
 ) -> dict[str, Any]:
     s = _service()
+    _validate_launcher_management_metadata(agent_id, metadata)
     if (
         isinstance(metadata, dict)
         and _AGENT_PERCEPTION_POLICY_METADATA_KEY in metadata
@@ -419,6 +434,7 @@ def create_agent_instance(
     initial_tool_policy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     s = _service()
+    _validate_launcher_management_metadata("", metadata)
     if isinstance(metadata, dict) and _AGENT_PERCEPTION_POLICY_METADATA_KEY in metadata:
         raise s.AgentDirectoryError(
             "Agent perception policy cannot be set at Agent creation; configure it through the operator-only perception API."

@@ -339,7 +339,8 @@ def _management_contracts():
             schema = create_model(f"Launcher_{model.__name__}", __base__=model,
                 project_id=(str, Field(min_length=1, max_length=160)),
                 request_id=(str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$")))
-            result[name] = (schema, {**contract_source()[name], "parameters": schema.model_json_schema()})
+            result[name] = (schema, {**contract_source()[name], "parameters": schema.model_json_schema(),
+                                    "governed": True})
     result["dispatch_write"] = (DispatchWrite, {
         "action": "dispatch_write", "governed": True,
         "description": "按原生审批策略派遣单个已有 Agent 修改项目，仅申请 workspace_write，实际权限以目标项目回执为准。task 必须是当前用户消息去除首尾空白后的完整正文，不得截取、改写或追加；过长时请用户重新提供完整消息，不截断。使用稳定 dispatch_id，未知时查询原回执，不换 ID 重派。",

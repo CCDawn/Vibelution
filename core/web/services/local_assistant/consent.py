@@ -1,8 +1,7 @@
 """Apply task-level local consent at the existing final execution gate."""
-import json
 from pathlib import Path
 
-from .policy import LOCAL_RUNTIME_SOURCE_PREFIX, normal_assistant_manage_call, normal_development_call
+from .policy import LOCAL_RUNTIME_SOURCE_PREFIX, normal_development_call
 
 
 def _ordinary_read(tool_name, args, workspace):
@@ -60,13 +59,8 @@ def local_terminal_wait_allowed(runtime):
 
 def local_approval_policy(runtime, tool_name, args, requirement, permission_preset):
     if _native_launcher(runtime) and tool_name == "personal_assistant_manage_tool":
-        try:
-            parameters = json.loads(args.get("arguments_json", "{}"))
-            if normal_assistant_manage_call(args.get("action", ""), parameters):
-                return None, permission_preset
-        except (ValueError, TypeError):
-            pass
-        return requirement or ("always", "destructive"), "request_approval"
+        from .management_approval import approval_requirement
+        return approval_requirement(runtime, args), "request_approval"
     if not str(runtime.get("runtimeToolSource", "")).startswith(LOCAL_RUNTIME_SOURCE_PREFIX):
         return requirement, permission_preset
     task = _task_runtime(runtime)

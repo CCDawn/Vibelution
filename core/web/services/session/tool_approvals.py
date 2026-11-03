@@ -427,10 +427,14 @@ def authorize_or_wait(
         normalized_tool,
         _session_grant_key(session_grant_scope),
     )
+    native_management = False
+    if normalized_tool == "personal_assistant_manage_tool":
+        from core.web.services.local_assistant.consent import _native_launcher
+        native_management = _native_launcher({"agentId": normalized_agent, "sessionId": normalized_session})
     with _LOCK:
         # Assistant manage low-risk actions with an active delegation window
         # are executed directly; the tier table stays server-owned.
-        if not reminder_recovery and _assistant_action_window_remaining_seconds(normalized_agent, normalized_tool, tool_args) > 0:
+        if not reminder_recovery and not native_management and _assistant_action_window_remaining_seconds(normalized_agent, normalized_tool, tool_args) > 0:
             return ToolApprovalOutcome(True, "approved_for_action_window")
         if normalized_approval != "always":
             if grant_key in _SESSION_GRANTS:
@@ -1400,7 +1404,8 @@ def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
             return {"assistantAction": action, "assistantArgumentsInvalid": True}
         try:
             raw = args.get("arguments_json")
-            values = json.loads(raw) if isinstance(raw, str) and len(raw) <= 16000 else None
+            from core.web.services.local_assistant.management_approval import parse_arguments
+            values = parse_arguments(raw)
             if not isinstance(values, dict):
                 raise ValueError("Invalid Agent cleanup arguments")
             from core.assistant_runtime.actions import (agent_archive_approval_summary, agent_purge_approval_summary,

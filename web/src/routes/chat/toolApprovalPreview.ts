@@ -1,5 +1,6 @@
 import { TOOL_APPROVAL_LABELS } from "./toolApprovalLabels";
-import { AUTONOMY_APPROVAL_LABELS, autonomyActionIsKnown, autonomyApprovalText } from "./autonomyApprovalPreview";
+import { ASSISTANT_ACTION_LABELS } from "../../components/conversation/assistantActionLabels";
+import { autonomyActionIsKnown, autonomyApprovalText } from "./autonomyApprovalPreview";
 export { autonomyActionIsKnown, autonomyApprovalPreviewIsValid } from "./autonomyApprovalPreview";
 
 const PLATFORM_MANAGE_ACTIONS = new Set(["dispatch_cancel", "runtime_command", "team_update", "agent_tool_policy_update",
@@ -320,54 +321,10 @@ export function preferenceProposalPreviewIsValid(summary: Record<string, unknown
   return kind === "address" ? value.trim().replace(/\s+/gu, " ") === value : (Object.hasOwn(enums, kind) && enums[kind].includes(value));
 }
 
-const MANAGE_ACTIONS: Record<string, readonly [string, string]> = {
-      ...AUTONOMY_APPROVAL_LABELS,
-      dispatch_cancel: ["停止原派遣任务", "Stop original dispatched task"], runtime_command: ["控制原生运行", "Control native run"],
-      agent_tool_policy_update: ["修改 Agent 工具权限", "Update agent tool permissions"],
-      knowledge_acl_revoke: ["撤销知识访问权限", "Revoke knowledge access"],
-      flow_save: ["保存团队 Flow 定义", "Save team Flow definition"], flow_start: ["启动已有团队 Flow", "Start existing team Flow"],
-      preference_proposal_accept: ["接受偏好建议", "Accept preference suggestion"],
-      preference_proposal_reject: ["拒绝偏好建议", "Reject preference suggestion"],
-      operator_image_upload: ["上传图片", "Upload image"],
-      project_lifecycle: ["管理项目", "Manage project"],
-      dispatch_write: ["派遣 Agent 修改项目", "Dispatch agent to modify project"],
-      authorization_upgrade: ["新增项目权限", "Add project permissions"],
-      agent_create: ["创建 Agent", "Create agent"], agent_update: ["修改 Agent", "Update agent"],
-      agent_purge: ["永久删除 Agent", "Permanently delete agent"],
-      agent_archive: ["归档 Agent", "Archive agent"], agent_dispatch_access_set: ["调整 Agent 接单资格", "Set agent dispatch access"],
-      session_create: ["创建会话", "Create session"],
-      session_update: ["修改会话", "Update session"], session_stop: ["停止会话任务", "Stop session turn"],
-      session_delete: ["删除会话", "Delete session"], knowledge_acl_grant: ["变更知识访问权限", "Change knowledge access"],
-      restart: ["重启平台", "Restart platform"], workflow_recovery_bind: ["绑定失败恢复流程", "Bind failure recovery"],
-      workflow_recovery_revoke: ["撤销失败恢复绑定", "Revoke failure recovery"], workflow_start: ["启动工作流", "Start workflow"],
-      team_create: ["创建团队", "Create team"], knowledge_ingest: ["知识入库", "Ingest knowledge"],
-      team_run: ["创建团队并运行", "Create and run team"],
-      config_update: ["修改偏好配置", "Update preferences config"],
-      provider_add: ["添加模型连接", "Add model provider"], provider_update: ["修改模型连接", "Update model provider"],
-      provider_remove: ["移除模型连接", "Remove model provider"], provider_test: ["测试模型连接", "Test model provider"],
-      provider_discover: ["发现连接模型", "Discover provider models"],
-      model_update: ["修改模型", "Update model"], model_remove: ["移除模型", "Remove model"],
-      model_default: ["设置默认模型", "Set default model"],
-      session_pin: ["置顶会话", "Pin session"], session_unpin: ["取消会话置顶", "Unpin session"],
-      session_reasoning_update: ["调整会话推理", "Update session reasoning"],
-      session_model_parameters_update: ["调整会话模型参数", "Update session model parameters"],
-      session_budget_update: ["调整会话预算", "Update session budget"],
-      session_archive: ["归档会话", "Archive session"], session_unarchive: ["恢复归档会话", "Unarchive session"],
-      team_update: ["修改团队信息", "Update team"], team_archive: ["归档团队及成员", "Archive team and members"],
-      room_update: ["修改群聊信息", "Update chat room"],
-      assistant_settings_update: ["修改助理偏好", "Update assistant preferences"],
-      assistant_model_set: ["切换助理模型", "Change assistant model"],
-      dialogue_settings_update: ["调整对话偏好", "Update dialogue preferences"],
-      history_import: ["导入旧助理历史", "Import previous assistant history"],
-      affairs_sync: ["同步旧助理事务", "Sync previous assistant affairs"],
-      episodic_sync: ["同步情景记忆", "Sync episodic memory"],
-      initial_migration_queue: ["开始旧助理迁移", "Start previous assistant migration"],
-      knowledge_sync_queue: ["同步旧助理知识", "Sync previous assistant knowledge"],
-      knowledge_sync_recover: ["恢复知识同步", "Recover knowledge sync"],
-      reminder_handoff_queue: ["交接旧助理提醒", "Transfer previous assistant reminders"],
-      reminder_handoff_recover: ["重新授权旧提醒交接", "Reauthorize previous reminder handoff"],
-      browser_interact: ["操作网页元素", "Interact with webpage element"],
-};
+// Managed-write approval labels share the single assistant action table with
+// the process labels (conversationToolSemanticLabel) so wording cannot drift;
+// read-only actions included there never reach this managed-approval path.
+const MANAGE_ACTIONS: Record<string, readonly [string, string]> = ASSISTANT_ACTION_LABELS;
 
 export function managementApprovalActionIsKnown(value: unknown): boolean {
   return typeof value === "string" && Object.hasOwn(MANAGE_ACTIONS, value);
