@@ -199,6 +199,7 @@ def _mock_frontend_inspection(monkeypatch, root: Path, *, current: bool = True, 
         "inspect_frontend_build",
         lambda project_root: {
             "current": current,
+            "buildKey": metadata["buildKey"],
             "dist": str(active),
             "provenance": metadata,
             "buildInputs": {"frontendTree": metadata["frontendTree"]},
@@ -2787,6 +2788,138 @@ def test_run_desktop_shell_prebuild_skips_when_shell_current(tmp_path, monkeypat
     assert result["ok"] is True
     assert result["skipped"] == "current"
     assert not desktop_shell._refresh_lock_path(tmp_path, desktop_shell.PREBUILD_LOCK_RELATIVE).is_file()
+
+
+def _write_current_staging_beside_stale_live(root: Path, monkeypatch) -> tuple[Path, Path]:
+    _write_packaged_shell(root, tree_hash="a" * 40, asar_mtime=2_000_000_000)
+    live = desktop_shell.packaged_desktop_exe(root).parent
+    staged = root / desktop_shell.STAGING_WIN_UNPACKED_RELATIVE
+    shutil.copytree(live, staged)
+    provenance_path = desktop_shell.packaged_provenance_path(root)
+    provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    provenance["electronTreeHash"] = "b" * 40
+    provenance_path.write_text(json.dumps(provenance), encoding="utf-8")
+    # The staged artifact, rather than the older live asar, owns source freshness.
+    os.utime(desktop_shell.packaged_asar_path(root), (1, 1))
+    _mock_frontend_inspection(monkeypatch, root)
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda *_args: "a" * 40)
+    monkeypatch.setattr(
+        desktop_shell, "run_git", lambda *_args, **_kwargs: types.SimpleNamespace(returncode=0, stdout=""),
+    )
+    return live, staged
+
+
+def _shell_tree_snapshot(root: Path) -> dict:
+    return {
+        path.relative_to(root).as_posix(): (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in root.rglob("*") if path.is_file()
+    }
+
+
+def test_prebuild_reuses_current_staging_without_touching_live_or_building(tmp_path, monkeypatch):
+    live, staged = _write_current_staging_beside_stale_live(tmp_path, monkeypatch)
+    before_live, before_staged = _shell_tree_snapshot(live), _shell_tree_snapshot(staged)
+    assert desktop_shell.inspect_desktop_shell(tmp_path)["stale"] is True
+
+    def unexpected_build(*_args, **_kwargs):
+        pytest.fail("strictly current staging must not trigger another package build")
+
+    monkeypatch.setattr(desktop_shell, "_run_desktop_shell_package_build", unexpected_build)
+    events = []
+    monkeypatch.setattr(desktop_shell, "_append_refresh_log", lambda _root, event, **fields: events.append((event, fields)))
+    monkeypatch.setattr(
+        "core.runtime_manager.daemon._preflight_frontend_build_for_restart", lambda *_args, **_kwargs: {"ok": True},
+    )
+    original_verify = assistant_builder.verify_launcher_assistant_payload
+    verifications = []
+
+    def verify(payload, **kwargs):
+        assert desktop_shell._desktop_shell_lock_owned_by_current_process(
+            tmp_path, lock_relative=desktop_shell.PREBUILD_LOCK_RELATIVE,
+        )
+        verifications.append(Path(payload))
+        return original_verify(payload, **kwargs)
+
+    monkeypatch.setattr(assistant_builder, "verify_launcher_assistant_payload", verify)
+    result = desktop_shell.run_desktop_shell_prebuild(tmp_path)
+    assert result["ok"] is True and result["staged"] is True
+    assert result["electronTreeHash"] == "a" * 40
+    prepared = desktop_shell.ensure_latest_launcher(tmp_path, shell_kind="packaged")
+    assert prepared["ok"] is True and prepared["electron"]["prepared"] is True
+    assert verifications == [assistant_builder._trusted_root(staged / "resources/launcher-assistant")] * 2
+    assert events == [("prebuild.reused", {"electronTreeHash": "a" * 40})] * 2
+    assert _shell_tree_snapshot(live) == before_live
+    assert _shell_tree_snapshot(staged) == before_staged
+    assert not desktop_shell._refresh_lock_path(tmp_path, desktop_shell.PREBUILD_LOCK_RELATIVE).exists()
+
+
+@pytest.mark.parametrize("fault", [
+    "exe_missing", "asar_missing", "provenance_missing", "electron_tree", "electron_tree_unavailable",
+    "native_source_commit", "native_source_commit_missing", "electron_dirty", "electron_source_dirty", "electron_status_unavailable",
+    "frontend_bytes", "frontend_tree", "frontend_build_key", "frontend_source_commit", "frontend_source_stale",
+    "active_frontend_bytes", "assistant_missing", "assistant_bytes", "assistant_source", "assistant_provenance",
+])
+def test_prebuild_rebuilds_staging_when_current_package_cannot_be_proven(tmp_path, monkeypatch, fault):
+    live, staged = _write_current_staging_beside_stale_live(tmp_path, monkeypatch)
+    proof_path = staged / "resources/app.asar.unpacked/package-provenance.json"
+    proof = json.loads(proof_path.read_text(encoding="utf-8"))
+    if fault in {"exe_missing", "asar_missing", "provenance_missing", "assistant_missing"}:
+        paths = {
+            "exe_missing": staged / "Vibelution.exe", "asar_missing": staged / "resources/app.asar",
+            "provenance_missing": proof_path, "assistant_missing": staged / "resources/launcher-assistant/manifest.json",
+        }
+        paths[fault].unlink()
+    elif fault in {"electron_tree", "native_source_commit", "native_source_commit_missing", "frontend_tree",
+                   "frontend_build_key", "frontend_source_commit", "assistant_provenance"}:
+        key = {
+            "electron_tree": "electronTreeHash", "native_source_commit": "sourceCommit",
+            "native_source_commit_missing": "sourceCommit", "frontend_tree": "frontendTreeHash",
+            "frontend_build_key": "frontendBuildKey", "frontend_source_commit": "frontendSourceCommit",
+            "assistant_provenance": "assistant",
+        }[fault]
+        proof[key] = {} if key == "assistant" else ("" if fault.endswith("missing") else "c" * len(str(proof[key])))
+        proof_path.write_text(json.dumps(proof), encoding="utf-8")
+    elif fault == "electron_tree_unavailable":
+        monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda _root, spec: "" if ":" in spec else "a" * 40)
+    elif fault in {"electron_dirty", "electron_source_dirty", "electron_status_unavailable"}:
+        source = tmp_path / ("desktop/electron/package.json" if fault == "electron_dirty" else "desktop/electron/src/main.ts")
+        source.write_text("export const changed = true;\n", encoding="utf-8")
+        os.utime(source, (1, 1))  # Old timestamps cannot prove dirty source matches the staged build.
+
+        def git_status(args, **_kwargs):
+            assert args[-1] in {"desktop/electron", "desktop/electron/src"}
+            if fault == "electron_dirty" and args[-1] == "desktop/electron/src":
+                return types.SimpleNamespace(returncode=0, stdout="")
+            return types.SimpleNamespace(returncode=int(fault.endswith("unavailable")), stdout=" M desktop/electron/src/main.ts")
+
+        monkeypatch.setattr(desktop_shell, "run_git", git_status)
+    elif fault in {"frontend_bytes", "active_frontend_bytes"}:
+        frontend = staged / "resources/web-dist" if fault == "frontend_bytes" else tmp_path / "web/.vibelution-builds/release-current"
+        (frontend / "index.html").write_bytes(b"tampered frontend")
+    elif fault == "frontend_source_stale":
+        _mock_frontend_inspection(monkeypatch, tmp_path, current=False)
+    elif fault == "assistant_bytes":
+        (staged / "resources/launcher-assistant/python/pythonw.exe").write_bytes(b"tampered runtime")
+    elif fault == "assistant_source":
+        (tmp_path / "core/__init__.py").write_bytes(b"changed source")
+    else:
+        raise AssertionError(fault)
+    before_live = _shell_tree_snapshot(live)
+    builds = []
+
+    def build(root, **_kwargs):
+        assert desktop_shell._desktop_shell_lock_owned_by_current_process(
+            root, lock_relative=desktop_shell.PREBUILD_LOCK_RELATIVE,
+        )
+        builds.append(root)
+        raise RuntimeError("fixture rebuild required")
+
+    monkeypatch.setattr(desktop_shell, "_run_desktop_shell_package_build", build)
+    result = desktop_shell.run_desktop_shell_prebuild(tmp_path)
+    assert builds == [tmp_path]
+    assert result["ok"] is False and "fixture rebuild required" in result["message"]
+    assert _shell_tree_snapshot(live) == before_live
+    assert not desktop_shell._refresh_lock_path(tmp_path, desktop_shell.PREBUILD_LOCK_RELATIVE).exists()
 
 
 def test_run_desktop_shell_prebuild_skips_while_refresh_lock_held(tmp_path, monkeypatch):
