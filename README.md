@@ -50,7 +50,7 @@
 <a id="start"></a>
 ## 开始你的第一次对话
 
-推荐先体验 **Windows 桌面工作台**。准备 Python 3.11+（推荐 3.12）、Node.js 22.12+ 和 Git，在 PowerShell 中执行：
+推荐先体验 **Windows 桌面工作台**。准备 Python 3.11+（推荐 3.12）、Node.js 22.12+（24.x 已验证，25+ 暂不支持）、Git 和 VS 2022 生成工具（C++ 工作负载，安装命令见 [Windows 安装指南](docs/guides/install-windows.md)），装完请新开 PowerShell 窗口再执行：
 
 ```powershell
 git clone https://github.com/CCDawn/Vibelution.git
