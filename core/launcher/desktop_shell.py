@@ -1081,12 +1081,21 @@ def _assistant_package_block_reason(root: Path, package: Path, *, full: bool = F
             manifest.get(key) != evidence.get(key) for key in (*hashes[2:], "pythonVersion")
         ) or not re.fullmatch(r"3\.[0-9]+\.[0-9]+", str(evidence.get("pythonVersion", ""))):
             return "assistant_manifest_mismatch"
-        if full:
-            assistant_payload.verify_launcher_assistant_payload(payload, expected_manifest_sha256=evidence["manifestSha256"])
-            if _frontend_directory_content_sha256(payload) != evidence["contentSha256"]:
-                return "assistant_package_content_mismatch"
         if _assistant_source_content_sha256(root) != evidence["sourceContentSha256"]:
             return "assistant_source_mismatch"
+        if full:
+            try:
+                assistant_payload.verify_launcher_assistant_payload(
+                    payload, expected_manifest_sha256=evidence["manifestSha256"],
+                    expected_content_sha256=evidence["contentSha256"],
+                )
+            except assistant_payload.AssistantPayloadContentMismatch:
+                return "assistant_package_content_mismatch"
+            # Workspace edits are not serialized by the package build lock.
+            # Keep the original post-verification source proof as well as the
+            # fast rejection above, so a long payload read cannot admit drift.
+            if _assistant_source_content_sha256(root) != evidence["sourceContentSha256"]:
+                return "assistant_source_mismatch"
     except (OSError, ValueError, TypeError):
         return "assistant_payload_invalid"
     return ""

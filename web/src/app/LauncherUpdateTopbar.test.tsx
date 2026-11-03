@@ -120,6 +120,84 @@ describe("shared Launcher update topbar", () => {
     expect(api.restartLatestLauncher).not.toHaveBeenCalled();
   });
 
+  it("recovers an accepted update when a later native read is idle on the old version", async () => {
+    api.getLauncherFreshness.mockResolvedValue({ ...available, updateInProgress: true });
+    await mount();
+    // The native owner may report an automatic update before this click.
+    api.getLauncherFreshness.mockResolvedValue({ ...available, updateInProgress: false });
+    await act(async () => { window.dispatchEvent(new Event("focus")); await new Promise((resolve) => setTimeout(resolve, 10)); });
+    await click("更新并重启");
+    api.getLauncherFreshness.mockResolvedValue({ ...available, updateInProgress: true });
+    await click("确认更新");
+    expect(button("准备中…").disabled).toBe(true);
+    await act(async () => root.render(<QueryClientProvider client={client}><div /></QueryClientProvider>));
+    await act(async () => root.render(<QueryClientProvider client={client}><LauncherUpdateTopbar lang="zh" /></QueryClientProvider>));
+    api.getLauncherFreshness.mockResolvedValue({ ...available, updateInProgress: false, refreshError: "保存任务失败" });
+    await act(async () => { window.dispatchEvent(new Event("focus")); await new Promise((resolve) => setTimeout(resolve, 20)); });
+    expect(host.textContent).toContain("更新失败");
+    expect(host.textContent).toContain("保存任务失败");
+    expect(button("重试更新").disabled).toBe(false);
+    expect(api.restartLatestLauncher).toHaveBeenCalledOnce();
+    await click("重试更新");
+    await click("确认更新");
+    expect(api.restartLatestLauncher).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not let an idle freshness read release a still-pending update request", async () => {
+    let rejectUpdate!: (reason: Error) => void;
+    api.restartLatestLauncher.mockImplementationOnce(() => new Promise((_, reject) => { rejectUpdate = reject; }));
+    api.getLauncherFreshness.mockResolvedValue({ ...available, updateInProgress: false });
+    await mount();
+    await click("更新并重启");
+    await click("确认更新");
+    await act(async () => { await client.refetchQueries({ queryKey: queryKeys.launcherFreshness() }); });
+    expect(button("准备中…").disabled).toBe(true);
+    expect(api.restartLatestLauncher).toHaveBeenCalledOnce();
+    await act(async () => { rejectUpdate(new Error("构建失败")); await new Promise((resolve) => setTimeout(resolve, 10)); });
+    expect(button("重试更新").disabled).toBe(false);
+  });
+
+  it("keeps update acceptance separate from a failed status read and permits read-only recovery", async () => {
+    await mount();
+    await click("更新并重启");
+    api.getLauncherFreshness.mockRejectedValue(new Error("offline"));
+    await click("确认更新");
+    expect(host.textContent).toContain("无法确认更新状态");
+    expect(button("准备中…").disabled).toBe(true);
+    expect(button("重新检测").disabled).toBe(false);
+    api.getLauncherFreshness.mockResolvedValue({ ...available, updateInProgress: false });
+    await click("重新检测");
+    expect(host.textContent).toContain("Launcher 仍在运行旧版本");
+    expect(button("重试更新").disabled).toBe(false);
+    expect(api.restartLatestLauncher).toHaveBeenCalledOnce();
+  });
+
+  it("clears historical success after the native owner confirms the current version", async () => {
+    await mount();
+    await click("更新并重启");
+    await click("确认更新");
+    api.getLauncherFreshness.mockResolvedValue({ ...available, current: true, updateAvailable: false, updateInProgress: false });
+    await act(async () => { window.dispatchEvent(new Event("focus")); await new Promise((resolve) => setTimeout(resolve, 20)); });
+    expect(host.textContent).toContain("已是最新版本");
+    expect(host.textContent).not.toContain("准备中");
+    expect(api.restartLatestLauncher).toHaveBeenCalledOnce();
+  });
+
+  it("recovers through polling without a window focus event after acceptance", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await mount();
+    await click("更新并重启");
+    await click("确认更新");
+    expect(button("准备中…").disabled).toBe(true);
+    const readsBefore = api.getLauncherFreshness.mock.calls.length;
+    api.getLauncherFreshness.mockResolvedValue({ ...available, updateInProgress: false, refreshError: "保存任务失败" });
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_100); });
+    expect(api.getLauncherFreshness.mock.calls.length).toBeGreaterThan(readsBefore);
+    expect(host.textContent).toContain("更新失败");
+    expect(button("重试更新").disabled).toBe(false);
+    expect(api.restartLatestLauncher).toHaveBeenCalledOnce();
+  });
+
   it("reports unknown after a cached current version fails a background refresh", async () => {
     api.getLauncherFreshness.mockResolvedValueOnce({ ...available, current: true, updateAvailable: false }).mockRejectedValue(new Error("offline"));
     await mount();

@@ -6,6 +6,7 @@ import base64
 import csv
 import hashlib
 import json
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -69,6 +70,82 @@ def _build(fixture):
     project, python, site, output = fixture
     return build_launcher_assistant_payload(project, output, python_root=python,
                                             site_packages=site, python_version="3.12.10")
+
+
+def _content_verification_kwargs(output, enabled):
+    if not enabled:
+        return {}
+    from core.launcher.desktop_shell import _frontend_directory_content_sha256
+    return {"expected_content_sha256": _frontend_directory_content_sha256(output)}
+
+
+def test_raw_directory_hash_uses_the_same_stable_reads_as_file_verification(package_fixture, monkeypatch):
+    from core.launcher.desktop_shell import _frontend_directory_content_sha256
+    from scripts import build_assistant_runtime as builder
+
+    _write(package_fixture[0], "core/Z.json", b"uppercase")
+    _write(package_fixture[0], "core/a.json", b"lowercase")
+    _write(package_fixture[0], "core/\u4e2d.json", b"unicode")
+    _build(package_fixture)
+    output = package_fixture[-1]
+    manifest_path = output / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    # The raw directory domain follows UTF-8 paths, independently of manifest order.
+    manifest["files"].reverse()
+    for field, prefix in (("sourceContentSha256", "source/"), ("runtimeContentSha256", "python/"),
+                          ("payloadContentSha256", "")):
+        manifest[field] = builder._content_hash(manifest["files"], prefix)
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+    expected_manifest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    expected_content = _frontend_directory_content_sha256(output)
+    reads = Counter()
+    original_read = builder._read_stable_file
+    payload_root = builder._io_path(output)
+
+    def read(path, **kwargs):
+        reads[builder._io_path(path).relative_to(payload_root).as_posix()] += 1
+        return original_read(path, **kwargs)
+
+    monkeypatch.setattr(builder, "_read_stable_file", read)
+    assert verify_launcher_assistant_payload(
+        output, expected_manifest_sha256=expected_manifest, expected_content_sha256=expected_content,
+    ) == manifest
+    assert reads == Counter({"manifest.json": 1, **{entry["path"]: 1 for entry in manifest["files"]}})
+
+
+@pytest.mark.parametrize("expected", ["", "a" * 63, "A" * 64, 123])
+def test_raw_directory_hash_rejects_invalid_expected_digest(package_fixture, expected):
+    _build(package_fixture)
+    with pytest.raises(ValueError, match="content.*SHA-256"):
+        verify_launcher_assistant_payload(package_fixture[-1], expected_content_sha256=expected)
+
+
+def test_raw_directory_hash_rejects_a_different_digest_domain(package_fixture):
+    result = _build(package_fixture)
+    with pytest.raises(ValueError, match="content.*SHA-256"):
+        verify_launcher_assistant_payload(
+            package_fixture[-1], expected_manifest_sha256=result["manifestSha256"],
+            expected_content_sha256=result["manifest"]["payloadContentSha256"],
+        )
+
+
+def test_raw_directory_hash_preserves_link_rejection(package_fixture, tmp_path):
+    from core.launcher.desktop_shell import _frontend_directory_content_sha256
+
+    result = _build(package_fixture)
+    output = package_fixture[-1]
+    expected_content = _frontend_directory_content_sha256(output)
+    linked = output / "python/pythonw.exe"
+    target = _write(tmp_path, "outside.exe", linked.read_bytes())
+    linked.unlink()
+    try:
+        linked.symlink_to(target)
+    except OSError:
+        pytest.skip("Symlink creation requires OS permission")
+    with pytest.raises(ValueError, match="link"):
+        verify_launcher_assistant_payload(
+            output, expected_manifest_sha256=result["manifestSha256"], expected_content_sha256=expected_content,
+        )
 
 
 def test_builds_offline_closure_and_complete_product_files(package_fixture):
@@ -143,8 +220,9 @@ def test_never_overwrites_or_deletes_existing_output(package_fixture):
     assert marker.read_bytes() == b"untouched"
 
 
+@pytest.mark.parametrize("verify_content", [False, True])
 @pytest.mark.parametrize("fault", ["hash", "tamper", "missing", "extra", "bytecode", "path", "entrypoint", "dependencies"])
-def test_verifier_rejects_corrupt_or_unbound_payload(package_fixture, fault):
+def test_verifier_rejects_corrupt_or_unbound_payload(package_fixture, fault, verify_content):
     result = _build(package_fixture)
     output = package_fixture[-1]
     expected = result["manifestSha256"]
@@ -169,8 +247,9 @@ def test_verifier_rejects_corrupt_or_unbound_payload(package_fixture, fault):
             manifest["dependencies"] = []
         path.write_text(json.dumps(manifest))
         expected = hashlib.sha256(path.read_bytes()).hexdigest()
+    kwargs = _content_verification_kwargs(output, verify_content)
     with pytest.raises(ValueError):
-        verify_launcher_assistant_payload(output, expected_manifest_sha256=expected)
+        verify_launcher_assistant_payload(output, expected_manifest_sha256=expected, **kwargs)
 
 
 def test_snapshot_without_contracts_module_fails_the_build(package_fixture):
@@ -182,7 +261,8 @@ def test_snapshot_without_contracts_module_fails_the_build(package_fixture):
         _build(package_fixture)
 
 
-def test_verifier_rejects_manifest_whose_contracts_identity_disagrees(package_fixture):
+@pytest.mark.parametrize("verify_content", [False, True])
+def test_verifier_rejects_manifest_whose_contracts_identity_disagrees(package_fixture, verify_content):
     _build(package_fixture)
     output = package_fixture[-1]
     # Simulates a manifest rewritten (or a pre-guard manifest) whose sealed
@@ -195,13 +275,17 @@ def test_verifier_rejects_manifest_whose_contracts_identity_disagrees(package_fi
     manifest_path.write_text(json.dumps(manifest))
     expected = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
     with pytest.raises(ValueError, match="contracts identity mismatch"):
-        verify_launcher_assistant_payload(output, expected_manifest_sha256=expected)
+        verify_launcher_assistant_payload(
+            output, expected_manifest_sha256=expected, **_content_verification_kwargs(output, verify_content),
+        )
     # An old manifest without the field fails closed the same way.
     del manifest["contractsSha256"]
     manifest_path.write_text(json.dumps(manifest))
     expected = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
     with pytest.raises(ValueError, match="contracts identity mismatch"):
-        verify_launcher_assistant_payload(output, expected_manifest_sha256=expected)
+        verify_launcher_assistant_payload(
+            output, expected_manifest_sha256=expected, **_content_verification_kwargs(output, verify_content),
+        )
 
 
 def test_missing_product_entrypoint_prevents_manifest(package_fixture):
@@ -514,23 +598,27 @@ def _change_during_legacy_read(monkeypatch, target, change):
     return observed
 
 
-def test_legacy_manifest_read_refuses_growth_after_stat(package_fixture, monkeypatch):
+@pytest.mark.parametrize("verify_content", [False, True])
+def test_legacy_manifest_read_refuses_growth_after_stat(package_fixture, monkeypatch, verify_content):
     _build(package_fixture)
     path = package_fixture[-1] / "manifest.json"
+    kwargs = _content_verification_kwargs(package_fixture[-1], verify_content)
     initial_size = path.stat().st_size
     def grow(target, original):
         with original(target, "ab") as writer:
             writer.write(b" " * 1024)  # Still valid JSON: old read_bytes accepted it.
     observed = _change_during_legacy_read(monkeypatch, path, grow)
     with pytest.raises(ValueError):
-        verify_launcher_assistant_payload(package_fixture[-1])
+        verify_launcher_assistant_payload(package_fixture[-1], **kwargs)
     assert observed["changed"]
     assert observed["bytes"] <= initial_size + 1
     assert all(0 < size <= 32 * 1024 * 1024 + 1 for size in observed["requests"])
 
 
-def test_legacy_file_hash_bounds_read_even_when_file_grows(package_fixture, monkeypatch):
+@pytest.mark.parametrize("verify_content", [False, True])
+def test_legacy_file_hash_bounds_read_even_when_file_grows(package_fixture, monkeypatch, verify_content):
     _build(package_fixture)
+    kwargs = _content_verification_kwargs(package_fixture[-1], verify_content)
     path = package_fixture[-1] / "source/agent.py"
     initial_size = path.stat().st_size
     def grow(target, original):
@@ -538,28 +626,32 @@ def test_legacy_file_hash_bounds_read_even_when_file_grows(package_fixture, monk
             writer.write(b"extra" * 1000)
     observed = _change_during_legacy_read(monkeypatch, path, grow)
     with pytest.raises(ValueError):
-        verify_launcher_assistant_payload(package_fixture[-1])
+        verify_launcher_assistant_payload(package_fixture[-1], **kwargs)
     assert observed["changed"]
     assert observed["bytes"] <= initial_size + 1
 
 
-def test_legacy_file_hash_checks_mtime_after_same_bytes_read(package_fixture, monkeypatch):
+@pytest.mark.parametrize("verify_content", [False, True])
+def test_legacy_file_hash_checks_mtime_after_same_bytes_read(package_fixture, monkeypatch, verify_content):
     import os
     _build(package_fixture)
+    kwargs = _content_verification_kwargs(package_fixture[-1], verify_content)
     path = package_fixture[-1] / "source/agent.py"
     initial = path.stat()
     def touch(target, _original):
         os.utime(target, ns=(initial.st_atime_ns, initial.st_mtime_ns + 1_000_000_000))
     observed = _change_during_legacy_read(monkeypatch, path, touch)
     with pytest.raises(ValueError):
-        verify_launcher_assistant_payload(package_fixture[-1])
+        verify_launcher_assistant_payload(package_fixture[-1], **kwargs)
     assert observed["changed"]
 
 
-def test_legacy_hash_checks_opened_file_identity(package_fixture, monkeypatch):
+@pytest.mark.parametrize("verify_content", [False, True])
+def test_legacy_hash_checks_opened_file_identity(package_fixture, monkeypatch, verify_content):
     import os
     from scripts.build_assistant_runtime import _io_path
     _build(package_fixture)
+    kwargs = _content_verification_kwargs(package_fixture[-1], verify_content)
     target = _io_path(package_fixture[-1] / "source/agent.py")
     initial = target.stat()
     content = target.read_bytes()
@@ -577,7 +669,7 @@ def test_legacy_hash_checks_opened_file_identity(package_fixture, monkeypatch):
         return original(path, *args, **kwargs)
     monkeypatch.setattr(Path, "open", open_file)
     with pytest.raises(ValueError, match="identity"):
-        verify_launcher_assistant_payload(package_fixture[-1])
+        verify_launcher_assistant_payload(package_fixture[-1], **kwargs)
     assert changed
 
 
