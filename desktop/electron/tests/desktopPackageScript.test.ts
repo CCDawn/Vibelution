@@ -105,6 +105,170 @@ describe("installed Electron package runtime", () => {
   });
 });
 
+describe("Electron runtime auto-install before packaging", () => {
+  type Installed = { root: string; installed: string; dist: string };
+  type SpawnResult = { status: number | null; signal?: string; error?: Error; stdout?: string; stderr?: string };
+
+  // electron's npm package has no postinstall, so a fresh `npm ci` leaves
+  // node_modules/electron present but its dist/ runtime absent.
+  function installFixture(run: (paths: Installed) => void) {
+    const root = mkdtempSync(join(tmpdir(), "vibelution-electron-install-"));
+    const installed = join(root, "node_modules", "electron");
+    mkdirSync(installed, { recursive: true });
+    writeFileSync(join(root, "package.json"), JSON.stringify({ devDependencies: { electron: "42.5.0" } }));
+    writeFileSync(join(installed, "package.json"), JSON.stringify({ version: "42.5.0" }));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try { run({ root, installed, dist: join(installed, "dist") }); } finally {
+      warn.mockRestore();
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+
+  function writeRuntime(dist: string, version = "42.5.0") {
+    mkdirSync(dist, { recursive: true });
+    writeFileSync(join(dist, "version"), `${version}\n`);
+    writeFileSync(join(dist, "electron.exe"), "fixture");
+  }
+
+  function thrownMessage(run: () => unknown): string {
+    try { run(); } catch (error) { return (error as Error).message; }
+    throw new Error("expected the call to throw");
+  }
+
+  it("downloads a missing runtime through the injected installer and then packages it", () => {
+    installFixture(({ root, installed, dist }) => {
+      const run = vi.fn((_command: string, _args: string[], _options: unknown): SpawnResult => {
+        writeRuntime(dist);
+        return { status: 0, stdout: "", stderr: "" };
+      });
+      expect(resolveInstalledElectronDistribution(root, "dir", "win32", { run }))
+        .toEqual({ electronDist: dist, electronVersion: "42.5.0" });
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(run.mock.calls[0][0]).toBe(process.execPath);
+      expect(run.mock.calls[0][1]).toEqual([join(installed, "install.js")]);
+      expect(run.mock.calls[0][2]).toMatchObject({
+        cwd: installed, stdio: "pipe", shell: false, timeout: 600_000, windowsHide: true
+      });
+      expect((run.mock.calls[0][2] as { env: unknown }).env).toBe(process.env);
+      expect(console.warn).toHaveBeenCalledWith(expect.stringContaining(join(installed, "install.js")));
+    });
+  });
+
+  it("repairs a runtime that kept its version file but lost its executable", () => {
+    installFixture(({ root, dist }) => {
+      mkdirSync(dist, { recursive: true });
+      writeFileSync(join(dist, "version"), "42.5.0\n");
+      const run = vi.fn((): SpawnResult => { writeRuntime(dist); return { status: 0 }; });
+      expect(resolveInstalledElectronDistribution(root, "dir", "win32", { run })).toMatchObject({ electronVersion: "42.5.0" });
+      expect(run).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("leaves a complete runtime alone", () => {
+    installFixture(({ root, dist }) => {
+      writeRuntime(dist);
+      const run = vi.fn();
+      expect(resolveInstalledElectronDistribution(root, "dir", "win32", { run }))
+        .toEqual({ electronDist: dist, electronVersion: "42.5.0" });
+      expect(run).not.toHaveBeenCalled();
+      expect(console.warn).not.toHaveBeenCalled();
+    });
+  });
+
+  it("explains how to recover when the installer fails", () => {
+    installFixture(({ root, dist }) => {
+      const run = vi.fn((): SpawnResult => ({
+        status: 1, stdout: "", stderr: "RequestError: getaddrinfo ENOTFOUND github.com"
+      }));
+      const message = thrownMessage(() => resolveInstalledElectronDistribution(root, "dir", "win32", { run }));
+      expect(message).toContain(`Installed Electron distribution is incomplete: ${dist} lacks version or electron.exe`);
+      expect(message).toContain("exited with code 1");
+      expect(message).toContain("node node_modules/electron/install.js");
+      expect(message).toContain("ELECTRON_MIRROR");
+      expect(message).toContain("Installer output (tail):\nRequestError: getaddrinfo ENOTFOUND github.com");
+      expect(run).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it.each([
+    {
+      name: "a clean exit that still left the runtime missing",
+      result: { status: 0, stdout: "", stderr: "" } as SpawnResult,
+      expectation: "exited successfully but left the distribution incomplete"
+    },
+    {
+      name: "a timeout",
+      result: {
+        status: null, signal: "SIGTERM", stdout: "Downloading electron-v42.5.0-win32-x64.zip 42%", stderr: "",
+        error: Object.assign(new Error("spawnSync node ETIMEDOUT"), { code: "ETIMEDOUT" })
+      } as SpawnResult,
+      expectation: "timed out after 600s"
+    },
+    {
+      name: "a launch failure",
+      result: { status: null, error: Object.assign(new Error("spawnSync node EACCES"), { code: "EACCES" }) } as SpawnResult,
+      expectation: "failed to run (spawnSync node EACCES)"
+    }
+  ])("reports $name together with the recovery command", ({ result, expectation }) => {
+    installFixture(({ root }) => {
+      const message = thrownMessage(() => resolveInstalledElectronDistribution(root, "dir", "win32", { run: () => result }));
+      expect(message).toContain("incomplete");
+      expect(message).toContain(expectation);
+      expect(message).toContain("node node_modules/electron/install.js");
+      expect(message).toContain("ELECTRON_MIRROR");
+      if (result.stdout) expect(message).toContain(result.stdout);
+    });
+  });
+
+  it("keeps the exact-version mismatch error and never downloads over a complete runtime", () => {
+    installFixture(({ root, dist }) => {
+      writeRuntime(dist, "41.0.0");
+      const run = vi.fn();
+      expect(() => resolveInstalledElectronDistribution(root, "dir", "win32", { run }))
+        .toThrow("Installed Electron does not match the project's exact declared Electron version; refresh task-local dependencies before packaging.");
+      expect(run).not.toHaveBeenCalled();
+    });
+  });
+
+  it("still validates the exact pin after a download that installed another version", () => {
+    installFixture(({ root, dist }) => {
+      writeFileSync(join(root, "package.json"), JSON.stringify({ devDependencies: { electron: "43.8.3" } }));
+      const run = vi.fn((): SpawnResult => { writeRuntime(dist, "42.5.0"); return { status: 0 }; });
+      expect(() => resolveInstalledElectronDistribution(root, "dir", "win32", { run })).toThrow(/declared.*version/i);
+      expect(run).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it.skipIf(process.platform !== "win32")("reaches the injected installer from the managed package build", () => {
+    installFixture(({ root, installed, dist }) => {
+      const workspace = join(root, "workspace");
+      const session = join(workspace, "dist", ".desktop-shell-build-fixture");
+      const assistantRoot = join(session, "launcher-assistant");
+      const builderPackage = join(root, "node_modules", "electron-builder");
+      mkdirSync(assistantRoot, { recursive: true });
+      mkdirSync(builderPackage, { recursive: true });
+      writeFileSync(join(assistantRoot, "manifest.json"), "{}");
+      writeFileSync(join(root, "desktop-entry-catalog.json"), "{}");
+      writeFileSync(join(builderPackage, "package.json"), JSON.stringify({ bin: { "electron-builder": "cli.js" } }));
+      const run = vi.fn((_command: string, args: string[]): SpawnResult => {
+        if (args[0] === join(installed, "install.js")) writeRuntime(dist);
+        return { status: 0, stdout: "", stderr: "" };
+      });
+      vi.stubEnv("VIBELUTION_DESKTOP_BUILD_MANAGED", "1");
+      vi.stubEnv("VIBELUTION_DESKTOP_BUILD_ROOT", session);
+      vi.stubEnv("VIBELUTION_ASSISTANT_PAYLOAD_ROOT", assistantRoot);
+      vi.stubEnv("VIBELUTION_ASSISTANT_MANIFEST_SHA256", "c".repeat(64));
+      try {
+        expect(() => runDesktopPackageBuild({ workspaceRoot: workspace, electronRoot: root, baseConfig: {}, run }))
+          .toThrow(/missing the executable/);
+      } finally { vi.unstubAllEnvs(); }
+      expect(run.mock.calls.map((call) => call[1][0])).toContain(join(installed, "install.js"));
+      expect(JSON.parse(readFileSync(join(session, "electron-builder.generated.json"), "utf8")))
+        .toMatchObject({ electronDist: dist, electronVersion: "42.5.0" });
+    });
+  });
+});
+
 describe("desktop package script", () => {
   it("does not mask npm or node failures before writing the launch profile", () => {
     const script = readFileSync(buildScriptPath, "utf8");

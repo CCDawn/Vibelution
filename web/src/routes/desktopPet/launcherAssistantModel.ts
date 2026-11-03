@@ -72,6 +72,21 @@ export function launcherAssistantActivity(source: SessionActivitySource = {}): {
   return { tone: "idle", animationState: "idle" };
 }
 
+/** Cold-boot wait cadence while the first backend status read has never
+ * succeeded (the workbench backend may still be starting). The first probe
+ * follows a failure after 2s; the interval doubles per elapsed 4s window and
+ * caps at 16s, so a booting backend is joined promptly while a long outage
+ * never hammers the host RPC. */
+export const LAUNCHER_ASSISTANT_WAIT_POLL_FIRST_MS = 2_000;
+export const LAUNCHER_ASSISTANT_WAIT_POLL_MAX_MS = 16_000;
+
+export function launcherAssistantWaitInterval(waitStartedAt: number | null, now: number): number {
+  if (waitStartedAt === null || !Number.isFinite(waitStartedAt)) return LAUNCHER_ASSISTANT_WAIT_POLL_FIRST_MS;
+  const age = Number.isFinite(now) ? Math.max(0, now - waitStartedAt) : 0;
+  const steps = Math.min(8, Math.floor(age / (LAUNCHER_ASSISTANT_WAIT_POLL_FIRST_MS * 2)));
+  return Math.min(LAUNCHER_ASSISTANT_WAIT_POLL_MAX_MS, LAUNCHER_ASSISTANT_WAIT_POLL_FIRST_MS * 2 ** steps);
+}
+
 /** Any pushed session event (heartbeats included, ~15s cadence) seen inside this
  * window proves the push channel alive; two missed heartbeats mark it dead. */
 export const LAUNCHER_ASSISTANT_SSE_HEALTH_WINDOW_MS = 35_000;

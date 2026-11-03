@@ -14,9 +14,18 @@
 |------|----------|----------|
 | Windows | 10/11 | — |
 | Python | 3.11+（推荐 3.12） | `py -3.12 --version` 或 `python --version` |
-| Node.js | 推荐 22.12+（含 npm；Vite 8 要求 20.19+ 的 20.x，或 22.12+） | `node --version` / `npm --version` |
+| Node.js | 22.12+（含 npm；24.x 实测验证；25+ 因 Node fs.cp 语义变化暂不支持） | `node --version` / `npm --version` |
 | Git | 任意近期版 | `git --version` |
+| VS 2022 生成工具 | 含「使用 C++ 的桌面开发」工作负载（MSVC + Windows SDK）；构建 managed 桌面包时要用 node-gyp 现场编译原生模块，缺了必败 | 安装脚本会预检（vswhere），缺失时报错并给出安装指引 |
 | 浏览器 | Edge（推荐） | — |
+
+VS 2022 生成工具可用 winget 一行装好（已含 C++ 工作负载）：
+
+```powershell
+winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+```
+
+> **装完前置请重开终端**：winget / MSI 静默装完 Python、Node、Git、VS 生成工具后，已经打开的终端看不到新的 PATH（检查命令会报「找不到命令」）。请新开一个 PowerShell 窗口，再跑检查命令和下方安装脚本。
 
 > **Phase 2 规划**：官方便携包将尽量不再要求你预装 Python/Node。当前请用下方一键脚本。
 
@@ -45,12 +54,14 @@ powershell -ExecutionPolicy Bypass -File scripts/install_windows.ps1 -SkipFronte
 
 脚本会：
 
-1. 检查 Python / Node / Git
+1. 检查 Python / Node / Git 与 VS C++ 工具链
 2. 创建项目 `.venv` 并安装 `requirements.txt`
-3. 在 `web/` 执行 `npm install`（若缺 `node_modules`）
-4. 构建 `web/dist`（若需要）
-5. 同步桌面/开始菜单用的 **Vibelution Launcher** 入口（若本机工具链可用）
-6. 打印配置路径与启动方式
+3. 准备 `desktop/electron` 构建依赖（`npm ci`；缺 electron 二进制时自动补装）
+4. 在 `web/` 执行 `npm install`（若缺 `node_modules`）
+5. 构建 `web/dist`（若需要）
+6. 同步桌面/开始菜单用的 **Vibelution Launcher** 入口（若本机工具链可用）
+7. 构建并发布 managed 桌面包（用 node-gyp 现场编译原生模块，这一步需要 VS C++ 工具链）
+8. 打印配置路径与启动方式
 
 ## 启动
 
@@ -79,7 +90,9 @@ powershell -ExecutionPolicy Bypass -File scripts/vibelution_launcher.ps1 -Action
 
 | 现象 | 优先查看 |
 |------|----------|
-| 脚本报缺 Python/Node | 安装对应运行时后重跑 `install_windows.ps1` |
+| 脚本报缺 Python/Node | 安装对应运行时后**新开终端**重跑 `install_windows.ps1`（旧终端看不到新 PATH） |
+| 脚本报缺 VS C++ 工具链 | 按上方 winget 命令安装 VS 2022 生成工具（C++ 工作负载），**新开终端**后重跑 `install_windows.ps1` |
+| electron 二进制缺失（`node_modules\electron\dist\electron.exe` 不存在） | 安装脚本会自动执行 `node node_modules\electron\install.js` 补装；下载不通时设置 `ELECTRON_MIRROR`（如 `https://npmmirror.com/mirrors/electron/`）后重跑 |
 | Launcher 起不来 | `python scripts/migrate_project_storage.py inventory` 输出的 `activePaths.runtime/launcher/` |
 | 工作台打不开 / 重建失败 | inventory 输出的 `activePaths.logs/runtime_scenes/` 最新目录；确认 git 在 **main**（开发机） |
 | 黑窗闪烁 | 应使用官方 Launcher / pythonw 路径，勿手搓 `python.exe` 常驻服务 |

@@ -117,11 +117,12 @@ describe("Launcher assistant status degradation", () => {
     expect(container.querySelector('[data-testid="native-conversation"]')).toBeTruthy();
   });
 
-  it("keeps the full-page error only for a first-load failure with no session content", async () => {
+  it("waits for the backend on a first-load failure with no session content", async () => {
     await renderEmbedded({ status: async () => { throw new Error("host restarting"); } });
-    // No session data has ever loaded: the full-page error state stays.
-    const surface = container.querySelector('[data-vui="state-surface"][data-fill="true"][data-tone="error"]');
-    expect(surface?.textContent).toContain("个人助理暂不可用");
+    // No session data has ever loaded: the cold-boot wait skeleton stays
+    // (the transport keeps probing, so a late backend is joined automatically).
+    const surface = container.querySelector('[data-vui="state-surface"][data-fill="true"][data-tone="loading"]');
+    expect(surface?.textContent).toContain("正在等待工作台后端启动");
     expect(surface?.textContent).toContain("host restarting");
     expect(container.querySelector('[data-testid="native-conversation"]')).toBeNull();
     expect(container.querySelector('[data-assistant-embedded="true"]')).toBeNull();

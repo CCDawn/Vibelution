@@ -45,7 +45,7 @@ import { classifyComposerFiles, mergeComposerAttachmentsWithRejections, type Com
 import {
   launcherAssistantActivity, launcherAssistantPollInterval, launcherAssistantSubmission,
   launcherAssistantQueueReadback, launcherAssistantQueueLabel, launcherAssistantRequestReadback,
-  launcherAssistantSessionEventRefreshesDetail, launcherAssistantSseHealthy,
+  launcherAssistantSessionEventRefreshesDetail, launcherAssistantSseHealthy, launcherAssistantWaitInterval,
   type LauncherAssistantSubmission, type LauncherAssistantQueuedAcceptance,
 } from "./launcherAssistantModel";
 import { loadLauncherComposer, saveLauncherComposer } from "./launcherAssistantComposerStorage";
@@ -57,6 +57,7 @@ const COPY = {
     retry: "重试", refresh: "刷新", placeholder: "和个人助理聊一聊…", send: "发送", sending: "正在发送…",
     unknownSend: "尚未确认消息是否收到。输入已保留，重试会核对同一条消息。",
     receipts: "任务状态暂不可用", checking: "正在连接 Launcher…",
+    waitingBackend: "正在等待工作台后端启动…",
     statusStale: "个人助理状态轮询暂不可用，会话内容可能未更新",
     pendingQuestion: "待你回答",
     answerBelow: "去回答", answerHint: "请在下方输入回答，再点击发送。",
@@ -67,6 +68,7 @@ const COPY = {
     retry: "Retry", refresh: "Refresh", placeholder: "Chat with your assistant…", send: "Send", sending: "Sending…",
     unknownSend: "Delivery is unconfirmed. Your input is retained; retry checks the same message.",
     receipts: "Task status unavailable", checking: "Connecting to Launcher…",
+    waitingBackend: "Waiting for the workbench backend…",
     statusStale: "Assistant status polling is unavailable; conversation content may be stale",
     pendingQuestion: "Waiting for your answer",
     answerBelow: "Answer below", answerHint: "Type your answer below, then send it.",
@@ -165,10 +167,26 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   const controlGate = useRef(false);
   const refreshedTerminal = useRef<{ sessionId: string; turnId: string } | null>(null);
   const [controlPending, setControlPending] = useState(false);
+  // First-failure timestamp of the never-succeeded status read. query.state only
+  // exposes the LAST error time, and the backoff must grow across failures, so
+  // the wait start is held here and reset once any status read succeeds.
+  const backendWaitStartedAt = useRef<number | null>(null);
   const status = useQuery({
     queryKey: ["launcher-assistant", "status"], queryFn: getLauncherAssistantStatus,
-    retry: false, staleTime: 0, refetchInterval: expanded && visible ? 10_000 : false,
+    retry: false, staleTime: 0,
+    refetchInterval: query => {
+      // Cold boot: before the first successful status read, keep probing for the
+      // workbench backend with a backoff cadence so a late backend start is
+      // joined without any manual refresh.
+      if (!query.state.data) return launcherAssistantWaitInterval(backendWaitStartedAt.current, Date.now());
+      return expanded && visible ? 10_000 : false;
+    },
   });
+  useEffect(() => {
+    backendWaitStartedAt.current = status.isError && !status.data
+      ? backendWaitStartedAt.current ?? Date.now()
+      : null;
+  }, [status.isError, status.data]);
   const sessionId = status.data?.assistant.directSessionId || "";
   const sessionIdRef = useRef(sessionId);
   sessionIdRef.current = sessionId;
@@ -817,7 +835,12 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   const removedQueueText = lang === "zh" ? "排队消息已移除" : "Queued message removed";
   const queueStatusText = queueReadback.removed ? removedQueueText : queueRow ? launcherAssistantQueueLabel(queueRow.status, lang)
     : queuedAcceptance && !queuedAcceptance.observed ? waitingQueueText : "";
-  const statusText = feedback || queueStatusText || (status.isError ? copy.unavailable : status.isPending ? copy.checking
+  // The very first status read has never succeeded: at a cold boot this is the
+  // workbench backend still starting, not a broken assistant. The page shows a
+  // waiting state (kept probing by the backoff interval above) instead of a
+  // dead-end unavailable error.
+  const waitingForBackend = status.isError && !status.data;
+  const statusText = feedback || queueStatusText || (status.isError ? (waitingForBackend ? copy.waitingBackend : copy.unavailable) : status.isPending ? copy.checking
     : detail.data ? !detail.isError && !approval && !stopping && !acceptedTurnId && !sendPending && !sendUnconfirmed && preferences.idleMessage
         && (activity.execution === "idle" || (activity.execution === "settled" && activity.outcome === "completed"))
       ? preferences.idleMessage : sessionActivityStatusLabel(activity, lang)
@@ -825,9 +848,13 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
 
   // A status refresh failure no longer discards the mounted conversation.
   // While any session content exists (detail data), the page stays mounted
-  // behind one compact recovery banner; only a first-load failure with no
-  // content keeps the full-page error. Collapsed keeps its status line.
-  if (status.isError && expanded && !detail.data) return <VStateSurface fill tone="error" title={copy.unavailable}
+  // behind one compact recovery banner. A first-load failure with no content is
+  // the cold-boot backend wait (loading skeleton with pulse lines) unless a
+  // prior success proves the identity itself broke; collapsed keeps its status
+  // line visible through the wait.
+  if (status.isError && expanded && !detail.data) return waitingForBackend ? <VStateSurface fill tone="loading"
+    data-launcher-assistant-waiting="backend" title={copy.waitingBackend}>{status.error.message}</VStateSurface>
+    : <VStateSurface fill tone="error" title={copy.unavailable}
     actions={<VButton onClick={() => void status.refetch()}>{copy.retry}</VButton>}>{status.error.message}</VStateSurface>;
 
   const refreshAll = () => {
@@ -837,7 +864,8 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   };
 
   if (!expanded) return <main className={petStyles.root} data-vui-domain-recipe="launcher-assistant"
-    data-expanded="false" data-tone={tone} aria-label={displayName}>
+    data-expanded="false" data-tone={tone} aria-label={displayName}
+    data-waiting={waitingForBackend ? "backend" : undefined}>
     <div className={petStyles.stage}>
       <div className={petStyles.toolbar}>
         <span className={petStyles.status} role="status" aria-live="polite" hidden={!preferences.showStatus && !feedback && !status.isError}>
