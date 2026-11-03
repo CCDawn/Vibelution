@@ -14,7 +14,7 @@ import {
   readLauncherAttachment, subscribeLauncherAssistantSessionEvent,
 } from "../../api/launcherAssistant";
 import { openLauncherModelConnection } from "../../api/launcher";
-import type { ConversationMessage, SessionDetail } from "../../api/types";
+import type { ConversationMessage, SessionDetail, SessionReferenceAttachment } from "../../api/types";
 import type { SessionContinuationExpectation } from "../../api/chat";
 import { queryKeys } from "../../api/queryKeys";
 import type { SessionToolApprovalRequest } from "../../api/types";
@@ -130,7 +130,7 @@ function readableApprovalJson(source: string): string {
 }
 
 type ContinueAttempt = { requestId: string; expected: SessionContinuationExpectation; accepted: boolean };
-type ComposerSnapshot = { draft: string; outstanding: LauncherAssistantSubmission | null; acceptedTurnId: string; queuedAcceptance: LauncherAssistantQueuedAcceptance | null; continuation?: ContinueAttempt; attachments?: ComposerImageAttachment[] };
+type ComposerSnapshot = { draft: string; outstanding: LauncherAssistantSubmission | null; acceptedTurnId: string; queuedAcceptance: LauncherAssistantQueuedAcceptance | null; continuation?: ContinueAttempt; attachments?: ComposerImageAttachment[]; references?: SessionReferenceAttachment[] };
 
 export function LauncherAssistantRoute({ embedded = false, navigationOwned = false, computerRequested = false, entryIntent }: {
   embedded?: boolean; navigationOwned?: boolean; computerRequested?: boolean;
@@ -166,6 +166,8 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   const [attachments, setAttachments] = useState<ComposerImageAttachment[]>([]);
   const [visibleMessageIds, setVisibleMessageIds] = useState<string[]>([]);
   const attachmentsRef = useRef<ComposerImageAttachment[]>([]);
+  const [composerReferences, setComposerReferences] = useState<SessionReferenceAttachment[]>([]);
+  const composerReferencesRef = useRef<SessionReferenceAttachment[]>([]);
   const uploadGate = useRef(false);
   const draftRef = useRef("");
   const dragStateRef = useRef<DesktopPetDragState | null>(null);
@@ -300,6 +302,8 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     setDraft(draftRef.current);
     attachmentsRef.current = (saved?.attachments || []).map(item => item.uploadStatus === "uploading" ? { ...item, uploadStatus: "pending" } : item);
     setAttachments(attachmentsRef.current);
+    composerReferencesRef.current = saved?.references || [];
+    setComposerReferences(composerReferencesRef.current);
     outstanding.current = saved?.outstanding || null;
     setSendUnconfirmed(Boolean(saved?.outstanding));
     setAcceptedTurnId(saved?.acceptedTurnId || "");
@@ -750,6 +754,34 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     if (item) URL.revokeObjectURL(item.previewUrl);
     updateAttachments(attachmentsRef.current.filter(row => row.id !== id));
   }
+  // Reference chips (selection-quote message quotes today; session/knowledge
+  // candidates await a session-list IPC verb). Same dedupe and cap as the chat
+  // composer: six per turn, keyed by the reference's own id.
+  function composerReferenceId(reference: SessionReferenceAttachment): string {
+    return String(reference.referenceId || reference.sessionId || "").trim();
+  }
+  function updateComposerReferences(next: SessionReferenceAttachment[]) {
+    composerReferencesRef.current = next;
+    setComposerReferences(next);
+    saveComposer({ references: next });
+  }
+  function addComposerReference(reference: SessionReferenceAttachment) {
+    if (sendPending || sendUnconfirmed || controlPending) return;
+    const referenceId = composerReferenceId(reference);
+    if (!referenceId) return;
+    if (composerReferencesRef.current.some(item => composerReferenceId(item) === referenceId)) return;
+    updateComposerReferences([...composerReferencesRef.current, reference].slice(-6));
+  }
+  function removeComposerReference(referenceId: string) {
+    if (sendPending || sendUnconfirmed || controlPending) return;
+    updateComposerReferences(composerReferencesRef.current.filter(item => composerReferenceId(item) !== referenceId));
+  }
+  function clearAcceptedReferences(submission: LauncherAssistantSubmission) {
+    const sent = submission.references;
+    if (!sent?.length) return;
+    const sentIds = new Set(sent.map(item => composerReferenceId(item)).filter(Boolean));
+    updateComposerReferences(composerReferencesRef.current.filter(item => !sentIds.has(composerReferenceId(item))));
+  }
   async function uploadAttachments(onlyId?: string): Promise<boolean> {
     if (uploadGate.current || status.data?.attachmentVersion !== 1 || !sessionId) return false;
     const uploadSessionId = sessionId;
@@ -802,7 +834,8 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     if (!prepared && !outstanding.current && attachmentsRef.current.length && !(await uploadAttachments())) return false;
     const snapshot = attachmentsRef.current;
     const submission = prepared ?? launcherAssistantSubmission(outstanding.current, draftRef.current, undefined,
-      snapshot.map(item => item.artifactId || "").filter(Boolean), snapshot.map(item => item.id));
+      snapshot.map(item => item.artifactId || "").filter(Boolean), snapshot.map(item => item.id),
+      composerReferencesRef.current);
     if (!submission) return false;
     outstanding.current = submission;
     saveComposer({ draft: draftRef.current, outstanding: submission });
@@ -813,10 +846,12 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     setFeedback("");
     const requestEpoch = epochRef.current;
     try {
-      const acceptance = await sendLauncherAssistantMessage(submission.message, submission.requestId, submission.attachmentIds);
+      const acceptance = await sendLauncherAssistantMessage(submission.message, submission.requestId,
+        submission.attachmentIds, submission.references);
       if (!mounted.current || requestEpoch !== epochRef.current || sending.current !== flight || outstanding.current !== submission) return true;
       outstanding.current = null;
       clearAcceptedAttachments(submission);
+      clearAcceptedReferences(submission);
       const queueReceipt = acceptance.queuedTurnId ? { id: acceptance.queuedTurnId, clientSubmissionId: acceptance.clientSubmissionId, observed: false } : null;
       const remainingDraft = !submission.preserveDraft && draftRef.current === (submission.draftSnapshot ?? submission.message) ? "" : draftRef.current;
       draftRef.current = remainingDraft;
@@ -1267,6 +1302,10 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       composerPending={sendPending || controlPending || stopping} composerActionMode={actionMode}
       composerAttachmentInputDisabled={status.data?.attachmentVersion !== 1 || sendPending || sendUnconfirmed || controlPending}
       composerAttachments={attachments}
+      composerReferences={composerReferences}
+      composerReferenceOptions={[]}
+      onAddComposerReference={addComposerReference}
+      onRemoveComposerReference={removeComposerReference}
       onAddComposerAttachments={addAttachments} onRemoveComposerAttachment={removeAttachment}
       onRetryComposerAttachment={id => void uploadAttachments(id)} onRetryComposerAttachmentUploads={() => void uploadAttachments()}
       composerError={sendUnconfirmed ? copy.unknownSend

@@ -130,6 +130,7 @@ class Message(BaseModel):
     message: str = Field(max_length=64000)
     requestId: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.:-]+$")
     attachmentIds: list[str] = Field(default_factory=list, max_length=8)
+    references: list[dict] = Field(default_factory=list, max_length=8)
 
     @model_validator(mode="after")
     def validate_content(self):
@@ -517,9 +518,9 @@ class NativeFacade:
         )
         return resolve_tool_approval_request(self.assistant["directSessionId"], request_id, decision=decision)
 
-    def submit(self, message, request_id, attachment_ids=None):
+    def submit(self, message, request_id, attachment_ids=None, references=None):
         from . import native
-        return native.submit(message, request_id, attachment_ids)
+        return native.submit(message, request_id, attachment_ids, references)
 
     def upload_attachment(self, payload, filename, content_type):
         from . import native
@@ -1458,8 +1459,9 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
     @app.post("/api/assistant/messages")
     def message(payload: Message):
         try:
-            if payload.attachmentIds:
-                return native.submit(payload.message, payload.requestId, payload.attachmentIds)
+            if payload.attachmentIds or payload.references:
+                return native.submit(payload.message, payload.requestId, payload.attachmentIds or None,
+                                     payload.references or None)
             return native.submit(payload.message, payload.requestId)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc

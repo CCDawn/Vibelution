@@ -393,7 +393,8 @@ def read_assistant_avatar() -> dict[str, Any]:
         raise ValueError("assistant_avatar_unavailable") from None
 
 
-def submit(message: str, request_id: str, attachment_ids: list[str] | None = None) -> dict[str, Any]:
+def submit(message: str, request_id: str, attachment_ids: list[str] | None = None,
+           references: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Use native acceptance and journal idempotency, without a second queue."""
     if not isinstance(message, str):
         raise ValueError("message must be text")  # noqa: TRY004 - preserve the existing submit contract.
@@ -406,6 +407,7 @@ def submit(message: str, request_id: str, attachment_ids: list[str] | None = Non
         return sessions.submit_session_message_lightweight(
             session_id, message,
             client_submission_id=request_id.strip(), queue_if_busy=True, attachment_ids=attachment_ids,
+            references=references,
         )
 
 

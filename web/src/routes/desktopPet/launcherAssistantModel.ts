@@ -1,6 +1,6 @@
 import type { LauncherAssistantDispatch, LauncherAssistantSessionEvent } from "../../api/launcherAssistant";
 import type { PetActivityTone, PetAnimationState } from "../../api/types/petActivity";
-import type { ConversationMessage, SessionDetail, SessionQueuedTurn } from "../../api/types";
+import type { ConversationMessage, SessionDetail, SessionQueuedTurn, SessionReferenceAttachment } from "../../api/types";
 import { exactAcceptedSubmitTurnId, findSubmitAcceptanceEvidence } from "../chat/chatSubmitAcceptanceReadback";
 import {
   buildComposerContextRingModel, resolveComposerContextUsage,
@@ -9,7 +9,7 @@ import {
 import { promptSegmentDisplayLabel } from "../chat/chatRoutePresentation";
 import { hasExecutionOwnership, resolveSessionActivity, type SessionActivitySource } from "../sessionActivityState";
 
-export type LauncherAssistantSubmission = { message: string; requestId: string; draftSnapshot?: string; attachmentIds?: string[]; attachmentSnapshotIds?: string[]; preserveDraft?: true };
+export type LauncherAssistantSubmission = { message: string; requestId: string; draftSnapshot?: string; attachmentIds?: string[]; attachmentSnapshotIds?: string[]; references?: SessionReferenceAttachment[]; preserveDraft?: true };
 export type LauncherAssistantQueuedAcceptance = { id: string; clientSubmissionId: string; observed: boolean };
 type LauncherAssistantActivitySource = SessionActivitySource & Partial<Pick<SessionDetail, "messages" | "activeTask">>
   & { queuedTurns?: Array<Pick<SessionQueuedTurn, "id" | "status" | "clientSubmissionId">> };
@@ -58,11 +58,15 @@ export function launcherAssistantSubmission(
   createId: () => string = () => crypto.randomUUID(),
   attachmentIds: string[] = [],
   attachmentSnapshotIds: string[] = [],
+  references: SessionReferenceAttachment[] = [],
 ): LauncherAssistantSubmission | null {
   if (outstanding) return outstanding;
   const message = draft.trim();
-  if (!message && !attachmentIds.length) return null;
-  return attachmentIds.length ? { message, requestId: createId(), draftSnapshot: draft, attachmentIds, attachmentSnapshotIds }
+  if (!message && !attachmentIds.length && !references.length) return null;
+  return references.length || attachmentIds.length
+    ? { message, requestId: createId(), draftSnapshot: draft,
+        ...(attachmentIds.length ? { attachmentIds, attachmentSnapshotIds } : {}),
+        ...(references.length ? { references } : {}) }
     : { message, requestId: createId(), draftSnapshot: draft };
 }
 

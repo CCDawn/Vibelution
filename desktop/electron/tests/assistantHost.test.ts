@@ -1211,6 +1211,22 @@ describe("AssistantHost", () => {
     await expect(host.request({ operation: "regenerate", messageId: "target-message", requestId: "regen-1" } as AssistantHostRequest)).rejects.toThrow("ASSISTANT_IDENTITY_INVALID");
     await host.stop();
   });
+  it("carries bounded reference chips on the send verb and rejects malformed chips", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    const reference = { kind: "message", referenceId: "message:m1", sourceSessionId: "s", sourceMessageId: "m1", quote: "text" };
+    fetchImpl.mockResolvedValueOnce(Response.json({ accepted: true, sessionId: "s", turnId: "turn-1" }));
+    await host.request({ operation: "send", message: "see this", requestId: "send-refs", references: [reference] } as AssistantHostRequest);
+    expect(fetchImpl.mock.calls.at(-1)?.[1]?.body).toBe(JSON.stringify({ message: "see this", requestId: "send-refs", references: [reference] }));
+    const before = fetchImpl.mock.calls.length;
+    for (const value of [
+      { operation: "send", message: "see this", requestId: "send-refs", references: "chip" },
+      { operation: "send", message: "see this", requestId: "send-refs", references: [reference, reference, reference, reference, reference, reference, reference, reference, reference] },
+      { operation: "send", message: "see this", requestId: "send-refs", references: ["plain"] },
+    ]) await expect(host.request(value as AssistantHostRequest)).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    expect(fetchImpl).toHaveBeenCalledTimes(before);
+    await host.stop();
+  });
   it("steers the running turn with bounded guidance content only", async () => {
     const { host, fetchImpl } = fixture({ graceful: true });
     await host.start();

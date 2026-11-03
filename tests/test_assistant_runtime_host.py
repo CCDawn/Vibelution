@@ -30,8 +30,9 @@ class Native:
     def get_detail(self):
         return {"sessionId": "native-session", "messages": []}
 
-    def submit(self, message, request_id):
-        return {"sessionId": "native-session", "acceptedRequestId": request_id}
+    def submit(self, message, request_id, attachment_ids=None, references=None):
+        return {"sessionId": "native-session", "acceptedRequestId": request_id,
+                "references": list(references or [])}
 
     def stop(self, turn_id):
         return {"id": "native-session", "activeTurnId": turn_id, "stopRequested": True}
@@ -185,7 +186,7 @@ def test_host_attachment_transport_uses_fixed_native_owner():
             assert artifact_id == "file-1"
             return b"fixture", "text/plain"
 
-        def submit(self, message, request_id, attachment_ids=None):
+        def submit(self, message, request_id, attachment_ids=None, references=None):
             return {"acceptedRequestId": request_id, "attachmentIds": attachment_ids}
 
     app = create_app(native=AttachmentNative(), token="private-test-token")
@@ -369,6 +370,11 @@ def test_fixed_session_stop_and_continue_forward_once_without_renderer_session_s
         assert result.status_code == 202 and result.json()["id"] == "native-session"
         result = client.post("/api/assistant/guidance", json={"content": "hold on", "mode": "interrupt"})
         assert result.status_code == 202 and result.json()["id"] == "native-session"
+        result = client.post("/api/assistant/messages", json={"message": "see this", "requestId": "send-refs",
+            "references": [{"kind": "message", "referenceId": "message:m1", "sourceSessionId": "native-session",
+                            "sourceMessageId": "m1", "quote": "quoted text"}]})
+        assert result.status_code == 200 and result.json()["acceptedRequestId"] == "send-refs"
+        assert result.json()["references"][0]["referenceId"] == "message:m1"
     assert calls == [("stop", "old-turn"), ("continue", "continue-1", CONTINUATION), ("head", "target-node"),
                      ("regenerate", "target-message", "regen-1"), ("guidance", "hold on", "interrupt")]
 
@@ -395,6 +401,9 @@ def test_fixed_session_stop_and_continue_forward_once_without_renderer_session_s
     ("guidance", {"content": "hold on"}), ("guidance", {"content": "hold on", "mode": "unsafe"}),
     ("guidance", {"content": "hold on", "mode": 7}),
     ("guidance", {"content": "hold on", "mode": "safe", "sessionId": "other"}),
+    ("messages", {"message": "m", "requestId": "r", "references": "chip"}),
+    ("messages", {"message": "m", "requestId": "r", "references": [{} for _ in range(9)]}),
+    ("messages", {"message": "m", "requestId": "r", "references": ["plain"]}),
 ])
 def test_session_commands_reject_invalid_payload_before_native_call(path, payload):
     class Owner(Native):

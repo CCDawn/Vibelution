@@ -1483,6 +1483,24 @@ def test_fixed_session_regenerate_reruns_the_fixed_user_request(assistant_comman
     assert users[-1].correlation_id == "regen-1"
 
 
+def test_fixed_session_submit_carries_reference_chips_to_the_journal(assistant_command_session, tmp_path):
+    from core.chat.conversation_ledger import load_conversation_events
+
+    native, sessions, sid, _, scheduled, _ = assistant_command_session
+    # Message references resolve at submit time against the projected message
+    # ids, so the chip quotes a real timeline message of the fixed session.
+    detail = native.get_detail(sid)
+    quoted = next(message for message in detail["messages"] if message["role"] == "assistant")
+    reference = {"kind": "message", "referenceId": f"message:{quoted['id']}", "sourceSessionId": sid,
+                 "sourceMessageId": quoted["id"], "quote": "partial answer", "title": "quoted"}
+    receipt = native.submit("参考这条", "send-refs", None, [reference])
+    assert len(scheduled) == 1
+    users = [event for event in load_conversation_events(tmp_path, sid) if event.event_type == "user_message"]
+    assert users[-1].correlation_id == "send-refs"
+    carried = users[-1].payload.get("references")
+    assert isinstance(carried, list) and carried and carried[0]["referenceId"] == f"message:{quoted['id']}"
+
+
 def test_fixed_session_guidance_records_safe_and_interrupt_modes(assistant_command_session, tmp_path, monkeypatch):
     from core.chat.conversation_ledger import load_conversation_events
 

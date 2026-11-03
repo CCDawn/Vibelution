@@ -300,6 +300,16 @@ describe("Launcher assistant bridge", () => {
     // refused renderer-side without any transport use.
     expect(invoke.mock.calls).toHaveLength(2);
   });
+  it("sends bounded reference chips on the same closed send verb", async () => {
+    const invoke = vi.fn().mockResolvedValue({ accepted: true, turnId: "turn-refs" });
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    const reference = { kind: "message", referenceId: "message:m1", sourceSessionId: "s", sourceMessageId: "m1", quote: "text" };
+    await expect(sendLauncherAssistantMessage("see this", "send-refs", [], [reference])).resolves.toEqual({ turnId: "turn-refs" });
+    expect(invoke.mock.calls[0]).toEqual([{ operation: "send", message: "see this", requestId: "send-refs", references: [reference] }]);
+    await expect(sendLauncherAssistantMessage("", "send-refs", [], [{ kind: "" } as typeof reference])).rejects.toThrow("消息或请求标识无效");
+    await expect(sendLauncherAssistantMessage("see this", "send-refs", [], Array(9).fill(reference))).rejects.toThrow("消息或请求标识无效");
+    expect(invoke.mock.calls).toHaveLength(1);
+  });
   it("steers only with non-empty guidance content and a fixed mode", async () => {
     const invoke = vi.fn().mockResolvedValue({ id: "s" });
     vi.stubGlobal("vibelutionLauncherAssistant", { invoke });

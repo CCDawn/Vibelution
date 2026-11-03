@@ -1,4 +1,4 @@
-import type { ConfigBootstrap, SessionDetail, SessionMessageCurationAction, SessionMessageCurationMutationResponse, SessionMessageCurationResponse, SessionToolApprovalRequest } from "./types";
+import type { ConfigBootstrap, SessionDetail, SessionMessageCurationAction, SessionMessageCurationMutationResponse, SessionMessageCurationResponse, SessionReferenceAttachment, SessionToolApprovalRequest } from "./types";
 import type { DesktopPetPreferences } from "../routes/desktopPet/desktopPetPreferences";
 import type { SessionContinuationExpectation } from "./chat";
 
@@ -84,7 +84,7 @@ export type LauncherAssistantRequest =
   | { operation: "previewDispatchApproval"; dispatchId: string; taskId: string; approvalId: string }
   | { operation: "declineDispatchApproval"; dispatchId: string; taskId: string; approvalId: string; revision: string }
   | { operation: "decideDispatchApproval"; dispatchId: string; taskId: string; approvalId: string; revision: string; decision: "accept" | "decline" }
-  | { operation: "send"; message: string; requestId: string; attachmentIds?: string[] }
+  | { operation: "send"; message: string; requestId: string; attachmentIds?: string[]; references?: SessionReferenceAttachment[] }
   | { operation: "uploadAttachment"; filename: string; contentType: string; dataBase64: string }
   | { operation: "readAttachment"; artifactId: string }
   | { operation: "stop"; turnId: string }
@@ -355,10 +355,29 @@ export async function getLauncherAssistantDetail(sessionId: string, beforeMessag
   return result as SessionDetail;
 }
 
-export async function sendLauncherAssistantMessage(message: string, requestId: string, attachmentIds: string[] = []): Promise<LauncherAssistantAcceptance> {
-  if ((!message.trim() && !attachmentIds.length) || !attachmentIds.every(validArtifactId) || !/^[A-Za-z0-9_.:-]{1,128}$/.test(requestId)) throw new LauncherAssistantRejectedError("消息或请求标识无效。");
-  const result = await launcherAssistantBridge().invoke(attachmentIds.length
-    ? { operation: "send", message, requestId, attachmentIds } : { operation: "send", message, requestId });
+/** Reference chips ride the same closed send verb; each entry keeps the chat
+ * payload's SessionReferenceAttachment shape, bounded like the chat composer. */
+export function validLauncherAssistantReferences(references: SessionReferenceAttachment[] | undefined): references is SessionReferenceAttachment[] {
+  return Array.isArray(references) && references.length <= 8 && references.every(reference =>
+    record(reference) && typeof reference.kind === "string" && reference.kind.length <= 40
+    && typeof (reference.referenceId || reference.sessionId || reference.knowledgeItemId
+      || reference.knowledgeBaseId || reference.artifactId || reference.sourceMessageId || "") === "string"
+    && String(reference.referenceId || reference.sessionId || reference.knowledgeItemId
+      || reference.knowledgeBaseId || reference.artifactId || reference.sourceMessageId || "").trim().length > 0
+    && String(reference.referenceId || reference.sessionId || reference.knowledgeItemId
+      || reference.knowledgeBaseId || reference.artifactId || reference.sourceMessageId || "").length <= 255);
+}
+
+export async function sendLauncherAssistantMessage(message: string, requestId: string, attachmentIds: string[] = [],
+                                                   references: SessionReferenceAttachment[] = []): Promise<LauncherAssistantAcceptance> {
+  if ((!message.trim() && !attachmentIds.length && !references.length) || !attachmentIds.every(validArtifactId)
+    || !validLauncherAssistantReferences(references)
+    || !/^[A-Za-z0-9_.:-]{1,128}$/.test(requestId)) throw new LauncherAssistantRejectedError("消息或请求标识无效。");
+  const result = await launcherAssistantBridge().invoke({
+    operation: "send", message, requestId,
+    ...(attachmentIds.length ? { attachmentIds } : {}),
+    ...(references.length ? { references } : {}),
+  });
   if (record(result) && (result.status === "queued" || result.queuedTurnId !== undefined)) {
     if (result.accepted !== true || result.status !== "queued" || result.turnId !== ""
       || typeof result.queuedTurnId !== "string" || !result.queuedTurnId.trim() || result.clientSubmissionId !== requestId) {

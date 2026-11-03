@@ -51,7 +51,7 @@ export type AssistantHostRequest =
   | { operation: "previewDispatchApproval"; dispatchId: string; taskId: string; approvalId: string }
   | { operation: "declineDispatchApproval"; dispatchId: string; taskId: string; approvalId: string; revision: string }
   | { operation: "decideDispatchApproval"; dispatchId: string; taskId: string; approvalId: string; revision: string; decision: "accept" | "decline" }
-  | { operation: "send"; message: string; requestId: string; attachmentIds?: string[] }
+  | { operation: "send"; message: string; requestId: string; attachmentIds?: string[]; references?: unknown[] }
   | { operation: "uploadAttachment"; filename: string; contentType: string; dataBase64: string }
   | { operation: "readAttachment"; artifactId: string }
   | { operation: "stop"; turnId: string }
@@ -1085,14 +1085,17 @@ export class AssistantHost {
         return result;
       }
       case "send":
-        if (!ownKeys(payload, ["operation", "message", "requestId", "attachmentIds"])
+        if (!ownKeys(payload, ["operation", "message", "requestId", "attachmentIds", "references"])
           || typeof payload.message !== "string" || payload.message.length > 64_000
           || (payload.attachmentIds !== undefined && (!Array.isArray(payload.attachmentIds) || payload.attachmentIds.length > 8
             || payload.attachmentIds.some(id => typeof id !== "string" || !/^[A-Za-z0-9_.-]{1,255}$/.test(id) || id === "." || id === "..")))
+          || (payload.references !== undefined && (!Array.isArray(payload.references) || payload.references.length > 8
+            || payload.references.some(reference => !object(reference) || JSON.stringify(reference).length > 16_000)))
           || (!payload.message.trim() && !payload.attachmentIds?.length)
           || typeof payload.requestId !== "string" || !/^[A-Za-z0-9_.:-]{1,128}$/.test(payload.requestId)) throw new HostError("ASSISTANT_REQUEST_INVALID");
         return await this.rpc(generation, "/api/assistant/messages", "POST", { message: payload.message, requestId: payload.requestId,
-          ...(payload.attachmentIds?.length ? { attachmentIds: payload.attachmentIds } : {}) });
+          ...(payload.attachmentIds?.length ? { attachmentIds: payload.attachmentIds } : {}),
+          ...(payload.references?.length ? { references: payload.references } : {}) });
       case "uploadAttachment": {
         if (!ownKeys(payload, ["operation", "filename", "contentType", "dataBase64"])
           || typeof payload.filename !== "string" || !payload.filename.length || payload.filename.length > 255

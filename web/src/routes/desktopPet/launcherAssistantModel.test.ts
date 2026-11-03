@@ -4,7 +4,7 @@ import { act, createElement, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ConversationViewProps } from "../../components/conversation/conversationViewTypes";
-import type { ConversationMessage, SessionDetail, SessionToolApprovalRequest } from "../../api/types";
+import type { ConversationMessage, SessionDetail, SessionReferenceAttachment, SessionToolApprovalRequest } from "../../api/types";
 import type { LauncherAssistantSessionEvent } from "../../api/launcherAssistant";
 import {
   launcherAssistantActivity, launcherAssistantMessageOverLimit, launcherAssistantPollInterval, launcherAssistantSendDefinitelyRejected, launcherAssistantSubmission, launcherDispatchLabel, launcherAssistantQueueReadback, launcherAssistantQueueLabel, launcherAssistantRequestReadback,
@@ -366,6 +366,11 @@ describe("Launcher assistant state", () => {
     expect(launcherAssistantSubmission(first, "changed draft", createId)).toBe(first);
     expect(createId).toHaveBeenCalledTimes(1);
     expect(launcherAssistantSubmission(null, "   ", createId)).toBeNull();
+    const reference = { kind: "message", referenceId: "message:m1", sourceMessageId: "m1", quote: "text" } as SessionReferenceAttachment;
+    expect(launcherAssistantSubmission(null, " see this ", createId, [], [], [reference]))
+      .toEqual({ message: "see this", requestId: "id-1", draftSnapshot: " see this ", references: [reference] });
+    expect(launcherAssistantSubmission(null, "   ", createId, [], [], [reference]))
+      .toEqual({ message: "", requestId: "id-1", draftSnapshot: "   ", references: [reference] });
   });
 
   it("pre-checks the host message length bound without changing the retry contract", () => {
