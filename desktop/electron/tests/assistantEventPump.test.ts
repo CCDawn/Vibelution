@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { IPC_CHANNELS } from "../src/ipc.js";
 import { LAUNCHER_ASSISTANT_URL } from "../src/assistant/assistantBridge.js";
-import { SseFrameParser, startAssistantEventPump, type AssistantEventPumpLease, type SseFrame } from "../src/assistant/assistantEventPump.js";
+import { SseFrameParser, sessionEventEnvelope, startAssistantEventPump, type AssistantEventPumpLease, type SseFrame } from "../src/assistant/assistantEventPump.js";
 
 vi.mock("electron", () => ({
   protocol: { handle: vi.fn() },
@@ -100,7 +100,7 @@ describe("SSE frame parsing", () => {
 });
 
 describe("assistant session event pump", () => {
-  it("forwards event and heartbeat envelopes to both fans-out targets via publish, dropping payloads", async () => {
+  it("forwards event and heartbeat envelopes to both fans-out targets via publish, identity-only for plain frames", async () => {
     const publish = vi.fn();
     const stop = new AbortController();
     const fetchImpl = vi.fn(async (_url: unknown, init: FetchInit) => eventStream(init, [
@@ -117,6 +117,30 @@ describe("assistant session event pump", () => {
     expect(publish).toHaveBeenNthCalledWith(1, { type: "assistant_delta", sessionId: "session-1", ledgerSeq: 7, at: 5_000 });
     expect(publish).toHaveBeenNthCalledWith(2, { type: "heartbeat", sessionId: "session-1", at: 5_000 });
     expect(Object.keys(publish.mock.calls[0][0] as object).sort()).toEqual(["at", "ledgerSeq", "sessionId", "type"]);
+    stop.abort();
+    await pump.done;
+  });
+
+  it("carries done, turnId and a text preview from assistant_delta turnItems on the envelope", async () => {
+    const publish = vi.fn();
+    const stop = new AbortController();
+    const turnItems = JSON.stringify([
+      { type: "agent_message", text: "earlier answer" },
+      { type: "reasoning", text: "thought stream is not the response body" },
+      { type: "agent_message", text: "最新回答正文" },
+      { type: "tool_call", text: "tool output text stays local" },
+    ]);
+    const fetchImpl = vi.fn(async (_url: unknown, init: FetchInit) => eventStream(init, [
+      `id: 8\nevent: assistant_delta\ndata: {"type":"assistant_delta","sessionId":"session-1","turnId":"turn-9","done":false,"turnItems":${turnItems}}\n\n`,
+      'id: 9\nevent: assistant_delta\ndata: {"type":"assistant_delta","sessionId":"session-1","turnId":"turn-9","done":true}\n\n',
+    ]));
+    const pump = startAssistantEventPump({ lease: () => sseLease("g1"), stop: stop.signal,
+      fetch: fetchImpl as unknown as typeof fetch, publish, now: () => 5_000 });
+    await vi.waitFor(() => expect(publish).toHaveBeenCalledTimes(2));
+    expect(publish).toHaveBeenNthCalledWith(1, { type: "assistant_delta", sessionId: "session-1", ledgerSeq: 8, at: 5_000,
+      turnId: "turn-9", done: false, textPreview: "最新回答正文" });
+    expect(publish).toHaveBeenNthCalledWith(2, { type: "assistant_delta", sessionId: "session-1", ledgerSeq: 9, at: 5_000,
+      turnId: "turn-9", done: true });
     stop.abort();
     await pump.done;
   });
@@ -300,6 +324,62 @@ const desktopPaths = {
   workspaceRoot: "C:/Users/Administrator/Desktop/Vibelution",
   userDataRoot: "C:/Users/Administrator/AppData/Roaming/Vibelution",
 };
+
+describe("session event envelope reduction", () => {
+  const base = { frameName: "assistant_delta", leaseSessionId: "session-1", at: 5_000 } as const;
+
+  it("tail-caps a long agent_message body to the preview budget without splitting a surrogate pair", () => {
+    const text = "a".repeat(7_999) + "\u{1F600}" + "b".repeat(7_999);
+    const envelope = sessionEventEnvelope({ ...base, frameId: "12",
+      data: { type: "assistant_delta", sessionId: "session-1", turnId: "turn-1", done: false, turnItems: [{ type: "agent_message", text }] } });
+    expect(envelope.ledgerSeq).toBe(12);
+    expect(envelope.done).toBe(false);
+    expect(envelope.turnId).toBe("turn-1");
+    expect(envelope.textPreview).toHaveLength(7_999);
+    expect(envelope.textPreview![0]).toBe("b");
+    expect(envelope.textPreview).not.toMatch(/[\uD800-\uDFFF]/);
+  });
+
+  it("ignores non-boolean done, empty turnId and non-answer item text; delta content never leaks onto other types", () => {
+    const noisy = sessionEventEnvelope({ ...base,
+      data: { type: "assistant_delta", sessionId: "session-1", done: "true", turnId: "", turnItems: [
+        { type: "reasoning", text: "thought" },
+        { type: "status", text: "x".repeat(300_000) },
+        { type: "agent_message", text: "" },
+      ] } });
+    expect(Object.keys(noisy).sort()).toEqual(["at", "sessionId", "type"]);
+    // session_detail is a snapshot frame: no delta projection fields even if present.
+    const detail = sessionEventEnvelope({ ...base, frameName: "session_detail",
+      data: { type: "session_detail", sessionId: "session-1", done: true, turnId: "turn-1", turnItems: [{ type: "agent_message", text: "answer" }] } });
+    expect(Object.keys(detail).sort()).toEqual(["at", "sessionId", "type"]);
+  });
+
+  it("caps the turnId length", () => {
+    const envelope = sessionEventEnvelope({ ...base,
+      data: { type: "assistant_delta", sessionId: "session-1", turnId: "t".repeat(500) } });
+    expect(envelope.turnId).toHaveLength(200);
+  });
+
+  it("falls back to an identity-only envelope with clamped identity and logs when the envelope would exceed the size cap", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const envelope = sessionEventEnvelope({ ...base, frameId: "13",
+        data: { type: "assistant_delta", sessionId: "s".repeat(300_000), turnId: "turn-1", done: true,
+          turnItems: [{ type: "agent_message", text: "answer" }] } });
+      expect(Object.keys(envelope).sort()).toEqual(["at", "ledgerSeq", "sessionId", "type"]);
+      expect(envelope.type).toBe("assistant_delta");
+      expect(envelope.sessionId).toHaveLength(80);
+      expect(envelope.done).toBeUndefined();
+      expect(envelope.turnId).toBeUndefined();
+      expect(envelope.textPreview).toBeUndefined();
+      expect(JSON.stringify(envelope).length).toBeLessThan(256 * 1024);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect((warn.mock.calls[0]?.[0] as string)).toBe("ASSISTANT_EVENT_ENVELOPE_OVERSIZE");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
 
 describe("session event fan-out targets", () => {
   const envelope = { type: "assistant_delta", sessionId: "session-1", ledgerSeq: 7, at: 5_000 };

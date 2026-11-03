@@ -1,13 +1,85 @@
-/** Main-only pump for the host session-event SSE stream. Envelopes carry
- * identity and ordering only: detail/delta payloads are parsed and dropped
- * here, and the bearer token never leaves this process. */
+/** Main-only pump for the host session-event SSE stream. Envelopes always
+ * carry identity and ordering; assistant_delta frames are additionally reduced
+ * to a small content projection (done flag, turn id, tail-capped answer-text
+ * preview) so renderers can show live output without re-pulling detail. A hard
+ * per-envelope size cap falls back to an identity-only envelope and logs when
+ * exceeded, and the bearer token never leaves this process. */
 
 export type AssistantSessionEventEnvelope = {
   type: string;
   sessionId: string;
   ledgerSeq?: number;
   at: number;
+  /** assistant_delta only, all optional and additive. `done` is the frame's
+   * terminal flag (only true proves the turn finished); `turnId` names the
+   * generating turn; `textPreview` is the newest assistant answer text from
+   * the frame's turnItems projection, tail-capped — a display hint, never an
+   * authority (session_detail stays authoritative). Absent means unknown. */
+  turnId?: string;
+  done?: boolean;
+  textPreview?: string;
 };
+
+const DELTA_TURN_ID_MAX_CHARS = 200;
+const DELTA_TEXT_PREVIEW_MAX_CHARS = 8_000;
+/** IPC/renderer safety cap for one published envelope. The projection above
+ * keeps normal envelopes far below it; exceeding it means a pathological host
+ * frame, which fans out as identity only. */
+const MAX_ENVELOPE_CHARS = 256 * 1024;
+
+/** Newest assistant answer text from one assistant_delta frame's turnItems
+ * projection: the last `agent_message` item's body, tail-capped so the newest
+ * streaming output survives. reasoning/tool/status items are not the response
+ * body and are never forwarded; the projection is read, not copied. */
+function deltaTextPreview(turnItems: unknown): string | undefined {
+  if (!Array.isArray(turnItems)) return undefined;
+  for (let index = turnItems.length - 1; index >= 0; index -= 1) {
+    const item: unknown = turnItems[index];
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const record = item as Record<string, unknown>;
+    if (record.type !== "agent_message" || typeof record.text !== "string" || !record.text) continue;
+    const text = record.text;
+    if (text.length <= DELTA_TEXT_PREVIEW_MAX_CHARS) return text;
+    // Tail wins for live display; avoid splitting a surrogate pair at the cut.
+    const cut = text.length - DELTA_TEXT_PREVIEW_MAX_CHARS;
+    const preview = text.slice(cut);
+    const head = preview.charCodeAt(0);
+    return head >= 0xdc00 && head <= 0xdfff ? preview.slice(1) : preview;
+  }
+  return undefined;
+}
+
+/** One parsed SSE frame reduced to the publish envelope: identity and ordering
+ * for every event type, plus the bounded assistant_delta content projection.
+ * If the assembled envelope would exceed the size cap, the content projection
+ * is stripped back to identity (identity itself clamped) and the fallback is
+ * logged — a huge host frame can never fan out to renderer windows. */
+export function sessionEventEnvelope(input: {
+  data: Record<string, unknown> | null;
+  frameName: string;
+  frameId?: string;
+  leaseSessionId: string;
+  at: number;
+}): AssistantSessionEventEnvelope {
+  const data = input.data;
+  const type = typeof data?.type === "string" && data.type ? data.type : input.frameName;
+  const sessionId = typeof data?.sessionId === "string" && data.sessionId ? data.sessionId : input.leaseSessionId;
+  const seq = typeof input.frameId === "string" && /^[0-9]+$/.test(input.frameId) ? Number(input.frameId) : Number.NaN;
+  const ledger = Number.isSafeInteger(seq) && seq >= 0 ? { ledgerSeq: seq } : {};
+  const envelope: AssistantSessionEventEnvelope = { type, sessionId, ...ledger, at: input.at };
+  if (type === "assistant_delta" && data) {
+    if (typeof data.done === "boolean") envelope.done = data.done;
+    if (typeof data.turnId === "string" && data.turnId) envelope.turnId = data.turnId.slice(0, DELTA_TURN_ID_MAX_CHARS);
+    const preview = deltaTextPreview(data.turnItems);
+    if (preview !== undefined) envelope.textPreview = preview;
+  }
+  if (JSON.stringify(envelope).length > MAX_ENVELOPE_CHARS) {
+    console.warn("ASSISTANT_EVENT_ENVELOPE_OVERSIZE",
+      { type: envelope.type.slice(0, 80), sessionId: envelope.sessionId.slice(0, 80), at: input.at });
+    return { type: envelope.type.slice(0, 80), sessionId: envelope.sessionId.slice(0, 80), ...ledger, at: input.at };
+  }
+  return envelope;
+}
 
 /** One live host generation's connection facts, leased per connection attempt. */
 export type AssistantEventPumpLease = {
@@ -201,11 +273,8 @@ export function startAssistantEventPump(options: {
                   if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) data = parsed as Record<string, unknown>;
                 } catch { data = null; }
               }
-              const type = typeof data?.type === "string" && data.type ? data.type : frame.name;
-              const sessionId = typeof data?.sessionId === "string" && data.sessionId ? data.sessionId : (lease.sessionId || "");
-              const seq = typeof frame.id === "string" && /^[0-9]+$/.test(frame.id) ? Number(frame.id) : Number.NaN;
-              options.publish({ type, sessionId,
-                ...(Number.isSafeInteger(seq) && seq >= 0 ? { ledgerSeq: seq } : {}), at: now() });
+              options.publish(sessionEventEnvelope({ data, frameName: frame.name,
+                ...(frame.id !== undefined ? { frameId: frame.id } : {}), leaseSessionId: lease.sessionId || "", at: now() }));
             }
           }
         } finally {
