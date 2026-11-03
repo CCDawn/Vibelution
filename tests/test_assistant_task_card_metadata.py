@@ -85,6 +85,49 @@ def test_missing_metadata_capability_keeps_legacy_host_mocks_usable():
     assert enrich(SimpleNamespace(), rows) == rows
 
 
+def test_agent_labels_in_one_project_do_not_skip_each_other(tmp_path):
+    async def scenario():
+        calls = []
+
+        async def agent(project_id, *, agent_id):
+            guard = dispatch._project_locks.setdefault(project_id, anyio.Lock())
+            async with guard:
+                calls.append(agent_id)
+                await anyio.sleep(0)
+                return {"projectId": project_id, "agent": {"agentId": agent_id,
+                    "displayName": "Name " + agent_id}}
+
+        dispatch = label_dispatch(tmp_path, agent)
+        dispatch._project_locks = {}
+        agents = ["researcher", "developer", "reviewer"]
+        rows = [{"projectId": "same-project", "agentId": name} for name in agents]
+        cards = await metadata.enrich_dispatch_cards(dispatch, rows)
+        assert set(calls) == set(agents) and len(calls) == len(agents)
+        assert [row.get("agentName") for row in cards] == ["Name " + name for name in agents]
+        assert all("agentName" not in row for row in rows)
+
+    anyio.run(scenario)
+
+
+def test_task_control_claimed_between_labels_keeps_priority(tmp_path):
+    calls = []
+    busy = False
+
+    async def agent(project_id, *, agent_id):
+        nonlocal busy
+        calls.append(agent_id)
+        # Task control acquires the project after the first metadata read.
+        busy = True
+        return {"projectId": project_id, "agent": {"agentId": agent_id, "displayName": "First"}}
+
+    dispatch = label_dispatch(tmp_path, agent)
+    dispatch._project_locks = {"same-project": SimpleNamespace(locked=lambda: busy)}
+    rows = [{"projectId": "same-project", "agentId": name} for name in ["first", "second"]]
+    cards = enrich(dispatch, rows)
+    assert calls == ["first"]
+    assert cards[0]["agentName"] == "First" and "agentName" not in cards[1]
+
+
 @pytest.mark.parametrize("busy", ["borrowers", "closing", "guard"])
 def test_busy_native_task_control_skips_optional_name_lookup(tmp_path, busy):
     async def forbidden(*args, **kwargs):

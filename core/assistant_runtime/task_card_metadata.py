@@ -86,11 +86,20 @@ async def enrich_dispatch_cards(dispatch, rows):
             except Exception:
                 pass
 
+    async def lookup_project(project, agents):
+        # Native reads share one project lock. Do not mistake another label
+        # lookup from this request for busy task control and drop its siblings.
+        for agent, indices in agents:
+            await lookup(project, agent, indices)
+
     if callable(agent_reader):
+        by_project = {}
+        for (project, agent), indices in list(targets.items())[:_MAX_LOOKUPS]:
+            by_project.setdefault(project, []).append((agent, indices))
         with anyio.move_on_after(_PAGE_BUDGET):
             async with anyio.create_task_group() as tasks:
-                for (project, agent), indices in list(targets.items())[:_MAX_LOOKUPS]:
-                    tasks.start_soon(lookup, project, agent, indices)
+                for project, agents in by_project.items():
+                    tasks.start_soon(lookup_project, project, agents)
     # Registry changes invalidate only optional labels, never original rows.
     for index, row in enumerate(cards):
         project = row.get("projectId")
