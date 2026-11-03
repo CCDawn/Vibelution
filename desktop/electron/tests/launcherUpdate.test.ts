@@ -3,7 +3,8 @@ import { runInNewContext } from "node:vm";
 import { createSourceFile, isFunctionDeclaration, ScriptTarget, transpileModule } from "typescript";
 import { describe, expect, it, vi } from "vitest";
 import { executeLauncherUpdate, projectLauncherUpdateFreshness, retainKnownDesktopShell } from "../src/process/launcherUpdate.js";
-import { decidePackagedDesktopShellRefresh } from "../src/process/desktopShellFreshness.js";
+import { decidePackagedDesktopShellRefresh, type DesktopShellStatus } from "../src/process/desktopShellFreshness.js";
+import { createLauncherFreshnessObservation } from "../src/process/launcherFreshnessObservation.js";
 import { parseBranchInstanceRecords } from "../src/protocol/launcherControlClient.js";
 import { combineAssistantActiveWork } from "../src/assistant/lifecycleGuard.js";
 import { activeWorkStatusFromLauncherStatus, type ActiveWorkStatus } from "../src/shutdown/shutdownCoordinator.js";
@@ -460,7 +461,7 @@ describe("Launcher freshness is based on the real packaged shell", () => {
   });
   it("returns a version when task status fails and keeps the last known shell", () => {
     const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
-    const body = main.slice(main.indexOf("async function currentLauncherUpdateFreshness"), main.indexOf("async function exitAndRelaunchLauncherShell"));
+    const body = main.slice(main.indexOf("const observeLauncherFreshness"), main.indexOf("async function exitAndRelaunchLauncherShell"));
     expect(body).toContain("Promise.allSettled");
     expect(body).toContain("retainKnownDesktopShell");
     expect(body).toContain('state: "unknown"');
@@ -480,7 +481,7 @@ describe("Launcher freshness is based on the real packaged shell", () => {
 });
 
 describe("Launcher freshness serves the settled state-refresh snapshot before spawning", () => {
-  type SnapshotStoreOverrides = { observedAt?: Date; snapshotFreshness?: string; freshnessSource?: unknown };
+  type SnapshotStoreOverrides = { observedAt?: Date; snapshotFreshness?: string; freshnessSource?: unknown; valid?: boolean };
 
   function settledSnapshotStore(overrides: SnapshotStoreOverrides = {}) {
     return {
@@ -494,18 +495,27 @@ describe("Launcher freshness serves the settled state-refresh snapshot before sp
         cleanup: { reconciliation: { active: false, reason: "" }, cleanedCount: 0, skippedCount: 0, failedCount: 0, classifications: [], portConflicts: [], removedInstanceIds: [], worktreeDryRun: [], orphanCriteria: [] }
       }),
       projectFreshness: () => "freshnessSource" in overrides ? overrides.freshnessSource : { current: true, reason: "current" },
+      observationEpoch: () => 0,
+      projectFreshnessObservation: () => ({ observedAtMs: (overrides.observedAt ?? new Date()).getTime(), epoch: 0, valid: overrides.valid ?? true }),
       projectStatus: () => ({ lifecycleProof: { activeWorkRuns: { count: 0, items: [] } } }),
       projectBranchInstances: () => ({ schemaVersion: 1, items: [] }),
     };
   }
 
-  function snapshotFreshnessHarness(launcherStateStore: ReturnType<typeof settledSnapshotStore>) {
+  function snapshotFreshnessHarness(launcherStateStore: ReturnType<typeof settledSnapshotStore>, afterObservation?: () => void) {
     const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
     const region = main.slice(main.indexOf("async function resolveLauncherUpdateActiveWork"), main.indexOf("async function exitAndRelaunchLauncherShell"));
     const sandbox = {
       app: { isPackaged: false },
       shellRefreshInFlight: false,
-      lastKnownDesktopShell: undefined,
+      lastKnownDesktopShell: undefined as DesktopShellStatus | undefined,
+      lastKnownDesktopShellObservation: undefined as { identity: string; observedAtMs: number } | undefined,
+      createLauncherFreshnessObservation: <T>(identity: () => string, load: () => Promise<T>) => {
+        const observe = createLauncherFreshnessObservation(identity, load);
+        return async () => { const result = await observe(); afterObservation?.(); return result; };
+      },
+      createDesktopPathsForApp: () => ({ workspaceRoot: "test-workspace" }),
+      recordSupervisorEventFallbackLocally: vi.fn(),
       projectLauncherUpdateFreshness,
       retainKnownDesktopShell,
       activeWorkStatusFromLauncherStatus,
@@ -544,6 +554,77 @@ describe("Launcher freshness serves the settled state-refresh snapshot before sp
     expect(input.inspectCurrentDesktopShell).not.toHaveBeenCalled();
   });
 
+  const verifiedShell: DesktopShellStatus = {
+    schemaVersion: 1, stale: false, launchBlocking: false, reason: "current",
+    currentElectronTree: "a".repeat(40), packagedSourceCommit: "b".repeat(40), currentCommit: "b".repeat(40),
+  };
+
+  it("shares one native inspection group for concurrent packaged requests", async () => {
+    const input = snapshotFreshnessHarness(settledSnapshotStore({ observedAt: new Date(0) }));
+    input.app.isPackaged = true;
+    input.inspectCurrentDesktopShell.mockResolvedValue(verifiedShell);
+    const results = await Promise.all([input.readFreshness(), input.readFreshness(), input.readFreshness()]);
+    expect(results).toEqual(Array(3).fill(expect.objectContaining({ current: true })));
+    expect(input.inspectCurrentDesktopShell).toHaveBeenCalledOnce();
+    expect(input.orchestrateLauncherApi.mock.calls.filter(([path]) => path === "freshness")).toHaveLength(1);
+    expect(input.orchestrateLauncherApi.mock.calls.filter(([path]) => path === "status")).toHaveLength(1);
+    expect(input.recordSupervisorEventFallbackLocally).toHaveBeenCalledOnce();
+  });
+
+  it("requires current packaged-shell evidence before using a recent source snapshot", async () => {
+    const input = snapshotFreshnessHarness(settledSnapshotStore());
+    input.app.isPackaged = true;
+    input.inspectCurrentDesktopShell.mockResolvedValue(verifiedShell);
+    expect(await input.readFreshness()).toMatchObject({ current: true });
+    expect(input.inspectCurrentDesktopShell).toHaveBeenCalledOnce();
+    expect(await input.readFreshness()).toMatchObject({ current: true });
+    expect(input.inspectCurrentDesktopShell).toHaveBeenCalledOnce();
+    input.lastKnownDesktopShellObservation!.observedAtMs = Date.now() - 120_000;
+    await input.readFreshness();
+    expect(input.inspectCurrentDesktopShell).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps known version labels without claiming current when shell inspection fails", async () => {
+    const input = snapshotFreshnessHarness(settledSnapshotStore({ valid: false }));
+    input.app.isPackaged = true;
+    input.lastKnownDesktopShell = verifiedShell;
+    input.inspectCurrentDesktopShell.mockRejectedValue(new Error("inspection failed"));
+    expect(await input.readFreshness()).toMatchObject({ current: null, runningShort: "b".repeat(12) });
+    expect(input.lastKnownDesktopShellObservation).toBeUndefined();
+  });
+
+  it("projects the live update flag after shared inputs finish", async () => {
+    const input = snapshotFreshnessHarness(settledSnapshotStore({ valid: false }));
+    let finish!: (value: unknown) => void;
+    input.orchestrateLauncherApi.mockImplementation(async path => path === "freshness"
+      ? new Promise(resolve => { finish = resolve; })
+      : { lifecycleProof: { activeWorkRuns: { count: 0, items: [] } } });
+    const reading = input.readFreshness();
+    await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+    input.shellRefreshInFlight = true;
+    finish({ current: true });
+    expect(await reading).toMatchObject({ updateInProgress: true });
+  });
+
+  it("rechecks version inputs if the epoch changes during the fast-path native task probe", async () => {
+    const input = snapshotFreshnessHarness(settledSnapshotStore());
+    let epoch = 0;
+    input.launcherStateStore.observationEpoch = () => epoch;
+    input.residentAssistantActiveWork.mockImplementationOnce(async () => {
+      epoch += 1;
+      return { state: "idle", message: "" };
+    });
+    expect(await input.readFreshness()).toMatchObject({ current: false });
+    expect(input.orchestrateLauncherApi.mock.calls.filter(([path]) => path === "freshness")).toHaveLength(1);
+  });
+
+  it("rejects a result invalidated between shared observation and consumer projection", async () => {
+    let epoch = 0;
+    const input = snapshotFreshnessHarness(settledSnapshotStore({ valid: false }), () => { epoch += 1; });
+    input.launcherStateStore.observationEpoch = () => epoch;
+    await expect(input.readFreshness()).rejects.toThrow("version changed during inspection");
+  });
+
   it.each(["active", "unknown"] as const)("retains native %s in the actual main update aggregator with an idle backend", async state => {
     const input = snapshotFreshnessHarness(settledSnapshotStore({ observedAt: new Date(0) }));
     input.residentAssistantActiveWork.mockResolvedValue({ state, message: "native" });
@@ -554,7 +635,9 @@ describe("Launcher freshness serves the settled state-refresh snapshot before sp
   it.each([
     ["an idle-stale observation", { observedAt: new Date(Date.now() - 10 * 60_000) }],
     ["a mid-refresh snapshot", { snapshotFreshness: "refreshing" }],
-    ["a missing freshness source", { freshnessSource: undefined }]
+    ["a missing freshness source", { freshnessSource: undefined }],
+    ["an unsuccessful version observation", { valid: false }],
+    ["a future version observation", { observedAt: new Date(Date.now() + 60_000) }]
   ] as Array<[string, SnapshotStoreOverrides]>)("falls back to the launcher read for %s", async (_reason, overrides) => {
     const input = snapshotFreshnessHarness(settledSnapshotStore(overrides));
     expect(await input.readFreshness()).toMatchObject({

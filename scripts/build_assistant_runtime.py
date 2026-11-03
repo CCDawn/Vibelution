@@ -83,8 +83,8 @@ def _read_stable_file(path: Path, *, expected_size: int | None = None,
     No extra byte reaches a copied output or digest. Existing payload helpers
     use the same gate for captures, hashes and ordinary build copies.
     """
-    _reject_link(path)
     before = path.lstat()
+    _reject_link(path, info=before)
     if not stat.S_ISREG(before.st_mode):
         raise ValueError("assistant payload input is not a regular file")
     size = before.st_size if expected_size is None else expected_size
@@ -111,8 +111,9 @@ def _read_stable_file(path: Path, *, expected_size: int | None = None,
                 digest.update(chunk)
         if count != size or _file_identity(os.fstat(handle.fileno())) != identity:
             raise ValueError("assistant payload input changed during read")
-    _reject_link(path)
-    if _file_identity(path.lstat()) != identity:
+    after = path.lstat()
+    _reject_link(path, info=after)
+    if _file_identity(after) != identity:
         raise ValueError("assistant payload path changed during read")
     return count, b"".join(pieces)
 
@@ -139,8 +140,19 @@ def _relative(value: str) -> str:
     return path.as_posix()
 
 
-def _reject_link(path: Path) -> None:
-    if path.is_symlink() or (hasattr(path, "is_junction") and path.is_junction()):
+def _reject_link(path: Path, *, info: os.stat_result | None = None) -> None:
+    # Use one no-follow observation for both checks, including stable-reader
+    # identity checks. Never retain it across reads or ancestor traversals.
+    if info is None:
+        try:
+            info = path.lstat()
+        except (FileNotFoundError, NotADirectoryError):
+            # Build destinations may not exist yet; their existing ancestors
+            # are still checked separately by _checked.
+            return
+    if stat.S_ISLNK(info.st_mode) or (
+        os.name == "nt" and info.st_reparse_tag == stat.IO_REPARSE_TAG_MOUNT_POINT
+    ):
         raise ValueError(f"links are not allowed: {path}")
 
 
@@ -176,14 +188,18 @@ def _trusted_root(value: Path | str) -> Path:
     return _io_path(path.resolve())
 
 
-def _checked(root: Path, relative: str) -> Path:
+def _checked(root: Path, relative: str, *, resolved_root: Path | None = None) -> Path:
     relative = _relative(relative)
     _reject_link(root)
     target = root
     for part in PurePosixPath(relative).parts:
         target = target / part
         _reject_link(target)
-    if not target.resolve().is_relative_to(root.resolve()):
+    resolved_target = target.resolve()
+    # Verification passes the canonical root admitted by _trusted_root. Keep
+    # that boundary fixed if a parent is redirected while files are checked.
+    boundary = root.resolve() if resolved_root is None else resolved_root
+    if not resolved_target.is_relative_to(boundary):
         raise ValueError(f"path escapes its root: {relative}")
     return target
 
@@ -582,7 +598,8 @@ def _directory_content_prefix(digest, relative: str, size: int) -> None:
     digest.update(size.to_bytes(8, "big"))
 
 
-def _verify_files(root: Path, manifest: dict, *, directory_digest=None) -> None:
+def _verify_files(root: Path, manifest: dict, *, directory_digest=None,
+                  resolved_root: Path | None = None) -> None:
     if manifest.get("schemaVersion") != 1 or manifest.get("protocolVersion") != 1:
         raise ValueError("unsupported assistant payload manifest")
     python_name, abi = _python_names(manifest.get("pythonVersion", ""))
@@ -610,7 +627,7 @@ def _verify_files(root: Path, manifest: dict, *, directory_digest=None) -> None:
     pth_relative = f"python/{python_name}._pth"
     pth_content = None
     for relative, entry in checked_entries:
-        path = _checked(root, relative)
+        path = _checked(root, relative, resolved_root=resolved_root)
         if not path.is_file() or path.stat().st_size != entry["size"]:
             raise ValueError(f"assistant payload file missing or size mismatch: {relative}")
         if directory_digest is None:
@@ -642,7 +659,7 @@ def _verify_files(root: Path, manifest: dict, *, directory_digest=None) -> None:
     }
     if not {path.casefold() for path in required} <= seen or not any(path.startswith("python/license") for path in seen):
         raise ValueError("required assistant payload files are missing")
-    pth_path = _checked(root, pth_relative)
+    pth_path = _checked(root, pth_relative, resolved_root=resolved_root)
     if directory_digest is None:
         _, pth_content = _read_stable_file(pth_path, limit=len(_PTH_CONTENT), capture=True)
     elif not pth_path.is_file():
@@ -690,7 +707,7 @@ def verify_launcher_assistant_payload(
     ):
         raise ValueError("assistant content SHA-256 mismatch")
     root = _trusted_root(payload_root)
-    path = _checked(root, "manifest.json")
+    path = _checked(root, "manifest.json", resolved_root=root)
     if not path.is_file() or path.stat().st_size > _MANIFEST_MAX_BYTES:
         raise ValueError("assistant payload manifest missing or too large")
     _, content = _read_stable_file(path, limit=_MANIFEST_MAX_BYTES, capture=True)
@@ -712,7 +729,7 @@ def verify_launcher_assistant_payload(
         # manifest itself precedes all of them in UTF-8 path order.
         _directory_content_prefix(directory_digest, "manifest.json", len(content))
         directory_digest.update(content)
-    _verify_files(root, manifest, directory_digest=directory_digest)
+    _verify_files(root, manifest, directory_digest=directory_digest, resolved_root=root)
     if directory_digest is not None and directory_digest.hexdigest() != expected_content_sha256:
         raise AssistantPayloadContentMismatch("assistant content SHA-256 mismatch")
     return manifest

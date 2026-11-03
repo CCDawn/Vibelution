@@ -79,6 +79,92 @@ def _content_verification_kwargs(output, enabled):
     return {"expected_content_sha256": _frontend_directory_content_sha256(output)}
 
 
+def test_link_check_uses_one_fresh_lstat(tmp_path, monkeypatch):
+    from scripts import build_assistant_runtime as builder
+
+    path = _write(tmp_path, "input.py")
+    original_stat, original_lstat = builder.os.stat, builder.os.lstat
+    calls = []
+
+    def stat(*args, **kwargs):
+        calls.append(args[0])
+        return original_stat(*args, **kwargs)
+
+    def lstat(*args, **kwargs):
+        calls.append(args[0])
+        return original_lstat(*args, **kwargs)
+
+    monkeypatch.setattr(builder.os, "stat", stat)
+    monkeypatch.setattr(builder.os, "lstat", lstat)
+    builder._reject_link(path)
+    assert len(calls) == 1
+
+
+def test_stable_read_shares_each_lstat_with_its_link_check(tmp_path, monkeypatch):
+    from scripts import build_assistant_runtime as builder
+
+    path = _write(tmp_path, "input.py", b"stable bytes")
+    original_stat, original_lstat = builder.os.stat, builder.os.lstat
+    calls = []
+
+    def stat(*args, **kwargs):
+        calls.append(args[0])
+        return original_stat(*args, **kwargs)
+
+    def lstat(*args, **kwargs):
+        calls.append(args[0])
+        return original_lstat(*args, **kwargs)
+
+    monkeypatch.setattr(builder.os, "stat", stat)
+    monkeypatch.setattr(builder.os, "lstat", lstat)
+    assert builder._read_stable_file(path, capture=True) == (12, b"stable bytes")
+    assert len(calls) == 2  # One fresh observation before and after the read.
+
+
+@pytest.mark.parametrize("replacement_kind", ["file", "symlink"])
+def test_stable_read_rejects_path_replacement_after_handle_closes(tmp_path, monkeypatch, replacement_kind):
+    from scripts import build_assistant_runtime as builder
+
+    path = _write(tmp_path, "input.py", b"stable bytes")
+    initial = path.stat()
+    replacement = _write(tmp_path, "replacement.py", b"stable bytes")
+    builder.os.utime(replacement, ns=(initial.st_atime_ns, initial.st_mtime_ns))
+    if replacement_kind == "symlink":
+        link = tmp_path / "replacement-link.py"
+        try:
+            link.symlink_to(replacement)
+        except OSError:
+            pytest.skip("Symlink creation requires OS permission")
+        replacement = link
+    original = Path.open
+    changed = False
+
+    class Reader:
+        def __init__(self, handle):
+            self.handle = handle
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            nonlocal changed
+            self.handle.__exit__(*args)
+            replacement.replace(path)
+            changed = True
+
+        def __getattr__(self, name):
+            return getattr(self.handle, name)
+
+    def open_file(target, *args, **kwargs):
+        handle = original(target, *args, **kwargs)
+        return Reader(handle) if target == path and args == ("rb",) else handle
+
+    monkeypatch.setattr(Path, "open", open_file)
+    with pytest.raises(ValueError, match="links|path changed"):
+        builder._read_stable_file(path)
+    assert changed
+
+
 def test_raw_directory_hash_uses_the_same_stable_reads_as_file_verification(package_fixture, monkeypatch):
     from core.launcher.desktop_shell import _frontend_directory_content_sha256
     from scripts import build_assistant_runtime as builder
@@ -146,6 +232,83 @@ def test_raw_directory_hash_preserves_link_rejection(package_fixture, tmp_path):
         verify_launcher_assistant_payload(
             output, expected_manifest_sha256=result["manifestSha256"], expected_content_sha256=expected_content,
         )
+
+
+def test_raw_directory_hash_preserves_junction_rejection(package_fixture, tmp_path):
+    from core.launcher.desktop_shell import _frontend_directory_content_sha256
+    from scripts import build_assistant_runtime as builder
+
+    if builder.os.name != "nt":
+        pytest.skip("Directory junctions require Windows")
+    import _winapi
+
+    result = _build(package_fixture)
+    output = package_fixture[-1]
+    expected_content = _frontend_directory_content_sha256(output)
+    directory = output / "source/core"
+    outside = tmp_path / "outside-core"
+    directory.rename(outside)
+    _winapi.CreateJunction(str(outside), str(directory))
+    assert directory.is_junction()
+    with pytest.raises(ValueError, match="links"):
+        verify_launcher_assistant_payload(
+            output, expected_manifest_sha256=result["manifestSha256"], expected_content_sha256=expected_content,
+        )
+
+
+@pytest.mark.parametrize("verify_content", [False, True])
+def test_verifier_resolves_the_admitted_root_once(package_fixture, monkeypatch, verify_content):
+    from scripts import build_assistant_runtime as builder
+
+    result = _build(package_fixture)
+    output = package_fixture[-1]
+    kwargs = _content_verification_kwargs(output, verify_content)
+    root = builder._io_path(output)
+    original = Path.resolve
+    resolutions = 0
+
+    def resolve(path, *args, **kwargs):
+        nonlocal resolutions
+        if path == root:
+            resolutions += 1
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", resolve)
+    verify_launcher_assistant_payload(output, expected_manifest_sha256=result["manifestSha256"], **kwargs)
+    assert resolutions == 1
+
+
+@pytest.mark.parametrize("verify_content", [False, True])
+def test_verifier_rejects_ancestor_redirection_after_root_admission(
+    package_fixture, tmp_path, monkeypatch, verify_content,
+):
+    from scripts import build_assistant_runtime as builder
+
+    if builder.os.name != "nt":
+        pytest.skip("Directory junctions require Windows")
+    import _winapi
+
+    parent = tmp_path / "admitted-parent"
+    output = parent / "payload"
+    result = _build((*package_fixture[:3], output))
+    kwargs = _content_verification_kwargs(output, verify_content)
+    redirected = tmp_path / "redirected-parent"
+    original = builder._read_stable_file
+    changed = False
+
+    def read(path, **kwargs):
+        nonlocal changed
+        value = original(path, **kwargs)
+        if path.name == "manifest.json" and not changed:
+            parent.rename(redirected)
+            _winapi.CreateJunction(str(redirected), str(parent))
+            changed = True
+        return value
+
+    monkeypatch.setattr(builder, "_read_stable_file", read)
+    with pytest.raises(ValueError, match="path escapes its root"):
+        verify_launcher_assistant_payload(output, expected_manifest_sha256=result["manifestSha256"], **kwargs)
+    assert changed
 
 
 def test_builds_offline_closure_and_complete_product_files(package_fixture):
@@ -467,6 +630,7 @@ def test_build_and_verify_support_windows_extended_length_paths(package_fixture,
     manifest = verify_launcher_assistant_payload(long_output, expected_manifest_sha256=result["manifestSha256"])
     assert all(not entry["path"].startswith("\\\\?\\") for entry in manifest["files"])
     verify_launcher_assistant_payload(extended, expected_manifest_sha256=result["manifestSha256"])
+    verify_launcher_assistant_payload(str(extended).swapcase(), expected_manifest_sha256=result["manifestSha256"])
     # An internal I/O namespace never turns a manifest entry into an absolute
     # path, even when the manifest's external SHA is recalculated.
     manifest["files"][0]["path"] = "\\\\?\\C:\\outside.txt"

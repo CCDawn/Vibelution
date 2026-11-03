@@ -8,6 +8,51 @@ const initial = {
 };
 
 describe("LauncherStateStore", () => {
+  it("does not renew version evidence when window or cleanup state is published", async () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_000);
+    try {
+      const store = new LauncherStateStore(async () => ({ ...initial, freshness: { current: true } }), initial);
+      await store.refresh("version_read");
+      const observation = store.projectFreshnessObservation();
+      expect(observation).toMatchObject({ valid: true, epoch: store.observationEpoch(), observedAtMs: 1_000 });
+      clock.mockReturnValue(121_000);
+      store.updateWindowTruth({ workbench: null, instances: [] });
+      store.updateCleanup({ failedCount: 1 });
+      expect(store.projectFreshnessObservation()).toEqual(observation);
+    } finally { clock.mockRestore(); }
+  });
+
+  it("invalidates version evidence when its source fails despite a successful status read", async () => {
+    const loader = vi.fn().mockResolvedValueOnce({ ...initial, freshness: { current: true } })
+      .mockResolvedValueOnce({ ...initial, freshness: { ok: false, errorType: "TimeoutError", message: "version timed out" } });
+    const store = new LauncherStateStore(loader, initial);
+    await store.refresh("version_read");
+    expect(store.projectFreshnessObservation()?.valid).toBe(true);
+    await store.refresh("version_failed");
+    expect(store.snapshot().freshness).toBe("fresh");
+    expect(store.projectFreshness()).toEqual({ current: true });
+    expect(store.projectFreshnessObservation()?.valid).toBe(false);
+  });
+
+  it("does not turn a verified close into verified version evidence", async () => {
+    const store = new LauncherStateStore(async () => ({ ...initial, freshness: { current: true } }), initial);
+    await store.refresh("version_read");
+    const epoch = store.beginMainLifecycle("shutdown");
+    expect(store.projectFreshnessObservation()?.valid).toBe(false);
+    expect(store.commitVerifiedMainClosed(epoch)).toBe(true);
+    expect(store.projectFreshnessObservation()?.valid).toBe(false);
+  });
+
+  it("discards version proof from a read overtaken by a lifecycle change", async () => {
+    let finish!: (value: typeof initial & { freshness: { current: boolean } }) => void;
+    const store = new LauncherStateStore(() => new Promise(resolve => { finish = resolve; }), initial);
+    const reading = store.refresh("old_read");
+    store.beginMainLifecycle("restart");
+    finish({ ...initial, freshness: { current: true } });
+    await reading;
+    expect(store.projectFreshnessObservation()?.valid).toBe(false);
+  });
+
   it("retains pending main retirement across window closure and empty observations until verified", async () => {
     const live = { status: { projectBundle: { id: "main", observedState: "open", backend: { pid: 42, port: 8000 } } }, branchInstances: { items: [] } };
     const store = new LauncherStateStore(async () => initial, live);

@@ -240,6 +240,7 @@ import {
 } from "./process/launcherBootstrap.js";
 import { listActiveWorkRuns } from "./process/activeWorkGuard.js";
 import { executeLauncherUpdate, projectLauncherUpdateFreshness, retainKnownDesktopShell } from "./process/launcherUpdate.js";
+import { createLauncherFreshnessObservation } from "./process/launcherFreshnessObservation.js";
 import { assertTrustedIpcSender } from "./security/ipcSenderValidation.js";
 import { isExternalOpenableUrl, normalizeAbsoluteOpenPath } from "./security/externalOpenPolicy.js";
 import { isLiveWorkbenchWindowUrl } from "./security/urlPolicy.js";
@@ -564,6 +565,7 @@ let shellRefreshRequest: {
   shellKind: "packaged" | "unpackaged";
 } | null = null;
 let lastKnownDesktopShell: DesktopShellStatus | undefined;
+let lastKnownDesktopShellObservation: { identity: string; observedAtMs: number } | undefined;
 let periodicShellFreshnessTimer: ReturnType<typeof setInterval> | null = null;
 let periodicAdvisoryStaleNotified = false;
 let advisoryFrontendEnsure: AdvisoryFrontendEnsureScheduler | null = null;
@@ -4528,51 +4530,79 @@ function launcherActiveWorkFromSnapshot(): ActiveWorkStatus {
   }
 }
 
-/**
- * The workbench renderer polls freshness on a 60s cadence, and every fallback
- * read below spawns a short-lived Python process plus several git children.
- * The state-refresh snapshot already carries a freshness source and stays
- * current through file events while the workspace is active, so a snapshot
- * observed within this window answers the poll without spawning anything.
- * The window deliberately matches the poll interval: during idle stretches no
- * state-refresh publishes, the age check fails, and each poll falls back to
- * the real read, so this only removes redundant spawns during active periods.
- */
 const LAUNCHER_FRESHNESS_SNAPSHOT_MAX_AGE_MS = 60_000;
 
-function launcherFreshnessSnapshotUsable(snapshot: LauncherStateSnapshotV1, rawFreshness: unknown, nowMs: number): boolean {
-  // "refreshing" or "stale" means the store has no settled observation (a
-  // refresh is in flight or a lifecycle change tainted the last one); only a
-  // settled "fresh" snapshot may stand in for the launcher CLI read.
-  if (snapshot.freshness !== "fresh") return false;
-  if (typeof rawFreshness !== "object" || rawFreshness === null) return false;
-  const observedAt = Date.parse(snapshot.observedAt);
-  return Number.isFinite(observedAt) && nowMs - observedAt <= LAUNCHER_FRESHNESS_SNAPSHOT_MAX_AGE_MS;
+function launcherFreshnessObservationIdentity(): string {
+  return JSON.stringify([createDesktopPathsForApp().workspaceRoot, launcherStateStore.observationEpoch()]);
 }
 
-async function currentLauncherUpdateFreshness(): Promise<Record<string, unknown>> {
-  // Snapshot-first: answer from the event-driven launcherStateStore while its
-  // freshness source is recent enough; the spawn-heavy read below stays the
-  // authority for missing or stale snapshots.
-  const snapshot = launcherStateStore.snapshot();
-  const snapshotRawFreshness = launcherStateStore.projectFreshness();
-  if (launcherFreshnessSnapshotUsable(snapshot, snapshotRawFreshness, Date.now())) {
-    return projectLauncherUpdateFreshness({
-      raw: snapshotRawFreshness,
-      shell: app.isPackaged ? lastKnownDesktopShell : undefined,
-      activeWork: combineAssistantActiveWork(launcherActiveWorkFromSnapshot(), await residentAssistantActiveWork()),
-      packaged: app.isPackaged,
-      updating: shellRefreshInFlight
-    });
-  }
+function launcherFreshnessObservationRecent(observedAtMs: number, nowMs: number): boolean {
+  const age = nowMs - observedAtMs;
+  return Number.isFinite(age) && age >= 0 && age <= LAUNCHER_FRESHNESS_SNAPSHOT_MAX_AGE_MS;
+}
+
+function launcherFreshnessSnapshotUsable(snapshot: LauncherStateSnapshotV1, rawFreshness: unknown, nowMs: number): boolean {
+  if (snapshot.freshness !== "fresh") return false;
+  if (typeof rawFreshness !== "object" || rawFreshness === null) return false;
+  const observation = launcherStateStore.projectFreshnessObservation();
+  if (!observation?.valid || observation.epoch !== launcherStateStore.observationEpoch()
+    || !launcherFreshnessObservationRecent(observation.observedAtMs, nowMs)) return false;
+  return !app.isPackaged || Boolean(lastKnownDesktopShellObservation
+    && lastKnownDesktopShellObservation.identity === launcherFreshnessObservationIdentity()
+    && launcherFreshnessObservationRecent(lastKnownDesktopShellObservation.observedAtMs, nowMs));
+}
+
+const observeLauncherFreshness = createLauncherFreshnessObservation(launcherFreshnessObservationIdentity, async () => {
+  const observedAtMs = Date.now();
+  const identity = launcherFreshnessObservationIdentity();
   const [rawResult, shellResult, activeWorkResult] = await Promise.allSettled([
     orchestrateLauncherApi("freshness", { schemaVersion: 1, path: "freshness" }),
     app.isPackaged ? inspectCurrentDesktopShell() : Promise.resolve(undefined),
     resolveLauncherUpdateActiveWork()
   ]);
+  recordSupervisorEventFallbackLocally({
+    eventCode: "electron.launcher.version_observation",
+    message: "Launcher version inputs inspected.",
+    fields: { durationMs: Date.now() - observedAtMs, sourceOk: rawResult.status === "fulfilled",
+      shellReadOk: shellResult.status === "fulfilled",
+      taskState: activeWorkResult.status === "fulfilled" ? activeWorkResult.value.state : "unknown" }
+  });
+  return { rawResult, shellResult, activeWorkResult, observedAtMs, identity };
+});
+
+async function currentLauncherUpdateFreshness(): Promise<Record<string, unknown>> {
+  const snapshot = launcherStateStore.snapshot();
+  const snapshotRawFreshness = launcherStateStore.projectFreshness();
+  if (launcherFreshnessSnapshotUsable(snapshot, snapshotRawFreshness, Date.now())) {
+    const snapshotIdentity = launcherFreshnessObservationIdentity();
+    const assistant = await residentAssistantActiveWork();
+    if (snapshotIdentity === launcherFreshnessObservationIdentity()
+      && launcherFreshnessSnapshotUsable(snapshot, snapshotRawFreshness, Date.now())) {
+      return projectLauncherUpdateFreshness({
+        raw: snapshotRawFreshness,
+        shell: app.isPackaged ? lastKnownDesktopShell : undefined,
+        activeWork: combineAssistantActiveWork(launcherActiveWorkFromSnapshot(), assistant),
+        packaged: app.isPackaged,
+        updating: shellRefreshInFlight
+      });
+    }
+  }
+  const { rawResult, shellResult, activeWorkResult, observedAtMs, identity } = await observeLauncherFreshness();
+  if (identity !== launcherFreshnessObservationIdentity()) {
+    throw new Error("Launcher version changed during inspection. Check again.");
+  }
+  let displayShell = lastKnownDesktopShell;
   if (app.isPackaged) {
     const inspected = shellResult.status === "fulfilled" ? shellResult.value : undefined;
     lastKnownDesktopShell = retainKnownDesktopShell(lastKnownDesktopShell, inspected);
+    if (inspected && lastKnownDesktopShell === inspected) {
+      lastKnownDesktopShellObservation = { identity, observedAtMs };
+      displayShell = inspected;
+    } else {
+      lastKnownDesktopShellObservation = undefined;
+      displayShell = lastKnownDesktopShell ? { ...lastKnownDesktopShell,
+        currentElectronTree: "", reason: inspected?.reason ?? "inspection_failed" } : undefined;
+    }
   }
   if (rawResult.status !== "fulfilled") {
     throw rawResult.reason;
@@ -4582,7 +4612,7 @@ async function currentLauncherUpdateFreshness(): Promise<Record<string, unknown>
     : { state: "unknown" as const, message: "Launcher task status is unavailable." };
   return projectLauncherUpdateFreshness({
     raw: rawResult.value,
-    shell: app.isPackaged ? lastKnownDesktopShell : undefined,
+    shell: app.isPackaged ? displayShell : undefined,
     activeWork,
     packaged: app.isPackaged,
     updating: shellRefreshInFlight

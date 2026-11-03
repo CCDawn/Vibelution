@@ -8,6 +8,12 @@ import {
 
 export type LauncherStateFreshness = "fresh" | "refreshing" | "stale";
 
+export type LauncherFreshnessSourceObservation = {
+  observedAtMs: number;
+  epoch: number;
+  valid: boolean;
+};
+
 export type LauncherWindowState = {
   open: boolean;
   rendererProcessId: number;
@@ -333,6 +339,8 @@ export class LauncherStateStore {
   private mainLifecycleEpoch = 0;
   private observedMainEpoch = -1;
   private pendingMainRetirementEpoch: number | null = null;
+  private freshnessEpoch = 0;
+  private freshnessObservation: LauncherFreshnessSourceObservation | null = null;
 
   constructor(
     private readonly loader: LauncherStateLoader,
@@ -371,6 +379,17 @@ export class LauncherStateStore {
     return this.sources.freshness;
   }
 
+  observationEpoch(): number {
+    return this.freshnessEpoch;
+  }
+
+  projectFreshnessObservation(): LauncherFreshnessSourceObservation | null {
+    return this.freshnessObservation === null ? null : {
+      ...this.freshnessObservation,
+      valid: this.freshnessObservation.valid && this.freshnessObservation.epoch === this.freshnessEpoch,
+    };
+  }
+
   subscribe(listener: LauncherStateListener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -383,6 +402,7 @@ export class LauncherStateStore {
 
   beginMainLifecycle(_operation: string): number {
     this.mainLifecycleEpoch += 1;
+    this.freshnessEpoch += 1;
     this.pendingMainRetirementEpoch = null;
     this.freshness = "stale";
     this.staleReason = "main_lifecycle_changed";
@@ -421,6 +441,7 @@ export class LauncherStateStore {
     if (expectedEpoch !== this.mainLifecycleEpoch) return false;
     this.pendingMainRetirementEpoch = null;
     this.mainLifecycleEpoch += 1;
+    this.freshnessEpoch += 1;
     this.observedMainEpoch = this.mainLifecycleEpoch;
     this.freshness = "fresh";
     this.staleReason = "";
@@ -464,6 +485,9 @@ export class LauncherStateStore {
       return queued;
     }
     const mainLifecycleEpoch = this.mainLifecycleEpoch;
+    const freshnessEpoch = ++this.freshnessEpoch;
+    const observedAtMs = Date.now();
+    if (this.freshnessObservation) this.freshnessObservation.valid = false;
     this.refreshEpoch = mainLifecycleEpoch;
     this.freshness = "refreshing";
     this.staleReason = "";
@@ -479,6 +503,10 @@ export class LauncherStateStore {
         const freshness = sources.freshness === undefined ? null : unwrapSource(sources.freshness);
         const cleanup = sources.cleanup === undefined ? null : unwrapSource(sources.cleanup);
         const mainChanged = mainLifecycleEpoch !== this.mainLifecycleEpoch || this.pendingMainRetirementEpoch !== null;
+        this.freshnessObservation = {
+          observedAtMs, epoch: freshnessEpoch,
+          valid: freshness?.ok === true && !mainChanged && freshnessEpoch === this.freshnessEpoch,
+        };
         this.sources = {
           ...this.sources,
           ...(status.ok && !mainChanged ? { status: status.value } : {}),
@@ -530,6 +558,7 @@ export class LauncherStateStore {
         return this.publish();
       })
       .catch((error: unknown) => {
+        this.freshnessObservation = { observedAtMs, epoch: freshnessEpoch, valid: false };
         const mainChanged = mainLifecycleEpoch !== this.mainLifecycleEpoch;
         const mainVerified = mainChanged && this.observedMainEpoch === this.mainLifecycleEpoch;
         this.freshness = mainVerified ? "fresh" : "stale";
