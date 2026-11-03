@@ -31,8 +31,30 @@ def _absolute_directory(value: str) -> Path:
     return path
 
 
+# One receipt line must still tell three different build failures apart.
+FAILURE_PREFIX = "MANAGED_INSTALL_FAILED"
+FAILURE_HEAD_MAX_CHARS = 500
+
+
+def _failure_error(exc: BaseException, *, stage: str) -> str:
+    """Format ``MANAGED_INSTALL_FAILED stage=<stage> <Type>: <first line>; tail: <output>``.
+
+    The build chain tags its own exceptions with the exact stage and the tail
+    of the captured process output; ``stage`` is the installer's coarse phase,
+    used only when the exception carries no finer label.
+    """
+
+    stage = str(getattr(exc, "build_stage", "") or stage)
+    message = str(exc).strip().splitlines()
+    head = type(exc).__name__ + (f": {message[0][:FAILURE_HEAD_MAX_CHARS]}" if message else "")
+    error = f"{FAILURE_PREFIX} stage={stage} {head}"
+    tail = str(getattr(exc, "build_output_tail", "") or "").strip()
+    return f"{error}; tail: {tail}" if tail else error
+
+
 def main(argv: list[str] | None = None, *, managed_root: Path | None = None) -> int:
     """managed_root is a function-test seam, never a CLI or env setting."""
+    stage = "arguments"
     try:
         parser = _Parser(description=__doc__, allow_abbrev=False)
         source = parser.add_mutually_exclusive_group(required=True)
@@ -49,7 +71,9 @@ def main(argv: list[str] | None = None, *, managed_root: Path | None = None) -> 
                 project = _absolute_directory(args.project)
                 from core.launcher.desktop_shell import build_desktop_shell_package
 
+                stage = "node-build"
                 built = build_desktop_shell_package(project, mode="dir")
+                stage = "publish"
                 if not isinstance(built, dict) or built.get("built") is not True or built.get("mode") != "dir":
                     raise ValueError("Desktop package build did not succeed")
                 package = _absolute_directory(str(project / "dist/desktop/win-unpacked"))
@@ -58,6 +82,7 @@ def main(argv: list[str] | None = None, *, managed_root: Path | None = None) -> 
 
             from core.launcher import managed_desktop_package as owner
 
+            stage = "verify-apply"
             if args.apply:
                 # Production uses the owner's OS KnownFolder root. No public
                 # argument, environment variable or working directory selects it.
@@ -69,8 +94,8 @@ def main(argv: list[str] | None = None, *, managed_root: Path | None = None) -> 
                 receipt = {"schemaVersion": 1, "status": "prepared", "fileCount": len(prepared.files),
                            "bytes": sum(row["size"] for row in prepared.files),
                            "packageId": prepared.active["packageId"]}
-    except Exception:
-        print(json.dumps({"schemaVersion": 1, "status": "failed", "error": "MANAGED_INSTALL_FAILED"}))
+    except Exception as exc:
+        print(json.dumps({"schemaVersion": 1, "status": "failed", "error": _failure_error(exc, stage=stage)}))
         return 1
     print(json.dumps(receipt, separators=(",", ":")))
     return 0
