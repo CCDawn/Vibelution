@@ -23,6 +23,7 @@ import {
   type AgentMessageTimelineRowIdentity,
 } from "./agentMessageTimelineRows";
 import { isRetryOperation } from "./conversationOperationState";
+import { conversationToolSemanticLabel } from "./conversationToolSemanticLabel";
 import {
   buildCodexToolActivityPills,
   completedToolPresentationSummary,
@@ -340,7 +341,17 @@ export function createConversationTimelineItems({
     const itemSummary = String(item.summary ?? "").trim();
     const rawOperationLabel = String(operation.rawLabel ?? "").trim();
     const rawToolName = rawOperationLabel || rawTimelineTitle || String(operation.label ?? "").trim();
-    const semanticToolTitle = conversationToolPresentationLabel(rawToolName, lang);
+    // Assistant tools fold dozens of actions behind one tool name; resolve the
+    // specific action from the operation arguments instead of repeating the
+    // generic "处理助理请求". Other tools keep the static presentation label.
+    const semanticToolTitle = rawToolName.toLowerCase().startsWith("personal_assistant_")
+      ? conversationToolSemanticLabel({
+          toolName: rawToolName,
+          summary: itemSummary,
+          commandSource: operation.arguments,
+          lang,
+        })
+      : conversationToolPresentationLabel(rawToolName, lang);
     const visibleTitle = isRetryOperation(operation)
       ? lang === "zh" ? "请求重试" : "Retrying"
       : operation.kind === "tool"
