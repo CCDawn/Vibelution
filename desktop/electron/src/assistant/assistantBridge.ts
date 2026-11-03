@@ -65,7 +65,10 @@ export async function invokeAssistant(event: Sender, payload: unknown, owner: As
     return owner.setExpanded(request.expanded);
   }
   if (request.operation === "assistantAvatar" && Object.keys(request).length !== 1) throw new Error("ASSISTANT_REQUEST_INVALID");
-  if (!["status", "detail", "dispatches", "teamRuns", "previewTaskCleanup", "executeTaskCleanup", "config", "send", "uploadAttachment", "readAttachment", "stop", "continue", "curation", "curate", "approvals", "resolveApproval", "previewDispatchApproval", "decideDispatchApproval", "declineDispatchApproval", "operatorAsset", "assistantAvatar", "computerState", "computerWindows", "computerGrant", "computerControl", "computerConfirm"].includes(String(request.operation))) {
+  if (request.operation === "setModel" && (Object.keys(request).length !== 2
+    || typeof request.modelId !== "string" || !/^[^\s\x00-\x1f\x7f]{1,200}(?![\s\S])/.test(request.modelId)))
+    throw new Error("ASSISTANT_REQUEST_INVALID");
+  if (!["status", "detail", "dispatches", "teamRuns", "setModel", "previewTaskCleanup", "executeTaskCleanup", "config", "send", "uploadAttachment", "readAttachment", "stop", "continue", "curation", "curate", "approvals", "resolveApproval", "previewDispatchApproval", "decideDispatchApproval", "declineDispatchApproval", "operatorAsset", "assistantAvatar", "computerState", "computerWindows", "computerGrant", "computerControl", "computerConfirm"].includes(String(request.operation))) {
     throw new Error("ASSISTANT_REQUEST_INVALID");
   }
   try {

@@ -38,7 +38,9 @@ export type AssistantHostSnapshot = {
 export type AssistantHostRequest =
   | { operation: "previewTaskCleanup" | "executeTaskCleanup"; agentId: string; directSessionId: string; targets: unknown[]; fingerprint?: string }
   | { operation: "teamRuns"; cursor?: string }
-  | { operation: "status" | "detail" | "dispatches" | "config" | "approvals" | "assistantAvatar" }
+  | { operation: "setModel"; modelId: string }
+  | { operation: "detail"; beforeMessageIndex?: number }
+  | { operation: "status" | "dispatches" | "config" | "approvals" | "assistantAvatar" }
   | { operation: "resolveApproval"; requestId: string; decision: "accept" | "decline" }
   | { operation: "previewDispatchApproval"; dispatchId: string; taskId: string; approvalId: string }
   | { operation: "declineDispatchApproval"; dispatchId: string; taskId: string; approvalId: string; revision: string }
@@ -925,6 +927,15 @@ export class AssistantHost {
     }
     if (!object(payload)) throw new HostError("ASSISTANT_REQUEST_INVALID");
     switch (payload.operation) {
+      case "setModel": {
+        if (Object.keys(payload).length !== 2 || !ownKeys(payload, ["operation", "modelId"])
+          || typeof payload.modelId !== "string" || !/^[^\s\x00-\x1f\x7f]{1,200}(?![\s\S])/.test(payload.modelId))
+          throw new HostError("ASSISTANT_REQUEST_INVALID");
+        const result = await this.rpc(generation, "/api/assistant/model", "POST", { modelId: payload.modelId });
+        if (!object(result) || Object.keys(result).length !== 1 || result.modelId !== payload.modelId)
+          throw new HostError("ASSISTANT_RESPONSE_INVALID");
+        return result;
+      }
       case "previewTaskCleanup":
       case "executeTaskCleanup": {
         const execute = payload.operation === "executeTaskCleanup";
@@ -948,8 +959,16 @@ export class AssistantHost {
           throw new HostError("ASSISTANT_IDENTITY_INVALID");
         return result;
       }
+      case "detail": {
+        if (!ownKeys(payload, ["operation", "beforeMessageIndex"]) || payload.beforeMessageIndex !== undefined
+          && (!Number.isSafeInteger(payload.beforeMessageIndex) || payload.beforeMessageIndex < 1 || payload.beforeMessageIndex > 2_147_483_647))
+          throw new HostError("ASSISTANT_REQUEST_INVALID");
+        const path = "/api/assistant/session" + (payload.beforeMessageIndex === undefined ? "" : `?before_message_index=${payload.beforeMessageIndex}`);
+        const result = await this.rpc(generation, path, "GET");
+        if (!object(result) || result.id !== generation.sessionId) throw new HostError("ASSISTANT_IDENTITY_INVALID");
+        return result;
+      }
       case "status":
-      case "detail":
       case "dispatches":
       case "approvals":
       case "config": {
@@ -957,7 +976,6 @@ export class AssistantHost {
         const paths = { status: "/api/assistant", detail: "/api/assistant/session", dispatches: "/api/assistant/dispatches", config: "/api/assistant/config", approvals: "/api/assistant/approvals" };
         const result = await this.rpc(generation, paths[payload.operation], "GET");
         if (payload.operation === "status" && (identity(result) !== generation.sessionId || (result as { assistant: { agentId: string } }).assistant.agentId !== generation.agentId)) throw new HostError("ASSISTANT_IDENTITY_INVALID");
-        if (payload.operation === "detail" && (!object(result) || result.id !== generation.sessionId)) throw new HostError("ASSISTANT_IDENTITY_INVALID");
         return result;
       }
       case "resolveApproval":
@@ -1690,6 +1708,11 @@ export class AssistantHost {
       });
       if (!response.ok) {
         await response.body?.cancel().catch(() => undefined);
+        if (path === "/api/assistant/model") {
+          if (response.status === 409) throw new HostError("ASSISTANT_MODEL_BUSY");
+          if (response.status === 422) throw new HostError("ASSISTANT_MODEL_INVALID");
+          if (response.status === 503) throw new HostError("ASSISTANT_MODEL_UNAVAILABLE");
+        }
         throw new HostError(path === "/api/assistant/reminders/next" && response.status === 409
           ? "ASSISTANT_REMINDER_BLOCKED" : "ASSISTANT_HTTP_FAILED");
       }

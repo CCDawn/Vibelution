@@ -304,10 +304,21 @@ def test_native_profile_root_mismatch_releases_acquired_lease_before_rejecting(c
             assert error.value.code == "REFERENCE_REGISTRY_IDENTITY_CHANGED"
 
         task = asyncio.create_task(asyncio.to_thread(worker))
+
+        async def next_request():
+            # claim() is a bounded long poll, not a guarantee that the worker
+            # thread has enqueued its next delivery within this single poll.
+            while True:
+                wire = (await owner.claim())["request"]
+                if wire is not None:
+                    return wire
+                if task.done():
+                    await task
+                    pytest.fail("lease worker ended before the required release delivery")
+
         try:
             for _ in range(2):
-                wire = (await owner.claim())["request"]
-                assert wire is not None
+                wire = await asyncio.wait_for(next_request(), timeout=2)
                 seen.append(wire["action"])
                 value = census if wire["action"] == ACQUIRE else {"schemaVersion": 1, "leaseId": LEASE, "released": True}
                 assert owner.settle(wire["deliveryId"], value)

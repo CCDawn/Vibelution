@@ -488,10 +488,45 @@ def test_private_detail_uses_native_light_projection_and_keeps_identity_gate(mon
     monkeypatch.setattr(native, "_services", lambda: (None, None, SimpleNamespace(
         get_session_detail=detail, SessionNotFoundError=MissingSession), None))
     assert native.get_detail("session-1")["id"] == "session-1"
-    assert calls == [("session-1", {"include_secondary": False})]
+    # The resident renderer polls this endpoint: the recent-window limit and the
+    # chat-page window scope keep each response under the desktop bridge's
+    # 8 MiB envelope on long sessions.
+    assert calls == [("session-1", {
+        "include_secondary": False,
+        "message_limit": native.LAUNCHER_ASSISTANT_DETAIL_MESSAGE_LIMIT,
+        "transcript_scope": "window",
+    })]
+    assert 100 <= native.LAUNCHER_ASSISTANT_DETAIL_MESSAGE_LIMIT <= 200
     with pytest.raises(MissingSession):
         native.get_detail("another-session")
     assert len(calls) == 1
+    native.get_detail("session-1", before_message_index=61)
+    assert calls[-1][1]["before_message_index"] == 61
+
+
+def test_private_detail_returns_only_the_recent_message_window(assistant_command_session, tmp_path):
+    from core.chat.conversation_ledger import append_conversation_event
+
+    native, sessions, sid, _, _, _ = assistant_command_session
+    total = native.LAUNCHER_ASSISTANT_DETAIL_MESSAGE_LIMIT + 60
+    for index in range(total):
+        append_conversation_event(tmp_path, sid, f"window-turn-{index}", "user_message",
+                                  payload={"content": f"window message {index}"}, status="")
+    detail = native.get_detail(sid)
+    window = detail.get("messageWindow") or {}
+    assert window.get("hasEarlier") is True
+    assert window.get("hasLater") is False
+    assert window.get("returnedMessages") == native.LAUNCHER_ASSISTANT_DETAIL_MESSAGE_LIMIT
+    assert window.get("totalMessages") >= total
+    # The newest window keeps the recent tail that acceptance readback and the
+    # conversation view rely on; the oldest rows are the truncated ones.
+    assert detail["messages"][-1]["content"] == f"window message {total - 1}"
+    assert len(detail["messages"]) == native.LAUNCHER_ASSISTANT_DETAIL_MESSAGE_LIMIT
+    earlier = native.get_detail(sid, before_message_index=window["nextBeforeMessageIndex"])
+    assert any(message.get("content") == "window message 0" for message in earlier["messages"])
+    assert earlier["messageWindow"]["oldestMessageIndex"] == 1
+    assert earlier["messageWindow"]["hasEarlier"] is False
+    assert earlier["messageWindow"]["hasLater"] is True
 
 
 @pytest.fixture
@@ -1262,3 +1297,83 @@ async def test_native_source_journal_io_does_not_block_host_event_loop(native_so
         watchdog.cancel()
         if not pending.done():
             await pending
+
+
+def test_fixed_assistant_model_bridge_uses_real_owner_whitelist_and_readback(tmp_path):
+    config = TEST_MODEL_CONFIG.replace("[llm.profiles.primary]", '''
+[llm.providers.local.models.other]
+upstream_id = "other"
+label = "Other"
+enabled = true
+context_window = 8192
+[llm.providers.local.models.disabled]
+upstream_id = "disabled"
+label = "Disabled"
+enabled = false
+context_window = 8192
+[llm.profiles.primary]''')
+    _run(tmp_path, '''
+        import json
+        from core.assistant_runtime import native
+        from core.infrastructure.native_runtime import assistant_native_root
+        from core.web.services import personal_assistant_service as personal, session_service as sessions
+        from core.web.services.session import journal_bridge
+
+        assistant = native.bootstrap(assistant_native_root())["assistant"]
+        sid = assistant["directSessionId"]
+        before = journal_bridge.load_session_conversation_events_snapshot(sid, project_root=sessions.PROJECT_ROOT)
+        real_options = sessions.get_session_llm_options
+        def options(session_id):
+            result = real_options(session_id)
+            for choice in result["choices"]:
+                choice["apiKey"] = "PRIVATE_MODEL_CREDENTIAL"
+            return result
+        sessions.get_session_llm_options = options
+        settings = native.assistant_settings()
+        assert settings["modelId"] == "local/test"
+        assert "local/other" in [row["modelId"] for row in settings["modelChoices"]]
+        assert "local/disabled" not in [row["modelId"] for row in settings["modelChoices"]]
+        assert "PRIVATE_MODEL_CREDENTIAL" not in json.dumps(settings)
+
+        def rejected(model_id, code):
+            try:
+                native.set_model(model_id)
+            except native.AssistantSessionError as exc:
+                assert exc.code == code, exc.code
+            else:
+                raise AssertionError("model change should have been refused")
+            assert native.assistant_settings()["modelId"] == "local/test"
+
+        for model_id in ("", "local/test\\n", "local/unknown", "local/disabled"):
+            rejected(model_id, "ASSISTANT_MODEL_INVALID")
+        def unavailable(session_id):
+            result = options(session_id)
+            for choice in result["choices"]:
+                if choice["modelId"] == "local/other":
+                    choice["missingApiKey"] = True
+            return result
+        sessions.get_session_llm_options = unavailable
+        rejected("local/other", "ASSISTANT_MODEL_INVALID")
+        sessions.get_session_llm_options = options
+        with sessions._RUNNING_SESSIONS_LOCK:
+            sessions._SESSION_ACTIVE_TURN_IDS[sid] = "running-turn"
+        rejected("local/other", "ASSISTANT_MODEL_BUSY")
+        with sessions._RUNNING_SESSIONS_LOCK:
+            sessions._SESSION_ACTIVE_TURN_IDS.pop(sid)
+
+        agent_id = native._AGENT_ID
+        native._AGENT_ID = "another-agent"
+        try:
+            native.set_model("local/other")
+        except native.AssistantSessionError as exc:
+            assert exc.code == "ASSISTANT_IDENTITY_INVALID"
+        else:
+            raise AssertionError("identity rebinding was admitted")
+        native._AGENT_ID = agent_id
+        assert native.set_model("local/other") == {"modelId": "local/other"}
+        assert personal.get_personal_assistant_settings()["settings"]["model"]["currentModelId"] == "local/other"
+        assert native.identity()["assistant"]["agentId"] == agent_id
+        assert native.identity()["assistant"]["directSessionId"] == sid
+        assert journal_bridge.load_session_conversation_events_snapshot(sid, project_root=sessions.PROJECT_ROOT) == before
+        native.shutdown()
+    ''', config_text=config)

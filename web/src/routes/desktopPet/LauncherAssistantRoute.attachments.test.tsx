@@ -10,17 +10,23 @@ vi.mock("./DesktopPetCharacter", () => ({ DesktopPetCharacter: () => null }));
 let conversation: ConversationViewProps;
 vi.mock("../../components/conversation/LazyConversationView", () => ({ LazyConversationView: (props: ConversationViewProps) => { conversation = props; return null; } }));
 const roots: ReturnType<typeof createRoot>[] = [];
-afterEach(async () => { for (const root of roots.splice(0)) await act(async () => root.unmount()); document.body.innerHTML = ""; vi.unstubAllGlobals(); });
+afterEach(async () => {
+  for (const root of roots.splice(0)) await act(async () => root.unmount());
+  document.body.innerHTML = "";
+  localStorage.clear();
+  vi.unstubAllGlobals();
+});
 async function settle() { await act(async () => { await new Promise(resolve => setTimeout(resolve, 25)); }); }
-async function setup(enabled: boolean) {
+async function setup(enabled: boolean, statusExtra: Record<string, unknown> = {}) {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("fetch", vi.fn(() => { throw new Error("HTTP forbidden"); }));
   vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: vi.fn(() => "blob:preview"), revokeObjectURL: vi.fn() }));
   let fail = false;
-  let failSend = false;
+  let sendFailure: string | null = null;
   const invoke = vi.fn(async (request: Record<string, unknown>) => {
     switch (request.operation) {
-      case "status": return { assistant: { agentId: "a", directSessionId: "s", displayName: "助手" }, ...(enabled ? { attachmentVersion: 1 } : {}) };
+      case "status": return { assistant: { agentId: "a", directSessionId: "s", displayName: "助手" },
+        ...(enabled ? { attachmentVersion: 1 } : {}), ...statusExtra };
       case "config": return { language: "zh" };
       case "detail": return { id: "s", agentId: "a", status: "ready", messages: [{ id: "m", role: "user", content: "", attachments: [{ artifactId: "user-image-1.png", filename: "old.png", kind: "user_image", contentType: "image/png", sizeBytes: 2, status: "ready", url: "/api/secret", imageUrl: "/api/secret", downloadUrl: "/api/secret" }] }] };
       case "approvals": return [];
@@ -28,7 +34,7 @@ async function setup(enabled: boolean) {
       case "setExpanded": return { expanded: request.expanded };
       case "readAttachment": return { contentType: "image/png", dataBase64: "AQI=" };
       case "uploadAttachment": if (fail) throw new Error("failure"); else return { artifactId: "user-image-2.png", filename: "new.png", contentType: "image/png", sizeBytes: 2, kind: "user_image", status: "ready" };
-      case "send": if (failSend) throw new Error("lost acknowledgement"); return { accepted: true, turnId: "turn" };
+      case "send": if (sendFailure !== null) throw new Error(sendFailure); return { accepted: true, turnId: "turn" };
       default: throw new Error("unexpected");
     }
   });
@@ -40,7 +46,11 @@ async function setup(enabled: boolean) {
   await settle(); await settle();
   await act(async () => conversation.onVisibleTimelineMessageIds?.(["m"]));
   await settle();
-  return { invoke, setFailure(value: boolean) { fail = value; }, setSendFailure(value: boolean) { failSend = value; } };
+  return {
+    invoke,
+    setFailure(value: boolean) { fail = value; },
+    setSendFailure(message: string | null) { sendFailure = message; },
+  };
 }
 it("keeps unsupported bridge closed and never renders the ordinary session URL", async () => {
   const { invoke } = await setup(false);
@@ -72,16 +82,100 @@ it("retries an unconfirmed send with the identical request and attachment IDs", 
   const { invoke, setSendFailure } = await setup(true);
   const file = new File([new Uint8Array([1, 2])], "new.png", { type: "image/png" });
   await act(async () => conversation.onAddComposerAttachments!([file]));
-  setSendFailure(true);
+  setSendFailure("lost acknowledgement");
   await act(async () => conversation.onSubmit()); await settle(); await settle();
   expect(conversation.composerAttachments).toHaveLength(1);
   expect(conversation.composerAttachmentInputDisabled).toBe(true);
   const first = invoke.mock.calls.find(([request]) => request.operation === "send")?.[0];
-  setSendFailure(false);
+  setSendFailure(null);
   await act(async () => conversation.onSubmit()); await settle(); await settle();
   const sends = invoke.mock.calls.filter(([request]) => request.operation === "send").map(([request]) => request);
   expect(sends).toHaveLength(2);
   expect(sends[1]).toEqual(first);
   expect(invoke.mock.calls.filter(([request]) => request.operation === "uploadAttachment")).toHaveLength(1);
+  expect(conversation.composerAttachments).toHaveLength(0);
+});
+
+it("unlocks the composer after a definite pre-admission rejection instead of dead-ending unconfirmed", async () => {
+  const { invoke, setSendFailure } = await setup(true);
+  await act(async () => conversation.onComposerChange!("可编辑草稿"));
+  setSendFailure("ASSISTANT_REQUEST_INVALID");
+  await act(async () => conversation.onSubmit()); await settle(); await settle();
+  const first = invoke.mock.calls.find(([request]) => request.operation === "send");
+  expect(first).toBeTruthy();
+  // Definite refusal: no unconfirmed lock, editable composer, explanatory status.
+  expect(conversation.composerDisabled).toBe(false);
+  expect(conversation.composerError).toBe("");
+  expect(conversation.composerValue).toBe("可编辑草稿");
+  // A corrected resend builds a NEW request identity instead of replaying the refused one.
+  setSendFailure(null);
+  await act(async () => conversation.onComposerChange!("修改后的草稿"));
+  await act(async () => conversation.onSubmit()); await settle(); await settle();
+  const sends = invoke.mock.calls.filter(([request]) => request.operation === "send").map(([request]) => request);
+  expect(sends).toHaveLength(2);
+  expect(sends[1]).toMatchObject({ message: "修改后的草稿" });
+  expect(sends[1].requestId).not.toBe(sends[0]!.requestId);
+});
+
+it("blocks an over-limit draft locally before any upload or send", async () => {
+  const { invoke } = await setup(true);
+  await act(async () => conversation.onAddComposerAttachments!([new File([new Uint8Array([1, 2])], "new.png", { type: "image/png" })]));
+  expect(invoke.mock.calls.some(([request]) => request.operation === "uploadAttachment")).toBe(false);
+  await act(async () => conversation.onComposerChange!("字".repeat(64_001)));
+  await act(async () => conversation.onSubmit()); await settle(); await settle();
+  expect(invoke.mock.calls.some(([request]) => request.operation === "uploadAttachment")).toBe(false);
+  expect(invoke.mock.calls.some(([request]) => request.operation === "send")).toBe(false);
+  expect(conversation.composerAttachments).toHaveLength(1);
+  expect(conversation.composerDisabled).toBe(false);
+  // The exact limit still sends.
+  await act(async () => conversation.onComposerChange!("字".repeat(64_000)));
+  await act(async () => conversation.onSubmit()); await settle(); await settle();
+  expect(invoke.mock.calls.some(([request]) => request.operation === "send")).toBe(true);
+});
+
+it("blocks sending image attachments when the dialogue model cannot accept images", async () => {
+  const { invoke } = await setup(true, { settings: { ok: true, displayName: "助手", modelId: "m", supportsImageInput: false,
+    preferences: { characterId: "dafeiyu", showStatus: true, showTitles: true, showCompletion: true, idleMessage: "" } } });
+  await act(async () => conversation.onAddComposerAttachments!([new File([new Uint8Array([1, 2])], "new.png", { type: "image/png" })]));
+  expect(conversation.composerAttachments).toHaveLength(1);
+  // Tray guidance mirrors the chat page: only an explicit false explains itself.
+  expect(conversation.composerError).toBe("当前模型不支持图片输入，请移除图片附件后再发送。");
+  await act(async () => conversation.onSubmit()); await settle(); await settle();
+  expect(invoke.mock.calls.some(([request]) => request.operation === "uploadAttachment")).toBe(false);
+  expect(invoke.mock.calls.some(([request]) => request.operation === "send")).toBe(false);
+  expect(conversation.composerAttachments).toHaveLength(1);
+  expect(conversation.composerDisabled).toBe(false);
+});
+
+it("allows document attachments for a text-only model without showing an image warning", async () => {
+  const { invoke } = await setup(true, { settings: { ok: true, displayName: "助手", modelId: "m", supportsImageInput: false,
+    preferences: { characterId: "dafeiyu", showStatus: true, showTitles: true, showCompletion: true, idleMessage: "" } } });
+  await act(async () => conversation.onAddComposerAttachments!([new File(["ok"], "notes.txt", { type: "text/plain" })]));
+  expect(conversation.composerAttachments?.[0].kind).toBe("document");
+  expect(conversation.composerError).toBe("");
+  await act(async () => conversation.onSubmit()); await settle(); await settle();
+  expect(invoke.mock.calls.some(([request]) => request.operation === "send")).toBe(true);
+});
+
+it("restores uploaded attachment chips across a reload and refills previews through the read IPC", async () => {
+  localStorage.setItem("vibelution.launcher-assistant.composer.v1:embedded:s", JSON.stringify({
+    version: 1, sessionId: "s", surface: "embedded",
+    snapshot: { draft: "恢复的草稿", outstanding: null, acceptedTurnId: "", queuedAcceptance: null,
+      attachments: [{ id: "chip-1", artifactId: "user-image-2.png", filename: "kept.png", contentType: "image/png", sizeBytes: 2, kind: "image" }] },
+  }));
+  await setup(true);
+  await settle(); await settle();
+  expect(conversation.composerValue).toBe("恢复的草稿");
+  expect(conversation.composerAttachments).toHaveLength(1);
+  expect(conversation.composerAttachments?.[0]).toMatchObject({ id: "chip-1", artifactId: "user-image-2.png",
+    uploadStatus: "uploaded", filename: "kept.png" });
+  // The preview is refilled from the uploaded artifact, not a stale blob: URL.
+  expect(conversation.composerAttachments?.[0].previewUrl).toBe("data:image/png;base64,AQI=");
+  // The restored chip resends without re-uploading.
+  const { invoke } = await setup(true);
+  await act(async () => conversation.onSubmit()); await settle(); await settle();
+  expect(invoke.mock.calls.some(([request]) => request.operation === "uploadAttachment")).toBe(false);
+  const sent = invoke.mock.calls.find(([request]) => request.operation === "send")?.[0];
+  expect(sent).toMatchObject({ message: "恢复的草稿", attachmentIds: ["user-image-2.png"] });
   expect(conversation.composerAttachments).toHaveLength(0);
 });

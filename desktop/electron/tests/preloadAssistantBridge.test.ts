@@ -50,6 +50,7 @@ describe("preload assistant bridge injection by window role", () => {
     const bridge = exposed.get("vibelutionLauncher")!;
     expect(bridge.requestWindowClose).toBeTypeOf("function");
     expect(bridge.focusAssistantWindow).toBeTypeOf("function");
+    expect(bridge.openWorkbenchConfig).toBeUndefined();
     expect(bridge.controlDesktopPet).toBeUndefined();
     expect(bridge.setDesktopPetExpanded).toBeUndefined();
     expect(bridge.beginDesktopPetWindowDrag).toBeUndefined();
@@ -81,6 +82,9 @@ describe("preload assistant bridge injection by window role", () => {
     await bridge.selectProject();
     expect(invoke).toHaveBeenCalledWith(IPC_CHANNELS.returnToDesktop);
     expect(invoke).toHaveBeenCalledWith(IPC_CHANNELS.selectProject);
+    expect(bridge.openWorkbenchConfig).toBeTypeOf("function");
+    await bridge.openWorkbenchConfig();
+    expect(invoke).toHaveBeenCalledWith(IPC_CHANNELS.openWorkbenchConfig);
     expect(bridge.requestWindowClose).toBeUndefined();
   });
 
@@ -92,6 +96,7 @@ describe("preload assistant bridge injection by window role", () => {
     expect(exposed.has("vibelutionLauncher")).toBe(true);
     expect(exposed.get("vibelutionLauncher")!.returnToDesktop).toBeUndefined();
     expect(exposed.get("vibelutionLauncher")!.selectProject).toBeUndefined();
+    expect(exposed.get("vibelutionLauncher")!.openWorkbenchConfig).toBeUndefined();
   });
 
   it("retains explicit browser-open intent until the Launcher UI subscribes", async () => {

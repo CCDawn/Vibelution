@@ -289,40 +289,96 @@ def revert_candidate_commit(
     commit_sha = str(integration_commit or "").strip()
     if not commit_sha:
         raise CandidateIntegrationError("缺少候选合入提交，不能执行回退。")
-    if _status_entries(root):
-        raise CandidateIntegrationError("主工作区必须完全干净后才能回退候选提交。")
-    current_head = _git_text(root, "rev-parse", "HEAD")
-    if current_head != commit_sha:
-        raise CandidateIntegrationError(
-            "自动回退仅允许在候选合入提交仍为当前 HEAD 时执行，避免覆盖后续提交。"
-        )
+    _check_revert_target(root, commit_sha)
+    # With HEAD fixed to the reverted commit, revert (including -m 1 for a
+    # merge) produces its first parent's tree. Prepare only immutable objects:
+    # never run revert against main's index/worktree before obtaining a lease.
     parents = _git_text(root, "rev-list", "--parents", "-n", "1", commit_sha).split()
-    revert_args = ["revert", "--no-edit"]
+    tree = (_git_text(root, "rev-parse", f"{parents[1]}^{{tree}}") if len(parents) > 1
+            else _git_text(root, "mktree"))  # DEVNULL supplies the empty root tree.
+    if tree == _git_text(root, "rev-parse", f"{commit_sha}^{{tree}}"):
+        raise CandidateIntegrationError("候选合入提交没有可回退的树变更，不能创建空回退提交。")
+    subject = _git_text(root, "show", "-s", "--format=%s", commit_sha)
+    message = f'Revert "{subject}"\n\nThis reverts commit {commit_sha}.'
     if len(parents) >= 3:
-        revert_args.extend(["-m", "1"])
-    revert_args.append(commit_sha)
-    result = git_process.run_git(
-        revert_args,
-        cwd=root,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-    )
-    if result.returncode != 0:
-        detail = str(result.stderr or result.stdout or "").strip()
-        raise CandidateIntegrationError(f"Git revert 失败：{detail or 'unknown error'}")
-    revert_sha = _git_text(root, "rev-parse", "HEAD")
-    if not revert_sha or revert_sha == commit_sha or _status_entries(root):
-        raise CandidateIntegrationError("Git revert 未形成干净、可审计的新提交。")
+        message += f"\nReversing changes made to {parents[1]}."
+    message += f"\n\nSupervised run: {str(run_id or '').strip()}\n"
+    revert_sha = _git_text(root, "commit-tree", tree, "-p", commit_sha, "-m", message)
+    _check_revert_target(root, commit_sha)
+
+    context = task_closeout.CloseoutContext(root, root, "main")
+    # claim auto-registers this independent owner; the integrated candidate's
+    # development owner may already be completed and must never be revived.
+    agent_id = f"supervised-rollback-{uuid.uuid4().hex}"
+    lease, merged_sha = "", ""
+    merge_applied = False
+    failure = None
+    cleanup_errors: list[str] = []
+    try:
+        lease = task_closeout.acquire_integration_claim_with_retry(context, agent_id=agent_id)
+        _check_revert_target(root, commit_sha)
+        merged_sha = task_closeout.merge_ff_only(context, integration_claim_id=lease, target_sha=revert_sha)
+        merge_applied = merged_sha == revert_sha
+        if (merged_sha != revert_sha or _git_text(root, "branch", "--show-current") != "main"
+                or _git_text(root, "rev-parse", "HEAD") != revert_sha
+                or _git_text(root, "rev-parse", "HEAD^{tree}") != tree or _status_entries(root)):
+            raise CandidateIntegrationError("Git revert 未形成干净、可审计的新提交。")
+    except (OSError, RuntimeError, ValueError) as error:
+        failure = error
+        if not merge_applied:
+            # The ff may have succeeded before permit cleanup raised. Retain
+            # that fact without retrying the update or weakening its checks.
+            try:
+                merge_applied = _git_text(root, "rev-parse", "refs/heads/main") == revert_sha
+            except (OSError, RuntimeError, ValueError):
+                pass
+    finally:
+        try:
+            if lease:
+                task_closeout.release_claim(context, lease, status="released", reason="Supervised rollback finished")
+                owner_registered = True
+            else:
+                # A failed claim request may still have registered our unique
+                # owner. Complete only that identity, if it actually exists.
+                snapshot = task_closeout._coordination_call(context, "status")
+                owner_registered = any(isinstance(item, dict) and item.get("id") == agent_id
+                                       for item in snapshot.get("agents", []))
+            if owner_registered:
+                outcome = "finished" if merge_applied else "aborted"
+                task_closeout._coordination_call(
+                    context, "complete", "--agent-id", agent_id, "--summary",
+                    f"Supervised rollback {outcome}: {commit_sha} -> {revert_sha}",
+                )
+        except (OSError, RuntimeError, ValueError) as error:
+            cleanup_errors.append(str(error)[:300])
+    if failure is not None and not merge_applied:
+        detail = f"; governance_cleanup_pending: {'; '.join(cleanup_errors)}" if cleanup_errors else ""
+        raise CandidateIntegrationError(f"受控回退未完成：{failure}{detail}") from failure
     return {
         "status": "reverted",
         "runId": str(run_id or "").strip(),
         "revertedCommit": commit_sha,
         "revertCommit": revert_sha,
         "revertedAt": _now_iso(),
+        # Once main advanced, the caller must persist this receipt even if a
+        # later observation failed. It can block activation without rerunning Git.
+        "postCommitValidation": {
+            "status": "failed" if failure is not None else "passed",
+            "error": str(failure)[:1000] if failure is not None else "",
+        },
+        "governanceCleanup": {"status": "pending" if cleanup_errors else "completed", "errors": cleanup_errors},
     }
+
+
+def _check_revert_target(root: Path, commit_sha: str) -> None:
+    if _git_text(root, "branch", "--show-current") != "main":
+        raise CandidateIntegrationError("受控回退只允许写入 main。")
+    if _status_entries(root):
+        raise CandidateIntegrationError("主工作区必须完全干净后才能回退候选提交。")
+    if _git_text(root, "rev-parse", "HEAD") != commit_sha:
+        raise CandidateIntegrationError(
+            "自动回退仅允许在候选合入提交仍为当前 HEAD 时执行，避免覆盖后续提交。"
+        )
 
 
 def _merge_validated_candidate(root: Path, candidate: Path, *, expected_head: str, candidate_head: str,

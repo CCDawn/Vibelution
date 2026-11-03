@@ -19,8 +19,10 @@ import threading
 import time
 
 from config import get_config
+from config.workbench import DEFAULT_WORKBENCH_HOST, parse_port
 from config.public_config import load_public_config
 from core.launcher import desktop_session_store, lifecycle_intent_store
+from core.launcher.status_projection import project_root_matches, runtime_state_for_status
 from core.infrastructure import developer_sandbox
 from core.infrastructure.mental_model import get_mental_model
 from core.mental_model_flags import is_mental_model_enabled
@@ -1406,7 +1408,7 @@ def _runtime_manager_workbench_observation_trustworthy(state: dict, manager_pid:
     provably dead is equally falsified (backend crashed after the last write).
     """
 
-    if int(manager_pid or 0) <= 0:
+    if not project_root_matches(state.get("projectRoot"), PROJECT_ROOT) or int(manager_pid or 0) <= 0:
         return False
     updated_at = _parse_snapshot_updated_at(state)
     if updated_at is None:
@@ -1435,8 +1437,18 @@ def _load_runtime_manager_snapshot() -> dict:
     manager_pid = current_runtime_manager_pid(PROJECT_ROOT)
     payload["daemonRunning"] = manager_pid > 0
     payload["managerPid"] = manager_pid
-    payload["runtimeState"] = "running" if manager_pid > 0 else str(payload.get("runtimeState") or "idle")
-    payload["projectRoot"] = str(PROJECT_ROOT)
+    payload["runtimeState"] = "running" if manager_pid > 0 else "idle"
+    try:
+        launcher_state = json.loads(LAUNCHER_STATE_PATH.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        launcher_state = {}
+    payload = runtime_state_for_status(
+        payload, launcher_state if isinstance(launcher_state, dict) else {}, project_root=PROJECT_ROOT,
+    )
+    # Unlike the file's pid, this observer already verified the current project.
+    payload.update(daemonRunning=manager_pid > 0, managerPid=manager_pid,
+                   runtimeState="running" if manager_pid > 0 else "idle")
+    payload.setdefault("projectRoot", str(PROJECT_ROOT))
     if not _runtime_manager_workbench_observation_trustworthy(payload, manager_pid):
         # The persisted state.json outlives its daemon (or its backend) and
         # then only carries frozen observation: dead pids advertised as alive.
@@ -2332,6 +2344,17 @@ def _observe_backend_from_summary_request(workbench: dict) -> dict:
     answering instead of letting the stale claim suppress the correction.
     """
 
+    bound_port = parse_port(os.environ.get("VIBELUTION_PORT")) or parse_port(os.environ.get("AGENT_WORKBENCH_BACKEND_PORT"))
+    if bound_port is not None:
+        # The answering backend's launch environment owns its listener endpoint.
+        # Do not attach current-process health to a stale snapshot's old port.
+        host = str(os.environ.get("VIBELUTION_HOST") or "").strip() or DEFAULT_WORKBENCH_HOST
+        if host in {"0.0.0.0", "::", "[::]"}:
+            host = DEFAULT_WORKBENCH_HOST
+        url_host = f"[{host}]" if ":" in host and not host.startswith("[") else host
+        port_changed = int(workbench.get("backendPort") or 0) != bound_port
+        workbench = {**workbench, "backendPort": bound_port, "url": f"http://{url_host}:{bound_port}",
+                     "backendPortConflict": False if port_changed else bool(workbench.get("backendPortConflict"))}
     if str(workbench.get("desiredState") or "").strip() != "open":
         return workbench
     if bool(workbench.get("backendPortConflict")):

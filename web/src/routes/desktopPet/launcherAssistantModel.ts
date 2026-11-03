@@ -1,7 +1,12 @@
 import type { LauncherAssistantDispatch, LauncherAssistantSessionEvent } from "../../api/launcherAssistant";
 import type { PetActivityTone, PetAnimationState } from "../../api/types/petActivity";
-import type { SessionDetail, SessionQueuedTurn } from "../../api/types";
+import type { ConversationMessage, SessionDetail, SessionQueuedTurn } from "../../api/types";
 import { exactAcceptedSubmitTurnId, findSubmitAcceptanceEvidence } from "../chat/chatSubmitAcceptanceReadback";
+import {
+  buildComposerContextRingModel, resolveComposerContextUsage,
+  type ComposerContextRingModel,
+} from "../chat/composerContextModel";
+import { promptSegmentDisplayLabel } from "../chat/chatRoutePresentation";
 import { hasExecutionOwnership, resolveSessionActivity, type SessionActivitySource } from "../sessionActivityState";
 
 export type LauncherAssistantSubmission = { message: string; requestId: string; draftSnapshot?: string; attachmentIds?: string[]; attachmentSnapshotIds?: string[]; preserveDraft?: true };
@@ -59,6 +64,32 @@ export function launcherAssistantSubmission(
   if (!message && !attachmentIds.length) return null;
   return attachmentIds.length ? { message, requestId: createId(), draftSnapshot: draft, attachmentIds, attachmentSnapshotIds }
     : { message, requestId: createId(), draftSnapshot: draft };
+}
+
+/** Matches the native host's Pydantic `Message.message` max_length and the
+ * desktop bridge's pre-admission length check, both 64,000 characters. The
+ * composer pre-checks locally so an over-long draft can never dead-end in a
+ * rejection loop. Callers pass the exact string that would be sent. */
+export const LAUNCHER_ASSISTANT_MAX_MESSAGE_CHARS = 64_000;
+
+export function launcherAssistantMessageOverLimit(message: string): boolean {
+  return message.length > LAUNCHER_ASSISTANT_MAX_MESSAGE_CHARS;
+}
+
+/** A refusal that provably happened before any admission (renderer-side payload
+ * validation, or the desktop bridge rejecting the envelope before the host RPC)
+ * leaves nothing queued: the composer may unlock immediately. Everything else —
+ * transport loss, timeouts, an unconfirmed host response — keeps the
+ * conservative unconfirmed lock because the outcome is genuinely unknown.
+ * Classification is structural (name/message) because Electron re-creates the
+ * error across the context bridge. */
+export function launcherAssistantSendDefinitelyRejected(error: unknown): boolean {
+  return error instanceof Error
+    && (error.name === "LauncherAssistantRejectedError"
+      // The desktop bridge's pre-admission HostError code, surfaced as the
+      // caught Error's message; thrown only before the send RPC leaves main.
+      || error.message === "ASSISTANT_REQUEST_INVALID"
+      || /^Error invoking remote method '[^']+': (?:Error: )?ASSISTANT_REQUEST_INVALID$/.test(error.message));
 }
 
 export function launcherAssistantActivity(source: SessionActivitySource = {}): {
@@ -151,4 +182,60 @@ export function launcherDispatchReceiptLabel(row: LauncherAssistantDispatch, lan
   if (status && words[status]) return words[status][lang === "zh" ? 0 : 1];
   return status ? `${lang === "zh" ? "原生任务状态" : "Native task status"}: ${status}`
     : lang === "zh" ? "待回执" : "Awaiting receipt";
+}
+
+/** The assistant identity's bound dialogue model, read-only. The launcher
+ * surface never edits model parameters (no native verb), so this stays a plain
+ * display string; an unset binding says so instead of pretending a model. */
+export function launcherAssistantModelDisplay(modelId: string | undefined | null, lang: "zh" | "en"): string {
+  const id = String(modelId ?? "").trim();
+  return id || (lang === "zh" ? "未绑定模型" : "No model bound");
+}
+
+/** The launcher host's lightweight dictionary avoids the workbench dictionary
+ * loader; segment labels fall back to promptSegmentDisplayLabel's built-in
+ * mapping, and only unknown keys degrade to the generic "other" name. */
+const launcherIdentityTranslator = (key: string) => key;
+
+/** Read-only composer context ring from the native detail's usage projections.
+ * Same builders as the chat page; the cache-diagnostics handoff and the
+ * auto-compression countdown stay off because the launcher surface mounts
+ * neither the diagnostics dialog nor the runtime compression settings. */
+export function launcherAssistantContextRing(
+  detail: Pick<SessionDetail, "contextUsage" | "lastContextComposition" | "lastCacheComposition" | "llmUsage"> | undefined,
+  lang: "zh" | "en",
+): ComposerContextRingModel | null {
+  if (!detail || (!detail.contextUsage && !detail.lastContextComposition)) return null;
+  const usage = resolveComposerContextUsage({
+    contextUsage: detail.contextUsage ?? null,
+    contextComposition: detail.lastContextComposition ?? null,
+  });
+  const cache = detail.lastCacheComposition;
+  return buildComposerContextRingModel({
+    usageUsed: usage.used,
+    usageLimit: usage.limit,
+    hitPercent: Math.round(Math.max(0, Math.min(1, cache?.cacheHitRate ?? 0)) * 100),
+    detailAvailable: false,
+    segments: (detail.lastContextComposition?.segments ?? []).map(segment => ({
+      ...segment,
+      label: promptSegmentDisplayLabel(segment, lang, launcherIdentityTranslator),
+      contentPreview: segment.description,
+    })),
+    lang,
+    cacheSource: cache?.source,
+    cacheUsageObserved: cache?.cacheUsageObserved,
+    cachedInputTokens: cache?.cachedInputTokens,
+    cacheCreationInputTokens: cache?.cacheCreationInputTokens,
+    tokensPerSecond: detail.llmUsage?.tokensPerSecond ?? null,
+  });
+}
+
+/** The assistant's edit affordance backfills the composer with a previous user
+ * message's text for a NEW send: the native facade has no edit-resubmit verb,
+ * so history is never replaced and the copy must not claim it. Returns null
+ * for non-user rows or empty content (nothing honest to backfill). */
+export function launcherAssistantEditBackfillDraft(message: { role: ConversationMessage["role"]; content?: string }): string | null {
+  if (message.role !== "user") return null;
+  const content = String(message.content ?? "");
+  return content.trim() ? content : null;
 }

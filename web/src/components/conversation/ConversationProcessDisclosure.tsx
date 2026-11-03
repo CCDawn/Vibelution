@@ -34,6 +34,9 @@ type ConversationProcessDisclosureProps = {
   children: ReactNode;
   messageOrder?: ReadonlyMap<string, number>;
   onUserToggle?: ConversationProcessUserToggle;
+  /** Session-owned user choice survives row identity changes and remounts. */
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
   /**
    * True while the owning assistant turn is still streaming. Multi-step agents
    * often finish every current tool before the next model step; without this
@@ -263,6 +266,8 @@ export function ConversationProcessDisclosure({
   children,
   messageOrder,
   onUserToggle,
+  expanded: controlledExpanded,
+  onExpandedChange,
   turnStreaming = false,
   turnStartedAt,
   activeStage,
@@ -285,7 +290,7 @@ export function ConversationProcessDisclosure({
     handleContentTransitionEnd,
     handleSummaryClick,
     mounted,
-  } = useConversationProcessDisclosureMotion(running, onUserToggle);
+  } = useConversationProcessDisclosureMotion(running, onUserToggle, controlledExpanded, onExpandedChange);
   const contentId = useId();
   const contentRef = useRef<HTMLDivElement>(null);
   const summaryRef = useRef<HTMLElement>(null);

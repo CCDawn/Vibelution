@@ -65,13 +65,13 @@ afterEach(() => {
   errorSpy.mockRestore();
 });
 
-function mountCompletionFlow(ctx: TeamsWorkspacePanelRenderContext) {
+function mountCompletionFlow(ctx: TeamsWorkspacePanelRenderContext, presentation: "board" | "rail" = "board") {
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
   const { renderKnowledgeCollectionCompletionFlowPanel } = createTeamsWorkspacePanelRenderers(ctx);
   act(() => {
-    root?.render(<MemoryRouter>{renderKnowledgeCollectionCompletionFlowPanel()}</MemoryRouter>);
+    root?.render(<MemoryRouter>{renderKnowledgeCollectionCompletionFlowPanel({ presentation })}</MemoryRouter>);
   });
   return host;
 }
@@ -134,5 +134,80 @@ describe("renderKnowledgeCollectionCompletionFlowPanel assembly fallbacks", () =
     expect(openChat).toHaveBeenCalledWith("finding");
     expect(rerun).toHaveBeenCalledOnce();
     expect(assemblyErrors()).toHaveLength(0);
+  });
+
+  it.each(["board", "rail"] as const)("explains blocked Agent chat before a run exists in %s presentation", (presentation) => {
+    const openChat = vi.fn();
+    const binding = { agentId: "source-agent", agent: { agentId: "source-agent" } };
+    const state = vi.fn(() => ({ binding, route: "", status: "blocked" }));
+    const element = mountCompletionFlow(completionFlowContext({
+      openSourceCollectionStageAgentChat: openChat,
+      sourceCollectionStagePrimaryAgentBinding: () => binding,
+      sourceCollectionStageAgentChatState: state,
+    }), presentation);
+
+    const chat = buttonByText(element, "Agent 私聊");
+    expect(chat.disabled).toBe(true);
+    expect(chat.title).toContain("开始资料搜集");
+    expect(element.textContent).toContain("开始资料搜集");
+    act(() => chat.click());
+    expect(openChat).not.toHaveBeenCalled();
+    expect(state).toHaveBeenCalledWith("finding");
+  });
+
+  it("disables Agent chat while its context is loading", () => {
+    const openChat = vi.fn();
+    const element = mountCompletionFlow(completionFlowContext({
+      openSourceCollectionStageAgentChat: openChat,
+      sourceCollectionStageAgentChatState: () => ({ binding: null, route: "", status: "loading" }),
+    }));
+
+    const chat = buttonByText(element, "Agent 私聊");
+    expect(chat.disabled).toBe(true);
+    expect(chat.title).toContain("加载");
+    act(() => chat.click());
+    expect(openChat).not.toHaveBeenCalled();
+  });
+
+  it("keeps ready Agent chat callable", () => {
+    const openChat = vi.fn();
+    const element = mountCompletionFlow(completionFlowContext({
+      openSourceCollectionStageAgentChat: openChat,
+      sourceCollectionStageAgentChatState: () => ({ binding: { agent: { agentId: "source-agent" } }, route: "", status: "ready" }),
+    }));
+
+    const chat = buttonByText(element, "Agent 私聊");
+    expect(chat.disabled).toBe(false);
+    act(() => chat.click());
+    expect(openChat).toHaveBeenCalledExactlyOnceWith("finding");
+  });
+
+  it.each(["stale-agent", ""])("keeps the Challenge Cup configuration fallback for blocked Agent %s", (agentId) => {
+    const openChat = vi.fn();
+    const binding = { agentId, agent: null };
+    const element = mountCompletionFlow(completionFlowContext({
+      selectedTeam: { teamId: "research-team", teamKind: "research", teamSource: "research_organization" },
+      openSourceCollectionStageAgentChat: openChat,
+      sourceCollectionStagePrimaryAgentBinding: () => binding,
+      sourceCollectionStageAgentChatState: () => ({ binding, route: "", status: "blocked" }),
+    }));
+
+    const chat = buttonByText(element, "Agent 私聊");
+    expect(chat.disabled).toBe(false);
+    act(() => chat.click());
+    expect(openChat).toHaveBeenCalledExactlyOnceWith("finding");
+  });
+
+  it.each(["repair", "error"])("keeps the existing %s action callable", (status) => {
+    const openChat = vi.fn();
+    const element = mountCompletionFlow(completionFlowContext({
+      openSourceCollectionStageAgentChat: openChat,
+      sourceCollectionStageAgentChatState: () => ({ binding: null, route: "", status }),
+    }));
+
+    const chat = buttonByText(element, "Agent 私聊");
+    expect(chat.disabled).toBe(false);
+    act(() => chat.click());
+    expect(openChat).toHaveBeenCalledExactlyOnceWith("finding");
   });
 });

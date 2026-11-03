@@ -1,13 +1,101 @@
-/** Main-only pump for the host session-event SSE stream. Envelopes carry
- * identity and ordering only: detail/delta payloads are parsed and dropped
- * here, and the bearer token never leaves this process. */
+/** Main-only SSE bridge. Forward native delta fields without inventing items
+ * or cutting their text. A frame that cannot cross the bounded IPC boundary
+ * requests an authoritative detail refresh instead. Connection credentials and
+ * session_detail payloads never leave Main through this channel. */
 
 export type AssistantSessionEventEnvelope = {
   type: string;
   sessionId: string;
   ledgerSeq?: number;
+  /** Main-local SSE connection identity; native deltaSeq can reset on reconnect. */
+  connectionEpoch?: number;
   at: number;
+  turnId?: string;
+  done?: boolean;
+  deltaSeq?: number;
+  deltaSeqFrom?: number;
+  stage?: string;
+  updatedAt?: string;
+  turnItems?: Record<string, unknown>[];
+  turnItemAppends?: Record<string, unknown>[];
+  streamEncoding?: "append-v1";
+  needsRefresh?: true;
 };
+
+const MAX_ENVELOPE_BYTES = 256 * 1024;
+// Main lifetime, including replacement pump instances. A renderer may outlive
+// a native host/pump replacement but never a full Electron Main restart.
+let latestConnectionEpoch = 0;
+const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
+const sequence = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
+const identity = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= 256;
+const ITEM_FIELDS = ["id", "itemId", "version", "sessionId", "turnId", "status", "revision", "sequence", "createdAt", "updatedAt", "terminal", "title", "summary", "diagnosticSummary", "metadata", "type", "phase", "text", "callId", "toolName", "input", "output", "semanticStatus", "durationMs", "error", "attempt", "targetItemId", "reason", "code"];
+const APPEND_FIELDS = ["kind", "itemId", "itemType", "baseLength", "appendedLength", "appendedText"];
+const pick = (row: Record<string, unknown>, keys: string[]) => Object.fromEntries(keys.filter(key => key in row).map(key => [key, row[key]]));
+
+function nativeItem(value: unknown, sessionId: string, turnId: string): value is Record<string, unknown> {
+  if (!object(value) || value.version !== 3 || !identity(value.id) || !identity(value.itemId)
+    || value.sessionId !== sessionId || value.turnId !== turnId || !sequence(value.revision) || !sequence(value.sequence)
+    || !["pending", "running", "completed", "failed"].includes(String(value.status))) return false;
+  switch (value.type) {
+    case "agent_message": return ["commentary", "final_answer"].includes(String(value.phase)) && typeof value.text === "string";
+    case "reasoning": return typeof value.text === "string";
+    case "tool_call": return identity(value.callId) && typeof value.toolName === "string";
+    case "retry": return sequence(value.attempt) && identity(value.targetItemId) && typeof value.reason === "string";
+    case "status": case "error": return typeof value.code === "string" && typeof value.text === "string";
+    default: return false;
+  }
+}
+
+function nativeAppend(value: unknown): value is Record<string, unknown> {
+  return object(value) && value.kind === "append" && identity(value.itemId)
+    && ["agent_message", "reasoning"].includes(String(value.itemType)) && sequence(value.baseLength)
+    && sequence(value.appendedLength) && typeof value.appendedText === "string" && value.appendedText.length > 0;
+}
+
+/** Closed projection for the leased assistant session only. */
+export function sessionEventEnvelope(input: {
+  data: Record<string, unknown> | null;
+  frameName: string;
+  frameId?: string;
+  leaseSessionId: string;
+  at: number;
+  connectionEpoch?: number;
+}): AssistantSessionEventEnvelope | null {
+  const data = input.data;
+  if (typeof data?.sessionId === "string" && data.sessionId !== input.leaseSessionId) return null;
+  const type = (typeof data?.type === "string" && data.type ? data.type : input.frameName).slice(0, 80);
+  const sessionId = input.leaseSessionId;
+  const seq = typeof input.frameId === "string" && /^[0-9]+$/.test(input.frameId) ? Number(input.frameId) : Number.NaN;
+  const ledgerSeq = sequence(data?.ledgerSeq) ? data.ledgerSeq : seq;
+  const ledger = sequence(ledgerSeq) ? { ledgerSeq } : {};
+  const envelope: AssistantSessionEventEnvelope = { type, sessionId, ...ledger, at: input.at };
+  if (sequence(input.connectionEpoch) && input.connectionEpoch > 0) envelope.connectionEpoch = input.connectionEpoch;
+  if (type !== "assistant_delta") return envelope;
+  const fallback: AssistantSessionEventEnvelope = { ...envelope, needsRefresh: true };
+  if (identity(data?.turnId)) fallback.turnId = data.turnId;
+  if (!data || data.sessionId !== sessionId || !identity(data.turnId) || typeof data.done !== "boolean"
+    || typeof data.stage !== "string" || data.stage.length > 256 || typeof data.updatedAt !== "string" || data.updatedAt.length > 80
+    || !Array.isArray(data.turnItems) || !data.turnItems.every(item => nativeItem(item, sessionId, data.turnId as string))
+    || [data.deltaSeq, data.deltaSeqFrom, data.ledgerSeq].some(value => value !== undefined && !sequence(value))
+    || data.streamEncoding !== undefined && data.streamEncoding !== "append-v1"
+    || data.turnItemAppends !== undefined && (!Array.isArray(data.turnItemAppends) || !data.turnItemAppends.every(nativeAppend)
+      || data.turnItemAppends.length > 0 && data.streamEncoding !== "append-v1")) return fallback;
+  Object.assign(envelope, {
+    turnId: data.turnId, done: data.done, stage: data.stage, updatedAt: data.updatedAt,
+    turnItems: data.turnItems.map(item => pick(item as Record<string, unknown>, ITEM_FIELDS)),
+  });
+  for (const key of ["deltaSeq", "deltaSeqFrom", "streamEncoding"] as const) {
+    if (data[key] !== undefined) Object.assign(envelope, { [key]: data[key] });
+  }
+  if (Array.isArray(data.turnItemAppends)) envelope.turnItemAppends = data.turnItemAppends.map(item => pick(item as Record<string, unknown>, APPEND_FIELDS));
+  if (Buffer.byteLength(JSON.stringify(envelope), "utf8") > MAX_ENVELOPE_BYTES) {
+    console.warn("ASSISTANT_EVENT_ENVELOPE_OVERSIZE",
+      { type, sessionId, at: input.at });
+    return fallback;
+  }
+  return envelope;
+}
 
 /** One live host generation's connection facts, leased per connection attempt. */
 export type AssistantEventPumpLease = {
@@ -39,6 +127,7 @@ export class SseFrameParser {
   private comment = "";
   private sawComment = false;
   private discarding = false;
+  private discardingLine = false;
   private lastId?: string;
 
   feed(chunk: string): SseFrame[] {
@@ -48,13 +137,23 @@ export class SseFrameParser {
       const end = this.buffer.search(/\r\n|\r|\n/);
       if (end < 0) {
         // An unterminated block cannot legitimately exceed the frame cap.
-        if (this.buffer.length > DEFAULT_MAX_FRAME_BYTES) this.buffer = "";
+        if (this.buffer.length > DEFAULT_MAX_FRAME_BYTES) {
+          this.buffer = "";
+          this.dataLines = [];
+          this.dataSeen = true;
+          this.discarding = true;
+          this.discardingLine = true;
+        }
         break;
       }
       // A lone trailing "\r" may precede "\n" in the next chunk; wait for it.
       if (this.buffer[end] === "\r" && end + 1 === this.buffer.length) break;
       const line = this.buffer.slice(0, end);
       this.buffer = this.buffer.slice(end + (this.buffer[end] === "\r" && this.buffer[end + 1] === "\n" ? 2 : 1));
+      if (this.discardingLine) {
+        this.discardingLine = false;
+        continue;
+      }
       const frame = this.line(line);
       if (frame) frames.push(frame);
     }
@@ -175,6 +274,13 @@ export function startAssistantEventPump(options: {
           throw new Error("ASSISTANT_EVENT_STREAM_HTTP_FAILED");
         }
         if (!response.body) throw new Error("ASSISTANT_EVENT_STREAM_INVALID");
+        // Fail closed at the safe integer bound instead of wrapping and making
+        // a new connection indistinguishable from a retired one.
+        if (latestConnectionEpoch >= Number.MAX_SAFE_INTEGER) {
+          await response.body.cancel().catch(() => undefined);
+          return;
+        }
+        const connectionEpoch = ++latestConnectionEpoch;
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         const parser = new SseFrameParser();
@@ -190,7 +296,7 @@ export function startAssistantEventPump(options: {
               // Any complete frame — event or keep-alive comment — proves liveness.
               retryMs = minRetryMs;
               if (frame.kind === "comment") {
-                options.publish({ type: "heartbeat", sessionId: lease.sessionId || "", at: now() });
+                options.publish({ type: "heartbeat", sessionId: lease.sessionId || "", at: now(), connectionEpoch });
                 continue;
               }
               if (frame.id !== undefined) lastEventId = frame.id;
@@ -201,11 +307,9 @@ export function startAssistantEventPump(options: {
                   if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) data = parsed as Record<string, unknown>;
                 } catch { data = null; }
               }
-              const type = typeof data?.type === "string" && data.type ? data.type : frame.name;
-              const sessionId = typeof data?.sessionId === "string" && data.sessionId ? data.sessionId : (lease.sessionId || "");
-              const seq = typeof frame.id === "string" && /^[0-9]+$/.test(frame.id) ? Number(frame.id) : Number.NaN;
-              options.publish({ type, sessionId,
-                ...(Number.isSafeInteger(seq) && seq >= 0 ? { ledgerSeq: seq } : {}), at: now() });
+              const envelope = sessionEventEnvelope({ data, frameName: frame.name,
+                ...(frame.id !== undefined ? { frameId: frame.id } : {}), leaseSessionId: lease.sessionId || "", at: now(), connectionEpoch });
+              if (envelope) options.publish(envelope);
             }
           }
         } finally {

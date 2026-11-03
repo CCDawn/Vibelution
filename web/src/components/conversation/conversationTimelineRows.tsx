@@ -352,6 +352,7 @@ export type ConversationTimelineRowsDeps = {
   imageArtifactUrlsBeforeMessage: Map<string, Set<string>>;
   timelineModelSwitchBoundaries: ReadonlyMap<string, ConversationModelSwitchBoundary>;
   messageCurationMap: Map<string, MessageCurationDecision>;
+  messageCurationEnabled: boolean;
   sectionExpansion: Record<string, Record<string, boolean>>;
   computerUseSessionResults: Record<string, ComputerUseResult>;
   computerUseSessionPending: Record<string, "confirm" | "cancel" | undefined>;
@@ -441,6 +442,7 @@ export function createConversationTimelineRows({
   imageArtifactUrlsBeforeMessage,
   timelineModelSwitchBoundaries,
   messageCurationMap,
+  messageCurationEnabled,
   sectionExpansion,
   computerUseSessionResults,
   computerUseSessionPending,
@@ -753,7 +755,7 @@ export function createConversationTimelineRows({
               : null;
             // SFT curation actions share the copy affordance's gate and stay
             // out of companion/inbox/group surfaces by contract.
-            const messageCurationGate = Boolean(copyableAnswerText)
+            const messageCurationGate = messageCurationEnabled && Boolean(copyableAnswerText)
               && !companionMode
               && !agentInboxMessage
               && !groupTranscriptMessage;

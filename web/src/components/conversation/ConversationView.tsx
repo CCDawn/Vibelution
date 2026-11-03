@@ -1045,6 +1045,7 @@ export const ConversationView = React.memo(function ConversationView({
     resetSessionExpansion,
     getCachedResponseSegments,
     getExpansionState,
+    setExpansionState,
     toggleSection,
   } = useConversationProcessExpansion({
     sessionId,
@@ -1053,6 +1054,8 @@ export const ConversationView = React.memo(function ConversationView({
     agentRenderStatesByMessageId,
     agentTimelineItemsByMessageId,
     agentOperationGroupsByMessageId,
+    timelineRowIdentities: activeAgentMessageTimelineProjection.rowIdentities,
+    retiredOverlayAliases: activeAgentMessageTimelineProjection.retiredOverlayAliases,
   });
 
   const {
@@ -1409,6 +1412,8 @@ export const ConversationView = React.memo(function ConversationView({
     imageArtifactUrlsBeforeMessage,
     activeTimelineMessageOrder,
     handleProcessDisclosureUserToggle,
+    getExpansionState,
+    setExpansionState,
     showComposer,
     composerDisabled,
     composerValue,
@@ -1439,6 +1444,7 @@ export const ConversationView = React.memo(function ConversationView({
     imageArtifactUrlsBeforeMessage,
     timelineModelSwitchBoundaries,
     messageCurationMap,
+    messageCurationEnabled: Boolean(sessionId),
     sectionExpansion,
     computerUseSessionResults,
     computerUseSessionPending,

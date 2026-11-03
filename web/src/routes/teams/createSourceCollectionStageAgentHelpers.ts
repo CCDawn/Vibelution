@@ -172,6 +172,10 @@ export function createSourceCollectionStageAgentHelpers(
       }
       return;
     }
+    if (agentId && chatState.route) {
+      navigate(chatState.route);
+      return;
+    }
     if (challengeCupAgentUnavailable && chatState.status !== "loading") {
       navigate(
         boundAgentId

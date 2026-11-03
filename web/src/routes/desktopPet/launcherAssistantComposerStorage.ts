@@ -1,10 +1,36 @@
+import type { ComposerImageAttachment } from "../chat/chatComposerSubmitModel";
 import type { LauncherAssistantQueuedAcceptance, LauncherAssistantSubmission } from "./launcherAssistantModel";
+
+/** Recoverable attachment metadata only: id plus the uploaded backend artifact.
+ * The File/Blob body and its local blob: preview URL are not serializable, so
+ * they are intentionally never persisted; a restored chip reuses its artifactId
+ * (no re-upload) and fetches a fresh preview through the read IPC. */
+export type PersistedLauncherComposerAttachment = {
+  id: string;
+  artifactId: string;
+  filename: string;
+  contentType: string;
+  sizeBytes: number;
+  kind: "image" | "document";
+};
 
 export type PersistedLauncherComposer = {
   draft: string;
   outstanding: LauncherAssistantSubmission | null;
   acceptedTurnId: string;
   queuedAcceptance: LauncherAssistantQueuedAcceptance | null;
+  attachments: PersistedLauncherComposerAttachment[];
+};
+
+/** Write-side input: the Route's richer snapshot (full tray chips, continuation)
+ * is accepted and reduced to recovery fields. Already-persisted metadata rows
+ * are also accepted so recovery snapshots re-save without re-reduction. */
+export type LauncherComposerPersistenceInput = {
+  draft: string;
+  outstanding: LauncherAssistantSubmission | null;
+  acceptedTurnId: string;
+  queuedAcceptance: LauncherAssistantQueuedAcceptance | null;
+  attachments?: readonly (ComposerImageAttachment | PersistedLauncherComposerAttachment)[] | undefined;
 };
 
 type ComposerSurface = "floating" | "embedded";
@@ -14,7 +40,12 @@ const MAX_TEXT_CHARS = 64_000;
 const MAX_JSON_CHARS = 1_200_000;
 const MAX_ATTACHMENT_IDS = 32;
 const SNAPSHOT_FIELDS = ["draft", "outstanding", "acceptedTurnId", "queuedAcceptance"];
+// `attachments` is optional so envelopes written before attachment persistence
+// (same VERSION) still load; new writes always include the field.
+const SNAPSHOT_ALLOWED = [...SNAPSHOT_FIELDS, "attachments"];
 const SUBMISSION_FIELDS = ["message", "requestId", "draftSnapshot", "attachmentIds", "attachmentSnapshotIds", "preserveDraft"];
+const ATTACHMENT_FIELDS = ["id", "artifactId", "filename", "contentType", "sizeBytes", "kind"];
+const MAX_FILENAME_CHARS = 255;
 
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -27,6 +58,10 @@ function fields(value: Record<string, unknown>, required: string[], allowed = re
 
 function id(value: unknown, max = 255): value is string {
   return typeof value === "string" && value.length <= max && /^[A-Za-z0-9_.:-]+$/.test(value);
+}
+
+function artifactId(value: unknown): value is string {
+  return typeof value === "string" && value.length <= 255 && /^[A-Za-z0-9_.-]+$/.test(value) && value !== "." && value !== "..";
 }
 
 function text(value: unknown): value is string {
@@ -55,9 +90,56 @@ function submission(value: unknown): LauncherAssistantSubmission | null {
   };
 }
 
+function contentTypeValid(value: unknown): value is string {
+  return typeof value === "string" && value.length <= 127
+    && /^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*$/.test(value);
+}
+
+function persistedAttachment(value: unknown): PersistedLauncherComposerAttachment | null {
+  if (!record(value) || !fields(value, ATTACHMENT_FIELDS) || !id(value.id, 128) || !artifactId(value.artifactId)
+    || typeof value.filename !== "string" || Array.from(value.filename).length > MAX_FILENAME_CHARS
+    || /[\u0000-\u001f\u007f]/.test(value.filename)
+    || !contentTypeValid(value.contentType) || !Number.isSafeInteger(value.sizeBytes) || (value.sizeBytes as number) < 0
+    || !["image", "document"].includes(String(value.kind))) return null;
+  return { id: value.id, artifactId: value.artifactId, filename: value.filename,
+    contentType: value.contentType, sizeBytes: value.sizeBytes as number, kind: value.kind as "image" | "document" };
+}
+
+function attachmentRows(value: unknown): PersistedLauncherComposerAttachment[] | null {
+  if (!Array.isArray(value) || value.length > MAX_ATTACHMENT_IDS) return null;
+  const rows: PersistedLauncherComposerAttachment[] = [];
+  for (const item of value) {
+    const row = persistedAttachment(item);
+    if (!row) return null;
+    rows.push(row);
+  }
+  return rows;
+}
+
+/** Only already-uploaded chips are recoverable: pending/failed ones still hold
+ * their unreadable File body, so persisting them would promise a restore the
+ * tray cannot honour. Metadata rows without an upload lifecycle pass through. */
+function persistedAttachments(
+  value: readonly (ComposerImageAttachment | PersistedLauncherComposerAttachment)[] | null | undefined,
+): PersistedLauncherComposerAttachment[] {
+  if (!value) return [];
+  const rows: PersistedLauncherComposerAttachment[] = [];
+  for (const item of value.slice(0, MAX_ATTACHMENT_IDS)) {
+    const source = item as Partial<ComposerImageAttachment & PersistedLauncherComposerAttachment>;
+    if (source.uploadStatus !== undefined && source.uploadStatus !== "uploaded") continue;
+    const row = persistedAttachment({ id: source.id, artifactId: source.artifactId,
+      filename: Array.from(source.filename || "").slice(0, MAX_FILENAME_CHARS).join("").replace(/[\u0000-\u001f\u007f]/g, ""),
+      contentType: source.contentType, sizeBytes: source.sizeBytes, kind: source.kind });
+    if (row) rows.push(row);
+  }
+  return rows;
+}
+
 function snapshot(value: unknown): PersistedLauncherComposer | null {
-  if (!record(value) || !fields(value, SNAPSHOT_FIELDS) || !text(value.draft)
+  if (!record(value) || !fields(value, SNAPSHOT_FIELDS, SNAPSHOT_ALLOWED) || !text(value.draft)
     || (value.acceptedTurnId !== "" && !id(value.acceptedTurnId))) return null;
+  const attachments = value.attachments === undefined ? [] : attachmentRows(value.attachments);
+  if (!attachments) return null;
   const outstanding = submission(value.outstanding);
   if (value.outstanding !== null && !outstanding) return null;
   let queuedAcceptance: LauncherAssistantQueuedAcceptance | null = null;
@@ -67,7 +149,7 @@ function snapshot(value: unknown): PersistedLauncherComposer | null {
       || !id(receipt.id) || !id(receipt.clientSubmissionId, 128) || typeof receipt.observed !== "boolean") return null;
     queuedAcceptance = { id: receipt.id, clientSubmissionId: receipt.clientSubmissionId, observed: receipt.observed };
   }
-  return { draft: value.draft, outstanding, acceptedTurnId: value.acceptedTurnId as string, queuedAcceptance };
+  return { draft: value.draft, outstanding, acceptedTurnId: value.acceptedTurnId as string, queuedAcceptance, attachments };
 }
 
 function key(sessionId: string, surface: ComposerSurface): string | null {
@@ -93,15 +175,18 @@ export function loadLauncherComposer(
   }
 }
 
-/** Pick only recovery fields; File/Blob, continuation and other Route state never enter storage. */
+/** Pick only recovery fields; File/Blob bodies, blob: previews, continuation and
+ * other Route state never enter storage. Uploaded attachment metadata is kept so
+ * a reload can rebuild the tray without re-uploading. */
 export function saveLauncherComposer(
-  sessionId: string, surface: ComposerSurface, value: PersistedLauncherComposer, storage?: Pick<Storage, "setItem">,
+  sessionId: string, surface: ComposerSurface, value: LauncherComposerPersistenceInput, storage?: Pick<Storage, "setItem">,
 ): boolean {
   try {
     const storageKey = key(sessionId, surface);
     if (!storageKey || !record(value)) return false;
     const saved = snapshot({ draft: value.draft, outstanding: value.outstanding,
-      acceptedTurnId: value.acceptedTurnId, queuedAcceptance: value.queuedAcceptance });
+      acceptedTurnId: value.acceptedTurnId, queuedAcceptance: value.queuedAcceptance,
+      attachments: persistedAttachments(value.attachments) });
     if (!saved) return false;
     const raw = JSON.stringify({ version: VERSION, sessionId, surface, snapshot: saved });
     if (raw.length > MAX_JSON_CHARS) return false;
@@ -110,4 +195,22 @@ export function saveLauncherComposer(
   } catch {
     return false;
   }
+}
+
+/** Rebuild tray chips from persisted rows. The original File body and blob:
+ * preview are unrecoverable, so a restored chip carries an empty placeholder
+ * File (never re-uploaded: submit reuses the stored artifactId) with an empty
+ * preview that the Route fills asynchronously through the attachment read IPC. */
+export function restoreLauncherComposerAttachments(rows: readonly PersistedLauncherComposerAttachment[]): ComposerImageAttachment[] {
+  return rows.map(row => ({
+    id: row.id,
+    file: new File([], row.filename, { type: row.contentType }),
+    filename: row.filename,
+    previewUrl: "",
+    sizeBytes: row.sizeBytes,
+    contentType: row.contentType,
+    kind: row.kind,
+    uploadStatus: "uploaded",
+    artifactId: row.artifactId,
+  }));
 }

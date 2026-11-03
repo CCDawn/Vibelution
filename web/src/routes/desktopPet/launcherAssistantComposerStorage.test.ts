@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { loadLauncherComposer, saveLauncherComposer, type PersistedLauncherComposer } from "./launcherAssistantComposerStorage";
+import { loadLauncherComposer, restoreLauncherComposerAttachments, saveLauncherComposer,
+  type PersistedLauncherComposer } from "./launcherAssistantComposerStorage";
+import type { ComposerImageAttachment } from "../chat/chatComposerSubmitModel";
 
 function memoryStorage() {
   const entries = new Map<string, string>();
@@ -11,7 +13,7 @@ function memoryStorage() {
 }
 
 function empty(): PersistedLauncherComposer {
-  return { draft: "", outstanding: null, acceptedTurnId: "", queuedAcceptance: null };
+  return { draft: "", outstanding: null, acceptedTurnId: "", queuedAcceptance: null, attachments: [] };
 }
 
 function pending(): PersistedLauncherComposer {
@@ -19,6 +21,14 @@ function pending(): PersistedLauncherComposer {
     message: "原消息", requestId: "original.request:1-2_3", draftSnapshot: "  原消息  ",
     attachmentIds: ["artifact-1"], attachmentSnapshotIds: ["composer-image-1"], preserveDraft: true,
   } };
+}
+
+function chip(overrides: Partial<ComposerImageAttachment> = {}): ComposerImageAttachment {
+  return {
+    id: "composer-image-1", file: new File([new Uint8Array([1])], "shot.png", { type: "image/png" }),
+    filename: "shot.png", previewUrl: "blob:preview", sizeBytes: 1, contentType: "image/png", kind: "image",
+    ...overrides,
+  };
 }
 
 afterEach(() => vi.unstubAllGlobals());
@@ -39,7 +49,7 @@ describe("launcher assistant composer recovery storage", () => {
     expect(storage.entries.size).toBe(3);
     expect(loadLauncherComposer("session-1", "floating", storage)).toEqual(pending());
     expect(loadLauncherComposer("session-1", "embedded", storage)?.draft).toBe("embedded draft");
-    expect(loadLauncherComposer("session-2", "floating", storage)?.draft).toBe("other session");
+    expect(loadLauncherComposer("session-2", "floating", storage)).toEqual({ ...empty(), draft: "other session" });
   });
 
   it("overwrites an old outstanding request with native acceptance and then an empty snapshot", () => {
@@ -60,15 +70,67 @@ describe("launcher assistant composer recovery storage", () => {
     expect(loadLauncherComposer("session", "floating", storage)).toEqual(value);
   });
 
-  it("projects only recovery fields from richer Route state and never serializes attachments or continuation", () => {
+  it("persists only uploaded attachment metadata and never a File body, preview or extra Route state", () => {
     const storage = memoryStorage();
     const forbidden = { toJSON: () => { throw new Error("must never serialize extra state"); } };
-    const value = { ...pending(), attachments: [forbidden], continuation: forbidden, token: forbidden, policy: forbidden };
+    const attachments = [
+      chip({ id: "chip-uploaded", uploadStatus: "uploaded", artifactId: "user-image-1.png" }),
+      chip({ id: "chip-pending", uploadStatus: "pending" }),
+      chip({ id: "chip-failed", uploadStatus: "failed" }),
+      chip({ id: "chip-uploading", uploadStatus: "uploading", artifactId: undefined }),
+    ];
+    const value = { ...pending(), attachments, continuation: forbidden, token: forbidden };
     expect(saveLauncherComposer("session", "floating", value, storage)).toBe(true);
+    expect(loadLauncherComposer("session", "floating", storage)).toEqual({ ...pending(),
+      attachments: [{ id: "chip-uploaded", artifactId: "user-image-1.png", filename: "shot.png",
+        contentType: "image/png", sizeBytes: 1, kind: "image" }] });
+    const savedSnapshot = JSON.parse([...storage.entries.values()][0]).snapshot;
+    expect(Object.keys(savedSnapshot)).toEqual(["draft", "outstanding", "acceptedTurnId", "queuedAcceptance", "attachments"]);
+    expect(JSON.stringify(savedSnapshot.attachments)).not.toContain("blob:");
+    expect(JSON.stringify(savedSnapshot)).not.toContain("continuation");
+  });
+
+  it("loads envelopes written before attachment persistence with an empty tray", () => {
+    const storage = memoryStorage();
+    saveLauncherComposer("session", "floating", pending(), storage);
+    const [key, raw] = [...storage.entries][0];
+    const legacy = JSON.parse(raw);
+    delete legacy.snapshot.attachments;
+    storage.setItem(key, JSON.stringify(legacy));
     expect(loadLauncherComposer("session", "floating", storage)).toEqual(pending());
-    expect(Object.keys(JSON.parse([...storage.entries.values()][0]).snapshot)).toEqual([
-      "draft", "outstanding", "acceptedTurnId", "queuedAcceptance",
-    ]);
+  });
+
+  it.each([
+    ["non-object attachment row", (row: any) => { row.snapshot.attachments = ["chip"]; }],
+    ["unknown attachment field", (row: any) => { row.snapshot.attachments[0].previewUrl = "blob:x"; }],
+    ["missing attachment field", (row: any) => { delete row.snapshot.attachments[0].artifactId; }],
+    ["bad attachment artifact", (row: any) => { row.snapshot.attachments[0].artifactId = "../escape"; }],
+    ["bad attachment size", (row: any) => { row.snapshot.attachments[0].sizeBytes = -1; }],
+    ["bad attachment kind", (row: any) => { row.snapshot.attachments[0].kind = "video"; }],
+    ["too many attachment rows", (row: any) => {
+      row.snapshot.attachments = Array.from({ length: 33 }, (_, index) =>
+        ({ id: `chip-${index}`, artifactId: `artifact-${index}`, filename: "f.png", contentType: "image/png", sizeBytes: 1, kind: "image" }));
+    }],
+  ])("rejects %s without deleting the stored input", (_label, mutate) => {
+    const storage = memoryStorage();
+    saveLauncherComposer("session", "floating", { ...empty(), attachments: [chip({ uploadStatus: "uploaded", artifactId: "a.png" })] }, storage);
+    const [key, raw] = [...storage.entries][0];
+    const row = JSON.parse(raw);
+    mutate(row);
+    const invalid = JSON.stringify(row);
+    storage.setItem(key, invalid);
+    expect(loadLauncherComposer("session", "floating", storage)).toBeNull();
+    expect(storage.getItem(key)).toBe(invalid);
+  });
+
+  it("rebuilds tray chips from persisted rows with a placeholder body and no preview", () => {
+    const restored = restoreLauncherComposerAttachments([{ id: "chip-1", artifactId: "user-image-1.png",
+      filename: "shot.png", contentType: "image/png", sizeBytes: 7, kind: "image" }]);
+    expect(restored).toHaveLength(1);
+    expect(restored[0]).toMatchObject({ id: "chip-1", artifactId: "user-image-1.png", filename: "shot.png",
+      contentType: "image/png", sizeBytes: 7, kind: "image", uploadStatus: "uploaded", previewUrl: "" });
+    expect(restored[0].file.name).toBe("shot.png");
+    expect(restored[0].file.size).toBe(0);
   });
 
   it("retains drafts across time without an arbitrary expiration", () => {

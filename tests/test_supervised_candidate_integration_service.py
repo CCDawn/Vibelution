@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from copy import deepcopy
@@ -36,18 +37,23 @@ def install_validation_authority(monkeypatch, tmp_path):
     monkeypatch.setattr(service.task_closeout, "acquire_integration_claim_with_retry", lambda *a, **kw: "integration-test")
     monkeypatch.setattr(service.task_closeout, "release_claim", lambda *a, **kw: None)
     monkeypatch.setattr(service.task_closeout, "complete_agent", lambda *a, **kw: None)
+    monkeypatch.setattr(service.task_closeout, "_coordination_call", lambda *a: {})
 
 
 def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    # Fixture setup keeps its original pytest-level budget. The production
+    # runner's separate 30s deadline is not part of this test helper's contract.
     result = subprocess.run(
-        ["git", *args],
+        service.git_process.git_command(args),
         cwd=str(repo),
         capture_output=True,
         text=True,
         encoding="utf-8",
         errors="replace",
+        stdin=subprocess.DEVNULL,
         check=False,
         env=service.local_quality_gate.git_hook_isolated_environment(),
+        **service.git_process.no_console_subprocess_kwargs(),
     )
     if check and result.returncode != 0:
         raise AssertionError(result.stderr or result.stdout)
@@ -328,7 +334,7 @@ def test_integrate_candidate_restores_clean_tree_when_commit_fails(tmp_path, mon
     assert not (project / "tests" / "candidate_marker.py").exists()
 
 
-def test_revert_candidate_commit_creates_auditable_revert(tmp_path):
+def test_revert_candidate_commit_creates_auditable_revert(tmp_path, monkeypatch):
     project = tmp_path / "project"
     candidate = tmp_path / "candidate"
     base_commit = _init_repo(project)
@@ -343,7 +349,41 @@ def test_revert_candidate_commit_creates_auditable_revert(tmp_path):
         manifest_root=tmp_path / "manifests",
     )
 
-    _git(project, "switch", "-c", "codex/revert")
+    # Integration installed the real reference-transaction hook. A direct
+    # update still fails; rollback must use its own exact old/new permit.
+    rejected = _git(project, "update-ref", "refs/heads/main", base_commit, integrated["commitSha"], check=False)
+    assert rejected.returncode != 0
+    assert "main_update_permit_required" in rejected.stderr
+    index_path = Path(_git(project, "rev-parse", "--git-path", "index").stdout.strip())
+    if not index_path.is_absolute():
+        index_path = project / index_path
+    index_before = index_path.read_bytes()
+    calls, permits = [], []
+    run_process = service.local_quality_gate.run_process
+
+    def acquire(context, *, agent_id):
+        assert agent_id.startswith("supervised-rollback-")
+        assert index_path.read_bytes() == index_before
+        assert _git(project, "rev-parse", "HEAD").stdout.strip() == integrated["commitSha"]
+        assert (project / "agent.py").read_text(encoding="utf-8") == "BASELINE = False\n"
+        assert _git(project, "status", "--porcelain=v1").stdout == ""
+        calls.append(("acquire", agent_id))
+        return "rollback-lease"
+
+    def observe_permit(argv, cwd, **kwargs):
+        if list(argv[:3]) == ["git", "merge", "--ff-only"]:
+            permit = json.loads(service.git_claim_guard._permit_path(project).read_text(encoding="utf-8"))
+            assert permit["oldSha"] == integrated["commitSha"]
+            assert permit["newSha"] == argv[3]
+            assert permit["integrationClaimId"] == "rollback-lease"
+            permits.append(permit)
+        return run_process(argv, cwd, **kwargs)
+
+    monkeypatch.setattr(service.task_closeout, "acquire_integration_claim_with_retry", acquire)
+    monkeypatch.setattr(service.task_closeout, "release_claim", lambda *a, **kw: calls.append(("release", a[1])))
+    monkeypatch.setattr(service.task_closeout, "_coordination_call", lambda *a: calls.append(a[1:]) or {})
+    monkeypatch.setattr(service.local_quality_gate, "run_process", observe_permit)
+    monkeypatch.setattr(service.git_claim_guard, "read_claim_binding", lambda *a: pytest.fail("rollback cannot revive a candidate owner"))
     result = service.revert_candidate_commit(
         project_root=project,
         integration_commit=str(integrated["commitSha"]),
@@ -354,10 +394,286 @@ def test_revert_candidate_commit_creates_auditable_revert(tmp_path):
     assert result["revertedCommit"] == integrated["commitSha"]
     assert result["revertCommit"] == _git(project, "rev-parse", "HEAD").stdout.strip()
     assert result["revertCommit"] != integrated["commitSha"]
-    assert _git(project, "rev-parse", "main").stdout.strip() == integrated["commitSha"]
+    assert _git(project, "rev-parse", "main").stdout.strip() == result["revertCommit"]
+    assert _git(project, "rev-parse", "HEAD^").stdout.strip() == integrated["commitSha"]
+    assert _git(project, "rev-parse", "HEAD^{tree}").stdout == _git(project, "rev-parse", f"{base_commit}^{{tree}}").stdout
+    assert integrated["commitSha"] in _git(project, "show", "-s", "--format=%B", "HEAD").stdout
+    assert "swte-123" in _git(project, "show", "-s", "--format=%B", "HEAD").stdout
+    assert _git(project, "show", "-s", "--format=%an|%ae|%cn|%ce", "HEAD").stdout.strip() == (
+        "Supervised Integration|supervised@example.local|Supervised Integration|supervised@example.local"
+    )
+    assert len(permits) == 1
+    assert calls[1] == ("release", "rollback-lease")
+    assert calls[2][:3] == ("complete", "--agent-id", calls[0][1])
+    assert "finished" in calls[2][-1]
+    assert result["governanceCleanup"] == {"status": "completed", "errors": []}
+    assert not service.git_claim_guard._permit_path(project).exists()
     assert _git(project, "status", "--porcelain=v1").stdout == ""
     assert (project / "agent.py").read_text(encoding="utf-8") == "BASELINE = True\n"
     assert not (project / "tests" / "candidate_marker.py").exists()
+
+
+def _rollback_args(tmp_path):
+    args = _integration_args(tmp_path)
+    integrated = service.integrate_candidate(**args)
+    return dict(project_root=args["project_root"], integration_commit=integrated["commitSha"], run_id=args["run_id"])
+
+
+@pytest.mark.parametrize("change", ["head", "dirty", "branch"])
+@pytest.mark.parametrize("when", ["before_prepare", "before_lease", "under_lease"])
+def test_revert_rejects_main_drift_without_changing_its_state(tmp_path, monkeypatch, change, when):
+    args = _rollback_args(tmp_path)
+    project = args["project_root"]
+    base = _git(project, "rev-parse", "HEAD^").stdout.strip()
+    original_check = service._check_revert_target
+    observed, released, completed = [], [], []
+    checks = 0
+
+    def snapshot():
+        return (_git(project, "rev-parse", "HEAD").stdout, _git(project, "ls-files", "--stage").stdout,
+                _git(project, "status", "--porcelain=v1").stdout, (project / "agent.py").read_bytes())
+
+    def drift():
+        if change == "head":
+            # A concurrent authorized transition, with the production permit.
+            service.git_claim_guard.issue_main_permit(project, old_sha=args["integration_commit"],
+                                                      new_sha=base, integration_claim_id="other-owner")
+            try:
+                _git(project, "update-ref", "refs/heads/main", base, args["integration_commit"])
+            finally:
+                service.git_claim_guard.clear_main_permit(project)
+        elif change == "dirty":
+            (project / "agent.py").write_text("USER_EDIT = True\n", encoding="utf-8")
+            _git(project, "add", "agent.py")
+        else:
+            _git(project, "switch", "-c", "codex/other-owner")
+        observed.append(snapshot())
+
+    def check(root, sha):
+        nonlocal checks
+        checks += 1
+        if checks == {"before_prepare": 1, "before_lease": 2, "under_lease": 3}[when]:
+            drift()
+        return original_check(root, sha)
+
+    monkeypatch.setattr(service, "_check_revert_target", check)
+    monkeypatch.setattr(service.task_closeout, "release_claim", lambda *a, **kw: released.append(a[1]))
+    monkeypatch.setattr(service.task_closeout, "_coordination_call", lambda *a: completed.append(a[1:]) or {})
+    with pytest.raises(service.CandidateIntegrationError, match="HEAD|干净|main"):
+        service.revert_candidate_commit(**args)
+    assert snapshot() == observed[0]
+    assert released == (["integration-test"] if when == "under_lease" else [])
+    assert len(completed) == (1 if when == "under_lease" else 0)
+    assert not service.git_claim_guard._permit_path(project).exists()
+
+
+def test_revert_preparation_failure_never_acquires_lease_or_changes_main(tmp_path, monkeypatch):
+    args = _rollback_args(tmp_path)
+    project = args["project_root"]
+    before = _git(project, "ls-files", "--stage").stdout
+    _git(project, "config", "user.name", "")
+    monkeypatch.setattr(service.task_closeout, "acquire_integration_claim_with_retry", lambda *a, **kw: pytest.fail("preparation must precede lease"))
+    with pytest.raises(service.CandidateIntegrationError, match="identity|empty ident"):
+        service.revert_candidate_commit(**args)
+    assert _git(project, "rev-parse", "HEAD").stdout.strip() == args["integration_commit"]
+    assert _git(project, "ls-files", "--stage").stdout == before
+    assert _git(project, "status", "--porcelain=v1").stdout == ""
+    assert not service.git_claim_guard._permit_path(project).exists()
+
+
+def test_revert_failed_ff_clears_real_permit_and_releases_lease(tmp_path, monkeypatch):
+    args = _rollback_args(tmp_path)
+    project = args["project_root"]
+    released, completed = [], []
+    run_process = service.local_quality_gate.run_process
+    index_lock = project / ".git" / "index.lock"
+
+    def lock_merge(argv, cwd, **kwargs):
+        if list(argv[:3]) != ["git", "merge", "--ff-only"]:
+            return run_process(argv, cwd, **kwargs)
+        assert service.git_claim_guard._permit_path(project).exists()
+        index_lock.write_text("held by another writer", encoding="utf-8")
+        try:
+            return run_process(argv, cwd, **kwargs)
+        finally:
+            index_lock.unlink()
+
+    monkeypatch.setattr(service.local_quality_gate, "run_process", lock_merge)
+    monkeypatch.setattr(service.task_closeout, "release_claim", lambda *a, **kw: released.append(a[1]))
+    monkeypatch.setattr(service.task_closeout, "_coordination_call", lambda *a: completed.append(a[1:]) or {})
+    with pytest.raises(service.CandidateIntegrationError, match=r"index\.lock"):
+        service.revert_candidate_commit(**args)
+    assert released == ["integration-test"]
+    assert "aborted" in completed[0][-1]
+    assert _git(project, "rev-parse", "HEAD").stdout.strip() == args["integration_commit"]
+    assert _git(project, "status", "--porcelain=v1").stdout == ""
+    assert not service.git_claim_guard._permit_path(project).exists()
+
+
+@pytest.mark.parametrize("registered", [False, True])
+def test_revert_claim_failure_finishes_only_its_registered_owner(tmp_path, monkeypatch, registered):
+    args = _rollback_args(tmp_path)
+    owner, calls = [], []
+
+    def acquire(context, *, agent_id):
+        owner.append(agent_id)
+        raise RuntimeError("integration_claim_conflict")
+
+    def coordination(context, *argv):
+        calls.append(argv)
+        agents = ([{"id": owner[0]}] if registered else []) + [{"id": "unrelated-owner"}]
+        return {"agents": agents} if argv[0] == "status" else {}
+
+    monkeypatch.setattr(service.task_closeout, "acquire_integration_claim_with_retry", acquire)
+    monkeypatch.setattr(service.task_closeout, "release_claim", lambda *a, **kw: pytest.fail("no acquired lease to release"))
+    monkeypatch.setattr(service.task_closeout, "_coordination_call", coordination)
+    with pytest.raises(service.CandidateIntegrationError, match="integration_claim_conflict"):
+        service.revert_candidate_commit(**args)
+    assert calls[0] == ("status",)
+    assert len(calls) == (2 if registered else 1)
+    if registered:
+        assert calls[1][:3] == ("complete", "--agent-id", owner[0])
+        assert "aborted" in calls[1][-1]
+    assert _git(args["project_root"], "rev-parse", "HEAD").stdout.strip() == args["integration_commit"]
+    assert not service.git_claim_guard._permit_path(args["project_root"]).exists()
+
+
+@pytest.mark.parametrize("cleanup_failure", ["release", "complete"])
+def test_revert_reports_cleanup_pending_without_losing_success(tmp_path, monkeypatch, cleanup_failure):
+    args = _rollback_args(tmp_path)
+
+    def fail(*a, **kw):
+        raise RuntimeError("rollback cleanup unavailable")
+
+    monkeypatch.setattr(service.task_closeout, "release_claim" if cleanup_failure == "release" else "_coordination_call", fail)
+    result = service.revert_candidate_commit(**args)
+    assert result["status"] == "reverted"
+    assert result["governanceCleanup"] == {"status": "pending", "errors": ["rollback cleanup unavailable"]}
+    assert _git(args["project_root"], "rev-parse", "HEAD").stdout.strip() == result["revertCommit"]
+    assert not service.git_claim_guard._permit_path(args["project_root"]).exists()
+
+
+@pytest.mark.parametrize("postcheck_failure", ["branch", "dirty", "tree_read"])
+def test_revert_postcheck_failure_retains_applied_commit_and_never_retries(tmp_path, monkeypatch, postcheck_failure):
+    args = _rollback_args(tmp_path)
+    project = args["project_root"]
+    merge_ff_only, git_text = service.task_closeout.merge_ff_only, service._git_text
+    merges, completed = [], []
+
+    def merge(*a, **kw):
+        sha = merge_ff_only(*a, **kw)
+        merges.append(sha)
+        if postcheck_failure == "branch":
+            _git(project, "switch", "-c", "codex/after-rollback")
+        elif postcheck_failure == "dirty":
+            (project / "agent.py").write_text("CONCURRENT_EDIT = True\n", encoding="utf-8")
+        return sha
+
+    def read(root, *argv):
+        if merges and postcheck_failure == "tree_read" and argv == ("rev-parse", "HEAD^{tree}"):
+            raise RuntimeError("postcheck read unavailable")
+        return git_text(root, *argv)
+
+    monkeypatch.setattr(service.task_closeout, "merge_ff_only", merge)
+    monkeypatch.setattr(service, "_git_text", read)
+    monkeypatch.setattr(service.task_closeout, "_coordination_call", lambda *a: completed.append(a[1:]) or {})
+    result = service.revert_candidate_commit(**args)
+    assert result["revertCommit"] == merges[0]
+    assert result["postCommitValidation"]["status"] == "failed"
+    assert result["postCommitValidation"]["error"]
+    assert _git(project, "rev-parse", "refs/heads/main").stdout.strip() == merges[0]
+    assert _git(project, "rev-parse", f"{merges[0]}^").stdout.strip() == args["integration_commit"]
+    assert "finished" in completed[0][-1]
+    assert not service.git_claim_guard._permit_path(project).exists()
+    with pytest.raises(service.CandidateIntegrationError, match="HEAD|干净|main"):
+        service.revert_candidate_commit(**args)
+    assert len(merges) == 1
+
+
+def test_revert_permit_cleanup_error_retains_applied_commit(tmp_path, monkeypatch):
+    args = _rollback_args(tmp_path)
+    project = args["project_root"]
+    clear_permit = service.git_claim_guard.clear_main_permit
+    completed = []
+
+    def fail_after_clear(root):
+        clear_permit(root)
+        raise RuntimeError("permit cleanup receipt unavailable")
+
+    monkeypatch.setattr(service.git_claim_guard, "clear_main_permit", fail_after_clear)
+    monkeypatch.setattr(service.task_closeout, "_coordination_call", lambda *a: completed.append(a[1:]) or {})
+    result = service.revert_candidate_commit(**args)
+    applied = _git(project, "rev-parse", "HEAD").stdout.strip()
+    assert applied != args["integration_commit"]
+    assert result["revertCommit"] == applied
+    assert result["postCommitValidation"]["status"] == "failed"
+    assert "permit cleanup receipt unavailable" in result["postCommitValidation"]["error"]
+    assert _git(project, "rev-parse", "HEAD^").stdout.strip() == args["integration_commit"]
+    assert "finished" in completed[0][-1]
+    assert not service.git_claim_guard._permit_path(project).exists()
+
+
+@pytest.mark.parametrize("kind", ["root", "linear", "merge"])
+def test_revert_rejects_empty_tree_change_without_creating_a_commit(tmp_path, monkeypatch, kind):
+    project = tmp_path / "project"
+    if kind == "root":
+        project.mkdir()
+        _git(project, "init", "-b", "main")
+        _git(project, "config", "user.email", "supervised@example.local")
+        _git(project, "config", "user.name", "Supervised Integration")
+    else:
+        _init_repo(project)
+        if kind == "merge":
+            _git(project, "switch", "-c", "codex/empty-candidate")
+    _git(project, "commit", "--allow-empty", "-m", "empty candidate")
+    if kind == "merge":
+        _git(project, "switch", "main")
+        _git(project, "merge", "--no-ff", "codex/empty-candidate", "-m", "empty merge")
+    head = _git(project, "rev-parse", "HEAD").stdout.strip()
+    index_before = _git(project, "ls-files", "--stage").stdout
+    git_text = service._git_text
+
+    def read(root, *argv):
+        assert argv[0] != "commit-tree", "empty revert must not create a commit object"
+        return git_text(root, *argv)
+
+    monkeypatch.setattr(service, "_git_text", read)
+    monkeypatch.setattr(service.task_closeout, "acquire_integration_claim_with_retry", lambda *a, **kw: pytest.fail("empty revert cannot acquire a lease"))
+    with pytest.raises(service.CandidateIntegrationError, match="不能创建空回退提交"):
+        service.revert_candidate_commit(project_root=project, integration_commit=head, run_id="empty-revert")
+    assert _git(project, "rev-parse", "HEAD").stdout.strip() == head
+    assert _git(project, "ls-files", "--stage").stdout == index_before
+    assert _git(project, "status", "--porcelain=v1").stdout == ""
+    assert not service.git_claim_guard._permit_path(project).exists()
+
+
+@pytest.mark.parametrize("kind", ["root", "linear", "merge"])
+def test_revert_restores_only_current_commit_first_parent_tree(tmp_path, kind):
+    project = tmp_path / "project"
+    _init_repo(project)
+    if kind != "root":
+        (project / "earlier.txt").write_text("keep earlier candidate commit\n", encoding="utf-8")
+        _git(project, "add", "earlier.txt")
+        _git(project, "commit", "-m", "earlier candidate change")
+        if kind == "merge":
+            _git(project, "switch", "-c", "codex/merge-candidate")
+        (project / "last.txt").write_text("revert only last commit\n", encoding="utf-8")
+        _git(project, "add", "last.txt")
+        _git(project, "commit", "-m", "last candidate change")
+        if kind == "merge":
+            _git(project, "switch", "main")
+            _git(project, "merge", "--no-ff", "codex/merge-candidate", "-m", "merge candidate")
+    head = _git(project, "rev-parse", "HEAD").stdout.strip()
+    expected_tree = _git(project, "mktree" if kind == "root" else "rev-parse",
+                         *([] if kind == "root" else ["HEAD^1^{tree}"])).stdout
+    result = service.revert_candidate_commit(project_root=project, integration_commit=head, run_id="first-parent-only")
+    assert _git(project, "rev-parse", "HEAD^").stdout.strip() == head
+    assert _git(project, "rev-parse", "HEAD^{tree}").stdout == expected_tree
+    assert _git(project, "rev-parse", "HEAD").stdout.strip() == result["revertCommit"]
+    assert (project / "earlier.txt").exists() == (kind != "root")
+    assert not (project / "last.txt").exists()
+    assert _git(project, "status", "--porcelain=v1").stdout == ""
+    assert not service.git_claim_guard._permit_path(project).exists()
 
 
 def _integration_args(tmp_path):

@@ -21,6 +21,7 @@ import { researchWorkspaceStageRoute } from "./researchWorkspaceModel";
 import { parseSourceCollectionStageModuleId } from "./teamRouteShellModel";
 import type { ResearchStageType } from "./source-collection/stageProjection";
 import type { ExperimentPlanRecord } from "./experimentLoopModel";
+import { isChallengeCupResearchWorkflowTeam } from "./teamKindModel";
 
 /** Loose context bag from TeamsRoute; keep typing light to avoid dual ownership of route state. */
 export type TeamsWorkspacePanelRenderContext = {
@@ -191,6 +192,7 @@ export function createTeamsWorkspacePanelRenderers(ctx: TeamsWorkspacePanelRende
         runKnowledgeCollectionCompletionAction,
         selectedTeamKnowledgeCollectionIngestPending,
         selectedTeamKnowledgeCollectionWorkRun,
+        selectedTeam,
         sourceCollectionActionDisabledTitle,
         sourceCollectionCompletionActionDisabled,
         sourceCollectionCompletionActionReadiness,
@@ -198,6 +200,7 @@ export function createTeamsWorkspacePanelRenderers(ctx: TeamsWorkspacePanelRende
         sourceCollectionCompletionFlowNodes,
         sourceCollectionStageModules,
         sourceCollectionStagePrimaryAgentBinding,
+        sourceCollectionStageAgentChatState,
         sourceCollectionStageReturnRoute,
         sourceCollectionStepClassName,
         workflowIngestionToneBound
@@ -244,6 +247,12 @@ export function createTeamsWorkspacePanelRenderers(ctx: TeamsWorkspacePanelRende
           sourceCollectionStagePrimaryAgentBinding={stagePrimaryBinding}
           sourceCollectionStageReturnRoute={stageReturnRoute}
           openSourceCollectionStageAgentChat={openStageAgentChat}
+          sourceCollectionStageAgentChatState={
+            typeof sourceCollectionStageAgentChatState === "function"
+              ? sourceCollectionStageAgentChatState
+              : undefined
+          }
+          allowStageAgentConfigurationFallback={Boolean(selectedTeam && isChallengeCupResearchWorkflowTeam(selectedTeam))}
           sourceCollectionStepClassName={stepClassName}
           runKnowledgeCollectionCompletionAction={
             typeof runKnowledgeCollectionCompletionAction === "function"

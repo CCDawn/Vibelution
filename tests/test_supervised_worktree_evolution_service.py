@@ -15,6 +15,43 @@ from tests.test_supervised_candidate_integration_service import (
 pytestmark = pytest.mark.slow
 
 
+@pytest.mark.parametrize(
+    "execution_mode,session_id,navigable",
+    [
+        ("simulation", "simulation-baseline-run", False),
+        ("simulation", "opaque-simulation-evidence", False),
+        ("", "simulation-judge-legacy-run", False),
+        ("real", "simulation-baseline-legacy-run", False),
+        ("real", "native-session", True),
+        ("", "native-session", True),
+    ],
+)
+def test_workflow_routes_only_link_native_conversations(execution_mode, session_id, navigable):
+    messages = [{"role": "assistant", "content": "Recorded evidence"}]
+    snapshot = {
+        "runId": "navigation-test",
+        "status": "done",
+        "phase": "complete",
+        "executionMode": execution_mode,
+        "baselineConversationSessionId": session_id,
+        "candidateModification": {"conversationSessionId": session_id},
+        "workflowProgress": {
+            "baseline_eval": {"conversationMessages": messages},
+            "improve": {"conversationMessages": messages},
+        },
+    }
+
+    workflow_step = service._build_workflow_steps(snapshot)[0]
+    self_step = service._build_self_evolution_workflow_steps(snapshot)[0]
+
+    for step in (workflow_step, self_step):
+        assert step["conversationSessionId"] == session_id
+        assert step["conversationMessages"] == messages
+        assert bool(step["chatRoute"]) is navigable
+        if navigable:
+            assert step["chatRoute"] == f"/chat?session={session_id}"
+
+
 @pytest.mark.parametrize("activation,expected", [("applied", "done"), ("activating", "running"), ("activation_failed", "failed")])
 def test_approval_step_tracks_integration_and_activation(activation, expected):
     decorated = service._decorate_snapshot({
@@ -983,8 +1020,9 @@ def test_supervised_worktree_flow_projects_six_steps_with_independent_rerun_sess
     assert rerun_score_step["label"] == "独立复跑"
     assert improve_step["conversationSessionId"] == "session-improver"
     assert rerun_score_step["conversationSessionId"] == "session-rerun"
-    assert improve_step["chatRoute"].endswith("session=session-improver")
-    assert rerun_score_step["chatRoute"].endswith("session=session-rerun")
+    assert snapshot["executionMode"] == "simulation"
+    assert improve_step["chatRoute"] == ""
+    assert rerun_score_step["chatRoute"] == ""
     assert approval_step["label"] == "最终审批与合入"
     assert approval_step["ownerKind"] == "human"
     assert approval_step["conversationSessionId"] == ""
@@ -1972,7 +2010,8 @@ def test_force_merge_never_overwrites_main_workspace_overlap(tmp_path):
     assert (project_root / "agent.py").read_text(encoding="utf-8") == "print('user edit')\n"
 
 
-def test_force_merge_creates_rollback_manifest_and_rollback_restores_file(tmp_path):
+@pytest.mark.parametrize("postcheck_failure", [False, True])
+def test_force_merge_creates_rollback_manifest_and_rollback_restores_file(tmp_path, monkeypatch, postcheck_failure):
     project_root = tmp_path / "project"
     _init_repo(project_root)
     (project_root / "agent.py").write_text("print('base')\n", encoding="utf-8")
@@ -2012,12 +2051,31 @@ def test_force_merge_creates_rollback_manifest_and_rollback_restores_file(tmp_pa
     manifest_path = Path(merged["rollback"]["manifestPath"])
     assert manifest_path.exists()
 
+    if postcheck_failure:
+        revert = service.revert_candidate_commit
+
+        def warn_after_commit(**kwargs):
+            result = revert(**kwargs)
+            result["postCommitValidation"] = {"status": "failed", "error": "Post-commit observation unavailable"}
+            return result
+
+        monkeypatch.setattr(service, "revert_candidate_commit", warn_after_commit)
+        monkeypatch.setattr(service, "_queue_runtime_activation", lambda *a, **kw: pytest.fail("Unverified rollback must not activate"))
+
     rolled_back = service.execute_supervised_worktree_action("swte-merge-rollback", "rollback")
 
     assert rolled_back["rollback"]["status"] == "revert_committed"
     assert rolled_back["rollback"]["revertCommit"]
-    assert rolled_back["outcome"] == "rollback_activation_pending"
+    assert rolled_back["outcome"] == ("activation_failed" if postcheck_failure else "rollback_activation_pending")
     assert (project_root / "agent.py").read_text(encoding="utf-8") == "print('base')\n"
+    persisted = service._work_run_store().load_snapshot(service.RUN_KIND, "swte-merge-rollback")
+    assert persisted["rollback"]["revertCommit"] == rolled_back["rollback"]["revertCommit"]
+    assert persisted["runtimeActivationTargetCommit"] == rolled_back["rollback"]["revertCommit"]
+    assert service._action_states(persisted)["rollback"]["enabled"] is False
+    if postcheck_failure:
+        assert persisted["rollback"]["postCommitValidation"]["status"] == "failed"
+        assert persisted["runtimeActivation"]["reason"] == "rollback_post_commit_validation_failed"
+        assert persisted["runtimeActivation"]["error"] == "Post-commit observation unavailable"
 
 
 def test_force_merge_rejects_candidate_when_main_has_moved(tmp_path):

@@ -28,7 +28,18 @@ beforeEach(() => {
   container = document.createElement("div"); document.body.appendChild(container); root = createRoot(container);
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); client.clear(); vi.restoreAllMocks(); });
-async function settle(ms = 25) { await act(async () => new Promise(resolve => setTimeout(resolve, ms))); }
+async function settle(ms = 0) {
+  if (ms > 0) await act(async () => new Promise(resolve => setTimeout(resolve, ms)));
+  // A settled query can precede its scheduled React notification. Wait for
+  // both the cache and visible loading state, keeping each scheduler yield in act.
+  const deadline = Date.now() + 2000;
+  do {
+    await act(async () => new Promise(resolve => setTimeout(resolve, 10)));
+  } while ((client.isFetching() || client.isMutating() || container.querySelector('[aria-busy="true"]')) && Date.now() < deadline);
+  expect(client.isFetching()).toBe(0);
+  expect(client.isMutating()).toBe(0);
+  expect(container.querySelector('[aria-busy="true"]')).toBeNull();
+}
 async function render(active = true) {
   await act(async () => root.render(<QueryClientProvider client={client}><PersonalAssistantComputerPanel active={active} onCollapse={collapse} /></QueryClientProvider>));
   await settle();

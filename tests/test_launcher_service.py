@@ -2989,6 +2989,208 @@ def test_launcher_status_keeps_project_open_when_launcher_control_surface_stays_
     assert bundle["statusLine"] == "工作台正在运行。"
 
 
+@pytest.mark.parametrize("foreign_project", [False, True])
+def test_iss003_launcher_status_uses_new_electron_state_over_old_opening(
+    tmp_path, monkeypatch, foreign_project
+):
+    now = datetime.now(timezone.utc)
+    project_root = tmp_path / "current-project"
+    old_state = {
+        "projectRoot": str(tmp_path / "old-project" if foreign_project else project_root),
+        "updatedAt": (now - timedelta(days=60)).isoformat(),
+        "runtimeState": "running",
+        "lastError": {"at": (now - timedelta(days=60)).isoformat(), "message": "Old dirty-main failure"},
+        "workbench": {
+            "desiredState": "open", "observedState": "closed", "phase": "opening",
+            "backendPort": 8002, "backendPid": 0, "failureMessage": "",
+        },
+    }
+    launcher_state = {
+        "runtimeProjectRoot": str(project_root), "lastSource": "electron_main",
+        "updatedAt": now.isoformat(), "desiredState": "open", "observedState": "open",
+        "phase": "steady", "backendPid": 4321, "backendPort": 8000,
+        "url": "http://127.0.0.1:8000", "failureMessage": "",
+    }
+    observed = {
+        "observedState": "open", "backendPid": 4321, "backendAlive": True,
+        "backendHealthy": True, "backendPortListening": True, "backendPort": 8000,
+        "backendPortConflict": False, "browserManaged": False, "browserWindowAlive": False,
+    }
+    state_path = tmp_path / "runtime-manager" / "state.json"
+    state_path.parent.mkdir()
+    state_path.write_text(json.dumps(old_state), encoding="utf-8")
+    launcher_path = tmp_path / "launcher" / "state.json"
+    launcher_path.parent.mkdir()
+    launcher_path.write_text(json.dumps(launcher_state), encoding="utf-8")
+    before = (state_path.read_bytes(), launcher_path.read_bytes())
+    monkeypatch.setattr(launcher_service, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(launcher_service, "STATE_PATH", state_path)
+    monkeypatch.setattr(launcher_service, "LAUNCHER_STATE_PATH", launcher_path)
+    monkeypatch.setattr(launcher_service, "load_state", lambda: json.loads(state_path.read_text(encoding="utf-8")))
+    monkeypatch.setattr(launcher_service, "load_pid", lambda: 0)
+    monkeypatch.setattr(launcher_service, "_is_process_alive", lambda pid: int(pid) == 4321)
+    _pin_empty_launcher_status_store(monkeypatch, tmp_path)
+    monkeypatch.setattr(launcher_service, "_desktop_session_workbench_projection", dict)
+    monkeypatch.setattr(launcher_service, "_desktop_session_window_provider_projection", dict)
+    monkeypatch.setattr(launcher_service, "get_launcher_startup_settings", lambda: {"workbench": {"effectiveBackendPort": 8000}})
+    monkeypatch.setattr(launcher_service, "get_workbench_window_mode_setting", dict)
+    monkeypatch.setattr(launcher_service, "get_launcher_developer_mode_setting", dict)
+    monkeypatch.setattr(launcher_service, "ensure_runtime_manager_daemon_alive", lambda: pytest.fail("GET must not start a daemon"))
+    calls = []
+    monkeypatch.setattr(launcher_service, "observe_workbench", lambda **kwargs: calls.append(kwargs) or observed)
+
+    payload = launcher_service.get_launcher_status()
+
+    assert len(calls) == 1
+    assert calls[0]["recover_browser_window"] is False
+    assert payload["projectBundle"]["backend"]["port"] == 8000
+    assert payload["observedState"] == "open"
+    assert payload["phase"] == "steady"
+    assert payload["overallState"] == "ready"
+    assert payload["failureMessage"] == ""
+    assert payload["projectBundle"]["failureMessage"] == ""
+    assert payload["lastErrorMessage"] == "Old dirty-main failure"
+    assert payload["lastErrorAt"] == old_state["lastError"]["at"]
+    assert (state_path.read_bytes(), launcher_path.read_bytes()) == before
+
+
+def test_iss003_fresh_current_opening_keeps_status_within_observation_budget(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(launcher_service, "_has_young_processing_open_command", lambda: False)
+    monkeypatch.setattr(launcher_service, "_observed_workbench", lambda: pytest.fail("Fresh opening must not deep-observe"))
+    runtime_state = {
+        "projectRoot": str(tmp_path), "daemonRunning": True,
+        "updatedAt": datetime.now(timezone.utc).isoformat(),
+        "command": {"activeCommandId": "cmd-opening", "activeType": "open_workbench"},
+        "workbench": {"desiredState": "open", "observedState": "closed", "phase": "opening"},
+    }
+    assert launcher_service._status_observed_workbench(runtime_state) == {}
+
+
+def test_iss003_idle_opening_heartbeat_does_not_block_observation(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(launcher_service, "_has_young_processing_open_command", lambda: False)
+    calls = []
+    monkeypatch.setattr(launcher_service, "_observed_workbench", lambda: calls.append("observe") or {"observedState": "open"})
+    now = datetime.now(timezone.utc)
+    runtime_state = {"projectRoot": str(tmp_path), "daemonRunning": True, "updatedAt": now.isoformat(),
+                     "command": {"activeCommandId": "", "activeType": ""},
+                     "workbench": {"desiredState": "open", "observedState": "closed", "phase": "opening",
+                                   "lastTransitionAt": (now - timedelta(days=60)).isoformat()}}
+
+    assert launcher_service._status_observed_workbench(runtime_state) == {"observedState": "open"}
+    assert calls == ["observe"]
+
+
+@pytest.mark.parametrize("phase, observed_state", [("steady", "open"), ("opening", "closed")])
+def test_iss003_foreign_fresh_runtime_cannot_skip_observation(tmp_path, monkeypatch, phase, observed_state):
+    monkeypatch.setattr(launcher_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(launcher_service, "get_launcher_startup_settings", lambda: {"workbench": {"effectiveBackendPort": 8000}})
+    monkeypatch.setattr(launcher_service, "_has_young_processing_open_command", lambda: False)
+    calls = []
+    monkeypatch.setattr(launcher_service, "_observed_workbench", lambda: calls.append("observe") or {"observedState": "open"})
+    runtime_state = {"projectRoot": str(tmp_path / "foreign"), "daemonRunning": True,
+                     "updatedAt": datetime.now(timezone.utc).isoformat(),
+                     "workbench": {"desiredState": "open", "observedState": observed_state,
+                                   "phase": phase, "backendPort": 8000}}
+
+    assert launcher_service._status_observed_workbench(runtime_state) == {"observedState": "open"}
+    assert calls == ["observe"]
+
+
+@pytest.mark.parametrize("phase", ["opening", "failed", "closed"])
+@pytest.mark.parametrize("fresh_idle", [False, True])
+def test_iss003_new_electron_lifecycle_is_not_overridden_by_observation(tmp_path, monkeypatch, phase, fresh_idle):
+    now = datetime.now(timezone.utc)
+    failure = "Current Electron lifecycle failed" if phase == "failed" else ""
+    old_state = {"projectRoot": str(tmp_path / "foreign"), "updatedAt": (now - timedelta(days=60)).isoformat(),
+                 "daemonRunning": False, "workbench": {"desiredState": "closed", "observedState": "closed", "phase": "steady"}}
+    if fresh_idle:
+        old_state.update(projectRoot=str(tmp_path), updatedAt=now.isoformat(), daemonRunning=True,
+                         command={"activeCommandId": "", "activeType": ""})
+        old_state["workbench"] = {"desiredState": "open", "observedState": "open", "phase": "steady",
+                                  "lastTransitionAt": (now - timedelta(days=60)).isoformat()}
+    latest = {"runtimeProjectRoot": str(tmp_path), "lastSource": "electron_main", "updatedAt": (now - timedelta(seconds=1)).isoformat(),
+              "desiredState": "closed" if phase == "closed" else "open",
+              "observedState": "closed" if phase in {"opening", "closed"} else "open",
+              "phase": "steady" if phase == "closed" else phase, "backendPort": 8000, "failureMessage": failure}
+    monkeypatch.setattr(launcher_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(launcher_service, "_runtime_manager_state", lambda: old_state)
+    monkeypatch.setattr(launcher_service, "_load_launcher_state", lambda: latest)
+    _pin_empty_launcher_status_store(monkeypatch, tmp_path)
+    monkeypatch.setattr(launcher_service, "_desktop_session_workbench_projection", dict)
+    monkeypatch.setattr(launcher_service, "_desktop_session_window_provider_projection", dict)
+    monkeypatch.setattr(launcher_service, "_control_plane_evidence", dict)
+    monkeypatch.setattr(launcher_service, "_is_process_alive", lambda pid: False)
+    monkeypatch.setattr(launcher_service, "get_launcher_startup_settings", dict)
+    monkeypatch.setattr(launcher_service, "get_workbench_window_mode_setting", dict)
+    monkeypatch.setattr(launcher_service, "get_launcher_developer_mode_setting", dict)
+    calls = []
+    observed = {"observedState": "open", "backendAlive": True, "backendHealthy": True,
+                "backendPortListening": True, "backendPort": 8000, "browserManaged": False,
+                "browserWindowAlive": True, "windowManaged": True, "windowProvider": "electron"}
+    if phase == "closed":
+        observed = {"observedState": "closed", "backendAlive": False, "backendHealthy": False,
+                    "backendPortListening": False, "browserWindowAlive": False, "browserManaged": False}
+    monkeypatch.setattr(launcher_service, "observe_workbench", lambda **kwargs: calls.append("observe") or observed)
+
+    payload = launcher_service.get_launcher_status()
+
+    assert payload["phase"] == ("steady" if phase == "closed" else phase)
+    assert payload["failureMessage"] == failure
+    assert payload["overallState"] == {"opening": "starting", "failed": "failed", "closed": "closed"}[phase]
+    assert calls == ([] if phase == "opening" else ["observe"])
+
+
+def test_iss003_real_current_command_retains_inflight_intent(tmp_path, monkeypatch):
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr(launcher_service, "PROJECT_ROOT", tmp_path)
+    runtime_state = {"projectRoot": str(tmp_path), "daemonRunning": True, "updatedAt": now.isoformat(),
+                     "command": {"activeCommandId": "cmd-current", "activeType": "open_workbench"},
+                     "workbench": {"desiredState": "open", "observedState": "closed", "phase": "opening"}}
+    launcher_state = {"runtimeProjectRoot": str(tmp_path), "lastSource": "electron_main",
+                      "updatedAt": (now + timedelta(seconds=1)).isoformat(),
+                      "desiredState": "closed", "observedState": "closed", "phase": "steady"}
+
+    assert launcher_service._status_runtime_state(runtime_state, launcher_state) == runtime_state
+
+
+def test_iss003_current_failure_survives_healthy_backend_without_a_window(tmp_path, monkeypatch):
+    now = datetime.now(timezone.utc)
+    failure = "Current Electron window failed to start"
+    runtime_state = {
+        "projectRoot": str(tmp_path), "updatedAt": now.isoformat(),
+        "daemonRunning": True,
+        "lastError": {"at": now.isoformat(), "scope": "open_workbench", "message": failure},
+        "workbench": {"desiredState": "open", "observedState": "open", "phase": "failed", "failureMessage": failure,
+                      "lastTransitionAt": (now - timedelta(seconds=60)).isoformat()},
+    }
+    monkeypatch.setattr(launcher_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(launcher_service, "_runtime_manager_state", lambda: runtime_state)
+    monkeypatch.setattr(launcher_service, "_load_launcher_state", lambda: {
+        "lastSource": "electron_main", "updatedAt": (now - timedelta(seconds=30)).isoformat(),
+        "desiredState": "open", "observedState": "open", "phase": "steady",
+    })
+    _pin_empty_launcher_status_store(monkeypatch, tmp_path)
+    monkeypatch.setattr(launcher_service, "_desktop_session_workbench_projection", dict)
+    monkeypatch.setattr(launcher_service, "_desktop_session_window_provider_projection", dict)
+    monkeypatch.setattr(launcher_service, "_control_plane_evidence", dict)
+    monkeypatch.setattr(launcher_service, "_is_process_alive", lambda pid: False)
+    monkeypatch.setattr(launcher_service, "get_launcher_startup_settings", dict)
+    monkeypatch.setattr(launcher_service, "get_workbench_window_mode_setting", dict)
+    monkeypatch.setattr(launcher_service, "get_launcher_developer_mode_setting", dict)
+    observed = {"observedState": "open", "backendAlive": True, "backendHealthy": True,
+                "backendPortListening": True, "backendPort": 8000, "browserManaged": False,
+                "browserWindowAlive": False}
+
+    monkeypatch.setattr(launcher_service, "observe_workbench", lambda **kwargs: observed)
+
+    payload = launcher_service.get_launcher_status()
+
+    assert payload["phase"] == "failed"
+    assert payload["failureMessage"] == failure
+
+
 def test_launcher_status_uses_fresh_runtime_manager_state_without_deep_observation(tmp_path, monkeypatch):
     now = datetime.now(timezone.utc).isoformat()
     runtime_state = {

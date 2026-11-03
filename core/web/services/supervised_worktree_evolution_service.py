@@ -3099,7 +3099,7 @@ def _build_self_evolution_workflow_steps(snapshot: dict[str, Any]) -> list[dict[
             },
             "conversationSessionId": candidate_session_id,
             "conversationTurnId": conversation_turn_id,
-            "chatRoute": _workflow_chat_route(candidate_session_id),
+            "chatRoute": _workflow_chat_route(candidate_session_id, snapshot.get("executionMode")),
             "conversationMessages": conversation_messages,
         },
         {
@@ -3147,7 +3147,7 @@ def _build_workflow_steps(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
         return {
             "conversationSessionId": session_id,
             "conversationTurnId": turn_id,
-            "chatRoute": _workflow_chat_route(session_id),
+            "chatRoute": _workflow_chat_route(session_id, snapshot.get("executionMode")),
             "conversationMessages": list(item.get("conversationMessages") or []),
         }
 
@@ -3381,9 +3381,13 @@ def _approval_summary(
     return str(snapshot.get("latestMessage") or "等待最终结果、改进提案和样本评审证据。")
 
 
-def _workflow_chat_route(session_id: str) -> str:
+def _workflow_chat_route(session_id: str, execution_mode: Any = "") -> str:
     normalized = str(session_id or "").strip()
-    if not normalized:
+    if (
+        not normalized
+        or str(execution_mode or "").strip().lower() == "simulation"
+        or normalized.lower().startswith("simulation-")
+    ):
         return ""
     return f"/chat?session={normalized}"
 
@@ -4197,17 +4201,35 @@ def _rollback_merge(snapshot: dict[str, Any]) -> dict[str, Any]:
     except CandidateIntegrationError as exc:
         raise SupervisedWorktreeRunActionError(str(exc)) from exc
     updated = _clone(snapshot)
+    validation = reverted.get("postCommitValidation") if isinstance(reverted.get("postCommitValidation"), dict) else {}
+    activation_blocked = validation.get("status") == "failed"
+    reason = (
+        "已创建可审计的 Git revert 提交，但后续检查未通过，尚未请求 Launcher 激活。"
+        if activation_blocked else "已创建可审计的 Git revert 提交，等待 Launcher 激活。"
+    )
     updated["rollback"] = {
         **rollback,
         "status": "revert_committed",
         "revertedCommit": str(reverted.get("revertedCommit") or ""),
         "revertCommit": str(reverted.get("revertCommit") or ""),
         "rolledBackAt": _now_iso(),
-        "reason": "已创建可审计的 Git revert 提交，等待 Launcher 激活。",
+        "reason": reason,
+        "postCommitValidation": validation,
+        "governanceCleanup": reverted.get("governanceCleanup") or {},
     }
     updated["runtimeActivationTargetCommit"] = str(reverted.get("revertCommit") or "")
-    updated["runtimeActivation"] = _queue_runtime_activation(updated)
-    updated["outcome"] = "rollback_activation_pending"
+    if activation_blocked:
+        updated["runtimeActivation"] = {
+            "status": "activation_failed",
+            "targetCommit": updated["runtimeActivationTargetCommit"],
+            "reason": "rollback_post_commit_validation_failed",
+            "error": str(validation.get("error") or "")[:1000],
+        }
+        updated["outcome"] = "activation_failed"
+        updated["latestMessage"] = reason
+    else:
+        updated["runtimeActivation"] = _queue_runtime_activation(updated)
+        updated["outcome"] = "rollback_activation_pending"
     updated["updatedAt"] = _now_iso()
     _persist_snapshot(updated, active_run_id="")
     _record_worktree_scene_event(
@@ -4218,6 +4240,7 @@ def _rollback_merge(snapshot: dict[str, Any]) -> dict[str, Any]:
         fields={
             "integrationCommit": str(reverted.get("revertedCommit") or ""),
             "revertCommit": str(reverted.get("revertCommit") or ""),
+            "activationBlocked": activation_blocked,
         },
         lifecycle=True,
     )

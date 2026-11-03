@@ -595,6 +595,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     ? supervisedRunMonitorSource.run
     : null;
   const supervisedWorkflowRun = selectedSupervisedDetail.run ?? monitoredRun;
+  const supervisedExecutionMode = supervisedWorkflowRun && "executionMode" in supervisedWorkflowRun
+    ? String(supervisedWorkflowRun.executionMode || "")
+    : "";
   const supervisedMembersRun = monitoredRun && (
     !supervisedWorkflowRun || monitoredRun.runId === supervisedWorkflowRun.runId
   )
@@ -704,7 +707,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
         agentId,
         status: isActive ? "active" : agentId ? "configured" : "missing",
         conversationSession,
-        chatRoute: supervisedMemberChatRoute(conversationSessionId, supervisedMemberReturnTo, supervisedMemberReturnLabel),
+        executionMode: supervisedExecutionMode,
+        chatRoute: supervisedMemberChatRoute(conversationSessionId, supervisedMemberReturnTo, supervisedMemberReturnLabel, supervisedExecutionMode),
         configRoute: agentId ? supervisedMemberAgentManagementRoute(agentId, supervisedMemberReturnTo) : "",
       };
     });
@@ -713,6 +717,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     resolveModelLabel,
     supervisedMemberReturnLabel,
     supervisedMemberReturnTo,
+    supervisedExecutionMode,
     supervisedMembersBindings,
     backendWorkflowCurrent?.role,
     supervisedWorkflowRun?.workflowSteps,
@@ -734,7 +739,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     const member = definition.role ? supervisedRunMemberByRole.get(definition.role) : undefined;
     const fallbackSessionId = member?.conversationSession?.conversationSessionId || "";
     const conversationSessionId = String(backendStep?.conversationSessionId || fallbackSessionId || "").trim();
-    const chatRoute = backendStep?.chatRoute || supervisedMemberChatRoute(conversationSessionId, supervisedMemberReturnTo, supervisedMemberReturnLabel);
+    const memberChatRoute = supervisedMemberChatRoute(conversationSessionId, supervisedMemberReturnTo, supervisedMemberReturnLabel, supervisedExecutionMode);
+    const chatRoute = memberChatRoute ? backendStep?.chatRoute || memberChatRoute : "";
     const fallbackStatus = supervisedWorkflowFallbackStatus(supervisedWorkflowRun?.status, definition.id === supervisedRuntimeWorkflowStepId);
     const backendStatus = backendStep?.status || fallbackStatus;
     return {

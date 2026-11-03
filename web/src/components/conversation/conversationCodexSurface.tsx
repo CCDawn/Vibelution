@@ -27,7 +27,7 @@ import {
   conversationToolPresentationLabel,
 } from "./conversationToolPresentation";
 import { ConversationToolActivity } from "./ConversationToolActivity";
-import { ConversationProcessDisclosure } from "./ConversationProcessDisclosure";
+import { ConversationProcessDisclosure, processState } from "./ConversationProcessDisclosure";
 import { ConversationFileDeliveries } from "./ConversationFileDeliveries";
 import type { ConversationToolApprovalSurface } from "./conversationViewTypes";
 import type { AgentMessageTimelineRowIdentity } from "./agentMessageTimelineRows";
@@ -67,6 +67,8 @@ export type ConversationCodexSurfaceDeps = CodexCellRenderers & CodexToolDetails
   imageArtifactUrlsBeforeMessage: Map<string, Set<string>>;
   activeTimelineMessageOrder: Map<string, number>;
   handleProcessDisclosureUserToggle: (summary: HTMLElement, nextExpanded: boolean) => void;
+  getExpansionState: (messageId: string, section: string, defaultExpanded: boolean) => boolean;
+  setExpansionState: (messageId: string, section: string, expanded: boolean) => void;
   showComposer: boolean;
   composerDisabled: boolean;
   composerValue: string;
@@ -90,6 +92,8 @@ export function createConversationCodexSurface({
   imageArtifactUrlsBeforeMessage,
   activeTimelineMessageOrder,
   handleProcessDisclosureUserToggle,
+  getExpansionState,
+  setExpansionState,
   showComposer,
   composerDisabled,
   composerValue,
@@ -463,6 +467,12 @@ export function createConversationCodexSurface({
             language={lang === "en" ? "en" : "zh"}
             messageOrder={activeTimelineMessageOrder}
             onUserToggle={handleProcessDisclosureUserToggle}
+            expanded={getExpansionState(message.id, "process", processState(
+              processCells,
+              activeTimelineMessageOrder,
+              assistantTurnIsStreaming(message),
+            ) === "running")}
+            onExpandedChange={(expanded) => setExpansionState(message.id, "process", expanded)}
             turnStreaming={assistantTurnIsStreaming(message)}
             turnStartedAt={(message as ConversationMessage & { turnStartedAt?: string }).turnStartedAt || message.timestamp}
             activeStage={phase === "stopping" ? "stopping" : resolveActiveTurnProgressStage(message)}

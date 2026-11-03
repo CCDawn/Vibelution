@@ -58,6 +58,7 @@ def test_status_skips_live_observe_while_start_is_in_flight(monkeypatch):
         {
             "daemonRunning": True,
             "updatedAt": "2099-01-01T00:00:00+00:00",
+            "command": {"activeCommandId": "cmd-starting", "activeType": "open_workbench"},
             "workbench": {
                 "observedState": "closed",
                 "desiredState": "open",

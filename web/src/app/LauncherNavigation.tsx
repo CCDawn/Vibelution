@@ -1,8 +1,8 @@
 import { useRef, useState } from "react";
-import { Activity, ArrowDownRight, ArrowUpCircle, Folder, ListTodo, MessageCircle, Settings2, Wrench } from "lucide-react";
+import { Activity, ArrowDownRight, ArrowUpCircle, Folder, ListTodo, MessageCircle, Plug, Settings2, Wrench } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import type { LauncherBranchInstance } from "../api/launcher";
-import { returnLauncherToDesktop } from "../api/launcher";
+import { openLauncherModelConnection, returnLauncherToDesktop } from "../api/launcher";
 import { VButton, VDropdownMenu, VRouteLinkButton } from "../components/vui";
 import { launcherAssistantPanelLabel, launcherAssistantPanelPath, resolveLauncherAssistantPanel } from "./launcherNavigationModel";
 import styles from "./LauncherNavigation.styles";
@@ -12,6 +12,7 @@ const assistantEntries = [
   ["tasks", ListTodo],
 ] as const;
 const settingsEntries = [
+  { id:"model-connection", zh:"模型连接", en:"Model connection", to:"", Icon:Plug },
   { id:"diagnostics", zh:"诊断", en:"Diagnostics", to:"/launcher/tools?view=diagnostics", Icon:Activity },
   { id:"maintenance", zh:"维护", en:"Maintenance", to:"/launcher/tools?view=maintenance", Icon:Wrench },
   { id:"settings", zh:"启动设置", en:"Startup settings", to:"/launcher?view=settings", Icon:Settings2 },
@@ -45,7 +46,7 @@ export function LauncherNavigation({ lang, onNavigate, updateAvailable = false, 
       {updateAvailable || updateFailed ? <VRouteLinkButton to="/launcher/updates" chrome="shell-nav" aria-current={selected === "updates" ? "page" : undefined} className={`${styles.link} ${styles.updateLink} ${selected === "updates" ? styles.selectedLink : styles.idleLink}`} icon={<ArrowUpCircle size={17} aria-hidden="true"/>} trailingIcon={<span className={styles.updateBadge}>{updateFailed ? (lang === "zh" ? "失败" : "Failed") : (lang === "zh" ? "有新版" : "New")}</span>} onClick={onNavigate}>{lang === "zh" ? "更新" : "Update"}</VRouteLinkButton> : null}
       <VDropdownMenu side="top" align="start" aria-label={lang === "zh" ? "设置" : "Settings"}
       trigger={<VButton variant="ghost" className={styles.returnButton} aria-current={!assistant && selected !== "branches" && !(selected === "updates" && (updateAvailable || updateFailed)) ? "page" : undefined} icon={<Settings2 size={16} aria-hidden="true" />}>{lang === "zh" ? "设置" : "Settings"}</VButton>}
-      items={settingsEntries.map(({ id, zh, en, to, Icon }) => ({ id, label: lang === "zh" ? zh : en, icon: <Icon size={16} />, onSelect: () => { navigate(to); onNavigate?.(); } }))} />
+      items={settingsEntries.map(({ id, zh, en, to, Icon }) => ({ id, label: lang === "zh" ? zh : en, icon: <Icon size={16} />, onSelect: () => { onNavigate?.(); if (id === "model-connection") { setError(""); void openLauncherModelConnection().catch((error: unknown) => setError(error instanceof Error ? error.message : String(error))); return; } navigate(to); } }))} />
       <VButton variant="ghost" className={styles.returnButton} icon={<ArrowDownRight size={16}/>} isPending={returning} onClick={() => void returnToDesktop()}>{lang === "zh" ? "回到桌面" : "Return to desktop"}</VButton>
       {error ? <p className={styles.error} role="alert">{error}</p> : null}
     </div>

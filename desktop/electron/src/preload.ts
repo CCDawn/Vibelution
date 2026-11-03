@@ -133,7 +133,8 @@ contextBridge.exposeInMainWorld("vibelutionLauncher", {
         launcherInvoke: (payload: unknown) => ipcRenderer.invoke(IPC_CHANNELS.launcherInvoke, payload),
         returnToDesktop: () => ipcRenderer.invoke(IPC_CHANNELS.returnToDesktop),
         selectProject: () => ipcRenderer.invoke(IPC_CHANNELS.selectProject),
-        refreshLauncherState: () => ipcRenderer.invoke(IPC_CHANNELS.refreshLauncherState)
+        refreshLauncherState: () => ipcRenderer.invoke(IPC_CHANNELS.refreshLauncherState),
+        openWorkbenchConfig: () => ipcRenderer.invoke(IPC_CHANNELS.openWorkbenchConfig)
       }
     : {}),
 });
