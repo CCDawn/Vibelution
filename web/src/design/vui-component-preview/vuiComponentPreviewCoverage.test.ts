@@ -64,6 +64,13 @@ const previewExemptDesignSections = new Set([
   // Their read/interaction tests and isolated real-component fixture cover the
   // composition; packaged visual acceptance remains a separate check.
   "LauncherAssistantTaskCards",
+  // Parts of that Launcher-owned composition, not standalone VUI exports.
+  // Identity-scoped provider/cleanup callbacks and the real navigation anchor
+  // supply their state. Task-card, overview and StrictMode/navigation tests
+  // cover them; approved source preview and packaged UI acceptance cover pixels.
+  "LauncherAssistantTaskSidebar",
+  "LauncherAssistantTaskDetail",
+  "LauncherTaskNavigationSlot",
   // Launcher-owned confirmation consumes identity-bound native cleanup plans
   // and one-use tokens; it is not a standalone VUI export. Card interaction
   // tests and the isolated real-component delete/cancel/bulk preview cover it.
