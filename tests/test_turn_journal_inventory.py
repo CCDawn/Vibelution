@@ -123,6 +123,51 @@ def test_directory_budget_is_explicit_and_total_reads_include_verification(journ
     assert len(consumed) == 2 and sum(consumed) <= 2048
 
 
+@pytest.mark.parametrize("exact", [False, True])
+def test_total_byte_budget_stops_namespace_scan_and_verifies_accepted_facts(journals, monkeypatch, exact):
+    accepted = write(journals, "session-a", [event("session-a", "turn-a", 1)])
+    overflow = write(journals, "session-b", [event("session-b", "turn-b", 1)])
+    original_iterdir, original_read = Path.iterdir, inventory.read_stable_file
+    budget = accepted.stat().st_size * 2 + (0 if exact else overflow.stat().st_size * 2 - 1)
+    consumed = []
+
+    def bounded_entries(path):
+        if path != journals:
+            yield from original_iterdir(path)
+            return
+        yield accepted.parent
+        yield overflow.parent
+        pytest.fail("traversed the namespace after exhausting the source byte budget")
+
+    def measured(*args, **kwargs):
+        snapshot = original_read(*args, **kwargs)
+        consumed.append((args[0], len(snapshot.raw)))
+        return snapshot
+
+    monkeypatch.setattr(Path, "iterdir", bounded_entries)
+    monkeypatch.setattr(inventory, "read_stable_file", measured)
+    result = read(journals, max_bytes=budget)
+    assert [item["turnId"] for item in result["turns"]] == ["turn-a"]
+    assert result["truncated"] is True and result["complete"] is False
+    assert result["reason"] == "budget_exceeded" and result["invalidCount"] == 0
+    assert [path for path, _ in consumed] == [accepted, accepted]
+    assert sum(size for _, size in consumed) <= budget
+    assert "SECRET" not in json.dumps(result)
+
+
+def test_oversized_single_journal_does_not_hide_later_healthy_sibling(journals, monkeypatch):
+    oversized = write(journals, "large", [event("large", "turn-large", 1, payload={"content": "x" * 2048})])
+    healthy = write(journals, "healthy", [event("healthy", "turn-healthy", 1)])
+    monkeypatch.setattr(inventory, "MAX_FILE_BYTES", healthy.stat().st_size)
+    original_iterdir = Path.iterdir
+    monkeypatch.setattr(Path, "iterdir", lambda path: iter([oversized.parent, healthy.parent])
+                        if path == journals else original_iterdir(path))
+    result = read(journals)
+    assert [item["turnId"] for item in result["turns"]] == ["turn-healthy"]
+    assert result["complete"] is False and result["truncated"] is True
+    assert result["invalidCount"] == 0
+
+
 def test_source_changes_before_verification_discard_affected_journal(journals, monkeypatch):
     path = write(journals, "session-a", [event("session-a", "turn-a", 1)])
     original, count = inventory.read_stable_file, 0
