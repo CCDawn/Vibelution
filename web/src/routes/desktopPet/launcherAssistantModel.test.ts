@@ -30,7 +30,7 @@ let character: { characterId: string; name: string } | undefined;
 vi.mock("./DesktopPetCharacter", () => ({ DesktopPetCharacter: (props: typeof character) => { character = props; return null; } }));
 let conversation: ConversationViewProps | undefined;
 vi.mock("../../components/conversation/LazyConversationView", () => ({
-  LazyConversationView: (props: ConversationViewProps) => { conversation = props; return createElement("div", { "data-testid": "assistant-conversation" }, props.composerPrecedingContent); },
+  LazyConversationView: (props: ConversationViewProps) => { conversation = props; return createElement("div", { "data-testid": "assistant-conversation" }, props.composerPrecedingContent, props.composerModelControl); },
 }));
 let root: Root | undefined;
 let container: HTMLDivElement | undefined;
@@ -1135,7 +1135,7 @@ describe("Launcher assistant composer surface model", () => {
     expect(ring?.segments[0]?.contentPreview).toBe("最近两轮");
   });
 
-  it("shows the bound model row and opens the model-connection page from it", async () => {
+  it("shows the bound model toolbar control and opens its model-connection settings", async () => {
     const openWorkbenchConfig = vi.fn().mockResolvedValue(undefined);
     (globalThis as { vibelutionLauncher?: unknown }).vibelutionLauncher = { openWorkbenchConfig };
     try {
@@ -1143,9 +1143,10 @@ describe("Launcher assistant composer surface model", () => {
         settings: { ok: true, displayName: "助理", modelId: "test-model-x",
           preferences: { characterId: "xiaoluo", showStatus: true, showTitles: true, showCompletion: false, idleMessage: "" } } });
       await showConversation();
-      const row = container?.querySelector("[data-launcher-assistant-model-row]");
+      const row = container?.querySelector("[data-launcher-assistant-model-control]");
       expect(row?.textContent).toContain("test-model-x");
-      const settingsButton = [...(row?.querySelectorAll<HTMLButtonElement>("button") ?? [])]
+      await act(async () => row?.querySelector<HTMLButtonElement>("button")?.click());
+      const settingsButton = [...document.querySelectorAll<HTMLButtonElement>("button")]
         .find(button => button.textContent?.includes("模型设置"));
       expect(settingsButton).toBeTruthy();
       await act(async () => settingsButton?.click());
@@ -1164,12 +1165,13 @@ describe("Launcher assistant composer surface model", () => {
     await act(async () => conversation?.onComposerChange("保留我的草稿"));
     bridge.setLauncherAssistantModel.mockResolvedValue({ modelId: "m2" });
     bridge.getLauncherAssistantStatus.mockResolvedValue({ ...status, settings: { ...status.settings, modelId: "m2" } });
-    const select = container!.querySelector<HTMLSelectElement>('select[aria-label="助理模型"]')!;
+    await act(async () => container?.querySelector<HTMLButtonElement>('[data-launcher-assistant-model-control] button')?.click());
+    const select = document.querySelector<HTMLSelectElement>('select[aria-label="切换助理模型"]')!;
     expect(select.disabled).toBe(false);
     await act(async () => { select.value = "m2"; select.dispatchEvent(new Event("change", { bubbles: true })); });
     await settle(); await settle();
     expect(bridge.setLauncherAssistantModel).toHaveBeenCalledWith("m2");
-    expect(select.value).toBe("m2");
+    expect(container?.querySelector('[data-launcher-assistant-model-control] button')?.textContent).toBe("模型二");
     expect(conversation?.composerValue).toBe("保留我的草稿");
     expect(bridge.sendLauncherAssistantMessage).not.toHaveBeenCalled();
   });
