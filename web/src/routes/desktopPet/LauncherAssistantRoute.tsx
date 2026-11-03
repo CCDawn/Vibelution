@@ -9,6 +9,7 @@ import {
   getLauncherAssistantApprovals, resolveLauncherAssistantApproval,
   previewLauncherDispatchApproval, decideLauncherDispatchApproval, declineLauncherDispatchSummary, launcherDispatchDeclineRevisionIsValid, type LauncherDispatchApprovalPreview,
   stopLauncherAssistantTurn, continueLauncherAssistantTurn, switchLauncherAssistantHead,
+  regenerateLauncherAssistantMessage,
   getLauncherOperatorAsset, getLauncherAssistantAvatar, openLauncherFromAssistant, uploadLauncherAttachment,
   readLauncherAttachment, subscribeLauncherAssistantSessionEvent,
 } from "../../api/launcherAssistant";
@@ -975,6 +976,56 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     }
   }
 
+  // The latest assistant answer a regenerate action may rerun: the last
+  // assistant message that has a user message before it (chat-page baseline).
+  const regenerableAssistantMessageId = (() => {
+    const messages = detail.data?.messages || [];
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index].role !== "assistant") continue;
+      const hasUserBefore = messages.slice(0, index).some(entry => entry.role === "user");
+      return hasUserBefore ? messages[index].id : "";
+    }
+    return "";
+  })();
+  const [regeneratePending, setRegeneratePending] = useState(false);
+  // A lost regenerate ACK keeps its original request id: native admission
+  // replays by clientSubmissionId, so a new id would create a distinct turn.
+  const regenerateAttempt = useRef<{ messageId: string; requestId: string } | null>(null);
+  async function regenerateMessage(message: ConversationMessage) {
+    if (controlGate.current || sending.current || !detail.data || !sessionId) return;
+    if (message.role !== "assistant" || busy || stopping) return;
+    const messages = detail.data.messages;
+    const assistantIndex = messages.findIndex(entry => String(entry.id || "").trim() === String(message.id || "").trim());
+    if (assistantIndex <= 0) return;
+    let userMessage: ConversationMessage | undefined;
+    for (let index = assistantIndex - 1; index >= 0; index -= 1) {
+      if (messages[index].role === "user") { userMessage = messages[index]; break; }
+    }
+    if (!userMessage) return;
+    const messageId = String(userMessage.id || "").trim();
+    if (!messageId) return;
+    const attempt = regenerateAttempt.current?.messageId === messageId
+      ? regenerateAttempt.current : { messageId, requestId: crypto.randomUUID() };
+    regenerateAttempt.current = attempt;
+    controlGate.current = true;
+    setRegeneratePending(true);
+    setFeedback("");
+    try {
+      const next = await regenerateLauncherAssistantMessage(sessionId, attempt.messageId, attempt.requestId);
+      regenerateAttempt.current = null;
+      if (!mounted.current || sessionIdRef.current !== sessionId) return;
+      client.setQueryData<SessionDetail>(["launcher-assistant", "detail", sessionId], previous =>
+        mergeSessionDetailMessageWindow(previous, next));
+      if (mounted.current) setAcceptedTurnId(String(next.activeTurnId || ""));
+    } catch (error) {
+      // The attempt is retained so an immediate retry replays the same id.
+      if (mounted.current) setFeedback(errorMessage(error));
+    } finally {
+      controlGate.current = false;
+      if (mounted.current) { setRegeneratePending(false); void detail.refetch(); }
+    }
+  }
+
   const identity = status.data?.assistant;
   const avatarImage = readingAssets && !avatar.isError ? avatar.data?.image : null;
   const assistantAvatarImage = readingAssistantAvatar && !assistantAvatar.isError && !assistantAvatar.isFetching ? assistantAvatar.data?.image : null;
@@ -1204,6 +1255,10 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       editUserMessageDisabled={sendPending || sendUnconfirmed || controlPending || busy || stopping}
       onSwitchMessageVersion={switchMessageVersion}
       branchVersionSwitchDisabled={busy || stopping || switchHeadPending}
+      onRegenerateAssistantMessage={regenerateMessage}
+      regenerableAssistantMessageId={regenerableAssistantMessageId}
+      regenerateDisabled={busy || stopping || sendPending || sendUnconfirmed || controlPending || regeneratePending}
+      regeneratePending={regeneratePending}
       composerLeadingControl={<ChatComposerPlusMenu lang={lang} showCapabilities={false} showReferences={false}
         sessionReferences={[]} onAddAttachments={addAttachments}
         attachmentDisabled={status.data?.attachmentVersion !== 1 || sendPending || sendUnconfirmed || controlPending} />}

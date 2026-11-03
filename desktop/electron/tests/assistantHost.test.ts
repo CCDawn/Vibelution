@@ -1192,6 +1192,25 @@ describe("AssistantHost", () => {
     await expect(host.request({ operation: "switchHead", nodeId: "target-node" } as AssistantHostRequest)).rejects.toThrow("ASSISTANT_TRANSPORT_FAILED");
     await host.stop();
   });
+  it("regenerates once with a stable request id and rejects malformed authority", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    fetchImpl.mockResolvedValueOnce(Response.json({ id: "s", messages: [] }));
+    await host.request({ operation: "regenerate", messageId: "target-message", requestId: "regen-1" } as AssistantHostRequest);
+    expect(fetchImpl.mock.calls.at(-1)?.[0]).toContain("/api/assistant/messages/regenerate");
+    expect(fetchImpl.mock.calls.at(-1)?.[1]?.body).toBe(JSON.stringify({ messageId: "target-message", requestId: "regen-1" }));
+    const before = fetchImpl.mock.calls.length;
+    for (const value of [
+      { operation: "regenerate", messageId: "target-message", requestId: "regen-1", sessionId: "other" },
+      { operation: "regenerate", messageId: "   ", requestId: "regen-1" },
+      { operation: "regenerate", messageId: "target-message", requestId: "bad id" },
+      { operation: "regenerate", messageId: "target-message" },
+    ]) await expect(host.request(value as AssistantHostRequest)).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    expect(fetchImpl).toHaveBeenCalledTimes(before);
+    fetchImpl.mockResolvedValueOnce(Response.json({ id: "other-session", messages: [] }));
+    await expect(host.request({ operation: "regenerate", messageId: "target-message", requestId: "regen-1" } as AssistantHostRequest)).rejects.toThrow("ASSISTANT_IDENTITY_INVALID");
+    await host.stop();
+  });
   it("does not reintroduce inherited Python search paths for the isolated packaged runtime", async () => {
     vi.stubEnv("PYTHONPATH", "foreign-source");
     vi.stubEnv("PYTHONHOME", "foreign-runtime");

@@ -57,6 +57,8 @@ export type AssistantHostRequest =
   | { operation: "stop"; turnId: string }
   | { operation: "continue"; requestId: string; continuation: { turnId: string; headId: string; ledgerSeq: number; agentId: string } }
   | { operation: "switchHead"; nodeId: string }
+  | { operation: "regenerate"; messageId: string; requestId: string }
+  | { operation: "regenerate"; messageId: string; requestId: string }
   | { operation: "curation"; sessionId: string }
   | { operation: "curate"; sessionId: string; messageId: string; action: "include" | "exclude" }
   | { operation: "operatorAsset"; kind: "avatar" | "background" }
@@ -1149,6 +1151,16 @@ export class AssistantHost {
           || typeof payload.nodeId !== "string" || !payload.nodeId.trim()
           || payload.nodeId.length > 200) throw new HostError("ASSISTANT_REQUEST_INVALID");
         const result = await this.rpc(generation, "/api/assistant/head", "POST", { nodeId: payload.nodeId });
+        if (!object(result) || result.id !== generation.sessionId) throw new HostError("ASSISTANT_IDENTITY_INVALID");
+        return result;
+      }
+      case "regenerate": {
+        if (!ownKeys(payload, ["operation", "messageId", "requestId"])
+          || typeof payload.messageId !== "string" || !payload.messageId.trim() || payload.messageId.length > 160
+          || typeof payload.requestId !== "string" || !/^[A-Za-z0-9_.:-]{1,128}$/.test(payload.requestId))
+          throw new HostError("ASSISTANT_REQUEST_INVALID");
+        const result = await this.rpc(generation, "/api/assistant/messages/regenerate", "POST",
+          { messageId: payload.messageId, requestId: payload.requestId });
         if (!object(result) || result.id !== generation.sessionId) throw new HostError("ASSISTANT_IDENTITY_INVALID");
         return result;
       }

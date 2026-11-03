@@ -6,6 +6,7 @@ import {
   getLauncherAssistantApprovals, resolveLauncherAssistantApproval,
   previewLauncherDispatchApproval, decideLauncherDispatchApproval, declineLauncherDispatchSummary,
   stopLauncherAssistantTurn, continueLauncherAssistantTurn, switchLauncherAssistantHead,
+  regenerateLauncherAssistantMessage,
   getLauncherOperatorAsset, getLauncherAssistantAvatar, openLauncherFromAssistant,
   subscribeLauncherAssistantSessionEvent,
 } from "./launcherAssistant";
@@ -284,6 +285,19 @@ describe("Launcher assistant bridge", () => {
     await expect(switchLauncherAssistantHead("s", "x".repeat(201))).rejects.toThrow("版本标识无效");
     // Only the two well-formed attempts reached the bridge; blank and oversized
     // node ids are refused renderer-side without any transport use.
+    expect(invoke.mock.calls).toHaveLength(2);
+  });
+  it("regenerates with a trimmed message id and keeps the request id contract", async () => {
+    const invoke = vi.fn().mockResolvedValueOnce({ id: "s", messages: [{ id: "m1" }] })
+      .mockResolvedValueOnce({ id: "other", messages: [] });
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    await expect(regenerateLauncherAssistantMessage("s", " target-message ", "regen-1")).resolves.toMatchObject({ id: "s" });
+    expect(invoke.mock.calls[0]).toEqual([{ operation: "regenerate", messageId: "target-message", requestId: "regen-1" }]);
+    await expect(regenerateLauncherAssistantMessage("s", "target-message", "regen-1")).rejects.toThrow("未确认重新生成");
+    await expect(regenerateLauncherAssistantMessage("s", "   ", "regen-1")).rejects.toThrow("消息标识无效");
+    await expect(regenerateLauncherAssistantMessage("s", "target-message", "bad id")).rejects.toThrow("请求标识无效");
+    // Only the two well-formed attempts reached the bridge; malformed ids are
+    // refused renderer-side without any transport use.
     expect(invoke.mock.calls).toHaveLength(2);
   });
   it("requires the dedicated Launcher bridge without a browser HTTP fallback", async () => {

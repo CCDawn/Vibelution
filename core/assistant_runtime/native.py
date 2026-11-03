@@ -697,6 +697,23 @@ def switch_head(node_id: str) -> dict[str, Any]:
         return switch_session_head(session_id, node_id.strip())
 
 
+def regenerate(message_id: str, request_id: str) -> dict[str, Any]:
+    """Rerun the fixed assistant Session's last user request at the target turn.
+
+    The shared service layer owns the branch fork and journal idempotency; the
+    client_submission_id keeps the native turnId/requestId acceptance contract
+    the composer's send confirmation relies on.
+    """
+    if not isinstance(message_id, str) or not message_id.strip() or len(message_id) > 160:
+        raise AssistantSessionError("SESSION_INVALID")
+    if not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", request_id or ""):
+        raise AssistantSessionError("SESSION_INVALID")
+    with _session_command() as (sessions, session_id):
+        return sessions.regenerate_session_message(
+            session_id, message_id.strip(), client_submission_id=request_id,
+        )
+
+
 def shutdown(*, timeout: float = 8.0) -> dict[str, Any]:
     """Stop owned native work and drain it before closing its directory store."""
     global _STARTED, _SESSION_ID, _AGENT_ID, _OFFLINE_MIGRATION

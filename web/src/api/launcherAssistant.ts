@@ -90,6 +90,7 @@ export type LauncherAssistantRequest =
   | { operation: "stop"; turnId: string }
   | { operation: "continue"; requestId: string; continuation: SessionContinuationExpectation }
   | { operation: "switchHead"; nodeId: string }
+  | { operation: "regenerate"; messageId: string; requestId: string }
   | { operation: "config" }
   | { operation: "operatorAsset"; kind: LauncherOperatorAssetKind }
   | { operation: "computerState" | "computerWindows" }
@@ -435,6 +436,17 @@ export async function switchLauncherAssistantHead(sessionId: string, nodeId: str
   if (!normalized || normalized.length > 200) throw new Error("对话版本标识无效。");
   const result = await launcherAssistantBridge().invoke({ operation: "switchHead", nodeId: normalized });
   if (!record(result) || result.id !== sessionId || !Array.isArray(result.messages)) throw new Error("Launcher 未确认版本切换所属会话。");
+  return result as SessionDetail;
+}
+
+/** Rerun the last user request at the target turn. The request id keeps the
+ * send-acceptance contract: a lost ACK replays the same id, never a new one. */
+export async function regenerateLauncherAssistantMessage(sessionId: string, messageId: string, requestId: string): Promise<SessionDetail> {
+  const normalizedMessageId = String(messageId || "").trim();
+  if (!normalizedMessageId || normalizedMessageId.length > 160) throw new Error("消息标识无效。");
+  if (!/^[A-Za-z0-9_.:-]{1,128}$/.test(requestId || "")) throw new Error("请求标识无效。");
+  const result = await launcherAssistantBridge().invoke({ operation: "regenerate", messageId: normalizedMessageId, requestId });
+  if (!record(result) || result.id !== sessionId || !Array.isArray(result.messages)) throw new Error("Launcher 未确认重新生成所属会话。");
   return result as SessionDetail;
 }
 

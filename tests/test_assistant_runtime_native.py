@@ -1464,6 +1464,50 @@ def test_fixed_session_head_switch_rebases_the_active_path(assistant_command_ses
     assert not scheduled
 
 
+def test_fixed_session_regenerate_reruns_the_fixed_user_request(assistant_command_session, tmp_path, monkeypatch):
+    from core.chat.conversation_ledger import load_conversation_events
+
+    native, sessions, sid, _, scheduled, _ = assistant_command_session
+    detail = native.get_detail(sid)
+    # Regenerate reruns only the latest user request, exactly like the chat page.
+    user_message_id = [message["id"] for message in detail["messages"] if message["role"] == "user"][-1]
+    first = native.regenerate(user_message_id, "regen-1")
+    assert first["id"] == sid
+    assert len(scheduled) == 1 and scheduled[0]["raw_user_message"] == "original request"
+    # Journal idempotency: the same submission id replays the accepted turn
+    # snapshot instead of scheduling a second rerun.
+    again = native.regenerate(user_message_id, "regen-1")
+    assert again["id"] == sid
+    assert len(scheduled) == 1
+    users = [event for event in load_conversation_events(tmp_path, sid) if event.event_type == "user_message"]
+    assert users[-1].correlation_id == "regen-1"
+
+
+def test_fixed_session_regenerate_validates_input(assistant_command_session, monkeypatch):
+    native, sessions, _, _, scheduled, _ = assistant_command_session
+    for message_id, request_id in ((None, "r"), ("   ", "r"), ("x" * 161, "r"),
+                                   ("m", None), ("m", ""), ("m", "x" * 129), ("m", "has space")):
+        with pytest.raises(native.AssistantSessionError) as error:
+            native.regenerate(message_id, request_id)
+        assert error.value.code == "SESSION_INVALID"
+    with pytest.raises(native.AssistantSessionError) as error:
+        native.regenerate("missing-message", "regen-x")
+    assert error.value.code in {"SESSION_INVALID", "SESSION_NOT_FOUND"}
+    assert not scheduled
+
+
+@pytest.mark.parametrize("changed", ["directSessionId", "agentId"])
+def test_fixed_session_regenerate_refuses_identity_rebinding(assistant_command_session, monkeypatch, changed):
+    native, sessions, _, _, scheduled, identity = assistant_command_session
+    identity[changed] = "replacement"
+    monkeypatch.setattr(sessions, "regenerate_session_message",
+                        lambda *_: pytest.fail("rebound regenerate admitted"))
+    with pytest.raises(native.AssistantSessionError) as error:
+        native.regenerate("m", "regen-x")
+    assert error.value.code == "ASSISTANT_IDENTITY_INVALID"
+    assert not scheduled
+
+
 def test_fixed_session_head_switch_validates_input_and_busy_state(assistant_command_session, monkeypatch):
     native, sessions, sid, _, scheduled, _ = assistant_command_session
     for bad in ("", "   ", "x" * 201, 7, None):

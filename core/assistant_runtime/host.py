@@ -162,6 +162,12 @@ class SwitchHead(BaseModel):
     nodeId: str = Field(min_length=1, max_length=200, pattern=r"\S", strict=True)
 
 
+class RegenerateMessage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    messageId: str = Field(min_length=1, max_length=160, pattern=r"\S", strict=True)
+    requestId: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.:-]+$", strict=True)
+
+
 class Continuation(BaseModel):
     model_config = ConfigDict(extra="forbid")
     turnId: str = Field(min_length=1, max_length=160, pattern=r"\S", strict=True)
@@ -522,6 +528,10 @@ class NativeFacade:
     def switch_head(self, node_id):
         from . import native
         return native.switch_head(node_id)
+
+    def regenerate(self, message_id, request_id):
+        from . import native
+        return native.regenerate(message_id, request_id)
 
     def shutdown(self):
         from . import native
@@ -1504,6 +1514,10 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
     @app.post("/api/assistant/head", status_code=202)
     def switch_head(payload: SwitchHead):
         return native.switch_head(payload.nodeId)
+
+    @app.post("/api/assistant/messages/regenerate", status_code=202)
+    def regenerate(payload: RegenerateMessage):
+        return native.regenerate(payload.messageId, payload.requestId)
 
     @app.get("/api/assistant/events")
     async def events(request: Request):
