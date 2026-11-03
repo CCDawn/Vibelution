@@ -204,9 +204,9 @@ def _project(kind, raw):
     return result
 
 
-def _json(path, max_bytes=2 * 1024 * 1024):
+def _json(path, max_bytes=2 * 1024 * 1024, *, read_file=None):
     from core.assistant_runtime.migration_io import read_stable_file, strict_json
-    raw = read_stable_file(Path(path), max_bytes).raw
+    raw = (read_file or read_stable_file)(Path(path), max_bytes).raw
     row = strict_json(raw)
     if not isinstance(row, dict):
         raise ValueError("Invalid native metadata")
@@ -215,38 +215,39 @@ def _json(path, max_bytes=2 * 1024 * 1024):
 
 def _scan(folder, *, key, prefix="", budget=None):
     """Read all existing snapshots, including unindexed rows, without repair."""
-    from core.assistant_runtime.migration_io import check_path, path_identity
+    from core.assistant_runtime.migration_io import check_path, path_identity, stable_directory_reader
     folder = check_path(Path(folder))
     before = path_identity(folder)
     rows, paths, complete = [], [], True
     budget = [_MAX_FILES, _MAX_BYTES] if budget is None else budget
-    for visited, path in enumerate(folder.iterdir()):
-        if visited >= _MAX_FILES * 3:
-            complete = False
-            break
-        if path.name.endswith(".json") and path.name.startswith(prefix) and not path.name.startswith("_"):
-            paths.append(path)
-            if len(paths) > budget[0]:
+    with stable_directory_reader(folder) as read_file:
+        for visited, path in enumerate(folder.iterdir()):
+            if visited >= _MAX_FILES * 3:
                 complete = False
                 break
-    paths = sorted(paths)[:budget[0]]
-    for path in paths:
-        if budget[1] <= 0:
-            complete = False
-            break
-        budget[0] -= 1
-        try:
-            allowance = min(2 * 1024 * 1024, budget[1])
-            # Charge corrupt records too; invalid JSON must not bypass the
-            # per-source byte budget and force thousands of full-size reads.
-            budget[1] -= min(path.stat().st_size, allowance)
-            row, _ = _json(path, allowance)
-            if _token(row.get(key)) != path.stem:
-                raise ValueError("Snapshot identity mismatch")
-            rows.append(row)
-        except (OSError, ValueError, TypeError):
-            complete = False
-    return rows, complete and path_identity(folder) == before
+            if path.name.endswith(".json") and path.name.startswith(prefix) and not path.name.startswith("_"):
+                paths.append(path)
+                if len(paths) > budget[0]:
+                    complete = False
+                    break
+        paths = sorted(paths)[:budget[0]]
+        for path in paths:
+            if budget[1] <= 0:
+                complete = False
+                break
+            budget[0] -= 1
+            try:
+                allowance = min(2 * 1024 * 1024, budget[1])
+                # Charge corrupt records too; invalid JSON must not bypass the
+                # per-source byte budget and force thousands of full-size reads.
+                budget[1] -= min(path.stat().st_size, allowance)
+                row, _ = _json(path, allowance, read_file=read_file)
+                if _token(row.get(key)) != path.stem:
+                    raise ValueError("Snapshot identity mismatch")
+                rows.append(row)
+            except (OSError, ValueError, TypeError):
+                complete = False
+        return rows, complete and path_identity(folder) == before
 
 
 def _root(gateway, *owners):

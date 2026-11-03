@@ -13,7 +13,7 @@ import pytest
 from core.assistant_runtime.migration_io import (
     MigrationIOError, check_path, fingerprint_tree, read_stable_file, strict_json, verify_snapshot,
     path_identity, publish_directory,
-    existing_migration_file_lock,
+    existing_migration_file_lock, stable_directory_reader,
 )
 
 
@@ -161,6 +161,86 @@ def test_stable_file_and_tree_are_exact_read_only_snapshots(tmp_path):
     path.write_bytes(b"modified")
     with pytest.raises(MigrationIOError, match="source_changed"):
         verify_snapshot(value)
+
+
+def test_directory_stable_reader_preserves_snapshots_expected_identity_and_scope(tmp_path):
+    folder = tmp_path / "source"
+    folder.mkdir()
+    target = folder / "data.json"
+    raw = b'{"private":"source body"}'
+    target.write_bytes(raw)
+    ordinary = read_stable_file(target, len(raw))
+    with stable_directory_reader(folder) as read:
+        assert read(target, len(raw), expected=ordinary.identity) == ordinary
+        with pytest.raises(MigrationIOError, match="source_not_immediate_child"):
+            read(folder / "nested" / "file.json", 32)
+        with pytest.raises(MigrationIOError, match="source_not_immediate_child"):
+            read(tmp_path / "outside.json", 32)
+        with pytest.raises(MigrationIOError, match="file_byte_limit"):
+            read(target, 1)
+        replacement = folder / "replacement.json"
+        replacement.write_bytes(raw)
+        replacement.replace(target)
+        with pytest.raises(MigrationIOError, match="source_changed"):
+            read(target, len(raw), expected=ordinary.identity)
+    target.unlink()
+    with pytest.raises(MigrationIOError, match="^source_reader_scope_closed$"):
+        read(target, 32)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows scoped source reader")
+def test_scoped_reader_does_not_change_ordinary_stable_file_guards(tmp_path, monkeypatch):
+    from core.web.services.personal_assistant_project import windows_read
+    target = tmp_path / "data.json"
+    target.write_bytes(b"safe")
+    real_read = windows_read.read_source_bytes
+    ordinary_reads = []
+
+    def counted(*args):
+        ordinary_reads.append(args[1])
+        return real_read(*args)
+
+    monkeypatch.setattr(windows_read, "read_source_bytes", counted)
+    with stable_directory_reader(tmp_path) as read:
+        scoped = read(target, 32)
+        assert ordinary_reads == []
+        assert read_stable_file(target, 32) == scoped
+    assert ordinary_reads == [target]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows scoped source reader")
+@pytest.mark.parametrize("replacement_kind", ["file", "symlink"])
+def test_scoped_reader_detects_leaf_replacement_after_handle_read(tmp_path, monkeypatch, replacement_kind):
+    from contextlib import contextmanager
+    from core.web.services.personal_assistant_project import windows_read
+    target = tmp_path / "data.json"
+    target.write_bytes(b"safe")
+    if replacement_kind == "symlink":
+        other = tmp_path / "other.json"
+        other.write_bytes(b"safe")
+        replacement = tmp_path / "replacement.json"
+        try:
+            replacement.symlink_to(other)
+        except OSError:
+            pytest.skip("native symlink privilege unavailable")
+    real_scope = windows_read.source_directory_reader
+
+    @contextmanager
+    def replacing(*args):
+        with real_scope(*args) as reader:
+            def read(path, max_bytes):
+                raw = reader(path, max_bytes)
+                replacement = tmp_path / "replacement.json"
+                if replacement_kind == "file":
+                    replacement.write_bytes(raw)
+                replacement.replace(path)
+                return raw
+            yield read
+
+    monkeypatch.setattr(windows_read, "source_directory_reader", replacing)
+    with stable_directory_reader(tmp_path) as read:
+        with pytest.raises(MigrationIOError, match="^source_changed$" if replacement_kind == "file" else "^linked_source$"):
+            read(target, 32)
 
 
 @pytest.mark.parametrize("raw", [b'{"a":1,"a":2}', b'{"a":NaN}', b'{"a":1e999}',
