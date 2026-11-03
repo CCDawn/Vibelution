@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Future
@@ -16,6 +17,7 @@ if TYPE_CHECKING:
     from .writer import ConversationWriter
 
 LAST_PREVIEW_MAX_CHARS = 240
+QUEUE_METADATA_MAX_BYTES = 16 * 1024 * 1024
 _DIRECTORY_SESSION_COLUMNS = (
     "session_id, agent_id, parent_session_id, agent_config_revision_id, "
     "title, status, recency_at_ms, updated_at_ms, created_at_ms, archived_at_ms, "
@@ -61,6 +63,14 @@ class ChatStateRevisionConflictError(RuntimeError):
         )
         self.expected = expected
         self.current = current
+
+
+class SessionQueueControlConflictError(RuntimeError):
+    """A metadata-bound queue cancellation no longer targets a removable row."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
 
 
 class AgentDao:
@@ -1061,6 +1071,178 @@ class WorkspaceChatStateDao:
             for row in rows
         }
 
+    def queue_metadata_snapshot(
+        self, *, max_rows: int, session_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Select only bounded queue identity/control scalars, never body columns.
+
+        The caller holds one read transaction. JSON stays inside SQLite; no
+        runtime document, queue content, debug snapshot or Journal is hydrated.
+        Malformed documents/rows stay visible through invalidCount.
+        """
+        root = self._connection.execute(
+            "SELECT state_revision FROM workspace_chat_state WHERE id=1"
+        ).fetchone()
+        revision = int(root["state_revision"]) if root is not None else 0
+        session_count = int(self._connection.execute(
+            "SELECT COUNT(*) FROM session_runtime_state WHERE (? IS NULL OR session_id=?)",
+            (session_id, session_id),
+        ).fetchone()[0])
+        # Even malformed documents and empty queues use a bounded session scan.
+        # CASE guards json_each from scalars and malformed JSON, while sentinel
+        # rows below distinguish an invalid queue from a valid empty queue.
+        rows = self._connection.execute("""
+            WITH bounded AS MATERIALIZED (
+              SELECT session_id, length(CAST(payload_json AS BLOB)) AS bytes
+              FROM session_runtime_state
+              WHERE (? IS NULL OR session_id=?)
+              ORDER BY session_id LIMIT ?
+            ), budgeted AS (
+              SELECT session_id,
+                SUM(bytes) OVER (ORDER BY session_id) > ? AS over_budget
+              FROM bounded
+            ), safe AS (
+              SELECT b.session_id, b.over_budget,
+                CASE WHEN NOT b.over_budget THEN json_valid(r.payload_json) ELSE 0 END AS valid,
+                CASE WHEN NOT b.over_budget AND json_valid(r.payload_json)
+                  THEN r.payload_json ELSE '{}' END AS doc
+              FROM budgeted b JOIN session_runtime_state r ON r.session_id=b.session_id
+            ), items AS (
+              SELECT s.session_id, s.valid, s.doc, s.over_budget, q.key, q.type AS row_type,
+                CASE WHEN q.type='object' THEN q.value ELSE '{}' END AS item
+              FROM safe s LEFT JOIN json_each(CASE
+                WHEN json_type(doc, '$.queued_turns')='array'
+                THEN json_extract(doc, '$.queued_turns') ELSE '[]' END) q
+            )
+            SELECT CASE WHEN length(i.session_id) <= 160 THEN i.session_id END AS sessionId,
+              CASE WHEN i.valid AND json_type(doc)='object' AND
+                (json_type(doc, '$.queued_turns') IS NULL OR json_type(doc, '$.queued_turns')='array')
+                THEN 1 ELSE 0 END AS documentValid,
+              row_type AS rowType, key AS queueIndex, over_budget AS budgetExceeded,
+              CASE WHEN json_type(item, '$.id')='text' AND length(json_extract(item, '$.id')) <= 160
+                THEN json_extract(item, '$.id') END AS queueId,
+              CASE WHEN d.agent_id IS NOT NULL AND (
+                  (json_type(doc, '$.agent_id')='text' AND json_extract(doc, '$.agent_id') NOT IN ('', d.agent_id))
+                  OR (json_type(doc, '$.agentId')='text' AND json_extract(doc, '$.agentId') NOT IN ('', d.agent_id)))
+                THEN ''
+                WHEN length(COALESCE(d.agent_id, json_extract(doc, '$.agent_id'),
+                    json_extract(doc, '$.agentId'), '')) <= 160
+                   AND typeof(COALESCE(d.agent_id, json_extract(doc, '$.agent_id'),
+                    json_extract(doc, '$.agentId'), ''))='text'
+                THEN COALESCE(d.agent_id, json_extract(doc, '$.agent_id'), json_extract(doc, '$.agentId'), '')
+                ELSE '' END AS agentId,
+              CASE WHEN json_type(item, '$.kind') IS NULL THEN 'user'
+                WHEN json_extract(item, '$.kind') IN ('user','task_notification','subagent_message','control_notice')
+                THEN json_extract(item, '$.kind') ELSE 'unknown' END AS queueKind,
+              CASE WHEN json_type(item, '$.status') IS NULL THEN 'queued'
+                WHEN json_extract(item, '$.status') IN ('queued','starting','paused','blocked')
+                THEN json_extract(item, '$.status') ELSE 'unknown' END AS status,
+              CASE WHEN json_type(item, '$.branchGeneration')='integer'
+                AND typeof(json_extract(item, '$.branchGeneration'))='integer'
+                AND json_extract(item, '$.branchGeneration') >= 0
+                THEN json_extract(item, '$.branchGeneration') END AS branchGeneration,
+              CASE WHEN json_type(doc, '$.branchGeneration')='integer'
+                AND typeof(json_extract(doc, '$.branchGeneration'))='integer'
+                AND json_extract(doc, '$.branchGeneration') >= 0
+                THEN json_extract(doc, '$.branchGeneration') ELSE 0 END AS sessionBranchGeneration,
+              CASE WHEN json_type(doc, '$.queued_turn_hold')='object'
+                AND EXISTS(SELECT 1 FROM json_each(doc, '$.queued_turn_hold')) THEN 1 ELSE 0 END AS sessionHeld,
+              CASE WHEN json_type(item, '$.held')='object'
+                AND EXISTS(SELECT 1 FROM json_each(item, '$.held')) THEN 1 ELSE 0 END AS held,
+              CASE WHEN json_type(item, '$.sendNow')='true' THEN 1 ELSE 0 END AS sendNow,
+              CASE WHEN (json_type(item, '$.sendNow') IS NULL OR json_type(item, '$.sendNow') IN ('true','false'))
+                AND (json_type(item, '$.held') IS NULL OR json_type(item, '$.held') IN ('null','object'))
+                AND (json_type(doc, '$.queued_turn_hold') IS NULL OR json_type(doc, '$.queued_turn_hold')='object')
+                AND (json_type(item, '$.branchGeneration') IS NULL OR json_type(item, '$.branchGeneration')='null'
+                     OR (json_type(item, '$.branchGeneration')='integer'
+                         AND typeof(json_extract(item, '$.branchGeneration'))='integer'
+                         AND json_extract(item, '$.branchGeneration') >= 0))
+                AND (json_type(doc, '$.branchGeneration') IS NULL OR
+                     (json_type(doc, '$.branchGeneration')='integer'
+                      AND typeof(json_extract(doc, '$.branchGeneration'))='integer'
+                      AND json_extract(doc, '$.branchGeneration') >= 0))
+                AND (json_type(doc, '$.agent_id') IS NULL OR json_type(doc, '$.agent_id') IN ('null','text'))
+                AND (json_type(doc, '$.agentId') IS NULL OR json_type(doc, '$.agentId') IN ('null','text'))
+                AND length(COALESCE(json_extract(doc, '$.agent_id'), json_extract(doc, '$.agentId'), '')) <= 160
+                AND (d.agent_id IS NULL OR (
+                     (json_type(doc, '$.agent_id') IS NULL OR json_type(doc, '$.agent_id')='null'
+                      OR json_extract(doc, '$.agent_id') IN ('',d.agent_id))
+                     AND (json_type(doc, '$.agentId') IS NULL OR json_type(doc, '$.agentId')='null'
+                      OR json_extract(doc, '$.agentId') IN ('',d.agent_id))))
+                THEN 1 ELSE 0 END AS metadataValid
+            FROM items i LEFT JOIN sessions d ON d.session_id=i.session_id
+            WHERE row_type IS NOT NULL OR NOT(valid AND json_type(doc)='object' AND
+              (json_type(doc, '$.queued_turns') IS NULL OR json_type(doc, '$.queued_turns')='array'))
+            ORDER BY i.session_id, key LIMIT ?
+        """, (session_id, session_id, max_rows, QUEUE_METADATA_MAX_BYTES, max_rows + 1)).fetchall()
+        truncated = session_count > max_rows or len(rows) > max_rows
+        invalid = 0
+        projected: dict[tuple[str, str], dict[str, Any]] = {}
+        seen: set[tuple[str, str]] = set()
+        for raw in rows[:max_rows]:
+            item = dict(raw)
+            if item.pop("budgetExceeded"):
+                truncated = True
+                continue
+            if not item.pop("documentValid") or item.pop("rowType") != "object":
+                invalid += 1
+                continue
+            sid, qid, aid = (item[key] for key in ("sessionId", "queueId", "agentId"))
+            if (not all(isinstance(value, str) and re.fullmatch(
+                    r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}", value) for value in (sid, qid))):
+                invalid += 1
+                continue
+            if aid and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}", aid) is None:
+                invalid += 1
+                item["agentId"] = ""
+            identity = (sid, qid)
+            if identity in seen:
+                invalid += 1 + int(identity in projected)
+                projected.pop(identity, None)
+                continue
+            seen.add(identity)
+            invalid += int(not item.pop("metadataValid") or item["queueKind"] == "unknown" or item["status"] == "unknown")
+            item["position"] = item.pop("queueIndex") + 1
+            for field in ("sessionHeld", "held", "sendNow"):
+                item[field] = bool(item[field])
+            projected[identity] = item
+        return {"rows": list(projected.values()), "stateRevision": revision,
+                "complete": not (invalid or truncated), "truncated": truncated, "invalidCount": invalid}
+
+    def cancel_queued_turn_metadata(
+        self, *, session_id: str, queue_id: str, expected_state_revision: int,
+        expected_metadata: Mapping[str, Any], updated_at: str,
+    ) -> dict[str, Any]:
+        """Remove one pre-Turn row inside the existing writer transaction.
+
+        Only the target Session's metadata is selected. SQLite removes the JSON
+        element without returning any queue body or decoding sibling Sessions.
+        The workspace revision fences every native content/metadata mutation.
+        """
+        snapshot = self.queue_metadata_snapshot(max_rows=10000, session_id=session_id)
+        revision = snapshot["stateRevision"]
+        if revision != expected_state_revision:
+            raise ChatStateRevisionConflictError(expected=expected_state_revision, current=revision)
+        if not snapshot["complete"]:
+            raise SessionQueueControlConflictError("queue_metadata_unavailable")
+        row = next((item for item in snapshot["rows"] if item["queueId"] == queue_id), None)
+        if row is None:
+            raise SessionQueueControlConflictError("queue_not_found")
+        if row != dict(expected_metadata):
+            raise SessionQueueControlConflictError("queue_metadata_changed")
+        if row["status"] not in {"queued", "blocked", "paused"}:
+            raise SessionQueueControlConflictError("queue_starting")
+        path = f"$.queued_turns[{row['position'] - 1}]"
+        self._connection.execute(
+            "UPDATE session_runtime_state SET payload_json=json_set("
+            "json_remove(payload_json, ?), '$.updated_at', ?), updated_at_ms=? "
+            "WHERE session_id=?",
+            (path, updated_at, _now_ms(), session_id),
+        )
+        revision = self._bump_workspace_revision(updated_at=updated_at)
+        return {"sessionId": session_id, "queueId": queue_id, "agentId": row["agentId"],
+                "status": "cancelled", "stateRevision": revision, "queueMetadata": row}
+
     def upsert_one(
         self,
         session_id: str,
@@ -1694,6 +1876,39 @@ class ConversationRepository:
     def get_session_runtime_state(self, session_id: str) -> dict[str, Any] | None:
         with self._database.reader() as connection:
             return WorkspaceChatStateDao(connection).get_one(session_id)
+
+    def read_session_queue_metadata_snapshot(self, *, max_rows: int = 10000) -> dict[str, Any]:
+        """Read existing queue metadata in one SQLite snapshot without writes."""
+        if type(max_rows) is not int or not 1 <= max_rows <= 10000:
+            raise ValueError("Invalid metadata inventory limit")
+        with self._database.reader() as connection:
+            connection.execute("BEGIN")
+            try:
+                return WorkspaceChatStateDao(connection).queue_metadata_snapshot(max_rows=max_rows)
+            finally:
+                connection.execute("ROLLBACK")
+
+    def cancel_session_queued_turn_metadata(
+        self, *, session_id: str, queue_id: str, expected_state_revision: int,
+        expected_metadata: Mapping[str, Any], updated_at: str,
+    ) -> Future[dict[str, Any]]:
+        """CAS cancellation through the sole ConversationWriter persistence owner."""
+        if type(expected_state_revision) is not int or expected_state_revision < 0:
+            raise ValueError("Invalid metadata state revision")
+        for identity in (session_id, queue_id):
+            if not isinstance(identity, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}", identity) is None:
+                raise ValueError("Invalid queue identity")
+        frozen = dict(expected_metadata)
+        if frozen.get("sessionId") != session_id or frozen.get("queueId") != queue_id:
+            raise ValueError("Queue metadata identity mismatch")
+        return self._writer.submit(
+            lambda unit_of_work: unit_of_work.chat_state.cancel_queued_turn_metadata(
+                session_id=session_id, queue_id=queue_id,
+                expected_state_revision=expected_state_revision,
+                expected_metadata=frozen, updated_at=updated_at,
+            ),
+            force_flush=True,
+        )
 
     def get_session_terminal_states(self, session_ids: Sequence[str]) -> dict[str, dict[str, str]]:
         with self._database.reader() as connection:

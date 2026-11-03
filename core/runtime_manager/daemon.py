@@ -61,7 +61,7 @@ from .process_identity import (
 from .restart_coordinator import claim_next_restart_intent, complete_restart_intent
 from .scene_logging import append_runtime_manager_file_event, enforce_runtime_scene_retention_on_startup, record_runtime_manager_scene_event, runtime_manager_event_phase
 from .state_store import clear_pid, default_state, load_pid, load_state, now_iso, save_pid, save_state
-from . import work_run_store
+from . import evolution_control, work_run_store
 from .process_inventory import (
     list_repo_runtime_processes,
     managed_browser_pid_matches_profile,
@@ -98,6 +98,7 @@ _SOURCE_SIGNATURE_PATHS = (
     Path("core/runtime_manager/constants.py"),
     Path("core/runtime_manager/daemon.py"),
     Path("core/runtime_manager/evolution_store.py"),
+    Path("core/runtime_manager/evolution_control.py"),
     Path("core/runtime_manager/process_inventory.py"),
     Path("core/runtime_manager/restart_coordinator.py"),
     Path("core/runtime_manager/scene_logging.py"),
@@ -2374,6 +2375,29 @@ class RuntimeManagerDaemon:
         self._idle_reconcile_running = False
         self._idle_reconcile_result: dict[str, Any] | None = None
         self._idle_reconcile_error: Exception | None = None
+        self._evolution_metadata_server: evolution_control.MetadataServer | None = None
+
+    def _start_evolution_metadata_server(self) -> None:
+        from .state_store import load_pid_identity, publish_evolution_control_endpoint
+
+        server = None
+        try:
+            owner = evolution_control.public_identity(load_pid_identity())
+            server = evolution_control.MetadataServer(owner)
+            endpoint = server.start()
+            publish_evolution_control_endpoint(owner, endpoint)
+            self._evolution_metadata_server = server
+        except Exception as exc:
+            if server is not None:
+                server.close()
+            # Metadata availability does not authorize restarting the daemon.
+            # Do not put capabilities, endpoint records, or request data in logs.
+            _append_event("daemon.evolution_metadata_unavailable", {"errorType": type(exc).__name__})
+
+    def _close_evolution_metadata_server(self) -> None:
+        server, self._evolution_metadata_server = self._evolution_metadata_server, None
+        if server is not None:
+            server.close()
 
     def _idle_reconcile_observation(self) -> dict[str, Any]:
         return observe_workbench(recover_browser_window=False)
@@ -2585,6 +2609,7 @@ class RuntimeManagerDaemon:
             self._run_deferred_workbench_open(result)
         if bool(result.get("stopDaemon")):
             _finalize_daemon_stopped_state(manager_pid=self._pid)
+            self._close_evolution_metadata_server()
             clear_pid(self._pid)
             _exit_current_process(0)
             return True
@@ -2627,6 +2652,7 @@ class RuntimeManagerDaemon:
         startup_reconcile_scheduled = False
 
         try:
+            self._start_evolution_metadata_server()
             while True:
                 command = claim_next_command()
                 if command is not None:
@@ -2675,6 +2701,7 @@ class RuntimeManagerDaemon:
                     self._start_idle_reconcile_probe(observation)
                 time.sleep(DAEMON_LOOP_INTERVAL_SECONDS)
         finally:
+            self._close_evolution_metadata_server()
             clear_pid(self._pid)
             if self._owns_daemon_lock:
                 _release_daemon_ownership(self._pid)
@@ -2820,7 +2847,7 @@ class RuntimeManagerDaemon:
                     "reason": "open_workbench_avoids_prelaunch_reconcile",
                 },
             )
-        elif command_type in {"close_workbench", "force_close_workbench", "restart_workbench"}:
+        elif command_type in {"close_workbench", "force_close_workbench", "restart_workbench", "managed_evolution_control"}:
             # Restart/close observe themselves. A pre-handler reconcile walks
             # every process and added multiple seconds after the click.
             state = save_state(state)
@@ -2907,7 +2934,7 @@ class RuntimeManagerDaemon:
             # a second process/residual scan here can block result persistence
             # and leave the Launcher stuck in ``opening``.  The daemon loop
             # reconciles observations again after the failed result is durable.
-            reconcile_failure = command_type != "open_workbench"
+            reconcile_failure = command_type not in {"open_workbench", "managed_evolution_control"}
             result = self._finish_command(
                 command_id,
                 ok=False,
@@ -5577,6 +5604,37 @@ class RuntimeManagerDaemon:
                 return blocked
             return self._handle_close_workbench(command_id=command_id, args=args)
         return self._handle_open_workbench(command_id=command_id, args=args)
+
+    def _handle_managed_evolution_control(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
+        """Fixed control protocol; native owners compare inside their own locks."""
+        from .state_store import load_pid_identity
+
+        if set(args) != {"kind", "runId", "action", "expectedRevision", "owner"}:
+            raise evolution_control.InputError("Invalid managed evolution command")
+        kind, rid, action = args["kind"], args["runId"], args["action"]
+        evolution_control._kind(kind)
+        evolution_control._token(rid)
+        if not isinstance(action, str) or action not in {"pause", "resume", "stop"}:
+            raise evolution_control.InputError("Invalid managed evolution action")
+        owner = evolution_control.public_identity(args["owner"])
+        current = evolution_control.public_identity(load_pid_identity())
+        if (owner != current or current["pid"] != self._pid
+                or current != evolution_control.public_identity(capture_process_identity(self._pid))):
+            raise evolution_control.Conflict("Manager owner changed")
+        before = evolution_control.snapshot(kind, owner, run_id=rid)["rows"][0]
+        if action not in {"pause", "resume", "stop"} or action not in before["commands"]:
+            raise evolution_control.Conflict("Native control action unavailable")
+        methods = ({"pause": supervised_control_service._LOCAL_REQUEST_PAUSE_SUPERVISED_RUN,
+                    "resume": supervised_control_service._LOCAL_REQUEST_RESUME_SUPERVISED_RUN,
+                    "stop": supervised_control_service._LOCAL_REQUEST_STOP_SUPERVISED_RUN}
+                   if kind == "supervised" else
+                   {"pause": self_evolution_control_service._LOCAL_REQUEST_PAUSE_SELF_EVOLUTION_RUN,
+                    "resume": self_evolution_control_service._LOCAL_RESUME_SELF_EVOLUTION_RUN,
+                    "stop": self_evolution_control_service._LOCAL_REQUEST_STOP_SELF_EVOLUTION_RUN})
+        methods[action](rid, expected_revision=args["expectedRevision"], expected_owner=owner)
+        row = evolution_control.snapshot(kind, owner, run_id=rid)["rows"][0]
+        return self._finish_command(command_id, ok=True, message="Native evolution control accepted.",
+            result_data={"operation": row, "revisionCheck": "native_cas"}, reconcile=False)
 
     def _handle_start_self_evolution_run(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
         payload = args.get("payload") if isinstance(args.get("payload"), dict) else {}

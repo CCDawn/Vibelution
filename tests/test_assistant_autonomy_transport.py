@@ -114,6 +114,8 @@ async def test_new_inventory_and_item_are_explicit_scoped_additions_with_legacy_
     assert legacy.status_code == item.status_code == 200
     assert "snapshot" not in legacy.json() and "progressFingerprint" not in legacy.json()["operations"][0]
     assert "progressFingerprint" not in item.json()["operation"]
+    assert "queue" not in item.json()["operation"] and "queue" not in legacy.json()["operations"][0]
+    assert all(set(row) == {"source", "state", "complete"} for row in legacy.json()["coverage"])
     inventory = await api.sdk.management_runtime("list", kind="research_run")
     current = await api.sdk.management_runtime("get", **RUN_QUERY)
     assert len(inventory["snapshot"]) == 64 and inventory["operations"][0]["progressFingerprint"] == HASH
@@ -123,6 +125,27 @@ async def test_new_inventory_and_item_are_explicit_scoped_additions_with_legacy_
     assert any(path.endswith("/runtime/item") for path in paths)
     assert not any(path.endswith(("/runtime/operations", "/runtime/operation")) for path in paths)
     assert api.client.get(PREFIX + "/runtime/operations?expected_snapshot=" + inventory["snapshot"], headers=api.headers).status_code == 422
+
+
+@pytest.mark.anyio
+async def test_legacy_default_pagination_excludes_new_queue_source_before_counting(api):
+    await authorize(api, ["operations:read"])
+    queue = {**RUN, "kind": "session_queue", "resourceId": "queued-a", "sessionId": "session-a",
+        "teamId": "", "flowId": "", "commands": ["stop"], "status": "queued", "queue": {
+            "queueKind": "user", "position": 1, "held": False, "sessionHeld": False,
+            "sendNow": False, "branchGeneration": None, "sessionBranchGeneration": 0}}
+    api.state.operation_rows.append(queue)
+    old = api.client.get(PREFIX + "/runtime/operations", headers=api.headers)
+    assert old.status_code == 200
+    old = old.json()
+    assert old["total"] == 1 and len(old["coverage"]) == 7
+    assert {row["kind"] for row in old["operations"]} == {"research_run"}
+    assert all(set(item) == {"source", "state", "complete"} for item in old["coverage"])
+    assert all("queue" not in row for row in old["operations"])
+    current = await api.sdk.management_runtime("list")
+    assert current["total"] == 2 and len(current["coverage"]) == 8
+    assert any(row["kind"] == "session_queue" for row in current["operations"])
+    assert api.client.get(PREFIX + "/runtime/operations", params={"kind": "session_queue"}, headers=api.headers).status_code == 422
 
 
 @pytest.mark.anyio

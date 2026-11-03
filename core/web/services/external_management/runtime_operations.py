@@ -13,7 +13,7 @@ from pathlib import Path
 
 from .service import ManagementError
 
-KINDS = ("session_turn", "runtime_task", "external_task", "team_run", "supervised_run",
+KINDS = ("session_turn", "session_queue", "runtime_task", "external_task", "team_run", "supervised_run",
          "self_evolution_run", "research_run")
 _TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}\Z")
 _STATUSES = frozenset({"idle", "created", "queued", "sent", "running", "waiting", "waiting_human",
@@ -25,10 +25,11 @@ _STATUSES = frozenset({"idle", "created", "queued", "sent", "running", "waiting"
 _TERMINAL = _STATUSES - {"idle", "created", "queued", "sent", "running", "waiting", "waiting_human",
     "waiting_external", "awaiting_approval", "paused", "pausing", "pause_requested", "stopping",
     "cancelling", "stop_unconfirmed"}
-_TERMINAL_BY_KIND = {"team_run": {"completed", "failed", "stopped"},
+_TERMINAL_BY_KIND = {"session_queue": {"cancelled"}, "team_run": {"completed", "failed", "stopped"},
     "external_task": {"succeeded", "failed", "cancelled", "timed_out"},
     "research_run": {"succeeded", "failed", "cancelled", "archived"}}
 _KNOWN_BY_KIND = {
+    "session_queue": {"queued", "starting", "paused", "blocked", "cancelled"},
     "runtime_task": {"queued", "sent", "running", "idle", "blocked", "canceled", "cancelled", "closed",
         "completed", "dropped", "error", "exited", "failed", "incomplete", "stale", "stopped",
         "superseded", "timed_out", "timeout"},
@@ -62,7 +63,7 @@ def _reference(kind, resource_id, refs):
         refs = {key: value for key, value in refs.items() if value not in (None, "")}
         for value in refs.values():
             _token(value)
-        required, allowed = ({"session_id"}, {"session_id"}) if kind == "session_turn" else (
+        required, allowed = ({"session_id"}, {"session_id"}) if kind in {"session_turn", "session_queue"} else (
             ({"team_id"}, {"team_id", "flow_id"}) if kind == "team_run" else (
             ({"team_id", "flow_id"}, {"team_id", "flow_id"}) if kind == "research_run" else (set(), set())))
         if not required <= set(refs) or set(refs) - allowed:
@@ -140,7 +141,7 @@ def _project(kind, raw):
             value = (raw.get("flow") or {}).get("id") or ""
         if value:
             result[field] = _token(value)
-    if kind == "session_turn" and not result.get("sessionId"):
+    if kind in {"session_turn", "session_queue"} and not result.get("sessionId"):
         raise ValueError("Missing Session identity")
     if kind in {"team_run", "research_run"} and not all(result.get(key) for key in ("teamId", "flowId")):
         raise ValueError("Missing workflow identity")
@@ -149,7 +150,7 @@ def _project(kind, raw):
             and not raw.get("stopRequested") and not raw.get("stopInitiator")
             and (kind != "session_turn" or raw.get("_liveControl") is True)):
         commands = ["stop"]
-    elif kind == "team_run":
+    elif kind == "team_run" and status != "unknown":
         if status not in {"completed", "stopped"} and not raw.get("stopRequested"):
             commands.append("stop")
         if not raw.get("_recoveryParent"):
@@ -174,11 +175,27 @@ def _project(kind, raw):
         elif status in {"running", "waiting_human"} and raw.get("_hasAttempts"):
             commands.append("pause")
     result["commands"] = commands
+    if kind in {"supervised_run", "self_evolution_run"} and raw.get("_nativeCAS") is True:
+        native_commands = raw["_nativeCommands"]
+        if native_commands not in ([], ["stop", "pause"], ["stop", "resume"]):
+            raise ValueError("Invalid native managed commands")
+        result["commands"] = list(native_commands) if status != "unknown" else []
+    if kind == "session_queue":
+        from .runtime_contracts import RuntimeQueueMetadata
+        result["commands"] = ["stop"] if (status in {"queued", "paused", "blocked"}
+            and type(raw.get("_queueStateRevision")) is int and raw["_queueStateRevision"] >= 0) else []
+        result["queue"] = RuntimeQueueMetadata.model_validate(raw["_queue"]).model_dump()
     if kind in {"team_run", "external_task", "research_run"}:
         revision = raw.get("revision")
         if type(revision) is not int or revision < 0:
             raise ValueError("Invalid native version")
         result["revision"] = str(revision)
+    elif kind == "session_queue":
+        result["revision"] = _fingerprint([result, raw.get("_queueStateRevision")])
+    elif raw.get("_nativeCAS") is True:
+        if not isinstance(raw.get("revision"), str) or re.fullmatch(r"[a-f0-9]{64}", raw["revision"]) is None:
+            raise ValueError("Invalid native managed revision")
+        result["revision"] = raw["revision"]
     else:
         # Include control-changing facts, never a prompt, summary, or transcript.
         result["revision"] = _fingerprint([result, {key: raw.get(key) for key in (
@@ -256,27 +273,51 @@ def _work_store(gateway):
     return store
 
 
+def _observed_turn(fact, previous=None):
+    previous = previous or {}
+    return {**previous, "runId": fact["turnId"], "sessionId": fact["sessionId"],
+        "agentId": fact["agentId"] or previous.get("agentId", ""), "status": fact["status"],
+        "stopRequested": fact["stopRequested"], "finishedAt": "", "endedAt": "",
+        "_liveControl": fact["liveControl"]}
+
+
 def _sessions(gateway):
     from core.web.services import session_service as sessions
-    store = _work_store(gateway)
+    _root(gateway, sessions)
     try:
-        persisted, _ = _scan(store.runs_dir("chat_turn"), key="runId")
+        persisted, disk_complete = _scan(_work_store(gateway).runs_dir("chat_turn"), key="runId")
     except (OSError, ValueError):
-        persisted = []
+        persisted, disk_complete = [], False
     by_id = {row["runId"]: {**row, "_liveControl": False} for row in persisted}
-    with sessions._RUNNING_SESSIONS_LOCK:
-        live = [(sid, sessions._SESSION_ACTIVE_TURN_IDS.get(sid)) for sid in sessions._RUNNING_SESSION_IDS]
-    for sid, turn_id in live:
-        controller = sessions._get_session_turn_control(sid)
-        if controller is None or controller.turn_id != turn_id:
-            continue
-        state = controller.snapshot()
-        previous_status = by_id.get(turn_id, {}).get("status")
-        by_id[turn_id] = {**by_id.get(turn_id, {}), "runId": turn_id, "sessionId": sid,
-            "status": "stopping" if state.get("stopRequested") else previous_status if previous_status in {"queued", "running"} else "running",
-            "stopRequested": bool(state.get("stopRequested")), "finishedAt": "", "endedAt": "", "_liveControl": True}
-    # No native authority certifies a global atomic Session/queued snapshot.
-    return list(by_id.values()), False
+    try:
+        observed = sessions.read_session_runtime_inventory(gateway.project_root, max_rows=_MAX_FILES)
+    except Exception:
+        observed = {"turns": [], "complete": False, "sourceCoverage": [
+            {"source": source, "state": "unavailable", "complete": False, "reason": "read_failed"}
+            for source in ("running_controller", "scheduler", "persisted_queue", "journal")]}
+    for fact in observed["turns"]:
+        rid = fact["turnId"]
+        previous = by_id.get(rid, {})
+        if previous.get("sessionId", fact["sessionId"]) != fact["sessionId"]:
+            raise ValueError("Conflicting native Turn identity")
+        by_id[rid] = _observed_turn(fact, previous)
+    details = [*observed["sourceCoverage"], {"source": "work_runs",
+        "state": "available" if disk_complete else "partial", "complete": disk_complete}]
+    return list(by_id.values()), bool(disk_complete and observed["complete"]), details
+
+
+def _session_queues(gateway):
+    from core.web.services import session_service as sessions
+    _root(gateway, sessions)
+    observed = sessions.read_session_runtime_inventory(gateway.project_root, max_rows=_MAX_FILES)
+    coverage = [item for item in observed["sourceCoverage"] if item["source"] == "persisted_queue"]
+    if len(coverage) != 1:
+        raise ValueError("Missing native queue authority")
+    rows = [{"runId": row["queueId"], "sessionId": row["sessionId"], "agentId": row["agentId"],
+        "status": row["status"], "_queueFact": row, "_queueStateRevision": coverage[0]["revision"], "_queue": {key: row[key] for key in (
+            "queueKind", "position", "held", "sessionHeld", "sendNow", "branchGeneration", "sessionBranchGeneration")}}
+        for row in observed["queues"]]
+    return rows, coverage[0]["complete"], coverage
 
 
 def _runtime_store(gateway):
@@ -400,22 +441,33 @@ def _managed_manager_pid(gateway):
 
 
 def _managed_metadata(gateway, native_kind, row, *, manager_pid=None):
-    pid = _managed_manager_pid(gateway) if manager_pid is None else manager_pid
-    control = row.get("runtimeManagerControl")
-    control = control if isinstance(control, dict) else {}
-    owner_pid = control.get("ownerPid")
-    return {**row, "_liveControl": (pid > 0 and type(owner_pid) is int and owner_pid == pid
-                                    and control.get("kind") == native_kind)}
+    # Durable ownerPid/claimedAt cannot prove a live slot in this daemon epoch.
+    # Only the authenticated manager observation grants native commands.
+    return {**row, "_liveControl": False}
+
+
+def _native_managed_rows(gateway, native_kind, *, run_id=None):
+    from core.runtime_manager import evolution_control
+    snapshot = evolution_control.read_inventory(gateway.project_root, native_kind, run_id=run_id)
+    if snapshot.get("complete") is not True:
+        raise evolution_control.Unavailable("Incomplete native manager observation")
+    return [{**row, "_nativeCAS": True, "_nativeCommands": row["commands"]}
+            for row in snapshot["rows"]]
 
 
 def _managed_runs(gateway, kind):
     native_kind = {"supervised_run": "supervised", "self_evolution_run": "self"}[kind]
     store = _managed_store(gateway)
     folder = store.runs_dir(native_kind)
-    rows, _ = _scan(folder, key="runId") if _managed_directory(folder) else ([], False)
-    pid = _managed_manager_pid(gateway)
-    # A backend's durable directory cannot certify the manager's live slots.
-    return [_managed_metadata(gateway, native_kind, row, manager_pid=pid) for row in rows], False
+    rows, complete = _scan(folder, key="runId") if _managed_directory(folder) else ([], True)
+    durable = {row["runId"]: _managed_metadata(gateway, native_kind, row) for row in rows}
+    from core.runtime_manager import evolution_control
+    try:
+        for row in _native_managed_rows(gateway, native_kind):
+            durable[row["runId"]] = row
+    except evolution_control.Unavailable:
+        complete = False
+    return list(durable.values()), complete
 
 
 def _research_store(gateway):
@@ -527,13 +579,15 @@ def _external_command(gateway, before, expected):
 
 
 def _source(gateway, kind):
-    return {"session_turn": _sessions, "runtime_task": _runtime_tasks, "external_task": _external_tasks,
+    return {"session_turn": _sessions, "session_queue": _session_queues, "runtime_task": _runtime_tasks, "external_task": _external_tasks,
         "team_run": _team_runs, "research_run": _research_runs}.get(kind, lambda g: _managed_runs(g, kind))(gateway)
 
 
 def _snapshot(gateway, kind):
     try:
-        raw, complete = _source(gateway, kind)
+        source = _source(gateway, kind)
+        raw, complete = source[:2]
+        details = source[2] if len(source) == 3 else []
     except Exception:
         # Source-local failures never erase other owners or claim an idle source.
         return [], {"source": kind, "state": "unavailable", "complete": False}
@@ -550,10 +604,24 @@ def _snapshot(gateway, kind):
             rows.append(projected)
         except (ValueError, TypeError, AttributeError):
             complete = False
-    return rows, {"source": kind, "state": "available" if complete else "partial", "complete": complete}
+    coverage = {"source": kind, "state": "available" if complete else "partial", "complete": complete}
+    if details:
+        from .runtime_contracts import RuntimeInventorySource
+        try:
+            projected_details = [RuntimeInventorySource.model_validate(item).model_dump() for item in details]
+            if len(projected_details) > 5 or len({item["source"] for item in projected_details}) != len(projected_details):
+                raise ValueError("Ambiguous native coverage")
+            coverage["details"] = projected_details
+            if any(not item["complete"] for item in projected_details):
+                coverage.update(state="partial", complete=False)
+        except (ValueError, TypeError):
+            coverage.update(state="partial", complete=False)
+    return rows, coverage
 
 
 def read_operations(gateway, query):
+    from .runtime_legacy_contracts import LegacyRuntimeOperationsQuery, LEGACY_RUNTIME_KINDS
+    allowed_kinds = LEGACY_RUNTIME_KINDS if isinstance(query, LegacyRuntimeOperationsQuery) else KINDS
     gateway._owners()
     query = _parameters(query)
     kind, offset, limit = query.get("kind"), query.get("offset", 0), query.get("limit", 3)
@@ -566,7 +634,7 @@ def read_operations(gateway, query):
             or type(offset) is not int or not 0 <= offset <= 1000000 or type(limit) is not int or not 1 <= limit <= 3):
         raise ManagementError("INVALID_INPUT", 422)
     operations, coverage, observed = [], [], []
-    for selected in (kind,) if kind else KINDS:
+    for selected in (kind,) if kind else allowed_kinds:
         rows, source_state = _snapshot(gateway, selected)
         observed.extend(rows)
         operations.extend(row for row in rows if filter_state == "all" or
@@ -626,7 +694,16 @@ def _session_target(gateway, resource_id, session_id):
     elif live:
         row = {"runId": resource_id, "sessionId": session_id}
     else:
-        return _point_json(path, "runId", resource_id)
+        observed = sessions.read_session_runtime_inventory(gateway.project_root, max_rows=_MAX_FILES)
+        facts = [fact for fact in observed["turns"] if (fact["sessionId"], fact["turnId"]) == (session_id, resource_id)]
+        if len(facts) == 1:
+            return _observed_turn(facts[0])
+        if facts:
+            raise ValueError("Ambiguous native Turn identity")
+        turn_sources = {item["source"]: item for item in observed["sourceCoverage"]
+                        if item["source"] in {"running_controller", "scheduler", "journal"}}
+        complete = len(turn_sources) == 3 and all(item["complete"] for item in turn_sources.values())
+        raise ManagementError("OPERATION_UNAVAILABLE" if complete else "OPERATION_SOURCE_UNAVAILABLE", 404 if complete else 503)
     if live:
         state = controller.snapshot()
         previous = row.get("status")
@@ -637,6 +714,12 @@ def _session_target(gateway, resource_id, session_id):
 
 
 def _point_operation(gateway, kind, resource_id, refs):
+    if kind == "session_queue":
+        rows, complete, _ = _session_queues(gateway)
+        matches = [row for row in rows if row["runId"] == resource_id and row["sessionId"] == refs["session_id"]]
+        if len(matches) == 1:
+            return matches[0]
+        raise ManagementError("OPERATION_UNAVAILABLE" if complete else "OPERATION_SOURCE_UNAVAILABLE", 404 if complete else 503)
     if kind == "research_run":
         rows = _research_metadata(gateway, resource_id)
         if not rows:
@@ -668,6 +751,14 @@ def _point_operation(gateway, kind, resource_id, refs):
         return row
     store = _managed_store(gateway)
     native_kind = "supervised" if kind == "supervised_run" else "self"
+    from core.runtime_manager import evolution_control
+    try:
+        rows = _native_managed_rows(gateway, native_kind, run_id=resource_id)
+        if len(rows) != 1 or rows[0]["runId"] != resource_id:
+            raise ValueError("Native managed identity changed")
+        return rows[0]
+    except (evolution_control.Unavailable, evolution_control.NotFound):
+        pass
     folder = store.runs_dir(native_kind)
     if not _managed_directory(folder):
         raise ManagementError("OPERATION_UNAVAILABLE", 404)
@@ -734,7 +825,28 @@ def command(gateway, parameters, *, request_id=""):
     # exception is a lost acknowledgement, not permission to repeat the command.
     try:
         accepted, stop_requested = True, False
-        if kind == "session_turn":
+        if kind == "session_queue":
+            from core.web.services import session_service as sessions
+            from core.web.services.session.queued_turns import cancel_session_queued_turn
+            target = _point_operation(gateway, kind, rid, refs)
+            if _project(kind, target)["revision"] != expected:
+                raise ManagementError("STATE_CONFLICT", 409)
+            try:
+                result = cancel_session_queued_turn(refs["session_id"], rid,
+                    expected_state_revision=target["_queueStateRevision"], expected_metadata=target["_queueFact"])
+            except sessions.SessionBusyError:
+                raise ManagementError("STATE_CONFLICT", 409) from None
+            except sessions.SessionNotFoundError:
+                raise ManagementError("OPERATION_UNAVAILABLE", 404) from None
+            except sessions.SessionValidationError:
+                raise ManagementError("COMMAND_UNAVAILABLE", 409) from None
+            if (result.get("sessionId") != refs["session_id"] or result.get("queueId") != rid
+                    or result.get("agentId") != target["agentId"] or result.get("queueMetadata") != target["_queueFact"]
+                    or result.get("status") != "cancelled" or type(result.get("stateRevision")) is not int
+                    or result["stateRevision"] <= target["_queueStateRevision"]):
+                raise ManagementError("OPERATION_UNCONFIRMED", 503)
+            after = _project(kind, {**target, "status": "cancelled", "_queueStateRevision": result["stateRevision"]})
+        elif kind == "session_turn":
             from core.web.services import session_service as sessions
             from core.web.services.session.control import request_stop_session_turn
             controller = sessions._get_session_turn_control(refs["session_id"])
@@ -775,33 +887,45 @@ def command(gateway, parameters, *, request_id=""):
         elif kind == "external_task":
             after, accepted, stop_requested = _external_command(gateway, before, expected)
         else:
-            from core.web.services import self_evolution_control_service, supervised_control_service
-            owner = supervised_control_service if kind == "supervised_run" else self_evolution_control_service
-            _root(gateway, owner)
-            methods = ({"pause": owner.request_pause_supervised_run, "resume": owner.request_resume_supervised_run,
-                        "stop": owner.request_stop_supervised_run} if kind == "supervised_run" else
-                       {"pause": owner.request_pause_self_evolution_run, "resume": owner.resume_self_evolution_run,
-                        "stop": owner.request_stop_self_evolution_run})
-            state_errors = ((owner.SupervisedRunBusyError, owner.SupervisedRunStateError) if kind == "supervised_run"
-                            else (owner.SelfEvolutionRunBusyError,))
-            not_found = owner.SupervisedRunNotFoundError if kind == "supervised_run" else owner.SelfEvolutionRunNotFoundError
-            invalid = owner.SupervisedRunValidationError if kind == "supervised_run" else owner.SelfEvolutionRunValidationError
-            try:
-                raw = methods[action](rid)
-            except state_errors:
-                raise ManagementError("STATE_CONFLICT", 409) from None
-            except not_found:
-                raise ManagementError("OPERATION_UNAVAILABLE", 404) from None
-            except invalid:
-                raise ManagementError("INVALID_INPUT", 422) from None
+            from core.runtime_manager import evolution_control
             native_kind = "supervised" if kind == "supervised_run" else "self"
-            after = _project(kind, _managed_metadata(gateway, native_kind, raw))
-            stop_requested = action == "stop" and (raw.get("stopRequested") is True or raw.get("status") in {"stopping", "cancelled"})
+            try:
+                result = evolution_control.command(gateway.project_root, native_kind, rid, action, expected,
+                                                   request_id=request_id)
+            except evolution_control.Conflict:
+                raise ManagementError("STATE_CONFLICT", 409) from None
+            except evolution_control.NotFound:
+                raise ManagementError("OPERATION_UNAVAILABLE", 404) from None
+            except evolution_control.InputError:
+                raise ManagementError("INVALID_INPUT", 422) from None
+            raw = result["operation"]
+            after = _project(kind, {**raw, "_nativeCAS": True, "_nativeCommands": raw["commands"]})
+            accepted, stop_requested = result["accepted"], action == "stop" and result["stopRequested"]
         if any(after.get(key) != before.get(key) for key in ("kind", "resourceId", "agentId", "sessionId", "teamId", "flowId")):
             raise ManagementError("OPERATION_UNCONFIRMED", 503)
         return {"operation": after, "command": action, "accepted": accepted, "stopRequested": stop_requested,
-            "revisionCheck": "native_cas" if kind in {"team_run", "research_run"} else "preflight_only", "untrustedContent": True}
+            "revisionCheck": "native_cas" if kind in {"session_queue", "team_run", "research_run", "supervised_run", "self_evolution_run"} else "preflight_only", "untrustedContent": True}
     except ManagementError:
         raise
     except Exception:
         raise ManagementError("OPERATION_UNCONFIRMED", 503) from None
+
+
+def read_command_receipt(gateway, parameters, *, request_id):
+    """Recover only the original manager command acknowledgement, never state."""
+    from core.runtime_manager import evolution_control
+    parameters = _parameters(parameters)
+    kind, rid = parameters.get("kind"), parameters.get("resource_id")
+    if kind not in {"supervised_run", "self_evolution_run"}:
+        return None
+    _reference(kind, rid, {key: parameters[key] for key in _REFS if key in parameters})
+    outcome = evolution_control.read_command_outcome(
+        gateway.project_root, "supervised" if kind == "supervised_run" else "self", rid,
+        parameters["command"], parameters["expected_revision"], request_id=request_id)
+    if outcome["state"] != "completed":
+        return None
+    raw = outcome["operation"]
+    row = _project(kind, {**raw, "_nativeCAS": True, "_nativeCommands": raw["commands"]})
+    return {"operation": row, "command": parameters["command"], "accepted": outcome["accepted"],
+            "stopRequested": parameters["command"] == "stop" and outcome["stopRequested"],
+            "revisionCheck": "native_cas", "untrustedContent": True}

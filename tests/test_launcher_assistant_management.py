@@ -293,8 +293,16 @@ def test_native_gateway_has_no_project_pa_or_runtime_impersonation():
 
 def test_contracts_are_closed_and_do_not_add_daily_action_approval():
     from core.web.services.external_management.contracts import ACTION_MODELS, contracts
+    governed = {"team_run", "session_pin", "agent_archive", "agent_purge", "agent_purge_batch",
+        "authorization_upgrade", "authorization_reduce", "authorization_revoke", "runtime_command",
+        "research_command", "team_update", "agent_tool_policy_update", "agent_dispatch_access_set",
+        "knowledge_acl_grant", "knowledge_acl_revoke", "flow_save", "flow_start", "team_create",
+        "team_member_add", "team_member_remove", "team_archive"}
+    # The expanded management surface uses native governance. Ordinary Agent
+    # create/update/avatar remain daily actions; this does not add approvals.
+    assert set(ACTION_MODELS) == governed | {"agent_create", "agent_update", "agent_avatar"}
     for name, contract in contracts().items():
-        assert contract["governed"] is (name in {"team_run", "session_pin", "agent_archive", "authorization_upgrade"})
+        assert contract["governed"] is (name in governed)
         assert contract["parameters"]["additionalProperties"] is False
         assert not {"subject", "owner", "runtime", "governed", "nativeApproval", "expected_binding"} & set(ACTION_MODELS[name].model_fields)
 

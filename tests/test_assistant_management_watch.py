@@ -70,7 +70,7 @@ def watch(dispatch_setup, monkeypatch):
                                 read_binding=dispatch._project_read_binding)
     adapter._root.mkdir()
     dispatch.management = adapter
-    monkeypatch.setattr(runtime_watch, "_CALLS", 8)
+    monkeypatch.setattr(runtime_watch, "_CALLS", len(runtime_watch.KINDS) + 1)
     runtime = patrol.LauncherPatrol(root, "pa", "session", dispatch)
 
     def add(action="team_update", request="asset-original", **state):
@@ -219,7 +219,7 @@ def test_paginated_directory_skips_special_owners_and_completed_refs_without_sta
     for now in range(10000, 10006):
         before = len(remote.calls)
         events.extend(refresh(runtime, now))
-        assert len(remote.calls) - before <= 9  # Seven lists and at most two original-request reads.
+        assert len(remote.calls) - before <= len(runtime_watch.KINDS) + 2
     assert len(events) == 1 and events[0]["requestId"] == "last"
     assert not any(row[1].startswith("authorization_") or row[1] == "team_run"
                    for row in remote.calls if row[0] != "runtime")
@@ -256,6 +256,17 @@ def test_unknown_control_is_reconciled_then_waits_for_actual_target_terminal(wat
     assert sum(row["issue"] == "control_settled" for row in events) == 1
     assert all(row["kind"] == "platform_runtime" for row in events)
     assert any(row[0:2] == ("runtime", "get") for row in remote.calls)
+
+
+def test_atomic_queue_withdrawal_settles_from_exact_native_ack_without_guessing_absence(watch):
+    _, _, remote, runtime, add = watch
+    add("runtime_command", request="withdraw-original", receipt="completed",
+        command={"operation": operation(kind="session_queue", resource="queued-a", status="cancelled"),
+            "command": "stop", "accepted": True, "stopRequested": False, "revisionCheck": "native_cas"})
+    events = refresh(runtime, 10000)
+    assert len(events) == 1 and events[0]["issue"] == "control_settled"
+    assert events[0]["runtimeKind"] == "session_queue" and events[0]["status"] == "cancelled"
+    assert not any(row[0:2] == ("runtime", "get") for row in remote.calls)
 
 
 def test_new_closed_event_cannot_smuggle_object_identity_or_unsupported_owner(watch):

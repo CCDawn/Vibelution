@@ -613,6 +613,55 @@ def remove_session_queued_turn(
     return normalized_rows
 
 
+def cancel_session_queued_turn(
+    session_id: str,
+    queue_id: str,
+    *,
+    expected_state_revision: int,
+    expected_metadata: dict[str, Any],
+) -> dict[str, Any]:
+    """Withdraw exactly one observed pre-Turn item without resuming its queue.
+
+    Management callers supply the native metadata fact, never model-provided
+    expectations. Existing UI removal keeps its historical projection/drain.
+    """
+    from core.chat.conversation_store.repository import (
+        ChatStateRevisionConflictError,
+        SessionQueueControlConflictError,
+    )
+    from core.ui import chat_state
+    from . import directory_runtime
+
+    s = _service()
+    with s._CHAT_STATE_LOCK:
+        pin = directory_runtime.pin_open_directory_store(s.PROJECT_ROOT)
+        if pin is None:
+            raise s.SessionBusyError("Session queue store is unavailable.")
+        # Reuse native mutability checks; only this Session may be hydrated.
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, session_id)
+        s._ensure_session_mutable(session_id, conversation=conversation)
+        if not directory_runtime.directory_store_pin_is_current(pin):
+            raise s.SessionBusyError("Session queue store changed.")
+        try:
+            result = pin.store.repository.cancel_session_queued_turn_metadata(
+                session_id=session_id, queue_id=queue_id,
+                expected_state_revision=expected_state_revision,
+                expected_metadata=expected_metadata, updated_at=s._now_timestamp(),
+            # A Future timeout does not cancel a queued writer mutation. Keep
+            # the CHAT lock until commit/rejection and cache invalidation, so
+            # another read/save cannot resurrect a subsequently deleted row.
+            ).result()
+        except (ChatStateRevisionConflictError, SessionQueueControlConflictError) as exc:
+            raise s.SessionBusyError(str(exc)) from exc
+        # Same cache epoch and catalog notification as save_session_chat_state;
+        # subsequent locked load/mutate/save cannot resurrect the removed row.
+        chat_state._bump_chat_state_write_epoch()
+        chat_state.notify_session_catalog_dirty(
+            s.PROJECT_ROOT, session_id, f"state:{result['stateRevision']}",
+        )
+        return result
+
+
 def _rollback_send_now_promotion(
     s: Any,
     session_id: str,

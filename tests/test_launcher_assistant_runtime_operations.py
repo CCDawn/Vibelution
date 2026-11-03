@@ -21,7 +21,7 @@ def env(tmp_path, monkeypatch):
     import vibelution_storage
     from core.infrastructure import developer_sandbox
     from core.runtime_manager.work_run_store import WorkRunStore
-    from core.runtime_manager import constants, evolution_store
+    from core.runtime_manager import constants, evolution_store, evolution_control
     from core.runtime_manager import process_identity
     import psutil
     from core.web.services import runtime_manager_control_service
@@ -58,6 +58,9 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "_RUNNING_SESSION_IDS", set())
     monkeypatch.setattr(session_service, "_SESSION_ACTIVE_TURN_IDS", {})
     monkeypatch.setattr(session_service, "_get_session_turn_control", lambda sid: None)
+    def no_native_manager(*args, **kwargs):
+        raise evolution_control.Unavailable("isolated test has no running manager")
+    monkeypatch.setattr(evolution_control, "read_inventory", no_native_manager)
     tasks = runtime_task_registry.store_for(runtime_home / runtime_task_registry.STORE_DIR_NAME)
     tasks.root.mkdir()
     external = runtime_home / "external_agents" / "tasks"
@@ -91,6 +94,128 @@ def native_run(env, *, status="waiting", revision=1):
     path = env.workspace / "teams" / "team-a" / "generic-workflows" / "runs" / "run-a.json"
     write(path, row)
     return path
+
+
+def managed_snapshot(native_kind, rows):
+    from core.runtime_manager import evolution_control
+    owner = {"pid": 4321, "createTime": 123.0, "executable": "pythonw.exe"}
+    return {"schemaVersion": 1, "kind": native_kind, "owner": owner, "complete": True,
+        "rows": [evolution_control.metadata_row(native_kind, row, owner, live_context=True) for row in rows]}
+
+
+def install_queue_inventory(env, monkeypatch, *, status="queued", revision=7):
+    fact = {"sessionId": "hidden-session", "queueId": "queued-a", "agentId": "hidden-agent",
+        "queueKind": "user", "status": status, "branchGeneration": None, "sessionBranchGeneration": 0,
+        "sessionHeld": True, "held": True, "sendNow": False, "position": 0}
+    snapshot = {"turns": [], "queues": [fact], "consistency": "non_atomic", "complete": False,
+        "sourceCoverage": [{"source": "persisted_queue", "state": "available", "complete": True,
+                            "revision": revision}]}
+    monkeypatch.setattr(env.sessions, "read_session_runtime_inventory", lambda *a, **kw: snapshot)
+    return fact, snapshot
+
+
+def test_queue_projection_has_exact_identity_metadata_and_no_turn_control(env, monkeypatch):
+    from core.web.services.external_management.runtime_contracts import RuntimeOperationsResponse, RuntimeOperationQuery
+    fact, _ = install_queue_inventory(env, monkeypatch)
+    page = operations.read_operations(env.gateway, {"kind": "session_queue"})
+    RuntimeOperationsResponse.model_validate(page)
+    row, = page["operations"]
+    assert (row["resourceId"], row["sessionId"], row["status"], row["commands"]) == (
+        fact["queueId"], fact["sessionId"], "queued", ["stop"])
+    assert row["queue"]["sessionHeld"] is True and "content" not in json.dumps(page)
+    with pytest.raises(ValueError):
+        RuntimeOperationQuery(kind="session_queue", resource_id=fact["queueId"])
+    assert detail(env, "session_queue", fact["queueId"], session_id=fact["sessionId"]) == row
+    with pytest.raises(ManagementError):
+        detail(env, "session_turn", fact["queueId"], session_id=fact["sessionId"])
+
+
+def test_journal_only_turn_can_be_read_by_exact_owner_without_work_run_or_controller(env, monkeypatch):
+    _, snapshot = install_queue_inventory(env, monkeypatch)
+    snapshot["turns"] = [{"sessionId": "session-journal", "turnId": "turn-journal", "agentId": "",
+        "status": "unknown", "stopRequested": False, "releasedToUser": False,
+        "liveControl": False, "sources": ["journal"]}]
+    listed, = operations.read_operations(env.gateway, {"kind": "session_turn"})["operations"]
+    point = detail(env, "session_turn", "turn-journal", session_id="session-journal")
+    assert point == listed and point["status"] == "unknown" and point["commands"] == []
+    with pytest.raises(ManagementError, match="COMMAND_UNAVAILABLE"):
+        invoke(env, point, "stop", session_id="session-journal")
+    with pytest.raises(ManagementError, match="OPERATION_SOURCE_UNAVAILABLE"):
+        detail(env, "session_turn", "turn-journal", session_id="different-session")
+
+
+@pytest.mark.parametrize("status", ["queued", "paused", "blocked"])
+def test_queue_stop_is_single_item_native_cas_with_closed_cancellation_ack(env, monkeypatch, status):
+    from core.web.services.session import queued_turns
+    from core.web.services.external_management.runtime_contracts import RuntimeCommandResponse
+    fact, _ = install_queue_inventory(env, monkeypatch, status=status)
+    calls = []
+    def cancel(sid, qid, *, expected_state_revision, expected_metadata):
+        assert (sid, qid, expected_state_revision, expected_metadata) == (
+            fact["sessionId"], fact["queueId"], 7, fact)
+        calls.append(qid)
+        return {"sessionId": sid, "queueId": qid, "agentId": fact["agentId"], "status": "cancelled",
+                "stateRevision": 8, "queueMetadata": fact}
+    monkeypatch.setattr(queued_turns, "cancel_session_queued_turn", cancel)
+    monkeypatch.setattr(env.sessions, "_get_session_turn_control", lambda *a: pytest.fail("queue targeted a Turn"))
+    row = detail(env, "session_queue", fact["queueId"], session_id=fact["sessionId"])
+    result = invoke(env, row, "stop", session_id=fact["sessionId"])
+    RuntimeCommandResponse.model_validate(result)
+    assert result["revisionCheck"] == "native_cas" and result["stopRequested"] is False
+    assert result["operation"]["status"] == "cancelled" and result["operation"]["commands"] == []
+    assert calls == [fact["queueId"]]
+
+
+def test_queue_starting_or_changed_native_revision_never_invokes_cancel(env, monkeypatch):
+    from core.web.services.session import queued_turns
+    fact, snapshot = install_queue_inventory(env, monkeypatch, status="starting")
+    monkeypatch.setattr(queued_turns, "cancel_session_queued_turn", lambda *a, **kw: pytest.fail("invalid queue control"))
+    row = detail(env, "session_queue", fact["queueId"], session_id=fact["sessionId"])
+    assert row["commands"] == []
+    with pytest.raises(ManagementError, match="COMMAND_UNAVAILABLE"):
+        invoke(env, row, "stop", session_id=fact["sessionId"])
+    fact["status"] = "queued"
+    row = detail(env, "session_queue", fact["queueId"], session_id=fact["sessionId"])
+    snapshot["sourceCoverage"][0]["revision"] += 1
+    with pytest.raises(ManagementError, match="STATE_CONFLICT"):
+        invoke(env, row, "stop", session_id=fact["sessionId"])
+
+
+def test_unknown_team_status_never_advertises_mutation(env):
+    raw = {"id": "run-a", "teamId": "team-a", "flow": {"id": "flow-a"}, "status": "future_state", "revision": 1}
+    assert operations._project("team_run", raw)["commands"] == []
+
+
+def test_queue_read_only_rejection_is_a_known_no_write_conflict(env, monkeypatch):
+    from core.web.services.session import queued_turns
+    fact, _ = install_queue_inventory(env, monkeypatch)
+    def read_only(*a, **kw):
+        raise env.sessions.SessionValidationError("read only")
+    monkeypatch.setattr(queued_turns, "cancel_session_queued_turn", read_only)
+    row = detail(env, "session_queue", fact["queueId"], session_id=fact["sessionId"])
+    with pytest.raises(ManagementError, match="COMMAND_UNAVAILABLE") as exc:
+        invoke(env, row, "stop", session_id=fact["sessionId"])
+    assert exc.value.status_code == 409
+
+
+@pytest.mark.parametrize("reason", ["budget_exceeded", "unknown_future_reason"])
+def test_queue_source_coverage_failure_never_erases_other_native_sources(env, monkeypatch, reason):
+    _, snapshot = install_queue_inventory(env, monkeypatch)
+    snapshot["sourceCoverage"][0].update(state="partial", complete=False, truncated=True, reason=reason)
+    native_run(env)
+    page = operations.read_operations(env.gateway, {})
+    assert any(row["kind"] == "team_run" for row in page["operations"])
+    coverage = {item["source"]: item for item in page["coverage"]}
+    assert coverage["session_queue"]["complete"] is False
+    assert coverage["team_run"]["complete"] is True
+
+
+def test_native_model_budget_preserves_full_source_coverage(env):
+    from tests.test_assistant_runtime_actions import _through_native_model_budget
+    page = operations.read_operations(env.gateway, {})
+    _, outcome, facts, _ = _through_native_model_budget(page)
+    assert outcome is None and not facts.truncated
+    assert len(page["coverage"]) == 8 and page["complete"] is False
 
 
 def test_real_session_stop_retains_turn_identity_and_only_acknowledges_request(env, monkeypatch):
@@ -214,7 +339,12 @@ def test_metadata_only_hidden_queued_turn_beyond_native_forty_snapshot_cap(env):
             "companion": True, "userMessage": "SECRET", "summary": "SECRET"})
     page = operations.read_operations(env.gateway, {"kind": "session_turn", "offset": 42, "limit": 1})
     assert page["operations"][0]["resourceId"] == "turn-42" and page["total"] == 43
-    assert page["coverage"] == [{"source": "session_turn", "state": "partial", "complete": False}]
+    coverage, = page["coverage"]
+    assert {key: coverage[key] for key in ("source", "state", "complete")} == {
+        "source": "session_turn", "state": "partial", "complete": False}
+    sources = {item["source"]: item for item in coverage["details"]}
+    assert sources["work_runs"]["complete"] is True
+    assert sources["journal"]["complete"] is False
     assert "SECRET" not in json.dumps(page)
 
 
@@ -352,29 +482,36 @@ def test_formal_research_ledger_metadata_read_has_no_operator_commands(env, tmp_
 @pytest.mark.parametrize("kind,native_kind,module,method", [
     ("supervised_run", "supervised", "supervised_control_service", "request_pause_supervised_run"),
     ("self_evolution_run", "self", "self_evolution_control_service", "request_pause_self_evolution_run")])
-def test_managed_controls_use_exported_owner_with_non_atomic_revision_label(env, monkeypatch, kind, native_kind, module, method):
+def test_managed_controls_use_native_cas_without_starting_owner_wrappers(env, monkeypatch, kind, native_kind, module, method):
     import importlib
     from core.web.services import runtime_manager_control_service
     owner = importlib.import_module("core.web.services." + module)
+    from core.runtime_manager import evolution_control
     monkeypatch.setattr(owner, "PROJECT_ROOT", env.project)
     monkeypatch.setattr(runtime_manager_control_service, "current_runtime_manager_pid", lambda root: 4321)
     control = {"ownerPid": 4321, "kind": native_kind}
     path = env.managed.runs_dir(native_kind) / "managed-a.json"
     write(path, {"runId": "managed-a", "status": "running", "summary": "SECRET body", "runtimeManagerControl": control})
     calls = []
-    def pause(rid):
+    def native_inventory(*args, **kwargs):
+        return managed_snapshot(native_kind, [json.loads(path.read_text())])
+    monkeypatch.setattr(evolution_control, "read_inventory", native_inventory)
+    def pause(root, observed_kind, rid, action, expected, *, request_id):
+        assert root == env.project and observed_kind == native_kind and action == "pause"
+        assert expected == native_inventory()["rows"][0]["revision"]
         calls.append(rid)
         row = {"runId": rid, "status": "paused", "pauseRequested": True, "goal": "SECRET prompt", "runtimeManagerControl": control}
         write(path, row)
-        return row
-    monkeypatch.setattr(owner, method, pause)
+        return {"operation": native_inventory()["rows"][0], "accepted": True, "stopRequested": False}
+    monkeypatch.setattr(owner, method, lambda *_: pytest.fail("control used an ensuring wrapper"))
+    monkeypatch.setattr(evolution_control, "command", pause)
     row = detail(env, kind, "managed-a")
     result = invoke(env, row, "pause")
     assert calls == ["managed-a"] and result["operation"]["commands"] == ["stop", "resume"]
-    assert result["revisionCheck"] == "preflight_only" and result["stopRequested"] is False
+    assert result["revisionCheck"] == "native_cas" and result["stopRequested"] is False
     assert "SECRET" not in json.dumps(result)
     page = operations.read_operations(env.gateway, {"kind": kind})
-    assert page["coverage"] == [{"source": kind, "state": "partial", "complete": False}]
+    assert page["coverage"] == [{"source": kind, "state": "available", "complete": True}]
 
 
 @pytest.mark.parametrize("kind,native_kind", [("supervised_run", "supervised"), ("self_evolution_run", "self")])
@@ -492,10 +629,13 @@ def test_managed_unreadable_source_is_distinct_from_an_uninitialized_store(env, 
 @pytest.mark.parametrize("failed_probe", [False, True])
 def test_managed_manager_loss_revokes_controls_without_repairing_durable_state(env, monkeypatch, failed_probe):
     from core.web.services import runtime_manager_control_service, supervised_control_service
+    from core.runtime_manager import evolution_control
     path = env.managed.runs_dir("supervised") / "managed-a.json"
     write(path, {"runId": "managed-a", "status": "running", "runtimeManagerControl": {"ownerPid": 4321, "kind": "supervised"}})
     before = path.read_bytes()
     monkeypatch.setattr(runtime_manager_control_service, "current_runtime_manager_pid", lambda root: 4321)
+    monkeypatch.setattr(evolution_control, "read_inventory", lambda *args, **kwargs:
+        managed_snapshot("supervised", [json.loads(path.read_text())]))
     row = detail(env, "supervised_run", "managed-a")
     assert row["commands"] == ["stop", "pause"]
     def unavailable(root):
@@ -503,6 +643,9 @@ def test_managed_manager_loss_revokes_controls_without_repairing_durable_state(e
             raise OSError("test manager unavailable")
         return 0
     monkeypatch.setattr(runtime_manager_control_service, "current_runtime_manager_pid", unavailable)
+    def missing_native(*args, **kwargs):
+        raise evolution_control.Unavailable("manager disappeared")
+    monkeypatch.setattr(evolution_control, "read_inventory", missing_native)
     monkeypatch.setattr(supervised_control_service, "request_stop_supervised_run", lambda rid: pytest.fail("lost manager was commanded"))
     assert detail(env, "supervised_run", "managed-a")["commands"] == []
     page = operations.read_operations(env.gateway, {"kind": "supervised_run"})

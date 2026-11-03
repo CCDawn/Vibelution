@@ -124,11 +124,12 @@ def _closed_query(request, model):
 
 
 from core.web.services.external_management.runtime_legacy_contracts import (
-    LegacyRuntimeOperationsQuery, LegacyRuntimeOperationsResponse, LegacyRuntimeOperationResponse)
+    LegacyRuntimeKind, LegacyRuntimeOperationsQuery, LegacyRuntimeOperationQuery,
+    LegacyRuntimeOperationsResponse, LegacyRuntimeOperationResponse)
 
 
 @router.get("/runtime/operations", response_model=LegacyRuntimeOperationsResponse)
-async def runtime_operations(request: Request, kind: RuntimeKind | None = None,
+async def runtime_operations(request: Request, kind: LegacyRuntimeKind | None = None,
                              state: Literal["active", "terminal", "all"] = "active", offset: int = 0, limit: int = 3):
     _require_control(request)
     query = _closed_query(request, LegacyRuntimeOperationsQuery)
@@ -136,10 +137,10 @@ async def runtime_operations(request: Request, kind: RuntimeKind | None = None,
 
 
 @router.get("/runtime/operation", response_model=LegacyRuntimeOperationResponse)
-async def runtime_operation(request: Request, kind: RuntimeKind, resource_id: str,
+async def runtime_operation(request: Request, kind: LegacyRuntimeKind, resource_id: str,
                             session_id: str = "", team_id: str = "", flow_id: str = ""):
     _require_control(request)
-    query = _closed_query(request, RuntimeOperationQuery)
+    query = _closed_query(request, LegacyRuntimeOperationQuery)
     return await _operator_call(request, lambda: _service().read_runtime(*_credentials(request), "get", query, legacy=True))
 
 

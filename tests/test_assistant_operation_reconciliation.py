@@ -159,6 +159,41 @@ def test_unknown_inside_native_owner_has_no_outcome_and_requires_review(owner, m
     assert owner.native.calls == 1
 
 
+@pytest.mark.parametrize("kind,native_kind", [("supervised_run", "supervised"), ("self_evolution_run", "self")])
+def test_lost_manager_ack_is_recovered_from_original_native_command_without_current_owner(
+        owner, tmp_path, monkeypatch, kind, native_kind):
+    from core.runtime_manager import evolution_control
+    from tests.test_launcher_assistant_runtime_operations import managed_snapshot
+    params = parameters(kind=kind, resource_id="managed-a", command="pause", expected_revision="a" * 64)
+    service, credentials, binding = authorized(tmp_path / "management", owner.native)
+    saved = {}
+    row = managed_snapshot(native_kind, [{"runId": "managed-a", "status": "paused", "pauseRequested": True}])["rows"][0]
+
+    def lose_native_ack(parameters, proof):
+        owner.native.calls += 1
+        saved[proof["requestKey"]] = {"commandId": "cmd_managed_" + "b" * 64, "state": "completed",
+            "operation": row, "accepted": True, "stopRequested": False, "revisionCheck": "native_cas"}
+        raise OSError("response lost after original native completion")
+
+    def original_result(project, observed_kind, rid, action, expected, *, request_id):
+        assert (project, observed_kind, rid, action, expected) == (
+            owner.native.project_root, native_kind, "managed-a", "pause", "a" * 64)
+        return saved.get(request_id, {"state": "unknown"})
+
+    monkeypatch.setattr(owner.native, "runtime_command", lose_native_ack)
+    monkeypatch.setattr(evolution_control, "read_command_outcome", original_result)
+    monkeypatch.setattr(evolution_control, "read_inventory", lambda *a, **kw: pytest.fail("recovery read current manager"))
+    monkeypatch.setattr(evolution_control, "command", lambda *a, **kw: pytest.fail("recovery replayed mutation"))
+    envelope = {"request_id": "original-manager-command", "expected_binding": binding, "parameters": params}
+    first = service.invoke(*credentials, "runtime_command", envelope)
+    assert first["status"] == "unknown"
+    recovered = service.receipt(*credentials, "runtime_command", envelope["request_id"])
+    assert recovered["status"] == "completed" and recovered["operation"]["revisionCheck"] == "native_cas"
+    assert recovered["operation"]["operation"]["status"] == "paused"
+    assert owner.native.calls == 1
+    assert platform_actions.reconcile(owner.native, "runtime_command", params, marker(params, key="f" * 64))["state"] == "requires_review"
+
+
 def inject_outcome(native, tmp_path, monkeypatch):
     target = receipts().NativeOutcomeStore(tmp_path / "outcomes", project_root=native.project_root)
     monkeypatch.setattr(native, "operation_receipts", lambda: target, raising=False)

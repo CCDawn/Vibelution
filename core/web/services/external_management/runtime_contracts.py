@@ -4,7 +4,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-RuntimeKind = Literal["session_turn", "runtime_task", "external_task", "team_run",
+RuntimeKind = Literal["session_turn", "session_queue", "runtime_task", "external_task", "team_run",
                       "supervised_run", "self_evolution_run", "research_run"]
 RuntimeCommandName = Literal["stop", "pause", "resume", "retry", "confirm"]
 _ID = r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$"
@@ -32,7 +32,7 @@ class RuntimeOperationQuery(RuntimeClosed):
 
     @model_validator(mode="after")
     def owner_references(self):
-        if self.kind == "session_turn":
+        if self.kind in {"session_turn", "session_queue"}:
             valid = bool(self.session_id) and not self.team_id and not self.flow_id
         elif self.kind == "team_run":
             valid = bool(self.team_id) and not self.session_id
@@ -50,6 +50,16 @@ class RuntimeCommand(RuntimeOperationQuery):
     expected_revision: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9_.:-]+$")
 
 
+class RuntimeQueueMetadata(RuntimeClosed):
+    queueKind: Literal["user", "task_notification", "subagent_message", "control_notice", "unknown"]
+    position: int = Field(ge=0, le=10000)
+    held: bool
+    sessionHeld: bool
+    sendNow: bool
+    branchGeneration: int | None = Field(default=None, ge=0)
+    sessionBranchGeneration: int = Field(ge=0)
+
+
 class RuntimeOperation(RuntimeClosed):
     kind: RuntimeKind
     resourceId: str = Field(pattern=_ID)
@@ -61,6 +71,7 @@ class RuntimeOperation(RuntimeClosed):
     flowId: str = Field(default="", pattern=_OPTIONAL_ID)
     commands: list[RuntimeCommandName] = Field(max_length=5)
     progressFingerprint: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    queue: RuntimeQueueMetadata | None = None
 
     @field_validator("commands")
     @classmethod
@@ -69,16 +80,47 @@ class RuntimeOperation(RuntimeClosed):
             raise ValueError("Unique native commands required")
         return value
 
+    @model_validator(mode="after")
+    def queue_identity(self):
+        if (self.kind == "session_queue") != (self.queue is not None):
+            raise ValueError("Queue metadata belongs only to a persisted queue item")
+        if self.kind == "session_queue" and not self.sessionId:
+            raise ValueError("Queue owner Session required")
+        return self
+
+
+class RuntimeInventorySource(RuntimeClosed):
+    source: Literal["running_controller", "scheduler", "persisted_queue", "journal", "work_runs"]
+    state: Literal["available", "unavailable", "partial"]
+    complete: bool
+    truncated: bool = False
+    invalidCount: int = Field(default=0, ge=0)
+    reason: Literal["none", "metadata_inventory_unavailable", "invalid_metadata", "pending_admission",
+                    "project_binding_mismatch", "source_changed", "store_not_open", "read_failed", "budget_exceeded"] = "none"
+    pendingAdmissionCount: int = Field(default=0, ge=0)
+    externalReservationCount: int = Field(default=0, ge=0)
+    revision: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def availability(self):
+        if self.complete and (self.state != "available" or self.truncated or self.invalidCount):
+            raise ValueError("Incomplete metadata cannot certify its source")
+        return self
+
 
 class RuntimeCoverage(RuntimeClosed):
     source: RuntimeKind
     state: Literal["available", "unavailable", "partial"]
     complete: bool
+    details: list[RuntimeInventorySource] = Field(default_factory=list, max_length=5)
 
     @model_validator(mode="after")
     def availability(self):
         if self.complete and self.state != "available":
             raise ValueError("Unavailable or partial source cannot prove completeness")
+        sources = [item.source for item in self.details]
+        if len(sources) != len(set(sources)) or self.complete and any(not item.complete for item in self.details):
+            raise ValueError("Consistent unique native source details required")
         return self
 
 
@@ -99,7 +141,7 @@ class RuntimeOperationsResponse(RuntimeUntrusted):
     offset: int = Field(ge=0, le=1_000_000)
     total: int = Field(ge=0, le=1_000_000)
     nextOffset: int | None = Field(ge=0, le=1_000_000)
-    coverage: list[RuntimeCoverage] = Field(min_length=1, max_length=7)
+    coverage: list[RuntimeCoverage] = Field(min_length=1, max_length=8)
     complete: bool
 
     @model_validator(mode="after")
