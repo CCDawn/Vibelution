@@ -58,7 +58,7 @@ export type AssistantHostRequest =
   | { operation: "continue"; requestId: string; continuation: { turnId: string; headId: string; ledgerSeq: number; agentId: string } }
   | { operation: "switchHead"; nodeId: string }
   | { operation: "regenerate"; messageId: string; requestId: string }
-  | { operation: "regenerate"; messageId: string; requestId: string }
+  | { operation: "guidance"; content: string; mode: "safe" | "interrupt" }
   | { operation: "curation"; sessionId: string }
   | { operation: "curate"; sessionId: string; messageId: string; action: "include" | "exclude" }
   | { operation: "operatorAsset"; kind: "avatar" | "background" }
@@ -1163,6 +1163,13 @@ export class AssistantHost {
           { messageId: payload.messageId, requestId: payload.requestId });
         if (!object(result) || result.id !== generation.sessionId) throw new HostError("ASSISTANT_IDENTITY_INVALID");
         return result;
+      }
+      case "guidance": {
+        if (!ownKeys(payload, ["operation", "content", "mode"])
+          || typeof payload.content !== "string" || !payload.content.trim() || payload.content.length > 64_000
+          || !["safe", "interrupt"].includes(payload.mode)) throw new HostError("ASSISTANT_REQUEST_INVALID");
+        return await this.rpc(generation, "/api/assistant/guidance", "POST",
+          { content: payload.content, mode: payload.mode });
       }
       case "curation":
       case "curate":

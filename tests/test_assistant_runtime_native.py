@@ -1483,6 +1483,51 @@ def test_fixed_session_regenerate_reruns_the_fixed_user_request(assistant_comman
     assert users[-1].correlation_id == "regen-1"
 
 
+def test_fixed_session_guidance_records_safe_and_interrupt_modes(assistant_command_session, tmp_path, monkeypatch):
+    from core.chat.conversation_ledger import load_conversation_events
+
+    native, sessions, sid, _, scheduled, _ = assistant_command_session
+    # Guidance steers a running turn, exactly the composer's running state.
+    controller = sessions.SessionTurnControl(session_id=sid, turn_id="running-turn")
+    monkeypatch.setattr(sessions, "_get_session_turn_control", lambda _: controller)
+    monkeypatch.setattr(sessions, "_is_session_running", lambda _: True)
+    result = native.guidance("先核对当前结论", "safe")
+    assert result["id"] == sid
+    interrupt = native.guidance("停下当前步骤", "interrupt")
+    assert interrupt["id"] == sid
+    events = load_conversation_events(tmp_path, sid)
+    guidance_events = [event for event in events if event.event_type == "user_message"
+                       and isinstance(event.payload, dict)
+                       and isinstance(event.payload.get("metadata"), dict)
+                       and event.payload["metadata"].get("kind") in {"user_guidance", "user_interrupt_guidance"}]
+    kinds = [event.payload["metadata"]["kind"] for event in guidance_events]
+    assert kinds == ["user_guidance", "user_interrupt_guidance"]
+    assert [event.payload["content"] for event in guidance_events] == ["先核对当前结论", "停下当前步骤"]
+    assert not scheduled
+
+
+def test_fixed_session_guidance_validates_input_and_mode(assistant_command_session, monkeypatch):
+    native, sessions, _, _, scheduled, _ = assistant_command_session
+    for content, mode in ((None, "safe"), ("   ", "safe"), ("x" * 64001, "safe"),
+                          ("引导", None), ("引导", ""), ("引导", "unsafe"), ("引导", 7)):
+        with pytest.raises(native.AssistantSessionError) as error:
+            native.guidance(content, mode)
+        assert error.value.code == "SESSION_INVALID"
+    assert not scheduled
+
+
+@pytest.mark.parametrize("changed", ["directSessionId", "agentId"])
+def test_fixed_session_guidance_refuses_identity_rebinding(assistant_command_session, monkeypatch, changed):
+    native, sessions, _, _, scheduled, identity = assistant_command_session
+    identity[changed] = "replacement"
+    monkeypatch.setattr(sessions, "submit_session_guidance",
+                        lambda *_: pytest.fail("rebound guidance admitted"))
+    with pytest.raises(native.AssistantSessionError) as error:
+        native.guidance("引导", "safe")
+    assert error.value.code == "ASSISTANT_IDENTITY_INVALID"
+    assert not scheduled
+
+
 def test_fixed_session_regenerate_validates_input(assistant_command_session, monkeypatch):
     native, sessions, _, _, scheduled, _ = assistant_command_session
     for message_id, request_id in ((None, "r"), ("   ", "r"), ("x" * 161, "r"),

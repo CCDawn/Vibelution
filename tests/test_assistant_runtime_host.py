@@ -353,6 +353,10 @@ def test_fixed_session_stop_and_continue_forward_once_without_renderer_session_s
             calls.append(("regenerate", message_id, request_id))
             return {"id": "native-session", "messages": []}
 
+        def guidance(self, content, mode):
+            calls.append(("guidance", content, mode))
+            return {"id": "native-session"}
+
     with TestClient(create_app(native=Owner(), token="private-test-token"), base_url="http://127.0.0.1",
                     headers={"Authorization": "Bearer private-test-token"}) as client:
         result = client.post("/api/assistant/stop", json={"turnId": "old-turn"})
@@ -363,8 +367,10 @@ def test_fixed_session_stop_and_continue_forward_once_without_renderer_session_s
         assert result.status_code == 202 and result.json()["id"] == "native-session"
         result = client.post("/api/assistant/messages/regenerate", json={"messageId": "target-message", "requestId": "regen-1"})
         assert result.status_code == 202 and result.json()["id"] == "native-session"
+        result = client.post("/api/assistant/guidance", json={"content": "hold on", "mode": "interrupt"})
+        assert result.status_code == 202 and result.json()["id"] == "native-session"
     assert calls == [("stop", "old-turn"), ("continue", "continue-1", CONTINUATION), ("head", "target-node"),
-                     ("regenerate", "target-message", "regen-1")]
+                     ("regenerate", "target-message", "regen-1"), ("guidance", "hold on", "interrupt")]
 
 
 @pytest.mark.parametrize("path,payload", [
@@ -385,6 +391,10 @@ def test_fixed_session_stop_and_continue_forward_once_without_renderer_session_s
     ("messages/regenerate", {"messageId": "m"}), ("messages/regenerate", {"messageId": "m", "requestId": ""}),
     ("messages/regenerate", {"messageId": "m", "requestId": "bad id"}),
     ("messages/regenerate", {"messageId": "m", "requestId": "r", "sessionId": "other"}),
+    ("guidance", {}), ("guidance", {"content": " ", "mode": "safe"}),
+    ("guidance", {"content": "hold on"}), ("guidance", {"content": "hold on", "mode": "unsafe"}),
+    ("guidance", {"content": "hold on", "mode": 7}),
+    ("guidance", {"content": "hold on", "mode": "safe", "sessionId": "other"}),
 ])
 def test_session_commands_reject_invalid_payload_before_native_call(path, payload):
     class Owner(Native):
@@ -400,6 +410,9 @@ def test_session_commands_reject_invalid_payload_before_native_call(path, payloa
         def regenerate(self, *args):
             pytest.fail("invalid regenerate reached native owner")
 
+        def guidance(self, *args):
+            pytest.fail("invalid guidance reached native owner")
+
     with TestClient(create_app(native=Owner(), token="private-test-token"), base_url="http://127.0.0.1",
                     headers={"Authorization": "Bearer private-test-token"}) as client:
         assert client.post(f"/api/assistant/{path}", json=payload).status_code == 422
@@ -410,7 +423,7 @@ def test_session_commands_reject_invalid_payload_before_native_call(path, payloa
     ("ASSISTANT_IDENTITY_INVALID", 409), ("SESSION_NOT_FOUND", 404),
     ("SESSION_CONFLICT", 409), ("SESSION_INVALID", 422),
 ])
-@pytest.mark.parametrize("path", ["stop", "continue", "head", "messages/regenerate"])
+@pytest.mark.parametrize("path", ["stop", "continue", "head", "messages/regenerate", "guidance"])
 def test_session_command_errors_have_bounded_codes(code, status, path):
     from core.assistant_runtime.native import AssistantSessionError
 
@@ -427,9 +440,14 @@ def test_session_command_errors_have_bounded_codes(code, status, path):
         def regenerate(self, *args):
             raise AssistantSessionError(code)
 
+        def guidance(self, *args):
+            raise AssistantSessionError(code)
+
     payload = {"turnId": "old-turn"} if path == "stop" else (
         {"requestId": "c", "continuation": CONTINUATION} if path == "continue" else (
-            {"nodeId": "target"} if path == "head" else {"messageId": "m", "requestId": "r"}))
+            {"nodeId": "target"} if path == "head" else (
+                {"messageId": "m", "requestId": "r"} if path == "messages/regenerate"
+                else {"content": "hold on", "mode": "safe"})))
     with TestClient(create_app(native=Owner(), token="private-test-token"), base_url="http://127.0.0.1",
                     headers={"Authorization": "Bearer private-test-token"}) as client:
         response = client.post(f"/api/assistant/{path}", json=payload)
@@ -446,12 +464,15 @@ def test_native_facade_forwards_commands_to_fixed_native_owner(monkeypatch):
     monkeypatch.setattr(native, "continue_turn", lambda request, expected: calls.append(("continue", request, expected)) or {"turnId": "new"})
     monkeypatch.setattr(native, "switch_head", lambda node: calls.append(("head", node)) or {"id": "s"})
     monkeypatch.setattr(native, "regenerate", lambda message, request: calls.append(("regenerate", message, request)) or {"id": "s"})
+    monkeypatch.setattr(native, "guidance", lambda content, mode: calls.append(("guidance", content, mode)) or {"id": "s"})
     facade = NativeFacade(None)
     assert facade.stop("old")["stopRequested"]
     assert facade.continue_turn("c", CONTINUATION)["turnId"] == "new"
     assert facade.switch_head("target")["id"] == "s"
     assert facade.regenerate("m", "r")["id"] == "s"
-    assert calls == [("stop", "old"), ("continue", "c", CONTINUATION), ("head", "target"), ("regenerate", "m", "r")]
+    assert facade.guidance("hold on", "safe")["id"] == "s"
+    assert calls == [("stop", "old"), ("continue", "c", CONTINUATION), ("head", "target"),
+                     ("regenerate", "m", "r"), ("guidance", "hold on", "safe")]
 
 
 def test_main_only_project_snapshot_updates_same_owner_and_rejects_browser_origin(tmp_path):

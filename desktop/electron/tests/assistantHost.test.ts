@@ -1211,6 +1211,23 @@ describe("AssistantHost", () => {
     await expect(host.request({ operation: "regenerate", messageId: "target-message", requestId: "regen-1" } as AssistantHostRequest)).rejects.toThrow("ASSISTANT_IDENTITY_INVALID");
     await host.stop();
   });
+  it("steers the running turn with bounded guidance content only", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    fetchImpl.mockResolvedValueOnce(Response.json({ id: "s" }));
+    await host.request({ operation: "guidance", content: "hold on", mode: "safe" } as AssistantHostRequest);
+    expect(fetchImpl.mock.calls.at(-1)?.[0]).toContain("/api/assistant/guidance");
+    expect(fetchImpl.mock.calls.at(-1)?.[1]?.body).toBe(JSON.stringify({ content: "hold on", mode: "safe" }));
+    const before = fetchImpl.mock.calls.length;
+    for (const value of [
+      { operation: "guidance", content: "hold on", mode: "safe", sessionId: "other" },
+      { operation: "guidance", content: "   ", mode: "safe" },
+      { operation: "guidance", content: "hold on", mode: "unsafe" },
+      { operation: "guidance", mode: "safe" },
+    ]) await expect(host.request(value as AssistantHostRequest)).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    expect(fetchImpl).toHaveBeenCalledTimes(before);
+    await host.stop();
+  });
   it("does not reintroduce inherited Python search paths for the isolated packaged runtime", async () => {
     vi.stubEnv("PYTHONPATH", "foreign-source");
     vi.stubEnv("PYTHONHOME", "foreign-runtime");

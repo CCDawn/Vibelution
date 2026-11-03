@@ -9,7 +9,7 @@ import {
   getLauncherAssistantApprovals, resolveLauncherAssistantApproval,
   previewLauncherDispatchApproval, decideLauncherDispatchApproval, declineLauncherDispatchSummary, launcherDispatchDeclineRevisionIsValid, type LauncherDispatchApprovalPreview,
   stopLauncherAssistantTurn, continueLauncherAssistantTurn, switchLauncherAssistantHead,
-  regenerateLauncherAssistantMessage,
+  regenerateLauncherAssistantMessage, guideLauncherAssistantTurn,
   getLauncherOperatorAsset, getLauncherAssistantAvatar, openLauncherFromAssistant, uploadLauncherAttachment,
   readLauncherAttachment, subscribeLauncherAssistantSessionEvent,
 } from "../../api/launcherAssistant";
@@ -77,6 +77,8 @@ const COPY = {
     pendingQuestion: "待你回答",
     answerBelow: "去回答", answerHint: "请在下方输入回答，再点击发送。",
     editAsNew: "编辑为新消息",
+    safeGuidance: "引导", safeGuidancePending: "正在引导",
+    interruptGuidance: "打断引导", interruptGuidancePending: "打断中",
   },
   en: {
     title: "Personal assistant", expand: "Open assistant chat", chat: "Chat", hide: "Hide assistant",
@@ -93,6 +95,8 @@ const COPY = {
     pendingQuestion: "Waiting for your answer",
     answerBelow: "Answer below", answerHint: "Type your answer below, then send it.",
     editAsNew: "Edit as new message",
+    safeGuidance: "Steer", safeGuidancePending: "Steering",
+    interruptGuidance: "Interrupt guide", interruptGuidancePending: "Interrupting",
   },
 } as const;
 
@@ -1026,6 +1030,29 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     }
   }
 
+  const [guidancePendingMode, setGuidancePendingMode] = useState<"" | "safe" | "interrupt">("");
+  async function submitGuidance(mode: "safe" | "interrupt") {
+    // Same gates as the chat baseline: guidance only steers a running turn and
+    // carries the draft text; attachments ride the queue instead.
+    if (!detail.data || !sessionId || guidancePendingMode) return;
+    if (!busy || stopping || sendPending || sendUnconfirmed) return;
+    const content = draftRef.current.trim();
+    if (!content) return;
+    setGuidancePendingMode(mode);
+    setFeedback("");
+    try {
+      await guideLauncherAssistantTurn(sessionId, content, mode);
+      if (!mounted.current || sessionIdRef.current !== sessionId) return;
+      draftRef.current = "";
+      saveComposer({ draft: "" });
+      setDraft("");
+    } catch (error) {
+      if (mounted.current) setFeedback(errorMessage(error));
+    } finally {
+      if (mounted.current) { setGuidancePendingMode(""); void detail.refetch(); }
+    }
+  }
+
   const identity = status.data?.assistant;
   const avatarImage = readingAssets && !avatar.isError ? avatar.data?.image : null;
   const assistantAvatarImage = readingAssistantAvatar && !assistantAvatar.isError && !assistantAvatar.isFetching ? assistantAvatar.data?.image : null;
@@ -1259,6 +1286,12 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       regenerableAssistantMessageId={regenerableAssistantMessageId}
       regenerateDisabled={busy || stopping || sendPending || sendUnconfirmed || controlPending || regeneratePending}
       regeneratePending={regeneratePending}
+      onSafeGuidance={() => void submitGuidance("safe")}
+      onInterruptGuidance={() => void submitGuidance("interrupt")}
+      safeGuidanceLabel={copy.safeGuidance} safeGuidancePendingLabel={copy.safeGuidancePending}
+      interruptGuidanceLabel={copy.interruptGuidance} interruptGuidancePendingLabel={copy.interruptGuidancePending}
+      composerSafeGuidancePending={guidancePendingMode === "safe"}
+      composerInterruptGuidancePending={guidancePendingMode === "interrupt"}
       composerLeadingControl={<ChatComposerPlusMenu lang={lang} showCapabilities={false} showReferences={false}
         sessionReferences={[]} onAddAttachments={addAttachments}
         attachmentDisabled={status.data?.attachmentVersion !== 1 || sendPending || sendUnconfirmed || controlPending} />}

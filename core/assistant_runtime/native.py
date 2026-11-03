@@ -714,6 +714,21 @@ def regenerate(message_id: str, request_id: str) -> dict[str, Any]:
         )
 
 
+def guidance(content: str, mode: str) -> dict[str, Any]:
+    """Record operator guidance for the running native turn, as Chat does.
+
+    The shared service layer owns the guidance event, the interrupt polarity,
+    and the stop request when ``mode`` is interrupt; this wrapper binds it to
+    the fixed identity and session-command admission.
+    """
+    if not isinstance(content, str) or not content.strip() or len(content) > 64000:
+        raise AssistantSessionError("SESSION_INVALID")
+    if not isinstance(mode, str) or mode not in {"safe", "interrupt"}:
+        raise AssistantSessionError("SESSION_INVALID")
+    with _session_command() as (sessions, session_id):
+        return sessions.submit_session_guidance(session_id, content, mode=mode)
+
+
 def shutdown(*, timeout: float = 8.0) -> dict[str, Any]:
     """Stop owned native work and drain it before closing its directory store."""
     global _STARTED, _SESSION_ID, _AGENT_ID, _OFFLINE_MIGRATION

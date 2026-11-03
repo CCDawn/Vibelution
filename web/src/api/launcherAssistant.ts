@@ -91,6 +91,7 @@ export type LauncherAssistantRequest =
   | { operation: "continue"; requestId: string; continuation: SessionContinuationExpectation }
   | { operation: "switchHead"; nodeId: string }
   | { operation: "regenerate"; messageId: string; requestId: string }
+  | { operation: "guidance"; content: string; mode: "safe" | "interrupt" }
   | { operation: "config" }
   | { operation: "operatorAsset"; kind: LauncherOperatorAssetKind }
   | { operation: "computerState" | "computerWindows" }
@@ -447,6 +448,16 @@ export async function regenerateLauncherAssistantMessage(sessionId: string, mess
   if (!/^[A-Za-z0-9_.:-]{1,128}$/.test(requestId || "")) throw new Error("请求标识无效。");
   const result = await launcherAssistantBridge().invoke({ operation: "regenerate", messageId: normalizedMessageId, requestId });
   if (!record(result) || result.id !== sessionId || !Array.isArray(result.messages)) throw new Error("Launcher 未确认重新生成所属会话。");
+  return result as SessionDetail;
+}
+
+/** Steer the running native turn (safe) or interrupt it with guidance. */
+export async function guideLauncherAssistantTurn(sessionId: string, content: string, mode: "safe" | "interrupt"): Promise<SessionDetail> {
+  const normalized = String(content || "");
+  if (!normalized.trim() || normalized.length > 64000) throw new Error("引导内容无效。");
+  if (!["safe", "interrupt"].includes(mode)) throw new Error("引导模式无效。");
+  const result = await launcherAssistantBridge().invoke({ operation: "guidance", content: normalized, mode });
+  if (!record(result) || result.id !== sessionId) throw new Error("Launcher 未确认引导所属会话。");
   return result as SessionDetail;
 }
 

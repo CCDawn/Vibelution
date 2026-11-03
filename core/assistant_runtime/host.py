@@ -168,6 +168,18 @@ class RegenerateMessage(BaseModel):
     requestId: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.:-]+$", strict=True)
 
 
+class Guidance(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    content: str = Field(min_length=1, max_length=64000)
+    mode: Literal["safe", "interrupt"]
+
+    @model_validator(mode="after")
+    def validate_content(self):
+        if not self.content.strip():
+            raise ValueError("Guidance content required")
+        return self
+
+
 class Continuation(BaseModel):
     model_config = ConfigDict(extra="forbid")
     turnId: str = Field(min_length=1, max_length=160, pattern=r"\S", strict=True)
@@ -532,6 +544,10 @@ class NativeFacade:
     def regenerate(self, message_id, request_id):
         from . import native
         return native.regenerate(message_id, request_id)
+
+    def guidance(self, content, mode):
+        from . import native
+        return native.guidance(content, mode)
 
     def shutdown(self):
         from . import native
@@ -1518,6 +1534,10 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
     @app.post("/api/assistant/messages/regenerate", status_code=202)
     def regenerate(payload: RegenerateMessage):
         return native.regenerate(payload.messageId, payload.requestId)
+
+    @app.post("/api/assistant/guidance", status_code=202)
+    def guidance(payload: Guidance):
+        return native.guidance(payload.content, payload.mode)
 
     @app.get("/api/assistant/events")
     async def events(request: Request):

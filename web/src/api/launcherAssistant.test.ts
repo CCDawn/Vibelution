@@ -6,7 +6,7 @@ import {
   getLauncherAssistantApprovals, resolveLauncherAssistantApproval,
   previewLauncherDispatchApproval, decideLauncherDispatchApproval, declineLauncherDispatchSummary,
   stopLauncherAssistantTurn, continueLauncherAssistantTurn, switchLauncherAssistantHead,
-  regenerateLauncherAssistantMessage,
+  regenerateLauncherAssistantMessage, guideLauncherAssistantTurn,
   getLauncherOperatorAsset, getLauncherAssistantAvatar, openLauncherFromAssistant,
   subscribeLauncherAssistantSessionEvent,
 } from "./launcherAssistant";
@@ -299,6 +299,15 @@ describe("Launcher assistant bridge", () => {
     // Only the two well-formed attempts reached the bridge; malformed ids are
     // refused renderer-side without any transport use.
     expect(invoke.mock.calls).toHaveLength(2);
+  });
+  it("steers only with non-empty guidance content and a fixed mode", async () => {
+    const invoke = vi.fn().mockResolvedValue({ id: "s" });
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    await expect(guideLauncherAssistantTurn("s", " hold on ", "safe")).resolves.toMatchObject({ id: "s" });
+    expect(invoke.mock.calls[0]).toEqual([{ operation: "guidance", content: " hold on ", mode: "safe" }]);
+    await expect(guideLauncherAssistantTurn("s", "   ", "interrupt")).rejects.toThrow("引导内容无效");
+    await expect(guideLauncherAssistantTurn("s", "hold on", "unsafe")).rejects.toThrow("引导模式无效");
+    expect(invoke.mock.calls).toHaveLength(1);
   });
   it("requires the dedicated Launcher bridge without a browser HTTP fallback", async () => {
     vi.stubGlobal("vibelutionLauncherAssistant", undefined);
