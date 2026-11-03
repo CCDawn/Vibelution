@@ -1,5 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { kernelTaskTitle } from "./kernelTaskPresentation";
+import { kernelTaskStatusLabel, kernelTaskTitle } from "./kernelTaskPresentation";
+
+describe("kernel task status", () => {
+  it.each([
+    ["blocked", "zh", "已阻塞"],
+    ["blocked", "en", "Blocked"],
+    ["failed", "zh", "失败"],
+    ["failed", "en", "Failed"],
+    ["delivered", "zh", "已投递"],
+    [" BLOCKED ", "zh", "已阻塞"],
+  ] as const)("labels %s in %s as %s", (status, lang, label) => {
+    expect(kernelTaskStatusLabel(status, lang)).toBe(label);
+  });
+});
 
 describe("kernel task title", () => {
   it("uses the actual topic without the machine prefix or the remaining prompt", () => {

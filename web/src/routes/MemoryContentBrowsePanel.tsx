@@ -160,6 +160,8 @@ export function MemoryContentBrowsePanel({
   const cardGroups = groupItems(cards, ungrouped);
   const entryGroups = groupItems(entries, selectedCard?.title || ungrouped);
   const searchActive = Boolean((searchText ?? "").trim());
+  const emptyCardsTitle = searchActive ? copy.browseEmptyEntries : copy.browseEmptyCards;
+  const emptyCardsHint = searchActive ? undefined : copy.browseEmptyCardsHint;
 
   const rail = (
     <div className={styles.rail}>
@@ -185,8 +187,8 @@ export function MemoryContentBrowsePanel({
               </VSection>
             ) : null}
             {!loading && !cards.length && !errorText ? (
-              <VStateSurface tone="empty" title={copy.browseEmptyCards}>
-                {copy.browseEmptyCardsHint || undefined}
+              <VStateSurface tone="empty" title={emptyCardsTitle}>
+                {emptyCardsHint || undefined}
               </VStateSurface>
             ) : null}
             {cardGroups.map((group) => {
@@ -300,7 +302,7 @@ export function MemoryContentBrowsePanel({
               </VSection>
             ))}
           </div>
-        ) : loading ? <SkeletonCardGrid count={3} /> : !errorText ? <VStateSurface tone="empty" title={cards.length ? copy.browseSelectCard : copy.browseEmptyCards}>{!cards.length ? copy.browseEmptyCardsHint : undefined}</VStateSurface> : null}
+        ) : loading ? <SkeletonCardGrid count={3} /> : !errorText ? <VStateSurface tone="empty" title={cards.length ? copy.browseSelectCard : emptyCardsTitle}>{!cards.length ? emptyCardsHint : undefined}</VStateSurface> : null}
       </div>
     </div>
   );

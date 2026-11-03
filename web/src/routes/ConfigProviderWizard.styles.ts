@@ -18,6 +18,7 @@ const styles = {
   wizardBody: "vui-routes-configproviderwizard wizardBody grid min-w-0 gap-2",
   wizardFooter: "vui-routes-configproviderwizard wizardFooter flex min-w-0 flex-wrap items-center justify-between gap-2 border-t border-vui-border-hairline pt-2",
   wizardSteps: "vui-routes-configproviderwizard wizardSteps flex flex-wrap gap-2",
+  stepLabel: "inline-flex items-center gap-1",
 };
 
 export default styles;

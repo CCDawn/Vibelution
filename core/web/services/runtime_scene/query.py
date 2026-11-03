@@ -1,7 +1,7 @@
 """Runtime scene list/get/detail/query helpers.
 
-Claim scope: list/get detail, read scene files, evidence listing,
-prompt index, retention prune, and query-side package sidecar sync.
+Claim scope: read-only list/get detail, scene files, evidence listing,
+prompt index, and explicit retention prune.
 
 Late-bound facade keeps monkeypatches stable.
 """
@@ -283,23 +283,25 @@ def _remember_runtime_scene_prompt_index_cache(
             s._RUNTIME_SCENE_PROMPT_INDEX_CACHE.pop(oldest_key, None)
 
 
-def _repair_runtime_scene_from_reconciliation_history(scene_dir: Path, manifest: dict[str, Any]) -> bool:
+def _project_runtime_scene_from_reconciliation_history(
+    scene_dir: Path, manifest: dict[str, Any]
+) -> dict[str, Any]:
+    """Project recorded closure evidence without repairing the stored package."""
     s = _service()
+    manifest = copy.deepcopy(manifest)
     if str(manifest.get("status") or "").strip().lower() not in {"", "running", "starting", "queued", "opening", "stopping", "closing"}:
-        return False
+        return manifest
     reconciliation = s._latest_closed_reconciliation_event(scene_dir)
     if reconciliation is None:
-        return False
-    changed = s._maybe_close_runtime_scene_from_reconciliation(
+        return manifest
+    s._maybe_close_runtime_scene_from_reconciliation(
         scene_dir,
         manifest,
         "runtime.snapshot.reconciled",
         reconciliation["fields"],
         reconciliation["timestamp"],
     )
-    if changed:
-        s._update_runtime_scene_package_manifest(scene_dir, manifest)
-    return changed
+    return manifest
 
 
 def _runtime_scene_component_evidence_path(component: str) -> str:
@@ -663,43 +665,6 @@ def _runtime_scene_operation_timing_summary(events: list[dict]) -> dict[str, Any
     }
 
 
-def _runtime_scene_package_sidecars_are_stale(
-    scene_dir: Path,
-    manifest: dict[str, Any],
-    package_index: dict[str, Any],
-) -> bool:
-    s = _service()
-    expected_index = s._runtime_scene_sidecar_compare_payload(
-        s._runtime_scene_package_index_payload(scene_dir, package_index)
-    )
-    actual_index = s._runtime_scene_sidecar_compare_payload(
-        s._load_scene_json(scene_dir / s.PACKAGE_INDEX_PATH)
-    )
-    if set(actual_index) != set(expected_index):
-        return True
-    for key, expected_value in expected_index.items():
-        if actual_index.get(key) != expected_value:
-            return True
-
-    expected_summary = s._runtime_scene_sidecar_compare_payload(
-        s._runtime_scene_summary_payload(scene_dir, manifest, package_index)
-    )
-    actual_summary = s._runtime_scene_sidecar_compare_payload(
-        s._load_scene_json(scene_dir / s.SUMMARY_PATH)
-    )
-    if set(actual_summary) - {"generated_at"} != set(expected_summary) - {"generated_at"}:
-        return True
-    for key, expected_value in expected_summary.items():
-        if key == "generated_at":
-            continue
-        if actual_summary.get(key) != expected_value:
-            return True
-
-    package = manifest.get("package") if isinstance(manifest.get("package"), dict) else {}
-    expected_package_values = s._runtime_scene_manifest_package_index_values(package_index)
-    return any(package.get(key) != expected_value for key, expected_value in expected_package_values.items())
-
-
 def _runtime_scene_package_summary(
     *,
     timeline: list[dict],
@@ -840,20 +805,6 @@ def _safe_current_runtime_scene_dir_for_retention() -> Path | None:
         return None
 
 
-def _sync_runtime_scene_package_sidecars_if_stale(
-    scene_dir: Path,
-    manifest: dict[str, Any],
-    package_index: dict[str, Any],
-) -> None:
-    s = _service()
-    if not s._runtime_scene_package_sidecars_are_stale(scene_dir, manifest, package_index):
-        return
-    try:
-        s._update_runtime_scene_package_manifest(scene_dir, manifest)
-    except OSError:
-        return
-
-
 def _truncate_prompt_index_text(value: str, limit: int) -> str:
     s = _service()
     text = " ".join(str(value or "").split())
@@ -943,12 +894,13 @@ def build_runtime_scene_prompt_index(limit: int = 3) -> str:
 
 
 def get_runtime_scene_detail(scene_id: str) -> dict:
-    """Return one runtime scene bundle with manifest, merged timeline, and raw file metadata."""
+    """Return a fresh runtime scene projection without modifying package files."""
     s = _service()
 
     scene_dir = s._resolve_scene_dir(scene_id)
-    manifest = s._load_scene_manifest(scene_dir)
-    s._repair_runtime_scene_from_reconciliation_history(scene_dir, manifest)
+    manifest = s._project_runtime_scene_from_reconciliation_history(
+        scene_dir, s._load_scene_manifest(scene_dir)
+    )
     detail_scene_id = s._scene_id(scene_dir, manifest)
     timeline = s._read_scene_timeline(scene_dir)
     raw_files = s._list_raw_files(scene_dir)
@@ -958,10 +910,23 @@ def get_runtime_scene_detail(scene_id: str) -> dict:
     artifacts = s._list_artifacts(scene_dir)
     event_logs = s._list_event_logs(scene_dir)
     research_logs = s._list_research_logs(scene_dir)
-    package_index = s._runtime_scene_package_index(scene_dir, manifest, detail_scene_id)
-    s._sync_runtime_scene_package_sidecars_if_stale(scene_dir, manifest, package_index)
-    summary_payload = s._load_scene_json(scene_dir / s.SUMMARY_PATH)
-    package_diagnosis = summary_payload.get("diagnosis") if isinstance(summary_payload.get("diagnosis"), dict) else {}
+    package_diagnosis = s._runtime_scene_package_diagnosis_for_scene(
+        scene_dir, manifest, detail_scene_id, timeline=timeline, lifecycle=lifecycle_events
+    )
+    package_index = s._runtime_scene_package_index_from_diagnosis(
+        scene_dir, manifest, detail_scene_id, package_diagnosis
+    )
+    package = manifest.get("package") if isinstance(manifest.get("package"), dict) else {}
+    package.update({"schema_version": 2, **s._runtime_scene_manifest_package_index_values(package_index)})
+    manifest["package"] = package
+    summary_payload = s._runtime_scene_summary_payload(
+        scene_dir,
+        manifest,
+        package_index,
+        diagnosis=package_diagnosis,
+        timeline=timeline,
+        lifecycle=lifecycle_events,
+    )
     return {
         "runtimeSceneId": detail_scene_id,
         "directoryName": scene_dir.name,

@@ -66,6 +66,27 @@ describe("MemoryContentBrowsePanel collapsible groups", () => {
     expect(markup).toContain("可在「团队」页面打开团队知识库");
   });
 
+  it("uses the no-match state in both panes while searching instead of claiming the library is empty", () => {
+    const markup = renderPanel({
+      cards: [], searchText: "找不到的团队", onSearchTextChange: () => {},
+      copy: { ...copy, browseEmptyEntries: "未找到匹配项", browseEmptyCardsHint: "可在「团队」页面打开团队知识库" },
+    });
+    expect(markup.match(/未找到匹配项/g)).toHaveLength(2);
+    expect(markup).not.toContain("暂无卡片");
+    expect(markup).not.toContain("可在「团队」页面打开团队知识库");
+    expect(markup).toContain('value="找不到的团队"');
+  });
+
+  it("restores the empty-library guidance when the search is cleared", () => {
+    const emptyCopy = { ...copy, browseEmptyEntries: "未找到匹配项", browseEmptyCardsHint: "可在「团队」页面打开团队知识库" };
+    const searching = renderPanel({ cards: [], searchText: "无匹配", copy: emptyCopy });
+    expect(searching).not.toContain("暂无卡片");
+    const cleared = renderPanel({ cards: [], searchText: "  ", copy: emptyCopy });
+    expect(cleared.match(/暂无卡片/g)).toHaveLength(2);
+    expect(cleared.match(/可在「团队」页面打开团队知识库/g)).toHaveLength(2);
+    expect(cleared).not.toContain("未找到匹配项");
+  });
+
   it("renders an optional header above the cards", () => {
     const markup = renderPanel({ header: <p>读取身份</p> });
     expect(markup).toContain("读取身份");

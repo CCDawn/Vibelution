@@ -45,10 +45,10 @@ export type TeamKnowledgeCollectionCompletionFlowPanelProps = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   sourceCollectionStagePrimaryAgentBinding: (stageId: SourceCollectionStageModuleId) => any;
   sourceCollectionStageReturnRoute: (stageId: SourceCollectionStageModuleId) => string;
-  openSourceCollectionStageAgentChat: (stageId: SourceCollectionStageModuleId) => void;
+  openSourceCollectionStageAgentChat?: (stageId: SourceCollectionStageModuleId) => void;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   sourceCollectionStepClassName: (state: any) => string;
-  runKnowledgeCollectionCompletionAction: () => void;
+  runKnowledgeCollectionCompletionAction?: () => void;
   sourceCollectionCompletionActionDisabled: boolean;
   selectedTeamKnowledgeCollectionIngestPending: boolean;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -89,6 +89,9 @@ export function TeamKnowledgeCollectionCompletionFlowPanel(props: TeamKnowledgeC
   const flowError = String(flow?.error || workRun?.error || "");
   const currentStageId = String(flow?.currentStageId || "");
   const rail = presentation === "rail";
+  const unavailableActionMessage = lang === "zh"
+    ? "部分操作暂不可用，请刷新页面后重试。"
+    : "Some actions are unavailable. Refresh this page and try again.";
   return (
     <section
       className={[
@@ -118,6 +121,9 @@ export function TeamKnowledgeCollectionCompletionFlowPanel(props: TeamKnowledgeC
           {flow?.errorType || workRun?.errorType ? `${flow?.errorType || workRun?.errorType}: ` : ""}
           {flowError}
         </div>
+      ) : null}
+      {!openSourceCollectionStageAgentChat || !runKnowledgeCollectionCompletionAction ? (
+        <p role="status" className={styles.workflowError}>{unavailableActionMessage}</p>
       ) : null}
       <div
         className={[
@@ -171,7 +177,12 @@ export function TeamKnowledgeCollectionCompletionFlowPanel(props: TeamKnowledgeC
                   <Link2 size={13} />
                   {lang === "zh" ? "阶段详情" : "Stage detail"}
                 </Link>
-                <VNativeButton type="button" onClick={() => openSourceCollectionStageAgentChat(node.stageId)}>
+                <VNativeButton
+                  type="button"
+                  disabled={!openSourceCollectionStageAgentChat}
+                  title={!openSourceCollectionStageAgentChat ? unavailableActionMessage : undefined}
+                  onClick={() => openSourceCollectionStageAgentChat?.(node.stageId)}
+                >
                   <MessageSquare size={13} />
                   {lang === "zh" ? "Agent 私聊" : "Agent chat"}
                 </VNativeButton>
@@ -179,9 +190,10 @@ export function TeamKnowledgeCollectionCompletionFlowPanel(props: TeamKnowledgeC
                   <VNativeButton
                     type="button"
                     onClick={runKnowledgeCollectionCompletionAction}
-                    disabled={sourceCollectionCompletionActionDisabled || selectedTeamKnowledgeCollectionIngestPending}
+                    disabled={!runKnowledgeCollectionCompletionAction || sourceCollectionCompletionActionDisabled || selectedTeamKnowledgeCollectionIngestPending}
                     title={
-                      sourceCollectionActionDisabledTitle(sourceCollectionCompletionActionReadiness, lang === "zh" ? "重新执行搜集闭环" : "Rerun collection loop")
+                      !runKnowledgeCollectionCompletionAction ? unavailableActionMessage
+                      : sourceCollectionActionDisabledTitle(sourceCollectionCompletionActionReadiness, lang === "zh" ? "重新执行搜集闭环" : "Rerun collection loop")
                       ?? (lang === "zh"
                         ? "会重新执行资料搜集→提炼→证据关系→知识入库整套闭环（含重新检索），不是只重试这一个节点"
                         : "Reruns the whole search→extract→relations→ingest loop (including fresh searches), not just this node")

@@ -225,11 +225,16 @@ export function ConfigProviderWizard({
       />
       <div className={styles.wizardSteps} aria-label={copy.wizardStepsAria}>
         {STEPS.map((step, index) => (
-          <VButton key={step.id} variant={step.id === state.step ? "primary" : "ghost"} isDisabled
-            icon={index < selectedStepIndex ? <Check size={13} /> : null}
+          <VStatusChip
+            key={step.id}
+            tone={step.id === state.step ? "accent" : index < selectedStepIndex ? "success" : "neutral"}
+            aria-current={step.id === state.step ? "step" : undefined}
           >
-            {copy[step.copyKey]}
-          </VButton>
+            <span className={styles.stepLabel}>
+              {index < selectedStepIndex ? <Check size={13} aria-hidden="true" /> : null}
+              {copy[step.copyKey]}
+            </span>
+          </VStatusChip>
         ))}
       </div>
 

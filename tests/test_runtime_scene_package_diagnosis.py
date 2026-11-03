@@ -3,6 +3,15 @@ from pathlib import Path
 
 from core.web.services import runtime_scene_service
 
+
+def _persist_scene_package(scene_id):
+    """Exercise the explicit writer before asserting persisted sidecars."""
+    scene_dir = runtime_scene_service._resolve_scene_dir(scene_id)
+    runtime_scene_service._update_runtime_scene_package_manifest(
+        scene_dir, runtime_scene_service._load_scene_manifest(scene_dir)
+    )
+
+
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n", encoding="utf-8")
@@ -332,6 +341,7 @@ def test_runtime_scene_diagnosis_names_legacy_model_discovery_auth_failure(tmp_p
     assert diagnosis["evidencePaths"][0] == "raw/browser.telemetry.log"
     assert "请求返回 422" not in diagnosis["userSummary"]
 
+    _persist_scene_package(detail["runtimeSceneId"])
     summary = json.loads((tmp_path / "logs" / "runtime_scenes" / f"20260518T120000Z__{scene_id}" / "summary.json").read_text(encoding="utf-8"))
     package_index = json.loads((tmp_path / "logs" / "runtime_scenes" / f"20260518T120000Z__{scene_id}" / "package_index.json").read_text(encoding="utf-8"))
     assert summary["agent_brief"]["primary_issue"] == "config.model_discovery.failed"
@@ -622,6 +632,7 @@ def test_runtime_scene_issue_state_treats_recovered_route_chunk_errors_as_histor
         "browser.route_chunk_recovery.reload_requested",
     }
 
+    _persist_scene_package(detail["runtimeSceneId"])
     summary = json.loads((tmp_path / "logs" / "runtime_scenes" / f"20260518T120000Z__{scene_id}" / "summary.json").read_text(encoding="utf-8"))
     assert summary["agent_brief"]["diagnosis_status"] == "resolved"
     assert summary["agent_brief"]["primary_issue"] == "none"
@@ -924,6 +935,7 @@ def test_runtime_scene_treats_transient_agent_directory_slow_as_policy_observati
     assert issue_state["policyClusterCount"] == 1
     assert issue_state["firstPolicyCluster"]["eventCode"] == "agent_directory.list_agents.slow"
     assert "issueState.policyClusterCount" in diagnosis["agentNextStep"]
+    _persist_scene_package(detail["runtimeSceneId"])
     summary = json.loads(
         (
             tmp_path
@@ -1260,6 +1272,7 @@ def test_runtime_scene_diagnosis_keeps_memory_status_mirror_out_of_active_cluste
     assert "memory.event_written" not in active_codes
     assert diagnosis["firstSignal"]["eventCode"] == "tool.execute.degraded"
 
+    _persist_scene_package(detail["runtimeSceneId"])
     summary = json.loads((tmp_path / "logs" / "runtime_scenes" / f"20260518T120000Z__{scene_id}" / "summary.json").read_text(encoding="utf-8"))
     assert summary["event_counts"]["warnings"] == 1
     assert summary["agent_brief"]["diagnosis_status"] == "active_issue"
@@ -1317,6 +1330,7 @@ def test_runtime_scene_agent_brief_names_the_primary_cluster_not_the_first_signa
     assert issue_state["firstActiveCluster"]["eventCode"] == "browser.page.error"
     assert issue_state["activeClusterCount"] == 2
 
+    _persist_scene_package(detail["runtimeSceneId"])
     summary = json.loads(
         (tmp_path / "logs" / "runtime_scenes" / f"20260518T120000Z__{scene_id}" / "summary.json").read_text(
             encoding="utf-8"
@@ -1395,6 +1409,7 @@ def test_runtime_scene_busy_command_is_actionable_policy_not_active_failure(tmp_
     assert "issueState.policyClusterCount" in diagnosis["agentNextStep"]
     assert "issueState.activeClusterCount" not in diagnosis["agentNextStep"]
 
+    _persist_scene_package(detail["runtimeSceneId"])
     summary = json.loads((tmp_path / "logs" / "runtime_scenes" / f"20260518T120000Z__{scene_id}" / "summary.json").read_text(encoding="utf-8"))
     assert summary["agent_brief"]["diagnosis_status"] == "policy_only"
     assert summary["agent_brief"]["actionability"] == "policy_acknowledge_only"
@@ -1475,6 +1490,7 @@ def test_runtime_scene_self_evolution_busy_manager_event_is_policy_not_active_fa
     assert issue_state["firstPolicyCluster"]["eventCode"] == "command.failed"
     assert diagnosis["firstSignal"]["eventCode"] == "command.failed"
 
+    _persist_scene_package(detail["runtimeSceneId"])
     summary = json.loads((tmp_path / "logs" / "runtime_scenes" / f"20260518T120000Z__{scene_id}" / "summary.json").read_text(encoding="utf-8"))
     assert summary["agent_brief"]["diagnosis_status"] == "policy_only"
     assert summary["agent_brief"]["needs_action"] is False
@@ -1550,6 +1566,7 @@ def test_runtime_scene_conversation_artifact_failure_wraps_image2_root_cause(tmp
     assert diagnosis["firstSignal"]["eventCode"] == "image2.generate.failed"
     assert diagnosis["evidencePaths"][0] == "artifacts/session-image2-image2.jsonl"
 
+    _persist_scene_package(detail["runtimeSceneId"])
     summary = json.loads((tmp_path / "logs" / "runtime_scenes" / f"20260518T120000Z__{scene_id}" / "summary.json").read_text(encoding="utf-8"))
     assert summary["agent_brief"]["diagnosis_status"] == "active_issue"
     assert summary["agent_brief"]["primary_issue"] == "image2.generate.failed"
@@ -1648,6 +1665,7 @@ def test_runtime_scene_startup_wrappers_do_not_duplicate_specific_frontend_root_
     assert "command.failed" not in active_codes
     assert "command_queue.command_result_written" not in active_codes
 
+    _persist_scene_package(detail["runtimeSceneId"])
     summary = json.loads((tmp_path / "logs" / "runtime_scenes" / f"20260518T120000Z__{scene_id}" / "summary.json").read_text(encoding="utf-8"))
     assert summary["agent_brief"]["diagnosis_status"] == "active_issue"
     assert summary["agent_brief"]["primary_issue"] == "frontend.build.failed"
@@ -1731,6 +1749,7 @@ def test_runtime_scene_startup_failure_keeps_launcher_root_when_no_specific_even
     assert diagnosis["firstSignal"]["diagnosisReason"] == "powershell_command_missing"
     assert "Get-InventoryPythonPath" in diagnosis["agentNextStep"]
 
+    _persist_scene_package(detail["runtimeSceneId"])
     summary = json.loads((tmp_path / "logs" / "runtime_scenes" / f"20260518T120000Z__{scene_id}" / "summary.json").read_text(encoding="utf-8"))
     assert summary["agent_brief"]["diagnosis_status"] == "active_issue"
     assert summary["agent_brief"]["primary_issue"] == "startup.launcher.command_missing"
@@ -1795,6 +1814,7 @@ def test_runtime_scene_issue_state_clusters_recovered_historical_errors(tmp_path
     assert issue_state["firstHistoricalCluster"]["identity"] == {"runId": "build-1"}
     assert "frontend.build.failed ×2" in detail["packageDiagnosis"]["userSummary"]
     assert "frontend.build.failed ×2" in detail["packageDiagnosis"]["agentNextStep"]
+    _persist_scene_package(detail["runtimeSceneId"])
     summary = json.loads((tmp_path / "logs" / "runtime_scenes" / "20260518T120000Z__scene-diagnosis-historical-cluster" / "summary.json").read_text(encoding="utf-8"))
     assert summary["agent_brief"]["diagnosis_status"] == "resolved"
     assert summary["agent_brief"]["primary_issue"] == "none"
@@ -1839,6 +1859,7 @@ def test_runtime_scene_detail_exposes_clean_package_diagnosis(tmp_path, monkeypa
     assert "raw/backend.stderr.log" in diagnosis["recommendedOrder"]
     assert diagnosis["startupTrace"]["missingStepIds"]
     assert "startupTrace.missingStepIds" in diagnosis["agentNextStep"]
+    _persist_scene_package(detail["runtimeSceneId"])
     summary = json.loads((tmp_path / "logs" / "runtime_scenes" / "20260518T120000Z__scene-diagnosis-clean" / "summary.json").read_text(encoding="utf-8"))
     assert summary["agent_brief"]["diagnosis_status"] == "healthy"
     assert summary["agent_brief"]["primary_issue"] == "none"
@@ -2005,6 +2026,7 @@ def test_runtime_scene_diagnosis_exposes_compact_work_run_summary(tmp_path, monk
     assert work_runs["activeRuns"][0]["runId"] == "run-busy"
     assert work_runs["highFrequencyRuns"][0]["snapshotCount"] == 7
 
+    _persist_scene_package(detail["runtimeSceneId"])
     summary = json.loads((tmp_path / "logs" / "runtime_scenes" / f"20260518T120000Z__{scene_id}" / "summary.json").read_text(encoding="utf-8"))
     assert summary["agent_brief"]["work_run_focus"]["active_run_count"] == 1
     assert summary["agent_brief"]["work_run_focus"]["high_frequency_run_count"] == 1

@@ -1,10 +1,10 @@
 const styles = {
   overview:
-    "grid min-h-full min-w-0 content-start gap-3 [grid-template-rows:auto_minmax(0,_1fr)]",
+    "@container/agent-overview grid min-h-full min-w-0 content-start gap-3 [grid-template-rows:auto_minmax(0,_1fr)]",
   metricStrip:
-    "w-full [&_[data-vui=metric-strip]]:w-full [&>div]:min-w-[150px] [&>div]:flex-1 max-[680px]:[&>div]:min-w-[calc(50%-1px)] max-[440px]:[&>div]:min-w-full",
+    "w-full [&_[data-vui=metric-strip]]:w-full [&>div]:min-w-[150px] [&>div]:flex-1 [&_strong]:min-w-0 [&_strong]:shrink [&_strong]:[overflow-wrap:anywhere] [&_strong]:leading-snug max-[680px]:[&>div]:min-w-[calc(50%-1px)] max-[440px]:[&>div]:min-w-full",
   workspace:
-    "grid min-h-[520px] min-w-0 grid-cols-[minmax(0,_1.6fr)_minmax(280px,_0.85fr)] items-stretch gap-3 max-[1180px]:min-h-0 max-[1180px]:grid-cols-1",
+    "grid min-h-[520px] min-w-0 grid-cols-[minmax(0,_1.6fr)_minmax(280px,_0.85fr)] items-stretch gap-3 max-[1180px]:min-h-0 max-[1180px]:grid-cols-1 @max-[900px]/agent-overview:min-h-0 @max-[900px]/agent-overview:grid-cols-1",
   mainColumn: "grid min-w-0 content-start gap-3",
   sideColumn:
     "grid min-w-0 content-start gap-3 [grid-template-rows:auto_auto_minmax(0,_1fr)]",
@@ -20,30 +20,30 @@ const styles = {
     "inline-flex min-h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-[var(--vui-control-muted)] px-1.5 [font-size:var(--vui-font-xs)] font-bold text-[var(--fg-secondary)]",
   effectiveTable: "grid min-w-0 gap-1",
   effectiveHeader:
-    "grid min-w-0 grid-cols-[minmax(120px,_0.9fr)_minmax(150px,_1.4fr)_minmax(96px,_0.75fr)_auto] gap-2 px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold text-[var(--fg-tertiary)] max-[760px]:hidden",
+    "grid min-w-0 grid-cols-[minmax(120px,_0.9fr)_minmax(150px,_1.4fr)_minmax(96px,_0.75fr)_auto] gap-2 px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold text-[var(--fg-tertiary)] max-[760px]:hidden @max-[760px]/agent-overview:hidden",
   effectiveRow:
-    "grid min-w-0 grid-cols-[minmax(120px,_0.9fr)_minmax(150px,_1.4fr)_minmax(96px,_0.75fr)_auto] items-center gap-2 rounded-[var(--radius-control)] border border-[var(--vui-border-hairline)] bg-[var(--vui-surface-row)] px-2 py-2 max-[760px]:grid-cols-[minmax(0,_1fr)_auto] max-[760px]:items-start",
+    "grid min-w-0 grid-cols-[minmax(120px,_0.9fr)_minmax(150px,_1.4fr)_minmax(96px,_0.75fr)_auto] items-center gap-2 rounded-[var(--radius-control)] border border-[var(--vui-border-hairline)] bg-[var(--vui-surface-row)] px-2 py-2 max-[760px]:grid-cols-[minmax(0,_1fr)_auto] max-[760px]:items-start @max-[760px]/agent-overview:grid-cols-[minmax(0,_1fr)_auto] @max-[760px]/agent-overview:items-start",
   effectiveIdentity:
     "grid min-w-0 gap-0.5 [&>strong]:min-w-0 [&>strong]:[overflow-wrap:anywhere] [&>strong]:[font-size:var(--vui-font-sm)]",
   effectiveSource:
-    "min-w-0 truncate [font-size:var(--vui-font-xs)] text-[var(--fg-tertiary)] max-[760px]:col-start-1 max-[760px]:row-start-2",
+    "min-w-0 truncate [font-size:var(--vui-font-xs)] text-[var(--fg-tertiary)] max-[760px]:col-start-1 max-[760px]:row-start-2 @max-[760px]/agent-overview:col-start-1 @max-[760px]/agent-overview:row-start-2",
   effectiveValue:
-    "grid min-w-0 gap-0.5 [overflow-wrap:anywhere] max-[760px]:col-span-2 max-[760px]:row-start-3",
+    "grid min-w-0 gap-0.5 [overflow-wrap:anywhere] max-[760px]:col-span-2 max-[760px]:row-start-3 @max-[760px]/agent-overview:col-span-2 @max-[760px]/agent-overview:row-start-3",
   effectiveValuePrimary:
     "min-w-0 [overflow-wrap:anywhere] [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-primary)]",
   effectiveValueDetail:
     "min-w-0 [overflow-wrap:anywhere] [font-size:var(--vui-font-xs)] font-normal leading-5 text-[var(--fg-tertiary)]",
   effectiveStatus:
-    "min-w-0 justify-self-end max-[760px]:col-start-2 max-[760px]:row-span-2 max-[760px]:row-start-1",
+    "min-w-0 justify-self-end max-[760px]:col-start-2 max-[760px]:row-span-2 max-[760px]:row-start-1 @max-[760px]/agent-overview:col-start-2 @max-[760px]/agent-overview:row-span-2 @max-[760px]/agent-overview:row-start-1",
   activityList: "grid min-w-0 gap-1",
   activityItem:
-    "grid min-w-0 grid-cols-[minmax(0,_1fr)_auto] gap-x-3 gap-y-1 rounded-[var(--radius-control)] border border-[var(--vui-border-hairline)] bg-[var(--vui-surface-row)] px-2 py-2 max-[560px]:grid-cols-1",
+    "grid min-w-0 grid-cols-[minmax(0,_1fr)_auto] gap-x-3 gap-y-1 rounded-[var(--radius-control)] border border-[var(--vui-border-hairline)] bg-[var(--vui-surface-row)] px-2 py-2 max-[560px]:grid-cols-1 @max-[560px]/agent-overview:grid-cols-1",
   activityTitle:
     "m-0 min-w-0 [overflow-wrap:anywhere] [font-size:var(--vui-font-sm)] font-bold text-[var(--fg-primary)]",
   activityBody:
     "col-start-1 m-0 min-w-0 [overflow-wrap:anywhere] [font-size:var(--vui-font-xs)] leading-5 text-[var(--fg-secondary)]",
   activityMeta:
-    "col-start-2 row-start-1 min-w-0 max-w-[220px] truncate text-right [font-size:var(--vui-font-xs)] text-[var(--fg-tertiary)] max-[560px]:col-start-1 max-[560px]:row-start-auto max-[560px]:max-w-full max-[560px]:text-left",
+    "col-start-2 row-start-1 min-w-0 max-w-[220px] truncate text-right [font-size:var(--vui-font-xs)] text-[var(--fg-tertiary)] max-[560px]:col-start-1 max-[560px]:row-start-auto max-[560px]:max-w-full max-[560px]:text-left @max-[560px]/agent-overview:col-start-1 @max-[560px]/agent-overview:row-start-auto @max-[560px]/agent-overview:max-w-full @max-[560px]/agent-overview:text-left",
   identityGrid: "grid min-w-0 grid-cols-2 gap-2 max-[480px]:grid-cols-1",
   identityItem:
     "grid min-w-0 gap-1 rounded-[var(--radius-control)] border border-[var(--vui-border-hairline)] bg-[var(--vui-surface-row)] px-2 py-2",

@@ -91,6 +91,7 @@ function copyFor(lang: string) {
         saving: "保存中",
         saved: "提示词模板已保存。",
         reset: "恢复默认",
+        resetting: "恢复中",
         resetDone: "已恢复默认模板。",
         resetUnavailable: "没有默认内容",
         category: "分类",
@@ -142,6 +143,7 @@ function copyFor(lang: string) {
         saving: "Saving",
         saved: "Prompt template saved.",
         reset: "Restore default",
+        resetting: "Restoring",
         resetDone: "Default template restored.",
         resetUnavailable: "No default content",
         category: "Category",
@@ -779,11 +781,11 @@ export function PromptTemplatesRoute() {
                   className={styles.primaryButtonClass}
                   icon={<Save size={15} />}
                   isDisabled={busy}
-                  disabledReason={copy.saving}
+                  disabledReason={savePending ? copy.saving : resetPending ? copy.resetting : copy.loading}
                   tooltip={copy.snapshotNotice}
                   onPress={() => saveMutation.mutate(editor)}
                 >
-                  {busy ? copy.saving : copy.save}
+                  {savePending ? copy.saving : copy.save}
                 </VButton>
               </div>
             </>

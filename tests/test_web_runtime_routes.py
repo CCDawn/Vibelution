@@ -4051,6 +4051,27 @@ def test_local_backend_exit_schedule_is_defused_under_pytest(monkeypatch):
     assert recorded == ["runtime_service.local_backend_exit"]
 
 
+def test_runtime_scene_detail_endpoint_does_not_rewrite_scene_files(tmp_path, monkeypatch):
+    scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-read-only")
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    # Request telemetry has its own explicit writer; isolate the query contract.
+    monkeypatch.setattr(runtime_scene_api, "should_record_api_runtime_event", lambda _request: False)
+    before = {
+        path.relative_to(scene_dir).as_posix(): (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in scene_dir.rglob("*") if path.is_file()
+    }
+
+    for _ in range(2):
+        response = client.get("/api/logs/runtime-scenes/scene-read-only")
+        assert response.status_code == 200
+        assert response.json()["packageDiagnosis"]["severity"] == "error"
+
+    assert {
+        path.relative_to(scene_dir).as_posix(): (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in scene_dir.rglob("*") if path.is_file()
+    } == before
+
+
 def test_runtime_scene_endpoints_list_detail_content_and_delete(tmp_path, monkeypatch):
     _seed_runtime_scene_bundle(tmp_path, scene_id="scene-a")
     _seed_runtime_scene_bundle(tmp_path, scene_id="scene-b")
@@ -4819,7 +4840,7 @@ def test_runtime_scene_reconciliation_closes_running_package(tmp_path, monkeypat
     assert summary["result"] == "state_reconciled"
     assert summary["display_name"].endswith("状态校准")
 
-def test_runtime_scene_detail_repairs_historical_running_package_from_reconciliation(tmp_path, monkeypatch):
+def test_runtime_scene_detail_projects_historical_reconciliation_without_writing(tmp_path, monkeypatch):
     scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-history", status="running")
     with (scene_dir / "timeline.jsonl").open("a", encoding="utf-8") as handle:
         handle.write(
@@ -4853,15 +4874,23 @@ def test_runtime_scene_detail_repairs_historical_running_package_from_reconcilia
     manifest_before = json.loads((scene_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest_before["status"] == "running"
     monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    files_before = {
+        path.relative_to(scene_dir).as_posix(): (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in scene_dir.rglob("*") if path.is_file()
+    }
 
     detail = runtime_scene_service.get_runtime_scene_detail("scene-history")
 
     assert detail["status"] == "stopped"
     assert detail["result"] == "state_reconciled"
     assert detail["packageIndex"]["indexKey"].endswith("_workbench-start_state-reconciled")
+    assert detail["manifest"]["ended_at"] == "2026-05-18T12:05:00+00:00"
     manifest_after = json.loads((scene_dir / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest_after["status"] == "stopped"
-    assert manifest_after["ended_at"] == "2026-05-18T12:05:00+00:00"
+    assert manifest_after == manifest_before
+    assert {
+        path.relative_to(scene_dir).as_posix(): (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in scene_dir.rglob("*") if path.is_file()
+    } == files_before
 
 def test_runtime_scene_list_does_not_repair_or_rewrite_sidecars(tmp_path, monkeypatch):
     scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-history-list", status="running")

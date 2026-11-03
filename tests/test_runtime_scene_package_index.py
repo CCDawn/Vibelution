@@ -1117,7 +1117,7 @@ def test_runtime_scene_status_defaults_to_running_until_ended(tmp_path, monkeypa
     assert detail["status"] == "running"
 
 
-def test_runtime_scene_detail_refreshes_stale_package_sidecars(tmp_path, monkeypatch):
+def test_runtime_scene_detail_projects_stale_package_sidecars_without_writing(tmp_path, monkeypatch):
     scene_id = "stale-sidecars-scene"
     scene_dir = tmp_path / "logs" / "runtime_scenes" / f"20260524T120001Z__{scene_id}"
     scene_dir.mkdir(parents=True)
@@ -1142,21 +1142,21 @@ def test_runtime_scene_detail_refreshes_stale_package_sidecars(tmp_path, monkeyp
     scene_dir.joinpath("package_index.json").write_text('{"index_key":"stale"}', encoding="utf-8")
     scene_dir.joinpath("summary.json").write_text('{"package_id":"stale"}', encoding="utf-8")
     monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    before = {
+        path.name: (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in scene_dir.iterdir()
+    }
 
     detail = runtime_scene_service.get_runtime_scene_detail(scene_id)
 
-    manifest = json.loads(scene_dir.joinpath("manifest.json").read_text(encoding="utf-8"))
-    package_index = json.loads(scene_dir.joinpath("package_index.json").read_text(encoding="utf-8"))
-    summary = json.loads(scene_dir.joinpath("summary.json").read_text(encoding="utf-8"))
     assert detail["status"] == "running"
-    assert package_index["package_id"] == scene_id
-    assert package_index["index_key"] == detail["packageIndex"]["indexKey"]
-    assert package_index["summary_ref"] == "summary.json"
-    assert "diagnosis" not in package_index
-    assert summary["package_id"] == scene_id
-    assert summary["display_name"] == detail["packageIndex"]["displayName"]
-    assert summary["diagnosis"]["issueState"]["activeClusterCount"] == 0
-    assert manifest["package"]["index_key"] == detail["packageIndex"]["indexKey"]
+    assert detail["packageIndex"]["packageId"] == scene_id
+    assert detail["packageDiagnosis"]["issueState"]["activeClusterCount"] == 0
+    assert detail["manifest"]["package"]["index_key"] == detail["packageIndex"]["indexKey"]
+    assert {
+        path.name: (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in scene_dir.iterdir()
+    } == before
 
 
 def test_runtime_scene_detail_skips_locked_child_log_during_file_listing(tmp_path, monkeypatch):
@@ -1266,6 +1266,9 @@ def test_runtime_scene_static_summary_distinguishes_recovered_issue_from_active_
 
     detail = runtime_scene_service.get_runtime_scene_detail(scene_id)
 
+    runtime_scene_service._update_runtime_scene_package_manifest(
+        scene_dir, runtime_scene_service._load_scene_manifest(scene_dir)
+    )
     package_index = json.loads(scene_dir.joinpath("package_index.json").read_text(encoding="utf-8"))
     summary = json.loads(scene_dir.joinpath("summary.json").read_text(encoding="utf-8"))
     assert detail["packageDiagnosis"]["severity"] == "info"

@@ -1852,12 +1852,12 @@ export function SelfEvolutionTrack({
                         {lang === "zh" ? "开始" : "Start"}
                       </VButton>
                     )}
-                    <VIconButton
-                      label={lang === "zh" ? "运行约束" : "Runtime constraints"}
-                      tooltip={lang === "zh" ? "迭代上限 1 · 隔离工作树 · 提交前必须审批" : "Iteration limit 1 · isolated worktree · approval required before commit"}
-                      variant="ghost"
-                      icon={<Settings size={15} />}
-                    />
+                    <VStatusChip
+                      tone="neutral"
+                      title={lang === "zh" ? "迭代上限 1 · 隔离工作树 · 提交前必须审批" : "Iteration limit 1 · isolated worktree · approval required before commit"}
+                    >
+                      {lang === "zh" ? "固定运行约束" : "Fixed runtime constraints"}
+                    </VStatusChip>
                   </div>
                   <div className={styles.railFeedbackStack}>
                     {actionFeedback ? <p className={styles.feedbackText}>{actionFeedback}</p> : null}

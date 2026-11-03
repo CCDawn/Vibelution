@@ -93,31 +93,31 @@ function assemblyErrors() {
 }
 
 describe("renderKnowledgeCollectionCompletionFlowPanel assembly fallbacks", () => {
-  it("logs 装配缺失 instead of failing silently when openSourceCollectionStageAgentChat is not wired", () => {
+  it("disables Agent chat and explains why when its handler is not wired", () => {
     const ctx = completionFlowContext();
     delete ctx.openSourceCollectionStageAgentChat;
     const element = mountCompletionFlow(ctx);
 
     const chat = buttonByText(element, "Agent 私聊");
+    expect(chat.disabled).toBe(true);
+    expect(chat.title).toContain("暂不可用");
+    expect(element.querySelector('[role="status"]')?.textContent).toContain("刷新");
     expect(() => act(() => chat.click())).not.toThrow();
-
-    const errors = assemblyErrors();
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("openSourceCollectionStageAgentChat");
+    expect(assemblyErrors()).toHaveLength(0);
   });
 
-  it("logs 装配缺失 instead of failing silently when runKnowledgeCollectionCompletionAction is not wired", () => {
+  it("disables rerun and explains why when its handler is not wired", () => {
     const ctx = completionFlowContext();
     delete ctx.runKnowledgeCollectionCompletionAction;
     const element = mountCompletionFlow(ctx);
 
     const rerun = buttonByText(element, "重新执行搜集闭环");
-    expect(rerun.disabled).toBe(false);
+    expect(rerun.disabled).toBe(true);
+    expect(rerun.title).toContain("暂不可用");
+    expect(element.querySelector('[role="status"]')?.textContent).toContain("刷新");
     expect(() => act(() => rerun.click())).not.toThrow();
 
-    const errors = assemblyErrors();
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("runKnowledgeCollectionCompletionAction");
+    expect(assemblyErrors()).toHaveLength(0);
   });
 
   it("forwards clicks to wired handlers without logging", () => {

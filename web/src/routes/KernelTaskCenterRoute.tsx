@@ -26,8 +26,7 @@ import {
 } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import styles from "./KernelTaskCenterRoute.styles";
-import { agentRunStatusLabel } from "./agents/agentRunPresentation";
-import { kernelTaskTitle } from "./kernelTaskPresentation";
+import { kernelTaskStatusLabel, kernelTaskTitle } from "./kernelTaskPresentation";
 import { ProgressiveRegionSkeleton } from "./shared/ProgressiveRegionSkeleton";
 
 const ALL_STATUS_KEY = "all";
@@ -195,7 +194,7 @@ export function KernelTaskCenterRoute() {
   const statusOptions = useMemo(
     () => [
       { id: ALL_STATUS_KEY, label: copy.allStatus },
-      ...STATUS_OPTIONS.map((option) => ({ id: option, label: agentRunStatusLabel(option, lang) })),
+      ...STATUS_OPTIONS.map((option) => ({ id: option, label: kernelTaskStatusLabel(option, lang) })),
     ],
     [copy.allStatus, lang],
   );
@@ -262,7 +261,7 @@ export function KernelTaskCenterRoute() {
             metrics={[
               { id: "authority", label: copy.factAuthority, value: timeline.readModel.truthSource || "-", tone: "info" },
               { id: "view", label: copy.viewType, value: timeline.readModel.projection ? copy.projectionView : copy.directView },
-              { id: "outcome", label: copy.outcome, value: agentRunStatusLabel(timeline.outcome.status || "-", lang) },
+              { id: "outcome", label: copy.outcome, value: kernelTaskStatusLabel(timeline.outcome.status || "-", lang) },
             ]}
           />
           <p className={styles.rawGoalClass}>{timeline.task.goal}</p>
@@ -503,7 +502,7 @@ function RefList({
 function StatusPill({ status, lang }: { status: string; lang: "zh" | "en" }) {
   return (
     <VStatusChip tone={statusTone(status)} className={styles.statusPillBaseClass}>
-      {status === "delivered" && lang === "zh" ? "已投递" : agentRunStatusLabel(status || "unknown", lang)}
+      {kernelTaskStatusLabel(status, lang)}
     </VStatusChip>
   );
 }

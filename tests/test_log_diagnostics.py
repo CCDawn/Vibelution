@@ -57,7 +57,7 @@ def test_health_diagnostics_groups_log_helpers_and_reset_hints(tmp_path, monkeyp
     monkeypatch.setattr(
         diagnostics_service,
         "list_sessions",
-        lambda: [
+        lambda *, repair_collisions: [
             {
                 "id": "session-live",
                 "title": "真实会话",
@@ -124,6 +124,36 @@ def test_health_diagnostics_groups_log_helpers_and_reset_hints(tmp_path, monkeyp
     assert quick_actions[0]["findingId"] == "runtime_scene_failed"
     assert quick_actions[0]["route"] == "/logs?root=runtime_scenes"
     assert any(item["resetItemId"] == "stopped_runtime_scenes" for item in quick_actions)
+
+
+def test_health_diagnostics_reads_sessions_without_collision_repair(tmp_path, monkeypatch):
+    session_path = tmp_path / "workspace" / "session.json"
+    session_path.parent.mkdir()
+    session_path.write_text('{"id":"session-a"}', encoding="utf-8")
+    observed_flags = []
+
+    def list_sessions(*, repair_collisions=True):
+        observed_flags.append(repair_collisions)
+        if repair_collisions:
+            session_path.write_text('{"id":"repaired"}', encoding="utf-8")
+        return [{"id": "session-a", "title": "Synthetic session", "status": "ready"}]
+
+    monkeypatch.setattr(diagnostics_service, "list_sessions", list_sessions)
+    monkeypatch.setattr(log_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    before = {
+        path.relative_to(tmp_path).as_posix(): (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in tmp_path.rglob("*") if path.is_file()
+    }
+
+    payload = diagnostics_service.get_health_diagnostics()
+
+    assert observed_flags == [False]
+    assert payload["sessionHelpers"][0]["sessionCount"] == 1
+    assert {
+        path.relative_to(tmp_path).as_posix(): (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in tmp_path.rglob("*") if path.is_file()
+    } == before
 
 
 def test_log_file_content_returns_user_summary_and_agent_anchor(tmp_path, monkeypatch):

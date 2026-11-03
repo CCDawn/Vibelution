@@ -500,7 +500,7 @@ def _reset_action_title(helper_id: str) -> str:
 
 def _safe_sessions() -> list[dict[str, Any]]:
     try:
-        return list_sessions()
+        return list_sessions(repair_collisions=False)
     except Exception:
         return []
 
